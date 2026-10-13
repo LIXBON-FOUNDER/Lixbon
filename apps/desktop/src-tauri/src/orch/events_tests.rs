@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use super::boot_tests::*;
 use super::events::{Actor, Channel, EntityKind, EventDraft, EventError, EventPayload};
-use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy};
+use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy, Tx};
 use super::state::{NewTask, State};
 use super::store_boot::StorageStatus;
 use super::{Core, Orch};
@@ -345,7 +345,10 @@ fn con_state_json_no_hay_event_log_y_no_se_crea_ningun_archivo_paralelo() {
     .unwrap();
     assert_eq!(core.lock().runs.len(), 1, "la mutación se confirma igual");
     assert_eq!(archivos(&data), vec!["state.json".to_string()], "solo state.json: ni events.json ni nada parecido");
-    // Los borradores ni siquiera se materializan (no se genera id ni hora).
+    let en_disco = std::fs::read_to_string(data.join("state.json")).unwrap();
+    assert!(en_disco.contains("\"objective\": \"a\""), "el estado SÍ se persistió");
+    assert!(!en_disco.contains("test.hecho") && !en_disco.contains("outbox"), "y no contiene el outbox");
+    // Los borradores se finalizaron y validaron, y el resultado se descartó: el backend recibe una lista vacía.
     let w = Inyecta::instala(&core, 0, false);
     // (sin SQLite, el `inner` es StateJsonFile: records_events = false)
     core.mutate(|tx| {
@@ -355,6 +358,46 @@ fn con_state_json_no_hay_event_log_y_no_se_crea_ningun_archivo_paralelo() {
     })
     .unwrap();
     assert!(w.intentos().iter().all(|e| e.is_empty()), "StateJsonFile no recibe eventos: {:?}", w.intentos());
+}
+
+/// Mutación que cambia de verdad el estado y emite un borrador válido seguido de uno inválido
+/// (clave de idempotencia vacía: solo la frontera final, `NewEvent::check`, la detecta).
+fn con_un_borrador_invalido(tx: &mut Tx) -> Result<(), String> {
+    tx.create_run("x", nt());
+    tx.push_event(hecho(1));
+    tx.push_event(hecho(2).idempotent(""));
+    Ok(())
+}
+
+#[test]
+fn un_borrador_invalido_es_rechazado_tambien_con_state_json_sin_cambiar_nada() {
+    let (_l, data, _core_dir) = dirs();
+    let core = Orch::default().0; // persistencia state.json (legacy/degradado)
+    core.mutate(|tx| {
+        tx.create_run("previo", nt());
+        tx.push_event(hecho(0));
+        Ok(())
+    })
+    .unwrap();
+    let antes = std::fs::read(data.join("state.json")).unwrap();
+    let r = core.mutate(con_un_borrador_invalido);
+    assert!(matches!(&r, Err(MutateError::Rejected(m)) if m.contains("test.hecho") && m.contains("idem_key")), "{r:?}");
+    assert_eq!(core.lock().runs.len(), 1, "la memoria no cambia");
+    assert_eq!(std::fs::read(data.join("state.json")).unwrap(), antes, "state.json no recibe el cambio rechazado");
+    assert_eq!(archivos(&data), vec!["state.json".to_string()], "ningún events.json");
+    assert_eq!(core.health(), Health::Normal, "un contrato roto no degrada el Core");
+}
+
+#[test]
+fn el_mismo_borrador_invalido_da_el_mismo_rejected_con_sqlite_y_con_state_json() {
+    let (_l, _d, _c, sqlite) = core_listo();
+    let r_sqlite = sqlite.mutate(con_un_borrador_invalido);
+    let (_l2, _data2, _core_dir2) = dirs();
+    let legacy = Orch::default().0;
+    let r_legacy = legacy.mutate(con_un_borrador_invalido);
+    assert!(matches!(r_sqlite, Err(MutateError::Rejected(_))), "{r_sqlite:?}");
+    assert_eq!(r_sqlite, r_legacy, "la semántica de una mutación no depende del backend");
+    assert!(sqlite.lock().runs.is_empty() && legacy.lock().runs.is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------
