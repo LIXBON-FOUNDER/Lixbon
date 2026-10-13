@@ -236,7 +236,9 @@ pub(super) trait Persistence: Send + Sync {
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError>;
 
     /// ¿Esta persistencia guarda el Event Log? Solo SQLite: en `state.json` (arranque legacy o
-    /// degradado) no hay Event Log y los borradores se descartan sin materializarse.
+    /// degradado) no hay Event Log. Los borradores se finalizan y validan SIEMPRE (la semántica de una
+    /// mutación no depende del backend); donde no hay Event Log, el resultado materializado se descarta
+    /// antes de persistir.
     fn records_events(&self) -> bool {
         false
     }
@@ -464,14 +466,17 @@ impl Core {
         if tx.unchanged {
             return Ok(value);
         }
-        // Los eventos se materializan UNA vez, aquí, antes del bucle de reintentos. Sin Event Log
-        // (state.json) se descartan sin finalizarse. Un evento inválido rechaza la mutación entera.
+        // Los eventos se finalizan y VALIDAN siempre, UNA vez, aquí y antes del bucle de reintentos:
+        // un evento inválido rechaza la mutación entera (`Rejected`) con SQLite y con state.json por
+        // igual. Solo DESPUÉS se decide si hay Event Log donde persistirlos; si no (state.json), el
+        // resultado materializado se descarta y el backend recibe una lista vacía.
         let drafts = std::mem::take(&mut tx.events);
-        let events = if drafts.is_empty() || !self.persister.records_events() {
+        let finalized = if drafts.is_empty() {
             Vec::new()
         } else {
             finalize_all(drafts, &tx.actor, super::state::now_ms() as i64).map_err(MutateError::Rejected)?
         };
+        let events = if self.persister.records_events() { finalized } else { Vec::new() };
         if let Err(e) = self.persister.persist(&tx.state, &events) {
             self.enter_read_only(&e.message);
             return Err(MutateError::Persist(e.message));

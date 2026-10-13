@@ -21,8 +21,10 @@
 //! * **Retry.** Los eventos se finalizan ANTES del bucle de reintentos de la persistencia: cada
 //!   intento recibe exactamente los mismos `NewEvent` (mismo `id`, misma hora). Un `BUSY` no los
 //!   regenera ni los duplica (cada intento es una transacción nueva y la anterior se deshizo).
-//! * **Modo legacy/degradado** (`state.json`): no hay Event Log. Los borradores se descartan sin
-//!   finalizarse; no se crea ningún archivo paralelo.
+//! * **Modo legacy/degradado** (`state.json`): no hay Event Log. Los borradores se finalizan y validan
+//!   igual que con SQLite (la semántica de una mutación no depende del backend: un borrador inválido
+//!   es `Rejected` en ambos) y después el resultado materializado se descarta; no se crea ningún
+//!   archivo paralelo.
 //!
 //! # Payload
 //! Solo lo produce un constructor TIPADO: [`EventDraft::new`] exige un [`EventPayload`] (una estructura

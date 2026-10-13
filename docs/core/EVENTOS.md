@@ -56,8 +56,11 @@ solo entonces: la memoria se sustituye y se publica
 * **Un evento inválido rechaza la mutación** (`MutateError::Rejected`) en vez de degradar el Core a
   solo lectura: es un error de contrato, no un fallo de almacenamiento.
 * **Sin cambio (`no_change`) o con rechazo:** los borradores se descartan.
-* **Modo legacy/degradado (`state.json`):** no hay Event Log. Los borradores se descartan sin
-  materializarse (`Persistence::records_events() == false`); no se crea ningún archivo paralelo.
+* **Modo legacy/degradado (`state.json`):** no hay Event Log (`Persistence::records_events() == false`).
+  Los borradores se **finalizan y validan siempre**, igual que con SQLite: la semántica de una mutación
+  no puede depender del backend, y un borrador inválido es `Rejected` en ambos. Solo **después** se
+  decide dónde persistir: sin Event Log, el resultado materializado se descarta antes de persistir y el
+  backend recibe una lista vacía. No se crea ningún archivo paralelo.
 * **Una base sin la 004** (promovida pero todavía sin migrar) sigue confirmando mutaciones SIN eventos
   como siempre: con la lista vacía no se toca la tabla.
 * **Hechos que no tocan `legacy_state`** (registro de proyectos, solicitudes de lanzamiento) usan su
