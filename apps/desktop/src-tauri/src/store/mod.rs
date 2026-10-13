@@ -23,8 +23,8 @@
 //! propietario ([`private`]); `dir` no se modifica porque lo comparte el Core.
 //!
 //! # Referencias blandas de `events`
-//! `events.project_id`, `client_id`, `entity_kind` y `entity_id` (migración
-//! 004, slice E; la 003 es el registro de proyectos) NO llevan clave foránea
+//! `events.project_id`, `run_id`, `client_id`, `entity_kind` y `entity_id` (migración
+//! 004, slice E; la 003 es el registro de proyectos; ver [`events`] y `docs/core/EVENTOS.md`) NO llevan clave foránea
 //! de SQLite: los eventos históricos
 //! deben sobrevivir al archivado de un Project o a revocar un Client. El
 //! dominio valida al emitir (el Project/Client existe si el evento lo
@@ -35,6 +35,7 @@ mod authority;
 mod backup;
 mod crash;
 mod error;
+mod events;
 mod legacy;
 mod lock;
 mod migrate;
@@ -42,6 +43,8 @@ mod private;
 mod projects;
 #[cfg(test)]
 mod authority_tests;
+#[cfg(test)]
+mod events_tests;
 #[cfg(test)]
 mod projects_tests;
 #[cfg(test)]
@@ -51,10 +54,13 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
-pub use authority::{check_promotion_identity, new_uuid, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
+pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
+// `EventPage` y `EventRow` los consume la API de lectura de E1b; hasta entonces solo las pruebas.
+#[allow(unused_imports)]
+pub use events::{ActorKind, EventClass, EventPage, EventQuery, EventRow, Inserted, NewEvent, DEFAULT_PAGE, MAX_PAGE, MAX_PAYLOAD_BYTES};
 // El bootstrap de C1 ya no lo llama el arranque (ahora promociona); queda para las pruebas
 // y para el futuro slice de recuperación desde la instantánea.
 #[allow(unused_imports)]
