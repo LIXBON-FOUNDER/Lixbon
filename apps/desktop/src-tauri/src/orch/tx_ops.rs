@@ -23,6 +23,7 @@
 use std::collections::BTreeMap;
 
 use super::event_kinds as ev;
+use super::events::{Actor, Channel};
 use super::mutation::Tx;
 use super::state::{NewTask, State, Status};
 
@@ -203,5 +204,49 @@ impl Tx {
         let tasks = self.tasks.values().filter(|t| t.run == run).count();
         self.state_mut().remove_run(run);
         self.try_push_event(ev::run_removed(run, project, tasks));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Decisiones
+    // -----------------------------------------------------------------------------------------
+
+    /// Registra una decisión (fila legacy) y emite `decision.recorded`. ÚNICO sitio que construye ese
+    /// evento. Orden: 1) valida la tarea, el actor y el contrato del `detail`; 2) `State::record_decision`;
+    /// 3) con el id asignado, EXACTAMENTE un borrador cuando `kind` ∈ review/merge/pr. `spawn` conserva
+    /// su fila pero no emite (lo representará `spawn.resolved`); cualquier otro `kind` rechaza la
+    /// mutación completa.
+    ///
+    /// Validación de actor: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el
+    /// contexto de la mutación debe ser realmente ese actor. Además, review/merge/pr son decisiones de una
+    /// PERSONA desde la interfaz (`Person / Ui`); no es una regla global de `Decision`: los lanzamientos
+    /// pendientes podrán decidir como sistema.
+    pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
+        if !self.tasks.contains_key(task) {
+            return Err(format!("decisión {kind}: la tarea {task} no existe"));
+        }
+        self.check_decision_actor(kind, actor)?;
+        let facts = ev::DecisionRecorded::parse(kind, detail)?;
+        let id = self.state_mut().record_decision(task, kind, actor, detail);
+        if let Some(facts) = facts {
+            let run = self.run_of(task);
+            self.try_push_event(ev::decision_recorded(task, &run, &facts.with_id(id)));
+        }
+        Ok(id)
+    }
+
+    fn check_decision_actor(&self, kind: &str, actor: &str) -> Result<(), String> {
+        let ctx = self.context();
+        let coincide = match (actor, &ctx.actor) {
+            ("human", Actor::Person) | ("system", Actor::System) => true,
+            (a, Actor::Agent(task)) => a != "human" && a != "system" && a == task,
+            _ => false,
+        };
+        if !coincide {
+            return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
+        }
+        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || ctx.channel != Channel::Ui) {
+            return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
+        }
+        Ok(())
     }
 }

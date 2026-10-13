@@ -217,12 +217,16 @@ impl Core {
             let exists = st.tasks.contains_key(&p.parent_task);
             let dup = st.decisions.iter().any(|d| d.kind == "spawn"
                 && d.detail_json.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).is_some_and(|v| v["pending_id"] == p.pending_id.as_str()));
-            let id = (exists && !dup).then(|| st.record_decision(&p.parent_task, "spawn", actor, &json!({
+            if !exists || dup {
+                return Ok(None);
+            }
+            // La fila `spawn` se conserva; `Tx::record_decision` no emite evento para ella (spawn.resolved).
+            let id = st.record_decision(&p.parent_task, "spawn", actor, &json!({
                 "pending_id": p.pending_id, "parent_task": p.parent_task, "profile": p.profile, "argv": p.policy.argv,
                 "policy_status": p.policy.status, "outcome": outcome, "created_at": p.created_at, "decided_at": decided_at,
                 "task": task.and_then(|t| t["task"].as_str()), "reason": reason, "launch_error": launch_error,
-            })));
-            Ok(id)
+            }))?;
+            Ok(Some(id))
         })
         .ok()
         .flatten()

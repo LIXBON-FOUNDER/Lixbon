@@ -192,6 +192,11 @@ impl Tx {
         self.ctx.channel = channel;
     }
 
+    /// Quién actúa y por dónde, tal como lo ve ahora esta mutación.
+    pub(super) fn context(&self) -> &MutationContext {
+        &self.ctx
+    }
+
     /// Fija el contexto completo (lo usa `mutate_as`).
     pub(super) fn set_context(&mut self, ctx: MutationContext) {
         self.ctx = ctx;
@@ -812,14 +817,52 @@ impl StateAccess for Mutex<State> {
     }
 
     fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
-        let mut guard = self.lock().unwrap_or_else(|e| e.into_inner());
-        let mut tx = Tx::detached((*guard).clone());
-        let value = f(&mut tx)?;
-        if tx.unchanged {
-            return Ok(value);
-        }
-        tx.validate_events()?;
-        *guard = tx.into_state();
-        Ok(value)
+        mutate_detached(self, MutationContext::core(), f)
+    }
+}
+
+#[cfg(test)]
+fn mutate_detached<R>(state: &Mutex<State>, ctx: MutationContext, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+    let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tx = Tx::detached((*guard).clone());
+    tx.set_context(ctx);
+    let value = f(&mut tx)?;
+    if tx.unchanged {
+        return Ok(value);
+    }
+    tx.validate_events()?;
+    *guard = tx.into_state();
+    Ok(value)
+}
+
+/// SOLO pruebas: un `Mutex<State>` con el contexto EXPLÍCITO de quien actúa (como `Acting`, sin Core).
+/// Las pruebas de decisiones de una persona lo usan para representar de verdad a una persona en la
+/// interfaz, en vez de debilitar la validación de actor de producción.
+#[cfg(test)]
+pub(super) struct ConContexto<'a> {
+    state: &'a Mutex<State>,
+    ctx: MutationContext,
+}
+
+#[cfg(test)]
+impl<'a> ConContexto<'a> {
+    pub(super) fn new(state: &'a Mutex<State>, ctx: MutationContext) -> ConContexto<'a> {
+        ConContexto { state, ctx }
+    }
+
+    /// Una persona desde la interfaz (`Person / Ui`).
+    pub(super) fn persona(state: &'a Mutex<State>) -> ConContexto<'a> {
+        ConContexto::new(state, MutationContext::person(Channel::Ui))
+    }
+}
+
+#[cfg(test)]
+impl StateAccess for ConContexto<'_> {
+    fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
+        f(&self.state.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        mutate_detached(self.state, self.ctx.clone(), f)
     }
 }

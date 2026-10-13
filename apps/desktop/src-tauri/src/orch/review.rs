@@ -183,7 +183,7 @@ pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_comm
     let (did, at) = state.mutate(|st| {
         let did = st.record_decision(id, "review", "human", &json!({
             "decision": decision, "base_commit": base, "base_source": source, "head_commit": head_commit, "comment": comment,
-        }));
+        }))?;
         let at = st.decisions.iter().find(|d| d.id == did).map(|d| d.at).unwrap_or_default();
         Ok((did, at))
     })?;
@@ -194,8 +194,14 @@ pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_comm
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::orch::mutation::ConContexto;
     use crate::orch::state::NewTask;
     use std::path::{Path, PathBuf};
+
+    /// Una revisión es de una PERSONA desde la interfaz: la prueba la representa de forma explícita.
+    fn review_task(st: &Mutex<State>, id: &str, decision: &str, head: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
+        super::review_task(&ConContexto::persona(st), id, decision, head, comment, confirm)
+    }
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let o = std::process::Command::new("git").args(args).current_dir(dir).output().unwrap();
