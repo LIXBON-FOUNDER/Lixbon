@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"lixbon.com/cli/internal/history"
 	"lixbon.com/cli/internal/textutil"
@@ -52,6 +53,33 @@ const (
 		"Úsalos solo si el usuario los pide o si un símbolo aporta información que el texto no da (por ejemplo " +
 		"✅/❌ en una tabla de estado). Markdown sobrio: títulos cortos, listas y bloques de código con su lenguaje."
 )
+
+// AskFirstPrompt va en ask y en agent: sin él los modelos pequeños rellenan
+// lo que no saben con suposiciones en vez de preguntar.
+const AskFirstPrompt = "\n\n=== PREGUNTA ANTES DE ASUMIR ===\n" +
+	"Si la petición es ambigua, le falta un dato que cambia el resultado (qué archivo, qué tecnología, qué alcance, " +
+	"qué versión) o hay varias opciones razonables, LLAMA A LA HERRAMIENTA ask_user con UNA pregunta concreta y sus " +
+	"opciones (2 a 6) cuando las haya: al usuario se le abre un panel para elegir o escribir, y su respuesta te llega " +
+	"como resultado. NUNCA hagas la pregunta escribiéndola como respuesta de texto: eso termina tu turno. Si tienes " +
+	"varias dudas, pregunta primero la que más cambia el resultado y sigue con las demás en otras llamadas. No supongas " +
+	"ni inventes rutas, nombres, contenidos, resultados o datos que no hayas comprobado. Pregunta solo lo que únicamente " +
+	"el usuario puede decidir: lo que puedas averiguar tú (leyendo archivos, buscando en internet) averígualo sin " +
+	"preguntar, y nunca le pidas que busque, investigue o haga tu trabajo. Si la petición ya es clara, actúa. No uses " +
+	"ask_user para confirmar pasos obvios ni para pedir permiso de lo que ya te pidieron."
+
+// CurrentDataPrompt da la fecha real: el modelo solo conoce la de su corte y
+// sin ella contesta precios o noticias con datos viejos o con un método.
+func CurrentDataPrompt(now time.Time) string {
+	return "\n\n=== FECHA Y DATOS ACTUALES ===\n" +
+		"Hoy es " + now.Format("02/01/2006") + ". Tu conocimiento tiene fecha de corte. Para precios, cotizaciones " +
+		"(p. ej. el dólar hoy), noticias, clima, resultados, versiones recientes o cualquier dato que cambie con el " +
+		"tiempo, busca con web_search (y lee la página con fetch_url si hace falta) ANTES de responder, y da el dato " +
+		"con su fuente. No digas que no tienes acceso a información actual ni respondas solo con el método para calcularlo."
+}
+
+// DeleteManyPrompt: sin el ejemplo, los modelos borran archivo por archivo.
+const DeleteManyPrompt = "\n\nPara borrar varios archivos o carpetas usa UNA sola llamada a delete_file con todas las rutas: " +
+	`{"tool":"delete_file","args":{"paths":["a.txt","b.txt","build/"]}}`
 
 // NativeSystemPrompt es el prompt para tool-calling nativo: las herramientas
 // ya van en el template del modelo, así que solo se dan las reglas de uso.

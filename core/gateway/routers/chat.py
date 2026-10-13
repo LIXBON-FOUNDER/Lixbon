@@ -10,6 +10,7 @@ import json
 import logging
 import time
 import uuid
+from datetime import date
 from typing import Any, Literal
 
 import httpx
@@ -61,7 +62,7 @@ from core.gateway.model_router import model_for_request, target_or_503
 from core.inference.aliases import public_catalog, to_public
 from core.orchestration.orchestrator import ModelUnavailable
 from core.inference.context import fit_messages
-from core.inference.esfuerzo import nivel_de_razonamiento, podria_necesitar_internet
+from core.inference.esfuerzo import nivel_de_razonamiento, pide_datos_actuales, podria_necesitar_internet
 from core.inference.roles import REQUIRED_CAPABILITY, capabilities_of, resolve_all, resolve_num_ctx
 
 logger = logging.getLogger("lixbon.chat")
@@ -154,6 +155,23 @@ def _normalize_for_ollama(messages: list[dict]) -> list[dict]:
             m.pop("name", None)
         out.append(m)
     return out
+
+
+def _primer_paso(messages: list[dict]) -> bool:
+    """El mensaje del usuario y no un paso intermedio del agente: en el
+    protocolo de texto los resultados de herramientas también van como user."""
+    if not messages or messages[-1].get("role") != "user":
+        return False
+    texto = str(messages[-1].get("content") or "")
+    return not texto.startswith(("TOOL_RESULT", "Imágenes de los read_file"))
+
+
+def _con_fecha(messages: list[dict]) -> list[dict]:
+    """Sin la fecha real el modelo da por buena la de su corte («hoy es 2024»)."""
+    nota = f"Hoy es {date.today().strftime('%d/%m/%Y')}."
+    if messages and messages[0].get("role") == "system":
+        return [{**messages[0], "content": f"{messages[0].get('content') or ''}\n\n{nota}"}, *messages[1:]]
+    return [{"role": "system", "content": nota}, *messages]
 
 
 class UIChatRequest(BaseModel):
@@ -419,9 +437,12 @@ async def chat_completions(
     web_sources: list[dict] = []
     web_queries: list[str] = []
     web_mode = payload.web_search
-    if web_mode == "auto" and payload.tools:
+    datos_actuales = web_mode == "auto" and pide_datos_actuales(messages)
+    if web_mode == "auto" and payload.tools and not (datos_actuales and _primer_paso(messages)):
         # Con herramientas (agente) el modelo ya tiene `web_search` como tool
-        # y decide él; el planificador solo duplicaría la búsqueda.
+        # y decide él; el planificador solo duplicaría la búsqueda. Excepción:
+        # una pregunta que depende del momento, porque los modelos pequeños no
+        # llaman a web_search y contestan con datos de su fecha de corte.
         web_mode = False
     if web_mode == "auto" and not podria_necesitar_internet(messages):
         web_mode = False
@@ -443,11 +464,16 @@ async def chat_completions(
                                      format="json", think=False)
             return (resp.get("message") or {}).get("content", "")
 
-        web_queries = await websearch.plan_queries(messages, _preguntar, optional=web_mode == "auto")
+        web_queries = await websearch.plan_queries(
+            messages, _preguntar, optional=web_mode == "auto" and not datos_actuales,
+        )
         if web_queries:
             web_sources = await websearch.research(web_queries)
             context = websearch.build_context(messages[-1]["content"], web_sources, web_queries)
             messages.insert(len(messages) - 1, {"role": "system", "content": context})
+
+    if not web_queries and source in ("web", "mobile") and not payload.tools:
+        messages = _con_fecha(messages)
 
     messages = fit_messages(messages, num_ctx)
     started_at = time.perf_counter()

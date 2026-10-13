@@ -77,9 +77,9 @@ async def api_list_conversations(
     archived: bool | None = Query(default=None),
     user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
-    # Historial independiente por superficie: cada cliente pide su `source`
-    # (web/mobile/ide/cli). Si no lo manda, se infiere por el tipo de auth para
-    # que la web (sesión) NO vea las conversaciones del móvil/IDE/CLI; con API
+    # Historial por superficie: cada cliente pide su `source` (web/mobile/ide/cli);
+    # web y mobile comparten el suyo. Si no lo manda, se infiere por el tipo de
+    # auth para que la web (sesión) NO vea las conversaciones del IDE/CLI; con API
     # key sin `source` se devuelve todo, que es el contrato de la API pública.
     if not source:
         source = "web" if user_data.get("client") == "web" else None

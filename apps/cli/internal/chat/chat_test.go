@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -300,10 +301,12 @@ func TestInterruptedStreamKeepsThePartialAnswer(t *testing.T) {
 
 func TestContextUsageCountsOnlyTheConversation(t *testing.T) {
 	g, client := newGateway(t)
-	g.chat = func(_ int, w http.ResponseWriter) {
+	g.chat = func(n int, w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "ok"}}}})
-		usage, _ := json.Marshal(map[string]any{"usage": map[string]any{"prompt_tokens": 500, "completion_tokens": 20, "total_tokens": 520}})
+		// Un conteo proporcional a lo enviado, como el de un servidor real.
+		prompt := len([]rune(mustJSON(g.bodyAt(n)["messages"]))) / 4
+		usage, _ := json.Marshal(map[string]any{"usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": 20, "total_tokens": prompt + 20}})
 		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: "+string(usage)+"\n\ndata: [DONE]\n\n")
 	}
 	c := newChat(t, client, func(cfg *config.Config) { cfg.ContextWindow = 1000 }, Options{})
@@ -321,11 +324,12 @@ func TestContextUsageCountsOnlyTheConversation(t *testing.T) {
 	c.Session.NativeTools = false
 	c.Send(context.Background(), strings.Repeat("palabra ", 100), nil)
 	tokens, pct := c.ContextUsage()
-	if c.SessionTokens != 520 || c.TurnTokens != 520 {
+	if c.SessionTokens == 0 || c.SessionTokens != c.TurnTokens {
 		t.Fatalf("tokens de sesión: %d/%d", c.SessionTokens, c.TurnTokens)
 	}
-	// Los 500 tokens del prompt incluyen el mensaje de estilo, que no cuenta.
-	if tokens < 300 || tokens >= 500 || pct < 30 || before >= tokens {
+	// El prompt del modo ask y el de estilo van en el conteo pero no cuentan:
+	// queda la conversación, ~800 caracteres.
+	if tokens < 150 || tokens >= 400 || pct < 15 || before >= tokens {
 		t.Fatalf("uso de contexto: %d tokens (%.0f%%), antes %d", tokens, pct, before)
 	}
 	c.History = append(c.History, history.User(strings.Repeat("x", 20000)))
@@ -498,15 +502,75 @@ func TestAskModeCanFetchAPageAndKeepsItInTheHistory(t *testing.T) {
 	if err != nil || answer != "Es una plataforma de IA." {
 		t.Fatalf("answer=%q err=%v", answer, err)
 	}
-	tools, _ := g.bodyAt(0)["tools"].([]any)
-	if len(tools) != 1 || !strings.Contains(mustJSON(tools[0]), "fetch_url") {
-		t.Fatalf("en ask solo va fetch_url: %v", tools)
+	var names []string
+	for _, tool := range g.bodyAt(0)["tools"].([]any) {
+		names = append(names, tool.(map[string]any)["function"].(map[string]any)["name"].(string))
+	}
+	if !slices.Equal(names, agent.AskTools) {
+		t.Fatalf("en ask van solo las herramientas de lectura: %v", names)
 	}
 	if !strings.Contains(mustJSON(g.bodyAt(1)["messages"]), "plataforma de IA") {
 		t.Fatalf("el modelo no recibió la página: %v", g.bodyAt(1)["messages"])
 	}
 	if !strings.Contains(mustJSON(c.History), "TOOL_RESULT fetch_url") {
 		t.Fatalf("la página debe quedar en el historial: %+v", c.History)
+	}
+}
+
+func TestAskModeReadsTheProjectButNeverChangesIt(t *testing.T) {
+	g, client := newGateway(t)
+	g.chat = func(n int, w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		delta := map[string]any{"content": "El README dice hola."}
+		switch n {
+		case 0:
+			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "r1",
+				"function": map[string]any{"name": "read_file", "arguments": `{"path":"README.md"}`}}}}
+		case 1:
+			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "d1",
+				"function": map[string]any{"name": "delete_file", "arguments": `{"path":"README.md"}`}}}}
+		}
+		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta}}})
+		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: [DONE]\n\n")
+	}
+	c := newChat(t, client, nil, Options{})
+	readme := filepath.Join(c.Workspace, "README.md")
+	if err := os.WriteFile(readme, []byte("hola desde el proyecto"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := c.Send(context.Background(), "¿qué dice el README?", nil)
+	if err != nil || answer != "El README dice hola." {
+		t.Fatalf("answer=%q err=%v", answer, err)
+	}
+	if !strings.Contains(mustJSON(g.bodyAt(1)["messages"]), "hola desde el proyecto") {
+		t.Fatalf("el modelo no recibió el archivo: %v", g.bodyAt(1)["messages"])
+	}
+	if !strings.Contains(mustJSON(g.bodyAt(2)["messages"]), "[modo ask]") {
+		t.Fatalf("borrar en ask debe rechazarse: %v", g.bodyAt(2)["messages"])
+	}
+	if _, err := os.Stat(readme); err != nil {
+		t.Fatalf("el modo ask borró un archivo: %v", err)
+	}
+}
+
+func TestAskModeRetriesWithoutThinkingWhenTheAnswerStaysInTheReasoning(t *testing.T) {
+	g, client := newGateway(t)
+	g.chat = func(n int, w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		delta := map[string]any{"content": "Hay un README."}
+		if n == 0 {
+			delta = map[string]any{"reasoning_content": "Hay un README, se lo digo."}
+		}
+		chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta}}})
+		io.WriteString(w, "data: "+string(chunk)+"\n\ndata: [DONE]\n\n")
+	}
+	c := newChat(t, client, nil, Options{})
+	answer, err := c.Send(context.Background(), "¿qué hay?", nil)
+	if err != nil || answer != "Hay un README." {
+		t.Fatalf("answer=%q err=%v", answer, err)
+	}
+	if think, ok := g.bodyAt(1)["think"]; !ok || think != false {
+		t.Fatalf("el reintento va sin razonar: think=%v", think)
 	}
 }
 

@@ -17,6 +17,26 @@ export async function cargarPaginas(id, manifest) {
 // visual si el bloque lleva su nombre (file:index.html) o es una edición.
 const NOMBRADO = /```\s*(?:file|edit):\s*([\w./-]+\.(?:html?|svg))/gi;
 
+const COMANDO_VISUAL = /^\s*\/visuals?\b\s*/i;
+const PIDE_VISUAL = new RegExp(
+  '\\bvisuals?\\b'
+  + '|\\b(crea|creame|haz|hazme|genera|generame|disena|disename|dibuja|dibujame|construye|construyeme|arma|armame|maqueta|maquetame|'
+  + 'make|create|build|design|draw|generate)\\b.{0,40}\\b(diseno|landing|pagina web|sitio web|web|interfaz|ui|dashboard|panel|'
+  + 'prototipo|maqueta|mockup|wireframe|logo|icono|pantalla|page|website|site|interface|prototype|icon|screen)\\b',
+  'i',
+);
+
+const plano = (texto) => (texto || '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+
+// Visuals solo entra cuando el usuario lo pide (/visual o «hazme una landing»):
+// con el prompt siempre puesto, los modelos pequeños contestaban cualquier
+// pregunta con un diseño.
+export function pedidoVisual(texto) {
+  const comando = COMANDO_VISUAL.test(texto || '');
+  const limpio = comando ? texto.replace(COMANDO_VISUAL, '') : texto;
+  return { texto: limpio, visual: comando || PIDE_VISUAL.test(plano(limpio)), comando };
+}
+
 export function tieneVisual(texto) {
   return /```\s*(?:file|edit):\s*[\w./-]+\.(?:html?|svg)/i.test(texto || '');
 }

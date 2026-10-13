@@ -150,3 +150,46 @@ def test_el_razonamiento_de_una_llamada_vuelve_al_modelo(cliente, sesion, llamad
     paso = next(m for m in vistos if m.get("tool_calls"))
     assert paso["thinking"] == "miro la carpeta"
     assert paso["tool_calls"][0]["function"]["arguments"] == {"path": "."}
+
+
+@pytest.fixture
+def busquedas(llamadas, monkeypatch):
+    hechas = []
+
+    async def fake_research(consultas):
+        hechas.append(consultas)
+        return [{"title": "Dólar hoy", "url": "https://x.test", "snippet": "1 USD = 4.000 COP"}]
+
+    monkeypatch.setattr(chat_mod.websearch, "research", fake_research)
+    return hechas
+
+
+def test_un_dato_del_dia_se_busca_aunque_el_planificador_diga_que_no(cliente, sesion, busquedas):
+    _enviar(cliente, "precio del dolar en colombia hoy")
+    assert busquedas == [["precio del dolar en colombia hoy"]]
+
+
+_HERRAMIENTAS = [{"type": "function", "function": {"name": "web_search", "parameters": {"type": "object"}}}]
+
+
+def test_con_herramientas_solo_se_adelanta_en_el_primer_paso(cliente, sesion, busquedas):
+    _enviar(cliente, "precio del dolar hoy", model="gpt-oss:20b", tools=_HERRAMIENTAS)
+    assert len(busquedas) == 1
+    _enviar(cliente, "TOOL_RESULT list_files: precio del dolar hoy.txt", model="gpt-oss:20b", tools=_HERRAMIENTAS)
+    _enviar(cliente, "explica este código", model="gpt-oss:20b", tools=_HERRAMIENTAS)
+    assert len(busquedas) == 1
+
+
+def test_el_chat_web_recibe_la_fecha_de_hoy(cliente, sesion, llamadas, monkeypatch):
+    vistos = []
+
+    async def fake_stream(base, model, messages, collector=None, think=None, **kw):
+        vistos.extend(messages)
+        if collector is not None:
+            collector.update(parts=["ok"], content="ok", prompt_tokens=1, completion_tokens=1)
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(chat_mod, "stream_chat_openai", fake_stream)
+    _enviar(cliente, "hola", source="web")
+    hoy = chat_mod.date.today().strftime("%d/%m/%Y")
+    assert vistos[0]["role"] == "system" and f"Hoy es {hoy}" in vistos[0]["content"]

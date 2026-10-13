@@ -55,13 +55,15 @@ function ContextRing({ uso }) {
 }
 
 export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null,
-  nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso }) {
+  nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso, commands = [] }) {
   const t = useT('chat');
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
   const [error, setError] = useState('');
   const [arrastrando, setArrastrando] = useState(false);
+  const [filtro, setFiltro] = useState(null);
+  const sugerencias = filtro === null ? [] : commands.filter((c) => c.cmd.startsWith(filtro.toLowerCase()));
 
   const leyendo = attachments.some((a) => a.estado === 'leyendo');
 
@@ -226,13 +228,37 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     }
 
     el.value = '';
+    setFiltro(null);
     el.style.height = '';
     el.style.overflowY = 'hidden';
     setAttachments([]);
     onSend(payload, nativas.map((a) => a.base64));
   };
 
+  const alEscribir = () => {
+    ajustarAlto();
+    const valor = ref.current?.value || '';
+    setFiltro(commands.length && /^\/\S*$/.test(valor) ? valor : null);
+  };
+
+  const completar = (cmd) => {
+    const el = ref.current;
+    el.value = `${cmd} `;
+    setFiltro(null);
+    ajustarAlto();
+    el.focus();
+  };
+
   const onKeyDown = (e) => {
+    if (sugerencias.length && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+      e.preventDefault();
+      completar(sugerencias[0].cmd);
+      return;
+    }
+    if (filtro !== null && e.key === 'Escape') {
+      setFiltro(null);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -294,13 +320,26 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       )}
       {aviso && <div className="chat-input__error">{aviso}</div>}
 
+      {sugerencias.length > 0 && (
+        <ul className="chat-cmds" role="listbox" aria-label={t('commandsAria')}>
+          {sugerencias.map((c) => (
+            <li key={c.cmd}>
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => completar(c.cmd)}>
+                <strong>{c.cmd}</strong>
+                <span>{c.desc}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <textarea
         ref={ref}
         className="chat-input__text"
         placeholder={placeholder || t('inputPlaceholder')}
         rows={1}
         onKeyDown={onKeyDown}
-        onInput={ajustarAlto}
+        onInput={alEscribir}
         onPaste={alPegar}
         aria-label={t('messageAriaLabel')}
       />

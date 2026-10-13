@@ -15,7 +15,7 @@ export function buildBlocks(items) {
     turn = null;
   };
   const open = (key) => {
-    if (!turn) turn = { type: 'turn', key: `t${key}`, work: [], qa: [], end: null };
+    if (!turn) turn = { type: 'turn', key: `t${key}`, work: [], end: null };
     return turn;
   };
   for (const it of items) {
@@ -24,13 +24,12 @@ export function buildBlocks(items) {
         flush();
         blocks.push({ type: 'user', key: it.key, item: it });
         break;
+      // La pregunta respondida es un paso más del trabajo: se pliega con él.
       case 'thinking':
       case 'tool':
       case 'assistant':
-        open(it.key).work.push(it);
-        break;
       case 'qa':
-        open(it.key).qa.push(it);
+        open(it.key).work.push(it);
         break;
       case 'end':
         open(it.key).end = it;
@@ -49,6 +48,19 @@ export function buildBlocks(items) {
   }
   flush();
   return blocks;
+}
+
+/** Los turnos que cambiaron archivos, del más reciente al más antiguo, con el
+    mensaje que los pidió: es la pestaña «Cambios» de la sesión. El turno en
+    marcha (el último, sin fin) aún no cuenta. */
+export function changedTurns(blocks) {
+  const out = [];
+  let prompt = '';
+  blocks.forEach((b, i) => {
+    if (b.type === 'user') prompt = b.item.text || '';
+    else if (b.type === 'turn' && b.files.length && (b.end || i < blocks.length - 1)) out.push({ turn: b, prompt });
+  });
+  return out.reverse();
 }
 
 // La respuesta es la prosa del final del turno; la de antes de una

@@ -1290,7 +1290,7 @@
     "name": "all_tools",
     "messages": [],
     "tools": "all",
-    "chars": 9124
+    "chars": 9631
    }
   ],
   "budget": [
@@ -1315,23 +1315,23 @@
     "tools": "all",
     "system_tokens": 900,
     "calibrated": null,
-    "tools_tokens": 2851,
-    "budget": 6898
+    "tools_tokens": 3009,
+    "budget": 6740
    },
    {
     "window": 16384,
     "tools": "all",
     "system_tokens": 900,
     "calibrated": 2.0,
-    "tools_tokens": 4562,
-    "budget": 5187
+    "tools_tokens": 4815,
+    "budget": 4934
    },
    {
     "window": 4096,
     "tools": "all",
     "system_tokens": 900,
     "calibrated": null,
-    "tools_tokens": 2851,
+    "tools_tokens": 3009,
     "budget": 512
    },
    {
@@ -1339,7 +1339,7 @@
     "tools": "all",
     "system_tokens": 900,
     "calibrated": 2.0,
-    "tools_tokens": 4562,
+    "tools_tokens": 4815,
     "budget": 512
    },
    {
@@ -1347,7 +1347,7 @@
     "tools": "all",
     "system_tokens": 2000,
     "calibrated": null,
-    "tools_tokens": 2851,
+    "tools_tokens": 3009,
     "budget": 512
    },
    {
@@ -1355,7 +1355,7 @@
     "tools": "all",
     "system_tokens": 2000,
     "calibrated": 2.0,
-    "tools_tokens": 4562,
+    "tools_tokens": 4815,
     "budget": 512
    },
    {

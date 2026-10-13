@@ -1,6 +1,6 @@
 import pytest
 
-from core.inference.esfuerzo import nivel_de_razonamiento, podria_necesitar_internet
+from core.inference.esfuerzo import nivel_de_razonamiento, pide_datos_actuales, podria_necesitar_internet
 
 
 def _u(texto, **extra):
@@ -74,3 +74,15 @@ def test_no_hace_falta_planificar_la_busqueda(texto):
                                    "explica la diferencia entre TCP y UDP"])
 def test_puede_hacer_falta_buscar(texto):
     assert podria_necesitar_internet(_u(texto)) is True
+
+
+@pytest.mark.parametrize("texto", ["precio del dolar en colombia hoy", "¿Cuál es la cotización del euro?",
+                                   "últimas noticias de Chile", "clima en Bogotá", "latest version of React"])
+def test_lo_que_cambia_con_el_tiempo_se_busca_siempre(texto):
+    assert pide_datos_actuales(_u(texto)) is True
+
+
+@pytest.mark.parametrize("texto", ["explica la diferencia entre TCP y UDP", "hola", "que es lixbon.com?",
+                                   "arregla esto:\n```py\nprecio = 1\n```"])
+def test_lo_estable_lo_decide_el_planificador(texto):
+    assert pide_datos_actuales(_u(texto)) is False

@@ -1045,6 +1045,47 @@
   background: var(--surface-3);
 }
 
+.chat-cmds {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.chat-cmds button {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-cmds button:hover,
+.chat-cmds li:first-child button {
+  background: var(--surface-3);
+}
+
+.chat-cmds strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chat-cmds span {
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-input__chips {
   display: flex;
   flex-wrap: wrap;

@@ -115,7 +115,8 @@ export function streamChatCompletion({
       messages,
       conversation_id: conversationId,
       stream: true,
-      web_search: webSearch,
+      // Apagado no es "nunca": el gateway busca solo si la pregunta lo necesita.
+      web_search: webSearch ? true : 'auto',
       source: CHAT_SOURCE,
       ...(think !== undefined ? { think } : {}),
     }),

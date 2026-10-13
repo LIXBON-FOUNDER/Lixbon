@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"lixbon.com/cli/internal/textutil"
+	"lixbon.com/cli/internal/tools"
 )
 
 func truthy(v any) bool {
@@ -88,6 +89,14 @@ func ArgsSummary(tool string, args map[string]any) string {
 		return textutil.Head(stringArg(args, "question"), 200)
 	case "rename_file":
 		return fmt.Sprintf("%s → %s", orQuestion(args, "src"), orQuestion(args, "dst"))
+	case "delete_file":
+		switch paths := tools.DeletePaths(args); len(paths) {
+		case 0:
+		case 1:
+			return textutil.Head(paths[0], 200)
+		default:
+			return textutil.Head(fmt.Sprintf("%d rutas: %s", len(paths), strings.Join(paths, ", ")), 200)
+		}
 	case "search":
 		where := "."
 		if truthy(args["path"]) {

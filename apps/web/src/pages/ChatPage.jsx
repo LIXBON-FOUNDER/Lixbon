@@ -25,9 +25,11 @@ import { FILE_PROMPT } from '../lib/archivos';
 import { tieneVisuals } from '../lib/planes';
 import { deleteVisual, getVisual } from '../lib/visualsApi';
 import {
-  aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido, guardarRespuesta, tieneVisual,
+  aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido, guardarRespuesta, pedidoVisual, tieneVisual,
   tituloDe, visualDeConversacion,
 } from '../lib/visualStudio';
+
+const SEPARADOR_ADJUNTOS = '\n\n---\n\n';
 
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
@@ -244,11 +246,20 @@ export default function ChatPage() {
     setPanelVisual(false);
   };
 
-  const send = async (text, images = []) => {
+  const send = async (entrada, images = []) => {
     if (!user) {
       navigate('/auth?mode=register');
       return;
     }
+    // Con adjuntos el texto llega como «contexto --- pregunta»: el comando va en la pregunta.
+    const corte = entrada.lastIndexOf(SEPARADOR_ADJUNTOS);
+    const cabeza = corte >= 0 ? entrada.slice(0, corte + SEPARADOR_ADJUNTOS.length) : '';
+    const pedido = pedidoVisual(entrada.slice(cabeza.length));
+    if (pedido.comando && !pedido.texto.trim()) {
+      showToast(t('visualCommandEmpty'));
+      return;
+    }
+    const text = cabeza + pedido.texto;
     // Si el usuario escribe antes de que /v1/models responda, se resuelve aquí
     // para no perder su mensaje.
     let chosenModel = model;
@@ -270,7 +281,8 @@ export default function ChatPage() {
     // Las imágenes viajan con el mensaje (modelo con visión); el historial
     // guardado solo conserva el texto.
     const history = [...messages.slice(-CONTEXT_WINDOW), { role: 'user', content: text, ...(images.length ? { images } : {}) }];
-    const conVisuals = tieneVisuals(user);
+    // Con el diseño abierto, lo que se escriba suele ser un cambio del diseño.
+    const conVisuals = tieneVisuals(user) && (pedido.visual || (panelVisual && paginasVisual.length > 0));
     const base = { visual, paginas: paginasVisual };
 
     if (!routeConvId && saveHistory) {
@@ -386,6 +398,8 @@ export default function ChatPage() {
     setRazonar(valor);
     guardarRazonar(valor);
   };
+
+  const comandos = tieneVisuals(user) ? [{ cmd: '/visual', desc: t('visualCommand') }] : [];
 
   const usoCtx = contextUso && { ...contextUso, total: contextUso.total || modelInfo[model]?.num_ctx || null };
 
@@ -518,7 +532,7 @@ export default function ChatPage() {
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
                 nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} />
+                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
             </div>
           </div>
         ) : (
@@ -581,7 +595,7 @@ export default function ChatPage() {
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
                 nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} />
+                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
               <p className="chat-disclaimer">
                 {t('disclaimer')}
               </p>

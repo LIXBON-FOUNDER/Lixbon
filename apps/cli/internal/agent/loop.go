@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,7 +81,11 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	if s.ProjectContext != "" {
 		content += "\n\n=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n" + s.ProjectContext
 	}
-	content += TodoPrompt + "\n\n" + StylePrompt
+	content += TodoPrompt + AskFirstPrompt + CurrentDataPrompt(time.Now())
+	if !s.PlanMode {
+		content += DeleteManyPrompt
+	}
+	content += "\n\n" + StylePrompt
 	if s.PlanMode {
 		content += PlanModePrompt
 	} else if info := s.OrchInfo(); info.Available() {
@@ -643,7 +648,13 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		if s.Stats.Files == nil {
 			s.Stats.Files = map[string]bool{}
 		}
-		s.Stats.Files[change.Path] = true
+		if tool == "delete_file" {
+			for _, p := range tools.DeletePaths(args) {
+				s.Stats.Files[p] = true
+			}
+		} else {
+			s.Stats.Files[change.Path] = true
+		}
 		s.Stats.Adds += adds
 		s.Stats.Dels += dels
 	}
@@ -691,6 +702,25 @@ func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
 	}
 	t.emit(Event{Kind: EventActionResult, Tool: "fetch_url", Result: result, Summary: summary, Failed: failed, Elapsed: elapsed})
 	return result, nil
+}
+
+// AskTools son las herramientas del modo ask: ver el proyecto e internet y
+// preguntar, nunca cambiar nada.
+var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user"}
+
+const askBlockedMessage = "[modo ask] Solo puedes leer el proyecto, buscar en internet y preguntar. Para cambiar " +
+	"archivos o ejecutar comandos, explica qué harías y pide al usuario que pase al modo agent (/mode agent o Mayús+Tab)."
+
+// RunReadOnly ejecuta una herramienta del modo ask; cualquier otra se rechaza
+// sin tocar nada. Devuelve también las imágenes que haya adjuntado read_file.
+func (t *Turn) RunReadOnly(ctx context.Context, tool string, args map[string]any) (string, []string, error) {
+	if !slices.Contains(AskTools, tool) {
+		t.emit(Event{Kind: EventAction, Tool: tool, Text: ArgsSummary(tool, args)})
+		t.emit(Event{Kind: EventActionResult, Tool: tool, Summary: "bloqueado: modo ask", Failed: true})
+		return askBlockedMessage, nil, nil
+	}
+	result, err := t.approveAndRun(ctx, tool, args)
+	return result, t.S.popToolImages(), err
 }
 
 // runMCP: una herramienta MCP no es del CLI y no se sabe si escribe o solo
