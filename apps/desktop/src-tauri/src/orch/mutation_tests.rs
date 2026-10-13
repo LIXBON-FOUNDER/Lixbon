@@ -68,7 +68,7 @@ impl Falla {
 }
 
 impl Persistence for Falla {
-    fn persist(&self, state: &State) -> Result<(), PersistError> {
+    fn persist(&self, state: &State, _events: &[crate::store::NewEvent]) -> Result<(), PersistError> {
         self.intentos.fetch_add(1, Ordering::SeqCst);
         if self.quedan.load(Ordering::SeqCst) > 0 {
             self.quedan.fetch_sub(1, Ordering::SeqCst);

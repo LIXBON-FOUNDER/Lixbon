@@ -49,6 +49,13 @@
 //! línea debe converger en `Event(efecto externo sin registrar) -> Attention
 //! crítica`. La reconciliación automática queda fuera de esta fase.
 //!
+//! # Eventos (slice E)
+//! El candidato [`Tx`] lleva además un *outbox* de [`EventDraft`]: los hechos que describen la
+//! mutación. Se finalizan UNA vez (id, hora, actor, payload) antes de persistir y viajan a
+//! [`Persistence::persist`], que en SQLite los inserta en la MISMA transacción que la nueva `rev` de
+//! `legacy_state`. Si algo falla, ni mutación ni eventos; los reintentos pasan siempre los mismos
+//! eventos. El estado (`State`) no transporta nada de esto. Ver `events.rs`.
+//!
 //! # Lo que NO es una mutación de dominio
 //! * [`Core::touch_activity`]: marca de actividad efímera (pista de liveness),
 //!   solo en memoria. Es la única excepción y NO abre la puerta a otras.
@@ -62,10 +69,12 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+use super::events::{finalize_all, Actor, Channel, EventDraft};
 use super::fsio::data_dir;
 use super::lifecycle::BootProof;
 use super::state::{Kind, State};
 use super::Core;
+use crate::store::NewEvent;
 
 // ---------------------------------------------------------------------------
 // Celda de estado: el Mutex es privado a este módulo.
@@ -108,6 +117,11 @@ pub(super) struct Tx {
     state: State,
     notify: Vec<u64>,
     unchanged: bool,
+    /// Outbox de eventos del candidato. Vive aquí y no en `State`: el estado autoritativo no
+    /// transporta metadatos de una transacción. Se descarta con el candidato si algo falla.
+    events: Vec<EventDraft>,
+    /// Actor y canal por defecto de los eventos de esta mutación (un borrador puede traer el suyo).
+    actor: (Actor, Channel),
 }
 
 impl Deref for Tx {
@@ -134,9 +148,31 @@ impl Tx {
     }
 
     /// La mutación resultó no cambiar nada: se descarta el candidato y no se
-    /// persiste ni se publica (evita reescribir el estado por una no-operación).
+    /// persiste ni se publica (evita reescribir el estado por una no-operación). También descarta
+    /// los eventos emitidos hasta aquí: sin cambio no hay hecho que contar.
     pub(super) fn no_change(&mut self) {
         self.unchanged = true;
+        self.events.clear();
+    }
+
+    /// ÚNICO punto de entrada de un evento a la transacción: lo emite quien describe el hecho (los
+    /// mutadores semánticos), nunca una capa superior que ya vio el resultado. Una prueba de
+    /// arquitectura vigila quién lo llama.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn push_event(&mut self, draft: EventDraft) {
+        self.events.push(draft);
+    }
+
+    /// Fija el actor y el canal por defecto de los eventos de esta mutación.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn acting_as(&mut self, actor: Actor, channel: Channel) {
+        self.actor = (actor, channel);
+    }
+
+    /// Prueba: borradores pendientes en el candidato.
+    #[cfg(test)]
+    pub(super) fn pending_events(&self) -> &[EventDraft] {
+        &self.events
     }
 }
 
@@ -194,9 +230,16 @@ impl PersistError {
 /// ([`StateJsonFile`]). Tras la promoción (C2b): SQLite (`SqlitePersistence`), con
 /// `state.json` como espejo.
 pub(super) trait Persistence: Send + Sync {
-    /// Confirma el candidato (en SQLite: `BEGIN IMMEDIATE .. COMMIT`). Si falla, la
-    /// memoria NO cambia.
-    fn persist(&self, state: &State) -> Result<(), PersistError>;
+    /// Confirma el candidato (en SQLite: `BEGIN IMMEDIATE .. COMMIT`) junto con sus `events`, ya
+    /// materializados. Si falla, la memoria NO cambia y no queda ningún evento. En cada reintento
+    /// llegan exactamente los mismos `events`.
+    fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError>;
+
+    /// ¿Esta persistencia guarda el Event Log? Solo SQLite: en `state.json` (arranque legacy o
+    /// degradado) no hay Event Log y los borradores se descartan sin materializarse.
+    fn records_events(&self) -> bool {
+        false
+    }
 
     /// Tras confirmar Y publicar en memoria: copia de compatibilidad (el espejo
     /// `state.json`). Mejor esfuerzo: un fallo aquí NO invalida lo confirmado.
@@ -209,7 +252,8 @@ pub(super) trait Persistence: Send + Sync {
 pub(super) struct StateJsonFile;
 
 impl Persistence for StateJsonFile {
-    fn persist(&self, state: &State) -> Result<(), PersistError> {
+    /// No guarda eventos: `state.json` no tiene Event Log (ni se crea un `events.json`).
+    fn persist(&self, state: &State, _events: &[NewEvent]) -> Result<(), PersistError> {
         let path = data_dir().join("state.json");
         let bytes = serde_json::to_vec_pretty(state).map_err(|e| PersistError::structural(e.to_string()))?;
         if let Some(dir) = path.parent() {
@@ -318,14 +362,19 @@ impl Persister {
         lock(&self.health).clone()
     }
 
+    fn records_events(&self) -> bool {
+        lock(&self.backend).records_events()
+    }
+
     /// Persiste con reintentos para los fallos transitorios. `Err` ya incluye el
     /// mensaje definitivo; quien llama decide el paso a solo lectura.
-    fn persist(&self, state: &State) -> Result<(), PersistError> {
+    fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let backend = lock(&self.backend).clone();
         let retry = lock(&self.retry).clone();
         let mut attempt = 0;
         loop {
-            match backend.persist(state) {
+            // `events` se materializó antes del bucle: cada intento persiste EXACTAMENTE los mismos.
+            match backend.persist(state, events) {
                 Ok(()) => return Ok(()),
                 Err(e) => match retry.delay_for(&e, attempt) {
                     Some(wait) => {
@@ -410,12 +459,20 @@ impl Core {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
-        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false };
+        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), actor: (Actor::System, Channel::Core) };
         let value = f(&mut tx).map_err(MutateError::Rejected)?;
         if tx.unchanged {
             return Ok(value);
         }
-        if let Err(e) = self.persister.persist(&tx.state) {
+        // Los eventos se materializan UNA vez, aquí, antes del bucle de reintentos. Sin Event Log
+        // (state.json) se descartan sin finalizarse. Un evento inválido rechaza la mutación entera.
+        let drafts = std::mem::take(&mut tx.events);
+        let events = if drafts.is_empty() || !self.persister.records_events() {
+            Vec::new()
+        } else {
+            finalize_all(drafts, &tx.actor, super::state::now_ms() as i64).map_err(MutateError::Rejected)?
+        };
+        if let Err(e) = self.persister.persist(&tx.state, &events) {
             self.enter_read_only(&e.message);
             return Err(MutateError::Persist(e.message));
         }
@@ -535,6 +592,15 @@ impl Core {
     #[cfg(test)]
     pub(super) fn set_persistence(&self, p: Arc<dyn Persistence>) {
         *lock(&self.persister.backend) = p;
+    }
+
+    /// Prueba: envuelve la persistencia instalada (p. ej. para inyectar fallos transitorios delante
+    /// de la de SQLite sin cambiar lo que se confirma).
+    #[cfg(test)]
+    pub(super) fn wrap_persistence(&self, wrap: impl FnOnce(Arc<dyn Persistence>) -> Arc<dyn Persistence>) {
+        let mut backend = lock(&self.persister.backend);
+        let inner = backend.clone();
+        *backend = wrap(inner);
     }
 
     /// Prueba: sustituye la política de reintentos.
