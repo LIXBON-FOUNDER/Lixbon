@@ -19,6 +19,7 @@ impl Core {
     /// Valida lo que pide el agente (sin crear nada) y arma el pendiente.
     pub(super) fn plan_spawn(&self, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
         let parent_id = Self::me(caller)?;
+        self.check_project_launchable(&parent_id)?;
         let spec = s(args, "task");
         if spec.is_empty() {
             return Err("Falta --task con el encargo completo de la hija".into());
@@ -76,6 +77,11 @@ impl Core {
     /// resolvió el host (nunca el que llega de la UI).
     pub(super) fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
         let parent_id = p.parent_task.clone();
+        // REVALIDACIÓN tras la aprobación humana: plan -> aprobación -> revalidación -> efectos.
+        // Entre `plan_spawn` y el «sí» de la persona pueden pasar minutos: el proyecto pudo archivarse,
+        // su carpeta desaparecer o relocalizarse. La aprobación no congela una launchability antigua.
+        // Va ANTES de crear la tarea, el worktree o cualquier proceso: si falla, no queda nada.
+        self.check_project_launchable(&parent_id)?;
         // La tarea se persiste ANTES de cualquier efecto (worktree, proceso): una
         // caída a mitad del lanzamiento deja rastro recuperable en vez de un
         // worktree huérfano sin tarea.

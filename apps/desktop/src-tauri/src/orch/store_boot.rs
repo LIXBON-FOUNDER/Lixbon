@@ -15,9 +15,15 @@
 //!
 //! # Orden de apertura
 //! `core.lock` → abrir la base SOLO hasta donde permite la valla (migración 002 sin
-//! aplicar) → decidir con `decide_boot` → actuar. Un Core que no puede arrancar por
+//! aplicar) → decidir con `decide_boot` → intentar la acción sobre el marcador → y SOLO ENTONCES
+//! migraciones posteriores a la valla (003+). Que la publicación del marcador quede pendiente
+//! (`marker_pending`) no impide migrar; que `decide_boot` encuentre una contradicción, sí. Un Core que no puede arrancar por
 //! el lock, por incompatibilidad del almacén o por el protocolo de autoridad no
-//! modifica `state.json`.
+//! modifica `state.json` ni aplica ninguna migración de D en adelante.
+//!
+//! La política de apertura es mínima y vive aquí: el almacén recibe la lista completa de
+//! migraciones para validar y un techo implícito (la valla); `orch` es quien decide cuándo
+//! se levanta, con [`CoreStorage::migrate_authoritative`], y el almacén no conoce `Marker`.
 //!
 //! # Errores: bloqueantes y recuperables
 //! [`OpenStoreError`] clasifica cada fallo:
@@ -38,7 +44,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, InstanceLock, Store, StoreError};
+use crate::store::{self, InstanceLock, Migration, MigrationReport, Store, StoreError};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -154,6 +160,9 @@ pub(super) struct Slot {
     pub(super) store: Option<Store>,
     lock: Option<InstanceLock>,
     status: StorageStatus,
+    /// Las migraciones del binario. En producción son las embebidas; las pruebas pueden
+    /// añadir una migración ficticia para ejercitar el protocolo (ver `set_catalog`).
+    catalog: Vec<Migration>,
 }
 
 /// Único punto de contacto del Core con el almacén.
@@ -161,7 +170,7 @@ pub(super) struct CoreStorage(Arc<Mutex<Slot>>);
 
 impl Default for CoreStorage {
     fn default() -> Self {
-        CoreStorage(Arc::new(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened })))
+        CoreStorage(Arc::new(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened, catalog: store::embedded() })))
     }
 }
 
@@ -191,7 +200,7 @@ impl CoreStorage {
     /// llama decide si es bloqueante o si equivale a «la base no se puede consultar».
     pub(super) fn open_for_boot(&self, core_dir: &Path) -> Result<(), OpenStoreError> {
         let mut guard = self.slot();
-        let Slot { store: store_slot, lock: lock_slot, .. } = &mut *guard;
+        let Slot { store: store_slot, lock: lock_slot, catalog, .. } = &mut *guard;
         if store_slot.is_some() {
             return Err(OpenStoreError::AlreadyOpened);
         }
@@ -199,8 +208,23 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        *store_slot = Some(Store::open_boot_under_lock(core_dir, lock, &store::embedded(), env!("CARGO_PKG_VERSION"))?);
+        *store_slot = Some(Store::open_boot_under_lock(core_dir, lock, catalog, env!("CARGO_PKG_VERSION"))?);
         Ok(())
+    }
+
+    /// Levanta el techo de la valla: aplica las migraciones posteriores (003+). Solo la llama el
+    /// arranque, cuando `decide_boot` ya dio por coherente la instalación (ver `boot_authority`).
+    /// `None` = el almacén no está abierto.
+    pub(super) fn migrate_authoritative(&self) -> Option<Result<MigrationReport, StoreError>> {
+        let mut guard = self.slot();
+        let Slot { store, catalog, .. } = &mut *guard;
+        store.as_mut().map(|s| s.migrate_authoritative(catalog, env!("CARGO_PKG_VERSION")))
+    }
+
+    /// Solo pruebas: sustituye la lista de migraciones del binario (p. ej. añade una 003 ficticia).
+    #[cfg(test)]
+    pub(super) fn set_catalog(&self, catalog: Vec<Migration>) {
+        self.slot().catalog = catalog;
     }
 
     /// Marca el almacén como degradado (decisión explícita de `init`): suelta la

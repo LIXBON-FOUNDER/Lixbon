@@ -115,7 +115,10 @@ struct Plan {
 }
 
 /// Compara la base con la lista del binario. No escribe nada.
-fn plan(conn: &Connection, migrations: &[Migration]) -> StoreResult<Plan> {
+///
+/// La lista COMPLETA sirve para validar (checksums, migraciones desconocidas, base más nueva);
+/// `ceiling` solo limita cuáles se APLICAN: las pendientes con versión mayor se dejan sin tocar.
+fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResult<Plan> {
     let binary_max = migrations.last().map(|m| m.version).unwrap_or(0);
     let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let rows = applied_rows(conn)?;
@@ -142,6 +145,9 @@ fn plan(conn: &Connection, migrations: &[Migration]) -> StoreResult<Plan> {
         }
         if m.version < applied_max {
             return Err(StoreError::OutOfOrderMigration { pending: m.version, applied: applied_max });
+        }
+        if m.version > ceiling {
+            continue;
         }
         pending.push(i);
     }
@@ -175,8 +181,22 @@ pub fn migrate(
     app_version: &str,
     backup_dir: &Path,
 ) -> StoreResult<MigrationReport> {
+    migrate_capped(conn, migrations, i64::MAX, app_version, backup_dir)
+}
+
+/// Como [`migrate`], pero solo APLICA las migraciones de versión <= `ceiling`. La lista completa
+/// se valida igual: una base más nueva que el binario, o con una migración que no conoce, se
+/// rechaza aunque el techo no la fuera a tocar. Es lo que permite abrir una base que ya tiene la
+/// 003 sin aplicarle nada más allá de lo que el protocolo de autoridad ha autorizado.
+pub fn migrate_capped(
+    conn: &mut Connection,
+    migrations: &[Migration],
+    ceiling: i64,
+    app_version: &str,
+    backup_dir: &Path,
+) -> StoreResult<MigrationReport> {
     validate_list(migrations)?;
-    let first = plan(conn, migrations)?;
+    let first = plan(conn, migrations, ceiling)?;
     let mut report = MigrationReport { from_version: first.applied_max, to_version: first.applied_max, ..Default::default() };
     if first.pending.is_empty() {
         return Ok(report);
@@ -190,7 +210,7 @@ pub fn migrate(
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // Se vuelve a planificar ya con el bloqueo de escritura: si otro proceso
     // migró entre medias, esto es la fuente de verdad.
-    let plan = plan(&tx, migrations)?;
+    let plan = plan(&tx, migrations, ceiling)?;
     report.from_version = plan.applied_max;
     report.to_version = plan.applied_max;
     for &i in &plan.pending {
