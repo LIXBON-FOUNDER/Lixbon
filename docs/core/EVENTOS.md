@@ -163,6 +163,43 @@ El Event Log **empieza cuando la infraestructura ya es autoritativa**. No se rel
 **primera promoción** a SQLite (ocurren dentro de la transacción de promoción, no de `mutate`). En
 arranques posteriores las huérfanas sí emiten.
 
+## E1b · bloque 2: decisiones (`decision.recorded`)
+Un único evento, **`decision.recorded`** (`class = decision`, `v = 1`), lo emite SOLO `Tx::record_decision`
+(`orch/tx_ops.rs`), que envuelve `State::record_decision`:
+
+1. valida la tarea, el actor y el contrato del `detail`;
+2. escribe la fila legacy (`State.decisions`) y obtiene su `decision_id`;
+3. añade exactamente un borrador cuando `decision_kind` ∈ `review | merge | pr`.
+
+`integration.rs`, `review.rs`, `spawn_approval.rs`, el RPC y la interfaz **no construyen** el borrador.
+Si el detalle no cumple el contrato, o el `kind` es desconocido, la mutación completa se rechaza (sin fila,
+sin evento, sin cambios de estado).
+
+* **Entidad**: `task` (la tarea sobre la que se decide; `Decision.id` se reutiliza tras `remove_run`, no
+  puede ser identidad). `project_id` por `project_from_task`. **Sin `idem_key`** (revisar dos veces la misma
+  rama es legítimo) y sin `correlation_id` por ahora.
+* **Actor**: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el `MutationContext`
+  debe ser realmente ese actor. Además `review`, `merge` y `pr` exigen **Person / Ui** (regla por `kind`,
+  no global: los lanzamientos pendientes podrán decidir como sistema).
+* **`spawn`**: conserva su fila legacy pero **no emite** `decision.recorded`; lo representará
+  `spawn.resolved` en el bloque de lanzamientos pendientes. Es la única excepción
+  (`DECISION_KINDS_WITHOUT_EVENT`) y una prueba la fija contra el vocabulario.
+
+### Payload (cerrado por `decision_kind`)
+| `decision_kind` | Campos | Nunca |
+|---|---|---|
+| `review` | `decision_id`, `outcome` (`accepted`·`rejected`), `head_commit`, `base_commit?`, `base_source?`, `has_comment` | `comment` |
+| `merge` | `decision_id`, `outcome` (`merged`·`conflict`·`error`·`target_moved`), `branch`, `squash`, `base_commit?`, `result_commit?`, `conflict_count?`, `base_check?`, `accepted_moved_target?`, `expected_commit?`, `found_commit?` | `into`, mensajes de git, lista de archivos en conflicto |
+| `pr` | `decision_id`, `outcome` (`created`·`already_exists`·`error`), `branch`, `pr_url?` | `remote`, error textual |
+
+### Decisión y efecto
+Una decisión de la persona y el efecto externo que provoca (`git merge`, push + `gh pr create`, lanzamiento)
+son **hechos distintos**. Este bloque solo emite la decisión; `outcome` es el valor de la fila legacy. En el
+bloque de Effects, cuando un camino ejecute realmente un efecto externo, se emitirán ambos —
+`decision.recorded` y `effect.observed`— correlacionados por el mismo `effect_id` (desde la frontera
+`mutate_after_effect`). Un camino que no ejecutó un efecto (`target_moved`, `already_merged`, una revisión)
+no inventa `effect.observed`. `already_merged`, `review_required` y `head_moved` no crean decisión ni evento.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.

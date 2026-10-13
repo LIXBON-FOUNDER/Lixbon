@@ -10,9 +10,9 @@ use std::time::Duration;
 use serde::Serialize;
 
 use super::boot_tests::*;
-use super::events::{Actor, Channel, EntityKind, EventDraft, EventError, EventPayload};
+use super::events::{Actor, Channel, EntityKind, EventDraft, EventError, EventPayload, MutationContext};
 use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy, Tx};
-use super::state::{Run, State};
+use super::state::{NewTask, Run, State};
 use super::store_boot::StorageStatus;
 use super::{Core, Orch};
 use crate::store::{EventClass, EventQuery, EventRow, NewEvent, MAX_PAYLOAD_BYTES};
@@ -350,6 +350,35 @@ fn un_reintento_persiste_los_mismos_eventos_con_el_mismo_id_y_la_misma_hora() {
     assert_eq!(evs.len(), 2, "exactamente una vez");
     assert_eq!((evs[0].id.as_str(), evs[0].at), (intentos[0][0].id.as_str(), intentos[0][0].at));
     assert_eq!((evs[1].id.as_str(), evs[1].at), (intentos[0][1].id.as_str(), intentos[0][1].at));
+    assert_eq!(core.health(), Health::Normal);
+}
+
+#[test]
+fn un_reintento_de_persistencia_no_duplica_decision_recorded() {
+    let (_l, _d, _c, core) = core_listo();
+    core.set_retry_policy(RetryPolicy::with_backoffs(vec![Duration::from_millis(15); 3]));
+    let tarea = core
+        .mutate(|tx| {
+            let nueva = NewTask {
+                agent: "claude".into(), model: None, effort: None, role: None, title: "t".into(), spec: "s".into(),
+                repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: false,
+            };
+            Ok(tx.create_run("obj", nueva).1)
+        })
+        .unwrap();
+    let antes = eventos(&core).len();
+    let w = Inyecta::instala(&core, 2, true);
+    let detalle = serde_json::json!({ "decision": "accepted", "head_commit": "h", "comment": null });
+    let id = core
+        .mutate_as(&MutationContext::person(Channel::Ui), |tx| tx.record_decision(&tarea, "review", "human", &detalle))
+        .unwrap();
+    let intentos = w.intentos();
+    assert_eq!(intentos.len(), 3, "dos fallos transitorios y un éxito");
+    assert!(intentos.iter().all(|i| i.len() == 1 && i[0] == intentos[0][0]), "el mismo evento (id, hora, payload) en cada intento");
+    let evs: Vec<_> = eventos(&core).into_iter().skip(antes).collect();
+    assert_eq!(evs.len(), 1, "exactamente un decision.recorded confirmado");
+    assert_eq!((evs[0].kind.as_str(), evs[0].id.as_str()), ("decision.recorded", intentos[0][0].id.as_str()));
+    assert_eq!(core.lock().decisions.iter().filter(|d| d.id == id).count(), 1, "y una sola fila");
     assert_eq!(core.health(), Health::Normal);
 }
 

@@ -699,6 +699,369 @@ fn collect_no_entregado_y_el_fallback_de_aplicacion_son_del_core() {
     assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "fallback del Core tras fallar la aplicación");
 }
 
+// ---------------------------------------------------------------------------------------------
+// decision.recorded: un único mutador (`Tx::record_decision`), payload cerrado, actor validado
+// ---------------------------------------------------------------------------------------------
+
+fn persona_ui() -> MutationContext {
+    MutationContext::person(Channel::Ui)
+}
+
+/// Una decisión por el mutador semántico, como una persona desde la interfaz.
+fn decide(core: &Core, task: &str, kind: &str, detail: Value) -> (Result<u64, MutateError>, Vec<EventRow>) {
+    paso_como(core, &persona_ui(), |tx| tx.record_decision(task, kind, "human", &detail))
+}
+
+fn rechazada<T: std::fmt::Debug>(r: &Result<T, MutateError>, fragmento: &str) {
+    assert!(matches!(r, Err(MutateError::Rejected(m)) if m.contains(fragmento)), "se esperaba un rechazo con «{fragmento}»: {r:?}");
+}
+
+const SECRETOS: [&str; 6] = ["SECRETO-COMENTARIO", "/ruta/secreta", "token@host", "TEXTO-ERROR", "conflicto-uno.txt", "MENSAJE-GIT"];
+
+#[test]
+fn cada_decision_de_una_persona_emite_un_decision_recorded_con_su_payload_cerrado() {
+    let (_l, _d, core) = core_listo();
+    let (run, _root, a, _b) = escenario(&core);
+    core.mutate(|tx| {
+        tx.task_mut(&a)?.project_id = Some("p1".into());
+        Ok(())
+    })
+    .unwrap();
+    let casos: Vec<(&str, Value, Value)> = vec![
+        (
+            "review",
+            json!({ "decision": "accepted", "base_commit": "b1", "base_source": "task_base", "head_commit": "h1", "comment": "SECRETO-COMENTARIO" }),
+            json!({ "decision_kind": "review", "outcome": "accepted", "head_commit": "h1", "base_commit": "b1", "base_source": "task_base", "has_comment": true }),
+        ),
+        (
+            "review",
+            json!({ "decision": "rejected", "base_commit": null, "base_source": null, "head_commit": "h2", "comment": null }),
+            json!({ "decision_kind": "review", "outcome": "rejected", "head_commit": "h2", "has_comment": false }),
+        ),
+        (
+            "merge",
+            json!({ "outcome": "merged", "branch": "lx/t", "into": "/ruta/secreta", "squash": true, "base_commit": "b", "result_commit": "r",
+                    "conflicts": null, "base_check": "ok", "message": "MENSAJE-GIT" }),
+            json!({ "decision_kind": "merge", "outcome": "merged", "branch": "lx/t", "squash": true, "base_commit": "b", "result_commit": "r", "base_check": "ok" }),
+        ),
+        (
+            "merge",
+            json!({ "outcome": "conflict", "branch": "lx/t", "into": "/ruta/secreta", "squash": false, "base_commit": "b", "result_commit": null,
+                    "conflicts": ["conflicto-uno.txt", "dos.txt"], "base_check": "sin_referencia", "message": "MENSAJE-GIT" }),
+            json!({ "decision_kind": "merge", "outcome": "conflict", "branch": "lx/t", "squash": false, "base_commit": "b", "conflict_count": 2, "base_check": "sin_referencia" }),
+        ),
+        (
+            "merge",
+            json!({ "outcome": "error", "branch": "lx/t", "into": "/ruta/secreta", "squash": false, "base_commit": null, "result_commit": null,
+                    "conflicts": null, "base_check": "ok", "message": "MENSAJE-GIT" }),
+            json!({ "decision_kind": "merge", "outcome": "error", "branch": "lx/t", "squash": false, "base_check": "ok" }),
+        ),
+        (
+            "merge",
+            json!({ "outcome": "target_moved", "branch": "lx/t", "into": "/ruta/secreta", "squash": false, "expected_commit": "e", "found_commit": "f" }),
+            json!({ "decision_kind": "merge", "outcome": "target_moved", "branch": "lx/t", "squash": false, "expected_commit": "e", "found_commit": "f" }),
+        ),
+        (
+            "merge",
+            json!({ "outcome": "merged", "branch": "lx/t", "into": "/ruta/secreta", "squash": false, "base_commit": "f", "result_commit": "r", "conflicts": null,
+                    "base_check": "ok", "accepted_moved_target": true, "expected_commit": "e", "found_commit": "f" }),
+            json!({ "decision_kind": "merge", "outcome": "merged", "branch": "lx/t", "squash": false, "base_commit": "f", "result_commit": "r", "base_check": "ok",
+                    "accepted_moved_target": true, "expected_commit": "e", "found_commit": "f" }),
+        ),
+        (
+            "pr",
+            json!({ "outcome": "created", "branch": "lx/t", "remote": "https://token@host/x.git", "pr_url": "https://github.com/o/r/pull/1" }),
+            json!({ "decision_kind": "pr", "outcome": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+        ),
+        (
+            "pr",
+            json!({ "outcome": "already_exists", "branch": "lx/t", "remote": "https://token@host/x.git", "pr_url": "https://github.com/o/r/pull/1" }),
+            json!({ "decision_kind": "pr", "outcome": "already_exists", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+        ),
+        (
+            "pr",
+            json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null, "error": "TEXTO-ERROR" }),
+            json!({ "decision_kind": "pr", "outcome": "error", "branch": "lx/t" }),
+        ),
+    ];
+    let mut ultimo_seq = head(&core);
+    for (kind, detail, esperado) in casos {
+        let (r, evs) = decide(&core, &a, kind, detail);
+        let id = r.unwrap_or_else(|e| panic!("{kind}: {e:?}"));
+        assert_eq!(kinds(&evs), vec!["decision.recorded"], "{kind}: una decisión, un evento");
+        let mut con_id = esperado.clone();
+        con_id["decision_id"] = json!(id);
+        assert_eq!(pl(&evs[0]), con_id, "{kind}");
+        assert!(SECRETOS.iter().all(|s| !evs[0].payload.contains(s)), "{kind}: ni comentarios, ni rutas, ni mensajes, ni errores: {}", evs[0].payload);
+        let e = &evs[0];
+        assert_eq!((e.class, e.entity_kind.as_str(), e.entity_id.as_str()), (EventClass::Decision, "task", a.as_str()));
+        assert_eq!((e.project_id.as_deref(), e.run_id.as_deref()), (Some("p1"), Some(run.as_str())));
+        assert_eq!((e.idem_key.as_deref(), e.correlation_id.as_deref()), (None, None), "sin identidad natural y sin correlación todavía");
+        assert_eq!(actor_y_canal(e), ("person", None, Some("ui")));
+        assert_eq!(core.lock().decisions.iter().filter(|d| d.id == id).count(), 1, "la fila legacy se conserva");
+        assert!(e.seq > ultimo_seq);
+        ultimo_seq = e.seq;
+    }
+}
+
+#[test]
+fn dos_revisiones_legitimas_consecutivas_producen_dos_eventos_distintos() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let detalle = json!({ "decision": "accepted", "head_commit": "h", "comment": null });
+    let (r1, e1) = decide(&core, &a, "review", detalle.clone());
+    let (r2, e2) = decide(&core, &a, "review", detalle);
+    let (d1, d2) = (r1.unwrap(), r2.unwrap());
+    assert_ne!(d1, d2);
+    assert_eq!((e1.len(), e2.len()), (1, 1));
+    assert_ne!(e1[0].id, e2[0].id);
+    assert_eq!((pl(&e1[0])["decision_id"].as_u64(), pl(&e2[0])["decision_id"].as_u64()), (Some(d1), Some(d2)));
+    assert!(e1[0].idem_key.is_none() && e2[0].idem_key.is_none(), "repetir una revisión no se deduplica");
+}
+
+#[test]
+fn spawn_conserva_su_fila_legacy_pero_no_emite_evento() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let detalle = json!({ "pending_id": "p-1", "outcome": "approved", "argv": ["--secreto"] });
+    // Aprobado por la persona desde la interfaz.
+    let antes = (head(&core), core.lock().decisions.len());
+    let (r, evs) = decide(&core, &a, "spawn", detalle.clone());
+    let id = r.unwrap();
+    assert!(evs.is_empty(), "spawn.resolved lo representará en su bloque: {evs:?}");
+    assert_eq!(core.lock().decisions.len(), antes.1 + 1);
+    assert_eq!(core.lock().decisions.iter().find(|d| d.id == id).map(|d| d.kind.as_str()), Some("spawn"));
+    assert_eq!(head(&core), antes.0);
+    // Caducado por el Core: sistema / core.
+    let (r, evs) = paso_como(&core, &MutationContext::core(), |tx| tx.record_decision(&a, "spawn", "system", &detalle));
+    r.unwrap();
+    assert!(evs.is_empty());
+    assert_eq!(core.lock().decisions.len(), antes.1 + 2);
+}
+
+#[test]
+fn un_kind_desconocido_rechaza_la_mutacion_completa() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let (runs, decisiones, antes) = {
+        let st = core.lock();
+        (st.runs.len(), st.decisions.len(), head(&core))
+    };
+    for kind in ["release", "discard", "reopen", "stop", "", "Merge"] {
+        // Además de la decisión, la misma mutación hace otro cambio: tampoco debe publicarse.
+        let r = core.mutate_as(&persona_ui(), |tx| {
+            tx.create_run("no debe quedar", nt("otra"));
+            tx.record_decision(&a, kind, "human", &json!({ "outcome": "merged" }))
+        });
+        rechazada(&r, "fuera del contrato");
+    }
+    let (runs_ahora, decisiones_ahora) = {
+        let st = core.lock();
+        (st.runs.len(), st.decisions.len())
+    };
+    assert_eq!((runs_ahora, decisiones_ahora, head(&core)), (runs, decisiones, antes), "ni estado ni filas ni eventos");
+    // La tarea tiene que existir.
+    let (r, evs) = decide(&core, "t-no-existe", "review", json!({ "decision": "accepted", "head_commit": "h" }));
+    rechazada(&r, "no existe");
+    assert!(evs.is_empty());
+}
+
+#[test]
+fn un_detalle_fuera_del_contrato_rechaza_la_mutacion() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let antes = (core.lock().decisions.len(), head(&core));
+    let malos = [
+        ("review", json!({ "decision": "quizas", "head_commit": "h" })),
+        ("review", json!({ "decision": "accepted" })),
+        ("review", json!({ "decision": "accepted", "head_commit": "h", "base_commit": 5 })),
+        ("merge", json!({ "outcome": "inventado", "branch": "b", "squash": false })),
+        ("merge", json!({ "outcome": "merged", "squash": false })),
+        ("merge", json!({ "outcome": "merged", "branch": "b" })),
+        ("merge", json!({ "outcome": "conflict", "branch": "b", "squash": false, "conflicts": "a.txt" })),
+        ("pr", json!({ "outcome": "created" })),
+        ("pr", json!({ "outcome": "pendiente", "branch": "b" })),
+        ("pr", json!({ "outcome": "created", "branch": "b", "pr_url": 7 })),
+    ];
+    for (kind, detalle) in malos {
+        let (r, evs) = decide(&core, &a, kind, detalle.clone());
+        rechazada(&r, "decision.recorded");
+        assert!(evs.is_empty(), "{kind} {detalle}");
+    }
+    assert_eq!((core.lock().decisions.len(), head(&core)), antes, "ninguna fila ni evento");
+}
+
+#[test]
+fn la_validacion_de_actor_exige_coherencia_con_la_fila_y_una_persona_en_la_interfaz() {
+    let (_l, _d, core) = core_listo();
+    let (_run, root, a, _b) = escenario(&core);
+    let review = json!({ "decision": "accepted", "head_commit": "h" });
+    let (filas, antes) = (core.lock().decisions.len(), head(&core));
+    let rechazos: Vec<(&str, MutationContext, &str, &str)> = vec![
+        // La fila dice «human» pero quien muta no es una persona.
+        ("review", MutationContext::core(), "human", "la fila dice actor"),
+        ("review", MutationContext::agent(&root, Channel::Lxo), "human", "la fila dice actor"),
+        ("merge", MutationContext::agent(&root, Channel::Ui), "human", "la fila dice actor"),
+        // La fila dice «system» pero quien muta es una persona.
+        ("spawn", persona_ui(), "system", "la fila dice actor"),
+        // Coherentes, pero review/merge/pr son de una PERSONA desde la interfaz.
+        ("review", MutationContext::core(), "system", "solo la toma una persona"),
+        ("pr", MutationContext::agent(&a, Channel::Lxo), a.as_str(), "solo la toma una persona"),
+        ("review", MutationContext::person(Channel::Lxo), "human", "solo la toma una persona"),
+        ("merge", MutationContext::person(Channel::Core), "human", "solo la toma una persona"),
+    ];
+    for (kind, ctx, actor, fragmento) in rechazos {
+        let detalle = match kind {
+            "merge" => json!({ "outcome": "merged", "branch": "b", "squash": false }),
+            "pr" => json!({ "outcome": "created", "branch": "b" }),
+            "spawn" => json!({ "pending_id": "p", "outcome": "approved" }),
+            _ => review.clone(),
+        };
+        let r = core.mutate_as(&ctx, |tx| tx.record_decision(&a, kind, actor, &detalle));
+        rechazada(&r, fragmento);
+    }
+    assert_eq!((core.lock().decisions.len(), head(&core)), (filas, antes), "ningún rechazo deja fila ni evento");
+
+    // No es una regla global `Decision => Person`: spawn puede decidir el sistema (caducidad) o una persona.
+    let spawn = json!({ "pending_id": "p", "outcome": "expired" });
+    core.mutate_as(&MutationContext::core(), |tx| tx.record_decision(&a, "spawn", "system", &spawn)).unwrap();
+    core.mutate_as(&persona_ui(), |tx| tx.record_decision(&a, "spawn", "human", &spawn)).unwrap();
+
+    // El adaptador de pruebas por defecto es el Core: ahí una decisión humana se rechaza, no se tolera.
+    let st = Mutex::new(State::default());
+    let (_run, tarea) = st.mutate(|tx| Ok(tx.create_run("obj", nt("raiz")))).unwrap();
+    let r = st.mutate(|tx| tx.record_decision(&tarea, "review", "human", &review));
+    assert!(matches!(&r, Err(m) if m.contains("la fila dice actor")), "{r:?}");
+    assert!(st.read(|s| s.decisions.is_empty()));
+    // Representar a la persona es EXPLÍCITO.
+    let persona = crate::orch::mutation::ConContexto::persona(&st);
+    persona.mutate(|tx| tx.record_decision(&tarea, "review", "human", &review)).unwrap();
+    assert_eq!(st.read(|s| s.decisions.len()), 1);
+}
+
+#[test]
+fn todo_kind_del_vocabulario_o_emite_exactamente_un_evento_o_esta_en_la_excepcion_explicita() {
+    use super::event_kinds::DECISION_KINDS_WITHOUT_EVENT;
+    assert_eq!(DECISION_KINDS_WITHOUT_EVENT, ["spawn"], "la excepción es única y explícita");
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    for kind in super::vocab::DECISION_KIND {
+        let detalle = match kind {
+            "review" => json!({ "decision": "accepted", "head_commit": "h" }),
+            "merge" => json!({ "outcome": "merged", "branch": "b", "squash": false }),
+            "pr" => json!({ "outcome": "created", "branch": "b" }),
+            "spawn" => json!({ "pending_id": "p", "outcome": "approved" }),
+            otro => panic!("kind nuevo del vocabulario sin instrumentar ni excluir explícitamente: {otro}"),
+        };
+        let (r, evs) = decide(&core, &a, kind, detalle);
+        r.unwrap();
+        let esperados = if DECISION_KINDS_WITHOUT_EVENT.contains(&kind) { 0 } else { 1 };
+        assert_eq!(evs.len(), esperados, "{kind}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rutas reales de la persona: integrar, revisar y publicar
+// ---------------------------------------------------------------------------------------------
+
+/// Un Core real con la rama `lx/t` de la preparación de revisión (tarea hija ya terminada).
+fn core_con_rama(nombre: &str) -> (Limpia, Arc<Core>, String, PathBuf) {
+    let (l, _d, core) = core_listo();
+    let (st, id, dir, _base) = super::review::tests::setup(nombre);
+    let nuevo = st.into_inner().unwrap();
+    core.mutate(|tx| {
+        **tx = nuevo;
+        tx.task_mut(&id)?.project_id = Some("p9".into());
+        Ok(())
+    })
+    .unwrap();
+    (l, core, id, dir)
+}
+
+fn rev_parse(dir: &Path, rama: &str) -> String {
+    let o = Command::new("git").args(["rev-parse", rama]).current_dir(dir).output().unwrap();
+    String::from_utf8_lossy(&o.stdout).trim().to_string()
+}
+
+#[test]
+fn revisar_e_integrar_desde_la_interfaz_deja_un_solo_decision_recorded_por_decision() {
+    let (_l, core, id, dir) = core_con_rama("dec-flujo");
+    let h = rev_parse(&dir, "lx/t");
+
+    // head_moved no registra nada.
+    let antes = head(&core);
+    assert_eq!(core.review_from_ui(&id, "accepted", "0000000", None, true).unwrap()["outcome"], "head_moved");
+    assert!(desde(&core, antes).is_empty());
+    // Integrar sin revisión aceptada tampoco.
+    assert_eq!(core.integrate_from_ui(&id, true, false, None).unwrap()["outcome"], "review_required");
+    assert!(desde(&core, antes).is_empty());
+
+    // La revisión: UN evento; el comentario no viaja.
+    let r = core.review_from_ui(&id, "accepted", &h, Some("SECRETO-COMENTARIO"), true).unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    let p = pl(&evs[0]);
+    assert_eq!((p["decision_kind"].as_str(), p["outcome"].as_str(), p["head_commit"].as_str()), (Some("review"), Some("accepted"), Some(h.as_str())));
+    assert_eq!((p["decision_id"].as_u64(), p["has_comment"].as_bool()), (r["decision_id"].as_u64(), Some(true)));
+    assert!(!evs[0].payload.contains("SECRETO-COMENTARIO"));
+    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", None, Some("ui")), Some("p9")));
+
+    // La integración: UN evento (la decisión), sin segundo evento por la marca `merged` ni por nadie más.
+    let antes = head(&core);
+    let out = core.integrate_from_ui(&id, true, false, None).unwrap();
+    assert_eq!(out["outcome"], "merged");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"], "una decisión, un evento: ninguna capa lo repite");
+    let p = pl(&evs[0]);
+    assert_eq!((p["decision_kind"].as_str(), p["outcome"].as_str(), p["branch"].as_str(), p["squash"].as_bool()), (Some("merge"), Some("merged"), Some("lx/t"), Some(false)));
+    assert_eq!(p["decision_id"], out["decision"]);
+    assert_eq!(p["result_commit"], out["result_commit"]);
+    assert!(p.get("into").is_none() && p.get("message").is_none() && p.get("conflicts").is_none());
+    assert!(!evs[0].payload.contains("lxo-revision"), "la ruta local del destino no viaja: {}", evs[0].payload);
+    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", None, Some("ui")), Some("p9")));
+    assert_eq!(core.lock().decisions.last().map(|d| (d.kind.as_str(), d.actor.as_str())), Some(("merge", "human")), "fila legacy y evento coinciden");
+
+    // Repetir: already_merged no crea decisión ni evento.
+    let antes = head(&core);
+    assert_eq!(core.integrate_from_ui(&id, true, false, None).unwrap()["outcome"], "already_merged");
+    assert!(desde(&core, antes).is_empty());
+    // Un agente no puede integrar: ni efecto ni evento.
+    let r = core.rpc(Caller::Agent(Some(id.clone())), &s(&dir), "integrate", &json!({ "task": id, "confirm": true }));
+    assert!(r.is_err());
+    assert!(desde(&core, antes).is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn publicar_un_pr_deja_un_decision_recorded_sin_remoto_ni_error_textual() {
+    let (_l, core, id, dir) = core_con_rama("dec-pr");
+    let gh = |_: &str, _: &str, _: &str, _: &str, _: &str| -> Result<String, String> { Ok("https://github.com/o/r/pull/1".into()) };
+    let persona = core.acting(persona_ui());
+    // Sin remoto el push falla: se registra la decisión con outcome `error`, sin el texto del error.
+    let antes = head(&core);
+    let out = super::integration::publish_pr(&persona, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
+    assert_eq!(out["outcome"], "error");
+    assert!(out["message"].is_string(), "el error textual sí se devuelve al llamador");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    assert_eq!(pl(&evs[0]), json!({ "decision_kind": "pr", "decision_id": out["decision"], "outcome": "error", "branch": "lx/t" }));
+    assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")));
+    // Con un PR ya registrado: already_exists, con su URL; sigue siendo una decisión nueva.
+    core.mutate(|tx| {
+        tx.task_mut(&id)?.pr_url = Some("https://github.com/o/r/pull/3".into());
+        Ok(())
+    })
+    .unwrap();
+    let antes = head(&core);
+    let out = super::integration::publish_pr(&persona, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
+    assert_eq!(out["outcome"], "already_exists");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    assert_eq!(pl(&evs[0])["pr_url"], "https://github.com/o/r/pull/3");
+    assert!(!evs[0].payload.contains("remote"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn produccion(texto: &str) -> Vec<(usize, String)> {
     let prod = texto.split("mod tests {").next().unwrap().split("mod durable_tests {").next().unwrap();
     prod.lines().enumerate().filter(|(_, l)| !l.trim_start().starts_with("//")).map(|(n, l)| (n + 1, l.to_string())).collect()
@@ -708,12 +1071,16 @@ fn produccion(texto: &str) -> Vec<(usize, String)> {
 fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // El catálogo solo lo importa tx_ops; nadie más nombra sus constructores ni la cola de la transacción.
-    let prohibido: [(&str, &[&str]); 5] = [
+    let prohibido: [(&str, &[&str]); 8] = [
         ("event_kinds", &["tx_ops.rs", "mod.rs"]),
         ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
         ("task_status_changed(", &["event_kinds.rs", "tx_ops.rs"]),
         ("run_created(", &["event_kinds.rs", "tx_ops.rs"]),
+        // `decision.recorded` lo construye SOLO `Tx::record_decision`: ni integration, ni review, ni rpc.
+        ("decision_recorded(", &["event_kinds.rs", "tx_ops.rs"]),
+        ("DecisionRecorded", &["event_kinds.rs", "tx_ops.rs"]),
+        ("DECISION_KINDS_WITHOUT_EVENT", &["event_kinds.rs"]),
     ];
     let mut revisados = 0;
     for entrada in std::fs::read_dir(&dir).unwrap() {
