@@ -167,6 +167,8 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdLogout()
 	case "mcp":
 		m.cmdMCP()
+	case "browser":
+		return m.cmdBrowser(arg)
 	case "provider":
 		return m.cmdProvider(arg)
 	case "orquestar":
@@ -761,13 +763,23 @@ func (m *Model) cmdTools() {
 		commands = "sin preguntar"
 	}
 	report := reportBlock{title: fmt.Sprintf("Herramientas del modo agent %s workspace %s", glyphSep, shortPath(m.chat.Workspace)), keys: true}
+	site := "pide confirmación por sitio"
+	if s.AutoBrowser {
+		site = "sin preguntar"
+	}
 	for _, spec := range toolspec.Specs() {
+		if !s.ToolAllowed(spec.Name) {
+			continue
+		}
 		permission := sDim2.Render(glyphTodo + " solo lectura")
-		if !toolspec.IsReadOnly(spec.Name) {
+		switch {
+		case toolspec.IsReadOnly(spec.Name):
+		case toolspec.IsBrowser(spec.Name):
+			permission = sBeige.Render(glyphDot + " " + site)
+		case spec.Name == "run_command":
+			permission = sWarn.Render(glyphDot + " " + commands)
+		default:
 			permission = sBeige.Render(glyphDot + " " + approve)
-			if spec.Name == "run_command" {
-				permission = sWarn.Render(glyphDot + " " + commands)
-			}
 		}
 		report.rows = append(report.rows, [2]string{spec.Name, permission + sDim2.Render(" "+glyphSep+" ") + sDim.Render(spec.Description)})
 	}

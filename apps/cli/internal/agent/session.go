@@ -58,6 +58,7 @@ const (
 	ApproveEdit    ApprovalKind = "edit"
 	ApproveCommand ApprovalKind = "command"
 	ApproveMCP     ApprovalKind = "mcp"
+	ApproveBrowser ApprovalKind = "browser"
 )
 
 // Approval es lo que se le pide aprobar al usuario (o al móvil, en remoto).
@@ -66,8 +67,11 @@ type Approval struct {
 	Tool    string
 	Summary string
 	Detail  string // ruta y conteo de líneas, para las ediciones
-	Prefix  string // prefijo guardable, para los comandos
+	Prefix  string // prefijo guardable: de un comando, o el origen en el navegador
 	Change  *Change
+	// Sensitive: escribir en una contraseña, tarjeta o código. Solo admite
+	// sí o no, nunca «siempre».
+	Sensitive bool
 }
 
 // Approver decide. Un error (p. ej. contexto cancelado) aborta el turno.
@@ -141,6 +145,16 @@ type Session struct {
 	AllowedCommands []string
 	// OnAllowedCommands persiste la lista cuando el usuario añade un prefijo.
 	OnAllowedCommands func([]string)
+
+	// BrowserMode: "on", "off" o "auto" (solo con ventana de contexto
+	// suficiente). Las herramientas browser_* no se anuncian si no aplica.
+	BrowserMode string
+	// AutoBrowser no pregunta antes de navegar o actuar en ningún sitio;
+	// BrowserOrigins son los sitios aprobados en esta sesión.
+	AutoBrowser    bool
+	BrowserOrigins []string
+	// NoVision: el modelo no ve imágenes; no se le ofrece browser_screenshot.
+	NoVision bool
 	// Orch consulta el orquestador de Lixbon Desktop; nil lo desactiva.
 	Orch          func() orch.Info
 	ContextWindow int
@@ -182,6 +196,35 @@ func (s *Session) popToolImages() []string {
 	images := s.pendingImages
 	s.pendingImages = nil
 	return images
+}
+
+// BrowserMinContext: con menos ventana, los esquemas y la guía del navegador
+// (~1.2k tokens) y sus snapshots no compensan en modo auto.
+const BrowserMinContext = 32768
+
+func (s *Session) BrowserEnabled() bool {
+	if s.Tools == nil || s.Tools.Browser == nil {
+		return false
+	}
+	switch s.BrowserMode {
+	case "on":
+		return true
+	case "auto":
+		return s.ContextWindow >= BrowserMinContext
+	}
+	return false
+}
+
+// BrowserResume es la línea del prompt con la pestaña en la que quedó el
+// agente en un turno anterior, o "".
+func (s *Session) BrowserResume() string {
+	if !s.BrowserEnabled() {
+		return ""
+	}
+	if r := s.Tools.Browser.Resume(); r != "" {
+		return "\n" + r
+	}
+	return ""
 }
 
 func isEditTool(name string) bool { return toolspec.IsEdit(name) }

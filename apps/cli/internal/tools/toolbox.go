@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"lixbon.com/cli/internal/process"
@@ -45,17 +46,30 @@ type Toolbox struct {
 	// OnOutput recibe la salida cruda de run_command mientras corre (desde
 	// otra goroutine).
 	OnOutput func(chunk []byte)
+	// Browser es el navegador del agente; nil lo desactiva.
+	Browser Browser
 
 	todo      []TodoItem
 	lastFetch *FetchInfo
+	images    [][]byte
+	searches  []string
+
+	previewOnce sync.Once
+	previewSrv  *preview
 }
 
 func NewToolbox(root string) *Toolbox {
 	return &Toolbox{Root: root, Procs: process.NewManager()}
 }
 
-// Close termina los procesos en segundo plano.
-func (tb *Toolbox) Close() { tb.Procs.StopAll() }
+// Close termina los procesos en segundo plano y cierra el navegador.
+func (tb *Toolbox) Close() {
+	tb.Procs.StopAll()
+	if tb.Browser != nil {
+		tb.Browser.Close()
+	}
+	tb.preview().stop()
+}
 
 // Execute despacha cualquier herramienta del catálogo. Los fallos llegan como
 // texto "[ERROR] …".
@@ -68,6 +82,9 @@ func (tb *Toolbox) Execute(ctx context.Context, name string, args map[string]any
 }
 
 func (tb *Toolbox) dispatch(ctx context.Context, name string, args map[string]any) (string, error) {
+	if isBrowserTool(name) {
+		return tb.runBrowser(ctx, name, args)
+	}
 	switch name {
 	case "run_command":
 		command, err := textArg(args, "command", "")

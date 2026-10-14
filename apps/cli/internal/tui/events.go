@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"strings"
+
 	"lixbon.com/cli/internal/agent"
+	"lixbon.com/cli/internal/toolspec"
 )
 
 // handleEvent convierte los eventos del agente en bloques. Las acciones se
@@ -9,6 +12,7 @@ import (
 // detrás de otra, pero no todas tienen resultado (las de solo lectura llegan
 // ya hechas, y una cancelación deja la última sin cerrar).
 func (m *Model) handleEvent(e agent.Event) {
+	thought := m.takeThought(e)
 	m.flushLive()
 	if e.Kind == agent.EventStep {
 		return
@@ -16,17 +20,27 @@ func (m *Model) handleEvent(e agent.Event) {
 	m.live.usedTools = true
 	switch e.Kind {
 	case agent.EventNote, agent.EventRescued:
-		m.closeReads()
+		m.closeGroups()
 		m.add(note(e.Text))
 	case agent.EventReadGroup:
 		m.closeTool(toolDone)
-		for _, name := range e.Names {
-			m.addRead(readItem{tool: e.Tool, target: name})
+		m.closeBrowser()
+		for i, name := range e.Names {
+			it := readItem{tool: e.Tool, target: name}
+			if i == 0 {
+				it.thought = thought
+			}
+			m.addRead(it)
 		}
 	case agent.EventAction:
 		m.closeTool(toolDone)
+		if toolspec.IsBrowser(e.Tool) {
+			m.addBrowserStep(e, thought)
+			return
+		}
+		m.closeBrowser()
 		if e.ReadOnly && e.Tool != "ask_user" {
-			m.addRead(readItem{tool: e.Tool, target: e.Text, meta: e.Meta})
+			m.addRead(readItem{tool: e.Tool, target: e.Text, meta: e.Meta, thought: thought})
 			return
 		}
 		m.closeReads()
@@ -41,7 +55,10 @@ func (m *Model) handleEvent(e agent.Event) {
 	case agent.EventActionResult:
 		switch {
 		case m.openTool != nil:
-			m.openTool.b.(*toolBlock).finish(e)
+			m.currentTool().finish(e)
+			if g, ok := m.openTool.b.(*browserBlock); ok {
+				g.secs += e.Elapsed.Seconds()
+			}
 			m.refresh(m.openTool)
 			m.openTool = nil
 		case m.readGroup != nil && e.Failed:
@@ -55,9 +72,24 @@ func (m *Model) handleEvent(e agent.Event) {
 	}
 }
 
+// takeThought aparta lo pensado antes de una acción que va a un grupo: se
+// guarda dentro del grupo (ctrl+o lo enseña) en vez de como otra fila «Pensó».
+func (m *Model) takeThought(e agent.Event) thinkBlock {
+	live := &m.live
+	grouped := e.Kind == agent.EventReadGroup ||
+		e.Kind == agent.EventAction && (toolspec.IsBrowser(e.Tool) || e.ReadOnly && e.Tool != "ask_user")
+	if !grouped || live.answer != nil || m.liveProse() != "" {
+		return thinkBlock{}
+	}
+	t := thinkBlock{text: strings.TrimSpace(live.reasoning.String()), secs: live.reasoningSecs}
+	live.reasoning.Reset()
+	live.reasoningSecs = 0
+	return t
+}
+
 func (m *Model) addRead(it readItem) {
 	if m.readGroup == nil {
-		m.readGroup = m.add(&readGroupBlock{items: []readItem{it}})
+		m.readGroup = m.add(&readGroupBlock{items: []readItem{it}, live: true})
 		return
 	}
 	g := m.readGroup.b.(*readGroupBlock)
@@ -65,16 +97,71 @@ func (m *Model) addRead(it readItem) {
 	m.refresh(m.readGroup)
 }
 
+// addBrowserStep suma la acción al grupo del navegador en curso, que la
+// enseña en su única fila.
+func (m *Model) addBrowserStep(e agent.Event, thought thinkBlock) {
+	m.closeReads()
+	step := newToolBlock(e, &m.spin)
+	if e.ReadOnly {
+		step.state = toolDone
+	}
+	if m.browserGroup == nil {
+		m.browserGroup = m.add(&browserBlock{live: true, steps: []*toolBlock{step}, thoughts: []thinkBlock{thought}, secs: thought.secs})
+	} else {
+		g := m.browserGroup.b.(*browserBlock)
+		g.steps = append(g.steps, step)
+		g.thoughts = append(g.thoughts, thought)
+		g.secs += thought.secs
+		m.refresh(m.browserGroup)
+	}
+	m.openTool = m.browserGroup
+}
+
+// currentTool es la herramienta en marcha: un bloque propio o el último paso
+// del grupo del navegador.
+func (m *Model) currentTool() *toolBlock {
+	if m.openTool == nil {
+		return nil
+	}
+	switch b := m.openTool.b.(type) {
+	case *toolBlock:
+		return b
+	case *browserBlock:
+		return b.last()
+	}
+	return nil
+}
+
 // closeReads termina el grupo de lecturas en curso: lo siguiente que se lea
 // empieza otro.
-func (m *Model) closeReads() { m.readGroup = nil }
+func (m *Model) closeReads() {
+	if m.readGroup != nil {
+		m.readGroup.b.(*readGroupBlock).live = false
+		m.refresh(m.readGroup)
+		m.readGroup = nil
+	}
+}
+
+func (m *Model) closeBrowser() {
+	if m.browserGroup != nil {
+		m.browserGroup.b.(*browserBlock).live = false
+		m.refresh(m.browserGroup)
+		m.browserGroup = nil
+	}
+}
+
+func (m *Model) closeGroups() {
+	m.closeReads()
+	m.closeBrowser()
+}
 
 // closeTool cierra la herramienta que se quedó sin resultado.
 func (m *Model) closeTool(state toolState) {
-	if m.openTool == nil {
+	b := m.currentTool()
+	if b == nil {
 		return
 	}
-	if b := m.openTool.b.(*toolBlock); b.state == toolRunning || b.state == toolWaiting {
+	if b.state == toolRunning || b.state == toolWaiting {
 		b.state = state
 		m.refresh(m.openTool)
 	}
@@ -83,10 +170,11 @@ func (m *Model) closeTool(state toolState) {
 
 // setToolState marca la herramienta abierta (p. ej. esperando aprobación).
 func (m *Model) setToolState(state toolState) {
-	if m.openTool == nil {
+	b := m.currentTool()
+	if b == nil {
 		return
 	}
-	m.openTool.b.(*toolBlock).state = state
+	b.state = state
 	m.refresh(m.openTool)
 }
 
@@ -98,7 +186,7 @@ func (m *Model) printTodo(items, _ []todoItem) {
 		m.refresh(m.todoEntry)
 		return
 	}
-	m.closeReads()
+	m.closeGroups()
 	m.todoEntry, m.todoTurn = m.add(&todoBlock{items: items}), m.turn
 }
 

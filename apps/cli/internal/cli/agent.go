@@ -19,6 +19,12 @@ func (h *headlessApprover) Approve(ctx context.Context, req agent.Approval) (age
 		fmt.Fprintf(h.app.Stderr, "  ✗ comando sin aprobar: %s\n    permítelo con --auto-run, con «lixbon init» (allowed_commands) o desde el chat interactivo\n", req.Summary)
 	case agent.ApproveMCP:
 		fmt.Fprintf(h.app.Stderr, "  ✗ herramienta externa sin aprobar: %s\n    activa auto_approve_tools en la configuración\n", req.Detail)
+	case agent.ApproveBrowser:
+		hint := "activa browser_auto_approve en la configuración o usa el chat interactivo"
+		if req.Sensitive {
+			hint = "los campos sensibles (contraseñas, tarjetas, códigos) solo se aprueban en el chat interactivo"
+		}
+		fmt.Fprintf(h.app.Stderr, "  ✗ acción del navegador sin aprobar en %s: %s\n    %s\n", req.Detail, req.Summary, hint)
 	default:
 		fmt.Fprintf(h.app.Stderr, "  ✗ cambio sin aprobar: %s\n    activa auto_approve_tools en la configuración\n", req.Detail)
 	}

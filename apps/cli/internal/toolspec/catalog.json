@@ -515,6 +515,227 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_navigate",
+        "description": "Abre una URL o un archivo del workspace (index.html, web/, logo.svg: HTML, SVG, PDF, imágenes…) en el navegador del agente y devuelve el snapshot con refs [eN] y los errores de JavaScript de la página. Úsalo para ver y probar lo que construyes, páginas con JavaScript, formularios, sesiones iniciadas o el localhost del usuario; para solo leer una web, fetch_url basta.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "URL (https://…, localhost:3000) o ruta de un archivo o carpeta del workspace (index.html, web/index.html)"
+            },
+            "new_tab": {
+              "type": "boolean",
+              "description": "Abrir en una pestaña nueva"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_snapshot",
+        "description": "Devuelve la página actual: elementos interactivos con su ref [eN], encabezados y texto, primero lo visible.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "all": {
+              "type": "boolean",
+              "description": "Incluir también lo que está fuera de la vista"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_click",
+        "description": "Hace clic en el elemento [eN] del último snapshot y devuelve el snapshot resultante.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "Ref del snapshot, p. ej. e12"
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_type",
+        "description": "Escribe en el campo [eN] (en un desplegable elige la opción por su texto). Con submit pulsa Enter después.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "Ref del campo"
+            },
+            "text": {
+              "type": "string",
+              "description": "Texto a escribir u opción a elegir"
+            },
+            "submit": {
+              "type": "boolean",
+              "description": "Pulsar Enter al terminar"
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "Vaciar el campo antes (por defecto sí)"
+            }
+          },
+          "required": [
+            "ref",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_press_key",
+        "description": "Pulsa una tecla o atajo sobre el elemento con foco: Enter, Escape, Tab, ArrowDown, Control+A…",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Tecla o combinación, p. ej. Enter o Control+A"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_scroll",
+        "description": "Desplaza la página hacia abajo o arriba, o hasta el elemento ref, y devuelve el snapshot.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "down",
+                "up"
+              ],
+              "description": "down (por defecto) o up"
+            },
+            "ref": {
+              "type": "string",
+              "description": "Desplazar hasta este elemento"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_screenshot",
+        "description": "Captura lo visible de la pestaña y te la adjunta como imagen. Úsalo solo si el snapshot no basta (diseño, imágenes, canvas).",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_get_text",
+        "description": "Devuelve el texto legible de la página actual (sin menús), por trozos.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "description": "Carácter desde el que seguir leyendo"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_tabs",
+        "description": "Gestiona las pestañas: list (por defecto), new (con url), select o close (con index, 1 = la primera).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "list",
+                "new",
+                "select",
+                "close"
+              ],
+              "description": "Qué hacer"
+            },
+            "index": {
+              "type": "integer",
+              "description": "Número de pestaña (1-based)"
+            },
+            "url": {
+              "type": "string",
+              "description": "URL para action=new"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_wait",
+        "description": "Espera a que aparezca un texto en la página (o unos segundos, máx. 10) y devuelve el snapshot.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Texto que debe aparecer"
+            },
+            "seconds": {
+              "type": "integer",
+              "description": "Segundos máximos (1-10)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_back",
+        "description": "Vuelve a la página anterior de la pestaña y devuelve su snapshot.",
+        "parameters": {
+          "type": "object",
+          "properties": {}
+        }
+      }
     }
   ],
   "specs": [
@@ -617,10 +838,70 @@
       "name": "ask_user",
       "args": "question, options?",
       "description": "Preguntar al usuario antes de seguir"
+    },
+    {
+      "name": "browser_navigate",
+      "args": "url, new_tab?",
+      "description": "Abrir una página o un archivo del proyecto en el navegador"
+    },
+    {
+      "name": "browser_snapshot",
+      "args": "all?",
+      "description": "Ver la página actual con sus refs"
+    },
+    {
+      "name": "browser_click",
+      "args": "ref",
+      "description": "Hacer clic en un elemento"
+    },
+    {
+      "name": "browser_type",
+      "args": "ref, text, submit?, clear?",
+      "description": "Escribir en un campo"
+    },
+    {
+      "name": "browser_press_key",
+      "args": "key",
+      "description": "Pulsar una tecla"
+    },
+    {
+      "name": "browser_scroll",
+      "args": "direction?, ref?",
+      "description": "Desplazar la página"
+    },
+    {
+      "name": "browser_screenshot",
+      "args": "",
+      "description": "Capturar la pestaña"
+    },
+    {
+      "name": "browser_get_text",
+      "args": "offset?",
+      "description": "Leer el texto de la página"
+    },
+    {
+      "name": "browser_tabs",
+      "args": "action?, index?, url?",
+      "description": "Listar, abrir, cambiar o cerrar pestañas"
+    },
+    {
+      "name": "browser_wait",
+      "args": "text?, seconds?",
+      "description": "Esperar a la página"
+    },
+    {
+      "name": "browser_back",
+      "args": "",
+      "description": "Volver a la página anterior"
     }
   ],
   "read_only": [
     "ask_user",
+    "browser_get_text",
+    "browser_screenshot",
+    "browser_scroll",
+    "browser_snapshot",
+    "browser_wait",
     "fetch_url",
     "find_files",
     "list_files",
@@ -719,6 +1000,41 @@
     ],
     "stop_command": [
       "id"
+    ],
+    "browser_navigate": [
+      "url",
+      "new_tab"
+    ],
+    "browser_snapshot": [
+      "all"
+    ],
+    "browser_click": [
+      "ref"
+    ],
+    "browser_type": [
+      "ref",
+      "text",
+      "submit",
+      "clear"
+    ],
+    "browser_press_key": [
+      "key"
+    ],
+    "browser_scroll": [
+      "direction",
+      "ref"
+    ],
+    "browser_get_text": [
+      "offset"
+    ],
+    "browser_tabs": [
+      "action",
+      "index",
+      "url"
+    ],
+    "browser_wait": [
+      "text",
+      "seconds"
     ]
   }
 }

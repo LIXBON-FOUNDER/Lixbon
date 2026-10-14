@@ -17,6 +17,7 @@ import (
 
 	"lixbon.com/cli/internal/agent"
 	"lixbon.com/cli/internal/api"
+	"lixbon.com/cli/internal/browser"
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/history"
 	"lixbon.com/cli/internal/mcp"
@@ -83,6 +84,10 @@ type Chat struct {
 	Toolbox    *tools.Toolbox
 	// MCP es nil mientras no haya servidores MCP configurados.
 	MCP *mcp.Registry
+	// Browser es nil si está desactivado o no hay navegador instalado
+	// (BrowserErr dice por qué).
+	Browser    *browser.Manager
+	BrowserErr error
 
 	Model     string
 	Mode      string
@@ -176,6 +181,7 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 	orchDir := filepath.Dir(opts.ConfigPath)
 	s.Orch = func() orch.Info { return orch.Discover(orchDir) }
 	c.Session = s
+	c.setupBrowser(opts.ConfigPath)
 	return c, nil
 }
 
@@ -529,7 +535,11 @@ func (c *Chat) Send(ctx context.Context, text string, sink Sink) (string, error)
 	default:
 		answer, err = c.askTurn(ctx, sink)
 	}
-	if err != nil && ctx.Err() == nil {
+	if c.Browser != nil {
+		c.Browser.Release()
+	}
+	var kept *Interrupted
+	if err != nil && ctx.Err() == nil && !stopped(err) && !errors.As(err, &kept) {
 		// Un error del gateway no deja el mensaje a medias en el historial.
 		c.History = c.History[:prior]
 		return "", err
@@ -581,8 +591,12 @@ func (c *Chat) agentTurn(ctx context.Context, sink Sink) (string, error) {
 	c.Session.Working = nil
 	c.Session.EndTurn()
 	if err != nil {
-		if ctx.Err() != nil {
+		switch {
+		case ctx.Err() != nil || stopped(err):
 			c.History = working
+		case c.Session.Stats.Actions > 0:
+			c.History = working
+			err = &Interrupted{Err: err}
 		}
 		return "", err
 	}
@@ -602,7 +616,9 @@ func (c *Chat) askTurn(ctx context.Context, sink Sink) (string, error) {
 	var toolList []map[string]any
 	if c.Session.NativeTools {
 		for _, name := range agent.AskTools {
-			toolList = append(toolList, toolspec.Schema(name))
+			if schema := toolspec.Schema(name); schema != nil && c.Session.ToolAllowed(name) {
+				toolList = append(toolList, schema)
+			}
 		}
 	}
 	messages := c.contextMessages(toolList != nil)
@@ -665,6 +681,21 @@ func (c *Chat) askTurn(ctx context.Context, sink Sink) (string, error) {
 
 const maxAskSteps = 12
 
+// stopped: el agente cortó el turno (sin respuesta, repitiéndose, tope de
+// pasos). Lo hecho hasta ahí se conserva para poder decirle «continúa».
+func stopped(err error) bool {
+	var s *agent.Stopped
+	return errors.As(err, &s)
+}
+
+// Interrupted: el gateway falló a mitad de un turno del agente que ya había
+// hecho algo. Lo hecho queda en el historial y guardado, y «continúa» lo
+// retoma; sin acciones no hay nada que conservar y el mensaje se descarta.
+type Interrupted struct{ Err error }
+
+func (e *Interrupted) Error() string { return e.Err.Error() }
+func (e *Interrupted) Unwrap() error { return e.Err }
+
 // rejectsTools: el servidor (o el modelo) no admite herramientas nativas.
 func rejectsTools(err error) bool {
 	var apiErr *api.Error
@@ -679,7 +710,15 @@ func (c *Chat) contextMessages(withTools bool) []history.Message {
 	if limit := c.Cfg.MaxContextMessages; limit > 0 && len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}
-	system := []history.Message{{Role: "system", Content: askSystemPrompt(c.Workspace, withTools, time.Now()) + "\n\n" + agent.StylePrompt}}
+	prompt := askSystemPrompt(c.Workspace, withTools, time.Now())
+	if withTools {
+		prompt += agent.ResearchPrompt
+	}
+	if withTools && c.Session.BrowserEnabled() {
+		prompt += agent.BrowserPrompt + "\nEn modo ask solo puedes abrir y leer páginas con el navegador; no hagas clic ni escribas." +
+			c.Session.BrowserResume()
+	}
+	system := []history.Message{{Role: "system", Content: prompt + "\n\n" + agent.StylePrompt}}
 	if c.ProjectContext != "" {
 		system = append(system, history.Message{Role: "system", Content: "Contexto del proyecto (LIXBON.md):\n" + c.ProjectContext})
 	}
