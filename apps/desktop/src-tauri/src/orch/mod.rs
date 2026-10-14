@@ -138,6 +138,8 @@ pub struct Core {
     server: Mutex<Option<server::Handle>>,
     /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
     pending: Mutex<HashMap<String, spawn_approval::Entry>>,
+    /// Serializa las transiciones de un pendiente (ver `spawn_approval::Core::gate`).
+    pend_gate: Mutex<()>,
     /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
     resolver: Resolver,
     ttl_ms: u64,
@@ -172,6 +174,7 @@ impl Default for Orch {
             settings: Mutex::new(Settings::default()),
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
+            pend_gate: Mutex::new(()),
             resolver: resolve_real,
             ttl_ms: spawn_approval::ttl_ms(),
             #[cfg(test)]

@@ -139,7 +139,7 @@ impl Core {
                 Ok(json!({ "run": run, "task": task }))
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
-            "spawn" => self.spawn_request(&caller, args),
+            "spawn" => self.spawn_request(channel, &caller, args),
             "spawn_status" => self.spawn_status(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
@@ -320,16 +320,9 @@ impl Core {
                     return Err("Solo desde la interfaz".into());
                 }
                 let run = s(args, "run");
-                self.expire_run_pending(&run);
-                let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-                for id in &ids {
-                    self.kill_term(id);
-                }
-                let (_, kept) = self.free_worktrees(&ctx_of()?, &run, false);
-                self.mutate_as(&ctx_of()?, |st| {
-                    st.remove_run(&run);
-                    Ok(())
-                })?;
+                // `spawn.resolved` (cancelled_run_removed) de sus pendientes + `run.removed`: UNA mutación; la memoria
+                // de los pendientes solo cambia tras el COMMIT.
+                let kept = self.remove_run_and_cancel_pending(&ctx_of()?, &run)?;
                 Ok(json!({ "removed": run, "kept": kept }))
             }
             other => Err(format!("Comando desconocido: {other}")),

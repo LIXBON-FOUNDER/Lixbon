@@ -36,14 +36,29 @@ pub(super) enum SpawnStep {
     AfterLaunch,
     /// Dentro del cierre que registra `pty_process` (un `Err` es un rechazo del registro).
     InPtyRegistration,
+    /// `spawn_request`: el plan ya está hecho y todavía no se tomó la compuerta ni se revalidó el padre (la
+    /// carrera con `remove_run` o con un cierre del run). `id` es la tarea padre.
+    BeforeRequestRevalidation,
+    /// Después de persistir e insertar el pending y antes de emitir el aviso de UI.
+    AfterRequestPersistBeforeEmit,
+    /// Después de pasar `Pending → Launching`, antes de `create_child`.
+    AfterApprovalClaim,
+    /// Justo antes de que `remove_run` intente tomar `pend_gate`.
+    BeforeRunRemovalGate,
+    /// Después de limpiar terminales/worktrees de `remove_run`, antes de tomar la instantánea de pendientes.
+    AfterRunRemovalCleanupSnapshot,
+    /// Después de confirmar el registro `pty_process` de la tarea hija.
+    AfterPtyRegistration,
 }
 
 #[cfg(test)]
 pub(super) type SpawnHook = Arc<dyn Fn(&Core, &str, SpawnStep) -> Result<(), String> + Send + Sync>;
 
 impl Core {
-    /// Solo pruebas: ejecuta el gancho instalado en ese punto. Los ganchos `In*` corren DENTRO de una mutación
-    /// y no deben tocar el estado del Core.
+    /// Solo pruebas: ejecuta el gancho instalado en ese punto. `AfterApprovalClaim`, `AfterRequestPersistBeforeEmit`,
+    /// `AfterPtyRegistration` y `AfterRunRemovalCleanupSnapshot` corren con `pend_gate` tomada; sus ganchos no deben
+    /// llamar una transición que vuelva a tomarla. Los ganchos `In*` corren DENTRO de una mutación y no deben tocar
+    /// el estado del Core.
     #[cfg(test)]
     pub(super) fn spawn_hook(&self, step: SpawnStep, id: &str) -> Result<(), String> {
         let hook = self.spawn_hook.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -145,10 +160,10 @@ impl Core {
         // sin ellos; C2a no introduce Attempt, solo deja constancia de la necesidad.
         let (id, parent) = self.mutate_as(&ctx, |st| {
             let parent = st.task(&parent_id)?.clone();
-            let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
+            let id = st.add_child_for_spawn(&parent_id, MAX_DEPTH, NewTask {
                 agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
-            })?;
+            }, &p.pending_id)?;
             let t = st.task_mut(&id)?;
             t.profile = Some(p.profile.clone());
             t.ack_unverified = ack_unverified;
@@ -222,6 +237,7 @@ impl Core {
                 return Err(e);
             }
         };
+        self.spawn_hook(SpawnStep::AfterPtyRegistration, &id)?;
         Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "effort": t.effort, "role": t.role, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
     }
 

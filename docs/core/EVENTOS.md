@@ -1,7 +1,8 @@
 # Event Log del Core (slice E)
 
-Estado: **E1a — infraestructura** (migración `004_events`). Todavía no hay mutadores instrumentados:
-eso es **E1b**. HTTP/SSE es **E2**. Nada de F1 (clientes), G (Attention) ni de la vista Activity.
+Estado: **E1a cerrada; E1b en curso**. E1b instrumenta mutadores de estado, decisiones, efectos, Projects y
+Pending Spawn. La API del diario y `lxo events` siguen pendientes de E1b; HTTP/SSE es **E2**. F1 (clientes), G
+(Attention) y la vista Activity siguen fuera de esta etapa.
 
 ## Qué es
 Un *evento* es un **hecho estructurado y durable**: qué ocurrió (`kind`), quién lo provocó (actor), sobre
@@ -79,7 +80,7 @@ pequeños, sí.
 * `limit` por defecto 100, máximo **500** (se recorta); `0` o un cursor negativo son un error.
 * Devuelve `events`, `has_more`, `next_cursor` (el `seq` del último evento devuelto) y `head_seq`.
 * Los filtros por proyecto/entidad/run/`kind` (exacto **o** prefijo, parámetros distintos, con `LIKE`
-  escapando `%` y `_`), el comando RPC y `lxo events` llegan en E1b. Los agentes solo verán su run.
+  escapando `%` y `_`), el comando RPC y `lxo events` siguen pendientes de E1b. Los agentes solo verán su run.
 
 ## Un solo punto de emisión
 `Tx::push_event` es el único punto de entrada de un evento a la transacción; `INSERT INTO events` solo
@@ -181,9 +182,10 @@ sin evento, sin cambios de estado).
 * **Actor**: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el `MutationContext`
   debe ser realmente ese actor. Además `review`, `merge` y `pr` exigen **Person / Ui** (regla por `kind`,
   no global: los lanzamientos pendientes podrán decidir como sistema).
-* **`spawn`**: conserva su fila legacy pero **no emite** `decision.recorded`; lo representará
-  `spawn.resolved` en el bloque de lanzamientos pendientes. Es la única excepción
-  (`DECISION_KINDS_WITHOUT_EVENT`) y una prueba la fija contra el vocabulario.
+* **`spawn`**: conserva su fila legacy pero **no emite** `decision.recorded`; `Tx::record_spawn_resolution`
+  registra la fila y `spawn.resolved` juntos en una mutación. `cancelled_run_removed` no deja fila porque el run
+  y la tarea padre se borran en esa misma mutación. Es la única excepción al registro genérico; la
+  prueba la fija contra el vocabulario.
 
 ### Payload (cerrado por `decision_kind`)
 | `decision_kind` | Campos | Nunca |
@@ -239,9 +241,8 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 | `pty_process` | `spawn` | `launched` |
 
 Nunca rutas locales, `env`, `argv`, mensajes de error ni credenciales. Los datos estructurales los pone el
-llamador en `Effect.observed`; el constructor no consulta git. **Excepción temporal**: `spawn_outcome` (el
-marcador de registro de la decisión `spawn`) sigue yendo al diario pero no emite `effect.observed` ni se
-correlaciona; lo reformulará el bloque de lanzamientos pendientes.
+llamador en `Effect.observed`; el constructor no consulta git. No existe un efecto `spawn_outcome`: las
+resoluciones de spawn son decisiones `spawn.resolved`, no efectos.
 
 Invariantes (un call site no puede inventar un efecto que no ocurrió): `pty_process.launched` debe ser
 `true`; `git_worktree_removed` exige `worktree_removed || branch_deleted`, y `branch_deleted` exige `branch`
@@ -336,7 +337,7 @@ construye y finaliza los borradores de Projects y el único que le entrega un `N
 
 * **Solo nace con la fila.** No hay `created`: el evento existe únicamente cuando `projects` recibió el `INSERT`.
   Encontrar un proyecto ya registrado (misma ruta, un worktree), una ambigüedad, o un `join` **no** lo emiten.
-  El `join` (`project.location_added`), archivar/restaurar y relocalizar llegan en el commit siguiente.
+  `project.location_added`, archivar/restaurar y relocalizar están definidos en E1b · Projects, commit 2.
 * **Nunca** lleva ruta, `display_path`, remoto, commits ni huella: la identidad física del repositorio vive en el
   registro, no en el log. `name` se recorta a 120 caracteres.
 * **Atomicidad.** `project_ops::register_project` pre-genera el `project_id` y finaliza el evento FUERA de la
@@ -398,10 +399,10 @@ volver a archivar es legítimo) y `state_rev` NULL. Nunca copian rutas, remotos,
   `project_set_archived`, `project_create`) son `#[cfg(test)]`; una prueba de arquitectura impide usarlas en
   producción. Con el Core en `DegradedReadOnly` las cuatro decisiones se rechazan (frontera `registry_write`).
 
-## E1b · Pending Spawn, commit A: hechos standalone (`Core::record_facts`)
-Infraestructura para hechos DURABLES que **no modifican `legacy_state`** (p. ej. una solicitud de lanzamiento que
-solo vive en memoria). Todavía ningún hecho de dominio la usa: `spawn.requested` / `spawn.resolved` llegan en el
-commit siguiente.
+## E1b · Pending Spawn: solicitud y resolución durables
+`spawn.requested` y `spawn.resolved` registran el ciclo de aprobación humana. La solicitud existe primero como
+hecho durable; luego se inserta en memoria y se emiten `orch-spawn-pending` y el aviso. Si el almacenamiento está
+degradado, el padre terminó o el run se cerró, no se guarda la solicitud ni se publica un pendiente.
 
 ```text
 Core::record_facts(ctx, drafts)
@@ -422,12 +423,37 @@ Core::record_facts(ctx, drafts)
   el estado se registra con `record_facts`, no forzando una mutación ni subiendo la `rev` para guardarlo.
 * El `project_id` de un borrador con `project_from_task` se resuelve contra el estado CONFIRMADO.
 
+### Contrato de los hechos
+* `spawn.requested` es `class = state`; `spawn.resolved` es `class = decision`. Ambos usan la entidad
+  `spawn_request`, `entity_id = pending_id`, `correlation_id = pending_id` e `idem_key = pending_id`.
+* El payload de `spawn.requested` contiene `parent_task`, `provider`, `profile`, `role?`, `model?`, `effort?`,
+  `title` (recortado), `shared`, `policy_status` y `expires_at`. No copia el encargo, `argv`, `cwd`, `env`, rutas,
+  motivos de política ni credenciales.
+* El payload de `spawn.resolved` contiene `outcome`, `task?` y `has_reason`; nunca copia el texto del rechazo o
+  del error de lanzamiento. Los outcomes cerrados son `approved`, `rejected`, `launch_failed`, `timeout`,
+  `coordinator_closed` y `cancelled_run_removed`. `expired` solo es el estado compatible de la API; no es un
+  outcome del Event Log.
+* Con padre presente, la fila legacy `Decision(spawn)` y `spawn.resolved` se confirman juntos. Al quitar un run,
+  las cancelaciones y `run.removed` comparten la misma mutación; esas cancelaciones no dejan fila spawn. Si el
+  padre ya no está, la resolución se registra standalone con `state_rev = NULL`, conservando el `run_id` y el
+  `project_id` capturados en la solicitud.
+* Las resoluciones por la persona son `person/ui`; `timeout` y `coordinator_closed` son `system/core`. En
+  aprobación, la compuerta serializa `Pending → Launching → create_child → spawn.resolved`; `remove_run` toma la
+  misma compuerta antes de capturar tareas, limpiar terminales/worktrees y borrar el run. Así una hija aprobada
+  entra en la limpieza del run.
+* Los eventos y el aviso de una solicitud se emiten bajo esa misma compuerta, antes de permitir una resolución
+  concurrente. Por eso la UI nunca recibe una tarjeta pendiente después de su resolución.
+
+### Reinicio
+Los pendientes viven en memoria y todavía no se reconstruyen ni se reconcilian al arrancar. Este cambio no añade
+`abandoned_on_restart` ni ningún otro outcome de reinicio. La reconciliación durable de solicitudes pendientes
+queda en un seguimiento separado.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
-* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos y registro de proyectos —nacimiento y
-  decisiones de gestión—):** solicitudes de lanzamiento, API completa, `lxo events`, diario `unrecorded-effects` v2
-  e importación segura.
+* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos, Projects y Pending Spawn):** API completa,
+  `lxo events`, diario `unrecorded-effects` v2 e importación segura.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 
 ## Fuera de E

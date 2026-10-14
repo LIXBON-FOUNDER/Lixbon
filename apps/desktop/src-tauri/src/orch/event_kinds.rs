@@ -19,10 +19,13 @@
 //! | `task.removed` (`launch_failed`) | state | `task` |
 //! | `effect.observed` (`git_merge` · `git_push_pr` · `git_worktree` · `git_worktree_removed` · `pty_process`) | effect | `task` |
 //! | `project.registered` (`manual` · `auto` · `backfill` · `import`) | state | `project` |
+//! | `spawn.requested` | state | `spawn_request` |
+//! | `spawn.resolved` (`approved` · `rejected` · `launch_failed` · `timeout` · `coordinator_closed` · `cancelled_run_removed`) | decision | `spawn_request` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
 
 use serde::Serialize;
 
+use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
 use crate::store::{EventClass, Fingerprint};
@@ -210,11 +213,6 @@ pub(super) fn task_reply(asker_task: &str, run: &str, question_id: u64, message_
 // decision.recorded
 // ---------------------------------------------------------------------------------------------
 
-/// `Decision.kind` que conservan su fila legacy pero NO emiten `decision.recorded`. Excepción única y
-/// explícita: `spawn` lo representará `spawn.resolved` (bloque de lanzamientos pendientes); emitirlo
-/// aquí lo duplicaría. Un `kind` que no esté ni en el contrato ni en esta lista rechaza la mutación.
-pub(super) const DECISION_KINDS_WITHOUT_EVENT: [&str; 1] = ["spawn"];
-
 #[derive(Serialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum ReviewOutcome {
@@ -323,11 +321,11 @@ fn outcome_str<'a>(who: &str, d: &'a serde_json::Value, key: &str, allowed: &[&s
 }
 
 impl DecisionRecorded {
-    /// Valida y normaliza el `detail` de una fila `Decision` según su `kind`. `Ok(None)`: la excepción
-    /// explícita [`DECISION_KINDS_WITHOUT_EVENT`] (fila sí, evento no). Cualquier otro `kind`, o un
-    /// detalle que no cumple el contrato, es un error: la mutación completa se rechaza.
-    pub(super) fn parse(kind: &str, detail: &serde_json::Value) -> Result<Option<DecisionRecorded>, String> {
-        Ok(Some(match kind {
+    /// Valida y normaliza el `detail` de una fila `Decision` según su `kind`. Un `kind` fuera del contrato, o un
+    /// detalle que no cumple, es un error: la mutación completa se rechaza. `spawn` NO es de este evento: su
+    /// única vía es `Tx::record_spawn_resolution` (`spawn.resolved`).
+    pub(super) fn parse(kind: &str, detail: &serde_json::Value) -> Result<DecisionRecorded, String> {
+        Ok(match kind {
             "review" => {
                 let outcome = match outcome_str(DEC, detail, "decision", &["accepted", "rejected"])? {
                     "accepted" => ReviewOutcome::Accepted,
@@ -376,9 +374,9 @@ impl DecisionRecorded {
                 };
                 DecisionRecorded::Pr { decision_id: 0, outcome, branch: req_str(DEC, detail, "branch")?, pr_url: opt_str(DEC, detail, "pr_url")? }
             }
-            k if DECISION_KINDS_WITHOUT_EVENT.contains(&k) => return Ok(None),
+            "spawn" => return Err("decision.recorded: `spawn` solo se registra con Tx::record_spawn_resolution (spawn.resolved)".into()),
             other => return Err(format!("decision.recorded: decision_kind {other:?} fuera del contrato (review, merge, pr)")),
-        }))
+        })
     }
 
     /// Completa el id que acaba de asignar `State::record_decision`.
@@ -401,11 +399,6 @@ pub(super) fn decision_recorded(task: &str, run: &str, payload: &DecisionRecorde
 // ---------------------------------------------------------------------------------------------
 // effect.observed
 // ---------------------------------------------------------------------------------------------
-
-/// `Effect.kind` que solo viajan al diario de recuperación y NO emiten `effect.observed`. Excepción
-/// temporal y explícita: `spawn_outcome` no es un efecto externo sino el marcador del registro de la
-/// decisión `spawn`, cuyo hecho es `spawn.resolved` (bloque de lanzamientos pendientes).
-pub(super) const EFFECT_KINDS_WITHOUT_EVENT: [&str; 1] = ["spawn_outcome"];
 
 const EFF: &str = "effect.observed";
 
@@ -488,11 +481,12 @@ fn operation_of(kind: &str, operation: &str, allowed: &[&'static str]) -> Result
 }
 
 impl EffectObserved {
-    /// Valida y normaliza lo observado por un `Effect`. `Ok(None)`: la excepción explícita
-    /// [`EFFECT_KINDS_WITHOUT_EVENT`]. Un `kind` desconocido o un detalle fuera de contrato es un error.
-    pub(super) fn parse(effect_id: &str, operation: &str, kind: &str, observed: &serde_json::Value) -> Result<Option<EffectObserved>, String> {
+    /// Valida y normaliza lo observado por un `Effect`. Un `kind` desconocido (también `spawn_outcome`, que ya no
+    /// es un efecto: aprobar, rechazar o vencer un lanzamiento es una decisión) o un detalle fuera de contrato
+    /// es un error.
+    pub(super) fn parse(effect_id: &str, operation: &str, kind: &str, observed: &serde_json::Value) -> Result<EffectObserved, String> {
         let id = effect_id.to_string();
-        Ok(Some(match kind {
+        Ok(match kind {
             "git_merge" => {
                 let result = match outcome_str(EFF, observed, "outcome", &["merged", "conflict", "error"])? {
                     "merged" => MergeResult::Merged,
@@ -550,9 +544,8 @@ impl EffectObserved {
                 }
                 EffectObserved::PtyProcess { effect_id: id, operation: operation_of(kind, operation, &["spawn"])?, launched: true }
             }
-            k if EFFECT_KINDS_WITHOUT_EVENT.contains(&k) => return Ok(None),
             other => return Err(format!("{EFF}: effect_kind {other:?} fuera del contrato (git_merge, git_push_pr, git_worktree, git_worktree_removed, pty_process)")),
-        }))
+        })
     }
 }
 
@@ -715,4 +708,120 @@ impl EventPayload for ProjectRelocated {
 pub(super) fn project_relocated(project_id: &str, fingerprint_adopted: bool, confirmed_mismatch: bool) -> Result<EventDraft, EventError> {
     let p = ProjectRelocated { fingerprint_adopted, confirmed_mismatch };
     Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None))
+}
+
+// ---------------------------------------------------------------------------------------------
+// spawn.requested · spawn.resolved
+// ---------------------------------------------------------------------------------------------
+//
+// Una solicitud de lanzamiento (`lxo spawn`) y su resolución. La entidad es la solicitud
+// (`spawn_request` / `pending_id`); `correlation_id` e `idem_key` son el `pending_id`, así que hay como mucho
+// UNA solicitud y UNA resolución por `pending_id`. Nunca `spec`, `spec_summary`, `argv`, `cwd`, `env`,
+// `integrate_into`, rutas, `policy.reason`, avisos ni credenciales.
+
+/// Una solicitud de lanzamiento persistida ANTES de existir como pendiente en memoria.
+#[derive(Serialize)]
+pub(super) struct SpawnRequested {
+    parent_task: String,
+    provider: String,
+    profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<String>,
+    title: String,
+    shared: bool,
+    policy_status: agents::Status,
+    expires_at: u64,
+}
+
+impl EventPayload for SpawnRequested {
+    const KIND: &'static str = "spawn.requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Lo que describe la solicitud (todo validado al pedirla; nada del encargo ni de la política efectiva).
+pub(super) struct SpawnRequestFacts<'a> {
+    pub pending_id: &'a str,
+    pub parent_task: &'a str,
+    pub run: &'a str,
+    pub provider: &'a str,
+    pub profile: &'a str,
+    pub role: Option<&'a str>,
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub title: &'a str,
+    pub shared: bool,
+    pub policy_status: agents::Status,
+    pub expires_at: u64,
+}
+
+/// `project_id` de la tarea padre: se resuelve al finalizar contra el estado confirmado (`project_from_task`).
+pub(super) fn spawn_requested(f: &SpawnRequestFacts<'_>) -> Result<EventDraft, EventError> {
+    let p = SpawnRequested {
+        parent_task: f.parent_task.into(),
+        provider: f.provider.into(),
+        profile: f.profile.into(),
+        role: f.role.map(Into::into),
+        model: f.model.map(Into::into),
+        effort: f.effort.map(Into::into),
+        title: clip(f.title, 120),
+        shared: f.shared,
+        policy_status: f.policy_status,
+        expires_at: f.expires_at,
+    };
+    Ok(EventDraft::new(EntityKind::SpawnRequest, f.pending_id, &p)?
+        .run(Some(f.run.to_string()).filter(|r| !r.is_empty()))
+        .project_from_task(f.parent_task)
+        .correlated(f.pending_id)
+        .idempotent(f.pending_id))
+}
+
+/// Cómo terminó una solicitud. Cerrado. `expired` NO es un resultado del Event Log: es solo el estado/API
+/// compatible de `spawn_status`. La reconciliación de solicitudes tras reiniciar tiene seguimiento separado.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum SpawnOutcome {
+    Approved,
+    Rejected,
+    LaunchFailed,
+    Timeout,
+    CoordinatorClosed,
+    CancelledRunRemoved,
+}
+
+impl SpawnOutcome {
+    /// ¿La toma una persona desde la interfaz (`person/ui`) o el propio Core (`system/core`)?
+    pub(super) fn decided_by_person(self) -> bool {
+        !matches!(self, SpawnOutcome::Timeout | SpawnOutcome::CoordinatorClosed)
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct SpawnResolved {
+    outcome: SpawnOutcome,
+    /// SOLO cuando realmente existe una hija.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<String>,
+    /// ¿Hay un motivo (la razón del rechazo, el error del lanzamiento)? El texto nunca viaja en el evento.
+    has_reason: bool,
+}
+
+impl EventPayload for SpawnResolved {
+    const KIND: &'static str = "spawn.resolved";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+/// `run` y `project` van explícitos: al finalizar, la tarea padre puede haber desaparecido con el run.
+pub(super) fn spawn_resolved(pending_id: &str, run: &str, project: Option<String>, outcome: SpawnOutcome, task: Option<&str>, has_reason: bool) -> Result<EventDraft, EventError> {
+    let p = SpawnResolved { outcome, task: task.map(Into::into), has_reason };
+    Ok(EventDraft::new(EntityKind::SpawnRequest, pending_id, &p)?
+        .run(Some(run.to_string()).filter(|r| !r.is_empty()))
+        .project(project)
+        .correlated(pending_id)
+        .idempotent(pending_id))
 }
