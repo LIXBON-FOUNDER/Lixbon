@@ -76,8 +76,8 @@ impl Core {
                 match cmd {
                     // La persona registra (manual). La importación la dispara la interfaz, pero la hace el Core.
                     "project_add" => self.project_add(&MutationContext::person(channel), args),
-                    "project_archive" => self.project_archive(args),
-                    "project_locate" => self.project_locate(args),
+                    "project_archive" => self.project_archive(&MutationContext::person(channel), args),
+                    "project_locate" => self.project_locate(&MutationContext::person(channel), args),
                     _ => self.projects_import_recents(&MutationContext::system(channel), args),
                 }
             }

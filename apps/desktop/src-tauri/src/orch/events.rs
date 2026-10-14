@@ -305,6 +305,16 @@ impl EventDraft {
     }
 }
 
+/// Finaliza UN borrador (un hecho fuera de `Tx`, p. ej. los del registro de proyectos). Mismo contrato que
+/// [`finalize_all`]: una vez, con hora, actor y canal del contexto, y validado.
+pub(super) fn finalize_one(draft: EventDraft, ctx: &MutationContext, at: i64, project_of: &dyn Fn(&str) -> Option<String>) -> Result<NewEvent, String> {
+    let mut events = finalize_all(vec![draft], ctx, at, project_of)?;
+    match (events.pop(), events.is_empty()) {
+        (Some(e), true) => Ok(e),
+        _ => Err("un borrador produce exactamente un evento".into()),
+    }
+}
+
 /// Finaliza y valida los borradores de UNA mutación: misma hora para todos, un `id` nuevo cada uno.
 /// Un evento que no cumple el contrato rechaza la mutación entera (nada cambia): es un error de
 /// programación que debe verse, no un hecho que se pierda en silencio.
