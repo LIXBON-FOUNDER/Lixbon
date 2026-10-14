@@ -306,7 +306,7 @@ fn ubic(path: &str) -> NewLocation {
 fn un_fallo_al_insertar_la_ubicacion_no_deja_proyecto_ni_evento() {
     let (_l, _d, _c, core) = core_listo();
     let ctx = MutationContext::person(Channel::Ui);
-    let reg = Registration::new(ProjectOrigin::Manual, &ctx);
+    let reg = Registration::new(ProjectOrigin::Manual, &ctx).unwrap();
     core.storage.with_store(|st| register_project(st, "a", &fp(), &ubic("c:/a"), &reg)).unwrap().unwrap();
     assert_eq!((proyectos(&core), ubicaciones(&core).len(), registrados(&core).len()), (1, 1, 1));
     // La misma ruta, otro proyecto: el INSERT de la ubicación falla DESPUÉS del de la fila.
@@ -316,28 +316,94 @@ fn un_fallo_al_insertar_la_ubicacion_no_deja_proyecto_ni_evento() {
 }
 
 #[test]
-fn el_origen_debe_corresponder_a_quien_lo_provoca() {
+fn la_politica_exige_el_par_exacto_origen_actor_y_canal() {
     let (_l, _d, _c, core) = core_listo();
-    let casos: [(ProjectOrigin, MutationContext, bool); 10] = [
-        (ProjectOrigin::Manual, MutationContext::person(Channel::Ui), true),
+    use Channel::{Core as Nucleo, Lxo, Ui};
+    let casos: Vec<(ProjectOrigin, MutationContext, bool)> = vec![
+        // manual: Person + Ui
+        (ProjectOrigin::Manual, MutationContext::person(Ui), true),
+        (ProjectOrigin::Manual, MutationContext::person(Lxo), false),
+        (ProjectOrigin::Manual, MutationContext::person(Nucleo), false),
+        (ProjectOrigin::Manual, MutationContext::system(Ui), false),
         (ProjectOrigin::Manual, MutationContext::core(), false),
-        (ProjectOrigin::Manual, MutationContext::agent("t", Channel::Lxo), false),
+        (ProjectOrigin::Manual, MutationContext::agent("t", Lxo), false),
+        // backfill: System + Core
         (ProjectOrigin::Backfill, MutationContext::core(), true),
-        (ProjectOrigin::Backfill, MutationContext::person(Channel::Ui), false),
-        (ProjectOrigin::Backfill, MutationContext::system(Channel::Ui), false),
-        (ProjectOrigin::Import, MutationContext::system(Channel::Ui), true),
-        (ProjectOrigin::Import, MutationContext::person(Channel::Ui), false),
-        (ProjectOrigin::Auto, MutationContext::agent("t", Channel::Lxo), true),
-        (ProjectOrigin::Auto, MutationContext::new(Actor::Person, Channel::Ui), true),
+        (ProjectOrigin::Backfill, MutationContext::system(Ui), false),
+        (ProjectOrigin::Backfill, MutationContext::system(Lxo), false),
+        (ProjectOrigin::Backfill, MutationContext::person(Nucleo), false),
+        (ProjectOrigin::Backfill, MutationContext::person(Ui), false),
+        // import: System + Ui
+        (ProjectOrigin::Import, MutationContext::system(Ui), true),
+        (ProjectOrigin::Import, MutationContext::system(Lxo), false),
+        (ProjectOrigin::Import, MutationContext::system(Nucleo), false),
+        (ProjectOrigin::Import, MutationContext::person(Ui), false),
+        // auto: conserva el actor real y el canal de la petición (no se fija a Ui)
+        (ProjectOrigin::Auto, MutationContext::person(Ui), true),
+        (ProjectOrigin::Auto, MutationContext::person(Lxo), true),
+        (ProjectOrigin::Auto, MutationContext::agent("t", Lxo), true),
+        (ProjectOrigin::Auto, MutationContext::agent("t", Ui), true),
+        (ProjectOrigin::Auto, MutationContext::system(Lxo), true),
+        (ProjectOrigin::Auto, MutationContext::new(Actor::System, Ui), true),
     ];
     let mut esperados = 0;
     for (n, (origen, ctx, valido)) in casos.into_iter().enumerate() {
         let reg = Registration::new(origen, &ctx);
-        let r = core.storage.with_store(|st| register_project(st, "p", &fp(), &ubic(&format!("c:/p{n}")), &reg)).unwrap();
-        assert_eq!(r.is_ok(), valido, "{origen:?} con {ctx:?}: {r:?}");
-        esperados += usize::from(valido);
+        assert_eq!(reg.is_ok(), valido, "{origen:?} con {ctx:?}: {:?}", reg.as_ref().err());
+        if let Ok(reg) = reg {
+            let r = core.storage.with_store(|st| register_project(st, "p", &fp(), &ubic(&format!("c:/p{n}")), &reg)).unwrap();
+            r.expect("un registro válido se registra");
+            esperados += 1;
+        }
         assert_eq!((proyectos(&core), registrados(&core).len()), (esperados, esperados), "una combinación inválida no deja fila ni evento");
     }
+}
+
+/// Nada nuevo en el almacén: ni proyecto, ni ubicación, ni evento, ni `meta` (en particular `machine_id`).
+fn sin_escrituras(core: &Core, eventos: i64) {
+    assert_eq!((head(core), proyectos(core), ubicaciones(core).len()), (eventos, 0, 0));
+    for clave in ["machine_id", "projects_backfilled", "projects_recents_imported"] {
+        assert_eq!(meta(core, clave), None, "{clave}");
+    }
+}
+
+#[test]
+fn project_add_manual_por_un_canal_que_no_es_la_interfaz_se_rechaza_sin_escribir_nada() {
+    let (_l, data, _c, core) = core_listo();
+    let r = repo(&base_de(&data), "por-lxo", None);
+    let antes = head(&core);
+    let e = core.rpc_via(Channel::Lxo, Caller::User, "", "project_add", &json!({ "path": s(&r) })).unwrap_err();
+    assert!(e.contains("person/ui"), "{e}");
+    sin_escrituras(&core, antes);
+    // Por la interfaz sí.
+    core.rpc_via(Channel::Ui, Caller::User, "", "project_add", &json!({ "path": s(&r) })).unwrap();
+    assert_eq!(proyectos(&core), 1);
+}
+
+#[test]
+fn la_importacion_por_un_canal_que_no_es_la_interfaz_se_rechaza_sin_escribir_nada() {
+    let (_l, data, _c, core) = core_listo();
+    let r = repo(&base_de(&data), "imp-lxo", None);
+    let antes = head(&core);
+    for canal in [Channel::Lxo, Channel::Core] {
+        let e = core.rpc_via(canal, Caller::User, "", "projects_import_recents", &json!({ "paths": [s(&r)] })).unwrap_err();
+        assert!(e.contains("system/ui"), "{e}");
+        sin_escrituras(&core, antes);
+    }
+    // La marca de «ya importado» tampoco se puso: la importación legítima por la interfaz sigue disponible.
+    let ok = core.rpc_via(Channel::Ui, Caller::User, "", "projects_import_recents", &json!({ "paths": [s(&r)] })).unwrap();
+    assert_eq!(ok["imported"], 1);
+}
+
+#[test]
+fn run_create_automatico_conserva_el_canal_de_la_peticion_y_no_se_fija_a_la_interfaz() {
+    let (_l, data, _c, core) = core_listo();
+    let r = repo(&base_de(&data), "auto-lxo", None);
+    // Una persona que llega por `lxo`: válido para `auto`, canal `lxo`.
+    core.rpc_via(Channel::Lxo, Caller::User, &s(&r), "run_create", &json!({ "objective": "o" })).unwrap();
+    let reg = registrados(&core);
+    assert_eq!(reg.len(), 1);
+    assert_eq!((reg[0].actor_kind.as_str(), reg[0].channel.as_deref()), ("person", Some("lxo")));
 }
 
 // ---------------------------------------------------------------------------------------------
