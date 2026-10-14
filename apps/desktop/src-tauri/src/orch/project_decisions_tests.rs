@@ -122,6 +122,33 @@ fn join_sin_cambio_de_huella_o_con_la_principal_desaparecida_lo_refleja_en_el_pa
 }
 
 #[test]
+fn en_otra_maquina_la_primera_ubicacion_unida_es_su_principal_y_la_segunda_no() {
+    let (_l, data, _c, core) = core_listo();
+    let (id, origen, copia) = con_copia(&core, &data, None);
+    let esta: String = core.storage.with_store(|s| s.meta("machine_id").unwrap()).unwrap().unwrap();
+    // La ubicación registrada pasa a ser de OTRA máquina: esta todavía no tiene ninguna.
+    sql(&core, "UPDATE project_locations SET machine = 'machine-a'");
+    let estado = |core: &Core| -> Vec<(String, bool)> {
+        let mut v: Vec<_> = ubicaciones(core, &id).into_iter().map(|l| (if l.machine == "machine-a" { "A".to_string() } else { l.display_path.rsplit(|c| c == '/' || c == '\\').next().unwrap().to_string() }, l.primary)).collect();
+        v.sort();
+        v
+    };
+    assert!(!esta.is_empty());
+
+    let antes = head(&core);
+    join(&core, &id, &copia).unwrap();
+    let evs = desde(&core, antes);
+    afirma_decision(&evs[0], &id, "project.location_added", json!({ "primary": true, "fingerprint_adopted": false }));
+    assert_eq!(estado(&core), vec![("A".to_string(), true), ("copia".to_string(), true)], "una principal por máquina");
+
+    let copia2 = clon(&base_de(&data), &origen, "copia2", None);
+    let antes = head(&core);
+    join(&core, &id, &copia2).unwrap();
+    afirma_decision(&desde(&core, antes)[0], &id, "project.location_added", json!({ "primary": false, "fingerprint_adopted": false }));
+    assert_eq!(estado(&core), vec![("A".to_string(), true), ("copia".to_string(), true), ("copia2".to_string(), false)]);
+}
+
+#[test]
 fn repetir_el_join_o_unir_una_ruta_que_ya_es_del_proyecto_no_emite() {
     let (_l, data, _c, core) = core_listo();
     let (id, _origen, copia) = con_copia(&core, &data, None);

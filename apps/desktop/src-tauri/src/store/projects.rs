@@ -198,9 +198,14 @@ fn apply_location(tx: &Transaction<'_>, id: &str, loc: &NewLocation, fp: Option<
             return Err(StoreError::ProjectConflict(format!("la huella del proyecto {id} cambió desde que se leyó")));
         }
     }
-    // Snapshot: la ubicación nueva es la principal si y solo si el proyecto no tenía ninguna principal viva.
+    // Snapshot: la ubicación nueva es la principal si y solo si el proyecto no tenía ninguna principal viva EN ESA
+    // MÁQUINA (la principal es por `(project_id, machine)`; la de otra máquina no cuenta).
     if guard_primary {
-        let vivas: i64 = tx.query_row("SELECT COUNT(*) FROM project_locations WHERE project_id = ?1 AND is_primary = 1 AND state <> 'missing'", [id], |r| r.get(0))?;
+        let vivas: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM project_locations WHERE project_id = ?1 AND machine = ?2 AND is_primary = 1 AND state <> 'missing'",
+            params![id, loc.machine],
+            |r| r.get(0),
+        )?;
         if loc.primary != (vivas == 0) {
             return Err(StoreError::ProjectConflict(format!("las ubicaciones del proyecto {id} cambiaron desde que se leyeron")));
         }
