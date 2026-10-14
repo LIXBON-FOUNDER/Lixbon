@@ -239,7 +239,40 @@ fn una_task_ya_final_antes_del_cleanup_se_conserva() {
     assert!(!kinds(&evs).contains(&"task.removed"));
     assert_eq!(e.hijas().len(), 1);
     let hija = e.hijas()[0].clone();
-    assert_eq!(e.core.lock().tasks.get(&hija).unwrap().status, Status::Stopped);
+    let t = e.core.lock().tasks.get(&hija).cloned().unwrap();
+    assert_eq!(t.status, Status::Stopped);
+    // El worktree y la rama (borrada con -d) ya no existen: el estado deja de afirmarlo. No es una integración.
+    assert_eq!((t.worktree.as_deref(), t.branch.as_deref(), t.merged), (None, None, false));
+    assert_eq!(t.cwd, s(&e.repo));
+    assert!(e.ramas().is_empty());
+}
+
+#[test]
+fn una_task_preservada_cuya_rama_no_se_pudo_borrar_conserva_su_rama() {
+    let e = setup("c2c");
+    let pid = e.spawn(false);
+    let run = e.run.clone();
+    e.hook(move |core, id, step| {
+        if step == SpawnStep::AfterWorktreeRegistered {
+            // La rama gana un commit propio (branch -d la rechazará) y el run se cierra.
+            let wt = core.lock().tasks.get(id).and_then(|t| t.worktree.clone()).unwrap();
+            std::fs::write(Path::new(&wt).join("trabajo.txt"), "trabajo\n").unwrap();
+            g(Path::new(&wt), &["add", "."]);
+            g(Path::new(&wt), &["commit", "-qm", "trabajo"]);
+            core.mutate(|tx| {
+                tx.runs.get_mut(&run).unwrap().closed = true;
+                Ok(())
+            })
+            .unwrap();
+        }
+        Ok(())
+    });
+    assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
+    let hija = e.hijas()[0].clone();
+    let t = e.core.lock().tasks.get(&hija).cloned().unwrap();
+    assert_eq!((t.worktree.as_deref(), t.merged), (None, false), "el worktree ya no existe y no se marca merged");
+    assert!(t.branch.as_deref().is_some_and(|b| b.starts_with("lx/")), "la rama sigue existiendo: la Task sigue conociéndola");
+    assert!(e.ramas().contains("lx/"));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -501,6 +534,63 @@ fn si_no_se_puede_registrar_el_terminal_el_proceso_se_mata() {
     assert!(r.is_err());
     assert!(pruebas::espera_muerto(pid2), "el proceso no puede quedar vivo y sin dueño si falla el registro");
     let _ = (std::fs::remove_dir_all(dir), std::fs::remove_dir_all(dir2));
+}
+
+/// Falla las primeras `n` veces y después mata bien.
+#[derive(Debug)]
+struct MatadorIntermitente(Arc<std::sync::atomic::AtomicUsize>);
+
+impl ChildKiller for MatadorIntermitente {
+    fn kill(&mut self) -> std::io::Result<()> {
+        use std::sync::atomic::Ordering;
+        if self.0.load(Ordering::SeqCst) > 0 {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+            return Err(std::io::Error::other("no se puede matar (aún)"));
+        }
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(MatadorIntermitente(self.0.clone()))
+    }
+}
+
+fn envenena_el_mapa(core: &Arc<Core>) {
+    let c2 = core.clone();
+    let _ = std::thread::spawn(move || {
+        let _g = c2.terms.lock().unwrap();
+        panic!("envenenar el mapa de terminales");
+    })
+    .join();
+}
+
+fn custodiado(core: &Core, id: &str) -> bool {
+    core.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id)
+}
+
+#[test]
+fn registro_imposible_y_kill_imposible_dejan_el_terminal_bajo_la_custodia_del_core() {
+    // Un matador que NUNCA funciona: con el mapa envenenado el terminal no se pierde ni se suelta.
+    let core = Orch::default().0;
+    envenena_el_mapa(&core);
+    let r = core.register_term("t1", pty::AgentTerm::for_tests(Box::new(MatadorRoto)));
+    assert!(matches!(&r, Err(m) if m.contains("custodia")), "{r:?}");
+    assert!(custodiado(&core, "t1"), "registro imposible + kill imposible: el proceso sigue bajo el Core");
+    for _ in 0..2 {
+        assert!(matches!(core.kill_term_checked("t1"), Some(Err(_))));
+        assert!(custodiado(&core, "t1"), "tras volver a fallar sigue almacenado");
+    }
+
+    // Un matador que falla dos veces y luego funciona: el terminal se recupera del mapa envenenado y se mata.
+    let fallos = Arc::new(std::sync::atomic::AtomicUsize::new(2));
+    let r = core.register_term("t2", pty::AgentTerm::for_tests(Box::new(MatadorIntermitente(fallos.clone()))));
+    assert!(r.is_err() && custodiado(&core, "t2"), "el primer fallo es el del registro");
+    assert!(matches!(core.kill_term_checked("t2"), Some(Err(_))), "el segundo fallo");
+    assert!(custodiado(&core, "t2"));
+    assert!(matches!(core.kill_term_checked("t2"), Some(Ok(()))), "ahora sí se recupera y se mata");
+    assert!(!custodiado(&core, "t2"));
+    assert!(core.kill_term_checked("t2").is_none());
+    core.terms.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
 // ---------------------------------------------------------------------------------------------

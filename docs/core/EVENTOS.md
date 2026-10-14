@@ -296,6 +296,23 @@ artefactos del intento). Si falla la persistencia tras el cleanup físico: ni es
 | sin control sobre el proceso | todo se conserva |
 | hija `shared` | `task.removed` sin efecto git |
 
+### Endurecimiento del cleanup
+* **Custodia del terminal.** `register_term` mata el proceso con `try_kill` y comprueba el resultado. Si el mapa
+  está envenenado y tampoco se puede matar, el terminal NO se pierde: se guarda recuperando el guard
+  (`PoisonError::into_inner`, ruta de emergencia) y el proceso sigue bajo la custodia del Core —la Task y el
+  worktree se conservan—. `kill_term_checked` recupera ese terminal de un mapa envenenado y, si el kill vuelve a
+  fallar, lo deja otra vez almacenado. Nunca se suelta un `AgentTerm` con el proceso potencialmente vivo.
+* **Un kill dudoso es un error.** `TreeKiller::kill` ya no da por bueno que el comando de matar arrancara: un
+  estado distinto de cero es `Err`. Conservar la Task y el worktree ante la duda es mejor que borrar con el agente
+  quizá vivo. Única excepción: que el proceso **ya no exista** (`taskkill` sale con 128 si terminó justo antes;
+  observado 1 de cada ~60 ejecuciones): se comprueba mirando si el pid sigue vivo y, si esa comprobación no puede
+  hacerse, se asume vivo. Deuda preexistente, sin tocar: en Unix `kill -9` solo alcanza al proceso raíz, no a su árbol.
+* **Rama de una Task preservada.** Si la Task se conserva (final o run cerrado) y `branch -d` borró la rama,
+  `task.branch` pasa a `None` (además de `worktree = None` y `cwd = repo`); si `branch -d` falló, conserva su rama.
+  No se marca `merged`: fue un lanzamiento fallido, no una integración.
+* **`on_exit` tardío.** Si la Task ya no existe o ya estaba final, la mutación hace `no_change()` (decidido por el
+  estado previo, no por `close() == Ok(None)`): no avanza `rev` ni deja eventos.
+
 ### Seguridad de excepciones de `pty::spawn`
 Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm` (`try_clone_reader`,
 `take_writer`, tuberías de stdout/stderr) mata el proceso antes de devolver el error, tanto en `spawn_pty` como

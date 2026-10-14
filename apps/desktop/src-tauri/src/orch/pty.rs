@@ -246,11 +246,56 @@ impl ChildKiller for TreeKiller {
             c.args(["-9", &self.0.to_string()]);
             c
         };
-        hide_console(cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).status().map(|_| ())
+        // Que el comando de matar ARRANQUE no es éxito. Un estado distinto de cero (acceso denegado, árbol a
+        // medias) es un kill dudoso y se devuelve como error: quien lo pide (el cleanup de un lanzamiento)
+        // prefiere conservar la Task y el worktree antes que borrarlos con el agente quizá vivo. La única
+        // excepción es que el proceso YA NO EXISTA (`taskkill` sale con 128 si terminó justo antes): no hay nada
+        // que matar y no es un fallo. Se comprueba mirando si el pid sigue vivo; si esa comprobación no puede
+        // hacerse, se asume vivo (la duda es un error).
+        // Deuda preexistente, fuera de este cambio: en Unix `kill -9 <pid>` solo alcanza al proceso raíz, no a su
+        // árbol (en Windows `taskkill /T` sí).
+        let status = hide_console(cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).status()?;
+        kill_outcome(status.success(), || pid_alive(self.0), self.0, &status)
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(TreeKiller(self.0))
+    }
+}
+
+/// Resultado de un intento de matar `pid`: éxito si el comando terminó bien; con un estado distinto de cero,
+/// solo si el proceso ya no existe. Un proceso vivo que no se pudo matar (o cuya vida no se pudo comprobar) es
+/// un error. Pura (la vida del proceso entra como función) para poder probar cada rama.
+fn kill_outcome(success: bool, alive: impl FnOnce() -> bool, pid: u32, status: &dyn std::fmt::Debug) -> std::io::Result<()> {
+    if success || !alive() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("no se pudo matar el proceso {pid} ({status:?})")))
+    }
+}
+
+/// ¿Sigue vivo el proceso `pid`? Ante la duda (no se pudo ejecutar la comprobación), `true`.
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("tasklist");
+        cmd.args(["/FI", &format!("PID eq {pid}"), "/NH"]);
+        match hide_console(&mut cmd).output() {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} ")),
+            Err(_) => true,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = std::process::Command::new("ps");
+        cmd.args(["-o", "stat=", "-p", &pid.to_string()]);
+        match hide_console(&mut cmd).output() {
+            Ok(o) => {
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                !s.is_empty() && !s.starts_with('Z')
+            }
+            Err(_) => true,
+        }
     }
 }
 
@@ -713,17 +758,7 @@ pub(crate) mod pruebas {
 
     /// ¿Sigue vivo el proceso? (un zombi pendiente de `wait` cuenta como muerto).
     pub fn vivo(pid: u32) -> bool {
-        #[cfg(windows)]
-        {
-            let o = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
-            String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} "))
-        }
-        #[cfg(not(windows))]
-        {
-            let o = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            !s.is_empty() && !s.starts_with('Z')
-        }
+        super::pid_alive(pid)
     }
 
     pub fn espera_muerto(pid: u32) -> bool {
@@ -758,11 +793,43 @@ pub(crate) mod pruebas {
         r
     }
 
+    /// Carpeta de trabajo propia de cada llamada: las pruebas corren en paralelo dentro del mismo proceso y
+    /// compartir carpeta (y su `launch.cmd`) entre dos lanzamientos los pisaba.
     pub fn carpeta(nombre: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("lxo-pty-{nombre}-{}", std::process::id()));
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("lxo-pty-{nombre}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+}
+
+#[cfg(test)]
+mod matador {
+    use super::{kill_outcome, TreeKiller};
+    use portable_pty::ChildKiller;
+
+    #[test]
+    fn un_estado_distinto_de_cero_con_el_proceso_vivo_no_es_exito() {
+        // El comando de matar arrancó pero salió con error y el proceso sigue ahí: kill dudoso.
+        let r = kill_outcome(false, || true, 4242, &"estado 1");
+        assert!(r.is_err(), "no puede darse por matado: {r:?}");
+        // Si no se puede ni comprobar si vive, `pid_alive` devuelve true: la duda es un error.
+    }
+
+    #[test]
+    fn un_estado_distinto_de_cero_con_el_proceso_ya_inexistente_no_es_un_fallo() {
+        // `taskkill` sale con 128 si el proceso terminó justo antes: no hay nada que matar.
+        assert!(kill_outcome(false, || false, 4242, &"estado 128").is_ok());
+        // Con éxito ni se consulta si vive.
+        assert!(kill_outcome(true, || panic!("no debe consultarse"), 4242, &"estado 0").is_ok());
+    }
+
+    #[test]
+    fn matar_un_pid_que_no_existe_no_es_un_fallo() {
+        let mut k = TreeKiller(u32::MAX - 7);
+        assert!(k.kill().is_ok(), "un pid inexistente: ya no hay nada que matar");
     }
 }
 
