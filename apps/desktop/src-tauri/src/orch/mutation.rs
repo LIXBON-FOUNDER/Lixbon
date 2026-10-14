@@ -330,6 +330,14 @@ pub(super) trait Persistence: Send + Sync {
     fn after_publish(&self, _state: &State) -> Result<(), String> {
         Ok(())
     }
+
+    /// Confirma hechos DURABLES que NO modifican `legacy_state` (`Core::record_facts`): solo `events`, ya
+    /// materializados, con `state_rev = NULL`. No toca la `rev` del estado, ni el espejo, ni publica nada. En
+    /// cada reintento llegan exactamente los mismos `events`. Sin Event Log (`state.json`) no hay dónde
+    /// guardarlos: el resultado se descarta con éxito, igual que en `persist`.
+    fn append(&self, _events: &[NewEvent]) -> Result<(), PersistError> {
+        Ok(())
+    }
 }
 
 /// `state.json` en la carpeta de datos: los mismos bytes que escribía `commit()`.
@@ -454,11 +462,22 @@ impl Persister {
     /// mensaje definitivo; quien llama decide el paso a solo lectura.
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let backend = lock(&self.backend).clone();
+        // `events` se materializó antes del bucle: cada intento persiste EXACTAMENTE los mismos.
+        self.with_retries(|| backend.persist(state, events))
+    }
+
+    /// Como [`Persister::persist`], para hechos que no modifican `legacy_state`: misma política de reintentos,
+    /// mismos `NewEvent` en cada intento.
+    fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
+        let backend = lock(&self.backend).clone();
+        self.with_retries(|| backend.append(events))
+    }
+
+    fn with_retries(&self, mut op: impl FnMut() -> Result<(), PersistError>) -> Result<(), PersistError> {
         let retry = lock(&self.retry).clone();
         let mut attempt = 0;
         loop {
-            // `events` se materializó antes del bucle: cada intento persiste EXACTAMENTE los mismos.
-            match backend.persist(state, events) {
+            match op() {
                 Ok(()) => return Ok(()),
                 Err(e) => match retry.delay_for(&e, attempt) {
                     Some(wait) => {
@@ -577,6 +596,43 @@ impl Core {
             self.emit("orch:degraded", &json!({ "mode": "mirror_failed", "reason": reason }));
         }
         Ok(value)
+    }
+
+    /// Registra hechos DURABLES que NO modifican `legacy_state` (p. ej. una solicitud que solo vive en memoria).
+    ///
+    /// ```text
+    /// Health != Normal           -> ReadOnly, SIN finalizar ni intentar nada
+    /// finalizar y validar UNA vez -> Rejected si un borrador no cumple el contrato (nada se persiste)
+    /// sin Event Log (state.json)  -> el resultado materializado se descarta con éxito
+    /// Persister::append           -> reintentos con los MISMOS NewEvent (mismo id, hora e idem_key)
+    ///                                -> Store::append_events, state_rev = NULL
+    /// fallo definitivo            -> Core en DegradedReadOnly, igual que una mutación normal
+    /// ```
+    ///
+    /// No incrementa la `rev` de `legacy_state`, no escribe el espejo, no publica un `State` ni emite
+    /// `orch:changed`. Una repetición con la misma `(kind, idem_key)` es un éxito sin duplicar. El `project_id`
+    /// de un borrador con `project_from_task` se resuelve contra el estado CONFIRMADO.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn record_facts(&self, ctx: &MutationContext, drafts: Vec<EventDraft>) -> Result<(), MutateError> {
+        if let Health::DegradedReadOnly(reason) = self.persister.health() {
+            return Err(MutateError::ReadOnly(reason));
+        }
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let finalized = {
+            let st = self.lock();
+            finalize_all(drafts, ctx, super::state::now_ms() as i64, &|task| st.tasks.get(task).and_then(|t| t.project_id.clone()))
+        }
+        .map_err(MutateError::Rejected)?;
+        if !self.persister.records_events() {
+            return Ok(());
+        }
+        if let Err(e) = self.persister.append(&finalized) {
+            self.enter_read_only(&e.message);
+            return Err(MutateError::Persist(e.message));
+        }
+        Ok(())
     }
 
     /// Instala la persistencia autoritativa de SQLite al terminar el arranque.

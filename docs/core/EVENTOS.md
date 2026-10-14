@@ -398,6 +398,30 @@ volver a archivar es legítimo) y `state_rev` NULL. Nunca copian rutas, remotos,
   `project_set_archived`, `project_create`) son `#[cfg(test)]`; una prueba de arquitectura impide usarlas en
   producción. Con el Core en `DegradedReadOnly` las cuatro decisiones se rechazan (frontera `registry_write`).
 
+## E1b · Pending Spawn, commit A: hechos standalone (`Core::record_facts`)
+Infraestructura para hechos DURABLES que **no modifican `legacy_state`** (p. ej. una solicitud de lanzamiento que
+solo vive en memoria). Todavía ningún hecho de dominio la usa: `spawn.requested` / `spawn.resolved` llegan en el
+commit siguiente.
+
+```text
+Core::record_facts(ctx, drafts)
+  Health != Normal            -> ReadOnly, SIN finalizar ni intentar nada
+  finalizar + validar UNA vez -> Rejected si un borrador no cumple el contrato (nada se persiste)
+  sin Event Log (state.json)  -> el resultado materializado se descarta con éxito
+  Persister::append           -> reintentos con los MISMOS NewEvent (mismo id, hora e idem_key)
+    -> Persistence::append    -> Store::append_events (su propia transacción, state_rev = NULL)
+  fallo definitivo            -> Core en DegradedReadOnly (igual que una mutación normal)
+```
+
+* **No** incrementa la `rev` de `legacy_state`, **no** escribe el espejo `state.json`, **no** publica un `State`
+  nuevo ni emite `orch:changed`.
+* **No hay otra vía SQL:** la única inserción es `Store::append_events`; `SqlitePersistence::append` no toca la
+  `rev` ni la transacción del estado.
+* **Idempotencia:** repetir la misma `(kind, idem_key)` es un éxito que no duplica (`DO NOTHING`).
+* **`Tx::no_change()` no confirma eventos** (una mutación sin cambios descarta su outbox). Un hecho que no cambia
+  el estado se registra con `record_facts`, no forzando una mutación ni subiendo la `rev` para guardarlo.
+* El `project_id` de un borrador con `project_from_task` se resuelve contra el estado CONFIRMADO.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
