@@ -66,8 +66,58 @@ impl AgentTerm {
     }
 
     pub fn kill(&mut self) {
-        let _ = self.killer.kill();
+        let _ = self.try_kill();
     }
+
+    /// Mata el árbol del proceso y dice si pudo. `Ok` = el matador se ejecutó (un proceso que ya había
+    /// muerto también cuenta); `Err` = no hay control fiable sobre él.
+    pub fn try_kill(&mut self) -> Result<(), String> {
+        self.killer.kill().map_err(|e| e.to_string())
+    }
+
+    /// Prueba: un terminal sin proceso detrás, con el matador que se indique (p. ej. uno que falla).
+    #[cfg(test)]
+    pub fn for_tests(killer: Box<dyn ChildKiller + Send + Sync>) -> AgentTerm {
+        let sink: Box<dyn Write + Send> = Box::new(std::io::sink());
+        AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer, buffer: Arc::new(Mutex::new(Vec::new())) }
+    }
+}
+
+/// Mata el proceso que acaba de crearse y cuya construcción falló. No se confía en que soltar los
+/// manejadores lo mate: cerrar el master de una PTY puede acabar con él según la plataforma, pero un proceso
+/// canalizado seguiría vivo y `AgentTerm` no tiene `Drop`.
+fn kill_after_failed_setup(killer: &mut dyn ChildKiller) {
+    let killed = killer.kill().is_ok();
+    #[cfg(test)]
+    if killed {
+        KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
+    }
+    #[cfg(not(test))]
+    let _ = killed;
+}
+
+// SOLO pruebas: punto de fallo inyectable justo después de crear el proceso (el equivalente de que
+// `try_clone_reader`, `take_writer` o la captura de las tuberías devuelva `Err`).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FAIL_AFTER_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static LAST_SPAWNED_PID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+    /// Cuántas veces se ejecutó la compensación (el kill tras un fallo de construcción) en este hilo.
+    pub(crate) static KILLS_AFTER_FAILED_SETUP: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn post_spawn_failpoint(pid: Option<u32>) -> Result<(), String> {
+    LAST_SPAWNED_PID.with(|p| p.set(pid));
+    if FAIL_AFTER_SPAWN.with(|f| f.get()) {
+        return Err("fallo inyectado tras crear el proceso".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn post_spawn_failpoint(_pid: Option<u32>) -> Result<(), String> {
+    Ok(())
 }
 
 pub struct Launch<'a> {
@@ -217,6 +267,23 @@ fn spawn_piped(
         cmd.env(k, v);
     }
     let mut child = hide_console(&mut cmd).spawn().map_err(|e| format!("No se pudo lanzar el agente: {e}"))?;
+    let pid = child.id();
+    // El proceso ya existe: si falta cualquier tubería, se mata antes de devolver el error.
+    let pipes = post_spawn_failpoint(Some(pid)).and_then(|_| match (child.stdout.take(), child.stderr.take()) {
+        (Some(out), Some(err)) => Ok((out, err)),
+        (None, _) => Err("sin stdout".to_string()),
+        (_, None) => Err("sin stderr".to_string()),
+    });
+    let (stdout, stderr) = match pipes {
+        Ok(p) => p,
+        Err(e) => {
+            let mut killer: Box<dyn ChildKiller + Send + Sync> = Box::new(TreeKiller(pid));
+            kill_after_failed_setup(&mut *killer);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
     let on_output = Arc::new(on_output);
     let pump = |mut pipe: Box<dyn Read + Send>, buf: Arc<Mutex<Vec<u8>>>, out: Arc<dyn Fn(String) + Send + Sync>| {
@@ -245,9 +312,8 @@ fn spawn_piped(
             emit(carry.finish());
         })
     };
-    let a = pump(Box::new(child.stdout.take().ok_or("sin stdout")?), buffer.clone(), on_output.clone());
-    let b = pump(Box::new(child.stderr.take().ok_or("sin stderr")?), buffer.clone(), on_output);
-    let pid = child.id();
+    let a = pump(Box::new(stdout), buffer.clone(), on_output.clone());
+    let b = pump(Box::new(stderr), buffer.clone(), on_output);
     thread::spawn(move || {
         let _ = child.wait();
         let _ = a.join();
@@ -317,8 +383,21 @@ fn spawn_pty(
     };
     drop(pair.slave);
 
-    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer: Shared = Arc::new(Mutex::new(pair.master.take_writer().map_err(|e| e.to_string())?));
+    // El proceso ya existe: si falla cualquier preparación posterior se mata antes de devolver el error
+    // (`AgentTerm` no mata al soltarse, así que nadie más lo haría).
+    let streams = post_spawn_failpoint(child.process_id())
+        .and_then(|_| pair.master.try_clone_reader().map_err(|e| e.to_string()))
+        .and_then(|r| pair.master.take_writer().map_err(|e| e.to_string()).map(|w| (r, w)));
+    let (mut reader, writer): (_, Shared) = match streams {
+        Ok((r, w)) => (r, Arc::new(Mutex::new(w))),
+        Err(e) => {
+            let mut killer = killer;
+            kill_after_failed_setup(&mut *killer);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
     let started = Instant::now();
     let last_output = Arc::new(Mutex::new(None::<Instant>));
@@ -620,5 +699,111 @@ mod ancho_real {
             }
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+}
+
+/// Pruebas del cleanup de procesos: lanzar un proceso real de larga duración y saber si sigue vivo.
+#[cfg(test)]
+pub(crate) mod pruebas {
+    use super::*;
+
+    pub fn comando_largo() -> String {
+        if cfg!(windows) { "ping -n 60 127.0.0.1 >nul".into() } else { "sleep 60".into() }
+    }
+
+    /// ¿Sigue vivo el proceso? (un zombi pendiente de `wait` cuenta como muerto).
+    pub fn vivo(pid: u32) -> bool {
+        #[cfg(windows)]
+        {
+            let o = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
+            String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} "))
+        }
+        #[cfg(not(windows))]
+        {
+            let o = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            !s.is_empty() && !s.starts_with('Z')
+        }
+    }
+
+    pub fn espera_muerto(pid: u32) -> bool {
+        let limite = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < limite {
+            if !vivo(pid) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        !vivo(pid)
+    }
+
+    pub fn lanza(dir: &Path, piped: bool) -> Result<AgentTerm, String> {
+        let cwd = dir.to_string_lossy().into_owned();
+        spawn(Launch { cwd: &cwd, script_dir: &dir.join("s"), command: comando_largo(), env: vec![], inject: None, piped }, |_| {}, || {})
+    }
+
+    pub fn kills_tras_fallo() -> u32 {
+        KILLS_AFTER_FAILED_SETUP.with(|k| k.get())
+    }
+
+    pub fn ultimo_pid() -> Option<u32> {
+        LAST_SPAWNED_PID.with(|p| p.get())
+    }
+
+    /// Ejecuta `f` con el fallo inyectado justo después de crear el proceso.
+    pub fn con_fallo_tras_crear<R>(f: impl FnOnce() -> R) -> R {
+        FAIL_AFTER_SPAWN.with(|x| x.set(true));
+        let r = f();
+        FAIL_AFTER_SPAWN.with(|x| x.set(false));
+        r
+    }
+
+    pub fn carpeta(nombre: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("lxo-pty-{nombre}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+}
+
+#[cfg(test)]
+mod error_tras_crear_el_proceso {
+    use super::pruebas::*;
+
+    #[test]
+    fn sin_fallo_el_proceso_vive_y_try_kill_lo_mata() {
+        for piped in [false, true] {
+            let dir = carpeta(&format!("base-{piped}"));
+            let mut term = lanza(&dir, piped).expect("el lanzamiento normal funciona");
+            let pid = ultimo_pid().expect("pid");
+            assert!(vivo(pid), "el proceso arrancó (piped={piped})");
+            term.try_kill().unwrap();
+            assert!(espera_muerto(pid), "try_kill lo mata (piped={piped})");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn un_error_posterior_a_spawn_command_mata_el_proceso_en_pty() {
+        let dir = carpeta("pty");
+        let antes = kills_tras_fallo();
+        let r = con_fallo_tras_crear(|| lanza(&dir, false));
+        assert!(matches!(&r, Err(e) if e.contains("inyectado")), "{:?}", r.err());
+        assert_eq!(kills_tras_fallo(), antes + 1, "se ejecutó la compensación: no se depende de que soltar el master mate al proceso");
+        let pid = ultimo_pid().expect("el proceso llegó a crearse");
+        assert!(espera_muerto(pid), "el proceso no puede quedar vivo y sin dueño");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn un_error_posterior_al_spawn_mata_el_proceso_canalizado() {
+        let dir = carpeta("piped");
+        let antes = kills_tras_fallo();
+        let r = con_fallo_tras_crear(|| lanza(&dir, true));
+        assert!(matches!(&r, Err(e) if e.contains("inyectado")), "{:?}", r.err());
+        assert_eq!(kills_tras_fallo(), antes + 1, "se ejecutó la compensación");
+        let pid = ultimo_pid().expect("el proceso llegó a crearse");
+        assert!(espera_muerto(pid), "el proceso no puede quedar vivo y sin dueño");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

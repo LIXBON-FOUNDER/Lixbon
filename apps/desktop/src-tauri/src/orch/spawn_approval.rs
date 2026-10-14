@@ -416,6 +416,8 @@ impl Core {
     /// En pruebas no se abre ninguna terminal ni CLI: se resuelve y autoriza la
     /// política igual que `launch` y se anota el lanzamiento.
     pub(super) fn fake_launch(&self, id: &str) -> Result<(), String> {
+        // Punto de fallo/observación de las pruebas del cleanup (puede dejar un proceso real registrado).
+        self.spawn_hook(super::spawn::SpawnStep::InLaunch, id)?;
         let t = self.lock().task(id)?.clone();
         let profile = t.profile.clone().unwrap_or_default();
         let policy = self.task_policy(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref());
