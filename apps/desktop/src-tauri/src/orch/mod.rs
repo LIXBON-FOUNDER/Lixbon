@@ -30,6 +30,8 @@ mod project_ops_tests;
 #[cfg(test)]
 mod project_decisions_tests;
 #[cfg(test)]
+mod record_facts_tests;
+#[cfg(test)]
 mod crash_tests;
 #[cfg(test)]
 mod migration_gate_tests;

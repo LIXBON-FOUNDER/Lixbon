@@ -599,7 +599,7 @@ fn solo_store_events_escribe_en_la_tabla_y_solo_la_frontera_de_mutacion_emite() 
         ("EventDraft::new", &["events.rs", "event_kinds.rs"]),
         // Solo la persistencia de SQLite escribe eventos; nadie más de `orch/` toca el INSERT ni la inserción suelta.
         ("commit_authoritative_with_events", &["store_boot.rs"]),
-        ("append_events(", &[]),
+        ("append_events(", &["store_boot.rs"]),
     ];
     let mut revisados = 0;
     for (nombre, texto) in fuentes(&src.join("orch")) {
