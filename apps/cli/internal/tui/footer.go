@@ -132,13 +132,19 @@ func (m *Model) footer() string {
 // visionWarning avisa si hay imágenes en cola y el modelo dice que no las ve.
 // Si el servidor no publica capacidades, no se sabe y no se avisa.
 func (m *Model) visionWarning() string {
-	if len(m.chips) == 0 {
+	if len(m.chips) == 0 || !m.modelLacksVision() {
 		return ""
 	}
+	return m.modelLabel(m.chat.Model) + " no ve imágenes"
+}
+
+// modelLacksVision: el servidor dice que el modelo no ve imágenes. Si no
+// publica capacidades, no se sabe y se supone que sí.
+func (m *Model) modelLacksVision() bool {
 	for _, mod := range m.opts.Account.Models {
 		if mod.ID == m.chat.Model && mod.Capabilities != nil && !mod.HasCapability("vision") {
-			return m.modelLabel(mod.ID) + " no ve imágenes"
+			return true
 		}
 	}
-	return ""
+	return false
 }

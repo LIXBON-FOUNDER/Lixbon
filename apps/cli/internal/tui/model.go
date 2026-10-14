@@ -118,10 +118,11 @@ type Model struct {
 	relayoutGen int
 
 	// Bloques del turno que todavía cambian: la herramienta en marcha, el
-	// grupo de lecturas en curso y el plan.
-	openTool  *entry
-	readGroup *entry
-	todoEntry *entry
+	// grupos de lecturas y del navegador en curso y el plan.
+	openTool     *entry
+	readGroup    *entry
+	browserGroup *entry
+	todoEntry    *entry
 	todoTurn  int
 
 	// chips son las imágenes en cola, en el orden de las de chat: el marcador

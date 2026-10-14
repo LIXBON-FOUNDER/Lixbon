@@ -4,6 +4,19 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.8.0
+- El agente puede usar un navegador: abre páginas en tu navegador (el predeterminado si es Chrome, Brave, Chromium o Edge), las lee, hace clic, escribe en formularios, cambia de pestaña y, con modelos que ven imágenes, hace capturas. Sirve para páginas con JavaScript, formularios, sesiones iniciadas o tu app en `localhost`.
+- El navegador usa un perfil propio de Lixbon, separado del tuyo: inicia sesión donde haga falta con `/browser open <url>` y el agente la reutiliza. `/browser` muestra su estado; `/browser off` lo desactiva.
+- Antes de navegar o actuar en un sitio nuevo te pide permiso (puedes permitir ese sitio para toda la sesión); en `localhost` no pregunta. Escribir en contraseñas, tarjetas o códigos lo pregunta siempre, y el agente te pide que inicies sesión tú en vez de teclear tus credenciales.
+- Se nota cuándo el agente usa el navegador: borde verde, barra animada, el aviso «Lixbon está usando este navegador» y su cursor moviéndose hasta cada clic. Al terminar el turno el aviso desaparece, y en el siguiente el agente sigue en la misma pestaña.
+- El agente ve las ventanas que tapan la página (avisos de novedades, cookies, modales) aunque la web no las marque como diálogo, y sabe con qué botón cerrarlas antes de seguir. Si la página se redibuja mientras trabaja (WhatsApp Web, por ejemplo), recibe las referencias nuevas sin dar un paso de más.
+- Cuando el modelo no responde, se repite sin avanzar o llega al tope de pasos, el CLI lo dice como un error en rojo, no como si fuera la respuesta del modelo. Los reintentos ya no se anuncian, y lo hecho hasta ese momento se conserva: «continúa» sigue desde ahí.
+- Si el servidor falla a mitad de un turno del agente (nodo desconectado, error del gateway), lo que el agente ya hizo se conserva y la sesión se guarda; el error lo indica y «continúa» retoma el trabajo. Antes se perdía el turno entero.
+- El agente ve lo que construye: abre en el navegador los archivos del proyecto (HTML, SVG, PDF, imágenes) con su ruta, servidos desde un servidor local para que funcionen los scripts y los módulos, y recibe los errores de JavaScript y los archivos que no cargan. Tras crear una página la abre y comprueba que cumple lo pedido; abre solo el HTML (no su CSS ni su JS) y no instala servidores ni dependencias para verla.
+- Investiga mejor: los resultados de búsqueda llegan sin HTML, le recuerdan leer la fuente entera y le avisan si repite casi la misma búsqueda. Solo usa los datos de las fuentes que leyó.
+- Apunta tus requisitos (idioma, colores, «sin X»…) en su lista de pasos, los revisa antes de terminar, escribe en tu idioma y no añade archivos que no pediste.
+- El turno ocupa menos: las acciones seguidas en el navegador comparten una sola línea que va cambiando con cada paso, y las lecturas seguidas ya no se parten con cada «Pensó». Ctrl+O despliega los pasos y lo que pensó entre ellos.
+
 ## 2.7.1
 - El modo ask ve tu proyecto: lista, busca y lee archivos, busca en internet y te pregunta, pero no edita, borra ni ejecuta nada (para eso, `/mode agent`).
 - El agente borra varios archivos o carpetas en una sola acción, con una sola aprobación, y `/undo` los recupera todos.

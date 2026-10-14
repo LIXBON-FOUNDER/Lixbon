@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"lixbon.com/cli/internal/textutil"
@@ -214,14 +215,69 @@ func (tb *Toolbox) webSearch(ctx context.Context, query string, limitArg int) (s
 	if len(results) == 0 {
 		return "(sin resultados)", nil
 	}
-	parts := make([]string, len(results))
+	var out []string
+	if prev := tb.similarSearch(query); prev != "" {
+		out = append(out, fmt.Sprintf("(Ya buscaste algo casi igual: «%s». Repetir la búsqueda trae lo mismo; "+
+			"lee una de las fuentes con fetch_url.)", prev))
+	}
 	for i, r := range results {
-		title := pyStr(r["title"])
+		title := cleanSnippet(pyStr(r["title"]))
 		if title == "" {
 			title = "(sin título)"
 		}
-		snippet := textutil.Head(textutil.Strip(snippetSpace.ReplaceAllString(pyStr(r["snippet"]), " ")), 1500)
-		parts[i] = fmt.Sprintf("%d. %s\n   %s\n   %s", i+1, title, pyStr(r["url"]), snippet)
+		snippet := textutil.Head(cleanSnippet(pyStr(r["snippet"])), 1500)
+		out = append(out, fmt.Sprintf("%d. %s\n   %s\n   %s", i+1, title, pyStr(r["url"]), snippet))
 	}
-	return strings.Join(parts, "\n\n"), nil
+	out = append(out, "Son extractos: para fechas, cifras, nombres o premios lee la fuente entera con fetch_url "+
+		"(la más fiable, p. ej. la 1) y usa solo lo que diga.")
+	return strings.Join(out, "\n\n"), nil
+}
+
+// cleanSnippet quita el HTML que traen los extractos del buscador
+// (<strong>, &quot;…): al modelo le cuesta leerlos y los copia tal cual.
+func cleanSnippet(s string) string {
+	s = html.UnescapeString(anyTag.ReplaceAllString(s, ""))
+	return textutil.Strip(snippetSpace.ReplaceAllString(s, " "))
+}
+
+const searchMemory = 8
+
+// similarSearch devuelve una búsqueda reciente casi igual a query, o "".
+// Los modelos pequeños reformulan la misma consulta en bucle en vez de leer.
+func (tb *Toolbox) similarSearch(query string) string {
+	words := searchWords(query)
+	var found string
+	for _, prev := range tb.searches {
+		if jaccard(words, searchWords(prev)) >= 0.5 {
+			found = prev
+		}
+	}
+	tb.searches = append(tb.searches, query)
+	if len(tb.searches) > searchMemory {
+		tb.searches = tb.searches[len(tb.searches)-searchMemory:]
+	}
+	return found
+}
+
+func searchWords(q string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(q), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if len([]rune(w)) > 2 {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range a {
+		if b[w] {
+			inter++
+		}
+	}
+	return float64(inter) / float64(len(a)+len(b)-inter)
 }

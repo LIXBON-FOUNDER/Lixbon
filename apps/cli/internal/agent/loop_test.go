@@ -99,6 +99,17 @@ func (r *rig) run(prompt string) (string, []history.Message) {
 	return answer, working
 }
 
+// stop corre el turno esperando que el agente lo corte con un error suyo.
+func (r *rig) stop(prompt string) string {
+	r.t.Helper()
+	answer, _, err := r.turn.Run(context.Background(), []history.Message{history.User(prompt)})
+	var s *Stopped
+	if !errors.As(err, &s) || answer != "" {
+		r.t.Fatalf("se esperaba un corte del agente, no una respuesta: answer=%q err=%v", answer, err)
+	}
+	return s.Reason
+}
+
 func (r *rig) write(rel, content string) {
 	r.t.Helper()
 	path := filepath.Join(r.root, rel)
@@ -154,6 +165,17 @@ func TestEmptyReplyIsRetriedFreeingContext(t *testing.T) {
 	}
 	if len(r.model.calls) != 3 || !strings.Contains(answer, "corregido el login") {
 		t.Fatalf("calls=%d answer=%q", len(r.model.calls), answer)
+	}
+	if strings.Contains(r.notes(), "reintent") || strings.Contains(r.notes(), "no devolvió") {
+		t.Fatalf("los reintentos no se anuncian: %q", r.notes())
+	}
+}
+
+func TestPersistentSilenceIsAnErrorNotAnAnswer(t *testing.T) {
+	r := newRig(t, say("", "", "", ""))
+	reason := r.stop("haz algo")
+	if !strings.Contains(reason, "El modelo terminó sin responder") || len(r.model.calls) != maxEmptyRetries+1 || r.notes() != "" {
+		t.Fatalf("reason=%q calls=%d notes=%q", reason, len(r.model.calls), r.notes())
 	}
 }
 
@@ -225,9 +247,8 @@ func TestReasoningWithoutAnswerRetriesWithoutThinking(t *testing.T) {
 
 func TestPersistentEmptyReplySaysSo(t *testing.T) {
 	r := newRig(t, []StreamResult{{Reasoning: "pienso"}, {Reasoning: "pienso"}, {Reasoning: "pienso"}, {Reasoning: "pienso"}})
-	answer, _ := r.run("haz algo")
-	if strings.TrimSpace(answer) == "" || !strings.Contains(strings.ToLower(answer), "responder") {
-		t.Fatalf("answer=%q", answer)
+	if reason := r.stop("haz algo"); !strings.Contains(reason, "se quedó razonando") {
+		t.Fatalf("reason=%q", reason)
 	}
 }
 
@@ -235,9 +256,8 @@ func TestRepeatedCallIsCutWithExplanation(t *testing.T) {
 	repeated := `{"tool":"list_files","args":{"path":"."}}`
 	r := newRig(t, say(repeated, repeated, repeated, repeated, repeated, repeated, repeated, repeated, repeated, repeated))
 	r.turn.S.NativeTools = false
-	answer, _ := r.run("lista")
-	if !strings.Contains(strings.ToLower(answer), "repitiendo") || len(r.model.calls) >= 10 {
-		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+	if reason := r.stop("lista"); !strings.Contains(reason, "repetía") || len(r.model.calls) >= 10 {
+		t.Fatalf("reason=%q calls=%d", reason, len(r.model.calls))
 	}
 }
 
@@ -266,9 +286,9 @@ func TestStepCapIsWideAndExplained(t *testing.T) {
 	}
 	r := newRig(t, replies)
 	r.turn.S.NativeTools = false
-	answer, _ := r.run("explora")
-	if len(r.model.calls) != MaxSteps || !strings.Contains(strings.ToLower(answer), "continúa") {
-		t.Fatalf("calls=%d answer=%q", len(r.model.calls), answer)
+	reason := r.stop("explora")
+	if len(r.model.calls) != MaxSteps || !strings.Contains(reason, "continúa") {
+		t.Fatalf("calls=%d reason=%q", len(r.model.calls), reason)
 	}
 }
 
@@ -341,9 +361,8 @@ func TestRepeatedNativeCallsAreCut(t *testing.T) {
 		replies[i] = StreamResult{ToolCalls: []json.RawMessage{call}}
 	}
 	r := newRig(t, replies)
-	answer, _ := r.run("lista")
-	if !strings.Contains(answer, "repitiendo") || len(r.model.calls) > MaxRepeatedCalls+2 {
-		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+	if reason := r.stop("lista"); !strings.Contains(reason, "repetía") || len(r.model.calls) > MaxRepeatedCalls+2 {
+		t.Fatalf("reason=%q calls=%d", reason, len(r.model.calls))
 	}
 }
 

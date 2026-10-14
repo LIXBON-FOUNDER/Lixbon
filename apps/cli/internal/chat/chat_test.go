@@ -87,6 +87,8 @@ func newChat(t *testing.T, client *api.Client, mutate func(*config.Config), opts
 	cfg := config.Default()
 	cfg.APIKey, cfg.Model, cfg.Mode = "k", "qwen", ModeAsk
 	cfg.Workspace = t.TempDir()
+	// Sin el navegador del equipo: las pruebas no dependen de lo instalado.
+	cfg.SetExtraString("browser", "off")
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -506,7 +508,8 @@ func TestAskModeCanFetchAPageAndKeepsItInTheHistory(t *testing.T) {
 	for _, tool := range g.bodyAt(0)["tools"].([]any) {
 		names = append(names, tool.(map[string]any)["function"].(map[string]any)["name"].(string))
 	}
-	if !slices.Equal(names, agent.AskTools) {
+	readOnly := slices.DeleteFunc(slices.Clone(agent.AskTools), func(n string) bool { return strings.HasPrefix(n, "browser_") })
+	if !slices.Equal(names, readOnly) {
 		t.Fatalf("en ask van solo las herramientas de lectura: %v", names)
 	}
 	if !strings.Contains(mustJSON(g.bodyAt(1)["messages"]), "plataforma de IA") {

@@ -16,7 +16,8 @@ CLI de Lixbon en Go. Decisión y plan en `.planning/DECISION-CLI-GO.md`. El clie
 | `internal/documents` | Adjuntos `@ruta` (texto, imágenes, PDF), marcadores `[IMG#n]`, extracción de PDF y de `.docx` | `validation/fixtures/documents_corpus.json` |
 | `internal/clipboard` | `/paste` y Alt+V: imagen del portapapeles como PNG en `~/.lixbon/pastes` (DIB→PNG a mano, Win32 sin CGO, `wl-paste`/`xclip`/`pngpaste`) | casos DIB del mismo corpus, helpers simulados y una prueba con el portapapeles real de Windows |
 | `internal/remote` | Host de `/remote`: sesión en el relay, lotes de eventos cada 250 ms, SSE de comandos con reconexión, aprobaciones, snapshot | relay simulado en memoria y por HTTP |
-| `internal/toolspec` | Catálogo de las 20 herramientas (schemas, conjuntos, claves) | `catalog.json` (contrato congelado) |
+| `internal/toolspec` | Catálogo de las 31 herramientas (schemas, conjuntos, claves) | `catalog.json` (contrato congelado) |
+| `internal/browser` | Navegador del agente: lanza el navegador predeterminado (o Chrome/Brave/Chromium/Edge instalado) con un perfil propio y lo controla por CDP (cliente propio sobre `coder/websocket`); snapshot con refs `[eN]` desde un mundo aislado, clics y teclado reales, capturas JPEG | pruebas unitarias del formato, URLs, teclas y descubrimiento; prueba real con `LIXBON_BROWSER_LIVE=1` (Shadow DOM, iframes, diálogos, pestañas nuevas, adjuntarse desde otra sesión) |
 | `internal/toolparse` | Extrae tool-calls del texto del modelo y limpia la prosa | `fixtures/tool_parse_corpus.json` (40 casos de texto + 9 nativos) |
 | `internal/tools` | `list_files`, `find_files`, `read_file`, `outline`, `search` | `fixtures/workspace_corpus.json` (87 casos sobre un workspace sintético) |
 | `internal/tools` (escritura) | `write_file`, `edit_file` (con coincidencia tolerante), `multi_edit`, `insert_at_line`, `append_file`, `mkdir`, `delete_file`, `rename_file` | `fixtures/edit_corpus.json` (61 casos con árbol inicial y final) |
@@ -32,7 +33,7 @@ CLI de Lixbon en Go. Decisión y plan en `.planning/DECISION-CLI-GO.md`. El clie
 | `internal/update` | `lixbon update [--check]` y `/update`: manifest del gateway, descarga de la release de GitHub, verificación contra el digest del gateway **y** `SHA256SUMS`, comprobación del binario nuevo y reemplazo atómico (en Windows renombra el `.exe` en uso a `.old` y restaura si falla) | pruebas con un servidor de releases falso (digests y archivos manipulados, corte de red, binario roto) y una prueba real en Windows con el `.exe` en uso; diseño en `.planning/DECISION-UPDATE-GO.md` |
 | `internal/textutil` | Semánticas de texto de Python (decodificación, espacios, splitlines) | usado por los anteriores |
 
-Comandos: `init`, `setup`, `status`, `models`, `usage`, `update`, `auth`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` conversa y lee el proyecto sin modificarlo, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). `!comando` en la caja ejecuta un comando en el workspace sin pasar por el modelo y deja su salida en el historial (el control remoto lo ignora). Comandos `/` disponibles (los 41 del catálogo, más `/provider`, `/effort`, `/branch`, `/orquestar` y `/orquestador`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
+Comandos: `init`, `setup`, `status`, `models`, `usage`, `update`, `auth`, `profile`, `chat`/`run`/`start`, `chat --once "texto"` (según `mode` de la config: `agent` con herramientas y aprobaciones, `ask` conversa y lee el proyecto sin modificarlo, `delegate` usa el enrutador del gateway) y `chat` interactivo con Bubble Tea (requiere terminal). `!comando` en la caja ejecuta un comando en el workspace sin pasar por el modelo y deja su salida en el historial (el control remoto lo ignora). Comandos `/` disponibles (los 42 del catálogo, más `/provider`, `/effort`, `/branch`, `/orquestar` y `/orquestador`): `help model mode new clear compact history web copy paste image save approve plan todo tools diff undo ps check allow workspace run mcp browser commit init status cost usage nodes context-window key login logout config bar doctor visual remote exit` y los personalizados de `.lixbon/commands/`.
 
 Pendiente, con su issue: publicar la primera release e imagen Docker (#20); `ui-demo` no se porta (es una demo interna y oculta de la interfaz Python). Falta validar con modelos, terminales y un gateway reales (#21, #22). Los paquetes de este módulo no dependen de la UI.
 
@@ -73,6 +74,26 @@ En el chat, `/provider` abre el selector (también permite añadir uno eligiendo
 Un perfil sin `--gateway` es genérico: solo se envían `model`, `messages`, `stream`, `stream_options` y `tools` (OpenAI rechaza los parámetros desconocidos), la clave es opcional y no se consultan los endpoints `/api` de Lixbon (plan, uso, nodos, búsqueda web, título automático). `/usage /nodes /login /logout /key /web` lo avisan y el modo `delegate` pasa a `ask`. La ventana de contexto por defecto es de 8192 tokens; ajústala a la que cargaste en el servidor con `--context-window`.
 
 Una suscripción de ChatGPT o Claude no es una API key y no sirve aquí: hace falta una clave de API del proveedor (o un enrutador como OpenRouter).
+
+## Navegador del agente
+
+En modo agent (y en ask, solo para abrir y leer), el agente controla un navegador real con las herramientas `browser_*`: `navigate`, `snapshot`, `click`, `type`, `press_key`, `scroll`, `screenshot` (solo con modelos que ven imágenes), `get_text`, `tabs`, `wait` y `back`. Usa tu navegador predeterminado si es Chrome, Brave, Chromium o Edge; si no, el primero instalado en ese orden (Edge el último: viene con Windows aunque no se use). Cada navegador tiene su perfil propio en `~/.lixbon/browser-profile` (Chrome) o `~/.lixbon/browser-profile-<brave|chromium|edge>`: las sesiones que inicies ahí (`/browser open <url>`) quedan guardadas para el agente, separadas de tu navegador personal. El navegador se abre con la primera página que pida el agente y se cierra al salir; si hay otro `lixbon` abierto, se comparte.
+
+Permisos: leer no pregunta; navegar o actuar en un sitio nuevo pide permiso por origen («sí», «siempre en este sitio», «no preguntar más en el navegador»), salvo `localhost`. `auto_approve_tools` no lo cubre. Escribir en contraseñas, tarjetas o códigos pregunta siempre. Solo se abren `http`, `https` y `about:blank`. Lo que devuelve la página va delimitado como contenido de terceros y el prompt prohíbe seguir sus instrucciones.
+
+| Clave de `config.json` / variable | Efecto |
+|---|---|
+| `browser`: `auto` (defecto), `on`, `off` | En `auto` las herramientas solo se ofrecen con una ventana de contexto de 32k o más (cuestan ~1.5k tokens). `/browser on\|off\|auto` lo cambia |
+| `browser_path` o `LIXBON_BROWSER` | Ejecutable a usar en lugar de buscarlo |
+| `browser_headless` o `LIXBON_BROWSER_HEADLESS=1` | Sin ventana (automático en Linux sin `DISPLAY`) |
+| `browser_auto_approve` | No preguntar en ningún sitio (`--once` lo necesita para actuar) |
+| `browser_keep_open` | Dejar el navegador abierto al salir |
+
+`/browser` muestra el estado, las pestañas y los sitios aprobados; `/browser close` lo cierra.
+
+**Vista previa del proyecto:** `browser_navigate` acepta la ruta de un archivo o carpeta del workspace (`index.html`, `web/`, `logo.svg`, `file:///…`) y la abre desde un servidor estático en `127.0.0.1` con puerto aleatorio. Así funcionan los módulos ES y `fetch` (con `file://` no) y no pide permiso, como `localhost`. Solo sirve el workspace, nunca archivos ocultos (`.env`, `.git`), y responde únicamente a su `Host` exacto (sin rebinding de DNS). Se apaga al cerrar la sesión. Un nombre sin barra que parece un dominio (`lixbon.com`) se abre como web; para una carpeta con ese nombre se escribe `./lixbon.com`. En páginas locales (la vista previa o tu `localhost`) se activa la consola: los errores de JavaScript, `console.error` y los recursos que no cargan llegan en el resultado, sin repetir y como mucho 6. En webs ajenas la consola sigue apagada, porque `Runtime.enable` delata la automatización.
+
+Mientras el agente usa el navegador, la pestaña lleva un borde verde pulsante, una barra animada arriba y el aviso «Lixbon está usando este navegador», y su cursor se desliza hasta cada clic. Al acabar el turno el aviso se apaga (tampoco vuelve si navegas tú) y se apunta la pestaña en la que quedó: el prompt del turno siguiente se la indica al modelo, y otra sesión del CLI que se adjunte la retoma (`tab` en `lixbon-browser.json`). En el transcript, las acciones seguidas en el navegador comparten una fila «Navegador · <acción actual>» que cambia con cada paso, igual que las lecturas seguidas («Explorando …» → «Exploró …»); lo pensado entre pasos queda dentro del grupo y Ctrl+O lo despliega.
 
 ## Diferencias deliberadas con el cliente Python retirado
 
