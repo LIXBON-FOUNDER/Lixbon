@@ -74,10 +74,11 @@ impl Core {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
                 }
                 match cmd {
-                    "project_add" => self.project_add(args),
+                    // La persona registra (manual). La importación la dispara la interfaz, pero la hace el Core.
+                    "project_add" => self.project_add(&MutationContext::person(channel), args),
                     "project_archive" => self.project_archive(args),
                     "project_locate" => self.project_locate(args),
-                    _ => self.projects_import_recents(args),
+                    _ => self.projects_import_recents(&MutationContext::system(channel), args),
                 }
             }
             "run_create" => {
@@ -96,7 +97,14 @@ impl Core {
                 let branch = git::current_branch(cwd);
                 // Proyecto del repositorio: misma ruta -> ese; sin coincidencias -> nuevo; ambiguo -> ninguno.
                 // Un error real del registro activo se propaga: no se crea ni el run ni la tarea.
-                let project_id = self.project_for_repo(&repo)?;
+                // Si nace, `project.registered` lo atribuye a quien lanza el run: persona, agente (su tarea) o,
+                // sin identidad, el sistema.
+                let registrant = match &caller {
+                    Caller::User => MutationContext::person(channel),
+                    Caller::Agent(Some(id)) => MutationContext::agent(id.clone(), channel),
+                    Caller::Agent(None) => MutationContext::system(channel),
+                };
+                let project_id = self.project_for_repo(&registrant, &repo)?;
                 if let Some(pid) = &project_id {
                     self.check_project_launchable_id(pid)?;
                 }

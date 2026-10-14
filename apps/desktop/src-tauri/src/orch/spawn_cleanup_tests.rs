@@ -73,7 +73,7 @@ fn setup(nombre: &str) -> Env {
     let core = orch.0;
     core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
     core.settings.lock().unwrap().enabled = true;
-    let project = core.project_add(&json!({ "path": s(&repo) })).unwrap()["project"]["id"].as_str().unwrap().to_string();
+    let project = core.project_add(&MutationContext::person(Channel::Ui), &json!({ "path": s(&repo) })).unwrap()["project"]["id"].as_str().unwrap().to_string();
     let cwd = s(&repo);
     let (run, root) = core
         .mutate(|tx| {

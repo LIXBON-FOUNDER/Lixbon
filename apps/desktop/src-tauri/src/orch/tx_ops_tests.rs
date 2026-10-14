@@ -441,8 +441,15 @@ fn run_create_emite_tres_hechos_atribuidos_a_la_raiz_y_con_el_proyecto_ya_comple
     let antes = head(&core);
     let out = core.rpc(Caller::Agent(None), &s(&r), "run_create", &json!({ "objective": "hacer algo" })).unwrap();
     let (run, root) = (out["run"].as_str().unwrap().to_string(), out["task"].as_str().unwrap().to_string());
-    let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["run.created", "task.created", "task.status_changed"], "un hecho, un evento: rpc no vuelve a emitir nada");
+    let mut evs = desde(&core, antes);
+    assert_eq!(
+        kinds(&evs),
+        vec!["project.registered", "run.created", "task.created", "task.status_changed"],
+        "el repositorio nuevo nace ANTES (registro automático); después, un hecho un evento: rpc no vuelve a emitir nada"
+    );
+    // El proyecto nace por el registro automático: quien lanza es un agente sin identidad, así que lo registra el sistema.
+    let nacimiento = evs.remove(0);
+    assert_eq!((nacimiento.actor_kind.as_str(), nacimiento.actor_id.as_deref(), nacimiento.channel.as_deref()), ("system", None, Some("lxo")));
     // Bootstrap de identidad: un coordinador aún no registrado actúa como la tarea raíz que acaba de crear.
     assert!(evs.iter().all(|e| e.actor_kind.as_str() == "agent" && e.actor_id.as_deref() == Some(root.as_str()) && e.channel.as_deref() == Some("lxo")), "{evs:?}");
     let pid = core.lock().tasks.get(&root).unwrap().project_id.clone().expect("el repositorio nuevo se registró solo");
@@ -1481,7 +1488,8 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // El catálogo solo lo importa tx_ops; nadie más nombra sus constructores ni la cola de la transacción.
     let prohibido: [(&str, &[&str]); 16] = [
-        ("event_kinds", &["tx_ops.rs", "mod.rs"]),
+        // Dos únicos importadores del catálogo: los mutadores de `Tx` y el registro de proyectos (`project_ops.rs`).
+        ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs"]),
         ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
         ("task_status_changed(", &["event_kinds.rs", "tx_ops.rs"]),

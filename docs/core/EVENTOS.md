@@ -319,11 +319,59 @@ Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm`
 en `spawn_piped`; y `Core::register_term` mata el terminal si no puede registrarlo. `AgentTerm` no mata al
 soltarse (`Drop`): la compensación es explícita. El comportamiento normal de `on_exit` no cambia.
 
+## E1b · Projects, commit 1: nacimiento de un Project (`project.registered`)
+El registro de proyectos (D) no vive en `State`: sus escrituras son transacciones propias de SQLite. Para que la
+fila y su hecho nazcan juntos, `orch/project_ops.rs` hace de «`tx_ops` del registro»: es el **único** que
+construye y finaliza los borradores de Projects y el único que le entrega un `NewEvent` al almacén
+(`store/projects.rs` recibe `NewEvent`, nunca `EventDraft`).
+
+| campo | valor |
+|---|---|
+| `kind` / `class` / entidad | `project.registered` · `state` · `project` |
+| `project_id` | el id del proyecto (el mismo de la fila) |
+| `run_id` | `NULL` |
+| `idem_key` | `project_id` |
+| `state_rev` | `NULL` (no toca `legacy_state`) |
+| payload (cerrado) | `{ origin: manual \| auto \| backfill \| import, name, has_remote, root_commit_count }` |
+
+* **Solo nace con la fila.** No hay `created`: el evento existe únicamente cuando `projects` recibió el `INSERT`.
+  Encontrar un proyecto ya registrado (misma ruta, un worktree), una ambigüedad, o un `join` **no** lo emiten.
+  El `join` (`project.location_added`), archivar/restaurar y relocalizar llegan en el commit siguiente.
+* **Nunca** lleva ruta, `display_path`, remoto, commits ni huella: la identidad física del repositorio vive en el
+  registro, no en el log. `name` se recorta a 120 caracteres.
+* **Atomicidad.** `project_ops::register_project` pre-genera el `project_id` y finaliza el evento FUERA de la
+  transacción; `Store::project_register` hace `BEGIN IMMEDIATE · INSERT projects · INSERT project_locations ·
+  INSERT events (state_rev = NULL) · COMMIT`. Un fallo en cualquiera de los tres lo deshace todo (también un evento
+  que ya existía por `(kind, idem_key)`: no se registra un proyecto sin su hecho).
+
+### Quién provoca cada origen (se valida, no se supone)
+| origen | actor | canal |
+|---|---|---|
+| `manual` (`project_add` nuevo) | persona | `ui` |
+| `backfill` (relleno de tareas anteriores a D) | sistema | `core` |
+| `import` (carpetas recientes de la interfaz) | sistema | `ui` |
+| `auto` (`run_create`) | persona · agente (su tarea) · sistema (agente sin identidad) | el de la petición |
+
+Un par origen/actor que no cumple la tabla rechaza el registro entero (sin fila ni evento).
+
+### Frontera de escritura del registro y `Health`
+* `registry_read` / `registry_read_opt` reciben un `&Store`: **una lectura nunca escribe** (el compilador lo
+  impide), tampoco el `machine_id` lazy: sin él todavía no hay ubicaciones en esta máquina.
+* `registry_write` / `registry_write_opt` son el único camino de escritura y comprueban `Health` antes de abrir
+  el almacén. Con el Core en `DegradedReadOnly` rechazan toda creación, `location_put`, `meta_set`, relleno,
+  importación y escritura de marcas `ok ↔ missing`. `projects_list` y la guarda de lanzamiento siguen leyendo y
+  calculan `missing` solo en memoria.
+
+### Referencias históricas
+Los ids nuevos se validan **al asignarlos**; el Event Log preserva referencias históricas y **no consulta el
+Project Registry al finalizar** (`finalize_all` no hace SQL). `project_id` sigue siendo una referencia blanda.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
-* **E1b (en curso; bloque 1 hecho = mutadores de `State`):** mutadores de `State`, decisiones, efectos, registro de proyectos, solicitudes de lanzamiento,
-  API completa, `lxo events`, diario `unrecorded-effects` v2 e importación segura.
+* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos y `project.registered`):** resto del registro de proyectos
+  (`project.location_added`, archivar/restaurar, relocalizar), solicitudes de lanzamiento, API completa, `lxo events`,
+  diario `unrecorded-effects` v2 e importación segura.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 
 ## Fuera de E
