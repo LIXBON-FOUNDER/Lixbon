@@ -194,7 +194,7 @@ fn la_misma_ruta_o_su_worktree_o_un_run_sobre_un_repo_ya_registrado_no_emiten() 
 }
 
 #[test]
-fn lo_ambiguo_y_el_join_no_emiten_project_registered() {
+fn lo_ambiguo_no_emite_y_el_join_emite_location_added_no_registered() {
     let (_l, data, _c, core) = core_listo();
     core.settings.lock().unwrap().enabled = true;
     let base = base_de(&data);
@@ -222,12 +222,13 @@ fn lo_ambiguo_y_el_join_no_emiten_project_registered() {
     assert_eq!(registrados(&core).len(), 1, "solo el de `origen`");
     assert!(desde(&core, antes).iter().all(|e| e.kind != "project.registered"));
 
-    // join: el proyecto YA existía; su hecho (project.location_added) llega en el siguiente commit.
+    // join: el proyecto YA existía; su hecho es `project.location_added`, nunca `project.registered`.
     let antes_join = head(&core);
     let j = rpc(&core, "project_add", json!({ "path": s(&copia), "join": id })).unwrap();
     assert_eq!(j["created"], false);
     assert_eq!(ubicaciones(&core).len(), 2, "la ubicación sí se guardó");
-    assert_eq!(head(&core), antes_join, "pero join no emite project.registered");
+    assert_eq!(kinds(&desde(&core, antes_join)), vec!["project.location_added"], "join no emite project.registered");
+    assert_eq!(registrados(&core).len(), 1);
     assert_eq!(proyectos(&core), 1);
 }
 

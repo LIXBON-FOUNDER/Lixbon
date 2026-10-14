@@ -366,12 +366,44 @@ Un par origen/actor que no cumple la tabla rechaza el registro entero (sin fila 
 Los ids nuevos se validan **al asignarlos**; el Event Log preserva referencias históricas y **no consulta el
 Project Registry al finalizar** (`finalize_all` no hace SQL). `project_id` sigue siendo una referencia blanda.
 
+## E1b · Projects, commit 2: decisiones de gestión de un Project
+Un Project que ya existe cambia por decisión de una **persona por la interfaz** (`person/ui`, validado por
+`project_ops::Management` antes de cualquier escritura; por `lxo` o el Core se rechaza). Cuatro hechos, todos
+`class = decision`, entidad `project`, `project_id`, `run_id` NULL, **sin `idem_key`** (archivar, restaurar y
+volver a archivar es legítimo) y `state_rev` NULL. Nunca copian rutas, remotos, huellas ni commits.
+
+| kind | cuándo | payload |
+|---|---|---|
+| `project.location_added` | `join`: una ubicación nueva para un proyecto existente | `{ primary, fingerprint_adopted }` |
+| `project.archived` | `active → archived` | `{}` |
+| `project.restored` | `archived → active` | `{}` |
+| `project.relocated` | `project_locate`: la nueva ubicación pasa a ser la principal | `{ fingerprint_adopted, confirmed_mismatch }` |
+
+* `primary` es lo que se ESCRIBIÓ (la ubicación quedó como principal), no una intención. `fingerprint_adopted`
+  es `true` solo si la huella guardada **cambió de verdad**. `confirmed_mismatch` es `true` únicamente cuando la
+  persona usó `confirm` para aceptar un repositorio cuyos commits raíz no coincidían.
+* **Una transacción por decisión.** `Store::project_join_recorded` / `project_relocate_recorded` hacen
+  `ubicación + posible cambio de huella + evento`; `project_set_archived_recorded` hace `estado + evento`. Un fallo
+  en cualquier paso lo deshace todo: nunca «ubicación nueva + huella vieja» ni «cambios sin evento». Los tres
+  reciben un `NewEvent` ya materializado por `project_ops.rs` (el único que construye estos hechos), construido
+  dentro del closure que ya serializa el almacén pero ANTES de abrir `Store::write`, sin E/S externa.
+* **Resultado explícito:** `ChangeOutcome::{Missing, Unchanged, Changed}`. Solo `Changed` escribe filas y evento.
+  Archivar un archivado, restaurar un activo, relocalizar a una ruta que ya es la principal (`ok`, mismo
+  `display_path`, sin cambio de huella) o unir una ruta que ya era del proyecto: **0 eventos** y ni siquiera se
+  toca `last_seen`/`updated_at`. Una ruta que ya es de OTRO proyecto es `ProjectConflict` (rollback).
+* **Guarda de snapshot.** `FingerprintChange { from, to }` lleva la huella que la política leyó; la transacción
+  comprueba que sigue siendo la guardada y, en `join`, que «es la principal» sigue siendo cierto. Si no, rollback:
+  el payload no puede describir un estado que ya no existe.
+* Las APIs del almacén que cambiaban filas sin su hecho (`location_put`, `project_set_fingerprint`,
+  `project_set_archived`, `project_create`) son `#[cfg(test)]`; una prueba de arquitectura impide usarlas en
+  producción. Con el Core en `DegradedReadOnly` las cuatro decisiones se rechazan (frontera `registry_write`).
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
-* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos y `project.registered`):** resto del registro de proyectos
-  (`project.location_added`, archivar/restaurar, relocalizar), solicitudes de lanzamiento, API completa, `lxo events`,
-  diario `unrecorded-effects` v2 e importación segura.
+* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos y registro de proyectos —nacimiento y
+  decisiones de gestión—):** solicitudes de lanzamiento, API completa, `lxo events`, diario `unrecorded-effects` v2
+  e importación segura.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 
 ## Fuera de E

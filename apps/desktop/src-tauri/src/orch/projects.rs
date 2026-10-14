@@ -17,7 +17,11 @@
 //!   que Lixbon **nunca une dos identidades ambiguas en silencio**.
 //! * **Cada nacimiento deja su hecho.** Un proyecto que NACE (manual, automático, relleno, importación)
 //!   emite `project.registered` en la misma transacción que su fila (`project_ops.rs`). Encontrar uno
-//!   existente, una ambigüedad o un `join` no emiten nada en este commit.
+//!   existente o una ambigüedad no emiten nada.
+//! * **Cada decisión de gestión deja su hecho.** `join` (`project.location_added`), archivar/restaurar
+//!   (`project.archived` / `project.restored`) y `project_locate` (`project.relocated`) cambian TODAS sus
+//!   filas y escriben su evento en UNA transacción (`Store::project_*_recorded`); solo un cambio real deja
+//!   evento. Las toma una persona por la interfaz (`person/ui`).
 //! * **No escribe en ningún repositorio.** Solo ejecuta git de lectura; el registro vive en SQLite
 //!   (migración 003).
 //! * **No decide el modelo definitivo de Task/Attempt:** solo añade `Task.project_id`
@@ -47,10 +51,10 @@ use serde_json::{json, Value};
 
 use super::events::MutationContext;
 use super::mutation::Health;
-use super::project_ops::{register_project, ProjectOrigin, Registration};
+use super::project_ops::{join_project, register_project, relocate_project, set_archived, Management, ProjectOrigin, Registration};
 use super::state::now_ms;
 use super::{b, git, s, Core};
-use crate::store::{new_uuid, Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
+use crate::store::{new_uuid, ChangeOutcome, Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
 
 /// Presupuesto de tiempo del relleno de `project_id` al arrancar (se retoma en el siguiente arranque).
 pub(super) const BACKFILL_BUDGET: Duration = Duration::from_secs(4);
@@ -373,12 +377,13 @@ impl Core {
     /// `needs_confirmation` con los candidatos; se resuelve repitiendo con `join` (es el mismo
     /// proyecto: nueva ubicación) o `new` (es otro). Sin coincidencias → proyecto nuevo.
     ///
-    /// Un proyecto NUEVO emite `project.registered` (origen `manual`, la persona por el canal de `ctx`) en
-    /// la misma transacción que su fila y su ubicación. Misma ruta, ambigüedad y `join` no emiten nada: el
-    /// hecho del `join` (`project.location_added`) llega con el siguiente commit de Projects.
+    /// Un proyecto NUEVO emite `project.registered` (origen `manual`, person/ui) en la misma transacción que su
+    /// fila y su ubicación. Un `join` emite `project.location_added` en la misma transacción que la ubicación y
+    /// el posible cambio de huella. Misma ruta y ambigüedad no emiten nada.
     pub(super) fn project_add(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
         self.require_registry_writable()?;
         let reg = Registration::new(ProjectOrigin::Manual, ctx)?;
+        let mgmt = Management::new(ctx)?;
         let ident = identify(&s(args, "path"))?;
         let name = Some(s(args, "name")).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| ident.name.clone());
         let (join, force_new) = (s(args, "join"), b(args, "new"));
@@ -398,9 +403,12 @@ impl Core {
                             return Ok(json!({ "status": "error", "error": format!("El proyecto {join} no coincide con este repositorio (commits raíz o remotos distintos). Para forzar otra ubicación usa project_locate") }));
                         };
                         let primary = becomes_primary(&c.locations);
-                        st.location_put(&join, &NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary })?;
-                        if c.project.fingerprint.remotes.is_empty() && !ident.fingerprint.remotes.is_empty() {
-                            st.project_set_fingerprint(&join, &Fingerprint { remotes: ident.fingerprint.remotes.clone(), ..c.project.fingerprint.clone() })?;
+                        let loc = NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary };
+                        // Un proyecto sin remotos adopta los del repositorio que se une.
+                        let adopt = (c.project.fingerprint.remotes.is_empty() && !ident.fingerprint.remotes.is_empty())
+                            .then(|| Fingerprint { remotes: ident.fingerprint.remotes.clone(), ..c.project.fingerprint.clone() });
+                        if join_project(st, &c.project, &loc, adopt, &mgmt)? == ChangeOutcome::Missing {
+                            return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {join}") }));
                         }
                         Self::registered(st, &join, false, &counts)
                     } else if force_new {
@@ -428,13 +436,17 @@ impl Core {
         })
     }
 
-    /// `project_archive {project_id, archived?: bool = true}`: oculta (o restaura) sin borrar nada.
-    pub(super) fn project_archive(&self, args: &Value) -> Result<Value, String> {
+    /// `project_archive {project_id, archived?: bool = true}`: oculta (o restaura) sin borrar nada. Solo un
+    /// cambio REAL de estado deja `project.archived` / `project.restored`; archivar un archivado o restaurar un
+    /// activo no escribe nada.
+    pub(super) fn project_archive(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let mgmt = Management::new(ctx)?;
         let id = s(args, "project_id");
         let archived = args.get("archived").and_then(Value::as_bool).unwrap_or(true);
         let counts = self.tasks_per_project().0;
         self.registry_write(|st| {
-            if !st.project_set_archived(&id, archived)? {
+            if set_archived(st, &id, archived, &mgmt)? == ChangeOutcome::Missing {
                 return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {id}") }));
             }
             Self::registered(st, &id, false, &counts)
@@ -445,8 +457,12 @@ impl Core {
     /// `project_locate {project_id, path, confirm?: bool}`: dónde está ahora este proyecto (mismo id,
     /// otra ruta). Si el repositorio de `path` no parece el mismo (commits raíz distintos), pide
     /// confirmación en lugar de aceptarlo.
-    pub(super) fn project_locate(&self, args: &Value) -> Result<Value, String> {
+    ///
+    /// Emite `project.relocated` (con `confirmed_mismatch` solo si la persona aceptó con `confirm` un repositorio
+    /// de otros commits raíz) en la misma transacción que la ubicación y el posible cambio de huella.
+    pub(super) fn project_locate(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
         self.require_registry_writable()?;
+        let mgmt = Management::new(ctx)?;
         let id = s(args, "project_id");
         let ident = identify(&s(args, "path"))?;
         let confirm = b(args, "confirm");
@@ -463,9 +479,11 @@ impl Core {
             }
             let machine = machine_id_ensure(st)?;
             // Una ruta que ya es de otro proyecto es un error del almacén (ProjectConflict).
-            st.location_put(&id, &NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true })?;
-            if p.fingerprint.root_commits.is_empty() {
-                st.project_set_fingerprint(&id, &ident.fingerprint)?;
+            let loc = NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
+            // Un proyecto sin commits raíz adopta la huella del repositorio donde está ahora.
+            let adopt = p.fingerprint.root_commits.is_empty().then(|| ident.fingerprint.clone());
+            if relocate_project(st, &p, &loc, adopt, !same && confirm, &mgmt)? == ChangeOutcome::Missing {
+                return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {id}") }));
             }
             Self::registered(st, &id, false, &counts)
         })?;

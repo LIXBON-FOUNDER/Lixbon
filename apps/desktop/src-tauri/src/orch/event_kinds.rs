@@ -19,6 +19,7 @@
 //! | `task.removed` (`launch_failed`) | state | `task` |
 //! | `effect.observed` (`git_merge` · `git_push_pr` · `git_worktree` · `git_worktree_removed` · `pty_process`) | effect | `task` |
 //! | `project.registered` (`manual` · `auto` · `backfill` · `import`) | state | `project` |
+//! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
 
 use serde::Serialize;
 
@@ -638,4 +639,80 @@ impl EventPayload for ProjectRegistered {
 pub(super) fn project_registered(project_id: &str, name: &str, fingerprint: &Fingerprint, origin: ProjectOrigin) -> Result<EventDraft, EventError> {
     let p = ProjectRegistered { origin, name: clip(name, 120), has_remote: !fingerprint.remotes.is_empty(), root_commit_count: fingerprint.root_commits.len() };
     Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None).idempotent(project_id))
+}
+
+// ---------------------------------------------------------------------------------------------
+// project.location_added · project.archived · project.restored · project.relocated
+// ---------------------------------------------------------------------------------------------
+//
+// Decisiones de gestión de una PERSONA sobre un Project que ya existe. Todas: clase `decision`, entidad
+// `project`, `run_id` NULL, sin `idem_key` (archivar, restaurar y volver a archivar es legítimo), actor Person
+// y canal Ui (lo valida `project_ops::Management`). Nunca rutas, remotos, huellas ni commits.
+
+/// Se añadió una ubicación a un proyecto que ya existía (`join`).
+#[derive(Serialize)]
+pub(super) struct ProjectLocationAdded {
+    /// ¿La ubicación nueva quedó como la principal? Es lo que se ESCRIBIÓ, no una intención.
+    primary: bool,
+    /// ¿Cambió de verdad la huella guardada (se adoptaron los remotos del repositorio nuevo)?
+    fingerprint_adopted: bool,
+}
+
+impl EventPayload for ProjectLocationAdded {
+    const KIND: &'static str = "project.location_added";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+pub(super) fn project_location_added(project_id: &str, primary: bool, fingerprint_adopted: bool) -> Result<EventDraft, EventError> {
+    let p = ProjectLocationAdded { primary, fingerprint_adopted };
+    Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None))
+}
+
+/// El proyecto pasó de activo a archivado. El estado anterior y el nuevo los dice el `kind`.
+#[derive(Serialize)]
+pub(super) struct ProjectArchived {}
+
+impl EventPayload for ProjectArchived {
+    const KIND: &'static str = "project.archived";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+pub(super) fn project_archived(project_id: &str) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Project, project_id, &ProjectArchived {})?.project(Some(project_id.to_string())).run(None))
+}
+
+/// El proyecto pasó de archivado a activo.
+#[derive(Serialize)]
+pub(super) struct ProjectRestored {}
+
+impl EventPayload for ProjectRestored {
+    const KIND: &'static str = "project.restored";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+pub(super) fn project_restored(project_id: &str) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Project, project_id, &ProjectRestored {})?.project(Some(project_id.to_string())).run(None))
+}
+
+/// La persona indicó dónde está ahora el proyecto (`project_locate`): la nueva ubicación pasa a ser la principal.
+#[derive(Serialize)]
+pub(super) struct ProjectRelocated {
+    /// ¿Cambió de verdad la huella guardada (el proyecto no tenía commits raíz y adoptó los del repositorio)?
+    fingerprint_adopted: bool,
+    /// `true` SOLO cuando la persona usó `confirm` para aceptar un repositorio cuyos commits raíz no coincidían.
+    confirmed_mismatch: bool,
+}
+
+impl EventPayload for ProjectRelocated {
+    const KIND: &'static str = "project.relocated";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+pub(super) fn project_relocated(project_id: &str, fingerprint_adopted: bool, confirmed_mismatch: bool) -> Result<EventDraft, EventError> {
+    let p = ProjectRelocated { fingerprint_adopted, confirmed_mismatch };
+    Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None))
 }
