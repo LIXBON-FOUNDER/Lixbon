@@ -235,7 +235,7 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 | `git_merge` | `integrate` | `result` (`merged`·`conflict`·`error`), `branch`, `base_commit?`, `result_commit?` |
 | `git_push_pr` | `publish_pr` | `result` (`created`·`already_exists`·`error`), `branch`, `pr_url?` |
 | `git_worktree` | `spawn` | `branch`, `base?` |
-| `git_worktree_removed` | `release`·`close_idle_runs` | `worktree_removed`, `branch?`, `branch_deleted` |
+| `git_worktree_removed` | `release`·`close_idle_runs`·`spawn_cleanup` | `worktree_removed`, `branch?`, `branch_deleted` |
 | `pty_process` | `spawn` | `launched` |
 
 Nunca rutas locales, `env`, `argv`, mensajes de error ni credenciales. Los datos estructurales los pone el
@@ -243,9 +243,64 @@ llamador en `Effect.observed`; el constructor no consulta git. **Excepción temp
 marcador de registro de la decisión `spawn`) sigue yendo al diario pero no emite `effect.observed` ni se
 correlaciona; lo reformulará el bloque de lanzamientos pendientes.
 
+Invariantes (un call site no puede inventar un efecto que no ocurrió): `pty_process.launched` debe ser
+`true`; `git_worktree_removed` exige `worktree_removed || branch_deleted`, y `branch_deleted` exige `branch`
+presente y no vacía (un cleanup solo de rama es `worktree_removed = false, branch_deleted = true`).
+
+**Pertenencia histórica**: `observe_effect` captura `run_id` y `project_id` de la tarea EN ESE MOMENTO y los
+fija en el borrador (nunca `project_from_task`): el cierre que registra el efecto puede retirar la tarea, y
+una resolución al finalizar ya no la encontraría. Sin git ni registro de proyectos.
+
 Fuera de este bloque (sin evento de efecto): matar terminales (`kill_term`; el hecho es el
-`task.status_changed`), el archivo de informe, `delivery::prepare`, `type_prompt`, las observaciones de
-aprobación en terminal y la limpieza de `create_child` (`task.removed`).
+`task.status_changed` o `task.removed`; **no hay evento para el kill**), el archivo de informe,
+`delivery::prepare`, `type_prompt` y las observaciones de aprobación en terminal.
+
+## E1b · bloque 3b: cleanup de un lanzamiento fallido (`task.removed`)
+`create_child` crea la Task ANTES de cualquier efecto (worktree, proceso). Si el lanzamiento falla, el Core
+(no la persona que lo aprobó) deshace el intento y registra dos hechos distintos de «la solicitud de spawn
+terminó en `launch_failed`» (que será `spawn.resolved`):
+
+* `task.removed { cause: "launch_failed" }` (`class = state`, entidad `task`, actor **system / core**, sin
+  `idem_key`): lo emite SOLO `Tx::remove_failed_launch`, que captura `run_id` y `project_id` ANTES de borrar y
+  los pone explícitos. Exige contexto System / Core. La cascada de `State::remove_task` retira las decisiones
+  legacy de la tarea y los mensajes que la citan; con hijas, o siendo la raíz de un run, falla sin eliminar nada.
+* `effect.observed` de `git_worktree_removed` con `operation = "spawn_cleanup"` si se borró de verdad el
+  worktree o la rama. Va primero en la misma mutación (`mutate_after_effect`, System / Core).
+
+### `SpawnAttempt`
+El intento es un objeto local (no durable): `task`, `repo`, `worktree`, `branch`. Solo fija `worktree` y
+`branch` cuando `git::add_worktree` devolvió `Ok`; un `add_worktree` fallido (p. ej. «ya existe la carpeta») no
+da propiedad sobre esa ruta, que nunca se borra. El cleanup NO depende de `Task.worktree`: el worktree puede
+existir en disco sin que el estado lo sepa (el registro pudo fallar).
+
+### Política del cleanup
+Orden: 1) se captura si la Task es retirable (no final y run abierto) ANTES de matar nada; 2) se mata el proceso
+vivo y no registrado —también con el Core degradado— y, si no hay control fiable sobre él (el matador falla),
+se conserva TODO y el terminal vuelve al mapa; 3) con el Core degradado (`Health != Normal`: un `Persist` o
+`ReadOnly` degradan, un `Rejected` no) NO se borra worktree, rama ni Task; 4) se retira el worktree del
+intento y, si tuvo éxito, se intenta `git branch -d` (nunca `-D`; `branch_deleted` es el resultado real; un
+fallo de `-d` no impide retirar la Task); si `remove_worktree` falla la Task se conserva; 5) un único registro
+(`mutate_after_effect` si hubo borrado git; `mutate` si solo hay que retirar la Task): `effect.observed` y, si
+la Task era retirable, `task.removed`. Una Task ya final o con el run cerrado se conserva (solo se limpian los
+artefactos del intento). Si falla la persistencia tras el cleanup físico: ni estado ni eventos, y el diario v1.
+
+| Fallo | Resultado |
+|---|---|
+| `add_worktree` falla | Task retirada (`task.removed`); la ruta ajena intacta; sin efecto git |
+| worktree creado, registro rechazado y Core sano | worktree y rama retirados con los datos del intento; `effect.observed` + `task.removed`; el registro rechazado queda en el diario |
+| worktree creado, registro `Persist`/`ReadOnly` | todo se conserva; diario |
+| `ensure_launchable` falla (run cerrado / Task final) | Task conservada; solo `effect.observed` de cleanup |
+| `launch` falla antes del proceso | `effect.observed` + `task.removed` |
+| `launch` OK y falla el registro de `pty_process` (Core sano) | kill + `effect.observed` + `task.removed` |
+| ídem con el Core degradado | solo kill; Task y worktree se conservan |
+| sin control sobre el proceso | todo se conserva |
+| hija `shared` | `task.removed` sin efecto git |
+
+### Seguridad de excepciones de `pty::spawn`
+Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm` (`try_clone_reader`,
+`take_writer`, tuberías de stdout/stderr) mata el proceso antes de devolver el error, tanto en `spawn_pty` como
+en `spawn_piped`; y `Core::register_term` mata el terminal si no puede registrarlo. `AgentTerm` no mata al
+soltarse (`Drop`): la compensación es explícita. El comportamiento normal de `on_exit` no cambia.
 
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia

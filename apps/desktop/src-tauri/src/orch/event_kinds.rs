@@ -16,6 +16,7 @@
 //! | `run.created` · `run.closed` · `run.removed` | state | `run` |
 //! | `task.created` · `task.status_changed` · `task.phase` · `task.question` · `task.reply` | state | `task` |
 //! | `decision.recorded` (`review` · `merge` · `pr`) | decision | `task` |
+//! | `task.removed` (`launch_failed`) | state | `task` |
 //! | `effect.observed` (`git_merge` · `git_push_pr` · `git_worktree` · `git_worktree_removed` · `pty_process`) | effect | `task` |
 
 use serde::Serialize;
@@ -525,18 +526,28 @@ impl EffectObserved {
                 branch: req_str(EFF, observed, "branch")?,
                 base: opt_str(EFF, observed, "base")?,
             },
-            "git_worktree_removed" => EffectObserved::GitWorktreeRemoved {
-                effect_id: id,
-                operation: operation_of(kind, operation, &["release", "close_idle_runs"])?,
-                worktree_removed: opt_bool(EFF, observed, "worktree_removed")?.ok_or("effect.observed: falta `worktree_removed` (booleano)")?,
-                branch: opt_str(EFF, observed, "branch")?,
-                branch_deleted: opt_bool(EFF, observed, "branch_deleted")?.ok_or("effect.observed: falta `branch_deleted` (booleano)")?,
-            },
-            "pty_process" => EffectObserved::PtyProcess {
-                effect_id: id,
-                operation: operation_of(kind, operation, &["spawn"])?,
-                launched: opt_bool(EFF, observed, "launched")?.ok_or("effect.observed: falta `launched` (booleano)")?,
-            },
+            "git_worktree_removed" => {
+                let operation = operation_of(kind, operation, &["release", "close_idle_runs", "spawn_cleanup"])?;
+                let worktree_removed = opt_bool(EFF, observed, "worktree_removed")?.ok_or("effect.observed: falta `worktree_removed` (booleano)")?;
+                let branch = opt_str(EFF, observed, "branch")?;
+                let branch_deleted = opt_bool(EFF, observed, "branch_deleted")?.ok_or("effect.observed: falta `branch_deleted` (booleano)")?;
+                // Un efecto observado exige que ALGO se borrara de verdad: un call site futuro no puede inventar
+                // un cleanup que no ocurrió.
+                if !worktree_removed && !branch_deleted {
+                    return Err("effect.observed: git_worktree_removed exige worktree_removed o branch_deleted (no ocurrió ningún borrado)".into());
+                }
+                if branch_deleted && branch.as_deref().is_none_or(|b| b.trim().is_empty()) {
+                    return Err("effect.observed: branch_deleted exige `branch` presente y no vacía".into());
+                }
+                EffectObserved::GitWorktreeRemoved { effect_id: id, operation, worktree_removed, branch, branch_deleted }
+            }
+            "pty_process" => {
+                // `launched = false` no es un efecto observado: un lanzamiento que no arrancó no se registra.
+                if opt_bool(EFF, observed, "launched")? != Some(true) {
+                    return Err("effect.observed: pty_process exige launched = true (un proceso que no arrancó no es un efecto observado)".into());
+                }
+                EffectObserved::PtyProcess { effect_id: id, operation: operation_of(kind, operation, &["spawn"])?, launched: true }
+            }
             k if EFFECT_KINDS_WITHOUT_EVENT.contains(&k) => return Ok(None),
             other => return Err(format!("{EFF}: effect_kind {other:?} fuera del contrato (git_merge, git_push_pr, git_worktree, git_worktree_removed, pty_process)")),
         }))
@@ -544,10 +555,42 @@ impl EffectObserved {
 }
 
 /// Entidad: la tarea del efecto. `effect_id` = `correlation_id` = `idem_key` (y también va en el payload).
-pub(super) fn effect_observed(task: &str, run: &str, payload: &EffectObserved, effect_id: &str) -> Result<EventDraft, EventError> {
+/// `run` y `project` son los de la tarea EN EL MOMENTO de observar el efecto y van explícitos: el cierre
+/// que registra el efecto puede retirar la tarea (cleanup), y entonces `project_from_task` ya no la
+/// encontraría al finalizar. Sin git ni registro de proyectos.
+pub(super) fn effect_observed(task: &str, run: &str, project: Option<String>, payload: &EffectObserved, effect_id: &str) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Task, task, payload)?
         .run(Some(run.to_string()).filter(|r| !r.is_empty()))
-        .project_from_task(task)
+        .project(project)
         .correlated(effect_id)
         .idempotent(effect_id))
+}
+
+// ---------------------------------------------------------------------------------------------
+// task.removed
+// ---------------------------------------------------------------------------------------------
+
+/// Por qué se retiró una Task. Cerrado: hoy solo el cleanup de un lanzamiento fallido.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RemovalCause {
+    LaunchFailed,
+}
+
+#[derive(Serialize)]
+pub(super) struct TaskRemoved {
+    cause: RemovalCause,
+}
+
+impl EventPayload for TaskRemoved {
+    const KIND: &'static str = "task.removed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// «La Task existió y después fue retirada»: un hecho distinto de que la solicitud de spawn terminara en
+/// `launch_failed` (eso será `spawn.resolved`). La Task YA NO existe cuando se finaliza el borrador, así que
+/// `run` y `project` los captura el mutador ANTES de borrar y van explícitos (nunca `project_from_task`).
+pub(super) fn task_removed(task: &str, run: &str, project: Option<String>, cause: RemovalCause) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Task, task, &TaskRemoved { cause })?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project(project))
 }

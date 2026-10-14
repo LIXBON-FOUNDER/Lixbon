@@ -136,6 +136,41 @@ impl Core {
         });
     }
 
+    /// Mata y retira el terminal de `id` DICIENDO si pudo. `None`: no hay terminal registrado. `Some(Err)`:
+    /// no hay control fiable sobre el proceso (el matador falló o el mapa está corrupto); en ese caso el
+    /// terminal vuelve al mapa para poder reintentarlo y NADA que dependa de que el proceso esté muerto
+    /// (borrar su worktree, su tarea) debe hacerse.
+    pub(super) fn kill_term_checked(&self, id: &str) -> Option<Result<(), String>> {
+        let mut term = match self.terms.lock() {
+            Ok(mut m) => m.remove(id)?,
+            Err(_) => return Some(Err("Estado interno corrupto: no se puede localizar el proceso".into())),
+        };
+        match term.try_kill() {
+            Ok(()) => Some(Ok(())),
+            Err(e) => {
+                if let Ok(mut m) = self.terms.lock() {
+                    m.insert(id.to_string(), term);
+                }
+                Some(Err(e))
+            }
+        }
+    }
+
+    /// Registra el terminal recién creado. Si no se puede registrar, el proceso se MATA antes de devolver el
+    /// error: un `AgentTerm` suelto no mata al soltarse y quedaría vivo y sin dueño.
+    pub(super) fn register_term(&self, id: &str, mut term: super::pty::AgentTerm) -> Result<(), String> {
+        match self.terms.lock() {
+            Ok(mut m) => {
+                m.insert(id.to_string(), term);
+                Ok(())
+            }
+            Err(_) => {
+                term.kill();
+                Err("Estado interno corrupto".into())
+            }
+        }
+    }
+
     pub(super) fn kill_term(&self, id: &str) -> bool {
         let Some(mut t) = self.terms.lock().ok().and_then(|mut m| m.remove(id)) else { return false };
         t.kill();

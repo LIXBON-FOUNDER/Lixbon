@@ -19,6 +19,8 @@ mod tx_ops;
 mod events_tests;
 #[cfg(test)]
 mod tx_ops_tests;
+#[cfg(test)]
+mod spawn_cleanup_tests;
 mod projects;
 #[cfg(test)]
 mod projects_tests;
@@ -138,6 +140,9 @@ pub struct Core {
     /// espera en la barrera, para que la prueba mire el lock en ese punto exacto.
     #[cfg(test)]
     snapshot_git_hook: Mutex<Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>)>>,
+    /// En pruebas: puntos de fallo/observación dentro de `create_child` (ver `spawn.rs`).
+    #[cfg(test)]
+    spawn_hook: Mutex<Option<spawn::SpawnHook>>,
 }
 
 pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
@@ -166,6 +171,8 @@ impl Default for Orch {
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]
             snapshot_git_hook: Mutex::new(None),
+            #[cfg(test)]
+            spawn_hook: Mutex::new(None),
         }))
     }
 }

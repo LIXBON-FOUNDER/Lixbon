@@ -278,13 +278,38 @@ impl Tx {
             return Ok(());
         };
         let task = effect.task_id().ok_or_else(|| format!("effect.observed: el efecto {} no declara su tarea", effect.kind()))?;
-        if !self.tasks.contains_key(task) {
-            return Err(format!("effect.observed: la tarea {task} no existe"));
-        }
+        // Pertenencia histórica congelada AHORA: el cierre que registra el efecto puede retirar la tarea.
+        let (run, project) = match self.tasks.get(task) {
+            Some(t) => (t.run.clone(), t.project_id.clone()),
+            None => return Err(format!("effect.observed: la tarea {task} no existe")),
+        };
         let ctx = self.context().clone();
-        let run = self.run_of(task);
-        self.try_push_event(ev::effect_observed(task, &run, &facts, effect.effect_id()).map(|d| d.by(ctx.actor, ctx.channel)));
+        self.try_push_event(ev::effect_observed(task, &run, project, &facts, effect.effect_id()).map(|d| d.by(ctx.actor, ctx.channel)));
         self.set_active_effect(Some(effect.effect_id().to_string()));
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Retirada de una tarea
+    // -----------------------------------------------------------------------------------------
+
+    /// Retira una tarea cuyo lanzamiento falló y emite `task.removed { cause: launch_failed }`. ÚNICO sitio
+    /// que construye ese evento. La decide el Core (aunque la persona aprobara el lanzamiento): exige
+    /// contexto System / Core y el evento se atribuye explícitamente a ese actor. Captura `run` y
+    /// `project_id` ANTES de borrar y van explícitos en el borrador (la tarea ya no existe al finalizarlo).
+    /// La cascada de `State::remove_task` quita sus decisiones legacy y los mensajes que la citan; si tiene
+    /// hijas o es la raíz de un run, falla sin eliminar nada.
+    pub(super) fn remove_failed_launch(&mut self, id: &str) -> Result<(), String> {
+        let ctx = self.context().clone();
+        if ctx.actor != Actor::System || ctx.channel != Channel::Core {
+            return Err(format!("task.removed (launch_failed) lo decide el Core (System / Core); llegó {:?} por {:?}", ctx.actor, ctx.channel));
+        }
+        let (run, project) = match self.tasks.get(id) {
+            Some(t) => (t.run.clone(), t.project_id.clone()),
+            None => return Err(format!("La tarea {id} no existe")),
+        };
+        self.state_mut().remove_task(id)?;
+        self.try_push_event(ev::task_removed(id, &run, project, ev::RemovalCause::LaunchFailed).map(|d| d.by(Actor::System, Channel::Core)));
         Ok(())
     }
 }

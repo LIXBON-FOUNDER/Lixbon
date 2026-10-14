@@ -598,10 +598,16 @@ impl Core {
         lock(&self.persister.mirror).clone()
     }
 
-    /// Estado de salud del almacenamiento del Core (diagnóstico; la UI lo consumirá con el aviso `orch:degraded`).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Estado de salud del almacenamiento del Core. Lo consulta el cleanup de un lanzamiento fallido
+    /// (no borra nada con el Core degradado) y la UI lo consumirá con el aviso `orch:degraded`.
     pub(super) fn health(&self) -> Health {
         self.persister.health()
+    }
+
+    /// Prueba: deja el Core en solo lectura sin pasar por un fallo real del almacén.
+    #[cfg(test)]
+    pub(super) fn degrade_for_tests(&self, reason: &str) {
+        self.persister.degrade(reason);
     }
 
     fn enter_read_only(&self, reason: &str) {

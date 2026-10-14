@@ -62,15 +62,6 @@ impl Core {
         Ok(())
     }
 
-    pub(super) fn discard_worktree(&self, id: &str) {
-        let Some((repo, wt, branch)) = self.lock().tasks.get(id).and_then(|t| Some((t.repo.clone(), t.worktree.clone()?, t.branch.clone()))) else { return };
-        if git::remove_worktree(&repo, &wt, true).is_ok() {
-            if let Some(b) = branch {
-                let _ = git::delete_branch(&repo, &b);
-            }
-        }
-    }
-
     pub(super) fn close_run(&self, ctx: &MutationContext, run: &str, force: bool) -> Result<Value, String> {
         // Primero se persiste el cierre del run; después los efectos (matar terminales,
         // liberar worktrees), que registran cada uno su resultado.
