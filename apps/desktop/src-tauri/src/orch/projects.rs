@@ -213,9 +213,11 @@ fn project_json(p: &ProjectRow, locs: &[LocationRow], tasks: usize) -> Value {
     })
 }
 
-/// ¿La ubicación nueva debe ser la principal? Sí si el proyecto no tiene ninguna que exista.
-fn becomes_primary(existing: &[LocationRow]) -> bool {
-    !existing.iter().any(|l| l.primary && !l.missing)
+/// ¿La ubicación nueva debe ser la principal de ESTA máquina? Sí si el proyecto no tiene ya una principal viva
+/// en ella. La principal es por `(project_id, machine)` (índice único de la migración 003): la de otra máquina
+/// no cuenta, y la primera ubicación de una máquina nueva es su principal.
+fn becomes_primary(existing: &[LocationRow], machine: &str) -> bool {
+    !existing.iter().any(|l| l.machine == machine && l.primary && !l.missing)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -402,7 +404,7 @@ impl Core {
                         let Some(c) = cands.iter().find(|c| c.project.id == join) else {
                             return Ok(json!({ "status": "error", "error": format!("El proyecto {join} no coincide con este repositorio (commits raíz o remotos distintos). Para forzar otra ubicación usa project_locate") }));
                         };
-                        let primary = becomes_primary(&c.locations);
+                        let primary = becomes_primary(&c.locations, &machine);
                         let loc = NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary };
                         // Un proyecto sin remotos adopta los del repositorio que se une.
                         let adopt = (c.project.fingerprint.remotes.is_empty() && !ident.fingerprint.remotes.is_empty())

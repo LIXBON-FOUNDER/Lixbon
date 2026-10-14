@@ -392,7 +392,7 @@ volver a archivar es legítimo) y `state_rev` NULL. Nunca copian rutas, remotos,
   `display_path`, sin cambio de huella) o unir una ruta que ya era del proyecto: **0 eventos** y ni siquiera se
   toca `last_seen`/`updated_at`. Una ruta que ya es de OTRO proyecto es `ProjectConflict` (rollback).
 * **Guarda de snapshot.** `FingerprintChange { from, to }` lleva la huella que la política leyó; la transacción
-  comprueba que sigue siendo la guardada y, en `join`, que «es la principal» sigue siendo cierto. Si no, rollback:
+  comprueba que sigue siendo la guardada y, en `join`, que «es la principal» sigue siendo cierto EN ESA MÁQUINA (la principal es por `(project_id, machine)`: la de otra máquina no cuenta y la primera ubicación de una máquina nueva es su principal). Si no, rollback:
   el payload no puede describir un estado que ya no existe.
 * Las APIs del almacén que cambiaban filas sin su hecho (`location_put`, `project_set_fingerprint`,
   `project_set_archived`, `project_create`) son `#[cfg(test)]`; una prueba de arquitectura impide usarlas en

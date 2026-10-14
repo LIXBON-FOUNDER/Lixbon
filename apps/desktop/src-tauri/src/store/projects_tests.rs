@@ -577,3 +577,66 @@ fn si_falla_el_cambio_de_estado_o_el_evento_no_queda_nada_a_medias() {
     assert!(matches!(s.project_set_archived_recorded(&a.id, true, &NewEvent { payload: "[1]".into(), ..decision_de(&a.id, "project.archived") }), Err(StoreError::InvalidEvent(_))));
     assert_eq!(foto(&s, &a.id), antes);
 }
+
+// ---------------------------------------------------------------------------------------------
+// La principal es por (project_id, machine): multi-machine
+// ---------------------------------------------------------------------------------------------
+
+fn loc_m(machine: &str, path: &str, primary: bool) -> NewLocation {
+    NewLocation { machine: machine.into(), path: path.into(), display_path: path.into(), primary }
+}
+
+fn principales(s: &Store, id: &str) -> Vec<(String, String, bool)> {
+    let mut v: Vec<_> = s.project_locations(Some(id)).unwrap().into_iter().map(|l| (l.machine, l.path, l.primary)).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn la_primera_ubicacion_de_otra_maquina_es_su_principal_y_la_segunda_no() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc_m("machine-a", "ruta-a", true)).unwrap();
+    let ev = || decision_de(&a.id, "project.location_added");
+    // Machine B no tiene ninguna ubicación: la primera es su principal, aunque machine A ya tenga la suya.
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    assert_eq!(
+        principales(&s, &a.id),
+        vec![("machine-a".into(), "ruta-a".into(), true), ("machine-b".into(), "ruta-b".into(), true)],
+        "una principal POR máquina"
+    );
+    // La segunda de machine B ya no es principal…
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b2", false), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    assert_eq!(
+        principales(&s, &a.id),
+        vec![("machine-a".into(), "ruta-a".into(), true), ("machine-b".into(), "ruta-b".into(), true), ("machine-b".into(), "ruta-b2".into(), false)]
+    );
+    // …y declararla principal contradice el snapshot (machine B ya tiene una viva): se deshace todo.
+    let antes = foto(&s, &a.id);
+    let r = s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", true), None, &ev());
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!(foto(&s, &a.id), antes);
+    assert_eq!(eventos_n(&s), 2);
+}
+
+#[test]
+fn un_cambio_de_principal_en_otra_maquina_no_invalida_el_join_y_en_la_misma_si() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc_m("machine-a", "ruta-a", true)).unwrap();
+    let ev = || decision_de(&a.id, "project.location_added");
+    // La principal de machine A desaparece: machine B sigue sin tener ninguna, así que su primera es la principal.
+    s.location_mark("machine-a", "ruta-a", true).unwrap();
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    // Machine B ya tiene su principal. Un cambio en OTRA máquina (A vuelve) no invalida un join de B que dice «no principal».
+    s.location_mark("machine-a", "ruta-a", false).unwrap();
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b2", false), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    // Un cambio en la MISMA máquina sí: la principal de B desaparece y el join (leído antes) decía «no principal».
+    s.location_mark("machine-b", "ruta-b", true).unwrap();
+    let antes = foto(&s, &a.id);
+    let r = s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", false), None, &ev());
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!(foto(&s, &a.id), antes, "rollback total");
+    // …y con el snapshot correcto (no hay principal viva en B), la nueva es la principal.
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
+}
