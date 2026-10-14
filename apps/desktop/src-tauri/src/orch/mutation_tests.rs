@@ -252,6 +252,11 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
     assert!(linea["repo"].as_str().is_some_and(|r| !r.is_empty()) && linea["run"].as_str().is_some());
     assert!(linea["error"].as_str().is_some_and(|e| !e.is_empty()));
     assert_eq!(Core::unrecorded_effects(&data), 1);
+    // Ya en solo lectura (`ReadOnly`): otro efecto ocurrido tampoco se pierde, aunque la mutación ni se intente.
+    let otro = Effect::new("spawn", "pty_process").task(&id).observed(serde_json::json!({ "launched": true }));
+    let r = core.acting(MutationContext::core()).mutate_after_effect(otro, |_| Ok(()));
+    assert!(matches!(&r, Err(m) if m.contains("NO quedó registrada")), "{r:?}");
+    assert_eq!(Core::unrecorded_effects(&data), 2);
 
     // ...y el siguiente arranque lo avisa en vez de esconderlo.
     let otro = Orch::default().0;
@@ -261,16 +266,18 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
 }
 
 #[test]
-fn un_rechazo_tras_el_efecto_no_se_confunde_con_un_efecto_sin_registrar() {
+fn un_rechazo_tras_el_efecto_tambien_se_anota_porque_el_efecto_ya_ocurrio() {
     let (_l, data, _) = carpetas();
     let (core, _host) = core_con_host();
-    // La mutación se rechaza por sí misma (la tarea no existe): no hay nada que reconciliar.
+    // Entrar en `mutate_after_effect` significa que el efecto ocurrió: aunque el registro lo rechace el
+    // propio cierre (la tarea no existe), queda un efecto sin registrar. «No hubo efecto» = no llamarla.
     let r: Result<(), String> = core.acting(MutationContext::core()).mutate_after_effect(Effect::new("prueba", "ninguno"), |st| {
         st.task_mut("t-no-existe")?;
         Ok(())
     });
-    assert!(r.is_err());
-    assert_eq!(Core::unrecorded_effects(&data), 0);
+    assert!(matches!(&r, Err(m) if m.contains("NO quedó registrada")), "{r:?}");
+    assert_eq!(Core::unrecorded_effects(&data), 1);
+    // Un rechazo no degrada el almacenamiento: sigue siendo normal.
     assert_eq!(core.health(), Health::Normal);
 }
 

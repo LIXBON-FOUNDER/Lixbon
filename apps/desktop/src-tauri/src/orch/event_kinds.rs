@@ -16,6 +16,7 @@
 //! | `run.created` · `run.closed` · `run.removed` | state | `run` |
 //! | `task.created` · `task.status_changed` · `task.phase` · `task.question` · `task.reply` | state | `task` |
 //! | `decision.recorded` (`review` · `merge` · `pr`) | decision | `task` |
+//! | `effect.observed` (`git_merge` · `git_push_pr` · `git_worktree` · `git_worktree_removed` · `pty_process`) | effect | `task` |
 
 use serde::Serialize;
 
@@ -286,33 +287,35 @@ impl EventPayload for DecisionRecorded {
     const CLASS: EventClass = EventClass::Decision;
 }
 
-fn req_str(d: &serde_json::Value, key: &str) -> Result<String, String> {
+const DEC: &str = "decision.recorded";
+
+fn req_str(who: &str, d: &serde_json::Value, key: &str) -> Result<String, String> {
     match d.get(key).and_then(|v| v.as_str()) {
         Some(s) if !s.trim().is_empty() => Ok(clip(s, 300)),
-        _ => Err(format!("decision.recorded: falta `{key}` (texto no vacío) en el detalle")),
+        _ => Err(format!("{who}: falta `{key}` (texto no vacío) en el detalle")),
     }
 }
 
-fn opt_str(d: &serde_json::Value, key: &str) -> Result<Option<String>, String> {
+fn opt_str(who: &str, d: &serde_json::Value, key: &str) -> Result<Option<String>, String> {
     match d.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::String(s)) => Ok(Some(clip(s, 300))),
-        Some(_) => Err(format!("decision.recorded: `{key}` debe ser texto o null")),
+        Some(_) => Err(format!("{who}: `{key}` debe ser texto o null")),
     }
 }
 
-fn opt_bool(d: &serde_json::Value, key: &str) -> Result<Option<bool>, String> {
+fn opt_bool(who: &str, d: &serde_json::Value, key: &str) -> Result<Option<bool>, String> {
     match d.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Bool(b)) => Ok(Some(*b)),
-        Some(_) => Err(format!("decision.recorded: `{key}` debe ser booleano o null")),
+        Some(_) => Err(format!("{who}: `{key}` debe ser booleano o null")),
     }
 }
 
-fn outcome_str<'a>(d: &'a serde_json::Value, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
+fn outcome_str<'a>(who: &str, d: &'a serde_json::Value, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
     match d.get(key).and_then(|v| v.as_str()) {
         Some(s) if allowed.contains(&s) => Ok(s),
-        other => Err(format!("decision.recorded: `{key}` {other:?} fuera del contrato (admitidos: {})", allowed.join(", "))),
+        other => Err(format!("{who}: `{key}` {other:?} fuera del contrato (admitidos: {})", allowed.join(", "))),
     }
 }
 
@@ -323,21 +326,21 @@ impl DecisionRecorded {
     pub(super) fn parse(kind: &str, detail: &serde_json::Value) -> Result<Option<DecisionRecorded>, String> {
         Ok(Some(match kind {
             "review" => {
-                let outcome = match outcome_str(detail, "decision", &["accepted", "rejected"])? {
+                let outcome = match outcome_str(DEC, detail, "decision", &["accepted", "rejected"])? {
                     "accepted" => ReviewOutcome::Accepted,
                     _ => ReviewOutcome::Rejected,
                 };
                 DecisionRecorded::Review {
                     decision_id: 0,
                     outcome,
-                    head_commit: req_str(detail, "head_commit")?,
-                    base_commit: opt_str(detail, "base_commit")?,
-                    base_source: opt_str(detail, "base_source")?,
-                    has_comment: opt_str(detail, "comment")?.is_some_and(|c| !c.trim().is_empty()),
+                    head_commit: req_str(DEC, detail, "head_commit")?,
+                    base_commit: opt_str(DEC, detail, "base_commit")?,
+                    base_source: opt_str(DEC, detail, "base_source")?,
+                    has_comment: opt_str(DEC, detail, "comment")?.is_some_and(|c| !c.trim().is_empty()),
                 }
             }
             "merge" => {
-                let outcome = match outcome_str(detail, "outcome", &["merged", "conflict", "error", "target_moved"])? {
+                let outcome = match outcome_str(DEC, detail, "outcome", &["merged", "conflict", "error", "target_moved"])? {
                     "merged" => MergeOutcome::Merged,
                     "conflict" => MergeOutcome::Conflict,
                     "error" => MergeOutcome::Error,
@@ -351,24 +354,24 @@ impl DecisionRecorded {
                 DecisionRecorded::Merge {
                     decision_id: 0,
                     outcome,
-                    branch: req_str(detail, "branch")?,
-                    squash: opt_bool(detail, "squash")?.ok_or("decision.recorded: falta `squash` (booleano) en el detalle")?,
-                    base_commit: opt_str(detail, "base_commit")?,
-                    result_commit: opt_str(detail, "result_commit")?,
+                    branch: req_str(DEC, detail, "branch")?,
+                    squash: opt_bool(DEC, detail, "squash")?.ok_or("decision.recorded: falta `squash` (booleano) en el detalle")?,
+                    base_commit: opt_str(DEC, detail, "base_commit")?,
+                    result_commit: opt_str(DEC, detail, "result_commit")?,
                     conflict_count,
-                    base_check: opt_str(detail, "base_check")?,
-                    accepted_moved_target: opt_bool(detail, "accepted_moved_target")?,
-                    expected_commit: opt_str(detail, "expected_commit")?,
-                    found_commit: opt_str(detail, "found_commit")?,
+                    base_check: opt_str(DEC, detail, "base_check")?,
+                    accepted_moved_target: opt_bool(DEC, detail, "accepted_moved_target")?,
+                    expected_commit: opt_str(DEC, detail, "expected_commit")?,
+                    found_commit: opt_str(DEC, detail, "found_commit")?,
                 }
             }
             "pr" => {
-                let outcome = match outcome_str(detail, "outcome", &["created", "already_exists", "error"])? {
+                let outcome = match outcome_str(DEC, detail, "outcome", &["created", "already_exists", "error"])? {
                     "created" => PrOutcome::Created,
                     "already_exists" => PrOutcome::AlreadyExists,
                     _ => PrOutcome::Error,
                 };
-                DecisionRecorded::Pr { decision_id: 0, outcome, branch: req_str(detail, "branch")?, pr_url: opt_str(detail, "pr_url")? }
+                DecisionRecorded::Pr { decision_id: 0, outcome, branch: req_str(DEC, detail, "branch")?, pr_url: opt_str(DEC, detail, "pr_url")? }
             }
             k if DECISION_KINDS_WITHOUT_EVENT.contains(&k) => return Ok(None),
             other => return Err(format!("decision.recorded: decision_kind {other:?} fuera del contrato (review, merge, pr)")),
@@ -390,4 +393,161 @@ impl DecisionRecorded {
 /// puede ser identidad de entidad). Sin `idem_key`: revisar dos veces la misma rama es legítimo.
 pub(super) fn decision_recorded(task: &str, run: &str, payload: &DecisionRecorded) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Task, task, payload)?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project_from_task(task))
+}
+
+// ---------------------------------------------------------------------------------------------
+// effect.observed
+// ---------------------------------------------------------------------------------------------
+
+/// `Effect.kind` que solo viajan al diario de recuperación y NO emiten `effect.observed`. Excepción
+/// temporal y explícita: `spawn_outcome` no es un efecto externo sino el marcador del registro de la
+/// decisión `spawn`, cuyo hecho es `spawn.resolved` (bloque de lanzamientos pendientes).
+pub(super) const EFFECT_KINDS_WITHOUT_EVENT: [&str; 1] = ["spawn_outcome"];
+
+const EFF: &str = "effect.observed";
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MergeResult {
+    Merged,
+    Conflict,
+    Error,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum PrResult {
+    Created,
+    AlreadyExists,
+    Error,
+}
+
+/// Un efecto externo que YA ocurrió y que el Core observó. Contrato CERRADO por `effect_kind`. El
+/// `effect_id` es la identidad de la ocurrencia: va en el payload, en `correlation_id` y en `idem_key`
+/// (tres usos del mismo identificador: contenido, relación y unicidad). Nunca rutas locales, `env`,
+/// `argv`, mensajes de error ni credenciales.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(tag = "effect_kind", rename_all = "snake_case")]
+pub(super) enum EffectObserved {
+    GitMerge {
+        effect_id: String,
+        operation: &'static str,
+        result: MergeResult,
+        branch: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base_commit: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result_commit: Option<String>,
+    },
+    GitPushPr {
+        effect_id: String,
+        operation: &'static str,
+        result: PrResult,
+        branch: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pr_url: Option<String>,
+    },
+    GitWorktree {
+        effect_id: String,
+        operation: &'static str,
+        branch: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
+    },
+    GitWorktreeRemoved {
+        effect_id: String,
+        operation: &'static str,
+        worktree_removed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        branch_deleted: bool,
+    },
+    PtyProcess {
+        effect_id: String,
+        operation: &'static str,
+        launched: bool,
+    },
+}
+
+impl EventPayload for EffectObserved {
+    const KIND: &'static str = "effect.observed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Effect;
+}
+
+/// Valida `operation` contra los valores conocidos del `effect_kind` (no es un texto libre).
+fn operation_of(kind: &str, operation: &str, allowed: &[&'static str]) -> Result<&'static str, String> {
+    allowed
+        .iter()
+        .copied()
+        .find(|a| *a == operation)
+        .ok_or_else(|| format!("{EFF}: operation {operation:?} fuera del contrato de {kind} (admitidas: {})", allowed.join(", ")))
+}
+
+impl EffectObserved {
+    /// Valida y normaliza lo observado por un `Effect`. `Ok(None)`: la excepción explícita
+    /// [`EFFECT_KINDS_WITHOUT_EVENT`]. Un `kind` desconocido o un detalle fuera de contrato es un error.
+    pub(super) fn parse(effect_id: &str, operation: &str, kind: &str, observed: &serde_json::Value) -> Result<Option<EffectObserved>, String> {
+        let id = effect_id.to_string();
+        Ok(Some(match kind {
+            "git_merge" => {
+                let result = match outcome_str(EFF, observed, "outcome", &["merged", "conflict", "error"])? {
+                    "merged" => MergeResult::Merged,
+                    "conflict" => MergeResult::Conflict,
+                    _ => MergeResult::Error,
+                };
+                EffectObserved::GitMerge {
+                    effect_id: id,
+                    operation: operation_of(kind, operation, &["integrate"])?,
+                    result,
+                    branch: req_str(EFF, observed, "branch")?,
+                    base_commit: opt_str(EFF, observed, "base_commit")?,
+                    result_commit: opt_str(EFF, observed, "result_commit")?,
+                }
+            }
+            "git_push_pr" => {
+                let result = match outcome_str(EFF, observed, "outcome", &["created", "already_exists", "error"])? {
+                    "created" => PrResult::Created,
+                    "already_exists" => PrResult::AlreadyExists,
+                    _ => PrResult::Error,
+                };
+                EffectObserved::GitPushPr {
+                    effect_id: id,
+                    operation: operation_of(kind, operation, &["publish_pr"])?,
+                    result,
+                    branch: req_str(EFF, observed, "branch")?,
+                    pr_url: opt_str(EFF, observed, "pr_url")?,
+                }
+            }
+            "git_worktree" => EffectObserved::GitWorktree {
+                effect_id: id,
+                operation: operation_of(kind, operation, &["spawn"])?,
+                branch: req_str(EFF, observed, "branch")?,
+                base: opt_str(EFF, observed, "base")?,
+            },
+            "git_worktree_removed" => EffectObserved::GitWorktreeRemoved {
+                effect_id: id,
+                operation: operation_of(kind, operation, &["release", "close_idle_runs"])?,
+                worktree_removed: opt_bool(EFF, observed, "worktree_removed")?.ok_or("effect.observed: falta `worktree_removed` (booleano)")?,
+                branch: opt_str(EFF, observed, "branch")?,
+                branch_deleted: opt_bool(EFF, observed, "branch_deleted")?.ok_or("effect.observed: falta `branch_deleted` (booleano)")?,
+            },
+            "pty_process" => EffectObserved::PtyProcess {
+                effect_id: id,
+                operation: operation_of(kind, operation, &["spawn"])?,
+                launched: opt_bool(EFF, observed, "launched")?.ok_or("effect.observed: falta `launched` (booleano)")?,
+            },
+            k if EFFECT_KINDS_WITHOUT_EVENT.contains(&k) => return Ok(None),
+            other => return Err(format!("{EFF}: effect_kind {other:?} fuera del contrato (git_merge, git_push_pr, git_worktree, git_worktree_removed, pty_process)")),
+        }))
+    }
+}
+
+/// Entidad: la tarea del efecto. `effect_id` = `correlation_id` = `idem_key` (y también va en el payload).
+pub(super) fn effect_observed(task: &str, run: &str, payload: &EffectObserved, effect_id: &str) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Task, task, payload)?
+        .run(Some(run.to_string()).filter(|r| !r.is_empty()))
+        .project_from_task(task)
+        .correlated(effect_id)
+        .idempotent(effect_id))
 }

@@ -41,8 +41,8 @@
 //! # Efectos externos
 //! `git merge`, crear un worktree o lanzar una PTY **no** forman parte de la
 //! transacción. El patrón es: validar (lectura) -> efecto -> UNA mutación que lo
-//! registra ([`StateAccess::mutate_after_effect`]). Si el efecto ocurrió y el
-//! registro falla, no se esconde: se deja constancia en
+//! registra ([`StateAccess::mutate_after_effect`], que SOLO se llama si el efecto ocurrió de verdad).
+//! Si el registro falla por CUALQUIER motivo (también un rechazo), no se esconde: se deja constancia en
 //! `unrecorded-effects.jsonl` y se avisa al arrancar. Ese archivo es un **diario
 //! de recuperación temporal**, NO una segunda fuente de verdad: sirve para
 //! diagnosticar y reconciliar a mano. Cuando existan Events y Attention, cada
@@ -80,7 +80,7 @@ use super::fsio::data_dir;
 use super::lifecycle::BootProof;
 use super::state::{Kind, State};
 use super::Core;
-use crate::store::NewEvent;
+use crate::store::{new_uuid_v7, NewEvent};
 
 // ---------------------------------------------------------------------------
 // Celda de estado: el Mutex es privado a este módulo.
@@ -131,6 +131,9 @@ pub(super) struct Tx {
     /// Quién actúa y por dónde llegó la orden: valor por defecto de los eventos de esta mutación (un
     /// borrador puede traer el suyo).
     ctx: MutationContext,
+    /// Efecto externo ya observado en esta mutación (`Tx::observe_effect`): las decisiones que se registren
+    /// dentro de `mutate_after_effect` lo llevan como `correlation_id`. Efímero: no es estado.
+    active_effect: Option<String>,
 }
 
 impl Deref for Tx {
@@ -197,6 +200,20 @@ impl Tx {
         &self.ctx
     }
 
+    /// Identidad del efecto observado en esta mutación, si lo hay (la consulta `Tx::record_decision`).
+    pub(super) fn active_effect(&self) -> Option<&str> {
+        self.active_effect.as_deref()
+    }
+
+    pub(super) fn set_active_effect(&mut self, effect_id: Option<String>) {
+        self.active_effect = effect_id;
+    }
+
+    /// ¿Se llamó a [`Tx::no_change`]?
+    fn is_unchanged(&self) -> bool {
+        self.unchanged
+    }
+
     /// Fija el contexto completo (lo usa `mutate_as`).
     pub(super) fn set_context(&mut self, ctx: MutationContext) {
         self.ctx = ctx;
@@ -219,7 +236,7 @@ impl Tx {
     /// Prueba: un `Tx` sin `Core` (los adaptadores de prueba de `review` e `integration`).
     #[cfg(test)]
     pub(super) fn detached(state: State) -> Tx {
-        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core() }
+        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None }
     }
 
     /// Prueba: devuelve el estado del `Tx` detached.
@@ -536,7 +553,7 @@ impl Core {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
-        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core() };
+        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None };
         let value = f(&mut tx).map_err(MutateError::Rejected)?;
         if tx.unchanged {
             return Ok(value);
@@ -705,7 +722,14 @@ impl Core {
 /// estado se va a intentar. Si el registro falla, esto es lo que queda en
 /// `unrecorded-effects.jsonl`: lo justo para diagnosticar y reconciliar, sin
 /// secretos (nunca env, argv ni credenciales) ni datos de más.
+///
+/// `effect_id` (UUID v7) identifica ESTA ocurrencia observada: es el `effect_id` de `effect.observed`.
+/// No es un protocolo intención/confirmación: `Effect` se construye cuando el efecto ya ocurrió, así que
+/// sigue existiendo la ventana «efecto externo -> caída antes de construir o registrar el `Effect`»; E1b
+/// no pretende cerrarla. El diario `unrecorded-effects.jsonl` sigue en `v = 1` y todavía no lo persiste.
 pub(super) struct Effect {
+    /// Identidad estable de la ocurrencia.
+    effect_id: String,
     /// Operación de alto nivel («integrate», «publish_pr», «spawn»).
     operation: &'static str,
     /// Efecto concreto («git_merge», «git_push_pr», «git_worktree», «pty_process»).
@@ -725,7 +749,22 @@ pub(super) struct Effect {
 
 impl Effect {
     pub(super) fn new(operation: &'static str, kind: &'static str) -> Self {
-        Effect { operation, kind, task: None, repo: None, run: None, expected: Value::Null, observed: Value::Null }
+        Effect { effect_id: new_uuid_v7(), operation, kind, task: None, repo: None, run: None, expected: Value::Null, observed: Value::Null }
+    }
+    pub(super) fn effect_id(&self) -> &str {
+        &self.effect_id
+    }
+    pub(super) fn operation(&self) -> &'static str {
+        self.operation
+    }
+    pub(super) fn kind(&self) -> &'static str {
+        self.kind
+    }
+    pub(super) fn task_id(&self) -> Option<&str> {
+        self.task.as_deref()
+    }
+    pub(super) fn observed_value(&self) -> &Value {
+        &self.observed
     }
     pub(super) fn task(mut self, id: &str) -> Self {
         self.task = Some(id.to_string());
@@ -759,11 +798,14 @@ pub(super) trait StateAccess {
     fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String>;
 
     /// Registra en el estado un efecto externo YA ocurrido (p. ej. un `git merge`).
-    /// Si el registro falla no se esconde: el error lo dice con claridad y, en el
-    /// `Core`, el efecto queda anotado para reconciliar.
+    ///
+    /// **Contrato**: SOLO se llama si hubo un efecto externo real; la única forma de decir «no hubo
+    /// efecto» es no llamarla (`mutate` normal). Una vez dentro, CUALQUIER fallo del registro
+    /// (`Rejected`, `Persist`, `ReadOnly` o un `no_change` del cierre) deja el candidato sin publicar, sin
+    /// estado y sin eventos, y en el `Core` el efecto queda anotado para reconciliar. Esta implementación
+    /// por defecto (la del adaptador de pruebas) solo aplica las mismas reglas sobre el `Tx`.
     fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
-        let _ = &effect;
-        self.mutate(f)
+        self.mutate(|tx| register_effect(tx, &effect, f))
     }
 }
 
@@ -772,6 +814,21 @@ pub(super) trait StateAccess {
 pub(super) struct Acting<'a> {
     core: &'a Core,
     ctx: MutationContext,
+}
+
+/// El registro de un efecto ya ocurrido, dentro del `Tx`: 1) `effect.observed` entra ANTES de ejecutar el
+/// cierre (el efecto ocurrió antes que cualquier hecho que lo registre), así que el orden canónico es
+/// `effect.observed`, `decision.recorded`, resto de hechos de estado; 2) el cierre registra el estado;
+/// 3) un `no_change` es inválido: un efecto observado no puede quedar en un no-op silencioso.
+/// Si algo falla, el llamador descarta el candidato entero (ni estado ni eventos).
+fn register_effect<R>(tx: &mut Tx, effect: &Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+    tx.observe_effect(effect)?;
+    let value = f(tx)?;
+    if tx.is_unchanged() {
+        return Err("no_change dentro de mutate_after_effect: un efecto ya ocurrido no puede quedar sin registrar".into());
+    }
+    tx.set_active_effect(None);
+    Ok(value)
 }
 
 impl Core {
@@ -791,10 +848,10 @@ impl StateAccess for Acting<'_> {
 
     fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
         let core = self.core;
-        match core.mutate_as(&self.ctx, f) {
+        // Desde aquí el efecto YA ocurrió: cualquier fallo del registro (también `Rejected`) es un efecto sin
+        // registrar. Que no hubo efecto se dice no llamando a esta función.
+        match core.mutate_as(&self.ctx, |tx| register_effect(tx, &effect, f)) {
             Ok(v) => Ok(v),
-            // El efecto no ocurrió o la mutación lo rechazó por sí misma: nada que reconciliar.
-            Err(MutateError::Rejected(m)) => Err(m),
             Err(e) => {
                 core.journal_unrecorded_effect(effect, &e.to_string());
                 Err(format!(

@@ -15,7 +15,7 @@ static INTEGRATING: Mutex<()> = Mutex::new(());
 use serde_json::{json, Value};
 
 use super::git;
-use super::mutation::{Effect, StateAccess};
+use super::mutation::{Effect, StateAccess, Tx};
 use super::state::{State, Task};
 
 pub const AGENT_REJECT: &str = "La integración la aprueba una persona desde Lixbon: los agentes no pueden fusionar ramas. \
@@ -132,7 +132,7 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
     let effect = Effect::new("integrate", "git_merge").task(&id).repo(&repo)
         .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "into": into }))
-        .observed(json!({ "outcome": outcome, "base_commit": found, "result_commit": result }));
+        .observed(json!({ "outcome": outcome, "branch": branch, "base_commit": found, "result_commit": result }));
     let decision = state.mutate_after_effect(effect, |st| {
         let decision = st.record_decision(&id, "merge", "human", &detail)?;
         if outcome == "merged" {
@@ -198,6 +198,8 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
         Ok((branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone(), t.title.clone(), t.summary.clone(), t.pr_url.clone()))
     })?;
     let remote = git::remote_url(&dir);
+    // Con un PR ya registrado NO se ejecuta push ni `gh`: no hay efecto externo que observar.
+    let executed = existing.is_none();
     let (outcome, url, err) = match existing {
         Some(u) => ("already_exists", Some(u), None),
         None => {
@@ -211,17 +213,23 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
         }
     };
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
-    // El push y el PR ya ocurrieron: su registro es UNA mutación posterior.
-    let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
-        .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
-        .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
-    let decision = state.mutate_after_effect(effect, |st| {
+    let register = |st: &mut Tx| -> Result<u64, String> {
         let decision = st.record_decision(&id, "pr", "human", &detail)?;
         if url.is_some() {
             st.task_mut(&id)?.pr_url = url.clone();
         }
         Ok(decision)
-    })?;
+    };
+    let decision = if executed {
+        // El push y el PR ya ocurrieron (incluso si `gh` responde «ya existe»): su registro es UNA mutación posterior.
+        let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
+            .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
+            .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
+        state.mutate_after_effect(effect, register)?
+    } else {
+        // Sin efecto: solo la decisión (`already_exists`), por la vía normal. Sin `effect.observed` ni diario.
+        state.mutate(register)?
+    };
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     if let Some(e) = err {
         out["message"] = json!(e);

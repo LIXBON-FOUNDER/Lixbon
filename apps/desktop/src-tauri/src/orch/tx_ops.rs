@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use super::event_kinds as ev;
 use super::events::{Actor, Channel};
-use super::mutation::Tx;
+use super::mutation::{Effect, Tx};
 use super::state::{NewTask, State, Status};
 
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
@@ -233,7 +233,13 @@ impl Tx {
         let id = self.state_mut().record_decision(task, kind, actor, detail);
         if let Some(facts) = facts {
             let run = self.run_of(task);
-            self.try_push_event(ev::decision_recorded(task, &run, &facts.with_id(id)).map(|d| d.by(ctx.actor, ctx.channel)));
+            // Dentro de `mutate_after_effect` la decisión se correlaciona con el efecto que la provocó.
+            let efecto = self.active_effect().map(String::from);
+            let draft = ev::decision_recorded(task, &run, &facts.with_id(id)).map(|d| d.by(ctx.actor, ctx.channel));
+            self.try_push_event(draft.map(|d| match efecto {
+                Some(e) => d.correlated(e),
+                None => d,
+            }));
         }
         Ok(id)
     }
@@ -251,6 +257,34 @@ impl Tx {
         if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || ctx.channel != Channel::Ui) {
             return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Efectos externos
+    // -----------------------------------------------------------------------------------------
+
+    /// Registra que un efecto externo YA ocurrido fue observado: emite `effect.observed` (ÚNICO sitio que
+    /// construye ese evento) con `effect_id` = payload = `correlation_id` = `idem_key`. Solo lo llama la
+    /// frontera `mutate_after_effect`, ANTES de ejecutar el cierre de registro: por eso es el primer evento
+    /// del lote. Captura el actor y el canal vigentes (un `set_context` posterior no reatribuye el efecto) y
+    /// activa el `effect_id` para que las decisiones registradas dentro lo lleven como correlación. Los
+    /// demás hechos de estado NO se correlacionan. La excepción `spawn_outcome` no emite ni correlaciona.
+    ///
+    /// Un `effect_kind`/`operation` desconocido, un detalle fuera de contrato o una tarea inexistente
+    /// devuelven `Err`: el registro falla y, como el efecto ocurrió, el Core lo anota en el diario.
+    pub(super) fn observe_effect(&mut self, effect: &Effect) -> Result<(), String> {
+        let Some(facts) = ev::EffectObserved::parse(effect.effect_id(), effect.operation(), effect.kind(), effect.observed_value())? else {
+            return Ok(());
+        };
+        let task = effect.task_id().ok_or_else(|| format!("effect.observed: el efecto {} no declara su tarea", effect.kind()))?;
+        if !self.tasks.contains_key(task) {
+            return Err(format!("effect.observed: la tarea {task} no existe"));
+        }
+        let ctx = self.context().clone();
+        let run = self.run_of(task);
+        self.try_push_event(ev::effect_observed(task, &run, &facts, effect.effect_id()).map(|d| d.by(ctx.actor, ctx.channel)));
+        self.set_active_effect(Some(effect.effect_id().to_string()));
         Ok(())
     }
 }

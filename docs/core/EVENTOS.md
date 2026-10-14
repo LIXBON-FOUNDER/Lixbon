@@ -194,11 +194,58 @@ sin evento, sin cambios de estado).
 
 ### Decisión y efecto
 Una decisión de la persona y el efecto externo que provoca (`git merge`, push + `gh pr create`, lanzamiento)
-son **hechos distintos**. Este bloque solo emite la decisión; `outcome` es el valor de la fila legacy. En el
-bloque de Effects, cuando un camino ejecute realmente un efecto externo, se emitirán ambos —
-`decision.recorded` y `effect.observed`— correlacionados por el mismo `effect_id` (desde la frontera
-`mutate_after_effect`). Un camino que no ejecutó un efecto (`target_moved`, `already_merged`, una revisión)
-no inventa `effect.observed`. `already_merged`, `review_required` y `head_moved` no crean decisión ni evento.
+son **hechos distintos**: `decision.recorded` (`outcome` es el valor de la fila legacy) y `effect.observed`
+(ver «E1b · bloque 3»), correlacionados por el mismo `effect_id`. Un camino que no ejecutó un efecto
+(`target_moved`, `already_merged`, una revisión, un PR ya registrado) no inventa `effect.observed`.
+`already_merged`, `review_required` y `head_moved` no crean decisión ni evento.
+
+## E1b · bloque 3: efectos externos (`effect.observed`)
+Un único evento, **`effect.observed`** (`class = effect`, `v = 1`, entidad `task`, `project_from_task`), lo
+emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess::mutate_after_effect`.
+
+### Contrato de `mutate_after_effect`
+* **Solo se llama si hubo un efecto externo real.** La única forma de decir «no hubo efecto» es no llamarla
+  (mutación normal). Ejemplos: un `Task.pr_url` ya registrado (no se ejecuta push ni `gh`), `release` sin
+  worktree ni rama borrados, `target_moved`.
+* **Cualquier fallo posterior** (`Rejected`, `Persist`, `ReadOnly`, o un `tx.no_change()` del cierre, que es
+  inválido) deja el candidato sin publicar —ni estado ni eventos— y anota el efecto en
+  `unrecorded-effects.jsonl`. El efecto ya ocurrió: es un efecto sin registrar, también si el registro lo
+  rechaza el propio cierre.
+* **Orden canónico**: `observe_effect` entra al `Tx` ANTES de ejecutar el cierre (el efecto ocurrió antes que
+  cualquier hecho que lo registre): `effect.observed`, `decision.recorded`, resto de hechos de estado. Si el
+  cierre falla se descarta el candidato entero.
+* **Identidad**: `Effect::new` genera un `effect_id` (UUID v7) una sola vez. Es la identidad de la ocurrencia
+  observada y tiene tres usos del mismo identificador: `payload.effect_id` (contenido),
+  `correlation_id` (relación) e `idem_key` (unicidad `(kind, idem_key)`; no interfiere con un futuro
+  `effect.unrecorded` de la misma ocurrencia).
+* **Correlación**: `Tx::record_decision` consulta el efecto activo y pone ese `effect_id` como
+  `correlation_id` de `decision.recorded`. Los demás hechos de estado (`task.status_changed`,
+  `task.created`…) NO se correlacionan.
+* **Actor**: `effect.observed` captura el actor y el canal vigentes al observar (un `set_context` posterior no
+  lo reatribuye), igual que las decisiones.
+* **Ventana abierta**: `Effect` se construye cuando el efecto ya ocurrió; si el proceso cae entre el efecto
+  externo y la construcción o el registro del `Effect`, no queda rastro. E1b no pretende cerrarla (no es un
+  protocolo intención/confirmación).
+* **Diario**: sigue en `v = 1` y todavía no persiste el `effect_id`; el diario v2 y la importación idempotente
+  son un bloque posterior.
+
+### Payload (cerrado por `effect_kind`, `operation` validada contra valores conocidos)
+| `effect_kind` | `operation` | Campos (además de `effect_id`) |
+|---|---|---|
+| `git_merge` | `integrate` | `result` (`merged`·`conflict`·`error`), `branch`, `base_commit?`, `result_commit?` |
+| `git_push_pr` | `publish_pr` | `result` (`created`·`already_exists`·`error`), `branch`, `pr_url?` |
+| `git_worktree` | `spawn` | `branch`, `base?` |
+| `git_worktree_removed` | `release`·`close_idle_runs` | `worktree_removed`, `branch?`, `branch_deleted` |
+| `pty_process` | `spawn` | `launched` |
+
+Nunca rutas locales, `env`, `argv`, mensajes de error ni credenciales. Los datos estructurales los pone el
+llamador en `Effect.observed`; el constructor no consulta git. **Excepción temporal**: `spawn_outcome` (el
+marcador de registro de la decisión `spawn`) sigue yendo al diario pero no emite `effect.observed` ni se
+correlaciona; lo reformulará el bloque de lanzamientos pendientes.
+
+Fuera de este bloque (sin evento de efecto): matar terminales (`kill_term`; el hecho es el
+`task.status_changed`), el archivo de informe, `delivery::prepare`, `type_prompt`, las observaciones de
+aprobación en terminal y la limpieza de `create_child` (`task.removed`).
 
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia

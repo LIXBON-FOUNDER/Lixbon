@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, git};
 use super::events::MutationContext;
-use super::mutation::{Effect, StateAccess};
+use super::mutation::{Effect, StateAccess, Tx};
 use super::state::{State, Status};
 
 impl Core {
@@ -22,11 +22,14 @@ impl Core {
             git::remove_worktree(&repo, wt, force).map_err(|e| format!("{e}\nSi hay cambios sin guardar que quieres descartar, usa --force"))?;
         }
         let branch_deleted = merged && branch.as_ref().is_some_and(|br| git::delete_branch(&repo, br).is_ok());
-        // El worktree y la rama ya se borraron: el registro es UNA mutación posterior.
-        let effect = Effect::new("release", "git_worktree_removed").task(id).repo(&repo)
-            .expected(json!({ "record": "tarea liberada (stopped) y worktree/rama anotados" }))
-            .observed(json!({ "worktree": worktree, "branch": branch, "branch_deleted": branch_deleted }));
-        let hint = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
+        // Solo hay efecto externo si se borró el worktree o la rama; si no, es una mutación normal.
+        let ocurrio = worktree.is_some() || branch_deleted;
+        let effect = ocurrio.then(|| {
+            Effect::new("release", "git_worktree_removed").task(id).repo(&repo)
+                .expected(json!({ "record": "tarea liberada (stopped) y worktree/rama anotados" }))
+                .observed(json!({ "worktree": worktree, "worktree_removed": worktree.is_some(), "branch": branch, "branch_deleted": branch_deleted }))
+        });
+        let register = |st: &mut Tx| -> Result<Option<&'static str>, String> {
             if open {
                 let _ = st.close(id, Status::Stopped, "liberada por su coordinador");
             }
@@ -34,7 +37,13 @@ impl Core {
             t.worktree = None;
             t.cwd = repo;
             Ok(self.close_hint(st, id))
-        })?;
+        };
+        let acting = self.acting(ctx.clone());
+        let hint = match effect {
+            // El worktree y/o la rama ya se borraron: el registro es UNA mutación posterior.
+            Some(effect) => acting.mutate_after_effect(effect, register)?,
+            None => acting.mutate(register)?,
+        };
         Ok(json!({ "task": id, "worktree_removed": worktree.is_some(), "branch_deleted": branch_deleted, "hint": hint }))
     }
 
@@ -105,7 +114,7 @@ impl Core {
             let branch_deleted = merged && t.branch.as_ref().is_some_and(|b| git::delete_branch(&t.repo, b).is_ok());
             let effect = Effect::new("close_idle_runs", "git_worktree_removed").task(&t.id).repo(&t.repo)
                 .expected(json!({ "record": "worktree liberado en la tarea" }))
-                .observed(json!({ "worktree": wt, "branch": t.branch, "branch_deleted": branch_deleted }));
+                .observed(json!({ "worktree": wt, "worktree_removed": true, "branch": t.branch, "branch_deleted": branch_deleted }));
             // El worktree ya no existe: si el registro falla queda anotado, y se sigue informando.
             let _ = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
                 if let Ok(task) = st.task_mut(&t.id) {

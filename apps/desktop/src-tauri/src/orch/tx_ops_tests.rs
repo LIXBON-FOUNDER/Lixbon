@@ -15,7 +15,7 @@ use super::approval::{Change, Timeout};
 use super::boot_tests::*;
 use super::delivery::{self, Found};
 use super::events::{Channel, EntityKind, EventDraft, EventPayload, MutationContext};
-use super::mutation::{MutateError, StateAccess, Tx};
+use super::mutation::{Effect, Health, MutateError, StateAccess, Tx};
 use super::state::{NewTask, State, Status};
 use super::store_boot::StorageStatus;
 use super::{Caller, Core};
@@ -831,6 +831,343 @@ fn el_actor_validado_de_una_decision_no_cambia_si_el_contexto_cambia_despues() {
     assert!(desde(&core, antes).iter().all(|e| actor_y_canal(e) == ("system", None, Some("core"))), "contexto tardío para el resto");
 }
 
+// ---------------------------------------------------------------------------------------------
+// effect.observed: un único mutador (`Tx::observe_effect`) llamado por la frontera `mutate_after_effect`
+// ---------------------------------------------------------------------------------------------
+
+fn diario() -> Vec<Value> {
+    std::fs::read_to_string(super::fsio::data_dir().join("unrecorded-effects.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn estado_json(core: &Core) -> String {
+    serde_json::to_string(&*core.lock()).unwrap()
+}
+
+#[test]
+fn cada_efecto_observado_emite_un_effect_observed_con_payload_cerrado_y_una_sola_identidad() {
+    let (_l, _d, core) = core_listo();
+    let (run, root, a, _b) = escenario(&core);
+    core.mutate(|tx| {
+        tx.task_mut(&a)?.project_id = Some("p1".into());
+        Ok(())
+    })
+    .unwrap();
+    let casos: Vec<(&'static str, &'static str, Value, MutationContext, Value, (&str, Option<&str>, Option<&str>))> = vec![
+        (
+            "integrate", "git_merge",
+            json!({ "outcome": "conflict", "branch": "lx/t", "base_commit": "b", "result_commit": null, "worktree": "/ruta/secreta", "message": "MENSAJE-GIT" }),
+            persona_ui(),
+            json!({ "effect_kind": "git_merge", "operation": "integrate", "result": "conflict", "branch": "lx/t", "base_commit": "b" }),
+            ("person", None, Some("ui")),
+        ),
+        (
+            "publish_pr", "git_push_pr",
+            json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1", "remote": "https://token@host/x.git", "error": "TEXTO-ERROR" }),
+            persona_ui(),
+            json!({ "effect_kind": "git_push_pr", "operation": "publish_pr", "result": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+            ("person", None, Some("ui")),
+        ),
+        (
+            "spawn", "git_worktree",
+            json!({ "worktree": "/ruta/secreta", "branch": "lx/r/t1-x", "base": "main" }),
+            persona_ui(),
+            json!({ "effect_kind": "git_worktree", "operation": "spawn", "branch": "lx/r/t1-x", "base": "main" }),
+            ("person", None, Some("ui")),
+        ),
+        (
+            "release", "git_worktree_removed",
+            json!({ "worktree": "/ruta/secreta", "worktree_removed": false, "branch": "lx/b", "branch_deleted": true }),
+            MutationContext::agent(&root, Channel::Lxo),
+            json!({ "effect_kind": "git_worktree_removed", "operation": "release", "worktree_removed": false, "branch": "lx/b", "branch_deleted": true }),
+            ("agent", Some(root.as_str()), Some("lxo")),
+        ),
+        (
+            "close_idle_runs", "git_worktree_removed",
+            json!({ "worktree": "/ruta/secreta", "worktree_removed": true, "branch": null, "branch_deleted": false }),
+            MutationContext::core(),
+            json!({ "effect_kind": "git_worktree_removed", "operation": "close_idle_runs", "worktree_removed": true, "branch_deleted": false }),
+            ("system", None, Some("core")),
+        ),
+        (
+            "spawn", "pty_process",
+            json!({ "launched": true, "argv": ["--secreto"] }),
+            persona_ui(),
+            json!({ "effect_kind": "pty_process", "operation": "spawn", "launched": true }),
+            ("person", None, Some("ui")),
+        ),
+    ];
+    for (op, kind, observed, ctx, esperado, actor) in casos {
+        let efecto = Effect::new(op, kind).task(&a).observed(observed);
+        let effect_id = efecto.effect_id().to_string();
+        let antes = head(&core);
+        core.acting(ctx).mutate_after_effect(efecto, |_tx| Ok(())).unwrap();
+        let evs = desde(&core, antes);
+        assert_eq!(kinds(&evs), vec!["effect.observed"], "{op}/{kind}: un efecto, un evento");
+        let e = &evs[0];
+        let mut con_id = esperado.clone();
+        con_id["effect_id"] = json!(effect_id);
+        assert_eq!(pl(e), con_id, "{op}/{kind}");
+        // Tres usos del mismo identificador: contenido, relación y unicidad.
+        assert_eq!((e.correlation_id.as_deref(), e.idem_key.as_deref()), (Some(effect_id.as_str()), Some(effect_id.as_str())), "{op}/{kind}");
+        assert_eq!((e.class, e.entity_kind.as_str(), e.entity_id.as_str()), (EventClass::Effect, "task", a.as_str()));
+        assert_eq!((e.project_id.as_deref(), e.run_id.as_deref()), (Some("p1"), Some(run.as_str())));
+        assert_eq!(actor_y_canal(e), actor, "{op}/{kind}");
+        assert!(SECRETOS.iter().all(|s| !e.payload.contains(s)) && !e.payload.contains("--secreto"), "{op}/{kind}: {}", e.payload);
+    }
+}
+
+#[test]
+fn el_orden_es_efecto_decision_estado_y_solo_efecto_y_decision_comparten_correlacion() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let efecto = Effect::new("integrate", "git_merge").task(&a).observed(json!({ "outcome": "merged", "branch": "lx/t", "result_commit": "r" }));
+    let effect_id = efecto.effect_id().to_string();
+    let antes = head(&core);
+    core.acting(persona_ui())
+        .mutate_after_effect(efecto, |tx| {
+            // Primero el registro de la decisión y después un cambio de estado del mismo Tx.
+            tx.record_decision(&a, "merge", "human", &json!({ "outcome": "merged", "branch": "lx/t", "squash": false }))?;
+            tx.close(&a, Status::Stopped, "liberada").map(|_| ())
+        })
+        .unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded", "task.status_changed"], "el efecto ocurrió ANTES que su registro");
+    assert_eq!((evs[0].correlation_id.as_deref(), evs[1].correlation_id.as_deref()), (Some(effect_id.as_str()), Some(effect_id.as_str())), "efecto y decisión comparten effect_id");
+    assert_eq!(evs[2].correlation_id, None, "los hechos de estado NO se correlacionan con el efecto");
+    assert_eq!(evs[1].idem_key, None, "la decisión no hereda la clave de unicidad del efecto");
+    // Una decisión fuera de `mutate_after_effect` no lleva correlación.
+    let antes = head(&core);
+    core.mutate_as(&persona_ui(), |tx| tx.record_decision(&a, "review", "human", &json!({ "decision": "accepted", "head_commit": "h" }))).unwrap();
+    assert_eq!(desde(&core, antes)[0].correlation_id, None);
+}
+
+#[test]
+fn cambiar_el_contexto_despues_de_observar_el_efecto_no_reatribuye_actor_ni_canal() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let efecto = Effect::new("spawn", "pty_process").task(&a).observed(json!({ "launched": true }));
+    let antes = head(&core);
+    core.acting(persona_ui())
+        .mutate_after_effect(efecto, |tx| {
+            tx.set_context(MutationContext::core());
+            tx.mark_running(&a).map(|_| ())
+        })
+        .unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed"]);
+    assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")), "el efecto conserva el actor que lo observó");
+}
+
+#[test]
+fn todo_fallo_del_registro_tras_un_efecto_se_anota_y_no_deja_estado_ni_eventos() {
+    let (_l, _data, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let valido = |a: &str| Effect::new("spawn", "pty_process").task(a).observed(json!({ "launched": true }));
+    type Caso<'a> = (&'a str, Effect, Box<dyn Fn(&mut Tx) -> Result<(), String> + 'a>);
+    let casos: Vec<Caso> = vec![
+        ("el cierre devuelve Err (Rejected)", valido(&a), Box::new(|tx| {
+            tx.create_run("no debe quedar", nt("otra"));
+            Err("rechazado por el cierre".into())
+        })),
+        ("effect_kind desconocido", Effect::new("spawn", "kind_inventado").task(&a).observed(json!({})), Box::new(|_| Ok(()))),
+        ("operation fuera del contrato", Effect::new("operacion_inventada", "pty_process").task(&a).observed(json!({ "launched": true })), Box::new(|_| Ok(()))),
+        ("detalle fuera del contrato", Effect::new("spawn", "pty_process").task(&a).observed(json!({ "launched": "si" })), Box::new(|_| Ok(()))),
+        ("la tarea no existe", valido("t-no-existe"), Box::new(|_| Ok(()))),
+        ("no_change dentro de la frontera", valido(&a), Box::new(|tx| {
+            tx.create_run("no debe quedar", nt("otra"));
+            tx.no_change();
+            Ok(())
+        })),
+    ];
+    for (nombre, efecto, cierre) in casos {
+        let (estado, antes, n) = (estado_json(&core), head(&core), diario().len());
+        let r = core.acting(persona_ui()).mutate_after_effect(efecto, |tx| cierre(tx));
+        assert!(matches!(&r, Err(m) if m.contains("NO quedó registrada")), "{nombre}: {r:?}");
+        assert_eq!(estado_json(&core), estado, "{nombre}: ningún estado");
+        assert_eq!(head(&core), antes, "{nombre}: ningún evento");
+        let lineas = diario();
+        assert_eq!(lineas.len(), n + 1, "{nombre}: el efecto ocurrió, así que SÍ se anota (también un Rejected)");
+        let ultima = lineas.last().unwrap();
+        assert_eq!(ultima["v"], 1, "el diario sigue en v1");
+        assert!(ultima.get("effect_id").is_none(), "y todavía no persiste el effect_id");
+    }
+    assert_eq!(core.health(), Health::Normal, "un rechazo no degrada el almacenamiento");
+}
+
+#[test]
+fn spawn_outcome_solo_va_al_diario_y_no_emite_ni_correlaciona() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let efecto = Effect::new("spawn_approval", "spawn_outcome").task(&a).observed(json!({ "launched_task": null }));
+    let antes = head(&core);
+    core.acting(persona_ui())
+        .mutate_after_effect(efecto, |tx| tx.record_decision(&a, "spawn", "human", &json!({ "pending_id": "p", "outcome": "approved" })).map(|_| ()))
+        .unwrap();
+    assert!(desde(&core, antes).is_empty(), "spawn_outcome: evento cero");
+    assert_eq!(core.lock().decisions.iter().filter(|d| d.kind == "spawn").count(), 1, "pero el registro sí se confirmó");
+}
+
+fn con_remoto(dir: &Path) -> PathBuf {
+    let bare = dir.with_extension("remote.git");
+    let _ = std::fs::remove_dir_all(&bare);
+    g(dir, &["init", "-q", "--bare", &s(&bare)]);
+    g(dir, &["remote", "add", "origin", &s(&bare)]);
+    bare
+}
+
+#[test]
+fn publicar_un_pr_distingue_si_hubo_efecto_externo() {
+    let (_l, core, id, dir) = core_con_rama("eff-pr");
+    let persona = core.acting(persona_ui());
+    let args = json!({ "task": id, "confirm": true });
+    let gh_ok = |_: &str, _: &str, _: &str, _: &str, _: &str| -> Result<String, String> { Ok("https://github.com/o/r/pull/1".into()) };
+    let gh_ya_existe = |_: &str, _: &str, _: &str, _: &str, _: &str| -> Result<String, String> {
+        Err("gh pr create: a pull request for branch \"lx/t\" already exists:\nhttps://github.com/o/r/pull/3".into())
+    };
+
+    // Sin remoto el push falla: se ejecutó la acción, se observa con result `error`.
+    let antes = head(&core);
+    let out = super::integration::publish_pr(&persona, true, &args, &gh_ok).unwrap();
+    assert_eq!(out["outcome"], "error");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded"]);
+    let id_efecto = evs[0].idem_key.clone().unwrap();
+    assert_eq!(pl(&evs[0]), json!({ "effect_kind": "git_push_pr", "effect_id": id_efecto, "operation": "publish_pr", "result": "error", "branch": "lx/t" }));
+    assert_eq!((evs[0].correlation_id.as_deref(), evs[1].correlation_id.as_deref()), (Some(id_efecto.as_str()), Some(id_efecto.as_str())));
+    assert!(!evs[0].payload.contains("remote"));
+
+    // Con remoto: created -> efecto + decisión correlacionados.
+    let bare = con_remoto(&dir);
+    let antes = head(&core);
+    let out = super::integration::publish_pr(&persona, true, &args, &gh_ok).unwrap();
+    assert_eq!(out["outcome"], "created");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded"]);
+    assert_eq!((pl(&evs[0])["result"].as_str(), pl(&evs[0])["pr_url"].as_str()), (Some("created"), Some("https://github.com/o/r/pull/1")));
+    assert_eq!(evs[0].correlation_id, evs[1].correlation_id);
+    assert_eq!(evs[0].idem_key, evs[0].correlation_id);
+
+    // `gh` responde «ya existe» tras ejecutar push + gh: SÍ hubo efecto -> efecto + decisión.
+    core.mutate(|tx| {
+        tx.task_mut(&id)?.pr_url = None;
+        Ok(())
+    })
+    .unwrap();
+    let antes = head(&core);
+    let out = super::integration::publish_pr(&persona, true, &args, &gh_ya_existe).unwrap();
+    assert_eq!((out["outcome"].as_str(), out["pr_url"].as_str()), (Some("already_exists"), Some("https://github.com/o/r/pull/3")));
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded"]);
+    assert_eq!((pl(&evs[0])["result"].as_str(), pl(&evs[1])["outcome"].as_str()), (Some("already_exists"), Some("already_exists")));
+
+    // Con `Task.pr_url` ya registrada NO se ejecuta nada: decisión sí, efecto no, diario no.
+    let (antes, n) = (head(&core), diario().len());
+    let out = super::integration::publish_pr(&persona, true, &args, &gh_ok).unwrap();
+    assert_eq!(out["outcome"], "already_exists");
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"], "sin efecto no hay effect.observed");
+    assert_eq!(evs[0].correlation_id, None);
+    assert_eq!(diario().len(), n, "y nada que reconciliar");
+    let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(bare);
+}
+
+#[test]
+fn liberar_solo_observa_un_efecto_si_se_borro_un_worktree_o_una_rama() {
+    let (_l, data, core) = core_listo();
+    let r = repo(&data);
+    let (_run, root, a, b) = escenario(&core);
+    let wt = data.parent().unwrap().join("wt-release");
+    g(&r, &["worktree", "add", "-q", "-b", "lx/w", &s(&wt), "HEAD"]);
+    g(&r, &["branch", "lx/b"]);
+    core.mutate(|tx| {
+        let t = tx.task_mut(&a)?;
+        (t.repo, t.cwd, t.worktree, t.branch) = (s(&r), s(&wt), Some(s(&wt)), Some("lx/w".into()));
+        let t = tx.task_mut(&b)?;
+        (t.repo, t.cwd, t.worktree, t.branch, t.merged) = (s(&r), s(&r), None, Some("lx/b".into()), true);
+        Ok(())
+    })
+    .unwrap();
+    let ctx = MutationContext::agent(&root, Channel::Lxo);
+    let caller = Caller::Agent(Some(root.clone()));
+
+    // Se borra el worktree (la rama no está fusionada, así que se conserva): efecto + estado.
+    let antes = head(&core);
+    core.release(&ctx, &caller, &a, true).unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "task.status_changed"]);
+    let id_a = evs[0].idem_key.clone().unwrap();
+    assert_eq!(pl(&evs[0]), json!({ "effect_kind": "git_worktree_removed", "effect_id": id_a, "operation": "release", "worktree_removed": true, "branch": "lx/w", "branch_deleted": false }));
+    assert_eq!(actor_y_canal(&evs[0]), ("agent", Some(root.as_str()), Some("lxo")));
+    assert!(!evs[0].payload.contains("wt-release"), "la ruta no viaja");
+
+    // Sin worktree pero con la rama fusionada realmente borrada: efecto de rama únicamente.
+    let antes = head(&core);
+    core.release(&ctx, &caller, &b, true).unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "task.status_changed"]);
+    assert_eq!(pl(&evs[0])["worktree_removed"], false);
+    assert_eq!((pl(&evs[0])["branch"].as_str(), pl(&evs[0])["branch_deleted"].as_bool()), (Some("lx/b"), Some(true)));
+
+    // Ni worktree ni rama borrada: mutación normal, ningún efecto ficticio ni diario.
+    let (c, n) = (
+        core.mutate(|tx| {
+            let (_run, _root) = tx.create_run("otro", nt("raiz2"));
+            let h = tx.add_child(&_root, 2, nt("hija"))?;
+            tx.mark_running(&h)?;
+            Ok(h)
+        })
+        .unwrap(),
+        diario().len(),
+    );
+    let antes = head(&core);
+    core.release(&MutationContext::person(Channel::Ui), &Caller::User, &c, true).unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["task.status_changed"], "sin efecto externo real: effect.observed cero");
+    assert_eq!(diario().len(), n);
+}
+
+#[test]
+fn el_frontera_de_efectos_solo_conoce_los_kinds_del_contrato_y_los_efectos_reales_de_produccion() {
+    use super::event_kinds::{EffectObserved, EFFECT_KINDS_WITHOUT_EVENT};
+    assert_eq!(EFFECT_KINDS_WITHOUT_EVENT, ["spawn_outcome"], "la excepción es única y explícita");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
+    let mut pares = Vec::new();
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let ruta = entrada.unwrap().path();
+        let nombre = ruta.file_name().unwrap().to_string_lossy().into_owned();
+        if !nombre.ends_with(".rs") || nombre == "tests.rs" || nombre.ends_with("_tests.rs") {
+            continue;
+        }
+        let texto = std::fs::read_to_string(&ruta).unwrap();
+        for (_, l) in produccion(&texto) {
+            for trozo in l.split("Effect::new(\"").skip(1) {
+                let op = trozo.split('"').next().unwrap();
+                let kind = trozo.split("\"").nth(2).unwrap_or_default();
+                pares.push((nombre.clone(), op.to_string(), kind.to_string()));
+            }
+        }
+    }
+    assert!(pares.len() >= 7, "los siete sitios de producción: {pares:?}");
+    for (archivo, op, kind) in pares {
+        let observado = match kind.as_str() {
+            "git_merge" => json!({ "outcome": "merged", "branch": "b" }),
+            "git_push_pr" => json!({ "outcome": "created", "branch": "b" }),
+            "git_worktree" => json!({ "branch": "b" }),
+            "git_worktree_removed" => json!({ "worktree_removed": true, "branch_deleted": false }),
+            "pty_process" => json!({ "launched": true }),
+            _ => json!({}),
+        };
+        let r = EffectObserved::parse("id", &op, &kind, &observado);
+        assert!(r.is_ok(), "{archivo}: Effect::new({op:?}, {kind:?}) no está en el contrato de effect.observed ni en la excepción: {r:?}");
+    }
+}
+
 #[test]
 fn dos_revisiones_legitimas_consecutivas_producen_dos_eventos_distintos() {
     let (_l, _d, core) = core_listo();
@@ -1033,12 +1370,20 @@ fn revisar_e_integrar_desde_la_interfaz_deja_un_solo_decision_recorded_por_decis
     assert!(!evs[0].payload.contains("SECRETO-COMENTARIO"));
     assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", None, Some("ui")), Some("p9")));
 
-    // La integración: UN evento (la decisión), sin segundo evento por la marca `merged` ni por nadie más.
+    // La integración: el efecto (git merge) y la decisión son hechos distintos, correlacionados por `effect_id`;
+    // ninguna capa repite ninguno de los dos.
     let antes = head(&core);
     let out = core.integrate_from_ui(&id, true, false, None).unwrap();
     assert_eq!(out["outcome"], "merged");
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["decision.recorded"], "una decisión, un evento: ninguna capa lo repite");
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded"], "un efecto y una decisión, en ese orden");
+    let efecto = pl(&evs[0]);
+    assert_eq!((efecto["effect_kind"].as_str(), efecto["result"].as_str(), efecto["branch"].as_str()), (Some("git_merge"), Some("merged"), Some("lx/t")));
+    assert_eq!(efecto["result_commit"], out["result_commit"]);
+    assert_eq!(efecto["effect_id"].as_str(), evs[0].idem_key.as_deref());
+    assert_eq!((evs[0].correlation_id.as_deref(), evs[1].correlation_id.as_deref()), (evs[0].idem_key.as_deref(), evs[0].idem_key.as_deref()));
+    assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")));
+    let evs = vec![evs[1].clone()];
     let p = pl(&evs[0]);
     assert_eq!((p["decision_kind"].as_str(), p["outcome"].as_str(), p["branch"].as_str(), p["squash"].as_bool()), (Some("merge"), Some("merged"), Some("lx/t"), Some(false)));
     assert_eq!(p["decision_id"], out["decision"]);
@@ -1070,7 +1415,8 @@ fn publicar_un_pr_deja_un_decision_recorded_sin_remoto_ni_error_textual() {
     assert_eq!(out["outcome"], "error");
     assert!(out["message"].is_string(), "el error textual sí se devuelve al llamador");
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    assert_eq!(kinds(&evs), vec!["effect.observed", "decision.recorded"], "el push/gh se ejecutó: efecto observado y decisión");
+    let evs = vec![evs[1].clone()];
     assert_eq!(pl(&evs[0]), json!({ "decision_kind": "pr", "decision_id": out["decision"], "outcome": "error", "branch": "lx/t" }));
     assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")));
     // Con un PR ya registrado: already_exists, con su URL; sigue siendo una decisión nueva.
@@ -1083,7 +1429,7 @@ fn publicar_un_pr_deja_un_decision_recorded_sin_remoto_ni_error_textual() {
     let out = super::integration::publish_pr(&persona, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
     assert_eq!(out["outcome"], "already_exists");
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"], "con la URL ya registrada no se ejecuta nada: sin efecto");
     assert_eq!(pl(&evs[0])["pr_url"], "https://github.com/o/r/pull/3");
     assert!(!evs[0].payload.contains("remote"));
     let _ = std::fs::remove_dir_all(dir);
@@ -1098,7 +1444,7 @@ fn produccion(texto: &str) -> Vec<(usize, String)> {
 fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // El catálogo solo lo importa tx_ops; nadie más nombra sus constructores ni la cola de la transacción.
-    let prohibido: [(&str, &[&str]); 8] = [
+    let prohibido: [(&str, &[&str]); 12] = [
         ("event_kinds", &["tx_ops.rs", "mod.rs"]),
         ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
@@ -1108,6 +1454,11 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
         ("decision_recorded(", &["event_kinds.rs", "tx_ops.rs"]),
         ("DecisionRecorded", &["event_kinds.rs", "tx_ops.rs"]),
         ("DECISION_KINDS_WITHOUT_EVENT", &["event_kinds.rs"]),
+        // `effect.observed` lo construye SOLO `Tx::observe_effect`, y solo lo invoca la frontera `mutate_after_effect`.
+        ("effect_observed(", &["event_kinds.rs", "tx_ops.rs"]),
+        ("EffectObserved", &["event_kinds.rs", "tx_ops.rs"]),
+        (".observe_effect(", &["mutation.rs"]),
+        ("EFFECT_KINDS_WITHOUT_EVENT", &["event_kinds.rs"]),
     ];
     let mut revisados = 0;
     for entrada in std::fs::read_dir(&dir).unwrap() {
