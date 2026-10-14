@@ -805,6 +805,33 @@ fn cada_decision_de_una_persona_emite_un_decision_recorded_con_su_payload_cerrad
 }
 
 #[test]
+fn el_actor_validado_de_una_decision_no_cambia_si_el_contexto_cambia_despues() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let antes = head(&core);
+    // Person/Ui decide y, ya validada, la misma mutación cambia el contexto a System/Core antes de confirmar.
+    core.mutate_as(&persona_ui(), |tx| {
+        tx.record_decision(&a, "review", "human", &json!({ "decision": "accepted", "head_commit": "h" }))?;
+        tx.set_context(MutationContext::core());
+        Ok(())
+    })
+    .unwrap();
+    let evs = desde(&core, antes);
+    assert_eq!(kinds(&evs), vec!["decision.recorded"]);
+    assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")), "el evento conserva el actor que se validó, no el contexto tardío");
+
+    // Los demás eventos siguen usando el contexto vigente al finalizar (el bootstrap de `run_create` lo necesita).
+    let antes = head(&core);
+    core.mutate_as(&persona_ui(), |tx| {
+        tx.set_context(MutationContext::core());
+        tx.create_run("obj", nt("otra"));
+        Ok(())
+    })
+    .unwrap();
+    assert!(desde(&core, antes).iter().all(|e| actor_y_canal(e) == ("system", None, Some("core"))), "contexto tardío para el resto");
+}
+
+#[test]
 fn dos_revisiones_legitimas_consecutivas_producen_dos_eventos_distintos() {
     let (_l, _d, core) = core_listo();
     let (_run, _root, a, _b) = escenario(&core);
