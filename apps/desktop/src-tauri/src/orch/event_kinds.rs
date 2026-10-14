@@ -18,12 +18,13 @@
 //! | `decision.recorded` (`review` · `merge` · `pr`) | decision | `task` |
 //! | `task.removed` (`launch_failed`) | state | `task` |
 //! | `effect.observed` (`git_merge` · `git_push_pr` · `git_worktree` · `git_worktree_removed` · `pty_process`) | effect | `task` |
+//! | `project.registered` (`manual` · `auto` · `backfill` · `import`) | state | `project` |
 
 use serde::Serialize;
 
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::EventClass;
+use crate::store::{EventClass, Fingerprint};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -593,4 +594,48 @@ impl EventPayload for TaskRemoved {
 /// `run` y `project` los captura el mutador ANTES de borrar y van explícitos (nunca `project_from_task`).
 pub(super) fn task_removed(task: &str, run: &str, project: Option<String>, cause: RemovalCause) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Task, task, &TaskRemoved { cause })?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project(project))
+}
+
+// ---------------------------------------------------------------------------------------------
+// project.registered
+// ---------------------------------------------------------------------------------------------
+
+/// Cómo llegó un Project al registro. Cerrado: es el único dato de PROCEDENCIA del hecho (quién lo
+/// provocó va en el actor y por dónde llegó en el canal).
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ProjectOrigin {
+    /// La persona registró el repositorio (`project_add`).
+    Manual,
+    /// Se descubrió al lanzar un run (`run_create`), sin preguntar: era inequívocamente nuevo.
+    Auto,
+    /// El relleno de `project_id` de las tareas anteriores a D.
+    Backfill,
+    /// La importación de las carpetas recientes de la interfaz.
+    Import,
+}
+
+/// El Project NACIÓ. Este hecho solo existe cuando la fila `projects` se insertó de verdad: encontrar un
+/// proyecto ya registrado, una ambigüedad o un `join` NO lo emiten. Sin ruta, `display_path`, remoto,
+/// commits ni huella: la identidad física del repositorio vive en el registro, no en el log.
+#[derive(Serialize)]
+pub(super) struct ProjectRegistered {
+    origin: ProjectOrigin,
+    name: String,
+    has_remote: bool,
+    root_commit_count: usize,
+}
+
+impl EventPayload for ProjectRegistered {
+    const KIND: &'static str = "project.registered";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Entidad: el proyecto. `run_id` NULL (no pertenece a ningún run). `idem_key = project_id`: un proyecto
+/// nace una sola vez y su evento no se duplica. El `project_id` se pre-genera FUERA de la transacción y es
+/// el mismo de la fila: el borrador lo lleva explícito (nunca `project_from_task`).
+pub(super) fn project_registered(project_id: &str, name: &str, fingerprint: &Fingerprint, origin: ProjectOrigin) -> Result<EventDraft, EventError> {
+    let p = ProjectRegistered { origin, name: clip(name, 120), has_remote: !fingerprint.remotes.is_empty(), root_commit_count: fingerprint.root_commits.len() };
+    Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None).idempotent(project_id))
 }

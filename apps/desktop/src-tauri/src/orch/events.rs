@@ -40,6 +40,12 @@
 //! la tarea (o del proyecto) que ya se conoce al emitir: **no se ejecuta git para resolverlo**. `None`
 //! es válido (tareas anteriores a D, repositorios ambiguos, hechos sin proyecto).
 //!
+//! **Los ids nuevos se validan al asignarlos; el Event Log preserva referencias históricas y no consulta el
+//! Project Registry al finalizar.** Quien asigna un `project_id` (el registro automático, el relleno, la
+//! importación) lo resuelve o lo crea en ese momento; `finalize_all` no hace SQL ni comprueba que el
+//! proyecto siga existiendo: un proyecto archivado, relocalizado o restaurado desde una copia no invalida
+//! los eventos que ya lo citan.
+//!
 //! # Actor y canal
 //! `Actor` = persona, agente (con su tarea) o sistema. `Channel` describe el TRANSPORTE (`ui`, `lxo`,
 //! `core`), no una identidad: Desktop, móvil y CLI no se distinguen todavía; F1 añadirá `client_id`
@@ -95,6 +101,12 @@ impl MutationContext {
 
     pub(super) fn person(channel: Channel) -> MutationContext {
         MutationContext::new(Actor::Person, channel)
+    }
+
+    /// El Core actuando por su cuenta, pero por un canal concreto (p. ej. la importación de recientes,
+    /// que la dispara la interfaz sin que una persona decida cada proyecto).
+    pub(super) fn system(channel: Channel) -> MutationContext {
+        MutationContext::new(Actor::System, channel)
     }
 
     pub(super) fn agent(task: impl Into<String>, channel: Channel) -> MutationContext {

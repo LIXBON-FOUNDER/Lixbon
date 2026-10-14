@@ -245,3 +245,126 @@ fn reabrir_conserva_los_proyectos_y_no_vuelve_a_migrar() {
     assert_eq!(s.project(&id).unwrap().unwrap().name, "p");
     assert_eq!(s.project_locations(None).unwrap().len(), 1);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Project + Event: el nacimiento de un proyecto es UNA transacción (E1b · Projects)
+// ---------------------------------------------------------------------------------------------
+
+fn evento_de(id: &str) -> NewEvent {
+    NewEvent {
+        id: new_uuid_v7(),
+        at: 1_000,
+        v: 1,
+        kind: "project.registered".into(),
+        class: EventClass::State,
+        actor_kind: ActorKind::Person,
+        actor_id: None,
+        channel: Some("ui".into()),
+        client_id: None,
+        project_id: Some(id.into()),
+        run_id: None,
+        entity_kind: "project".into(),
+        entity_id: id.into(),
+        correlation_id: None,
+        idem_key: Some(id.into()),
+        payload: r#"{"origin":"manual","name":"p","has_remote":false,"root_commit_count":1}"#.into(),
+    }
+}
+
+fn eventos_n(s: &Store) -> i64 {
+    s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?)).unwrap()
+}
+
+fn proyectos_n(s: &Store) -> usize {
+    s.projects(true).unwrap().len()
+}
+
+fn ubicaciones_n(s: &Store) -> usize {
+    s.project_locations(None).unwrap().len()
+}
+
+#[test]
+fn registrar_inserta_proyecto_ubicacion_y_evento_en_una_transaccion_sin_tocar_legacy_state() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let antes = s.row_rev().unwrap();
+    let id = new_project_id();
+    let p = s.project_register(&id, "api", &fp(&["c1"], &["github.com/o/api"]), &loc("c:/api"), &evento_de(&id)).unwrap();
+    assert_eq!((p.id.as_str(), p.name.as_str()), (id.as_str(), "api"));
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+    let page = s.events_page(&EventQuery::default()).unwrap();
+    assert_eq!(page.events[0].kind, "project.registered");
+    assert_eq!(page.events[0].state_rev, None, "un evento de proyecto no confirma legacy_state");
+    assert_eq!(page.events[0].project_id.as_deref(), Some(id.as_str()));
+    assert_eq!(s.row_rev().unwrap(), antes, "legacy_state intacto");
+}
+
+#[test]
+fn si_el_insert_del_proyecto_falla_no_queda_evento() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    // Mismo id: la PK de `projects` rechaza el INSERT.
+    let r = s.project_register(&a.id, "otra", &fp(&["c2"], &[]), &loc("c:/otra"), &evento_de(&a.id));
+    assert!(r.is_err());
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 0), "ni ubicación ni evento");
+    assert_eq!(s.project(&a.id).unwrap().unwrap().name, "a", "el proyecto existente sigue igual");
+}
+
+#[test]
+fn si_la_ubicacion_ya_es_de_otro_proyecto_se_deshace_todo() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let id = new_project_id();
+    let r = s.project_register(&id, "b", &fp(&["c2"], &[]), &loc("c:/a"), &evento_de(&id));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 0), "el proyecto b no quedó, ni su evento");
+    assert!(s.project(&id).unwrap().is_none());
+}
+
+#[test]
+fn si_el_insert_del_evento_falla_se_deshacen_el_proyecto_y_la_ubicacion() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    // Un evento ajeno ya ocupa ese `id`: el INSERT del evento (después de la fila y la ubicación) falla.
+    let ocupado = NewEvent { idem_key: None, ..evento_de("otro") };
+    s.append_events(std::slice::from_ref(&ocupado)).unwrap();
+    let id = new_project_id();
+    let r = s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &NewEvent { id: ocupado.id.clone(), ..evento_de(&id) });
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (0, 0, 1), "ni proyecto ni ubicación: solo el evento previo");
+    // Y el mismo registro, ya sin el choque, funciona: nada quedó a medias.
+    s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &evento_de(&id)).unwrap();
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 2));
+}
+
+#[test]
+fn un_evento_mal_formado_o_de_otro_proyecto_no_deja_nada() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let id = new_project_id();
+    let sin_objeto = NewEvent { payload: "[1]".into(), ..evento_de(&id) };
+    assert!(matches!(s.project_register(&id, "x", &fp(&["c1"], &[]), &loc("c:/x"), &sin_objeto), Err(StoreError::InvalidEvent(_))));
+    let ajeno = evento_de("otro-proyecto");
+    assert!(matches!(s.project_register(&id, "x", &fp(&["c1"], &[]), &loc("c:/x"), &ajeno), Err(StoreError::InvalidEvent(_))));
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (0, 0, 0));
+}
+
+#[test]
+fn repetir_el_registro_no_duplica_el_evento_ni_el_proyecto() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let id = new_project_id();
+    let e = evento_de(&id);
+    s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &e).unwrap();
+    // El reintento (mismo id, mismo evento) falla entero: sigue habiendo exactamente un proyecto y un evento.
+    assert!(s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &e).is_err());
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+    // Un evento duplicado por (kind, idem_key) tampoco crea un proyecto sin su hecho propio.
+    let otro = new_project_id();
+    let duplicado = NewEvent { idem_key: Some(id.clone()), ..evento_de(&otro) };
+    let r = s.project_register(&otro, "otro", &fp(&["c9"], &[]), &loc("c:/otro"), &duplicado);
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+}

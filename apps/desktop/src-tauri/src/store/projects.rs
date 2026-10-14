@@ -7,12 +7,19 @@
 //!
 //! Todas las escrituras son UNA transacción (`Store::write`). Los identificadores
 //! de proyecto son UUID v7 (ordenables por creación).
+//!
+//! # Project + Event
+//! El nacimiento de un proyecto ([`Store::project_register`]) inserta la fila `projects`, su primera
+//! ubicación y su evento `project.registered` en UNA transacción (`events.state_rev = NULL`: no toca
+//! `legacy_state`). Recibe el evento ya MATERIALIZADO ([`NewEvent`]): no sabe qué hechos existen ni quién
+//! los provoca, solo que un fallo en cualquiera de los tres INSERT deshace los tres.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::authority::new_uuid_v7;
 use super::error::{StoreError, StoreResult};
+use super::events::{insert_events, Inserted, NewEvent};
 use super::migrate::now_ms;
 use super::Store;
 
@@ -146,7 +153,35 @@ fn put_location(tx: &Connection, project_id: &str, loc: &NewLocation, now: i64) 
 }
 
 impl Store {
-    /// Crea un proyecto con su primera ubicación, en una sola transacción.
+    /// Nace un proyecto: fila + primera ubicación + su evento, en UNA transacción (`BEGIN IMMEDIATE`).
+    ///
+    /// * `id` lo genera quien llama FUERA de la transacción y es el mismo del evento (`event.project_id`).
+    /// * Un fallo en cualquiera de los tres INSERT (la fila, la ubicación —incluida una ruta que ya es de
+    ///   otro proyecto— o el evento) lo deshace todo: ni proyecto huérfano de evento ni evento huérfano de
+    ///   proyecto.
+    /// * El evento de un proyecto que NACE no puede ser un duplicado: si su `(kind, idem_key)` ya existía, es
+    ///   una inconsistencia y se deshace en lugar de crear el proyecto sin su hecho.
+    pub fn project_register(&mut self, id: &str, name: &str, fingerprint: &Fingerprint, loc: &NewLocation, event: &NewEvent) -> StoreResult<ProjectRow> {
+        if event.project_id.as_deref() != Some(id) {
+            return Err(StoreError::InvalidEvent(format!("{}: el evento no se refiere al proyecto {id}", event.kind)));
+        }
+        event.check()?;
+        let fp = fingerprint_to(fingerprint)?;
+        let now = now_ms();
+        self.write(|tx| {
+            tx.execute("INSERT INTO projects (id, name, created_at, updated_at, fingerprint) VALUES (?1, ?2, ?3, ?3, ?4)", params![id, name, now, fp])?;
+            put_location(tx, id, &NewLocation { primary: true, ..loc.clone() }, now)?;
+            match insert_events(tx, std::slice::from_ref(event), None)?.first() {
+                Some(Inserted::New(_)) => Ok(()),
+                _ => Err(StoreError::ProjectConflict(format!("el evento {} de {id} ya existía: el proyecto no se registra sin su hecho", event.kind))),
+            }
+        })?;
+        self.project(id)?.ok_or_else(|| StoreError::ProjectConflict(format!("el proyecto recién registrado {id} no existe")))
+    }
+
+    /// Prueba: crea un proyecto SIN evento (fixture de las pruebas del almacén). Producción registra con
+    /// [`Store::project_register`], que no separa la fila de su hecho.
+    #[cfg(test)]
     pub fn project_create(&mut self, name: &str, fingerprint: &Fingerprint, loc: &NewLocation) -> StoreResult<ProjectRow> {
         let id = new_project_id();
         let fp = fingerprint_to(fingerprint)?;

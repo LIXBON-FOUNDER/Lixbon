@@ -22,8 +22,11 @@ mod tx_ops_tests;
 #[cfg(test)]
 mod spawn_cleanup_tests;
 mod projects;
+mod project_ops;
 #[cfg(test)]
 mod projects_tests;
+#[cfg(test)]
+mod project_ops_tests;
 #[cfg(test)]
 mod crash_tests;
 #[cfg(test)]
