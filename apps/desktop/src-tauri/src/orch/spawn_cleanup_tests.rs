@@ -6,7 +6,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use portable_pty::ChildKiller;
 use serde_json::{json, Value};
@@ -14,10 +15,11 @@ use serde_json::{json, Value};
 use super::boot_tests::*;
 use super::event_kinds::EffectObserved;
 use super::events::{Channel, MutationContext};
-use super::host::RecordingHost;
+use super::host::{RecordedCall, RecordingHost};
 use super::mutation::Health;
 use super::pty::{self, pruebas};
 use super::spawn::SpawnStep;
+use super::spawn_approval::{PendState, EV_PENDING, EV_RESOLVED};
 use super::state::{NewTask, State, Status};
 use super::{agents, Caller, Core, Orch};
 use crate::store::{EventQuery, EventRow};
@@ -26,16 +28,51 @@ use crate::store::{EventQuery, EventRow};
 // Ayudas
 // ---------------------------------------------------------------------------------------------
 
+/// Punto de sincronización de dos participantes con límite: una regresión o fallo previo produce un error legible
+/// en lugar de dejar bloqueado el proceso de pruebas.
+struct TimedBarrier {
+    state: Mutex<(usize, bool)>,
+    changed: Condvar,
+}
+
+impl TimedBarrier {
+    fn new() -> Self {
+        Self { state: Mutex::new((0, false)), changed: Condvar::new() }
+    }
+
+    fn wait(&self) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.1 {
+            return Ok(());
+        }
+        state.0 += 1;
+        if state.0 == 2 {
+            state.1 = true;
+            self.changed.notify_all();
+            return Ok(());
+        }
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, Duration::from_secs(5), |state| !state.1)
+            .unwrap_or_else(|e| e.into_inner());
+        if state.1 {
+            Ok(())
+        } else {
+            Err(format!("punto de sincronización venció con {} de 2 participantes", state.0))
+        }
+    }
+}
+
 fn fake(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
     let prof = agents::Profile::parse(profile).expect("perfil");
     agents::evaluate_for(provider, prof, role, worktree, agents::Detected::Skip, false, agents::Delivery::FileOrMarkers)
 }
 
-fn s(p: &Path) -> String {
+pub(super) fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-fn g(dir: &Path, args: &[&str]) -> String {
+pub(super) fn g(dir: &Path, args: &[&str]) -> String {
     let o = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -49,16 +86,17 @@ fn g(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
 
-struct Env {
-    _l: Limpia,
-    core: Arc<Core>,
-    root: String,
-    run: String,
-    project: String,
-    repo: PathBuf,
+pub(super) struct Env {
+    pub(super) _l: Limpia,
+    pub(super) core: Arc<Core>,
+    pub(super) root: String,
+    pub(super) run: String,
+    pub(super) project: String,
+    pub(super) repo: PathBuf,
+    pub(super) host: Arc<RecordingHost>,
 }
 
-fn setup(nombre: &str) -> Env {
+pub(super) fn setup(nombre: &str) -> Env {
     let (l, data, core_dir) = dirs();
     let repo = data.parent().unwrap().join("repos").join(nombre);
     std::fs::create_dir_all(&repo).unwrap();
@@ -71,7 +109,8 @@ fn setup(nombre: &str) -> Env {
     let mut orch = Orch::default();
     Arc::get_mut(&mut orch.0).unwrap().resolver = fake;
     let core = orch.0;
-    core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
+    let host = RecordingHost::new();
+    core.init_in(host.clone(), &data, &core_dir).unwrap();
     core.settings.lock().unwrap().enabled = true;
     let project = core.project_add(&MutationContext::person(Channel::Ui), &json!({ "path": s(&repo) })).unwrap()["project"]["id"].as_str().unwrap().to_string();
     let cwd = s(&repo);
@@ -86,11 +125,11 @@ fn setup(nombre: &str) -> Env {
             Ok((run, root))
         })
         .unwrap();
-    Env { _l: l, core, root, run, project, repo }
+    Env { _l: l, core, root, run, project, repo, host }
 }
 
 impl Env {
-    fn spawn(&self, shared: bool) -> String {
+    pub(super) fn spawn(&self, shared: bool) -> String {
         let v = self
             .core
             .rpc(Caller::Agent(Some(self.root.clone())), "", "spawn", &json!({ "agent": "claude", "task": "Encargo\nDetalle", "name": "Hija", "shared": shared }))
@@ -98,37 +137,52 @@ impl Env {
         v["pending_id"].as_str().unwrap().to_string()
     }
 
-    fn aprobar(&self, pid: &str) -> Value {
+    pub(super) fn aprobar(&self, pid: &str) -> Value {
         let argv = self.core.list_pending_spawns().into_iter().find(|p| p.pending_id == pid).unwrap().policy.argv;
         self.core.approve_spawn(pid, true, &argv, true).unwrap()
     }
 
-    fn hijas(&self) -> Vec<String> {
+    /// Como `aprobar`, pero devuelve el `Result` (con el Core degradado la resolución no se puede registrar).
+    pub(super) fn aprobar_res(&self, pid: &str) -> Result<Value, String> {
+        let argv = self.core.list_pending_spawns().into_iter().find(|p| p.pending_id == pid).unwrap().policy.argv;
+        self.core.approve_spawn(pid, true, &argv, true)
+    }
+
+    pub(super) fn estado_pendiente(&self, pid: &str) -> Option<PendState> {
+        self.core.pending.lock().unwrap().get(pid).map(|e| e.state.clone())
+    }
+
+    pub(super) fn hijas(&self) -> Vec<String> {
         self.core.lock().tasks.values().filter(|t| t.parent.as_deref() == Some(self.root.as_str())).map(|t| t.id.clone()).collect()
     }
 
-    fn hook(&self, f: impl Fn(&Core, &str, SpawnStep) -> Result<(), String> + Send + Sync + 'static) {
+    pub(super) fn hook(&self, f: impl Fn(&Core, &str, SpawnStep) -> Result<(), String> + Send + Sync + 'static) {
         *self.core.spawn_hook.lock().unwrap() = Some(Arc::new(f));
     }
 
-    fn ramas(&self) -> String {
+    pub(super) fn ramas(&self) -> String {
         g(&self.repo, &["branch", "--list", "lx/*"])
     }
 }
 
-fn head(core: &Core) -> i64 {
+pub(super) fn head(core: &Core) -> i64 {
     core.storage.with_store(|s| s.events_head().unwrap()).unwrap()
 }
 
-fn desde(core: &Core, seq: i64) -> Vec<EventRow> {
+pub(super) fn desde(core: &Core, seq: i64) -> Vec<EventRow> {
     core.storage.with_store(|s| s.events_page(&EventQuery { after: Some(seq), limit: Some(500), ..Default::default() }).unwrap().events).unwrap()
 }
 
-fn kinds(evs: &[EventRow]) -> Vec<&str> {
+/// Como `kinds`, sin el `spawn.resolved` con el que termina cada aprobación: estas pruebas son del cleanup.
+fn kinds_sin_resolucion(evs: &[EventRow]) -> Vec<&str> {
+    kinds(evs).into_iter().filter(|k| *k != "spawn.resolved").collect()
+}
+
+pub(super) fn kinds(evs: &[EventRow]) -> Vec<&str> {
     evs.iter().map(|e| e.kind.as_str()).collect()
 }
 
-fn pl(e: &EventRow) -> Value {
+pub(super) fn pl(e: &EventRow) -> Value {
     serde_json::from_str(&e.payload).unwrap()
 }
 
@@ -178,7 +232,7 @@ fn add_worktree_que_falla_no_toca_una_ruta_ajena_y_retira_la_task_con_run_y_proy
     assert_eq!(std::fs::read_to_string(ajena.join("ajeno.txt")).unwrap(), "mío", "una ruta que add_worktree no creó nunca se borra");
     assert!(e.hijas().is_empty(), "la Task retirada ya no está en el estado");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "task.removed"], "sin worktree no hay effect.observed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed"], "sin worktree no hay effect.observed");
     let quitada = &evs[1];
     assert_eq!(pl(quitada), json!({ "cause": "launch_failed" }));
     assert_eq!(actor(quitada), ("system", Some("core")), "lo decide el Core aunque la persona aprobara el lanzamiento");
@@ -209,7 +263,7 @@ fn worktree_registrado_con_el_run_cerrado_conserva_la_task_y_limpia_solo_los_art
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed"], "ni task.removed: el run ya estaba cerrado");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed"], "ni task.removed: el run ya estaba cerrado");
     let hija = e.hijas().pop().expect("la Task se conserva");
     let limpieza = &evs[2];
     assert_eq!(pl(limpieza)["effect_kind"], "git_worktree_removed");
@@ -235,8 +289,8 @@ fn una_task_ya_final_antes_del_cleanup_se_conserva() {
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "task.status_changed", "effect.observed"]);
-    assert!(!kinds(&evs).contains(&"task.removed"));
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.status_changed", "effect.observed"]);
+    assert!(!kinds_sin_resolucion(&evs).contains(&"task.removed"));
     assert_eq!(e.hijas().len(), 1);
     let hija = e.hijas()[0].clone();
     let t = e.core.lock().tasks.get(&hija).cloned().unwrap();
@@ -288,7 +342,7 @@ fn worktree_fisico_con_registro_rechazado_y_core_sano_se_limpia_sin_depender_del
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     // State nunca llegó a conocer el worktree: el cleanup usó los datos del intento.
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.removed"]);
     assert_eq!(pl(&evs[1])["operation"], "spawn_cleanup");
     assert_eq!(pl(&evs[1])["worktree_removed"], true);
     assert_eq!((actor(&evs[1]), actor(&evs[2])), (("system", Some("core")), ("system", Some("core"))));
@@ -308,13 +362,15 @@ fn worktree_fisico_con_el_core_degradado_se_conserva_todo() {
         Ok(())
     });
     let antes = head(&e.core);
-    assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
+    let r = e.aprobar_res(&pid);
+    assert!(r.as_ref().is_err_and(|m| m.contains("no se pudo registrar su resolución")), "{r:?}");
+    assert_eq!(e.estado_pendiente(&pid), Some(PendState::Launching), "no vuelve a Pending ni admite otra aprobación");
     assert!(matches!(e.core.health(), Health::DegradedReadOnly(_)));
     assert_eq!(e.hijas().len(), 1, "no se borra la Task con el Core degradado");
     assert!(e.ramas().contains("lx/"), "ni la rama");
     assert!(g(&e.repo, &["worktree", "list"]).lines().count() > 1, "ni el worktree");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created"], "nada más se persiste");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created"], "nada más se persiste");
     assert!(kinds_del_diario().contains(&"git_worktree".to_string()), "el worktree físico queda en el diario para reconciliar: {:?}", diario());
 }
 
@@ -330,7 +386,7 @@ fn launch_que_falla_antes_del_proceso_limpia_y_retira_con_orden_actor_y_pertenen
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "effect.observed del cleanup antes que task.removed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "effect.observed del cleanup antes que task.removed");
     let (limpieza, quitada) = (&evs[2], &evs[3]);
     assert_eq!((actor(limpieza), actor(quitada)), (("system", Some("core")), ("system", Some("core"))));
     for ev in [&evs[1], limpieza, quitada] {
@@ -366,7 +422,7 @@ fn pty_process_rechazado_con_el_core_sano_mata_el_proceso_y_limpia() {
     assert!(pruebas::espera_muerto(pid_proceso), "el proceso vivo y no registrado se mata");
     assert_eq!(terminales(&e.core), 0, "y se retira del mapa");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "el kill no tiene evento propio");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "el kill no tiene evento propio");
     assert!(evs.iter().all(|ev| pl(ev).get("launched").is_none()), "pty_process no se registró: no hay evento de proceso");
     assert!(e.hijas().is_empty() && e.ramas().is_empty());
     assert_eq!(kinds_del_diario(), vec!["pty_process"]);
@@ -387,14 +443,16 @@ fn pty_process_con_el_core_degradado_mata_el_proceso_pero_conserva_task_y_worktr
         Ok(())
     });
     let antes = head(&e.core);
-    assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
+    let r = e.aprobar_res(&pid);
+    assert!(r.as_ref().is_err_and(|m| m.contains("no se pudo registrar su resolución")), "{r:?}");
+    assert_eq!(e.estado_pendiente(&pid), Some(PendState::Launching), "no vuelve a Pending ni admite otra aprobación");
     let pid_proceso = proceso.lock().unwrap().expect("proceso real");
     assert!(pruebas::espera_muerto(pid_proceso), "la única acción destructiva con el Core degradado: matar el proceso no registrado");
     assert_eq!(terminales(&e.core), 0);
     assert_eq!(e.hijas().len(), 1, "la Task se conserva");
     assert!(e.ramas().contains("lx/"), "y su rama y su worktree");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed"], "solo lo ya confirmado");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed"], "solo lo ya confirmado");
     assert!(kinds_del_diario().contains(&"pty_process".to_string()));
 }
 
@@ -429,7 +487,7 @@ fn si_no_hay_control_fiable_sobre_el_proceso_se_conserva_todo() {
     assert_eq!(e.hijas().len(), 1, "sin control sobre el proceso no se retira la Task");
     assert!(e.ramas().contains("lx/"), "ni se borra su worktree");
     assert_eq!(terminales(&e.core), 1, "el terminal vuelve al mapa para poder reintentar el kill");
-    assert_eq!(kinds(&desde(&e.core, antes)), vec!["task.created", "effect.observed"]);
+    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed"]);
     e.core.terms.lock().unwrap().clear();
 }
 
@@ -445,7 +503,7 @@ fn una_hija_shared_que_falla_al_lanzar_solo_retira_la_task_sin_efecto_git() {
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed"]);
     assert_eq!(actor(&evs[1]), ("system", Some("core")));
     assert!(e.hijas().is_empty() && e.ramas().is_empty());
 }
@@ -475,7 +533,7 @@ fn si_remove_worktree_falla_se_conserva_la_task() {
     let wt = e.core.lock().tasks.get(&hija).and_then(|t| t.worktree.clone()).unwrap();
     assert!(Path::new(&wt).exists());
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed"], "ni cleanup registrado ni task.removed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed"], "ni cleanup registrado ni task.removed");
     g(&e.repo, &["worktree", "unlock", &wt]);
 }
 
@@ -497,7 +555,7 @@ fn si_branch_d_falla_la_task_se_retira_con_branch_deleted_false_y_nunca_se_usa_d
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"]);
     assert_eq!((pl(&evs[2])["worktree_removed"].as_bool(), pl(&evs[2])["branch_deleted"].as_bool()), (Some(true), Some(false)));
     assert!(e.ramas().contains("lx/"), "la rama con trabajo sobrevive: nunca branch -D");
     assert!(e.hijas().is_empty(), "un fallo de branch -d no impide retirar la Task");
@@ -649,7 +707,7 @@ fn task_removed_solo_lo_decide_el_core_y_no_deja_estado_si_se_rechaza() {
     // El Core sí, con run y proyecto capturados antes de borrar.
     e.core.mutate_as(&MutationContext::core(), |tx| tx.remove_failed_launch(&hija)).unwrap();
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds(&evs), vec!["task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.removed"]);
     assert_eq!(pl(&evs[0]), json!({ "cause": "launch_failed" }));
     assert_eq!((evs[0].run_id.as_deref(), evs[0].project_id.as_deref()), (Some(e.run.as_str()), Some(e.project.as_str())));
     assert_eq!((evs[0].idem_key.clone(), evs[0].class), (None, crate::store::EventClass::State));
@@ -670,4 +728,513 @@ fn effect_observed_rechaza_un_efecto_que_no_ocurrio() {
     assert!(ok("release", "git_worktree_removed", base(false, true, json!(null))).unwrap_err().contains("branch"));
     assert!(ok("release", "git_worktree_removed", base(false, true, json!("  "))).is_err());
     assert!(ok("spawn", "git_worktree_removed", base(true, false, json!(null))).is_err(), "operación fuera del contrato");
+}
+
+#[test]
+fn approve_spawn_y_remove_run_no_dejan_hija_fuera_de_la_limpieza_ni_resolucion_tardia() {
+    let e = setup("race-approve-remove");
+    let pending_id = e.spawn(false);
+    let argv = e.core.list_pending_spawns().into_iter().find(|p| p.pending_id == pending_id).unwrap().policy.argv;
+    let before = head(&e.core);
+    e.host.clear_events();
+    e.host.clear_calls();
+
+    let claimed = Arc::new(TimedBarrier::new());
+    let release_claim = Arc::new(TimedBarrier::new());
+    let removal_snapshot = Arc::new(TimedBarrier::new());
+    let release_removal = Arc::new(TimedBarrier::new());
+    let child_ready = Arc::new(TimedBarrier::new());
+    let release_child = Arc::new(TimedBarrier::new());
+    let child_id = Arc::new(Mutex::new(None::<String>));
+    let child_worktree = Arc::new(Mutex::new(None::<PathBuf>));
+    let child_pid = Arc::new(Mutex::new(None::<u32>));
+    let child_process_dir = Arc::new(Mutex::new(None::<PathBuf>));
+
+    let (claimed_hook, release_claim_hook) = (claimed.clone(), release_claim.clone());
+    let (snapshot_hook, release_removal_hook) = (removal_snapshot.clone(), release_removal.clone());
+    let (child_ready_hook, release_child_hook) = (child_ready.clone(), release_child.clone());
+    let (child_id_hook, worktree_hook, pid_hook, process_dir_hook) =
+        (child_id.clone(), child_worktree.clone(), child_pid.clone(), child_process_dir.clone());
+    e.hook(move |core, id, step| {
+        match step {
+            SpawnStep::AfterApprovalClaim => {
+                claimed_hook.wait()?;
+                release_claim_hook.wait()?;
+            }
+            SpawnStep::AfterRunRemovalCleanupSnapshot => {
+                snapshot_hook.wait()?;
+                release_removal_hook.wait()?;
+            }
+            SpawnStep::AfterPtyRegistration => {
+                let task = core.lock().tasks.get(id).cloned().ok_or_else(|| format!("hija {id} no existe en el hook"))?;
+                *child_id_hook.lock().unwrap() = Some(id.to_string());
+                *worktree_hook.lock().unwrap() = task.worktree.clone().map(PathBuf::from);
+                let dir = pruebas::carpeta(&format!("race-{id}"));
+                let term = pruebas::lanza(&dir, false)?;
+                *pid_hook.lock().unwrap() = Some(pruebas::ultimo_pid().ok_or_else(|| "el proceso no devolvió PID".to_string())?);
+                core.register_term(id, term)?;
+                *process_dir_hook.lock().unwrap() = Some(dir);
+                child_ready_hook.wait()?;
+                release_child_hook.wait()?;
+            }
+            _ => {}
+        }
+        Ok(())
+    });
+
+    let approve_core = e.core.clone();
+    let approve_id = pending_id.clone();
+    let approval = std::thread::spawn(move || approve_core.approve_spawn(&approve_id, true, &argv, true));
+    claimed.wait().expect("approve_spawn alcanzó el claim");
+
+    // La compuerta existente debe cubrir toda la transición, incluido create_child. Esta lectura permite forzar
+    // el camino roto (captura de limpieza mientras la aprobación está pausada) antes de ejecutar el fix.
+    let approval_holds_gate = match e.core.pend_gate.try_lock() {
+        Ok(guard) => {
+            drop(guard);
+            false
+        }
+        Err(std::sync::TryLockError::WouldBlock) => true,
+        Err(std::sync::TryLockError::Poisoned(_)) => panic!("pend_gate envenenada"),
+    };
+
+    let (remove_started_tx, remove_started_rx) = mpsc::channel();
+    let remove_core = e.core.clone();
+    let run = e.run.clone();
+    let removal = std::thread::spawn(move || {
+        remove_started_tx.send(()).unwrap();
+        remove_core.rpc(Caller::User, "", "remove_run", &json!({ "run": run }))
+    });
+    remove_started_rx.recv_timeout(Duration::from_secs(5)).expect("remove_run inició");
+
+    let remove_result = if approval_holds_gate {
+        release_claim.wait().expect("continuar la aprobación");
+        child_ready.wait().expect("hija alcanzó el registro de PTY");
+        release_child.wait().expect("continuar el registro de PTY");
+        let approved = approval.join().unwrap();
+        assert!(approved.is_ok(), "la aprobación debe resolver antes de quitar el run: {approved:?}");
+        removal_snapshot.wait().expect("remove_run alcanzó el cleanup");
+        release_removal.wait().expect("continuar remove_run");
+        removal.join().unwrap().unwrap()
+    } else {
+        // En la implementación actual la limpieza captura solo al padre; se pausa ahí y se deja que create_child
+        // cree hija, worktree y proceso antes del commit que elimina el run.
+        removal_snapshot.wait().expect("remove_run alcanzó el cleanup viejo");
+        release_claim.wait().expect("continuar la aprobación vieja");
+        child_ready.wait().expect("hija alcanzó el registro de PTY");
+        release_removal.wait().expect("continuar remove_run");
+        let removed = removal.join().unwrap().unwrap();
+        release_child.wait().expect("continuar el registro de PTY");
+        let approved = approval.join().unwrap();
+        assert!(approved.is_ok(), "la resolución tardía debe reproducirse: {approved:?}");
+        removed
+    };
+
+    let child_id = child_id.lock().unwrap().clone().expect("create_child alcanzó pty_process");
+    let child_worktree = child_worktree.lock().unwrap().clone().expect("la hija creó un worktree");
+    let child_pid = child_pid.lock().unwrap().expect("proceso de hija");
+    let child_process_dir = child_process_dir.lock().unwrap().clone().expect("carpeta del proceso");
+    let events = desde(&e.core, before);
+    let resolution_index = events.iter().position(|ev| ev.kind == "spawn.resolved");
+    let removed_index = events.iter().position(|ev| ev.kind == "run.removed");
+    let resolution = events.iter().find(|ev| ev.kind == "spawn.resolved").map(pl);
+    let resolution_task = resolution.as_ref().and_then(|v| v["task"].as_str()).map(str::to_owned);
+    let resolution_outcome = resolution.as_ref().and_then(|v| v["outcome"].as_str());
+    let term_survived = e.core.terms.lock().unwrap().contains_key(&child_id);
+    let process_alive_after_remove = pruebas::vivo(child_pid);
+    let worktree_survived = child_worktree.exists();
+    let task_survived = e.core.lock().tasks.contains_key(&child_id);
+    let run_survived = e.core.lock().runs.contains_key(&e.run);
+    let worktree_reported_kept = remove_result["kept"].as_array().is_some_and(|items| items.iter().any(|item| item["task"] == child_id));
+
+    // Ningún recurso que creó esta prueba queda vivo aunque la aserción de regresión falle en la implementación vieja.
+    if term_survived {
+        e.core.kill_term(&child_id);
+    }
+    assert!(pruebas::espera_muerto(child_pid), "el proceso simulado de la hija terminó");
+    if child_worktree.exists() {
+        let _ = super::git::remove_worktree(&s(&e.repo), &s(&child_worktree), true);
+    }
+    let _ = std::fs::remove_dir_all(&child_process_dir);
+
+    assert!(!term_survived && !process_alive_after_remove, "remove_run no debe dejar vivo el proceso de la hija");
+    assert!(!worktree_survived || worktree_reported_kept, "un worktree que la política preserva debe salir en `kept`, nunca quedar fuera de la instantánea");
+    assert!(!task_survived && !run_survived, "el run y sus tareas se eliminan");
+    assert_eq!(resolution_outcome, Some("approved"));
+    assert_eq!(resolution_task.as_deref(), Some(child_id.as_str()));
+    assert!(matches!((resolution_index, removed_index), (Some(r), Some(m)) if r < m), "spawn.resolved debe preceder a run.removed: {:?}", kinds(&events));
+}
+
+#[test]
+fn spawn_request_no_emite_un_pending_despues_de_su_resolucion() {
+    let e = setup("race-request-ui-order");
+    e.core.settings.lock().unwrap().notify_questions = true;
+    e.host.clear_events();
+    e.host.clear_calls();
+    let before = head(&e.core);
+    let request_paused = Arc::new(TimedBarrier::new());
+    let release_request = Arc::new(TimedBarrier::new());
+    let (paused_hook, release_hook) = (request_paused.clone(), release_request.clone());
+    e.hook(move |_core, _id, step| {
+        if step == SpawnStep::AfterRequestPersistBeforeEmit {
+            paused_hook.wait()?;
+            release_hook.wait()?;
+        }
+        Ok(())
+    });
+
+    let request_core = e.core.clone();
+    let parent = e.root.clone();
+    let request = std::thread::spawn(move || {
+        request_core.rpc(
+            Caller::Agent(Some(parent)),
+            "",
+            "spawn",
+            &json!({ "agent": "claude", "task": "Encargo", "name": "Hija UI", "shared": true }),
+        )
+    });
+    request_paused.wait().expect("solicitud persistida antes de su aviso");
+    let pending_id = e.core.list_pending_spawns().into_iter().next().expect("pending ya persistido e insertado").pending_id;
+    let request_holds_gate = match e.core.pend_gate.try_lock() {
+        Ok(guard) => {
+            drop(guard);
+            false
+        }
+        Err(std::sync::TryLockError::WouldBlock) => true,
+        Err(std::sync::TryLockError::Poisoned(_)) => panic!("pend_gate envenenada"),
+    };
+
+    let rejection = if request_holds_gate {
+        let (reject_started_tx, reject_started_rx) = mpsc::channel();
+        let reject_core = e.core.clone();
+        let reject_id = pending_id.clone();
+        let reject = std::thread::spawn(move || {
+            reject_started_tx.send(()).unwrap();
+            reject_core.reject_spawn(&reject_id, true, Some("resolución concurrente"))
+        });
+        reject_started_rx.recv_timeout(Duration::from_secs(5)).expect("reject_spawn inició");
+        release_request.wait().expect("emitir el aviso antes de resolver");
+        let requested = request.join().unwrap();
+        let rejected = reject.join().unwrap();
+        assert!(requested.is_ok(), "solicitud: {requested:?}");
+        rejected
+    } else {
+        let rejected = e.core.reject_spawn(&pending_id, true, Some("resolución concurrente"));
+        release_request.wait().expect("emitir el aviso de solicitud");
+        let requested = request.join().unwrap();
+        assert!(requested.is_ok(), "solicitud: {requested:?}");
+        rejected
+    };
+    assert!(rejection.is_ok(), "rechazo: {rejection:?}");
+
+    let ui_events: Vec<String> = e
+        .host
+        .events()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| name == EV_PENDING || name == EV_RESOLVED)
+        .collect();
+    let visible_order: Vec<&str> = e
+        .host
+        .calls()
+        .iter()
+        .filter_map(|call| match call {
+            RecordedCall::Event(name, _) if name == EV_PENDING => Some("pending"),
+            RecordedCall::Event(name, _) if name == EV_RESOLVED => Some("resolved"),
+            RecordedCall::Notification(_, _) => Some("notification"),
+            _ => None,
+        })
+        .collect();
+    let rows = desde(&e.core, before);
+    assert_eq!(ui_events, vec![EV_PENDING, EV_RESOLVED], "el UI recibe request antes de resolution");
+    assert_eq!(visible_order, vec!["pending", "notification", "resolved"], "ni el evento UI ni el aviso aparecen después de la resolución");
+    assert_eq!(kinds(&rows), vec!["spawn.requested", "spawn.resolved"], "los hechos durables siguen el mismo orden");
+    assert_eq!(pl(&rows[1])["outcome"], "rejected", "`expired` es solo estado/API, nunca outcome del Event Log");
+    assert_eq!(e.host.notifications().len(), 1, "el aviso del sistema se emite para la solicitud persistida");
+    assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Rejected("resolución concurrente".into())));
+}
+
+#[test]
+fn remove_run_antes_de_revalidar_rechaza_spawn_request_sin_persistirlo() {
+    let e = setup("race-remove-before-spawn-request");
+    e.core.settings.lock().unwrap().notify_questions = true;
+    e.host.clear_events();
+    e.host.clear_calls();
+    let before = head(&e.core);
+    let run = e.run.clone();
+    let core_for_remove = Arc::downgrade(&e.core);
+    e.hook(move |_core, _id, step| {
+        if step == SpawnStep::BeforeRequestRevalidation {
+            let core = core_for_remove.upgrade().ok_or("Core de prueba ya cerrado")?;
+            core.rpc(Caller::User, "", "remove_run", &json!({ "run": run }))?;
+        }
+        Ok(())
+    });
+
+    let result = e.core.rpc(
+        Caller::Agent(Some(e.root.clone())),
+        "",
+        "spawn",
+        &json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true }),
+    );
+
+    assert!(result.as_ref().is_err_and(|error| error.contains("run está cerrado") || error.contains("tarea ya terminó")), "el padre se revalida después del borrado: {result:?}");
+    assert!(e.core.list_pending_spawns().is_empty(), "no queda pending en memoria");
+    assert_eq!(kinds(&desde(&e.core, before)), vec!["run.removed"], "no queda un spawn.requested después de run.removed");
+    assert!(!e.host.events().iter().any(|(name, _)| name == EV_PENDING || name == EV_RESOLVED));
+    assert!(e.host.notifications().is_empty(), "no se avisa una solicitud que no se pudo persistir");
+}
+
+#[test]
+fn spawn_request_persistido_se_cancela_antes_de_run_removed_y_su_aviso_va_primero() {
+    let e = setup("race-spawn-request-remove-run");
+    e.core.settings.lock().unwrap().notify_questions = true;
+    e.host.clear_events();
+    e.host.clear_calls();
+    let before = head(&e.core);
+
+    let request_paused = Arc::new(TimedBarrier::new());
+    let release_request = Arc::new(TimedBarrier::new());
+    let (paused_hook, release_hook) = (request_paused.clone(), release_request.clone());
+    let (before_gate_tx, before_gate_rx) = mpsc::channel();
+    let (continue_gate_tx, continue_gate_rx) = mpsc::channel();
+    let (cleanup_tx, cleanup_rx) = mpsc::channel();
+    let (continue_cleanup_tx, continue_cleanup_rx) = mpsc::channel();
+    let continue_gate_rx = Arc::new(Mutex::new(continue_gate_rx));
+    let continue_cleanup_rx = Arc::new(Mutex::new(continue_cleanup_rx));
+    let (continue_gate_hook, continue_cleanup_hook) = (continue_gate_rx.clone(), continue_cleanup_rx.clone());
+    e.hook(move |_core, _id, step| {
+        match step {
+            SpawnStep::AfterRequestPersistBeforeEmit => {
+                paused_hook.wait()?;
+                release_hook.wait()?;
+            }
+            SpawnStep::BeforeRunRemovalGate => {
+                before_gate_tx.send(()).map_err(|e| e.to_string())?;
+                continue_gate_hook.lock().unwrap().recv_timeout(Duration::from_secs(5)).map_err(|e| format!("remove_run no pudo continuar hacia pend_gate: {e}"))?;
+            }
+            SpawnStep::AfterRunRemovalCleanupSnapshot => {
+                cleanup_tx.send(()).map_err(|e| e.to_string())?;
+                continue_cleanup_hook.lock().unwrap().recv_timeout(Duration::from_secs(5)).map_err(|e| format!("remove_run no pudo continuar tras cleanup: {e}"))?;
+            }
+            _ => {}
+        }
+        Ok(())
+    });
+
+    let request_core = e.core.clone();
+    let parent = e.root.clone();
+    let request = std::thread::spawn(move || {
+        request_core.rpc(
+            Caller::Agent(Some(parent)),
+            "",
+            "spawn",
+            &json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true }),
+        )
+    });
+    request_paused.wait().expect("spawn.requested persistido y pending insertado");
+    let pending_id = e.core.list_pending_spawns().into_iter().next().expect("pending insertado antes del aviso").pending_id;
+
+    let (remove_started_tx, remove_started_rx) = mpsc::channel();
+    let remove_core = e.core.clone();
+    let run = e.run.clone();
+    let removal = std::thread::spawn(move || {
+        remove_started_tx.send(()).unwrap();
+        remove_core.rpc(Caller::User, "", "remove_run", &json!({ "run": run }))
+    });
+    remove_started_rx.recv_timeout(Duration::from_secs(5)).expect("remove_run inició");
+    before_gate_rx.recv_timeout(Duration::from_secs(5)).expect("remove_run alcanzó la frontera de pend_gate");
+    continue_gate_tx.send(()).expect("continuar remove_run hacia pend_gate");
+
+    // El punto de cleanup es posterior a pend_gate. Mientras la solicitud sigue pausada dentro de la compuerta,
+    // que remove_run llegue aquí indicaría que ya no espera la misma compuerta.
+    let removal_bypassed_gate = match cleanup_rx.recv_timeout(Duration::from_secs(1)) {
+        Ok(()) => true,
+        Err(mpsc::RecvTimeoutError::Timeout) => false,
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("remove_run terminó antes de entrar al cleanup"),
+    };
+    release_request.wait().expect("publicar solicitud antes de resolverla");
+    let requested = request.join().unwrap();
+    assert!(requested.is_ok(), "solicitud: {requested:?}");
+    if !removal_bypassed_gate {
+        cleanup_rx.recv_timeout(Duration::from_secs(5)).expect("remove_run alcanza el cleanup al adquirir pend_gate");
+    }
+    continue_cleanup_tx.send(()).expect("continuar remove_run al commit");
+    removal.join().unwrap().unwrap();
+
+    let events = desde(&e.core, before);
+    assert!(!removal_bypassed_gate, "remove_run no debe limpiar ni resolver mientras spawn_request conserva pend_gate");
+    assert_eq!(kinds(&events), vec!["spawn.requested", "spawn.resolved", "run.removed"]);
+    assert_eq!(pl(&events[1])["outcome"], "cancelled_run_removed");
+    assert_eq!(events[1].state_rev, events[2].state_rev, "cancelación y run.removed comparten una mutación");
+    let visible_order: Vec<&str> = e
+        .host
+        .calls()
+        .iter()
+        .filter_map(|call| match call {
+            RecordedCall::Event(name, _) if name == EV_PENDING => Some("pending"),
+            RecordedCall::Event(name, _) if name == EV_RESOLVED => Some("resolved"),
+            RecordedCall::Notification(_, _) => Some("notification"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(visible_order, vec!["pending", "notification", "resolved"], "el aviso no puede aparecer después de resolver el pending");
+    assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Expired));
+    assert_eq!(e.host.notifications().len(), 1);
+}
+
+#[test]
+fn spawn_request_no_inserta_pending_ni_avisa_si_falla_la_persistencia() {
+    let e = setup("spawn-request-persist-fail");
+    e.core.mutate(|tx| {
+        tx.task_mut(&e.root)?.project_id = None;
+        Ok(())
+    }).unwrap();
+    e.core.settings.lock().unwrap().notify_questions = true;
+    e.host.clear_events();
+    let before = head(&e.core);
+    e.core.degrade_for_tests("fallo de persistencia preparado");
+
+    let result = e.core.rpc(
+        Caller::Agent(Some(e.root.clone())),
+        "",
+        "spawn",
+        &json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true }),
+    );
+    let error = result.expect_err("la solicitud no puede tener éxito si `spawn.requested` no se persiste");
+    assert!(error.contains("fallo de persistencia preparado"), "debe fallar al persistir `spawn.requested`, no antes: {error}");
+    assert!(e.core.list_pending_spawns().is_empty(), "persistencia fallida no deja pendiente en memoria");
+    assert!(desde(&e.core, before).is_empty(), "no hay hecho parcial");
+    let events = e.host.events();
+    assert!(!events.iter().any(|(name, _)| name == EV_PENDING || name == EV_RESOLVED));
+    assert!(e.host.notifications().is_empty(), "tampoco llega el aviso al sistema");
+}
+
+#[test]
+fn reject_y_timeout_siguen_pending_si_falla_la_persistencia_de_la_resolucion() {
+    let e = setup("spawn-resolution-persist-fail");
+    let reject_id = e.spawn(true);
+    let timeout_id = e.spawn(true);
+    e.core.expire_pending_for_test(&timeout_id);
+    e.host.clear_events();
+    let before = head(&e.core);
+    e.core.degrade_for_tests("fallo de persistencia preparado");
+
+    let rejected = e.core.reject_spawn(&reject_id, true, Some("no"));
+    let rejection_error = rejected.expect_err("el rechazo no cambia memoria si no queda durable");
+    assert!(rejection_error.contains("fallo de persistencia preparado"), "el rechazo debe fallar en la persistencia: {rejection_error}");
+    e.core.sweep_pending();
+    assert_eq!(e.estado_pendiente(&reject_id), Some(PendState::Pending));
+    assert_eq!(e.estado_pendiente(&timeout_id), Some(PendState::Pending));
+    assert!(desde(&e.core, before).is_empty());
+    assert!(!e.host.events().iter().any(|(name, _)| name == EV_RESOLVED));
+}
+
+#[test]
+fn spawn_requested_y_resolved_cumplen_identidad_clase_actor_y_correlacion() {
+    let e = setup("spawn-event-contract");
+    let before = head(&e.core);
+    let pending_id = e.spawn(true);
+    let request = desde(&e.core, before).into_iter().find(|ev| ev.kind == "spawn.requested").unwrap();
+    assert_eq!((request.entity_kind.as_str(), request.entity_id.as_str()), ("spawn_request", pending_id.as_str()));
+    assert_eq!((request.class, request.actor_kind.as_str(), request.actor_id.as_deref(), request.channel.as_deref()),
+        (crate::store::EventClass::State, "agent", Some(e.root.as_str()), Some("lxo")));
+    assert_eq!((request.correlation_id.as_deref(), request.idem_key.as_deref(), request.run_id.as_deref(), request.project_id.as_deref()),
+        (Some(pending_id.as_str()), Some(pending_id.as_str()), Some(e.run.as_str()), Some(e.project.as_str())));
+    let requested = pl(&request);
+    assert_eq!(requested["parent_task"], e.root);
+    assert_eq!(requested["title"], "Hija");
+    assert_eq!(requested["shared"], true);
+    assert!(requested.get("argv").is_none() && requested.get("cwd").is_none() && requested.get("env").is_none());
+
+    let before_resolution = head(&e.core);
+    e.core.reject_spawn(&pending_id, true, Some("motivo no exportado")).unwrap();
+    let resolution = desde(&e.core, before_resolution).into_iter().find(|ev| ev.kind == "spawn.resolved").unwrap();
+    assert_eq!((resolution.entity_kind.as_str(), resolution.entity_id.as_str()), ("spawn_request", pending_id.as_str()));
+    assert_eq!((resolution.class, resolution.actor_kind.as_str(), resolution.actor_id.as_deref(), resolution.channel.as_deref()),
+        (crate::store::EventClass::Decision, "person", None, Some("ui")));
+    assert_eq!((resolution.correlation_id.as_deref(), resolution.idem_key.as_deref(), resolution.run_id.as_deref(), resolution.project_id.as_deref()),
+        (Some(pending_id.as_str()), Some(pending_id.as_str()), Some(e.run.as_str()), Some(e.project.as_str())));
+    assert_eq!(pl(&resolution), json!({ "outcome": "rejected", "has_reason": true }));
+}
+
+#[test]
+fn timeout_se_persiste_como_outcome_timeout_y_no_expired() {
+    let e = setup("spawn-timeout-event-contract");
+    let pending_id = e.spawn(true);
+    e.core.expire_pending_for_test(&pending_id);
+    let before = head(&e.core);
+    e.core.sweep_pending();
+    let events = desde(&e.core, before);
+    assert_eq!(kinds(&events), vec!["spawn.resolved"]);
+    assert_eq!(pl(&events[0])["outcome"], "timeout");
+    assert_ne!(pl(&events[0])["outcome"], "expired");
+}
+
+#[test]
+fn resolucion_standalone_conserva_el_project_id_capturado_en_el_pendiente() {
+    let e = setup("spawn-standalone-project");
+    let pending_id = e.spawn(true);
+    let p = e.core.list_pending_spawns().into_iter().find(|p| p.pending_id == pending_id).expect("pending persistido");
+    assert_eq!(p.project_id.as_deref(), Some(e.project.as_str()));
+    let before = head(&e.core);
+    let fact = super::tx_ops::spawn_resolution_fact(
+        &MutationContext::core(),
+        &p,
+        super::event_kinds::SpawnOutcome::CoordinatorClosed,
+        None,
+        false,
+    )
+    .unwrap();
+    e.core.record_facts(&MutationContext::core(), vec![fact]).unwrap();
+    let events = desde(&e.core, before);
+    assert_eq!(kinds(&events), vec!["spawn.resolved"]);
+    assert_eq!(events[0].project_id.as_deref(), Some(e.project.as_str()));
+}
+
+#[test]
+fn remove_run_degradado_no_mata_terminales_ni_borra_el_run() {
+    let e = setup("remove-run-degraded-preflight");
+    let dir = pruebas::carpeta("remove-run-degraded");
+    let term = pruebas::lanza(&dir, false).unwrap();
+    let pid = pruebas::ultimo_pid().expect("proceso simulado");
+    e.core.register_term(&e.root, term).unwrap();
+    e.core.degrade_for_tests("fallo de almacenamiento preparado");
+
+    let result = e.core.rpc(Caller::User, "", "remove_run", &json!({ "run": e.run }));
+    assert!(result.is_err(), "no se quita un run con el Core degradado: {result:?}");
+    assert!(pruebas::vivo(pid), "el terminal no se mata antes del rechazo");
+    assert!(e.core.terms.lock().unwrap().contains_key(&e.root));
+    assert!(e.core.lock().runs.contains_key(&e.run));
+    assert!(e.core.lock().tasks.contains_key(&e.root));
+
+    e.core.kill_term(&e.root);
+    assert!(pruebas::espera_muerto(pid));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn coordinator_closed_y_remove_run_persisten_outcomes_canónicos() {
+    let closed = setup("spawn-coordinator-closed-event");
+    let closed_id = closed.spawn(true);
+    let before_closed = head(&closed.core);
+    closed.core.lock_unpersisted().close(&closed.root, Status::Exited, "coordinador terminó").unwrap();
+    closed.core.sweep_pending();
+    let closed_events = desde(&closed.core, before_closed);
+    let closed_resolution = closed_events.iter().find(|ev| ev.kind == "spawn.resolved").expect("resolución durable");
+    assert_eq!(pl(closed_resolution)["outcome"], "coordinator_closed");
+    assert_eq!((closed_resolution.entity_id.as_str(), closed_resolution.actor_kind.as_str(), closed_resolution.channel.as_deref()),
+        (closed_id.as_str(), "system", Some("core")));
+
+    let removed = setup("spawn-cancelled-run-event");
+    let removed_id = removed.spawn(true);
+    let before_removed = head(&removed.core);
+    removed.core.rpc(Caller::User, "", "remove_run", &json!({ "run": removed.run })).unwrap();
+    let removed_events = desde(&removed.core, before_removed);
+    assert_eq!(kinds(&removed_events), vec!["spawn.resolved", "run.removed"]);
+    let cancellation = &removed_events[0];
+    assert_eq!(pl(cancellation)["outcome"], "cancelled_run_removed");
+    assert_eq!(cancellation.entity_id, removed_id);
+    assert_eq!(cancellation.state_rev, removed_events[1].state_rev, "resolución y borrado son la misma mutación");
+    assert!(removed.core.lock().decisions.iter().all(|decision| decision.kind != "spawn"));
 }

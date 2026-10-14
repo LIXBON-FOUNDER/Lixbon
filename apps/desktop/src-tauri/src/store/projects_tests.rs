@@ -190,7 +190,11 @@ fn archivar_oculta_sin_borrar_y_se_puede_restaurar() {
     assert_eq!(s.project_locations(Some(&a.id)).unwrap().len(), 1, "su historial de ubicaciones sigue");
     assert!(s.project(&a.id).unwrap().unwrap().archived);
     assert!(s.project_set_archived(&a.id, false).unwrap());
-    assert_eq!(s.projects(false).unwrap().iter().map(|p| p.id.clone()).collect::<Vec<_>>(), vec![a.id.clone(), b.id.clone()], "orden de creación");
+    let listed = s.projects(false).unwrap();
+    let mut expected = vec![(a.created_at, a.id.clone()), (b.created_at, b.id.clone())];
+    expected.sort();
+    let actual: Vec<_> = listed.iter().map(|p| (p.created_at, p.id.clone())).collect();
+    assert_eq!(actual, expected, "orden estable por created_at y UUID v7");
     assert!(!s.project_set_archived("no-existe", true).unwrap());
 }
 

@@ -134,6 +134,22 @@ fn una_hija_produce_unicamente_task_created_y_hereda_el_proyecto() {
 }
 
 #[test]
+fn solo_task_created_de_la_hija_lleva_la_correlacion_del_pending() {
+    let (_l, _d, core) = core_listo();
+    let (_run, root, _a, _b) = escenario(&core);
+    let pending_id = "sp-correlation-only";
+    let (r, evs) = paso(&core, |tx| {
+        let child = tx.add_child_for_spawn(&root, 2, nt("hija"), pending_id)?;
+        tx.mark_running(&child)?;
+        Ok(child)
+    });
+    assert!(r.is_ok());
+    assert_eq!(kinds(&evs), vec!["task.created", "task.status_changed"]);
+    assert_eq!(evs[0].correlation_id.as_deref(), Some(pending_id));
+    assert_eq!(evs[1].correlation_id, None, "ningún otro evento hereda la correlación del pending");
+}
+
+#[test]
 fn el_proyecto_se_resuelve_al_finalizar_aunque_se_complete_despues_de_crear_el_run() {
     let (_l, _d, core) = core_listo();
     // Como `run_create`: crea el run y SOLO DESPUÉS completa `project_id`, antes del commit.
@@ -1007,16 +1023,14 @@ fn todo_fallo_del_registro_tras_un_efecto_se_anota_y_no_deja_estado_ni_eventos()
 }
 
 #[test]
-fn spawn_outcome_solo_va_al_diario_y_no_emite_ni_correlaciona() {
+fn spawn_outcome_ya_no_es_un_efecto_aprobar_rechazar_o_vencer_no_son_efectos_externos() {
     let (_l, _d, core) = core_listo();
     let (_run, _root, a, _b) = escenario(&core);
     let efecto = Effect::new("spawn_approval", "spawn_outcome").task(&a).observed(json!({ "launched_task": null }));
-    let antes = head(&core);
-    core.acting(persona_ui())
-        .mutate_after_effect(efecto, |tx| tx.record_decision(&a, "spawn", "human", &json!({ "pending_id": "p", "outcome": "approved" })).map(|_| ()))
-        .unwrap();
-    assert!(desde(&core, antes).is_empty(), "spawn_outcome: evento cero");
-    assert_eq!(core.lock().decisions.iter().filter(|d| d.kind == "spawn").count(), 1, "pero el registro sí se confirmó");
+    let (antes, filas) = (head(&core), core.lock().decisions.len());
+    let r = core.acting(persona_ui()).mutate_after_effect(efecto, |_tx| Ok(()));
+    assert!(matches!(&r, Err(m) if m.contains("fuera del contrato")), "{r:?}");
+    assert_eq!((head(&core), core.lock().decisions.len()), (antes, filas), "ni evento ni fila");
 }
 
 fn con_remoto(dir: &Path) -> PathBuf {
@@ -1141,8 +1155,7 @@ fn liberar_solo_observa_un_efecto_si_se_borro_un_worktree_o_una_rama() {
 
 #[test]
 fn el_frontera_de_efectos_solo_conoce_los_kinds_del_contrato_y_los_efectos_reales_de_produccion() {
-    use super::event_kinds::{EffectObserved, EFFECT_KINDS_WITHOUT_EVENT};
-    assert_eq!(EFFECT_KINDS_WITHOUT_EVENT, ["spawn_outcome"], "la excepción es única y explícita");
+    use super::event_kinds::EffectObserved;
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     let mut pares = Vec::new();
     for entrada in std::fs::read_dir(&dir).unwrap() {
@@ -1227,23 +1240,53 @@ fn dos_revisiones_legitimas_consecutivas_producen_dos_eventos_distintos() {
 }
 
 #[test]
-fn spawn_conserva_su_fila_legacy_pero_no_emite_evento() {
+fn record_decision_rechaza_spawn_su_unica_via_es_record_spawn_resolution() {
     let (_l, _d, core) = core_listo();
     let (_run, _root, a, _b) = escenario(&core);
     let detalle = json!({ "pending_id": "p-1", "outcome": "approved", "argv": ["--secreto"] });
-    // Aprobado por la persona desde la interfaz.
-    let antes = (head(&core), core.lock().decisions.len());
+    let (filas, antes) = (core.lock().decisions.len(), head(&core));
+    // Ni la persona desde la interfaz…
     let (r, evs) = decide(&core, &a, "spawn", detalle.clone());
-    let id = r.unwrap();
-    assert!(evs.is_empty(), "spawn.resolved lo representará en su bloque: {evs:?}");
-    assert_eq!(core.lock().decisions.len(), antes.1 + 1);
-    assert_eq!(core.lock().decisions.iter().find(|d| d.id == id).map(|d| d.kind.as_str()), Some("spawn"));
-    assert_eq!(head(&core), antes.0);
-    // Caducado por el Core: sistema / core.
-    let (r, evs) = paso_como(&core, &MutationContext::core(), |tx| tx.record_decision(&a, "spawn", "system", &detalle));
-    r.unwrap();
+    rechazada(&r, "record_spawn_resolution");
     assert!(evs.is_empty());
-    assert_eq!(core.lock().decisions.len(), antes.1 + 2);
+    // …ni el Core.
+    let (r, evs) = paso_como(&core, &MutationContext::core(), |tx| tx.record_decision(&a, "spawn", "system", &detalle));
+    rechazada(&r, "record_spawn_resolution");
+    assert!(evs.is_empty());
+    assert_eq!((core.lock().decisions.len(), head(&core)), (filas, antes), "ni fila ni evento");
+}
+
+#[test]
+fn record_spawn_resolution_no_duplica_decision_para_el_mismo_pending_id() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, parent, _other) = escenario(&core);
+    let pending_id = "sp-duplicate-resolution";
+    let detail = json!({ "pending_id": pending_id, "outcome": "rejected" });
+    let resolution = super::tx_ops::SpawnResolution {
+        pending_id,
+        parent_task: &parent,
+        outcome: super::event_kinds::SpawnOutcome::Rejected,
+        task: None,
+        has_reason: true,
+        legacy: Some(("human", &detail)),
+    };
+    let first = core.mutate_as(&persona_ui(), |tx| tx.record_spawn_resolution(&resolution)).unwrap();
+    assert!(matches!(first, super::tx_ops::SpawnRecorded::Recorded(Some(_))));
+    let (rev_before, seq_before) = (core.storage.confirmed_rev().unwrap(), head(&core));
+
+    let second = core.mutate_as(&persona_ui(), |tx| {
+        match tx.record_spawn_resolution(&resolution)? {
+            super::tx_ops::SpawnRecorded::Duplicate => {
+                tx.no_change();
+                Ok("duplicate")
+            }
+            super::tx_ops::SpawnRecorded::Recorded(_) => Ok("recorded twice"),
+        }
+    }).unwrap();
+    assert_eq!(second, "duplicate");
+    assert_eq!(core.storage.confirmed_rev().unwrap(), rev_before, "el duplicado no confirma otra mutación");
+    assert_eq!(head(&core), seq_before, "el duplicado no emite otro evento");
+    assert_eq!(core.lock().decisions.iter().filter(|d| d.kind == "spawn").count(), 1, "una sola Decision(spawn) por pending_id");
 }
 
 #[test]
@@ -1329,11 +1372,6 @@ fn la_validacion_de_actor_exige_coherencia_con_la_fila_y_una_persona_en_la_inter
     }
     assert_eq!((core.lock().decisions.len(), head(&core)), (filas, antes), "ningún rechazo deja fila ni evento");
 
-    // No es una regla global `Decision => Person`: spawn puede decidir el sistema (caducidad) o una persona.
-    let spawn = json!({ "pending_id": "p", "outcome": "expired" });
-    core.mutate_as(&MutationContext::core(), |tx| tx.record_decision(&a, "spawn", "system", &spawn)).unwrap();
-    core.mutate_as(&persona_ui(), |tx| tx.record_decision(&a, "spawn", "human", &spawn)).unwrap();
-
     // El adaptador de pruebas por defecto es el Core: ahí una decisión humana se rechaza, no se tolera.
     let st = Mutex::new(State::default());
     let (_run, tarea) = st.mutate(|tx| Ok(tx.create_run("obj", nt("raiz")))).unwrap();
@@ -1347,9 +1385,7 @@ fn la_validacion_de_actor_exige_coherencia_con_la_fila_y_una_persona_en_la_inter
 }
 
 #[test]
-fn todo_kind_del_vocabulario_o_emite_exactamente_un_evento_o_esta_en_la_excepcion_explicita() {
-    use super::event_kinds::DECISION_KINDS_WITHOUT_EVENT;
-    assert_eq!(DECISION_KINDS_WITHOUT_EVENT, ["spawn"], "la excepción es única y explícita");
+fn todo_kind_del_vocabulario_emite_exactamente_un_evento_salvo_spawn_que_tiene_su_propio_mutador() {
     let (_l, _d, core) = core_listo();
     let (_run, _root, a, _b) = escenario(&core);
     for kind in super::vocab::DECISION_KIND {
@@ -1361,9 +1397,13 @@ fn todo_kind_del_vocabulario_o_emite_exactamente_un_evento_o_esta_en_la_excepcio
             otro => panic!("kind nuevo del vocabulario sin instrumentar ni excluir explícitamente: {otro}"),
         };
         let (r, evs) = decide(&core, &a, kind, detalle);
+        if kind == "spawn" {
+            rechazada(&r, "record_spawn_resolution");
+            assert!(evs.is_empty());
+            continue;
+        }
         r.unwrap();
-        let esperados = if DECISION_KINDS_WITHOUT_EVENT.contains(&kind) { 0 } else { 1 };
-        assert_eq!(evs.len(), esperados, "{kind}");
+        assert_eq!(evs.len(), 1, "{kind}");
     }
 }
 
@@ -1490,7 +1530,7 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let prohibido: [(&str, &[&str]); 16] = [
         // Dos únicos importadores del catálogo: los mutadores de `Tx` y el registro de proyectos (`project_ops.rs`).
         ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs"]),
-        ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs"]),
+        ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs", "tx_ops.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
         ("task_status_changed(", &["event_kinds.rs", "tx_ops.rs"]),
         ("run_created(", &["event_kinds.rs", "tx_ops.rs"]),

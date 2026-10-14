@@ -8,11 +8,14 @@
 //!
 //! - Vencimiento: `DEFAULT_TTL_SECS` (10 min) o la variable de entorno
 //!   `LIXBON_SPAWN_APPROVAL_TTL_SECS` (segundos, mínimo 10) al arrancar Lixbon.
-//! - Los pendientes viven solo en memoria: al reiniciar la app no existen y un
-//!   id desconocido se responde como `expired`.
-//! - Si el coordinador termina, o su run se cierra o se elimina, sus pendientes
-//!   vencen (`expired`, actor `system`).
-//! - Una sola decisión por `pending_id` en `state.json` (`kind = "spawn"`).
+//! - Los pendientes viven solo en memoria: al reiniciar la app no se reconstruyen ni se reconcilian todavía; ese
+//!   trabajo durable se sigue por separado. Un id desconocido se responde como `expired`.
+//! - Si el coordinador termina, o su run se cierra, sus pendientes vencen (`expired` para el agente;
+//!   `coordinator_closed` en el Event Log, actor `system`); al caducar el plazo, `timeout`. Si el run se elimina,
+//!   `cancelled_run_removed` en la misma mutación que `run.removed`.
+//! - Una sola decisión por `pending_id` en `state.json` (`kind = "spawn"`) y UN `spawn.resolved` en el Event Log.
+//! - Event Log: `spawn.requested` se persiste ANTES de crear el pendiente en memoria y `spawn.resolved` ANTES de
+//!   cambiar su estado en memoria (ver `Core::gate`). `expired` solo existe en esta API; no es un outcome del log.
 //! - El argv que manda la UI al aprobar solo se compara: el host lanza siempre
 //!   el argv que él mismo vuelve a resolver. Si no coincide, no se lanza nada,
 //!   no se crea tarea y el pendiente **sigue pendiente** (la persona puede
@@ -25,7 +28,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::events::{Channel, MutationContext};
-use super::mutation::{Effect, StateAccess};
+use super::mutation::Health;
+use super::tx_ops::{spawn_requested_fact, spawn_resolution_fact, SpawnOutcome, SpawnRecorded, SpawnResolution};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
 
 pub const DEFAULT_TTL_SECS: u64 = 10 * 60;
@@ -46,6 +50,9 @@ pub struct PendingSpawn {
     pub pending_id: String,
     pub parent_task: String,
     pub run: String,
+    /// Se conserva para emitir la resolución standalone si el padre ya no está en el estado confirmado.
+    #[serde(skip)]
+    pub project_id: Option<String>,
     pub provider: String,
     /// Igual que `provider` (la CLI que se lanza), con el nombre que usa la UI.
     pub agent: String,
@@ -107,8 +114,45 @@ impl Core {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    #[cfg(test)]
+    pub(super) fn expire_pending_for_test(&self, pending_id: &str) {
+        if let Some(entry) = self.pend().get_mut(pending_id) {
+            entry.p.expires_at = 0;
+        }
+    }
+
+    /// Serializa las TRANSICIONES de un pendiente (solicitar, aprobar, resolver, vencer, quitar un run) y el
+    /// snapshot de limpieza de `remove_run`. La aprobación conserva la compuerta durante `create_child` para que
+    /// esa limpieza no omita una hija que se está creando. Orden de bloqueos: compuerta → estado → almacén →
+    /// `pending`; nadie toma la compuerta con el estado o el almacén ya tomados.
+    ///
+    /// Es lo que hace fiable el orden frente a `remove_run`: o `spawn.requested` queda persistido y el pendiente
+    /// en memoria ANTES de que `remove_run` tome su instantánea (y entonces se cancela con el run), o `remove_run`
+    /// termina primero y la revalidación del padre rechaza la solicitud. Sin compuerta, una solicitud persistida
+    /// entre la instantánea y el COMMIT quedaría sin resolver.
+    fn gate(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.pend_gate.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// El padre sigue vivo: existe, es del mismo run, no está final y el run existe y no está cerrado.
+    fn check_parent_live(&self, p: &PendingSpawn) -> Result<(), String> {
+        let st = self.lock();
+        let vivo = st.tasks.get(&p.parent_task).is_some_and(|t| t.run == p.run && !t.status.is_final()) && st.runs.get(&p.run).is_some_and(|r| !r.closed);
+        if vivo {
+            Ok(())
+        } else {
+            Err("Tu run está cerrado o tu tarea ya terminó: no se pueden lanzar hijas".into())
+        }
+    }
+
     /// `spawn` de un agente: valida, resuelve la política y deja el lanzamiento pendiente.
-    pub(super) fn spawn_request(self: &Arc<Self>, caller: &Caller, args: &Value) -> Result<Value, String> {
+    ///
+    /// Orden obligatorio, con la compuerta tomada:
+    /// `plan → revalidar el padre → record_facts(spawn.requested) → insertar el pendiente → EV_PENDING / aviso`.
+    /// Si el hecho no se puede persistir (también con el Core en solo lectura) no existe pendiente en memoria,
+    /// ni aviso, ni lanzamiento posible. Si el padre se perdió en la carrera con `remove_run` o con un cierre, no
+    /// se persiste nada: nunca existió una solicitud durable.
+    pub(super) fn spawn_request(self: &Arc<Self>, channel: Channel, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
         let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
         if policy.status == agents::Status::Blocked {
@@ -120,10 +164,20 @@ impl Core {
         p.policy = policy;
         p.created_at = now;
         p.expires_at = now + self.ttl_ms;
-        let ev = json!(p);
-        self.pend().insert(p.pending_id.clone(), Entry { p: p.clone(), state: PendState::Pending, decision: None, resolved_at: None });
-        self.emit(EV_PENDING, &ev);
-        self.notify_pending(&p);
+        let ctx = MutationContext::agent(p.parent_task.clone(), channel);
+        self.spawn_hook(super::spawn::SpawnStep::BeforeRequestRevalidation, &p.parent_task)?;
+        {
+            let _gate = self.gate();
+            self.check_parent_live(&p)?;
+            let fact = spawn_requested_fact(&ctx, &p)?;
+            self.record_facts(&ctx, vec![fact]).map_err(String::from)?;
+            self.pend().insert(p.pending_id.clone(), Entry { p: p.clone(), state: PendState::Pending, decision: None, resolved_at: None });
+            // La fila durable, el estado en memoria, el evento de UI y el aviso quedan serializados contra
+            // reject/sweep/approve: nunca se publica una tarjeta después de su resolución.
+            self.spawn_hook(super::spawn::SpawnStep::AfterRequestPersistBeforeEmit, &p.pending_id)?;
+            self.emit(EV_PENDING, &json!(p));
+            self.notify_pending(&p);
+        }
         Ok(json!({
             "status": "pending", "pending_id": p.pending_id, "expires_at": p.expires_at,
             "provider": p.provider, "profile": p.profile, "role": p.role, "title": p.title,
@@ -154,7 +208,7 @@ impl Core {
         };
         PendingSpawn {
             integrate_into: (!f.shared).then(|| super::integrate_target(&parent.cwd)),
-            pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
+            pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), project_id: parent.project_id.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
             env: if f.shared { worktree_env::Plan::default() } else { worktree_env::plan(&parent.repo) },
             policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None },
@@ -202,34 +256,41 @@ impl Core {
         })).unwrap_or(Value::Null)
     }
 
-    /// Registra la decisión (una por pending_id) y avisa. Si la tarea padre ya no
-    /// existe (run eliminado) no hay fila a la que colgarla: no se registra.
-    fn finish(&self, p: &PendingSpawn, actor: &str, outcome: &str, task: Option<&Value>, reason: Option<&str>, launch_error: Option<&str>) -> Option<u64> {
-        let decided_at = state::now_ms();
-        // El lanzamiento (o su rechazo) ya ocurrió: la decisión se registra con una
-        // mutación posterior y, si no se puede, queda anotada para reconciliar.
-        let effect = Effect::new("spawn_approval", "spawn_outcome").task(&p.parent_task)
-            .expected(json!({ "record": "decision spawn", "pending_id": p.pending_id, "outcome": outcome }))
-            .observed(json!({ "launched_task": task.and_then(|t| t["task"].as_str()), "launch_error": launch_error }));
+    /// Persiste la resolución de `p` (ANTES de cambiar nada en memoria) y devuelve el id de la fila legacy si la
+    /// hubo. Con la tarea padre viva: una sola mutación con la fila `Decision(spawn)` y `spawn.resolved`
+    /// (`Tx::record_spawn_resolution`); si ya existía una fila para ese `pending_id` no se añade otra. Con el padre
+    /// ya desaparecido no hay fila ni estado que cambiar: el hecho va standalone (`record_facts`). NO es un
+    /// efecto externo: aprobar, rechazar o vencer se registra con una mutación normal, no con `mutate_after_effect`.
+    fn persist_resolution(&self, p: &PendingSpawn, r: &Resolution<'_>) -> Result<Option<u64>, String> {
         // Quién resuelve: la persona desde la interfaz, o el propio Core al vencer el pendiente.
-        let ctx = if actor == "system" { MutationContext::core() } else { MutationContext::person(Channel::Ui) };
-        self.acting(ctx).mutate_after_effect(effect, |st| {
-            let exists = st.tasks.contains_key(&p.parent_task);
-            let dup = st.decisions.iter().any(|d| d.kind == "spawn"
-                && d.detail_json.as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()).is_some_and(|v| v["pending_id"] == p.pending_id.as_str()));
-            if !exists || dup {
-                return Ok(None);
+        let ctx = if r.outcome.decided_by_person() { MutationContext::person(Channel::Ui) } else { MutationContext::core() };
+        if !self.lock().tasks.contains_key(&p.parent_task) {
+            let fact = spawn_resolution_fact(&ctx, p, r.outcome, r.task, r.has_reason)?;
+            return self.record_facts(&ctx, vec![fact]).map(|_| None).map_err(String::from);
+        }
+        let detail = json!({
+            "pending_id": p.pending_id, "parent_task": p.parent_task, "profile": p.profile, "argv": p.policy.argv,
+            "policy_status": p.policy.status, "outcome": r.legacy_outcome, "created_at": p.created_at, "decided_at": state::now_ms(),
+            "task": r.task, "reason": r.reason, "launch_error": r.launch_error,
+        });
+        self.mutate_as(&ctx, |tx| {
+            let res = SpawnResolution {
+                pending_id: &p.pending_id,
+                parent_task: &p.parent_task,
+                outcome: r.outcome,
+                task: r.task,
+                has_reason: r.has_reason,
+                legacy: Some((r.actor, &detail)),
+            };
+            match tx.record_spawn_resolution(&res)? {
+                SpawnRecorded::Recorded(id) => Ok(id),
+                SpawnRecorded::Duplicate => {
+                    tx.no_change();
+                    Ok(None)
+                }
             }
-            // La fila `spawn` se conserva; `Tx::record_decision` no emite evento para ella (spawn.resolved).
-            let id = st.record_decision(&p.parent_task, "spawn", actor, &json!({
-                "pending_id": p.pending_id, "parent_task": p.parent_task, "profile": p.profile, "argv": p.policy.argv,
-                "policy_status": p.policy.status, "outcome": outcome, "created_at": p.created_at, "decided_at": decided_at,
-                "task": task.and_then(|t| t["task"].as_str()), "reason": reason, "launch_error": launch_error,
-            }))?;
-            Ok(Some(id))
         })
-        .ok()
-        .flatten()
+        .map_err(String::from)
     }
 
     fn resolved_payload(&self, pending_id: &str, outcome: &str, task: Option<&Value>, decision: Option<u64>, reason: Option<&str>) -> Value {
@@ -266,6 +327,12 @@ impl Core {
 
     /// Aprobación de la persona. `argv` solo se compara con el que vuelve a
     /// resolver el host; se lanza siempre el del host.
+    ///
+    /// `Pending → Launching → create_child → persistir la resolución → Approved | LaunchFailed`. Con el Core en
+    /// solo lectura no se empieza (no hay efectos externos que no se puedan registrar). Si la resolución no se
+    /// puede persistir DESPUÉS de `create_child`, el pendiente se queda en `Launching`: no vuelve a `Pending`, no
+    /// admite una segunda aprobación y se devuelve el error; la reconciliación durable tras reiniciar queda fuera
+    /// de esta entrega. El hijo no se compensa aquí: `create_child` tiene sus propios contratos.
     pub fn approve_spawn(self: &Arc<Self>, pending_id: &str, confirm: bool, argv: &[String], ack_unverified: bool) -> Result<Value, String> {
         if !confirm {
             return Err("Aprobar un lanzamiento necesita la confirmación explícita de la persona (confirm: true)".into());
@@ -274,10 +341,14 @@ impl Core {
         if let Some(v) = self.already(pending_id) {
             return Ok(v);
         }
+        if let Health::DegradedReadOnly(why) = self.health() {
+            return Err(format!("El Core está en solo lectura ({why}): no se puede aprobar un lanzamiento hasta que se recupere el almacenamiento"));
+        }
         let p = self.pend().get(pending_id).map(|e| e.p.clone()).ok_or("Pendiente desaparecido")?;
         let policy = self.task_policy(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref());
         // Errores de uso (argv distinto, sin ack, bloqueado ahora): no se lanza y sigue pendiente.
         agents::authorize(&policy, Some(argv), ack_unverified)?;
+        let _gate = self.gate();
         {
             let mut pend = self.pend();
             match pend.get_mut(pending_id) {
@@ -291,79 +362,140 @@ impl Core {
                 }
             }
         }
+        self.spawn_hook(super::spawn::SpawnStep::AfterApprovalClaim, pending_id)?;
         let mut p = p;
         p.policy = policy;
         // Se lanza con el argv del host (policy.argv); launch() lo vuelve a comprobar.
         let res = self.create_child(&p, p.policy.argv.clone(), ack_unverified);
-        // La decisión de la persona fue aprobar: se registra `approved` aunque el
-        // lanzamiento falle (detail_json.launch_error); a la UI y al agente les llega
+        // La decisión de la persona fue aprobar: la fila legacy dice `approved` aunque el lanzamiento falle
+        // (detail_json.launch_error); el hecho canónico dice `launch_failed`. A la UI y al agente les llega
         // `launch_failed` con el mensaje. No se reintenta solo.
         let (state_, outcome, task, reason, launch_error) = match res {
-            Ok(task) => (PendState::Approved(task.clone()), "approved", Some(task), None, None),
+            Ok(task) => (PendState::Approved(task.clone()), SpawnOutcome::Approved, Some(task), None, None),
             Err(e) => {
                 let r = format!("Aprobado, pero no se pudo lanzar: {e}");
-                (PendState::LaunchFailed(r.clone()), "launch_failed", None, Some(r), Some(e))
+                (PendState::LaunchFailed(r.clone()), SpawnOutcome::LaunchFailed, None, Some(r), Some(e))
             }
         };
-        let decision = self.finish(&p, "human", "approved", task.as_ref(), reason.as_deref(), launch_error.as_deref());
+        let task_id = task.as_ref().and_then(|t| t["task"].as_str());
+        let resolution = Resolution {
+            outcome,
+            actor: "human",
+            legacy_outcome: "approved",
+            task: task_id,
+            reason: reason.as_deref(),
+            launch_error: launch_error.as_deref(),
+            has_reason: reason.is_some(),
+        };
+        let decision = self
+            .persist_resolution(&p, &resolution)
+            .map_err(|e| format!("El lanzamiento se ejecutó pero no se pudo registrar su resolución: {e}. Queda en curso y no se puede aprobar de nuevo; la reconciliación tras reinicio requiere trabajo posterior."))?;
         if let Some(e) = self.pend().get_mut(pending_id) {
             e.state = state_;
             e.decision = decision;
             e.resolved_at = Some(state::now_ms());
         }
-        let v = self.resolved_payload(pending_id, outcome, task.as_ref(), decision, reason.as_deref());
+        let label = if outcome == SpawnOutcome::Approved { "approved" } else { "launch_failed" };
+        let v = self.resolved_payload(pending_id, label, task.as_ref(), decision, reason.as_deref());
         self.emit(EV_RESOLVED, &v);
         Ok(v)
     }
 
+    /// Rechazo de la persona: `Pending → persistir Decision + spawn.resolved → Rejected en memoria → EV_RESOLVED`.
+    /// Si la persistencia falla sigue `Pending` y no hay `EV_RESOLVED`.
     pub fn reject_spawn(&self, pending_id: &str, confirm: bool, reason: Option<&str>) -> Result<Value, String> {
         if !confirm {
             return Err("Rechazar un lanzamiento necesita la confirmación explícita de la persona (confirm: true)".into());
         }
         self.sweep_pending();
-        let reason = reason.map(str::trim).filter(|r| !r.is_empty()).unwrap_or("Rechazado por la persona").to_string();
+        let dada = reason.map(str::trim).filter(|r| !r.is_empty());
+        let reason = dada.unwrap_or("Rechazado por la persona").to_string();
+        let _gate = self.gate();
         let p = {
-            let mut pend = self.pend();
-            match pend.get_mut(pending_id) {
-                Some(e) if e.state == PendState::Pending => {
-                    e.state = PendState::Rejected(reason.clone());
-                    e.resolved_at = Some(state::now_ms());
-                    e.p.clone()
-                }
+            let pend = self.pend();
+            match pend.get(pending_id) {
+                Some(e) if e.state == PendState::Pending => e.p.clone(),
                 _ => {
                     drop(pend);
                     return Ok(self.already(pending_id).unwrap_or(Value::Null));
                 }
             }
         };
-        let decision = self.finish(&p, "human", "rejected", None, Some(&reason), None);
+        let resolution = Resolution { outcome: SpawnOutcome::Rejected, actor: "human", legacy_outcome: "rejected", task: None, reason: Some(&reason), launch_error: None, has_reason: dada.is_some() };
+        let decision = self.persist_resolution(&p, &resolution)?;
         if let Some(e) = self.pend().get_mut(pending_id) {
+            e.state = PendState::Rejected(reason.clone());
             e.decision = decision;
+            e.resolved_at = Some(state::now_ms());
         }
         let v = self.resolved_payload(pending_id, "rejected", None, decision, Some(&reason));
         self.emit(EV_RESOLVED, &v);
         Ok(v)
     }
 
-    /// El run se elimina: sus pendientes salen de la lista y vencen sin fila de
-    /// decisión (la tarea padre desaparece con el run).
-    pub(super) fn expire_run_pending(&self, run: &str) {
+    /// `remove_run` (solo desde la interfaz): UNA mutación `person/ui` con `spawn.resolved` (`cancelled_run_removed`)
+    /// por cada pendiente del run y, al final, `run.removed` (y el borrado del run), y SOLO tras el COMMIT los
+    /// pendientes pasan a `Expired` en memoria con su `EV_RESOLVED`. Sin fila `Decision(spawn)`: el run y su tarea
+    /// padre desaparecen en la misma mutación. La captura/limpieza de terminales y worktrees, la instantánea de
+    /// pendientes y el COMMIT ocurren con la compuerta tomada, así que una aprobación concurrente queda incluida
+    /// en la limpieza o espera hasta que el run ya no exista. Si el almacenamiento ya está degradado, se rechaza
+    /// antes de iniciar el cleanup.
+    pub(super) fn remove_run_and_cancel_pending(&self, ctx: &MutationContext, run: &str) -> Result<Vec<Value>, String> {
+        self.spawn_hook(super::spawn::SpawnStep::BeforeRunRemovalGate, run)?;
+        let _gate = self.gate();
+        if let Health::DegradedReadOnly(why) = self.health() {
+            return Err(format!("El Core está en solo lectura ({why}): no se puede quitar un run hasta recuperar el almacenamiento"));
+        }
+        let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+        for id in &ids {
+            self.kill_term(id);
+        }
+        let (_, kept) = self.free_worktrees(ctx, run, false);
+        self.spawn_hook(super::spawn::SpawnStep::AfterRunRemovalCleanupSnapshot, run)?;
+        let snapshot: Vec<PendingSpawn> = {
+            let st = self.lock();
+            let mut v: Vec<PendingSpawn> = self
+                .pend()
+                .values()
+                .filter(|e| e.p.run == run && e.state == PendState::Pending && st.tasks.contains_key(&e.p.parent_task))
+                .map(|e| e.p.clone())
+                .collect();
+            v.sort_by_key(|p| p.created_at);
+            v
+        };
+        self.mutate_as(ctx, |tx| {
+            for p in &snapshot {
+                let res = SpawnResolution {
+                    pending_id: &p.pending_id,
+                    parent_task: &p.parent_task,
+                    outcome: SpawnOutcome::CancelledRunRemoved,
+                    task: None,
+                    has_reason: false,
+                    legacy: None,
+                };
+                tx.record_spawn_resolution(&res)?;
+            }
+            tx.remove_run(run);
+            Ok(())
+        })
+        .map_err(String::from)?;
         let now = state::now_ms();
-        let gone: Vec<String> = {
-            let mut pend = self.pend();
-            pend.values_mut().filter(|e| e.p.run == run && e.state == PendState::Pending).map(|e| {
+        for p in snapshot {
+            if let Some(e) = self.pend().get_mut(&p.pending_id) {
                 e.state = PendState::Expired;
                 e.resolved_at = Some(now);
-                e.p.pending_id.clone()
-            }).collect()
-        };
-        for id in gone {
-            let v = self.resolved_payload(&id, "expired", None, None, None);
+            }
+            let v = self.resolved_payload(&p.pending_id, "expired", None, None, None);
             self.emit(EV_RESOLVED, &v);
         }
+        Ok(kept)
     }
 
-    /// Vence los pendientes caducados y los de coordinadores que ya no siguen.
+    /// Vence los pendientes caducados y los de coordinadores que ya no siguen. Distingue `coordinator_closed`
+    /// (el padre ya no existe, está final o su run está cerrado: la causa más específica gana) de `timeout`
+    /// (`now >= expires_at`). Persistencia primero: `spawn.resolved` (+ fila del sistema si hay padre) y SOLO
+    /// entonces `Expired` en memoria con `EV_RESOLVED` (estado/API compatible `expired`). Si no se puede
+    /// persistir sigue `Pending` y se reintenta en el siguiente barrido.
     pub fn sweep_pending(&self) {
         let now = state::now_ms();
         let parents: HashSet<String> = self.pend().values().filter(|e| e.state == PendState::Pending).map(|e| e.p.parent_task.clone()).collect();
@@ -378,25 +510,52 @@ impl Core {
                 Some(t) => t.status.is_final() || st.runs.get(&t.run).is_none_or(|r| r.closed),
             }).collect()
         };
-        let expired: Vec<PendingSpawn> = {
+        let due: Vec<(PendingSpawn, SpawnOutcome)> = {
             let mut pend = self.pend();
             pend.retain(|_, e| e.resolved_at.is_none_or(|t| now.saturating_sub(t) < KEEP_RESOLVED_MS));
-            pend.values_mut().filter(|e| e.state == PendState::Pending && (now >= e.p.expires_at || dead.contains(&e.p.parent_task)))
-                .map(|e| {
-                    e.state = PendState::Expired;
-                    e.resolved_at = Some(now);
-                    e.p.clone()
-                }).collect()
+            pend.values()
+                .filter(|e| e.state == PendState::Pending)
+                .filter_map(|e| {
+                    if dead.contains(&e.p.parent_task) {
+                        Some((e.p.clone(), SpawnOutcome::CoordinatorClosed))
+                    } else if now >= e.p.expires_at {
+                        Some((e.p.clone(), SpawnOutcome::Timeout))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         };
-        for p in expired {
-            let decision = self.finish(&p, "system", "expired", None, None, None);
+        for (p, outcome) in due {
+            let _gate = self.gate();
+            // Otro hilo pudo resolverlo mientras esperábamos la compuerta.
+            if !matches!(self.pend().get(&p.pending_id).map(|e| &e.state), Some(PendState::Pending)) {
+                continue;
+            }
+            let resolution = Resolution { outcome, actor: "system", legacy_outcome: "expired", task: None, reason: None, launch_error: None, has_reason: false };
+            let Ok(decision) = self.persist_resolution(&p, &resolution) else { continue };
             if let Some(e) = self.pend().get_mut(&p.pending_id) {
+                e.state = PendState::Expired;
                 e.decision = decision;
+                e.resolved_at = Some(state::now_ms());
             }
             let v = self.resolved_payload(&p.pending_id, "expired", None, decision, None);
             self.emit(EV_RESOLVED, &v);
         }
     }
+}
+
+/// Cómo se resuelve una solicitud: el outcome canónico del Event Log y lo que la fila legacy conserva.
+struct Resolution<'a> {
+    outcome: SpawnOutcome,
+    /// `"human"` | `"system"`: quién dice la fila legacy.
+    actor: &'a str,
+    /// El `outcome` de la fila legacy (compatibilidad: un `launch_failed` sigue siendo «approved» con `launch_error`).
+    legacy_outcome: &'a str,
+    task: Option<&'a str>,
+    reason: Option<&'a str>,
+    launch_error: Option<&'a str>,
+    has_reason: bool,
 }
 
 pub struct NewPending {

@@ -23,8 +23,10 @@
 use std::collections::BTreeMap;
 
 use super::event_kinds as ev;
-use super::events::{Actor, Channel};
+pub(super) use super::event_kinds::SpawnOutcome;
+use super::events::{Actor, Channel, EventDraft, MutationContext};
 use super::mutation::{Effect, Tx};
+use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
 
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
@@ -85,11 +87,25 @@ impl Tx {
         (run, task)
     }
 
-    /// `task.created`. Las hijas producen únicamente éste.
+    /// `task.created`. Las hijas producen únicamente éste. En producción las hijas nacen de una solicitud de
+    /// lanzamiento ([`Tx::add_child_for_spawn`]); ésta sin correlación queda para el modelo y las pruebas.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn add_child(&mut self, parent: &str, max_depth: u32, t: NewTask) -> Result<String, String> {
         let id = self.state_mut().add_child(parent, max_depth, t)?;
         if let Some(t) = self.tasks.get(&id).cloned() {
             self.try_push_event(ev::task_created(&t));
+        }
+        Ok(id)
+    }
+
+    /// `task.created` de la hija de una solicitud de lanzamiento: lleva `correlation_id = pending_id`. Es la
+    /// ÚNICA entrada que correlaciona un evento de Task con un `pending_id`, y solo este `task.created`: ni
+    /// `task.status_changed`, ni `effect.observed` (que conserva su `effect_id`), ni `task.removed` heredan la
+    /// correlación, y `Tx` no guarda ningún «correlation actual».
+    pub(super) fn add_child_for_spawn(&mut self, parent: &str, max_depth: u32, t: NewTask, pending_id: &str) -> Result<String, String> {
+        let id = self.state_mut().add_child(parent, max_depth, t)?;
+        if let Some(t) = self.tasks.get(&id).cloned() {
+            self.try_push_event(ev::task_created(&t).map(|d| d.correlated(pending_id)));
         }
         Ok(id)
     }
@@ -212,14 +228,12 @@ impl Tx {
 
     /// Registra una decisión (fila legacy) y emite `decision.recorded`. ÚNICO sitio que construye ese
     /// evento. Orden: 1) valida la tarea, el actor y el contrato del `detail`; 2) `State::record_decision`;
-    /// 3) con el id asignado, EXACTAMENTE un borrador cuando `kind` ∈ review/merge/pr. `spawn` conserva
-    /// su fila pero no emite (lo representará `spawn.resolved`); cualquier otro `kind` rechaza la
-    /// mutación completa.
+    /// 3) con el id asignado, EXACTAMENTE un borrador. Solo review/merge/pr: `spawn` NO pasa por aquí (su
+    /// única vía es [`Tx::record_spawn_resolution`]) y cualquier otro `kind` rechaza la mutación completa.
     ///
     /// Validación de actor: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el
     /// contexto de la mutación debe ser realmente ese actor. Además, review/merge/pr son decisiones de una
-    /// PERSONA desde la interfaz (`Person / Ui`); no es una regla global de `Decision`: los lanzamientos
-    /// pendientes podrán decidir como sistema.
+    /// PERSONA desde la interfaz (`Person / Ui`).
     pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));
@@ -231,17 +245,68 @@ impl Tx {
         self.check_decision_actor(kind, actor)?;
         let facts = ev::DecisionRecorded::parse(kind, detail)?;
         let id = self.state_mut().record_decision(task, kind, actor, detail);
-        if let Some(facts) = facts {
-            let run = self.run_of(task);
-            // Dentro de `mutate_after_effect` la decisión se correlaciona con el efecto que la provocó.
-            let efecto = self.active_effect().map(String::from);
-            let draft = ev::decision_recorded(task, &run, &facts.with_id(id)).map(|d| d.by(ctx.actor, ctx.channel));
-            self.try_push_event(draft.map(|d| match efecto {
-                Some(e) => d.correlated(e),
-                None => d,
-            }));
-        }
+        let run = self.run_of(task);
+        // Dentro de `mutate_after_effect` la decisión se correlaciona con el efecto que la provocó.
+        let efecto = self.active_effect().map(String::from);
+        let draft = ev::decision_recorded(task, &run, &facts.with_id(id)).map(|d| d.by(ctx.actor, ctx.channel));
+        self.try_push_event(draft.map(|d| match efecto {
+            Some(e) => d.correlated(e),
+            None => d,
+        }));
         Ok(id)
+    }
+
+    /// Resuelve una solicitud de lanzamiento: la fila legacy `Decision(kind = "spawn")` (cuando corresponde) y
+    /// EXACTAMENTE un `spawn.resolved`, en la MISMA mutación. ÚNICO mutador autorizado para una
+    /// `Decision(spawn)`; ÚNICO sitio que construye `spawn.resolved` dentro de una mutación (el caso de la tarea
+    /// padre ya desaparecida es [`spawn_resolution_fact`]).
+    ///
+    /// Invariante `pending_id → ≤ 1 Decision legacy spawn → ≤ 1 spawn.resolved`: si ya existe una fila `spawn`
+    /// para ese `pending_id`, devuelve [`SpawnRecorded::Duplicate`] sin fila ni evento (el `DO NOTHING` de
+    /// `(kind, idem_key)` solo protege al Event; la fila legacy se protege aquí).
+    ///
+    /// * `legacy = None` es `cancelled_run_removed` (el run y la tarea padre desaparecen en la misma mutación) y
+    ///   solo ese outcome puede ir sin fila.
+    /// * Actor validado: approved / rejected / launch_failed / cancelled_run_removed los toma una persona por la
+    ///   interfaz (`person/ui`, fila `human`); timeout / coordinator_closed el Core (`system/core`, fila `system`).
+    ///   El evento se atribuye a ese contexto, capturado ahora.
+    pub(super) fn record_spawn_resolution(&mut self, r: &SpawnResolution<'_>) -> Result<SpawnRecorded, String> {
+        let (run, project) = match self.tasks.get(r.parent_task) {
+            Some(t) => (t.run.clone(), t.project_id.clone()),
+            None => return Err(format!("spawn.resolved: la tarea padre {} no existe (usa spawn_resolution_fact)", r.parent_task)),
+        };
+        let ctx = self.context().clone();
+        check_spawn_actor(r.outcome, &ctx)?;
+        match r.legacy {
+            None if r.outcome != ev::SpawnOutcome::CancelledRunRemoved => {
+                return Err(format!("spawn.resolved: {:?} exige su fila Decision(spawn); solo cancelled_run_removed va sin ella", r.outcome))
+            }
+            Some(_) if r.outcome == ev::SpawnOutcome::CancelledRunRemoved => return Err("spawn.resolved: cancelled_run_removed no deja fila Decision(spawn)".into()),
+            _ => {}
+        }
+        let mut decision = None;
+        if let Some((actor, detail)) = r.legacy {
+            let esperado = if r.outcome.decided_by_person() { "human" } else { "system" };
+            if actor != esperado {
+                return Err(format!("spawn.resolved: {:?} lo decide {esperado:?}, no {actor:?}", r.outcome));
+            }
+            if detail["pending_id"] != r.pending_id {
+                return Err(format!("spawn.resolved: el detalle de la fila no corresponde al pending_id {}", r.pending_id));
+            }
+            if self.spawn_decision_exists(r.pending_id) {
+                return Ok(SpawnRecorded::Duplicate);
+            }
+            decision = Some(self.state_mut().record_decision(r.parent_task, "spawn", actor, detail));
+        }
+        self.try_push_event(ev::spawn_resolved(r.pending_id, &run, project, r.outcome, r.task, r.has_reason).map(|d| d.by(ctx.actor, ctx.channel)));
+        Ok(SpawnRecorded::Recorded(decision))
+    }
+
+    fn spawn_decision_exists(&self, pending_id: &str) -> bool {
+        self.decisions.iter().any(|d| {
+            d.kind == "spawn"
+                && d.detail_json.as_deref().and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).is_some_and(|v| v["pending_id"] == pending_id)
+        })
     }
 
     fn check_decision_actor(&self, kind: &str, actor: &str) -> Result<(), String> {
@@ -269,14 +334,12 @@ impl Tx {
     /// frontera `mutate_after_effect`, ANTES de ejecutar el cierre de registro: por eso es el primer evento
     /// del lote. Captura el actor y el canal vigentes (un `set_context` posterior no reatribuye el efecto) y
     /// activa el `effect_id` para que las decisiones registradas dentro lo lleven como correlación. Los
-    /// demás hechos de estado NO se correlacionan. La excepción `spawn_outcome` no emite ni correlaciona.
+    /// demás hechos de estado NO se correlacionan.
     ///
     /// Un `effect_kind`/`operation` desconocido, un detalle fuera de contrato o una tarea inexistente
     /// devuelven `Err`: el registro falla y, como el efecto ocurrió, el Core lo anota en el diario.
     pub(super) fn observe_effect(&mut self, effect: &Effect) -> Result<(), String> {
-        let Some(facts) = ev::EffectObserved::parse(effect.effect_id(), effect.operation(), effect.kind(), effect.observed_value())? else {
-            return Ok(());
-        };
+        let facts = ev::EffectObserved::parse(effect.effect_id(), effect.operation(), effect.kind(), effect.observed_value())?;
         let task = effect.task_id().ok_or_else(|| format!("effect.observed: el efecto {} no declara su tarea", effect.kind()))?;
         // Pertenencia histórica congelada AHORA: el cierre que registra el efecto puede retirar la tarea.
         let (run, project) = match self.tasks.get(task) {
@@ -312,4 +375,78 @@ impl Tx {
         self.try_push_event(ev::task_removed(id, &run, project, ev::RemovalCause::LaunchFailed).map(|d| d.by(Actor::System, Channel::Core)));
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Solicitudes de lanzamiento (spawn.requested · spawn.resolved)
+// ---------------------------------------------------------------------------------------------
+
+/// Una resolución de solicitud ya decidida: lo que `Tx::record_spawn_resolution` registra.
+pub(super) struct SpawnResolution<'a> {
+    pub pending_id: &'a str,
+    pub parent_task: &'a str,
+    pub outcome: ev::SpawnOutcome,
+    /// La hija, SOLO si existe de verdad.
+    pub task: Option<&'a str>,
+    /// ¿Hay un motivo (razón del rechazo, error del lanzamiento)? El texto no viaja en el evento.
+    pub has_reason: bool,
+    /// La fila legacy `Decision(spawn)`: `(actor "human" | "system", detalle)`. `None` solo para `cancelled_run_removed`.
+    pub legacy: Option<(&'a str, &'a serde_json::Value)>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum SpawnRecorded {
+    /// Registrada: el id de la fila legacy si la hubo.
+    Recorded(Option<u64>),
+    /// Ya existía una fila `Decision(spawn)` de ese `pending_id`: no se añadió nada.
+    Duplicate,
+}
+
+fn check_spawn_actor(outcome: ev::SpawnOutcome, ctx: &MutationContext) -> Result<(), String> {
+    let ok = if outcome.decided_by_person() {
+        ctx.actor == Actor::Person && ctx.channel == Channel::Ui
+    } else {
+        ctx.actor == Actor::System && ctx.channel == Channel::Core
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "spawn.resolved: {outcome:?} lo decide {} (llegó {:?} por {:?})",
+            if outcome.decided_by_person() { "una persona por la interfaz (person/ui)" } else { "el Core (system/core)" },
+            ctx.actor,
+            ctx.channel
+        ))
+    }
+}
+
+/// `spawn.requested` listo para `Core::record_facts`: la solicitud la hace SIEMPRE un agente (el padre) por
+/// `lxo` (`Agent(parent_task) / Lxo`). Un agente sin identidad no puede solicitar un lanzamiento.
+pub(super) fn spawn_requested_fact(ctx: &MutationContext, p: &PendingSpawn) -> Result<EventDraft, String> {
+    if ctx.actor != Actor::Agent(p.parent_task.clone()) || ctx.channel != Channel::Lxo {
+        return Err(format!("spawn.requested lo solicita el agente {} por lxo (llegó {:?} por {:?})", p.parent_task, ctx.actor, ctx.channel));
+    }
+    let facts = ev::SpawnRequestFacts {
+        pending_id: &p.pending_id,
+        parent_task: &p.parent_task,
+        run: &p.run,
+        provider: &p.provider,
+        profile: &p.profile,
+        role: p.role.as_deref(),
+        model: p.model.as_deref(),
+        effort: p.effort.as_deref(),
+        title: &p.title,
+        shared: p.shared,
+        policy_status: p.policy.status,
+        expires_at: p.expires_at,
+    };
+    ev::spawn_requested(&facts).map_err(|e| e.to_string())
+}
+
+/// `spawn.resolved` de una solicitud cuya tarea padre YA no existe (el run desapareció por otra vía): no hay
+/// fila legacy a la que colgarla ni estado que cambiar, así que el hecho va standalone (`Core::record_facts`,
+/// `state_rev = NULL`). Es el único camino standalone de `spawn.resolved`; mismas reglas de actor.
+pub(super) fn spawn_resolution_fact(ctx: &MutationContext, p: &PendingSpawn, outcome: ev::SpawnOutcome, task: Option<&str>, has_reason: bool) -> Result<EventDraft, String> {
+    check_spawn_actor(outcome, ctx)?;
+    ev::spawn_resolved(&p.pending_id, &p.run, p.project_id.clone(), outcome, task, has_reason).map(|d| d.by(ctx.actor.clone(), ctx.channel)).map_err(|e| e.to_string())
 }

@@ -1,5 +1,5 @@
-//! Pruebas de `Core::record_facts` (slice E, E1b · Pending Spawn, commit A): hechos durables que NO modifican
-//! `legacy_state`. Solo infraestructura: ningún hecho de dominio los usa todavía.
+//! Pruebas de `Core::record_facts` (slice E, E1b · Pending Spawn): hechos durables que NO modifican
+//! `legacy_state`, incluidos `spawn.requested` y las resoluciones standalone.
 //!
 //! `Persistence::append` → `Persister::append` (reintentos con los mismos `NewEvent`) → `Store::append_events`
 //! (`state_rev = NULL`). No incrementa la `rev` del estado, no escribe el espejo, no publica un `State`.
@@ -331,7 +331,7 @@ fn solo_la_frontera_de_persistencia_añade_hechos_standalone() {
                 (".append_events(", &["store_boot.rs"][..]),
                 ("fn append(", &["mutation.rs", "store_boot.rs"]),
                 (".append(&finalized)", &["mutation.rs"]),
-                ("record_facts(", &["mutation.rs"]),
+                ("record_facts(", &["mutation.rs", "spawn_approval.rs"]),
             ] {
                 assert!(!l.contains(simbolo) || donde.contains(&nombre.as_str()), "{nombre}:{}: «{simbolo}» solo puede aparecer en {donde:?}", n + 1);
             }
