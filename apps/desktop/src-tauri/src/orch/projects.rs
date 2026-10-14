@@ -378,11 +378,11 @@ impl Core {
     /// hecho del `join` (`project.location_added`) llega con el siguiente commit de Projects.
     pub(super) fn project_add(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
         self.require_registry_writable()?;
+        let reg = Registration::new(ProjectOrigin::Manual, ctx)?;
         let ident = identify(&s(args, "path"))?;
         let name = Some(s(args, "name")).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| ident.name.clone());
         let (join, force_new) = (s(args, "join"), b(args, "new"));
         let counts = self.tasks_per_project().0;
-        let reg = Registration::new(ProjectOrigin::Manual, ctx);
         self.registry_write(|st| {
             let machine = machine_id_ensure(st)?;
             let new_project = |st: &mut Store| -> StoreResult<Value> {
@@ -493,8 +493,8 @@ impl Core {
     /// solo lectura es un error (no se crea nada), no un `Ok(None)`: el run tampoco se podría crear.
     pub(super) fn project_for_repo(&self, ctx: &MutationContext, repo: &str) -> Result<Option<String>, String> {
         self.require_registry_writable()?;
+        let reg = Registration::new(ProjectOrigin::Auto, ctx)?;
         let Ok(ident) = identify(repo) else { return Ok(None) };
-        let reg = Registration::new(ProjectOrigin::Auto, ctx);
         self.registry_write_opt(|st| Self::resolve_in(st, &ident, &reg))
             .map(Option::flatten)
             .map_err(|why| format!("No se pudo comprobar el registro de proyectos para {repo}: {why}. No se crea nada hasta poder comprobarlo."))
@@ -530,7 +530,7 @@ impl Core {
     pub(super) fn backfill_projects(&self, budget: Duration) -> Result<Value, String> {
         self.require_registry_writable()?;
         let ctx = MutationContext::core();
-        let reg = Registration::new(ProjectOrigin::Backfill, &ctx);
+        let reg = Registration::new(ProjectOrigin::Backfill, &ctx)?;
         let started = Instant::now();
         let mut pending: Vec<String> = vec![];
         {
@@ -590,7 +590,7 @@ impl Core {
     /// en solo lectura se rechaza entera, incluida la marca de «ya importado».
     pub(super) fn projects_import_recents(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
         self.require_registry_writable()?;
-        let reg = Registration::new(ProjectOrigin::Import, ctx);
+        let reg = Registration::new(ProjectOrigin::Import, ctx)?;
         if self.registry_read(|st| st.meta(META_RECENTS))?.is_some() {
             return Ok(json!({ "imported": 0, "existing": 0, "skipped": [], "already_done": true }));
         }

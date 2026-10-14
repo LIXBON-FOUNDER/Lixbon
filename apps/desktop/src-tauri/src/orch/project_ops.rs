@@ -23,12 +23,16 @@
 //! # Quién provoca cada origen (se valida, no se supone)
 //! | origen | actor | canal |
 //! |---|---|---|
-//! | `manual` (`project_add`) | persona | el de la superficie (`ui`) |
+//! | `manual` (`project_add`) | persona | `ui` |
 //! | `backfill` (relleno al arrancar) | sistema | `core` |
-//! | `import` (carpetas recientes) | sistema | el de la superficie (`ui`) |
-//! | `auto` (`run_create`) | quien lanza el run: persona · agente (su tarea) · sistema | el de la superficie |
+//! | `import` (carpetas recientes) | sistema | `ui` |
+//! | `auto` (`run_create`) | quien lanza el run: persona · agente (su tarea) · sistema | el de la petición (no se fija) |
 //!
-//! Un par origen/actor que no cumple la tabla rechaza el registro entero (no queda fila ni evento).
+//! La gestión explícita de Projects es solo de la interfaz: `manual` e `import` exigen `ui` (un `Person/Lxo` o
+//! un `System/Lxo` no son válidos). `auto` conserva el actor real y el canal de la petición.
+//!
+//! La tabla se valida al CONSTRUIR la [`Registration`]: sus campos son privados, así que un registro inválido
+//! no existe y se rechaza antes de entrar en el almacén (ni siquiera llega a crear `meta.machine_id`).
 //!
 //! `join` NO emite `project.registered`: el proyecto ya existía. Su hecho (`project.location_added`),
 //! archivar/restaurar y relocalizar llegan en el commit siguiente.
@@ -39,36 +43,32 @@ use super::events::{finalize_all, Actor, Channel, MutationContext};
 use super::state::now_ms;
 use crate::store::{new_project_id, Fingerprint, NewEvent, NewLocation, ProjectRow, Store, StoreError, StoreResult};
 
-/// Por qué y por quién se registra un proyecto.
+/// Por qué y por quién se registra un proyecto. Solo se construye VALIDADA ([`Registration::new`]).
 pub(super) struct Registration<'a> {
-    pub origin: ProjectOrigin,
-    pub ctx: &'a MutationContext,
+    origin: ProjectOrigin,
+    ctx: &'a MutationContext,
 }
 
 impl<'a> Registration<'a> {
-    pub(super) fn new(origin: ProjectOrigin, ctx: &'a MutationContext) -> Registration<'a> {
-        Registration { origin, ctx }
-    }
-}
-
-/// ¿Es coherente este origen con quien lo provoca? `auto` lo puede provocar cualquiera que lance un run.
-fn check_origin_actor(reg: &Registration<'_>) -> Result<(), String> {
-    let (ok, esperado) = match reg.origin {
-        ProjectOrigin::Manual => (reg.ctx.actor == Actor::Person, "una persona"),
-        ProjectOrigin::Backfill => (reg.ctx.actor == Actor::System && reg.ctx.channel == Channel::Core, "el sistema por el canal core"),
-        ProjectOrigin::Import => (reg.ctx.actor == Actor::System, "el sistema"),
-        ProjectOrigin::Auto => (true, "una persona, un agente o el sistema"),
-    };
-    if ok {
-        Ok(())
-    } else {
-        Err(format!("project.registered: el origen {:?} lo provoca {esperado}, no {:?}", reg.origin, reg.ctx.actor))
+    /// Valida el par exacto origen + actor + canal. `auto` lo puede provocar cualquiera que lance un run y
+    /// conserva el canal de la petición. Se llama ANTES de cualquier escritura (también de `machine_id`).
+    pub(super) fn new(origin: ProjectOrigin, ctx: &'a MutationContext) -> Result<Registration<'a>, String> {
+        let (ok, esperado) = match origin {
+            ProjectOrigin::Manual => (ctx.actor == Actor::Person && ctx.channel == Channel::Ui, "una persona por la interfaz (person/ui)"),
+            ProjectOrigin::Backfill => (ctx.actor == Actor::System && ctx.channel == Channel::Core, "el sistema por el canal core (system/core)"),
+            ProjectOrigin::Import => (ctx.actor == Actor::System && ctx.channel == Channel::Ui, "el sistema por la interfaz (system/ui)"),
+            ProjectOrigin::Auto => (true, "una persona, un agente o el sistema"),
+        };
+        if ok {
+            Ok(Registration { origin, ctx })
+        } else {
+            Err(format!("project.registered: el origen {origin:?} lo provoca {esperado}, no {:?} por {:?}", ctx.actor, ctx.channel))
+        }
     }
 }
 
 /// El evento `project.registered` ya finalizado. `project_id` es el de la fila que va a nacer.
 pub(super) fn registered_event(project_id: &str, name: &str, fingerprint: &Fingerprint, reg: &Registration<'_>) -> Result<NewEvent, String> {
-    check_origin_actor(reg)?;
     let draft = event_kinds::project_registered(project_id, name, fingerprint, reg.origin).map_err(|e| e.to_string())?;
     // El `project_id` va explícito en el borrador: no se consulta ninguna tarea ni el registro al finalizar.
     let mut events = finalize_all(vec![draft], reg.ctx, now_ms() as i64, &|_: &str| None)?;
