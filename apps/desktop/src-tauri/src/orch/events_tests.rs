@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use super::boot_tests::*;
 use super::events::{Actor, Channel, EntityKind, EventDraft, EventError, EventPayload, MutationContext};
-use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy, Tx};
+use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess, Tx};
 use super::state::{NewTask, Run, State};
 use super::store_boot::StorageStatus;
 use super::{Core, Orch};
@@ -379,6 +379,39 @@ fn un_reintento_de_persistencia_no_duplica_decision_recorded() {
     assert_eq!(evs.len(), 1, "exactamente un decision.recorded confirmado");
     assert_eq!((evs[0].kind.as_str(), evs[0].id.as_str()), ("decision.recorded", intentos[0][0].id.as_str()));
     assert_eq!(core.lock().decisions.iter().filter(|d| d.id == id).count(), 1, "y una sola fila");
+    assert_eq!(core.health(), Health::Normal);
+}
+
+#[test]
+fn un_reintento_de_persistencia_conserva_el_mismo_effect_id_y_no_duplica_el_efecto_ni_la_decision() {
+    let (_l, _d, _c, core) = core_listo();
+    core.set_retry_policy(RetryPolicy::with_backoffs(vec![Duration::from_millis(15); 3]));
+    let tarea = core
+        .mutate(|tx| {
+            let nueva = NewTask {
+                agent: "claude".into(), model: None, effort: None, role: None, title: "t".into(), spec: "s".into(),
+                repo: "r".into(), cwd: "c".into(), branch: None, base: None, worktree: None, external: false,
+            };
+            Ok(tx.create_run("obj", nueva).1)
+        })
+        .unwrap();
+    let antes = eventos(&core).len();
+    let w = Inyecta::instala(&core, 2, true);
+    let efecto = super::mutation::Effect::new("integrate", "git_merge")
+        .task(&tarea)
+        .observed(serde_json::json!({ "outcome": "merged", "branch": "lx/t", "result_commit": "r" }));
+    let effect_id = efecto.effect_id().to_string();
+    let detalle = serde_json::json!({ "outcome": "merged", "branch": "lx/t", "squash": false });
+    core.acting(MutationContext::person(Channel::Ui))
+        .mutate_after_effect(efecto, |tx| tx.record_decision(&tarea, "merge", "human", &detalle).map(|_| ()))
+        .unwrap();
+    let intentos = w.intentos();
+    assert_eq!(intentos.len(), 3, "dos fallos transitorios y un éxito");
+    assert!(intentos.iter().all(|i| i.len() == 2 && *i == intentos[0]), "los mismos dos eventos (id, hora, payload) en cada intento");
+    assert_eq!(intentos[0][0].idem_key.as_deref(), Some(effect_id.as_str()), "el mismo effect_id en cada intento");
+    let evs: Vec<_> = eventos(&core).into_iter().skip(antes).collect();
+    assert_eq!(evs.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), vec!["effect.observed", "decision.recorded"], "exactamente una vez, y en orden");
+    assert!(evs.iter().all(|e| e.correlation_id.as_deref() == Some(effect_id.as_str())));
     assert_eq!(core.health(), Health::Normal);
 }
 

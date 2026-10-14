@@ -123,7 +123,7 @@ impl Core {
             // El worktree ya existe: su registro es UNA mutación posterior.
             let effect = Effect::new("spawn", "git_worktree").task(&id).repo(&parent.repo)
                 .expected(json!({ "record": "task worktree, branch y cwd" }))
-                .observed(json!({ "worktree": dir, "branch": branch }));
+                .observed(json!({ "worktree": dir, "branch": branch, "base": base }));
             self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
                 let t = st.task_mut(&id)?;
                 t.env = Some(env).filter(|e| !e.is_empty());
