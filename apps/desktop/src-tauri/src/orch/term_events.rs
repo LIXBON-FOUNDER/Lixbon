@@ -129,6 +129,13 @@ impl Core {
         self.collect(id, terminal, true);
         self.record_codex_model(id, session_id.as_deref());
         let _ = self.mutate(|st| {
+            // Decide mirando el estado PREVIO: si la Task ya no existe (la retiró un cleanup) o ya estaba final, un
+            // `on_exit` tardío no tiene nada que cerrar y NO debe confirmar una mutación vacía (rev, eventos).
+            // No se deduce de `close() == Ok(None)`: una raíz puede devolverlo tras cambiar su estado.
+            if st.tasks.get(id).is_none_or(|t| t.status.is_final()) {
+                st.no_change();
+                return Ok(());
+            }
             if let Ok(Some(msg)) = st.close(id, Status::Exited, delivery::MISSING) {
                 st.notify(&[msg]);
             }
@@ -137,36 +144,45 @@ impl Core {
     }
 
     /// Mata y retira el terminal de `id` DICIENDO si pudo. `None`: no hay terminal registrado. `Some(Err)`:
-    /// no hay control fiable sobre el proceso (el matador falló o el mapa está corrupto); en ese caso el
+    /// no hay control fiable sobre el proceso (el matador falló o devolvió un estado distinto de cero); en ese caso el
     /// terminal vuelve al mapa para poder reintentarlo y NADA que dependa de que el proceso esté muerto
     /// (borrar su worktree, su tarea) debe hacerse.
+    ///
+    /// Un mapa con el lock envenenado NO impide recuperar el terminal: su guard se recupera con
+    /// `PoisonError::into_inner` (el `HashMap` sigue siendo coherente; el pánico fue de otro hilo). Si el kill
+    /// vuelve a fallar, el terminal queda otra vez almacenado: nunca se suelta un `AgentTerm` cuyo proceso
+    /// puede seguir vivo.
     pub(super) fn kill_term_checked(&self, id: &str) -> Option<Result<(), String>> {
-        let mut term = match self.terms.lock() {
-            Ok(mut m) => m.remove(id)?,
-            Err(_) => return Some(Err("Estado interno corrupto: no se puede localizar el proceso".into())),
-        };
+        let mut term = self.terms.lock().unwrap_or_else(|e| e.into_inner()).remove(id)?;
         match term.try_kill() {
             Ok(()) => Some(Ok(())),
             Err(e) => {
-                if let Ok(mut m) = self.terms.lock() {
-                    m.insert(id.to_string(), term);
-                }
+                self.terms.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), term);
                 Some(Err(e))
             }
         }
     }
 
     /// Registra el terminal recién creado. Si no se puede registrar, el proceso se MATA antes de devolver el
-    /// error: un `AgentTerm` suelto no mata al soltarse y quedaría vivo y sin dueño.
+    /// error, comprobando el resultado. Si tampoco se puede matar, el terminal NO se pierde: se guarda en el
+    /// mapa (recuperando su guard envenenado, ruta de emergencia) y el proceso sigue bajo la custodia del Core,
+    /// que conservará la Task y el worktree. Nunca se suelta un `AgentTerm` con el proceso potencialmente vivo
+    /// (no tiene `Drop` que lo mate).
     pub(super) fn register_term(&self, id: &str, mut term: super::pty::AgentTerm) -> Result<(), String> {
         match self.terms.lock() {
             Ok(mut m) => {
                 m.insert(id.to_string(), term);
                 Ok(())
             }
-            Err(_) => {
-                term.kill();
-                Err("Estado interno corrupto".into())
+            Err(poisoned) => {
+                let mut map = poisoned.into_inner();
+                match term.try_kill() {
+                    Ok(()) => Err("Estado interno corrupto: no se pudo registrar el terminal (su proceso se mató)".into()),
+                    Err(e) => {
+                        map.insert(id.to_string(), term);
+                        Err(format!("Estado interno corrupto: no se pudo registrar el terminal ni matar su proceso ({e}); queda bajo la custodia del Core"))
+                    }
+                }
             }
         }
     }

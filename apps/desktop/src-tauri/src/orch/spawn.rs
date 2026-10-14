@@ -247,13 +247,14 @@ impl Core {
         if self.health() != Health::Normal {
             return;
         }
+        let mut branch_deleted = false;
         let effect = match &a.worktree {
             Some(wt) => {
                 let dir = wt.to_string_lossy().into_owned();
                 if git::remove_worktree(&a.repo, &dir, true).is_err() {
                     return;
                 }
-                let branch_deleted = a.branch.as_ref().is_some_and(|b| git::delete_branch(&a.repo, b).is_ok());
+                branch_deleted = a.branch.as_ref().is_some_and(|b| git::delete_branch(&a.repo, b).is_ok());
                 Some(
                     Effect::new("spawn_cleanup", "git_worktree_removed").task(&a.task).repo(&a.repo)
                         .expected(json!({ "record": "worktree del intento retirado", "task_removed": removable }))
@@ -266,11 +267,17 @@ impl Core {
             if removable {
                 return tx.remove_failed_launch(&a.task);
             }
-            // La Task se conserva (ya era final o su run estaba cerrado): solo se anota que el worktree ya no existe.
+            // La Task se conserva (ya era final o su run estaba cerrado): el estado deja de afirmar lo que ya no
+            // existe. Worktree y cwd si lo conocía; la rama solo si `branch -d` la borró de verdad (si no, sigue
+            // siendo suya). No se marca `merged`: fue un lanzamiento fallido, no una integración; la identidad
+            // histórica de la rama queda en `effect.observed`.
             let t = tx.task_mut(&a.task)?;
             if t.worktree.is_some() {
                 t.worktree = None;
                 t.cwd = a.repo.clone();
+            }
+            if branch_deleted && t.branch == a.branch {
+                t.branch = None;
             }
             Ok(())
         };

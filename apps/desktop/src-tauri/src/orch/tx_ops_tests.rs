@@ -1168,6 +1168,42 @@ fn el_frontera_de_efectos_solo_conoce_los_kinds_del_contrato_y_los_efectos_reale
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// on_exit tardío: no confirma una mutación vacía
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn un_on_exit_tardio_tras_retirar_la_task_no_avanza_la_rev_ni_deja_eventos() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    core.mutate_as(&MutationContext::core(), |tx| tx.remove_failed_launch(&a)).unwrap();
+    let (rev, seq) = (core.storage.confirmed_rev().unwrap(), head(&core));
+    core.on_exit(&a);
+    assert_eq!((core.storage.confirmed_rev().unwrap(), head(&core)), (rev, seq), "ni rev ni eventos");
+}
+
+#[test]
+fn un_on_exit_con_la_task_ya_final_no_avanza_la_rev_ni_deja_eventos() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    core.mutate(|tx| tx.close(&a, Status::Stopped, "detenida").map(|_| ())).unwrap();
+    let (rev, seq) = (core.storage.confirmed_rev().unwrap(), head(&core));
+    core.on_exit(&a);
+    assert_eq!((core.storage.confirmed_rev().unwrap(), head(&core)), (rev, seq));
+}
+
+#[test]
+fn un_on_exit_de_una_task_viva_la_cierra_una_sola_vez() {
+    let (_l, _d, core) = core_listo();
+    let (_run, _root, a, _b) = escenario(&core);
+    let (rev, seq) = (core.storage.confirmed_rev().unwrap(), head(&core));
+    core.on_exit(&a);
+    assert_eq!(estado(&core, &a), Status::Exited);
+    let evs = desde(&core, seq);
+    assert_eq!(kinds(&evs), vec!["task.status_changed"], "un solo cierre");
+    assert_eq!(core.storage.confirmed_rev().unwrap(), rev.map(|r| r + 1), "y UNA sola confirmación, no una segunda vacía");
+}
+
 #[test]
 fn dos_revisiones_legitimas_consecutivas_producen_dos_eventos_distintos() {
     let (_l, _d, core) = core_listo();
