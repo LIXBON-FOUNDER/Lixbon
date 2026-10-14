@@ -224,12 +224,16 @@ impl Tx {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));
         }
+        // El actor y el canal que se VALIDAN son los que quedan en el evento: se capturan ahora y se fijan
+        // en el borrador. Los demás eventos usan el contexto vigente al finalizar (`run_create` lo cambia a
+        // mitad de mutación a propósito); una decisión no: un `set_context` posterior no la reatribuye.
+        let ctx = self.context().clone();
         self.check_decision_actor(kind, actor)?;
         let facts = ev::DecisionRecorded::parse(kind, detail)?;
         let id = self.state_mut().record_decision(task, kind, actor, detail);
         if let Some(facts) = facts {
             let run = self.run_of(task);
-            self.try_push_event(ev::decision_recorded(task, &run, &facts.with_id(id)));
+            self.try_push_event(ev::decision_recorded(task, &run, &facts.with_id(id)).map(|d| d.by(ctx.actor, ctx.channel)));
         }
         Ok(id)
     }
