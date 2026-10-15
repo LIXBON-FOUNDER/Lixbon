@@ -226,8 +226,19 @@ fn cursor_y_limit_invalidos_se_rechazan_con_su_codigo() {
     assert_eq!(e.code, Code::CursorAhead);
     assert!(lee(&core, json!({ "cursor": h.to_string(), "limit": "10" }))["limit"] == 10, "los enteros también llegan como texto decimal");
     assert_eq!(lee(&core, json!({ "limit": 100_000 }))["limit"], 500, "el límite se recorta al máximo y se informa");
+    for grande in [json!(501), json!(i64::MAX), json!(i64::MAX as u64 + 1), json!(u64::MAX), json!("9223372036854775808"), json!("18446744073709551615"), json!("00000000000000000500")] {
+        assert_eq!(lee(&core, json!({ "limit": grande }))["limit"], 500, "{grande}");
+    }
+    for fuera in [json!("18446744073709551616"), json!("100000000000000000000000"), json!(1e30)] {
+        assert_eq!(falla(&core, &Caller::User, json!({ "limit": fuera })).code, Code::InvalidLimit, "{fuera}");
+    }
+    assert_eq!(falla(&core, &Caller::User, json!({ "cursor": i64::MAX as u64 + 1 })).code, Code::InvalidCursor, "el cursor sigue acotado a i64");
+    assert_eq!(falla(&core, &Caller::User, json!({ "cursor": "9223372036854775808" })).code, Code::InvalidCursor);
+    assert_eq!(falla(&core, &Caller::User, json!({ "cursor": i64::MAX })).code, Code::CursorAhead);
     for malo in [
         json!({ "nope": 1 }),
+        json!({ "session": false }),
+        json!({ "session": true }),
         json!({ "class": "otra" }),
         json!({ "project": "" }),
         json!({ "kind": "a", "kind_prefix": "a" }),
@@ -292,12 +303,18 @@ fn el_comando_rpc_events_aplica_el_mismo_contrato_y_los_errores_llevan_su_codigo
     let data = core.rpc(Caller::User, "", "events", &json!({ "kind_prefix": "run." })).unwrap();
     assert_eq!(data["v"], 1);
     assert_eq!(kinds(&data), ["run.created", "run.created"]);
-    let de_agente = core.rpc(Caller::Agent(Some(a.hija.clone())), "", "events", &json!({ "session": false })).unwrap();
+    let de_agente = core.rpc(Caller::Agent(Some(a.hija.clone())), "", "events", &json!({})).unwrap();
     assert!(de_agente["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
     let e = core.rpc(Caller::Agent(Some(a.hija)), "", "events", &json!({ "run": b.run })).unwrap_err();
     assert!(e.starts_with("forbidden: "), "{e}");
     let e = core.rpc(Caller::User, "", "events", &json!({ "cursor": "x" })).unwrap_err();
     assert!(e.starts_with("invalid_cursor: "), "{e}");
+    for malo in [json!({ "session": false }), json!({ "session": true }), json!({ "nope": 1 }), json!({ "run": 5 }), json!({ "class": "otra" }), json!([1])] {
+        for caller in [Caller::User, Caller::Agent(Some(b.hija.clone()))] {
+            let e = core.rpc(caller, "", "events", &malo).unwrap_err();
+            assert!(e.starts_with("invalid_filter: "), "{malo}: {e}");
+        }
+    }
 }
 
 #[test]
@@ -378,6 +395,16 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_filter")));
     let r = get(h.port, "/events?cursor=999999", Some(&h.token), Some(&a.hija));
     assert_eq!((r.status, r.cuerpo["code"].clone()), (409, json!("cursor_ahead")));
+    for ruta in ["/events?session=false", "/events?session=true", "/events?nope=1", "/events?class=otra", "/events?run="] {
+        let r = get(h.port, ruta, Some(&h.token), Some(&a.hija));
+        assert_eq!((r.status, r.cuerpo["code"].clone(), r.cuerpo["ok"].clone()), (400, json!("invalid_filter"), json!(false)), "{ruta}");
+    }
+    let r = get(h.port, "/events?limit=18446744073709551615", Some(&h.token), Some(&a.hija));
+    assert_eq!((r.status, r.cuerpo["data"]["limit"].clone()), (200, json!(500)));
+    let r = get(h.port, "/events?limit=18446744073709551616", Some(&h.token), Some(&a.hija));
+    assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_limit")));
+    let r = get(h.port, "/events?cursor=9223372036854775808", Some(&h.token), Some(&a.hija));
+    assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_cursor")));
 
     assert_eq!(get(h.port, "/events", None, Some(&a.hija)).status, 401);
     assert_eq!(get(h.port, "/events", Some("incorrecto"), Some(&a.hija)).status, 401);
@@ -394,6 +421,23 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     assert_eq!((r.status, r.cuerpo["ok"].clone(), r.cuerpo["data"]["limit"].clone()), (200, json!(true), json!(2)));
 
     assert_eq!((core.storage.confirmed_rev().unwrap(), head(&core)), (rev_antes, head_antes), "el servidor no escribió nada");
+    h.stop();
+}
+
+#[test]
+fn la_identidad_del_agente_es_declarada_y_el_token_compartido_no_la_ata_a_una_tarea() {
+    let (_l, _d, _c, core) = core_listo();
+    let a = escena(&core, "a");
+    let b = escena(&core, "b");
+    let h = server::start(core.clone()).unwrap();
+
+    let suplantada = get(h.port, "/events?limit=500", Some(&h.token), Some(&b.hija));
+    assert_eq!(suplantada.status, 200, "limitación documentada en EVENTOS.md: sin credencial por tarea, quien tiene el token puede declarar el id de otra");
+    assert!(suplantada.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == b.run));
+    assert_ne!(a.run, b.run);
+
+    let desconocida = get(h.port, "/events", Some(&h.token), Some("t-inventada"));
+    assert_eq!((desconocida.status, desconocida.cuerpo["code"].clone()), (403, json!("forbidden")));
     h.stop();
 }
 

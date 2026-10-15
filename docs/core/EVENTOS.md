@@ -86,12 +86,12 @@ Cualquier otro método en `/events` es `405`; sin token válido, `401` (antes de
 RPC ni ruta que escriba, borre o reescriba eventos.
 
 ### Parámetros
-Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un **error**, nunca se ignora.
+Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un **error** (`invalid_filter`), nunca se ignora. La lista es cerrada: ningún otro nombre se admite, tampoco los que añaden otros comandos de `lxo` (por ejemplo `session`).
 
 | Parámetro | Significado |
 |---|---|
 | `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
-| `limit` | entero ≥ 1, por defecto `100`, máximo `500` (un valor mayor se recorta; la respuesta informa el `limit` efectivo). |
+| `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
 | `project` · `run` | igualdad con `project_id` / `run_id`. |
 | `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`core`); `entity_id` exige `entity_kind`. |
 | `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
@@ -143,7 +143,7 @@ tienen índice y el esquema no cambia en este corte; quien necesite correlaciona
 * `seq` es el `AUTOINCREMENT` de la tabla: **estrictamente creciente, nunca se reutiliza** y sobrevive a
   reinicios (el diario está en SQLite). Un cursor guardado sigue valiendo tras reiniciar el Core.
 * El cursor es el `seq` en decimal, tanto como número JSON como texto (`"cursor": "42"`). No se admiten
-  signos, espacios, decimales ni valores fuera de `i64`.
+  signos, espacios, decimales ni valores fuera de `i64` (a diferencia de `limit`, el cursor no se recorta: se rechaza).
 * Un cursor **mayor que `head_seq`** no puede venir de este Core (base restaurada o sustituida): `409 cursor_ahead`,
   para que el cliente reinicie su lectura en vez de esperar eventos que ya existen con otra identidad.
 * Un cursor válido jamás queda caducado: no hay retención ni compactación (fuera de E).
@@ -170,6 +170,14 @@ tienen índice y el esquema no cambia en este corte; quien necesite correlaciona
 * **Sin identidad** (`Caller::Agent(None)`, token pero sin tarea): `forbidden`. El token de `orch.json` identifica
   «una terminal del usuario», no «el usuario»; abrir una lectura global para quien no es una tarea es una decisión
   de autoridad que queda para el cliente CLI/F1 (identidad por credencial), no para este corte.
+* **La identidad del agente es declarada, no autenticada.** `X-Lixbon-Caller` (y el campo `caller` de
+  `POST /rpc`) lo escribe el cliente y se acepta si la tarea existe; el `Bearer` es **un único token del proceso**
+  publicado en `orch.json` (legible por el usuario, igual que el resto de procesos del usuario), sin credencial
+  por tarea. Una tarea que lea `orch.json` puede declarar el id de otra y leer su run; lo mismo ocurre ya con
+  los demás comandos de `lxo` que identifican por `caller`. El alcance por run acota lecturas por error o por rol,
+  **no es aislamiento frente a un agente hostil** y no debe presentarse como tal. Cerrarlo exige una credencial
+  por tarea emitida al lanzarla (variable de entorno privada) que el servidor compare con el `caller`; eso cambia
+  `orch.json`, `lxo` y el lanzamiento, y queda fuera de este corte. Un id inexistente sigue siendo `forbidden`.
 * Leer no escribe: no cambia `rev`, no añade eventos, no toca `state.json`.
 
 ### Seguir (follow) y sondeo
@@ -192,7 +200,8 @@ Estable en `v = 1`; cualquier cambio incompatible sube `v` del envoltorio:
 * Ruta `GET /events` y comando RPC `events` con los parámetros y errores de arriba.
 * Los 14 campos de cada evento y su significado; `seq` entero positivo estrictamente creciente.
 * Semántica de `cursor` (exclusivo), `next_cursor`, `has_more`, `head_seq`, `limit` (100/500).
-* Códigos de error y su estado HTTP; alcance por run de los agentes.
+* Códigos de error y su estado HTTP; alcance por run de los agentes (sobre identidad declarada, ver Autorización).
+* Lista cerrada de parámetros: un cliente `lxo events` no debe reenviar `session` (el helper genérico de `lxo` lo añade a las llamadas de sesión) ni ningún otro nombre.
 
 Abierto (no congelado): sentido inverso, filtros por tiempo/actor/correlación, lectura global sin tarea,
 long-poll/SSE. El contenido de cada `kind`/`payload` lo define su propio `v`.
