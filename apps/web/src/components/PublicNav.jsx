@@ -5,9 +5,7 @@ import { stripLocale } from '../i18n/paths';
 import { useAuth } from '../hooks/useAuth';
 import { useDismiss } from '../hooks/useDismiss';
 import { useT } from '../i18n/useT';
-import { useLocale } from '../i18n/LocaleContext';
-import { urlFounder } from '../lib/founder';
-import { LogoFounderScroll } from './LogoFounder';
+import { Logo } from './Logo';
 import { IconChevron, IconMenu, IconX } from './Icons';
 import { LanguageSwitch } from './LanguageSwitch';
 
@@ -33,18 +31,6 @@ function useMenu(t) {
         { to: '/status', label: t('itemStatus'), desc: t('itemStatusDesc') },
       ],
     },
-    {
-      id: 'company',
-      label: t('menuCompany'),
-      items: [
-        { to: '/about', label: t('itemAbout'), desc: t('itemAboutDesc') },
-        { to: '/team', label: t('itemLeadership'), desc: t('itemLeadershipDesc') },
-        { to: '/news', label: t('itemNews'), desc: t('itemNewsDesc') },
-        { to: '/support', label: t('itemSupport'), desc: t('itemSupportDesc') },
-        { to: '/legal/terms', label: t('itemLegal'), desc: t('itemLegalDesc') },
-      ],
-    },
-    { id: 'donate', label: t('donate'), to: '/donate' },
   ];
 }
 
@@ -55,7 +41,6 @@ export function PublicNav() {
   const ruta = stripLocale(pathname);
   const { user } = useAuth();
   const t = useT('nav');
-  const locale = useLocale();
   const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
   const [abierto, setAbierto] = useState(null);
@@ -79,7 +64,7 @@ export function PublicNav() {
   return (
     <header className={`pubnav ${scrolled ? 'is-scrolled' : ''}`} ref={navRef}>
       <div className="pubnav__in">
-        <a href={urlFounder('/', locale)} className="pubnav__logo" aria-label={t('home')}><LogoFounderScroll /></a>
+        <Link to="/chat" className="pubnav__logo" aria-label={t('home')}><Logo /></Link>
 
         <nav className="pubnav__links" aria-label={t('home')}>
           {menu.map((g) => (g.to ? (
