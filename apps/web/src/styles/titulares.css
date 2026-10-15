@@ -1,5 +1,5 @@
-/* Lancelot solo en titulares: mensajes, listas y controles siguen en Geist, que
-   se lee mejor a tamaño de interfaz. Un solo peso: siempre a 400. */
+/* Titulares de la app: peso y tracking de titular; mensajes, listas y
+   controles siguen con el peso de interfaz. */
 
 .chat-hero__title,
 .chat-header__title,
@@ -16,8 +16,8 @@
 .md h2,
 .md h3 {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: 0;
+  font-weight: var(--display-peso);
+  letter-spacing: var(--display-tracking);
 }
 
 .chat-hero__title { font-size: 46px; line-height: 1.05; }
@@ -37,9 +37,10 @@
 .remote__title { font-size: 22px; }
 .remote__empty-title { font-size: 30px; line-height: 1.12; }
 
-.md h1 { font-size: 28px; line-height: 1.15; }
-.md h2 { font-size: 23px; line-height: 1.2; }
-.md h3 { font-size: 19px; line-height: 1.25; }
+.md h1 { font-size: 26px; line-height: 1.15; }
+.md h2 { font-size: 21px; line-height: 1.2; }
+.md h3 { font-size: 17px; line-height: 1.25; }
+.md h1, .md h2, .md h3 { letter-spacing: -0.02em; }
 
 @media (max-width: 640px) {
   .chat-hero__title, .vis-hero__title { font-size: 34px; }

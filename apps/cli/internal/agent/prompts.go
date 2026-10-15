@@ -45,7 +45,7 @@ const (
 		"actualízala al completar cada uno. Si algo es ambiguo y cambia el resultado, usa `ask_user` " +
 		"antes de tocar archivos."
 
-	ToolImagesPrompt = "Imágenes de los read_file anteriores, en el mismo orden. Continúa."
+	ToolImagesPrompt = "Imágenes adjuntas por las herramientas anteriores (read_file, browser_screenshot), en el mismo orden. Continúa."
 
 	// StylePrompt va en todos los modos: los modelos pequeños llenan de emojis
 	// los títulos y las listas, y en la terminal se ven como ruido.
@@ -76,6 +76,24 @@ func CurrentDataPrompt(now time.Time) string {
 		"tiempo, busca con web_search (y lee la página con fetch_url si hace falta) ANTES de responder, y da el dato " +
 		"con su fuente. No digas que no tienes acceso a información actual ni respondas solo con el método para calcularlo."
 }
+
+// ResearchPrompt: con solo los extractos del buscador, los modelos pequeños
+// rellenan la biografía o el informe con fechas y premios inventados.
+const ResearchPrompt = "\n\n=== DATOS DE INTERNET ===\n" +
+	"Los resultados de web_search son extractos. Para fechas, cifras, nombres, cargos o premios lee la fuente con " +
+	"fetch_url y usa solo lo que dicen las fuentes leídas: si un dato no está en ellas, omítelo en vez de suponerlo. " +
+	"No repitas búsquedas casi iguales; lee una de las fuentes."
+
+// RequirementsPrompt: sin él, los modelos olvidan las restricciones del
+// usuario («sin degradados», el idioma) y añaden archivos que nadie pidió.
+const RequirementsPrompt = "\n\n=== REQUISITOS DEL USUARIO ===\n" +
+	"Antes de crear o cambiar algo, apunta en `todo`, además de los pasos, cada requisito concreto de la petición " +
+	"(idioma, colores, «sin X», tipografías, comportamiento, archivos pedidos). Cúmplelos todos y, antes de terminar, " +
+	"revísalos uno a uno contra lo que hiciste y corrige lo que falle. Escribe el contenido (textos de páginas, " +
+	"documentos) en el idioma en que te habla el usuario salvo que pida otro. No crees archivos ni funciones que no " +
+	"se pidieron salvo que hagan falta para cumplir lo pedido; lo que se resuelve con HTML y CSS (un header fijo es " +
+	"position: sticky) no lleva JavaScript. No instales dependencias ni inicies proyectos (npm init, npm install, " +
+	"pip install) que el usuario no pidió."
 
 // DeleteManyPrompt: sin el ejemplo, los modelos borran archivo por archivo.
 const DeleteManyPrompt = "\n\nPara borrar varios archivos o carpetas usa UNA sola llamada a delete_file con todas las rutas: " +

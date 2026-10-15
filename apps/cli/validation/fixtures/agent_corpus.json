@@ -6130,7 +6130,7 @@
    "TRUNCATED_PROMPT": "Tu respuesta anterior se CORTÓ a mitad porque el contenido era demasiado largo. NO reescribas el archivo entero con write_file. Usa edit_file para cambiar solo las secciones necesarias (old_text/new_text), en varios pasos pequeños si hace falta.",
    "PLAN_MODE_PROMPT": "\n\n=== MODO PLAN ===\nEstás en modo plan: SOLO puedes leer, buscar y preguntar. No escribas, edites ni borres archivos ni ejecutes comandos. Explora lo necesario y termina con un plan numerado, concreto (archivos y cambios), para que el usuario lo apruebe. Cuando lo apruebe y salga del modo plan, ejecútalo.",
    "TODO_PROMPT": "\n\nPara peticiones con varios pasos, empieza llamando a `todo` con la lista de pasos y actualízala al completar cada uno. Si algo es ambiguo y cambia el resultado, usa `ask_user` antes de tocar archivos.",
-   "TOOL_IMAGES_PROMPT": "Imágenes de los read_file anteriores, en el mismo orden. Continúa.",
+   "TOOL_IMAGES_PROMPT": "Imágenes adjuntas por las herramientas anteriores (read_file, browser_screenshot), en el mismo orden. Continúa.",
    "MAX_AGENT_STEPS": 40,
    "MAX_REPEATED_CALLS": 3
   },

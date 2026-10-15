@@ -1131,7 +1131,7 @@
 .vis-inicio .vis-top { height: auto; padding: 14px 24px; gap: 14px; }
 .vis-inicio .vis-top__logo { margin-right: 0; color: var(--ink); text-decoration: none; }
 .vis-top__div { width: 1px; height: 20px; background: rgba(var(--ink-rgb), .18); }
-.vis-inicio .vis-top__seccion { font-family: var(--font-display); font-size: 24px; font-weight: 400; line-height: 1; }
+.vis-inicio .vis-top__seccion { font-family: var(--font-display); letter-spacing: var(--display-tracking); font-size: 24px; font-weight: var(--display-peso); line-height: 1; }
 .vis-top__volver {
   display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px;
   border-radius: var(--radius); color: var(--ink-soft); font-size: 14px; text-decoration: none;

@@ -103,7 +103,15 @@ func estimator(calibrated *float64) *Estimator {
 func tools(ref string) []map[string]any {
 	switch ref {
 	case "all":
-		return toolspec.Schemas()
+		// El corpus se calculó con el catálogo base, antes del navegador: lo
+		// que fija es la cuenta, no cuántas herramientas hay.
+		var base []map[string]any
+		for _, s := range toolspec.Schemas() {
+			if name, _ := s["function"].(map[string]any)["name"].(string); !toolspec.IsBrowser(name) {
+				base = append(base, s)
+			}
+		}
+		return base
 	case "sample":
 		return toolspec.Schemas()[:3]
 	}

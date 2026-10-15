@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"slices"
+	"strings"
 )
 
 //go:embed catalog.json
@@ -67,6 +68,9 @@ func Names() []string {
 func IsReadOnly(name string) bool { return slices.Contains(cat.ReadOnly, name) }
 func IsMutating(name string) bool { return slices.Contains(cat.Mutating, name) }
 func IsEdit(name string) bool     { return slices.Contains(cat.Edit, name) }
+func IsBrowser(name string) bool {
+	return strings.HasPrefix(name, "browser_") && slices.Contains(Names(), name)
+}
 
 // ArgKeys son los campos de args por herramienta, en el orden del prompt.
 func ArgKeys(tool string) []string { return cat.ArgKeys[tool] }

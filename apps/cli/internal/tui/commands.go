@@ -43,6 +43,7 @@ var Specs = []Spec{
 	{"allow", "[comando]", "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)", "agente"},
 	{"commit", "[mensaje]", "Commit de los cambios con mensaje redactado por el modelo", "agente"},
 	{"mcp", "", "Servidores MCP conectados y sus herramientas", "agente"},
+	{"browser", "[on|off|auto|close|open <url>]", "Navegador del agente: estado, activar, cerrar o abrir para iniciar sesión", "agente"},
 	{"run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"},
 	{"workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"},
 	{"init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"},

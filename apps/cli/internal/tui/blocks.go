@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -248,7 +249,15 @@ var toolVerbs = map[string][2]string{
 	"run_command": {"Ejecutar", "Ejecutando"}, "fetch_url": {"Descargar", "Descargando"}, "web_search": {"Buscar en la web", "Buscando en la web"},
 	"read_output": {"Leer salida", "Leyendo la salida"}, "stop_command": {"Detener", "Deteniendo"}, "outline": {"Esquematizar", "Esquematizando"},
 	"todo": {"Planificar", "Planificando"}, "ask_user": {"Preguntar", "Preguntando"},
+	"browser_navigate": {"Abrir", "Abriendo"}, "browser_snapshot": {"Ver página", "Mirando la página"},
+	"browser_click": {"Clic en", "Haciendo clic en"}, "browser_type": {"Escribir en", "Escribiendo en"},
+	"browser_press_key": {"Pulsar", "Pulsando"}, "browser_scroll": {"Desplazar", "Desplazando"},
+	"browser_screenshot": {"Capturar", "Capturando"}, "browser_get_text": {"Leer página", "Leyendo la página"},
+	"browser_tabs": {"Pestañas", "Pestañas"}, "browser_wait": {"Esperar", "Esperando"}, "browser_back": {"Volver", "Volviendo"},
 }
+
+// browserVerb es el verbo en minúscula para la petición de permiso.
+func browserVerb(tool string) string { return strings.ToLower(verbs(tool)[0]) }
 
 var kindVerbs = map[string][2]string{
 	"create": {"Crear", "Creando"}, "update": {"Editar", "Editando"}, "delete": {"Eliminar", "Eliminando"},
@@ -528,14 +537,20 @@ type readItem struct {
 	tool, target, meta string
 	failed             bool
 	summary            string
+	thought            thinkBlock
 }
 
+// readGroupBlock reúne las lecturas seguidas. Mientras sigue abierto
+// («Explorando») la fila dice cuál fue la última.
 type readGroupBlock struct {
 	items   []readItem
 	elapsed time.Duration
+	live    bool
 }
 
-func (b *readGroupBlock) folds() bool { return len(b.items) > 1 }
+func (b *readGroupBlock) folds() bool {
+	return len(b.items) > 1 || slices.ContainsFunc(b.items, func(it readItem) bool { return hasThought(it.thought) })
+}
 
 func (b *readGroupBlock) render(width int, open bool) string {
 	if len(b.items) == 1 {
@@ -545,11 +560,14 @@ func (b *readGroupBlock) render(width int, open bool) string {
 			dot = sErr.Render(glyphDot)
 		}
 		left := " " + dot + " " + sBold.Render(verbs(it.tool)[0]) + "  " + sBeige.Render(it.target)
-		out := fitRight(left, sDim.Render(it.meta), width)
-		if it.failed {
-			out += "\n" + failRow(pad+sDim2.Render(glyphCorner)+" ", it.summary, width)
+		out := []string{fitRight(left, sDim.Render(it.meta), width)}
+		if open {
+			out = append(out, thoughtRows(it.thought, pad, width)...)
 		}
-		return out
+		if it.failed {
+			out = append(out, failRow(pad+sDim2.Render(glyphCorner)+" ", it.summary, width))
+		}
+		return strings.Join(out, "\n")
 	}
 	files, searches, other, failed := 0, 0, 0, 0
 	for _, it := range b.items {
@@ -581,13 +599,20 @@ func (b *readGroupBlock) render(width int, open bool) string {
 		dot = sErr.Render(glyphDot)
 		summary += sErr.Render(" " + glyphSep + " " + noun(failed, "error", "errores"))
 	}
-	out := []string{fitRight(" "+dot+" "+sBold.Render("Exploró")+"  "+summary, sDim.Render(seconds(b.elapsed)), width)}
+	verb := "Exploró"
+	if b.live {
+		last := b.items[len(b.items)-1]
+		verb = "Explorando"
+		summary += sDim2.Render("  "+glyphSep+"  ") + sSoft.Render(verbs(last.tool)[0]) + " " + sBeige.Render(last.target)
+	}
+	out := []string{fitRight(" "+dot+" "+sBold.Render(verb)+"  "+summary, sDim.Render(seconds(b.elapsed)), width)}
 	if open {
 		for i, it := range b.items {
 			rail := glyphRail
 			if i == len(b.items)-1 {
 				rail = glyphCorner
 			}
+			out = append(out, thoughtRows(it.thought, pad, width)...)
 			verb := verbs(it.tool)[0]
 			left := pad + sDim2.Render(rail) + " " + sSoft.Render(fmt.Sprintf("%-9s", verb)) + sBeige.Render(it.target)
 			right := sDim.Render(it.meta)
@@ -595,6 +620,104 @@ func (b *readGroupBlock) render(width int, open bool) string {
 				right = sErr.Render(ansi.Truncate(it.summary, 40, glyphEllipsis))
 			}
 			out = append(out, fitRight(left, right, width))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func hasThought(t thinkBlock) bool { return strings.TrimSpace(t.text) != "" }
+
+// thoughtRows pinta lo pensado antes de un paso dentro de un grupo desplegado.
+func thoughtRows(t thinkBlock, lead string, width int) []string {
+	if !hasThought(t) {
+		return nil
+	}
+	italic := sDim.Italic(true)
+	rail := lead + sDim2.Render(glyphThinkRail) + " "
+	label := "Pensó"
+	if t.secs >= 0.1 {
+		label += fmt.Sprintf(" %.1f s", t.secs)
+	}
+	out := []string{rail + italic.Render(label)}
+	for _, l := range wrapText(t.text, max(10, width-ansi.StringWidth(rail)-1)) {
+		out = append(out, rail+italic.Render(l))
+	}
+	return out
+}
+
+// ── navegador ────────────────────────────────────────────────────────────
+
+// browserBlock reúne las acciones seguidas del agente en el navegador en una
+// fila que cambia con cada paso; ctrl+o despliega los pasos y lo pensado.
+type browserBlock struct {
+	steps    []*toolBlock
+	thoughts []thinkBlock
+	secs     float64
+	live     bool
+}
+
+func (b *browserBlock) last() *toolBlock { return b.steps[len(b.steps)-1] }
+
+func (b *browserBlock) folds() bool {
+	return len(b.steps) > 1 || slices.ContainsFunc(b.thoughts, hasThought)
+}
+
+func (b *browserBlock) render(width int, open bool) string {
+	cur := b.last()
+	verb := cur.verb
+	if cur.state == toolRunning {
+		verb = cur.gerund
+	}
+	left := " " + cur.dot() + " " + sBold.Render("Navegador") + sDim2.Render("  "+glyphSep+"  ") +
+		sSoft.Render(verb) + "  " + sBeige.Render(cur.target)
+	failed := 0
+	for _, s := range b.steps {
+		if s.state == toolFailed {
+			failed++
+		}
+	}
+	var right string
+	switch {
+	case cur.state == toolWaiting:
+		right = sWarn.Render("esperando")
+	case len(b.steps) == 1:
+		right = sDim.Render(cur.meta)
+	default:
+		right = sDim.Render(noun(len(b.steps), "acción", "acciones"))
+		if failed > 0 && (failed > 1 || cur.state != toolFailed) {
+			right += sErr.Render(" " + glyphSep + " " + noun(failed, "error", "errores"))
+		}
+		if t := seconds(time.Duration(b.secs * float64(time.Second))); t != "" {
+			right += sDim.Render(" " + glyphSep + " " + t)
+		}
+	}
+	out := []string{fitRight(left, right, width)}
+	if !open {
+		if footer := cur.footer(width); footer != "" {
+			out = append(out, footer)
+		}
+		return strings.Join(out, "\n")
+	}
+	for i, s := range b.steps {
+		branch, cont := glyphRail, glyphRail
+		if i == len(b.steps)-1 {
+			branch, cont = glyphCorner, " "
+		}
+		out = append(out, thoughtRows(b.thoughts[i], pad, width)...)
+		row := pad + sDim2.Render(branch) + " " + sSoft.Render(fmt.Sprintf("%-12s", s.verb)) + sBeige.Render(s.target)
+		meta := sDim.Render(s.meta)
+		if s.state == toolWaiting {
+			meta = sWarn.Render("esperando")
+		}
+		out = append(out, fitRight(row, meta, width))
+		if s.result == "" {
+			continue
+		}
+		lead := pad + sDim2.Render(cont) + " " + sDim2.Render(glyphCorner) + " "
+		if s.state == toolFailed {
+			out = append(out, failRow(lead, s.result, width))
+		} else {
+			out = append(out, ansi.Truncate(lead+sDim.Render(s.result), max(1, width-1), glyphEllipsis))
 		}
 	}
 	return strings.Join(out, "\n")

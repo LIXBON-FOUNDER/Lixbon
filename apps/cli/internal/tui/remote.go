@@ -202,7 +202,11 @@ func (a *remoteApprover) Approve(ctx context.Context, req agent.Approval) (agent
 	if req.Kind == agent.ApproveEdit {
 		risk = "edit"
 	}
-	request := map[string]any{"tool": req.Tool, "summary": firstNonEmpty(req.Summary, req.Tool), "risk": risk}
+	summary := firstNonEmpty(req.Summary, req.Tool)
+	if req.Kind == agent.ApproveBrowser {
+		summary = fmt.Sprintf("Navegador · %s %s en %s", browserVerb(req.Tool), summary, req.Detail)
+	}
+	request := map[string]any{"tool": req.Tool, "summary": summary, "risk": risk}
 	if req.Change != nil {
 		for k, v := range changeFields(*req.Change) {
 			request[k] = v

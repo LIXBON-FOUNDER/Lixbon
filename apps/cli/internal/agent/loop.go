@@ -20,9 +20,11 @@ import (
 )
 
 const (
-	repeatedMessage = "Me estaba repitiendo con la misma acción sin avanzar, así que he parado. Dime cómo seguir."
-	noAnswerMessage = "Me quedé sin respuesta del modelo: razona pero no llega a responder. " +
-		"Prueba con /model a uno sin «thinking», o /new para empezar con el contexto limpio."
+	repeatedMessage = "El agente se detuvo: repetía la misma acción sin avanzar. Dile cómo seguir."
+	noAnswerMessage = "El modelo terminó sin responder ni actuar, también al reintentarlo. " +
+		"Escribe «continúa» para volver a intentarlo o cambia de modelo con /model."
+	stalledMessage = "El modelo se quedó razonando sin responder ni actuar. " +
+		"Escribe «continúa» para volver a intentarlo, o usa /model para cambiar a un modelo sin «thinking»."
 	planBlockedMessage = "[modo plan] No puedes modificar archivos ni ejecutar comandos ahora. Termina de " +
 		"explorar y responde con el plan numerado para que el usuario lo apruebe."
 	planBlockedMCPMessage = "[modo plan] No puedes usar herramientas externas ahora; termina el plan."
@@ -38,6 +40,8 @@ type Turn struct {
 	S      *Session
 	Stream Streamer
 	Emit   func(Event)
+
+	readOnly bool
 }
 
 func (t *Turn) emit(e Event) {
@@ -81,9 +85,17 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	if s.ProjectContext != "" {
 		content += "\n\n=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n" + s.ProjectContext
 	}
-	content += TodoPrompt + AskFirstPrompt + CurrentDataPrompt(time.Now())
+	content += TodoPrompt + AskFirstPrompt + CurrentDataPrompt(time.Now()) + ResearchPrompt
 	if !s.PlanMode {
-		content += DeleteManyPrompt
+		content += DeleteManyPrompt + RequirementsPrompt
+	}
+	if s.BrowserEnabled() {
+		if native {
+			content += BrowserPrompt
+		} else {
+			content += BrowserTextPrompt(!s.NoVision)
+		}
+		content += s.BrowserResume()
 	}
 	content += "\n\n" + StylePrompt
 	if s.PlanMode {
@@ -100,7 +112,11 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	}
 	var toolList []map[string]any
 	if native {
-		toolList = toolspec.Schemas()
+		for _, schema := range toolspec.Schemas() {
+			if fn, _ := schema["function"].(map[string]any); s.ToolAllowed(pyStr(fn["name"])) {
+				toolList = append(toolList, schema)
+			}
+		}
 		for _, raw := range extra {
 			var schema map[string]any
 			if json.Unmarshal(raw, &schema) == nil {
@@ -194,7 +210,7 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				signatures[i] = CallSignature(calls[i].Tool, calls[i].Args)
 			}
 			signature := strings.Join(signatures, "|")
-			if signature == lastSignature {
+			if signature == lastSignature && !repeatable(callTools(calls)) {
 				repeated++
 			} else {
 				repeated = 0
@@ -222,7 +238,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 					Name:       call.Tool,
 				})
 			}
+			collapseOldSnapshots(working)
 			if images := s.popToolImages(); len(images) > 0 {
+				dropOldImages(working, maxLiveImageGroups-1)
 				working = append(working, history.Message{Role: "user", Content: ToolImagesPrompt, Images: images})
 			}
 			continue
@@ -253,19 +271,18 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				// pero sin razonar, sin meterle prisa con un mensaje. Si vuelve
 				// a pasar, responde con lo que ya tiene.
 				if stalled++; stalled > 1 {
-					return t.wrapUp(ctx, working, noAnswerMessage)
+					return t.wrapUp(ctx, working, stalledMessage)
 				}
 				next.NoThinking = true
 				continue
 			} else if emptyRetries < maxEmptyRetries {
 				emptyRetries++
 				// Nada en absoluto: huele a ventana desbordada. Se recorta lo
-				// que se ENVÍA, no el historial del usuario.
-				t.note("El modelo no devolvió nada; libero contexto y lo reintento.")
+				// que se ENVÍA, no el historial del usuario, y sin anunciarlo.
 				working = history.ShrinkOldResults(working, 2, history.MaxOldToolOutputChar)
 				continue
 			} else {
-				return noAnswerMessage, working, nil
+				return "", working, &Stopped{Reason: noAnswerMessage}
 			}
 		}
 		emptyRetries, stalled = 0, 0
@@ -300,7 +317,7 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			signatures[i] = CallSignature(c.Tool, c.Args)
 		}
 		signature := strings.Join(signatures, "|")
-		if signature == lastSignature {
+		if signature == lastSignature && !repeatable(callTools(toolCalls)) {
 			repeated++
 		} else {
 			repeated = 0
@@ -331,11 +348,14 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			}
 		}
 		results := history.User(strings.Join(combined, "\n"))
-		results.Images = s.popToolImages()
+		if results.Images = s.popToolImages(); len(results.Images) > 0 {
+			dropOldImages(working, maxLiveImageGroups-1)
+		}
 		working = append(working, results)
+		collapseOldSnapshots(working)
 	}
-	return fmt.Sprintf("He llegado al tope de %d pasos en un mismo turno y paro aquí para no seguir a ciegas. "+
-		"Dime «continúa» si quieres que siga desde donde iba.", MaxSteps), working, nil
+	return "", working, &Stopped{Reason: fmt.Sprintf("El agente llegó al tope de %d pasos en este turno. "+
+		"Escribe «continúa» para que siga desde donde iba.", MaxSteps)}
 }
 
 // pastesCode dice si la respuesta trae código que parece para un archivo:
@@ -362,7 +382,13 @@ func pastesCode(text string) bool {
 // wrapUp cierra un turno atascado (se repite o no llega a responder): le pide
 // al modelo, sin herramientas ni razonamiento, que conteste con lo que ya sabe.
 // fallback es lo que se dice si tampoco así responde.
-func (t *Turn) wrapUp(ctx context.Context, working []history.Message, fallback string) (string, []history.Message, error) {
+// Stopped corta el turno sin respuesta del modelo. Lo dice el CLI, no el
+// modelo, así que va como error; el trabajo hecho sigue en el historial.
+type Stopped struct{ Reason string }
+
+func (e *Stopped) Error() string { return e.Reason }
+
+func (t *Turn) wrapUp(ctx context.Context, working []history.Message, reason string) (string, []history.Message, error) {
 	system := history.Message{Role: "system", Content: "Eres un agente de código. Ya no quedan herramientas en este turno: " +
 		"responde al usuario con lo que ya sabes por los resultados anteriores, o dile qué te falta para seguir.\n\n" + StylePrompt}
 	est := t.S.Estimator
@@ -379,11 +405,11 @@ func (t *Turn) wrapUp(ctx context.Context, working []history.Message, fallback s
 		if ctx.Err() != nil {
 			return "", working, ctx.Err()
 		}
-		return fallback, working, nil
+		return "", working, &Stopped{Reason: reason}
 	}
 	answer := toolparse.CleanProse(toolparse.TruncateFabricated(res.Text))
 	if answer == "" {
-		return fallback, working, nil
+		return "", working, &Stopped{Reason: reason}
 	}
 	return answer, working, nil
 }
@@ -406,6 +432,14 @@ func PlainHistory(messages []history.Message) []history.Message {
 		}
 	}
 	return out
+}
+
+func callTools(calls []toolparse.Call) []string {
+	names := make([]string, len(calls))
+	for i, c := range calls {
+		names[i] = c.Tool
+	}
+	return names
 }
 
 // groupReads junta las lecturas seguidas: tres read_file de golpe se cuentan
@@ -558,6 +592,9 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 	if s.MCP != nil && s.MCP.IsMCPTool(tool) {
 		return t.runMCP(ctx, tool, args)
 	}
+	if toolspec.IsBrowser(tool) {
+		return t.runBrowser(ctx, tool, args)
+	}
 	if s.PlanMode && !toolspec.IsReadOnly(tool) {
 		t.emit(Event{Kind: EventAction, Tool: tool, Text: ArgsSummary(tool, args)})
 		t.emit(Event{Kind: EventActionResult, Tool: tool, Summary: "bloqueado: modo plan", Failed: true})
@@ -705,8 +742,10 @@ func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
 }
 
 // AskTools son las herramientas del modo ask: ver el proyecto e internet y
-// preguntar, nunca cambiar nada.
-var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user"}
+// preguntar, nunca cambiar nada. En el navegador abre y lee, sin clics.
+var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user",
+	"browser_navigate", "browser_snapshot", "browser_get_text", "browser_screenshot", "browser_scroll", "browser_back",
+	"browser_tabs", "browser_wait"}
 
 const askBlockedMessage = "[modo ask] Solo puedes leer el proyecto, buscar en internet y preguntar. Para cambiar " +
 	"archivos o ejecutar comandos, explica qué harías y pide al usuario que pase al modo agent (/mode agent o Mayús+Tab)."
@@ -714,11 +753,12 @@ const askBlockedMessage = "[modo ask] Solo puedes leer el proyecto, buscar en in
 // RunReadOnly ejecuta una herramienta del modo ask; cualquier otra se rechaza
 // sin tocar nada. Devuelve también las imágenes que haya adjuntado read_file.
 func (t *Turn) RunReadOnly(ctx context.Context, tool string, args map[string]any) (string, []string, error) {
-	if !slices.Contains(AskTools, tool) {
+	if !slices.Contains(AskTools, tool) || !t.S.ToolAllowed(tool) {
 		t.emit(Event{Kind: EventAction, Tool: tool, Text: ArgsSummary(tool, args)})
 		t.emit(Event{Kind: EventActionResult, Tool: tool, Summary: "bloqueado: modo ask", Failed: true})
 		return askBlockedMessage, nil, nil
 	}
+	t.readOnly = true
 	result, err := t.approveAndRun(ctx, tool, args)
 	return result, t.S.popToolImages(), err
 }
