@@ -245,6 +245,12 @@ Cada línea nueva de `unrecorded-effects.jsonl` tiene `v: 2`, el `effect_id` UUI
 `operation`, `kind`, `task`, `run`, `project`, `actor_kind`, `actor_id`, `channel` y un objeto `observed`
 filtrado al contrato del efecto. Ejemplo:
 
+Una línea heredada v1 se conserva opaca para revisión; no se le asigna identidad ni se importa:
+
+```json
+{"v":1,"operation":"integrate","kind":"git_merge","observed":{"outcome":"merged"},"error":"legacy diagnostic"}
+```
+
 ```json
 {"v":2,"effect_id":"01900000-0000-7000-8000-000000000001","at":1800000000000,"operation":"spawn","kind":"pty_process","task":"t1","run":"r1","project":null,"actor_kind":"system","actor_id":null,"channel":"core","observed":{"launched":true}}
 ```
