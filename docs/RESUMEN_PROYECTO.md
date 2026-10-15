@@ -82,7 +82,7 @@ Lixbon/
 │   ├── render/              Render HTML → PNG/MP4 (Visuals)
 │   ├── node_agent/          Agente que corre en cada nodo GPU
 │   └── config.py            Variables de entorno
-├── BD/                      schema.sql, configuración Alembic, scripts (dump, reset de staging, backups)
+├── db/                      schema.sql, configuración Alembic, scripts (dump, reset de staging, backups)
 ├── apps/
 │   ├── web/                 Frontend React (lixbon.com)
 │   ├── desktop/             App Tauri + `lxo/` (CLI del orquestador en Rust)
@@ -160,7 +160,7 @@ El render worker se despliega aparte con `infra/render_worker/deploy.sh`.
 
 1. `README.md` enlaza `docs/RAMAS_Y_RELEASES.md` y `docs/README.md`, que **no existen**.
 2. Versiones del README desfasadas: Desktop pone 1.2.0 (real 2.0.28), Móvil 0.3.4 (real 0.4.0) y CLI 2.3.0-go.2 (real 2.3.0-go.6).
-3. `BD/schema.sql` tiene 11 tablas frente a 39 modelos ORM, y no hay migraciones Alembic versionadas: la fuente de
+3. `db/schema.sql` tiene 11 tablas frente a 39 modelos ORM, y no hay migraciones Alembic versionadas: la fuente de
    verdad del esquema es `init_db()`.
 4. `requirements.txt` no fija versiones (no hay lock).
 5. `PRODUCT.md` y `tauri.yml` no coinciden sobre el papel del desktop (Lixbon IDE descontinuada frente a desktop oficial).

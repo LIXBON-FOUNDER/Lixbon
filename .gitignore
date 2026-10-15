@@ -10,6 +10,7 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # ── Bases de datos locales ──────────────────────────────────────
 *.db
@@ -30,7 +31,6 @@ apps/cli/lixbon
 apps/cli/lixbon.exe*
 *.msi
 *.msi.sig
-app/static/releases/
 
 # ── Logs y temporales ───────────────────────────────────────────
 logs/
@@ -38,7 +38,30 @@ logs/
 .DS_Store
 Thumbs.db
 
-.claude/skills/*
-.github/skills/impeccable
-# ── Pytest ──────────────────────────────────────────────────────
-.pytest_cache/
+# ── Agentes de IA: configuración personal de cada desarrollador ─
+# Claude Code
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+# Otros agentes y editores con IA
+.agents/
+AGENTS.md
+.cursor/
+.cursorrules
+.codex/
+.gemini/
+GEMINI.md
+.windsurf/
+.windsurfrules
+.continue/
+.aider*
+.opencode/
+.github/skills/
+# Orquestador de Lixbon (informes y tareas por proyecto)
+.lixbon/
+
+# ── Editores ────────────────────────────────────────────────────
+**/.vscode/*
+!**/.vscode/extensions.json
+.idea/

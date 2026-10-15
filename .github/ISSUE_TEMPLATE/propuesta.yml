@@ -1,0 +1,24 @@
+name: Propuesta
+description: Una función nueva o una mejora.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: producto
+    attributes:
+      label: Producto
+      multiple: true
+      options: [Gateway / API, Web, Desktop, CLI, Móvil, Orquestador (lxo)]
+    validations: { required: true }
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qué problema resuelve
+    validations: { required: true }
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Cómo lo resolverías
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas que has considerado

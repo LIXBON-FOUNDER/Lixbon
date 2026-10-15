@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vulnerabilidad de seguridad
+    url: https://github.com/LIXBON-FOUNDER/Lixbon/security/advisories/new
+    about: No abras un issue público; repórtala en privado (ver SECURITY.md).
+  - name: Soporte de la cuenta o del plan
+    url: https://lixbon.com
+    about: Para dudas de facturación o de tu cuenta, usa el soporte de la web.

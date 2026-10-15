@@ -14,7 +14,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY core/ core/
-COPY BD/ BD/
+COPY db/ db/
 COPY infra/node/ infra/node/
 COPY alembic.ini ./
 COPY --from=web-build /build/dist apps/web/dist

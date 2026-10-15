@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════
 #   lixbon DTC v2.0 — Lanzador Unificado Linux/macOS
-#   Reemplaza start_all.sh y scripts individuales
+#   Arranca gateway, node agent, Ollama y túnel desde un solo script
 # ═══════════════════════════════════════════════════════
 set -euo pipefail
 
