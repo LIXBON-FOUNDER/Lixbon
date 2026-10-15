@@ -20,7 +20,7 @@ export function PublicFooter() {
         { to: '/docs/visuals', label: 'Visuals' },
         { to: '/docs/cli', label: t('productCli') },
         { to: '/docs/api', label: t('productApi') },
-        { to: '/plans', label: t('plans') },
+        { to: '/donate', label: t('donate') },
       ],
     },
     {
