@@ -1,53 +1,43 @@
 import common from './common';
 import nav from './nav';
 import sidebar from './sidebar';
-import landing from './landing';
 import auth from './auth';
 import chat from './chat';
 import account from './account';
 import plans from './plans';
 import visuals from './visuals';
 import downloads from './downloads';
-import releases from './releases';
 import status from './status';
 import docsShell from './docsShell';
 import guiasShell from './guiasShell';
-import legalShell from './legalShell';
 import shared from './shared';
 import remote from './remote';
 import notFound from './notFound';
 import dialogs from './dialogs';
-import support from './support';
 import mascota from './mascota';
 import visual from './visual';
 import skills from './skills';
 import mcp from './mcp';
-import company from './company';
 
 export const DICTIONARIES = {
   common,
   nav,
   sidebar,
-  landing,
   auth,
   chat,
   account,
   plans,
   visuals,
   downloads,
-  releases,
   status,
   docsShell,
   guiasShell,
-  legalShell,
   shared,
   remote,
   notFound,
   dialogs,
-  support,
   mascota,
   visual,
   skills,
   mcp,
-  company,
 };

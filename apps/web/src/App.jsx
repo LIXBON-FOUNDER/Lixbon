@@ -1,6 +1,5 @@
 import { Suspense, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import LandingPage from './pages/LandingPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { AuthProvider } from './hooks/useAuth';
 import { ConfirmarProvider } from './hooks/useConfirmar';
@@ -9,6 +8,7 @@ import { RouteFade } from './components/RouteFade';
 import { ScrollArriba } from './components/ScrollArriba';
 import { LocaleProvider } from './i18n/LocaleContext';
 import { idiomaGuardado, localeDePath, sinPrefijoLegacyEn, withLocale } from './i18n/paths';
+import { IrAFounder, Navigate as NavigateLocal } from './i18n/link';
 import { MascotaSync } from './components/Mascota';
 import { perezosa } from './lib/perezosa';
 
@@ -21,15 +21,10 @@ const PlansPage = perezosa(() => import('./pages/PlansPage'));
 const VisualsPage = perezosa(() => import('./pages/VisualsPage'));
 const SharedVisualPage = perezosa(() => import('./pages/SharedVisualPage'));
 const DownloadsPage = perezosa(() => import('./pages/DownloadsPage'));
-const ReleasesPage = perezosa(() => import('./pages/ReleasesPage'));
 const DocsPage = perezosa(() => import('./pages/DocsPage'));
 const SharedPage = perezosa(() => import('./pages/SharedPage'));
 const RemotePage = perezosa(() => import('./pages/RemotePage'));
-const LegalPage = perezosa(() => import('./pages/LegalPage'));
 const StatusPage = perezosa(() => import('./pages/StatusPage'));
-const SupportPage = perezosa(() => import('./pages/SupportPage'));
-const CompanyPage = perezosa(() => import('./pages/CompanyPage'));
-const LeadershipPage = perezosa(() => import('./pages/LeadershipPage'));
 const SkillsPage = perezosa(() => import('./pages/SkillsPage'));
 
 const admin = () => import('./pages/admin');
@@ -55,9 +50,7 @@ const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles
 const POR_SECCION = {
   chat: [ChatPage], c: [ChatPage], guides: [GuiasPage], visuals: [VisualsPage], auth: [AuthPage],
   'reset-password': [ResetPasswordPage], account: [AccountPage], plans: [PlansPage], admin: ADMIN,
-  skills: [SkillsPage], apps: [DownloadsPage], news: [ReleasesPage], status: [StatusPage],
-  support: [SupportPage], about: [CompanyPage], team: [LeadershipPage], docs: [DocsPage],
-  legal: [LegalPage], remote: [RemotePage], s: [SharedPage, SharedVisualPage],
+  skills: [SkillsPage], apps: [DownloadsPage], status: [StatusPage], docs: [DocsPage], remote: [RemotePage], s: [SharedPage, SharedVisualPage],
 };
 
 // La página de la URL de entrada se carga antes de montar para pintar sin hueco
@@ -76,7 +69,7 @@ export function precargarTodo() {
 function LocalizedRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={<NavigateLocal to="/chat" replace />} />
       <Route path="/chat" element={<ChatPage />} />
       <Route path="/guides" element={<GuiasPage />} />
       <Route path="/guides/:slug" element={<GuiasPage />} />
@@ -112,20 +105,15 @@ function LocalizedRoutes() {
       <Route path="/skills" element={<SkillsPage />} />
       <Route path="/skills/:slug" element={<SkillsPage />} />
       <Route path="/apps" element={<DownloadsPage />} />
-      <Route path="/news" element={<ReleasesPage />} />
       <Route path="/status" element={<StatusPage />} />
-      <Route path="/support" element={<SupportPage />} />
-      <Route path="/about" element={<CompanyPage />} />
-      <Route path="/team" element={<LeadershipPage />} />
-      <Route path="/company" element={<Navigate to="/about" replace />} />
-      <Route path="/company/leadership" element={<Navigate to="/team" replace />} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/docs/:section" element={<DocsPage />} />
-      <Route path="/legal" element={<Navigate to="/legal/privacy" replace />} />
-      <Route path="/legal/:doc" element={<LegalPage />} />
       <Route path="/s/:token" element={<SharedPage />} />
       <Route path="/remote" element={<RemotePage />} />
       <Route path="/remote/:token" element={<RemotePage />} />
+      {['/about', '/team', '/company/*', '/news', '/support', '/legal/*', '/donate'].map((r) => (
+        <Route key={r} path={r} element={<IrAFounder />} />
+      ))}
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
