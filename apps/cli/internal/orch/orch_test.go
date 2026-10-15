@@ -128,3 +128,22 @@ func TestPromptSectionCitaLaRutaYLaAprobacionHumana(t *testing.T) {
 		}
 	}
 }
+
+func TestReadEndpointRelee(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := ReadEndpoint(dir); err != ErrClosed {
+		t.Fatalf("sin orch.json: %v", err)
+	}
+	writeDiscovery(t, dir, discovery{Port: 4000, Token: "a"})
+	if got, err := ReadEndpoint(dir); err != nil || got != (Endpoint{Port: 4000, Token: "a"}) {
+		t.Fatalf("%+v %v", got, err)
+	}
+	writeDiscovery(t, dir, discovery{Port: 4001, Token: "b"})
+	if got, _ := ReadEndpoint(dir); got != (Endpoint{Port: 4001, Token: "b"}) {
+		t.Fatalf("debe releer el archivo: %+v", got)
+	}
+	writeDiscovery(t, dir, discovery{Port: 0})
+	if _, err := ReadEndpoint(dir); err != ErrClosed {
+		t.Fatalf("puerto inválido: %v", err)
+	}
+}
