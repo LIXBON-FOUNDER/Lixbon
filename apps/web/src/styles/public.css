@@ -1431,6 +1431,10 @@
 .pubfoot__cta:hover { background: #FFFFFF; transform: translateY(-1px); }
 
 .pubfoot__mapa { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin-top: 96px; }
+.pubfoot--producto .pubfoot__in { padding-top: 64px; }
+.pubfoot--producto .pubfoot__mapa { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 0; padding-bottom: 48px; }
+.pubfoot--producto .pubfoot__base a { color: inherit; text-decoration: none; }
+.pubfoot--producto .pubfoot__base a:hover { color: var(--pf-ink); }
 .pubfoot__col, .pubfoot__contacto { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .pubfoot__mapa h2 { margin: 0 0 6px; font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pf-muted); }
 .pubfoot__mapa a { font-size: 15px; color: var(--pf-soft); text-decoration: none; transition: color .2s ease; }
@@ -1454,6 +1458,7 @@
   .pubfoot { margin-top: 72px; }
   .pubfoot__in { padding-top: 64px; }
   .pubfoot__mapa { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 24px; margin-top: 64px; }
+  .pubfoot--producto .pubfoot__mapa { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0; }
   .pubfoot__marca { margin-top: 64px; }
 }
 
