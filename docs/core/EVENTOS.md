@@ -201,7 +201,7 @@ Estable en `v = 1`; cualquier cambio incompatible sube `v` del envoltorio:
 * Los 14 campos de cada evento y su significado; `seq` entero positivo estrictamente creciente.
 * Semántica de `cursor` (exclusivo), `next_cursor`, `has_more`, `head_seq`, `limit` (100/500).
 * Códigos de error y su estado HTTP; alcance por run de los agentes (sobre identidad declarada, ver Autorización).
-* Lista cerrada de parámetros: un cliente `lxo events` no debe reenviar `session` (el helper genérico de `lxo` lo añade a las llamadas de sesión) ni ningún otro nombre.
+* Lista cerrada de parámetros: `session` no es un parámetro válido de `events`, y un cliente `lxo events` no debe reenviarlo ni reenviar ningún otro nombre fuera de la lista.
 
 Abierto (no congelado): sentido inverso, filtros por tiempo/actor/correlación, lectura global sin tarea,
 long-poll/SSE. El contenido de cada `kind`/`payload` lo define su propio `v`.
