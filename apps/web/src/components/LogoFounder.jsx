@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
 const UMBRAL = 48;
-const FUENTE = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,300..680&text=lixbonfuder&display=swap';
 
 // k = orden en que se recogen las letras de tono.
 const LETRAS = [
@@ -16,14 +15,7 @@ const claseLetra = (le) => `logo-founder__l ${le.clave ? 'logo-founder__l--clave
 
 let fuente;
 export function cargarFuente() {
-  fuente ??= new Promise((listo, fallo) => {
-    const enlace = document.createElement('link');
-    enlace.rel = 'stylesheet';
-    enlace.href = FUENTE;
-    enlace.onload = listo;
-    enlace.onerror = fallo;
-    document.head.appendChild(enlace);
-  }).then(() => document.fonts.load('italic 680 46px Fraunces', 'lf'));
+  fuente ??= document.fonts.load('italic 680 46px Fraunces', 'lf');
   return fuente;
 }
 
