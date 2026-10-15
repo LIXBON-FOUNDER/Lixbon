@@ -43,11 +43,15 @@
 //! transacción. El patrón es: validar (lectura) -> efecto -> UNA mutación que lo
 //! registra ([`StateAccess::mutate_after_effect`], que SOLO se llama si el efecto ocurrió de verdad).
 //! Si el registro falla por CUALQUIER motivo (también un rechazo), no se esconde: se deja constancia en
-//! `unrecorded-effects.jsonl` y se avisa al arrancar. Ese archivo es un **diario
-//! de recuperación temporal**, NO una segunda fuente de verdad: sirve para
-//! diagnosticar y reconciliar a mano. Cuando existan Events y Attention, cada
-//! línea debe converger en `Event(efecto externo sin registrar) -> Attention
-//! crítica`. La reconciliación automática queda fuera de esta fase.
+//! `unrecorded-effects.jsonl` (líneas v2 con la identidad `effect_id`, la hora y solo los campos
+//! `observed` permitidos) y, si ni eso se puede escribir, el error devuelto lo dice. Al arrancar con SQLite
+//! autoritativo cada v2 válido se añade al Event Log como `effect.observed` con su hora original y su
+//! `effect_id` como `idem_key` (ver `effect_journal.rs`); nunca se vuelve a ejecutar el efecto.
+//!
+//! La reconciliación demuestra que el efecto ocurrió, pero NO repara `legacy_state`: la mutación que lo
+//! registraba se descartó entera. Por eso el arranque avisa a la persona de cada efecto recuperado y
+//! las líneas v1, corruptas o no importables se conservan para revisión manual. El journal es un
+//! diario de recuperación, no una segunda fuente de verdad.
 //!
 //! # Eventos (slice E)
 //! El candidato [`Tx`] lleva además un *outbox* de [`EventDraft`]: los hechos que describen la
@@ -615,6 +619,12 @@ impl Core {
     /// de un borrador con `project_from_task` se resuelve contra el estado CONFIRMADO.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn record_facts(&self, ctx: &MutationContext, drafts: Vec<EventDraft>) -> Result<(), MutateError> {
+        self.record_facts_at(ctx, drafts, super::state::now_ms() as i64)
+    }
+
+    /// Como [`Core::record_facts`] con la hora del hecho explícita: la usa la recuperación del journal, que
+    /// debe conservar CUÁNDO ocurrió el efecto y no cuándo se reconcilió.
+    pub(super) fn record_facts_at(&self, ctx: &MutationContext, drafts: Vec<EventDraft>, at: i64) -> Result<(), MutateError> {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
@@ -623,7 +633,7 @@ impl Core {
         }
         let finalized = {
             let st = self.lock();
-            finalize_all(drafts, ctx, super::state::now_ms() as i64, &|task| st.tasks.get(task).and_then(|t| t.project_id.clone()))
+            finalize_all(drafts, ctx, at, &|task| st.tasks.get(task).and_then(|t| t.project_id.clone()))
         }
         .map_err(MutateError::Rejected)?;
         if !self.persister.records_events() {
@@ -702,8 +712,8 @@ impl Core {
     }
 
     /// Anota en v2 un efecto externo ya ocurrido cuyo Event Log no pudo registrarse.
-    /// Solo persiste la identidad y los campos `observed` del contrato tipado.
-    fn journal_unrecorded_effect(&self, effect: Effect, ctx: &MutationContext) {
+    /// Solo persiste la identidad, la hora y los campos `observed` del contrato tipado.
+    fn journal_unrecorded_effect(&self, effect: &Effect, ctx: &MutationContext) -> std::io::Result<()> {
         let (run, project) = effect.task.as_deref().map_or((None, None), |id| {
             let st = self.lock();
             let t = st.tasks.get(id);
@@ -719,7 +729,6 @@ impl Core {
             Channel::Lxo => "lxo",
             Channel::Core => "core",
         };
-        let observed = journal_observed(&effect);
         let record = RecordV2 {
             v: 2,
             effect_id: effect.effect_id.clone(),
@@ -727,17 +736,24 @@ impl Core {
             operation: effect.operation.to_string(),
             kind: effect.kind.to_string(),
             task: effect.task.clone(),
-            run: effect.run.or(run),
+            run: effect.run.clone().or(run),
             project,
             actor_kind: actor_kind.to_string(),
             actor_id,
             channel: channel.to_string(),
-            observed,
+            observed: journal_observed(effect),
         };
-        if effect_journal::append_v2(&data_dir(), &record).is_err() {
-            // No incluir el registro ni el error original: ambos podrían contener datos sensibles.
-            eprintln!("[core] no se pudo escribir unrecorded-effects.jsonl");
-        }
+        effect_journal::append_v2(&data_dir(), &record).inspect_err(|error| {
+            // Sin el registro ni el texto del error: ambos podrían contener rutas o datos sensibles.
+            eprintln!(
+                "[core] no se pudo escribir unrecorded-effects.jsonl ({:?}); efecto {} {}/{} de la tarea {}",
+                error.kind(),
+                effect.effect_id,
+                effect.operation,
+                effect.kind,
+                effect.task.as_deref().unwrap_or("-"),
+            );
+        })
     }
 
     /// Efectos externos ocurridos cuyo registro falló en una sesión anterior.
@@ -753,8 +769,8 @@ impl Core {
     }
 
     fn reconcile_effect(&self, record: &RecordV2) -> bool {
-        let Some((ctx, draft)) = super::tx_ops::recovered_effect(record) else { return false };
-        self.record_facts(&ctx, vec![draft]).is_ok()
+        let Some((ctx, draft, at)) = super::tx_ops::recovered_effect(record) else { return false };
+        self.record_facts_at(&ctx, vec![draft], at).is_ok()
     }
 
     /// Prueba: sustituye la persistencia (para inyectar fallos).
@@ -812,7 +828,7 @@ fn journal_observed(effect: &Effect) -> Value {
             continue;
         }
         if *key == "pr_url" {
-            if let Some(url) = value.as_str().and_then(safe_pr_url) {
+            if let Some(url) = value.as_str().and_then(super::pr_url::sanitize_pr_url) {
                 safe.insert((*key).to_string(), Value::String(url));
             }
         } else {
@@ -820,27 +836,6 @@ fn journal_observed(effect: &Effect) -> Value {
         }
     }
     Value::Object(safe)
-}
-
-/// Conserva la ruta pública de la URL de PR y descarta credenciales, query y fragmento.
-fn safe_pr_url(raw: &str) -> Option<String> {
-    let (scheme, rest) = raw.split_once("://")?;
-    if !matches!(scheme, "https" | "http") {
-        return None;
-    }
-    let authority_end = rest.find(|ch| matches!(ch, '/' | '?' | '#')).unwrap_or(rest.len());
-    let authority = rest[..authority_end].rsplit('@').next()?;
-    if authority.is_empty()
-        || !authority.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']'))
-    {
-        return None;
-    }
-    let suffix = &rest[authority_end..];
-    let path = suffix.split(|ch| ch == '?' || ch == '#').next().unwrap_or_default();
-    if path.bytes().any(|byte| byte.is_ascii_control() || byte == b'\\') {
-        return None;
-    }
-    Some(format!("{scheme}://{authority}{path}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -865,7 +860,7 @@ pub(super) struct Effect {
     kind: &'static str,
     /// `task` y `run` pertenecen al **modelo legacy actual** (Run -> tarea raíz ->
     /// hijas) y NO fijan el diseño futuro Task -> Attempt. El esquema del diario
-    /// lleva `v` justamente para poder evolucionar (p. ej. una `v: 2` con `attempt`).
+    /// lleva `v` justamente para poder evolucionar (p. ej. una `v: 3` con `attempt`).
     task: Option<String>,
     /// Si no se indica, el Core lo completa desde el estado por `task`.
     repo: Option<String>,
@@ -982,10 +977,16 @@ impl StateAccess for Acting<'_> {
         match core.mutate_as(&self.ctx, |tx| register_effect(tx, &effect, f)) {
             Ok(v) => Ok(v),
             Err(e) => {
-                core.journal_unrecorded_effect(effect, &self.ctx);
-                Err(format!(
-                    "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}). Queda anotada en unrecorded-effects.jsonl para reconciliarla; no la repitas sin comprobarlo."
-                ))
+                let message = match core.journal_unrecorded_effect(&effect, &self.ctx) {
+                    Ok(()) => format!(
+                        "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}). Queda anotada en unrecorded-effects.jsonl; al reiniciar se añadirá al Event Log, pero el estado NO se repara: compruébalo y no la repitas sin comprobarlo."
+                    ),
+                    Err(_) => format!(
+                        "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}) y TAMPOCO se pudo anotar en unrecorded-effects.jsonl (efecto {}). Compruébala manualmente; no la repitas sin comprobarlo.",
+                        effect.effect_id
+                    ),
+                };
+                Err(message)
             }
         }
     }
