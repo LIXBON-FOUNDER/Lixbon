@@ -490,3 +490,92 @@ fn los_eventos_standalone_no_llevan_state_rev() {
     s.append_events(&[ev("k.suelto")]).unwrap();
     assert_eq!(s.events_page(&EventQuery::default()).unwrap().events[0].state_rev, None);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Filtros de lectura (LXO-83)
+// ---------------------------------------------------------------------------------------------
+
+fn con(kind: &str, project: Option<&str>, run: Option<&str>, entity: (&str, &str), class: EventClass) -> NewEvent {
+    NewEvent {
+        project_id: project.map(Into::into),
+        run_id: run.map(Into::into),
+        entity_kind: entity.0.into(),
+        entity_id: entity.1.into(),
+        class,
+        ..ev(kind)
+    }
+}
+
+fn filtrado(s: &Store, q: EventQuery) -> Vec<i64> {
+    s.events_page(&q).unwrap().events.iter().map(|e| e.seq).collect()
+}
+
+#[test]
+fn los_filtros_se_combinan_con_and_y_conservan_el_orden_por_seq() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    s.append_events(&[
+        con("task.created", Some("p1"), Some("r1"), ("task", "t1"), EventClass::State),
+        con("task.status_changed", Some("p1"), Some("r1"), ("task", "t1"), EventClass::State),
+        con("task.created", Some("p2"), Some("r2"), ("task", "t2"), EventClass::State),
+        con("decision.recorded", Some("p1"), Some("r1"), ("task", "t1"), EventClass::Decision),
+        con("effect.observed", Some("p1"), Some("r1"), ("task", "t1"), EventClass::Effect),
+        con("project.registered", Some("p3"), None, ("project", "p3"), EventClass::State),
+    ])
+    .unwrap();
+    let q = EventQuery::default;
+    assert_eq!(filtrado(&s, EventQuery { project_id: Some("p1".into()), ..q() }), vec![1, 2, 4, 5]);
+    assert_eq!(filtrado(&s, EventQuery { run_id: Some("r2".into()), ..q() }), vec![3]);
+    assert_eq!(filtrado(&s, EventQuery { entity_kind: Some("task".into()), entity_id: Some("t1".into()), ..q() }), vec![1, 2, 4, 5]);
+    assert_eq!(filtrado(&s, EventQuery { entity_kind: Some("project".into()), ..q() }), vec![6]);
+    assert_eq!(filtrado(&s, EventQuery { kind: Some("task.created".into()), ..q() }), vec![1, 3]);
+    assert_eq!(filtrado(&s, EventQuery { kind_prefix: Some("task.".into()), ..q() }), vec![1, 2, 3]);
+    assert_eq!(filtrado(&s, EventQuery { class: Some(EventClass::Decision), ..q() }), vec![4]);
+    assert_eq!(filtrado(&s, EventQuery { project_id: Some("p1".into()), kind_prefix: Some("task.".into()), after: Some(1), ..q() }), vec![2]);
+    assert_eq!(filtrado(&s, EventQuery { project_id: Some("nadie".into()), ..q() }), Vec::<i64>::new());
+}
+
+#[test]
+fn el_prefijo_de_kind_es_literal_y_sensible_a_mayusculas() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    s.append_events(&[ev("a_b.x"), ev("axb.x"), ev("a%b.x"), ev("A_B.x")]).unwrap();
+    let por_prefijo = |p: &str| filtrado(&s, EventQuery { kind_prefix: Some(p.into()), ..Default::default() });
+    assert_eq!(por_prefijo("a_b"), vec![1]);
+    assert_eq!(por_prefijo("a%"), vec![3]);
+    assert_eq!(por_prefijo("A_"), vec![4]);
+    assert_eq!(por_prefijo("a"), vec![1, 2, 3]);
+}
+
+#[test]
+fn un_filtro_mal_formado_es_un_error_y_no_se_ignora() {
+    let tmp = Tmp::new();
+    let s = abre(tmp.path());
+    let malos = [
+        EventQuery { project_id: Some(String::new()), ..Default::default() },
+        EventQuery { kind: Some("a".into()), kind_prefix: Some("a".into()), ..Default::default() },
+        EventQuery { entity_id: Some("t1".into()), ..Default::default() },
+    ];
+    for q in malos {
+        assert!(matches!(s.events_page(&q), Err(StoreError::InvalidEvent(_))), "{q:?}");
+    }
+}
+
+#[test]
+fn la_pagina_filtrada_pagina_sin_saltar_y_head_seq_es_global() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let lote: Vec<NewEvent> = (0..30).map(|i| con("k.x", Some(if i % 3 == 0 { "p" } else { "q" }), None, ("core", "core"), EventClass::State)).collect();
+    s.append_events(&lote).unwrap();
+    let (mut vistos, mut cursor) = (vec![], None);
+    loop {
+        let p = s.events_page(&EventQuery { project_id: Some("p".into()), after: cursor, limit: Some(4), ..Default::default() }).unwrap();
+        assert_eq!(p.head_seq, 30);
+        vistos.extend(p.events.iter().map(|e| e.seq));
+        match (p.has_more, p.next_cursor) {
+            (true, Some(c)) => cursor = Some(c),
+            _ => break,
+        }
+    }
+    assert_eq!(vistos, (0..10).map(|i| 1 + i * 3).collect::<Vec<i64>>());
+}
