@@ -1,5 +1,5 @@
 -- lixbon — Esquema de referencia (generado desde core/persistence/models.py)
--- NO editar a mano: regenerar con `python BD/scripts/dump_schema.py`
+-- NO editar a mano: regenerar con `python db/scripts/dump_schema.py`
 
 CREATE TABLE app_versions (
 	id SERIAL NOT NULL, 

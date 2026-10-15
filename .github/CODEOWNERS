@@ -1,0 +1,12 @@
+# Revisores que GitHub pide automáticamente en cada PR. La última regla que coincide gana.
+*                                   @Gabriel-DgMr
+
+/apps/cli/                          @Gabriel-DgMr @PR3S1G4zZ
+/apps/desktop/lxo/                  @PR3S1G4zZ @Gabriel-DgMr
+/apps/desktop/src-tauri/src/orch/   @PR3S1G4zZ @Gabriel-DgMr
+/apps/desktop/src-tauri/src/store/  @PR3S1G4zZ @Gabriel-DgMr
+/apps/desktop/src-tauri/src/secure_store/ @PR3S1G4zZ @Gabriel-DgMr
+/contracts/                         @PR3S1G4zZ @Gabriel-DgMr
+/docs/core/                         @PR3S1G4zZ @Gabriel-DgMr
+
+/.github/                           @Gabriel-DgMr

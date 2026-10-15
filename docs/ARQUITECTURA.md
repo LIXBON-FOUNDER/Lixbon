@@ -5,7 +5,7 @@
 ```
                      ┌──────────────────────────────────────────────┐
    apps/web ────────►│                                              │
-   apps/desktop ────►│   Gateway (core/gateway, FastAPI, Railway)   │──► Postgres (BD/)
+   apps/desktop ────►│   Gateway (core/gateway, FastAPI, Railway)   │──► Postgres (db/)
    apps/cli ────────►│   /v1 OpenAI-compatible · /api/* · /ws/*     │──► Redis (rate limit, cache)
    apps/mobile ─────►│                                              │──► R2 (adjuntos, releases)
    n8n / SDKs ──────►│                                              │──► Stripe · Brevo
@@ -69,14 +69,14 @@ Dos modos (`core/orchestration/orchestrator.py`):
 
 Instalación del agente: `infra/node/` (Docker + `install-node.sh/.ps1`).
 
-### Base de datos — `BD/`
+### Base de datos — `db/`
 
-- `schema.sql` — volcado de referencia (`BD/scripts/dump_schema.py`)
+- `schema.sql` — volcado de referencia (`db/scripts/dump_schema.py`)
 - `migrations/` — Alembic (`alembic.ini` en la raíz; URL de `DATABASE_URL`)
-- `scripts/` — `reset_staging.py`
+- `scripts/` — `reset_staging.py` (recrea las tablas de staging), `reset_db.py`
+  (vaciado por alcance en producción), `backup.md`
 
-Operación en producción (`infra/ops/`): `reset_db.py` (vaciado por alcance),
-`probar_correo.py` (diagnóstico de Brevo).
+Operación en producción (`infra/ops/`): `probar_correo.py` (diagnóstico de Brevo).
 
 ### Web — `apps/web`
 
@@ -122,6 +122,6 @@ la app en su rama):
 ## Despliegue
 
 `railway.toml` → `Dockerfile` (multi-stage: build de la web con Node, luego
-Python 3.12 con `core/`, `BD/`, `infra/node/` y el
+Python 3.12 con `core/`, `db/`, `infra/node/` y el
 `dist` de la web). Uvicorn con `--proxy-headers` porque Railway/Cloudflare
 terminan TLS fuera. Health check en `/health`.

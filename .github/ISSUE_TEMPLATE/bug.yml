@@ -1,0 +1,33 @@
+name: Bug
+description: Algo no funciona como debería.
+labels: [bug]
+body:
+  - type: dropdown
+    id: producto
+    attributes:
+      label: Producto
+      options: [Gateway / API, Web, Desktop, CLI, Móvil, Orquestador (lxo)]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: "`lixbon --version`, Ajustes › Acerca de, o la fecha si es la web."
+    validations: { required: true }
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      placeholder: "1. …\n2. …\n3. …"
+    validations: { required: true }
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas y qué pasó
+    validations: { required: true }
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs o capturas
+      description: Quita API keys, tokens y datos personales antes de pegar.
+      render: text
