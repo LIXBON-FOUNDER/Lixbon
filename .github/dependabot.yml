@@ -1,52 +1,78 @@
 version: 2
 
-# Actualizaciones agrupadas y mensuales para no inundar de PRs; los parches de
-# seguridad llegan aparte en cuanto se publican.
+# Menores y parches llegan agrupados y mensuales; cada salto mayor llega en su
+# propio PR porque suele exigir cambios de código. Los parches de seguridad
+# llegan aparte en cuanto se publican.
 updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: monthly }
-    groups: { gateway: { patterns: ["*"] } }
-    open-pull-requests-limit: 2
+    groups: { gateway: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(gateway)" }
 
   - package-ecosystem: npm
     directory: /apps/web
     schedule: { interval: monthly }
-    groups: { web: { patterns: ["*"] } }
-    open-pull-requests-limit: 2
+    groups: { web: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(web)" }
 
   - package-ecosystem: npm
     directory: /apps/desktop
     schedule: { interval: monthly }
-    groups: { desktop: { patterns: ["*"] } }
-    open-pull-requests-limit: 2
+    groups: { desktop: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(desktop)" }
 
   - package-ecosystem: cargo
     directories: [/apps/desktop/src-tauri, /apps/desktop/lxo]
     schedule: { interval: monthly }
-    groups: { desktop-rust: { patterns: ["*"] } }
-    open-pull-requests-limit: 2
+    groups: { desktop-rust: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(desktop)" }
 
   - package-ecosystem: npm
     directory: /apps/mobile
     schedule: { interval: monthly }
     groups: { mobile: { patterns: ["*"], update-types: [minor, patch] } }
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(mobile)" }
+    # El SDK de Expo fija estas versiones; solo se suben juntas con
+    # `npx expo install --fix` al migrar de SDK. Los parches dentro del SDK sí pasan.
+    ignore:
+      - dependency-name: "expo"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "expo-*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@expo/*"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-reanimated"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-worklets"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-safe-area-context"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-svg"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "react-native-keyboard-controller"
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: "@react-native-async-storage/async-storage"
+        update-types: [version-update:semver-major, version-update:semver-minor]
 
   - package-ecosystem: gomod
     directory: /apps/cli
     schedule: { interval: monthly }
-    groups: { cli: { patterns: ["*"] } }
-    open-pull-requests-limit: 2
+    groups: { cli: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 3
     commit-message: { prefix: "chore(cli)" }
 
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
-    groups: { actions: { patterns: ["*"] } }
+    groups: { actions: { patterns: ["*"], update-types: [minor, patch] } }
     commit-message: { prefix: "ci" }
