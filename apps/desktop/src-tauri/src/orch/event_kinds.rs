@@ -305,6 +305,16 @@ fn opt_str(who: &str, d: &serde_json::Value, key: &str) -> Result<Option<String>
     }
 }
 
+/// La URL del PR llega saneada: sin credenciales, query ni fragmento. Una URL que no se puede sanear se omite
+/// (el hecho ya ocurrió y debe registrarse), pero un valor que no sea texto sigue siendo un error.
+fn opt_pr_url(who: &str, d: &serde_json::Value) -> Result<Option<String>, String> {
+    match d.get("pr_url") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(super::pr_url::sanitize_pr_url(s)),
+        Some(_) => Err(format!("{who}: `pr_url` debe ser texto o null")),
+    }
+}
+
 fn opt_bool(who: &str, d: &serde_json::Value, key: &str) -> Result<Option<bool>, String> {
     match d.get(key) {
         None | Some(serde_json::Value::Null) => Ok(None),
@@ -372,7 +382,7 @@ impl DecisionRecorded {
                     "already_exists" => PrOutcome::AlreadyExists,
                     _ => PrOutcome::Error,
                 };
-                DecisionRecorded::Pr { decision_id: 0, outcome, branch: req_str(DEC, detail, "branch")?, pr_url: opt_str(DEC, detail, "pr_url")? }
+                DecisionRecorded::Pr { decision_id: 0, outcome, branch: req_str(DEC, detail, "branch")?, pr_url: opt_pr_url(DEC, detail)? }
             }
             "spawn" => return Err("decision.recorded: `spawn` solo se registra con Tx::record_spawn_resolution (spawn.resolved)".into()),
             other => return Err(format!("decision.recorded: decision_kind {other:?} fuera del contrato (review, merge, pr)")),
@@ -513,7 +523,7 @@ impl EffectObserved {
                     operation: operation_of(kind, operation, &["publish_pr"])?,
                     result,
                     branch: req_str(EFF, observed, "branch")?,
-                    pr_url: opt_str(EFF, observed, "pr_url")?,
+                    pr_url: opt_pr_url(EFF, observed)?,
                 }
             }
             "git_worktree" => EffectObserved::GitWorktree {

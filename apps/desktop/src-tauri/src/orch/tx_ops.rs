@@ -29,11 +29,12 @@ use super::mutation::{Effect, Tx};
 use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
 
-/// Rebuilds the typed fact for a journal record without executing its external effect.
+/// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
+/// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
 pub(super) fn recovered_effect(
     record: &super::effect_journal::RecordV2,
-) -> Option<(MutationContext, EventDraft)> {
-    if record.v != 2 || !super::effect_journal::valid_effect_id(&record.effect_id) {
+) -> Option<(MutationContext, EventDraft, i64)> {
+    if record.v != 2 || record.at <= 0 || !super::effect_journal::valid_effect_id(&record.effect_id) {
         return None;
     }
     let (Some(task), Some(run)) = (record.task.as_deref(), record.run.as_deref()) else {
@@ -56,7 +57,7 @@ pub(super) fn recovered_effect(
     };
     let facts = ev::EffectObserved::parse(&record.effect_id, &record.operation, &record.kind, &record.observed).ok()?;
     let draft = ev::effect_observed(task, run, record.project.clone(), &facts, &record.effect_id).ok()?;
-    Some((MutationContext::new(actor, channel), draft))
+    Some((MutationContext::new(actor, channel), draft, record.at))
 }
 
 pub(super) fn effect_observed_is_valid(
