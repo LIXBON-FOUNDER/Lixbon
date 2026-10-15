@@ -30,9 +30,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-portable-pty = "0.8"
+portable-pty = "0.9"
 vt100 = "0.16"
-notify = "6"
+notify = "8"
 regex = "1"
 # Walker de ripgrep: respeta el .gitignore del proyecto en búsqueda/listado.
 ignore = "0.4"
@@ -40,13 +40,13 @@ ignore = "0.4"
 trash = "5"
 # Almacén SQLite del Core (módulo `store`, slice B). SQLite va incluido (3.46):
 # no depende de la del sistema y `STRICT` exige >= 3.37.
-rusqlite = { version = "0.32", features = ["bundled"] }
-tauri-plugin-http = "~2.6"
+rusqlite = { version = "0.40", features = ["bundled"] }
+tauri-plugin-http = "~2.8"
 tauri-plugin-single-instance = "2"
 # Catálogo de skills: paquete zip verificado por sha256 (Ajustes › Skills).
-zip = { version = "4", default-features = false, features = ["deflate"] }
-sha2 = "0.10"
-base64 = "0.22"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+sha2 = "0.11"
+base64 = "0.23"
 # Borra de memoria los secretos del almacén seguro al soltarlos (ya compilado
 # como dependencia de keyring).
 zeroize = "1"
@@ -56,7 +56,7 @@ zeroize = "1"
 # cae al JSON de siempre.
 [target.'cfg(windows)'.dependencies]
 # Solo `orch/fsio.rs` la usa (publicación durable del marcador de autoridad y del espejo).
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 keyring = { version = "3", features = ["windows-native"] }
 
 # Almacén seguro multiplataforma (slice J1, módulo `secure_store`): el mismo
