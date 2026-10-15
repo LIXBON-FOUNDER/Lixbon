@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
 httpx
-websockets>=13
-sqlalchemy>=2.0
+websockets>=17.2
+sqlalchemy>=2.1.4
 alembic
 psycopg[binary]
 redis
