@@ -39,15 +39,42 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+// source es donde el Core publica orch.json y solo se lee; work es el directorio
+// temporal con una copia, donde el CLI guarda su configuración y sus cursores.
 type e2eEnv struct {
-	dir     string
+	source  string
+	work    string
 	restart func(t *testing.T)
 	produce func(t *testing.T)
 }
 
+func newE2EEnv(t *testing.T, source string) e2eEnv {
+	t.Helper()
+	e := e2eEnv{source: source, work: t.TempDir()}
+	e.syncEndpoint(t)
+	return e
+}
+
+func (e e2eEnv) syncEndpoint(t *testing.T) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(e.source, "orch.json"))
+	if err != nil {
+		t.Fatalf("no se pudo leer el orch.json del Core: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(e.work, "orch.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (e e2eEnv) restartCore(t *testing.T) {
+	t.Helper()
+	e.restart(t)
+	e.syncEndpoint(t)
+}
+
 func (e e2eEnv) run(ctx context.Context, args ...string) (code int, stdout, stderr string) {
 	var out, errOut syncBuffer
-	app := &App{Stdout: &out, Stderr: &errOut, ConfigPath: filepath.Join(e.dir, "config.json")}
+	app := &App{Stdout: &out, Stderr: &errOut, ConfigPath: filepath.Join(e.work, "config.json")}
 	code = app.Run(ctx, append([]string{"events"}, args...))
 	return code, out.String(), errOut.String()
 }
@@ -216,7 +243,7 @@ func followedSeqs(t *testing.T, out string) []int64 {
 func e2eReconnect(t *testing.T, e e2eEnv) {
 	head := e.read(t).HeadSeq
 	var out, errOut syncBuffer
-	app := &App{Stdout: &out, Stderr: &errOut, ConfigPath: filepath.Join(e.dir, "config.json")}
+	app := &App{Stdout: &out, Stderr: &errOut, ConfigPath: filepath.Join(e.work, "config.json")}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan int, 1)
@@ -226,7 +253,7 @@ func e2eReconnect(t *testing.T, e e2eEnv) {
 		seqs := followedSeqs(t, out.String())
 		return int64(len(seqs)) > 0 && seqs[len(seqs)-1] >= head
 	})
-	e.restart(t)
+	e.restartCore(t)
 	e.produce(t)
 	waitFor(t, "un evento posterior al reinicio", 120*time.Second, func() bool {
 		seqs := followedSeqs(t, out.String())
@@ -261,24 +288,31 @@ func e2eReconnect(t *testing.T, e e2eEnv) {
 	if code, again, errOut := e.run(ctx2, "--follow", "--json"); code != 0 || again != "" {
 		t.Fatalf("reanudar con el cursor guardado: code %d, repetidos %q, stderr %q", code, again, errOut)
 	}
+	if _, err := os.Stat(filepath.Join(e.work, "events")); err != nil {
+		t.Fatalf("el cursor debe guardarse en el directorio aislado: %v", err)
+	}
+	for _, leaked := range []string{"events", "config.json"} {
+		if _, err := os.Stat(filepath.Join(e.source, leaked)); !os.IsNotExist(err) {
+			t.Fatalf("el E2E escribió %s junto al orch.json del Core (err=%v)", leaked, err)
+		}
+	}
 }
 
 func TestEventsE2EContraElCoreFalso(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		h, _ := newEventsHarness(t)
-		e2eEmpty(t, e2eEnv{dir: filepath.Dir(h.path)})
+		e2eEmpty(t, newE2EEnv(t, filepath.Dir(h.path)))
 	})
 	t.Run("history", func(t *testing.T) {
 		h, _ := newEventsHarness(t, 1, 2, 3, 4, 5, 6, 7)
-		e2eHistory(t, e2eEnv{dir: filepath.Dir(h.path)}, 5)
+		e2eHistory(t, newE2EEnv(t, filepath.Dir(h.path)), 5)
 	})
 	t.Run("reconnect", func(t *testing.T) {
 		h, core := newEventsHarness(t, 1, 2, 3)
-		e2eReconnect(t, e2eEnv{
-			dir:     filepath.Dir(h.path),
-			restart: func(*testing.T) { core.restart() },
-			produce: func(*testing.T) { core.append(4, 5) },
-		})
+		e := newE2EEnv(t, filepath.Dir(h.path))
+		e.restart = func(*testing.T) { core.restart() }
+		e.produce = func(*testing.T) { core.append(4, 5) }
+		e2eReconnect(t, e)
 	})
 }
 
@@ -308,7 +342,7 @@ func TestEventsE2ECoreReal(t *testing.T) {
 	if os.Getenv("LXO_TASK_ID") == "" {
 		t.Fatal("LXO_TASK_ID es obligatorio para el E2E contra un Core real")
 	}
-	e := e2eEnv{dir: dir}
+	e := newE2EEnv(t, dir)
 	switch scenario := os.Getenv("LIXBON_E2E_SCENARIO"); scenario {
 	case "empty":
 		e2eEmpty(t, e)
