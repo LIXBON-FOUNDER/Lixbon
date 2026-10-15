@@ -1,6 +1,8 @@
 // Package events lee el Event Log del Core por su API de lectura (GET /events,
-// contrato v=1 de docs/core/EVENTOS.md). No abre SQLite ni estado local: el
-// único dato local es orch.json, donde el desktop publica puerto y token.
+// contrato v=1 de docs/core/EVENTOS.md). Nunca abre SQLite ni el estado del Core.
+// Lo único que lee del disco es orch.json (puerto y token publicados por el
+// desktop); lo único que escribe es el último cursor confirmado de un
+// seguimiento, que es estado del cliente (ver cursor.go).
 package events
 
 import (
@@ -202,7 +204,7 @@ func (c *Client) parse(status int, body []byte, cursor int64) (*Page, error) {
 }
 
 func (p *Page) validate(cursor int64) error {
-	last := int64(0)
+	last := cursor
 	for i, raw := range p.Events {
 		var head struct {
 			Seq *int64 `json:"seq"`
@@ -210,19 +212,24 @@ func (p *Page) validate(cursor int64) error {
 		if err := json.Unmarshal(raw, &head); err != nil || head.Seq == nil || *head.Seq < 1 {
 			return newError(KindVersion, "contract", "contrato roto: el evento %d no tiene un seq entero positivo", i)
 		}
-		if i > 0 && *head.Seq <= last {
-			return newError(KindVersion, "contract", "contrato roto: seq no estrictamente creciente (%d tras %d)", *head.Seq, last)
+		if *head.Seq <= last {
+			return newError(KindVersion, "contract", "contrato roto: seq %d no es estrictamente creciente ni posterior al cursor %d (último visto %d)", *head.Seq, cursor, last)
+		}
+		if *head.Seq > p.HeadSeq {
+			return newError(KindVersion, "contract", "contrato roto: seq %d supera head_seq %d", *head.Seq, p.HeadSeq)
 		}
 		last = *head.Seq
 		p.Seqs = append(p.Seqs, last)
 	}
 	switch {
+	case p.NextCursor < cursor:
+		return newError(KindVersion, "contract", "contrato roto: next_cursor (%d) anterior al cursor pedido (%d); el Core debía responder cursor_ahead", p.NextCursor, cursor)
 	case p.HasMore && len(p.Events) == 0:
 		return newError(KindVersion, "contract", "contrato roto: has_more=true sin eventos en la página")
-	case p.NextCursor < cursor:
-		return newError(KindVersion, "contract", "contrato roto: next_cursor (%d) anterior al cursor pedido (%d)", p.NextCursor, cursor)
-	case p.NextCursor < last:
-		return newError(KindVersion, "contract", "contrato roto: next_cursor (%d) anterior al último seq (%d)", p.NextCursor, last)
+	case p.HasMore && p.NextCursor != last:
+		return newError(KindVersion, "contract", "contrato roto: con has_more=true next_cursor (%d) debe ser el último seq (%d)", p.NextCursor, last)
+	case !p.HasMore && p.NextCursor != p.HeadSeq:
+		return newError(KindVersion, "contract", "contrato roto: con has_more=false next_cursor (%d) debe ser head_seq (%d)", p.NextCursor, p.HeadSeq)
 	}
 	return nil
 }

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"lixbon.com/cli/internal/events"
 )
@@ -30,6 +29,7 @@ Paginación:
 
 Filtros (los que admite el Core, se combinan con AND):
   --project ID       --run ID           --class state|effect|decision|system
+  --task ID          atajo de --entity-kind task --entity-id ID (no se combina con ellos)
   --entity-kind K    --entity-id ID     (entity-id exige entity-kind: task, run, project, spawn_request, core)
   --kind K           --kind-prefix P    (incompatibles entre sí; el prefijo es literal)
 
@@ -41,12 +41,14 @@ Salida:
 Seguimiento:
   --follow           sigue el log con sondeo por cursor (el Core aún no ofrece stream). Sin esperar
                      mientras haya más páginas; al llegar al final espera 0,5 s y, si siguen vacías,
-                     1 s y 2 s (máximo). Cada cursor confirmado se guarda en ~/.lixbon/events/ y la
-                     siguiente ejecución con los mismos filtros continúa desde ahí; --after manda sobre
-                     el guardado. Un cursor guardado que el Core ya no reconoce reinicia en 0.
-  --max-outage D     cuánto reintentar si el Core no responde, con espera de 1 s a 8 s y releyendo el
-                     puerto y el token de Lixbon Desktop (defecto 60s; 0 = no reintentar)
-  Ctrl+C termina limpiamente con código 0.
+                     1 s y 2 s (máximo). Cada cursor confirmado se guarda en ~/.lixbon/events/ (estado
+                     del cliente; el Core no se toca) y la siguiente ejecución con los mismos filtros
+                     continúa desde ahí; --after manda sobre el guardado. Un cursor que el Core ya no
+                     reconoce (cursor_ahead) reinicia en 0 si era el guardado.
+                     Si el Core no responde reintenta con espera de 1 s a 8 s, releyendo el puerto y el
+                     token de Lixbon Desktop, hasta recuperar la conexión o pulsar Ctrl+C. Los errores
+                     de autenticación, versión o cursor terminan de inmediato.
+  Ctrl+C termina con código 0, salvo que la conexión esté caída: entonces sale con 5.
 
 Códigos de salida:
   0 correcto       1 error interno o Event Log no disponible   2 uso o filtro inválido
@@ -58,7 +60,6 @@ type eventsOptions struct {
 	json     bool
 	follow   bool
 	explicit bool
-	outage   time.Duration
 	query    events.Query
 }
 
@@ -85,11 +86,10 @@ func (a *App) events(ctx context.Context, args []string) int {
 	}
 
 	follower := &events.Follower{
-		Fetcher:   client,
-		Store:     events.FileStore{Path: events.StorePath(filepath.Join(dir, "events"), taskID, opts.query.Params)},
-		MaxOutage: opts.outage,
-		Notify:    func(format string, args ...any) { fmt.Fprintf(a.Stderr, format+"\n", args...) },
-		Emit:      func(raw json.RawMessage) error { return a.printEvent(raw, opts.json) },
+		Fetcher: client,
+		Store:   events.FileStore{Path: events.StorePath(filepath.Join(dir, "events"), taskID, opts.query.Params)},
+		Notify:  func(format string, args ...any) { fmt.Fprintf(a.Stderr, format+"\n", args...) },
+		Emit:    func(raw json.RawMessage) error { return a.printEvent(raw, opts.json) },
 	}
 	if err := follower.Run(ctx, opts.query, opts.explicit); err != nil {
 		return fail(err)
@@ -104,8 +104,7 @@ func (a *App) parseEvents(args []string) (opts eventsOptions, code int, stop boo
 	after := fs.String("after", "", "")
 	fs.BoolVar(&opts.json, "json", false, "")
 	fs.BoolVar(&opts.follow, "follow", false, "")
-	fs.DurationVar(&opts.outage, "max-outage", events.DefaultOutage, "")
-	for _, name := range []string{"limit", "project", "run", "entity-kind", "entity-id", "kind", "kind-prefix", "class"} {
+	for _, name := range []string{"limit", "project", "run", "entity-kind", "entity-id", "kind", "kind-prefix", "class", "task"} {
 		fs.String(name, "", "")
 	}
 	if code, stop := parseFlags(fs, args); stop {
@@ -115,20 +114,24 @@ func (a *App) parseEvents(args []string) (opts eventsOptions, code int, stop boo
 		a.printError(fmt.Sprintf("events no admite argumentos sueltos (%q): mira lixbon events --help", fs.Arg(0)))
 		return opts, events.ExitUsage, true
 	}
-	if opts.outage < 0 {
-		a.printError("--max-outage no puede ser negativo")
-		return opts, events.ExitUsage, true
-	}
 	opts.query.Params = map[string]string{}
+	given := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) {
+		given[f.Name] = true
 		switch f.Name {
 		case "after":
 			opts.explicit = true
-		case "json", "follow", "max-outage":
+		case "json", "follow":
+		case "task":
+			opts.query.Params["entity_kind"], opts.query.Params["entity_id"] = "task", f.Value.String()
 		default:
 			opts.query.Params[strings.ReplaceAll(f.Name, "-", "_")] = f.Value.String()
 		}
 	})
+	if given["task"] && (given["entity-kind"] || given["entity-id"]) {
+		a.printError("--task ya fija entity_kind=task y entity_id: no se combina con --entity-kind ni --entity-id")
+		return opts, events.ExitUsage, true
+	}
 	if opts.explicit {
 		cursor, err := events.ParseCursor(*after)
 		if err != nil {

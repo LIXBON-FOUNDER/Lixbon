@@ -300,7 +300,7 @@ func TestEventsAyuda(t *testing.T) {
 		if code := h.run("events", flag); code != 0 {
 			t.Fatalf("%s: code %d", flag, code)
 		}
-		for _, want := range []string{"--after", "--follow", "--json", "--limit", "--kind-prefix", "--max-outage", "Códigos de salida", "LXO_TASK_ID"} {
+		for _, want := range []string{"--after", "--follow", "--json", "--limit", "--kind-prefix", "--task", "Códigos de salida", "LXO_TASK_ID"} {
 			if !strings.Contains(h.out.String(), want) {
 				t.Errorf("%s: la ayuda no menciona %q", flag, want)
 			}
@@ -348,6 +348,7 @@ func TestEventsFiltrosSeMapeanUnoAUnoALaListaCerrada(t *testing.T) {
 		{[]string{"--project", "p1"}, url.Values{"project": {"p1"}}},
 		{[]string{"--run", "r1"}, url.Values{"run": {"r1"}}},
 		{[]string{"--entity-kind", "task", "--entity-id", "t3"}, url.Values{"entity_kind": {"task"}, "entity_id": {"t3"}}},
+		{[]string{"--task", "t3"}, url.Values{"entity_kind": {"task"}, "entity_id": {"t3"}}},
 		{[]string{"--kind", "task.created"}, url.Values{"kind": {"task.created"}}},
 		{[]string{"--kind-prefix", "task."}, url.Values{"kind_prefix": {"task."}}},
 		{[]string{"--class", "decision"}, url.Values{"class": {"decision"}}},
@@ -389,7 +390,7 @@ func TestEventsFiltroVacioSeEnviaYElCoreLoRechaza(t *testing.T) {
 
 func TestEventsNoReenviaParametrosAjenos(t *testing.T) {
 	h, _ := newEventsHarness(t, 1)
-	for _, args := range [][]string{{"--session"}, {"--filter", "x"}, {"--task", "t1"}, {"extra"}} {
+	for _, args := range [][]string{{"--session"}, {"--filter", "x"}, {"--max-outage", "1s"}, {"extra"}} {
 		if code := h.run(append([]string{"events"}, args...)...); code != events.ExitUsage {
 			t.Errorf("%v: code %d, quería %d", args, code, events.ExitUsage)
 		}
@@ -532,6 +533,10 @@ func TestEventsCodigosDeSalidaPorError(t *testing.T) {
 		{"contrato: has_more sin eventos", 200, `{"ok":true,"data":{"v":1,"events":[],"next_cursor":0,"has_more":true,"head_seq":9,"limit":100}}`, events.ExitVersion, "has_more"},
 		{"contrato: seq no creciente", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":3},{"seq":3}],"next_cursor":3,"has_more":false,"head_seq":3,"limit":100}}`, events.ExitVersion, "creciente"},
 		{"contrato: next_cursor atrasado", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":5}],"next_cursor":2,"has_more":false,"head_seq":5,"limit":100}}`, events.ExitVersion, "next_cursor"},
+		{"contrato: seq no posterior al cursor", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":0}],"next_cursor":3,"has_more":false,"head_seq":3,"limit":100}}`, events.ExitVersion, "seq"},
+		{"contrato: seq por encima de head_seq", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":4}],"next_cursor":3,"has_more":false,"head_seq":3,"limit":100}}`, events.ExitVersion, "head_seq"},
+		{"contrato: has_more con next_cursor distinto del último seq", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":1},{"seq":2}],"next_cursor":9,"has_more":true,"head_seq":9,"limit":2}}`, events.ExitVersion, "último seq"},
+		{"contrato: sin has_more next_cursor distinto de head_seq", 200, `{"ok":true,"data":{"v":1,"events":[{"seq":1}],"next_cursor":1,"has_more":false,"head_seq":9,"limit":100}}`, events.ExitVersion, "head_seq"},
 	}
 	for _, tc := range cases {
 		for _, asJSON := range []bool{false, true} {
@@ -650,34 +655,6 @@ func TestEventsFollowReconectaSinSaltarNiRepetir(t *testing.T) {
 	}
 }
 
-func TestEventsFollowSinConexionTrasMaxOutageFallaConRed(t *testing.T) {
-	h, core := newEventsHarness(t, 1, 2)
-	core.stop()
-	fakeClock(t, nil)
-	code := h.runCtx(context.Background(), "events", "--follow", "--max-outage", "10s")
-	if code != events.ExitNetwork {
-		t.Fatalf("code %d, quería %d (stderr %q)", code, events.ExitNetwork, h.errOut)
-	}
-	if h.out.Len() != 0 {
-		t.Errorf("stdout %q", h.out)
-	}
-	if !strings.Contains(h.errOut.String(), "10s") {
-		t.Errorf("stderr %q", h.errOut)
-	}
-}
-
-func TestEventsFollowMaxOutageCeroNoReintenta(t *testing.T) {
-	h, core := newEventsHarness(t, 1)
-	core.stop()
-	clock := fakeClock(t, nil)
-	if code := h.runCtx(context.Background(), "events", "--follow", "--max-outage", "0"); code != events.ExitNetwork {
-		t.Fatalf("code %d", code)
-	}
-	if len(clock.calls) != 0 {
-		t.Errorf("esperas %v", clock.calls)
-	}
-}
-
 func TestEventsFollowCursorAdelantadoGuardadoReiniciaEnCero(t *testing.T) {
 	h, core := newEventsHarness(t, 1, 2, 3)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -734,5 +711,60 @@ func TestEventsCancelarSinSeguirNoEsExito(t *testing.T) {
 	}
 	if h.out.Len() != 0 {
 		t.Errorf("stdout %q", h.out)
+	}
+}
+
+func TestEventsTaskEsAtajoDeEntidadTarea(t *testing.T) {
+	h, core := newEventsHarness(t, 1, 2)
+	if code := h.run("events", "--task", "t2"); code != 0 {
+		t.Fatalf("code %d, stderr %q", code, h.errOut)
+	}
+	q := core.lastQuery()
+	if _, sent := q["task"]; sent || q.Get("entity_kind") != "task" || q.Get("entity_id") != "t2" {
+		t.Errorf("query %v", q)
+	}
+	for _, args := range [][]string{{"--task", "t2", "--entity-kind", "run"}, {"--task", "t2", "--entity-id", "t3"}} {
+		before := core.requests()
+		if code := h.run(append([]string{"events"}, args...)...); code != events.ExitUsage {
+			t.Errorf("%v: code %d", args, code)
+		}
+		if core.requests() != before {
+			t.Errorf("%v: un uso inválido no consulta el Core", args)
+		}
+	}
+}
+
+func TestEventsFollowCancelarSinConexionSaleConRed(t *testing.T) {
+	h, core := newEventsHarness(t, 1)
+	core.stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	clock := fakeClock(t, func(n int) {
+		if n == 3 {
+			cancel()
+		}
+	})
+	if code := h.runCtx(ctx, "events", "--follow"); code != events.ExitNetwork {
+		t.Fatalf("code %d, stderr %q", code, h.errOut)
+	}
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	if fmt.Sprint(clock.calls) != fmt.Sprint(want) {
+		t.Errorf("esperas %v, quería %v", clock.calls, want)
+	}
+	if h.out.Len() != 0 {
+		t.Errorf("stdout %q", h.out)
+	}
+}
+
+func TestEventsFollowNoReintentaAutenticacionNiVersion(t *testing.T) {
+	for status, want := range map[int]int{401: events.ExitAuth, 403: events.ExitAuth, 404: events.ExitVersion} {
+		h, core := newEventsHarness(t, 1)
+		core.status, core.body = status, `{"ok":false,"code":"forbidden","error":"no"}`
+		clock := fakeClock(t, nil)
+		if code := h.runCtx(context.Background(), "events", "--follow"); code != want {
+			t.Errorf("HTTP %d: code %d, quería %d", status, code, want)
+		}
+		if len(clock.calls) != 0 || core.requests() != 1 {
+			t.Errorf("HTTP %d: esperas %v, peticiones %d", status, clock.calls, core.requests())
+		}
 	}
 }

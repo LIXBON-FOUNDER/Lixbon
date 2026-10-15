@@ -12,7 +12,6 @@ const (
 	pollMax        = 2 * time.Second
 	reconnectBase  = time.Second
 	reconnectMax   = 8 * time.Second
-	DefaultOutage  = 60 * time.Second
 	pollBackoffCap = 2
 )
 
@@ -40,11 +39,10 @@ type CursorStore interface {
 }
 
 type Follower struct {
-	Fetcher   Fetcher
-	Store     CursorStore
-	Emit      func(raw json.RawMessage) error
-	Notify    func(format string, args ...any)
-	MaxOutage time.Duration
+	Fetcher Fetcher
+	Store   CursorStore
+	Emit    func(raw json.RawMessage) error
+	Notify  func(format string, args ...any)
 }
 
 func pollDelay(emptyPolls int) time.Duration {
@@ -55,8 +53,10 @@ func reconnectDelay(attempt int) time.Duration {
 	return min(reconnectBase<<min(attempt, 3), reconnectMax)
 }
 
-// Run sigue el log hasta que ctx se cancela (devuelve nil) o hay un error que
-// no se arregla reintentando. El cursor guardado solo avanza tras emitir.
+// Run sigue el log hasta que ctx se cancela o hay un error que reintentar no
+// arregla. Una caída de red se reintenta con espera acotada hasta recuperarla o
+// hasta la cancelación; cancelar durante una caída devuelve el error de red, no
+// éxito. El cursor guardado solo avanza tras emitir.
 func (f *Follower) Run(ctx context.Context, q Query, explicit bool) error {
 	cursor, saved := q.Cursor, int64(-1)
 	if !explicit {
@@ -69,34 +69,30 @@ func (f *Follower) Run(ctx context.Context, q Query, explicit bool) error {
 		}
 	}
 	userCursor := explicit
-	var outageStart time.Time
+	var outage *Error
 	outageAttempt, emptyPolls := 0, 0
 
-	for ctx.Err() == nil {
+	for {
+		if ctx.Err() != nil {
+			return outage.orNil()
+		}
 		q.Cursor = cursor
 		page, err := f.Fetcher.Fetch(ctx, q)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
 			var apiErr *Error
 			if !errors.As(err, &apiErr) {
+				if ctx.Err() != nil {
+					return outage.orNil()
+				}
 				return err
 			}
 			switch {
 			case apiErr.Kind == KindNetwork:
-				if outageStart.IsZero() {
-					outageStart = Now()
-				}
-				if Now().Sub(outageStart) >= f.MaxOutage {
-					return newError(KindNetwork, "network", "sin respuesta del Core tras %s de reintentos: %s", f.MaxOutage, apiErr.Message)
-				}
+				outage = apiErr
 				delay := reconnectDelay(outageAttempt)
 				outageAttempt++
 				f.Notify("Reconectando en %s (último cursor confirmado: %d): %s", delay, cursor, apiErr.Message)
-				if Sleep(ctx, delay) != nil {
-					return nil
-				}
+				_ = Sleep(ctx, delay)
 				continue
 			case apiErr.Kind == KindCursorAhead && !userCursor && cursor > 0:
 				f.Notify("El cursor guardado (%d) supera el head_seq del Core: la base ya no es la misma, se empieza en 0.", cursor)
@@ -105,9 +101,9 @@ func (f *Follower) Run(ctx context.Context, q Query, explicit bool) error {
 			}
 			return err
 		}
-		if !outageStart.IsZero() {
+		if outage != nil {
 			f.Notify("Conexión recuperada.")
-			outageStart, outageAttempt = time.Time{}, 0
+			outage, outageAttempt = nil, 0
 		}
 		userCursor = false
 
@@ -139,11 +135,15 @@ func (f *Follower) Run(ctx context.Context, q Query, explicit bool) error {
 		} else {
 			emptyPolls = 0
 		}
-		if Sleep(ctx, pollDelay(max(emptyPolls-1, 0))) != nil {
-			return nil
-		}
+		_ = Sleep(ctx, pollDelay(max(emptyPolls-1, 0)))
 	}
-	return nil
+}
+
+func (e *Error) orNil() error {
+	if e == nil {
+		return nil
+	}
+	return newError(KindNetwork, "network", "interrumpido sin conexión con el Core: %s", e.Message)
 }
 
 func (f *Follower) persist(cursor int64, saved *int64) error {
