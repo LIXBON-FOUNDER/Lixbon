@@ -77,6 +77,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	}
 	m.turn++
 	id := m.turn
+	m.chat.Session.NoVision = m.modelLacksVision()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.running = true
@@ -85,7 +86,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	m.live = liveState{}
 	m.liveChars, m.liveReal, m.charsPerToken = 0, 0, m.chat.Session.Estimator.CharsPerToken()
 	m.notice = ""
-	m.openTool, m.readGroup, m.todoEntry = nil, nil, nil
+	m.openTool, m.readGroup, m.browserGroup, m.todoEntry = nil, nil, nil, nil
 	m.answerEntry = nil
 	var chips []imageChip
 	if m.remote != nil && m.remoteOrigin {
@@ -144,7 +145,7 @@ func (m *Model) flushLive() {
 func (m *Model) flushThinking() {
 	live := &m.live
 	if strings.TrimSpace(live.reasoning.String()) != "" {
-		m.closeReads()
+		m.closeGroups()
 		m.add(thinkBlock{text: live.reasoning.String(), secs: live.reasoningSecs})
 	}
 	live.reasoning.Reset()
@@ -190,7 +191,7 @@ func (m *Model) drawAnswer(prose string) {
 }
 
 func (m *Model) printAnswer(prose string) {
-	m.closeReads()
+	m.closeGroups()
 	m.gap()
 	m.answerEntry = m.add(answerBlock{text: prose, md: m.renderMarkdown})
 }
@@ -202,7 +203,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	cancelled := m.interrupted || errors.Is(msg.err, context.Canceled)
 	m.interrupted = false
 	m.closeTool(toolStopped)
-	m.closeReads()
+	m.closeGroups()
 	if m.remote != nil {
 		m.remoteTurnDone(msg, cancelled)
 	}
@@ -214,6 +215,9 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	switch {
 	case msg.err != nil && !errors.Is(msg.err, context.Canceled):
 		m.add(m.reportError(msg.err))
+		if kept := new(chat.Interrupted); errors.As(msg.err, &kept) {
+			m.add(note("Lo hecho en este turno quedó guardado: escribe «continúa» para seguir."))
+		}
 	default:
 		if answer := strings.TrimSpace(msg.answer); answer != "" {
 			shown := answer
@@ -304,6 +308,18 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 		options = append(options,
 			option{Label: "Sí, y no preguntar más", Value: "always", Desc: "auto-ejecutar cualquier comando esta sesión"},
 			option{Label: "No", Value: "no", Desc: "rechazar y decirle al agente que no"})
+	case agent.ApproveBrowser:
+		title = "¿Permitir esta acción en el navegador?"
+		options = append(options, option{Label: "Sí", Value: "yes", Desc: "solo esta vez"})
+		if !req.Sensitive {
+			if req.Prefix != "" {
+				options = append(options, option{Label: "Sí, y siempre en " + req.Detail, Value: "prefix",
+					Desc: "no volverá a preguntar en este sitio durante la sesión"})
+			}
+			options = append(options, option{Label: "Sí, y no preguntar más en el navegador", Value: "always",
+				Desc: "cualquier sitio, el resto de la sesión"})
+		}
+		options = append(options, option{Label: "No", Value: "no", Desc: "rechazar y decirle al agente que no"})
 	case agent.ApproveMCP:
 		title = "¿Ejecutar esta herramienta externa?"
 		options = []option{
@@ -329,7 +345,7 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 				d = agent.Allow
 			case "always":
 				d = agent.AllowAlways
-				m.alwaysAllowed = true
+				m.alwaysAllowed = req.Kind != agent.ApproveBrowser
 			case "prefix":
 				d = agent.AllowPrefix
 			}
@@ -361,14 +377,18 @@ func (m *Model) approvalBody(req agent.Approval) []string {
 		}
 	case agent.ApproveMCP:
 		return []string{sBeige.Render(req.Detail), sDim.Render("  " + req.Summary)}
+	case agent.ApproveBrowser:
+		lines := []string{sBeige.Render(browserVerb(req.Tool) + " " + req.Summary), sDim.Render("  en " + req.Detail)}
+		if req.Sensitive {
+			lines = append(lines, sWarn.Render("  Es un campo sensible (contraseña, tarjeta o código): mejor escríbelo tú en la ventana."))
+		}
+		return lines
 	}
 	line := sBeige.Render(firstNonEmpty(req.Detail, req.Summary))
 	if req.Change != nil {
 		line = sBeige.Render(req.Change.Path)
-		if m.openTool != nil {
-			if b := m.openTool.b.(*toolBlock); b.counts {
-				line += sDim2.Render(" "+glyphSep+" ") + counts(b.adds, b.dels)
-			}
+		if b := m.currentTool(); b != nil && b.counts {
+			line += sDim2.Render(" "+glyphSep+" ") + counts(b.adds, b.dels)
 		}
 		line += sDim.Render(" " + glyphSep + " el diff está justo encima")
 	}

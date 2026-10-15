@@ -6,8 +6,8 @@ import (
 )
 
 func TestCatalogIsConsistent(t *testing.T) {
-	if got := len(Names()); got != 20 {
-		t.Fatalf("herramientas: %d, esperaba 20", got)
+	if got := len(Names()); got != 31 {
+		t.Fatalf("herramientas: %d, esperaba 31", got)
 	}
 	schemaNames := map[string]bool{}
 	for _, schema := range Schemas() {
@@ -22,7 +22,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 			t.Errorf("%s es de solo lectura y mutante a la vez", name)
 		}
 	}
-	if len(schemaNames) != 20 {
+	if len(schemaNames) != 31 {
 		t.Errorf("schemas distintos: %d", len(schemaNames))
 	}
 }
@@ -44,5 +44,19 @@ func TestArgKeysOrder(t *testing.T) {
 	}
 	if ArgKeys("multi_edit") != nil {
 		t.Fatal("multi_edit no se repara por esquema")
+	}
+}
+
+func TestBrowserTools(t *testing.T) {
+	for _, name := range []string{"browser_click", "browser_type", "browser_press_key", "browser_navigate", "browser_tabs", "browser_back"} {
+		if !IsBrowser(name) || IsReadOnly(name) || IsMutating(name) {
+			t.Errorf("%s tiene aprobación propia por sitio: ni solo lectura ni mutante", name)
+		}
+	}
+	if !IsReadOnly("browser_snapshot") || !IsBrowser("browser_snapshot") || IsBrowser("browser_fake") {
+		t.Error("browser_snapshot es de solo lectura")
+	}
+	if got := ArgKeys("browser_type"); !slices.Equal(got, []string{"ref", "text", "submit", "clear"}) {
+		t.Fatalf("browser_type: %v", got)
 	}
 }

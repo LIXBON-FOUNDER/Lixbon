@@ -28,8 +28,7 @@ func (m *Model) liveLabel() (string, bool) {
 	if m.picker != nil && m.openTool != nil {
 		return "Esperando tu respuesta…", false
 	}
-	if m.openTool != nil {
-		b := m.openTool.b.(*toolBlock)
+	if b := m.currentTool(); b != nil {
 		if b.state == toolRunning {
 			target := ansi.Truncate(b.target, 32, glyphEllipsis)
 			return strings.TrimSpace(b.gerund+" "+target) + "…", false

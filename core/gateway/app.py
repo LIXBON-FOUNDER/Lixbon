@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import Request, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.gateway import deps
@@ -24,6 +24,8 @@ from core.persistence.queries import (
 )
 from core.security.auth import security_headers_middleware
 from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills
+
+FOUNDER_URL = "https://founder.lixbon.com"
 
 
 @asynccontextmanager
@@ -89,6 +91,7 @@ _cors_origins.append("http://localhost:5173")  # Vite dev server
 _cors_origins.append("http://localhost:1420")  # Tauri dev (app desktop)
 _cors_origins.append("http://tauri.localhost")  # App desktop en Windows (WebView2)
 _cors_origins.append("tauri://localhost")  # App desktop en macOS/Linux
+_cors_origins.append(FOUNDER_URL)  # Novedades, soporte y /api/ask desde la web pública
 
 app.add_middleware(
     CORSMiddleware,
@@ -186,6 +189,23 @@ _static_dir = Path(__file__).resolve().parent / "static"
 _static_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
+_RUTAS_FOUNDER = {"about", "team", "company", "news", "support", "legal", "donate"}
+
+
+def destino_web(path_name: str) -> tuple[str, int] | None:
+    """La portada y las páginas de empresa viven en founder.lixbon.com (repo
+    aparte); lixbon.com/ abre directamente el chat."""
+    ruta = path_name.strip("/")
+    partes = ruta.split("/")
+    es = partes[0] == "es"
+    resto = partes[1:] if es else partes
+    if not resto or resto == [""]:
+        return ("/es/chat" if es else "/chat"), 302
+    if resto[0] in _RUTAS_FOUNDER:
+        return f"{FOUNDER_URL}/{ruta}", 301
+    return None
+
+
 class _AssetsConHash(StaticFiles):
     """Vite pone el hash del contenido en el nombre, así que un asset nunca
     cambia: se puede cachear para siempre."""
@@ -209,6 +229,12 @@ if WEB_DIST_DIR.exists():
         candidate = (WEB_DIST_DIR / path_name).resolve()
         if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):
             return FileResponse(str(candidate))
+        destino = destino_web(path_name)
+        if destino:
+            url, codigo = destino
+            if request.url.query:
+                url = f"{url}?{request.url.query}"
+            return RedirectResponse(url, status_code=codigo)
         # Sin cookie de sesión (buscadores, visitantes nuevos) la página pública
         # va ya renderizada: texto y etiquetas SEO en el HTML, sin esperar al JS.
         # Con sesión se sirve el shell de la SPA: las páginas públicas cambian

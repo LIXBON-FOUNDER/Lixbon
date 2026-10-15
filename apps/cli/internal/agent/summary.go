@@ -115,6 +115,35 @@ func ArgsSummary(tool string, args map[string]any) string {
 		return fmt.Sprintf("%s (inserta en la línea %s)", orQuestion(args, "path"), orQuestion(args, "line"))
 	case "write_file", "append_file":
 		return fmt.Sprintf("%s (%d chars)", orQuestion(args, "path"), utf8.RuneCountInString(stringArg(args, "content")))
+	case "browser_navigate":
+		return textutil.Head(stringArg(args, "url"), 200)
+	case "browser_click", "browser_snapshot", "browser_screenshot", "browser_back", "browser_get_text":
+		return textutil.Head(stringArg(args, "ref"), 40)
+	case "browser_type":
+		return fmt.Sprintf("%s «%s»", stringArg(args, "ref"), textutil.Head(stringArg(args, "text"), 60))
+	case "browser_press_key":
+		return stringArg(args, "key")
+	case "browser_scroll":
+		if ref := stringArg(args, "ref"); ref != "" {
+			return "hasta " + ref
+		}
+		if strings.EqualFold(stringArg(args, "direction"), "up") {
+			return "arriba"
+		}
+		return "abajo"
+	case "browser_wait":
+		if text := stringArg(args, "text"); text != "" {
+			return fmt.Sprintf("«%s»", textutil.Head(text, 60))
+		}
+		return orQuestion(args, "seconds") + " s"
+	case "browser_tabs":
+		parts := []string{firstNonEmptyArg(args, "action", "list")}
+		for _, key := range []string{"index", "url"} {
+			if truthy(args[key]) {
+				parts = append(parts, pyStr(args[key]))
+			}
+		}
+		return textutil.Head(strings.Join(parts, " "), 200)
 	}
 	switch {
 	case truthy(args["path"]):
@@ -124,6 +153,13 @@ func ArgsSummary(tool string, args map[string]any) string {
 	}
 	raw, _ := json.Marshal(args)
 	return textutil.Head(string(raw), 200)
+}
+
+func firstNonEmptyArg(args map[string]any, key, def string) string {
+	if v := strings.TrimSpace(stringArg(args, key)); v != "" {
+		return v
+	}
+	return def
 }
 
 func collectionLen(v any) int {

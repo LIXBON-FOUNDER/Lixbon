@@ -294,16 +294,22 @@ func TestWebSearch(t *testing.T) {
 		t.Errorf("sin buscador: %q", got)
 	}
 	fake := &fakeSearch{results: []map[string]any{
-		{"title": "Go", "url": "https://go.dev", "snippet": "  El   lenguaje\n Go "},
+		{"title": "Go &amp; <b>más</b>", "url": "https://go.dev", "snippet": "  El   <strong>lenguaje</strong>\n &quot;Go&quot; "},
 		{"url": "https://b.test"},
 	}}
 	tb.Web = fake
-	want := "1. Go\n   https://go.dev\n   El lenguaje Go\n\n2. (sin título)\n   https://b.test\n   "
-	if got := tb.run("web_search", map[string]any{"query": " go ", "limit": 99}); got != want {
-		t.Errorf("got %q, want %q", got, want)
+	want := "1. Go & más\n   https://go.dev\n   El lenguaje \"Go\"\n\n2. (sin título)\n   https://b.test\n   \n\nSon extractos"
+	if got := tb.run("web_search", map[string]any{"query": " go ", "limit": 99}); !strings.HasPrefix(got, want) || strings.Contains(got, "Ya buscaste") {
+		t.Errorf("got %q, want %q…", got, want)
 	}
 	if fake.query != "go" || fake.limit != 10 {
 		t.Errorf("query=%q limit=%d", fake.query, fake.limit)
+	}
+	if got := tb.run("web_search", map[string]any{"query": "biografía completa de Robert Downey"}); strings.Contains(got, "Ya buscaste") {
+		t.Errorf("una búsqueda distinta no avisa: %q", got)
+	}
+	if got := tb.run("web_search", map[string]any{"query": "Robert Downey biografía"}); !strings.Contains(got, "Ya buscaste algo casi igual: «biografía completa de Robert Downey»") {
+		t.Errorf("la búsqueda repetida avisa: %q", got)
 	}
 	tb.run("web_search", map[string]any{"query": "x"})
 	if fake.limit != 5 {

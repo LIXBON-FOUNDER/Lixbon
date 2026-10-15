@@ -155,6 +155,7 @@ func newHarness(t *testing.T, mutate func(*config.Config), steps ...func(http.Re
 	cfg.BaseURL = client.BaseURL
 	cfg.APIKey, cfg.Model, cfg.Mode = "k", "qwen", "ask"
 	cfg.AutoApproveTools = true
+	cfg.SetExtraString("browser", "off")
 	if mutate != nil {
 		mutate(&cfg)
 	}
