@@ -83,10 +83,9 @@ func newHarness(t *testing.T, fetch Fetcher, store CursorStore) *harness {
 	Now = func() time.Time { return h.now }
 	t.Cleanup(func() { Sleep, Now = prevSleep, prevNow })
 	h.f = &Follower{
-		Fetcher:   fetch,
-		Store:     store,
-		MaxOutage: DefaultOutage,
-		Notify:    func(format string, args ...any) { h.notes = append(h.notes, fmt.Sprintf(format, args...)) },
+		Fetcher: fetch,
+		Store:   store,
+		Notify:  func(format string, args ...any) { h.notes = append(h.notes, fmt.Sprintf(format, args...)) },
 		Emit: func(raw json.RawMessage) error {
 			var ev struct{ Seq int64 }
 			_ = json.Unmarshal(raw, &ev)
@@ -233,21 +232,6 @@ func TestSeguirReintentaRedConRetrocesoAcotado(t *testing.T) {
 	}
 }
 
-func TestSeguirRendirseTrasMaxOutageEsErrorDeRed(t *testing.T) {
-	down := step{err: newError(KindNetwork, "network", "refused")}
-	fetch := &scripted{steps: []step{down, down, down, down, down, down, down, down}}
-	h := newHarness(t, fetch, &memStore{})
-	h.f.MaxOutage = 5 * time.Second
-	err := h.f.Run(h.ctx, Query{}, false)
-	var apiErr *Error
-	if !errors.As(err, &apiErr) || apiErr.Kind != KindNetwork || apiErr.ExitCode() != ExitNetwork {
-		t.Fatalf("error %v", err)
-	}
-	if len(fetch.cursors) != 4 {
-		t.Errorf("intentos %d", len(fetch.cursors))
-	}
-}
-
 func TestSeguirNoReintentaErroresQueNoSonDeRed(t *testing.T) {
 	for _, kind := range []Kind{KindAuth, KindVersion, KindUsage, KindInternal, KindCursor} {
 		fetch := &scripted{steps: []step{{err: newError(kind, "x", "falla")}, page(1, false, 1)}}
@@ -366,5 +350,76 @@ func TestHumanLineNoInterpretaPayloadNiDejaPasarControles(t *testing.T) {
 	}
 	if want := "7  2026-10-15T06:18:33.470Z  x?[31m.y  task  agent:t9"; line != want {
 		t.Errorf("\n got %q\nwant %q", line, want)
+	}
+}
+
+func TestSeguirCancelarSinConexionDevuelveErrorDeRedNoExito(t *testing.T) {
+	down := step{err: newError(KindNetwork, "network", "refused")}
+	fetch := &scripted{steps: []step{down, down, down}}
+	h := newHarness(t, fetch, &memStore{})
+	fetch.onFetch = func(n int) {
+		if n == 3 {
+			h.cancel()
+		}
+	}
+	err := h.f.Run(h.ctx, Query{}, false)
+	var apiErr *Error
+	if !errors.As(err, &apiErr) || apiErr.ExitCode() != ExitNetwork {
+		t.Fatalf("error %v", err)
+	}
+	if len(h.emitted) != 0 {
+		t.Errorf("emitidos %v", h.emitted)
+	}
+}
+
+func TestSeguirCancelarTrasRecuperarLaConexionEsExito(t *testing.T) {
+	down := step{err: newError(KindNetwork, "network", "refused")}
+	fetch := &scripted{steps: []step{down, page(1, false, 1)}}
+	h := newHarness(t, fetch, &memStore{})
+	fetch.onFetch = func(n int) {
+		if n == 3 {
+			h.cancel()
+		}
+	}
+	if err := h.f.Run(h.ctx, Query{}, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPaginaRechazaViolacionesDelCursor(t *testing.T) {
+	ev := func(seqs ...int64) []json.RawMessage {
+		var out []json.RawMessage
+		for _, s := range seqs {
+			out = append(out, json.RawMessage(fmt.Sprintf(`{"seq":%d}`, s)))
+		}
+		return out
+	}
+	cases := []struct {
+		name   string
+		cursor int64
+		page   Page
+		ok     bool
+	}{
+		{"correcta con has_more", 2, Page{Events: ev(3, 4), NextCursor: 4, HasMore: true, HeadSeq: 9}, true},
+		{"correcta al final", 2, Page{Events: ev(3, 4), NextCursor: 4, HeadSeq: 4}, true},
+		{"vacía avanza hasta head", 2, Page{NextCursor: 9, HeadSeq: 9}, true},
+		{"evento igual al cursor", 3, Page{Events: ev(3, 4), NextCursor: 4, HeadSeq: 4}, false},
+		{"evento anterior al cursor", 3, Page{Events: ev(2), NextCursor: 3, HeadSeq: 3}, false},
+		{"seq sobre head", 0, Page{Events: ev(5), NextCursor: 4, HeadSeq: 4}, false},
+		{"has_more con next distinto del último", 0, Page{Events: ev(1, 2), NextCursor: 3, HasMore: true, HeadSeq: 9}, false},
+		{"final con next distinto de head", 0, Page{Events: ev(1), NextCursor: 1, HeadSeq: 5}, false},
+		{"next anterior al cursor", 7, Page{NextCursor: 3, HeadSeq: 3}, false},
+		{"has_more sin eventos", 0, Page{NextCursor: 0, HasMore: true, HeadSeq: 4}, false},
+	}
+	for _, tc := range cases {
+		p := tc.page
+		err := p.validate(tc.cursor)
+		var apiErr *Error
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		if !tc.ok && (!errors.As(err, &apiErr) || apiErr.ExitCode() != ExitVersion) {
+			t.Errorf("%s: debía ser un error de contrato, fue %v", tc.name, err)
+		}
 	}
 }
