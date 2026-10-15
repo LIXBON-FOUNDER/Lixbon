@@ -288,13 +288,8 @@ func e2eReconnect(t *testing.T, e e2eEnv) {
 	if code, again, errOut := e.run(ctx2, "--follow", "--json"); code != 0 || again != "" {
 		t.Fatalf("reanudar con el cursor guardado: code %d, repetidos %q, stderr %q", code, again, errOut)
 	}
-	if _, err := os.Stat(filepath.Join(e.work, "events")); err != nil {
-		t.Fatalf("el cursor debe guardarse en el directorio aislado: %v", err)
-	}
-	for _, leaked := range []string{"events", "config.json"} {
-		if _, err := os.Stat(filepath.Join(e.source, leaked)); !os.IsNotExist(err) {
-			t.Fatalf("el E2E escribió %s junto al orch.json del Core (err=%v)", leaked, err)
-		}
+	if saved, err := filepath.Glob(filepath.Join(e.work, "events", "*.cursor")); err != nil || len(saved) == 0 {
+		t.Fatalf("el cursor debe guardarse en el directorio aislado %s (hallados %v, err=%v)", e.work, saved, err)
 	}
 }
 

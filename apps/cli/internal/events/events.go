@@ -182,10 +182,10 @@ func (c *Client) parse(status int, body []byte, cursor int64) (*Page, error) {
 	}
 	var doc struct {
 		V          int               `json:"v"`
-		Events     []json.RawMessage `json:"events"`
-		NextCursor *int64            `json:"next_cursor"`
-		HasMore    bool              `json:"has_more"`
-		HeadSeq    *int64            `json:"head_seq"`
+		Events     json.RawMessage `json:"events"`
+		NextCursor *int64          `json:"next_cursor"`
+		HasMore    *bool           `json:"has_more"`
+		HeadSeq    *int64          `json:"head_seq"`
 	}
 	if err := json.Unmarshal(envelope.Data, &doc); err != nil {
 		return nil, newError(KindVersion, "bad_response", "respuesta inválida del Core en /events: %v", err)
@@ -196,7 +196,17 @@ func (c *Client) parse(status int, body []byte, cursor int64) (*Page, error) {
 	if doc.NextCursor == nil || doc.HeadSeq == nil {
 		return nil, newError(KindVersion, "contract", "contrato roto: falta next_cursor o head_seq")
 	}
-	page := &Page{Data: envelope.Data, Events: doc.Events, NextCursor: *doc.NextCursor, HasMore: doc.HasMore, HeadSeq: *doc.HeadSeq}
+	if doc.HasMore == nil {
+		return nil, newError(KindVersion, "contract", "contrato roto: falta has_more o no es un booleano")
+	}
+	var list []json.RawMessage
+	if bytes.HasPrefix(bytes.TrimSpace(doc.Events), []byte("[")) {
+		_ = json.Unmarshal(doc.Events, &list)
+	}
+	if list == nil {
+		return nil, newError(KindVersion, "contract", "contrato roto: falta events o no es un array")
+	}
+	page := &Page{Data: envelope.Data, Events: list, NextCursor: *doc.NextCursor, HasMore: *doc.HasMore, HeadSeq: *doc.HeadSeq}
 	if err := page.validate(cursor); err != nil {
 		return nil, err
 	}
