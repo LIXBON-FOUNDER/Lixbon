@@ -1,0 +1,52 @@
+version: 2
+
+# Actualizaciones agrupadas y mensuales para no inundar de PRs; los parches de
+# seguridad llegan aparte en cuanto se publican.
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: monthly }
+    groups: { gateway: { patterns: ["*"] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(gateway)" }
+
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule: { interval: monthly }
+    groups: { web: { patterns: ["*"] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(web)" }
+
+  - package-ecosystem: npm
+    directory: /apps/desktop
+    schedule: { interval: monthly }
+    groups: { desktop: { patterns: ["*"] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(desktop)" }
+
+  - package-ecosystem: cargo
+    directories: [/apps/desktop/src-tauri, /apps/desktop/lxo]
+    schedule: { interval: monthly }
+    groups: { desktop-rust: { patterns: ["*"] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(desktop)" }
+
+  - package-ecosystem: npm
+    directory: /apps/mobile
+    schedule: { interval: monthly }
+    groups: { mobile: { patterns: ["*"], update-types: [minor, patch] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(mobile)" }
+
+  - package-ecosystem: gomod
+    directory: /apps/cli
+    schedule: { interval: monthly }
+    groups: { cli: { patterns: ["*"] } }
+    open-pull-requests-limit: 2
+    commit-message: { prefix: "chore(cli)" }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    groups: { actions: { patterns: ["*"] } }
+    commit-message: { prefix: "ci" }

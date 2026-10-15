@@ -3,23 +3,19 @@
 Gracias por querer aportar. Esta guía cubre cómo montar el entorno, en qué
 rama trabajar, cómo escribir commits y qué tiene que cumplir un PR.
 
-## 1. Elige la rama según lo que vas a tocar
+## 1. Ramas
 
-| Vas a cambiar… | Trabaja en | Y luego |
-|---|---|---|
-| `core/`, `BD/`, `infra/`, `apps/web/`, docs generales | `master` (o rama corta desde `master`) | PR a `master` |
-| `apps/desktop/**` | `desktop` | PR `desktop` → `master` |
-| `apps/cli/**` | `cli` | PR `cli` → `master` |
-| `apps/mobile/**` | `mobile` | PR `mobile` → `master` |
+`master` es la única rama larga y está protegida: nadie hace push directo, todo
+entra por PR con el CI en verde. Trabaja en una rama corta desde `master`:
 
 ```bash
-git checkout cli && git pull
-git merge master              # traer lo último del gateway antes de empezar
-git checkout -b cli/mi-cambio # opcional: rama corta para cambios grandes
+git switch master && git pull
+git switch -c usuario/lxo-123-resumen   # o fix/…, feat/…, chore/…
 ```
 
-Siempre **merge**, nunca rebase, sobre `desktop`/`cli`/`mobile`: son ramas
-compartidas. Detalle en [`docs/RAMAS_Y_RELEASES.md`](docs/RAMAS_Y_RELEASES.md).
+- Una rama por cambio; si la tarea tiene issue, su clave va en el nombre (`lxo-83`).
+- Antes de pedir revisión, trae `master` a tu rama (`git merge master`).
+- La rama se borra sola al mergear el PR.
 
 ## 2. Entorno por producto
 
@@ -57,8 +53,12 @@ cd apps/mobile && npm install && npx expo start   # Expo Go en el teléfono
 
 - **Idioma**: español en código de UI, docs, commits y mensajes de error.
 - **Comentarios**: solo para decisiones no evidentes, workarounds, límites de una
-  API o reglas de negocio. Nada de comentarios que repitan el código
-  (`.claude/claude.md`).
+  API o reglas de negocio. Nada de comentarios que repitan el código ni JSDoc
+  innecesario: prioriza nombres claros y buena estructura.
+- **Agentes de IA**: la configuración de Claude Code, Cursor, Codex, etc.
+  (`.claude/`, `CLAUDE.md`, `.agents/`, `.mcp.json`…) es personal y está en
+  `.gitignore`; no la subas al repo.
+- **Formato**: `.editorconfig` fija indentación y finales de línea por lenguaje.
 - **Diseño**: los tokens de `apps/web/src/styles/base.css` son la fuente de
   verdad; desktop y móvil los copian. Nada de temas oscuros con gradientes ni
   glassmorphism (`PRODUCT.md`).
@@ -73,7 +73,7 @@ tipo(ámbito): resumen en español, en presente
 ```
 
 - **tipo**: `feat` `fix` `refactor` `docs` `chore` `ci` `test`
-- **ámbito**: `gateway` `web` `desktop` `cli` `mobile` `agent` `billing` `bd` `infra` `repo`
+- **ámbito**: `gateway` `web` `desktop` `cli` `mobile` `agent` `billing` `db` `infra` `repo`
 
 Ejemplos: `fix(billing): activa el gate de sesión/semana`,
 `feat(cli): cliente MCP por stdio`, `docs(repo): índice de documentación`.
@@ -89,17 +89,26 @@ Ejemplos: `fix(billing): activa el gate de sesión/semana`,
 - [ ] Si cambias estructura de carpetas o comandos, actualiza el README afectado.
 - [ ] Rellena la plantilla de PR (`.github/pull_request_template.md`).
 
-`ci.yml` corre los tests del CLI automáticamente en cada PR a `master`.
+Para mergear a `master` tienen que pasar `Gateway · tests` y `CLI Go` (Linux y
+Windows) de `ci.yml`. `desktop-ci.yml` solo corre si el PR toca `apps/desktop/`.
 
 ## 6. Publicar una versión
 
-Solo mantenedores. Pasos por producto en
-[`docs/RAMAS_Y_RELEASES.md`](docs/RAMAS_Y_RELEASES.md#releases-por-producto):
-`desktop-vX.Y.Z` y `mobile-vX.Y.Z` disparan el CI; el CLI se publica con el
-siguiente deploy del gateway; gateway y web se despliegan con cada push a `master`.
+Solo mantenedores, siempre desde `master` ya mergeado:
+
+| Producto | Pasos |
+|---|---|
+| Gateway y web | Se despliegan solos en Railway con cada push a `master` |
+| CLI | Nota en `apps/cli/CHANGELOG.md` → `git tag cli-vX.Y.Z && git push origin cli-vX.Y.Z`. `release-cli.yml` compila, sube los binarios a lixbon.com (R2) y los registra en el gateway. Un sufijo (`-beta.1`) la publica como beta |
+| Desktop | Sube `version` en `apps/desktop/src-tauri/tauri.conf.json` → tag `desktop-vX.Y.Z`. `tauri.yml` sube MSI/DMG y el auto-update |
+| Móvil | Sube `version` en `apps/mobile/package.json` (el CI lo comprueba) → tag `mobile-vX.Y.Z`. `mobile.yml` publica el APK |
+
+Si una funcionalidad del desktop, CLI o móvil llama a una ruta nueva del
+gateway, mergea primero el gateway: hasta que llega a `master` esa ruta da 404
+en producción.
 
 ## 7. Reportar bugs y proponer funciones
 
-Abre un issue con: producto afectado (web / desktop / cli / mobile / gateway),
-versión, pasos para reproducir y qué esperabas. Para vulnerabilidades **no
-abras un issue**: sigue [`SECURITY.md`](SECURITY.md).
+Usa las plantillas de issue (bug o propuesta): producto afectado, versión,
+pasos para reproducir y qué esperabas. Para vulnerabilidades **no abras un
+issue**: sigue [`SECURITY.md`](SECURITY.md).

@@ -1,6 +1,6 @@
 """
-dump_schema.py — Genera BD/schema.sql desde los modelos SQLAlchemy (sin conectarse a nada).
-Uso:  python BD/scripts/dump_schema.py
+dump_schema.py — Genera db/schema.sql desde los modelos SQLAlchemy (sin conectarse a nada).
+Uso:  python db/scripts/dump_schema.py
 """
 import sys
 from pathlib import Path
@@ -19,7 +19,7 @@ OUT = Path(__file__).resolve().parents[1] / "schema.sql"
 def main() -> None:
     statements: list[str] = [
         "-- lixbon — Esquema de referencia (generado desde core/persistence/models.py)",
-        "-- NO editar a mano: regenerar con `python BD/scripts/dump_schema.py`",
+        "-- NO editar a mano: regenerar con `python db/scripts/dump_schema.py`",
         "",
     ]
     engine = create_mock_engine("postgresql+psycopg://", lambda sql, *a, **kw: None)
