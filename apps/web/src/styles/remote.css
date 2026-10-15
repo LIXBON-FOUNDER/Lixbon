@@ -296,7 +296,7 @@
 .rorch-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .rorch-empty, .rorch-off { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: auto; padding: 40px 16px; text-align: center; color: var(--ink-soft); }
 .rorch-empty code { padding: 6px 10px; border-radius: var(--radius); background: var(--surface-3); font-family: var(--font-mono); font-size: 13px; color: var(--ink); }
-.rorch-off h2 { margin: 0; font-family: var(--font-display); font-size: 26px; font-weight: 400; color: var(--ink); }
+.rorch-off h2 { margin: 0; font-family: var(--font-display); letter-spacing: var(--display-tracking); font-size: 26px; font-weight: var(--display-peso); color: var(--ink); }
 .rorch-off p { max-width: 460px; margin: 0; line-height: 1.55; }
 
 .rorch-runs { display: flex; flex-direction: column; gap: 14px; }
