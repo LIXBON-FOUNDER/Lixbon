@@ -8,7 +8,7 @@ use crate::store::{EventClass, EventQuery, EventRow, StoreError, DEFAULT_PAGE, M
 
 pub(super) const API_VERSION: i64 = 1;
 const MAX_FILTER_CHARS: usize = 128;
-const PARAMS: [&str; 10] = ["cursor", "limit", "project", "run", "entity_kind", "entity_id", "kind", "kind_prefix", "class", "session"];
+const PARAMS: [&str; 9] = ["cursor", "limit", "project", "run", "entity_kind", "entity_id", "kind", "kind_prefix", "class"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Code {
@@ -110,14 +110,14 @@ struct Params {
     query: EventQuery,
 }
 
-fn integer(v: &Value, name: &str, code: Code, min: u64) -> Result<u64, EventsError> {
+fn integer(v: &Value, name: &str, code: Code, min: u64, max: u64) -> Result<u64, EventsError> {
     let parsed = match v {
         Value::Number(n) => n.as_u64(),
-        Value::String(s) if !s.is_empty() && s.len() <= 19 && s.bytes().all(|b| b.is_ascii_digit()) => s.parse().ok(),
+        Value::String(s) if !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit()) => s.parse().ok(),
         _ => None,
     };
     parsed
-        .filter(|n| *n >= min && *n <= i64::MAX as u64)
+        .filter(|n| (min..=max).contains(n))
         .ok_or_else(|| EventsError::new(code, format!("`{name}` debe ser un entero decimal >= {min}")))
 }
 
@@ -139,8 +139,8 @@ fn parse_params(args: &Value) -> Result<Params, EventsError> {
         return Err(EventsError::new(Code::InvalidFilter, format!("parámetro desconocido: {unknown}")));
     }
     let get = |name: &str| map.get(name).filter(|v| !v.is_null());
-    let cursor = get("cursor").map(|v| integer(v, "cursor", Code::InvalidCursor, 0)).transpose()?.unwrap_or(0) as i64;
-    let limit = get("limit").map(|v| integer(v, "limit", Code::InvalidLimit, 1)).transpose()?.map(|n| n.min(MAX_PAGE as u64) as usize);
+    let cursor = get("cursor").map(|v| integer(v, "cursor", Code::InvalidCursor, 0, i64::MAX as u64)).transpose()?.unwrap_or(0) as i64;
+    let limit = get("limit").map(|v| integer(v, "limit", Code::InvalidLimit, 1, u64::MAX)).transpose()?.map(|n| n.min(MAX_PAGE as u64) as usize);
     let string = |name: &str| get(name).map(|v| text(v, name)).transpose();
     let class = get("class")
         .map(|v| {
@@ -186,6 +186,8 @@ pub(super) fn event_json(e: &EventRow) -> Result<Value, EventsError> {
 
 impl Core {
     /// Un agente solo lee el Event Log de su propio run; la interfaz lee todo. Sin identidad no hay alcance.
+    /// La identidad es la que declara el cliente (`X-Lixbon-Caller` / `caller`) bajo un token compartido: acota
+    /// lecturas por error o por rol, no aísla a un agente hostil que declare el id de otra tarea.
     fn events_scope(&self, caller: &Caller) -> Result<Option<String>, EventsError> {
         let forbidden = |m: &str| EventsError::new(Code::Forbidden, m);
         match caller {
