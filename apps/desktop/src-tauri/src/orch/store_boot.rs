@@ -44,7 +44,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError};
+use crate::store::{self, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -252,6 +252,11 @@ impl CoreStorage {
     /// pruebas; las escrituras de estado entran por [`SqlitePersistence`].
     pub(super) fn with_store<R>(&self, f: impl FnOnce(&mut Store) -> R) -> Option<R> {
         self.slot().store.as_mut().map(f)
+    }
+
+    /// Una página del Event Log. `None` = el almacén no está abierto. Solo lee.
+    pub(super) fn events_page(&self, q: &EventQuery) -> Option<StoreResult<EventPage>> {
+        self.slot().store.as_ref().map(|s| s.events_page(q))
     }
 
     /// La persistencia autoritativa: escribe en SQLite (y, después de publicar, el espejo).
