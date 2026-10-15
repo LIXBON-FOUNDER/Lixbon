@@ -2,7 +2,7 @@
 reset_staging.py — Borra y recrea todas las tablas de la BD apuntada por DATABASE_URL.
 SOLO para staging. Pide confirmación explícita y se niega si lixbon_ENV=production.
 
-Uso:  python BD/scripts/reset_staging.py
+Uso:  python db/scripts/reset_staging.py
 """
 import os
 import sys

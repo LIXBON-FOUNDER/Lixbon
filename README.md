@@ -6,7 +6,7 @@
 
 **Modelos LLM auto-hospedados sobre un clúster GPU distribuido, con API compatible con OpenAI y clientes web, escritorio, CLI y móvil.**
 
-[Arquitectura](docs/ARQUITECTURA.md) · [Ramas y releases](docs/RAMAS_Y_RELEASES.md) · [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) · [Toda la documentación](docs/README.md)
+[lixbon.com](https://lixbon.com) · [Arquitectura](docs/ARQUITECTURA.md) · [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md) · [Toda la documentación](docs/README.md)
 
 </div>
 
@@ -15,7 +15,7 @@
 ## Índice
 
 1. [Qué es lixbon](#qué-es-lixbon)
-2. [Productos y ramas](#productos-y-ramas)
+2. [Productos](#productos)
 3. [Estructura del repositorio](#estructura-del-repositorio)
 4. [Arranque rápido](#arranque-rápido)
 5. [Añadir un nodo GPU](#añadir-un-nodo-gpu)
@@ -37,29 +37,24 @@ que una GPU alquilada no necesita puerto entrante, túnel ni DNS.
 - **Límites por plan** con dos relojes: sesión de 5 h y cap semanal, compartidos entre todos los clientes.
 - **Orquestación**: selección por CPU/RAM/GPU, circuit breaker con backoff, nodos por conexión inversa.
 - **Cuatro clientes con la misma cuenta e historial**: web, desktop (Tauri), CLI (agente con herramientas y MCP) y Android.
-- **Visuals y MCP**: diseños y piezas de marketing con versiones con nombre, editables en la web y creables desde cualquier agente (Claude Code, Cursor, VS Code, el CLI…) por el servidor MCP `lixbon.com/mcp`. Catálogo de skills oficiales (`/marketing-lxo`, `/adversary`) en `lixbon.com/skills`. Configuración en Ajustes › MCP.
+- **Orquestador de agentes** en el desktop (`lxo`): reparte un objetivo entre agentes hijos por rol, con Event Log y almacén seguro locales.
+- **Visuals y MCP**: diseños y piezas de marketing con versiones con nombre, editables en la web y creables desde cualquier agente (Claude Code, Cursor, VS Code, el CLI…) por el servidor MCP `lixbon.com/mcp`. Catálogo de skills oficiales (`/marketing-lxo`, `/adversary`) en `lixbon.com/skills`.
 - **Control remoto**: una sesión del CLI o del desktop se puede seguir y dirigir desde el móvil (`/remote`).
 
-## Productos y ramas
+## Productos
 
-Monorepo con una rama larga por producto. Todas contienen el árbol completo;
-la rama es *dónde se trabaja*, y se integra a `master` por PR.
+Monorepo: todo vive en `master`. Cada cambio se hace en una rama corta y entra
+por PR; cada producto se publica con su propia etiqueta.
 
-| Producto | Carpeta | Stack | Rama | Versión | Release |
-|---|---|---|---|---|---|
-| **Gateway** + node agent | `core/`, `BD/`, `infra/` | Python 3.12 · FastAPI · SQLAlchemy · Postgres · Redis | `master` | — | Railway despliega cada push a `master` |
-| **Web** — lixbon.com | `apps/web` | React 19 · Vite · SSR estático | `master` | — | Dentro de la imagen del gateway |
-| **Desktop** — Windows | `apps/desktop` | Tauri 2 · Rust · React | `desktop` | 1.2.0 | Tag `desktop-vX.Y.Z` → CI → MSI con auto-update |
-| **CLI** | `apps/cli` | Go · un solo ejecutable, sin Python | `cli` | 2.3.0-go.2 (beta) | Tag `cli-vX.Y.Z` → CI → binarios en GitHub Releases registrados en el gateway; la etapa (beta o estable) sale de la etiqueta |
-| **Móvil** — Android | `apps/mobile` | React Native · Expo | `mobile` | 0.3.4 | Tag `mobile-vX.Y.Z` → CI → APK |
+| Producto | Carpeta | Stack | Versión | Cómo se publica |
+|---|---|---|---|---|
+| **Gateway** + node agent | `core/`, `db/`, `infra/` | Python 3.12 · FastAPI · SQLAlchemy · Postgres · Redis | — | Railway despliega cada push a `master` |
+| **Web** — lixbon.com | `apps/web` | React 19 · Vite · SSR estático | — | Dentro de la imagen del gateway |
+| **Desktop** — Windows / macOS | `apps/desktop` | Tauri 2 · Rust · React | 2.0.29 | Tag `desktop-vX.Y.Z` → `tauri.yml` → MSI/DMG con auto-update |
+| **CLI** | `apps/cli` | Go · un solo ejecutable | 2.8.0 | Tag `cli-vX.Y.Z` → `release-cli.yml` → binarios servidos desde lixbon.com (R2) y registrados en el gateway |
+| **Móvil** — Android | `apps/mobile` | React Native · Expo | 0.6.1 | Tag `mobile-vX.Y.Z` → `mobile.yml` → APK |
 
-```
-master ─┬─ desktop   (apps/desktop)  ─► PR a master
-        ├─ cli       (apps/cli)      ─► PR a master
-        └─ mobile    (apps/mobile)   ─► PR a master
-```
-
-Detalle del flujo, convención de commits y pasos de release: [`docs/RAMAS_Y_RELEASES.md`](docs/RAMAS_Y_RELEASES.md).
+Flujo de ramas, commits y releases: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Estructura del repositorio
 
@@ -70,25 +65,32 @@ Detalle del flujo, convención de commits y pasos de release: [`docs/RAMAS_Y_REL
 │   ├── inference/       cliente Ollama, roles rol→modelo, contexto, websearch
 │   ├── orchestration/   selección de nodo, circuit breaker, enlace WebSocket con nodos
 │   ├── node_agent/      proceso que corre en cada GPU
+│   ├── delegation/      enrutado de tareas por embeddings
 │   ├── billing/         planes, cuotas, créditos, Stripe
 │   ├── persistence/     modelos SQLAlchemy y queries
+│   ├── render/          worker que renderiza los Visuals
+│   ├── storage/         almacenamiento de objetos (R2)
 │   └── security/        auth, API keys, rate limit
-├── BD/                  schema.sql, migraciones Alembic, scripts de BD
+├── db/                  schema.sql, migraciones Alembic y scripts de BD (reset, dump, backups)
 ├── infra/
 │   ├── node/            Docker e instaladores del nodo GPU
-│   ├── scripts/         lanzadores locales (lixbon.bat / lixbon.sh)
+│   ├── render_worker/   imagen y despliegue del worker de render
+│   ├── ci/              pruebas que lanza el CI (gateway, instaladores)
+│   ├── scripts/         lanzador local (lixbon.bat / lixbon.sh)
 │   └── ops/             herramientas de operación en producción
 ├── apps/
 │   ├── web/             lixbon.com
-│   ├── desktop/         app de escritorio
-│   ├── cli/             el CLI en Go (el que se distribuye) · validation/ (corpus congelados) · audit/ (historial)
+│   ├── desktop/         app de escritorio y orquestador de agentes
+│   ├── cli/             CLI en Go · validation/ (corpus congelados) · audit/ (decisiones)
 │   └── mobile/          app Android
+├── contracts/           contratos compartidos entre Core, desktop, CLI y móvil
+├── skills/              skills oficiales del catálogo (lixbon.com/skills)
 ├── assets/brand/        iconos y favicon oficiales
 ├── docs/                documentación técnica y de producto
-├── .github/             ci.yml, tauri.yml, mobile.yml, plantilla de PR
+├── .github/             workflows de CI y releases, plantillas de PR e issues
 ├── Dockerfile           imagen del gateway (compila la web)
 ├── railway.toml         despliegue
-├── alembic.ini          migraciones → BD/migrations
+├── alembic.ini          migraciones → db/migrations
 ├── requirements.txt     dependencias del gateway
 └── .env.example         todas las variables de entorno, documentadas
 ```
@@ -104,7 +106,7 @@ Cada app tiene su README:
 Requisitos: Python 3.12+, Node 20+, Ollama en local para inferencia sin nodos.
 
 ```bash
-git clone https://github.com/gabriel-DgMr/Lixbon.git && cd Lixbon
+git clone https://github.com/LIXBON-FOUNDER/Lixbon.git && cd Lixbon
 python -m venv .venv && source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                                   # DATABASE_URL apunta a staging
@@ -189,18 +191,21 @@ Es un único ejecutable (no necesita Python). Los instaladores verifican su SHA-
 ## Tests
 
 ```bash
-python -m pytest core             # gateway — los tests viven junto al módulo que prueban
-(cd apps/cli && go test ./...) # CLI Go
+python infra/ci/gateway_tests.py  # gateway — un proceso por módulo, como en el CI
+(cd apps/cli && go test ./...)    # CLI Go
 python infra/ci/install_e2e.py    # instaladores install.sh / install.ps1 contra un servidor de releases local
-cd apps/web && npm run lint       # web
+(cd apps/desktop && npm test)     # desktop (vitest); el Core en Rust con `cargo test` en src-tauri
+(cd apps/web && npm run lint)     # web
 ```
 
-`ci.yml` corre en cada PR a `master` los tests del CLI Go (Linux, macOS y Windows) y la prueba de los instaladores. Ver [CONTRIBUTING.md](CONTRIBUTING.md).
+En cada PR a `master`, `ci.yml` corre los tests del gateway, del CLI Go (Linux,
+macOS y Windows) y de los instaladores; `desktop-ci.yml` valida el desktop
+cuando el PR toca `apps/desktop/`.
 
 ## Despliegue
 
 `railway.toml` → `Dockerfile` multi-stage: Node compila `apps/web`, y la
-imagen final de Python 3.12 lleva `core/`, `BD/`, `infra/node/` y el `dist` de
+imagen final de Python 3.12 lleva `core/`, `db/`, `infra/node/` y el `dist` de
 la web. Uvicorn arranca con `--proxy-headers`
 porque Railway/Cloudflare terminan TLS fuera. Health check en `/health`.
 
@@ -212,10 +217,12 @@ Migraciones: `alembic upgrade head` (usa `DATABASE_URL`).
 |---|---|
 | [`docs/README.md`](docs/README.md) | Índice completo |
 | [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Componentes, routers, nodos, contratos gateway↔apps |
-| [`docs/RAMAS_Y_RELEASES.md`](docs/RAMAS_Y_RELEASES.md) | Flujo de ramas y cómo publicar cada producto |
-| [`docs/LIMITES_DE_USO.md`](docs/LIMITES_DE_USO.md) | Modelo de límites sesión + semanal |
-| [`docs/CUELLO_DE_BOTELLA_MODELOS.md`](docs/CUELLO_DE_BOTELLA_MODELOS.md) | Por qué hay un modelo por rol |
-| [`docs/DISENO_WEB.md`](docs/DISENO_WEB.md) | Identidad visual y tokens |
-| [`docs/PLAN_REMOTE.md`](docs/PLAN_REMOTE.md) | Protocolo `/remote` |
-| [`docs/ESTADO_ACTUAL.md`](docs/ESTADO_ACTUAL.md) | Estado del proyecto para retomar el trabajo |
+| [`docs/RESUMEN_PROYECTO.md`](docs/RESUMEN_PROYECTO.md) | Resumen del proyecto y deuda conocida |
+| [`docs/VOCABULARIO.md`](docs/VOCABULARIO.md) | Vocabulario canónico de estados |
+| [`docs/core/`](docs/core/) | Core del orquestador: autoridad, eventos, migraciones, proyectos |
+| [`docs/INCIDENTES.md`](docs/INCIDENTES.md) | Registro de incidentes en producción |
 | [`PRODUCT.md`](PRODUCT.md) | Brief de producto y principios de diseño |
+
+## Licencia
+
+Código propietario. Todos los derechos reservados; ver [`LICENSE`](LICENSE).
