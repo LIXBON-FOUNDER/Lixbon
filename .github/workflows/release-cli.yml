@@ -14,7 +14,7 @@ jobs:
     outputs:
       channel: ${{ steps.etapa.outputs.channel }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: etapa
         run: |
           version="${GITHUB_REF_NAME#cli-v}"
@@ -42,8 +42,8 @@ jobs:
       run:
         working-directory: apps/cli
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: apps/cli/go.mod
           cache-dependency-path: apps/cli/go.sum
@@ -70,7 +70,7 @@ jobs:
           cp README.md "dist/${name}/"
           cd dist
           if [ "$GOOS" = windows ]; then zip -qr "${name}.zip" "${name}"; else tar -czf "${name}.tar.gz" "${name}"; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: lixbon-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -82,9 +82,9 @@ jobs:
     needs: [preparar, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # No es «assets»: el repo ya tiene esa carpeta en la raíz y se mezclarían.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist-cli
           merge-multiple: true
@@ -110,8 +110,8 @@ jobs:
     needs: [preparar, release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist-cli
           merge-multiple: true
