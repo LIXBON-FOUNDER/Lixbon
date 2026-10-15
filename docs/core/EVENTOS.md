@@ -228,8 +228,8 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 * **Ventana abierta**: `Effect` se construye cuando el efecto ya ocurrió; si el proceso cae entre el efecto
   externo y la construcción o el registro del `Effect`, no queda rastro. E1b no pretende cerrarla (no es un
   protocolo intención/confirmación).
-* **Diario**: sigue en `v = 1` y todavía no persiste el `effect_id`; el diario v2 y la importación idempotente
-  son un bloque posterior.
+* **Diario**: el writer nuevo usa `v = 2` y conserva el mismo `effect_id`. Las líneas `v = 1` siguen siendo
+  diagnósticas/manuales: no reciben IDs inventados ni se importan al Event Log.
 
 ### Payload (cerrado por `effect_kind`, `operation` validada contra valores conocidos)
 | `effect_kind` | `operation` | Campos (además de `effect_id`) |
@@ -239,6 +239,33 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 | `git_worktree` | `spawn` | `branch`, `base?` |
 | `git_worktree_removed` | `release`·`close_idle_runs`·`spawn_cleanup` | `worktree_removed`, `branch?`, `branch_deleted` |
 | `pty_process` | `spawn` | `launched` |
+
+### Journal v2 y reconciliación
+Cada línea nueva de `unrecorded-effects.jsonl` tiene `v: 2`, el `effect_id` UUID v7 original, `at`,
+`operation`, `kind`, `task`, `run`, `project`, `actor_kind`, `actor_id`, `channel` y un objeto `observed`
+filtrado al contrato del efecto. Ejemplo:
+
+```json
+{"v":2,"effect_id":"01900000-0000-7000-8000-000000000001","at":1800000000000,"operation":"spawn","kind":"pty_process","task":"t1","run":"r1","project":null,"actor_kind":"system","actor_id":null,"channel":"core","observed":{"launched":true}}
+```
+
+El writer no guarda `expected`, texto de error, campos desconocidos de `observed`, `argv`, `env`, diff ni body.
+Las URLs de PR se conservan solo como URL sin usuario, contraseña, query ni fragmento. El lector mantiene las
+líneas v1 para revisión manual y nunca las convierte en hechos.
+
+Al arrancar con SQLite autoritativo, cada v2 válido se transforma en el `effect.observed` tipado y se inserta
+con el `effect_id` original como `payload.effect_id`, `correlation_id` e `idem_key`. La recuperación no invoca
+Git, PTY ni filesystem. Un duplicado `(kind, idem_key)` es éxito: si el proceso cae después del commit y antes
+del ACK, el siguiente arranque reintenta solo la inserción idempotente.
+
+El ACK es la compactación del archivo tras confirmar el Event: se escribe un temporal en el mismo directorio,
+se sincroniza y se renombra atómicamente. Solo se quitan líneas v2 confirmadas; v1, truncadas, corruptas o
+incompatibles quedan para revisión manual. Un registro inválido no bloquea los posteriores. Si falla la
+compactación, el v2 sigue presente y el replay es seguro.
+
+Ventanas que permanecen: una caída después del efecto externo y antes de persistir una línea v2 puede dejarlo
+sin rastro; una línea v2 parcialmente escrita requiere revisión manual; y la durabilidad de la operación de
+renombre ante pérdida súbita de energía depende del sistema de archivos.
 
 Nunca rutas locales, `env`, `argv`, mensajes de error ni credenciales. Los datos estructurales los pone el
 llamador en `Effect.observed`; el constructor no consulta git. No existe un efecto `spawn_outcome`: las
@@ -541,9 +568,9 @@ queda en un seguimiento separado.
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
 * **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos, Projects y Pending Spawn):** API completa,
-  `lxo events`, diario `unrecorded-effects` v2 e importación segura.
+  `lxo events`, journal `unrecorded-effects` v2 y reconciliación idempotente.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 
 ## Fuera de E
 Attention (G), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
-(`terminal.output`…), retención/compactación, Task/Attempt.
+(`terminal.output`…), retención/compactación del Event Log, Task/Attempt.

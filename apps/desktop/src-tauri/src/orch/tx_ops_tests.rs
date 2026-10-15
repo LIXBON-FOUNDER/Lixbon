@@ -1016,8 +1016,12 @@ fn todo_fallo_del_registro_tras_un_efecto_se_anota_y_no_deja_estado_ni_eventos()
         let lineas = diario();
         assert_eq!(lineas.len(), n + 1, "{nombre}: el efecto ocurrió, así que SÍ se anota (también un Rejected)");
         let ultima = lineas.last().unwrap();
-        assert_eq!(ultima["v"], 1, "el diario sigue en v1");
-        assert!(ultima.get("effect_id").is_none(), "y todavía no persiste el effect_id");
+        assert_eq!(ultima["v"], 2, "el writer nuevo usa v2");
+        let effect_id = ultima["effect_id"].as_str().expect("persiste la identidad del efecto");
+        assert!(super::effect_journal::valid_effect_id(effect_id), "UUID v7 original");
+        assert!(ultima.get("expected").is_none(), "no persiste valores esperados");
+        assert!(ultima.get("error").is_none(), "no persiste texto de error");
+        assert!(ultima.get("repo").is_none(), "no persiste rutas de repositorio");
     }
     assert_eq!(core.health(), Health::Normal, "un rechazo no degrada el almacenamiento");
 }

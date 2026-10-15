@@ -76,14 +76,30 @@ impl Core {
                 self.adopt_state(&proof, st); // carga inicial: no es una mutación
             }
         }
-        // Acciones externas (merge, PR, worktree, proceso) que ocurrieron en una sesión
-        // anterior pero cuyo registro no se pudo guardar: se avisa, no se esconde.
-        let unrecorded = Self::unrecorded_effects(data);
-        if unrecorded > 0 {
-            let msg = format!("{unrecorded} acción(es) externa(s) se ejecutaron sin quedar registradas (ver unrecorded-effects.jsonl en {}): revísalas antes de repetirlas.", data.display());
-            eprintln!("[core] {msg}");
-            if let Some(host) = self.host.get() {
-                host.notify("Lixbon: acciones sin registrar", &msg);
+        // Reconciliar hechos v2 agrega solo `effect.observed`; nunca vuelve a ejecutar
+        // Git, PTY ni filesystem. En modo legacy no hay Event Log y las líneas se conservan.
+        match self.reconcile_unrecorded_effects(data) {
+            Ok(report) if report.recovered > 0 => eprintln!("[core] se reconciliaron {} efecto(s) del journal v2", report.recovered),
+            Ok(_) => {}
+            Err(_) => eprintln!("[core] no se pudo leer o compactar el journal de efectos"),
+        }
+        // Líneas v1/corruptas o v2 que no pudieron importarse requieren revisión: se avisa,
+        // no se esconde ni se descarta su diagnóstico.
+        match Self::unrecorded_effects(data) {
+            Ok(unrecorded) if unrecorded > 0 => {
+                let msg = format!("{unrecorded} acción(es) externa(s) se ejecutaron sin quedar registradas (ver unrecorded-effects.jsonl en {}): revísalas antes de repetirlas.", data.display());
+                eprintln!("[core] {msg}");
+                if let Some(host) = self.host.get() {
+                    host.notify("Lixbon: acciones sin registrar", &msg);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => {
+                let msg = "No se pudo leer unrecorded-effects.jsonl; revísalo antes de repetir acciones externas.";
+                eprintln!("[core] {msg}");
+                if let Some(host) = self.host.get() {
+                    host.notify("Lixbon: journal de efectos no disponible", msg);
+                }
             }
         }
         let enabled = settings.enabled;

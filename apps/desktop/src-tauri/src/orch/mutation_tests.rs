@@ -15,6 +15,7 @@ use super::lifecycle::BootProof;
 use super::mutation::{Effect, Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess};
 use super::state::{Kind, NewTask, State};
 use super::{fsio, review, Core, Orch};
+use crate::store::{new_uuid_v7, EventQuery};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
@@ -86,6 +87,29 @@ fn core_con_host() -> (Arc<Core>, Arc<RecordingHost>) {
     core.set_host(host.clone());
     core.set_retry_policy(RetryPolicy::with_backoffs(vec![Duration::from_millis(1); 3]));
     (core, host)
+}
+
+fn journal_v2(effect_id: &str, task: &str, run: &str, observed: Value) -> Value {
+    serde_json::json!({
+        "v": 2,
+        "effect_id": effect_id,
+        "at": 1_800_000_000_000_i64,
+        "operation": "spawn",
+        "kind": "pty_process",
+        "task": task,
+        "run": run,
+        "project": null,
+        "actor_kind": "system",
+        "actor_id": null,
+        "channel": "core",
+        "observed": observed,
+    })
+}
+
+fn eventos(core: &Core) -> Vec<crate::store::EventRow> {
+    core.storage
+        .with_store(|s| s.events_page(&EventQuery { limit: Some(500), ..Default::default() }).unwrap().events)
+        .expect("almacén abierto")
 }
 
 fn estado(core: &Core) -> Value {
@@ -221,7 +245,7 @@ fn mutate_locked_despierta_a_quien_espera_con_condvar() {
 }
 
 #[test]
-fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
+fn un_efecto_externo_sin_registro_se_reconcilia_al_arrancar() {
     let (_l, data, core_dir) = carpetas();
     // Una tarea con rama real y una revisión aceptada, como en el flujo de integración.
     let (st, id, dir, _) = review::tests::setup("c2a-efecto");
@@ -246,23 +270,30 @@ fn un_efecto_externo_sin_registro_se_anota_se_avisa_y_se_ve_al_arrancar() {
     let linea: Value = serde_json::from_str(diario.lines().next().unwrap()).unwrap();
     assert_eq!((linea["operation"].as_str(), linea["kind"].as_str(), linea["task"].as_str()), (Some("integrate"), Some("git_merge"), Some(id.as_str())));
     assert_eq!(linea["observed"]["outcome"], "merged");
-    assert_eq!(linea["expected"]["merged"], true);
-    // Diagnóstico completo: cuándo, dónde, de qué run y por qué falló el registro.
-    assert!(linea["at"].as_u64().is_some() && linea["v"] == 1);
-    assert!(linea["repo"].as_str().is_some_and(|r| !r.is_empty()) && linea["run"].as_str().is_some());
-    assert!(linea["error"].as_str().is_some_and(|e| !e.is_empty()));
-    assert_eq!(Core::unrecorded_effects(&data), 1);
+    assert_eq!(linea["v"], 2);
+    assert!(linea["at"].as_u64().is_some() && linea["effect_id"].as_str().is_some());
+    assert!(linea["run"].as_str().is_some() && linea.get("project").is_some());
+    assert!(linea.get("expected").is_none() && linea.get("error").is_none());
+    assert!(linea.get("repo").is_none());
+    let first_effect_id = linea["effect_id"].as_str().unwrap().to_owned();
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 1);
     // Ya en solo lectura (`ReadOnly`): otro efecto ocurrido tampoco se pierde, aunque la mutación ni se intente.
     let otro = Effect::new("spawn", "pty_process").task(&id).observed(serde_json::json!({ "launched": true }));
+    let second_effect_id = otro.effect_id().to_owned();
     let r = core.acting(MutationContext::core()).mutate_after_effect(otro, |_| Ok(()));
     assert!(matches!(&r, Err(m) if m.contains("NO quedó registrada")), "{r:?}");
-    assert_eq!(Core::unrecorded_effects(&data), 2);
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 2);
 
-    // ...y el siguiente arranque lo avisa en vez de esconderlo.
+    // ...y la promoción al Event Log reconcilia los dos hechos sin repetir los efectos externos.
     let otro = Orch::default().0;
     let host = RecordingHost::new();
     otro.init_in(host.clone(), &data, &core_dir).unwrap();
-    assert!(host.notifications().iter().any(|(t, _)| t == "Lixbon: acciones sin registrar"), "{:?}", host.notifications());
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 0);
+    assert!(!host.notifications().iter().any(|(t, _)| t == "Lixbon: acciones sin registrar"), "{:?}", host.notifications());
+    let recovered = eventos(&otro).into_iter().filter(|event| event.kind == "effect.observed").collect::<Vec<_>>();
+    assert_eq!(recovered.len(), 2);
+    assert!(recovered.iter().any(|event| event.idem_key.as_deref() == Some(first_effect_id.as_str())));
+    assert!(recovered.iter().any(|event| event.idem_key.as_deref() == Some(second_effect_id.as_str())));
 }
 
 #[test]
@@ -276,9 +307,139 @@ fn un_rechazo_tras_el_efecto_tambien_se_anota_porque_el_efecto_ya_ocurrio() {
         Ok(())
     });
     assert!(matches!(&r, Err(m) if m.contains("NO quedó registrada")), "{r:?}");
-    assert_eq!(Core::unrecorded_effects(&data), 1);
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 1);
     // Un rechazo no degrada el almacenamiento: sigue siendo normal.
     assert_eq!(core.health(), Health::Normal);
+}
+
+#[test]
+fn journal_v2_conserva_identidad_y_filtra_datos_sensibles_del_efecto() {
+    let (_l, data, _) = carpetas();
+    let (core, _host) = core_con_host();
+    let (run, task) = core.lock_unpersisted().create_run("obj", nt());
+    let effect = Effect::new("publish_pr", "git_push_pr")
+        .task(&task)
+        .expected(serde_json::json!({ "diff": "SENTINEL_EXPECTED" }))
+        .observed(serde_json::json!({
+            "outcome": "created",
+            "branch": "lx/safe",
+            "pr_url": "https://user:SENTINEL_CREDENTIAL@github.com/org/repo/pull/1?token=SENTINEL_QUERY",
+            "argv": ["SENTINEL_ARGV"],
+            "env": { "TOKEN": "SENTINEL_ENV" },
+            "diff": "SENTINEL_DIFF",
+            "body": "SENTINEL_BODY",
+        }));
+    let effect_id = effect.effect_id().to_owned();
+    let result: Result<(), String> = core.acting(MutationContext::person(super::events::Channel::Ui)).mutate_after_effect(effect, |_| {
+        Err("SENTINEL_ERROR_TEXT".into())
+    });
+    assert!(result.unwrap_err().contains("SENTINEL_ERROR_TEXT"));
+
+    let journal = std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap();
+    let record: Value = serde_json::from_str(journal.lines().next().unwrap()).unwrap();
+    assert_eq!(record["effect_id"], effect_id);
+    assert_eq!(record["v"], 2);
+    assert_eq!(record["operation"], "publish_pr");
+    assert_eq!(record["kind"], "git_push_pr");
+    assert_eq!(record["task"], task);
+    assert_eq!(record["run"], run);
+    assert_eq!(record["actor_kind"], "person");
+    assert_eq!(record["channel"], "ui");
+    assert_eq!(record["observed"]["outcome"], "created");
+    assert_eq!(record["observed"]["branch"], "lx/safe");
+    assert_eq!(record["observed"]["pr_url"], "https://github.com/org/repo/pull/1");
+    for secret in [
+        "SENTINEL_EXPECTED",
+        "SENTINEL_CREDENTIAL",
+        "SENTINEL_QUERY",
+        "SENTINEL_ARGV",
+        "SENTINEL_ENV",
+        "SENTINEL_DIFF",
+        "SENTINEL_BODY",
+        "SENTINEL_ERROR_TEXT",
+    ] {
+        assert!(!journal.contains(secret), "el journal filtró {secret}: {journal}");
+    }
+}
+
+#[test]
+fn restart_reconcilia_v2_por_effect_id_sin_repetir_efecto_y_conserva_v1() {
+    let (_l, data, core_dir) = carpetas();
+    let seed = Orch::default().0;
+    let (run, task) = seed.lock_unpersisted().create_run("obj", nt());
+    fsio::write_json(&data.join("state.json"), &*seed.lock()).unwrap();
+    drop(seed);
+
+    let effect_id = new_uuid_v7();
+    let record = journal_v2(&effect_id, &task, &run, serde_json::json!({ "launched": true }));
+    let line = serde_json::to_string(&record).unwrap();
+    let v1 = r#"{"v":1,"operation":"manual","kind":"legacy","observed":{"outcome":"merged"},"error":"legacy diagnostic"}"#;
+    std::fs::write(data.join("unrecorded-effects.jsonl"), format!("{v1}\n{line}\n{line}\n")).unwrap();
+    let external_effect_marker = data.join("external-effect.marker");
+    std::fs::write(&external_effect_marker, b"already happened once").unwrap();
+
+    let (core, host, result) = super::boot_tests::arranca(&data, &core_dir);
+    result.unwrap();
+    let matching = eventos(&core).into_iter().filter(|event| event.kind == "effect.observed" && event.idem_key.as_deref() == Some(&effect_id)).collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1, "dos copias del mismo v2 producen un Event");
+    let event = &matching[0];
+    assert_eq!(event.correlation_id.as_deref(), Some(effect_id.as_str()));
+    assert_eq!(event.idem_key.as_deref(), Some(effect_id.as_str()));
+    assert_eq!(serde_json::from_str::<Value>(&event.payload).unwrap()["effect_id"], effect_id);
+    assert_eq!(event.actor_kind.as_str(), "system");
+    assert_eq!(event.channel.as_deref(), Some("core"));
+    assert!(event.state_rev.is_none(), "la reconciliación solo agrega el hecho, sin mutar legacy_state");
+    assert_eq!(std::fs::read(&external_effect_marker).unwrap(), b"already happened once", "la recuperación no repite el efecto externo");
+    assert!(host.notifications().iter().any(|(title, _)| title == "Lixbon: acciones sin registrar"), "el v1 sigue como diagnóstico manual: {:?}", host.notifications());
+    assert_eq!(std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap(), format!("{v1}\n"), "v1 permanece para revisión manual y los v2 confirmados se compactan");
+
+    // Simula una caída después del commit SQLite pero antes del ACK durable (compactación).
+    // Al reintentar tras reiniciar, la clave (effect.observed, effect_id) debe deduplicar el Event.
+    std::fs::write(data.join("unrecorded-effects.jsonl"), format!("{line}\n")).unwrap();
+    super::boot_tests::suelta(core, &core_dir);
+    let (restarted, _host, result) = super::boot_tests::arranca(&data, &core_dir);
+    result.unwrap();
+    let repeated = eventos(&restarted).into_iter().filter(|event| event.kind == "effect.observed" && event.idem_key.as_deref() == Some(&effect_id)).collect::<Vec<_>>();
+    assert_eq!(repeated.len(), 1, "el replay tras commit y antes de ACK no duplica");
+    assert_eq!(repeated[0].id, event.id, "el evento confirmado original se conserva");
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 0, "el v2 repetido queda acknowledged por compactación");
+    super::boot_tests::suelta(restarted, &core_dir);
+}
+
+#[test]
+fn v2_truncado_o_corrupto_no_impide_reconciliar_lineas_validas_posteriores() {
+    let (_l, data, core_dir) = carpetas();
+    let seed = Orch::default().0;
+    let (run, task) = seed.lock_unpersisted().create_run("obj", nt());
+    fsio::write_json(&data.join("state.json"), &*seed.lock()).unwrap();
+    drop(seed);
+
+    let effect_id = new_uuid_v7();
+    let record = journal_v2(&effect_id, &task, &run, serde_json::json!({ "launched": true }));
+    let line = serde_json::to_string(&record).unwrap();
+    let v1 = r#"{"v":1,"operation":"manual","kind":"legacy"}"#;
+    let corrupt = r#"{"v":2,"effect_id":"truncated""#;
+    std::fs::write(data.join("unrecorded-effects.jsonl"), format!("{v1}\n{corrupt}\n{line}\n")).unwrap();
+
+    let (core, _host, result) = super::boot_tests::arranca(&data, &core_dir);
+    result.unwrap();
+    let matching = eventos(&core).into_iter().filter(|event| event.kind == "effect.observed" && event.idem_key.as_deref() == Some(&effect_id)).count();
+    assert_eq!(matching, 1, "la línea válida posterior se recupera pese a v1 y JSON truncado previos");
+    assert_eq!(std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap(), format!("{v1}\n{corrupt}\n"), "la compactación conserva diagnósticos v1/corruptos");
+    assert_eq!(Core::unrecorded_effects(&data).unwrap(), 2);
+    super::boot_tests::suelta(core, &core_dir);
+}
+
+#[test]
+fn journal_ilegible_se_reporta_sin_inventar_un_conteo_de_efectos() {
+    let (_l, data, core_dir) = carpetas();
+    std::fs::create_dir(data.join("unrecorded-effects.jsonl")).unwrap();
+
+    let (core, host, result) = super::boot_tests::arranca(&data, &core_dir);
+    result.unwrap();
+    assert!(host.notifications().iter().any(|(title, _)| title == "Lixbon: journal de efectos no disponible"), "se comunica que no se pudo leer el journal: {:?}", host.notifications());
+    assert!(!host.notifications().iter().any(|(title, _)| title == "Lixbon: acciones sin registrar"), "no se presenta como conteo exacto: {:?}", host.notifications());
+    super::boot_tests::suelta(core, &core_dir);
 }
 
 /// Garantía contra escrituras futuras fuera de la frontera: además de que el
