@@ -45,7 +45,7 @@ tauri-plugin-http = "~2.6"
 tauri-plugin-single-instance = "2"
 # Catálogo de skills: paquete zip verificado por sha256 (Ajustes › Skills).
 zip = { version = "4", default-features = false, features = ["deflate"] }
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 # Borra de memoria los secretos del almacén seguro al soltarlos (ya compilado
 # como dependencia de keyring).
