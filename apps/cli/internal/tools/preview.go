@@ -178,7 +178,7 @@ func (p *preview) start(root string) (string, error) {
 	host := ln.Addr().String()
 	files := http.FileServer(http.Dir(root))
 	p.root, p.ln = root, ln
-	p.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Otra web abierta en el navegador podría apuntar aquí con un dominio
 		// propio que resuelva a 127.0.0.1: solo se atiende al host exacto.
 		if r.Host != host {
@@ -198,7 +198,10 @@ func (p *preview) start(root string) (string, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		files.ServeHTTP(w, r)
 	})}
-	go func() { _ = p.srv.Serve(ln) }()
+	p.srv = srv
+	// Con la copia local: si stop() llega antes de que arranque la goroutine,
+	// p.srv ya es nil y Serve entraría en pánico.
+	go func() { _ = srv.Serve(ln) }()
 	return "http://" + host, nil
 }
 
