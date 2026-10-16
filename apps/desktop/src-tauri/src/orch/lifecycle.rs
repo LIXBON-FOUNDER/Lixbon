@@ -7,6 +7,7 @@ use serde_json::json;
 use super::host::Host;
 use super::events::MutationContext;
 use super::boot_authority::{Authoritative, BootResult};
+use super::effect_journal::RecoveryReport;
 use super::mirror::{self, Reconciled};
 use super::store_boot::{OpenStoreError, StorageReport};
 use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, core_dir, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
@@ -76,14 +77,29 @@ impl Core {
                 self.adopt_state(&proof, st); // carga inicial: no es una mutación
             }
         }
-        // Acciones externas (merge, PR, worktree, proceso) que ocurrieron en una sesión
-        // anterior pero cuyo registro no se pudo guardar: se avisa, no se esconde.
-        let unrecorded = Self::unrecorded_effects(data);
-        if unrecorded > 0 {
-            let msg = format!("{unrecorded} acción(es) externa(s) se ejecutaron sin quedar registradas (ver unrecorded-effects.jsonl en {}): revísalas antes de repetirlas.", data.display());
-            eprintln!("[core] {msg}");
-            if let Some(host) = self.host.get() {
-                host.notify("Lixbon: acciones sin registrar", &msg);
+        // Reconciliar hechos v2 agrega solo `effect.observed`; nunca vuelve a ejecutar
+        // Git, PTY ni filesystem. En modo legacy no hay Event Log y las líneas se conservan.
+        match self.reconcile_unrecorded_effects(data) {
+            Ok(report) => self.announce_reconciled_effects(&report),
+            Err(error) => eprintln!("[core] no se pudo leer el journal de efectos ({:?})", error.kind()),
+        }
+        // Líneas v1/corruptas o v2 que no pudieron importarse requieren revisión: se avisa,
+        // no se esconde ni se descarta su diagnóstico.
+        match Self::unrecorded_effects(data) {
+            Ok(unrecorded) if unrecorded > 0 => {
+                let msg = format!("{unrecorded} acción(es) externa(s) se ejecutaron sin quedar registradas (ver unrecorded-effects.jsonl en {}): revísalas antes de repetirlas.", data.display());
+                eprintln!("[core] {msg}");
+                if let Some(host) = self.host.get() {
+                    host.notify("Lixbon: acciones sin registrar", &msg);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => {
+                let msg = "No se pudo leer unrecorded-effects.jsonl; revísalo antes de repetir acciones externas.";
+                eprintln!("[core] {msg}");
+                if let Some(host) = self.host.get() {
+                    host.notify("Lixbon: journal de efectos no disponible", msg);
+                }
             }
         }
         let enabled = settings.enabled;
@@ -235,6 +251,38 @@ impl Core {
         if let Some(h) = self.server.lock().ok().and_then(|mut s| s.take()) {
             h.stop();
             let _ = std::fs::remove_file(discovery_file());
+        }
+    }
+}
+
+impl Core {
+    /// La reconciliación demuestra que el efecto ocurrió, pero NO repara `legacy_state`: la persona debe
+    /// comprobar el estado (tarea, rama, PR, proceso) antes de repetir la acción.
+    fn announce_reconciled_effects(&self, report: &RecoveryReport) {
+        if let Some(kind) = report.ack_failed {
+            eprintln!("[core] no se pudo compactar el journal de efectos ({kind:?}); se reintentará al arrancar");
+        }
+        if report.recovered == 0 {
+            return;
+        }
+        const LISTED: usize = 5;
+        let mut listed = report
+            .recovered_effects
+            .iter()
+            .take(LISTED)
+            .map(|effect| format!("{}/{} (tarea {})", effect.operation, effect.kind, effect.task))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if report.recovered > LISTED {
+            listed.push_str(&format!(" y {} más", report.recovered - LISTED));
+        }
+        let msg = format!(
+            "{} acción(es) externa(s) ya ocurrida(s) se añadieron al Event Log, pero Lixbon NO ha reparado el estado: {listed}. Comprueba el estado (tarea, rama, PR o proceso) antes de repetirlas.",
+            report.recovered
+        );
+        eprintln!("[core] {msg}");
+        if let Some(host) = self.host.get() {
+            host.notify("Lixbon: acciones recuperadas, estado sin reparar", &msg);
         }
     }
 }

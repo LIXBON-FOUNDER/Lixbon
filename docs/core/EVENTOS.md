@@ -228,8 +228,9 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 * **Ventana abierta**: `Effect` se construye cuando el efecto ya ocurrió; si el proceso cae entre el efecto
   externo y la construcción o el registro del `Effect`, no queda rastro. E1b no pretende cerrarla (no es un
   protocolo intención/confirmación).
-* **Diario**: sigue en `v = 1` y todavía no persiste el `effect_id`; el diario v2 y la importación idempotente
-  son un bloque posterior.
+* **Diario**: el writer nuevo usa `v = 2` y conserva el mismo `effect_id` y la hora. Las líneas `v = 1` siguen
+  siendo diagnósticas/manuales: no reciben IDs inventados ni se importan al Event Log. Reconciliar no repara
+  `legacy_state` (ver «Journal v2 y reconciliación»).
 
 ### Payload (cerrado por `effect_kind`, `operation` validada contra valores conocidos)
 | `effect_kind` | `operation` | Campos (además de `effect_id`) |
@@ -239,6 +240,68 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 | `git_worktree` | `spawn` | `branch`, `base?` |
 | `git_worktree_removed` | `release`·`close_idle_runs`·`spawn_cleanup` | `worktree_removed`, `branch?`, `branch_deleted` |
 | `pty_process` | `spawn` | `launched` |
+
+### Journal v2 y reconciliación
+Cada línea nueva de `unrecorded-effects.jsonl` tiene `v: 2`, el `effect_id` UUID v7 original, `at` (cuándo se
+anotó el efecto), `operation`, `kind`, `task`, `run`, `project`, `actor_kind`, `actor_id`, `channel` y un
+objeto `observed` filtrado al contrato del efecto. Ejemplo:
+
+```json
+{"v":2,"effect_id":"01900000-0000-7000-8000-000000000001","at":1800000000000,"operation":"spawn","kind":"pty_process","task":"t1","run":"r1","project":null,"actor_kind":"system","actor_id":null,"channel":"core","observed":{"launched":true}}
+```
+
+Una línea heredada v1 se conserva opaca para revisión; no se le asigna identidad ni se importa:
+
+```json
+{"v":1,"operation":"integrate","kind":"git_merge","observed":{"outcome":"merged"},"error":"legacy diagnostic"}
+```
+
+El writer no guarda `expected`, texto de error, campos desconocidos de `observed`, `argv`, `env`, diff ni body.
+`pr_url` pasa por el mismo saneador (`pr_url.rs`) en el camino normal (`effect.observed` y `decision.recorded`)
+y en el replay: solo `http(s)://host[:puerto]/segmentos`, sin usuario, contraseña, query ni fragmento; la ruta
+admite únicamente `A-Za-z0-9._~-` (controles, `;`, `%`, `@` o `\` la invalidan). Una URL que no se puede
+sanear se omite del hecho, no se recorta. `Task.pr_url` (estado legacy) no forma parte del contrato de
+eventos y no se toca. El lector mantiene las líneas v1 para revisión manual y nunca las convierte en hechos.
+
+Al arrancar con SQLite autoritativo, cada v2 válido (UUID v7 canónico en minúsculas, actor y canal coherentes,
+`at` positivo) se transforma en el `effect.observed` tipado y se inserta con el `effect_id` original como
+`payload.effect_id`, `correlation_id` e `idem_key`, y con `at` igual al del journal: el Event dice cuándo
+ocurrió el efecto, no cuándo se reconcilió (`seq` sigue ordenando). La recuperación no invoca Git, PTY ni
+filesystem. Un duplicado `(kind, idem_key)` es éxito: si el proceso cae después del commit y antes del ACK,
+el siguiente arranque reintenta solo la inserción idempotente. Dos líneas con el mismo `effect_id` pero
+distinto contenido (`at` aparte) son un conflicto: no se importan ni se compactan.
+
+**La reconciliación NO repara `legacy_state`.** El registro original falló y su mutación se descartó entera
+(sin estado ni eventos); la recuperación solo añade el hecho `effect.observed` (`state_rev = NULL`). Tarea,
+rama, PR o proceso pueden seguir sin reflejar lo que ocurrió. Por eso, tras recuperar efectos, el arranque
+avisa a la persona (`Lixbon: acciones recuperadas, estado sin reparar`) con la operación, el tipo y la tarea
+de cada uno (máximo 5, sin datos del efecto), y le pide comprobar el estado antes de repetirlos. Quien
+decida repetir una acción debe hacerlo después de comprobarlo: un nuevo intento es un efecto distinto con su
+propio `effect_id`.
+
+El ACK es la compactación del archivo tras confirmar el Event: se escribe un temporal en el mismo directorio,
+se sincroniza y se renombra atómicamente (el temporal se borra si algo falla). Solo se quitan líneas v2
+confirmadas; v1, truncadas, corruptas, de una versión que este binario no conoce (`v` ≥ 3 o campos
+desconocidos), con identidad inválida o conflictivas quedan para revisión manual y se avisan en cada
+arranque. Un registro inválido no bloquea los posteriores. Si falla la compactación, el v2 sigue presente,
+se avisa por el log y el replay es seguro.
+
+Si el journal no se puede escribir (disco lleno, permisos, registro demasiado grande), el error que recibe el
+llamador lo dice (`TAMPOCO se pudo anotar…`, con el `effect_id`) y no afirma que la anotación exista; el log
+solo recibe identificadores no sensibles (`effect_id`, `operation`/`kind`, `task` y la clase del error de E/S).
+
+Durabilidad: cada línea se sincroniza con `sync_data` antes de devolver `Ok`. Al crear el archivo se sincroniza
+además el directorio que lo contiene, y la compactación sincroniza el directorio tras el `rename`, donde el SO
+lo permite (Unix). **En Windows no se sincroniza el directorio**: `std` no ofrece un flush de directorio
+(haría falta `CreateFileW` con `FILE_FLAG_BACKUP_SEMANTICS` y `FlushFileBuffers`, que exige permisos de
+escritura sobre el directorio). Allí el contenido sí está sincronizado, pero la entrada de directorio de un
+journal recién creado o de un `rename` puede perderse ante un corte de energía; el efecto quedaría entonces
+sin rastro, como en la ventana siguiente.
+
+Ventanas que permanecen: una caída después del efecto externo y antes de persistir una línea v2 puede dejarlo
+sin rastro; una línea v2 parcialmente escrita requiere revisión manual (la siguiente escritura la separa con
+un salto de línea y no la pierde); el fallo al escribir el journal (ver arriba); y la durabilidad de la
+creación o el `rename` en Windows.
 
 Nunca rutas locales, `env`, `argv`, mensajes de error ni credenciales. Los datos estructurales los pone el
 llamador en `Effect.observed`; el constructor no consulta git. No existe un efecto `spawn_outcome`: las
@@ -283,7 +346,7 @@ intento y, si tuvo éxito, se intenta `git branch -d` (nunca `-D`; `branch_delet
 fallo de `-d` no impide retirar la Task); si `remove_worktree` falla la Task se conserva; 5) un único registro
 (`mutate_after_effect` si hubo borrado git; `mutate` si solo hay que retirar la Task): `effect.observed` y, si
 la Task era retirable, `task.removed`. Una Task ya final o con el run cerrado se conserva (solo se limpian los
-artefactos del intento). Si falla la persistencia tras el cleanup físico: ni estado ni eventos, y el diario v1.
+artefactos del intento). Si falla la persistencia tras el cleanup físico: ni estado ni eventos, y el diario v2.
 
 | Fallo | Resultado |
 |---|---|
@@ -541,9 +604,9 @@ queda en un seguimiento separado.
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
 * **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos, Projects y Pending Spawn):** API completa,
-  `lxo events`, diario `unrecorded-effects` v2 e importación segura.
+  `lxo events`, journal `unrecorded-effects` v2 y reconciliación idempotente.
 * **E2:** HTTP `GET /events` y SSE (`server.rs`).
 
 ## Fuera de E
 Attention (G), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
-(`terminal.output`…), retención/compactación, Task/Attempt.
+(`terminal.output`…), retención/compactación del Event Log, Task/Attempt.
