@@ -134,6 +134,24 @@ impl MutationContext {
             client_id: Some(client.identity().client_id().to_string()),
         })
     }
+
+    pub(super) fn is_person(&self) -> bool {
+        match &self.actor {
+            Actor::Person => true,
+            Actor::PersonId(_) => self.client_id.as_deref().is_some_and(|id| !id.is_empty()),
+            Actor::Agent(_) | Actor::System => false,
+        }
+    }
+
+    pub(super) fn is_person_ui(&self) -> bool {
+        self.is_person() && self.channel == Channel::Ui
+    }
+
+    pub(super) fn with_actor(&self, actor: Actor) -> MutationContext {
+        let mut context = self.clone();
+        context.actor = actor;
+        context
+    }
 }
 
 /// Por dónde llegó la orden (transporte), no quién es el cliente.

@@ -529,10 +529,10 @@ fn el_mismo_borrador_invalido_da_el_mismo_rejected_con_sqlite_y_con_state_json()
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn la_004_se_aplica_en_el_arranque_tras_decidir_la_autoridad() {
+fn las_migraciones_post_authority_se_aplican_en_el_arranque() {
     let (_l, _d, _c, core) = core_listo();
     let v = core.storage.with_store(|s| s.schema_version().unwrap()).unwrap();
-    assert_eq!(v, 4);
+    assert_eq!(v, 5);
     assert_eq!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap(), 0);
 }
 
@@ -671,4 +671,20 @@ fn el_estado_no_conoce_los_eventos() {
     for (n, l) in produccion(&texto) {
         assert!(!l.contains("EventDraft") && !l.contains("outbox") && !l.contains("NewEvent"), "state.rs:{n}: el estado no transporta eventos: {l}");
     }
+}
+
+#[test]
+fn rpc_desktop_persiste_client_id_en_eventos_de_run_create() {
+    let (_l, _d, _c, core) = core_listo();
+    let inicio = eventos(&core).len();
+    let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+
+    core.rpc_via(Channel::Ui, super::Caller::User, &cwd, "run_create", &serde_json::json!({"objective": "identidad desktop"})).unwrap();
+
+    let nuevos = eventos(&core).into_iter().skip(inicio).collect::<Vec<_>>();
+    assert!(!nuevos.is_empty(), "run_create debe producir eventos");
+    let client_id = nuevos[0].client_id.as_deref().expect("la frontera Desktop debe asignar client_id");
+    assert_ne!(client_id, CORE_CLIENT_ID, "Desktop no debe usar la identidad reservada del Core");
+    assert!(nuevos.iter().all(|e| e.client_id.as_deref() == Some(client_id)), "los eventos de la acción comparten client_id");
+    assert!(nuevos.iter().all(|e| e.channel.as_deref() == Some("ui")), "los eventos preservan el canal UI");
 }
