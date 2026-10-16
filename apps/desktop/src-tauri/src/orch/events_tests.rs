@@ -688,3 +688,31 @@ fn rpc_desktop_persiste_client_id_en_eventos_de_run_create() {
     assert!(nuevos.iter().all(|e| e.client_id.as_deref() == Some(client_id)), "los eventos de la acción comparten client_id");
     assert!(nuevos.iter().all(|e| e.channel.as_deref() == Some("ui")), "los eventos preservan el canal UI");
 }
+
+#[test]
+fn decision_de_revision_desde_ui_persiste_client_id_autenticado() {
+    let (_l, data, core_dir) = dirs();
+    let (legacy_state, task, repo, _) = super::review::tests::setup("desktop-client-id");
+    let legacy_core = Orch::default().0;
+    *legacy_core.lock_unpersisted() = legacy_state.into_inner().unwrap();
+    escribe_state_de(&legacy_core, &data);
+
+    let (core, _host, started) = arranca(&data, &core_dir);
+    started.unwrap();
+    let head = super::review::branch_head(repo.to_str().unwrap(), "lx/t").unwrap();
+    let before = eventos(&core).len();
+
+    let outcome = core.review_from_ui(&task, "accepted", &head, None, true).unwrap();
+
+    assert_eq!(outcome["outcome"], "recorded");
+    let decision = eventos(&core)
+        .into_iter()
+        .skip(before)
+        .find(|event| event.kind == "decision.recorded")
+        .expect("la decisión aceptada emite decision.recorded");
+    assert_eq!(decision.actor_kind.as_str(), "person");
+    assert_eq!(decision.actor_id.as_deref(), Some("user"));
+    assert_eq!(decision.channel.as_deref(), Some("ui"));
+    assert!(decision.client_id.as_deref().is_some_and(|id| id != CORE_CLIENT_ID), "la acción humana lleva el client_id autenticado");
+    let _ = std::fs::remove_dir_all(repo);
+}

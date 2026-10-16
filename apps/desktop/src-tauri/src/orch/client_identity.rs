@@ -1,9 +1,10 @@
 //! Frontera de identidad de clientes: alta del Desktop local y resolución de credenciales.
 
 use super::Core;
+use super::events::{Channel, MutationContext};
 use crate::store::{
-    AuthenticatedClient, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface,
-    DeviceIdentity,
+    AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration,
+    ClientSurface, DeviceIdentity,
 };
 
 impl Core {
@@ -37,5 +38,13 @@ impl Core {
         let client = registered.map_err(|error| format!("No se pudo registrar la identidad local de Desktop: {error:?}"))?;
         *cached = Some(client.clone());
         Ok(Some(client))
+    }
+
+    pub(super) fn desktop_mutation_context(&self) -> Result<MutationContext, String> {
+        match self.desktop_client()? {
+            Some(client) => MutationContext::authenticated(&client, &ClientClaims::default(), Channel::Ui)
+                .map_err(|error| format!("Identidad de cliente inválida: {error:?}")),
+            None => Ok(MutationContext::person(Channel::Ui)),
+        }
     }
 }
