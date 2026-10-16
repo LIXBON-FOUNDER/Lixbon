@@ -45,6 +45,7 @@ pub(super) fn recovered_effect(
     }
     let actor = match (record.actor_kind.as_str(), record.actor_id.as_deref()) {
         ("person", None) => Actor::Person,
+        ("person", Some(id)) if !id.is_empty() => Actor::PersonId(id.to_string()),
         ("agent", Some(task)) if !task.is_empty() => Actor::Agent(task.to_string()),
         ("system", None) => Actor::System,
         _ => return None,
@@ -57,7 +58,11 @@ pub(super) fn recovered_effect(
     };
     let facts = ev::EffectObserved::parse(&record.effect_id, &record.operation, &record.kind, &record.observed).ok()?;
     let draft = ev::effect_observed(task, run, record.project.clone(), &facts, &record.effect_id).ok()?;
-    Some((MutationContext::new(actor, channel), draft, record.at))
+    Some((MutationContext {
+        actor,
+        channel,
+        client_id: record.client_id.clone(),
+    }, draft, record.at))
 }
 
 pub(super) fn effect_observed_is_valid(

@@ -739,6 +739,7 @@ impl Core {
             task: effect.task.clone(),
             run: effect.run.clone().or(run),
             project,
+            client_id: ctx.client_id.clone(),
             actor_kind: actor_kind.to_string(),
             actor_id,
             channel: channel.to_string(),

@@ -31,6 +31,8 @@ Los bearer tokens deben ser de alta entropía: `ClientCredential::new` exige al 
 
 La migración `005_clients` agrega el registro sin reescribir Events históricos ni inventar `client_id`. Los contextos nuevos autenticados escriben `client_id`; los eventos anteriores conservan `NULL`.
 
+El journal de efectos v2 también conserva el `client_id` opcional para que una reconciliación tras fallo de persistencia no pierda la atribución. Los registros v2 anteriores, que no tenían ese campo, siguen leyéndose como `None`. El token nunca se copia al journal.
+
 Los clientes actuales siguen temporalmente en su ruta legacy hasta LXO-86: Desktop invoca el Core dentro del proceso y `lxo` usa el bearer local publicado por el servidor junto con su campo `caller`. Esa ruta aún no produce un `AuthenticatedClient`, por lo que conserva la semántica anterior y no recibe un `client_id` nuevo por inferencia. No se debe tratar `caller` como una credencial ni permitir que seleccione `Person` o `System`. LXO-86 debe reemplazarla por credenciales CLI guardadas en secure store y handshake; las credenciales de cliente no se publican en `orch.json`, no aparecen en shell history ni se registran en logs.
 
 El Event Log mantiene el vocabulario de canal actual (`ui`, `lxo`, `core`). Desktop y CLI se validan contra `ui` y `lxo`, respectivamente. Mobile y Automation quedan representados en el modelo de superficie, pero no reciben un transporte nuevo en LXO-85.

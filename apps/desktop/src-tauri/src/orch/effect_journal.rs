@@ -30,6 +30,9 @@ pub(super) struct RecordV2 {
     pub(super) task: Option<String>,
     pub(super) run: Option<String>,
     pub(super) project: Option<String>,
+    /// Instalación autenticada que produjo el efecto. Ausente en journals v2 anteriores a LXO-85.
+    #[serde(default)]
+    pub(super) client_id: Option<String>,
     pub(super) actor_kind: String,
     pub(super) actor_id: Option<String>,
     pub(super) channel: String,
@@ -46,6 +49,7 @@ impl RecordV2 {
             && self.task == other.task
             && self.run == other.run
             && self.project == other.project
+            && self.client_id == other.client_id
             && self.actor_kind == other.actor_kind
             && self.actor_id == other.actor_id
             && self.channel == other.channel
@@ -403,6 +407,7 @@ mod tests {
             task: Some("t1".into()),
             run: Some("r1".into()),
             project: None,
+            client_id: None,
             actor_kind: "system".into(),
             actor_id: None,
             channel: "core".into(),
