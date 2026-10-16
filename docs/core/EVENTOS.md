@@ -357,7 +357,8 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
 | plataforma | identidad `start` | vías de descubrimiento | garantía |
 |---|---|---|---|
 | Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica |
-| Linux / macOS | token opaco = hash normalizado de `ps lstart` (solo igualdad, nunca orden) | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído de una única instantánea de `ps` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada |
+| Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada |
+| macOS | hash normalizado de `ps lstart` (resolución de 1 s; solo igualdad) | igual, con una única instantánea de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` | igual; un falso «mismo proceso» exige reutilizar el pid y arrancar en el mismo segundo, es decir, agotar el espacio circular de pids (99 999) en menos de 1 s |
 
 * **Unix y el número de grupo.** Un `pgid` solo está reservado mientras el grupo tiene miembros. Por eso solo se
   descubre por `pgid` si un proceso que ya rastreamos (identidad verificada en esa ronda) sigue dentro en la misma
