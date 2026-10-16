@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use super::events::{Channel, MutationContext};
-use super::{Core, agents, approval, codex_session, delivery};
+use super::{Core, agents, approval, codex_session, delivery, pty};
 use super::state::Status;
 
 impl Core {
@@ -166,21 +166,58 @@ impl Core {
         });
     }
 
-    /// Mata y retira el terminal de `id` DICIENDO si pudo. `None`: no hay terminal registrado. `Some(Err)`:
-    /// no hay control fiable sobre el proceso (el matador falló o devolvió un estado distinto de cero); en ese caso el
-    /// terminal vuelve al mapa para poder reintentarlo y NADA que dependa de que el proceso esté muerto
-    /// (borrar su worktree, su tarea) debe hacerse.
+    /// Mata y retira el terminal de `id` DICIENDO si pudo. `None`: no hay ningún proceso bajo la custodia del Core
+    /// (ni terminal registrado ni proceso sin dueño de un lanzamiento fallido). `Some(Err)`: no hay control fiable sobre
+    /// el proceso (el matador falló o devolvió un estado distinto de cero, o OTRO llamante lo está matando ahora);
+    /// el proceso sigue custodiado para poder reintentarlo y NADA que dependa de que esté muerto (borrar su worktree,
+    /// su tarea, darla por detenida) debe hacerse.
+    ///
+    /// Durante el kill el terminal NO sale del mapa: queda marcado como «terminación en curso»
+    /// ([`pty::AgentTerm::begin_kill`]). Así `has_term`, el sondeo de salida, `close_idle_runs` y `free_worktrees`
+    /// siguen viendo un proceso vivo, y un segundo `kill_term` recibe `Err` en vez de «no hay terminal». El mapa solo
+    /// se bloquea para marcar y para registrar el resultado, nunca mientras corre `taskkill`.
     ///
     /// Un mapa con el lock envenenado NO impide recuperar el terminal: su guard se recupera con
     /// `PoisonError::into_inner` (el `HashMap` sigue siendo coherente; el pánico fue de otro hilo). Si el kill
-    /// vuelve a fallar, el terminal queda otra vez almacenado: nunca se suelta un `AgentTerm` cuyo proceso
-    /// puede seguir vivo.
+    /// vuelve a fallar, el matador regresa al terminal (o, si `on_exit` ya lo retiró del mapa mientras tanto, a la
+    /// custodia de `pty`): nunca se suelta un matador cuyo proceso puede seguir vivo.
     pub(super) fn kill_term_checked(&self, id: &str) -> Option<Result<(), String>> {
-        let mut term = self.terms.lock().unwrap_or_else(|e| e.into_inner()).remove(id)?;
-        match term.try_kill() {
-            Ok(()) => Some(Ok(())),
+        let term = self.kill_registered_term(id);
+        // Un proceso de este `id` sin terminal (su construcción falló y no se pudo matar) también es nuestro.
+        let custody = pty::resolve_custody(&self.custody_key(id));
+        match (term, custody) {
+            (None, None) => None,
+            (Some(Err(e)), _) | (_, Some(Err(e))) => Some(Err(e)),
+            _ => Some(Ok(())),
+        }
+    }
+
+    /// Nombre bajo el que `pty` custodia los procesos sin dueño de la tarea `id`. Los ids de tarea son contadores de
+    /// cada `State` y la custodia es del proceso entero: la dirección del Core evita que dos Cores (las pruebas crean
+    /// muchos) confundan «t2» con «t2».
+    pub(super) fn custody_key(&self, id: &str) -> String {
+        format!("{:p}/{id}", self)
+    }
+
+    fn kill_registered_term(&self, id: &str) -> Option<Result<(), String>> {
+        let mut killer = match self.terms.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id)?.begin_kill() {
+            Ok(k) => k,
+            Err(e) => return Some(Err(e)),
+        };
+        // Sin el mapa bloqueado: el resto del Core sigue leyendo y escribiendo terminales mientras el árbol muere.
+        let outcome = killer.kill().map_err(|e| e.to_string());
+        let mut terms = self.terms.lock().unwrap_or_else(|e| e.into_inner());
+        match outcome {
+            Ok(()) => {
+                terms.remove(id);
+                Some(Ok(()))
+            }
             Err(e) => {
-                self.terms.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), term);
+                match terms.get_mut(id) {
+                    Some(term) => term.end_kill(killer),
+                    // `on_exit` retiró el terminal durante el kill y este falló: el matador no se descarta.
+                    None => pty::keep_in_custody(&self.custody_key(id), killer),
+                }
                 Some(Err(e))
             }
         }
@@ -221,8 +258,9 @@ impl Core {
         }
     }
 
-    /// ¿Hay un terminal (un proceso bajo la custodia del Core) para `id`?
+    /// ¿Hay un proceso bajo la custodia del Core para `id`? Un terminal con una terminación en curso cuenta (sigue en
+    /// el mapa), igual que un proceso sin dueño de un lanzamiento fallido.
     pub(super) fn has_term(&self, id: &str) -> bool {
-        self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id)
+        self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id) || pty::in_custody(&self.custody_key(id))
     }
 }

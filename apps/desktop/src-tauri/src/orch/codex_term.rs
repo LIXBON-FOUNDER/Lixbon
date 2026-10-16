@@ -300,7 +300,7 @@ impl CodexTerms {
         let (out_id, exit_id, emit_exit) = (term_id.clone(), term_id.clone(), emit.clone());
         let (out_w, out_e, dir_e) = (out.clone(), out.clone(), script_dir.clone());
         let term = pty::spawn_user(
-            pty::Launch { cwd: &display(cwd), script_dir: &script_dir, command, env: vec![], inject: None, piped: false },
+            pty::Launch { cwd: &display(cwd), script_dir: &script_dir, command, env: vec![], inject: None, piped: false, owner: None },
             cols,
             rows,
             move |data| {

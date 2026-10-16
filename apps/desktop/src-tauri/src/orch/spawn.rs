@@ -246,7 +246,9 @@ impl Core {
     ///
     /// Orden: 1) capturar si la Task es retirable (antes de matar nada: nuestro propio `on_exit` no puede
     /// convertir una Task removible en preservada); 2) matar el proceso vivo, también con el Core degradado
-    /// (es el único acto destructivo permitido ahí); si no hay control fiable sobre él, se conserva TODO;
+    /// (es el único acto destructivo permitido ahí); «el proceso» incluye uno sin terminal que `pty` custodia porque su
+    /// construcción falló y no se pudo matar (`kill_term_checked` lo resuelve), y una terminación ya en curso por otro
+    /// llamante cuenta como «sin control»; si no hay control fiable sobre él, se conserva TODO;
     /// 3) con el Core degradado no se borra nada más (ni worktree, ni rama, ni Task): su borrado no se podría
     /// registrar y el estado y el disco quedarían inconsistentes; 4) quitar el worktree del intento y, si
     /// tuvo éxito, intentar `branch -d` (nunca `-D`; `branch_deleted` es el resultado real); 5) registrar en
@@ -459,6 +461,7 @@ impl Core {
             ("LXO_REPORT_NONCE".to_string(), nonce),
             ("LXO_REPORT_ATTEMPT".to_string(), delivery::ATTEMPT.to_string()),
         ]);
+        let custody = self.custody_key(id);
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
         let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
@@ -467,7 +470,7 @@ impl Core {
         let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
         let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
         let term = pty::spawn(
-            pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped },
+            pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped, owner: Some(&custody) },
             move |text| {
                 let change = guard_out.lock().ok().and_then(|mut g| g.on_output(&text, state::now_ms()));
                 if let (Some(change), Some(core)) = (change, weak_out.upgrade()) {
