@@ -697,6 +697,24 @@ Seguimiento:
         Err(format!("Tu run anterior {} sigue abierto: ciérralo con `lxo run close` y vuelve a crear el run", t.run))
     }
 
+    /// Retira UNA tarea que nunca llegó a ser (cleanup de un lanzamiento fallido) con la misma cascada
+    /// que `remove_run` aplica a las suyas: sus decisiones legacy y los mensajes que la citan. NO retira
+    /// nada si la tarea es la raíz de un run o tiene hijas: una eliminación parcial dejaría referencias
+    /// colgando. El historial durable lo conserva el Event Log, no el estado.
+    pub fn remove_task(&mut self, id: &str) -> Result<(), String> {
+        let t = self.tasks.get(id).ok_or_else(|| format!("La tarea {id} no existe"))?;
+        if self.runs.get(&t.run).is_some_and(|r| r.root == id) {
+            return Err(format!("{id} es la raíz de su run: no se retira como tarea"));
+        }
+        if let Some(hija) = self.tasks.values().find(|c| c.parent.as_deref() == Some(id)) {
+            return Err(format!("{id} tiene hijas ({}): no se retira una tarea con descendientes", hija.id));
+        }
+        self.messages.retain(|m| m.from != id && m.to != id);
+        self.decisions.retain(|d| d.task != id);
+        self.tasks.remove(id);
+        Ok(())
+    }
+
     pub fn remove_run(&mut self, run: &str) {
         self.runs.remove(run);
         // Como ON DELETE CASCADE de decisions.task: se van con sus tareas.

@@ -304,6 +304,16 @@ impl Persistence for SqlitePersistence {
         }
     }
 
+    /// Hechos que NO modifican `legacy_state`: `Store::append_events` (su propia transacción, `state_rev = NULL`).
+    /// No toca `committed` (la `rev` no avanza) ni el espejo. Repetir la misma `(kind, idem_key)` es un éxito.
+    fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        store.append_events(events).map(|_| ()).map_err(|e| PersistError { transient: e.is_transient(), message: e.to_string() })
+    }
+
     fn after_publish(&self, _state: &State) -> Result<(), String> {
         let pending = self.committed.lock().unwrap_or_else(|e| e.into_inner()).pending_mirror.take();
         let Some((rev, doc)) = pending else { return Ok(()) };

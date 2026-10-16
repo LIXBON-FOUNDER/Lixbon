@@ -15,7 +15,7 @@ static INTEGRATING: Mutex<()> = Mutex::new(());
 use serde_json::{json, Value};
 
 use super::git;
-use super::mutation::{Effect, StateAccess};
+use super::mutation::{Effect, StateAccess, Tx};
 use super::state::{State, Task};
 
 pub const AGENT_REJECT: &str = "La integración la aprueba una persona desde Lixbon: los agentes no pueden fusionar ramas. \
@@ -104,7 +104,7 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
         let detail = json!({ "outcome": "target_moved", "branch": branch, "into": into, "squash": squash,
             "expected_commit": exp, "found_commit": found });
         // No hubo merge: es un registro puro, sin efecto externo que reconciliar.
-        let decision = state.mutate(|st| Ok(st.record_decision(&id, "merge", "human", &detail)))?;
+        let decision = state.mutate(|st| st.record_decision(&id, "merge", "human", &detail))?;
         return Ok(json!({ "task": id, "outcome": "target_moved", "decision": decision, "branch": branch, "into": into,
             "expected_commit": exp, "found_commit": found,
             "message": "La rama destino cambió fuera de Lixbon (commit, merge o reset manual): revisa el destino antes de integrar. No se integró." }));
@@ -132,9 +132,9 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
     let effect = Effect::new("integrate", "git_merge").task(&id).repo(&repo)
         .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "into": into }))
-        .observed(json!({ "outcome": outcome, "base_commit": found, "result_commit": result }));
+        .observed(json!({ "outcome": outcome, "branch": branch, "base_commit": found, "result_commit": result }));
     let decision = state.mutate_after_effect(effect, |st| {
-        let decision = st.record_decision(&id, "merge", "human", &detail);
+        let decision = st.record_decision(&id, "merge", "human", &detail)?;
         if outcome == "merged" {
             st.task_mut(&id)?.merged = true;
         }
@@ -198,6 +198,8 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
         Ok((branch, t.base.clone().unwrap_or_else(|| "HEAD".into()), t.cwd.clone(), t.title.clone(), t.summary.clone(), t.pr_url.clone()))
     })?;
     let remote = git::remote_url(&dir);
+    // Con un PR ya registrado NO se ejecuta push ni `gh`: no hay efecto externo que observar.
+    let executed = existing.is_none();
     let (outcome, url, err) = match existing {
         Some(u) => ("already_exists", Some(u), None),
         None => {
@@ -211,17 +213,23 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
         }
     };
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
-    // El push y el PR ya ocurrieron: su registro es UNA mutación posterior.
-    let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
-        .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
-        .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
-    let decision = state.mutate_after_effect(effect, |st| {
-        let decision = st.record_decision(&id, "pr", "human", &detail);
+    let register = |st: &mut Tx| -> Result<u64, String> {
+        let decision = st.record_decision(&id, "pr", "human", &detail)?;
         if url.is_some() {
             st.task_mut(&id)?.pr_url = url.clone();
         }
         Ok(decision)
-    })?;
+    };
+    let decision = if executed {
+        // El push y el PR ya ocurrieron (incluso si `gh` responde «ya existe»): su registro es UNA mutación posterior.
+        let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
+            .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
+            .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
+        state.mutate_after_effect(effect, register)?
+    } else {
+        // Sin efecto: solo la decisión (`already_exists`), por la vía normal. Sin `effect.observed` ni diario.
+        state.mutate(register)?
+    };
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     if let Some(e) = err {
         out["message"] = json!(e);
@@ -232,9 +240,24 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orch::mutation::ConContexto;
     use crate::orch::state::{NewTask, Status};
     use std::path::Path;
     use std::process::Command;
+
+    // Las decisiones las toma una PERSONA desde la interfaz: las pruebas la representan de forma
+    // explícita (`ConContexto::persona`) en vez de usar el contexto Core del adaptador por defecto.
+    fn integrate(st: &Mutex<State>, from_user: bool, args: &Value) -> Result<Value, String> {
+        super::integrate(&ConContexto::persona(st), from_user, args)
+    }
+
+    fn publish_pr(st: &Mutex<State>, from_user: bool, args: &Value, create: CreatePr) -> Result<Value, String> {
+        super::publish_pr(&ConContexto::persona(st), from_user, args, create)
+    }
+
+    fn review_task(st: &Mutex<State>, id: &str, decision: &str, head: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
+        super::super::review::review_task(&ConContexto::persona(st), id, decision, head, comment, confirm)
+    }
 
     fn git(dir: &Path, args: &[&str]) -> String {
         let o = Command::new("git").args(args).current_dir(dir)
@@ -284,7 +307,7 @@ mod tests {
     /// Revisión aceptada de la persona sobre el HEAD actual de la rama.
     fn accept(st: &Mutex<State>, id: &str, dir: &Path, branch: &str) {
         let h = git(dir, &["rev-parse", branch]);
-        let out = super::super::review::review_task(st, id, "accepted", &h, None, true).unwrap();
+        let out = review_task(st, id, "accepted", &h, None, true).unwrap();
         assert_eq!(out["outcome"], "recorded");
     }
 
@@ -622,7 +645,7 @@ mod tests {
         assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
         assert_eq!(st.lock().unwrap().decisions.len(), n);
         // Revisar el commit viejo ya no vale: head_moved, sin registrar nada.
-        let old = super::super::review::review_task(&st, &id, "accepted", &accepted, None, true).unwrap();
+        let old = review_task(&st, &id, "accepted", &accepted, None, true).unwrap();
         assert_eq!(old["outcome"], "head_moved");
         assert_eq!(st.lock().unwrap().decisions.len(), n);
         // Aceptado sobre el nuevo HEAD sí integra.
@@ -635,7 +658,7 @@ mod tests {
     fn aceptar_y_luego_rechazar_el_mismo_commit_no_integra() {
         let (st, id, dir) = setup("acepta-rechaza", false);
         let h = git(&dir, &["rev-parse", "lx/t"]);
-        let r = super::super::review::review_task(&st, &id, "rejected", &h, Some("mejor no"), true).unwrap();
+        let r = review_task(&st, &id, "rejected", &h, Some("mejor no"), true).unwrap();
         assert_eq!(r["outcome"], "recorded");
         let before = git(&dir, &["rev-parse", "HEAD"]);
         let out = integrate(&st, true, &json!({ "task": id, "confirm": true })).unwrap();

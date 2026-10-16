@@ -66,7 +66,7 @@ pub use events::{ActorKind, EventClass, EventPage, EventQuery, EventRow, Inserte
 #[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
-pub use projects::{Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow};
+pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 use migrate::now_ms;
 

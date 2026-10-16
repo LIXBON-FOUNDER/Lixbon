@@ -9,14 +9,30 @@ mod authority;
 mod boot_authority;
 #[cfg(test)]
 mod boot_tests;
-// E1a: el Event Log todavía no se instrumenta (llega en E1b); hasta entonces solo lo usan las pruebas.
+// E1b se entrega por bloques: parte del vocabulario (`project`, `idempotent`, `by`, entidades de
+// proyecto y lanzamiento…) la estrenan los bloques siguientes (decisiones, efectos, Projects, spawn).
 #[cfg_attr(not(test), allow(dead_code))]
 mod events;
+mod event_kinds;
+mod tx_ops;
 #[cfg(test)]
 mod events_tests;
+#[cfg(test)]
+mod tx_ops_tests;
+#[cfg(test)]
+mod spawn_cleanup_tests;
+#[cfg(test)]
+mod hardening_tests;
 mod projects;
+mod project_ops;
 #[cfg(test)]
 mod projects_tests;
+#[cfg(test)]
+mod project_ops_tests;
+#[cfg(test)]
+mod project_decisions_tests;
+#[cfg(test)]
+mod record_facts_tests;
 #[cfg(test)]
 mod crash_tests;
 #[cfg(test)]
@@ -124,6 +140,8 @@ pub struct Core {
     server: Mutex<Option<server::Handle>>,
     /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
     pending: Mutex<HashMap<String, spawn_approval::Entry>>,
+    /// Serializa las transiciones de un pendiente (ver `spawn_approval::Core::gate`).
+    pend_gate: Mutex<()>,
     /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
     resolver: Resolver,
     ttl_ms: u64,
@@ -133,6 +151,9 @@ pub struct Core {
     /// espera en la barrera, para que la prueba mire el lock en ese punto exacto.
     #[cfg(test)]
     snapshot_git_hook: Mutex<Option<(std::sync::mpsc::Sender<()>, Arc<std::sync::Barrier>)>>,
+    /// En pruebas: puntos de fallo/observación dentro de `create_child` (ver `spawn.rs`).
+    #[cfg(test)]
+    spawn_hook: Mutex<Option<spawn::SpawnHook>>,
 }
 
 pub type Resolver = fn(&str, &str, Option<&str>, &str) -> agents::Policy;
@@ -155,12 +176,15 @@ impl Default for Orch {
             settings: Mutex::new(Settings::default()),
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
+            pend_gate: Mutex::new(()),
             resolver: resolve_real,
             ttl_ms: spawn_approval::ttl_ms(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]
             snapshot_git_hook: Mutex::new(None),
+            #[cfg(test)]
+            spawn_hook: Mutex::new(None),
         }))
     }
 }

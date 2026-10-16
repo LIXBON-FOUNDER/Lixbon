@@ -4,10 +4,76 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
-use super::mutation::{Effect, StateAccess};
+use super::events::{Channel, MutationContext};
+use super::mutation::{Effect, Health, StateAccess, Tx};
 use super::state::NewTask;
 
+/// Lo que UN intento de lanzamiento ha creado y por tanto puede deshacer. Local al intento (no durable) y
+/// independiente de `State`: el worktree puede existir en disco sin que `Task.worktree` lo sepa (el registro
+/// pudo fallar), así que el cleanup NO se apoya en el estado. `worktree`/`branch` solo se rellenan cuando
+/// `git::add_worktree` devolvió `Ok`: un `add_worktree` que falla (p. ej. «ya existe la carpeta») no da
+/// propiedad sobre esa ruta, que nunca se borra.
+pub(super) struct SpawnAttempt {
+    pub(super) task: String,
+    pub(super) repo: String,
+    pub(super) worktree: Option<PathBuf>,
+    pub(super) branch: Option<String>,
+}
+
+/// Puntos del lanzamiento donde las pruebas pueden fallar o intervenir (ver `Core::spawn_hook`).
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SpawnStep {
+    /// `git worktree add` devolvió Ok; todavía no se registró.
+    AfterAddWorktree,
+    /// Dentro del cierre que registra el worktree (un `Err` es un rechazo del registro).
+    InWorktreeRegistration,
+    /// Worktree registrado; antes de `ensure_launchable`.
+    AfterWorktreeRegistered,
+    /// Dentro de `launch` (en pruebas, `fake_launch`).
+    InLaunch,
+    /// `launch` devolvió Ok; antes de registrar `pty_process`.
+    AfterLaunch,
+    /// Dentro del cierre que registra `pty_process` (un `Err` es un rechazo del registro).
+    InPtyRegistration,
+    /// `spawn_request`: el plan ya está hecho y todavía no se tomó la compuerta ni se revalidó el padre (la
+    /// carrera con `remove_run` o con un cierre del run). `id` es la tarea padre.
+    BeforeRequestRevalidation,
+    /// Después de persistir e insertar el pending y antes de emitir el aviso de UI.
+    AfterRequestPersistBeforeEmit,
+    /// Después de pasar `Pending → Launching`, antes de `create_child`.
+    AfterApprovalClaim,
+    /// Justo antes de que `remove_run` intente tomar `pend_gate`.
+    BeforeRunRemovalGate,
+    /// Después de limpiar terminales/worktrees de `remove_run`, antes de tomar la instantánea de pendientes.
+    AfterRunRemovalCleanupSnapshot,
+    /// Después de confirmar el registro `pty_process` de la tarea hija.
+    AfterPtyRegistration,
+}
+
+#[cfg(test)]
+pub(super) type SpawnHook = Arc<dyn Fn(&Core, &str, SpawnStep) -> Result<(), String> + Send + Sync>;
+
 impl Core {
+    /// Solo pruebas: ejecuta el gancho instalado en ese punto. `AfterApprovalClaim`, `AfterRequestPersistBeforeEmit`,
+    /// `AfterPtyRegistration` y `AfterRunRemovalCleanupSnapshot` corren con `pend_gate` tomada; sus ganchos no deben
+    /// llamar una transición que vuelva a tomarla. Los ganchos `In*` corren DENTRO de una mutación y no deben tocar
+    /// el estado del Core.
+    #[cfg(test)]
+    pub(super) fn spawn_hook(&self, step: SpawnStep, id: &str) -> Result<(), String> {
+        let hook = self.spawn_hook.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        match hook {
+            Some(h) => h(self, id, step),
+            None => Ok(()),
+        }
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    pub(super) fn spawn_hook(&self, _step: SpawnStep, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     pub(super) fn branch_of(&self, caller: &Caller, id: &str) -> Result<(String, String, String), String> {
         let st = self.lock();
         Self::check_manages(&st, caller, id)?;
@@ -77,6 +143,10 @@ impl Core {
     /// resolvió el host (nunca el que llega de la UI).
     pub(super) fn create_child(self: &Arc<Self>, p: &spawn_approval::PendingSpawn, argv: Vec<String>, ack_unverified: bool) -> Result<Value, String> {
         let parent_id = p.parent_task.clone();
+        // Quien actúa: la PERSONA que aprobó el lanzamiento, desde la interfaz (`approve_spawn` solo
+        // existe como comando de Tauri: los agentes no pueden aprobar). El agente que lo pidió consta en
+        // `spawn.requested` (bloque de Pending Spawn).
+        let ctx = MutationContext::person(Channel::Ui);
         // REVALIDACIÓN tras la aprobación humana: plan -> aprobación -> revalidación -> efectos.
         // Entre `plan_spawn` y el «sí» de la persona pueden pasar minutos: el proyecto pudo archivarse,
         // su carpeta desaparecer o relocalizarse. La aprobación no congela una launchability antigua.
@@ -88,12 +158,12 @@ impl Core {
         // Nota para Task/Attempt: este orden ya pide estados intermedios explícitos
         // (`pending` -> `starting` -> `working`, y `failed_start`). Hoy la tarea nace
         // sin ellos; C2a no introduce Attempt, solo deja constancia de la necesidad.
-        let (id, parent) = self.mutate(|st| {
+        let (id, parent) = self.mutate_as(&ctx, |st| {
             let parent = st.task(&parent_id)?.clone();
-            let id = st.add_child(&parent_id, MAX_DEPTH, NewTask {
+            let id = st.add_child_for_spawn(&parent_id, MAX_DEPTH, NewTask {
                 agent: p.provider.clone(), model: p.model.clone(), effort: p.effort.clone(), role: p.role.clone(), title: p.title.clone(), spec: p.spec.clone(),
                 repo: parent.repo.clone(), cwd: parent.cwd.clone(), branch: None, base: None, worktree: None, external: false,
-            })?;
+            }, &p.pending_id)?;
             let t = st.task_mut(&id)?;
             t.profile = Some(p.profile.clone());
             t.ack_unverified = ack_unverified;
@@ -101,6 +171,7 @@ impl Core {
             Ok((id, parent))
         })?;
 
+        let mut attempt = SpawnAttempt { task: id.clone(), repo: parent.repo.clone(), worktree: None, branch: None };
         let prepared = (|| -> Result<(), String> {
             if p.shared {
                 return Ok(());
@@ -114,12 +185,17 @@ impl Core {
             let dir = PathBuf::from(&p.cwd);
             let start = git::head(&parent.cwd);
             git::add_worktree(&parent.repo, &dir, &branch, &base)?;
+            // A partir de aquí el intento es dueño de este worktree y esta rama (y solo de ellos).
+            attempt.worktree = Some(dir.clone());
+            attempt.branch = Some(branch.clone());
+            self.spawn_hook(SpawnStep::AfterAddWorktree, &id)?;
             let env = worktree_env::apply(&parent.repo, &dir, &worktree_env::plan(&parent.repo).restricted_to(&p.env));
             // El worktree ya existe: su registro es UNA mutación posterior.
             let effect = Effect::new("spawn", "git_worktree").task(&id).repo(&parent.repo)
                 .expected(json!({ "record": "task worktree, branch y cwd" }))
-                .observed(json!({ "worktree": dir, "branch": branch }));
-            self.mutate_after_effect(effect, |st| {
+                .observed(json!({ "worktree": dir, "branch": branch, "base": base }));
+            self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
+                self.spawn_hook(SpawnStep::InWorktreeRegistration, &id)?;
                 let t = st.task_mut(&id)?;
                 t.env = Some(env).filter(|e| !e.is_empty());
                 t.base_commit = start;
@@ -130,16 +206,17 @@ impl Core {
                 Ok(())
             })
         })()
+        .and_then(|_| self.spawn_hook(SpawnStep::AfterWorktreeRegistered, &id))
         .and_then(|_| self.ensure_launchable(&id))
         .and_then(|_| self.launch(&id));
 
         if let Err(e) = prepared {
-            self.discard_worktree(&id);
-            // Se devuelve el error original aunque la limpieza no se pueda persistir.
-            let _ = self.mutate(|st| {
-                st.tasks.remove(&id);
-                Ok(())
-            });
+            // Se devuelve el error original aunque la limpieza no se pueda hacer o persistir.
+            self.abandon_attempt(&attempt);
+            return Err(e);
+        }
+        if let Err(e) = self.spawn_hook(SpawnStep::AfterLaunch, &id) {
+            self.abandon_attempt(&attempt);
             return Err(e);
         }
         // El proceso ya corre: su registro es UNA mutación posterior. Si el agente ya
@@ -147,16 +224,92 @@ impl Core {
         let effect = Effect::new("spawn", "pty_process").task(&id)
             .expected(json!({ "record": "task en marcha (running)" }))
             .observed(json!({ "launched": true }));
-        let t = self.mutate_after_effect(effect, |st| {
+        let registered = self.acting(ctx.clone()).mutate_after_effect(effect, |st| {
+            self.spawn_hook(SpawnStep::InPtyRegistration, &id)?;
             let _ = st.mark_running(&id);
             Ok(st.task(&id)?.clone())
-        })?;
+        });
+        let t = match registered {
+            Ok(t) => t,
+            Err(e) => {
+                // El proceso está vivo y NO quedó registrado: se compensa (matarlo y, si el Core sigue sano, deshacer).
+                self.abandon_attempt(&attempt);
+                return Err(e);
+            }
+        };
+        self.spawn_hook(SpawnStep::AfterPtyRegistration, &id)?;
         Ok(json!({ "task": t.id, "agent": t.agent, "model": t.model, "effort": t.effort, "role": t.role, "status": t.status, "branch": t.branch, "worktree": t.worktree }))
+    }
+
+    /// Deshace un intento de lanzamiento fallido. Lo decide el Core (System / Core), aunque la persona aprobara
+    /// el lanzamiento, y se apoya en lo que el INTENTO creó, no en lo que `State` recuerde.
+    ///
+    /// Orden: 1) capturar si la Task es retirable (antes de matar nada: nuestro propio `on_exit` no puede
+    /// convertir una Task removible en preservada); 2) matar el proceso vivo, también con el Core degradado
+    /// (es el único acto destructivo permitido ahí); «el proceso» incluye uno sin terminal que `pty` custodia porque su
+    /// construcción falló y no se pudo matar (`kill_term_checked` lo resuelve), y una terminación ya en curso por otro
+    /// llamante cuenta como «sin control»; si no hay control fiable sobre él, se conserva TODO;
+    /// 3) con el Core degradado no se borra nada más (ni worktree, ni rama, ni Task): su borrado no se podría
+    /// registrar y el estado y el disco quedarían inconsistentes; 4) quitar el worktree del intento y, si
+    /// tuvo éxito, intentar `branch -d` (nunca `-D`; `branch_deleted` es el resultado real); 5) registrar en
+    /// UNA mutación: `effect.observed` (git_worktree_removed / spawn_cleanup) y `task.removed` solo si la
+    /// Task era retirable. Si `remove_worktree` falla, la Task se conserva.
+    pub(super) fn abandon_attempt(&self, a: &SpawnAttempt) {
+        let removable = {
+            let st = self.lock();
+            st.tasks.get(&a.task).is_some_and(|t| !t.status.is_final() && st.runs.get(&t.run).is_some_and(|r| !r.closed))
+        };
+        if let Some(Err(_)) = self.kill_term_checked(&a.task) {
+            return;
+        }
+        if self.health() != Health::Normal {
+            return;
+        }
+        let mut branch_deleted = false;
+        let effect = match &a.worktree {
+            Some(wt) => {
+                let dir = wt.to_string_lossy().into_owned();
+                if git::remove_worktree(&a.repo, &dir, true).is_err() {
+                    return;
+                }
+                branch_deleted = a.branch.as_ref().is_some_and(|b| git::delete_branch(&a.repo, b).is_ok());
+                Some(
+                    Effect::new("spawn_cleanup", "git_worktree_removed").task(&a.task).repo(&a.repo)
+                        .expected(json!({ "record": "worktree del intento retirado", "task_removed": removable }))
+                        .observed(json!({ "worktree": dir, "worktree_removed": true, "branch": a.branch, "branch_deleted": branch_deleted })),
+                )
+            }
+            None => None,
+        };
+        let register = |tx: &mut Tx| -> Result<(), String> {
+            if removable {
+                return tx.remove_failed_launch(&a.task);
+            }
+            // La Task se conserva (ya era final o su run estaba cerrado): el estado deja de afirmar lo que ya no
+            // existe. Worktree y cwd si lo conocía; la rama solo si `branch -d` la borró de verdad (si no, sigue
+            // siendo suya). No se marca `merged`: fue un lanzamiento fallido, no una integración; la identidad
+            // histórica de la rama queda en `effect.observed`.
+            let t = tx.task_mut(&a.task)?;
+            if t.worktree.is_some() {
+                t.worktree = None;
+                t.cwd = a.repo.clone();
+            }
+            if branch_deleted && t.branch == a.branch {
+                t.branch = None;
+            }
+            Ok(())
+        };
+        let core = self.acting(MutationContext::core());
+        let _ = match effect {
+            Some(effect) => core.mutate_after_effect(effect, register),
+            None if removable => core.mutate(register),
+            None => Ok(()),
+        };
     }
 
     /// Trabajo nuevo para una hija que ya entregó, en su misma terminal: conserva
     /// su contexto (como reutilizar la terminal de un worker en Orca).
-    pub(super) fn follow_up(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
+    pub(super) fn follow_up(&self, ctx: &MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let id = s(args, "task");
         let spec = s(args, "spec");
         if spec.is_empty() {
@@ -166,10 +319,12 @@ impl Core {
             let st = self.lock();
             Self::check_manages(&st, caller, &id)?;
         }
-        if !self.terms.lock().map(|t| t.contains_key(&id)).unwrap_or(false) {
-            return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn"));
+        match self.terms.lock().map(|t| t.get(&id).map(|t| t.kill_in_progress())) {
+            Ok(Some(false)) => {}
+            Ok(Some(true)) => return Err(format!("La terminal de {id} se está cerrando (terminación en curso): espera a que acabe o lanza una hija nueva con lxo spawn")),
+            _ => return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn")),
         }
-        let task = self.mutate(|st| {
+        let task = self.mutate_as(ctx, |st| {
             st.reopen(&id, &spec)?;
             let t = st.task(&id)?.clone();
             // n = 1 hasta que haya intentos: se borra lo del intento anterior para no
@@ -185,7 +340,7 @@ impl Core {
             writeln!(f, "\n## Seguimiento del coordinador\n\n{spec}\n\nAl terminar, escribe un informe nuevo y vuelve a cerrar con lxo done --report (sin red: lxo report).")
         });
         if let Ok(terms) = self.terms.lock() {
-            if let Some(t) = terms.get(&id) {
+            if let Some(t) = terms.get(&id).filter(|t| !t.kill_in_progress()) {
                 t.type_prompt(&format!(
                     "Nuevo encargo de tu coordinador (también al final de .lixbon/tasks/{id}.md): {spec} -- Al terminar escribe un informe nuevo y cierra otra vez con lxo done --report."
                 ));
@@ -308,6 +463,7 @@ impl Core {
             ("LXO_REPORT_NONCE".to_string(), nonce),
             ("LXO_REPORT_ATTEMPT".to_string(), delivery::ATTEMPT.to_string()),
         ]);
+        let custody = self.custody_key(id);
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
         let (out_event, exit_event) = (format!("orch:term:{id}"), format!("orch:term-exit:{id}"));
@@ -316,7 +472,7 @@ impl Core {
         let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
         let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
         let term = pty::spawn(
-            pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped },
+            pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped, owner: Some(&custody) },
             move |text| {
                 let change = guard_out.lock().ok().and_then(|mut g| g.on_output(&text, state::now_ms()));
                 if let (Some(change), Some(core)) = (change, weak_out.upgrade()) {
@@ -331,7 +487,8 @@ impl Core {
                 }
             },
         )?;
-        self.terms.lock().map_err(|_| "Estado interno corrupto")?.insert(id.to_string(), term);
+        // Si no se puede registrar, el proceso se mata antes de devolver el error (un `AgentTerm` suelto no mata).
+        self.register_term(id, term)?;
         // Sondeo del report.json y de la salida mientras la terminal siga abierta.
         let weak = Arc::downgrade(self);
         let tid = id.to_string();

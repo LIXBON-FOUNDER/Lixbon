@@ -95,7 +95,7 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
         return reply(&mut stream, 200, &json!({ "ok": false, "error": why }));
     }
     // Un pánico dentro de un comando no debe cortar la conexión sin decir nada: el agente recibe el motivo.
-    let res = guarded(cmd, || core.rpc(super::Caller::Agent(caller), &cwd, cmd, &args));
+    let res = guarded(cmd, || core.rpc_via(super::events::Channel::Lxo, super::Caller::Agent(caller), &cwd, cmd, &args));
     reply(&mut stream, 200, &res)
 }
 
