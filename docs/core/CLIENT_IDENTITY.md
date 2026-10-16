@@ -35,7 +35,7 @@ La clasificación de comandos debe ser explícita al añadir RPCs. En esta imple
 
 ## Fronteras autenticadas de LXO-85
 
-Tauri fija `Channel::Ui` y usa una credencial local registrada en Store con principal `Person("user")`, superficie Desktop e instalación `desktop-local`. Store recupera el `client_id` estable por `(surface, installation_id)`. La credencial Desktop queda en memoria del proceso y SQLite guarda su hash. Los argumentos de la interfaz no pueden cambiar actor, canal ni `client_id`.
+Tauri fija `Channel::Ui` y usa una credencial local registrada en Store con principal `Person("user")`, superficie Desktop e instalación `desktop-local`. Store recupera el `client_id` estable por `(surface, installation_id)`. El secreto se usa al registrar la credencial y luego se descarta; Core conserva la identidad autenticada en caché y SQLite guarda el hash. Los argumentos de la interfaz no pueden cambiar actor, canal ni `client_id`.
 
 `POST /rpc` y `GET /events` aceptan credenciales registradas por cliente. El transporte autentica el bearer en Store; claims opcionales como `caller`, principal, superficie, scope, canal y `client_id` deben coincidir. El servidor deriva `Caller` de la identidad autenticada. La API HTTP usa el canal `lxo`; por ello, una credencial Desktop no puede presentarse por esa frontera.
 
