@@ -1415,7 +1415,7 @@ fn remove_run_antes_de_revalidar_rechaza_spawn_request_sin_persistirlo() {
         &json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true }),
     );
 
-    assert!(result.as_ref().is_err_and(|error| error.contains("run está cerrado") || error.contains("tarea ya terminó")), "el padre se revalida después del borrado: {result:?}");
+    assert!(result.as_ref().is_err_and(|error| error.contains("run está cerrado") || error.contains("tarea ya terminó")), "el padre se revalida después del borrado (Ok: {}; si es Err, su motivo no es el esperado)", result.is_ok());
     assert!(e.core.list_pending_spawns().is_empty(), "no queda pending en memoria");
     assert_eq!(kinds(&desde(&e.core, before)), vec!["run.removed"], "no queda un spawn.requested después de run.removed");
     assert!(!e.host.events().iter().any(|(name, _)| name == EV_PENDING || name == EV_RESOLVED));
@@ -1639,7 +1639,7 @@ fn remove_run_degradado_no_mata_terminales_ni_borra_el_run() {
     e.core.degrade_for_tests("fallo de almacenamiento preparado");
 
     let result = e.core.rpc(Caller::User, "", "remove_run", &json!({ "run": e.run }));
-    assert!(result.is_err(), "no se quita un run con el Core degradado: {result:?}");
+    assert!(result.is_err(), "no se quita un run con el Core degradado, y devolvió Ok");
     assert!(pruebas::vivo(pid), "el terminal no se mata antes del rechazo");
     assert!(e.core.terms.lock().unwrap().contains_key(&e.root));
     assert!(e.core.lock().runs.contains_key(&e.run));
