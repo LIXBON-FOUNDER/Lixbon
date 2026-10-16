@@ -30,9 +30,14 @@ pub struct AgentTerm {
     /// Sin master: el agente corre sin terminal (salida canalizada).
     master: Option<Box<dyn MasterPty + Send>>,
     writer: Shared,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    /// `None` mientras alguien lo tiene prestado para matar el árbol (ver [`AgentTerm::begin_kill`]): el terminal
+    /// SIGUE en el mapa del Core, así que una terminación en curso no se confunde con «no hay terminal».
+    killer: Option<Box<dyn ChildKiller + Send + Sync>>,
     pub buffer: Arc<Mutex<Vec<u8>>>,
 }
+
+/// Matador de un proceso, prestado por [`AgentTerm::begin_kill`] para matarlo SIN tener el mapa de terminales bloqueado.
+pub type Killer = Box<dyn ChildKiller + Send + Sync>;
 
 fn write_to(w: &Shared, data: &[u8]) -> Result<(), String> {
     let mut w = w.lock().map_err(|_| "Estado interno corrupto".to_string())?;
@@ -70,26 +75,49 @@ impl AgentTerm {
     }
 
     /// Mata el árbol del proceso y dice si pudo. `Ok` = el matador se ejecutó (un proceso que ya había
-    /// muerto también cuenta); `Err` = no hay control fiable sobre él.
+    /// muerto también cuenta); `Err` = no hay control fiable sobre él (o ya hay otra terminación en curso).
     pub fn try_kill(&mut self) -> Result<(), String> {
-        self.killer.kill().map_err(|e| e.to_string())
+        let mut killer = self.begin_kill()?;
+        let r = killer.kill().map_err(|e| e.to_string());
+        self.end_kill(killer);
+        r
+    }
+
+    /// Toma prestado el matador para matar con el terminal AÚN almacenado. Mientras esté prestado hay una terminación
+    /// en curso ([`AgentTerm::kill_in_progress`]) y un segundo llamante recibe `Err` en vez de matar a la vez o de
+    /// creer que el proceso ya está muerto.
+    pub fn begin_kill(&mut self) -> Result<Killer, String> {
+        self.killer.take().ok_or_else(|| "ya hay una terminación en curso de este proceso".to_string())
+    }
+
+    /// Devuelve el matador prestado (el kill falló o terminó): el terminal vuelve a poder matarse.
+    pub fn end_kill(&mut self, killer: Killer) {
+        self.killer = Some(killer);
+    }
+
+    /// ¿Hay alguien matando este proceso ahora mismo?
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn kill_in_progress(&self) -> bool {
+        self.killer.is_none()
     }
 
     /// Prueba: un terminal sin proceso detrás, con el matador que se indique (p. ej. uno que falla).
     #[cfg(test)]
     pub fn for_tests(killer: Box<dyn ChildKiller + Send + Sync>) -> AgentTerm {
         let sink: Box<dyn Write + Send> = Box::new(std::io::sink());
-        AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer, buffer: Arc::new(Mutex::new(Vec::new())) }
+        AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer: Some(killer), buffer: Arc::new(Mutex::new(Vec::new())) }
     }
 }
 
 /// Un proceso recién creado cuya construcción falló y que NO se pudo dar por muerto. No hay `AgentTerm` al que
 /// colgarlo (el lanzamiento devuelve `Err`), así que queda aquí, bajo la custodia del módulo, con el matador que
-/// falló: nunca se suelta un proceso potencialmente vivo y sin dueño. Se reintenta con [`reap_unowned`]
-/// (`Core::shutdown`).
+/// falló: nunca se suelta un proceso potencialmente vivo y sin dueño. `owner` es la tarea que lo lanzó: quien limpia
+/// un lanzamiento fallido pregunta por ella ([`resolve_custody`]) ANTES de borrar su worktree, su rama o su Task. Se
+/// reintenta también con [`reap_unowned`] (`Core::shutdown`).
 struct Unowned {
+    owner: Option<String>,
     pid: Option<u32>,
-    killer: Box<dyn ChildKiller + Send + Sync>,
+    killer: Killer,
 }
 
 static UNOWNED: Mutex<Vec<Unowned>> = Mutex::new(Vec::new());
@@ -104,10 +132,19 @@ pub fn unowned_count() -> usize {
     unowned().len()
 }
 
+/// Un intento de matar un proceso en custodia. En pruebas, `BREAK_KILLS` lo hace fallar sin tocarlo.
+fn kill_unowned(u: &mut Unowned) -> Result<(), String> {
+    #[cfg(test)]
+    if BREAK_KILLS.with(|b| b.get()) {
+        return Err("matador roto inyectado".into());
+    }
+    u.killer.kill().map_err(|e| e.to_string())
+}
+
 /// Reintenta matar los procesos en custodia que cumplan `pred` y devuelve cuántos siguen en ella.
 fn reap_unowned_where(pred: impl Fn(Option<u32>) -> bool) -> usize {
     let mut list = unowned();
-    list.retain_mut(|u| !pred(u.pid) || u.killer.kill().is_err());
+    list.retain_mut(|u| !pred(u.pid) || kill_unowned(u).is_err());
     list.len()
 }
 
@@ -116,12 +153,49 @@ pub fn reap_unowned() -> usize {
     reap_unowned_where(|_| true)
 }
 
+/// ¿Hay un proceso de `owner` en custodia (sin dueño porque falló su construcción o su terminal desapareció)?
+pub fn in_custody(owner: &str) -> bool {
+    unowned().iter().any(|u| u.owner.as_deref() == Some(owner))
+}
+
+/// Pone bajo custodia un proceso de `owner` cuyo matador acaba de fallar y que ya no tiene terminal al que volver.
+pub fn keep_in_custody(owner: &str, killer: Killer) {
+    unowned().push(Unowned { owner: Some(owner.to_string()), pid: None, killer });
+}
+
+/// Resuelve la custodia de `owner` COMPROBANDO el resultado: reintenta matar sus procesos. `None`: no había ninguno.
+/// `Some(Ok)`: había y se mataron todos (salen de la custodia). `Some(Err)`: al menos uno sigue sin control fiable y
+/// permanece en ella: quien limpia debe CONSERVARLO todo (worktree, rama, Task). La custodia se mantiene bloqueada
+/// durante el intento, así que un segundo llamante nunca ve «no hay nada» mientras el primero aún no ha terminado.
+pub fn resolve_custody(owner: &str) -> Option<Result<(), String>> {
+    let mut list = unowned();
+    let (mut found, mut failure) = (false, None);
+    list.retain_mut(|u| {
+        if u.owner.as_deref() != Some(owner) {
+            return true;
+        }
+        found = true;
+        match kill_unowned(u) {
+            Ok(()) => false,
+            Err(e) => {
+                failure.get_or_insert(e);
+                true
+            }
+        }
+    });
+    match (found, failure) {
+        (false, _) => None,
+        (true, None) => Some(Ok(())),
+        (true, Some(e)) => Some(Err(format!("un proceso lanzado para {owner} sigue en custodia: {e}"))),
+    }
+}
+
 /// Compensa un fallo de construcción posterior a crear el proceso: lo mata COMPROBANDO el resultado y devuelve
 /// `true` solo si puede darse por muerto. No se confía en que soltar los manejadores lo mate: cerrar el master de
 /// una PTY puede acabar con él según la plataforma, pero un proceso canalizado seguiría vivo y `AgentTerm` no
 /// tiene `Drop`. Si ni el matador del árbol ni el kill directo lo logran, el proceso pasa a la custodia
-/// del módulo (`UNOWNED`) en vez de soltarse. `direct` es el kill del propio hijo (solo alcanza a la raíz).
-fn kill_after_failed_setup(pid: Option<u32>, mut killer: Box<dyn ChildKiller + Send + Sync>, direct: &mut dyn FnMut() -> std::io::Result<()>) -> bool {
+/// del módulo (`UNOWNED`, a nombre de `owner`) en vez de soltarse. `direct` es el kill del propio hijo (solo alcanza a la raíz).
+fn kill_after_failed_setup(owner: Option<&str>, pid: Option<u32>, mut killer: Killer, direct: &mut dyn FnMut() -> std::io::Result<()>) -> bool {
     #[cfg(test)]
     let broken = BREAK_KILLS.with(|b| b.get());
     #[cfg(not(test))]
@@ -133,7 +207,7 @@ fn kill_after_failed_setup(pid: Option<u32>, mut killer: Box<dyn ChildKiller + S
         #[cfg(test)]
         KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
     } else {
-        unowned().push(Unowned { pid, killer });
+        unowned().push(Unowned { owner: owner.map(str::to_string), pid, killer });
     }
     dead
 }
@@ -180,6 +254,8 @@ pub struct Launch<'a> {
     pub env: Vec<(String, String)>,
     pub inject: Option<String>,
     pub piped: bool,
+    /// Tarea a cuyo nombre queda en custodia el proceso si su construcción falla y no se puede matar.
+    pub owner: Option<&'a str>,
 }
 
 /// El comando va en un script y no como argumento: portable-pty escapa las
@@ -391,7 +467,7 @@ fn spawn_piped(
     let (stdout, stderr) = match pipes {
         Ok(p) => p,
         Err(e) => {
-            let dead = kill_after_failed_setup(Some(pid), Box::new(TreeKiller(pid)), &mut || child.kill());
+            let dead = kill_after_failed_setup(l.owner, Some(pid), Box::new(TreeKiller(pid)), &mut || child.kill());
             if dead {
                 let _ = child.wait();
             }
@@ -435,7 +511,7 @@ fn spawn_piped(
         on_exit();
     });
     let sink: Box<dyn Write + Send> = Box::new(std::io::sink());
-    Ok(AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer: Box::new(TreeKiller(pid)), buffer })
+    Ok(AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer: Some(Box::new(TreeKiller(pid))), buffer })
 }
 
 /// `on_output` recibe cada trozo de salida; `on_exit`, el fin del proceso.
@@ -506,7 +582,7 @@ fn spawn_pty(
         Ok((r, w)) => (r, Arc::new(Mutex::new(w))),
         Err(e) => {
             let pid = child.process_id();
-            let dead = kill_after_failed_setup(pid, killer, &mut || child.kill());
+            let dead = kill_after_failed_setup(l.owner, pid, killer, &mut || child.kill());
             if dead {
                 let _ = child.wait();
             }
@@ -586,7 +662,7 @@ fn spawn_pty(
         on_exit(code);
     });
 
-    let term = AgentTerm { master: Some(pair.master), writer, killer, buffer };
+    let term = AgentTerm { master: Some(pair.master), writer, killer: Some(killer), buffer };
     if let Some(prompt) = l.inject {
         let w = term.writer.clone();
         thread::spawn(move || {
@@ -724,7 +800,7 @@ mod real {
         let screen = Arc::new(Mutex::new(String::new()));
         let sc = screen.clone();
         let mut term = super::spawn(
-            super::Launch { cwd: &dir.to_string_lossy(), script_dir: &dir.join(".lixbon"), command: l.command, env: l.env, inject: l.inject, piped: l.piped },
+            super::Launch { cwd: &dir.to_string_lossy(), script_dir: &dir.join(".lixbon"), command: l.command, env: l.env, inject: l.inject, piped: l.piped, owner: None },
             move |t| sc.lock().unwrap().push_str(&t),
             || {},
         )
@@ -790,6 +866,7 @@ mod ancho_real {
                     env: vec![],
                     inject: None,
                     piped: false,
+                    owner: None,
                 },
                 move |t| sc.lock().unwrap().push_str(&t),
                 move || d.store(true, Ordering::SeqCst),
@@ -843,8 +920,29 @@ pub(crate) mod pruebas {
     }
 
     pub fn lanza(dir: &Path, piped: bool) -> Result<AgentTerm, String> {
+        lanza_para(dir, piped, None)
+    }
+
+    /// Como `lanza`, con la tarea a cuyo nombre queda en custodia el proceso si su construcción falla y no se mata.
+    pub fn lanza_para(dir: &Path, piped: bool, owner: Option<&str>) -> Result<AgentTerm, String> {
         let cwd = dir.to_string_lossy().into_owned();
-        spawn(Launch { cwd: &cwd, script_dir: &dir.join("s"), command: comando_largo(), env: vec![], inject: None, piped }, |_| {}, || {})
+        spawn(Launch { cwd: &cwd, script_dir: &dir.join("s"), command: comando_largo(), env: vec![], inject: None, piped, owner }, |_| {}, || {})
+    }
+
+    /// Ejecuta `f` con TODOS los matadores rotos (el del árbol, el directo y los reintentos de la custodia): no hay
+    /// control fiable sobre ningún proceso.
+    pub fn con_matadores_rotos<R>(f: impl FnOnce() -> R) -> R {
+        BREAK_KILLS.with(|b| b.set(true));
+        let r = f();
+        BREAK_KILLS.with(|b| b.set(false));
+        r
+    }
+
+    /// La custodia es global y `Core::shutdown` la vacía entera (mata lo que encuentre): las pruebas que la tocan, o que
+    /// lo invocan, van de una en una.
+    pub fn serie_custodia() -> std::sync::MutexGuard<'static, ()> {
+        static SERIE: Mutex<()> = Mutex::new(());
+        SERIE.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn kills_tras_fallo() -> u32 {
@@ -950,10 +1048,7 @@ mod error_tras_crear_el_proceso {
 #[cfg(test)]
 mod custodia_y_verificacion {
     use super::pruebas::*;
-    use super::{ps_alive, reap_unowned_where, tasklist_alive, unowned, BREAK_KILLS};
-
-    /// La custodia es global y `Core::shutdown` la vacía entera: las pruebas que la tocan van de una en una.
-    static SERIE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use super::{in_custody, ps_alive, reap_unowned_where, resolve_custody, tasklist_alive, unowned};
 
     fn pids_en_custodia() -> Vec<u32> {
         unowned().iter().filter_map(|u| u.pid).collect()
@@ -964,16 +1059,9 @@ mod custodia_y_verificacion {
         reap_unowned_where(|p| p == Some(pid))
     }
 
-    fn con_matadores_rotos<R>(f: impl FnOnce() -> R) -> R {
-        BREAK_KILLS.with(|b| b.set(true));
-        let r = f();
-        BREAK_KILLS.with(|b| b.set(false));
-        r
-    }
-
     #[test]
     fn si_ningun_matador_funciona_el_proceso_queda_en_custodia_y_se_mata_al_reintentar() {
-        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        let _serie = serie_custodia();
         for piped in [false, true] {
             let dir = carpeta(&format!("custodia-{piped}"));
             let r = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, piped)));
@@ -995,7 +1083,7 @@ mod custodia_y_verificacion {
 
     #[test]
     fn un_reintento_que_vuelve_a_fallar_no_pierde_la_custodia() {
-        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        let _serie = serie_custodia();
         let dir = carpeta("custodia-reintento");
         let _ = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, true)));
         let pid = ultimo_pid().expect("pid");
@@ -1009,8 +1097,29 @@ mod custodia_y_verificacion {
     }
 
     #[test]
+    fn la_custodia_se_resuelve_por_la_tarea_dueña_y_solo_mata_cuando_el_matador_funciona() {
+        let _serie = serie_custodia();
+        let dir = carpeta("custodia-dueno");
+        let dueno = "t-custodia-dueno";
+        let r = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza_para(&dir, true, Some(dueno))));
+        let pid = ultimo_pid().expect("pid");
+        assert!(r.err().is_some_and(|e| e.contains("custodia")));
+        assert!(in_custody(dueno) && vivo(pid));
+        // Otra tarea no puede resolver ni ver la custodia ajena.
+        assert!(resolve_custody("otra-tarea").is_none() && !in_custody("otra-tarea"));
+        // Sin control fiable: se informa, el proceso sigue vivo y sigue en custodia.
+        assert!(matches!(con_matadores_rotos(|| resolve_custody(dueno)), Some(Err(_))));
+        assert!(in_custody(dueno) && vivo(pid), "un kill que no se pudo confirmar no libera la custodia");
+        // Con control: se mata, sale de la custodia y no queda nada que resolver.
+        assert!(matches!(resolve_custody(dueno), Some(Ok(()))));
+        assert!(espera_muerto(pid) && !in_custody(dueno));
+        assert!(resolve_custody(dueno).is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn si_el_matador_funciona_no_queda_nada_en_custodia() {
-        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        let _serie = serie_custodia();
         for piped in [false, true] {
             let dir = carpeta(&format!("sin-custodia-{piped}"));
             let r = con_fallo_tras_crear(|| lanza(&dir, piped));
@@ -1024,7 +1133,7 @@ mod custodia_y_verificacion {
 
     #[test]
     fn el_apagado_del_core_reintenta_matar_los_procesos_en_custodia() {
-        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        let _serie = serie_custodia();
         let dir = carpeta("custodia-apagado");
         let _ = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, true)));
         let pid = ultimo_pid().expect("pid");

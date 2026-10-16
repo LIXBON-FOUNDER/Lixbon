@@ -276,7 +276,7 @@ mod falso_agente {
         let pid_al_entrar = Arc::new(Mutex::new(None::<bool>));
         let p2 = pid_al_entrar.clone();
         let mut term = super::super::pty::spawn(
-            super::super::pty::Launch { cwd: &dir.to_string_lossy(), script_dir: &dir.join("s"), command: command.into(), env: vec![], inject: None, piped: false },
+            super::super::pty::Launch { cwd: &dir.to_string_lossy(), script_dir: &dir.join("s"), command: command.into(), env: vec![], inject: None, piped: false, owner: None },
             move |t| {
                 if let Some(ch) = g.lock().unwrap().on_output(&t, now_ms()) {
                     if matches!(ch, Change::Entered(_)) {
