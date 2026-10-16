@@ -48,8 +48,9 @@
 //!
 //! # Actor y canal
 //! `Actor` = persona, agente (con su tarea) o sistema. `Channel` describe el TRANSPORTE (`ui`, `lxo`,
-//! `core`), no una identidad: Desktop, móvil y CLI no se distinguen todavía; F1 añadirá `client_id`
-//! desde la credencial sin reescribir los eventos ya guardados.
+//! `core`), no una identidad. Cuando el límite autenticado dispone de una credencial de cliente,
+//! `client_id` identifica su instalación y se copia desde Store; las rutas legacy y eventos históricos
+//! pueden conservar `NULL` sin reescritura.
 
 use serde::Serialize;
 
