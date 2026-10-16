@@ -556,6 +556,13 @@ fn spawn_piped(
     let (program, args) = write_script(l.script_dir, &l.command)?;
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(l.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Unix: la raíz lidera su PROPIO grupo de procesos (pgid == pid) para que `proctable` pueda encontrar a toda su
+    // descendencia aunque un padre intermedio salga y sus hijos se reparenten a init. (La PTY ya hace `setsid`.)
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     for (k, v) in &l.env {
         cmd.env(k, v);
     }

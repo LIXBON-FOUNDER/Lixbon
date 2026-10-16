@@ -303,11 +303,10 @@ artefactos del intento). Si falla la persistencia tras el cleanup físico: ni es
   (`PoisonError::into_inner`, ruta de emergencia) y el proceso sigue bajo la custodia del Core —la Task y el
   worktree se conservan—. `kill_term_checked` recupera ese terminal de un mapa envenenado y, si el kill vuelve a
   fallar, lo deja otra vez almacenado. Nunca se suelta un `AgentTerm` con el proceso potencialmente vivo.
-* **Un kill dudoso es un error.** `TreeKiller::kill` ya no da por bueno que el comando de matar arrancara: un
-  estado distinto de cero es `Err`. Conservar la Task y el worktree ante la duda es mejor que borrar con el agente
-  quizá vivo. Única excepción: que el proceso **ya no exista** (`taskkill` sale con 128 si terminó justo antes;
-  observado 1 de cada ~60 ejecuciones): se comprueba mirando si el pid sigue vivo y, si esa comprobación no puede
-  hacerse, se asume vivo. Deuda preexistente, sin tocar: en Unix `kill -9` solo alcanza al proceso raíz, no a su árbol.
+* **Un kill dudoso es un error.** `TreeKiller::kill` solo da `Ok` si COMPRUEBA que no queda ningún proceso del árbol
+  vivo; que el comando de matar arrancara, saliera con estado cero o que la raíz haya muerto no prueba nada. Ante la
+  duda (tabla de procesos ilegible, vacía o truncada; identidad no probable; árbol que cambia sin parar) es `Err`, el
+  proceso sigue custodiado y no se borra nada. Garantías exactas por plataforma en «Kill verificado del árbol».
 * **Rama de una Task preservada.** Si la Task se conserva (final o run cerrado) y `branch -d` borró la rama,
   `task.branch` pasa a `None` (además de `worktree = None` y `cwd = repo`); si `branch -d` falló, conserva su rama.
   No se marca `merged`: fue un lanzamiento fallido, no una integración.
@@ -326,9 +325,8 @@ Mismo principio: ante la duda, el proceso está vivo, el terminal sigue custodia
   directo ya no se descartan: si ninguno prueba que el proceso murió, pasa a una custodia estática (`UNOWNED`) con su
   matador, el `Err` lo dice («queda bajo la custodia de Lixbon») y `Core::shutdown` lo reintenta (`pty::reap_unowned`).
   Solo se espera al hijo (`wait`) si se pudo matar: antes un `wait` tras un kill fallido podía bloquear para siempre.
-* **`pid_alive` no confunde un fallo de la herramienta con «no existe».** Windows: `tasklist` con estado distinto de
-  cero (consulta no válida) es «vivo»; solo una salida con éxito que no nombra al pid prueba que murió. Unix: `ps`
-  sale con 1 cuando ningún proceso coincide; cualquier otro estado con la salida vacía es «vivo».
+* **La vida de un proceso se decide por su identidad, no por su pid.** Ver «Kill verificado del árbol». (`pid_alive`,
+  basado en `tasklist`/`ps`, quedó solo como ayuda de las pruebas.)
 * **Core degradado también en `release` y `free_worktrees`.** Sin poder registrar el borrado no se mata un terminal
   ya registrado ni se borra worktree, rama o Task (`release` devuelve `Err`; `free_worktrees` lo deja en `kept`,
   «Core en solo lectura»). La única acción destructiva permitida con el Core degradado sigue siendo matar un proceso
@@ -342,6 +340,36 @@ Mismo principio: ante la duda, el proceso está vivo, el terminal sigue custodia
 * **Causalidad (sin cambios, ahora fijada por prueba).** `effect.observed` y `task.removed` del cleanup van
   contiguos y con el mismo `state_rev`; `task.removed` no lleva `correlation_id` (solo `decision.recorded` se
   correlaciona con el efecto).
+
+### Kill verificado del árbol (LXO-18)
+Implementado en `src/proctable.rs` (`kill_tree`) y usado por `pty::TreeKiller`. Un pid NO identifica un proceso (se
+reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de creación. Reglas comunes:
+
+* Solo se mata un proceso cuya identidad se comprueba justo antes (`Os::terminate`); un proceso verificado muerto sale de
+  `seen` y no se vuelve a tocar; una raíz verificada muerta no vuelve a ser origen de descendientes. Nunca se mata un pid
+  ajeno.
+* `Ok` exige una ronda COMPLETA en la que ningún proceso rastreado sigue vivo, no apareció ninguno nuevo y nada quedó sin
+  probar; `ROUNDS = 20` rondas con 50 ms (~1 s) y luego `Err`. Una tabla vacía, sin este proceso o interrumpida es
+  «no fiable».
+* La descendencia se localiza por tres vías que se refuerzan, porque el recorrido por `ppid` no ve a un nieto cuyo padre
+  intermedio ya salió:
+
+| plataforma | identidad `start` | vías de descubrimiento | garantía |
+|---|---|---|---|
+| Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica |
+| Linux / macOS | token opaco = hash normalizado de `ps lstart` (solo igualdad, nunca orden) | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído de una única instantánea de `ps` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada |
+
+* **Unix y el número de grupo.** Un `pgid` solo está reservado mientras el grupo tiene miembros. Por eso solo se
+  descubre por `pgid` si un proceso que ya rastreamos (identidad verificada en esa ronda) sigue dentro en la misma
+  lectura; con miembros y sin ese ancla (p. ej. la raíz murió antes del primer kill y no se anotó nada) no se puede
+  probar que el número siga siendo nuestro: `Err`, custodia y nada se mata. Nunca `kill(-pgid)`.
+* **Residuales (no cubiertos):** un proceso que se desvincula a propósito tras perder a su padre (`setsid`/`setpgid` a
+  otro grupo, daemonización) escapa a las tres vías; en Unix la identidad se comprueba justo antes de `kill -9` (dos
+  llamadas, sin handle que ancle el pid; ventana de milisegundos); un proceso creado por la raíz antes de entrar en el
+  Job (microsegundos) solo lo cubre el recorrido por `ppid`. Cubrirlos exigiría un contenedor del sistema (cgroups).
+* **Pruebas.** Mundo simulado determinista (`proctable::tests::World`) para cada carrera y mutantes; procesos reales con
+  Job Object en Windows y con grupo de procesos en Linux/macOS (`#[cfg(unix)]`, solo en CI Linux/macOS: la rama Unix se
+  compila-verifica en Windows con un crate scratch, no se ejecuta contra `ps` real).
 
 ### Seguridad de excepciones de `pty::spawn`
 Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm` (`try_clone_reader`,
