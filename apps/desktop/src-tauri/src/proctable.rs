@@ -21,7 +21,10 @@
 //! * donde la hora de creación es un instante real y comparable (Windows, `ordered_starts`), un hijo solo cuelga de un
 //!   padre si no es anterior a él (`start(hijo) >= start(padre)`). En Unix la identidad es un TOKEN opaco (igualdad, nunca
 //!   orden): ahí el `ppid` de un proceso vivo es siempre su padre vivo (los huérfanos se reparentan), así que ese filtro
-//!   no hace falta y compararlo por orden saltaría descendientes vivos;
+//!   no hace falta y compararlo por orden saltaría descendientes vivos. Eso solo vale para padres que SE RASTREAN vivos:
+//!   un `ppid` que cuelga del pid de una raíz muerta (que Windows no actualiza, y cuyo pid se reutiliza) NO prueba que la
+//!   raíz fuera su padre, y `start(hijo) >= start(raíz)` solo prueba que nació después; nunca se adopta ni se mata por
+//!   eso: el Job Object es quien da los descendientes, y sin Job esos procesos vetan el éxito ([`orphans_of_gone_root`]);
 //! * la descendencia se localiza por TRES vías que se refuerzan, porque el recorrido por `ppid` no ve a un nieto cuyo
 //!   padre intermedio ya salió (en Unix se reparenta a init; en Windows su `ppid` queda colgando):
 //!   1. recorrido por `ppid` desde la raíz y desde cada descendiente ya rastreado;
@@ -154,6 +157,9 @@ pub(crate) struct Tree {
     start: Option<u64>,
     /// La raíz se verificó muerta (o su pid es de otro): nunca más se usa como origen de descendientes.
     root_dead: bool,
+    /// La raíz murió SIN que nadie lo observara: su pid desapareció de la tabla entre dos rondas. Es persistente. Ver
+    /// [`orphans_of_gone_root`]: sus supuestos huérfanos no se pueden atribuir a ella.
+    root_gone: bool,
     seen: Vec<Proc>,
     /// Pids presentes cuya identidad no se pudo consultar al descubrirlos: mientras sigan en la tabla, el árbol no se
     /// da por muerto (la duda es un error), aunque su padre ya haya desaparecido.
@@ -188,7 +194,7 @@ impl Tree {
         let group = os.make_group(pid, start);
         let pgid = os.leads_group(pid).then_some(pid);
         let gone = start.is_none() && os.table().is_some_and(|t| !t.iter().any(|(p, _)| *p == pid)) && !os.opaque().contains(&pid);
-        Tree { pid, start, root_dead: gone, seen: Vec::new(), unproven: Vec::new(), group, pgid, pinned: false }
+        Tree { pid, start, root_dead: gone, root_gone: false, seen: Vec::new(), unproven: Vec::new(), group, pgid, pinned: false }
     }
 
     /// Declara que el proceso raíz no se reapeará hasta [`root_exited`] (lo garantiza quien espera al hijo: ver
@@ -324,14 +330,13 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
 
     // 2) La raíz.
     let mut parents = alive.clone();
-    let mut adopt_orphans = false;
     let mut root = t.start.map(|start| Proc { pid: t.pid, start });
     let mut root_alive = false;
     if !t.root_dead {
         match (present(t.pid), root) {
             (false, _) => {
                 t.root_dead = true;
-                adopt_orphans = true;
+                t.root_gone = true;
             }
             // Raíz sin reapear: su pid es suyo, así que la identidad que tiene AHORA es la verdadera.
             (true, None) if t.pinned => match os.start(t.pid) {
@@ -366,10 +371,6 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
     // 3) Descubrimiento: hijos (transitivos) de los padres vivos, o los huérfanos de una raíz que acaba de morir.
     let mut found = false;
     let mut queue: Vec<Proc> = parents.clone();
-    // Adoptar los huérfanos de una raíz muerta se apoya en `start(hijo) >= start(raíz)`: sin instantes reales no se hace.
-    if adopt_orphans && ordered {
-        queue.extend(root);
-    }
     while let Some(parent) = queue.pop() {
         for &(pid, ppid) in &table {
             if ppid != parent.pid || pid == 0 || pid == parent.pid || pid == t.pid || alive.iter().any(|p| p.pid == pid) {
@@ -392,6 +393,10 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
             }
         }
     }
+
+    // 3-bis) Los procesos cuyo `ppid` cuelga del pid de una raíz que murió sin que nadie lo viera NO se adoptan jamás.
+    let ambiguous = orphans_of_gone_root(t, os, &table, &alive, ordered, present(t.pid));
+    unproven |= !ambiguous.is_empty();
 
     // 3a) Un proceso ilegible (de otro usuario, con `/proc` restringido) puede ser un hijo de algo que rastreamos: el
     // kernel lo dice en la lista de hijos del padre aunque su fila no se pueda leer. Si lo es, el árbol no está probado,
@@ -466,7 +471,28 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
     }
     t.seen = alive;
     let clean = targets.is_empty() && !found && !unproven && !group_alive;
-    Ok(Round { clean, what: format!("siguen vivos o sin probar: {:?}", targets.iter().map(|p| p.pid).collect::<Vec<_>>()) })
+    Ok(Round { clean, what: format!("siguen vivos o sin probar: {:?}; con ppid de la raíz muerta, sin atribuir: {ambiguous:?}", targets.iter().map(|p| p.pid).collect::<Vec<_>>()) })
+}
+
+/// Pids con `ppid == pid de la raíz` que NO se pueden atribuir a la raíz, porque esta murió sin observación y su pid está
+/// libre. Se devuelven para vetar el éxito de la ronda (la duda es un error); NUNCA se matan.
+///
+/// Windows no actualiza el `ppid` de los hijos de un proceso muerto, y el pid de la raíz se reutiliza: si otro programa `F`
+/// toma el pid, lanza `X` y sale, `X` queda con el mismo `ppid` colgando y una hora de creación POSTERIOR a la de la raíz.
+/// Ni `start(hijo) >= start(raíz)` ni el `ppid` prueban que la raíz fuera su creadora, y tampoco haber visto viva a la raíz
+/// antes. Los descendientes de la raíz nacidos con ella viva ya los da el Job Object (autoritativo), o están en `seen`.
+/// Sin Job no hay prueba: el árbol queda sin probar (`Err`, custodia) en vez de matar a un ajeno. Solo con instantes reales
+/// (`ordered`; en Unix el grupo de procesos cubre este caso) y mientras el pid siga ausente: si lo ocupa otro proceso, sus
+/// hijos son legítimamente ajenos. Con Job no se mira nada.
+fn orphans_of_gone_root(t: &Tree, os: &mut dyn Os, table: &[(u32, u32)], alive: &[Proc], ordered: bool, root_present: bool) -> Vec<u32> {
+    let Some(start) = t.start.filter(|_| t.root_gone && ordered && t.group.is_none() && !root_present) else { return Vec::new() };
+    table
+        .iter()
+        .filter(|&&(pid, ppid)| ppid == t.pid && pid != 0 && pid != t.pid && !alive.iter().any(|p| p.pid == pid))
+        // Anterior a la raíz: no puede ser suyo. Posterior o ilegible: sin atribuir.
+        .filter(|&&(pid, _)| os.start(pid).is_none_or(|s| s >= start))
+        .map(|&(pid, _)| pid)
+        .collect()
 }
 
 /// Espera a que la raíz `pid` termine y la reapea (`wait`) SIN perder la prueba de que el grupo es suyo. Unix: la
@@ -1359,16 +1385,104 @@ mod tests {
         assert!(kill_tree(&mut t, &mut w).is_err());
     }
 
+    /// Raíz 10 y sus descendientes 11 y 12 mueren; luego otro programa F toma el pid 10, lanza X (pid 77) y sale. X queda con
+    /// `ppid` 10 (colgando) y una hora de creación POSTERIOR a la de la raíz: no es descendiente de nadie nuestro.
+    fn mundo_con_hijo_ajeno_posterior_a_la_raiz(job: bool) -> World {
+        let mut w = arbol();
+        if job {
+            w.grp = Some(std::sync::Arc::new(std::sync::Mutex::new(Grp { members: vec![10, 11, 12], ..Default::default() })));
+        }
+        w
+    }
+
+    fn muere_la_raiz_y_nace_un_ajeno_con_su_ppid(w: &mut World) {
+        w.procs.iter_mut().filter(|p| matches!(p.0, 10..=12)).for_each(|p| p.3 = false);
+        w.procs.push((77, 10, 9_000, true));
+        if let Some(g) = &w.grp {
+            g.lock().unwrap().members.clear();
+        }
+    }
+
     #[test]
-    fn los_huerfanos_de_una_raiz_que_acaba_de_morir_se_adoptan_si_no_son_anteriores_a_ella() {
+    fn un_hijo_ajeno_posterior_a_la_raiz_con_ppid_colgando_no_se_mata_con_job() {
+        let mut w = mundo_con_hijo_ajeno_posterior_a_la_raiz(true);
+        let mut t = captura(&mut w);
+        muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.alive(77), "el Job es autoritativo: nada se adopta por ppid");
+        assert!(w.killed.is_empty(), "no se terminó a nadie: {:?}", w.killed);
+    }
+
+    #[test]
+    fn un_hijo_ajeno_posterior_a_la_raiz_con_ppid_colgando_no_se_mata_sin_job_y_veta_el_exito() {
+        let mut w = mundo_con_hijo_ajeno_posterior_a_la_raiz(false);
+        let mut t = captura(&mut w);
+        muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+        let e = kill_tree(&mut t, &mut w).unwrap_err().to_string();
+        assert!(w.alive(77), "ni el start posterior ni el ppid prueban que la raíz lo creara");
+        assert!(w.killed.is_empty(), "no se terminó a nadie: {:?}", w.killed);
+        assert!(e.contains("77"), "el error dice qué no se pudo atribuir: {e}");
+        // Y el veto desaparece en cuanto el ajeno se va: no hay nada que no se pueda probar.
+        w.procs.iter_mut().filter(|p| p.0 == 77).for_each(|p| p.3 = false);
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.killed.is_empty());
+    }
+
+    #[test]
+    fn el_hijo_ajeno_tampoco_se_mata_si_la_raiz_se_vio_viva_antes_de_morir() {
+        // Haber visto viva a la raíz en una ronda anterior no prueba nada sobre un proceso que nace DESPUÉS de que muera.
+        let mut w = mundo_con_hijo_ajeno_posterior_a_la_raiz(false);
+        let mut t = captura(&mut w);
+        w.immortal.push(12);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "12 sigue vivo");
+        w.immortal.clear();
+        w.procs.iter_mut().filter(|p| p.0 == 12).for_each(|p| p.3 = false);
+        muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        assert!(w.alive(77));
+        assert!(w.killed.iter().all(|k| k.0 != 77), "{:?}", w.killed);
+    }
+
+    #[test]
+    fn un_ajeno_que_ocupa_el_pid_de_la_raiz_muerta_no_veta_ni_se_toca() {
+        // Mientras el pid de la raíz lo tiene F (vivo), los hijos de F son legítimamente de F.
+        let mut w = mundo_con_hijo_ajeno_posterior_a_la_raiz(false);
+        let mut t = captura(&mut w);
+        muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+        // Una primera lectura ve el pid ausente (`root_gone`) y 77 sin atribuir; después F toma el pid.
+        observe(&mut t, &mut w).unwrap();
+        assert!(t.root_gone, "la ausencia del pid quedó anotada");
+        w.procs.push((10, 1, 8_000, true)); // F
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.alive(10) && w.alive(77) && w.killed.is_empty());
+    }
+
+    #[test]
+    fn los_huerfanos_de_una_raiz_muerta_los_mata_el_job_y_el_ajeno_sobrevive() {
+        let mut w = arbol();
+        w.grp = Some(std::sync::Arc::new(std::sync::Mutex::new(Grp { members: vec![11, 12], ..Default::default() })));
+        let mut t = captura(&mut w);
+        // La raíz murió antes de este intento y sus descendientes siguen en el Job; 77 es ajeno, posterior y con su ppid.
+        w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
+        w.procs.push((77, 10, 9_000, true));
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(!w.alive(11) && !w.alive(12), "los descendientes de la raíz muerta mueren por el Job");
+        assert!(w.alive(77) && w.killed.iter().all(|k| k.0 != 77));
+    }
+
+    #[test]
+    fn sin_job_los_huerfanos_de_una_raiz_muerta_sin_observar_no_se_matan_y_vetan_el_exito() {
         let mut w = arbol();
         let mut t = captura(&mut w);
-        // La raíz murió antes de este intento y su hijo 11 quedó colgando de un ppid muerto; 21 es anterior a la raíz.
         w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
-        w.procs.push((21, 10, 60, true));
+        w.procs.push((21, 10, 60, true)); // anterior a la raíz: nunca fue suyo, ni siquiera veta
+        assert!(kill_tree(&mut t, &mut w).is_err(), "11 podría ser de la raíz, pero no se puede probar");
+        assert!(w.alive(11) && w.alive(12) && w.alive(21), "nada se mata sin prueba");
+        assert!(w.killed.is_empty());
+        // Solo 11 es ambiguo (ppid de la raíz, posterior a ella): sin él, 21 no veta.
+        w.procs.iter_mut().filter(|p| p.0 == 11 || p.0 == 12).for_each(|p| p.3 = false);
         kill_tree(&mut t, &mut w).unwrap();
-        assert!(!w.alive(11) && !w.alive(12), "los descendientes de la raíz muerta se adoptan");
-        assert!(w.alive(21), "uno más antiguo que la raíz no es suyo");
+        assert!(w.alive(21) && w.killed.is_empty());
     }
 
     #[test]
