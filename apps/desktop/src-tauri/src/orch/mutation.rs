@@ -721,6 +721,7 @@ impl Core {
         });
         let (actor_kind, actor_id) = match &ctx.actor {
             Actor::Person => ("person", None),
+            Actor::PersonId(id) => ("person", Some(id.clone())),
             Actor::Agent(task) => ("agent", Some(task.clone())),
             Actor::System => ("system", None),
         };
@@ -738,6 +739,7 @@ impl Core {
             task: effect.task.clone(),
             run: effect.run.clone().or(run),
             project,
+            client_id: ctx.client_id.clone(),
             actor_kind: actor_kind.to_string(),
             actor_id,
             channel: channel.to_string(),

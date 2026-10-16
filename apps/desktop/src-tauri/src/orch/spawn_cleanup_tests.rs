@@ -1589,7 +1589,7 @@ fn spawn_requested_y_resolved_cumplen_identidad_clase_actor_y_correlacion() {
     let resolution = desde(&e.core, before_resolution).into_iter().find(|ev| ev.kind == "spawn.resolved").unwrap();
     assert_eq!((resolution.entity_kind.as_str(), resolution.entity_id.as_str()), ("spawn_request", pending_id.as_str()));
     assert_eq!((resolution.class, resolution.actor_kind.as_str(), resolution.actor_id.as_deref(), resolution.channel.as_deref()),
-        (crate::store::EventClass::Decision, "person", None, Some("ui")));
+        (crate::store::EventClass::Decision, "person", Some("user"), Some("ui")));
     assert_eq!((resolution.correlation_id.as_deref(), resolution.idem_key.as_deref(), resolution.run_id.as_deref(), resolution.project_id.as_deref()),
         (Some(pending_id.as_str()), Some(pending_id.as_str()), Some(e.run.as_str()), Some(e.project.as_str())));
     assert_eq!(pl(&resolution), json!({ "outcome": "rejected", "has_reason": true }));

@@ -473,11 +473,17 @@ fn run_create_emite_tres_hechos_atribuidos_a_la_raiz_y_con_el_proyecto_ya_comple
     assert_eq!(pl(&evs[2]), json!({ "from": "starting", "to": "running" }));
     assert_eq!(evs[0].run_id.as_deref(), Some(run.as_str()));
 
-    // Una PERSONA desde la interfaz: el actor es la persona, el canal la interfaz.
+    // Una PERSONA autenticada desde la interfaz: el actor y el client_id salen de su credencial.
     let antes = head(&core);
     core.rpc(Caller::User, &s(&r), "run_create", &json!({ "objective": "otro" })).unwrap();
     let evs = desde(&core, antes);
-    assert!(evs.iter().all(|e| e.actor_kind.as_str() == "person" && e.actor_id.is_none() && e.channel.as_deref() == Some("ui")), "{evs:?}");
+    let client_id = evs[0].client_id.as_deref().expect("client_id autenticado");
+    assert!(evs.iter().all(|e| {
+        e.actor_kind.as_str() == "person"
+            && e.actor_id.as_deref() == Some("user")
+            && e.channel.as_deref() == Some("ui")
+            && e.client_id.as_deref() == Some(client_id)
+    }), "{evs:?}");
 }
 
 #[test]
@@ -513,7 +519,13 @@ fn cada_comando_de_rpc_deja_exactamente_los_eventos_de_su_mutador_con_su_actor()
     // reply (PERSONA desde la interfaz) -> respuesta + vuelve a correr
     let evs = ejecuta(Caller::User, "reply", json!({ "question": q, "answer": "main" }));
     assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed"]);
-    assert!(evs.iter().all(|e| e.actor_kind.as_str() == "person" && e.channel.as_deref() == Some("ui")));
+    let client_id = evs[0].client_id.as_deref().expect("client_id autenticado");
+    assert!(evs.iter().all(|e| {
+        e.actor_kind.as_str() == "person"
+            && e.actor_id.as_deref() == Some("user")
+            && e.channel.as_deref() == Some("ui")
+            && e.client_id.as_deref() == Some(client_id)
+    }));
     assert_eq!(evs[0].entity_id, hija, "la respuesta cuelga de la tarea que preguntó");
     // send / check no son hechos del Event Log.
     assert!(ejecuta(Caller::User, "send", json!({ "to": hija, "body": "ánimo" })).is_empty());
@@ -1479,7 +1491,7 @@ fn revisar_e_integrar_desde_la_interfaz_deja_un_solo_decision_recorded_por_decis
     assert_eq!((p["decision_kind"].as_str(), p["outcome"].as_str(), p["head_commit"].as_str()), (Some("review"), Some("accepted"), Some(h.as_str())));
     assert_eq!((p["decision_id"].as_u64(), p["has_comment"].as_bool()), (r["decision_id"].as_u64(), Some(true)));
     assert!(!evs[0].payload.contains("SECRETO-COMENTARIO"));
-    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", None, Some("ui")), Some("p9")));
+    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", Some("user"), Some("ui")), Some("p9")));
 
     // La integración: el efecto (git merge) y la decisión son hechos distintos, correlacionados por `effect_id`;
     // ninguna capa repite ninguno de los dos.
@@ -1493,7 +1505,7 @@ fn revisar_e_integrar_desde_la_interfaz_deja_un_solo_decision_recorded_por_decis
     assert_eq!(efecto["result_commit"], out["result_commit"]);
     assert_eq!(efecto["effect_id"].as_str(), evs[0].idem_key.as_deref());
     assert_eq!((evs[0].correlation_id.as_deref(), evs[1].correlation_id.as_deref()), (evs[0].idem_key.as_deref(), evs[0].idem_key.as_deref()));
-    assert_eq!(actor_y_canal(&evs[0]), ("person", None, Some("ui")));
+    assert_eq!(actor_y_canal(&evs[0]), ("person", Some("user"), Some("ui")));
     let evs = vec![evs[1].clone()];
     let p = pl(&evs[0]);
     assert_eq!((p["decision_kind"].as_str(), p["outcome"].as_str(), p["branch"].as_str(), p["squash"].as_bool()), (Some("merge"), Some("merged"), Some("lx/t"), Some(false)));
@@ -1501,7 +1513,7 @@ fn revisar_e_integrar_desde_la_interfaz_deja_un_solo_decision_recorded_por_decis
     assert_eq!(p["result_commit"], out["result_commit"]);
     assert!(p.get("into").is_none() && p.get("message").is_none() && p.get("conflicts").is_none());
     assert!(!evs[0].payload.contains("lxo-revision"), "la ruta local del destino no viaja: {}", evs[0].payload);
-    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", None, Some("ui")), Some("p9")));
+    assert_eq!((actor_y_canal(&evs[0]), evs[0].project_id.as_deref()), (("person", Some("user"), Some("ui")), Some("p9")));
     assert_eq!(core.lock().decisions.last().map(|d| (d.kind.as_str(), d.actor.as_str())), Some(("merge", "human")), "fila legacy y evento coinciden");
 
     // Repetir: already_merged no crea decisión ni evento.

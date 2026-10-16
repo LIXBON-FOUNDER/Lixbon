@@ -45,6 +45,7 @@ pub(super) fn recovered_effect(
     }
     let actor = match (record.actor_kind.as_str(), record.actor_id.as_deref()) {
         ("person", None) => Actor::Person,
+        ("person", Some(id)) if !id.is_empty() => Actor::PersonId(id.to_string()),
         ("agent", Some(task)) if !task.is_empty() => Actor::Agent(task.to_string()),
         ("system", None) => Actor::System,
         _ => return None,
@@ -57,7 +58,11 @@ pub(super) fn recovered_effect(
     };
     let facts = ev::EffectObserved::parse(&record.effect_id, &record.operation, &record.kind, &record.observed).ok()?;
     let draft = ev::effect_observed(task, run, record.project.clone(), &facts, &record.effect_id).ok()?;
-    Some((MutationContext::new(actor, channel), draft, record.at))
+    Some((MutationContext {
+        actor,
+        channel,
+        client_id: record.client_id.clone(),
+    }, draft, record.at))
 }
 
 pub(super) fn effect_observed_is_valid(
@@ -352,14 +357,16 @@ impl Tx {
     fn check_decision_actor(&self, kind: &str, actor: &str) -> Result<(), String> {
         let ctx = self.context();
         let coincide = match (actor, &ctx.actor) {
-            ("human", Actor::Person) | ("system", Actor::System) => true,
+            ("human", Actor::Person) => ctx.is_person(),
+            ("human", Actor::PersonId(_)) => ctx.is_person(),
+            ("system", Actor::System) => true,
             (a, Actor::Agent(task)) => a != "human" && a != "system" && a == task,
             _ => false,
         };
         if !coincide {
             return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
         }
-        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || ctx.channel != Channel::Ui) {
+        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !ctx.is_person_ui()) {
             return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }
         Ok(())
@@ -444,7 +451,7 @@ pub(super) enum SpawnRecorded {
 
 fn check_spawn_actor(outcome: ev::SpawnOutcome, ctx: &MutationContext) -> Result<(), String> {
     let ok = if outcome.decided_by_person() {
-        ctx.actor == Actor::Person && ctx.channel == Channel::Ui
+        ctx.is_person_ui()
     } else {
         ctx.actor == Actor::System && ctx.channel == Channel::Core
     };
