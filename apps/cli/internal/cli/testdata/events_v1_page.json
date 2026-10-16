@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "data": {
+    "v": 1,
+    "events": [
+      {
+        "seq": 2, "id": "01a13e36-607e-71eb-8e8d-43d75c9836d3", "ts": 1792045113470, "v": 1,
+        "kind": "task.created", "class": "state",
+        "actor": { "kind": "system", "id": null }, "channel": "core", "client_id": null,
+        "project_id": null, "run_id": "r1",
+        "entity": { "kind": "task", "id": "t2" }, "correlation_id": null,
+        "payload": { "agent": "claude", "depth": 0, "external": true, "model": null, "parent": null, "role": null, "title": "raiz-humo-a" }
+      },
+      {
+        "seq": 9007199254740993, "id": "01a13e36-607e-71eb-8e8d-43d75c9836d4", "ts": 1792045113999, "v": 1,
+        "kind": "task.status_changed", "class": "state",
+        "actor": { "kind": "agent", "id": "t2" }, "channel": "lxo", "client_id": null,
+        "project_id": "p1", "run_id": "r1",
+        "entity": { "kind": "task", "id": "t2" }, "correlation_id": null,
+        "payload": { "from": "running", "to": "done" }
+      }
+    ],
+    "next_cursor": 9007199254740993, "has_more": true, "head_seq": 9007199254740999, "limit": 2
+  }
+}

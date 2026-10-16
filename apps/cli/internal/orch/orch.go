@@ -5,6 +5,7 @@ package orch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,6 +22,8 @@ const (
 	dialTimeout   = 250 * time.Millisecond
 )
 
+var ErrClosed = errors.New(problemClosed)
+
 const (
 	problemClosed = "Lixbon Desktop no está abierto o el orquestador está desactivado (Ajustes → Orquestador)."
 	problemStale  = "Lixbon Desktop dejó de responder: ábrelo de nuevo."
@@ -36,8 +39,29 @@ type Info struct {
 func (i Info) Available() bool { return i.Lxo != "" && i.Running }
 
 type discovery struct {
-	Port int    `json:"port"`
-	Lxo  string `json:"lxo"`
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+	Lxo   string `json:"lxo"`
+}
+
+// Endpoint es la dirección y la credencial que el desktop publica en orch.json.
+type Endpoint struct {
+	Port  int
+	Token string
+}
+
+// ReadEndpoint lee orch.json en cada llamada: el puerto y el token cambian cuando
+// Lixbon Desktop se reinicia.
+func ReadEndpoint(dir string) (Endpoint, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, discoveryFile))
+	if err != nil {
+		return Endpoint{}, ErrClosed
+	}
+	var d discovery
+	if json.Unmarshal(raw, &d) != nil || d.Port <= 0 || d.Port > 65535 {
+		return Endpoint{}, ErrClosed
+	}
+	return Endpoint{Port: d.Port, Token: d.Token}, nil
 }
 
 var dialPort = func(port int) bool {
