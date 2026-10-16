@@ -106,7 +106,7 @@ fn stop_con_el_kill_fallido_no_declara_detenida_una_tarea_cuyo_proceso_sigue_viv
     let id = hija(&e);
     e.core.register_term(&id, AgentTerm::for_tests(Box::new(MatadorRoto))).unwrap();
     let r = e.core.rpc(Caller::Agent(Some(e.root.clone())), "", "stop", &json!({ "task": id }));
-    assert!(r.is_err(), "{r:?}");
+    assert!(r.is_err(), "stop debía fallar con el kill roto y devolvió Ok");
     assert_eq!(e.core.lock().tasks.get(&id).map(|t| t.status.clone()), Some(Status::Running), "no se miente sobre un proceso que no se pudo detener");
     assert_eq!(terminales(&e.core), 1);
     e.core.terms.lock().unwrap().clear();

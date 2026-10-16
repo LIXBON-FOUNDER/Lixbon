@@ -397,7 +397,7 @@ fn si_falla_el_insert_del_evento_se_deshacen_todos_los_cambios_del_proyecto() {
             1 => locate(&core, &id, &copia, false),
             _ => rpc(&core, "project_archive", json!({ "project_id": id })),
         };
-        assert!(r.is_err(), "{kind}: {r:?}");
+        assert!(r.is_err(), "{kind}: debía fallar sin su evento y devolvió Ok");
         assert_eq!(foto(&core, &id), antes, "{kind}: ni ubicación, ni huella, ni estado nuevos sin su evento");
         sql(&core, "DROP TRIGGER sin_evento");
     }
