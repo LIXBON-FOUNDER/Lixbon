@@ -57,7 +57,7 @@ zeroize = "1"
 [target.'cfg(windows)'.dependencies]
 # `orch/fsio.rs` (publicación durable del marcador de autoridad y del espejo) y `proctable.rs` (tabla de procesos para
 # comprobar que murió TODO el árbol de un agente e identificar cada proceso: ToolHelp y Threading).
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security"] }
 keyring = { version = "3", features = ["windows-native"] }
 
 # Almacén seguro multiplataforma (slice J1, módulo `secure_store`): el mismo

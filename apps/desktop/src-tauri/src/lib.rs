@@ -1453,7 +1453,9 @@ pub fn run() {
                     window.state::<claude_code::ClaudeSessions>().stop_all();
                     window.state::<orch::Orch>().0.shutdown();
                     // Las pestañas de Codex mueren con la ventana, con todo su árbol.
-                    window.state::<orch::CodexTerms>().close_all();
+                    if let Err(e) = window.state::<orch::CodexTerms>().close_all() {
+                        eprintln!("[codex] terminales que no se pudieron matar al cerrar: {e}");
+                    }
                     team::apagar(window.app_handle());
                     mascota::apagar(window.app_handle());
                 }
