@@ -294,7 +294,8 @@ impl Core {
                     let st = self.lock();
                     Self::check_manages(&st, &caller, &id)?;
                 }
-                self.kill_term(&id);
+                // Si el proceso no se pudo detener la tarea NO se declara detenida: el terminal sigue custodiado.
+                self.kill_term(&id).map_err(|e| format!("No se pudo detener {id}: {e}. Sigue en marcha; reinténtalo"))?;
                 self.mutate_as(&ctx_of()?, |st| {
                     let msg = st.close(&id, Status::Stopped, "detenida por su coordinador")?;
                     st.notify_opt(msg);

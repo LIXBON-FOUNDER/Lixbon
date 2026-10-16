@@ -28,7 +28,8 @@ impl Core {
             st.notify_opt(msg);
             Ok(())
         });
-        self.kill_term(id);
+        // Si el kill falla el terminal sigue en el mapa (custodiado) y `on_exit` cerrará lo que quede.
+        let _ = self.kill_term(id);
     }
 
     pub(super) fn term_text(&self, id: &str) -> Option<String> {
@@ -78,6 +79,16 @@ impl Core {
             _ => MutationContext::core(),
         };
         let _ = self.mutate_as(&ctx, |st| {
+            // Decide mirando el estado PREVIO, como `on_exit`: `collect` la vio abierta, pero entre su lectura y esta
+            // mutación otra acción pudo cerrarla o retirarla (`lxo done`, un cleanup). Y fuera del cierre del proceso
+            // solo un informe válido cambia algo: el sondeo de cada segundo no encuentra nada que aplicar. En ambos
+            // casos `apply` devolvería `Ok(vec![])` sin tocar el estado, y confirmarlo avanzaría la `rev` en vano.
+            let nada_que_aplicar = st.tasks.get(id).is_none_or(|t| t.status.is_final())
+                || (!at_exit && !matches!(found, delivery::Found::Valid(_)));
+            if nada_que_aplicar {
+                st.no_change();
+                return Ok(());
+            }
             match delivery::apply(st, id, found, at_exit) {
                 Ok(msgs) => st.notify(&msgs),
                 Err(e) if at_exit => {
@@ -106,11 +117,23 @@ impl Core {
         }
         let r = codex_session::resolve(agents::codex_home().map(|h| h.join("sessions")).as_deref(), session_id, &cwd, since);
         let _ = self.mutate(|st| {
+            // Lo que esta resolución puede tocar: si queda igual (un `on_exit` repetido, una Task retirada entre medias)
+            // no hay nada que confirmar.
+            let campos = |t: &super::state::Task| {
+                (t.model_effective.clone(), t.model_mismatch, t.model_mismatch_reason.clone(), t.model_source.clone(), t.session_match.clone(), t.session_ref.clone())
+            };
+            let Some(antes) = st.tasks.get(id).map(campos) else {
+                st.no_change();
+                return Ok(());
+            };
             if let Ok(t) = st.task_mut(id) {
                 delivery::set_model_effective(t, &r.model);
                 t.model_source = Some(r.source().into());
                 t.session_match = r.session_match().map(str::to_string);
                 t.session_ref = r.session_ref;
+            }
+            if st.tasks.get(id).map(campos).as_ref() == Some(&antes) {
+                st.no_change();
             }
             Ok(())
         });
@@ -187,9 +210,19 @@ impl Core {
         }
     }
 
-    pub(super) fn kill_term(&self, id: &str) -> bool {
-        let Some(mut t) = self.terms.lock().ok().and_then(|mut m| m.remove(id)) else { return false };
-        t.kill();
-        true
+    /// Mata y retira el terminal de `id` COMPROBANDO el resultado. `Ok(true)`: se mató y se retiró; `Ok(false)`: no
+    /// había terminal; `Err`: no hay control fiable sobre el proceso y el terminal sigue en el mapa (nunca se suelta un
+    /// `AgentTerm` cuyo proceso puede seguir vivo). Quien lo llama NO debe borrar nada que dependa de que haya muerto.
+    pub(super) fn kill_term(&self, id: &str) -> Result<bool, String> {
+        match self.kill_term_checked(id) {
+            None => Ok(false),
+            Some(Ok(())) => Ok(true),
+            Some(Err(e)) => Err(e),
+        }
+    }
+
+    /// ¿Hay un terminal (un proceso bajo la custodia del Core) para `id`?
+    pub(super) fn has_term(&self, id: &str) -> bool {
+        self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id)
     }
 }

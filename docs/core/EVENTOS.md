@@ -314,6 +314,35 @@ artefactos del intento). Si falla la persistencia tras el cleanup físico: ni es
 * **`on_exit` tardío.** Si la Task ya no existe o ya estaba final, la mutación hace `no_change()` (decidido por el
   estado previo, no por `close() == Ok(None)`): no avanza `rev` ni deja eventos.
 
+### Endurecimiento final (LXO-18)
+Mismo principio: ante la duda, el proceso está vivo, el terminal sigue custodiado y no se borra nada. Sin eventos nuevos.
+
+* **Ningún camino suelta un terminal cuyo kill falló.** `Core::kill_term` ya no hace `remove` + `kill` ignorando el
+  resultado: devuelve `Result<bool, String>` sobre `kill_term_checked` (el terminal vuelve al mapa si el kill falla).
+  `release` y `lxo stop` devuelven `Err` sin tocar ni el estado ni el disco; `remove_run` (UI) aborta antes de borrar
+  el run; `close_run` no cuenta el terminal como cerrado y `free_worktrees` conserva (`kept`, «proceso sin detener»)
+  el worktree de toda tarea cuyo terminal sigue custodiado. En `on_guard_timeout` el terminal queda custodiado.
+* **Compensación comprobada tras un fallo de construcción (`pty::spawn_pty`/`spawn_piped`).** El kill del árbol y el
+  directo ya no se descartan: si ninguno prueba que el proceso murió, pasa a una custodia estática (`UNOWNED`) con su
+  matador, el `Err` lo dice («queda bajo la custodia de Lixbon») y `Core::shutdown` lo reintenta (`pty::reap_unowned`).
+  Solo se espera al hijo (`wait`) si se pudo matar: antes un `wait` tras un kill fallido podía bloquear para siempre.
+* **`pid_alive` no confunde un fallo de la herramienta con «no existe».** Windows: `tasklist` con estado distinto de
+  cero (consulta no válida) es «vivo»; solo una salida con éxito que no nombra al pid prueba que murió. Unix: `ps`
+  sale con 1 cuando ningún proceso coincide; cualquier otro estado con la salida vacía es «vivo».
+* **Core degradado también en `release` y `free_worktrees`.** Sin poder registrar el borrado no se mata un terminal
+  ya registrado ni se borra worktree, rama o Task (`release` devuelve `Err`; `free_worktrees` lo deja en `kept`,
+  «Core en solo lectura»). La única acción destructiva permitida con el Core degradado sigue siendo matar un proceso
+  spawneado y no registrado (`abandon_attempt`).
+* **`task.branch` no sobrevive a su rama** en `release` y `free_worktrees`: si `branch -d` la borró, la Task
+  retenida pasa a `branch = None` (la identidad histórica queda en `effect.observed`); si `-d` falló, conserva su rama.
+  Nunca `-D`.
+* **Ninguna confirmación vacía.** `apply_found` decide por el estado previo: Task retirada o ya final, o sondeo sin
+  informe válido fuera del cierre del proceso, es `no_change()` (el sondeo de cada segundo avanzaba la `rev` de toda
+  Task viva). `record_codex_model` solo confirma si algún campo del modelo cambia (un `on_exit` repetido no).
+* **Causalidad (sin cambios, ahora fijada por prueba).** `effect.observed` y `task.removed` del cleanup van
+  contiguos y con el mismo `state_rev`; `task.removed` no lleva `correlation_id` (solo `decision.recorded` se
+  correlaciona con el efecto).
+
 ### Seguridad de excepciones de `pty::spawn`
 Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm` (`try_clone_reader`,
 `take_writer`, tuberías de stdout/stderr) mata el proceso antes de devolver el error, tanto en `spawn_pty` como

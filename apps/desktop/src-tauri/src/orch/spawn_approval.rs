@@ -447,8 +447,10 @@ impl Core {
             return Err(format!("El Core está en solo lectura ({why}): no se puede quitar un run hasta recuperar el almacenamiento"));
         }
         let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-        for id in &ids {
-            self.kill_term(id);
+        // Un proceso que no se pudo matar impide quitar el run: sus tareas, worktrees y terminales siguen siendo suyos.
+        let sin_control: Vec<String> = ids.iter().filter_map(|id| self.kill_term(id).err().map(|e| format!("{id} ({e})"))).collect();
+        if !sin_control.is_empty() {
+            return Err(format!("No se pudo detener el proceso de {}: el run se conserva hasta poder matarlo", sin_control.join(", ")));
         }
         let (_, kept) = self.free_worktrees(ctx, run, false);
         self.spawn_hook(super::spawn::SpawnStep::AfterRunRemovalCleanupSnapshot, run)?;
