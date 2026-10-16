@@ -31,6 +31,7 @@ mod mascota;
 mod claude_code;
 mod env_path;
 mod orch;
+mod proctable;
 mod skills_catalog;
 mod secure_store;
 // Almacén SQLite del Core (slice B). C1 lo abre en `Core::init` solo para guardar una

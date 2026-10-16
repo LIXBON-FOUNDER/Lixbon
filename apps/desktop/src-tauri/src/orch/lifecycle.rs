@@ -211,10 +211,9 @@ impl Core {
 
     pub fn shutdown(&self) {
         if let Ok(mut terms) = self.terms.lock() {
-            for t in terms.values_mut() {
-                t.kill();
-            }
-            terms.clear();
+            // Una terminación en curso no se interrumpe ni se descarta (otro hilo conserva su matador), y un terminal
+            // cuyo kill falla tampoco: sale del mapa solo quien se comprobó muerto.
+            terms.retain(|_, t| t.kill_in_progress() || t.try_kill().is_err());
         }
         // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
         super::pty::reap_unowned();

@@ -14,10 +14,10 @@ use super::state::NewTask;
 /// `git::add_worktree` devolvió `Ok`: un `add_worktree` que falla (p. ej. «ya existe la carpeta») no da
 /// propiedad sobre esa ruta, que nunca se borra.
 pub(super) struct SpawnAttempt {
-    task: String,
-    repo: String,
-    worktree: Option<PathBuf>,
-    branch: Option<String>,
+    pub(super) task: String,
+    pub(super) repo: String,
+    pub(super) worktree: Option<PathBuf>,
+    pub(super) branch: Option<String>,
 }
 
 /// Puntos del lanzamiento donde las pruebas pueden fallar o intervenir (ver `Core::spawn_hook`).
@@ -254,7 +254,7 @@ impl Core {
     /// tuvo éxito, intentar `branch -d` (nunca `-D`; `branch_deleted` es el resultado real); 5) registrar en
     /// UNA mutación: `effect.observed` (git_worktree_removed / spawn_cleanup) y `task.removed` solo si la
     /// Task era retirable. Si `remove_worktree` falla, la Task se conserva.
-    fn abandon_attempt(&self, a: &SpawnAttempt) {
+    pub(super) fn abandon_attempt(&self, a: &SpawnAttempt) {
         let removable = {
             let st = self.lock();
             st.tasks.get(&a.task).is_some_and(|t| !t.status.is_final() && st.runs.get(&t.run).is_some_and(|r| !r.closed))
@@ -319,8 +319,10 @@ impl Core {
             let st = self.lock();
             Self::check_manages(&st, caller, &id)?;
         }
-        if !self.terms.lock().map(|t| t.contains_key(&id)).unwrap_or(false) {
-            return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn"));
+        match self.terms.lock().map(|t| t.get(&id).map(|t| t.kill_in_progress())) {
+            Ok(Some(false)) => {}
+            Ok(Some(true)) => return Err(format!("La terminal de {id} se está cerrando (terminación en curso): espera a que acabe o lanza una hija nueva con lxo spawn")),
+            _ => return Err(format!("La terminal de {id} ya está cerrada: lanza una hija nueva con lxo spawn")),
         }
         let task = self.mutate_as(ctx, |st| {
             st.reopen(&id, &spec)?;
@@ -338,7 +340,7 @@ impl Core {
             writeln!(f, "\n## Seguimiento del coordinador\n\n{spec}\n\nAl terminar, escribe un informe nuevo y vuelve a cerrar con lxo done --report (sin red: lxo report).")
         });
         if let Ok(terms) = self.terms.lock() {
-            if let Some(t) = terms.get(&id) {
+            if let Some(t) = terms.get(&id).filter(|t| !t.kill_in_progress()) {
                 t.type_prompt(&format!(
                     "Nuevo encargo de tu coordinador (también al final de .lixbon/tasks/{id}.md): {spec} -- Al terminar escribe un informe nuevo y cierra otra vez con lxo done --report."
                 ));
