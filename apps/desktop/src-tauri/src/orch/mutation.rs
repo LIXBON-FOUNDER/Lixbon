@@ -744,11 +744,10 @@ impl Core {
             observed: journal_observed(effect),
         };
         effect_journal::append_v2(&data_dir(), &record).inspect_err(|error| {
-            // Sin el registro ni el texto del error: ambos podrían contener rutas o datos sensibles.
+            // Sin el registro, el texto del error ni el id del efecto: podrían contener rutas o datos sensibles.
             eprintln!(
-                "[core] no se pudo escribir unrecorded-effects.jsonl ({:?}); efecto {} {}/{} de la tarea {}",
+                "[core] no se pudo escribir unrecorded-effects.jsonl ({:?}); efecto {}/{} de la tarea {}",
                 error.kind(),
-                effect.effect_id,
                 effect.operation,
                 effect.kind,
                 effect.task.as_deref().unwrap_or("-"),
