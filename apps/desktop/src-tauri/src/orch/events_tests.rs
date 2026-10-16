@@ -15,7 +15,7 @@ use super::mutation::{Health, MutateError, PersistError, Persistence, RetryPolic
 use super::state::{NewTask, Run, State};
 use super::store_boot::StorageStatus;
 use super::{Core, Orch};
-use crate::store::{EventClass, EventQuery, EventRow, NewEvent, MAX_PAYLOAD_BYTES};
+use crate::store::{ClientCredential, ClientClaims, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, EventClass, EventQuery, EventRow, NewEvent, CORE_CLIENT_ID, MAX_PAYLOAD_BYTES};
 
 // ---------------------------------------------------------------------------------------------
 // Tipos de prueba: el contrato real de cada `kind` llega con E1b
@@ -70,6 +70,17 @@ fn core_listo() -> (Limpia, std::path::PathBuf, std::path::PathBuf, Arc<Core>) {
 
 fn eventos(core: &Core) -> Vec<EventRow> {
     core.storage.with_store(|s| s.events_page(&EventQuery { limit: Some(500), ..Default::default() }).unwrap().events).expect("almacén abierto")
+}
+
+fn cliente_autenticado(core: &Core, surface: ClientSurface, principal: ClientPrincipal, installation: &str, secret: &str) -> crate::store::AuthenticatedClient {
+    let registration = ClientRegistration::new(surface, DeviceIdentity::new(installation, Some(format!("device-{installation}"))).unwrap()).unwrap();
+    let credential = ClientCredential::new(principal, secret).unwrap();
+    core.storage
+        .with_store(|store| {
+            store.register_client(&registration, &credential, super::state::now_ms() as i64).unwrap();
+            store.authenticate_client(credential.reveal_for_delivery()).unwrap().unwrap()
+        })
+        .expect("almacén abierto")
 }
 
 fn rev(core: &Core) -> i64 {
@@ -193,8 +204,35 @@ fn un_evento_emitido_en_mutate_se_confirma_con_la_mutacion() {
     assert_eq!((e.actor_kind.as_str(), e.actor_id.as_deref(), e.channel.as_deref()), ("system", None, Some("core")), "actor por defecto: el Core");
     assert_eq!((e.project_id.as_deref(), e.run_id.as_deref(), e.correlation_id.as_deref(), e.idem_key.as_deref()), (Some("p1"), Some("r1"), Some("c1"), Some("k1")));
     assert_eq!((e.entity_kind.as_str(), e.entity_id.as_str(), e.payload.as_str()), ("core", "core", "{\"n\":1}"));
-    assert_eq!(e.client_id, None, "client_id es de F1");
+    assert_eq!(e.client_id.as_deref(), Some(CORE_CLIENT_ID), "los eventos internos identifican al Core reservado");
     assert!(e.at > 0 && e.id.len() == 36 && &e.id[14..15] == "7", "UUID v7: {}", e.id);
+}
+
+#[test]
+fn cliente_autenticado_cli_y_desktop_conserva_client_id_actor_y_canal_en_evento() {
+    let (_l, _d, _c, core) = core_listo();
+    let clients = [
+        (ClientSurface::Cli, ClientPrincipal::Agent("task-cli-85".into()), "install-cli-85", "cli-secret-85-this-is-at-least-32-bytes-long", Channel::Lxo, "agent", Some("task-cli-85")),
+        (ClientSurface::Desktop, ClientPrincipal::Person("person-desktop-85".into()), "install-desktop-85", "desktop-secret-85-this-is-at-least-32-bytes-long", Channel::Ui, "person", Some("person-desktop-85")),
+    ];
+
+    for (index, (surface, principal, installation, secret, channel, actor_kind, actor_id)) in clients.into_iter().enumerate() {
+        let authenticated = cliente_autenticado(&core, surface, principal, installation, secret);
+        let client_id = authenticated.identity().client_id().to_string();
+        let ctx = MutationContext::authenticated(&authenticated, &ClientClaims::default(), channel).unwrap();
+        core.mutate_as(&ctx, |tx| {
+            run_sin_eventos(tx, "identity-event");
+            tx.push_event(hecho(index as u32 + 10));
+            Ok(())
+        })
+        .unwrap();
+
+        let event = &eventos(&core)[index];
+        assert_eq!(event.client_id.as_deref(), Some(client_id.as_str()));
+        assert_eq!(event.actor_kind.as_str(), actor_kind);
+        assert_eq!(event.actor_id.as_deref(), actor_id);
+        assert_eq!(event.channel.as_deref(), Some(match channel { Channel::Lxo => "lxo", Channel::Ui => "ui", Channel::Core => "core" }));
+    }
 }
 
 #[test]

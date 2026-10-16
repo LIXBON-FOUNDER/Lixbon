@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::events::MutationContext;
+use super::events::{Actor, Channel, MutationContext};
 use super::host::RecordingHost;
 use super::lifecycle::BootProof;
 use super::mutation::{Effect, Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess};
@@ -588,6 +588,28 @@ fn el_journal_v2_en_modo_legacy_se_conserva_sin_reconciliar() {
 
     assert_eq!((report.recovered, report.pending), (0, 1));
     assert_eq!(std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap(), format!("{linea}\n"));
+}
+
+#[test]
+fn journal_v2_conserva_el_id_de_persona_autenticada() {
+    let (_l, data, _) = carpetas();
+    let (core, _host) = core_con_host();
+    let (_, task) = core.lock_unpersisted().create_run("obj", nt());
+    let effect = Effect::new("identity_test", "external_action")
+        .task(&task)
+        .observed(serde_json::json!({ "completed": true }));
+    let result: Result<(), String> = core
+        .acting(MutationContext::new(
+            Actor::PersonId("person-authenticated".into()),
+            Channel::Ui,
+        ))
+        .mutate_after_effect(effect, |_| Err("registro rechazado".into()));
+    assert!(result.is_err());
+
+    let journal = std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap();
+    let record: Value = serde_json::from_str(journal.lines().next().unwrap()).unwrap();
+    assert_eq!(record["actor_kind"], "person");
+    assert_eq!(record["actor_id"], "person-authenticated");
 }
 
 #[test]
