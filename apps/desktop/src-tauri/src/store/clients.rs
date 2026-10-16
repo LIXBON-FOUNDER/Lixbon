@@ -214,7 +214,12 @@ pub enum ClientScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientAction {
     Read,
+    EventLogRead,
     AgentCommand,
+    /// Acción que el Agent puede ejecutar con los checks de relación de tarea; una Persona
+    /// solo puede ejecutarla desde Desktop, donde `Caller::User` sí representa a la interfaz.
+    AgentOrDesktopCommand,
+    UiCommand,
     HumanDecision,
     CoreCommand,
 }
@@ -346,9 +351,24 @@ impl AuthenticatedClient {
     /// Scope viene de la credencial: un Agent nunca adquiere acciones humanas ni de Core.
     pub fn authorize(&self, action: ClientAction) -> Result<(), ClientIdentityError> {
         let allowed = match self.scope() {
-            ClientScope::Person(_) => action != ClientAction::CoreCommand,
+            ClientScope::Person(_) => match action {
+                ClientAction::CoreCommand => false,
+                ClientAction::EventLogRead
+                | ClientAction::AgentOrDesktopCommand
+                | ClientAction::UiCommand
+                | ClientAction::HumanDecision => {
+                    self.identity.surface() == ClientSurface::Desktop
+                }
+                _ => true,
+            },
             ClientScope::AgentTask(_) => {
-                matches!(action, ClientAction::Read | ClientAction::AgentCommand)
+                matches!(
+                    action,
+                    ClientAction::Read
+                        | ClientAction::EventLogRead
+                        | ClientAction::AgentCommand
+                        | ClientAction::AgentOrDesktopCommand
+                )
             }
             ClientScope::System => matches!(action, ClientAction::Read | ClientAction::CoreCommand),
         };
@@ -808,6 +828,57 @@ mod tests {
             auth.authorize(ClientAction::CoreCommand),
             Err(ClientIdentityError::ForbiddenAction)
         );
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn comandos_acotados_permiten_agent_o_persona_desktop_pero_no_persona_cli() {
+        let dir = dir();
+        let mut store = Store::open(&dir, "test").unwrap();
+        let person_desktop = ClientCredential::new(
+            ClientPrincipal::Person("person-desktop".into()),
+            token("person-desktop"),
+        )
+        .unwrap();
+        let person_cli = ClientCredential::new(
+            ClientPrincipal::Person("person-cli".into()),
+            token("person-cli"),
+        )
+        .unwrap();
+        let agent = ClientCredential::new(
+            ClientPrincipal::Agent("task-1".into()),
+            token("agent-scoped"),
+        )
+        .unwrap();
+        let desktop = store
+            .register_client(
+                &registration(ClientSurface::Desktop, "install-action-desktop"),
+                &person_desktop,
+                100,
+            )
+            .unwrap();
+        let cli = store
+            .register_client(
+                &registration(ClientSurface::Cli, "install-action-cli"),
+                &person_cli,
+                101,
+            )
+            .unwrap();
+        let worker = store
+            .register_client(
+                &registration(ClientSurface::Cli, "install-action-agent"),
+                &agent,
+                102,
+            )
+            .unwrap();
+
+        assert!(desktop.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
+        assert_eq!(
+            cli.authorize(ClientAction::AgentOrDesktopCommand),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert!(worker.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }

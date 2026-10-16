@@ -44,6 +44,12 @@ impl Core {
             .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
         let action = if review::closed_to_agents(cmd).is_some() {
             ClientAction::HumanDecision
+        } else if cmd == "events" {
+            ClientAction::EventLogRead
+        } else if matches!(cmd, "project_add" | "project_archive" | "project_locate" | "projects_import_recents" | "remove_run") {
+            ClientAction::UiCommand
+        } else if matches!(cmd, "reply" | "send" | "stop" | "release" | "continue" | "diff") {
+            ClientAction::AgentOrDesktopCommand
         } else {
             ClientAction::AgentCommand
         };

@@ -114,7 +114,7 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
             RequestIdentity::LegacyServerToken => super::Caller::Agent(caller_claim),
             RequestIdentity::Client(client) => {
                 let claims = ClientClaims { caller: caller_claim, ..Default::default() };
-                if client.validate_claims(&claims, "lxo").is_err() || client.authorize(ClientAction::Read).is_err() {
+                if client.validate_claims(&claims, "lxo").is_err() || client.authorize(ClientAction::EventLogRead).is_err() {
                     return reply(&mut stream, 403, &json!({ "ok": false, "error": "Identidad no autorizada para este canal" }));
                 }
                 match client.identity().principal() {
@@ -294,6 +294,31 @@ mod authenticated_client_tests {
         (status, serde_json::from_str(payload).unwrap())
     }
 
+    fn get(port: u16, token: &str, path: &str) -> (u16, Value) {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(stream, "GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        let (head, payload) = raw.split_once("\r\n\r\n").unwrap();
+        let status = head.lines().next().unwrap().split_whitespace().nth(1).unwrap().parse().unwrap();
+        (status, serde_json::from_str(payload).unwrap())
+    }
+
+    fn create_ui_task(core: &Arc<Core>, objective: &str) -> String {
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        core.rpc_via(
+            super::super::events::Channel::Ui,
+            super::super::Caller::User,
+            &cwd,
+            "run_create",
+            &json!({ "objective": objective }),
+        )
+        .unwrap()["task"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn credencial_cli_deriva_actor_y_client_id_y_rechaza_claims_spoof_antes_de_mutar() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
@@ -348,6 +373,213 @@ mod authenticated_client_tests {
         assert_eq!(status, 200);
         assert_eq!(response["ok"], false, "un Agent no puede ejecutar una decisión humana");
         assert_eq!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap(), head_before, "rechazo antes de mutar");
+        server.stop();
+    }
+
+    #[test]
+    fn credencial_person_cli_no_puede_quitar_un_run() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let created = core
+            .rpc_via(
+                super::super::events::Channel::Ui,
+                super::super::Caller::User,
+                &cwd,
+                "run_create",
+                &json!({ "objective": "run to protect from CLI Person" }),
+            )
+            .unwrap();
+        let run = created["run"].as_str().unwrap().to_string();
+
+        let secret = "person-cli-remove-run-secret-85-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-cli-remove-85".into()),
+            "install-cli-remove-85",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core
+            .storage
+            .with_store(|store| store.events_head().unwrap())
+            .unwrap();
+
+        let (status, response) = post(
+            server.port,
+            secret,
+            &json!({ "cmd": "remove_run", "args": { "run": run } }),
+        );
+
+        assert_eq!(status, 200);
+        assert_eq!(response["ok"], false, "Person/Cli no hereda permisos de la interfaz");
+        assert!(core.lock().runs.contains_key(&run), "el run permanece intacto");
+        assert_eq!(
+            core.storage
+                .with_store(|store| store.events_head().unwrap())
+                .unwrap(),
+            head_before,
+            "el rechazo ocurre antes de mutar"
+        );
+        server.stop();
+    }
+
+    #[test]
+    fn credencial_person_cli_no_puede_leer_eventos_sin_acotar() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let secret = "person-cli-events-secret-85-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-cli-events-85".into()),
+            "install-cli-events-85",
+            secret,
+        );
+        let server = start(core).unwrap();
+
+        let (status, response) = get(server.port, secret, "/events");
+
+        assert_eq!(status, 403, "Person/Cli no hereda la lectura de eventos de Desktop: {response}");
+        assert_eq!(response["ok"], false);
+        server.stop();
+    }
+
+    #[test]
+    fn credencial_person_cli_no_puede_detener_tarea_de_interfaz() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let created = core
+            .rpc_via(
+                super::super::events::Channel::Ui,
+                super::super::Caller::User,
+                &cwd,
+                "run_create",
+                &json!({ "objective": "task to protect from CLI stop" }),
+            )
+            .unwrap();
+        let task = created["task"].as_str().unwrap().to_string();
+        let initial_status = core.lock().task(&task).unwrap().status;
+
+        let secret = "person-cli-stop-secret-85-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-cli-stop-85".into()),
+            "install-cli-stop-85",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core
+            .storage
+            .with_store(|store| store.events_head().unwrap())
+            .unwrap();
+
+        let (status, response) = post(
+            server.port,
+            secret,
+            &json!({ "cmd": "stop", "args": { "task": task } }),
+        );
+
+        assert_eq!(status, 200);
+        assert_eq!(response["ok"], false, "Person/Cli no hereda stop de Desktop: {response}");
+        assert!(response["error"].as_str().unwrap().contains("Acción no permitida"));
+        assert_eq!(core.lock().task(&task).unwrap().status, initial_status);
+        assert_eq!(
+            core.storage
+                .with_store(|store| store.events_head().unwrap())
+                .unwrap(),
+            head_before,
+            "el rechazo ocurre antes de mutar"
+        );
+        server.stop();
+    }
+
+    #[test]
+    fn credencial_person_cli_no_puede_liberar_tarea_de_interfaz() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let cwd = std::env::current_dir().unwrap().to_string_lossy().into_owned();
+        let created = core
+            .rpc_via(
+                super::super::events::Channel::Ui,
+                super::super::Caller::User,
+                &cwd,
+                "run_create",
+                &json!({ "objective": "task to protect from CLI release" }),
+            )
+            .unwrap();
+        let task = created["task"].as_str().unwrap().to_string();
+        let initial_status = core.lock().task(&task).unwrap().status;
+
+        let secret = "person-cli-release-secret-85-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-cli-release-85".into()),
+            "install-cli-release-85",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core
+            .storage
+            .with_store(|store| store.events_head().unwrap())
+            .unwrap();
+
+        let (status, response) = post(
+            server.port,
+            secret,
+            &json!({ "cmd": "release", "args": { "task": task, "force": true } }),
+        );
+
+        assert_eq!(status, 200);
+        assert_eq!(response["ok"], false, "Person/Cli no hereda release de Desktop: {response}");
+        assert!(response["error"].as_str().unwrap().contains("Acción no permitida"));
+        assert_eq!(core.lock().task(&task).unwrap().status, initial_status);
+        assert_eq!(
+            core.storage
+                .with_store(|store| store.events_head().unwrap())
+                .unwrap(),
+            head_before,
+            "el rechazo ocurre antes de mutar"
+        );
+        server.stop();
+    }
+
+    #[test]
+    fn credencial_person_cli_no_puede_seguir_ni_ver_diff_de_cualquier_tarea() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let task = create_ui_task(&core, "task scoped against CLI Person");
+        let secret = "person-cli-scoped-command-secret-85-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-cli-scoped-85".into()),
+            "install-cli-scoped-85",
+            secret,
+        );
+        let server = start(core).unwrap();
+
+        for (cmd, args) in [
+            ("continue", json!({ "task": task, "spec": "reopen as CLI Person" })),
+            ("diff", json!({ "task": task })),
+        ] {
+            let (status, response) = post(server.port, secret, &json!({ "cmd": cmd, "args": args }));
+            assert_eq!(status, 200);
+            assert_eq!(response["ok"], false, "{cmd} debe rechazarse: {response}");
+            assert!(
+                response["error"].as_str().unwrap().contains("Acción no permitida"),
+                "{cmd} debe rechazarse antes de consultar o mutar tareas: {response}"
+            );
+        }
         server.stop();
     }
 }
