@@ -5,6 +5,13 @@
 //! Un pid NO identifica un proceso: se reutiliza. La identidad es `(pid, hora de creación)` ([`Proc`]). Reglas:
 //! * solo se mata un proceso cuya hora de creación se comprueba JUSTO antes (en Windows con el mismo handle con el que
 //!   se termina, así que no hay ventana entre comprobar y matar; en Unix la ventana es la de dos llamadas seguidas);
+//! * identidad por plataforma (siempre la MÁS FUERTE disponible, la misma en todas las vías de descubrimiento): Windows,
+//!   FILETIME (100 ns); Linux, `starttime` de `/proc/<pid>/stat` (ticks de 10 ms; `ppid`, `pgrp` y `starttime` salen de
+//!   la misma lectura del archivo); macOS y otros Unix, hash de `ps lstart` (1 s). En el caso de 1 s un falso «mismo
+//!   proceso» exige que el pid se REUTILICE y el nuevo proceso EMPIECE en el mismo segundo que el original: los pids se
+//!   asignan de forma secuencial y circular (macOS: hasta 99 999), así que reutilizar uno exige agotar todo el espacio en
+//!   menos de un segundo, algo que ni siquiera un fork-bomb sostiene en un segundo; además un proceso solo se mata si
+//!   sigue presente y con ese token JUSTO antes del kill;
 //! * un proceso al que se verificó muerto (ausente, o presente con otra hora de creación) sale de `seen` y no se vuelve
 //!   a tocar nunca; la raíz verificada muerta no se vuelve a usar como origen de descendientes;
 //! * donde la hora de creación es un instante real y comparable (Windows, `ordered_starts`), un hijo solo cuelga de un
@@ -356,7 +363,21 @@ fn lstart_token(lstart: &str) -> Option<u64> {
     (!norm.is_empty()).then(|| norm.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)))
 }
 
-/// Una fila de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=`.
+/// Lee `/proc/<pid>/stat` (Linux). Todo sale de UNA lectura del mismo archivo: `ppid` (campo 4), `pgrp` (5) y `starttime`
+/// (22, en ticks de reloj desde el arranque, resolución de 10 ms) son coherentes entre sí. El nombre (campo 2) va entre
+/// paréntesis y puede contener espacios y paréntesis: se cuenta desde el ÚLTIMO `)`. `None` si no se entiende.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_proc_stat(pid: u32, stat: &str) -> Option<PsRow> {
+    let after = &stat[stat.rfind(')')? + 1..];
+    let mut f = after.split_whitespace();
+    let state = f.next()?; // campo 3
+    let ppid = f.next()?.parse().ok()?; // 4
+    let pgid = f.next()?.parse().ok()?; // 5
+    let start = f.nth(16)?.parse().ok()?; // 22 (tras 5: 6..=21 son 16 campos, el 17.º es el 22)
+    Some(PsRow { pid, ppid, pgid, zombie: matches!(state, "Z" | "X" | "x"), start })
+}
+
+/// Una fila de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` (macOS y otros Unix) o de `/proc/<pid>/stat` (Linux).
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(windows, allow(dead_code))]
 struct PsRow {
@@ -423,7 +444,7 @@ fn raw_table() -> Option<Vec<(u32, u32)>> {
 }
 
 /// `ps` en un entorno fijo (`LC_ALL=C`): el token de `lstart` debe salir igual en todas las lecturas.
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn ps_output(args: &[&str]) -> Option<String> {
     let mut cmd = std::process::Command::new("ps");
     cmd.args(args).env("LC_ALL", "C");
@@ -431,8 +452,29 @@ fn ps_output(args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
+/// Linux: recorre `/proc`. Un proceso que desaparece durante la lectura (`ENOENT`/`ESRCH`) simplemente ya no está; cualquier
+/// otro error, o un archivo que no se entiende, vuelve dudosa TODA la lectura.
+#[cfg(target_os = "linux")]
+fn proc_rows() -> Option<Vec<PsRow>> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir("/proc").ok()? {
+        let e = e.ok()?;
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        match std::fs::read_to_string(e.path().join("stat")) {
+            Ok(text) => out.push(parse_proc_stat(pid, &text)?),
+            Err(err) if matches!(err.raw_os_error(), Some(2) | Some(3)) => {}
+            Err(_) => return None,
+        }
+    }
+    Some(out)
+}
+
+/// Fuente de filas por plataforma: Linux usa `/proc` (identidad en ticks); macOS y el resto, `ps` (identidad por `lstart`).
 #[cfg(not(windows))]
 fn ps_rows() -> Option<Vec<PsRow>> {
+    #[cfg(target_os = "linux")]
+    let rows = proc_rows()?;
+    #[cfg(not(target_os = "linux"))]
     let rows = parse_ps_rows(&ps_output(&["-e", "-o", "pid=,ppid=,pgid=,stat=,lstart="])?)?;
     // Sin este proceso la lectura está truncada o es inesperada.
     rows.iter().any(|r| r.pid == std::process::id()).then_some(rows)
@@ -456,7 +498,14 @@ fn group_rows(_pgid: u32) -> Option<Vec<Proc>> {
 
 #[cfg(not(windows))]
 fn leads_group(pid: u32) -> bool {
-    ps_output(&["-o", "pgid=", "-p", &pid.to_string()]).and_then(|t| t.trim().parse::<u32>().ok()) == Some(pid)
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|t| parse_proc_stat(pid, &t)).is_some_and(|r| r.pgid == pid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        ps_output(&["-o", "pgid=", "-p", &pid.to_string()]).and_then(|t| t.trim().parse::<u32>().ok()) == Some(pid)
+    }
 }
 
 #[cfg(windows)]
@@ -617,11 +666,20 @@ fn terminate(p: Proc) -> Fate {
     }
 }
 
+/// Identidad en Unix: la MISMA fuente que las filas de `ps_rows`, para que los tokens de un proceso coincidan en todas las
+/// vías de descubrimiento. Linux: `starttime` de `/proc/<pid>/stat` (ticks, 10 ms). macOS y el resto: hash de `lstart`
+/// (resolución de 1 s; ver la cabecera del módulo sobre por qué no hay colisión práctica). En ambos casos es un token
+/// que solo se compara por IGUALDAD: `ordered_starts` es falso en Unix y `kill_tree` nunca lo ordena.
 #[cfg(not(windows))]
 fn start_time(pid: u32) -> Option<u64> {
-    // La MISMA fuente (`lstart`) que las filas de `ps_rows`, para que los tokens de un proceso coincidan en todas las
-    // vías de descubrimiento. Token opaco: `ordered_starts` es falso en Unix y `kill_tree` nunca lo ordena.
-    lstart_token(&ps_output(&["-o", "lstart=", "-p", &pid.to_string()])?)
+    #[cfg(target_os = "linux")]
+    {
+        parse_proc_stat(pid, &std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?).map(|r| r.start)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        lstart_token(&ps_output(&["-o", "lstart=", "-p", &pid.to_string()])?)
+    }
 }
 
 /// En Unix la identidad se comprueba justo antes de `kill -9`: son dos llamadas seguidas, no una sola operación (no hay
@@ -1250,6 +1308,55 @@ mod tests {
         assert_eq!(os.group_rows(child.id()).map(|r| r.len()), Some(0), "el grupo quedó vacío");
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Identidad fuerte en Linux (starttime en ticks) y reutilización de pid en el mismo instante ---
+
+    #[test]
+    fn proc_stat_da_ppid_pgrp_y_starttime_de_una_sola_lectura() {
+        let tail = "S 1 1234 1234 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 5000 300 18446744073709551615";
+        let r = parse_proc_stat(77, &format!("77 (bash) {tail}")).unwrap();
+        assert_eq!((r.pid, r.ppid, r.pgid, r.zombie, r.start), (77, 1, 1234, false, 987_654));
+        let raro = parse_proc_stat(77, &format!("77 (we ird) na)me) {tail}")).unwrap();
+        assert_eq!((raro.ppid, raro.pgid, raro.start), (1, 1234, 987_654), "el nombre puede traer espacios y paréntesis");
+        let zombi = parse_proc_stat(77, &format!("77 (x) {}", tail.replacen("S ", "Z ", 1))).unwrap();
+        assert!(zombi.zombie, "un zombi cuenta como muerto");
+        assert!(parse_proc_stat(77, "77 (corto) S 1 2").is_none());
+        assert!(parse_proc_stat(77, "sin paréntesis").is_none());
+        assert!(parse_proc_stat(77, &format!("77 (x) {}", tail.replace("987654", "no-numero"))).is_none());
+    }
+
+    #[test]
+    fn dos_procesos_con_el_mismo_pid_y_un_tick_de_diferencia_no_comparten_identidad() {
+        // El pid se reutiliza y el nuevo proceso empieza solo 10 ms (1 tick) después: con ticks los tokens difieren.
+        let base = "S 1 50 50 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0";
+        let viejo = parse_proc_stat(50, &format!("50 (a) {base} 1000 0")).unwrap();
+        let nuevo = parse_proc_stat(50, &format!("50 (a) {base} 1001 0")).unwrap();
+        assert_ne!(viejo.start, nuevo.start);
+    }
+
+    #[test]
+    fn un_pid_reutilizado_en_el_instante_siguiente_se_poda_y_no_se_mata() {
+        let mut w = arbol_sin_orden();
+        let mut t = captura(&mut w);
+        w.immortal.push(12);
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        let viejo = t.seen().iter().find(|p| p.pid == 12).unwrap().start;
+        w.immortal.clear();
+        w.procs.iter_mut().filter(|p| p.0 == 12).for_each(|p| p.3 = false);
+        // Mismo pid, token adyacente (+1 y -1), y estando en el MISMO grupo que los miembros: aun así es otro proceso.
+        for (pid_ajeno, tok) in [(12u32, viejo + 1), (12u32, viejo - 1)] {
+            let mut w2 = arbol_sin_orden();
+            let mut t2 = captura(&mut w2);
+            w2.leader = true;
+            w2.immortal.push(12);
+            assert!(kill_tree(&mut t2, &mut w2).is_err());
+            w2.immortal.clear();
+            w2.procs.iter_mut().filter(|p| p.0 == pid_ajeno).for_each(|p| p.3 = false);
+            w2.procs.push((pid_ajeno, 1, tok, true));
+            kill_tree(&mut t2, &mut w2).unwrap();
+            assert!(w2.alive(pid_ajeno) && w2.killed.iter().all(|k| !(k.0 == pid_ajeno && k.1 == tok)), "el ajeno con token {tok} no se mató");
+        }
     }
 
     #[test]
