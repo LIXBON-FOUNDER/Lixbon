@@ -353,8 +353,8 @@ fn journal_v2_conserva_identidad_y_filtra_datos_sensibles_del_efecto() {
         Err("SENTINEL_ERROR_TEXT".into())
     });
     let error = result.unwrap_err();
-    assert!(error.contains("SENTINEL_ERROR_TEXT") && error.contains("Queda anotada en unrecorded-effects.jsonl"), "{error}");
-    assert!(error.contains("el estado NO se repara"), "el mensaje avisa de que la reconciliación no repara el estado: {error}");
+    assert!(error.contains("SENTINEL_ERROR_TEXT") && error.contains("Queda anotada en unrecorded-effects.jsonl"), "el error conserva el texto del rechazo y dice que queda anotada");
+    assert!(error.contains("el estado NO se repara"), "el mensaje avisa de que la reconciliación no repara el estado");
 
     let journal = std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap();
     let record: Value = serde_json::from_str(journal.lines().next().unwrap()).unwrap();
@@ -369,7 +369,7 @@ fn journal_v2_conserva_identidad_y_filtra_datos_sensibles_del_efecto() {
     assert_eq!(record["observed"]["outcome"], "created");
     assert_eq!(record["observed"]["branch"], "lx/safe");
     assert_eq!(record["observed"]["pr_url"], "https://github.com/org/repo/pull/1");
-    for secret in [
+    for (indice, secret) in [
         "SENTINEL_EXPECTED",
         "SENTINEL_CREDENTIAL",
         "SENTINEL_QUERY",
@@ -378,8 +378,11 @@ fn journal_v2_conserva_identidad_y_filtra_datos_sensibles_del_efecto() {
         "SENTINEL_DIFF",
         "SENTINEL_BODY",
         "SENTINEL_ERROR_TEXT",
-    ] {
-        assert!(!journal.contains(secret), "el journal filtró {secret}: {journal}");
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert!(!journal.contains(secret), "el journal filtró el valor sensible n.º {indice}");
     }
 }
 
@@ -599,10 +602,10 @@ fn si_falla_anotar_el_journal_el_error_lo_dice_y_no_afirma_que_quedo_anotado() {
     let result: Result<(), String> = core.acting(MutationContext::core()).mutate_after_effect(effect, |_| Err("rechazo del registro".into()));
 
     let error = result.unwrap_err();
-    assert!(error.contains("NO quedó registrada") && error.contains("TAMPOCO se pudo anotar"), "{error}");
-    assert!(error.contains(&effect_id), "el error da la identidad para comprobarlo a mano: {error}");
-    assert!(!error.contains("Queda anotada"), "no afirma una anotación que no existe: {error}");
-    assert!(error.contains("no la repitas sin comprobarlo"), "{error}");
+    assert!(error.contains("NO quedó registrada") && error.contains("TAMPOCO se pudo anotar"), "el error dice que no quedó registrada ni anotada");
+    assert!(error.contains(&effect_id), "el error da la identidad para comprobarlo a mano");
+    assert!(!error.contains("Queda anotada"), "no afirma una anotación que no existe");
+    assert!(error.contains("no la repitas sin comprobarlo"), "el error pide comprobar antes de repetir");
 }
 
 /// Garantía contra escrituras futuras fuera de la frontera: además de que el
