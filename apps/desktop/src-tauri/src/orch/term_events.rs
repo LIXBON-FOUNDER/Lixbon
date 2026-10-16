@@ -145,9 +145,13 @@ impl Core {
     }
 
     pub(super) fn on_exit(&self, id: &str) {
-        let terminal = self.terms.lock().ok()
-            .and_then(|mut t| t.remove(id))
-            .and_then(|t| t.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned()));
+        // Un terminal con una terminación en curso NO se retira: seguiría vivo para quien lo está matando, y si ese kill
+        // falla, `has_term`, `release`, `abandon_attempt` y `free_worktrees` tienen que seguir viéndolo. Lo retira el
+        // propio kill al comprobar el resultado. Se lee su salida igualmente: el proceso ya terminó.
+        let terminal = self.terms.lock().ok().and_then(|mut t| {
+            let text = |term: &pty::AgentTerm| term.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+            if t.get(id)?.kill_in_progress() { text(t.get(id)?) } else { text(&t.remove(id)?) }
+        });
         let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
         self.record_codex_model(id, session_id.as_deref());
@@ -200,26 +204,30 @@ impl Core {
     }
 
     fn kill_registered_term(&self, id: &str) -> Option<Result<(), String>> {
-        let mut killer = match self.terms.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id)?.begin_kill() {
+        let killer = match self.terms.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id)?.begin_kill() {
             Ok(k) => k,
             Err(e) => return Some(Err(e)),
         };
+        // Desde aquí el matador está prestado: si el kill falla o entra en pánico, `KillLease` lo devuelve.
+        let mut lease = KillLease { core: self, id, killer: Some(killer) };
         // Sin el mapa bloqueado: el resto del Core sigue leyendo y escribiendo terminales mientras el árbol muere.
-        let outcome = killer.kill().map_err(|e| e.to_string());
-        let mut terms = self.terms.lock().unwrap_or_else(|e| e.into_inner());
+        let outcome = lease.killer.as_mut().map_or(Ok(()), |k| k.kill()).map_err(|e| e.to_string());
         match outcome {
             Ok(()) => {
-                terms.remove(id);
+                lease.killer = None;
+                self.terms.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
                 Some(Ok(()))
             }
-            Err(e) => {
-                match terms.get_mut(id) {
-                    Some(term) => term.end_kill(killer),
-                    // `on_exit` retiró el terminal durante el kill y este falló: el matador no se descarta.
-                    None => pty::keep_in_custody(&self.custody_key(id), killer),
-                }
-                Some(Err(e))
-            }
+            Err(e) => Some(Err(e)),
+        }
+    }
+
+    /// Devuelve a `id` el matador prestado por `kill_registered_term`: a su terminal si sigue en el mapa; si el terminal
+    /// desapareció por otra vía, a la custodia de `pty` (el proceso puede seguir vivo y no se descarta su matador).
+    fn return_killer(&self, id: &str, killer: pty::Killer) {
+        match self.terms.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
+            Some(term) => term.end_kill(killer),
+            None => pty::keep_in_custody(&self.custody_key(id), killer),
         }
     }
 
@@ -262,5 +270,21 @@ impl Core {
     /// el mapa), igual que un proceso sin dueño de un lanzamiento fallido.
     pub(super) fn has_term(&self, id: &str) -> bool {
         self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id) || pty::in_custody(&self.custody_key(id))
+    }
+}
+
+/// El matador de un terminal, prestado mientras corre. Al soltarse sin consumirlo (el kill falló o hubo un pánico) vuelve
+/// a su terminal: la terminación en curso nunca deja un terminal sin matador.
+struct KillLease<'a> {
+    core: &'a Core,
+    id: &'a str,
+    killer: Option<pty::Killer>,
+}
+
+impl Drop for KillLease<'_> {
+    fn drop(&mut self) {
+        if let Some(k) = self.killer.take() {
+            self.core.return_killer(self.id, k);
+        }
     }
 }

@@ -77,10 +77,21 @@ impl AgentTerm {
     /// Mata el árbol del proceso y dice si pudo. `Ok` = el matador se ejecutó (un proceso que ya había
     /// muerto también cuenta); `Err` = no hay control fiable sobre él (o ya hay otra terminación en curso).
     pub fn try_kill(&mut self) -> Result<(), String> {
-        let mut killer = self.begin_kill()?;
-        let r = killer.kill().map_err(|e| e.to_string());
-        self.end_kill(killer);
-        r
+        /// Devuelve el matador a su sitio al soltarse, también si `kill` entra en pánico.
+        struct Lease<'a> {
+            slot: &'a mut Option<Killer>,
+            killer: Option<Killer>,
+        }
+        impl Drop for Lease<'_> {
+            fn drop(&mut self) {
+                if let Some(k) = self.killer.take() {
+                    *self.slot = Some(k);
+                }
+            }
+        }
+        let killer = self.begin_kill()?;
+        let mut lease = Lease { slot: &mut self.killer, killer: Some(killer) };
+        lease.killer.as_mut().map_or(Ok(()), |k| k.kill()).map_err(|e| e.to_string())
     }
 
     /// Toma prestado el matador para matar con el terminal AÚN almacenado. Mientras esté prestado hay una terminación
@@ -114,16 +125,27 @@ impl AgentTerm {
 /// falló: nunca se suelta un proceso potencialmente vivo y sin dueño. `owner` es la tarea que lo lanzó: quien limpia
 /// un lanzamiento fallido pregunta por ella ([`resolve_custody`]) ANTES de borrar su worktree, su rama o su Task. Se
 /// reintenta también con [`reap_unowned`] (`Core::shutdown`).
+///
+/// `killer: None` = alguien lo está matando AHORA (el matador está prestado, ver [`CustodyLease`]): la entrada sigue en
+/// la custodia, así que ni un segundo `resolve_custody` ni el apagado la dan por resuelta o la descartan, y el mutex
+/// global NO se mantiene bloqueado mientras corre el matador.
 struct Unowned {
+    id: u64,
     owner: Option<String>,
     pid: Option<u32>,
-    killer: Killer,
+    killer: Option<Killer>,
 }
 
 static UNOWNED: Mutex<Vec<Unowned>> = Mutex::new(Vec::new());
+static NEXT_UNOWNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn unowned() -> std::sync::MutexGuard<'static, Vec<Unowned>> {
     UNOWNED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn push_unowned(owner: Option<String>, pid: Option<u32>, killer: Killer) {
+    let id = NEXT_UNOWNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    unowned().push(Unowned { id, owner, pid, killer: Some(killer) });
 }
 
 /// Procesos en custodia (su compensación no se pudo comprobar). Diagnóstico.
@@ -132,20 +154,80 @@ pub fn unowned_count() -> usize {
     unowned().len()
 }
 
-/// Un intento de matar un proceso en custodia. En pruebas, `BREAK_KILLS` lo hace fallar sin tocarlo.
-fn kill_unowned(u: &mut Unowned) -> Result<(), String> {
-    #[cfg(test)]
-    if BREAK_KILLS.with(|b| b.get()) {
-        return Err("matador roto inyectado".into());
-    }
-    u.killer.kill().map_err(|e| e.to_string())
+/// El matador de una entrada de la custodia, prestado mientras corre. Si se suelta sin `finish` (el kill falló o hubo
+/// un pánico dentro del matador) vuelve a su entrada: la custodia nunca pierde un matador cuyo proceso puede seguir vivo.
+struct CustodyLease {
+    id: u64,
+    killer: Option<Killer>,
 }
 
-/// Reintenta matar los procesos en custodia que cumplan `pred` y devuelve cuántos siguen en ella.
+impl CustodyLease {
+    /// Un intento de matar. En pruebas, `BREAK_KILLS` lo hace fallar sin tocar el proceso.
+    fn kill(&mut self) -> Result<(), String> {
+        #[cfg(test)]
+        if BREAK_KILLS.with(|b| b.get()) {
+            return Err("matador roto inyectado".into());
+        }
+        self.killer.as_mut().ok_or("matador ya consumido")?.kill().map_err(|e| e.to_string())
+    }
+
+    /// El kill se comprobó: la entrada sale de la custodia.
+    fn finish(mut self) {
+        self.killer = None;
+        unowned().retain(|u| u.id != self.id);
+    }
+}
+
+impl Drop for CustodyLease {
+    fn drop(&mut self) {
+        if let Some(k) = self.killer.take() {
+            if let Some(u) = unowned().iter_mut().find(|u| u.id == self.id) {
+                u.killer = Some(k);
+            }
+        }
+    }
+}
+
+/// Resultado de reintentar un conjunto de entradas de la custodia.
+struct Retry {
+    /// Había al menos una entrada seleccionada.
+    found: bool,
+    /// Alguna ya la estaba matando otro llamante: no se pudo comprobar.
+    in_progress: bool,
+    failure: Option<String>,
+}
+
+/// Presta el matador de las entradas que cumplan `select` (las que otro ya está matando se marcan `in_progress`), los
+/// ejecuta SIN el mutex global y saca de la custodia los que se comprobaron.
+fn retry_where(select: impl Fn(&Unowned) -> bool) -> Retry {
+    let mut leases = Vec::new();
+    let mut r = Retry { found: false, in_progress: false, failure: None };
+    {
+        let mut list = unowned();
+        for u in list.iter_mut().filter(|u| select(u)) {
+            r.found = true;
+            match u.killer.take() {
+                Some(k) => leases.push(CustodyLease { id: u.id, killer: Some(k) }),
+                None => r.in_progress = true,
+            }
+        }
+    }
+    for mut lease in leases {
+        match lease.kill() {
+            Ok(()) => lease.finish(),
+            Err(e) => {
+                r.failure.get_or_insert(e);
+            }
+        }
+    }
+    r
+}
+
+/// Reintenta matar los procesos en custodia que cumplan `pred` y devuelve cuántos siguen en ella. No descarta los que
+/// otro está matando ya: siguen en la custodia.
 fn reap_unowned_where(pred: impl Fn(Option<u32>) -> bool) -> usize {
-    let mut list = unowned();
-    list.retain_mut(|u| !pred(u.pid) || kill_unowned(u).is_err());
-    list.len()
+    retry_where(|u| pred(u.pid));
+    unowned().len()
 }
 
 /// Reintenta matar todos los procesos en custodia. Lo llama `Core::shutdown`.
@@ -153,61 +235,52 @@ pub fn reap_unowned() -> usize {
     reap_unowned_where(|_| true)
 }
 
-/// ¿Hay un proceso de `owner` en custodia (sin dueño porque falló su construcción o su terminal desapareció)?
+/// ¿Hay un proceso de `owner` en custodia (sin dueño porque falló su construcción o su terminal desapareció)? Uno al que
+/// otro llamante está matando ahora mismo también cuenta.
 pub fn in_custody(owner: &str) -> bool {
     unowned().iter().any(|u| u.owner.as_deref() == Some(owner))
 }
 
 /// Pone bajo custodia un proceso de `owner` cuyo matador acaba de fallar y que ya no tiene terminal al que volver.
 pub fn keep_in_custody(owner: &str, killer: Killer) {
-    unowned().push(Unowned { owner: Some(owner.to_string()), pid: None, killer });
+    push_unowned(Some(owner.to_string()), None, killer);
 }
 
 /// Resuelve la custodia de `owner` COMPROBANDO el resultado: reintenta matar sus procesos. `None`: no había ninguno.
-/// `Some(Ok)`: había y se mataron todos (salen de la custodia). `Some(Err)`: al menos uno sigue sin control fiable y
-/// permanece en ella: quien limpia debe CONSERVARLO todo (worktree, rama, Task). La custodia se mantiene bloqueada
-/// durante el intento, así que un segundo llamante nunca ve «no hay nada» mientras el primero aún no ha terminado.
+/// `Some(Ok)`: había y se mataron todos (salen de la custodia). `Some(Err)`: al menos uno sigue sin control fiable, o
+/// OTRO llamante lo está matando ahora mismo, y permanece en la custodia: quien limpia debe CONSERVARLO todo (worktree,
+/// rama, Task). El mutex global solo se toma para prestar y devolver matadores, nunca mientras corre `taskkill`.
 pub fn resolve_custody(owner: &str) -> Option<Result<(), String>> {
-    let mut list = unowned();
-    let (mut found, mut failure) = (false, None);
-    list.retain_mut(|u| {
-        if u.owner.as_deref() != Some(owner) {
-            return true;
-        }
-        found = true;
-        match kill_unowned(u) {
-            Ok(()) => false,
-            Err(e) => {
-                failure.get_or_insert(e);
-                true
-            }
-        }
-    });
-    match (found, failure) {
-        (false, _) => None,
-        (true, None) => Some(Ok(())),
-        (true, Some(e)) => Some(Err(format!("un proceso lanzado para {owner} sigue en custodia: {e}"))),
+    let r = retry_where(|u| u.owner.as_deref() == Some(owner));
+    match (r.found, r.in_progress, r.failure) {
+        (false, ..) => None,
+        (true, _, Some(e)) => Some(Err(format!("un proceso lanzado para {owner} sigue en custodia: {e}"))),
+        (true, true, None) => Some(Err(format!("un proceso lanzado para {owner} se está matando ahora mismo: terminación en curso"))),
+        (true, false, None) => Some(Ok(())),
     }
 }
 
 /// Compensa un fallo de construcción posterior a crear el proceso: lo mata COMPROBANDO el resultado y devuelve
 /// `true` solo si puede darse por muerto. No se confía en que soltar los manejadores lo mate: cerrar el master de
 /// una PTY puede acabar con él según la plataforma, pero un proceso canalizado seguiría vivo y `AgentTerm` no
-/// tiene `Drop`. Si ni el matador del árbol ni el kill directo lo logran, el proceso pasa a la custodia
-/// del módulo (`UNOWNED`, a nombre de `owner`) en vez de soltarse. `direct` es el kill del propio hijo (solo alcanza a la raíz).
+/// tiene `Drop`. Solo el matador del ÁRBOL cuenta (verifica que murió todo, no solo la raíz); si falla, el kill directo
+/// del hijo (`direct`, solo alcanza a la raíz) se intenta por si ayuda, pero NO libera nada: el proceso pasa a la
+/// custodia del módulo (`UNOWNED`, a nombre de `owner`) con su matador del árbol, que recuerda los descendientes que
+/// vio y los verificará al reintentar.
 fn kill_after_failed_setup(owner: Option<&str>, pid: Option<u32>, mut killer: Killer, direct: &mut dyn FnMut() -> std::io::Result<()>) -> bool {
     #[cfg(test)]
     let broken = BREAK_KILLS.with(|b| b.get());
     #[cfg(not(test))]
     let broken = false;
-    let tree = !broken && killer.kill().is_ok();
-    // Un kill directo `Ok` solo vale si el pid ya no existe; sin pid conocido no hay nada que comprobar.
-    let dead = tree || (!broken && direct().is_ok() && pid.is_none_or(|p| !pid_alive(p)));
+    let dead = !broken && killer.kill().is_ok();
     if dead {
         #[cfg(test)]
         KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
     } else {
-        unowned().push(Unowned { owner: owner.map(str::to_string), pid, killer });
+        if !broken {
+            let _ = direct();
+        }
+        push_unowned(owner.map(str::to_string), pid, killer);
     }
     dead
 }
@@ -357,50 +430,126 @@ pub(crate) fn plain(text: &str) -> String {
     out
 }
 
-/// Mata el árbol entero: bajo `cmd /C` quedaría vivo el proceso del agente.
+/// Mata el árbol entero: bajo `cmd /C` quedaría vivo el proceso del agente. Recuerda los descendientes que vio en
+/// cada intento (`seen`): si la raíz muere pero un descendiente sobrevive, el reintento (la custodia, `Core::shutdown`)
+/// sigue sabiendo a quién matar y a quién comprobar, aunque ya no haya raíz de la que colgarlos.
 #[derive(Debug)]
-struct TreeKiller(u32);
+struct TreeKiller {
+    root: u32,
+    seen: Vec<u32>,
+}
 
-impl ChildKiller for TreeKiller {
-    fn kill(&mut self) -> std::io::Result<()> {
-        #[cfg(windows)]
-        let mut cmd = {
-            let mut c = std::process::Command::new("taskkill");
-            c.args(["/PID", &self.0.to_string(), "/T", "/F"]);
-            c
-        };
-        #[cfg(not(windows))]
-        let mut cmd = {
-            let mut c = std::process::Command::new("kill");
-            c.args(["-9", &self.0.to_string()]);
-            c
-        };
-        // Que el comando de matar ARRANQUE no es éxito. Un estado distinto de cero (acceso denegado, árbol a
-        // medias) es un kill dudoso y se devuelve como error: quien lo pide (el cleanup de un lanzamiento)
-        // prefiere conservar la Task y el worktree antes que borrarlos con el agente quizá vivo. La única
-        // excepción es que el proceso YA NO EXISTA (`taskkill` sale con 128 si terminó justo antes): no hay nada
-        // que matar y no es un fallo. Se comprueba mirando si el pid sigue vivo; si esa comprobación no puede
-        // hacerse, se asume vivo (la duda es un error).
-        // Deuda preexistente, fuera de este cambio: en Unix `kill -9 <pid>` solo alcanza al proceso raíz, no a su
-        // árbol (en Windows `taskkill /T` sí).
-        let status = hide_console(cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).status()?;
-        kill_outcome(status.success(), || pid_alive(self.0), self.0, &status)
-    }
-
-    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
-        Box::new(TreeKiller(self.0))
+impl TreeKiller {
+    fn new(root: u32) -> Self {
+        TreeKiller { root, seen: Vec::new() }
     }
 }
 
-/// Resultado de un intento de matar `pid`: éxito si el comando terminó bien; con un estado distinto de cero,
-/// solo si el proceso ya no existe. Un proceso vivo que no se pudo matar (o cuya vida no se pudo comprobar) es
-/// un error. Pura (la vida del proceso entra como función) para poder probar cada rama.
-fn kill_outcome(success: bool, alive: impl FnOnce() -> bool, pid: u32, status: &dyn std::fmt::Debug) -> std::io::Result<()> {
-    if success || !alive() {
+impl ChildKiller for TreeKiller {
+    /// `Ok` solo si, tras matar, NINGÚN proceso del árbol conocido (la raíz y todos sus descendientes vistos) sigue
+    /// vivo. Que la raíz haya muerto, o que el comando de matar saliera con estado cero, no prueba nada del resto del
+    /// árbol. Si no se puede comprobar si siguen vivos, se asume que sí (la duda es un error).
+    fn kill(&mut self) -> std::io::Result<()> {
+        kill_tree(self.root, &mut self.seen, &mut crate::proctable::process_table, &mut issue_kill, &mut wait_dead)
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(TreeKiller { root: self.root, seen: self.seen.clone() })
+    }
+}
+
+/// Descendientes (transitivos) de `root` y de los pids `known` según una tabla `(pid, ppid)`. No incluye a los propios
+/// `root` ni `known`. Tolera ciclos (un pid reutilizado) y el pid 0.
+fn descendants(table: &[(u32, u32)], root: u32, known: &[u32]) -> Vec<u32> {
+    let mut front: Vec<u32> = std::iter::once(root).chain(known.iter().copied()).collect();
+    let mut visited: Vec<u32> = front.clone();
+    let mut found = Vec::new();
+    while let Some(parent) = front.pop() {
+        for &(pid, ppid) in table {
+            if ppid == parent && pid != 0 && !visited.contains(&pid) {
+                visited.push(pid);
+                front.push(pid);
+                found.push(pid);
+            }
+        }
+    }
+    found
+}
+
+/// Núcleo puro de [`TreeKiller::kill`] (la tabla de procesos, la orden de matar y la comprobación de supervivientes
+/// entran como funciones para poder probar cada rama sin procesos reales):
+/// 1) anota en `seen` los descendientes actuales de la raíz y de los ya vistos; 2) ordena matar a los que siguen en la
+/// tabla (todos, si no hay tabla); 3) pregunta quiénes de `{raíz} ∪ seen` siguen vivos y falla si queda alguno.
+fn kill_tree(
+    root: u32,
+    seen: &mut Vec<u32>,
+    table: &mut dyn FnMut() -> Option<Vec<(u32, u32)>>,
+    issue: &mut dyn FnMut(&[u32]),
+    survivors: &mut dyn FnMut(&[u32]) -> Vec<u32>,
+) -> std::io::Result<()> {
+    let snapshot = table();
+    if let Some(t) = &snapshot {
+        for d in descendants(t, root, seen) {
+            if !seen.contains(&d) {
+                seen.push(d);
+            }
+        }
+    }
+    let targets: Vec<u32> = std::iter::once(root).chain(seen.iter().copied()).collect();
+    let to_kill: Vec<u32> = match &snapshot {
+        Some(t) => targets.iter().copied().filter(|p| t.iter().any(|(q, _)| q == p)).collect(),
+        None => targets.clone(),
+    };
+    if !to_kill.is_empty() {
+        issue(&to_kill);
+    }
+    let left = survivors(&targets);
+    if left.is_empty() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("no se pudo matar el proceso {pid} ({status:?})")))
+        Err(std::io::Error::other(format!("no se pudo matar todo el árbol del proceso {root}: siguen vivos {left:?}")))
     }
+}
+
+/// Ordena matar `pids` y sus árboles. El estado del comando no se interpreta: lo decide `wait_dead`.
+fn issue_kill(pids: &[u32]) {
+    #[cfg(windows)]
+    for pid in pids {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        let _ = hide_console(cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).status();
+    }
+    // Deuda preexistente, fuera de este cambio: en Unix `kill -9 <pid>` solo alcanza a los pids que se le dan; los
+    // descendientes vistos se incluyen en `pids`, los que aún no se hayan visto no.
+    #[cfg(not(windows))]
+    {
+        let mut cmd = std::process::Command::new("kill");
+        cmd.arg("-9").args(pids.iter().map(u32::to_string));
+        let _ = hide_console(cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())).status();
+    }
+}
+
+/// Procesos de `pids` que siguen vivos, según UNA lectura de la tabla de procesos (si no se puede leer, `pid_alive` de
+/// cada uno: ante la duda, vivo).
+fn alive_of(pids: &[u32]) -> Vec<u32> {
+    match crate::proctable::process_table() {
+        Some(t) => pids.iter().copied().filter(|p| t.iter().any(|(q, _)| q == p)).collect(),
+        None => pids.iter().copied().filter(|p| pid_alive(*p)).collect(),
+    }
+}
+
+/// Espera un máximo de ~1 s a que mueran `pids` (el sistema tarda en retirar un proceso recién matado: una lectura
+/// inmediata daría un «sigue vivo» engañoso) y devuelve los que siguen vivos.
+fn wait_dead(pids: &[u32]) -> Vec<u32> {
+    let mut alive = alive_of(pids);
+    for _ in 0..20 {
+        if alive.is_empty() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+        alive = alive_of(&alive);
+    }
+    alive
 }
 
 /// ¿Sigue vivo el proceso `pid`? Ante la duda (no se pudo ejecutar la comprobación, o la herramienta falló y su
@@ -467,7 +616,7 @@ fn spawn_piped(
     let (stdout, stderr) = match pipes {
         Ok(p) => p,
         Err(e) => {
-            let dead = kill_after_failed_setup(l.owner, Some(pid), Box::new(TreeKiller(pid)), &mut || child.kill());
+            let dead = kill_after_failed_setup(l.owner, Some(pid), Box::new(TreeKiller::new(pid)), &mut || child.kill());
             if dead {
                 let _ = child.wait();
             }
@@ -511,7 +660,7 @@ fn spawn_piped(
         on_exit();
     });
     let sink: Box<dyn Write + Send> = Box::new(std::io::sink());
-    Ok(AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer: Some(Box::new(TreeKiller(pid))), buffer })
+    Ok(AgentTerm { master: None, writer: Arc::new(Mutex::new(sink)), killer: Some(Box::new(TreeKiller::new(pid))), buffer })
 }
 
 /// `on_output` recibe cada trozo de salida; `on_exit`, el fin del proceso.
@@ -568,7 +717,7 @@ fn spawn_pty(
     // El proceso del PTY es `cmd /C launch.cmd`: matar solo ese deja vivo al
     // agente, que además retiene su worktree y no deja borrarlo.
     let killer: Box<dyn ChildKiller + Send + Sync> = match child.process_id() {
-        Some(pid) => Box::new(TreeKiller(pid)),
+        Some(pid) => Box::new(TreeKiller::new(pid)),
         None => child.clone_killer(),
     };
     drop(pair.slave);
@@ -945,6 +1094,12 @@ pub(crate) mod pruebas {
         SERIE.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// ¿Está libre el mutex global de la custodia? Una prueba lo consulta MIENTRAS un matador corre: si estuviera
+    /// bloqueado, `lock()` colgaría la prueba en vez de fallarla.
+    pub fn custodia_libre() -> bool {
+        !matches!(UNOWNED.try_lock(), Err(std::sync::TryLockError::WouldBlock))
+    }
+
     pub fn kills_tras_fallo() -> u32 {
         KILLS_AFTER_FAILED_SETUP.with(|k| k.get())
     }
@@ -975,30 +1130,61 @@ pub(crate) mod pruebas {
 
 #[cfg(test)]
 mod matador {
-    use super::{kill_outcome, TreeKiller};
+    use super::{descendants, kill_tree, TreeKiller};
     use portable_pty::ChildKiller;
 
-    #[test]
-    fn un_estado_distinto_de_cero_con_el_proceso_vivo_no_es_exito() {
-        // El comando de matar arrancó pero salió con error y el proceso sigue ahí: kill dudoso.
-        let r = kill_outcome(false, || true, 4242, &"estado 1");
-        assert!(r.is_err(), "no puede darse por matado: {r:?}");
-        // Si no se puede ni comprobar si vive, `pid_alive` devuelve true: la duda es un error.
+    /// root 10 -> 11 -> 12 (y 20, ajeno).
+    fn tabla() -> Vec<(u32, u32)> {
+        vec![(1, 0), (10, 1), (11, 10), (12, 11), (20, 1)]
     }
 
     #[test]
-    fn un_estado_distinto_de_cero_con_el_proceso_ya_inexistente_no_es_un_fallo() {
-        // `taskkill` sale con 128 si el proceso terminó justo antes: no hay nada que matar.
-        assert!(kill_outcome(false, || false, 4242, &"estado 128").is_ok());
-        // Con éxito ni se consulta si vive.
-        assert!(kill_outcome(true, || panic!("no debe consultarse"), 4242, &"estado 0").is_ok());
+    fn los_descendientes_son_transitivos_y_toleran_ciclos() {
+        assert_eq!(descendants(&tabla(), 10, &[]), vec![11, 12]);
+        // Un pid reutilizado puede cerrar un ciclo: no se repite ni se cuelga.
+        let ciclo = vec![(10, 12), (11, 10), (12, 11)];
+        let mut d = descendants(&ciclo, 10, &[]);
+        d.sort();
+        assert_eq!(d, vec![11, 12]);
+        // Los ya vistos aportan sus propios hijos aunque la raíz ya no esté en la tabla.
+        assert_eq!(descendants(&[(13, 12)], 10, &[12]), vec![13]);
+    }
+
+    #[test]
+    fn que_muera_la_raiz_no_prueba_que_haya_muerto_el_arbol() {
+        let mut seen = Vec::new();
+        let mut ordenados = Vec::new();
+        // La raíz y 11 mueren; el nieto 12 sobrevive: el kill falla aunque la orden «saliera bien».
+        let r = kill_tree(10, &mut seen, &mut || Some(tabla()), &mut |p| ordenados = p.to_vec(), &mut |_| vec![12]);
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("12")), "{r:?}");
+        assert_eq!(ordenados, vec![10, 11, 12], "se ordenó matar a toda la rama, no solo a la raíz");
+        assert_eq!(seen, vec![11, 12], "y se recuerda a los descendientes vistos");
+    }
+
+    #[test]
+    fn el_reintento_recuerda_a_los_descendientes_aunque_la_raiz_ya_no_exista() {
+        let mut seen = vec![11, 12];
+        let mut ordenados = Vec::new();
+        // La raíz y 11 ya no están; 12 quedó huérfano (en Unix, colgando de init). Sin `seen` nadie sabría de él.
+        let huerfano = || Some(vec![(1, 0), (12, 1), (20, 1)]);
+        let r = kill_tree(10, &mut seen, &mut || huerfano(), &mut |p| ordenados = p.to_vec(), &mut |_| vec![]);
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(ordenados, vec![12], "solo se ordena matar a quien sigue vivo, y se llega al huérfano");
+    }
+
+    #[test]
+    fn sin_tabla_de_procesos_se_ordena_matar_a_todos_y_la_duda_es_un_error() {
+        let mut seen = vec![11];
+        let mut ordenados = Vec::new();
+        let r = kill_tree(10, &mut seen, &mut || None, &mut |p| ordenados = p.to_vec(), &mut |p| p.to_vec());
+        assert!(r.is_err());
+        assert_eq!(ordenados, vec![10, 11]);
     }
 
     #[test]
     fn matar_un_pid_que_no_existe_no_es_un_fallo() {
-        // Un pid válido para `tasklist`/`ps` (cabe en un i32 y supera cualquier `pid_max`) que no existe. Uno fuera de
-        // rango haría fallar a `tasklist`, y un fallo de la herramienta ya no se toma por «no existe».
-        let mut k = TreeKiller(2_000_000_001);
+        // Un pid válido que no existe en ninguna tabla (supera cualquier `pid_max`): ya no hay nada que matar.
+        let mut k = TreeKiller::new(2_000_000_001);
         assert!(k.kill().is_ok(), "un pid inexistente: ya no hay nada que matar");
     }
 }

@@ -18,7 +18,7 @@ use super::events::{Channel, MutationContext};
 use super::host::{RecordedCall, RecordingHost};
 use super::mutation::Health;
 use super::pty::{self, pruebas};
-use super::spawn::SpawnStep;
+use super::spawn::{SpawnAttempt, SpawnStep};
 use super::spawn_approval::{PendState, EV_PENDING, EV_RESOLVED};
 use super::state::{NewTask, State, Status};
 use super::{agents, Caller, Core, Orch};
@@ -830,7 +830,7 @@ fn un_kill_en_curso_sigue_siendo_del_core_y_ningun_otro_llamante_lo_toma_por_mue
 }
 
 #[test]
-fn un_kill_fallido_cuyo_terminal_retiro_on_exit_pasa_a_la_custodia_en_vez_de_perderse() {
+fn si_el_terminal_desaparece_por_otra_via_durante_un_kill_fallido_el_matador_pasa_a_la_custodia() {
     let _serie = pruebas::serie_custodia();
     let core = Orch::default().0;
     let pasos: Pasos = Arc::default();
@@ -840,7 +840,8 @@ fn un_kill_fallido_cuyo_terminal_retiro_on_exit_pasa_a_la_custodia_en_vez_de_per
     let c2 = core.clone();
     let a = std::thread::spawn(move || c2.kill_term_checked("t-onexit"));
     entra.wait().expect("el kill está en curso");
-    // `on_exit` retira el terminal del mapa mientras el kill corre (lo que hace al ver terminar al hijo).
+    // Ruta defensiva: `on_exit` ya NO retira un terminal con terminación en curso (ver la prueba específica), pero si
+    // el terminal desapareciera por cualquier otra vía el matador no se descarta.
     drop(core.terms.lock().unwrap().remove("t-onexit"));
     sale.wait().expect("el kill falla");
     assert!(matches!(a.join().unwrap(), Some(Err(_))));
@@ -854,6 +855,171 @@ fn un_kill_fallido_cuyo_terminal_retiro_on_exit_pasa_a_la_custodia_en_vez_de_per
     sale2.wait().expect("el reintento termina");
     assert!(matches!(b.join().unwrap(), Some(Ok(()))));
     assert!(!pty::in_custody(&core.custody_key("t-onexit")) && !core.has_term("t-onexit"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Segunda ronda de revisión de LXO-18 (P1-A y P2): `on_exit` y los demás cleanups dentro de la ventana de un kill
+// ---------------------------------------------------------------------------------------------
+
+/// Un matador que siempre funciona.
+#[derive(Debug)]
+struct MatadorOk;
+
+impl ChildKiller for MatadorOk {
+    fn kill(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(MatadorOk)
+    }
+}
+
+/// Entra en pánico la primera vez que se le pide matar y funciona después.
+#[derive(Debug)]
+struct MatadorQuePanicaUnaVez(Arc<std::sync::atomic::AtomicBool>);
+
+impl ChildKiller for MatadorQuePanicaUnaVez {
+    fn kill(&mut self) -> std::io::Result<()> {
+        if !self.0.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            panic!("pánico inyectado dentro del matador");
+        }
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(MatadorQuePanicaUnaVez(self.0.clone()))
+    }
+}
+
+#[test]
+fn on_exit_y_un_segundo_cleanup_dentro_de_la_ventana_de_un_kill_fallan_cerrados_sin_borrar_nada() {
+    let e = setup("onexit-ventana");
+    let pend = e.spawn(false);
+    assert_eq!(e.aprobar(&pend)["outcome"], "approved");
+    let hija = e.hijas().pop().expect("hija lanzada");
+    let t = e.core.lock().tasks.get(&hija).cloned().expect("tarea");
+    let wt = t.worktree.clone().expect("worktree de la hija");
+    let intento = || SpawnAttempt { task: hija.clone(), repo: t.repo.clone(), worktree: Some(PathBuf::from(&wt)), branch: t.branch.clone() };
+
+    let pasos: Pasos = Arc::default();
+    let (entra1, sale1) = programa(&pasos, false);
+    let (entra2, sale2) = programa(&pasos, true);
+    e.core.register_term(&hija, pty::AgentTerm::for_tests(Box::new(MatadorGuiado(pasos)))).unwrap();
+
+    let (core, id) = (e.core.clone(), hija.clone());
+    let a = std::thread::spawn(move || core.kill_term(&id));
+    entra1.wait().expect("kill_term entró en el matador");
+
+    // El proceso termina (ve terminar al hijo) JUSTO mientras se le está matando.
+    e.core.on_exit(&hija);
+    assert_eq!(e.core.lock().tasks.get(&hija).map(|t| t.status.clone()), Some(Status::Exited), "on_exit sí cierra la tarea");
+    assert!(e.core.has_term(&hija), "pero NO retira un terminal con una terminación en curso");
+    assert!(e.core.terms.lock().unwrap().get(&hija).is_some_and(|t| t.kill_in_progress()), "que sigue constando como tal");
+
+    // Un segundo cleanup en esa ventana no puede tomar al proceso por muerto ni borrar nada.
+    let antes = head(&e.core);
+    assert!(e.core.kill_term(&hija).is_err());
+    e.core.abandon_attempt(&intento());
+    assert!(e.core.rpc(Caller::User, "", "release", &json!({ "task": hija, "force": true })).is_err());
+    let (liberadas, conservadas) = e.core.free_worktrees(&MutationContext::person(Channel::Ui), &e.run, true);
+    assert!(liberadas.is_empty() && conservadas.iter().any(|k| k["task"] == hija.as_str()), "{liberadas:?} {conservadas:?}");
+    assert!(e.core.follow_up(&MutationContext::person(Channel::Ui), &Caller::User, &json!({ "task": hija, "spec": "más" })).is_err_and(|m| m.contains("terminación en curso")));
+    assert!(Path::new(&wt).exists() && e.ramas().contains("lx/"), "worktree y rama intactos");
+    assert!(e.core.lock().tasks.contains_key(&hija), "la Task sigue en el estado");
+    assert_eq!(head(&e.core), antes, "y no se registró ningún evento");
+
+    // El kill falla: el terminal sigue siendo del Core y se puede reintentar; el cleanup sigue sin proceder.
+    sale1.wait().expect("liberar el kill fallido");
+    assert!(a.join().unwrap().is_err());
+    assert!(e.core.has_term(&hija) && e.core.terms.lock().unwrap().get(&hija).is_some_and(|t| !t.kill_in_progress()));
+    assert!(Path::new(&wt).exists());
+
+    // El reintento funciona: ahora sí el terminal sale y el cleanup puede continuar.
+    let (core, id) = (e.core.clone(), hija.clone());
+    let b = std::thread::spawn(move || core.kill_term(&id));
+    entra2.wait().expect("el reintento entró en el matador");
+    assert!(e.core.has_term(&hija));
+    sale2.wait().expect("liberar el kill correcto");
+    assert!(matches!(b.join().unwrap(), Ok(true)));
+    assert!(!e.core.has_term(&hija));
+    e.core.abandon_attempt(&intento());
+    assert!(!Path::new(&wt).exists(), "con el proceso comprobado muerto, el cleanup sí procede");
+}
+
+#[test]
+fn la_custodia_no_se_bloquea_ni_se_descarta_mientras_un_kill_esta_en_curso() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let dueno = core.custody_key("t-curso");
+    let pasos: Pasos = Arc::default();
+    let (entra1, sale1) = programa(&pasos, false);
+    let (entra2, sale2) = programa(&pasos, true);
+    pty::keep_in_custody(&dueno, Box::new(MatadorGuiado(pasos)));
+
+    let d = dueno.clone();
+    let a = std::thread::spawn(move || pty::resolve_custody(&d));
+    entra1.wait().expect("la custodia entró en el matador");
+    assert!(pruebas::custodia_libre(), "el mutex global de la custodia no se mantiene bloqueado durante taskkill");
+    assert!(pty::in_custody(&dueno) && core.has_term("t-curso"), "la entrada no desaparece mientras se mata");
+    assert!(matches!(pty::resolve_custody(&dueno), Some(Err(m)) if m.contains("en curso")), "un segundo resolver falla cerrado");
+    assert!(matches!(core.kill_term_checked("t-curso"), Some(Err(_))));
+    pty::reap_unowned();
+    assert!(pty::in_custody(&dueno), "el apagado no descarta una terminación en curso");
+    sale1.wait().expect("liberar el kill fallido");
+    assert!(matches!(a.join().unwrap(), Some(Err(_))));
+    assert!(pty::in_custody(&dueno), "tras fallar, el matador vuelve a la custodia");
+
+    let d = dueno.clone();
+    let b = std::thread::spawn(move || pty::resolve_custody(&d));
+    entra2.wait().expect("el reintento entró");
+    sale2.wait().expect("el reintento termina");
+    assert!(matches!(b.join().unwrap(), Some(Ok(()))));
+    assert!(!pty::in_custody(&dueno));
+}
+
+#[test]
+fn el_apagado_no_interrumpe_ni_descarta_una_terminacion_en_curso_ni_un_terminal_cuyo_kill_falla() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let pasos: Pasos = Arc::default();
+    let (entra, sale) = programa(&pasos, false);
+    core.register_term("t-curso", pty::AgentTerm::for_tests(Box::new(MatadorGuiado(pasos)))).unwrap();
+    core.register_term("t-roto", pty::AgentTerm::for_tests(Box::new(MatadorRoto))).unwrap();
+    core.register_term("t-ok", pty::AgentTerm::for_tests(Box::new(MatadorOk))).unwrap();
+
+    let c2 = core.clone();
+    let a = std::thread::spawn(move || c2.kill_term("t-curso"));
+    entra.wait().expect("el kill está en curso");
+    core.shutdown();
+    assert!(core.terms.lock().unwrap().get("t-curso").is_some_and(|t| t.kill_in_progress()), "la terminación en curso sigue siendo del Core");
+    assert!(core.has_term("t-roto"), "un terminal cuyo kill falló no se descarta");
+    assert!(!core.has_term("t-ok"), "el que se comprobó muerto sí sale");
+    sale.wait().expect("liberar el kill");
+    assert!(a.join().unwrap().is_err());
+    assert!(core.has_term("t-curso"), "y si ese kill falla, el terminal sigue ahí para reintentar");
+    core.terms.lock().unwrap().clear();
+}
+
+#[test]
+fn un_panico_dentro_del_matador_no_pierde_el_matador_ni_deja_la_terminacion_en_curso() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    core.register_term("t-panico", pty::AgentTerm::for_tests(Box::new(MatadorQuePanicaUnaVez(flag)))).unwrap();
+    let c2 = core.clone();
+    assert!(std::thread::spawn(move || c2.kill_term("t-panico")).join().is_err(), "el pánico se propaga");
+    assert!(core.has_term("t-panico") && core.terms.lock().unwrap().get("t-panico").is_some_and(|t| !t.kill_in_progress()), "el terminal recuperó su matador");
+    assert!(matches!(core.kill_term_checked("t-panico"), Some(Ok(()))), "y se puede reintentar");
+
+    // Lo mismo en la custodia.
+    let dueno = core.custody_key("t-panico-custodia");
+    pty::keep_in_custody(&dueno, Box::new(MatadorQuePanicaUnaVez(Arc::new(std::sync::atomic::AtomicBool::new(false)))));
+    let d = dueno.clone();
+    assert!(std::thread::spawn(move || pty::resolve_custody(&d)).join().is_err());
+    assert!(pty::in_custody(&dueno), "la entrada sigue en la custodia");
+    assert!(matches!(pty::resolve_custody(&dueno), Some(Ok(()))), "con su matador de vuelta, no marcada como «en curso»");
+    assert!(!pty::in_custody(&dueno));
 }
 
 // ---------------------------------------------------------------------------------------------
