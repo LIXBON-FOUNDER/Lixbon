@@ -2506,6 +2506,7 @@ dependencies = [
  "base64 0.22.1",
  "ignore",
  "keyring",
+ "libc",
  "notify",
  "portable-pty",
  "regex",

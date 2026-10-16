@@ -148,16 +148,25 @@ impl Core {
         // Un terminal con una terminación en curso NO se retira: seguiría vivo para quien lo está matando, y si ese kill
         // falla, `has_term`, `release`, `abandon_attempt` y `free_worktrees` tienen que seguir viéndolo. Lo retira el
         // propio kill al comprobar el resultado. Se lee su salida igualmente: el proceso ya terminó.
+        //
+        // Sin una terminación en curso, el terminal tampoco se suelta sin más: que la RAÍZ haya salido no prueba que haya
+        // salido su árbol (un servidor de desarrollo en segundo plano, un agente que lanzó algo y terminó). Se presta el
+        // matador y se barre el árbol antes de retirar el terminal (ver `kill_leased`): si el barrido se comprueba, el
+        // terminal sale como siempre; si no, queda custodiado —nunca se suelta un `AgentTerm` cuyo árbol puede seguir vivo—.
+        let mut barrido = None;
         let terminal = self.terms.lock().ok().and_then(|mut t| {
-            let text = |term: &pty::AgentTerm| term.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned());
-            if t.get(id)?.kill_in_progress() {
-                // El kill en curso, si falla, lo reintenta una vez sabiendo que el proceso ya terminó.
-                t.get_mut(id)?.mark_exited();
-                text(t.get(id)?)
-            } else {
-                text(&t.remove(id)?)
+            let term = t.get_mut(id)?;
+            // La raíz ya terminó: un kill (este barrido o el de otro) que falle se reintenta una vez, solo a comprobar.
+            term.mark_exited();
+            if let Ok(killer) = term.begin_kill() {
+                barrido = Some(killer);
             }
+            term.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned())
         });
+        if let Some(killer) = barrido {
+            // Sin el mapa bloqueado. `Ok` retira el terminal; `Err` lo deja en el mapa con su matador devuelto.
+            let _ = self.kill_leased(id, killer);
+        }
         let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
         self.record_codex_model(id, session_id.as_deref());
