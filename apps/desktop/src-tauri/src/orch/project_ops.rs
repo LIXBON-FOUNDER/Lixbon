@@ -54,7 +54,7 @@ impl<'a> Registration<'a> {
     /// conserva el canal de la petición. Se llama ANTES de cualquier escritura (también de `machine_id`).
     pub(super) fn new(origin: ProjectOrigin, ctx: &'a MutationContext) -> Result<Registration<'a>, String> {
         let (ok, esperado) = match origin {
-            ProjectOrigin::Manual => (ctx.actor == Actor::Person && ctx.channel == Channel::Ui, "una persona por la interfaz (person/ui)"),
+            ProjectOrigin::Manual => (ctx.is_person_ui(), "una persona por la interfaz (person/ui)"),
             ProjectOrigin::Backfill => (ctx.actor == Actor::System && ctx.channel == Channel::Core, "el sistema por el canal core (system/core)"),
             ProjectOrigin::Import => (ctx.actor == Actor::System && ctx.channel == Channel::Ui, "el sistema por la interfaz (system/ui)"),
             ProjectOrigin::Auto => (true, "una persona, un agente o el sistema"),
@@ -102,7 +102,7 @@ pub(super) struct Management<'a> {
 
 impl<'a> Management<'a> {
     pub(super) fn new(ctx: &'a MutationContext) -> Result<Management<'a>, String> {
-        if ctx.actor == Actor::Person && ctx.channel == Channel::Ui {
+        if ctx.is_person_ui() {
             Ok(Management { ctx })
         } else {
             Err(format!("la gestión de proyectos la decide una persona por la interfaz (person/ui), no {:?} por {:?}", ctx.actor, ctx.channel))

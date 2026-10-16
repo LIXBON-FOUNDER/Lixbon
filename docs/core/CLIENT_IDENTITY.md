@@ -29,6 +29,31 @@ Los bearer tokens deben ser de alta entropía: `ClientCredential::new` exige al 
 
 ## Compatibilidad y migración
 
+La migración `005_clients` agrega el registro sin reescribir Events históricos ni inventar `client_id`. Los contextos autenticados nuevos escriben `client_id`; los eventos anteriores conservan `NULL`.
+
+El journal de efectos v2 también conserva el `client_id` opcional para que una reconciliación tras fallo de persistencia no pierda la atribución. Los registros v2 anteriores, que no tenían ese campo, siguen leyéndose como `None`. El token nunca se copia al journal.
+
+### Fronteras autenticadas de LXO-85
+
+Tauri fija `Channel::Ui` y usa una credencial local registrada por Store con principal `Person("user")`, superficie Desktop e instalación `desktop-local`. El `client_id` lo recupera Store por `(surface, installation_id)` y permanece estable para esa instalación. La credencial aleatoria queda solo en memoria del proceso; SQLite conserva su hash. La interfaz no puede cambiar actor, canal ni `client_id` mediante argumentos.
+
+`POST /rpc` y `GET /events` también aceptan credenciales registradas por cliente. El transporte autentica el bearer en Store; los claims opcionales de `caller`, principal, superficie, scope, canal y `client_id` deben coincidir con la credencial. El servidor deriva `Caller` de la identidad autenticada. Un Agent conserva scope de su Task y las decisiones humanas quedan restringidas al flujo de la interfaz.
+
+`device_id` es opcional en el contrato. La identidad local de Desktop registra su instalación; el Core todavía no consulta un identificador de dispositivo del sistema operativo.
+
+### Ruta legacy y migración pendiente
+
+Los clientes `lxo` actuales siguen usando temporalmente el bearer global del servidor publicado en `orch.json` y el campo `caller`. Esa ruta conserva el comportamiento existente, no produce `AuthenticatedClient` ni atribuye un `client_id` verificado. Como todos esos clientes comparten el bearer, el campo `caller` puede afirmar otro ID de Agent; la ruta legacy no satisface el contrato de identidad verificable y queda como brecha explícita hasta que los clientes migren. En esa ruta el servidor solo construye `Caller::Agent`; el cuerpo no puede seleccionar `Person` o `System`.
+
+Plan para LXO-86:
+
+1. Añadir handshake CLI con negociación de versión y `client_id` estable.
+2. Entregar una credencial por instalación/principal y guardarla en el almacén seguro del sistema operativo.
+3. Enviar esa credencial en las llamadas RPC/Event Log; derivar actor y scope exclusivamente desde Store.
+4. Retirar el bearer global y el claim legacy `caller` después de migrar los clientes soportados.
+
+Las credenciales nuevas no se publican en `orch.json`, no aparecen en shell history ni se registran en logs. El Event Log conserva el vocabulario actual de canal (`ui`, `lxo`, `core`). Mobile y Automation están representados en el modelo, pero no reciben un transporte nuevo dentro de LXO-85.
+
 La migración `005_clients` agrega el registro sin reescribir Events históricos ni inventar `client_id`. Los contextos nuevos autenticados escriben `client_id`; los eventos anteriores conservan `NULL`.
 
 El journal de efectos v2 también conserva el `client_id` opcional para que una reconciliación tras fallo de persistencia no pierda la atribución. Los registros v2 anteriores, que no tenían ese campo, siguen leyéndose como `None`. El token nunca se copia al journal.

@@ -357,14 +357,16 @@ impl Tx {
     fn check_decision_actor(&self, kind: &str, actor: &str) -> Result<(), String> {
         let ctx = self.context();
         let coincide = match (actor, &ctx.actor) {
-            ("human", Actor::Person) | ("system", Actor::System) => true,
+            ("human", Actor::Person) => ctx.is_person(),
+            ("human", Actor::PersonId(_)) => ctx.is_person(),
+            ("system", Actor::System) => true,
             (a, Actor::Agent(task)) => a != "human" && a != "system" && a == task,
             _ => false,
         };
         if !coincide {
             return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
         }
-        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || ctx.channel != Channel::Ui) {
+        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !ctx.is_person_ui()) {
             return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }
         Ok(())
@@ -449,7 +451,7 @@ pub(super) enum SpawnRecorded {
 
 fn check_spawn_actor(outcome: ev::SpawnOutcome, ctx: &MutationContext) -> Result<(), String> {
     let ok = if outcome.decided_by_person() {
-        ctx.actor == Actor::Person && ctx.channel == Channel::Ui
+        ctx.is_person_ui()
     } else {
         ctx.actor == Actor::System && ctx.channel == Channel::Core
     };

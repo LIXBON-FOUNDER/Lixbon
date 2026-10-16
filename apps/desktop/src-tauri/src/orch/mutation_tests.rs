@@ -742,7 +742,7 @@ fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // (símbolo, archivos donde puede aparecer)
     let permitidos: [(&str, &[&str]); 16] = [
-        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs"]),
+        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs", "client_identity.rs"]),
         ("save_legacy_state", &["store_boot.rs"]),
         ("commit_authoritative", &["store_boot.rs"]),
         ("promote_to_authoritative", &["boot_authority.rs"]),

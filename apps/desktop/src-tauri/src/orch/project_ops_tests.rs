@@ -13,7 +13,7 @@ use super::events::{Actor, Channel, MutationContext};
 use super::project_ops::{register_project, ProjectOrigin, Registration};
 use super::projects_tests::{base_de, clon, core_listo, g, id_de, lista, project_id_de_tarea, regiones, registra, repo, rpc, s, tarea_en};
 use super::{Caller, Core};
-use crate::store::{EventClass, EventQuery, EventRow, Fingerprint, NewLocation, StoreError};
+use crate::store::{EventClass, EventQuery, EventRow, Fingerprint, NewLocation, StoreError, CORE_CLIENT_ID};
 
 // ---------------------------------------------------------------------------------------------
 // Ayudas
@@ -52,14 +52,33 @@ fn kinds(evs: &[EventRow]) -> Vec<&str> {
 }
 
 /// Todo lo que fija el contrato de `project.registered` para el proyecto `id`.
-fn afirma_registro(e: &EventRow, id: &str, origin: &str, name: &str, actor: (&str, Option<&str>, &str)) {
+#[derive(Clone, Copy)]
+enum ClientIdExpected {
+    Absent,
+    Present,
+    Core,
+}
+
+fn afirma_registro(
+    e: &EventRow,
+    id: &str,
+    origin: &str,
+    name: &str,
+    actor: (&str, Option<&str>, &str),
+    client_id: ClientIdExpected,
+) {
     assert_eq!(e.kind, "project.registered");
     assert_eq!((e.class, e.v), (EventClass::State, 1));
     assert_eq!((e.entity_kind.as_str(), e.entity_id.as_str()), ("project", id));
     assert_eq!(e.project_id.as_deref(), Some(id), "el id del evento es el de la fila");
     assert_eq!(e.run_id, None, "un proyecto no pertenece a ningún run");
     assert_eq!(e.idem_key.as_deref(), Some(id), "idem_key = project_id");
-    assert_eq!((e.correlation_id.as_deref(), e.client_id.as_deref()), (None, None));
+    assert_eq!(e.correlation_id.as_deref(), None);
+    match client_id {
+        ClientIdExpected::Absent => assert_eq!(e.client_id.as_deref(), None),
+        ClientIdExpected::Present => assert!(e.client_id.as_deref().is_some_and(|id| !id.is_empty())),
+        ClientIdExpected::Core => assert_eq!(e.client_id.as_deref(), Some(CORE_CLIENT_ID)),
+    }
     assert_eq!(e.state_rev, None, "no toca legacy_state");
     assert_eq!((e.actor_kind.as_str(), e.actor_id.as_deref(), e.channel.as_deref()), (actor.0, actor.1, Some(actor.2)));
     assert_eq!(pl(e), json!({ "origin": origin, "name": name, "has_remote": false, "root_commit_count": 1 }));
@@ -82,7 +101,7 @@ fn project_add_nuevo_emite_un_registro_manual_de_la_persona_por_la_interfaz() {
     let v = rpc(&core, "project_add", json!({ "path": s(&r), "name": "Mi aplicación" })).unwrap();
     let evs = desde(&core, antes);
     assert_eq!(kinds(&evs), vec!["project.registered"]);
-    afirma_registro(&evs[0], &id_de(&v), "manual", "Mi aplicación", ("person", None, "ui"));
+    afirma_registro(&evs[0], &id_de(&v), "manual", "Mi aplicación", ("person", Some("user"), "ui"), ClientIdExpected::Present);
 }
 
 #[test]
@@ -95,7 +114,7 @@ fn run_create_de_una_persona_registra_en_auto_y_atribuye_el_proyecto_a_la_person
     let reg: Vec<_> = evs.iter().filter(|e| e.kind == "project.registered").collect();
     assert_eq!(reg.len(), 1);
     let id = project_id_de_tarea(&core, out["task"].as_str().unwrap()).expect("la tarea tiene proyecto");
-    afirma_registro(reg[0], &id, "auto", "auto-persona", ("person", None, "ui"));
+    afirma_registro(reg[0], &id, "auto", "auto-persona", ("person", Some("user"), "ui"), ClientIdExpected::Present);
     assert_eq!(evs[0].kind, "project.registered", "el proyecto nace ANTES que el run que lo usa");
     let run = evs.iter().find(|e| e.kind == "run.created").unwrap();
     assert_eq!(run.project_id.as_deref(), Some(id.as_str()), "y el run lo cita");
@@ -111,7 +130,7 @@ fn run_create_de_un_agente_sin_identidad_registra_como_sistema_por_el_canal_de_l
     let reg: Vec<_> = desde(&core, antes).into_iter().filter(|e| e.kind == "project.registered").collect();
     assert_eq!(reg.len(), 1);
     let id = project_id_de_tarea(&core, out["task"].as_str().unwrap()).unwrap();
-    afirma_registro(&reg[0], &id, "auto", "auto-sin-id", ("system", None, "lxo"));
+    afirma_registro(&reg[0], &id, "auto", "auto-sin-id", ("system", None, "lxo"), ClientIdExpected::Absent);
 }
 
 #[test]
@@ -124,7 +143,7 @@ fn run_create_de_un_agente_con_identidad_registra_como_ese_agente() {
     let reg: Vec<_> = desde(&core, antes).into_iter().filter(|e| e.kind == "project.registered").collect();
     assert_eq!(reg.len(), 1);
     let id = project_id_de_tarea(&core, out["task"].as_str().unwrap()).unwrap();
-    afirma_registro(&reg[0], &id, "auto", "auto-agente", ("agent", Some("sesion-previa"), "lxo"));
+    afirma_registro(&reg[0], &id, "auto", "auto-agente", ("agent", Some("sesion-previa"), "lxo"), ClientIdExpected::Absent);
 }
 
 #[test]
@@ -137,7 +156,7 @@ fn el_relleno_registra_como_sistema_por_el_canal_core_y_repetirlo_no_emite_mas()
     let evs = desde(&core, antes);
     assert_eq!(kinds(&evs), vec!["project.registered"], "un proyecto nuevo, un evento; asignar el project_id a la tarea no emite nada");
     let id = project_id_de_tarea(&core, &t).unwrap();
-    afirma_registro(&evs[0], &id, "backfill", "relleno", ("system", None, "core"));
+    afirma_registro(&evs[0], &id, "backfill", "relleno", ("system", None, "core"), ClientIdExpected::Core);
     // Otra pasada: nada nuevo que registrar.
     let tras = head(&core);
     assert_eq!(core.backfill_projects(Duration::from_secs(60)).unwrap()["assigned"], 0);
@@ -157,7 +176,7 @@ fn la_importacion_registra_como_sistema_por_la_interfaz_y_un_evento_por_proyecto
     let ids: Vec<String> = lista(&core).iter().map(|p| p["id"].as_str().unwrap().to_string()).collect();
     for (e, nombre) in evs.iter().zip(["imp-a", "imp-b"]) {
         assert!(ids.contains(e.project_id.as_ref().unwrap()));
-        afirma_registro(e, e.project_id.as_ref().unwrap(), "import", nombre, ("system", None, "ui"));
+        afirma_registro(e, e.project_id.as_ref().unwrap(), "import", nombre, ("system", None, "ui"), ClientIdExpected::Present);
     }
     // La importación es de una sola vez: la segunda llamada no escribe ni emite.
     let tras = head(&core);

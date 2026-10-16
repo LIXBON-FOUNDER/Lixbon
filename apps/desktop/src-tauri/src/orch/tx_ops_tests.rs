@@ -473,11 +473,17 @@ fn run_create_emite_tres_hechos_atribuidos_a_la_raiz_y_con_el_proyecto_ya_comple
     assert_eq!(pl(&evs[2]), json!({ "from": "starting", "to": "running" }));
     assert_eq!(evs[0].run_id.as_deref(), Some(run.as_str()));
 
-    // Una PERSONA desde la interfaz: el actor es la persona, el canal la interfaz.
+    // Una PERSONA autenticada desde la interfaz: el actor y el client_id salen de su credencial.
     let antes = head(&core);
     core.rpc(Caller::User, &s(&r), "run_create", &json!({ "objective": "otro" })).unwrap();
     let evs = desde(&core, antes);
-    assert!(evs.iter().all(|e| e.actor_kind.as_str() == "person" && e.actor_id.is_none() && e.channel.as_deref() == Some("ui")), "{evs:?}");
+    let client_id = evs[0].client_id.as_deref().expect("client_id autenticado");
+    assert!(evs.iter().all(|e| {
+        e.actor_kind.as_str() == "person"
+            && e.actor_id.as_deref() == Some("user")
+            && e.channel.as_deref() == Some("ui")
+            && e.client_id.as_deref() == Some(client_id)
+    }), "{evs:?}");
 }
 
 #[test]
@@ -513,7 +519,13 @@ fn cada_comando_de_rpc_deja_exactamente_los_eventos_de_su_mutador_con_su_actor()
     // reply (PERSONA desde la interfaz) -> respuesta + vuelve a correr
     let evs = ejecuta(Caller::User, "reply", json!({ "question": q, "answer": "main" }));
     assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed"]);
-    assert!(evs.iter().all(|e| e.actor_kind.as_str() == "person" && e.channel.as_deref() == Some("ui")));
+    let client_id = evs[0].client_id.as_deref().expect("client_id autenticado");
+    assert!(evs.iter().all(|e| {
+        e.actor_kind.as_str() == "person"
+            && e.actor_id.as_deref() == Some("user")
+            && e.channel.as_deref() == Some("ui")
+            && e.client_id.as_deref() == Some(client_id)
+    }));
     assert_eq!(evs[0].entity_id, hija, "la respuesta cuelga de la tarea que preguntó");
     // send / check no son hechos del Event Log.
     assert!(ejecuta(Caller::User, "send", json!({ "to": hija, "body": "ánimo" })).is_empty());

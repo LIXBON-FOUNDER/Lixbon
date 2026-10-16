@@ -4,8 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
-use super::events::{Channel, MutationContext};
+use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
+use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
 
 impl Core {
     /// SOLO pruebas: atajo con el canal de cada superficie real (Tauri -> `Ui`, `lxo` -> `Lxo`). La
@@ -22,10 +23,55 @@ impl Core {
     /// Despacho de un comando desde una superficie CONOCIDA: Tauri -> `Channel::Ui`, servidor local de
     /// `lxo` -> `Channel::Lxo`. El canal lo fija quien recibe la orden; nunca se deduce del actor.
     pub(super) fn rpc_via(self: &Arc<Self>, channel: Channel, caller: Caller, cwd: &str, cmd: &str, args: &Value) -> Result<Value, String> {
+        if channel == Channel::Ui && matches!(&caller, Caller::User) {
+            if let Some(client) = self.desktop_client()? {
+                return self.rpc_authenticated_via(&client, &ClientClaims::default(), channel, cwd, cmd, args);
+            }
+        }
+        self.rpc_with_context(channel, caller, cwd, cmd, args, None)
+    }
+
+    pub(super) fn rpc_authenticated_via(
+        self: &Arc<Self>,
+        client: &AuthenticatedClient,
+        claims: &ClientClaims,
+        channel: Channel,
+        cwd: &str,
+        cmd: &str,
+        args: &Value,
+    ) -> Result<Value, String> {
+        let context = MutationContext::authenticated(client, claims, channel)
+            .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
+        let action = if review::closed_to_agents(cmd).is_some() {
+            ClientAction::HumanDecision
+        } else {
+            ClientAction::AgentCommand
+        };
+        client.authorize(action).map_err(|error| format!("Acción no permitida para esta identidad: {error:?}"))?;
+        let caller = match client.identity().principal() {
+            ClientPrincipal::Person(_) => Caller::User,
+            ClientPrincipal::Agent(task) => Caller::Agent(Some(task.clone())),
+            ClientPrincipal::System => return Err("La identidad Core/System está reservada".into()),
+        };
+        self.rpc_with_context(channel, caller, cwd, cmd, args, Some(context))
+    }
+
+    fn rpc_with_context(
+        self: &Arc<Self>,
+        channel: Channel,
+        caller: Caller,
+        cwd: &str,
+        cmd: &str,
+        args: &Value,
+        authenticated_context: Option<MutationContext>,
+    ) -> Result<Value, String> {
         // Contexto de lo que muta este comando. Un agente sin identidad solo puede crear un run
         // (`run_create` fija su actor al crear la tarea raíz): para todo lo demás, sin identidad no hay
         // evento atribuido a un agente que no existe.
         let ctx_of = || -> Result<MutationContext, String> {
+            if let Some(context) = &authenticated_context {
+                return Ok(context.clone());
+            }
             match &caller {
                 Caller::User => Ok(MutationContext::person(channel)),
                 Caller::Agent(Some(id)) => Ok(MutationContext::agent(id.clone(), channel)),
@@ -74,12 +120,13 @@ impl Core {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
                 }
+                let context = ctx_of()?;
                 match cmd {
                     // La persona registra (manual). La importación la dispara la interfaz, pero la hace el Core.
-                    "project_add" => self.project_add(&MutationContext::person(channel), args),
-                    "project_archive" => self.project_archive(&MutationContext::person(channel), args),
-                    "project_locate" => self.project_locate(&MutationContext::person(channel), args),
-                    _ => self.projects_import_recents(&MutationContext::system(channel), args),
+                    "project_add" => self.project_add(&context, args),
+                    "project_archive" => self.project_archive(&context, args),
+                    "project_locate" => self.project_locate(&context, args),
+                    _ => self.projects_import_recents(&context.with_actor(Actor::System), args),
                 }
             }
             "run_create" => {
@@ -101,9 +148,8 @@ impl Core {
                 // Si nace, `project.registered` lo atribuye a quien lanza el run: persona, agente (su tarea) o,
                 // sin identidad, el sistema.
                 let registrant = match &caller {
-                    Caller::User => MutationContext::person(channel),
-                    Caller::Agent(Some(id)) => MutationContext::agent(id.clone(), channel),
                     Caller::Agent(None) => MutationContext::system(channel),
+                    _ => ctx_of()?,
                 };
                 let project_id = self.project_for_repo(&registrant, &repo)?;
                 if let Some(pid) = &project_id {
@@ -128,8 +174,9 @@ impl Core {
                     // el actor de los eventos de esta mutación es la tarea raíz recién creada. Los borradores
                     // ya acumulados usan este actor al finalizar.
                     st.set_context(match &caller {
-                        Caller::User => MutationContext::person(channel),
-                        Caller::Agent(_) => MutationContext::agent(task.clone(), channel),
+                        Caller::User => ctx_of()?,
+                        Caller::Agent(None) => MutationContext::agent(task.clone(), channel),
+                        Caller::Agent(Some(_)) => ctx_of()?.with_actor(Actor::Agent(task.clone())),
                     });
                     st.mark_running(&task)?;
                     if let Some(t) = st.tasks.get_mut(&task) {
@@ -329,5 +376,52 @@ impl Core {
             }
             other => Err(format!("Comando desconocido: {other}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orch::boot_tests;
+    use crate::store::{ClientCredential, ClientRegistration, ClientSurface, DeviceIdentity};
+
+    #[test]
+    fn credencial_agent_no_puede_decidir_revision_antes_de_mutar() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+
+        let secret = "agent-rpc-review-secret-85-at-least-32-bytes";
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new("install-agent-rpc-review-85", None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(
+            ClientPrincipal::Agent("task-agent-rpc-review-85".into()),
+            secret,
+        )
+        .unwrap();
+        core.storage
+            .with_store(|store| {
+                store
+                    .register_client(&registration, &credential, super::super::state::now_ms() as i64)
+                    .unwrap();
+            })
+            .expect("almacén abierto");
+        let client = core.authenticate_client(secret).unwrap().expect("credencial registrada");
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let result = core.rpc_authenticated_via(
+            &client,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "review",
+            &json!({ "task": "task-agent-rpc-review-85", "decision": "accepted", "confirm": true }),
+        );
+
+        assert!(result.unwrap_err().contains("Acción no permitida"), "la identidad Agent se rechaza en la frontera autenticada");
+        assert_eq!(core.storage.with_store(|store| store.events_head().unwrap()).unwrap(), head_before);
     }
 }
