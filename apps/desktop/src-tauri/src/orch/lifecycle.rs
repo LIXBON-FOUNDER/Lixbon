@@ -189,7 +189,7 @@ impl Core {
     }
 
     pub(super) fn close_idle_runs(&self) {
-        let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+        let live = self.live_ids();
         let idle = self.lock().idle_runs(state::now_ms(), IDLE_CLOSE_MS, &live);
         for run in idle {
             let noted = self.mutate(|st| {
@@ -210,11 +210,8 @@ impl Core {
     }
 
     pub fn shutdown(&self) {
-        if let Ok(mut terms) = self.terms.lock() {
-            // Una terminación en curso no se interrumpe ni se descarta (otro hilo conserva su matador), y un terminal
-            // cuyo kill falla tampoco: sale del mapa solo quien se comprobó muerto.
-            terms.retain(|_, t| t.kill_in_progress() || t.try_kill().is_err());
-        }
+        // Sin el mapa de terminales bloqueado mientras corre cada matador (ver `kill_all_terms`).
+        self.kill_all_terms();
         // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
         super::pty::reap_unowned();
         self.stop_server();
