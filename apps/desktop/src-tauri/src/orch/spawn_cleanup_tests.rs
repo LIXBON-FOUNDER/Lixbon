@@ -458,7 +458,7 @@ fn pty_process_con_el_core_degradado_mata_el_proceso_pero_conserva_task_y_worktr
 
 /// Un matador que siempre falla: no hay control fiable sobre el proceso.
 #[derive(Debug)]
-struct MatadorRoto;
+pub(super) struct MatadorRoto;
 
 impl ChildKiller for MatadorRoto {
     fn kill(&mut self) -> std::io::Result<()> {

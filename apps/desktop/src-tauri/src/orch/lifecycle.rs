@@ -216,6 +216,8 @@ impl Core {
             }
             terms.clear();
         }
+        // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
+        super::pty::reap_unowned();
         self.stop_server();
     }
 

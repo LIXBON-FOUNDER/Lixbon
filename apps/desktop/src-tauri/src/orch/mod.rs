@@ -21,6 +21,8 @@ mod events_tests;
 mod tx_ops_tests;
 #[cfg(test)]
 mod spawn_cleanup_tests;
+#[cfg(test)]
+mod hardening_tests;
 mod projects;
 mod project_ops;
 #[cfg(test)]

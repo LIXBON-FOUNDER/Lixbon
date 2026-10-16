@@ -83,17 +83,68 @@ impl AgentTerm {
     }
 }
 
-/// Mata el proceso que acaba de crearse y cuya construcción falló. No se confía en que soltar los
-/// manejadores lo mate: cerrar el master de una PTY puede acabar con él según la plataforma, pero un proceso
-/// canalizado seguiría vivo y `AgentTerm` no tiene `Drop`.
-fn kill_after_failed_setup(killer: &mut dyn ChildKiller) {
-    let killed = killer.kill().is_ok();
+/// Un proceso recién creado cuya construcción falló y que NO se pudo dar por muerto. No hay `AgentTerm` al que
+/// colgarlo (el lanzamiento devuelve `Err`), así que queda aquí, bajo la custodia del módulo, con el matador que
+/// falló: nunca se suelta un proceso potencialmente vivo y sin dueño. Se reintenta con [`reap_unowned`]
+/// (`Core::shutdown`).
+struct Unowned {
+    pid: Option<u32>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+static UNOWNED: Mutex<Vec<Unowned>> = Mutex::new(Vec::new());
+
+fn unowned() -> std::sync::MutexGuard<'static, Vec<Unowned>> {
+    UNOWNED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Procesos en custodia (su compensación no se pudo comprobar). Diagnóstico.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn unowned_count() -> usize {
+    unowned().len()
+}
+
+/// Reintenta matar los procesos en custodia que cumplan `pred` y devuelve cuántos siguen en ella.
+fn reap_unowned_where(pred: impl Fn(Option<u32>) -> bool) -> usize {
+    let mut list = unowned();
+    list.retain_mut(|u| !pred(u.pid) || u.killer.kill().is_err());
+    list.len()
+}
+
+/// Reintenta matar todos los procesos en custodia. Lo llama `Core::shutdown`.
+pub fn reap_unowned() -> usize {
+    reap_unowned_where(|_| true)
+}
+
+/// Compensa un fallo de construcción posterior a crear el proceso: lo mata COMPROBANDO el resultado y devuelve
+/// `true` solo si puede darse por muerto. No se confía en que soltar los manejadores lo mate: cerrar el master de
+/// una PTY puede acabar con él según la plataforma, pero un proceso canalizado seguiría vivo y `AgentTerm` no
+/// tiene `Drop`. Si ni el matador del árbol ni el kill directo lo logran, el proceso pasa a la custodia
+/// del módulo (`UNOWNED`) en vez de soltarse. `direct` es el kill del propio hijo (solo alcanza a la raíz).
+fn kill_after_failed_setup(pid: Option<u32>, mut killer: Box<dyn ChildKiller + Send + Sync>, direct: &mut dyn FnMut() -> std::io::Result<()>) -> bool {
     #[cfg(test)]
-    if killed {
-        KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
-    }
+    let broken = BREAK_KILLS.with(|b| b.get());
     #[cfg(not(test))]
-    let _ = killed;
+    let broken = false;
+    let tree = !broken && killer.kill().is_ok();
+    // Un kill directo `Ok` solo vale si el pid ya no existe; sin pid conocido no hay nada que comprobar.
+    let dead = tree || (!broken && direct().is_ok() && pid.is_none_or(|p| !pid_alive(p)));
+    if dead {
+        #[cfg(test)]
+        KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
+    } else {
+        unowned().push(Unowned { pid, killer });
+    }
+    dead
+}
+
+/// El `Err` de un lanzamiento cuya construcción falló, con lo que pasó con el proceso si no se pudo matar.
+fn setup_failure(e: String, pid: Option<u32>, dead: bool) -> String {
+    if dead {
+        return e;
+    }
+    let who = pid.map_or("recién creado".to_string(), |p| p.to_string());
+    format!("{e}. El proceso {who} no se pudo matar y queda bajo la custodia de Lixbon")
 }
 
 // SOLO pruebas: punto de fallo inyectable justo después de crear el proceso (el equivalente de que
@@ -104,6 +155,8 @@ thread_local! {
     pub(crate) static LAST_SPAWNED_PID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
     /// Cuántas veces se ejecutó la compensación (el kill tras un fallo de construcción) en este hilo.
     pub(crate) static KILLS_AFTER_FAILED_SETUP: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Ningún matador (ni el del árbol ni el directo) funciona: no hay control fiable sobre el proceso.
+    pub(crate) static BREAK_KILLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -274,14 +327,15 @@ fn kill_outcome(success: bool, alive: impl FnOnce() -> bool, pid: u32, status: &
     }
 }
 
-/// ¿Sigue vivo el proceso `pid`? Ante la duda (no se pudo ejecutar la comprobación), `true`.
+/// ¿Sigue vivo el proceso `pid`? Ante la duda (no se pudo ejecutar la comprobación, o la herramienta falló y su
+/// salida vacía no prueba nada), `true`.
 fn pid_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         let mut cmd = std::process::Command::new("tasklist");
         cmd.args(["/FI", &format!("PID eq {pid}"), "/NH"]);
         match hide_console(&mut cmd).output() {
-            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&format!(" {pid} ")),
+            Ok(o) => tasklist_alive(o.status.success(), &String::from_utf8_lossy(&o.stdout), pid),
             Err(_) => true,
         }
     }
@@ -290,13 +344,28 @@ fn pid_alive(pid: u32) -> bool {
         let mut cmd = std::process::Command::new("ps");
         cmd.args(["-o", "stat=", "-p", &pid.to_string()]);
         match hide_console(&mut cmd).output() {
-            Ok(o) => {
-                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                !s.is_empty() && !s.starts_with('Z')
-            }
+            Ok(o) => ps_alive(o.status.code(), &String::from_utf8_lossy(&o.stdout)),
             Err(_) => true,
         }
     }
+}
+
+/// Interpreta la salida de `tasklist /FI "PID eq N" /NH`. Un estado distinto de cero es un fallo de la herramienta
+/// (su salida vacía NO significa «no existe»): vivo. Con éxito, el proceso vive si su fila lo nombra.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn tasklist_alive(success: bool, stdout: &str, pid: u32) -> bool {
+    !success || stdout.contains(&format!(" {pid} "))
+}
+
+/// Interpreta la salida de `ps -o stat= -p N`. `ps` sale con 1 cuando ningún proceso coincide; cualquier otro estado
+/// con la salida vacía es un fallo de la herramienta y no prueba nada: vivo. Un zombi pendiente de `wait` cuenta como muerto.
+#[cfg_attr(windows, allow(dead_code))]
+fn ps_alive(code: Option<i32>, stdout: &str) -> bool {
+    let stat = stdout.trim();
+    if stat.is_empty() {
+        return code != Some(1);
+    }
+    !stat.starts_with('Z')
 }
 
 fn spawn_piped(
@@ -322,11 +391,11 @@ fn spawn_piped(
     let (stdout, stderr) = match pipes {
         Ok(p) => p,
         Err(e) => {
-            let mut killer: Box<dyn ChildKiller + Send + Sync> = Box::new(TreeKiller(pid));
-            kill_after_failed_setup(&mut *killer);
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(e);
+            let dead = kill_after_failed_setup(Some(pid), Box::new(TreeKiller(pid)), &mut || child.kill());
+            if dead {
+                let _ = child.wait();
+            }
+            return Err(setup_failure(e, Some(pid), dead));
         }
     };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -436,11 +505,12 @@ fn spawn_pty(
     let (mut reader, writer): (_, Shared) = match streams {
         Ok((r, w)) => (r, Arc::new(Mutex::new(w))),
         Err(e) => {
-            let mut killer = killer;
-            kill_after_failed_setup(&mut *killer);
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(e);
+            let pid = child.process_id();
+            let dead = kill_after_failed_setup(pid, killer, &mut || child.kill());
+            if dead {
+                let _ = child.wait();
+            }
+            return Err(setup_failure(e, pid, dead));
         }
     };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -828,7 +898,9 @@ mod matador {
 
     #[test]
     fn matar_un_pid_que_no_existe_no_es_un_fallo() {
-        let mut k = TreeKiller(u32::MAX - 7);
+        // Un pid válido para `tasklist`/`ps` (cabe en un i32 y supera cualquier `pid_max`) que no existe. Uno fuera de
+        // rango haría fallar a `tasklist`, y un fallo de la herramienta ya no se toma por «no existe».
+        let mut k = TreeKiller(2_000_000_001);
         assert!(k.kill().is_ok(), "un pid inexistente: ya no hay nada que matar");
     }
 }
@@ -872,5 +944,97 @@ mod error_tras_crear_el_proceso {
         let pid = ultimo_pid().expect("el proceso llegó a crearse");
         assert!(espera_muerto(pid), "el proceso no puede quedar vivo y sin dueño");
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod custodia_y_verificacion {
+    use super::pruebas::*;
+    use super::{ps_alive, reap_unowned_where, tasklist_alive, unowned, BREAK_KILLS};
+
+    fn pids_en_custodia() -> Vec<u32> {
+        unowned().iter().filter_map(|u| u.pid).collect()
+    }
+
+    /// Reintenta SOLO el proceso `pid` (otras pruebas comparten la custodia, que es global).
+    fn reintenta(pid: u32) -> usize {
+        reap_unowned_where(|p| p == Some(pid))
+    }
+
+    fn con_matadores_rotos<R>(f: impl FnOnce() -> R) -> R {
+        BREAK_KILLS.with(|b| b.set(true));
+        let r = f();
+        BREAK_KILLS.with(|b| b.set(false));
+        r
+    }
+
+    #[test]
+    fn si_ningun_matador_funciona_el_proceso_queda_en_custodia_y_se_mata_al_reintentar() {
+        for piped in [false, true] {
+            let dir = carpeta(&format!("custodia-{piped}"));
+            let r = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, piped)));
+            let pid = ultimo_pid().expect("el proceso llegó a crearse");
+            let e = r.err().expect("el lanzamiento falla");
+            assert!(e.contains("inyectado") && e.contains("custodia"), "el error dice qué pasó con el proceso: {e}");
+            assert!(pids_en_custodia().contains(&pid), "un proceso que no se pudo matar no se suelta (piped={piped})");
+            if piped {
+                // Sin master PTY que se cierre al soltarlo, solo un kill explícito puede acabar con él.
+                assert!(vivo(pid), "el proceso canalizado sigue vivo: la custodia es lo único que lo posee");
+            }
+            // El control se recupera: el reintento lo mata y lo saca de la custodia.
+            reintenta(pid);
+            assert!(espera_muerto(pid), "el reintento lo mata (piped={piped})");
+            assert!(!pids_en_custodia().contains(&pid), "y deja la custodia (piped={piped})");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn un_reintento_que_vuelve_a_fallar_no_pierde_la_custodia() {
+        let dir = carpeta("custodia-reintento");
+        let _ = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, true)));
+        let pid = ultimo_pid().expect("pid");
+        // El killer de la custodia es el real (`TreeKiller`): para simular que sigue fallando se retira el pid
+        // del filtro (no se toca) y se comprueba que un reintento ajeno no la vacía.
+        reintenta(pid.wrapping_add(1));
+        assert!(pids_en_custodia().contains(&pid), "un reintento que no la alcanza no la pierde");
+        reintenta(pid);
+        assert!(espera_muerto(pid));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn si_el_matador_funciona_no_queda_nada_en_custodia() {
+        for piped in [false, true] {
+            let dir = carpeta(&format!("sin-custodia-{piped}"));
+            let r = con_fallo_tras_crear(|| lanza(&dir, piped));
+            let pid = ultimo_pid().expect("pid");
+            assert!(matches!(&r, Err(e) if e.contains("inyectado") && !e.contains("custodia")), "{:?}", r.err());
+            assert!(espera_muerto(pid));
+            assert!(!pids_en_custodia().contains(&pid), "compensado: nada que custodiar (piped={piped})");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn tasklist_que_falla_no_prueba_que_el_proceso_haya_muerto() {
+        // Salida vacía con éxito: la herramienta dice que no hay filas -> muerto.
+        assert!(!tasklist_alive(true, "INFO: No tasks are running which match the specified criteria.\r\n", 4242));
+        assert!(!tasklist_alive(true, "", 4242));
+        // Salida vacía con fallo de la herramienta: NO prueba nada -> vivo.
+        assert!(tasklist_alive(false, "", 4242), "tasklist falló: ante la duda, vivo");
+        // La fila nombra al proceso -> vivo.
+        assert!(tasklist_alive(true, "cmd.exe                      4242 Console                    1      3.512 K\r\n", 4242));
+        // Otro pid en la fila no cuenta.
+        assert!(!tasklist_alive(true, "cmd.exe                      42420 Console                   1      3.512 K\r\n", 4242));
+    }
+
+    #[test]
+    fn ps_que_falla_no_prueba_que_el_proceso_haya_muerto() {
+        assert!(!ps_alive(Some(1), ""), "ps sale con 1 cuando ningún proceso coincide -> muerto");
+        assert!(ps_alive(Some(127), ""), "ps no pudo ejecutarse bien: vivo");
+        assert!(ps_alive(None, ""), "ps murió por una señal: vivo");
+        assert!(ps_alive(Some(0), "S"), "dormido -> vivo");
+        assert!(!ps_alive(Some(0), "Z+"), "un zombi pendiente de wait cuenta como muerto");
     }
 }
