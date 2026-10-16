@@ -150,7 +150,13 @@ impl Core {
         // propio kill al comprobar el resultado. Se lee su salida igualmente: el proceso ya terminó.
         let terminal = self.terms.lock().ok().and_then(|mut t| {
             let text = |term: &pty::AgentTerm| term.buffer.lock().ok().map(|b| String::from_utf8_lossy(&b).into_owned());
-            if t.get(id)?.kill_in_progress() { text(t.get(id)?) } else { text(&t.remove(id)?) }
+            if t.get(id)?.kill_in_progress() {
+                // El kill en curso, si falla, lo reintenta una vez sabiendo que el proceso ya terminó.
+                t.get_mut(id)?.mark_exited();
+                text(t.get(id)?)
+            } else {
+                text(&t.remove(id)?)
+            }
         });
         let session_id = terminal.as_deref().and_then(codex_session::session_id_from_terminal);
         self.collect(id, terminal, true);
@@ -208,17 +214,78 @@ impl Core {
             Ok(k) => k,
             Err(e) => return Some(Err(e)),
         };
-        // Desde aquí el matador está prestado: si el kill falla o entra en pánico, `KillLease` lo devuelve.
+        Some(self.kill_leased(id, killer))
+    }
+
+    /// Mata con un matador YA prestado por `begin_kill` (sin el mapa bloqueado: el resto del Core sigue leyendo y
+    /// escribiendo terminales mientras el árbol muere). Si el kill falla o entra en pánico, `KillLease` devuelve el
+    /// matador. Si falla pero `on_exit` vio terminar al proceso durante la ventana, se reintenta UNA vez: la raíz ya
+    /// no existe y solo falta que la verificación pase, para no dejar un terminal muerto retenido para siempre.
+    fn kill_leased(&self, id: &str, killer: pty::Killer) -> Result<(), String> {
         let mut lease = KillLease { core: self, id, killer: Some(killer) };
-        // Sin el mapa bloqueado: el resto del Core sigue leyendo y escribiendo terminales mientras el árbol muere.
-        let outcome = lease.killer.as_mut().map_or(Ok(()), |k| k.kill()).map_err(|e| e.to_string());
-        match outcome {
-            Ok(()) => {
+        let mut retried = false;
+        loop {
+            let outcome = lease.killer.as_mut().map_or(Ok(()), |k| k.kill()).map_err(|e| e.to_string());
+            let Err(e) = outcome else {
                 lease.killer = None;
                 self.terms.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
-                Some(Ok(()))
+                return Ok(());
+            };
+            // La decisión y la devolución del matador son atómicas respecto a `on_exit` (ambos bajo el lock del mapa).
+            let mut terms = self.terms.lock().unwrap_or_else(|e| e.into_inner());
+            match terms.get_mut(id) {
+                Some(t) if t.exited() && !retried => retried = true,
+                Some(t) => {
+                    if let Some(k) = lease.killer.take() {
+                        t.end_kill(k);
+                    }
+                    return Err(e);
+                }
+                None => {
+                    // El terminal desapareció por otra vía: el `Drop` del lease pasa el matador a la custodia.
+                    drop(terms);
+                    return Err(e);
+                }
             }
-            Err(e) => Some(Err(e)),
+        }
+    }
+
+    /// Ids con un proceso vivo bajo la custodia del Core: los terminales registrados (también con una terminación en
+    /// curso) y los procesos sin terminal que `pty` custodia a nombre de este Core. Lo que consultan la interfaz
+    /// (`live`) y el cierre por inactividad; coincide con `has_term`.
+    pub(super) fn live_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.terms.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+        for owner in pty::custody_owners(&self.custody_key("")) {
+            if !ids.contains(&owner) {
+                ids.push(owner);
+            }
+        }
+        ids
+    }
+
+    /// Apagado: mata todos los terminales COMPROBANDO el resultado. Los matadores se prestan bajo el lock y se ejecutan
+    /// fuera de él (como en `kill_registered_term`): ni un terminal lento bloquea `on_exit` o `has_term`. Sale del mapa
+    /// solo quien se comprobó muerto; una terminación que otro hilo ya tiene en curso no se interrumpe ni se descarta, y
+    /// se espera (acotado) a que acabe antes de salir de la aplicación.
+    pub(super) fn kill_all_terms(&self) {
+        let mut leased = Vec::new();
+        let mut busy = Vec::new();
+        for (id, t) in self.terms.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+            match t.begin_kill() {
+                Ok(k) => leased.push((id.clone(), k)),
+                Err(_) => busy.push(id.clone()),
+            }
+        }
+        for (id, killer) in leased {
+            let _ = self.kill_leased(&id, killer);
+        }
+        for _ in 0..20 {
+            let terms = self.terms.lock().unwrap_or_else(|e| e.into_inner());
+            if !busy.iter().any(|id| terms.get(id).is_some_and(|t| t.kill_in_progress())) {
+                break;
+            }
+            drop(terms);
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
@@ -275,7 +342,7 @@ impl Core {
 
 /// El matador de un terminal, prestado mientras corre. Al soltarse sin consumirlo (el kill falló o hubo un pánico) vuelve
 /// a su terminal: la terminación en curso nunca deja un terminal sin matador.
-struct KillLease<'a> {
+pub(super) struct KillLease<'a> {
     core: &'a Core,
     id: &'a str,
     killer: Option<pty::Killer>,

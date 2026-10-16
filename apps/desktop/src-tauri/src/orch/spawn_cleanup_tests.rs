@@ -904,6 +904,7 @@ fn on_exit_y_un_segundo_cleanup_dentro_de_la_ventana_de_un_kill_fallan_cerrados_
 
     let pasos: Pasos = Arc::default();
     let (entra1, sale1) = programa(&pasos, false);
+    let (entra_auto, sale_auto) = programa(&pasos, false);
     let (entra2, sale2) = programa(&pasos, true);
     e.core.register_term(&hija, pty::AgentTerm::for_tests(Box::new(MatadorGuiado(pasos)))).unwrap();
 
@@ -929,8 +930,13 @@ fn on_exit_y_un_segundo_cleanup_dentro_de_la_ventana_de_un_kill_fallan_cerrados_
     assert!(e.core.lock().tasks.contains_key(&hija), "la Task sigue en el estado");
     assert_eq!(head(&e.core), antes, "y no se registró ningún evento");
 
-    // El kill falla: el terminal sigue siendo del Core y se puede reintentar; el cleanup sigue sin proceder.
+    // El kill falla. Como `on_exit` vio terminar al proceso, el propio kill lo reintenta UNA vez (sigue en curso)...
     sale1.wait().expect("liberar el kill fallido");
+    entra_auto.wait().expect("el reintento automático entró en el matador");
+    assert!(e.core.has_term(&hija) && e.core.terms.lock().unwrap().get(&hija).is_some_and(|t| t.kill_in_progress()));
+    assert!(e.core.kill_term(&hija).is_err());
+    // ...y si también falla, el terminal sigue siendo del Core y se puede reintentar; el cleanup sigue sin proceder.
+    sale_auto.wait().expect("liberar el reintento fallido");
     assert!(a.join().unwrap().is_err());
     assert!(e.core.has_term(&hija) && e.core.terms.lock().unwrap().get(&hija).is_some_and(|t| !t.kill_in_progress()));
     assert!(Path::new(&wt).exists());
@@ -945,6 +951,66 @@ fn on_exit_y_un_segundo_cleanup_dentro_de_la_ventana_de_un_kill_fallan_cerrados_
     assert!(!e.core.has_term(&hija));
     e.core.abandon_attempt(&intento());
     assert!(!Path::new(&wt).exists(), "con el proceso comprobado muerto, el cleanup sí procede");
+}
+
+#[test]
+fn un_kill_fallido_con_on_exit_dentro_de_la_ventana_se_reintenta_y_no_deja_un_terminal_zombi() {
+    let e = setup("onexit-zombi");
+    let pend = e.spawn(false);
+    assert_eq!(e.aprobar(&pend)["outcome"], "approved");
+    let hija = e.hijas().pop().expect("hija lanzada");
+    let pasos: Pasos = Arc::default();
+    let (entra1, sale1) = programa(&pasos, false);
+    let (entra2, sale2) = programa(&pasos, true);
+    e.core.register_term(&hija, pty::AgentTerm::for_tests(Box::new(MatadorGuiado(pasos)))).unwrap();
+
+    let (core, id) = (e.core.clone(), hija.clone());
+    let a = std::thread::spawn(move || core.kill_term(&id));
+    entra1.wait().expect("kill_term entró en el matador");
+    e.core.on_exit(&hija);
+    assert!(e.core.has_term(&hija));
+    sale1.wait().expect("el primer kill falla");
+    entra2.wait().expect("y se reintenta una vez, sin que nadie lo pida");
+    assert!(e.core.has_term(&hija), "mientras tanto sigue siendo del Core");
+    sale2.wait().expect("el reintento comprueba la muerte");
+    assert!(matches!(a.join().unwrap(), Ok(true)));
+    assert!(!e.core.has_term(&hija), "el terminal de un proceso muerto no se queda en el mapa para siempre");
+    assert_eq!(e.core.lock().tasks.get(&hija).map(|t| t.status.clone()), Some(Status::Exited));
+    e.core.rpc(Caller::User, "", "release", &json!({ "task": hija, "force": true })).expect("y la tarea se libera sin intervención manual");
+}
+
+#[test]
+fn los_procesos_en_custodia_cuentan_como_vivos_para_la_interfaz_y_el_cierre_por_inactividad() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    pty::keep_in_custody(&core.custody_key("t-vivo"), Box::new(MatadorRoto));
+    core.register_term("t-term", pty::AgentTerm::for_tests(Box::new(MatadorOk))).unwrap();
+    let mut live = core.live_ids();
+    live.sort();
+    assert_eq!(live, vec!["t-term".to_string(), "t-vivo".to_string()], "terminales y procesos sin terminal");
+    assert!(core.snapshot()["live"].as_array().is_some_and(|l| l.iter().any(|v| v == "t-vivo")), "la interfaz los ve");
+    // Otro Core no ve los de este.
+    assert!(Orch::default().0.live_ids().is_empty());
+    core.terms.lock().unwrap().clear();
+    assert!(pty::resolve_custody(&core.custody_key("t-vivo")).is_some_and(|r| r.is_err()), "el matador roto no libera la custodia");
+    pty::reap_unowned();
+}
+
+#[test]
+fn el_apagado_no_bloquea_el_mapa_de_terminales_mientras_corre_un_matador() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let pasos: Pasos = Arc::default();
+    let (entra, sale) = programa(&pasos, true);
+    core.register_term("t-lento", pty::AgentTerm::for_tests(Box::new(MatadorGuiado(pasos)))).unwrap();
+    let c2 = core.clone();
+    let apagado = std::thread::spawn(move || c2.shutdown());
+    entra.wait().expect("el apagado entró en el matador del terminal");
+    assert!(core.terms.try_lock().is_ok(), "el mapa no está bloqueado durante el kill del apagado");
+    assert!(core.has_term("t-lento") && core.terms.lock().unwrap().get("t-lento").is_some_and(|t| t.kill_in_progress()));
+    sale.wait().expect("liberar el matador");
+    apagado.join().unwrap();
+    assert!(!core.has_term("t-lento"), "comprobado muerto, sale del mapa");
 }
 
 #[test]
