@@ -453,22 +453,33 @@ pub(crate) fn plain(text: &str) -> String {
 /// identifica cada proceso por `(pid, hora de creación)` (un pid se reutiliza), recuerda entre intentos solo a los
 /// descendientes que siguen vivos, vuelve a descubrir lo que nazca durante el kill y falla CERRADO si algo no se puede
 /// probar. Ver la cabecera de ese módulo.
+///
+/// El árbol es COMPARTIDO (`Arc<Mutex<_>>`) entre este matador, sus clones y el hilo que espera a la raíz
+/// ([`proctable::wait_root`]): el hilo anota el grupo de procesos cuando la raíz sale y la reapea SOLO con el candado, así
+/// que mientras un kill tiene el árbol la raíz (zombi) sigue siendo el ancla de la propiedad del grupo.
 #[derive(Debug)]
 struct TreeKiller {
-    tree: crate::proctable::Tree,
+    tree: Arc<Mutex<crate::proctable::Tree>>,
 }
 
 impl TreeKiller {
     /// Se crea justo después de crear el proceso (su pid es seguro): anota su identidad en ese instante.
     fn new(pid: u32) -> Self {
-        TreeKiller { tree: crate::proctable::Tree::capture(&mut crate::proctable::RealOs, pid) }
+        TreeKiller { tree: Arc::new(Mutex::new(crate::proctable::Tree::capture(&mut crate::proctable::RealOs::default(), pid))) }
+    }
+
+    /// El árbol, para quien espera a la raíz.
+    fn shared(&self) -> Arc<Mutex<crate::proctable::Tree>> {
+        self.tree.clone()
     }
 }
 
 impl ChildKiller for TreeKiller {
     /// `Ok` solo si una ronda completa comprobó que NINGÚN proceso del árbol sigue vivo y no apareció ninguno nuevo.
     fn kill(&mut self) -> std::io::Result<()> {
-        crate::proctable::kill_tree(&mut self.tree, &mut crate::proctable::RealOs)
+        // Un pánico anterior dentro de un kill no invalida lo que el árbol recuerda: se recupera el candado.
+        let mut tree = self.tree.lock().unwrap_or_else(|e| e.into_inner());
+        crate::proctable::kill_tree(&mut tree, &mut crate::proctable::RealOs::default())
     }
 
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
@@ -570,6 +581,7 @@ fn spawn_piped(
     let pid = child.id();
     // La identidad de la raíz se anota ahora, con el proceso recién creado.
     let tree = TreeKiller::new(pid);
+    let waiter_tree = tree.shared();
     // El proceso ya existe: si falta cualquier tubería, se mata antes de devolver el error.
     let pipes = post_spawn_failpoint(Some(pid)).and_then(|_| match (child.stdout.take(), child.stderr.take()) {
         (Some(out), Some(err)) => Ok((out, err)),
@@ -637,7 +649,11 @@ fn spawn_piped(
     if let Err(e) = spawn_thread(move || {
         let taken = waiter_child.lock().unwrap_or_else(|x| x.into_inner()).take();
         if let Some(mut c) = taken {
-            let _ = c.wait();
+            // Unix: la raíz queda zombi mientras se anota su grupo (los procesos que deje en segundo plano retienen las
+            // tuberías, así que lo de abajo puede tardar), y solo entonces se reapea.
+            crate::proctable::wait_root(&waiter_tree, &mut crate::proctable::RealOs::default(), pid, || {
+                let _ = c.wait();
+            });
         }
         let _ = a.join();
         let _ = b.join();
@@ -702,8 +718,10 @@ fn spawn_pty(
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("No se pudo lanzar el agente: {e}"))?;
     // El proceso del PTY es `cmd /C launch.cmd`: matar solo ese deja vivo al
     // agente, que además retiene su worktree y no deja borrarlo.
-    let killer: Box<dyn ChildKiller + Send + Sync> = match child.process_id() {
-        Some(pid) => Box::new(TreeKiller::new(pid)),
+    let tree_killer = child.process_id().map(TreeKiller::new);
+    let observer = tree_killer.as_ref().map(TreeKiller::shared);
+    let killer: Box<dyn ChildKiller + Send + Sync> = match tree_killer {
+        Some(k) => Box::new(k),
         None => child.clone_killer(),
     };
     drop(pair.slave);
@@ -807,7 +825,17 @@ fn spawn_pty(
     let waiter_child = child.clone();
     if let Err(e) = spawn_thread(move || {
         let taken = waiter_child.lock().unwrap_or_else(|x| x.into_inner()).take();
-        let code = taken.and_then(|mut c| c.wait().ok()).map(|s| s.exit_code());
+        let code = taken
+            .and_then(|mut c| {
+                let mut status = None;
+                match (&observer, c.process_id()) {
+                    // Unix: la raíz queda zombi mientras se anota su grupo, y solo entonces se reapea.
+                    (Some(tree), Some(pid)) => crate::proctable::wait_root(tree, &mut crate::proctable::RealOs::default(), pid, || status = c.wait().ok()),
+                    _ => status = c.wait().ok(),
+                }
+                status
+            })
+            .map(|s| s.exit_code());
         thread::sleep(Duration::from_millis(300));
         on_exit(code);
     }) {
@@ -1260,6 +1288,146 @@ mod error_tras_crear_el_proceso {
         let pid = ultimo_pid().expect("el proceso llegó a crearse");
         assert!(espera_muerto(pid), "el proceso no puede quedar vivo y sin dueño");
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Unix, procesos de verdad: el lanzamiento deja a la raíz como líder de su grupo (`process_group(0)` canalizado, `setsid`
+/// en la PTY), el matador del árbol lo sabe, y una raíz que sale dejando un proceso en segundo plano no deja un cleanup
+/// imposible: el grupo se anota al salir la raíz (todavía zombi) y el kill posterior lo encuentra.
+#[cfg(all(test, unix))]
+mod grupo_de_procesos_unix {
+    use super::pruebas::*;
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn lanza_comando(dir: &Path, piped: bool, command: &str, on_exit: impl FnOnce() + Send + 'static) -> Result<AgentTerm, String> {
+        let cwd = dir.to_string_lossy().into_owned();
+        spawn(Launch { cwd: &cwd, script_dir: &dir.join("s"), command: command.into(), env: vec![], inject: None, piped, owner: None }, |_| {}, on_exit)
+    }
+
+    /// Espera (acotado) a que el grupo `pgid` tenga algún miembro vivo que no sea `raiz` y devuelve sus pids.
+    fn miembros_huerfanos(raiz: u32) -> Vec<u32> {
+        let limite = Instant::now() + Duration::from_secs(15);
+        loop {
+            let mut os = crate::proctable::RealOs::default();
+            let m: Vec<u32> = crate::proctable::Os::group_view(&mut os, raiz).map(|g| g.members.iter().map(|p| p.pid).filter(|p| *p != raiz).collect()).unwrap_or_default();
+            if !m.is_empty() || Instant::now() > limite {
+                return m;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn la_raiz_lanzada_lidera_su_grupo_y_un_matador_creado_tras_el_spawn_lo_sabe() {
+        for piped in [true, false] {
+            let dir = carpeta(&format!("lider-{piped}"));
+            let mut term = lanza(&dir, piped).expect("lanzamiento");
+            let pid = ultimo_pid().expect("pid");
+            let tk = TreeKiller::new(pid);
+            assert_eq!(tk.tree.lock().unwrap().pgid(), Some(pid), "la raíz lidera su propio grupo (piped={piped})");
+            term.try_kill().expect("el árbol se mata y se comprueba");
+            assert!(espera_muerto(pid));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn disparador_b_la_raiz_sale_dejando_un_proceso_en_segundo_plano_y_aun_asi_se_puede_matar_todo() {
+        // Canalizado: el proceso en segundo plano retiene las tuberías, así que `on_exit` NO llega mientras viva. PTY: la
+        // raíz ignora SIGHUP para que el huérfano sobreviva al cierre de su terminal de control.
+        for (piped, comando) in [(true, "sleep 120 &"), (false, "trap '' HUP; sleep 120 &")] {
+            let dir = carpeta(&format!("b-{piped}"));
+            let salio = Arc::new(AtomicBool::new(false));
+            let s2 = salio.clone();
+            let mut term = lanza_comando(&dir, piped, comando, move || s2.store(true, Ordering::SeqCst)).expect("lanzamiento");
+            let raiz = ultimo_pid().expect("pid");
+            assert!(espera_muerto(raiz), "la raíz salió por sí sola (piped={piped})");
+            let huerfanos = miembros_huerfanos(raiz);
+            assert!(!huerfanos.is_empty(), "el proceso en segundo plano sigue en el grupo de la raíz muerta (piped={piped})");
+            if piped {
+                assert!(!salio.load(Ordering::SeqCst), "retiene las tuberías: on_exit no puede haber llegado");
+            }
+            // Antes de la reparación esto daba `Err` para siempre: la raíz ya estaba reapeada y nada se había anotado.
+            term.try_kill().unwrap_or_else(|e| panic!("(piped={piped}) {e}"));
+            for h in &huerfanos {
+                assert!(espera_muerto(*h), "el huérfano {h} murió (piped={piped})");
+            }
+            let limite = Instant::now() + Duration::from_secs(15);
+            while !salio.load(Ordering::SeqCst) && Instant::now() < limite {
+                thread::sleep(Duration::from_millis(50));
+            }
+            assert!(salio.load(Ordering::SeqCst), "y con el huérfano muerto el hilo de espera termina y avisa (piped={piped})");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// Windows, procesos de verdad: el Job Object de la raíz se crea también en los lanzamientos reales (ConPTY de
+/// portable-pty y tuberías), no solo con un `Command` suelto. El nieto que deja la raíz al salir tiene el `ppid` colgando:
+/// solo el Job lo conoce, así que si no estuviera el kill no lo encontraría.
+#[cfg(all(test, windows))]
+mod job_en_los_lanzamientos_reales {
+    use super::pruebas::*;
+    use super::*;
+
+    /// Pids de los `ping.exe` de esta prueba, reconocidos por su cuenta de paquetes `marca` (sin tocar otras pruebas que
+    /// también lanzan `ping`).
+    fn pings_con(marca: &str) -> Vec<u32> {
+        powershell(&format!("Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'PING.EXE' -and $_.CommandLine -like '*-n {marca} 127.0.0.1*' }} | ForEach-Object {{ $_.ProcessId }}"))
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect()
+    }
+
+    fn powershell(script: &str) -> String {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+        String::from_utf8_lossy(&hide_console(&mut cmd).output().expect("powershell").stdout).into_owned()
+    }
+
+    /// Si la prueba falla a medias, el `ping` huérfano no puede quedarse vivo (y reteniendo las tuberías de `cargo test`).
+    struct LimpiaPings(&'static str);
+
+    impl Drop for LimpiaPings {
+        fn drop(&mut self) {
+            for pid in pings_con(self.0) {
+                powershell(&format!("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"));
+            }
+        }
+    }
+
+    fn espera_pings(marca: &str) -> Vec<u32> {
+        let limite = Instant::now() + Duration::from_secs(20);
+        loop {
+            let p = pings_con(marca);
+            if !p.is_empty() || Instant::now() > limite {
+                return p;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+    }
+
+    #[test]
+    fn el_nieto_huerfano_de_un_lanzamiento_real_muere_con_el_job_de_la_raiz() {
+        for (piped, marca) in [(true, "117"), (false, "118")] {
+            let _limpia = LimpiaPings(marca);
+            let dir = carpeta(&format!("job-{piped}"));
+            let cwd = dir.to_string_lossy().into_owned();
+            // Un `cmd` INTERMEDIO lanza el ping y sale; el script termina y la raíz sale también: el ping queda con el `ppid`
+            // colgando de un pid que no es el de la raíz (el recorrido por `ppid` no lo ve; solo lo conoce el Job).
+            let comando = format!("cmd /C \"start \"\" /B ping -n {marca} 127.0.0.1 >nul\"");
+            let mut term = spawn(Launch { cwd: &cwd, script_dir: &dir.join("s"), command: comando, env: vec![], inject: None, piped, owner: None }, |_| {}, || {}).expect("lanzamiento");
+            let raiz = ultimo_pid().expect("pid");
+            let nietos = espera_pings(marca);
+            assert!(!nietos.is_empty(), "el ping huérfano llegó a arrancar (piped={piped})");
+            assert!(espera_muerto(raiz), "la raíz (cmd) salió dejando al nieto (piped={piped})");
+            term.try_kill().unwrap_or_else(|e| panic!("(piped={piped}) {e}"));
+            for n in &nietos {
+                assert!(espera_muerto(*n), "el nieto {n} (ppid colgando) murió con el Job de la raíz (piped={piped})");
+            }
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 

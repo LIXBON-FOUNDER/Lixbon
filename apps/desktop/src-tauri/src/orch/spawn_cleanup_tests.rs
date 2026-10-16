@@ -1675,3 +1675,88 @@ fn coordinator_closed_y_remove_run_persisten_outcomes_canónicos() {
     assert_eq!(cancellation.state_rev, removed_events[1].state_rev, "resolución y borrado son la misma mutación");
     assert!(removed.core.lock().decisions.iter().all(|decision| decision.kind != "spawn"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// LXO-18 (reparación P2-2): la salida natural de la raíz no suelta el terminal sin barrer su árbol
+// ---------------------------------------------------------------------------------------------
+
+/// Cuenta cuántas veces se le pide matar; funciona solo mientras `ok` esté activo (se cambia entre llamadas).
+#[derive(Debug, Clone)]
+struct MatadorContado {
+    llamadas: Arc<std::sync::atomic::AtomicUsize>,
+    ok: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl MatadorContado {
+    fn nuevo(ok: bool) -> MatadorContado {
+        MatadorContado { llamadas: Arc::default(), ok: Arc::new(std::sync::atomic::AtomicBool::new(ok)) }
+    }
+
+    fn llamadas(&self) -> usize {
+        self.llamadas.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl ChildKiller for MatadorContado {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.llamadas.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.ok.load(std::sync::atomic::Ordering::SeqCst) {
+            Ok(())
+        } else {
+            Err(std::io::Error::other("el árbol sigue vivo"))
+        }
+    }
+
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(self.clone())
+    }
+}
+
+#[test]
+fn la_salida_natural_barre_el_arbol_con_el_matador_y_solo_entonces_suelta_el_terminal() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let matador = MatadorContado::nuevo(true);
+    core.register_term("t-natural", pty::AgentTerm::for_tests(Box::new(matador.clone()))).unwrap();
+    core.on_exit("t-natural");
+    assert_eq!(matador.llamadas(), 1, "la raíz salió sola: el árbol se barre antes de soltar el matador");
+    assert!(!core.has_term("t-natural"), "comprobado el barrido, el terminal sale del mapa como siempre");
+}
+
+#[test]
+fn si_el_barrido_de_la_salida_natural_no_se_comprueba_el_terminal_queda_custodiado_y_se_puede_reintentar() {
+    let _serie = pruebas::serie_custodia();
+    let core = Orch::default().0;
+    let matador = MatadorContado::nuevo(false);
+    core.register_term("t-natural", pty::AgentTerm::for_tests(Box::new(matador.clone()))).unwrap();
+    core.on_exit("t-natural");
+    assert_eq!(matador.llamadas(), 2, "un intento y el único reintento (la raíz ya salió: solo falta comprobar)");
+    assert!(core.has_term("t-natural"), "descendientes sin comprobar: nunca se suelta un AgentTerm cuyo árbol puede seguir vivo");
+    assert!(core.terms.lock().unwrap().get("t-natural").is_some_and(|t| t.exited() && !t.kill_in_progress()), "con su matador de vuelta");
+    assert!(core.live_ids().contains(&"t-natural".to_string()));
+    // Más tarde el árbol ya no existe: cualquier cleanup posterior lo comprueba y lo suelta.
+    matador.ok.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(core.kill_term("t-natural"), Ok(true)));
+    assert!(!core.has_term("t-natural"));
+}
+
+#[test]
+fn con_el_arbol_sin_comprobar_la_task_sale_cerrada_pero_el_worktree_no_se_borra() {
+    let e = setup("onexit-arbol-vivo");
+    let pend = e.spawn(false);
+    assert_eq!(e.aprobar(&pend)["outcome"], "approved");
+    let hija = e.hijas().pop().expect("hija lanzada");
+    let wt = e.core.lock().tasks.get(&hija).and_then(|t| t.worktree.clone()).expect("worktree de la hija");
+    let matador = MatadorContado::nuevo(false);
+    e.core.register_term(&hija, pty::AgentTerm::for_tests(Box::new(matador.clone()))).unwrap();
+
+    e.core.on_exit(&hija);
+    assert_eq!(e.core.lock().tasks.get(&hija).map(|t| t.status.clone()), Some(Status::Exited), "la raíz salió: la Task se cierra");
+    assert!(e.core.has_term(&hija), "pero su árbol no se comprobó muerto: el terminal sigue siendo del Core");
+    assert!(e.core.rpc(Caller::User, "", "release", &json!({ "task": hija, "force": true })).is_err(), "y no se libera nada");
+    assert!(Path::new(&wt).exists(), "ni se borra el worktree con descendientes posiblemente vivos");
+
+    matador.ok.store(true, std::sync::atomic::Ordering::SeqCst);
+    e.core.rpc(Caller::User, "", "release", &json!({ "task": hija, "force": true })).expect("comprobado el árbol, se libera");
+    assert!(!e.core.has_term(&hija));
+}

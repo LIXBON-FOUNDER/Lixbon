@@ -334,6 +334,13 @@ Mismo principio: ante la duda, el proceso está vivo, el terminal sigue custodia
 * **`task.branch` no sobrevive a su rama** en `release` y `free_worktrees`: si `branch -d` la borró, la Task
   retenida pasa a `branch = None` (la identidad histórica queda en `effect.observed`); si `-d` falló, conserva su rama.
   Nunca `-D`.
+* **La salida natural de la raíz no suelta el terminal sin barrer su árbol.** `Core::on_exit` presta el matador y ejecuta
+  un `kill_tree` final (grupo de procesos / Job aún consultables) ANTES de retirar el terminal: que la raíz haya salido
+  no prueba que hayan salido sus descendientes (un servidor en segundo plano). Si el barrido se comprueba, el terminal
+  sale como siempre; si no (tras el único reintento), el terminal queda en el mapa —`exited`, con su matador de vuelta,
+  visible en `live`— y la Task se cierra `Exited` pero `release`, `abandon_attempt` y `free_worktrees` conservan el
+  worktree («proceso sin detener») hasta que un cleanup posterior lo compruebe. Con una terminación ya en curso no se
+  barre: lo hace ese kill (sin cambios).
 * **Ninguna confirmación vacía.** `apply_found` decide por el estado previo: Task retirada o ya final, o sondeo sin
   informe válido fuera del cierre del proceso, es `no_change()` (el sondeo de cada segundo avanzaba la `rev` de toda
   Task viva). `record_codex_model` solo confirma si algún campo del modelo cambia (un `on_exit` repetido no).
@@ -357,20 +364,43 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
 | plataforma | identidad `start` | vías de descubrimiento | garantía |
 |---|---|---|---|
 | Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica |
-| Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada |
-| macOS | hash normalizado de `ps lstart` (resolución de 1 s; solo igualdad) | igual, con una única instantánea de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` | igual; un falso «mismo proceso» exige reutilizar el pid y arrancar en el mismo segundo, es decir, agotar el espacio circular de pids (99 999) en menos de 1 s |
+| Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo, leída EN BYTES (el nombre del proceso no tiene por qué ser UTF-8) | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada, si se PRUEBA que el grupo es nuestro (abajo) |
+| macOS | hash normalizado de `ps lstart` (resolución de 1 s, `TZ=UTC` y `LC_ALL=C` fijados; solo igualdad) | igual, con una única instantánea de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` | igual. **No demostrado:** un falso «mismo proceso» exige reutilizar el pid y arrancar en el mismo segundo; es una suposición de caudal, no una prueba. Identidad fina (`proc_pidinfo`, µs) pendiente. Sin ejecutar en un macOS real |
+| otros Unix | como macOS | como macOS | **sin garantía** (pids aleatorios en FreeBSD/OpenBSD) |
 
-* **Unix y el número de grupo.** Un `pgid` solo está reservado mientras el grupo tiene miembros. Por eso solo se
-  descubre por `pgid` si un proceso que ya rastreamos (identidad verificada en esa ronda) sigue dentro en la misma
-  lectura; con miembros y sin ese ancla (p. ej. la raíz murió antes del primer kill y no se anotó nada) no se puede
-  probar que el número siga siendo nuestro: `Err`, custodia y nada se mata. Nunca `kill(-pgid)`.
+* **Unix y el número de grupo: la propiedad se prueba, no se supone.** Un `pgid` solo está reservado mientras alguien lo
+  ocupa, y un grupo con el líder muerto es indistinguible de uno ajeno que reutilizó el número (su líder murió dejando
+  hijos). Una sola lectura da los miembros, su token y quien ocupa el PID `pgid`. Son nuestros si: (1) la raíz sigue sin
+  reapear (viva o zombi: ocupa el pid y nadie más puede ser ese pid ni crear ese grupo); (2) el ocupante tiene el token de
+  la raíz; (3) un miembro YA verificado en esa lectura sigue dentro (continuidad). Si el ocupante tiene OTRO token el
+  grupo es ajeno: no se toca y el número se retira. Sin ocupante ni miembros el grupo murió y el número se retira. En
+  cualquier otro caso: `Err`, custodia y nada se mata. Nunca `kill(-pgid)`.
+  Para que (1) no se pierda, el hilo que espera a la raíz (`proctable::wait_root`, piped y PTY) usa `waitid(WNOWAIT)`
+  (crate `libc`, solo Unix): la raíz queda zombi, se anotan los miembros del grupo y SOLO después se reapea, todo bajo el
+  candado del `Arc<Mutex<Tree>>` que comparte con el `TreeKiller`. Mientras un `kill_tree` tiene el árbol, la raíz que
+  muere sigue de ancla: lo que nazca entre dos instantáneas se descubre y se mata, y una raíz que sale sola dejando un
+  proceso en segundo plano (que retiene las tuberías) deja el grupo anotado para el kill posterior. **Residuo:** todos los
+  miembros anotados mueren solos, la raíz ya está reapeada y queda un nacido posterior sin anotar → `Err` y custodia.
+* **Procesos ilegibles (`/proc` con `hidepid`).** Un `stat` ilegible por permisos de un proceso de OTRO usuario ya no
+  invalida la tabla de todos: es un pid «opaco» (existe, no se puede leer). Un pid rastreado opaco está sin probar (no
+  muerto) y el kernel (`/proc/<pid>/task/*/children`) dice si un opaco es hijo de algo rastreado: entonces el veto es
+  persistente aunque su padre muera. Un opaco sin relación visible se omite (no se puede atribuir ni, siendo de otro
+  usuario, matar). Un fallo de lectura de un proceso del PROPIO usuario, o cualquier error no clasificado, sigue
+  invalidando la lectura. Límite: un hijo de otro usuario cuyo padre ya murió, bajo `hidepid`, es invisible.
+* **Identidad de la raíz.** Se reintenta (acotado, `CAPTURE_TRIES`) al crearla, con su pid seguro. Si aun así falta y la
+  raíz sigue sin reapear (pin), se toma al matar; si no, `Err` y custodia (nunca se mata un pid sin identidad).
 * **Residuales (no cubiertos):** un proceso que se desvincula a propósito tras perder a su padre (`setsid`/`setpgid` a
   otro grupo, daemonización) escapa a las tres vías; en Unix la identidad se comprueba justo antes de `kill -9` (dos
-  llamadas, sin handle que ancle el pid; ventana de milisegundos); un proceso creado por la raíz antes de entrar en el
+  llamadas, sin handle que ancle el pid; ventana de decenas de milisegundos con carga: no es una garantía); un proceso creado por la raíz antes de entrar en el
   Job (microsegundos) solo lo cubre el recorrido por `ppid`. Cubrirlos exigiría un contenedor del sistema (cgroups).
-* **Pruebas.** Mundo simulado determinista (`proctable::tests::World`) para cada carrera y mutantes; procesos reales con
-  Job Object en Windows y con grupo de procesos en Linux/macOS (`#[cfg(unix)]`, solo en CI Linux/macOS: la rama Unix se
-  compila-verifica en Windows con un crate scratch, no se ejecuta contra `ps` real).
+* **Pruebas.** Mundo simulado determinista (`proctable::tests::World`, corre en Windows) para cada carrera: nacido entre
+  instantáneas con la raíz zombi de ancla, raíz que sale dejando un huérfano (con y sin observación), pin roto, número
+  reutilizado por un líder ajeno (vivo o muerto), zombi sin token, opacos rastreados/ajenos/hijos, identidad de la raíz.
+  Procesos reales: Job Object en Windows; grupo de procesos, `waitid(WNOWAIT)`, el waiter sin reapear durante un kill y
+  un nombre de proceso no UTF-8 en `#[cfg(unix)]`, y `orch::pty` (`TreeKiller::new` tras `spawn_piped`/PTY y la raíz que
+  sale dejando un proceso que retiene las tuberías). Se han ejecutado en un Linux real (WSL2, kernel 6.6, binario musl
+  compilado desde Windows); la rama macOS solo se compila (`cargo check --target aarch64-apple-darwin`) y NO se ha
+  ejecutado.
 
 ### Seguridad de excepciones de `pty::spawn`
 Una vez creado el proceso, cualquier `Err` posterior al construir el `AgentTerm` (`try_clone_reader`,
