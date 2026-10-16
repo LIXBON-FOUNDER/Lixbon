@@ -53,13 +53,15 @@
 
 use serde::Serialize;
 
-use crate::store::{new_uuid_v7, ActorKind, EventClass, NewEvent, MAX_PAYLOAD_BYTES};
+use crate::store::{new_uuid_v7, ActorKind, AuthenticatedClient, ClientClaims, ClientIdentityError, ClientPrincipal, EventClass, NewEvent, MAX_PAYLOAD_BYTES, CORE_CLIENT_ID};
 
 /// Quién provoca un hecho.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Actor {
-    /// Una persona (la interfaz local). Su identidad concreta llega con F1.
+    /// Una persona del cliente legacy, sin id de cuenta verificado.
     Person,
+    /// Una persona identificada por una credencial autenticada.
+    PersonId(String),
     /// Un agente, con la tarea que lo identifica.
     Agent(String),
     /// El propio Core.
@@ -70,6 +72,7 @@ impl Actor {
     fn parts(&self) -> (ActorKind, Option<String>) {
         match self {
             Actor::Person => (ActorKind::Person, None),
+            Actor::PersonId(person) => (ActorKind::Person, Some(person.clone())),
             Actor::Agent(task) => (ActorKind::Agent, Some(task.clone())),
             Actor::System => (ActorKind::System, None),
         }
@@ -80,12 +83,13 @@ impl Actor {
 /// ni «caller actual» global). Lo construye quien conoce la superficie real:
 /// * Tauri -> `Channel::Ui` · servidor local de `lxo` -> `Channel::Lxo` · vigilantes, arranque y
 ///   temporizadores -> `Channel::Core`.
-/// El canal NO se deduce del actor. `client_id` queda vacío hasta F1 (identidad por credencial).
+/// El canal NO se deduce del actor. Los constructores legacy no llevan `client_id`; el constructor
+/// autenticado lo copia de la credencial resuelta en Store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct MutationContext {
     pub actor: Actor,
     pub channel: Channel,
-    /// Reservado para F1; siempre `None` en E.
+    /// Instalación autenticada de origen, si la operación llegó desde un cliente registrado.
     pub client_id: Option<String>,
 }
 
@@ -96,7 +100,7 @@ impl MutationContext {
 
     /// El propio Core (arranque, vigilantes, temporizadores).
     pub(super) fn core() -> MutationContext {
-        MutationContext::new(Actor::System, Channel::Core)
+        MutationContext { actor: Actor::System, channel: Channel::Core, client_id: Some(CORE_CLIENT_ID.to_string()) }
     }
 
     pub(super) fn person(channel: Channel) -> MutationContext {
@@ -111,6 +115,23 @@ impl MutationContext {
 
     pub(super) fn agent(task: impl Into<String>, channel: Channel) -> MutationContext {
         MutationContext::new(Actor::Agent(task.into()), channel)
+    }
+
+    /// Construye contexto exclusivamente desde una identidad que Store ya autenticó. Los claims
+    /// opcionales del request se validan contra esta misma credencial antes del despacho.
+    pub(super) fn authenticated(client: &AuthenticatedClient, claims: &ClientClaims, channel: Channel) -> Result<MutationContext, ClientIdentityError> {
+        client.validate_claims(claims, channel.as_str())?;
+        let actor = match client.identity().principal() {
+            ClientPrincipal::Person(id) => Actor::PersonId(id.clone()),
+            ClientPrincipal::Agent(task) => Actor::Agent(task.clone()),
+            ClientPrincipal::System if client.identity().client_id() == CORE_CLIENT_ID && channel == Channel::Core => Actor::System,
+            ClientPrincipal::System => return Err(ClientIdentityError::ReservedPrincipal),
+        };
+        Ok(MutationContext {
+            actor,
+            channel,
+            client_id: Some(client.identity().client_id().to_string()),
+        })
     }
 }
 

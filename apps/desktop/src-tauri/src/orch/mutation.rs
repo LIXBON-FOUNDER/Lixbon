@@ -721,6 +721,7 @@ impl Core {
         });
         let (actor_kind, actor_id) = match &ctx.actor {
             Actor::Person => ("person", None),
+            Actor::PersonId(id) => ("person", Some(id.clone())),
             Actor::Agent(task) => ("agent", Some(task.clone())),
             Actor::System => ("system", None),
         };
