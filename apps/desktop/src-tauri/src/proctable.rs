@@ -314,6 +314,10 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
     // 1) Los ya vistos: los verificados muertos (ausentes, o con otro dueño del pid) salen para siempre.
     let mut unproven = false;
     let mut alive: Vec<Proc> = Vec::new();
+    // Vistos cuyo pid lo ocupa quien no se puede leer: se conservan (veto), pero con su `start` VIEJO no son padres de nadie
+    // (ese pid puede ser ya de otro, y los hijos de otro no se adoptan) ni se terminan en esta ronda (sus hijos legítimos
+    // no se habrían descubierto). Se resuelven cuando vuelven a leerse.
+    let mut unreadable: Vec<Proc> = Vec::new();
     for p in std::mem::take(&mut t.seen) {
         if !present(p.pid) {
             continue;
@@ -324,12 +328,13 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
             None => {
                 unproven = true;
                 alive.push(p); // presente y sin identidad probable: se conserva, y el éxito queda vetado
+                unreadable.push(p);
             }
         }
     }
 
     // 2) La raíz.
-    let mut parents = alive.clone();
+    let mut parents: Vec<Proc> = alive.iter().copied().filter(|p| !unreadable.contains(p)).collect();
     let mut root = t.start.map(|start| Proc { pid: t.pid, start });
     let mut root_alive = false;
     if !t.root_dead {
@@ -357,10 +362,10 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
             (true, Some(r)) => match os.start(t.pid) {
                 Some(s) if s == r.start => root_alive = true,
                 Some(_) => t.root_dead = true, // pid reutilizado: no hay huérfanos que adoptar con seguridad
-                None => {
-                    unproven = true;
-                    root_alive = true;
-                }
+                // Ocupado por quien no se lee: veta, pero con el `start` viejo no es padre de nadie ni ancla de propiedad
+                // (sus hijos pueden ser de otro) y NO se termina en esta ronda: sus hijos legítimos, si los hay, no se
+                // habrían descubierto y quedarían huérfanos. Cuando vuelva a leerse se resuelve; si no, `Err` y custodia.
+                None => unproven = true,
             },
         }
     }
@@ -456,7 +461,7 @@ fn round(t: &mut Tree, os: &mut dyn Os, ordered: bool, kill: bool) -> std::io::R
     }
 
     // 4) Terminar todo lo vivo, cada uno comprobando su identidad en el momento de matarlo.
-    let targets: Vec<Proc> = parents.iter().copied().chain(alive.iter().copied()).fold(Vec::new(), |mut v, p| {
+    let targets: Vec<Proc> = parents.iter().copied().chain(alive.iter().copied()).filter(|p| !unreadable.contains(p)).fold(Vec::new(), |mut v, p| {
         if !v.contains(&p) {
             v.push(p);
         }
@@ -1122,6 +1127,8 @@ mod tests {
         no_children: bool,
         /// Lo que `make_group` recibió como `start` (para comprobar que `capture` pasa la identidad capturada).
         group_start_seen: Option<Option<u64>>,
+        /// Todo `Proc` que llegó a `terminate` (mate o no): un ajeno no debe aparecer jamás aquí.
+        terminate_calls: Vec<Proc>,
     }
 
     #[derive(Default, Debug)]
@@ -1232,6 +1239,7 @@ mod tests {
         }
 
         fn terminate(&mut self, p: Proc) -> Fate {
+            self.terminate_calls.push(p);
             if let Some(mut hook) = self.before_terminate.take() {
                 hook(&mut self.procs, p);
                 self.before_terminate = Some(hook);
@@ -1441,6 +1449,103 @@ mod tests {
         assert!(kill_tree(&mut t, &mut w).is_err());
         assert!(w.alive(77));
         assert!(w.killed.iter().all(|k| k.0 != 77), "{:?}", w.killed);
+    }
+
+    // --- Un ocupante ilegible del pid de la raíz o de un visto no es padre de nadie (revisión de 6b57d11) ---
+
+    /// F, un programa cuyo token de identidad NO se puede leer (servicio de otro usuario), ocupa el pid `pid`.
+    fn ocupante_ilegible(w: &mut World, pid: u32) {
+        w.procs.iter_mut().filter(|p| p.0 == pid).for_each(|p| p.3 = false);
+        w.procs.push((pid, 1, 8_000, true));
+        w.no_start.push(pid);
+    }
+
+    fn sin_ni_una_llamada_a_terminate_sobre(w: &World, ajeno: u32) {
+        assert!(w.alive(ajeno), "el ajeno {ajeno} sigue vivo");
+        assert!(w.terminate_calls.iter().all(|p| p.pid != ajeno), "nunca se le envió terminate: {:?}", w.terminate_calls);
+        assert!(w.killed.iter().all(|k| k.0 != ajeno), "{:?}", w.killed);
+    }
+
+    #[test]
+    fn un_ocupante_ilegible_del_pid_de_la_raiz_no_adopta_a_los_hijos_del_ocupante() {
+        for job in [false, true] {
+            let mut w = mundo_con_hijo_ajeno_posterior_a_la_raiz(job);
+            let mut t = captura(&mut w);
+            // La raíz y los suyos mueren sin que ninguna ronda lo vea; F (ilegible) toma el pid 10 y lanza X (77, ppid 10).
+            muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+            ocupante_ilegible(&mut w, 10);
+            let e = kill_tree(&mut t, &mut w).unwrap_err().to_string();
+            sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+            assert!(w.alive(10) && w.terminate_calls.iter().all(|p| p.pid != 10), "tampoco se toca al ocupante (job={job}): {e}");
+            // La duda sigue vetando mientras el ocupante siga sin leerse...
+            assert!(kill_tree(&mut t, &mut w).is_err());
+            sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+            // ...y en cuanto se lee y es otro proceso, el pid se descarta sin adoptar nada.
+            w.no_start.clear();
+            kill_tree(&mut t, &mut w).unwrap();
+            sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+            assert!(w.alive(10) && w.killed.is_empty(), "job={job}: {:?}", w.killed);
+        }
+    }
+
+    #[test]
+    fn un_ocupante_ilegible_de_un_pid_visto_no_adopta_a_los_hijos_del_ocupante() {
+        let mut w = arbol();
+        let mut t = captura(&mut w);
+        w.immortal.push(11);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "11 no muere");
+        assert!(t.seen().iter().any(|p| p.pid == 11), "11 quedó anotado");
+        // 11 muere de verdad; F (ilegible) toma su pid y lanza X (77, ppid 11) con un instante posterior.
+        w.immortal.clear();
+        w.terminate_calls.clear();
+        w.killed.clear();
+        ocupante_ilegible(&mut w, 11);
+        w.procs.push((77, 11, 9_000, true));
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+        assert!(w.terminate_calls.iter().all(|p| p.pid != 11), "11 es de F: no se le envía terminate: {:?}", w.terminate_calls);
+        assert!(w.alive(11), "el ocupante tampoco se toca");
+        // Controles: el ocupante pasa a ser legible (otro token) o desaparece: el visto se descarta y X no es de nadie nuestro.
+        w.no_start.clear();
+        kill_tree(&mut t, &mut w).unwrap();
+        sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+        assert!(w.alive(11));
+    }
+
+    #[test]
+    fn un_visto_cuyo_pid_desaparece_no_adopta_a_los_hijos_que_lo_reutilizan() {
+        let mut w = arbol();
+        let mut t = captura(&mut w);
+        w.immortal.push(11);
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        w.immortal.clear();
+        w.procs.iter_mut().filter(|p| p.0 == 11).for_each(|p| p.3 = false); // pid ausente
+        w.procs.push((77, 11, 9_000, true));
+        kill_tree(&mut t, &mut w).unwrap();
+        sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+    }
+
+    #[test]
+    fn una_raiz_legible_que_es_otro_proceso_no_adopta_a_sus_hijos_control() {
+        let mut w = arbol();
+        let mut t = captura(&mut w);
+        muere_la_raiz_y_nace_un_ajeno_con_su_ppid(&mut w);
+        w.procs.push((10, 1, 8_000, true)); // F, legible
+        kill_tree(&mut t, &mut w).unwrap();
+        sin_ni_una_llamada_a_terminate_sobre(&w, 77);
+    }
+
+    #[test]
+    fn una_raiz_o_un_visto_propios_que_solo_estan_un_momento_ilegibles_se_matan_con_su_arbol() {
+        // La identidad ilegible vuelve a leerse: el ocupante ERA la raíz y sus descendientes legítimos mueren.
+        let mut w = arbol();
+        let mut t = captura(&mut w);
+        w.no_start.push(10);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "con la raíz ilegible no se declara nada muerto");
+        assert!(w.terminate_calls.is_empty(), "y no se termina a nadie a ciegas: {:?}", w.terminate_calls);
+        w.no_start.clear();
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(!w.alive(10) && !w.alive(11) && !w.alive(12) && w.alive(20));
     }
 
     #[test]
