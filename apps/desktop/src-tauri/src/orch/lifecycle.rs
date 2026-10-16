@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use serde_json::json;
 use super::host::Host;
+use super::events::MutationContext;
 use super::boot_authority::{Authoritative, BootResult};
 use super::mirror::{self, Reconciled};
 use super::store_boot::{OpenStoreError, StorageReport};
@@ -188,7 +189,7 @@ impl Core {
     }
 
     pub(super) fn close_idle_runs(&self) {
-        let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+        let live = self.live_ids();
         let idle = self.lock().idle_runs(state::now_ms(), IDLE_CLOSE_MS, &live);
         for run in idle {
             let noted = self.mutate(|st| {
@@ -204,17 +205,15 @@ impl Core {
             if !matches!(noted, Ok(true)) {
                 continue;
             }
-            let _ = self.close_run(&run, false);
+            let _ = self.close_run(&MutationContext::core(), &run, false);
         }
     }
 
     pub fn shutdown(&self) {
-        if let Ok(mut terms) = self.terms.lock() {
-            for t in terms.values_mut() {
-                t.kill();
-            }
-            terms.clear();
-        }
+        // Sin el mapa de terminales bloqueado mientras corre cada matador (ver `kill_all_terms`).
+        self.kill_all_terms();
+        // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
+        super::pty::reap_unowned();
         self.stop_server();
     }
 

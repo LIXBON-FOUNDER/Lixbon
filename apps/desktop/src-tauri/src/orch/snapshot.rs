@@ -12,7 +12,7 @@ impl Core {
     pub fn snapshot(&self) -> Value {
         let (mut out, git_in) = {
             let st = self.lock();
-            let live: Vec<String> = self.terms.lock().map(|t| t.keys().cloned().collect()).unwrap_or_default();
+            let live = self.live_ids();
             let server = self.server.lock().ok().and_then(|s| s.as_ref().map(|h| h.port));
             let start = st.messages.len().saturating_sub(400);
             let out = json!({

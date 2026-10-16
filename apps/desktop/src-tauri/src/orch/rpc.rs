@@ -4,10 +4,34 @@ use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
 use super::{CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::events::{Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 
 impl Core {
+    /// SOLO pruebas: atajo con el canal de cada superficie real (Tauri -> `Ui`, `lxo` -> `Lxo`). La
+    /// producción llama a `rpc_via` con el canal que conoce; aquí el mapa es explícito y de prueba.
+    #[cfg(test)]
     pub fn rpc(self: &Arc<Self>, caller: Caller, cwd: &str, cmd: &str, args: &Value) -> Result<Value, String> {
+        let channel = match &caller {
+            Caller::User => Channel::Ui,
+            Caller::Agent(_) => Channel::Lxo,
+        };
+        self.rpc_via(channel, caller, cwd, cmd, args)
+    }
+
+    /// Despacho de un comando desde una superficie CONOCIDA: Tauri -> `Channel::Ui`, servidor local de
+    /// `lxo` -> `Channel::Lxo`. El canal lo fija quien recibe la orden; nunca se deduce del actor.
+    pub(super) fn rpc_via(self: &Arc<Self>, channel: Channel, caller: Caller, cwd: &str, cmd: &str, args: &Value) -> Result<Value, String> {
+        // Contexto de lo que muta este comando. Un agente sin identidad solo puede crear un run
+        // (`run_create` fija su actor al crear la tarea raíz): para todo lo demás, sin identidad no hay
+        // evento atribuido a un agente que no existe.
+        let ctx_of = || -> Result<MutationContext, String> {
+            match &caller {
+                Caller::User => Ok(MutationContext::person(channel)),
+                Caller::Agent(Some(id)) => Ok(MutationContext::agent(id.clone(), channel)),
+                Caller::Agent(None) => Err("Un agente sin identidad solo puede crear un run (lxo run create)".to_string()),
+            }
+        };
         if matches!(caller, Caller::Agent(_)) && !self.settings().enabled {
             return Err("El orquestador está desactivado: actívalo en Lixbon → Ajustes → Orquestador".into());
         }
@@ -50,10 +74,11 @@ impl Core {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
                 }
                 match cmd {
-                    "project_add" => self.project_add(args),
-                    "project_archive" => self.project_archive(args),
-                    "project_locate" => self.project_locate(args),
-                    _ => self.projects_import_recents(args),
+                    // La persona registra (manual). La importación la dispara la interfaz, pero la hace el Core.
+                    "project_add" => self.project_add(&MutationContext::person(channel), args),
+                    "project_archive" => self.project_archive(&MutationContext::person(channel), args),
+                    "project_locate" => self.project_locate(&MutationContext::person(channel), args),
+                    _ => self.projects_import_recents(&MutationContext::system(channel), args),
                 }
             }
             "run_create" => {
@@ -72,7 +97,14 @@ impl Core {
                 let branch = git::current_branch(cwd);
                 // Proyecto del repositorio: misma ruta -> ese; sin coincidencias -> nuevo; ambiguo -> ninguno.
                 // Un error real del registro activo se propaga: no se crea ni el run ni la tarea.
-                let project_id = self.project_for_repo(&repo)?;
+                // Si nace, `project.registered` lo atribuye a quien lanza el run: persona, agente (su tarea) o,
+                // sin identidad, el sistema.
+                let registrant = match &caller {
+                    Caller::User => MutationContext::person(channel),
+                    Caller::Agent(Some(id)) => MutationContext::agent(id.clone(), channel),
+                    Caller::Agent(None) => MutationContext::system(channel),
+                };
+                let project_id = self.project_for_repo(&registrant, &repo)?;
                 if let Some(pid) = &project_id {
                     self.check_project_launchable_id(pid)?;
                 }
@@ -91,6 +123,13 @@ impl Core {
                         worktree: None,
                         external: true,
                     });
+                    // Bootstrap de identidad (solo aquí): el coordinador aún no existía como tarea, así que
+                    // el actor de los eventos de esta mutación es la tarea raíz recién creada. Los borradores
+                    // ya acumulados usan este actor al finalizar.
+                    st.set_context(match &caller {
+                        Caller::User => MutationContext::person(channel),
+                        Caller::Agent(_) => MutationContext::agent(task.clone(), channel),
+                    });
                     st.mark_running(&task)?;
                     if let Some(t) = st.tasks.get_mut(&task) {
                         t.project_id = project_id.clone();
@@ -100,7 +139,7 @@ impl Core {
                 Ok(json!({ "run": run, "task": task }))
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
-            "spawn" => self.spawn_request(&caller, args),
+            "spawn" => self.spawn_request(channel, &caller, args),
             "spawn_status" => self.spawn_status(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
@@ -113,14 +152,14 @@ impl Core {
                 let host = self.host.get().ok_or("La app todavía no ha arrancado")?;
                 issues::ejecutar(host.as_ref(), args, rol)
             }
-            "continue" => self.follow_up(&caller, args),
+            "continue" => self.follow_up(&ctx_of()?, &caller, args),
             "phase" => {
                 let me = Self::me(&caller)?;
                 let name = s(args, "name");
                 if name.is_empty() {
                     return Err("Falta el nombre de la fase".into());
                 }
-                self.mutate(|st| {
+                self.mutate_as(&ctx_of()?, |st| {
                     let msg = st.phase(&me, &name, b(args, "done"), &s(args, "note"))?;
                     st.notify_opt(msg);
                     Ok(())
@@ -134,7 +173,7 @@ impl Core {
                     .unwrap_or_default();
                 let summary = s(args, "summary");
                 let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
-                let status = self.mutate(|st| {
+                let status = self.mutate_as(&ctx_of()?, |st| {
                     let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
                     st.task_mut(&me)?.delivery_channel = Some("lxo_done".into());
                     st.notify_opt(msg);
@@ -148,7 +187,7 @@ impl Core {
                 if question.is_empty() {
                     return Err("Falta la pregunta".into());
                 }
-                let id = self.mutate(|st| {
+                let id = self.mutate_as(&ctx_of()?, |st| {
                     let id = st.ask(&me, &question)?;
                     st.notify(&[id]);
                     Ok(id)
@@ -168,7 +207,7 @@ impl Core {
             "reply" => {
                 let q = n(args, "question").ok_or("Falta el id de la pregunta")?;
                 let answer = s(args, "answer");
-                let id = self.mutate(|st| {
+                let id = self.mutate_as(&ctx_of()?, |st| {
                     let from = match &caller {
                         Caller::User => st.messages.iter().find(|m| m.id == q).map(|m| m.to.clone()).ok_or_else(|| format!("No existe la pregunta {q}"))?,
                         _ => Self::me(&caller)?,
@@ -255,15 +294,16 @@ impl Core {
                     let st = self.lock();
                     Self::check_manages(&st, &caller, &id)?;
                 }
-                self.kill_term(&id);
-                self.mutate(|st| {
+                // Si el proceso no se pudo detener la tarea NO se declara detenida: el terminal sigue custodiado.
+                self.kill_term(&id).map_err(|e| format!("No se pudo detener {id}: {e}. Sigue en marcha; reinténtalo"))?;
+                self.mutate_as(&ctx_of()?, |st| {
                     let msg = st.close(&id, Status::Stopped, "detenida por su coordinador")?;
                     st.notify_opt(msg);
                     Ok(())
                 })?;
                 Ok(json!({ "task": id, "status": "stopped" }))
             }
-            "release" => self.release(&caller, &s(args, "task"), b(args, "force")),
+            "release" => self.release(&ctx_of()?, &caller, &s(args, "task"), b(args, "force")),
             "run_close" => {
                 let me = Self::me(&caller)?;
                 let run = {
@@ -274,23 +314,16 @@ impl Core {
                     }
                     t.run.clone()
                 };
-                self.close_run(&run, b(args, "force"))
+                self.close_run(&ctx_of()?, &run, b(args, "force"))
             }
             "remove_run" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz".into());
                 }
                 let run = s(args, "run");
-                self.expire_run_pending(&run);
-                let ids: Vec<String> = self.lock().tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-                for id in &ids {
-                    self.kill_term(id);
-                }
-                let (_, kept) = self.free_worktrees(&run, false);
-                self.mutate(|st| {
-                    st.remove_run(&run);
-                    Ok(())
-                })?;
+                // `spawn.resolved` (cancelled_run_removed) de sus pendientes + `run.removed`: UNA mutación; la memoria
+                // de los pendientes solo cambia tras el COMMIT.
+                let kept = self.remove_run_and_cancel_pending(&ctx_of()?, &run)?;
                 Ok(json!({ "removed": run, "kept": kept }))
             }
             other => Err(format!("Comando desconocido: {other}")),

@@ -41,8 +41,8 @@
 //! # Efectos externos
 //! `git merge`, crear un worktree o lanzar una PTY **no** forman parte de la
 //! transacción. El patrón es: validar (lectura) -> efecto -> UNA mutación que lo
-//! registra ([`StateAccess::mutate_after_effect`]). Si el efecto ocurrió y el
-//! registro falla, no se esconde: se deja constancia en
+//! registra ([`StateAccess::mutate_after_effect`], que SOLO se llama si el efecto ocurrió de verdad).
+//! Si el registro falla por CUALQUIER motivo (también un rechazo), no se esconde: se deja constancia en
 //! `unrecorded-effects.jsonl` y se avisa al arrancar. Ese archivo es un **diario
 //! de recuperación temporal**, NO una segunda fuente de verdad: sirve para
 //! diagnosticar y reconciliar a mano. Cuando existan Events y Attention, cada
@@ -55,6 +55,12 @@
 //! [`Persistence::persist`], que en SQLite los inserta en la MISMA transacción que la nueva `rev` de
 //! `legacy_state`. Si algo falla, ni mutación ni eventos; los reintentos pasan siempre los mismos
 //! eventos. El estado (`State`) no transporta nada de esto. Ver `events.rs`.
+//!
+//! # Quién actúa
+//! Cada mutación lleva un [`MutationContext`] EXPLÍCITO (actor + canal + `client_id` reservado):
+//! [`Core::mutate_as`] para lo que desencadena una persona o un agente, [`Core::mutate`] (contexto
+//! del propio Core) para arranque, vigilantes y temporizadores. No hay contexto implícito por hilo ni
+//! un «caller actual» global.
 //!
 //! # Lo que NO es una mutación de dominio
 //! * [`Core::touch_activity`]: marca de actividad efímera (pista de liveness),
@@ -69,12 +75,12 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::events::{finalize_all, Actor, Channel, EventDraft};
+use super::events::{finalize_all, Actor, Channel, EventDraft, EventError, MutationContext};
 use super::fsio::data_dir;
 use super::lifecycle::BootProof;
 use super::state::{Kind, State};
 use super::Core;
-use crate::store::NewEvent;
+use crate::store::{new_uuid_v7, NewEvent};
 
 // ---------------------------------------------------------------------------
 // Celda de estado: el Mutex es privado a este módulo.
@@ -120,8 +126,14 @@ pub(super) struct Tx {
     /// Outbox de eventos del candidato. Vive aquí y no en `State`: el estado autoritativo no
     /// transporta metadatos de una transacción. Se descarta con el candidato si algo falla.
     events: Vec<EventDraft>,
-    /// Actor y canal por defecto de los eventos de esta mutación (un borrador puede traer el suyo).
-    actor: (Actor, Channel),
+    /// Un borrador que no se pudo construir (contrato roto): se convierte en `Rejected` al confirmar.
+    event_error: Option<String>,
+    /// Quién actúa y por dónde llegó la orden: valor por defecto de los eventos de esta mutación (un
+    /// borrador puede traer el suyo).
+    ctx: MutationContext,
+    /// Efecto externo ya observado en esta mutación (`Tx::observe_effect`): las decisiones que se registren
+    /// dentro de `mutate_after_effect` lo llevan como `correlation_id`. Efímero: no es estado.
+    active_effect: Option<String>,
 }
 
 impl Deref for Tx {
@@ -153,6 +165,7 @@ impl Tx {
     pub(super) fn no_change(&mut self) {
         self.unchanged = true;
         self.events.clear();
+        self.event_error = None;
     }
 
     /// ÚNICO punto de entrada de un evento a la transacción: lo emite quien describe el hecho (los
@@ -163,10 +176,79 @@ impl Tx {
         self.events.push(draft);
     }
 
+    /// Como [`Tx::push_event`], a partir del resultado de un constructor del catálogo. Si el borrador
+    /// no se pudo construir se recuerda el error y la mutación se rechaza al confirmar (con SQLite y
+    /// con state.json por igual): un error de instrumentación nunca se pierde en silencio.
+    pub(super) fn try_push_event(&mut self, draft: Result<EventDraft, EventError>) {
+        match draft {
+            Ok(d) => self.events.push(d),
+            Err(e) => {
+                self.event_error.get_or_insert_with(|| e.to_string());
+            }
+        }
+    }
+
     /// Fija el actor y el canal por defecto de los eventos de esta mutación.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn acting_as(&mut self, actor: Actor, channel: Channel) {
-        self.actor = (actor, channel);
+        self.ctx.actor = actor;
+        self.ctx.channel = channel;
+    }
+
+    /// Quién actúa y por dónde, tal como lo ve ahora esta mutación.
+    pub(super) fn context(&self) -> &MutationContext {
+        &self.ctx
+    }
+
+    /// Identidad del efecto observado en esta mutación, si lo hay (la consulta `Tx::record_decision`).
+    pub(super) fn active_effect(&self) -> Option<&str> {
+        self.active_effect.as_deref()
+    }
+
+    pub(super) fn set_active_effect(&mut self, effect_id: Option<String>) {
+        self.active_effect = effect_id;
+    }
+
+    /// ¿Se llamó a [`Tx::no_change`]?
+    fn is_unchanged(&self) -> bool {
+        self.unchanged
+    }
+
+    /// Fija el contexto completo (lo usa `mutate_as`).
+    pub(super) fn set_context(&mut self, ctx: MutationContext) {
+        self.ctx = ctx;
+    }
+
+    /// Finaliza y VALIDA los borradores de esta mutación (una sola vez). El `project_id` de un
+    /// borrador con `project_from_task` sale del candidato, sin git ni registro.
+    fn finalize_events(&mut self) -> Result<Vec<NewEvent>, String> {
+        if let Some(e) = self.event_error.take() {
+            return Err(e);
+        }
+        let drafts = std::mem::take(&mut self.events);
+        if drafts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let state = &self.state;
+        finalize_all(drafts, &self.ctx, super::state::now_ms() as i64, &|task| state.tasks.get(task).and_then(|t| t.project_id.clone()))
+    }
+
+    /// Prueba: un `Tx` sin `Core` (los adaptadores de prueba de `review` e `integration`).
+    #[cfg(test)]
+    pub(super) fn detached(state: State) -> Tx {
+        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None }
+    }
+
+    /// Prueba: devuelve el estado del `Tx` detached.
+    #[cfg(test)]
+    pub(super) fn into_state(self) -> State {
+        self.state
+    }
+
+    /// Prueba: valida los borradores igual que producción y descarta el resultado (no hay SQLite).
+    #[cfg(test)]
+    pub(super) fn validate_events(&mut self) -> Result<(), String> {
+        self.finalize_events().map(|_| ())
     }
 
     /// Prueba: borradores pendientes en el candidato.
@@ -246,6 +328,14 @@ pub(super) trait Persistence: Send + Sync {
     /// Tras confirmar Y publicar en memoria: copia de compatibilidad (el espejo
     /// `state.json`). Mejor esfuerzo: un fallo aquí NO invalida lo confirmado.
     fn after_publish(&self, _state: &State) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Confirma hechos DURABLES que NO modifican `legacy_state` (`Core::record_facts`): solo `events`, ya
+    /// materializados, con `state_rev = NULL`. No toca la `rev` del estado, ni el espejo, ni publica nada. En
+    /// cada reintento llegan exactamente los mismos `events`. Sin Event Log (`state.json`) no hay dónde
+    /// guardarlos: el resultado se descarta con éxito, igual que en `persist`.
+    fn append(&self, _events: &[NewEvent]) -> Result<(), PersistError> {
         Ok(())
     }
 }
@@ -372,11 +462,22 @@ impl Persister {
     /// mensaje definitivo; quien llama decide el paso a solo lectura.
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let backend = lock(&self.backend).clone();
+        // `events` se materializó antes del bucle: cada intento persiste EXACTAMENTE los mismos.
+        self.with_retries(|| backend.persist(state, events))
+    }
+
+    /// Como [`Persister::persist`], para hechos que no modifican `legacy_state`: misma política de reintentos,
+    /// mismos `NewEvent` en cada intento.
+    fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
+        let backend = lock(&self.backend).clone();
+        self.with_retries(|| backend.append(events))
+    }
+
+    fn with_retries(&self, mut op: impl FnMut() -> Result<(), PersistError>) -> Result<(), PersistError> {
         let retry = lock(&self.retry).clone();
         let mut attempt = 0;
         loop {
-            // `events` se materializó antes del bucle: cada intento persiste EXACTAMENTE los mismos.
-            match backend.persist(state, events) {
+            match op() {
                 Ok(()) => return Ok(()),
                 Err(e) => match retry.delay_for(&e, attempt) {
                     Some(wait) => {
@@ -449,10 +550,20 @@ impl Core {
         self.state.raw().touch_run(task_id);
     }
 
-    /// Única vía de escritura del estado. Ver la documentación del módulo.
+    /// Única vía de escritura del estado. Ver la documentación del módulo. Los eventos de esta
+    /// mutación se atribuyen al propio Core (arranque, vigilantes, temporizadores); lo que provoca una
+    /// persona o un agente usa [`Core::mutate_as`].
     pub(super) fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, MutateError> {
         let mut guard = self.lock();
         self.mutate_locked(&mut guard, f)
+    }
+
+    /// Como [`Core::mutate`], con el contexto EXPLÍCITO de quien actúa (actor + canal).
+    pub(super) fn mutate_as<R>(&self, ctx: &MutationContext, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, MutateError> {
+        self.mutate(|tx| {
+            tx.set_context(ctx.clone());
+            f(tx)
+        })
     }
 
     /// Como [`Core::mutate`] sobre un guard ya tomado (la espera con `Condvar`
@@ -461,7 +572,7 @@ impl Core {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
-        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), actor: (Actor::System, Channel::Core) };
+        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None };
         let value = f(&mut tx).map_err(MutateError::Rejected)?;
         if tx.unchanged {
             return Ok(value);
@@ -470,12 +581,7 @@ impl Core {
         // un evento inválido rechaza la mutación entera (`Rejected`) con SQLite y con state.json por
         // igual. Solo DESPUÉS se decide si hay Event Log donde persistirlos; si no (state.json), el
         // resultado materializado se descarta y el backend recibe una lista vacía.
-        let drafts = std::mem::take(&mut tx.events);
-        let finalized = if drafts.is_empty() {
-            Vec::new()
-        } else {
-            finalize_all(drafts, &tx.actor, super::state::now_ms() as i64).map_err(MutateError::Rejected)?
-        };
+        let finalized = tx.finalize_events().map_err(MutateError::Rejected)?;
         let events = if self.persister.records_events() { finalized } else { Vec::new() };
         if let Err(e) = self.persister.persist(&tx.state, &events) {
             self.enter_read_only(&e.message);
@@ -490,6 +596,43 @@ impl Core {
             self.emit("orch:degraded", &json!({ "mode": "mirror_failed", "reason": reason }));
         }
         Ok(value)
+    }
+
+    /// Registra hechos DURABLES que NO modifican `legacy_state` (p. ej. una solicitud que solo vive en memoria).
+    ///
+    /// ```text
+    /// Health != Normal           -> ReadOnly, SIN finalizar ni intentar nada
+    /// finalizar y validar UNA vez -> Rejected si un borrador no cumple el contrato (nada se persiste)
+    /// sin Event Log (state.json)  -> el resultado materializado se descarta con éxito
+    /// Persister::append           -> reintentos con los MISMOS NewEvent (mismo id, hora e idem_key)
+    ///                                -> Store::append_events, state_rev = NULL
+    /// fallo definitivo            -> Core en DegradedReadOnly, igual que una mutación normal
+    /// ```
+    ///
+    /// No incrementa la `rev` de `legacy_state`, no escribe el espejo, no publica un `State` ni emite
+    /// `orch:changed`. Una repetición con la misma `(kind, idem_key)` es un éxito sin duplicar. El `project_id`
+    /// de un borrador con `project_from_task` se resuelve contra el estado CONFIRMADO.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn record_facts(&self, ctx: &MutationContext, drafts: Vec<EventDraft>) -> Result<(), MutateError> {
+        if let Health::DegradedReadOnly(reason) = self.persister.health() {
+            return Err(MutateError::ReadOnly(reason));
+        }
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let finalized = {
+            let st = self.lock();
+            finalize_all(drafts, ctx, super::state::now_ms() as i64, &|task| st.tasks.get(task).and_then(|t| t.project_id.clone()))
+        }
+        .map_err(MutateError::Rejected)?;
+        if !self.persister.records_events() {
+            return Ok(());
+        }
+        if let Err(e) = self.persister.append(&finalized) {
+            self.enter_read_only(&e.message);
+            return Err(MutateError::Persist(e.message));
+        }
+        Ok(())
     }
 
     /// Instala la persistencia autoritativa de SQLite al terminar el arranque.
@@ -511,10 +654,16 @@ impl Core {
         lock(&self.persister.mirror).clone()
     }
 
-    /// Estado de salud del almacenamiento del Core (diagnóstico; la UI lo consumirá con el aviso `orch:degraded`).
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Estado de salud del almacenamiento del Core. Lo consulta el cleanup de un lanzamiento fallido
+    /// (no borra nada con el Core degradado) y la UI lo consumirá con el aviso `orch:degraded`.
     pub(super) fn health(&self) -> Health {
         self.persister.health()
+    }
+
+    /// Prueba: deja el Core en solo lectura sin pasar por un fallo real del almacén.
+    #[cfg(test)]
+    pub(super) fn degrade_for_tests(&self, reason: &str) {
+        self.persister.degrade(reason);
     }
 
     fn enter_read_only(&self, reason: &str) {
@@ -635,7 +784,14 @@ impl Core {
 /// estado se va a intentar. Si el registro falla, esto es lo que queda en
 /// `unrecorded-effects.jsonl`: lo justo para diagnosticar y reconciliar, sin
 /// secretos (nunca env, argv ni credenciales) ni datos de más.
+///
+/// `effect_id` (UUID v7) identifica ESTA ocurrencia observada: es el `effect_id` de `effect.observed`.
+/// No es un protocolo intención/confirmación: `Effect` se construye cuando el efecto ya ocurrió, así que
+/// sigue existiendo la ventana «efecto externo -> caída antes de construir o registrar el `Effect`»; E1b
+/// no pretende cerrarla. El diario `unrecorded-effects.jsonl` sigue en `v = 1` y todavía no lo persiste.
 pub(super) struct Effect {
+    /// Identidad estable de la ocurrencia.
+    effect_id: String,
     /// Operación de alto nivel («integrate», «publish_pr», «spawn»).
     operation: &'static str,
     /// Efecto concreto («git_merge», «git_push_pr», «git_worktree», «pty_process»).
@@ -655,7 +811,22 @@ pub(super) struct Effect {
 
 impl Effect {
     pub(super) fn new(operation: &'static str, kind: &'static str) -> Self {
-        Effect { operation, kind, task: None, repo: None, run: None, expected: Value::Null, observed: Value::Null }
+        Effect { effect_id: new_uuid_v7(), operation, kind, task: None, repo: None, run: None, expected: Value::Null, observed: Value::Null }
+    }
+    pub(super) fn effect_id(&self) -> &str {
+        &self.effect_id
+    }
+    pub(super) fn operation(&self) -> &'static str {
+        self.operation
+    }
+    pub(super) fn kind(&self) -> &'static str {
+        self.kind
+    }
+    pub(super) fn task_id(&self) -> Option<&str> {
+        self.task.as_deref()
+    }
+    pub(super) fn observed_value(&self) -> &Value {
+        &self.observed
     }
     pub(super) fn task(mut self, id: &str) -> Self {
         self.task = Some(id.to_string());
@@ -676,41 +847,75 @@ impl Effect {
 }
 
 // ---------------------------------------------------------------------------
-// StateAccess: lo mínimo que necesitan `review` e `integration`
+// StateAccess: lo mínimo que necesitan `review`, `integration`, `release` y `spawn`
 // ---------------------------------------------------------------------------
 
-/// Lectura y mutación del estado, sin que el llamador conozca el `Mutex`.
-/// Implementado por [`Core`] (persistente) y por `Mutex<State>` (sin persistir:
-/// las pruebas de `review`/`integration`).
+/// Lectura y mutación del estado, sin que el llamador conozca el `Mutex`. Los cierres mutadores
+/// reciben un [`Tx`] (no un `State`): así usan los mismos mutadores semánticos y producen eventos.
+///
+/// Implementado por [`Acting`] (el `Core` con el contexto EXPLÍCITO de quien actúa: no hay una
+/// versión «sin contexto») y, solo en pruebas, por `Mutex<State>` con un `Tx` detached.
 pub(super) trait StateAccess {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R;
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String>;
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String>;
 
     /// Registra en el estado un efecto externo YA ocurrido (p. ej. un `git merge`).
-    /// Si el registro falla no se esconde: el error lo dice con claridad y, en el
-    /// `Core`, el efecto queda anotado para reconciliar.
-    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        let _ = &effect;
-        self.mutate(f)
+    ///
+    /// **Contrato**: SOLO se llama si hubo un efecto externo real; la única forma de decir «no hubo
+    /// efecto» es no llamarla (`mutate` normal). Una vez dentro, CUALQUIER fallo del registro
+    /// (`Rejected`, `Persist`, `ReadOnly` o un `no_change` del cierre) deja el candidato sin publicar, sin
+    /// estado y sin eventos, y en el `Core` el efecto queda anotado para reconciliar. Esta implementación
+    /// por defecto (la del adaptador de pruebas) solo aplica las mismas reglas sobre el `Tx`.
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        self.mutate(|tx| register_effect(tx, &effect, f))
     }
 }
 
-impl StateAccess for Core {
+/// El `Core` actuando con un contexto explícito (quién y por dónde). Lo construye
+/// [`Core::acting`] quien conoce la superficie real.
+pub(super) struct Acting<'a> {
+    core: &'a Core,
+    ctx: MutationContext,
+}
+
+/// El registro de un efecto ya ocurrido, dentro del `Tx`: 1) `effect.observed` entra ANTES de ejecutar el
+/// cierre (el efecto ocurrió antes que cualquier hecho que lo registre), así que el orden canónico es
+/// `effect.observed`, `decision.recorded`, resto de hechos de estado; 2) el cierre registra el estado;
+/// 3) un `no_change` es inválido: un efecto observado no puede quedar en un no-op silencioso.
+/// Si algo falla, el llamador descarta el candidato entero (ni estado ni eventos).
+fn register_effect<R>(tx: &mut Tx, effect: &Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+    tx.observe_effect(effect)?;
+    let value = f(tx)?;
+    if tx.is_unchanged() {
+        return Err("no_change dentro de mutate_after_effect: un efecto ya ocurrido no puede quedar sin registrar".into());
+    }
+    tx.set_active_effect(None);
+    Ok(value)
+}
+
+impl Core {
+    pub(super) fn acting(&self, ctx: MutationContext) -> Acting<'_> {
+        Acting { core: self, ctx }
+    }
+}
+
+impl StateAccess for Acting<'_> {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
-        f(&self.lock())
+        f(&self.core.lock())
     }
 
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        Core::mutate(self, |tx| f(tx)).map_err(String::from)
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        self.core.mutate_as(&self.ctx, f).map_err(String::from)
     }
 
-    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        match Core::mutate(self, |tx| f(tx)) {
+    fn mutate_after_effect<R>(&self, effect: Effect, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        let core = self.core;
+        // Desde aquí el efecto YA ocurrió: cualquier fallo del registro (también `Rejected`) es un efecto sin
+        // registrar. Que no hubo efecto se dice no llamando a esta función.
+        match core.mutate_as(&self.ctx, |tx| register_effect(tx, &effect, f)) {
             Ok(v) => Ok(v),
-            // El efecto no ocurrió o la mutación lo rechazó por sí misma: nada que reconciliar.
-            Err(MutateError::Rejected(m)) => Err(m),
             Err(e) => {
-                self.journal_unrecorded_effect(effect, &e.to_string());
+                core.journal_unrecorded_effect(effect, &e.to_string());
                 Err(format!(
                     "La acción se ejecutó pero NO quedó registrada en Lixbon ({e}). Queda anotada en unrecorded-effects.jsonl para reconciliarla; no la repitas sin comprobarlo."
                 ))
@@ -719,12 +924,64 @@ impl StateAccess for Core {
     }
 }
 
+/// SOLO pruebas: un `Mutex<State>` sin persistencia. Replica la semántica de `mutate_locked`: construye
+/// un `Tx` detached y ejecuta el cierre. NO publica si el cierre devuelve `Err`, ni si llamó a
+/// `Tx::no_change` (se descarta el candidato, sin validar nada), ni si los borradores son inválidos
+/// (una instrumentación inválida también falla aquí). Solo un `Tx` válido y cambiado sustituye el
+/// estado; sus eventos se descartan (no hay SQLite).
+#[cfg(test)]
 impl StateAccess for Mutex<State> {
     fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
         f(&self.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    fn mutate<R>(&self, f: impl FnOnce(&mut State) -> Result<R, String>) -> Result<R, String> {
-        f(&mut self.lock().unwrap_or_else(|e| e.into_inner()))
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        mutate_detached(self, MutationContext::core(), f)
+    }
+}
+
+#[cfg(test)]
+fn mutate_detached<R>(state: &Mutex<State>, ctx: MutationContext, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+    let mut guard = state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut tx = Tx::detached((*guard).clone());
+    tx.set_context(ctx);
+    let value = f(&mut tx)?;
+    if tx.unchanged {
+        return Ok(value);
+    }
+    tx.validate_events()?;
+    *guard = tx.into_state();
+    Ok(value)
+}
+
+/// SOLO pruebas: un `Mutex<State>` con el contexto EXPLÍCITO de quien actúa (como `Acting`, sin Core).
+/// Las pruebas de decisiones de una persona lo usan para representar de verdad a una persona en la
+/// interfaz, en vez de debilitar la validación de actor de producción.
+#[cfg(test)]
+pub(super) struct ConContexto<'a> {
+    state: &'a Mutex<State>,
+    ctx: MutationContext,
+}
+
+#[cfg(test)]
+impl<'a> ConContexto<'a> {
+    pub(super) fn new(state: &'a Mutex<State>, ctx: MutationContext) -> ConContexto<'a> {
+        ConContexto { state, ctx }
+    }
+
+    /// Una persona desde la interfaz (`Person / Ui`).
+    pub(super) fn persona(state: &'a Mutex<State>) -> ConContexto<'a> {
+        ConContexto::new(state, MutationContext::person(Channel::Ui))
+    }
+}
+
+#[cfg(test)]
+impl StateAccess for ConContexto<'_> {
+    fn read<R>(&self, f: impl FnOnce(&State) -> R) -> R {
+        f(&self.state.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, String> {
+        mutate_detached(self.state, self.ctx.clone(), f)
     }
 }

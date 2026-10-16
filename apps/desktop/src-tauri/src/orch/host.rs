@@ -71,9 +71,17 @@ pub trait Host: Send + Sync {
 type GatewayFake = Arc<dyn Fn(GatewayMethod, &str, &Option<Value>) -> Result<Value, String> + Send + Sync>;
 
 #[cfg(test)]
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum RecordedCall {
+    Event(String, Value),
+    Notification(String, String),
+}
+
+#[cfg(test)]
 pub struct RecordingHost {
     events: std::sync::Mutex<Vec<(String, Value)>>,
     notifications: std::sync::Mutex<Vec<(String, String)>>,
+    calls: std::sync::Mutex<Vec<RecordedCall>>,
     gateway_calls: Arc<std::sync::Mutex<Vec<(GatewayMethod, String, Option<Value>)>>>,
     /// Respuestas del gateway falso; sin ellas simula «sin sesión».
     gateway_fake: std::sync::Mutex<Option<GatewayFake>>,
@@ -85,6 +93,7 @@ impl RecordingHost {
         Arc::new(Self {
             events: Default::default(),
             notifications: Default::default(),
+            calls: Default::default(),
             gateway_calls: Default::default(),
             gateway_fake: Default::default(),
         })
@@ -107,6 +116,14 @@ impl RecordingHost {
         self.notifications.lock().unwrap().clone()
     }
 
+    pub(super) fn calls(&self) -> Vec<RecordedCall> {
+        self.calls.lock().unwrap().clone()
+    }
+
+    pub(super) fn clear_calls(&self) {
+        self.calls.lock().unwrap().clear();
+    }
+
     pub fn gateway_calls(&self) -> Vec<(GatewayMethod, String, Option<Value>)> {
         self.gateway_calls.lock().unwrap().clone()
     }
@@ -120,10 +137,12 @@ impl RecordingHost {
 #[cfg(test)]
 impl Host for RecordingHost {
     fn emit(&self, event: &str, payload: &Value) {
+        self.calls.lock().unwrap().push(RecordedCall::Event(event.to_string(), payload.clone()));
         self.events.lock().unwrap().push((event.to_string(), payload.clone()));
     }
 
     fn notify(&self, title: &str, body: &str) {
+        self.calls.lock().unwrap().push(RecordedCall::Notification(title.to_string(), body.to_string()));
         self.notifications.lock().unwrap().push((title.to_string(), body.to_string()));
     }
 

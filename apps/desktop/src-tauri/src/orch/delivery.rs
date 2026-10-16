@@ -28,7 +28,8 @@ use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use super::state::{self, State, Status, Task};
+use super::mutation::Tx;
+use super::state::{self, Status, Task};
 
 /// Hueco aceptado: un solo intento por tarea hasta el PR de registro por intento.
 pub const ATTEMPT: u32 = 1;
@@ -449,7 +450,10 @@ pub fn set_model_effective(t: &mut super::state::Task, model: &str) {
 /// (llegó antes un `lxo done` u otra lectura) se descarta en silencio. Al salir
 /// el proceso, un informe inválido deja la tarea `Failed` y la falta, `Exited`.
 /// Devuelve los mensajes nuevos para `commit`.
-pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Vec<u64>, String> {
+///
+/// Recibe el `Tx` de la mutación y cierra con `tx.done` / `tx.close`: son esos mutadores semánticos
+/// los que emiten los eventos. Aquí NO se construye ningún borrador.
+pub fn apply(st: &mut Tx, id: &str, found: Found, at_exit: bool) -> Result<Vec<u64>, String> {
     let task = st.task(id)?.clone();
     if task.status.is_final() {
         return Ok(vec![]);
@@ -487,7 +491,18 @@ pub fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::orch::state::{Kind, NewTask};
+    use crate::orch::state::{Kind, NewTask, State};
+
+    /// `apply` sobre un `State` suelto: construye un `Tx` detached y valida los borradores igual que
+    /// producción (una instrumentación inválida también falla aquí).
+    fn apply(st: &mut State, id: &str, found: Found, at_exit: bool) -> Result<Vec<u64>, String> {
+        let mut tx = Tx::detached(std::mem::take(st));
+        let r = super::apply(&mut tx, id, found, at_exit);
+        let valid = tx.validate_events();
+        *st = tx.into_state();
+        valid?;
+        r
+    }
 
     const NONCE: &str = "0123456789abcdef0123456789abcdef";
 

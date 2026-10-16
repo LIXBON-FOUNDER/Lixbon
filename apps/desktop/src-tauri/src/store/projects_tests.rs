@@ -190,7 +190,11 @@ fn archivar_oculta_sin_borrar_y_se_puede_restaurar() {
     assert_eq!(s.project_locations(Some(&a.id)).unwrap().len(), 1, "su historial de ubicaciones sigue");
     assert!(s.project(&a.id).unwrap().unwrap().archived);
     assert!(s.project_set_archived(&a.id, false).unwrap());
-    assert_eq!(s.projects(false).unwrap().iter().map(|p| p.id.clone()).collect::<Vec<_>>(), vec![a.id.clone(), b.id.clone()], "orden de creación");
+    let listed = s.projects(false).unwrap();
+    let mut expected = vec![(a.created_at, a.id.clone()), (b.created_at, b.id.clone())];
+    expected.sort();
+    let actual: Vec<_> = listed.iter().map(|p| (p.created_at, p.id.clone())).collect();
+    assert_eq!(actual, expected, "orden estable por created_at y UUID v7");
     assert!(!s.project_set_archived("no-existe", true).unwrap());
 }
 
@@ -244,4 +248,399 @@ fn reabrir_conserva_los_proyectos_y_no_vuelve_a_migrar() {
     assert!(s.migration_report().applied.is_empty(), "ya estaba al día");
     assert_eq!(s.project(&id).unwrap().unwrap().name, "p");
     assert_eq!(s.project_locations(None).unwrap().len(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Project + Event: el nacimiento de un proyecto es UNA transacción (E1b · Projects)
+// ---------------------------------------------------------------------------------------------
+
+fn evento_de(id: &str) -> NewEvent {
+    NewEvent {
+        id: new_uuid_v7(),
+        at: 1_000,
+        v: 1,
+        kind: "project.registered".into(),
+        class: EventClass::State,
+        actor_kind: ActorKind::Person,
+        actor_id: None,
+        channel: Some("ui".into()),
+        client_id: None,
+        project_id: Some(id.into()),
+        run_id: None,
+        entity_kind: "project".into(),
+        entity_id: id.into(),
+        correlation_id: None,
+        idem_key: Some(id.into()),
+        payload: r#"{"origin":"manual","name":"p","has_remote":false,"root_commit_count":1}"#.into(),
+    }
+}
+
+fn eventos_n(s: &Store) -> i64 {
+    s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?)).unwrap()
+}
+
+fn proyectos_n(s: &Store) -> usize {
+    s.projects(true).unwrap().len()
+}
+
+fn ubicaciones_n(s: &Store) -> usize {
+    s.project_locations(None).unwrap().len()
+}
+
+#[test]
+fn registrar_inserta_proyecto_ubicacion_y_evento_en_una_transaccion_sin_tocar_legacy_state() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let antes = s.row_rev().unwrap();
+    let id = new_project_id();
+    let p = s.project_register(&id, "api", &fp(&["c1"], &["github.com/o/api"]), &loc("c:/api"), &evento_de(&id)).unwrap();
+    assert_eq!((p.id.as_str(), p.name.as_str()), (id.as_str(), "api"));
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+    let page = s.events_page(&EventQuery::default()).unwrap();
+    assert_eq!(page.events[0].kind, "project.registered");
+    assert_eq!(page.events[0].state_rev, None, "un evento de proyecto no confirma legacy_state");
+    assert_eq!(page.events[0].project_id.as_deref(), Some(id.as_str()));
+    assert_eq!(s.row_rev().unwrap(), antes, "legacy_state intacto");
+}
+
+#[test]
+fn si_el_insert_del_proyecto_falla_no_queda_evento() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    // Mismo id: la PK de `projects` rechaza el INSERT.
+    let r = s.project_register(&a.id, "otra", &fp(&["c2"], &[]), &loc("c:/otra"), &evento_de(&a.id));
+    assert!(r.is_err());
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 0), "ni ubicación ni evento");
+    assert_eq!(s.project(&a.id).unwrap().unwrap().name, "a", "el proyecto existente sigue igual");
+}
+
+#[test]
+fn si_la_ubicacion_ya_es_de_otro_proyecto_se_deshace_todo() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let id = new_project_id();
+    let r = s.project_register(&id, "b", &fp(&["c2"], &[]), &loc("c:/a"), &evento_de(&id));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 0), "el proyecto b no quedó, ni su evento");
+    assert!(s.project(&id).unwrap().is_none());
+}
+
+#[test]
+fn si_el_insert_del_evento_falla_se_deshacen_el_proyecto_y_la_ubicacion() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    // Un evento ajeno ya ocupa ese `id`: el INSERT del evento (después de la fila y la ubicación) falla.
+    let ocupado = NewEvent { idem_key: None, ..evento_de("otro") };
+    s.append_events(std::slice::from_ref(&ocupado)).unwrap();
+    let id = new_project_id();
+    let r = s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &NewEvent { id: ocupado.id.clone(), ..evento_de(&id) });
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (0, 0, 1), "ni proyecto ni ubicación: solo el evento previo");
+    // Y el mismo registro, ya sin el choque, funciona: nada quedó a medias.
+    s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &evento_de(&id)).unwrap();
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 2));
+}
+
+#[test]
+fn un_evento_mal_formado_o_de_otro_proyecto_no_deja_nada() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let id = new_project_id();
+    let sin_objeto = NewEvent { payload: "[1]".into(), ..evento_de(&id) };
+    assert!(matches!(s.project_register(&id, "x", &fp(&["c1"], &[]), &loc("c:/x"), &sin_objeto), Err(StoreError::InvalidEvent(_))));
+    let ajeno = evento_de("otro-proyecto");
+    assert!(matches!(s.project_register(&id, "x", &fp(&["c1"], &[]), &loc("c:/x"), &ajeno), Err(StoreError::InvalidEvent(_))));
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (0, 0, 0));
+}
+
+#[test]
+fn repetir_el_registro_no_duplica_el_evento_ni_el_proyecto() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let id = new_project_id();
+    let e = evento_de(&id);
+    s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &e).unwrap();
+    // El reintento (mismo id, mismo evento) falla entero: sigue habiendo exactamente un proyecto y un evento.
+    assert!(s.project_register(&id, "api", &fp(&["c1"], &[]), &loc("c:/api"), &e).is_err());
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+    // Un evento duplicado por (kind, idem_key) tampoco crea un proyecto sin su hecho propio.
+    let otro = new_project_id();
+    let duplicado = NewEvent { idem_key: Some(id.clone()), ..evento_de(&otro) };
+    let r = s.project_register(&otro, "otro", &fp(&["c9"], &[]), &loc("c:/otro"), &duplicado);
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!((proyectos_n(&s), ubicaciones_n(&s), eventos_n(&s)), (1, 1, 1));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Decisiones de gestión: filas + evento en UNA transacción (E1b · Projects, commit 2)
+// ---------------------------------------------------------------------------------------------
+
+fn decision_de(id: &str, kind: &str) -> NewEvent {
+    NewEvent {
+        id: new_uuid_v7(),
+        at: 1_000,
+        v: 1,
+        kind: kind.into(),
+        class: EventClass::Decision,
+        actor_kind: ActorKind::Person,
+        actor_id: None,
+        channel: Some("ui".into()),
+        client_id: None,
+        project_id: Some(id.into()),
+        run_id: None,
+        entity_kind: "project".into(),
+        entity_id: id.into(),
+        correlation_id: None,
+        idem_key: None,
+        payload: "{}".into(),
+    }
+}
+
+fn loc_en(path: &str, primary: bool) -> NewLocation {
+    NewLocation { primary, ..loc(path) }
+}
+
+fn cambio(from: &Fingerprint, to: &Fingerprint) -> FingerprintChange {
+    FingerprintChange { from: from.clone(), to: to.clone() }
+}
+
+/// Todo lo que describe el proyecto en el almacén, para comparar «antes» y «después» de un fallo.
+fn foto(s: &Store, id: &str) -> (Option<ProjectRow>, Vec<LocationRow>, i64) {
+    (s.project(id).unwrap(), s.project_locations(Some(id)).unwrap(), eventos_n(s))
+}
+
+fn dispara(s: &mut Store, sql: &str) {
+    s.write(|tx| {
+        tx.execute_batch(sql)?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn join_inserta_ubicacion_huella_y_evento_en_una_transaccion() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let nueva = fp(&["c1"], &["github.com/o/a"]);
+    let r = s.project_join_recorded(&a.id, &loc_en("d:/a-clon", false), Some(&cambio(&a.fingerprint, &nueva)), &decision_de(&a.id, "project.location_added"));
+    assert_eq!(r.unwrap(), ChangeOutcome::Changed);
+    let (p, locs, ev) = foto(&s, &a.id);
+    assert_eq!(p.unwrap().fingerprint, nueva);
+    assert_eq!(locs.len(), 2);
+    assert!(locs.iter().any(|l| l.path == "d:/a-clon" && !l.primary) && locs.iter().any(|l| l.path == "c:/a" && l.primary));
+    assert_eq!(ev, 1);
+    let e = &s.events_page(&EventQuery::default()).unwrap().events[0];
+    assert_eq!((e.kind.as_str(), e.state_rev, e.idem_key.clone()), ("project.location_added", None, None));
+}
+
+#[test]
+fn relocate_inserta_ubicacion_principal_huella_y_evento_en_una_transaccion() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&[], &[]), &loc("c:/a")).unwrap();
+    let nueva = fp(&["c9"], &[]);
+    let r = s.project_relocate_recorded(&a.id, &loc_en("d:/movido", true), Some(&cambio(&a.fingerprint, &nueva)), &decision_de(&a.id, "project.relocated"));
+    assert_eq!(r.unwrap(), ChangeOutcome::Changed);
+    let (p, locs, ev) = foto(&s, &a.id);
+    assert_eq!(p.unwrap().fingerprint, nueva);
+    assert_eq!(locs.iter().filter(|l| l.primary).map(|l| l.path.as_str()).collect::<Vec<_>>(), vec!["d:/movido"], "la nueva es la única principal");
+    assert_eq!(ev, 1);
+    // relocate exige que la ubicación sea la principal.
+    let r = s.project_relocate_recorded(&a.id, &loc_en("e:/otra", false), None, &decision_de(&a.id, "project.relocated"));
+    assert!(matches!(r, Err(StoreError::InvalidEvent(_))), "{r:?}");
+}
+
+#[test]
+fn si_la_huella_no_se_puede_actualizar_no_queda_ubicacion_nueva_ni_evento() {
+    for relocate in [false, true] {
+        let tmp = Tmp::new();
+        let mut s = abre(tmp.path());
+        let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+        dispara(&mut s, "CREATE TRIGGER falla_huella BEFORE UPDATE OF fingerprint ON projects BEGIN SELECT RAISE(ABORT, 'huella'); END;");
+        let antes = foto(&s, &a.id);
+        let (nueva_loc, nueva_fp) = (loc_en("d:/a-nueva", relocate), fp(&["c1"], &["github.com/o/a"]));
+        let ev = decision_de(&a.id, if relocate { "project.relocated" } else { "project.location_added" });
+        let c = cambio(&a.fingerprint, &nueva_fp);
+        let r = if relocate { s.project_relocate_recorded(&a.id, &nueva_loc, Some(&c), &ev) } else { s.project_join_recorded(&a.id, &nueva_loc, Some(&c), &ev) };
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(foto(&s, &a.id), antes, "relocate={relocate}: ni ubicación nueva con huella vieja, ni evento");
+    }
+}
+
+#[test]
+fn si_el_evento_no_se_puede_insertar_no_quedan_ubicacion_ni_huella_nuevas() {
+    for relocate in [false, true] {
+        let tmp = Tmp::new();
+        let mut s = abre(tmp.path());
+        let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+        let ocupado = decision_de("otro", "project.location_added");
+        s.append_events(std::slice::from_ref(&ocupado)).unwrap();
+        let antes = foto(&s, &a.id);
+        let nueva_fp = fp(&["c1"], &["github.com/o/a"]);
+        let ev = NewEvent { id: ocupado.id.clone(), ..decision_de(&a.id, if relocate { "project.relocated" } else { "project.location_added" }) };
+        let c = cambio(&a.fingerprint, &nueva_fp);
+        let l = loc_en("d:/a-nueva", relocate);
+        let r = if relocate { s.project_relocate_recorded(&a.id, &l, Some(&c), &ev) } else { s.project_join_recorded(&a.id, &l, Some(&c), &ev) };
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(foto(&s, &a.id), antes, "relocate={relocate}: ni ubicación/huella nuevas sin su evento");
+    }
+}
+
+#[test]
+fn una_ruta_de_otro_proyecto_o_un_snapshot_obsoleto_deshacen_todo() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let b = s.project_create("b", &fp(&["c2"], &[]), &loc("c:/b")).unwrap();
+    let antes = (foto(&s, &a.id), foto(&s, &b.id));
+    // La ruta ya es de `b`.
+    let r = s.project_join_recorded(&a.id, &loc_en("c:/b", false), None, &decision_de(&a.id, "project.location_added"));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    let r = s.project_relocate_recorded(&a.id, &loc_en("c:/b", true), None, &decision_de(&a.id, "project.relocated"));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    // La huella que se leyó ya no es la guardada.
+    let obsoleta = cambio(&fp(&["otro"], &[]), &fp(&["c1"], &["github.com/o/a"]));
+    let r = s.project_join_recorded(&a.id, &loc_en("d:/x", false), Some(&obsoleta), &decision_de(&a.id, "project.location_added"));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    // La ubicación nueva dice ser principal, pero `a` ya tiene una principal viva.
+    let r = s.project_join_recorded(&a.id, &loc_en("d:/y", true), None, &decision_de(&a.id, "project.location_added"));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    // …y a la inversa: no hay principal viva y la nueva dice no serlo.
+    dispara(&mut s, "UPDATE project_locations SET state = 'missing' WHERE path = 'c:/a'");
+    let r = s.project_join_recorded(&a.id, &loc_en("d:/z", false), None, &decision_de(&a.id, "project.location_added"));
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    dispara(&mut s, "UPDATE project_locations SET state = 'ok' WHERE path = 'c:/a'");
+    assert_eq!((foto(&s, &a.id), foto(&s, &b.id)), antes, "nada cambió");
+}
+
+#[test]
+fn una_ubicacion_sin_cambios_no_escribe_ni_deja_evento_y_una_desaparecida_que_vuelve_si() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let antes = foto(&s, &a.id);
+    // La misma ruta, principal, `ok`, mismo display_path y sin cambio de huella: Unchanged.
+    let r = s.project_relocate_recorded(&a.id, &loc("c:/a"), None, &decision_de(&a.id, "project.relocated"));
+    assert_eq!(r.unwrap(), ChangeOutcome::Unchanged);
+    assert_eq!(foto(&s, &a.id), antes, "ni last_seen ni evento");
+    // Desaparecida y vuelta a indicar: es un cambio real.
+    s.location_mark("m1", "c:/a", true).unwrap();
+    let r = s.project_relocate_recorded(&a.id, &loc("c:/a"), None, &decision_de(&a.id, "project.relocated"));
+    assert_eq!(r.unwrap(), ChangeOutcome::Changed);
+    assert!(s.project_locations(Some(&a.id)).unwrap().iter().all(|l| !l.missing));
+    assert_eq!(eventos_n(&s), 1);
+    // Un proyecto que no existe.
+    let r = s.project_join_recorded("fantasma", &loc_en("d:/q", true), None, &decision_de("fantasma", "project.location_added"));
+    assert_eq!(r.unwrap(), ChangeOutcome::Missing);
+    assert_eq!((ubicaciones_n(&s), eventos_n(&s)), (1, 1));
+}
+
+#[test]
+fn archivar_y_restaurar_distinguen_missing_unchanged_y_changed_y_solo_changed_deja_evento() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let ev = |k: &str| decision_de(&a.id, k);
+    assert_eq!(s.project_set_archived_recorded(&a.id, false, &ev("project.restored")).unwrap(), ChangeOutcome::Unchanged, "restaurar un activo");
+    assert_eq!(eventos_n(&s), 0);
+    assert_eq!(s.project_set_archived_recorded(&a.id, true, &ev("project.archived")).unwrap(), ChangeOutcome::Changed);
+    assert!(s.project(&a.id).unwrap().unwrap().archived);
+    let updated = s.project(&a.id).unwrap().unwrap().updated_at;
+    assert_eq!(s.project_set_archived_recorded(&a.id, true, &ev("project.archived")).unwrap(), ChangeOutcome::Unchanged, "archivar un archivado");
+    assert_eq!((eventos_n(&s), s.project(&a.id).unwrap().unwrap().updated_at), (1, updated), "ni evento ni updated_at");
+    assert_eq!(s.project_set_archived_recorded(&a.id, false, &ev("project.restored")).unwrap(), ChangeOutcome::Changed);
+    assert_eq!(eventos_n(&s), 2);
+    let fantasma = decision_de("fantasma", "project.archived");
+    assert_eq!(s.project_set_archived_recorded("fantasma", true, &fantasma).unwrap(), ChangeOutcome::Missing);
+    assert_eq!(eventos_n(&s), 2);
+}
+
+#[test]
+fn si_falla_el_cambio_de_estado_o_el_evento_no_queda_nada_a_medias() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc("c:/a")).unwrap();
+    let antes = foto(&s, &a.id);
+    // Falla el UPDATE de `projects`: no hay evento.
+    dispara(&mut s, "CREATE TRIGGER falla_estado BEFORE UPDATE OF state ON projects BEGIN SELECT RAISE(ABORT, 'estado'); END;");
+    assert!(s.project_set_archived_recorded(&a.id, true, &decision_de(&a.id, "project.archived")).is_err());
+    assert_eq!(foto(&s, &a.id), antes);
+    dispara(&mut s, "DROP TRIGGER falla_estado");
+    // Falla el INSERT del evento: el estado no cambia.
+    let ocupado = decision_de("otro", "project.archived");
+    s.append_events(std::slice::from_ref(&ocupado)).unwrap();
+    let antes = foto(&s, &a.id);
+    let r = s.project_set_archived_recorded(&a.id, true, &NewEvent { id: ocupado.id.clone(), ..decision_de(&a.id, "project.archived") });
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(foto(&s, &a.id), antes, "el proyecto sigue activo y sin evento nuevo");
+    // Un evento de otro proyecto o mal formado se rechaza antes de abrir la transacción.
+    assert!(matches!(s.project_set_archived_recorded(&a.id, true, &decision_de("otro-proyecto", "project.archived")), Err(StoreError::InvalidEvent(_))));
+    assert!(matches!(s.project_set_archived_recorded(&a.id, true, &NewEvent { payload: "[1]".into(), ..decision_de(&a.id, "project.archived") }), Err(StoreError::InvalidEvent(_))));
+    assert_eq!(foto(&s, &a.id), antes);
+}
+
+// ---------------------------------------------------------------------------------------------
+// La principal es por (project_id, machine): multi-machine
+// ---------------------------------------------------------------------------------------------
+
+fn loc_m(machine: &str, path: &str, primary: bool) -> NewLocation {
+    NewLocation { machine: machine.into(), path: path.into(), display_path: path.into(), primary }
+}
+
+fn principales(s: &Store, id: &str) -> Vec<(String, String, bool)> {
+    let mut v: Vec<_> = s.project_locations(Some(id)).unwrap().into_iter().map(|l| (l.machine, l.path, l.primary)).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn la_primera_ubicacion_de_otra_maquina_es_su_principal_y_la_segunda_no() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc_m("machine-a", "ruta-a", true)).unwrap();
+    let ev = || decision_de(&a.id, "project.location_added");
+    // Machine B no tiene ninguna ubicación: la primera es su principal, aunque machine A ya tenga la suya.
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    assert_eq!(
+        principales(&s, &a.id),
+        vec![("machine-a".into(), "ruta-a".into(), true), ("machine-b".into(), "ruta-b".into(), true)],
+        "una principal POR máquina"
+    );
+    // La segunda de machine B ya no es principal…
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b2", false), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    assert_eq!(
+        principales(&s, &a.id),
+        vec![("machine-a".into(), "ruta-a".into(), true), ("machine-b".into(), "ruta-b".into(), true), ("machine-b".into(), "ruta-b2".into(), false)]
+    );
+    // …y declararla principal contradice el snapshot (machine B ya tiene una viva): se deshace todo.
+    let antes = foto(&s, &a.id);
+    let r = s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", true), None, &ev());
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!(foto(&s, &a.id), antes);
+    assert_eq!(eventos_n(&s), 2);
+}
+
+#[test]
+fn un_cambio_de_principal_en_otra_maquina_no_invalida_el_join_y_en_la_misma_si() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = s.project_create("a", &fp(&["c1"], &[]), &loc_m("machine-a", "ruta-a", true)).unwrap();
+    let ev = || decision_de(&a.id, "project.location_added");
+    // La principal de machine A desaparece: machine B sigue sin tener ninguna, así que su primera es la principal.
+    s.location_mark("machine-a", "ruta-a", true).unwrap();
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    // Machine B ya tiene su principal. Un cambio en OTRA máquina (A vuelve) no invalida un join de B que dice «no principal».
+    s.location_mark("machine-a", "ruta-a", false).unwrap();
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b2", false), None, &ev()).unwrap(), ChangeOutcome::Changed);
+    // Un cambio en la MISMA máquina sí: la principal de B desaparece y el join (leído antes) decía «no principal».
+    s.location_mark("machine-b", "ruta-b", true).unwrap();
+    let antes = foto(&s, &a.id);
+    let r = s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", false), None, &ev());
+    assert!(matches!(r, Err(StoreError::ProjectConflict(_))), "{r:?}");
+    assert_eq!(foto(&s, &a.id), antes, "rollback total");
+    // …y con el snapshot correcto (no hay principal viva en B), la nueva es la principal.
+    assert_eq!(s.project_join_recorded(&a.id, &loc_m("machine-b", "ruta-b3", true), None, &ev()).unwrap(), ChangeOutcome::Changed);
 }

@@ -15,6 +15,13 @@
 //!   son de la persona: `join`, resolver una ambigüedad, un `project_locate` forzado, archivar o
 //!   restaurar y la importación explícita desde la interfaz (`Caller::User`). La garantía central es
 //!   que Lixbon **nunca une dos identidades ambiguas en silencio**.
+//! * **Cada nacimiento deja su hecho.** Un proyecto que NACE (manual, automático, relleno, importación)
+//!   emite `project.registered` en la misma transacción que su fila (`project_ops.rs`). Encontrar uno
+//!   existente o una ambigüedad no emiten nada.
+//! * **Cada decisión de gestión deja su hecho.** `join` (`project.location_added`), archivar/restaurar
+//!   (`project.archived` / `project.restored`) y `project_locate` (`project.relocated`) cambian TODAS sus
+//!   filas y escriben su evento en UNA transacción (`Store::project_*_recorded`); solo un cambio real deja
+//!   evento. Las toma una persona por la interfaz (`person/ui`).
 //! * **No escribe en ningún repositorio.** Solo ejecuta git de lectura; el registro vive en SQLite
 //!   (migración 003).
 //! * **No decide el modelo definitivo de Task/Attempt:** solo añade `Task.project_id`
@@ -26,15 +33,28 @@
 //! el mutex del almacén tomado** (ni `git`, ni `Path::exists`, ni nada del sistema de archivos): el
 //! almacén es uno para todo el Core y también lo usa la persistencia del estado. El ciclo es siempre
 //! leer (SQL) → comprobar fuera → persistir (SQL); una prueba escanea este archivo para impedirlo.
+//!
+//! # Lecturas y escrituras (frontera explícita)
+//! * [`Core::registry_read`] / [`Core::registry_read_opt`] reciben un `&Store`: el compilador impide
+//!   escribir desde una lectura. **Una lectura nunca escribe**, tampoco el `machine_id` (si aún no
+//!   existe, no hay ubicaciones suyas en esta máquina).
+//! * [`Core::registry_write`] / [`Core::registry_write_opt`] son el ÚNICO camino de escritura y respetan
+//!   `Health`: con el Core en `DegradedReadOnly` rechazan sin tocar el almacén (ninguna creación,
+//!   ubicación, marca, relleno ni importación). Las lecturas siguen funcionando.
+//! * El nacimiento de un proyecto es siempre Project + primera ubicación + `project.registered` en UNA
+//!   transacción: lo hace `project_ops::register_project`, el único que construye esos hechos.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::events::MutationContext;
+use super::mutation::Health;
+use super::project_ops::{join_project, register_project, relocate_project, set_archived, Management, ProjectOrigin, Registration};
 use super::state::now_ms;
 use super::{b, git, s, Core};
-use crate::store::{new_uuid, Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
+use crate::store::{new_uuid, ChangeOutcome, Fingerprint, LocationMark, LocationRow, NewLocation, ProjectRow, Store, StoreResult};
 
 /// Presupuesto de tiempo del relleno de `project_id` al arrancar (se retoma en el siguiente arranque).
 pub(super) const BACKFILL_BUDGET: Duration = Duration::from_secs(4);
@@ -159,9 +179,17 @@ fn lookup(store: &Store, machine: &str, ident: &Identity) -> StoreResult<Lookup>
     Ok(if cands.is_empty() { Lookup::None } else { Lookup::Candidates(cands) })
 }
 
-/// Identificador estable de esta máquina para `project_locations.machine` (se crea una vez).
-fn machine_id(store: &mut Store) -> StoreResult<String> {
-    if let Some(m) = store.meta(META_MACHINE)? {
+/// Identificador estable de esta máquina para `project_locations.machine`, SOLO LECTURA: `None` si aún no
+/// se creó (entonces esta máquina no tiene ubicaciones registradas). Las lecturas usan esta; así una
+/// consulta con el Core degradado no puede crear una fila de `meta`.
+fn machine_id_read(store: &Store) -> StoreResult<Option<String>> {
+    store.meta(META_MACHINE)
+}
+
+/// El mismo identificador, creándolo la primera vez. SOLO desde un closure de escritura
+/// ([`Core::registry_write`]), que ya respeta `Health`.
+fn machine_id_ensure(store: &mut Store) -> StoreResult<String> {
+    if let Some(m) = machine_id_read(store)? {
         return Ok(m);
     }
     let m = new_uuid();
@@ -185,9 +213,11 @@ fn project_json(p: &ProjectRow, locs: &[LocationRow], tasks: usize) -> Value {
     })
 }
 
-/// ¿La ubicación nueva debe ser la principal? Sí si el proyecto no tiene ninguna que exista.
-fn becomes_primary(existing: &[LocationRow]) -> bool {
-    !existing.iter().any(|l| l.primary && !l.missing)
+/// ¿La ubicación nueva debe ser la principal de ESTA máquina? Sí si el proyecto no tiene ya una principal viva
+/// en ella. La principal es por `(project_id, machine)` (índice único de la migración 003): la de otra máquina
+/// no cuenta, y la primera ubicación de una máquina nueva es su principal.
+fn becomes_primary(existing: &[LocationRow], machine: &str) -> bool {
+    !existing.iter().any(|l| l.machine == machine && l.primary && !l.missing)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -231,11 +261,40 @@ fn apply_transitions(locs: &mut [LocationRow], marks: &[LocationMark]) {
 
 type Counts = std::collections::HashMap<String, usize>;
 
+const REGISTRY_CLOSED: &str = "El registro de proyectos no está disponible: el almacén del Core no está abierto";
+
 impl Core {
-    /// Acceso al registro. `Ok(None)` = el almacén no está abierto (modo degradado): el registro es
+    /// LECTURA del registro. `Ok(None)` = el almacén no está abierto (modo degradado): el registro es
     /// ADITIVO y quien llama decide si eso importa. `Err` = el almacén está abierto y la consulta
-    /// falló: eso NO se esconde. El closure corre con el mutex del almacén tomado: solo SQL.
-    fn registry_opt<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<Option<R>, String> {
+    /// falló: eso NO se esconde. El closure corre con el mutex del almacén tomado: solo SQL, y solo
+    /// recibe `&Store`: no puede escribir.
+    fn registry_read_opt<R>(&self, f: impl FnOnce(&Store) -> StoreResult<R>) -> Result<Option<R>, String> {
+        match self.storage.with_store(|st| f(st)) {
+            Some(Ok(r)) => Ok(Some(r)),
+            Some(Err(e)) => Err(e.to_string()),
+            None => Ok(None),
+        }
+    }
+
+    /// Como [`Core::registry_read_opt`], pero un almacén cerrado es un error claro.
+    fn registry_read<R>(&self, f: impl FnOnce(&Store) -> StoreResult<R>) -> Result<R, String> {
+        self.registry_read_opt(f)?.ok_or_else(|| REGISTRY_CLOSED.to_string())
+    }
+
+    /// El registro admite escrituras solo con el Core en salud normal. Un `DegradedReadOnly` (fallo del
+    /// almacenamiento) rechaza toda creación, ubicación, marca, relleno o importación SIN abrir ninguna
+    /// transacción; las lecturas no pasan por aquí.
+    fn require_registry_writable(&self) -> Result<(), String> {
+        match self.health() {
+            Health::Normal => Ok(()),
+            Health::DegradedReadOnly(why) => Err(format!("El Core está en solo lectura ({why}): el registro de proyectos no admite escrituras hasta que se recupere el almacenamiento")),
+        }
+    }
+
+    /// ESCRITURA del registro, con las mismas reglas que [`Core::registry_read_opt`] para un almacén
+    /// cerrado (`Ok(None)`), pero ANTES de nada comprueba la salud del Core.
+    fn registry_write_opt<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<Option<R>, String> {
+        self.require_registry_writable()?;
         match self.storage.with_store(f) {
             Some(Ok(r)) => Ok(Some(r)),
             Some(Err(e)) => Err(e.to_string()),
@@ -243,17 +302,19 @@ impl Core {
         }
     }
 
-    /// Como [`Core::registry_opt`], pero un almacén cerrado es un error claro.
-    fn registry<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<R, String> {
-        self.registry_opt(f)?.ok_or_else(|| "El registro de proyectos no está disponible: el almacén del Core no está abierto".to_string())
+    /// Como [`Core::registry_write_opt`], pero un almacén cerrado es un error claro.
+    fn registry_write<R>(&self, f: impl FnOnce(&mut Store) -> StoreResult<R>) -> Result<R, String> {
+        self.registry_write_opt(f)?.ok_or_else(|| REGISTRY_CLOSED.to_string())
     }
 
-    /// Paso 3 del ciclo leer -> comprobar -> persistir: guarda las transiciones, en una transacción.
+    /// Paso 3 del ciclo leer -> comprobar -> persistir: guarda las transiciones, en una transacción. Con
+    /// el Core degradado las transiciones solo existen en memoria: el llamador ya las aplicó a lo que
+    /// devuelve y no se escribe ninguna marca.
     fn persist_marks(&self, marks: &[LocationMark]) -> Result<(), String> {
-        if marks.is_empty() {
+        if marks.is_empty() || self.require_registry_writable().is_err() {
             return Ok(());
         }
-        self.registry(|st| st.locations_mark(marks))
+        self.registry_write(|st| st.locations_mark(marks))
     }
 
     fn tasks_per_project(&self) -> (Counts, usize) {
@@ -279,7 +340,7 @@ impl Core {
     pub(super) fn projects_list(&self, include_archived: bool) -> Result<Value, String> {
         let (counts, unassigned) = self.tasks_per_project();
         // 1. Leer (solo SQL).
-        let mut rows = self.registry(|st| {
+        let mut rows = self.registry_read(|st| {
             let mut out = vec![];
             for p in st.projects(include_archived)? {
                 let locs = st.project_locations(Some(&p.id))?;
@@ -289,7 +350,7 @@ impl Core {
         })?;
         // 2. Comprobar el disco, con el almacén ya suelto.
         let marks = transitions(rows.iter().flat_map(|(_, l)| l.iter()), exists_on_disk);
-        // 3. Persistir solo lo que cambió.
+        // 3. Persistir solo lo que cambió (con el Core degradado, solo en memoria).
         self.persist_marks(&marks)?;
         for (_, locs) in rows.iter_mut() {
             apply_transitions(locs, &marks);
@@ -317,16 +378,23 @@ impl Core {
     /// Misma ruta (o un worktree del mismo repo) → ese proyecto. Otra ruta que coincide por huella →
     /// `needs_confirmation` con los candidatos; se resuelve repitiendo con `join` (es el mismo
     /// proyecto: nueva ubicación) o `new` (es otro). Sin coincidencias → proyecto nuevo.
-    pub(super) fn project_add(&self, args: &Value) -> Result<Value, String> {
+    ///
+    /// Un proyecto NUEVO emite `project.registered` (origen `manual`, person/ui) en la misma transacción que su
+    /// fila y su ubicación. Un `join` emite `project.location_added` en la misma transacción que la ubicación y
+    /// el posible cambio de huella. Misma ruta y ambigüedad no emiten nada.
+    pub(super) fn project_add(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let reg = Registration::new(ProjectOrigin::Manual, ctx)?;
+        let mgmt = Management::new(ctx)?;
         let ident = identify(&s(args, "path"))?;
         let name = Some(s(args, "name")).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| ident.name.clone());
         let (join, force_new) = (s(args, "join"), b(args, "new"));
         let counts = self.tasks_per_project().0;
-        self.registry(|st| {
-            let machine = machine_id(st)?;
+        self.registry_write(|st| {
+            let machine = machine_id_ensure(st)?;
             let new_project = |st: &mut Store| -> StoreResult<Value> {
                 let loc = NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
-                let p = st.project_create(&name, &ident.fingerprint, &loc)?;
+                let p = register_project(st, &name, &ident.fingerprint, &loc, &reg)?;
                 Self::registered(st, &p.id, true, &counts)
             };
             match lookup(st, &machine, &ident)? {
@@ -336,10 +404,13 @@ impl Core {
                         let Some(c) = cands.iter().find(|c| c.project.id == join) else {
                             return Ok(json!({ "status": "error", "error": format!("El proyecto {join} no coincide con este repositorio (commits raíz o remotos distintos). Para forzar otra ubicación usa project_locate") }));
                         };
-                        let primary = becomes_primary(&c.locations);
-                        st.location_put(&join, &NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary })?;
-                        if c.project.fingerprint.remotes.is_empty() && !ident.fingerprint.remotes.is_empty() {
-                            st.project_set_fingerprint(&join, &Fingerprint { remotes: ident.fingerprint.remotes.clone(), ..c.project.fingerprint.clone() })?;
+                        let primary = becomes_primary(&c.locations, &machine);
+                        let loc = NewLocation { machine: machine.clone(), path: ident.key.clone(), display_path: ident.root.clone(), primary };
+                        // Un proyecto sin remotos adopta los del repositorio que se une.
+                        let adopt = (c.project.fingerprint.remotes.is_empty() && !ident.fingerprint.remotes.is_empty())
+                            .then(|| Fingerprint { remotes: ident.fingerprint.remotes.clone(), ..c.project.fingerprint.clone() });
+                        if join_project(st, &c.project, &loc, adopt, &mgmt)? == ChangeOutcome::Missing {
+                            return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {join}") }));
                         }
                         Self::registered(st, &join, false, &counts)
                     } else if force_new {
@@ -367,13 +438,17 @@ impl Core {
         })
     }
 
-    /// `project_archive {project_id, archived?: bool = true}`: oculta (o restaura) sin borrar nada.
-    pub(super) fn project_archive(&self, args: &Value) -> Result<Value, String> {
+    /// `project_archive {project_id, archived?: bool = true}`: oculta (o restaura) sin borrar nada. Solo un
+    /// cambio REAL de estado deja `project.archived` / `project.restored`; archivar un archivado o restaurar un
+    /// activo no escribe nada.
+    pub(super) fn project_archive(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let mgmt = Management::new(ctx)?;
         let id = s(args, "project_id");
         let archived = args.get("archived").and_then(Value::as_bool).unwrap_or(true);
         let counts = self.tasks_per_project().0;
-        self.registry(|st| {
-            if !st.project_set_archived(&id, archived)? {
+        self.registry_write(|st| {
+            if set_archived(st, &id, archived, &mgmt)? == ChangeOutcome::Missing {
                 return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {id}") }));
             }
             Self::registered(st, &id, false, &counts)
@@ -384,12 +459,17 @@ impl Core {
     /// `project_locate {project_id, path, confirm?: bool}`: dónde está ahora este proyecto (mismo id,
     /// otra ruta). Si el repositorio de `path` no parece el mismo (commits raíz distintos), pide
     /// confirmación en lugar de aceptarlo.
-    pub(super) fn project_locate(&self, args: &Value) -> Result<Value, String> {
+    ///
+    /// Emite `project.relocated` (con `confirmed_mismatch` solo si la persona aceptó con `confirm` un repositorio
+    /// de otros commits raíz) en la misma transacción que la ubicación y el posible cambio de huella.
+    pub(super) fn project_locate(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let mgmt = Management::new(ctx)?;
         let id = s(args, "project_id");
         let ident = identify(&s(args, "path"))?;
         let confirm = b(args, "confirm");
         let counts = self.tasks_per_project().0;
-        let out = self.registry(|st| {
+        let out = self.registry_write(|st| {
             let Some(p) = st.project(&id)? else { return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {id}") })) };
             let same = p.fingerprint.root_commits.is_empty() || intersects(&ident.fingerprint.root_commits, &p.fingerprint.root_commits);
             if !same && !confirm {
@@ -399,11 +479,13 @@ impl Core {
                     "path": ident.root,
                 }));
             }
-            let machine = machine_id(st)?;
+            let machine = machine_id_ensure(st)?;
             // Una ruta que ya es de otro proyecto es un error del almacén (ProjectConflict).
-            st.location_put(&id, &NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true })?;
-            if p.fingerprint.root_commits.is_empty() {
-                st.project_set_fingerprint(&id, &ident.fingerprint)?;
+            let loc = NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
+            // Un proyecto sin commits raíz adopta la huella del repositorio donde está ahora.
+            let adopt = p.fingerprint.root_commits.is_empty().then(|| ident.fingerprint.clone());
+            if relocate_project(st, &p, &loc, adopt, !same && confirm, &mgmt)? == ChangeOutcome::Missing {
+                return Ok(json!({ "status": "error", "error": format!("No existe el proyecto {id}") }));
             }
             Self::registered(st, &id, false, &counts)
         })?;
@@ -425,30 +507,36 @@ impl Core {
     /// * `Err(..)` — el registro está ACTIVO y falló de verdad. Se propaga: quien lanza no debe crear
     ///   una tarea sin proyecto como si nada, porque entonces ni el archivado ni la ubicación
     ///   desaparecida podrían protegerla.
-    pub(super) fn project_for_repo(&self, repo: &str) -> Result<Option<String>, String> {
+    ///
+    /// Un proyecto inequívocamente nuevo emite `project.registered` (origen `auto`) en la misma transacción
+    /// que su fila. `ctx` es de quien lanza el run: persona, agente (su tarea) o sistema. Con el Core en
+    /// solo lectura es un error (no se crea nada), no un `Ok(None)`: el run tampoco se podría crear.
+    pub(super) fn project_for_repo(&self, ctx: &MutationContext, repo: &str) -> Result<Option<String>, String> {
+        self.require_registry_writable()?;
+        let reg = Registration::new(ProjectOrigin::Auto, ctx)?;
         let Ok(ident) = identify(repo) else { return Ok(None) };
-        self.registry_opt(|st| Self::resolve_in(st, &ident))
+        self.registry_write_opt(|st| Self::resolve_in(st, &ident, &reg))
             .map(Option::flatten)
             .map_err(|why| format!("No se pudo comprobar el registro de proyectos para {repo}: {why}. No se crea nada hasta poder comprobarlo."))
     }
 
-    /// Solo SQL: se llama con el mutex del almacén tomado.
-    fn resolve_in(st: &mut Store, ident: &Identity) -> StoreResult<Option<String>> {
-        let machine = machine_id(st)?;
+    /// Solo SQL: se llama con el mutex del almacén tomado, desde un closure de escritura.
+    fn resolve_in(st: &mut Store, ident: &Identity, reg: &Registration<'_>) -> StoreResult<Option<String>> {
+        let machine = machine_id_ensure(st)?;
         Ok(match lookup(st, &machine, ident)? {
             Lookup::ByPath(id) => Some(id),
             Lookup::Candidates(_) => None,
             Lookup::None => {
                 let loc = NewLocation { machine, path: ident.key.clone(), display_path: ident.root.clone(), primary: true };
-                Some(st.project_create(&ident.name, &ident.fingerprint, &loc)?.id)
+                Some(register_project(st, &ident.name, &ident.fingerprint, &loc, reg)?.id)
             }
         })
     }
 
     /// Como [`Core::project_for_repo`], pero un registro no disponible es un error (relleno e
     /// importación lo necesitan abierto).
-    fn resolve_or_create(&self, ident: &Identity) -> Result<Option<String>, String> {
-        self.registry(|st| Self::resolve_in(st, ident))
+    fn resolve_or_create(&self, ident: &Identity, reg: &Registration<'_>) -> Result<Option<String>, String> {
+        self.registry_write(|st| Self::resolve_in(st, ident, reg))
     }
 
     /// Asigna `project_id` a las tareas existentes que no lo tienen (perezoso: se llama tras arrancar,
@@ -456,7 +544,13 @@ impl Core {
     /// repositorios ambiguos o que ya no existen se dejan sin proyecto. `meta.projects_backfilled` es
     /// solo una marca diagnóstica (ver `META_BACKFILLED`): se anota si la pasada terminó y no se usa
     /// para saltarse pasadas futuras.
+    ///
+    /// Cada proyecto que NACE aquí emite `project.registered` (origen `backfill`, sistema por el canal
+    /// `core`) junto a su fila. Con el Core en solo lectura no hace nada y lo dice.
     pub(super) fn backfill_projects(&self, budget: Duration) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let ctx = MutationContext::core();
+        let reg = Registration::new(ProjectOrigin::Backfill, &ctx)?;
         let started = Instant::now();
         let mut pending: Vec<String> = vec![];
         {
@@ -476,7 +570,7 @@ impl Core {
             }
             match identify(repo) {
                 Err(_) => unresolved += 1,
-                Ok(ident) => match self.resolve_or_create(&ident)? {
+                Ok(ident) => match self.resolve_or_create(&ident, &reg)? {
                     Some(id) => {
                         resolved.insert(repo.clone(), id);
                     }
@@ -501,7 +595,7 @@ impl Core {
                 .map_err(String::from)?;
         }
         if complete {
-            self.registry(|st| st.meta_set(META_BACKFILLED, &now_ms().to_string()))?;
+            self.registry_write(|st| st.meta_set(META_BACKFILLED, &now_ms().to_string()))?;
         }
         Ok(json!({ "assigned": assigned, "ambiguous": ambiguous, "unresolved": unresolved, "complete": complete }))
     }
@@ -510,8 +604,14 @@ impl Core {
     /// de esta importación: la interfaz puede llamar en cada arranque y es `meta.projects_recents_imported`
     /// (en SQLite) quien decide; con la marca puesta devuelve `already_done` sin hacer nada. No
     /// pregunta: lo ambiguo se omite y se informa.
-    pub(super) fn projects_import_recents(&self, args: &Value) -> Result<Value, String> {
-        if self.registry(|st| st.meta(META_RECENTS))?.is_some() {
+    ///
+    /// Cada proyecto que NACE aquí emite `project.registered` (origen `import`, sistema por el canal de
+    /// `ctx`: la interfaz dispara la importación, pero ninguna persona decide cada proyecto). Con el Core
+    /// en solo lectura se rechaza entera, incluida la marca de «ya importado».
+    pub(super) fn projects_import_recents(&self, ctx: &MutationContext, args: &Value) -> Result<Value, String> {
+        self.require_registry_writable()?;
+        let reg = Registration::new(ProjectOrigin::Import, ctx)?;
+        if self.registry_read(|st| st.meta(META_RECENTS))?.is_some() {
             return Ok(json!({ "imported": 0, "existing": 0, "skipped": [], "already_done": true }));
         }
         let paths: Vec<String> = args
@@ -529,17 +629,17 @@ impl Core {
                     continue;
                 }
             };
-            let known = self.registry(|st| {
-                let machine = machine_id(st)?;
-                st.project_by_location(&machine, &ident.key)
+            let known = self.registry_read(|st| match machine_id_read(st)? {
+                Some(machine) => st.project_by_location(&machine, &ident.key),
+                None => Ok(None),
             })?;
-            match (known, self.resolve_or_create(&ident)?) {
+            match (known, self.resolve_or_create(&ident, &reg)?) {
                 (Some(_), _) => existing += 1,
                 (None, Some(_)) => imported += 1,
                 (None, None) => skipped.push(json!({ "path": path, "reason": "se parece a un proyecto ya registrado en otra ruta: añádelo con project_add para confirmarlo" })),
             }
         }
-        self.registry(|st| st.meta_set(META_RECENTS, &now_ms().to_string()))?;
+        self.registry_write(|st| st.meta_set(META_RECENTS, &now_ms().to_string()))?;
         Ok(json!({ "imported": imported, "existing": existing, "skipped": skipped, "already_done": false }))
     }
 
@@ -568,10 +668,14 @@ impl Core {
         let fallo = |why: String| format!("No se pudo comprobar el proyecto {pid} antes de lanzar: {why}. No se lanza hasta poder comprobarlo.");
         // 1. Leer (solo SQL).
         let read = self
-            .registry_opt(|st| {
-                let machine = machine_id(st)?;
+            .registry_read_opt(|st| {
+                // Solo lectura: sin `machine_id` todavía no hay ubicaciones de esta máquina (y no se crea ahora).
+                let machine = machine_id_read(st)?;
                 let Some(p) = st.project(pid)? else { return Ok((None, vec![])) };
-                let locs: Vec<LocationRow> = st.project_locations(Some(pid))?.into_iter().filter(|l| l.machine == machine).collect();
+                let locs: Vec<LocationRow> = match machine {
+                    Some(m) => st.project_locations(Some(pid))?.into_iter().filter(|l| l.machine == m).collect(),
+                    None => vec![],
+                };
                 Ok((Some(p), locs))
             })
             .map_err(fallo)?;

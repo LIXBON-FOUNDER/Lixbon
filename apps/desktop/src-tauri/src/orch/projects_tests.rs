@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::boot_tests::*;
+use super::events::MutationContext;
 use super::projects::{compatible, identify, norm_path_for};
 use super::state::NewTask;
 use super::store_boot::StorageStatus;
@@ -19,7 +20,7 @@ use crate::store::Fingerprint;
 // Ayudas
 // ---------------------------------------------------------------------------------------------
 
-fn g(dir: &Path, args: &[&str]) -> String {
+pub(super) fn g(dir: &Path, args: &[&str]) -> String {
     let o = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -35,7 +36,7 @@ fn g(dir: &Path, args: &[&str]) -> String {
 }
 
 /// Repositorio con un commit raíz y, si `remote` es `Some`, un `origin` (no hace falta que exista).
-fn repo(base: &Path, name: &str, remote: Option<&str>) -> PathBuf {
+pub(super) fn repo(base: &Path, name: &str, remote: Option<&str>) -> PathBuf {
     let dir = base.join("repos").join(name);
     std::fs::create_dir_all(&dir).unwrap();
     g(&dir, &["init", "-q", "-b", "main"]);
@@ -54,7 +55,7 @@ fn repo(base: &Path, name: &str, remote: Option<&str>) -> PathBuf {
 }
 
 /// Copia por `git clone` (mismos commits raíz) con el remoto que se pida (`None` = sin remoto).
-fn clon(base: &Path, de: &Path, name: &str, remote: Option<&str>) -> PathBuf {
+pub(super) fn clon(base: &Path, de: &Path, name: &str, remote: Option<&str>) -> PathBuf {
     let dir = base.join("repos").join(name);
     g(base, &["clone", "-q", de.to_str().unwrap(), dir.to_str().unwrap()]);
     g(&dir, &["config", "user.name", "t"]);
@@ -66,12 +67,12 @@ fn clon(base: &Path, de: &Path, name: &str, remote: Option<&str>) -> PathBuf {
     dir
 }
 
-fn s(p: &Path) -> String {
+pub(super) fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
 /// Un Core arrancado con el almacén abierto (SQLite autoritativa).
-fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
+pub(super) fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     let (l, data, core_dir) = dirs();
     let (core, _h, r) = arranca(&data, &core_dir);
     r.unwrap();
@@ -79,28 +80,28 @@ fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     (l, data, core_dir, core)
 }
 
-fn base_de(data: &Path) -> PathBuf {
+pub(super) fn base_de(data: &Path) -> PathBuf {
     data.parent().unwrap().to_path_buf()
 }
 
-fn rpc(core: &Arc<Core>, cmd: &str, args: Value) -> Result<Value, String> {
+pub(super) fn rpc(core: &Arc<Core>, cmd: &str, args: Value) -> Result<Value, String> {
     core.rpc(Caller::User, "", cmd, &args)
 }
 
-fn registra(core: &Arc<Core>, path: &Path) -> Value {
+pub(super) fn registra(core: &Arc<Core>, path: &Path) -> Value {
     rpc(core, "project_add", json!({ "path": s(path) })).unwrap()
 }
 
-fn id_de(v: &Value) -> String {
+pub(super) fn id_de(v: &Value) -> String {
     v["project"]["id"].as_str().unwrap().to_string()
 }
 
-fn lista(core: &Arc<Core>) -> Vec<Value> {
+pub(super) fn lista(core: &Arc<Core>) -> Vec<Value> {
     rpc(core, "projects", json!({ "all": true })).unwrap()["projects"].as_array().unwrap().clone()
 }
 
 /// Una tarea cuyo repositorio es `repo` (el estado se muta por la frontera, como en producción).
-fn tarea_en(core: &Arc<Core>, repo: &str, titulo: &str) -> String {
+pub(super) fn tarea_en(core: &Arc<Core>, repo: &str, titulo: &str) -> String {
     core.mutate(|st| {
         Ok(st
             .create_run("obj", NewTask {
@@ -112,7 +113,7 @@ fn tarea_en(core: &Arc<Core>, repo: &str, titulo: &str) -> String {
     .unwrap()
 }
 
-fn project_id_de_tarea(core: &Arc<Core>, task: &str) -> Option<String> {
+pub(super) fn project_id_de_tarea(core: &Arc<Core>, task: &str) -> Option<String> {
     core.lock().tasks.get(task).unwrap().project_id.clone()
 }
 
@@ -725,13 +726,13 @@ fn ambiguo_o_registro_no_disponible_siguen_creando_la_tarea_sin_proyecto() {
     let origen = repo(&base, "origen", None);
     registra(&core, &origen);
     let copia = clon(&base, &origen, "copia", None);
-    assert_eq!(core.project_for_repo(&s(&copia)), Ok(None));
+    assert_eq!(core.project_for_repo(&MutationContext::core(), &s(&copia)), Ok(None));
     // Lo que git no puede identificar tampoco es un error del registro.
-    assert_eq!(core.project_for_repo(&s(&base.join("no-existe"))), Ok(None));
+    assert_eq!(core.project_for_repo(&MutationContext::core(), &s(&base.join("no-existe"))), Ok(None));
     // Registro opcional NO disponible (almacén cerrado): no es un error, es compatibilidad.
     let otro = repo(&base, "otro", None);
     core.storage.degrade("prueba".into());
-    assert_eq!(core.project_for_repo(&s(&otro)), Ok(None));
+    assert_eq!(core.project_for_repo(&MutationContext::core(), &s(&otro)), Ok(None));
 }
 
 #[test]
@@ -877,7 +878,7 @@ fn con_el_almacen_realmente_degradado_el_registro_sigue_siendo_aditivo() {
 
 /// Texto (sin comentarios) de cada llamada `<llamada>…)`, desde el paréntesis de apertura hasta su
 /// cierre. Salta literales de cadena y comentarios de línea al contar paréntesis.
-fn regiones(src: &str, llamada: &str) -> Vec<String> {
+pub(super) fn regiones(src: &str, llamada: &str) -> Vec<String> {
     let b = src.as_bytes();
     let mut out = vec![];
     let mut desde = 0;
@@ -924,7 +925,7 @@ fn regiones(src: &str, llamada: &str) -> Vec<String> {
 }
 
 /// El almacén es UNO para todo el Core y su mutex lo usa también la persistencia del estado. Ningún
-/// closure de `registry` / `registry_opt` / `with_store` de `projects.rs` puede mirar el disco, ejecutar
+/// closure de `registry_read` / `registry_write` (y sus `_opt`) / `with_store` de `projects.rs` puede mirar el disco, ejecutar
 /// git o un proceso, dormir, ni tomar el bloqueo del estado (orden estado -> almacén). Si esta prueba
 /// falla, saca esa E/S del closure: léela antes (paso 1), compruébala fuera (paso 2) y persiste después (paso 3).
 #[test]
@@ -933,10 +934,11 @@ fn el_registro_no_hace_io_externo_bajo_el_bloqueo_del_almacen() {
     let prohibido = [
         "Path::new", ".exists()", "exists_on_disk", "is_dir()", "is_file()", "read_dir", ".metadata(", "canonicalize", "std::fs", "fs::",
         "git::", "identify(", "std::process", "Command", "std::thread", "sleep(",
-        "self.lock()", "self.mutate(", "tasks_per_project", ".registry(", ".registry_opt(", "persist_marks", "resolve_or_create",
+        "self.lock()", "self.mutate(", "tasks_per_project", ".registry_read(", ".registry_read_opt(", ".registry_write(", ".registry_write_opt(", "persist_marks", "resolve_or_create",
+        "require_registry_writable",
     ];
     let mut vistos = 0;
-    for llamada in [".registry(", ".registry_opt(", ".with_store("] {
+    for llamada in [".registry_read(", ".registry_read_opt(", ".registry_write(", ".registry_write_opt(", ".with_store("] {
         for r in regiones(src, llamada) {
             vistos += 1;
             for p in prohibido {
@@ -946,8 +948,8 @@ fn el_registro_no_hace_io_externo_bajo_el_bloqueo_del_almacen() {
     }
     assert!(vistos >= 10, "el escáner debe ver los closures del registro (vio {vistos}): ¿cambió su forma?");
     // La prueba no es vacía: sabe detectar la violación que previene.
-    let mala = "self.registry(|st| { let ok = Path::new(&x).exists(); Ok(ok) })";
-    assert!(regiones(mala, ".registry(").iter().any(|r| r.contains(".exists()")));
+    let mala = "self.registry_write(|st| { let ok = Path::new(&x).exists(); Ok(ok) })";
+    assert!(regiones(mala, ".registry_write(").iter().any(|r| r.contains(".exists()")));
 }
 
 // ---------------------------------------------------------------------------------------------

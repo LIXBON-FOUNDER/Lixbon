@@ -7,12 +7,19 @@
 //!
 //! Todas las escrituras son UNA transacción (`Store::write`). Los identificadores
 //! de proyecto son UUID v7 (ordenables por creación).
+//!
+//! # Project + Event
+//! El nacimiento de un proyecto ([`Store::project_register`]) inserta la fila `projects`, su primera
+//! ubicación y su evento `project.registered` en UNA transacción (`events.state_rev = NULL`: no toca
+//! `legacy_state`). Recibe el evento ya MATERIALIZADO ([`NewEvent`]): no sabe qué hechos existen ni quién
+//! los provoca, solo que un fallo en cualquiera de los tres INSERT deshace los tres.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
 use super::authority::new_uuid_v7;
 use super::error::{StoreError, StoreResult};
+use super::events::{insert_events, Inserted, NewEvent};
 use super::migrate::now_ms;
 use super::Store;
 
@@ -63,6 +70,25 @@ pub struct LocationMark {
     /// Ruta normalizada (la clave de `project_locations`).
     pub path: String,
     pub missing: bool,
+}
+
+/// Qué pasó con un cambio de gestión de un proyecto que ya existe. Solo `Changed` escribe filas y evento.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeOutcome {
+    /// El proyecto no existe: no se escribió nada.
+    Missing,
+    /// El proyecto ya estaba como se pedía: no se escribió nada (ni siquiera `last_seen`).
+    Unchanged,
+    /// Cambió: filas y evento se confirmaron juntos.
+    Changed,
+}
+
+/// Un cambio de huella ya DECIDIDO. `from` es la huella que quien llama leyó: la transacción comprueba que
+/// sigue siendo la guardada (si no, se deshace todo) para que el hecho no describa un snapshot obsoleto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FingerprintChange {
+    pub from: Fingerprint,
+    pub to: Fingerprint,
 }
 
 /// Una ubicación que se va a guardar. `path` ya viene normalizada por quien llama.
@@ -145,8 +171,132 @@ fn put_location(tx: &Connection, project_id: &str, loc: &NewLocation, now: i64) 
     Ok(())
 }
 
+/// El evento de un cambio de gestión: se refiere a este proyecto y está bien formado.
+fn check_event_for(id: &str, event: &NewEvent) -> StoreResult<()> {
+    if event.project_id.as_deref() != Some(id) {
+        return Err(StoreError::InvalidEvent(format!("{}: el evento no se refiere al proyecto {id}", event.kind)));
+    }
+    event.check()
+}
+
+/// Inserta el evento del cambio: un duplicado por `(kind, idem_key)` deshace el cambio en lugar de dejarlo sin su hecho.
+fn insert_one_event(tx: &Transaction<'_>, id: &str, event: &NewEvent) -> StoreResult<()> {
+    match insert_events(tx, std::slice::from_ref(event), None)?.first() {
+        Some(Inserted::New(_)) => Ok(()),
+        _ => Err(StoreError::ProjectConflict(format!("el evento {} de {id} ya existía: el cambio no se confirma sin su hecho", event.kind))),
+    }
+}
+
+/// Núcleo común de `join` y `relocate`: ubicación + posible cambio de huella + evento, DENTRO de la transacción
+/// de quien llama.
+fn apply_location(tx: &Transaction<'_>, id: &str, loc: &NewLocation, fp: Option<&FingerprintChange>, event: &NewEvent, guard_primary: bool, now: i64) -> StoreResult<ChangeOutcome> {
+    let current: Option<String> = tx.query_row("SELECT fingerprint FROM projects WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+    let Some(current) = current else { return Ok(ChangeOutcome::Missing) };
+    // Snapshot: la huella que quien llama leyó sigue siendo la guardada.
+    if let Some(c) = fp {
+        if fingerprint_from(&current)? != c.from {
+            return Err(StoreError::ProjectConflict(format!("la huella del proyecto {id} cambió desde que se leyó")));
+        }
+    }
+    // Snapshot: la ubicación nueva es la principal si y solo si el proyecto no tenía ninguna principal viva EN ESA
+    // MÁQUINA (la principal es por `(project_id, machine)`; la de otra máquina no cuenta).
+    if guard_primary {
+        let vivas: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM project_locations WHERE project_id = ?1 AND machine = ?2 AND is_primary = 1 AND state <> 'missing'",
+            params![id, loc.machine],
+            |r| r.get(0),
+        )?;
+        if loc.primary != (vivas == 0) {
+            return Err(StoreError::ProjectConflict(format!("las ubicaciones del proyecto {id} cambiaron desde que se leyeron")));
+        }
+    }
+    let existing: Option<(String, String, i64, String)> = tx
+        .query_row(
+            "SELECT project_id, display_path, is_primary, state FROM project_locations WHERE machine = ?1 AND path = ?2",
+            params![loc.machine, loc.path],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    if let Some((owner, display, primary, state)) = &existing {
+        if owner != id {
+            return Err(StoreError::ProjectConflict(format!("la ruta {} ya pertenece al proyecto {owner}", loc.display_path)));
+        }
+        if fp.is_none() && *display == loc.display_path && (*primary == 1) == loc.primary && state == "ok" {
+            return Ok(ChangeOutcome::Unchanged);
+        }
+    }
+    put_location(tx, id, loc, now)?;
+    if let Some(c) = fp {
+        let n = tx.execute("UPDATE projects SET fingerprint = ?2, updated_at = ?3 WHERE id = ?1", params![id, fingerprint_to(&c.to)?, now])?;
+        if n != 1 {
+            return Err(StoreError::ProjectConflict(format!("no se pudo actualizar la huella del proyecto {id}")));
+        }
+    }
+    insert_one_event(tx, id, event)?;
+    Ok(ChangeOutcome::Changed)
+}
+
 impl Store {
-    /// Crea un proyecto con su primera ubicación, en una sola transacción.
+    /// Nace un proyecto: fila + primera ubicación + su evento, en UNA transacción (`BEGIN IMMEDIATE`).
+    ///
+    /// * `id` lo genera quien llama FUERA de la transacción y es el mismo del evento (`event.project_id`).
+    /// * Un fallo en cualquiera de los tres INSERT (la fila, la ubicación —incluida una ruta que ya es de
+    ///   otro proyecto— o el evento) lo deshace todo: ni proyecto huérfano de evento ni evento huérfano de
+    ///   proyecto.
+    /// * El evento de un proyecto que NACE no puede ser un duplicado: si su `(kind, idem_key)` ya existía, es
+    ///   una inconsistencia y se deshace en lugar de crear el proyecto sin su hecho.
+    pub fn project_register(&mut self, id: &str, name: &str, fingerprint: &Fingerprint, loc: &NewLocation, event: &NewEvent) -> StoreResult<ProjectRow> {
+        check_event_for(id, event)?;
+        let fp = fingerprint_to(fingerprint)?;
+        let now = now_ms();
+        self.write(|tx| {
+            tx.execute("INSERT INTO projects (id, name, created_at, updated_at, fingerprint) VALUES (?1, ?2, ?3, ?3, ?4)", params![id, name, now, fp])?;
+            put_location(tx, id, &NewLocation { primary: true, ..loc.clone() }, now)?;
+            insert_one_event(tx, id, event)
+        })?;
+        self.project(id)?.ok_or_else(|| StoreError::ProjectConflict(format!("el proyecto recién registrado {id} no existe")))
+    }
+
+    /// `join`: añade una ubicación a un proyecto que YA existía, con el cambio de huella que lo acompañe y su
+    /// evento, en UNA transacción. Nunca queda «ubicación nueva + huella vieja» ni «cambios sin evento».
+    /// `loc.primary` debe ser lo que el proyecto admite (no había otra principal viva); si no, se deshace todo.
+    /// Una ruta que ya es de OTRO proyecto es `ProjectConflict`.
+    pub fn project_join_recorded(&mut self, id: &str, loc: &NewLocation, fingerprint: Option<&FingerprintChange>, event: &NewEvent) -> StoreResult<ChangeOutcome> {
+        check_event_for(id, event)?;
+        let now = now_ms();
+        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, true, now))
+    }
+
+    /// `relocate`: la ubicación nueva pasa a ser la principal; igual que [`Store::project_join_recorded`]
+    /// (ubicación + posible huella + evento atómicos), sin la guarda de «principal viva».
+    pub fn project_relocate_recorded(&mut self, id: &str, loc: &NewLocation, fingerprint: Option<&FingerprintChange>, event: &NewEvent) -> StoreResult<ChangeOutcome> {
+        check_event_for(id, event)?;
+        if !loc.primary {
+            return Err(StoreError::InvalidEvent("relocate: la ubicación nueva es la principal".into()));
+        }
+        let now = now_ms();
+        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, false, now))
+    }
+
+    /// Archiva o restaura. Distingue `Missing` / `Unchanged` / `Changed` ATÓMICAMENTE (el `UPDATE` solo toca la
+    /// fila si el estado cambia) y solo `Changed` escribe el evento. Nada se borra: el historial queda intacto.
+    pub fn project_set_archived_recorded(&mut self, id: &str, archived: bool, event: &NewEvent) -> StoreResult<ChangeOutcome> {
+        check_event_for(id, event)?;
+        let (state, now) = (if archived { "archived" } else { "active" }, now_ms());
+        self.write(|tx| {
+            let n = tx.execute("UPDATE projects SET state = ?2, updated_at = ?3 WHERE id = ?1 AND state <> ?2", params![id, state, now])?;
+            if n == 1 {
+                insert_one_event(tx, id, event)?;
+                return Ok(ChangeOutcome::Changed);
+            }
+            let exists: i64 = tx.query_row("SELECT COUNT(*) FROM projects WHERE id = ?1", [id], |r| r.get(0))?;
+            Ok(if exists == 1 { ChangeOutcome::Unchanged } else { ChangeOutcome::Missing })
+        })
+    }
+
+    /// Prueba: crea un proyecto SIN evento (fixture de las pruebas del almacén). Producción registra con
+    /// [`Store::project_register`], que no separa la fila de su hecho.
+    #[cfg(test)]
     pub fn project_create(&mut self, name: &str, fingerprint: &Fingerprint, loc: &NewLocation) -> StoreResult<ProjectRow> {
         let id = new_project_id();
         let fp = fingerprint_to(fingerprint)?;
@@ -221,7 +371,8 @@ impl Store {
         })
     }
 
-    /// Archiva o restaura. `false` si el proyecto no existe. Nada se borra: el historial queda intacto.
+    /// Prueba: archiva o restaura SIN evento (fixture). Producción usa [`Store::project_set_archived_recorded`].
+    #[cfg(test)]
     pub fn project_set_archived(&mut self, id: &str, archived: bool) -> StoreResult<bool> {
         let now = now_ms();
         self.write(|tx| {
@@ -230,13 +381,17 @@ impl Store {
         })
     }
 
+    /// Prueba: cambia la huella SIN evento (fixture). Producción la cambia dentro de una transacción con su hecho.
+    #[cfg(test)]
     pub fn project_set_fingerprint(&mut self, id: &str, fingerprint: &Fingerprint) -> StoreResult<bool> {
         let fp = fingerprint_to(fingerprint)?;
         let now = now_ms();
         self.write(|tx| Ok(tx.execute("UPDATE projects SET fingerprint = ?2, updated_at = ?3 WHERE id = ?1", params![id, fp, now])? == 1))
     }
 
-    /// Añade o actualiza una ubicación de un proyecto que ya existe (relocalizar, otra copia).
+    /// Prueba: añade o actualiza una ubicación SIN evento (fixture). Producción usa
+    /// [`Store::project_join_recorded`] y [`Store::project_relocate_recorded`].
+    #[cfg(test)]
     pub fn location_put(&mut self, project_id: &str, loc: &NewLocation) -> StoreResult<()> {
         let now = now_ms();
         self.write(|tx| {
