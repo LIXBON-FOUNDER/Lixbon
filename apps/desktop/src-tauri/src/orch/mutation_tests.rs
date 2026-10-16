@@ -9,13 +9,13 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::events::MutationContext;
+use super::events::{Channel, MutationContext};
 use super::host::RecordingHost;
 use super::lifecycle::BootProof;
 use super::mutation::{Effect, Health, MutateError, PersistError, Persistence, RetryPolicy, StateAccess};
 use super::state::{Kind, NewTask, State};
 use super::{fsio, review, Core, Orch};
-use crate::store::{new_uuid_v7, EventQuery};
+use crate::store::{new_uuid_v7, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, EventQuery};
 
 static N: AtomicUsize = AtomicUsize::new(0);
 
@@ -591,6 +591,72 @@ fn el_journal_v2_en_modo_legacy_se_conserva_sin_reconciliar() {
 }
 
 #[test]
+fn journal_y_evento_reconciliado_conservan_client_id_y_omiten_credencial() {
+    let (_l, data, core_dir) = carpetas();
+    let (core, _host, result) = super::boot_tests::arranca(&data, &core_dir);
+    result.unwrap();
+
+    let secret = "client-secret-journal-85-with-more-than-32-bytes";
+    let registration = ClientRegistration::new(
+        ClientSurface::Desktop,
+        DeviceIdentity::new("install-journal-85", Some("device-journal-85".into())).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(
+        ClientPrincipal::Person("person-journal-85".into()),
+        secret,
+    )
+    .unwrap();
+    let authenticated = core
+        .storage
+        .with_store(|store| {
+            store.register_client(&registration, &credential, 1).unwrap();
+            store.authenticate_client(credential.reveal_for_delivery()).unwrap().unwrap()
+        })
+        .expect("almacén abierto");
+    let client_id = authenticated.identity().client_id().to_string();
+    let context = MutationContext::authenticated(&authenticated, &Default::default(), Channel::Ui).unwrap();
+    let (_run, task) = core.lock_unpersisted().create_run("obj", nt());
+    let effect = Effect::new("publish_pr", "git_push_pr")
+        .task(&task)
+        .observed(serde_json::json!({
+            "outcome": "created",
+            "branch": "lx/identity",
+            "pr_url": "https://github.com/org/repo/pull/85"
+        }));
+    let result: Result<(), String> = core
+        .acting(context)
+        .mutate_after_effect(effect, |_| Err("registro rechazado".into()));
+    let error = result.unwrap_err();
+    assert!(!error.contains(secret), "el error no expone la credencial");
+
+    let journal = std::fs::read_to_string(data.join("unrecorded-effects.jsonl")).unwrap();
+    let record: Value = serde_json::from_str(journal.lines().next().unwrap()).unwrap();
+    assert_eq!(record["actor_kind"], "person");
+    assert_eq!(record["actor_id"], "person-journal-85");
+    assert_eq!(record["channel"], "ui");
+    assert_eq!(record["client_id"], client_id);
+    assert!(!journal.contains(secret), "la credencial no llega al journal");
+
+    let report = core.reconcile_unrecorded_effects(&data).unwrap();
+    assert_eq!(report.recovered, 1);
+    let recovered = core
+        .storage
+        .with_store(|store| store.events_page(&EventQuery { limit: Some(10), ..Default::default() }).unwrap().events)
+        .expect("almacén abierto");
+    let event = recovered.iter().find(|event| event.kind == "effect.observed").expect("evento recuperado");
+    assert_eq!(event.client_id.as_deref(), Some(client_id.as_str()));
+    assert_eq!(event.actor_id.as_deref(), Some("person-journal-85"));
+    assert_eq!(event.channel.as_deref(), Some("ui"));
+    assert!(!event.payload.contains(secret), "el Event Log no contiene la credencial");
+    assert!(
+        !data.join("unrecorded-effects.jsonl").exists(),
+        "el journal confirmado se compacta y elimina"
+    );
+    super::boot_tests::suelta(core, &core_dir);
+}
+
+#[test]
 fn si_falla_anotar_el_journal_el_error_lo_dice_y_no_afirma_que_quedo_anotado() {
     let (_l, data, _) = carpetas();
     std::fs::create_dir(data.join("unrecorded-effects.jsonl")).unwrap();
@@ -676,7 +742,7 @@ fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // (símbolo, archivos donde puede aparecer)
     let permitidos: [(&str, &[&str]); 16] = [
-        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs"]),
+        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs", "client_identity.rs"]),
         ("save_legacy_state", &["store_boot.rs"]),
         ("commit_authoritative", &["store_boot.rs"]),
         ("promote_to_authoritative", &["boot_authority.rs"]),

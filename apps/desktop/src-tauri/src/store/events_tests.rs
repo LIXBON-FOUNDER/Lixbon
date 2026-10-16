@@ -123,27 +123,27 @@ fn la_004_se_aplica_sobre_una_base_con_la_003_conservando_todo() {
         p.id
     };
     let s = abre(tmp.path());
-    assert_eq!(s.schema_version().unwrap(), 4);
-    assert_eq!(s.migration_report().from_version, 3, "solo se aplicó la 004");
+    assert_eq!(s.schema_version().unwrap(), 5);
+    assert_eq!(s.migration_report().from_version, 3, "se aplicaron 004 y 005");
     assert_eq!(s.project(&id).unwrap().unwrap().name, "api", "la 004 no toca los proyectos");
     assert_eq!(s.meta("marca").unwrap().as_deref(), Some("intacta"));
     assert_eq!(cuenta(&s), 0, "sin relleno histórico: los eventos empiezan en el despliegue");
 }
 
 #[test]
-fn una_base_con_la_004_no_la_abre_un_binario_que_no_la_conoce() {
+fn una_base_con_la_005_no_la_abre_un_binario_que_no_la_conoce() {
     let tmp = Tmp::new();
     drop(abre(tmp.path()));
     let r = Store::open_with(tmp.path(), &hasta_la_003(), "t");
     assert!(matches!(r, Err(StoreError::DatabaseNewer { .. }) | Err(StoreError::UnknownMigration { .. })), "{r:?}");
     // Y no se modificó nada: con el binario completo sigue abriendo igual.
-    assert_eq!(abre(tmp.path()).schema_version().unwrap(), 4);
+    assert_eq!(abre(tmp.path()).schema_version().unwrap(), 5);
 }
 
 #[test]
 fn la_004_es_la_siguiente_migracion_y_su_checksum_esta_fijado() {
     let lista = embedded();
-    assert_eq!(lista.iter().map(|m| (m.version, m.name)).collect::<Vec<_>>(), vec![(1, "core"), (2, "authority_fence"), (3, "projects"), (4, "events")]);
+    assert_eq!(lista.iter().map(|m| (m.version, m.name)).collect::<Vec<_>>(), vec![(1, "core"), (2, "authority_fence"), (3, "projects"), (4, "events"), (5, "clients")]);
     let m = &lista[3];
     assert_eq!(m.checksum(), "f6ab10ae4bacd44cb7b5bcf920bf84538931034976c28360a1bd00ac78bd712b", "una migración publicada no se edita (cree una nueva)");
     // Y las tres anteriores siguen congeladas (su pin completo está en `projects_tests`).

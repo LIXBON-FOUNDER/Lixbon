@@ -7,6 +7,7 @@
 mod agents;
 mod authority;
 mod boot_authority;
+mod client_identity;
 #[cfg(test)]
 mod boot_tests;
 // E1b se entrega por bloques: parte del vocabulario (`project`, `idempotent`, `by`, entidades de
@@ -142,6 +143,8 @@ pub struct Core {
     cv: Condvar,
     terms: Mutex<HashMap<String, pty::AgentTerm>>,
     settings: Mutex<Settings>,
+    /// Identidad autenticada del límite Tauri, estable para esta instalación.
+    desktop_identity: Mutex<Option<crate::store::AuthenticatedClient>>,
     server: Mutex<Option<server::Handle>>,
     /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
     pending: Mutex<HashMap<String, spawn_approval::Entry>>,
@@ -179,6 +182,7 @@ impl Default for Orch {
             cv: Condvar::new(),
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
+            desktop_identity: Mutex::new(None),
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             pend_gate: Mutex::new(()),

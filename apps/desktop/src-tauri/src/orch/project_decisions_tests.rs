@@ -61,9 +61,10 @@ fn afirma_decision(e: &EventRow, id: &str, kind: &str, payload: Value) {
     assert_eq!((e.class, e.v), (EventClass::Decision, 1));
     assert_eq!((e.entity_kind.as_str(), e.entity_id.as_str()), ("project", id));
     assert_eq!(e.project_id.as_deref(), Some(id));
-    assert_eq!((e.run_id.clone(), e.idem_key.clone(), e.correlation_id.clone(), e.client_id.clone()), (None, None, None, None));
+    assert_eq!((e.run_id.clone(), e.idem_key.clone(), e.correlation_id.clone()), (None, None, None));
+    assert!(e.client_id.as_deref().is_some_and(|id| !id.is_empty()), "la decisión conserva el client_id autenticado");
     assert_eq!(e.state_rev, None, "una decisión de Project no confirma legacy_state");
-    assert_eq!((e.actor_kind.as_str(), e.actor_id.as_deref(), e.channel.as_deref()), ("person", None, Some("ui")));
+    assert_eq!((e.actor_kind.as_str(), e.actor_id.as_deref(), e.channel.as_deref()), ("person", Some("user"), Some("ui")));
     assert_eq!(pl(e), payload);
 }
 

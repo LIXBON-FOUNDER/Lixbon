@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
-use super::events::{Channel, MutationContext};
+use super::events::MutationContext;
 use super::mutation::{Effect, Health, StateAccess, Tx};
 use super::state::NewTask;
 
@@ -146,7 +146,7 @@ impl Core {
         // Quien actúa: la PERSONA que aprobó el lanzamiento, desde la interfaz (`approve_spawn` solo
         // existe como comando de Tauri: los agentes no pueden aprobar). El agente que lo pidió consta en
         // `spawn.requested` (bloque de Pending Spawn).
-        let ctx = MutationContext::person(Channel::Ui);
+        let ctx = self.desktop_mutation_context()?;
         // REVALIDACIÓN tras la aprobación humana: plan -> aprobación -> revalidación -> efectos.
         // Entre `plan_spawn` y el «sí» de la persona pueden pasar minutos: el proyecto pudo archivarse,
         // su carpeta desaparecer o relocalizarse. La aprobación no congela una launchability antigua.

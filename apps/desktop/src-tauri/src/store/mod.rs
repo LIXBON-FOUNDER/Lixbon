@@ -33,6 +33,7 @@
 
 mod authority;
 mod backup;
+mod clients;
 mod crash;
 mod error;
 mod events;
@@ -56,6 +57,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, Transactio
 
 pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
+#[allow(unused_imports)]
+pub use clients::{AuthenticatedClient, ClientAction, ClientClaims, ClientCredential, ClientIdentity, ClientIdentityError, ClientPrincipal, ClientRegistration, ClientScope, ClientStoreError, ClientSurface, DeviceIdentity, CORE_CLIENT_ID};
 pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
 // `EventPage` y `EventRow` los consume la API de lectura de E1b; hasta entonces solo las pruebas.

@@ -27,7 +27,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::events::{Channel, MutationContext};
+use super::events::MutationContext;
 use super::mutation::Health;
 use super::tx_ops::{spawn_requested_fact, spawn_resolution_fact, SpawnOutcome, SpawnRecorded, SpawnResolution};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
@@ -152,7 +152,7 @@ impl Core {
     /// Si el hecho no se puede persistir (también con el Core en solo lectura) no existe pendiente en memoria,
     /// ni aviso, ni lanzamiento posible. Si el padre se perdió en la carrera con `remove_run` o con un cierre, no
     /// se persiste nada: nunca existió una solicitud durable.
-    pub(super) fn spawn_request(self: &Arc<Self>, channel: Channel, caller: &Caller, args: &Value) -> Result<Value, String> {
+    pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
         let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
         if policy.status == agents::Status::Blocked {
@@ -164,7 +164,6 @@ impl Core {
         p.policy = policy;
         p.created_at = now;
         p.expires_at = now + self.ttl_ms;
-        let ctx = MutationContext::agent(p.parent_task.clone(), channel);
         self.spawn_hook(super::spawn::SpawnStep::BeforeRequestRevalidation, &p.parent_task)?;
         {
             let _gate = self.gate();
@@ -263,7 +262,11 @@ impl Core {
     /// efecto externo: aprobar, rechazar o vencer se registra con una mutación normal, no con `mutate_after_effect`.
     fn persist_resolution(&self, p: &PendingSpawn, r: &Resolution<'_>) -> Result<Option<u64>, String> {
         // Quién resuelve: la persona desde la interfaz, o el propio Core al vencer el pendiente.
-        let ctx = if r.outcome.decided_by_person() { MutationContext::person(Channel::Ui) } else { MutationContext::core() };
+        let ctx = if r.outcome.decided_by_person() {
+            self.desktop_mutation_context()?
+        } else {
+            MutationContext::core()
+        };
         if !self.lock().tasks.contains_key(&p.parent_task) {
             let fact = spawn_resolution_fact(&ctx, p, r.outcome, r.task, r.has_reason)?;
             return self.record_facts(&ctx, vec![fact]).map(|_| None).map_err(String::from);
@@ -597,7 +600,9 @@ mod tests {
     use super::super::host::RecordingHost;
     use super::super::{Orch, Status};
     use super::*;
+    use crate::orch::boot_tests;
     use crate::orch::state::NewTask;
+    use crate::store::{EventQuery, CORE_CLIENT_ID};
     use std::path::{Path, PathBuf};
 
     fn fake(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
@@ -849,6 +854,87 @@ mod tests {
         assert_eq!(e.children(), 1);
         assert_eq!(e.decisions(&c).len(), 1);
         assert_eq!(e.decisions(&x).len(), 1);
+    }
+
+    #[test]
+    fn aprobacion_desde_ui_persiste_client_id_en_task_created_y_spawn_resolved() {
+        let (cleanup, data, core_dir) = boot_tests::dirs();
+        let e = setup("identity-events");
+        boot_tests::escribe_state_de(&e.core, &data);
+        e.core.init_in(e.host.clone(), &data, &core_dir).unwrap();
+
+        let parent = e.core.lock().task(&e.root).unwrap().clone();
+        let mut pending = e.core.new_pending(
+            &parent,
+            NewPending {
+                provider: "claude".into(),
+                profile: "delegar_con_revision".into(),
+                role: None,
+                model: None,
+                effort: None,
+                title: "identity child".into(),
+                spec: "verify authenticated event context".into(),
+                shared: true,
+                base: None,
+            },
+        );
+        pending.policy = fake("claude", "delegar_con_revision", None, &parent.cwd);
+        pending.created_at = state::now_ms();
+        pending.expires_at = pending.created_at + DEFAULT_TTL_SECS * 1000;
+        let pending_id = pending.pending_id.clone();
+        let argv = pending.policy.argv.clone();
+        e.core.pend().insert(
+            pending_id.clone(),
+            Entry {
+                p: pending,
+                state: PendState::Pending,
+                decision: None,
+                resolved_at: None,
+            },
+        );
+        let head_before = e
+            .core
+            .storage
+            .with_store(|store| store.events_head().unwrap())
+            .unwrap();
+
+        let result = e.core.approve_spawn(&pending_id, true, &argv, true).unwrap();
+        assert_eq!(result["outcome"], "approved");
+
+        let events = e
+            .core
+            .storage
+            .with_store(|store| {
+                store
+                    .events_page(&EventQuery {
+                        after: Some(head_before),
+                        limit: Some(100),
+                        ..Default::default()
+                    })
+                    .unwrap()
+                    .events
+            })
+            .unwrap();
+        let created = events
+            .iter()
+            .find(|event| event.kind == "task.created" && event.correlation_id.as_deref() == Some(&pending_id))
+            .expect("la hija aprobada emite task.created correlacionado");
+        let resolved = events
+            .iter()
+            .find(|event| event.kind == "spawn.resolved")
+            .expect("la aprobación emite spawn.resolved");
+        let client_id = created.client_id.as_deref().expect("task.created conserva client_id autenticado");
+        assert_ne!(client_id, CORE_CLIENT_ID);
+        for event in [created, resolved] {
+            assert_eq!(event.client_id.as_deref(), Some(client_id));
+            assert_eq!(event.actor_kind.as_str(), "person");
+            assert_eq!(event.actor_id.as_deref(), Some("user"));
+            assert_eq!(event.channel.as_deref(), Some("ui"));
+        }
+
+        drop(e);
+        boot_tests::espera_lock_libre(&core_dir);
+        drop(cleanup);
     }
 
     #[test]
