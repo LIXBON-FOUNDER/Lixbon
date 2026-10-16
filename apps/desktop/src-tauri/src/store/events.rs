@@ -21,7 +21,8 @@
 //! Los eventos llegan ya MATERIALIZADOS ([`NewEvent`]: id, hora y payload fijados una vez). Este
 //! módulo no genera nada: un reintento de la persistencia vuelve a insertar exactamente lo mismo.
 
-use rusqlite::{params, Transaction};
+use rusqlite::types::Value;
+use rusqlite::{params, params_from_iter, Transaction};
 use serde::Serialize;
 
 use super::error::{StoreError, StoreResult};
@@ -59,7 +60,7 @@ impl EventClass {
         }
     }
 
-    fn parse(s: &str) -> StoreResult<EventClass> {
+    pub fn parse(s: &str) -> StoreResult<EventClass> {
         Ok(match s {
             "state" => EventClass::State,
             "effect" => EventClass::Effect,
@@ -196,6 +197,9 @@ pub enum Inserted {
 /// Consulta por cursor. Solo por `seq`, nunca por desplazamiento:
 /// * `after = N`  → `seq > N`  (exclusivo);
 /// * `before = N` → `seq < N`  (exclusivo).
+///
+/// Los filtros se combinan con AND y solo usan columnas con índice por `seq`
+/// (`project_id`, `run_id`, `entity_kind`/`entity_id`) más `kind` y `class`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventQuery {
     pub after: Option<i64>,
@@ -205,6 +209,15 @@ pub struct EventQuery {
     /// `false` = del más antiguo al más nuevo (sincronizar); `true` = del más nuevo hacia atrás
     /// («últimos eventos», paginar hacia el pasado).
     pub newest_first: bool,
+    pub project_id: Option<String>,
+    pub run_id: Option<String>,
+    pub entity_kind: Option<String>,
+    /// Exige `entity_kind`.
+    pub entity_id: Option<String>,
+    pub kind: Option<String>,
+    /// Incompatible con `kind`. Coincidencia exacta de prefijo, sensible a mayúsculas.
+    pub kind_prefix: Option<String>,
+    pub class: Option<EventClass>,
 }
 
 /// Una página de eventos.
@@ -308,25 +321,71 @@ impl Store {
         self.write(|tx| insert_events(tx, events, None))
     }
 
-    /// Una página de eventos por cursor de `seq` (ver [`EventQuery`]).
+    /// Una página de eventos por cursor de `seq` (ver [`EventQuery`]). Las filas y `head_seq` salen de
+    /// UNA misma instantánea de lectura: ningún evento devuelto supera `head_seq`, y si la página no
+    /// tiene más, no hay ningún evento que cumpla los filtros entre `after` y `head_seq`.
     pub fn events_page(&self, q: &EventQuery) -> StoreResult<EventPage> {
+        let bad = |m: String| Err(StoreError::InvalidEvent(m));
         for (name, v) in [("after", q.after), ("before", q.before)] {
             if v.is_some_and(|n| n < 0) {
-                return Err(StoreError::InvalidEvent(format!("el cursor `{name}` no puede ser negativo")));
+                return bad(format!("el cursor `{name}` no puede ser negativo"));
             }
         }
         let limit = match q.limit {
             None => DEFAULT_PAGE,
-            Some(0) => return Err(StoreError::InvalidEvent("`limit` debe ser al menos 1".into())),
+            Some(0) => return bad("`limit` debe ser al menos 1".into()),
             Some(n) => n.min(MAX_PAGE),
         };
+        for (name, v) in [
+            ("project_id", &q.project_id),
+            ("run_id", &q.run_id),
+            ("entity_kind", &q.entity_kind),
+            ("entity_id", &q.entity_id),
+            ("kind", &q.kind),
+            ("kind_prefix", &q.kind_prefix),
+        ] {
+            if v.as_deref() == Some("") {
+                return bad(format!("el filtro `{name}` no puede estar vacío"));
+            }
+        }
+        if q.entity_id.is_some() && q.entity_kind.is_none() {
+            return bad("el filtro `entity_id` exige `entity_kind`".into());
+        }
+        if q.kind.is_some() && q.kind_prefix.is_some() {
+            return bad("`kind` y `kind_prefix` son incompatibles".into());
+        }
+
+        let mut conds = vec!["(?1 IS NULL OR seq > ?1)".to_string(), "(?2 IS NULL OR seq < ?2)".to_string()];
+        let mut binds: Vec<Value> = vec![q.after.into(), q.before.into()];
+        let mut eq = |col: &str, v: Option<&String>| {
+            if let Some(v) = v {
+                binds.push(Value::Text(v.clone()));
+                conds.push(format!("{col} = ?{}", binds.len()));
+            }
+        };
+        eq("project_id", q.project_id.as_ref());
+        eq("run_id", q.run_id.as_ref());
+        eq("entity_kind", q.entity_kind.as_ref());
+        eq("entity_id", q.entity_id.as_ref());
+        eq("kind", q.kind.as_ref());
+        if let Some(p) = &q.kind_prefix {
+            binds.push(Value::Text(p.clone()));
+            binds.push(Value::Integer(p.chars().count() as i64));
+            conds.push(format!("substr(kind, 1, ?{}) = ?{}", binds.len(), binds.len() - 1));
+        }
+        if let Some(c) = q.class {
+            binds.push(Value::Text(c.as_str().into()));
+            conds.push(format!("class = ?{}", binds.len()));
+        }
+        binds.push(Value::Integer((limit + 1) as i64));
         let order = if q.newest_first { "DESC" } else { "ASC" };
+        let sql = format!("SELECT {COLS} FROM events WHERE {} ORDER BY seq {order} LIMIT ?{}", conds.join(" AND "), binds.len());
+
         self.read(|c| {
-            let sql = format!("SELECT {COLS} FROM events WHERE (?1 IS NULL OR seq > ?1) AND (?2 IS NULL OR seq < ?2) ORDER BY seq {order} LIMIT ?3");
-            let mut stmt = c.prepare(&sql)?;
-            let raw = stmt
-                .query_map(params![q.after, q.before, (limit + 1) as i64], row_to_event)?
-                .collect::<Result<Vec<_>, _>>()?;
+            let snapshot = c.unchecked_transaction()?;
+            let mut stmt = snapshot.prepare(&sql)?;
+            let raw = stmt.query_map(params_from_iter(binds.iter()), row_to_event)?.collect::<Result<Vec<_>, _>>()?;
+            let head_seq: i64 = snapshot.query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |r| r.get(0))?;
             let mut events = Vec::with_capacity(raw.len());
             for (mut row, class, actor) in raw {
                 row.class = EventClass::parse(&class)?;
@@ -336,7 +395,6 @@ impl Store {
             let has_more = events.len() > limit;
             events.truncate(limit);
             let next_cursor = events.last().map(|e| e.seq);
-            let head_seq: i64 = c.query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |r| r.get(0))?;
             Ok(EventPage { events, has_more, next_cursor, head_seq })
         })
     }

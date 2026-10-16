@@ -1,5 +1,6 @@
 //! HTTP local por el que habla `lxo`. Solo 127.0.0.1 y con token: el puerto y
 //! el token se publican en `~/.lixbon/orch.json`, legible solo por el usuario.
+//! `POST /rpc` despacha comandos; `GET /events` es la lectura del Event Log (events_read.rs).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -59,6 +60,7 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
 
     let mut len = 0usize;
     let mut auth = String::new();
+    let mut caller_header = String::new();
     loop {
         let mut h = String::new();
         if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
@@ -68,6 +70,7 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
         match k.trim().to_ascii_lowercase().as_str() {
             "content-length" => len = v.trim().parse().unwrap_or(0),
             "authorization" => auth = v.trim().to_string(),
+            "x-lixbon-caller" => caller_header = v.trim().to_string(),
             _ => {}
         }
     }
@@ -77,6 +80,18 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body)?;
 
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    if route == "/events" {
+        if auth != format!("Bearer {token}") {
+            return reply(&mut stream, 401, &json!({ "ok": false, "error": "Token inválido: vuelve a abrir la terminal o reinicia Lixbon" }));
+        }
+        if method != "GET" {
+            return reply(&mut stream, 405, &json!({ "ok": false, "error": "El Event Log es de solo lectura: usa GET /events" }));
+        }
+        let caller = Some(caller_header).filter(|c| !c.is_empty());
+        let (code, body) = core.events_http(super::Caller::Agent(caller), query);
+        return reply(&mut stream, code, &body);
+    }
     if method != "POST" || path != "/rpc" {
         return reply(&mut stream, 404, &json!({ "ok": false, "error": "No encontrado" }));
     }
@@ -114,8 +129,13 @@ fn reply(stream: &mut TcpStream, code: u16, body: &Value) -> std::io::Result<()>
     let text = body.to_string();
     let status = match code {
         200 => "OK",
+        400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        503 => "Service Unavailable",
         _ => "Error",
     };
     write!(

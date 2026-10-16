@@ -1,8 +1,8 @@
 # Event Log del Core (slice E)
 
 Estado: **E1a cerrada; E1b en curso**. E1b instrumenta mutadores de estado, decisiones, efectos, Projects y
-Pending Spawn. La API del diario y `lxo events` siguen pendientes de E1b; HTTP/SSE es **E2**. F1 (clientes), G
-(Attention) y la vista Activity siguen fuera de esta etapa.
+Pending Spawn, y expone la **API de lectura versionada** (LXO-83, ver «API de lectura»). `lxo events` (LXO-84) sigue
+pendiente; SSE/streaming es **E2**. F1 (clientes), G (Attention) y la vista Activity siguen fuera de esta etapa.
 
 ## Qué es
 Un *evento* es un **hecho estructurado y durable**: qué ocurrió (`kind`), quién lo provocó (actor), sobre
@@ -74,13 +74,158 @@ forma de crear un borrador desde un `serde_json::Value` arbitrario (por ejemplo,
 entran cuerpos de mensaje, informes, diffs, `argv`, `env` ni credenciales; identificadores y hechos
 pequeños, sí.
 
-## Lectura (E1a: cursor básico)
-`Store::events_page(EventQuery { after, before, limit, newest_first })`:
-* `after = N` → `seq > N` · `before = N` → `seq < N` · **nunca inclusivo**; sin `OFFSET`.
-* `limit` por defecto 100, máximo **500** (se recorta); `0` o un cursor negativo son un error.
-* Devuelve `events`, `has_more`, `next_cursor` (el `seq` del último evento devuelto) y `head_seq`.
-* Los filtros por proyecto/entidad/run/`kind` (exacto **o** prefijo, parámetros distintos, con `LIKE`
-  escapando `%` y `_`), el comando RPC y `lxo events` siguen pendientes de E1b. Los agentes solo verán su run.
+## API de lectura (LXO-83)
+Contrato `v = 1`, **solo lectura**. Dos puertas al mismo documento, ambas del Core (ningún cliente abre SQLite):
+
+| Puerta | Quién | Cómo |
+|---|---|---|
+| RPC `events` (`orch_call` de la interfaz; `POST /rpc` con `{"cmd":"events","args":{…},"caller":"<tarea>"}`) | persona (interfaz) · agente con identidad | `args` = los parámetros de abajo |
+| `GET /events?<parámetros>` en el servidor local (127.0.0.1, `Authorization: Bearer <token de orch.json>`) | agente con identidad: cabecera `X-Lixbon-Caller: <tarea>` | query string |
+
+Cualquier otro método en `/events` es `405`; sin token válido, `401` (antes de revelar nada más). No hay comando
+RPC ni ruta que escriba, borre o reescriba eventos.
+
+### Parámetros
+Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un **error** (`invalid_filter`), nunca se ignora. La lista es cerrada: ningún otro nombre se admite, tampoco los que añaden otros comandos de `lxo` (por ejemplo `session`).
+
+| Parámetro | Significado |
+|---|---|
+| `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
+| `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
+| `project` · `run` | igualdad con `project_id` / `run_id`. |
+| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`core`); `entity_id` exige `entity_kind`. |
+| `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
+| `class` | `state` · `effect` · `decision` · `system`. |
+
+Los filtros se combinan con AND, miden 1–128 caracteres y solo usan columnas ya indexadas por `seq`
+(`project_id`, `run_id`, entidad) más `kind` y `class`. **No hay filtro por `correlation_id`, actor ni tiempo**: no
+tienen índice y el esquema no cambia en este corte; quien necesite correlacionar lo hace sobre el payload
+(`effect_id`, `pending_id`) leyendo por entidad.
+
+### Respuesta (`200`)
+```json
+{
+  "ok": true,
+  "data": {
+    "v": 1,
+    "events": [
+      {
+        "seq": 2, "id": "01a13e36-607e-71eb-8e8d-43d75c9836d3", "ts": 1792045113470, "v": 1,
+        "kind": "task.created", "class": "state",
+        "actor": { "kind": "system", "id": null }, "channel": "core", "client_id": null,
+        "project_id": null, "run_id": "r1",
+        "entity": { "kind": "task", "id": "t2" }, "correlation_id": null,
+        "payload": { "agent": "claude", "depth": 0, "external": true, "model": null, "parent": null, "role": null, "title": "raiz-humo-a" }
+      }
+    ],
+    "next_cursor": 2, "has_more": true, "head_seq": 10, "limit": 2
+  }
+}
+```
+* Cada evento lleva **exactamente** estos campos: `seq`, `id`, `ts`, `v`, `kind`, `class`, `actor{kind,id}`,
+  `channel`, `client_id`, `project_id`, `run_id`, `entity{kind,id}`, `correlation_id`, `payload`. Las claves
+  nulas se emiten como `null`, no se omiten.
+* Correspondencia con la fila persistida: `ts` = `at` (ms epoch, informativo: **no ordena**), `actor` =
+  `actor_kind`/`actor_id`, `entity` = `entity_kind`/`entity_id`. «Tarea» no es un campo: es `entity` cuando
+  `entity.kind = "task"` (y `actor.id` cuando el actor es un agente).
+* **No se exponen** `idem_key` ni `state_rev` (mecánica interna de idempotencia y de agrupación de commits) ni
+  nada que no estuviera ya persistido. El `payload` viaja como objeto JSON, tal como lo validó el Core al emitir.
+* `events` va en orden **ascendente y total por `seq`**, sin repeticiones. Solo existe el sentido ascendente
+  (el sentido inverso del almacén no forma parte del contrato).
+* `head_seq`: el `seq` más alto del Core (0 si no hay eventos). Filas y `head_seq` salen de **una misma
+  instantánea** de lectura: ninguna fila supera `head_seq`.
+* `next_cursor`: **siempre** el valor que se pasa como `cursor` en la siguiente petición. Con `has_more = true`
+  es el `seq` del último evento devuelto; con `has_more = false` es `head_seq`. Como `seq` se asigna en orden de
+  commit y la instantánea contiene todo lo anterior a `head_seq`, ningún evento que cumpla los filtros queda
+  entre medias: un cliente filtrado puede avanzar hasta `head_seq` sin releer.
+
+### Cursor y `seq`
+* `seq` es el `AUTOINCREMENT` de la tabla: **estrictamente creciente, nunca se reutiliza** y sobrevive a
+  reinicios (el diario está en SQLite). Un cursor guardado sigue valiendo tras reiniciar el Core.
+* El cursor es el `seq` en decimal, tanto como número JSON como texto (`"cursor": "42"`). No se admiten
+  signos, espacios, decimales ni valores fuera de `i64` (a diferencia de `limit`, el cursor no se recorta: se rechaza).
+* Un cursor **mayor que `head_seq`** no puede venir de este Core (base restaurada o sustituida): `409 cursor_ahead`,
+  para que el cliente reinicie su lectura en vez de esperar eventos que ya existen con otra identidad.
+* Un cursor válido jamás queda caducado: no hay retención ni compactación (fuera de E).
+
+### Errores
+`{"ok": false, "error": "<texto para personas>", "code": "<código>"}`. Por RPC el campo `error` llega como
+`"<código>: <texto>"` (el envoltorio de RPC no tiene `code`).
+
+| `code` | HTTP | Cuándo |
+|---|---|---|
+| `invalid_cursor` | 400 | `cursor` no es un entero decimal ≥ 0 |
+| `invalid_limit` | 400 | `limit` no es un entero ≥ 1 |
+| `invalid_filter` | 400 | parámetro desconocido/repetido/vacío/demasiado largo, `class` desconocida, combinaciones prohibidas, URL mal codificada |
+| `forbidden` | 403 | sin identidad, tarea inexistente, orquestador desactivado, o `run` ajeno |
+| `cursor_ahead` | 409 | `cursor > head_seq` |
+| `event_log_unavailable` | 503 | SQLite no es la autoridad (modo `state.json`/degradado) o falta la migración 004 |
+| `internal` | 500 | fallo de lectura o payload ilegible (el detalle no sale del Core) |
+
+### Autorización
+* **Persona (interfaz)**: lee todo el diario.
+* **Agente con identidad** (`Caller::Agent(Some(tarea))`): el Core fuerza `run = <su run>`; pedir otro run es
+  `forbidden`, pedir el suyo es válido. Ve los eventos con `run_id` de su run; **no** ve los de proyecto sin run
+  (`project.*`) ni los de otros runs. Con el orquestador desactivado no lee.
+* **Sin identidad** (`Caller::Agent(None)`, token pero sin tarea): `forbidden`. El token de `orch.json` identifica
+  «una terminal del usuario», no «el usuario»; abrir una lectura global para quien no es una tarea es una decisión
+  de autoridad que queda para el cliente CLI/F1 (identidad por credencial), no para este corte.
+* **La identidad del agente es declarada, no autenticada.** `X-Lixbon-Caller` (y el campo `caller` de
+  `POST /rpc`) lo escribe el cliente y se acepta si la tarea existe; el `Bearer` es **un único token del proceso**
+  publicado en `orch.json` (legible por el usuario, igual que el resto de procesos del usuario), sin credencial
+  por tarea. Una tarea que lea `orch.json` puede declarar el id de otra y leer su run; lo mismo ocurre ya con
+  los demás comandos de `lxo` que identifican por `caller`. El alcance por run acota lecturas por error o por rol,
+  **no es aislamiento frente a un agente hostil** y no debe presentarse como tal. Cerrarlo exige una credencial
+  por tarea emitida al lanzarla (variable de entorno privada) que el servidor compare con el `caller`; eso cambia
+  `orch.json`, `lxo` y el lanzamiento, y queda fuera de este corte. Un id inexistente sigue siendo `forbidden`.
+* Leer no escribe: no cambia `rev`, no añade eventos, no toca `state.json`.
+
+### Seguir (follow) y sondeo
+**Sin streaming en este corte.** El servidor local es un hilo por conexión con respuestas de
+`Content-Length` y cierre inmediato, y los avisos del Core (`orch:changed`) no llevan carga ni cursor. Un
+follow seguro (SSE o long-poll) exige un canal de notificación del COMMIT, límites de conexiones y de tiempo, y
+decidir qué pasa con una conexión de un agente que muere; eso es E2 y no cambia la autoridad (el diario sigue
+siendo la verdad, el stream solo avisaría). Hasta entonces el contrato de **sondeo** es:
+
+1. Primera lectura con `cursor=0` (o `cursor=<head_seq>` de una lectura previa para «solo lo nuevo»).
+2. Repetir con `cursor = next_cursor`. Si `has_more` es `true`, repetir **sin esperar**; si es `false`,
+   dormir entre 0,5 y 2 s (con retroceso si la respuesta viene vacía repetidamente).
+3. Guardar `next_cursor` de forma durable en el cliente; reanudar con él tras cualquier reinicio.
+4. Ante `cursor_ahead`, descartar el cursor y volver a empezar (la base ya no es la misma).
+
+Una extensión futura **aditiva** (`wait_ms` acotado para long-poll, o SSE) no cambia estas reglas.
+
+### Contrato mínimo congelado para LXO-84 (`lxo events`)
+Estable en `v = 1`; cualquier cambio incompatible sube `v` del envoltorio:
+* Ruta `GET /events` y comando RPC `events` con los parámetros y errores de arriba.
+* Los 14 campos de cada evento y su significado; `seq` entero positivo estrictamente creciente.
+* Semántica de `cursor` (exclusivo), `next_cursor`, `has_more`, `head_seq`, `limit` (100/500).
+* Códigos de error y su estado HTTP; alcance por run de los agentes (sobre identidad declarada, ver Autorización).
+* Lista cerrada de parámetros: `session` no es un parámetro válido de `events`, y un cliente `lxo events` no debe reenviarlo ni reenviar ningún otro nombre fuera de la lista.
+
+Abierto (no congelado): sentido inverso, filtros por tiempo/actor/correlación, lectura global sin tarea,
+long-poll/SSE. El contenido de cada `kind`/`payload` lo define su propio `v`.
+
+### Ejemplos
+```sh
+# datos de conexión: ~/.lixbon/orch.json (port, token)
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
+  "http://127.0.0.1:$PORT/events?limit=2"
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
+  "http://127.0.0.1:$PORT/events?cursor=2&kind_prefix=task.&limit=100"
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
+  "http://127.0.0.1:$PORT/events?entity_kind=task&entity_id=t3"
+
+# lo mismo por RPC
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -d '{"cmd":"events","args":{"cursor":2,"class":"decision"},"caller":"t3"}' "http://127.0.0.1:$PORT/rpc"
+```
+Error: `GET /events?cursor=abc` → `400 {"ok":false,"code":"invalid_cursor","error":"`cursor` debe ser un entero decimal >= 0"}`.
+
+### Dónde vive
+`orch/events_read.rs` (validación, alcance, JSON) → `Store::events_page` (SQL con parámetros, un solo
+`SELECT` por página). `server.rs` solo enruta `GET /events`; `rpc.rs` solo despacha `events`. Una prueba de
+arquitectura impide `rusqlite` o SQL de eventos en esas tres capas.
 
 ## Un solo punto de emisión
 `Tx::push_event` es el único punto de entrada de un evento a la transacción; `INSERT INTO events` solo
@@ -603,9 +748,9 @@ queda en un seguimiento separado.
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
-* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos, Projects y Pending Spawn):** API completa,
-  `lxo events`, journal `unrecorded-effects` v2 y reconciliación idempotente.
-* **E2:** HTTP `GET /events` y SSE (`server.rs`).
+* **E1b (en curso; hechos: mutadores de `State`, decisiones, efectos, Projects, Pending Spawn, journal
+  `unrecorded-effects` v2 y API de lectura LXO-83):** `lxo events` (LXO-84).
+* **E2:** SSE/long-poll de seguimiento (el `GET /events` de sondeo ya existe).
 
 ## Fuera de E
 Attention (G), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
