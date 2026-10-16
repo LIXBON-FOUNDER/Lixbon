@@ -27,7 +27,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::events::{Channel, MutationContext};
+use super::events::MutationContext;
 use super::mutation::Health;
 use super::tx_ops::{spawn_requested_fact, spawn_resolution_fact, SpawnOutcome, SpawnRecorded, SpawnResolution};
 use super::{agents, random_token, s, state, worktree_env, Caller, Core};
@@ -152,7 +152,7 @@ impl Core {
     /// Si el hecho no se puede persistir (también con el Core en solo lectura) no existe pendiente en memoria,
     /// ni aviso, ni lanzamiento posible. Si el padre se perdió en la carrera con `remove_run` o con un cierre, no
     /// se persiste nada: nunca existió una solicitud durable.
-    pub(super) fn spawn_request(self: &Arc<Self>, channel: Channel, caller: &Caller, args: &Value) -> Result<Value, String> {
+    pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
         let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
         if policy.status == agents::Status::Blocked {
@@ -164,7 +164,6 @@ impl Core {
         p.policy = policy;
         p.created_at = now;
         p.expires_at = now + self.ttl_ms;
-        let ctx = MutationContext::agent(p.parent_task.clone(), channel);
         self.spawn_hook(super::spawn::SpawnStep::BeforeRequestRevalidation, &p.parent_task)?;
         {
             let _gate = self.gate();

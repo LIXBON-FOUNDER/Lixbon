@@ -2,62 +2,65 @@
 
 ## Contrato
 
-`client_id` identifica una instalación y una superficie; no identifica a la persona ni reemplaza al actor. La clave natural de una instalación es `(surface, installation_id)`. `device_id` es un dato separado y, si existe, debe coincidir al recuperar esa instalación. Una instalación puede tener credenciales distintas para principals distintos, pero todas conservan el mismo `client_id`.
+`client_id` identifica una instalación y superficie; no identifica a la persona ni reemplaza al actor. La identidad estable se recupera por `(surface, installation_id)`. `device_id` es separado y opcional. Una instalación puede registrar credenciales de distintos principals que comparten el mismo `client_id`.
 
-El principal de una credencial es `Person(id)` o `Agent(task_id)`. `System` no puede registrarse como cliente externo. El Core usa la identidad reservada en memoria `core-system`, sin token. Los tipos de superficie admitidos por el registro son Desktop, CLI, Mobile y Automation; `core` se reserva para el propio Core.
+Una credencial autenticada tiene principal `Person(id)` o `Agent(task_id)`. `System` no puede registrarse como cliente externo. El Core usa la identidad reservada `core-system`, sin token. Las superficies registrables son Desktop, CLI, Mobile y Automation; `core` queda reservada al Core.
 
-Después de `Store::authenticate_client`, el resultado `AuthenticatedClient` es la fuente de actor, scope y `client_id`. `MutationContext::authenticated` valida el canal fijado por el transporte y deriva el actor sin leerlo de los argumentos de la mutación. Los claims opcionales de actor, client, superficie, scope y canal solo se aceptan si coinciden con esa identidad autenticada. La finalización del Event Log copia el `client_id` del contexto; no copia credenciales al payload ni al journal.
+Tras `Store::authenticate_client`, `AuthenticatedClient` es la fuente de actor, scope y `client_id`. `MutationContext::authenticated` fija el canal desde el transporte y deriva el actor desde la credencial. Los claims opcionales de actor, cliente, superficie, scope y canal solo se aceptan si coinciden con la identidad autenticada. Los Events y el journal reciben el `client_id` del contexto; nunca reciben credenciales.
 
-| Principal de la credencial | Actor del Event Log | Scope derivado | Permitido | Rechazado |
-| --- | --- | --- | --- | --- |
-| `Person(id)` | `person`, actor_id=`id` | `Person(id)` | Lectura, comandos de agente y decisiones humanas | Comandos reservados del Core |
-| `Agent(task_id)` | `agent`, actor_id=`task_id` | `AgentTask(task_id)` | Lectura y comandos de agente | Decisiones humanas y comandos del Core |
-| Core interno | `system`, sin actor_id | `System` | Lectura y comandos internos del Core | Decisiones humanas y comandos de agente |
+## Matriz de identidad y permisos
+
+Los permisos se evalúan después de clasificar el comando como `ClientAction`. La superficie también limita acciones de Person.
+
+| Identidad autenticada | Actor derivado | Scope | Acciones permitidas por la frontera autenticada |
+| --- | --- | --- | --- |
+| Person + Desktop | `person`, actor_id de la persona | `Person(id)` | Lecturas, comandos de agente/Desktop, Event Log, comandos UI y decisiones humanas; nunca comandos reservados al Core. |
+| Person + CLI | `person`, actor_id de la persona | `Person(id)` | Lecturas y comandos clasificados como `AgentCommand`. Los comandos `list`, `show` y `projects` conservan alcance global en esta fase. Event Log, comandos UI, decisiones humanas y comandos de agente/Desktop quedan rechazados. |
+| Agent + CLI | `agent`, actor_id=`task_id` | `AgentTask(task_id)` | Lecturas, Event Log y comandos de agente/Agent-or-Desktop admitidos por la política actual. Los métodos de comando aplican sus comprobaciones de relación con la Task. |
+| Core interno | `system`, sin actor_id externo | `System` | Lecturas y comandos internos del Core; no decisiones humanas ni comandos de agente. No existe una credencial externa System. |
+
+La clasificación de comandos debe ser explícita al añadir RPCs. En esta implementación, comandos no clasificados caen en `AgentCommand`; por tanto, esa ruta no es fail-closed para Person/CLI y requiere revisión al extender el dispatcher.
 
 ## Amenazas y controles
 
-| Amenaza | Control |
+| Amenaza | Control en la ruta autenticada |
 | --- | --- |
-| El request declara otro actor o cambia de agente | `ClientClaims` se compara con el principal devuelto por la credencial; el actor se deriva de ese principal. |
-| El request declara otro `client_id` | Se compara con la identidad resuelta; Events reciben el valor resuelto, nunca el del cuerpo. |
-| El request eleva superficie, canal o scope | La superficie/scope se comparan con la credencial y el canal lo pasa el transporte. Una discrepancia rechaza el contexto. |
-| Una credencial de agente se usa como persona o Core | `ClientPrincipal::Agent` solo obtiene `AgentTask`; `authorize` rechaza decisiones humanas y acciones del Core. |
-| Un cliente externo intenta registrarse como System/Core | El constructor de credencial rechaza `System`; `ClientSurface::Core` no se registra y tampoco aparece en la tabla SQL. |
-| Se filtra un bearer token a SQLite, Event Log, journal o `Debug` | SQLite conserva solo SHA-256 del secreto; `ClientCredential` lo redacta en `Debug` y no implementa serialización. |
+| El request declara otro actor o cambia de Agent | El actor se deriva del principal autenticado; claims discrepantes se rechazan. |
+| El request declara otro `client_id` | Se valida contra la identidad recuperada; el Event recibe el valor de la credencial, nunca el del body. |
+| El request eleva superficie, canal o scope | La superficie y el scope se validan contra Store; el canal lo fija el transporte. |
+| Una credencial registrada de Agent se usa como Person o Core | `AgentTask(task_id)` no puede ejecutar acciones UI ni decisiones humanas; System/Core no se registra como cliente externo. |
+| Una credencial se filtra a SQLite, Event, journal o `Debug` | Store conserva SHA-256 del secreto; `ClientCredential` lo redacta en `Debug` y no se serializa. |
 
-Los bearer tokens deben ser de alta entropía: `ClientCredential::new` exige al menos 32 bytes y el emisor debe generarlos con un CSPRNG, nunca a partir de una contraseña elegida por una persona. El hash SHA-256 sirve como índice del token aleatorio. La tabla no guarda el token ni una copia reversible.
+`ClientCredential::new` exige al menos 32 bytes, pero esa comprobación de longitud no demuestra entropía. El token de identidad Desktop se genera hoy mediante `random_token()` y solo se mantiene en memoria; el código no acredita que ese generador sea CSPRNG. No tratarlo como un mecanismo de emisión para credenciales remotas. El bearer legacy de `lxo` es un mecanismo distinto y sigue descrito abajo como deuda de seguridad.
 
-## Compatibilidad y migración
+## Fronteras autenticadas de LXO-85
 
-La migración `005_clients` agrega el registro sin reescribir Events históricos ni inventar `client_id`. Los contextos autenticados nuevos escriben `client_id`; los eventos anteriores conservan `NULL`.
+Tauri fija `Channel::Ui` y usa una credencial local registrada en Store con principal `Person("user")`, superficie Desktop e instalación `desktop-local`. Store recupera el `client_id` estable por `(surface, installation_id)`. La credencial Desktop queda en memoria del proceso y SQLite guarda su hash. Los argumentos de la interfaz no pueden cambiar actor, canal ni `client_id`.
 
-El journal de efectos v2 también conserva el `client_id` opcional para que una reconciliación tras fallo de persistencia no pierda la atribución. Los registros v2 anteriores, que no tenían ese campo, siguen leyéndose como `None`. El token nunca se copia al journal.
+`POST /rpc` y `GET /events` aceptan credenciales registradas por cliente. El transporte autentica el bearer en Store; claims opcionales como `caller`, principal, superficie, scope, canal y `client_id` deben coincidir. El servidor deriva `Caller` de la identidad autenticada. La API HTTP usa el canal `lxo`; por ello, una credencial Desktop no puede presentarse por esa frontera.
 
-### Fronteras autenticadas de LXO-85
+El modelo separa `device_id` de `client_id`, pero Desktop todavía no informa un identificador del dispositivo. Mobile y Automation existen como superficies del modelo, sin transporte nuevo en LXO-85.
 
-Tauri fija `Channel::Ui` y usa una credencial local registrada por Store con principal `Person("user")`, superficie Desktop e instalación `desktop-local`. El `client_id` lo recupera Store por `(surface, installation_id)` y permanece estable para esa instalación. La credencial aleatoria queda solo en memoria del proceso; SQLite conserva su hash. La interfaz no puede cambiar actor, canal ni `client_id` mediante argumentos.
+## Compatibilidad temporal y deuda de LXO-86
 
-`POST /rpc` y `GET /events` también aceptan credenciales registradas por cliente. El transporte autentica el bearer en Store; los claims opcionales de `caller`, principal, superficie, scope, canal y `client_id` deben coincidir con la credencial. El servidor deriva `Caller` de la identidad autenticada. Un Agent conserva scope de su Task y las decisiones humanas quedan restringidas al flujo de la interfaz.
+Los clientes CLI `lxo` actuales siguen en una ruta legacy: leen un bearer compartido publicado en `orch.json` y envían `caller`. Esa ruta no crea `AuthenticatedClient`, no prueba el `client_id` del cliente y no ata el bearer a una Task concreta. Un cliente con ese bearer puede declarar el ID de otra Task Agent. No presentar este comportamiento como aislamiento autenticado ni como cumplimiento de los invariantes de Agent.
 
-`device_id` es opcional en el contrato. La identidad local de Desktop registra su instalación; el Core todavía no consulta un identificador de dispositivo del sistema operativo.
+**LXO-85 acepta esta compatibilidad solo como transición. No satisface estos dos invariantes de seguridad; LXO-86 debe cerrarlos antes de retirar esta deuda:**
 
-### Ruta legacy y migración pendiente
+1. **Scope de Agent:** la credencial debe quedar vinculada al Attempt/Task permitido y el Core debe derivar y verificar ese scope desde la credencial en la frontera autenticada. El bearer compartido de `orch.json` y el `caller` declarativo no cumplen este requisito.
+2. **Sin secretos en `orch.json`:** LXO-86 debe retirar de ese archivo el bearer legacy, migrar `lxo` a credenciales almacenadas en el secure store soportado y probar que credenciales inválidas, revocadas o con scope ajeno se rechazan.
 
-Los clientes `lxo` actuales siguen usando temporalmente el bearer global del servidor publicado en `orch.json` y el campo `caller`. Esa ruta conserva el comportamiento existente, no produce `AuthenticatedClient` ni atribuye un `client_id` verificado. Como todos esos clientes comparten el bearer, el campo `caller` puede afirmar otro ID de Agent; la ruta legacy no satisface el contrato de identidad verificable y queda como brecha explícita hasta que los clientes migren. En esa ruta el servidor solo construye `Caller::Agent`; el cuerpo no puede seleccionar `Person` o `System`.
+Plan de migración de LXO-86:
 
-Plan para LXO-86:
+1. Persistir `client_id` estable por instalación CLI y obtener una credencial por principal/scope.
+2. Guardar la credencial en el almacén seguro de la plataforma; no escribirla en `orch.json`, logs ni shell history.
+3. Negociar versión/protocolo antes de mutaciones incompatibles y derivar actor/scope exclusivamente desde Store.
+4. Migrar los comandos soportados, verificar permisos y retirar el bearer global y el claim legacy `caller`.
 
-1. Añadir handshake CLI con negociación de versión y `client_id` estable.
-2. Entregar una credencial por instalación/principal y guardarla en el almacén seguro del sistema operativo.
-3. Enviar esa credencial en las llamadas RPC/Event Log; derivar actor y scope exclusivamente desde Store.
-4. Retirar el bearer global y el claim legacy `caller` después de migrar los clientes soportados.
+Los Events históricos sin identidad verificada conservan `client_id = NULL`; LXO-85 no inventa atribución retroactiva. El journal de efectos v2 conserva el `client_id` opcional para reconciliar mutaciones.
 
-Las credenciales nuevas no se publican en `orch.json`, no aparecen en shell history ni se registran en logs. El Event Log conserva el vocabulario actual de canal (`ui`, `lxo`, `core`). Mobile y Automation están representados en el modelo, pero no reciben un transporte nuevo dentro de LXO-85.
+## Migración y rollback
 
-La migración `005_clients` agrega el registro sin reescribir Events históricos ni inventar `client_id`. Los contextos nuevos autenticados escriben `client_id`; los eventos anteriores conservan `NULL`.
+La migración SQLite `005_clients` agrega el registro de clientes sin reescribir Events históricos. El journal v2 anterior a este cambio se sigue leyendo con `client_id = None`.
 
-El journal de efectos v2 también conserva el `client_id` opcional para que una reconciliación tras fallo de persistencia no pierda la atribución. Los registros v2 anteriores, que no tenían ese campo, siguen leyéndose como `None`. El token nunca se copia al journal.
-
-Los clientes actuales siguen temporalmente en su ruta legacy hasta LXO-86: Desktop invoca el Core dentro del proceso y `lxo` usa el bearer local publicado por el servidor junto con su campo `caller`. Esa ruta aún no produce un `AuthenticatedClient`, por lo que conserva la semántica anterior y no recibe un `client_id` nuevo por inferencia. No se debe tratar `caller` como una credencial ni permitir que seleccione `Person` o `System`. LXO-86 debe reemplazarla por credenciales CLI guardadas en secure store y handshake; las credenciales de cliente no se publican en `orch.json`, no aparecen en shell history ni se registran en logs.
-
-El Event Log mantiene el vocabulario de canal actual (`ui`, `lxo`, `core`). Desktop y CLI se validan contra `ui` y `lxo`, respectivamente. Mobile y Automation quedan representados en el modelo de superficie, pero no reciben un transporte nuevo en LXO-85.
+**No se admite downgrade a un binario anterior después de aplicar `005_clients` o escribir registros nuevos del journal v2.** El binario anterior puede rechazar la base por esquema desconocido y no leer registros v2 que incluyan `client_id`. La recuperación debe avanzar con una versión compatible; preservar un backup antes de actualizar.
