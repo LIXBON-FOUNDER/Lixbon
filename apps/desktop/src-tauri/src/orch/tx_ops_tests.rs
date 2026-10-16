@@ -803,6 +803,16 @@ fn cada_decision_de_una_persona_emite_un_decision_recorded_con_su_payload_cerrad
         ),
         (
             "pr",
+            json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO" }),
+            json!({ "decision_kind": "pr", "outcome": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+        ),
+        (
+            "pr",
+            json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://user:pa/ss@github.com/o/r/pull/1;x=SECRETO" }),
+            json!({ "decision_kind": "pr", "outcome": "created", "branch": "lx/t" }),
+        ),
+        (
+            "pr",
             json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null, "error": "TEXTO-ERROR" }),
             json!({ "decision_kind": "pr", "outcome": "error", "branch": "lx/t" }),
         ),
@@ -893,6 +903,20 @@ fn cada_efecto_observado_emite_un_effect_observed_con_payload_cerrado_y_una_sola
             json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1", "remote": "https://token@host/x.git", "error": "TEXTO-ERROR" }),
             persona_ui(),
             json!({ "effect_kind": "git_push_pr", "operation": "publish_pr", "result": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+            ("person", None, Some("ui")),
+        ),
+        (
+            "publish_pr", "git_push_pr",
+            json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO" }),
+            persona_ui(),
+            json!({ "effect_kind": "git_push_pr", "operation": "publish_pr", "result": "created", "branch": "lx/t", "pr_url": "https://github.com/o/r/pull/1" }),
+            ("person", None, Some("ui")),
+        ),
+        (
+            "publish_pr", "git_push_pr",
+            json!({ "outcome": "created", "branch": "lx/t", "pr_url": "https://user:pa/ss@github.com/o/r/pull/1;x=SECRETO" }),
+            persona_ui(),
+            json!({ "effect_kind": "git_push_pr", "operation": "publish_pr", "result": "created", "branch": "lx/t" }),
             ("person", None, Some("ui")),
         ),
         (
@@ -1016,8 +1040,12 @@ fn todo_fallo_del_registro_tras_un_efecto_se_anota_y_no_deja_estado_ni_eventos()
         let lineas = diario();
         assert_eq!(lineas.len(), n + 1, "{nombre}: el efecto ocurrió, así que SÍ se anota (también un Rejected)");
         let ultima = lineas.last().unwrap();
-        assert_eq!(ultima["v"], 1, "el diario sigue en v1");
-        assert!(ultima.get("effect_id").is_none(), "y todavía no persiste el effect_id");
+        assert_eq!(ultima["v"], 2, "el writer nuevo usa v2");
+        let effect_id = ultima["effect_id"].as_str().expect("persiste la identidad del efecto");
+        assert!(super::effect_journal::valid_effect_id(effect_id), "UUID v7 original");
+        assert!(ultima.get("expected").is_none(), "no persiste valores esperados");
+        assert!(ultima.get("error").is_none(), "no persiste texto de error");
+        assert!(ultima.get("repo").is_none(), "no persiste rutas de repositorio");
     }
     assert_eq!(core.health(), Health::Normal, "un rechazo no degrada el almacenamiento");
 }

@@ -14,6 +14,8 @@ mod boot_tests;
 #[cfg_attr(not(test), allow(dead_code))]
 mod events;
 mod event_kinds;
+mod effect_journal;
+mod pr_url;
 mod tx_ops;
 #[cfg(test)]
 mod events_tests;

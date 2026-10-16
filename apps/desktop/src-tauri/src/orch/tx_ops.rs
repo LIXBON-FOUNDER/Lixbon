@@ -29,6 +29,46 @@ use super::mutation::{Effect, Tx};
 use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
 
+/// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
+/// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
+pub(super) fn recovered_effect(
+    record: &super::effect_journal::RecordV2,
+) -> Option<(MutationContext, EventDraft, i64)> {
+    if record.v != 2 || record.at <= 0 || !super::effect_journal::valid_effect_id(&record.effect_id) {
+        return None;
+    }
+    let (Some(task), Some(run)) = (record.task.as_deref(), record.run.as_deref()) else {
+        return None;
+    };
+    if task.is_empty() || run.is_empty() || record.project.as_deref() == Some("") {
+        return None;
+    }
+    let actor = match (record.actor_kind.as_str(), record.actor_id.as_deref()) {
+        ("person", None) => Actor::Person,
+        ("agent", Some(task)) if !task.is_empty() => Actor::Agent(task.to_string()),
+        ("system", None) => Actor::System,
+        _ => return None,
+    };
+    let channel = match record.channel.as_str() {
+        "ui" => Channel::Ui,
+        "lxo" => Channel::Lxo,
+        "core" => Channel::Core,
+        _ => return None,
+    };
+    let facts = ev::EffectObserved::parse(&record.effect_id, &record.operation, &record.kind, &record.observed).ok()?;
+    let draft = ev::effect_observed(task, run, record.project.clone(), &facts, &record.effect_id).ok()?;
+    Some((MutationContext::new(actor, channel), draft, record.at))
+}
+
+pub(super) fn effect_observed_is_valid(
+    effect_id: &str,
+    operation: &str,
+    kind: &str,
+    observed: &serde_json::Value,
+) -> bool {
+    ev::EffectObserved::parse(effect_id, operation, kind, observed).is_ok()
+}
+
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
 type Snapshot = BTreeMap<String, (Status, String)>;
 
