@@ -319,6 +319,30 @@ mod authenticated_client_tests {
             .to_string()
     }
 
+    fn fake_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> super::super::agents::Policy {
+        let profile = super::super::agents::Profile::parse(profile).expect("perfil válido");
+        super::super::agents::evaluate_for(
+            provider,
+            profile,
+            role,
+            worktree,
+            super::super::agents::Detected::Skip,
+            false,
+            super::super::agents::Delivery::FileOrMarkers,
+        )
+    }
+
+    fn arranca_con_resolver_falso() -> (boot_tests::Limpia, Arc<Core>) {
+        let (cleanup, data, core_dir) = boot_tests::dirs();
+        let mut orch = super::super::Orch::default();
+        Arc::get_mut(&mut orch.0).expect("Core sin compartir").resolver = fake_policy;
+        let core = orch.0;
+        let host = super::super::host::RecordingHost::new();
+        core.init_in(host, &data, &core_dir).unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        (cleanup, core)
+    }
+
     #[test]
     fn credencial_cli_deriva_actor_y_client_id_y_rechaza_claims_spoof_antes_de_mutar() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
@@ -580,6 +604,49 @@ mod authenticated_client_tests {
                 "{cmd} debe rechazarse antes de consultar o mutar tareas: {response}"
             );
         }
+        server.stop();
+    }
+
+    #[test]
+    fn spawn_de_agent_autenticado_persiste_el_client_id_de_la_credencial() {
+        let (_cleanup, core) = arranca_con_resolver_falso();
+        let task = create_ui_task(&core, "Agent with authenticated spawn identity");
+        let secret = "agent-spawn-client-id-secret-85-at-least-32-bytes";
+        let client_id = register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Agent(task.clone()),
+            "install-agent-spawn-85",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let (status, response) = post(
+            server.port,
+            secret,
+            &json!({
+                "cmd": "spawn",
+                "args": { "agent": "claude", "task": "child task for identity test", "name": "identity child" }
+            }),
+        );
+
+        assert_eq!(status, 200);
+        assert_eq!(response["ok"], true, "spawn debe crear el pendiente sin lanzar hasta aprobación: {response}");
+        let events = core
+            .storage
+            .with_store(|store| {
+                store
+                    .events_page(&EventQuery { after: Some(head_before), limit: Some(100), ..Default::default() })
+                    .unwrap()
+                    .events
+            })
+            .unwrap();
+        let requested = events.iter().find(|event| event.kind == "spawn.requested").expect("spawn emite el evento durable");
+        assert_eq!(requested.client_id.as_deref(), Some(client_id.as_str()));
+        assert_eq!(requested.actor_kind.as_str(), "agent");
+        assert_eq!(requested.actor_id.as_deref(), Some(task.as_str()));
+        assert_eq!(requested.channel.as_deref(), Some("lxo"));
         server.stop();
     }
 }

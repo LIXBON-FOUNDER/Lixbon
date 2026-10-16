@@ -193,7 +193,7 @@ impl Core {
                 Ok(json!({ "run": run, "task": task }))
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
-            "spawn" => self.spawn_request(channel, &caller, args),
+            "spawn" => self.spawn_request(ctx_of()?, &caller, args),
             "spawn_status" => self.spawn_status(&caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
