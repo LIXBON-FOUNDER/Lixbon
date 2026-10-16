@@ -250,6 +250,23 @@ pub struct TermMeta {
     pub argv: Vec<String>,
 }
 
+/// El matador de una terminal, prestado mientras corre; al soltarse sin consumirlo vuelve a su terminal.
+struct Lease<'a> {
+    terms: &'a Mutex<HashMap<String, Entry>>,
+    id: &'a str,
+    killer: Option<pty::Killer>,
+}
+
+impl Drop for Lease<'_> {
+    fn drop(&mut self) {
+        if let Some(k) = self.killer.take() {
+            if let Some(e) = self.terms.lock().unwrap_or_else(|e| e.into_inner()).get_mut(self.id) {
+                e.term.end_kill(k);
+            }
+        }
+    }
+}
+
 struct Entry {
     term: AgentTerm,
     cwd: String,
@@ -375,24 +392,45 @@ impl CodexTerms {
         l
     }
 
-    /// Mata el árbol de procesos de la terminal y la quita de la lista.
+    /// Mata el árbol de procesos de la terminal COMPROBANDO el resultado y solo entonces la quita de la lista. Si el
+    /// kill falla (o ya hay otro cerrándola) la terminal SIGUE en la lista con su matador: el proceso puede seguir vivo
+    /// y no se suelta un `AgentTerm` sin dueño. El mapa no se bloquea mientras corre el matador.
     pub fn close(&self, term_id: &str) -> Result<(), String> {
-        let e = self.terms.lock().map_err(|_| "Estado interno corrupto")?.remove(term_id);
-        let mut e = e.ok_or_else(|| format!("Terminal desconocida: {term_id}"))?;
-        e.term.kill();
-        Ok(())
+        let killer = {
+            let mut t = self.terms.lock().map_err(|_| "Estado interno corrupto")?;
+            let e = t.get_mut(term_id).ok_or_else(|| format!("Terminal desconocida: {term_id}"))?;
+            e.term.begin_kill().map_err(|e| format!("No se pudo cerrar {term_id}: {e}"))?
+        };
+        // Si el kill falla o entra en pánico, el `Drop` devuelve el matador a su terminal.
+        let mut lease = Lease { terms: &self.terms, id: term_id, killer: Some(killer) };
+        match lease.killer.as_mut().map_or(Ok(()), |k| k.kill()) {
+            Ok(()) => {
+                lease.killer = None;
+                self.terms.lock().unwrap_or_else(|e| e.into_inner()).remove(term_id);
+                Ok(())
+            }
+            Err(e) => Err(format!("No se pudo cerrar {term_id}: {e}. La terminal sigue abierta y bajo la custodia de Lixbon")),
+        }
     }
 
-    /// Al cerrar la ventana principal o la app.
-    pub fn close_all(&self) {
-        let all: Vec<Entry> = self.terms.lock().map(|mut t| t.drain().map(|(_, v)| v).collect()).unwrap_or_default();
-        for mut e in all {
-            e.term.kill();
-        }
+    /// Al cerrar la ventana principal o la app. Cierra todas las que puede; las que no se pueden matar siguen en la
+    /// lista (custodiadas) y se devuelven en el `Err`, con su motivo.
+    pub fn close_all(&self) -> Result<(), String> {
+        let ids: Vec<String> = self.terms.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+        let failures: Vec<String> = ids.iter().filter_map(|id| self.close(id).err()).collect();
+        if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 
     pub fn len(&self) -> usize {
         self.terms.lock().map(|t| t.len()).unwrap_or(0)
+    }
+
+    /// Prueba: registra una terminal sin proceso, con el matador que se indique.
+    #[cfg(test)]
+    pub(crate) fn insert_for_tests(&self, term_id: &str, term: AgentTerm) {
+        let out = Arc::new(Mutex::new(Output::new(24, pty::MIN_COLS)));
+        let entry = Entry { term, cwd: String::new(), meta: TermMeta::default(), out };
+        self.terms.lock().unwrap().insert(term_id.to_string(), entry);
     }
 }
 
@@ -650,7 +688,7 @@ mod falso {
         let got: Vec<u32> = pty::plain(&out()).split_whitespace().filter_map(|t| t.strip_prefix('K')?.parse().ok()).collect();
         // ñ, ❤, símbolos de caja, 🚀 (par sustituto) y ❤ + selector de emoji: ConPTY los entrega todos.
         assert_eq!(got, [97, 241, 10084, 9472, 9474, 55357, 56960, 10084, 65039, 122]);
-        terms.close_all();
+        terms.close_all().unwrap();
     }
 
     #[test]
@@ -713,12 +751,89 @@ mod falso {
         assert_eq!(terms.list().len(), 1);
         // B sigue viva hasta cerrar todas (como al cerrar la app).
         assert!(alive(&pid_b) && !exited(&b));
-        terms.close_all();
+        terms.close_all().unwrap();
         assert!(wait(|| exited(&b) && !alive(&pid_b), 20));
         assert_eq!(terms.len(), 0);
         let ev = events.lock().unwrap();
         let exit_a = ev.iter().find(|(n, v)| n == EVENT_EXIT && v["term_id"] == a.as_str()).unwrap();
         assert!(exit_a.1.get("code").is_some());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// `close`/`close_all` no sueltan un `AgentTerm` cuyo kill falló: el proceso puede seguir vivo (LXO-18).
+#[cfg(test)]
+mod cierre_tests {
+    use super::*;
+    use portable_pty::ChildKiller;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Falla las primeras `n` veces y después mata bien.
+    #[derive(Debug)]
+    struct Intermitente(Arc<AtomicUsize>);
+
+    impl ChildKiller for Intermitente {
+        fn kill(&mut self) -> std::io::Result<()> {
+            if self.0.load(Ordering::SeqCst) > 0 {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+                return Err(std::io::Error::other("no se puede matar (aún)"));
+            }
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+            Box::new(Intermitente(self.0.clone()))
+        }
+    }
+
+    fn con_fallos(n: usize) -> AgentTerm {
+        AgentTerm::for_tests(Box::new(Intermitente(Arc::new(AtomicUsize::new(n)))))
+    }
+
+    #[test]
+    fn close_con_un_kill_fallido_conserva_la_terminal_y_lo_dice() {
+        let terms = CodexTerms::default();
+        terms.insert_for_tests("a", con_fallos(2));
+        for _ in 0..2 {
+            let e = terms.close("a").unwrap_err();
+            assert!(e.contains("sigue abierta"), "{e}");
+            assert_eq!(terms.len(), 1, "la terminal sigue en la lista con su matador");
+            assert_eq!(terms.list().len(), 1);
+        }
+        terms.close("a").expect("ahora el matador funciona");
+        assert_eq!(terms.len(), 0);
+        assert!(terms.close("a").unwrap_err().contains("desconocida"));
+    }
+
+    #[test]
+    fn close_all_cierra_las_que_puede_y_conserva_y_reporta_las_demas() {
+        let terms = CodexTerms::default();
+        terms.insert_for_tests("rota", AgentTerm::for_tests(Box::new(super::super::spawn_cleanup_tests::MatadorRoto)));
+        terms.insert_for_tests("bien", con_fallos(0));
+        let e = terms.close_all().unwrap_err();
+        assert!(e.contains("rota") && !e.contains("bien"), "{e}");
+        assert_eq!(terms.list().iter().map(|l| l.term_id.as_str()).collect::<Vec<_>>(), vec!["rota"], "solo queda la que no se pudo matar");
+        assert!(terms.close_all().is_err(), "y se sigue reportando mientras no muera");
+        assert_eq!(terms.len(), 1);
+    }
+
+    #[test]
+    fn un_pánico_dentro_del_matador_no_pierde_la_terminal() {
+        #[derive(Debug)]
+        struct Panica;
+        impl ChildKiller for Panica {
+            fn kill(&mut self) -> std::io::Result<()> {
+                panic!("pánico inyectado dentro del matador");
+            }
+            fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+                Box::new(Panica)
+            }
+        }
+        let terms = Arc::new(CodexTerms::default());
+        terms.insert_for_tests("p", AgentTerm::for_tests(Box::new(Panica)));
+        let t2 = terms.clone();
+        assert!(std::thread::spawn(move || t2.close("p")).join().is_err());
+        assert_eq!(terms.len(), 1, "la terminal sigue siendo nuestra");
+        assert!(terms.terms.lock().unwrap().get("p").is_some_and(|e| !e.term.kill_in_progress()), "con su matador de vuelta");
     }
 }
