@@ -11,9 +11,21 @@
 //!   padre si no es anterior a él (`start(hijo) >= start(padre)`). En Unix la identidad es un TOKEN opaco (igualdad, nunca
 //!   orden): ahí el `ppid` de un proceso vivo es siempre su padre vivo (los huérfanos se reparentan), así que ese filtro
 //!   no hace falta y compararlo por orden saltaría descendientes vivos;
-//! * donde el sistema lo permite (Windows: Job Object) la raíz se mete en un GRUPO al crearla y el grupo da la lista
-//!   autoritativa de TODOS los procesos del árbol, incluidos los huérfanos cuyo padre intermedio salió antes del primer
-//!   escaneo; matar el grupo y comprobar que queda vacío no depende de pids ni de `ppid`;
+//! * la descendencia se localiza por TRES vías que se refuerzan, porque el recorrido por `ppid` no ve a un nieto cuyo
+//!   padre intermedio ya salió (en Unix se reparenta a init; en Windows su `ppid` queda colgando):
+//!   1. recorrido por `ppid` desde la raíz y desde cada descendiente ya rastreado;
+//!   2. Windows: la raíz entra en un Job Object al crearla (solo si el proceso abierto tiene la MISMA hora de creación
+//!      que la capturada, para que un pid reutilizado nunca meta a un ajeno en un job que luego se termina) y el job da
+//!      la lista autoritativa de sus procesos vivos;
+//!   3. Unix: la raíz es líder de su propio grupo de procesos (`process_group(0)` al lanzar; la PTY hace `setsid`) y los
+//!      procesos con ese `pgid` se leen en UNA instantánea de `ps` junto a su token de identidad. El número de grupo solo
+//!      está reservado mientras el grupo tiene miembros, así que solo se descubre por `pgid` si un proceso que YA
+//!      rastreamos (identidad verificada en esa ronda) sigue dentro en esa misma lectura; con miembros y sin ese ancla
+//!      (p. ej. la raíz murió antes del primer kill y nada se había anotado) no se puede probar que el número siga
+//!      siendo nuestro y se falla CERRADO en vez de arriesgar un kill ajeno. Cada miembro se mata con `terminate(Proc)`
+//!      (identidad comprobada justo antes), nunca con `kill(-pgid)`;
+//!   Residual común: un proceso que se desvincula a propósito (`setsid`/`setpgid` a otro grupo, daemonización) tras
+//!   perder a su padre queda fuera de las tres vías; no se puede rastrear sin un contenedor del sistema (cgroups/jobs).
 //! * ante la duda (la tabla no se puede leer, parece vacía o truncada, no se puede probar la identidad) se falla
 //!   CERRADO: `Err` y el proceso sigue en custodia.
 
@@ -52,9 +64,21 @@ pub(crate) trait Os {
     fn ordered_starts(&self) -> bool {
         true
     }
-    /// Mete el proceso recién creado `pid` en un grupo que contendrá a todos sus descendientes futuros. `None` si el
-    /// sistema no lo ofrece o falla (se sigue solo con el escaneo, sin fingir más garantía).
-    fn make_group(&mut self, _pid: u32) -> Option<std::sync::Arc<dyn Group>> {
+    /// Mete el proceso recién creado `pid` en un grupo que contendrá a todos sus descendientes futuros. `start` es la
+    /// hora de creación capturada para `pid`: solo se adjunta si el proceso que se abre ahora tiene EXACTAMENTE esa
+    /// identidad (si el pid se hubiera reutilizado, un ajeno acabaría en un grupo que luego se termina). `None` si el
+    /// sistema no lo ofrece, falla o la identidad no coincide (se sigue solo con el escaneo, sin fingir más garantía).
+    fn make_group(&mut self, _pid: u32, _start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
+        None
+    }
+    /// Unix: ¿`pid` es líder de su propio grupo de procesos (`pgid == pid`)? Solo entonces el grupo es suyo y de su
+    /// descendencia; si el lanzamiento no lo dejó como líder (compartiría el grupo de Lixbon) no se usa.
+    fn leads_group(&mut self, _pid: u32) -> bool {
+        false
+    }
+    /// Unix: procesos vivos (no zombis) del grupo `pgid`, con su identidad, de UNA sola lectura (el `pgid` y el token de
+    /// cada fila salen de la misma instantánea). `None` = no fiable (la duda es un error).
+    fn group_rows(&mut self, _pgid: u32) -> Option<Vec<Proc>> {
         None
     }
 }
@@ -84,15 +108,18 @@ pub(crate) struct Tree {
     unproven: Vec<u32>,
     /// El grupo del sistema que contiene a toda la descendencia (si se pudo crear).
     group: Option<std::sync::Arc<dyn Group>>,
+    /// Unix: el número de grupo de procesos de la raíz (que es su líder). Ver la cabecera del módulo.
+    pgid: Option<u32>,
 }
 
 impl Tree {
     /// Anota la raíz recién creada (su pid es seguro: acaba de crearse). Si ya no existe, nace verificada muerta.
     pub(crate) fn capture(os: &mut dyn Os, pid: u32) -> Tree {
         let start = os.start(pid);
-        let group = os.make_group(pid);
+        let group = os.make_group(pid, start);
+        let pgid = os.leads_group(pid).then_some(pid);
         let gone = start.is_none() && os.table().is_some_and(|t| !t.iter().any(|(p, _)| *p == pid));
-        Tree { pid, start, root_dead: gone, seen: Vec::new(), unproven: Vec::new(), group }
+        Tree { pid, start, root_dead: gone, seen: Vec::new(), unproven: Vec::new(), group, pgid }
     }
 
     #[cfg(test)]
@@ -210,8 +237,28 @@ pub(crate) fn kill_tree(t: &mut Tree, os: &mut dyn Os) -> std::io::Result<()> {
                 Some(m) if m.is_empty() => {}
                 Some(_) => {
                     group_alive = true;
-                    if !g.terminate() {
+                    // El resultado de `terminate` no se mira a propósito: con miembros vivos `group_alive` ya impide el éxito
+                    // en esta ronda, y solo una lectura posterior con el grupo VACÍO prueba que murieron.
+                    let _ = g.terminate();
+                }
+            }
+        }
+
+        // 3c) Unix: los procesos del grupo de la raíz (incluidos los reparentados a init). Solo con ancla: ver la cabecera.
+        if let Some(g) = t.pgid {
+            match os.group_rows(g) {
+                None => unproven = true,
+                Some(rows) => {
+                    let anchored = rows.iter().any(|r| alive.contains(r) || (root_alive && Some(*r) == root));
+                    if !rows.is_empty() && !anchored {
                         unproven = true;
+                    } else {
+                        for r in rows {
+                            if r.pid != t.pid && !alive.contains(&r) {
+                                alive.push(r);
+                                found = true;
+                            }
+                        }
                     }
                 }
             }
@@ -269,21 +316,73 @@ impl Os for RealOs {
         cfg!(windows)
     }
 
-    fn make_group(&mut self, pid: u32) -> Option<std::sync::Arc<dyn Group>> {
-        make_group(pid)
+    fn make_group(&mut self, pid: u32, start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
+        make_group(pid, start)
+    }
+
+    fn leads_group(&mut self, pid: u32) -> bool {
+        leads_group(pid)
+    }
+
+    fn group_rows(&mut self, pgid: u32) -> Option<Vec<Proc>> {
+        group_rows(pgid)
     }
 }
 
 /// Windows: un Job Object sin límites (nada se mata al soltarlo ni se impide escapar a nadie: solo contabiliza).
 #[cfg(windows)]
-fn make_group(pid: u32) -> Option<std::sync::Arc<dyn Group>> {
-    win::Job::attach(pid).map(|j| std::sync::Arc::new(j) as std::sync::Arc<dyn Group>)
+fn make_group(pid: u32, start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
+    win::Job::attach(pid, start).map(|j| std::sync::Arc::new(j) as std::sync::Arc<dyn Group>)
 }
 
-/// Unix: sin grupo (residual documentado en el informe de LXO-18: grupos de procesos con identidad de miembros).
+/// Unix: no hay Job Object; el grupo de procesos (`leads_group` + `group_rows`) cumple ese papel.
 #[cfg(not(windows))]
-fn make_group(_pid: u32) -> Option<std::sync::Arc<dyn Group>> {
+fn make_group(_pid: u32, _start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
     None
+}
+
+/// ¿Puede adjuntarse al grupo el proceso abierto? Solo si su hora de creación es EXACTAMENTE la capturada al crearlo; sin
+/// identidad capturada (o distinta) el pid podría ser de otro proceso.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn may_attach(captured: Option<u64>, opened: Option<u64>) -> bool {
+    captured.is_some() && captured == opened
+}
+
+/// Token opaco de una cadena `lstart` (varios espacios entre campos, p. ej. «Oct  5»): FNV-1a de la cadena normalizada.
+/// Solo se compara por IGUALDAD; su orden numérico no dice nada del orden en el tiempo.
+#[cfg_attr(windows, allow(dead_code))]
+fn lstart_token(lstart: &str) -> Option<u64> {
+    let norm = lstart.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!norm.is_empty()).then(|| norm.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)))
+}
+
+/// Una fila de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=`.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(windows, allow(dead_code))]
+struct PsRow {
+    pid: u32,
+    ppid: u32,
+    pgid: u32,
+    zombie: bool,
+    start: u64,
+}
+
+/// Lee la salida de `ps`. Una fila que no se entiende (campos que faltan, `lstart` sin sus 5 campos) hace dudosa TODA la
+/// lectura: `None`.
+#[cfg_attr(windows, allow(dead_code))]
+fn parse_ps_rows(text: &str) -> Option<Vec<PsRow>> {
+    let mut out = Vec::new();
+    for l in text.lines().filter(|l| !l.trim().is_empty()) {
+        let mut f = l.split_whitespace();
+        let (pid, ppid, pgid): (u32, u32, u32) = (f.next()?.parse().ok()?, f.next()?.parse().ok()?, f.next()?.parse().ok()?);
+        let stat = f.next()?;
+        let lstart: Vec<&str> = f.collect();
+        if lstart.len() != 5 {
+            return None;
+        }
+        out.push(PsRow { pid, ppid, pgid, zombie: stat.starts_with('Z'), start: lstart_token(&lstart.join(" "))? });
+    }
+    Some(out)
 }
 
 /// Tabla `(pid, ppid)` de los procesos vivos, o `None` si no se pudo leer o no es fiable (vacía, sin este proceso,
@@ -323,23 +422,46 @@ fn raw_table() -> Option<Vec<(u32, u32)>> {
     }
 }
 
+/// `ps` en un entorno fijo (`LC_ALL=C`): el token de `lstart` debe salir igual en todas las lecturas.
+#[cfg(not(windows))]
+fn ps_output(args: &[&str]) -> Option<String> {
+    let mut cmd = std::process::Command::new("ps");
+    cmd.args(args).env("LC_ALL", "C");
+    let o = crate::hide_console(&mut cmd).output().ok().filter(|o| o.status.success())?;
+    Some(String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+#[cfg(not(windows))]
+fn ps_rows() -> Option<Vec<PsRow>> {
+    let rows = parse_ps_rows(&ps_output(&["-e", "-o", "pid=,ppid=,pgid=,stat=,lstart="])?)?;
+    // Sin este proceso la lectura está truncada o es inesperada.
+    rows.iter().any(|r| r.pid == std::process::id()).then_some(rows)
+}
+
 #[cfg(not(windows))]
 fn raw_table() -> Option<Vec<(u32, u32)>> {
-    let mut cmd = std::process::Command::new("ps");
-    cmd.args(["-e", "-o", "pid=,ppid=,stat="]);
-    let o = crate::hide_console(&mut cmd).output().ok().filter(|o| o.status.success())?;
-    let text = String::from_utf8_lossy(&o.stdout);
-    let mut out = Vec::new();
-    for l in text.lines().filter(|l| !l.trim().is_empty()) {
-        let mut f = l.split_whitespace();
-        // Una línea que no se entiende hace dudosa TODA la lectura.
-        let (pid, ppid, stat): (u32, u32, &str) = (f.next()?.parse().ok()?, f.next()?.parse().ok()?, f.next().unwrap_or(""));
-        // Un zombi pendiente de `wait` cuenta como muerto, pero el propio proceso sigue contando para validar.
-        if !stat.starts_with('Z') || pid == std::process::id() {
-            out.push((pid, ppid));
-        }
-    }
-    Some(out)
+    // Un zombi pendiente de `wait` cuenta como muerto, pero el propio proceso sigue contando para validar.
+    Some(ps_rows()?.into_iter().filter(|r| !r.zombie || r.pid == std::process::id()).map(|r| (r.pid, r.ppid)).collect())
+}
+
+#[cfg(not(windows))]
+fn group_rows(pgid: u32) -> Option<Vec<Proc>> {
+    Some(ps_rows()?.into_iter().filter(|r| r.pgid == pgid && !r.zombie).map(|r| Proc { pid: r.pid, start: r.start }).collect())
+}
+
+#[cfg(windows)]
+fn group_rows(_pgid: u32) -> Option<Vec<Proc>> {
+    None
+}
+
+#[cfg(not(windows))]
+fn leads_group(pid: u32) -> bool {
+    ps_output(&["-o", "pgid=", "-p", &pid.to_string()]).and_then(|t| t.trim().parse::<u32>().ok()) == Some(pid)
+}
+
+#[cfg(windows)]
+fn leads_group(_pid: u32) -> bool {
+    false
 }
 
 #[cfg(windows)]
@@ -407,19 +529,23 @@ mod win {
     unsafe impl Sync for Job {}
 
     impl Job {
-        pub fn attach(pid: u32) -> Option<Job> {
-            // SAFETY: FFI; los atributos nulos significan los de por defecto, y los handles se cierran en cada salida.
+        /// Mete a `pid` en un job nuevo SOLO si el proceso que se abre ahora (el mismo handle que se asigna) tiene la hora
+        /// de creación `expected` capturada al crearlo: así un pid reutilizado entre la captura y la apertura nunca
+        /// pone a un proceso ajeno en un job que `kill_tree` termina. Sin identidad capturada no se adjunta.
+        pub fn attach(pid: u32, expected: Option<u64>) -> Option<Job> {
+            let access = PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION;
+            let Open::Ok(h) = open(pid, access) else { return None };
+            if !super::may_attach(expected, creation(&h)) {
+                return None;
+            }
+            // SAFETY: FFI; los atributos nulos significan los de por defecto; el handle de proceso sigue abierto (ancla el pid).
             unsafe {
                 let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
                 if job == 0 {
                     return None;
                 }
                 let job = Job(job);
-                let access = PROCESS_SET_QUOTA | PROCESS_TERMINATE;
-                match open(pid, access) {
-                    Open::Ok(h) if AssignProcessToJobObject(job.0, h.0) != 0 => Some(job),
-                    _ => None,
-                }
+                (AssignProcessToJobObject(job.0, h.0) != 0).then_some(job)
             }
         }
     }
@@ -491,29 +617,11 @@ fn terminate(p: Proc) -> Fate {
     }
 }
 
-/// Campo 22 (`starttime`, en ticks desde el arranque) de `/proc/<pid>/stat`. El nombre (campo 2) va entre paréntesis y
-/// puede contener espacios y paréntesis: se cuenta desde el ÚLTIMO `)`.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn parse_proc_stat_start(stat: &str) -> Option<u64> {
-    let after = &stat[stat.rfind(')')? + 1..];
-    // Tras el `)` empieza el campo 3 (estado): el 22 es el 20.º de lo que queda.
-    after.split_whitespace().nth(19)?.parse().ok()
-}
-
 #[cfg(not(windows))]
 fn start_time(pid: u32) -> Option<u64> {
-    #[cfg(target_os = "linux")]
-    if let Some(t) = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|s| parse_proc_stat_start(&s)) {
-        return Some(t);
-    }
-    let mut cmd = std::process::Command::new("ps");
-    cmd.args(["-o", "lstart=", "-p", &pid.to_string()]);
-    let o = crate::hide_console(&mut cmd).output().ok().filter(|o| o.status.success())?;
-    let text = String::from_utf8_lossy(&o.stdout);
-    let text = text.trim();
-    // FNV-1a de la cadena: un TOKEN opaco, solo comparable por IGUALDAD (su orden numérico no dice nada del orden en el
-    // tiempo; por eso `ordered_starts` es falso en Unix y `kill_tree` nunca lo ordena).
-    (!text.is_empty()).then(|| text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)))
+    // La MISMA fuente (`lstart`) que las filas de `ps_rows`, para que los tokens de un proceso coincidan en todas las
+    // vías de descubrimiento. Token opaco: `ordered_starts` es falso en Unix y `kill_tree` nunca lo ordena.
+    lstart_token(&ps_output(&["-o", "lstart=", "-p", &pid.to_string()])?)
 }
 
 /// En Unix la identidad se comprueba justo antes de `kill -9`: son dos llamadas seguidas, no una sola operación (no hay
@@ -559,6 +667,13 @@ mod tests {
         unordered: bool,
         /// Estado del grupo del sistema (Job Object) si el mundo ofrece uno.
         grp: Option<std::sync::Arc<std::sync::Mutex<Grp>>>,
+        /// Unix: (pid, pgid) de cada proceso y si la raíz lidera su grupo.
+        pg: Vec<(u32, u32)>,
+        leader: bool,
+        /// La lectura de las filas del grupo no es fiable.
+        rows_unreadable: bool,
+        /// Lo que `make_group` recibió como `start` (para comprobar que `capture` pasa la identidad capturada).
+        group_start_seen: Option<Option<u64>>,
     }
 
     #[derive(Default, Debug)]
@@ -570,6 +685,8 @@ mod tests {
         /// Terminar el grupo falla.
         stuck: bool,
         terminated: bool,
+        /// Terminar «funciona» pero los miembros no se van (el sistema no los retira).
+        sticky: bool,
     }
 
     #[derive(Debug)]
@@ -606,15 +723,29 @@ mod tests {
             !self.unordered
         }
 
-        fn make_group(&mut self, _pid: u32) -> Option<std::sync::Arc<dyn Group>> {
+        fn make_group(&mut self, _pid: u32, start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
+            self.group_start_seen = Some(start);
             self.grp.clone().map(|g| std::sync::Arc::new(FakeGroup(g)) as std::sync::Arc<dyn Group>)
+        }
+
+        fn leads_group(&mut self, _pid: u32) -> bool {
+            self.leader
+        }
+
+        fn group_rows(&mut self, pgid: u32) -> Option<Vec<Proc>> {
+            if self.rows_unreadable {
+                return None;
+            }
+            Some(self.procs.iter().filter(|p| p.3 && self.pg.iter().any(|&(pid, g)| pid == p.0 && g == pgid)).map(|p| Proc { pid: p.0, start: p.2 }).collect())
         }
 
         fn table(&mut self) -> Option<Vec<(u32, u32)>> {
             // Terminar el grupo mata a todos sus miembros, vean o no el escaneo.
             if let Some(g) = &self.grp {
                 let mut g = g.lock().unwrap();
-                if g.terminated {
+                if g.terminated && g.sticky {
+                    g.terminated = false; // «terminado», pero los miembros siguen ahí
+                } else if g.terminated {
                     let muertos = std::mem::take(&mut g.members);
                     g.terminated = false;
                     self.procs.iter_mut().filter(|p| muertos.contains(&p.0)).for_each(|p| p.3 = false);
@@ -850,15 +981,6 @@ mod tests {
         assert!(w2.alive(12));
     }
 
-    #[test]
-    fn el_starttime_de_proc_stat_se_lee_tras_el_ultimo_parentesis() {
-        let tail = "S 1 1234 1234 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 5000 300 18446744073709551615";
-        assert_eq!(parse_proc_stat_start(&format!("1234 (bash) {tail}")), Some(987_654));
-        assert_eq!(parse_proc_stat_start(&format!("1234 (we ird) na)me) {tail}")), Some(987_654), "el nombre puede traer espacios y paréntesis");
-        assert_eq!(parse_proc_stat_start("1234 (corto) S 1 2"), None);
-        assert_eq!(parse_proc_stat_start("sin paréntesis"), None);
-    }
-
     // --- Grupo del sistema: lo que el escaneo no puede ver ---
 
     /// Raíz 10 viva; 50 es un huérfano cuyo padre INTERMEDIO (99) salió antes del primer escaneo: su ppid cuelga de un
@@ -900,6 +1022,249 @@ mod tests {
         let mut t = captura(&mut w);
         w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
         assert!(kill_tree(&mut t, &mut w).is_err());
+    }
+
+    // --- Unix: grupo de procesos de la raíz (P1: el nieto reparentado a init que el recorrido por ppid no ve) ---
+
+    /// Raíz 10 (líder de su grupo 10), su hijo 11 ya salió, y el nieto 12 se reparentó a init (ppid 1) pero sigue en el
+    /// grupo 10. 30 es un proceso ajeno con su propio grupo. Los tokens están en orden numérico contrario al del tiempo.
+    fn mundo_unix_con_nieto_huerfano() -> World {
+        let mut w = World::new(&[(1, 0, 1), (10, 1, 900), (12, 1, 3), (30, 1, 70)]);
+        w.unordered = true;
+        w.leader = true;
+        w.pg = vec![(10, 10), (12, 10), (30, 30)];
+        w
+    }
+
+    #[test]
+    fn el_grupo_de_procesos_mata_al_nieto_reparentado_a_init() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(!w.alive(12), "el nieto que el recorrido por ppid no ve murió con el grupo");
+        assert!(!w.alive(10) && w.alive(30) && w.alive(1), "y ningún proceso ajeno se tocó");
+    }
+
+    #[test]
+    fn un_nieto_del_grupo_que_no_muere_impide_declarar_el_arbol_muerto() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        w.immortal.push(12);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "con un miembro vivo el árbol NO está muerto");
+        assert!(w.alive(12));
+    }
+
+    #[test]
+    fn si_las_filas_del_grupo_no_son_fiables_se_falla_cerrado() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        w.rows_unreadable = true;
+        assert!(kill_tree(&mut t, &mut w).is_err());
+    }
+
+    #[test]
+    fn un_numero_de_grupo_reutilizado_por_un_ajeno_no_se_mata() {
+        // La raíz y todos sus miembros murieron; el número 10 lo reutiliza un programa ajeno que lidera SU grupo 10 y
+        // tiene un hijo. Nada rastreado sigue vivo: no hay ancla, así que no se puede probar que el grupo sea nuestro.
+        let mut w = World::new(&[(1, 0, 1), (10, 1, 900), (12, 1, 3)]);
+        w.unordered = true;
+        w.leader = true;
+        w.pg = vec![(10, 10), (12, 10)];
+        let mut t = captura(&mut w);
+        w.procs.iter_mut().filter(|p| p.0 == 10 || p.0 == 12).for_each(|p| p.3 = false);
+        w.procs.push((10, 1, 8_000, true));
+        w.procs.push((31, 10, 8_001, true));
+        w.pg.extend([(31, 10)]);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "ante la duda: Err y custodia");
+        assert!(w.alive(10) && w.alive(31) && w.killed.is_empty(), "ni el nuevo líder ni su hijo se tocaron");
+    }
+
+    #[test]
+    fn con_la_raiz_muerta_y_un_miembro_sin_anotar_no_se_da_el_arbol_por_muerto_ni_se_mata_a_ciegas() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
+        assert!(kill_tree(&mut t, &mut w).is_err(), "hay un miembro vivo y no hay ancla para fiarse del número de grupo");
+        assert!(w.alive(12) && w.killed.is_empty(), "no se mata sin poder probar que es nuestro");
+    }
+
+    #[test]
+    fn un_miembro_ya_rastreado_ancla_el_grupo_aunque_la_raiz_haya_muerto() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        // Primer intento: el nieto 12 no muere y queda anotado.
+        w.immortal.push(12);
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        assert!(t.seen().iter().any(|p| p.pid == 12));
+        // Mientras tanto nace otro huérfano del mismo grupo; ahora 12 sí muere en el siguiente intento.
+        w.procs.push((13, 1, 2, true));
+        w.pg.push((13, 10));
+        w.immortal.clear();
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(!w.alive(12) && !w.alive(13), "12 ancla el grupo y 13 se descubre y se mata");
+        assert!(w.alive(30));
+    }
+
+    #[test]
+    fn un_pid_de_otro_grupo_que_reutiliza_el_de_un_miembro_no_se_toca() {
+        let mut w = mundo_unix_con_nieto_huerfano();
+        let mut t = captura(&mut w);
+        w.immortal.push(12);
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        w.immortal.clear();
+        w.procs.iter_mut().filter(|p| p.0 == 12).for_each(|p| p.3 = false);
+        // El pid 12 pasa a un proceso ajeno de OTRO grupo.
+        w.procs.push((12, 1, 5_000, true));
+        w.pg.retain(|&(pid, _)| pid != 12);
+        w.pg.push((12, 12));
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.alive(12), "el ajeno que heredó el pid no se mata");
+    }
+
+    #[test]
+    fn sin_ser_lider_de_su_grupo_la_raiz_no_usa_pgid() {
+        // Si el lanzamiento no dejó a la raíz como líder, su grupo es el de Lixbon: jamás se enumera ni se mata por él.
+        let mut w = mundo_unix_con_nieto_huerfano();
+        w.leader = false;
+        let mut t = captura(&mut w);
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.alive(12) && w.alive(30), "sin pgid propio solo actúa el recorrido por ppid");
+    }
+
+    // --- P2: mutantes que sobrevivían en la revisión ---
+
+    #[test]
+    fn m01_con_la_raiz_muerta_y_un_huerfano_solo_en_el_grupo_no_hay_exito_antes_de_comprobar() {
+        // Solo el grupo (Job Object) conoce a 50. `terminate` «funciona», pero el sistema retira al miembro en la lectura
+        // SIGUIENTE: devolver Ok en la ronda en que se vio vivo sería afirmar la muerte sin comprobarla.
+        let mut w = mundo_con_huerfano_y_grupo();
+        let mut t = captura(&mut w);
+        w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
+        w.grp.as_ref().unwrap().lock().unwrap().members = vec![50];
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(!w.alive(50), "Ok solo tras comprobar que el miembro ya no está");
+    }
+
+    #[test]
+    fn m01_un_grupo_cuyos_miembros_no_se_van_aunque_terminate_funcione_falla() {
+        let mut w = mundo_con_huerfano_y_grupo();
+        let mut t = captura(&mut w);
+        w.grp.as_ref().unwrap().lock().unwrap().sticky = true;
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        assert!(w.alive(50));
+    }
+
+    #[test]
+    fn m03_sin_instantes_reales_no_se_adoptan_procesos_cuyo_ppid_cuelga_de_la_raiz_muerta() {
+        // Unix (tokens opacos): un proceso AJENO con `ppid == pid de la raíz` (pid ya libre) no es descendiente de nadie
+        // que conozcamos: adoptarlo sería matar a un ajeno.
+        let mut w = World::new(&[(1, 0, 1), (10, 1, 900), (21, 10, 60)]);
+        w.unordered = true;
+        let mut t = captura(&mut w);
+        w.procs.iter_mut().filter(|p| p.0 == 10).for_each(|p| p.3 = false);
+        kill_tree(&mut t, &mut w).unwrap();
+        assert!(w.alive(21) && w.killed.is_empty(), "el ajeno no se toca");
+    }
+
+    #[test]
+    fn m05_terminar_el_grupo_que_falla_no_cambia_el_veredicto_porque_ya_veta_group_alive() {
+        // `terminate() == false` solo importaría si no hubiera otro veto; pero con miembros vivos `group_alive` ya
+        // impide el éxito de la ronda y solo un grupo VACÍO lo permite. Con el grupo atascado el resultado es Err; si
+        // los miembros se van solos, el siguiente Ok es legítimo (la muerte se comprobó por la lectura vacía).
+        let mut w = mundo_con_huerfano_y_grupo();
+        let mut t = captura(&mut w);
+        w.grp.as_ref().unwrap().lock().unwrap().stuck = true;
+        assert!(kill_tree(&mut t, &mut w).is_err());
+        w.procs.iter_mut().filter(|p| p.0 == 50).for_each(|p| p.3 = false);
+        w.grp.as_ref().unwrap().lock().unwrap().members.clear();
+        kill_tree(&mut t, &mut w).unwrap();
+    }
+
+    #[test]
+    fn el_sistema_real_declara_si_los_instantes_son_comparables() {
+        // Windows: FILETIME real (comparables). Unix: token de `lstart` (solo igualdad).
+        assert_eq!(RealOs.ordered_starts(), cfg!(windows));
+    }
+
+    // --- Windows: un pid reutilizado no puede meter a un ajeno en el Job ---
+
+    #[test]
+    fn capture_pasa_la_identidad_capturada_a_make_group() {
+        let mut w = arbol();
+        let _ = captura(&mut w);
+        assert_eq!(w.group_start_seen, Some(Some(100)), "la hora de creación de la raíz viaja con la petición");
+        let mut w = arbol();
+        let _ = Tree::capture(&mut w, 2_000_000_001);
+        assert_eq!(w.group_start_seen, Some(None), "sin identidad capturada se pide sin identidad (y no se adjunta)");
+    }
+
+    #[test]
+    fn solo_se_adjunta_con_la_identidad_exacta() {
+        assert!(may_attach(Some(7), Some(7)));
+        assert!(!may_attach(Some(7), Some(8)), "otra hora de creación: el pid es de otro proceso");
+        assert!(!may_attach(None, Some(7)), "sin identidad capturada no hay con qué comparar");
+        assert!(!may_attach(Some(7), None), "si el proceso abierto no puede consultarse, no se adjunta");
+        assert!(!may_attach(None, None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn el_job_real_no_adjunta_un_proceso_con_otra_identidad() {
+        let mut child = std::process::Command::new("ping").args(["-n", "60", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        let start = start_time(pid).expect("identidad del proceso");
+        assert!(win::Job::attach(pid, Some(start.wrapping_add(1))).is_none(), "identidad distinta: no se adjunta");
+        assert!(win::Job::attach(pid, None).is_none(), "sin identidad: no se adjunta");
+        let job = win::Job::attach(pid, Some(start)).expect("con la identidad exacta sí");
+        assert!(Group::members(&job).is_some_and(|m| m.contains(&pid)));
+        assert!(Group::terminate(&job));
+        let _ = child.wait();
+    }
+
+    /// Unix, procesos de verdad: el intermedio (`( sleep 60 & )`) lanza al nieto y sale; el nieto se reparenta a init y
+    /// solo el grupo de procesos de la raíz lo conoce. Corre solo en Linux/macOS (CI); en Windows no compila.
+    #[cfg(unix)]
+    #[test]
+    fn el_grupo_de_procesos_real_mata_a_un_nieto_huerfano_de_verdad() {
+        use std::os::unix::process::CommandExt;
+        let dir = std::env::temp_dir().join(format!("lxo-pgrp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let marcador = dir.join("listo.txt");
+        let script = format!("( sleep 60 & ); echo ok > '{}'; sleep 60", marcador.display());
+        let mut cmd = std::process::Command::new("sh");
+        cmd.args(["-c", &script]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        cmd.process_group(0);
+        let mut child = cmd.spawn().unwrap();
+        let mut os = RealOs;
+        let mut t = Tree::capture(&mut os, child.id());
+        let limite = std::time::Instant::now() + Duration::from_secs(20);
+        while !marcador.exists() && std::time::Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(marcador.exists(), "la raíz llegó a su segunda fase: el intermedio ya salió");
+        let miembros = os.group_rows(child.id()).expect("filas del grupo");
+        assert!(miembros.len() >= 2, "la raíz y al menos el nieto huérfano: {miembros:?}");
+        assert!(miembros.iter().any(|m| m.pid != child.id()), "hay un miembro que no es la raíz (el nieto huérfano)");
+        kill_tree(&mut t, &mut os).expect("el árbol entero muere y se comprueba");
+        assert_eq!(os.group_rows(child.id()).map(|r| r.len()), Some(0), "el grupo quedó vacío");
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn las_filas_de_ps_se_leen_con_su_token_y_lo_dudoso_invalida_la_lectura() {
+        let ok = "  10     1    10 S    Wed Oct 15 10:20:30 2026\n  12     1    10 Z+   Wed Oct  5 09:00:01 2026\n";
+        let rows = parse_ps_rows(ok).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0].pid, rows[0].ppid, rows[0].pgid, rows[0].zombie), (10, 1, 10, false));
+        assert!(rows[1].zombie);
+        assert_eq!(lstart_token("Wed Oct  5 09:00:01 2026"), lstart_token("Wed Oct 5 09:00:01 2026"), "los espacios dobles no cambian el token");
+        assert_ne!(lstart_token("Wed Oct 15 10:20:30 2026"), lstart_token("Wed Oct 15 10:20:31 2026"));
+        assert!(parse_ps_rows("10 1 10 S Wed Oct 15 10:20:30").is_none(), "lstart incompleto");
+        assert!(parse_ps_rows("10 1 S Wed Oct 15 10:20:30 2026").is_none(), "falta una columna");
+        assert!(parse_ps_rows("x 1 10 S Wed Oct 15 10:20:30 2026").is_none(), "pid no numérico");
+        assert_eq!(parse_ps_rows("").map(|r| r.len()), Some(0));
     }
 
     /// Windows, procesos de verdad: el padre intermedio (`cmd /C inner.cmd`) lanza al nieto y SALE antes de que el
