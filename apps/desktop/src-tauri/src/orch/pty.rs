@@ -952,6 +952,9 @@ mod custodia_y_verificacion {
     use super::pruebas::*;
     use super::{ps_alive, reap_unowned_where, tasklist_alive, unowned, BREAK_KILLS};
 
+    /// La custodia es global y `Core::shutdown` la vacía entera: las pruebas que la tocan van de una en una.
+    static SERIE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn pids_en_custodia() -> Vec<u32> {
         unowned().iter().filter_map(|u| u.pid).collect()
     }
@@ -970,6 +973,7 @@ mod custodia_y_verificacion {
 
     #[test]
     fn si_ningun_matador_funciona_el_proceso_queda_en_custodia_y_se_mata_al_reintentar() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
         for piped in [false, true] {
             let dir = carpeta(&format!("custodia-{piped}"));
             let r = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, piped)));
@@ -991,6 +995,7 @@ mod custodia_y_verificacion {
 
     #[test]
     fn un_reintento_que_vuelve_a_fallar_no_pierde_la_custodia() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
         let dir = carpeta("custodia-reintento");
         let _ = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, true)));
         let pid = ultimo_pid().expect("pid");
@@ -1005,6 +1010,7 @@ mod custodia_y_verificacion {
 
     #[test]
     fn si_el_matador_funciona_no_queda_nada_en_custodia() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
         for piped in [false, true] {
             let dir = carpeta(&format!("sin-custodia-{piped}"));
             let r = con_fallo_tras_crear(|| lanza(&dir, piped));
@@ -1014,6 +1020,19 @@ mod custodia_y_verificacion {
             assert!(!pids_en_custodia().contains(&pid), "compensado: nada que custodiar (piped={piped})");
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    #[test]
+    fn el_apagado_del_core_reintenta_matar_los_procesos_en_custodia() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = carpeta("custodia-apagado");
+        let _ = con_fallo_tras_crear(|| con_matadores_rotos(|| lanza(&dir, true)));
+        let pid = ultimo_pid().expect("pid");
+        assert!(pids_en_custodia().contains(&pid) && vivo(pid));
+        crate::orch::Orch::default().0.shutdown();
+        assert!(espera_muerto(pid), "shutdown lo mata");
+        assert!(!pids_en_custodia().contains(&pid));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
