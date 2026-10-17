@@ -1,14 +1,27 @@
-// AuthScreen.js — acceso: iniciar sesión y crear cuenta como dos vistas con
-// titular en serif, Google y Apple primero, y el correo debajo. Recuperar la
-// contraseña es una hoja sobre el login, no otra pantalla.
+// AuthScreen.js — acceso: iniciar sesión y crear cuenta como dos vistas, cada
+// una con su lámina arriba (volver a casa / zarpar), titular en serif, Google y
+// Apple primero, y el correo debajo. Recuperar la contraseña es una hoja sobre
+// el login, no otra pantalla.
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
 import Icon from '../components/Icon';
 import { SheetTitle, useDialogs } from '../components/dialogs';
-import { AppleLogo, FadeUp, GoogleLogo, IconButton, KeyboardAware, LixLogo, LogoMark, Meter, ScreenTitle, useColors } from '../components/ui';
+import {
+  AppleLogo,
+  FadeUp,
+  GoogleLogo,
+  KeyboardAware,
+  Lamina,
+  LixLogo,
+  LogoMark,
+  Meter,
+  ScreenTitle,
+  useColors,
+  useKeyboardOpen,
+} from '../components/ui';
 import { DEFAULT_API_BASE, useApi, useAuth, usePrefs } from '../state';
 import { FONTS, RADIUS } from '../theme';
 
@@ -112,104 +125,133 @@ export default function AuthScreen() {
 
   const register = mode === 'register';
   const message = error || auth.notice;
+  const keyboard = useKeyboardOpen();
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
       {/* Con edge-to-edge la ventana no se encoge con el teclado: sin esto el
           formulario quedaba tapado y el ScrollView no tenía nada que mover. */}
       <KeyboardAware bottomInset={insets.bottom}>
-        <ScrollView
-          key={mode}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 24, paddingTop: register ? 12 : 40, paddingBottom: 28 }}
-        >
-          {register ? (
-            <View style={{ marginLeft: -12 }}>
-              <IconButton onPress={() => switchMode('login')} label="Volver">
-                <Icon name="arrow-left" size={20} color={c.inkBody} />
-              </IconButton>
-            </View>
-          ) : (
-            <FadeUp>
-              <Pressable onLongPress={changeServer} delayLongPress={800} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start' }}>
-                <LogoMark size={28} />
-                <LixLogo size={16} />
+        <ScrollView key={mode} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, paddingBottom: 28 + insets.bottom }}>
+          <Lamina
+            source={register ? LAMINA_REGISTRO : LAMINA_LOGIN}
+            height={register ? 240 : 360}
+            focus={register ? 0.46 : 0.18}
+            compact={keyboard}
+            label={register ? 'Un velero sale de un puerto tranquilo al amanecer' : 'Una casa con las ventanas encendidas en lo alto de una colina, a la hora azul'}
+          >
+            {register ? (
+              <Pressable
+                onPress={() => switchMode('login')}
+                accessibilityRole="button"
+                accessibilityLabel="Volver"
+                style={({ pressed }) => ({
+                  margin: c.dark ? 6 : 8,
+                  marginLeft: c.dark ? 14 : 8,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: c.dark ? 'rgba(14,14,14,0.42)' : 'rgba(246,245,241,0.72)',
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Icon name="arrow-left" size={20} color={c.ink} />
               </Pressable>
-            </FadeUp>
-          )}
-
-          <FadeUp delay={60}>
-            <ScreenTitle style={{ fontSize: 34, lineHeight: 38, marginTop: register ? 36 : 72, marginBottom: register ? 28 : 32 }}>
-              {register ? 'Crea tu cuenta' : 'Bienvenido\nde nuevo'}
-            </ScreenTitle>
-          </FadeUp>
-
-          <FadeUp delay={120} style={{ flexDirection: 'row', gap: 8 }}>
-            <SocialButton label="Google" icon={<GoogleLogo size={18} />} disabled={busy} onPress={() => withProvider('google')} />
-            <SocialButton label="Apple" icon={<AppleLogo size={18} color={c.ink} />} disabled={busy} onPress={() => withProvider('apple')} />
-          </FadeUp>
-
-          <FadeUp delay={160}>
-            <Text style={{ textAlign: 'center', marginTop: 24, marginBottom: 16, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>o con tu correo</Text>
-          </FadeUp>
-
-          <FadeUp delay={200} style={{ gap: 12 }}>
-            {register && <Field label="Nombre y apellido" value={name} onChangeText={setName} autoCapitalize="words" textContentType="name" />}
-            <Field label="Correo" value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" textContentType="emailAddress" />
-            <Field
-              label="Contraseña"
-              value={password}
-              onChangeText={setPassword}
-              secure
-              onSubmitEditing={submit}
-              aside={
-                register ? null : (
-                  <Pressable onPress={recover} hitSlop={8}>
-                    <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.accent }}>¿La olvidaste?</Text>
-                  </Pressable>
-                )
-              }
-            />
-            {register && password.length > 0 && <Strength password={password} />}
-
-            {!!message && (
-              <FadeUp key={message} distance={4}>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.danger }}>{message}</Text>
+            ) : (
+              <FadeUp>
+                <Pressable
+                  onLongPress={changeServer}
+                  delayLongPress={800}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', margin: 14, marginLeft: c.dark ? 24 : 14 }}
+                >
+                  <LogoMark size={28} />
+                  <LixLogo size={16} color="#FCFAEF" />
+                </Pressable>
               </FadeUp>
             )}
+          </Lamina>
 
-            <Pressable
-              onPress={submit}
-              disabled={busy}
-              style={({ pressed }) => ({
-                marginTop: 8,
-                height: 50,
-                borderRadius: RADIUS,
-                backgroundColor: c.primary,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: busy ? 0.5 : 1,
-                transform: [{ scale: pressed ? 0.98 : 1 }],
-              })}
-            >
-              <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
-                {register ? (busy ? 'Creando cuenta…' : 'Crear cuenta') : busy ? 'Entrando…' : 'Iniciar sesión'}
-              </Text>
-            </Pressable>
-          </FadeUp>
+          <View style={{ flexGrow: 1, paddingHorizontal: 24, marginTop: c.dark ? (keyboard ? -24 : register ? -46 : -60) : 20 }}>
+            <FadeUp delay={60}>
+              <ScreenTitle style={{ fontSize: 36, lineHeight: 40, marginBottom: 24 }}>
+                {register ? 'Crea tu cuenta' : 'Bienvenido\nde nuevo'}
+              </ScreenTitle>
+            </FadeUp>
 
-          <View style={{ flex: 1, minHeight: 32 }} />
-          <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>{register ? '¿Ya tienes cuenta? ' : '¿No tienes cuenta? '}</Text>
-            <Pressable onPress={() => switchMode(register ? 'login' : 'register')} hitSlop={10}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{register ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
-            </Pressable>
+            <FadeUp delay={120} style={{ flexDirection: 'row', gap: 8 }}>
+              <SocialButton label="Google" icon={<GoogleLogo size={18} />} disabled={busy} onPress={() => withProvider('google')} />
+              <SocialButton label="Apple" icon={<AppleLogo size={18} color={c.ink} />} disabled={busy} onPress={() => withProvider('apple')} />
+            </FadeUp>
+
+            <FadeUp delay={160} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, marginBottom: 14 }}>
+              <View style={{ flex: 1, height: 1, backgroundColor: c.surface4 }} />
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>o con tu correo</Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: c.surface4 }} />
+            </FadeUp>
+
+            <FadeUp delay={200} style={{ gap: 12 }}>
+              {register && <Field label="Nombre y apellido" value={name} onChangeText={setName} autoCapitalize="words" textContentType="name" />}
+              <Field label="Correo" value={email} onChangeText={setEmail} placeholder="tu@correo.com" keyboardType="email-address" textContentType="emailAddress" />
+              <Field
+                label="Contraseña"
+                value={password}
+                onChangeText={setPassword}
+                secure
+                onSubmitEditing={submit}
+                aside={
+                  register ? null : (
+                    <Pressable onPress={recover} hitSlop={8}>
+                      <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.dark ? c.accent : c.accentDeep }}>¿La olvidaste?</Text>
+                    </Pressable>
+                  )
+                }
+              />
+              {register && password.length > 0 && <Strength password={password} />}
+
+              {!!message && (
+                <FadeUp key={message} distance={4}>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.danger }}>{message}</Text>
+                </FadeUp>
+              )}
+
+              <Pressable
+                onPress={submit}
+                disabled={busy}
+                style={({ pressed }) => ({
+                  marginTop: 8,
+                  height: 50,
+                  borderRadius: RADIUS,
+                  backgroundColor: c.primary,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: busy ? 0.5 : 1,
+                  transform: [{ scale: pressed ? 0.98 : 1 }],
+                })}
+              >
+                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: c.onPrimary }}>
+                  {register ? (busy ? 'Creando cuenta…' : 'Crear cuenta') : busy ? 'Entrando…' : 'Iniciar sesión'}
+                </Text>
+              </Pressable>
+            </FadeUp>
+
+            <View style={{ flex: 1, minHeight: 32 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>{register ? '¿Ya tienes cuenta? ' : '¿No tienes cuenta? '}</Text>
+              <Pressable onPress={() => switchMode(register ? 'login' : 'register')} hitSlop={10}>
+                <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{register ? 'Iniciar sesión' : 'Crear cuenta'}</Text>
+              </Pressable>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAware>
-    </SafeAreaView>
+    </View>
   );
 }
+
+const LAMINA_LOGIN = require('../../assets/laminas/acceso-login.jpg');
+const LAMINA_REGISTRO = require('../../assets/laminas/acceso-registro.jpg');
 
 /// Campo con la etiqueta encima (y un enlace opcional a la derecha); el de
 /// contraseña trae el ojo para mostrarla.

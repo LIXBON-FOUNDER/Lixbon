@@ -201,13 +201,159 @@ glow. Calm, contemplative, generous negative space. No text, no letters, no logo
 
 ---
 
+## Fondos de los videos de producto (founder)
+
+Tres láminas nuevas para el fondo de los videos de las tarjetas de productos (IDE,
+App móvil y Visuals). Cada video lleva la suya, distinta de las láminas de la web.
+No se publican como imagen: quedan dentro del video.
+
+- **Archivos:** `img-lixbon/fondo-ide.png`, `img-lixbon/fondo-movil.png` y
+  `img-lixbon/fondo-visuals.png`.
+- **Formato:** 16:9, 2400×1350 o más.
+- **Zona segura:** la app tapa el centro (la ventana del IDE, el teléfono, el editor
+  de Visuals) y la cámara se acerca mucho. Por eso el tercio central va tranquilo, sin
+  nada importante, y lo que da carácter va en los tercios izquierdo y derecho y en la
+  franja de arriba.
+- **Contraste:** tonos medios y poco contraste, para que la app se lea encima.
+
+### 5 · Valle del río al final de la tarde (IDE)
+
+La ventana del IDE es oscura, así que el fondo va cálido y algo profundo.
+
+```
+Mixed-media editorial illustration of a quiet river valley in the late afternoon, wide landscape
+plate, 16:9. Low warm sun just out of frame on the right, the light suggested by long apricot
+#E3A366 brush strokes across the upper sky, which fades from dusty ochre #D9B48A at the horizon
+to muted slate blue #7E8C93 at the top, with two or three long cut-paper clouds in cream and sand.
+In the left third, an old stone bridge with two round arches torn from warm grey paper crosses the
+river, and a small stone mill with a terracotta #B8664A roof stands on the bank beside it. In the
+right third, a row of tall poplars in olive #6E7A3C and a steep wooded hillside in deep olive
+#3F4722. The river runs low and calm across the whole bottom of the plate in sage-teal #8FA39A,
+painted with short horizontal strokes and a few cream glints, with reeds drawn in charcoal at the
+edges. The centre of the composition stays calm and simple (soft hills in muted olive and the
+distant valley in hazy sage #A9B4AB), with no buildings or strong shapes, because an app window
+will cover it. Layered cut-paper and torn-paper shapes, visible brush strokes, dry-brush edges,
+coarse paper fibre, fine film grain, subtle risograph noise. Simplified, slightly naive shapes
+with irregular hand-cut edges, only a few loose graphite marks. Matte limited palette, mid tones
+and low contrast, light suggested by painted texture instead of glow. Calm, contemplative,
+generous negative space. No text, no letters, no logos, no people.
+```
+
+### 6 · Campos de lavanda a la hora dorada (App móvil)
+
+El teléfono es oscuro y ocupa el centro. Los surcos de lavanda dan ritmo a los lados.
+
+```
+Mixed-media editorial illustration of lavender fields in the golden hour, wide landscape plate,
+16:9. A warm sky painted in soft horizontal gouache strokes from pale peach #F8E8CC at the horizon
+to warm cream #F2EDE2 and a faint lilac grey at the top, a low amber sun #EFBA78 as a thick painted
+disc in the upper left with a soft painted halo, a few small cut-paper clouds. Rows of lavender in
+muted lilac #9C88A8 and dusty violet #6E5563 run in converging stripes toward the horizon, cut from
+paper with irregular edges, the furrows between them in warm ochre earth #C9A46A. In the right
+third, a small stone farmhouse in sand #E6D8BD with a terracotta #C06A4A roof and two tall dark
+cypress trees. In the left third, a single round olive tree and a low dry-stone wall. Distant
+hills in pale sage #BDBE9A along the horizon. A few graphite birds high on the right. The centre
+of the composition stays calm and even (only lavender rows and sky), with no buildings or trees,
+because a phone will cover it. Layered cut-paper and torn-paper shapes, visible brush strokes,
+dry-brush edges, coarse paper fibre, fine film grain, subtle risograph noise. Simplified, slightly
+naive shapes with irregular hand-cut edges, only a few loose graphite marks. Matte limited palette,
+mid tones and low contrast, light suggested by painted texture instead of glow. Calm,
+contemplative, generous negative space. No text, no letters, no logos, no people.
+```
+
+### 7 · Trigales y molino por la mañana (Visuals)
+
+El editor de Visuals es claro y el ejemplo es una panadería: trigo, molino y amapolas.
+
+```
+Mixed-media editorial illustration of wheat fields on a fresh summer morning, wide landscape plate,
+16:9. A clear morning sky painted in soft horizontal gouache strokes from pale cream #FBF4E6 at the
+horizon to a soft cool blue-grey #B9C4C4 at the top, a few cut-paper clouds in cream with sand
+shadows. Gently rolling hills of ripe wheat in golden ochre #E8C77A and mustard #D9AE5A, with
+lighter sand #E6D8BD stripes where the fields are cut, and a few graphite strokes for the wheat
+ears in the foreground. In the right third, a white windmill with a terracotta #B8664A cap and four
+sails standing on a small hill. In the left third, a dirt path curving away and a group of round
+olive #6E7A3C trees. Small dabs of poppy coral #D98B6A and cream wildflowers along the bottom edge.
+Distant hills in pale sage #BDBE9A. The centre of the composition stays calm and even (only fields
+and sky), with no buildings or trees, because a light app window will cover it. Layered cut-paper
+and torn-paper shapes, visible brush strokes, dry-brush edges, coarse paper fibre, fine film grain,
+subtle risograph noise. Simplified, slightly naive shapes with irregular hand-cut edges, only a few
+loose graphite marks. Matte limited palette, mid tones and low contrast, light suggested by painted
+texture instead of glow. Calm, contemplative, generous negative space. No text, no letters, no
+logos, no people.
+```
+
+---
+
+## Acceso de la app móvil (login y registro)
+
+Dos láminas para la parte de arriba de las pantallas de acceso de `apps/mobile`. Cada
+vista lleva la suya: entrar es volver a casa y crear la cuenta es salir de viaje.
+
+- **Archivos:** `img-lixbon/acceso-login.png` y `img-lixbon/acceso-registro.png`.
+- **Formato:** 3:4 en vertical, 1500×2000 o más. La app la recorta por el centro para
+  una franja de arriba: unos 45 % de la pantalla en el login y 30 % en el registro.
+- **Zona segura:** lo importante (la casa, el barco, el sol) en el 55 % de arriba y
+  centrado. El 40 % de abajo va tranquilo y liso (agua, campo en sombra), porque se
+  funde con el fondo de la app y el titular va encima. Los bordes izquierdo y derecho
+  pueden perderse.
+- **Temas:** la misma imagen sirve en oscuro y en claro; la app pone encima un
+  degradado al color del fondo.
+
+### 8 · Volver a casa a la hora azul (login, «Bienvenido de nuevo»)
+
+```
+Mixed-media editorial illustration of a small house on a hill at blue hour, tall portrait plate,
+3:4. The sky fills the upper half, painted in broad oil and gouache strokes from deep blue-grey
+#2B3140 at the top through dusky violet #4A4560 to a thin warm apricot band #E3A366 low on the
+horizon, with a few small cream star dots and one bright evening star. In the centre, at about
+forty percent of the height, a gentle hill cut from dark olive paper #3F4722 with a small
+whitewashed house with a terracotta #B8664A roof and two warm lit windows #F5C27A, a thin graphite
+curl of chimney smoke, and one round olive tree beside it. A winding cream path climbs from the
+bottom centre up to the door, drawn with a few graphite strokes. Behind, two soft ridges in misty
+mauve #6E5563 torn from paper. The lower forty percent of the plate is calm and dark: a meadow in
+shadow, deep olive #2B3018 fading to almost black #1B1A17 at the bottom edge, with only a few faint
+grass blades in charcoal and two or three tiny yellow fireflies, leaving room for a headline.
+Layered cut-paper and torn-paper shapes, visible brush strokes, dry-brush edges, coarse paper
+fibre, fine film grain, subtle risograph noise. Simplified, slightly naive shapes with irregular
+hand-cut edges, only a few loose graphite marks. Matte limited palette, light suggested by painted
+texture instead of glow. Calm, contemplative, generous negative space. No text, no letters, no
+logos, no people.
+```
+
+### 9 · Zarpar al amanecer (registro, «Crea tu cuenta»)
+
+```
+Mixed-media editorial illustration of a quiet harbour at sunrise with a small sailboat setting
+out, tall portrait plate, 3:4. The sky fills the upper half, painted in soft horizontal gouache
+strokes from pale cream #FBF4E6 at the top to warm peach #F8E8CC and apricot #EFBA78 near the
+horizon, with a low sun as a thick painted disc #EDA774 just above the sea in the centre and two
+or three small cut-paper clouds in cream with sand shadows, a few graphite gulls. At about forty
+percent of the height, the horizon: a calm sea in sage-teal #A9B4AB with a golden path of short
+cream and apricot dashes under the sun, and a small white sailboat with a dark hull and a cream
+sail heading out toward the sun, slightly left of centre. On the left edge, the end of a stone
+harbour wall in sand #E6D8BD with a small lantern post; on the right edge, a low headland torn from
+grey-sage paper with two tiny white houses with terracotta #C06A4A roofs. The lower forty percent
+is calm open water, darkening gradually from sage-teal to deep slate #3A4A4A at the bottom edge,
+with only a few pale horizontal wave marks in graphite, leaving room for a headline. Layered
+cut-paper and torn-paper shapes, visible brush strokes, dry-brush edges, coarse paper fibre, fine
+film grain, subtle risograph noise. Simplified, slightly naive shapes with irregular hand-cut
+edges, only a few loose graphite marks. Matte limited palette, light suggested by painted texture
+instead of glow. Calm, contemplative, generous negative space. No text, no letters, no logos,
+no people.
+```
+
+En Midjourney usa `--ar 3:4`.
+
+---
+
 ## Para que las cuatro parezcan una serie
 
 1. Genera primero la 3 (noche ancha). Es la más difícil y fija el grano, la pincelada y el papel.
 2. Usa esa imagen como referencia de estilo para las otras tres: `--sref` en Midjourney,
    «image prompt» o «style reference» en Leonardo, Ideogram y Flux, o adjúntala en
    ChatGPT y pide «same style as the reference».
-3. En Midjourney añade `--ar 16:7` / `--ar 5:4` / `--ar 2:1` / `--ar 4:5`, `--style raw`
+3. En Midjourney añade `--ar 16:7` / `--ar 5:4` / `--ar 2:1` / `--ar 4:5` (y `--ar 16:9` en los fondos de video), `--style raw`
    y `--stylize 150` a `250`. En el resto, pide la relación de aspecto en el propio prompt,
    como ya va escrito.
 4. Revisa cada lámina con su texto encima antes de darla por buena. En la 3 y la 4, el

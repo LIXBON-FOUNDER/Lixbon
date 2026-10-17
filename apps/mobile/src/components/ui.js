@@ -12,11 +12,12 @@ import {
   Text,
   View,
   useColorScheme,
+  useWindowDimensions,
 } from 'react-native';
 import { useKeyboardState, useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Defs, Path, Polygon, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Path, Polygon, RadialGradient, Rect, Stop, Circle } from 'react-native-svg';
 
 import { FONTS, MOTION, RADIUS, RADIUS_SM, buildTheme } from '../theme';
 import { UI_DEFAULTS, usePrefs } from '../state';
@@ -194,6 +195,63 @@ export function AmbientGlow() {
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxAccent)" />
       </Svg>
     </View>
+  );
+}
+
+/// Lámina de las pantallas de acceso. En oscuro va a sangre detrás de la barra
+/// de estado y su mitad de abajo se funde con el fondo; en claro va enmarcada
+/// (un fundido de noche a crema ensucia el fondo). `focus` es la altura de la
+/// imagen (0 arriba, 1 abajo) que queda a la vista al recortarla, y `compact`
+/// la encoge para que el teclado no tape el formulario.
+const LAMINA_RATIO = 1448 / 1086;
+
+export function Lamina({ source, height, compactHeight = 120, compact = false, focus = 0.5, label, children }) {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const insets = useSafeAreaInsets();
+  const { width: screen } = useWindowDimensions();
+  const framed = !c.dark;
+  const width = framed ? screen - 24 : screen;
+  const full = framed ? Math.round(height * 0.74) : height + insets.top;
+  const small = framed ? compactHeight : compactHeight + insets.top;
+  const anim = useRef(new Animated.Value(compact ? small : full)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, { toValue: compact ? small : full, duration: reduced ? 0 : 320, easing: EASE, useNativeDriver: false }).start();
+  }, [compact, small, full, anim, reduced]);
+
+  const imageHeight = width * LAMINA_RATIO;
+  const top = -Math.max(0, imageHeight - full) * focus;
+
+  return (
+    <Animated.View
+      style={{
+        width,
+        height: anim,
+        overflow: 'hidden',
+        marginTop: framed ? insets.top + 8 : 0,
+        marginHorizontal: framed ? 12 : 0,
+        borderRadius: framed ? RADIUS : 0,
+        backgroundColor: c.surface2,
+      }}
+    >
+      <Image source={source} accessible={!!label} accessibilityLabel={label} style={{ position: 'absolute', left: 0, top, width, height: imageHeight }} />
+      {!framed && (
+        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' }}>
+          <Svg width="100%" height="100%">
+            <Defs>
+              <LinearGradient id="lxLamina" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={c.bg} stopOpacity={0} />
+                <Stop offset="0.45" stopColor={c.bg} stopOpacity={0.55} />
+                <Stop offset="1" stopColor={c.bg} stopOpacity={1} />
+              </LinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxLamina)" />
+          </Svg>
+        </View>
+      )}
+      {children && <View style={{ position: 'absolute', left: 0, right: 0, top: framed ? 0 : insets.top }}>{children}</View>}
+    </Animated.View>
   );
 }
 
@@ -449,7 +507,8 @@ export function Card({ children, style }) {
 /// Encabezado de grupo (Fijadas, Hoy, Plan…): sin versalitas, apagado.
 export function Eyebrow({ children, style }) {
   const c = useColors();
-  return <Text style={[{ fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }, style]}>{children}</Text>;
+  // Etiqueta de grupo en mono y versalitas, para que no compita con las filas.
+  return <Text style={[{ fontFamily: FONTS.monoMedium, fontSize: 11, letterSpacing: 0.9, textTransform: 'uppercase', color: c.inkMuted }, style]}>{children}</Text>;
 }
 
 /// Sección de ajustes: encabezado y un bloque de filas sobre la tarjeta.
@@ -482,7 +541,7 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
         backgroundColor: pressed && onPress ? c.pressed : 'transparent',
       })}
     >
-      {icon ? <Icon name={icon} size={18} color={danger ? c.danger : c.inkSoft} /> : null}
+      {icon ? <RowIcon name={icon} danger={danger} /> : null}
       <View style={{ flex: 1, gap: 2 }}>
         <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 15, color: danger ? c.danger : c.ink }}>
           {title}
@@ -497,6 +556,17 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
       )}
       {chevron && <Icon name={external ? 'external' : 'chevron-right'} size={external ? 15 : 16} color={c.inkFaint} />}
     </Pressable>
+  );
+}
+
+/// Icono de fila sobre una pastilla de relleno, para que la columna de iconos
+/// se lea de un vistazo.
+export function RowIcon({ name, danger = false, children }) {
+  const c = useColors();
+  return (
+    <View style={{ width: 28, height: 28, borderRadius: RADIUS_SM, backgroundColor: danger ? c.dangerSoft : c.surface4, alignItems: 'center', justifyContent: 'center' }}>
+      {children || <Icon name={name} size={15} color={danger ? c.danger : c.inkBody} />}
+    </View>
   );
 }
 
@@ -515,7 +585,7 @@ export function Meter({ value, width, color }) {
 export function StackHeader({ title, onBack, right = null }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: 8, height: 60 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: 2, height: 50 }}>
       <IconButton onPress={onBack} label="Volver">
         <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
@@ -543,7 +613,7 @@ export function ChatHeader({ title, onLeading, leadingIcon = 'menu', onTitle, tr
   const c = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 8, height: insets.top + 60 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 2, height: insets.top + 50 }}>
       <IconButton onPress={onLeading} label={leadingIcon === 'menu' ? 'Abrir menú' : 'Volver'}>
         <Icon name={leadingIcon} size={leadingIcon === 'menu' ? 22 : 20} color={c.inkBody} />
       </IconButton>

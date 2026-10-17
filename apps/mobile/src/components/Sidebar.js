@@ -255,30 +255,35 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
         accessibilityLabel={`${displayName}, ajustes`}
         style={({ pressed }) => ({
           marginTop: 8,
-          padding: 10,
+          padding: 12,
           borderRadius: RADIUS,
           backgroundColor: pressed ? c.surface4 : c.surface2,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 12,
+          gap: 10,
         })}
       >
-        <Avatar name={displayName} size={38} uri={avatarUri(api.base, user)} />
-        <View style={{ flex: 1, gap: 5 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
-              {displayName}
-            </Text>
-            {typeof user.plan_name === 'string' && <PlanPill>{user.plan_name}</PlanPill>}
-          </View>
-          {usage != null && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Avatar name={displayName} size={36} uri={avatarUri(api.base, user)} />
+          <View style={{ flex: 1, gap: 2 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Meter value={usage} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>{Math.round(usage * 100)}%</Text>
+              <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
+                {displayName}
+              </Text>
+              {typeof user.plan_name === 'string' && <PlanPill>{user.plan_name}</PlanPill>}
             </View>
-          )}
+            {!!user.email && user.email !== displayName && (
+              <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+                {user.email}
+              </Text>
+            )}
+          </View>
+          <Icon name="gear" size={18} color={c.inkMuted} strokeWidth={1.7} />
         </View>
-        <Icon name="chevron-right" size={16} color={c.inkMuted} strokeWidth={1.8} />
+        {usage != null && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Meter value={usage} color={usage >= 0.9 ? c.danger : c.accent} />
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>{Math.round(usage * 100)} % de la sesión</Text>
+          </View>
+        )}
       </Pressable>
     </View>
   );
