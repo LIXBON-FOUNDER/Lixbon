@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { UsageChart } from '../../components/UsageChart';
 import {
-  Aviso, Boton, Cabecera, Cargando, Chip, Medida, Vacio,
+  Aviso, Boton, Cabecera, Cargando, Chip, Medida, ResumenCluster, Vacio,
   errMsg, fmtNum, fmtUSD, nombrePlan,
 } from './comunes';
 import { IconDownload } from '../../components/Icons';
@@ -208,12 +208,10 @@ export default function Inicio() {
             <StatMini label="Bloqueados" valor={fmtNum(totals.users_blocked)} />
             <StatMini label="Conversaciones" valor={fmtNum(totals.conversations)} />
             <StatMini label="Mensajes" valor={fmtNum(totals.messages)} />
-            <StatMini
-              label="Nodos en línea"
-              valor={`${metrics.nodes.online} / ${metrics.nodes.total}`}
-            />
           </div>
         )}
+
+        <ResumenCluster resumen={metrics?.cluster} />
 
         <div className="adm-tokens">
           <h2 className="adm-card__title">Tokens · todo el sistema, 30 días</h2>

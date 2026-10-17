@@ -392,7 +392,6 @@
   border-radius: var(--radius);
   background: var(--modal-bg);
   color: #141414;
-  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
   animation: modal-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -403,13 +402,12 @@
   left: 24px;
   width: 78px;
   height: 11px;
-  border-radius: 6px 6px 0 0;
+  border-radius: 12px 12px 0 0;
   background: var(--modal-bg);
 }
 
 :root[data-theme="light"] .modal {
   --modal-bg: #FBFAF6;
-  box-shadow: 0 30px 70px -18px rgba(60, 52, 30, 0.3);
 }
 
 @keyframes modal-pop {
@@ -914,7 +912,6 @@
 
 .release:target {
   background: var(--surface-3);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .release__head {
@@ -1058,66 +1055,75 @@
   text-decoration: none;
 }
 
+/* El dibujo del 404 (ClusterCaido.jsx). Una capa <svg> por cosa que se
+   anima, y la animación va sobre la capa entera. */
+.cluster { position: absolute; inset: 0; container-type: size; pointer-events: none; }
+.cluster__capa { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* Las aristas se trazan una vez al entrar (no se repite). */
 .caido__arista {
   stroke-dasharray: 1;
   animation: caido-trazar 1.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-
 @keyframes caido-trazar {
   from { stroke-dashoffset: 1; }
   to { stroke-dashoffset: 0; }
 }
 
-/* Reposan en el punto bajo del latido para que el relevo entre aparecer y
-   respirar no dé un salto. */
-.caido__nodo {
-  opacity: 0.38;
-  animation:
-    caido-aparecer 0.6s ease-out backwards,
-    latido 7s ease-in-out infinite;
+/* Aparecen una vez (dentro de la capa) y la capa respira entre 0.38 y 0.72.
+   Con las dos animaciones en la misma capa, el latido salía del compositor. */
+.caido__nodos { opacity: 0.38; animation: latido 7s ease-in-out 1.7s infinite; }
+.caido__aparecer { animation: caido-aparecer 0.6s ease-out 1.1s backwards; }
+@keyframes caido-aparecer { from { opacity: 0; } }
+@keyframes latido {
+  0%, 100% { opacity: 0.38; }
+  50% { opacity: 0.72; }
 }
 
-@keyframes caido-aparecer {
-  from { opacity: 0; }
-}
-
-.caido__roto {
-  animation-delay: 2s;
-}
-
-.caido__arista--j {
-  animation:
-    caido-trazar 1.4s cubic-bezier(0.22, 1, 0.36, 1) both,
-    caido-aislar 18s ease-in-out infinite;
-}
-
+/* El nodo J se cae: sus aristas se apagan mientras se ve el punto rojo. */
+.caido__aisladas { animation: caido-aislar 18s ease-in-out 2s infinite; }
 @keyframes caido-aislar {
   0%, 74%, 100% { opacity: 1; }
   82%, 92% { opacity: 0.12; }
 }
+.caido__roto { opacity: 0; animation: roto 18s ease-in-out 2s infinite; }
+@keyframes roto {
+  0%, 74%, 100% { opacity: 0; }
+  82%, 92% { opacity: 0.6; }
+}
 
+/* Peticiones en vuelo: puntos HTML colocados con la misma escala que el SVG
+   (slice centrado), así el transform no repinta nada. --k = px por unidad. */
+.caido__viaje {
+  --k: max(calc(100cqw / 1440), calc(100cqh / 900));
+  position: absolute;
+  left: calc(50cqw + (var(--cx) - 722) * var(--k));
+  top: calc(50cqh + (var(--cy) - 452) * var(--k));
+  width: calc(4 * var(--k));
+  height: calc(4 * var(--k));
+  border-radius: 50%;
+  background: #F2F2F0;
+  opacity: 0;
+}
 @keyframes caido-ab {
   0% { transform: translate(0, 0); opacity: 0; }
   12%, 88% { opacity: 0.9; }
-  100% { transform: translate(220px, 90px); opacity: 0; }
+  100% { transform: translate(calc(220 * var(--k)), calc(90 * var(--k))); opacity: 0; }
 }
-
 @keyframes caido-cd {
   0% { transform: translate(0, 0); opacity: 0; }
   12%, 88% { opacity: 0.9; }
-  100% { transform: translate(110px, 180px); opacity: 0; }
+  100% { transform: translate(calc(110 * var(--k)), calc(180 * var(--k))); opacity: 0; }
 }
-
 @keyframes caido-fe {
   0% { transform: translate(0, 0); opacity: 0; }
   12%, 88% { opacity: 0.9; }
-  100% { transform: translate(-150px, -180px); opacity: 0; }
+  100% { transform: translate(calc(-150 * var(--k)), calc(-180 * var(--k))); opacity: 0; }
 }
-
 @keyframes caido-ka {
   0% { transform: translate(0, 0); opacity: 0; }
   12%, 88% { opacity: 0.9; }
-  100% { transform: translate(220px, 30px); opacity: 0; }
+  100% { transform: translate(calc(220 * var(--k)), calc(30 * var(--k))); opacity: 0; }
 }
 
 @media (max-width: 1180px) {
@@ -1428,7 +1434,7 @@
   background: var(--pf-ink); color: var(--pf-bg); font-size: 14.5px; font-weight: 500; text-decoration: none;
   transition: background-color .2s ease, transform .2s var(--ease-out, ease);
 }
-.pubfoot__cta:hover { background: #FFFFFF; transform: translateY(-1px); }
+.pubfoot__cta:hover { background: #FFFFFF; }
 
 .pubfoot__mapa { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 40px; margin-top: 96px; }
 .pubfoot--producto .pubfoot__in { padding-top: 64px; }
@@ -1471,7 +1477,7 @@
   background: var(--surface-1); text-decoration: none; color: inherit;
   transition: background .15s ease, transform .15s ease;
 }
-.guias__item:hover { background: var(--surface-3); transform: translateY(-2px); }
+.guias__item:hover { background: var(--surface-3); }
 .guias__item h2 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 600; color: var(--ink); }
 .guias__item p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
 .guias__meta { font-size: 12px; color: var(--ink-muted); }

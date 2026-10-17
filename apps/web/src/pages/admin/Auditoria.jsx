@@ -126,7 +126,7 @@ export default function Auditoria() {
             <span key={l.nivel} className="adm-leyenda__item">
               <span
                 className="adm-leyenda__muestra"
-                style={{ background: l.color, borderRadius: '999px' }}
+                style={{ background: l.color, borderRadius: '6px' }}
               />
               {l.label}
             </span>

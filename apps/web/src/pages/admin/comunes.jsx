@@ -189,3 +189,25 @@ export function Quien({ nombre, correo }) {
     </div>
   );
 }
+
+const gb = (mb) => `${((Number(mb) || 0) / 1024).toLocaleString('es', { maximumFractionDigits: 1 })} GB`;
+
+// Lo calcula el orquestador con lo que mide cada node_agent (nvidia-smi):
+// solo cuentan las GPU de nodos en línea. Las peticiones son las enrutadas
+// por este proceso del gateway en la última hora.
+export function ResumenCluster({ resumen }) {
+  if (!resumen) return null;
+  const sinGpu = !resumen.gpus_online;
+  return (
+    <div className="adm-stats">
+      <Stat label="Nodos en línea" valor={`${resumen.nodes_online} / ${resumen.nodes_total}`}
+        pie={!resumen.nodes_total ? 'ninguno registrado' : resumen.nodes_total - resumen.nodes_online ? `${resumen.nodes_total - resumen.nodes_online} sin conexión` : 'todos conectados'} />
+      <Stat label="VRAM libre" valor={sinGpu ? '—' : gb(resumen.vram_free_mb)}
+        pie={sinGpu ? 'ninguna GPU en línea' : `de ${gb(resumen.vram_total_mb)} en ${resumen.gpus_online} GPU`} />
+      <Stat label="Uso de GPU" valor={resumen.gpu_used_percent_avg == null ? '—' : `${resumen.gpu_used_percent_avg} %`}
+        pie="media de las GPU en línea" />
+      <Stat label="Peticiones / min" valor={fmtNum(resumen.requests_last_minute)}
+        pie={`media de la última hora: ${resumen.requests_per_minute_avg}`} />
+    </div>
+  );
+}

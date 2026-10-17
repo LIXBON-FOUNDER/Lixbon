@@ -22,54 +22,49 @@ const VIAJES = [
   [540, 90, 'caido-ka', '7s', '2.7s'],
 ];
 
+const Capa = ({ clase, children }) => (
+  <svg className={`cluster__capa ${clase}`} viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    {children}
+  </svg>
+);
+
+const Aristas = ({ lista, clase = '' }) => (
+  <g stroke="#232320" strokeWidth="1" fill="none">
+    {lista.map(([x1, y1, x2, y2, retardo], i) => (
+      <line key={i} className={`caido__arista ${clase}`} pathLength="1" x1={x1} y1={y1} x2={x2} y2={y2} style={{ animationDelay: `${retardo}s` }} />
+    ))}
+  </g>
+);
+
+// Lo que se repite sin fin (el latido, el nodo J que se aísla, las peticiones)
+// anima capas enteras o puntos HTML: van en el compositor y no repintan el
+// dibujo en cada fotograma, como pasaba animando elementos dentro del SVG.
 export function ClusterCaido() {
   return (
-    <svg
-      className="cluster"
-      viewBox="0 0 1440 900"
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden="true"
-    >
-      <g stroke="#232320" strokeWidth="1" fill="none">
-        {ARISTAS.map(([x1, y1, x2, y2, retardo, aislable], i) => (
-          <line
-            key={i}
-            className={`caido__arista ${aislable ? 'caido__arista--j' : ''}`}
-            pathLength="1"
-            x1={x1}
-            y1={y1}
-            x2={x2}
-            y2={y2}
-            style={{ animationDelay: aislable ? `${retardo}s, 2s` : `${retardo}s` }}
-          />
-        ))}
-      </g>
-
-      {NODOS.map(([cx, cy, grande], i) => (
-        <circle
-          key={i}
-          className="caido__nodo"
-          cx={cx}
-          cy={cy}
-          r={grande ? 6 : 3.5}
-          fill={grande ? '#8CA038' : '#6E7A45'}
-          style={{ animationDelay: `1.1s, ${1.7 + 0.6 * i}s` }}
-        />
-      ))}
-
-      <circle className="cluster__roto caido__roto" cx="1000" cy="560" r="7" fill="#C4553D" />
-
+    <div className="cluster" aria-hidden="true">
+      <Capa clase="caido__base">
+        <Aristas lista={ARISTAS.filter((a) => !a[5])} />
+      </Capa>
+      <Capa clase="caido__aisladas">
+        <Aristas lista={ARISTAS.filter((a) => a[5])} />
+      </Capa>
+      <Capa clase="caido__nodos">
+        <g className="caido__aparecer">
+          {NODOS.map(([cx, cy, grande], i) => (
+            <circle key={i} cx={cx} cy={cy} r={grande ? 6 : 3.5} fill={grande ? '#8CA038' : '#6E7A45'} />
+          ))}
+        </g>
+      </Capa>
+      <Capa clase="caido__roto">
+        <circle cx="1000" cy="560" r="7" fill="#C4553D" />
+      </Capa>
       {VIAJES.map(([cx, cy, anim, dur, delay], i) => (
-        <circle
+        <span
           key={i}
-          className="cluster__viaje"
-          cx={cx}
-          cy={cy}
-          r="2"
-          fill="#F2F2F0"
-          style={{ animation: `${anim} ${dur} cubic-bezier(.4,0,.2,1) infinite ${delay}` }}
+          className="caido__viaje"
+          style={{ '--cx': cx, '--cy': cy, animation: `${anim} ${dur} cubic-bezier(.4,0,.2,1) infinite ${delay}` }}
         />
       ))}
-    </svg>
+    </div>
   );
 }
