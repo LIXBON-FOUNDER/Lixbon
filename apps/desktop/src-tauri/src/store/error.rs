@@ -52,6 +52,9 @@ pub enum StoreError {
     /// Un evento del Event Log no cumple el contrato (campos vacíos, payload que no es un objeto JSON
     /// o pasa de 8 KiB, cursor negativo…). Se rechaza ANTES de tocar la base.
     InvalidEvent(String),
+    /// Una Attention no cumple el contrato (destino que parece una ruta, `facts` que no es un objeto JSON
+    /// acotado, resolución anterior a la creación…). Se rechaza ANTES de tocar la base.
+    InvalidAttention(String),
 }
 
 impl StoreError {
@@ -151,6 +154,7 @@ impl fmt::Display for StoreError {
             StoreError::RevOutOfRange { rev } => write!(f, "la revisión {rev} está fuera de rango y no se puede avanzar; los datos de autoridad no se dan por buenos"),
             StoreError::ProjectConflict(m) => write!(f, "registro de proyectos: {m}"),
             StoreError::InvalidEvent(m) => write!(f, "evento inválido: {m}"),
+            StoreError::InvalidAttention(m) => write!(f, "attention inválida: {m}"),
         }
     }
 }
