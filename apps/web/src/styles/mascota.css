@@ -46,11 +46,6 @@
   line-height: 1.35;
   text-wrap: pretty;
   pointer-events: none;
-  box-shadow:
-    0 -3px 0 0 var(--primary),
-    0 3px 0 0 var(--primary),
-    -3px 0 0 0 var(--primary),
-    3px 0 0 0 var(--primary);
   transform-origin: 18px calc(100% + 9px);
   animation: mascota-abre 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
@@ -65,7 +60,6 @@
   width: 6px;
   height: 6px;
   background: var(--primary);
-  box-shadow: -6px -3px 0 0 var(--primary);
 }
 
 .mascota-bocadillo__texto { display: grid; }
@@ -201,7 +195,6 @@
 .mascota-guia--esquina .mascota-bocadillo::after {
   left: auto;
   right: 18px;
-  box-shadow: 6px -3px 0 0 var(--primary);
 }
 
 .mascota-guia__cuerpo { position: relative; }

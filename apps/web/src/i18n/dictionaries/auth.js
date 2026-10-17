@@ -1,6 +1,8 @@
 export default {
   es: {
     seoLogin: 'Iniciar sesión',
+    laminaPie: '— La sierra de noche · Lámina III',
+    laminaFrase: 'Lo que escribes se queda *contigo*.',
     titles: { login: 'Iniciar sesión', register: 'Crear cuenta', forgot: 'Restablecer contraseña' },
     home: 'Inicio',
     firstName: 'Nombre',
@@ -46,6 +48,8 @@ export default {
   },
   en: {
     seoLogin: 'Log in',
+    laminaPie: '— The sierra at night · Plate III',
+    laminaFrase: 'What you write stays *with you*.',
     titles: { login: 'Log in', register: 'Create account', forgot: 'Reset password' },
     home: 'Home',
     firstName: 'First name',

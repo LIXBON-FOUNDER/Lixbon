@@ -48,26 +48,11 @@
     transform var(--dur-1) var(--ease-out);
 }
 
-.pill-btn:active:not(:disabled),
-.set-btn:active:not(:disabled),
-.pubnav__btn:active,
-.auth__cta:active:not(:disabled),
-.auth__social-btn:active:not(:disabled),
-.card__cta:active,
-.plan-card__cta:active:not(:disabled),
-.dl-card__cta:active {
-  transform: scale(0.97);
-}
-
 .icon-btn {
   transition:
     background var(--dur-2) var(--ease-out),
     color var(--dur-2) var(--ease-out),
     transform var(--dur-1) var(--ease-out);
-}
-
-.icon-btn:active:not(:disabled) {
-  transform: scale(0.9);
 }
 
 .docs__nav-group svg,
@@ -76,7 +61,6 @@
   transition: transform var(--dur-2) var(--ease-out);
 }
 
-.dl-card,
 .adm-stat,
 .adm-nodo,
 .release,
@@ -88,12 +72,9 @@
 
 /* Solo con ratón: en táctil el :hover se queda pegado después de tocar. */
 @media (hover: hover) {
-  .dl-card:hover,
   .adm-stat:hover,
   .adm-nodo:hover,
-  .release:hover,
-  .remote__card:hover {
-    transform: translateY(-2px);
+  .release:hover {
     background: var(--surface-3);
   }
 }
@@ -204,21 +185,17 @@
 }
 
 .plans .plan-card,
-.downloads__apps .dl-card,
 .adm-stats .adm-stat {
   animation: card-in var(--dur-3) var(--ease-out) backwards;
 }
 
 .plans .plan-card:nth-child(2),
-.downloads__apps .dl-card:nth-child(2),
 .adm-stats .adm-stat:nth-child(2) { animation-delay: 60ms; }
 
 .plans .plan-card:nth-child(3),
-.downloads__apps .dl-card:nth-child(3),
 .adm-stats .adm-stat:nth-child(3) { animation-delay: 120ms; }
 
 .plans .plan-card:nth-child(n + 4),
-.downloads__apps .dl-card:nth-child(n + 4),
 .adm-stats .adm-stat:nth-child(n + 4) { animation-delay: 180ms; }
 
 @keyframes card-in {
@@ -239,7 +216,6 @@
 @media (prefers-reduced-motion: reduce) {
   .route-fade.is-entering,
   .plans .plan-card,
-  .downloads__apps .dl-card,
   .adm-stats .adm-stat,
   .verify-bar,
   .modal-overlay.is-closing,
@@ -253,32 +229,83 @@
     transition: none;
   }
 
-  .cluster__nodo,
-  .cluster__roto,
-  .cluster__viaje,
   .caido__arista,
-  .caido__arista--j,
-  .caido__nodo,
+  .caido__aparecer,
+  .caido__nodos,
+  .caido__aisladas,
+  .caido__roto,
+  .caido__viaje,
   .notfound__numeral,
   .notfound__row {
     animation: none !important;
   }
 
-  .caido__roto {
-    opacity: 0.6;
-  }
-
-  .cluster__viaje {
-    opacity: 0.9;
-  }
-
   .pill-btn:active:not(:disabled),
   .icon-btn:active:not(:disabled),
-  .dl-card:hover,
   .adm-stat:hover,
   .adm-nodo:hover,
   .release:hover,
   .remote__card:hover {
     transform: none;
   }
+}
+
+/* Botones: 8px de radio y sin borde en toda la web. Los que antes se
+   distinguían por el contorno llevan ahora un fondo suave. Va al final para
+   ganar a las reglas de cada pantalla. */
+button:not([role="switch"]):not([role="tab"]),
+.pill, .pill-btn, .btn-negro, .btn-grupo, .btn-grupo__item, .adm-btn, .set-btn,
+.sb-bandeja__casilla, .chat-input__send, .sidebar__upgrade, .pubnav__icono,
+.donaciones__monto, .vis-bandeja, .vis-bandeja__op {
+  border-radius: 8px !important;
+  border: 0 !important;
+}
+.pill-btn--outline, .pill--borde, .sb-bandeja__casilla.is-estrecha,
+.chat-input__tools .icon-btn {
+  background: var(--surface-3);
+}
+.pill-btn--outline:hover:not(:disabled), .pill--borde:hover,
+.chat-input__tools .icon-btn:hover:not(:disabled) {
+  background: var(--surface-4);
+  color: var(--ink);
+}
+
+/* Todos los botones responden: transición, hover y un hundimiento corto al
+   pulsar. Los que ya tienen su propio hover lo conservan; este solo se nota en
+   los que no lo tenían. */
+button, .pill, .pill-btn, .btn-negro, .btn-grupo__item, .adm-btn, .set-btn, .sb-nav, .sb-item,
+.settings__nav-link, .adm-link, .adm-sublink, .pubnav__link, .pubnav__item, .donaciones__monto {
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out),
+    filter var(--dur-2) var(--ease-out),
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
+}
+button:not(:disabled):not([role="switch"]):hover,
+.pill:hover, .pill-btn:not(:disabled):hover, .btn-negro:hover, .adm-btn:not(:disabled):hover, .set-btn:not(:disabled):hover {
+  filter: brightness(0.94);
+}
+:root[data-theme="dark"] button:not(:disabled):not([role="switch"]):hover,
+:root[data-theme="dark"] .pill:hover, :root[data-theme="dark"] .pill-btn:not(:disabled):hover,
+:root[data-theme="dark"] .btn-negro:hover, :root[data-theme="dark"] .adm-btn:not(:disabled):hover,
+:root[data-theme="dark"] .set-btn:not(:disabled):hover {
+  filter: brightness(1.18);
+}
+
+/* Cambio de sección (chat → Visuals, Ajustes, admin…): fundido cruzado con la
+   API de View Transitions; lo dispara i18n/link.jsx. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-3);
+  animation-timing-function: var(--ease-out);
+}
+::view-transition-new(root) { animation-name: vt-entra; }
+::view-transition-old(root) { animation-name: vt-sale; }
+@keyframes vt-entra { from { opacity: 0; transform: translateY(6px); } }
+@keyframes vt-sale { to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  button:active, .pill:active, .pill-btn:active { transform: none; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
 }

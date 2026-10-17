@@ -7,10 +7,11 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirmar } from '../../hooks/useConfirmar';
 import { useDismiss } from '../../hooks/useDismiss';
-import { Logo, LogoMark } from '../../components/Logo';
+import { Logo } from '../../components/Logo';
 import {
-  IconApps, IconBag, IconBolt, IconBook, IconCard, IconCaret, IconChat, IconDownload,
-  IconGear, IconHome, IconLogout, IconNodes, IconSend, IconShield, IconTerminal, IconTrend, IconUsers,
+  IconApps, IconArrowDown, IconBag, IconBolt, IconBook, IconCard, IconCaret, IconChart, IconChat, IconCorazon,
+  IconDownload, IconGear, IconHome, IconLayers, IconLink, IconLogout, IconNodes, IconRows, IconCorreo, IconShield,
+  IconTerminal, IconTrend, IconUser, IconUsers,
 } from '../../components/Icons';
 import { inicialDe } from './comunes';
 
@@ -21,10 +22,10 @@ const AREAS = [
     icon: IconApps,
     label: 'IA',
     hijos: [
-      { to: '/admin/ia/modelos', label: 'Modelos y costo' },
-      { to: '/admin/ia/roles', label: 'Roles' },
-      { to: '/admin/ia/alias', label: 'Alias' },
-      { to: '/admin/ia/tarifas', label: 'Tarifas' },
+      { to: '/admin/ia/modelos', icon: IconLayers, label: 'Modelos y costo' },
+      { to: '/admin/ia/roles', icon: IconUser, label: 'Roles' },
+      { to: '/admin/ia/alias', icon: IconLink, label: 'Alias' },
+      { to: '/admin/ia/tarifas', icon: IconChart, label: 'Tarifas' },
     ],
   },
   { to: '/admin/proveedores', icon: IconBag, label: 'Proveedores' },
@@ -35,13 +36,14 @@ const AREAS = [
     icon: IconCard,
     label: 'Pagos',
     hijos: [
-      { to: '/admin/pagos/transacciones', label: 'Transacciones' },
-      { to: '/admin/pagos/liquidaciones', label: 'Liquidaciones' },
-      { to: '/admin/pagos/pasarela', label: 'Configuración' },
+      { to: '/admin/pagos/donaciones', icon: IconCorazon, label: 'Donaciones' },
+      { to: '/admin/pagos/transacciones', icon: IconRows, label: 'Transacciones' },
+      { to: '/admin/pagos/liquidaciones', icon: IconArrowDown, label: 'Liquidaciones' },
+      { to: '/admin/pagos/pasarela', icon: IconGear, label: 'Configuración' },
     ],
   },
   { to: '/admin/usuarios', icon: IconUsers, label: 'Usuarios' },
-  { to: '/admin/correos', icon: IconSend, label: 'Correos' },
+  { to: '/admin/correos', icon: IconCorreo, label: 'Correos' },
   { to: '/admin/releases', icon: IconDownload, label: 'Releases' },
   { to: '/admin/skills', icon: IconTerminal, label: 'Skills' },
   { to: '/admin/auditoria', icon: IconShield, label: 'Auditoría' },
@@ -111,8 +113,7 @@ export default function AdminLayout() {
     <div className="adm">
       <aside className="adm__nav">
         <div className="adm__brand">
-          <LogoMark size={26} />
-          <span className="brand">LIXBON</span>
+          <Logo size={15} />
           <span className="adm__brand-tag">Admin</span>
         </div>
 
@@ -143,7 +144,10 @@ export default function AdminLayout() {
                   <IconCaret size={14} className={`adm-link__caret ${abierto ? 'is-open' : ''}`} />
                 </button>
                 {abierto && a.hijos.map((h) => (
-                  <NavLink key={h.to} to={h.to} className={claseSub}>{h.label}</NavLink>
+                  <NavLink key={h.to} to={h.to} className={claseSub}>
+                    <h.icon size={15} />
+                    <span>{h.label}</span>
+                  </NavLink>
                 ))}
               </div>
             );

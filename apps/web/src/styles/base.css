@@ -120,34 +120,39 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
+/* Paleta de founder.lixbon.com: papel cálido y tinta en claro; en oscuro,
+   negro neutro con la tinta crema de founder. El oliva es el único acento. */
 :root {
   color-scheme: dark;
 
-  --surface-0: #0E0E0E; /* fondo de la aplicación */
-  --surface-1: #131313; /* tarjeta, barra lateral */
-  --surface-2: #181818; /* fila de tabla */
-  --surface-3: #1C1C1C; /* bloque, campo, botón secundario */
-  --surface-4: #232323; /* activo */
-  --surface-5: #2A2A2A; /* encima (hover) */
+  --surface-0: #0B0B0A; /* fondo de la aplicación */
+  --surface-1: #131312; /* tarjeta, barra lateral */
+  --surface-2: #181817; /* fila de tabla */
+  --surface-3: #1E1E1C; /* bloque, campo, botón secundario */
+  --surface-4: #262624; /* activo */
+  --surface-5: #30302D; /* encima (hover) */
 
   --bg: var(--surface-0);
   --bg-sidebar: var(--surface-1);
   --bg-card: var(--surface-1);
+  /* Tarjeta elevada: un poco más clara que el fondo y con sombra suave. */
+  --card-elevada: #151514;
+  --sombra-elevada: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
   --bg-row: var(--surface-2);
   --bg-secondary: var(--surface-3);
   --bg-input: var(--surface-3);
   --bg-active: var(--surface-4);
   --bg-hover: var(--surface-5);
 
-  --ink: #F2F2F0;           /* principal */
-  --ink-rgb: 242, 242, 240; /* para alphas: hover, tracks, rejillas… */
-  --ink-title: #E6E6E3;     /* título de tarjeta */
-  --ink-body: #D6D6D3;      /* cuerpo largo */
-  --ink-soft: #B0B0AD;      /* secundario */
-  --ink-muted: #7C7C79;     /* apagado */
-  --ink-label: #6E6E6C;     /* etiqueta en versalitas */
-  --ink-faint: #5E5E5C;     /* al margen */
-  --ink-disabled: #4A4A48;
+  --ink: #F6EEDC;           /* principal */
+  --ink-rgb: 246, 238, 220; /* para alphas: hover, tracks, rejillas… */
+  --ink-title: #F6EEDC;     /* título de tarjeta */
+  --ink-body: #E4DCCB;      /* cuerpo largo */
+  --ink-soft: #CFC6B3;      /* secundario */
+  --ink-muted: #A59B86;     /* apagado */
+  --ink-label: #A59B86;     /* etiqueta en versalitas */
+  --ink-faint: #8A8170;     /* al margen */
+  --ink-disabled: #5A5244;
 
   /* Sin bordes en ninguna parte. Los dos tokens quedan transparentes para
      que ninguna regla heredada vuelva a dibujar una línea. */
@@ -156,53 +161,53 @@
 
   /* Acento y estado. El acento se reserva para el estado, no decora. */
   --accent: #B4C64E;
-  --accent-deep: #8CA038;
-  --accent-soft: rgba(140, 160, 56, 0.16);
-  --on-accent: #0E0E0E;
-  --ok: #6E9E3E;
-  --ok-soft: rgba(110, 158, 62, 0.16);
-  --warn: #C9A227;
-  --warn-soft: rgba(201, 162, 39, 0.14);
-  --danger: #C4553D;
-  --danger-ink: #D4785F;
-  --danger-soft: rgba(196, 85, 61, 0.14);
+  --accent-deep: #9AAB3E;
+  --accent-soft: rgba(180, 198, 78, 0.16);
+  --on-accent: #1F1B14;
+  --ok: #8FAE4A;
+  --ok-soft: rgba(143, 174, 74, 0.16);
+  --warn: #D99A3C;
+  --warn-soft: rgba(217, 154, 60, 0.14);
+  --danger: #E0683A;
+  --danger-ink: #F0A27A;
+  --danger-soft: rgba(224, 104, 58, 0.14);
 
   /* Invertido: CTA principal, botón de envío, avatar. */
-  --primary: #F2F2F0;
-  --on-primary: #0E0E0E;
+  --primary: #F6EEDC;
+  --on-primary: #1F1B14;
 
-  --code-bg: #131313;
-  --code-ink: #CBD69B;
-  --code-inline: #CBD69B;
-  --scrim: rgba(0, 0, 0, 0.62);
+  --code-bg: #070707;
+  --code-ink: #E4DCCB;
+  --code-inline: #C8D872;
+  --scrim: rgba(0, 0, 0, 0.66);
   --shadow-rgb: 0, 0, 0;
-  --sombra-menu: 0 14px 34px rgba(0, 0, 0, 0.5);
+  --sombra-menu: 0 0 0 1px #30302D, 0 24px 48px rgba(0, 0, 0, 0.5);
 
-  --field: #1C1C1C;
-  --field-focus: #242424;
-  --field-error: #241715;
-  --field-disabled: #141414;
+  --field: #1E1E1C;
+  --field-focus: #262624;
+  --field-error: #2E1A12;
+  --field-disabled: #131312;
 
-  --font-brand: 'Bruno Ace SC', 'Geist', sans-serif;
-  /* El producto habla en Geist de punta a punta; la voz editorial vive en
-     founder.lixbon.com. Los titulares leen peso y tracking de aquí. */
-  --font-ui: 'Geist', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-display: var(--font-ui);
+  /* La voz de founder: Fraunces en titulares, Source Serif para leer,
+     Instrument Sans para la interfaz. */
+  --font-brand: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
   --font-sub: var(--font-ui);
-  --font-text: var(--font-ui);
-  --display-peso: 600;
-  --display-tracking: -0.035em;
+  --font-text: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+  --display-peso: 400;
+  --display-tracking: -0.03em;
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
 
-  --radius: 6px;
-  --radius-box: 6px;
-  --radius-pill: 6px;
-  --radius-chip: 6px;
-  --radius-round: 999px;
+  --radius: 12px;
+  --radius-box: 12px;
+  --radius-pill: 12px;
+  --radius-chip: 12px;
+  --radius-round: 12px;
 
   --primary-hover: #FFFFFF;
 
-  --sidebar-w: 260px;
+  --sidebar-w: 280px;
   --shell-gap: 12px;
 
   /* Márgenes seguros del dispositivo (notch, barra de gestos). Fuera de móvil
@@ -213,54 +218,56 @@
   --safe-l: env(safe-area-inset-left, 0px);
 }
 
-/* Tema claro: mismos escalones, sobre un blanco cálido. Se activa con
-   data-theme="light" en <html> (hooks/useTema.js). */
+/* Tema claro: el papel de founder. Se activa con data-theme="light" en
+   <html> (hooks/useTema.js). */
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --surface-0: #F5F4EE;
-  --surface-1: #FBFAF6;
-  --surface-2: #F1EFE7;
-  --surface-3: #ECEAE1;
-  --surface-4: #E3E1D7;
-  --surface-5: #D9D7CC;
+  --surface-0: #F2EDE2;
+  --surface-1: #F8F4EB;
+  --surface-2: #EDE7DA;
+  --surface-3: #E9E2D3;
+  --surface-4: #E4DDCC;
+  --surface-5: #D8D0BC;
+  --card-elevada: #FBF8F1;
+  --sombra-elevada: 0 1px 2px rgba(31, 27, 20, 0.05), 0 18px 40px -18px rgba(31, 27, 20, 0.18);
 
-  --ink: #191917;
-  --ink-rgb: 25, 25, 23;
-  --ink-title: #191917;
-  --ink-body: #2E2E2B;
-  --ink-soft: #5B5B55;
-  --ink-muted: #8A8A82;
-  --ink-label: #8A8A82;
-  --ink-faint: #A3A39B;
-  --ink-disabled: #BFBFB6;
+  --ink: #1F1B14;
+  --ink-rgb: 31, 27, 20;
+  --ink-title: #1F1B14;
+  --ink-body: #3B3529;
+  --ink-soft: #5A5244;
+  --ink-muted: #6B6353;
+  --ink-label: #5A5244;
+  --ink-faint: #8A8170;
+  --ink-disabled: #B5AC98;
 
-  --accent: #7E9430;
-  --accent-deep: #6A7D28;
-  --accent-soft: rgba(126, 148, 48, 0.14);
-  --on-accent: #F5F4EE;
-  --ok: #5E8A32;
-  --ok-soft: rgba(94, 138, 50, 0.14);
-  --warn: #A8842A;
-  --warn-soft: rgba(168, 132, 42, 0.14);
-  --danger: #B8462F;
-  --danger-ink: #A33D28;
-  --danger-soft: rgba(184, 70, 47, 0.12);
+  --accent: #5E6B1E;
+  --accent-deep: #4D5818;
+  --accent-soft: rgba(180, 198, 78, 0.32);
+  --on-accent: #F2EDE2;
+  --ok: #4D5C12;
+  --ok-soft: rgba(94, 107, 30, 0.14);
+  --warn: #A85D0A;
+  --warn-soft: rgba(168, 93, 10, 0.12);
+  --danger: #9A3412;
+  --danger-ink: #9A3412;
+  --danger-soft: rgba(154, 52, 18, 0.1);
 
-  --primary: #191917;
-  --on-primary: #F5F4EE;
-  --primary-hover: #2E2E2B;
+  --primary: #1F1B14;
+  --on-primary: #F2EDE2;
+  --primary-hover: #000000;
 
   --code-bg: var(--surface-3);
   --code-ink: var(--ink-body);
-  --code-inline: #4F6320;
-  --scrim: rgba(0, 0, 0, 0.4);
-  --sombra-menu: 0 14px 34px rgba(25, 25, 23, 0.14);
+  --code-inline: #5E6B1E;
+  --scrim: rgba(31, 27, 20, 0.4);
+  --sombra-menu: 0 0 0 1px #D8D0BC, 0 24px 48px rgba(31, 27, 20, 0.14);
 
-  --field: #ECEAE1;
-  --field-focus: #E3E1D7;
-  --field-error: #F6E3DF;
-  --field-disabled: #F1EFE7;
+  --field: #E9E2D3;
+  --field-focus: #E4DDCC;
+  --field-error: #F6E3D3;
+  --field-disabled: #EDE7DA;
 }
 
 *,
@@ -384,11 +391,16 @@ body::-webkit-scrollbar,
    corrige el nudge óptico vertical. */
 .brand {
   font-family: var(--font-brand);
-  letter-spacing: 0.02em;
+  font-style: italic;
+  font-weight: 300;
+  letter-spacing: -0.01em;
   line-height: 1;
-  position: relative;
-  top: 0.05em;
+  color: var(--ink-soft);
+}
+
+.brand .logo__letra--clave {
   color: var(--ink);
+  font-weight: 500;
 }
 
 /* La pestaña que asoma sobre una tarjeta, un aviso o un diálogo. Es la pieza
@@ -399,7 +411,7 @@ body::-webkit-scrollbar,
   width: 86px;
   height: 11px;
   margin-left: 20px;
-  border-radius: 6px 6px 0 0;
+  border-radius: 12px 12px 0 0;
   background: var(--tab-fill, var(--surface-3));
 }
 
@@ -509,7 +521,6 @@ body::-webkit-scrollbar,
   padding: 4px;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: var(--sombra-menu);
   transform-origin: top right;
   animation: menu-in 0.16s ease;
 }
@@ -583,7 +594,6 @@ body::-webkit-scrollbar,
   overscroll-behavior: contain;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: var(--sombra-menu);
   animation: select-in 0.14s ease;
 }
 

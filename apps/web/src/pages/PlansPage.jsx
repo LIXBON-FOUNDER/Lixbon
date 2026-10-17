@@ -10,6 +10,8 @@ import { PublicFooter } from '../components/PublicFooter';
 import { PagoPlan } from '../components/pagos/PagoPlan';
 import { IconCheck, IconCard } from '../components/Icons';
 import { SITE_URL, useSeo } from '../lib/seo';
+import { useDonaciones } from '../lib/donaciones';
+import { PaginaDonaciones } from '../components/Donaciones';
 
 export default function PlansPage() {
   const t = useT('plans');
@@ -20,6 +22,7 @@ export default function PlansPage() {
   const [billingEnabled, setBillingEnabled] = useState(false);
   const [pagando, setPagando] = useState(null);
   const [error, setError] = useState('');
+  const donaciones = useDonaciones();
 
   // Cupo semanal expresado como múltiplo del plan Gratuito, no en créditos
   // crudos (la unidad interna no es un número que el usuario deba interpretar).
@@ -78,6 +81,11 @@ export default function PlansPage() {
     <div className="page web">
       <PublicNav />
 
+      {donaciones?.enabled ? (
+        <main className="page__body page__body--wide">
+          <PaginaDonaciones donaciones={donaciones} conCuenta={Boolean(user)} />
+        </main>
+      ) : (
       <main className="page__body page__body--wide">
         <h1 className="page__title page__title--center">{t('title')}</h1>
         <p className="plans__sub">
@@ -163,6 +171,7 @@ export default function PlansPage() {
           </p>
         </div>
       </main>
+      )}
 
       {pagando && (
         <PagoPlan

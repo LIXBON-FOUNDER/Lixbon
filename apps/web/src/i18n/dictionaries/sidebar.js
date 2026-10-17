@@ -23,6 +23,7 @@ export default {
     adminPanel: 'Panel admin',
     seePlans: 'Ver planes',
     freePlan: 'Gratuito',
+    donate: 'Donar',
   },
   en: {
     openPanel: 'Open panel',
@@ -48,5 +49,6 @@ export default {
     adminPanel: 'Admin panel',
     seePlans: 'See plans',
     freePlan: 'Free',
+    donate: 'Donate',
   },
 };

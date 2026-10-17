@@ -101,7 +101,6 @@
   padding: 3px;
   border-radius: var(--radius);
   background: var(--primary);
-  box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.14);
 }
 
 .sb-bandeja__casilla {
@@ -343,7 +342,6 @@
   padding: 4px;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: var(--sombra-menu);
   transform-origin: top right;
   animation: menu-in 0.16s ease;
 }
@@ -899,7 +897,6 @@
 
 .filecard {
   margin: 12px 0;
-  border: 1px solid rgba(var(--ink-rgb), 0.08);
   border-radius: var(--radius);
   background: var(--bg-card);
   overflow: hidden;
@@ -996,7 +993,6 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  box-shadow: 0 8px 22px -6px rgba(var(--shadow-rgb), 0.45);
   transition: background-color 0.15s ease;
   animation: jump-in 0.25s ease;
 }
@@ -1252,7 +1248,6 @@
 
 .chat-input__send:hover:not(:disabled) {
   background: var(--primary-hover);
-  transform: scale(1.05);
 }
 
 .chat-input__send:disabled {
@@ -1268,7 +1263,6 @@
 
 .chat-input__send.is-stop:hover {
   background: var(--field-focus);
-  transform: scale(1.05);
 }
 
 .chat-drop {
@@ -1363,7 +1357,7 @@
   left: 20px;
   width: 78px;
   height: 11px;
-  border-radius: 6px 6px 0 0;
+  border-radius: 12px 12px 0 0;
   background: #6B241C;
 }
 
@@ -1433,7 +1427,6 @@
 
   .sidebar.is-open {
     transform: none;
-    box-shadow: 0 0 70px rgba(0, 0, 0, 0.55);
   }
 
   .sidebar.is-collapsed {
@@ -1536,9 +1529,17 @@
     font-size: 22px;
   }
 
+  /* En un móvil estrecho el modelo se comía todo el recorte y quedaba en «‹»:
+     el esfuerzo se queda solo con su icono y el modelo conserva su nombre. */
   .chat-input__model {
+    min-width: 84px;
     max-width: 150px;
   }
+
+  .chat-input__meta .razonar__btn > span {
+    display: none;
+  }
+
 
   .chat-header__share {
     padding: 0 12px;
@@ -1610,7 +1611,7 @@
 .chat-vchip__txt strong { font-size: 13px; font-weight: 500; }
 .chat-vchip__txt small { font-size: 12px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-vchip__cta { flex: none; font-size: 12px; color: var(--accent); }
-.chat-vchip.is-busy strong::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--accent); animation: chat-vchip-pulso 1s ease-in-out infinite; vertical-align: middle; }
+.chat-vchip.is-busy strong::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 12px; background: var(--accent); animation: chat-vchip-pulso 1s ease-in-out infinite; vertical-align: middle; }
 @keyframes chat-vchip-pulso { 50% { opacity: 0.25; } }
 
 .chat-visual {
@@ -1676,7 +1677,6 @@
   padding: 12px 14px;
   border-radius: var(--radius);
   background: var(--surface-3);
-  box-shadow: var(--sombra-menu);
   animation: select-in 0.14s ease;
 }
 
@@ -1745,4 +1745,68 @@
   display: inline-flex;
   color: inherit;
   opacity: 0.7;
+}
+
+/* Piel de founder.lixbon.com: la barra lateral va pegada al borde sobre el
+   papel hondo, los botones son píldoras y el saludo habla en Fraunces. */
+.chat-shell { gap: 0; padding: 0; }
+.sidebar { border-radius: 0; background: var(--surface-2); }
+.sidebar__header { padding: 20px 14px 16px 20px; }
+.sidebar__logo .logo-lixbon { display: inline-block; font-size: 28px; color: var(--ink-soft); }
+.sidebar__logo .logo-lixbon::first-letter { color: var(--ink); font-weight: 500; }
+
+.sb-bandeja { margin: 0 14px; padding: 0; gap: 6px; background: none; }
+.sb-bandeja__casilla { height: 40px; border-radius: 12px; background: var(--primary); color: var(--on-primary); }
+.sb-bandeja__casilla--nuevo:not(.is-estrecha):hover { background: var(--primary-hover); }
+.sb-bandeja__casilla.is-estrecha { flex: 0 0 40px; width: 40px; min-width: 40px; background: var(--surface-3); color: var(--ink-soft); }
+.sb-bandeja__casilla.is-estrecha .sb-bandeja__btn { width: 40px; padding: 0; justify-content: center; }
+.sb-bandeja__casilla.is-estrecha:hover { background: var(--surface-4); color: var(--ink); }
+.sb-bandeja__casilla:not(.sb-bandeja__casilla--nuevo):not(.is-estrecha) { background: var(--surface-0); color: var(--ink); }
+.sb-bandeja__btn { padding: 0 16px; font-family: var(--font-ui); font-size: 14.5px; font-weight: 600; }
+
+.sidebar__label { font-family: var(--font-ui); font-size: 11px; font-weight: 500; letter-spacing: 0.14em; color: var(--ink-label); }
+.sb-nav { min-height: 38px; border-radius: 12px; font-family: var(--font-ui); font-size: 15px; }
+.sb-nav:hover { background: var(--surface-4); }
+.sb-nav.is-active { background: var(--surface-4); font-weight: 600; }
+.sb-item { border-radius: 12px; }
+.sb-item:hover { background: var(--surface-4); }
+.sb-item.is-active { background: var(--surface-0); }
+.sb-item__title { font-family: var(--font-ui); font-size: 14px; }
+
+.chat-hero { gap: 28px; padding: 0 32px 8vh; }
+.chat-hero__cabeza { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 760px; animation: fade-up 0.4s ease; }
+.chat-hero__fecha { font-family: var(--font-ui); font-size: 12px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-label); }
+.chat-hero__title {
+  font-family: var(--font-display); font-weight: 400; font-optical-sizing: auto;
+  font-size: clamp(40px, 5vw, 64px); line-height: 1; letter-spacing: -0.035em; text-align: left; text-wrap: balance;
+}
+.chat-hero__title em { font-style: italic; color: var(--accent); }
+.chat-hero__title--invitado { max-width: none; font-size: clamp(34px, 4vw, 52px); line-height: 1.04; letter-spacing: -0.03em; }
+.chat-hero__input { max-width: 760px; }
+
+.chat-input__box {
+  gap: 12px; padding: 18px 18px 14px 22px; border-radius: 12px;
+  background: var(--surface-1);
+}
+.chat-input__box textarea { font-family: var(--font-text); font-size: 18px; line-height: 1.5; }
+.chat-input__tools { gap: 6px; margin-left: -4px; }
+.chat-input__sep { display: none; }
+.chat-input__tools .icon-btn { width: 36px; height: 36px; border-radius: 8px; color: var(--ink-soft); }
+.chat-input__tools .icon-btn:hover:not(:disabled) { background: var(--surface-4); }
+.chat-input__tools .icon-btn.is-active { background: var(--accent-soft); color: var(--accent); }
+.chat-input__send { width: 38px; height: 38px; }
+
+.chat-thread { max-width: 760px; gap: 28px; }
+.msg--user { padding: 12px 18px; border-radius: 12px 12px 12px 12px; background: var(--surface-4); font-family: var(--font-text); font-size: 17px; line-height: 1.5; }
+.msg--assistant { font-family: var(--font-text); font-size: 17.5px; line-height: 1.65; }
+.msg--assistant :where(h1, h2, h3) { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; }
+.sidebar__body { font-family: var(--font-ui); }
+.sidebar__upgrade { margin: 8px 14px 0; min-height: 38px; border-radius: 12px; font-family: var(--font-ui); font-weight: 600; }
+.sidebar__upgrade--donar { background: #B4C64E; color: #1F1B14; }
+.sidebar__upgrade--donar:hover { background: #C2D35C; }
+
+/* Móvil estrecho: la barra del cuadro no cabía y el modelo quedaba en «‹». */
+@media (max-width: 400px) {
+  .chat-input__box { padding: 14px 14px 12px 16px; }
+  .chat-input__tools { gap: 4px; margin-left: 0; }
 }

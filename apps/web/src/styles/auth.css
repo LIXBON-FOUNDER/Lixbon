@@ -15,67 +15,6 @@
   overflow: hidden;
 }
 
-.cluster {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.cluster__nodo {
-  animation: latido 7s ease-in-out infinite;
-}
-
-@keyframes latido {
-  0%, 100% { opacity: 0.38; }
-  50% { opacity: 0.72; }
-}
-
-.cluster__roto {
-  opacity: 0;
-  animation: roto 18s ease-in-out infinite;
-}
-
-@keyframes roto {
-  0%, 74%, 100% { opacity: 0; }
-  82%, 92% { opacity: 0.6; }
-}
-
-.cluster__viaje {
-  transform-box: view-box;
-  transform-origin: 0 0;
-}
-
-@keyframes viaje-ab {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12%, 88% { opacity: 0.9; }
-  100% { transform: translate(170px, 120px); opacity: 0; }
-}
-
-@keyframes viaje-gh {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12%, 88% { opacity: 0.9; }
-  100% { transform: translate(-150px, 210px); opacity: 0; }
-}
-
-@keyframes viaje-tf {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12%, 88% { opacity: 0.9; }
-  100% { transform: translate(420px, 70px); opacity: 0; }
-}
-
-@keyframes viaje-ui {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12%, 88% { opacity: 0.9; }
-  100% { transform: translate(550px, -140px); opacity: 0; }
-}
-
-@keyframes viaje-cd {
-  0% { transform: translate(0, 0); opacity: 0; }
-  12%, 88% { opacity: 0.9; }
-  100% { transform: translate(170px, 140px); opacity: 0; }
-}
-
 .auth__panel {
   position: relative;
   display: flex;
@@ -106,11 +45,10 @@
   padding: 30px 32px 28px;
   border-radius: var(--radius);
   background: var(--auth-card);
-  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
 }
 
 :root[data-theme="light"] .auth { --auth-card: var(--surface-1); }
-:root[data-theme="light"] .auth__card { box-shadow: 0 30px 70px -20px rgba(60, 52, 30, 0.22); }
+:root[data-theme="light"] .auth__card { }
 
 .auth__head {
   display: flex;
@@ -330,3 +268,26 @@
 }
 
 .auth__legal a { color: inherit; text-decoration: underline; }
+
+/* Acceso con la piel de founder: la lámina nocturna a la izquierda y el
+   formulario sobre el papel, sin tarjeta flotante. */
+.auth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; padding: 0; }
+.auth__lamina { position: relative; overflow: hidden; background: #272439; }
+.auth__lamina .auth__paisaje { position: absolute; inset: 0; }
+.auth__lamina-texto {
+  position: absolute; left: 40px; right: 40px; bottom: 44px; z-index: 2;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.auth__lamina-texto span { font-family: var(--font-ui); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #CFC6B3; }
+.auth__lamina-texto p { max-width: 460px; font-family: var(--font-display); font-size: clamp(30px, 3vw, 42px); line-height: 1.05; letter-spacing: -0.02em; color: #F6EEDC; }
+.auth__lamina-texto em { font-style: italic; color: #D7E38A; }
+.auth__panel { align-self: center; justify-self: center; width: min(440px, 100%); padding: 48px 24px; }
+.auth__panel > .tab { display: none; }
+.auth__card, :root[data-theme="light"] .auth__card { padding: 0; background: none; }
+.auth__head { align-items: flex-start; }
+.auth__title { font-family: var(--font-display); font-weight: 400; font-size: 48px; line-height: 1; letter-spacing: -0.03em; }
+@media (max-width: 900px) {
+  /* minmax(0, …): con «1fr» la columna crecía hasta los 440px del panel y se salía. */
+  .auth { grid-template-columns: minmax(0, 1fr); }
+  .auth__lamina { display: none; }
+}

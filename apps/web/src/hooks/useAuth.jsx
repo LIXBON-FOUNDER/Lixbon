@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { aplicarTemaDeSesion } from './useTema';
 
 const AuthContext = createContext(null);
 
@@ -27,6 +28,12 @@ export function AuthProvider({ children }) {
       window.removeEventListener('auth:unauthorized', onUnauthorized);
     };
   }, []);
+
+  // Sin sesión la web va siempre en claro; con sesión, en el tema que eligió.
+  const conSesion = !!user;
+  useEffect(() => {
+    if (!loading) aplicarTemaDeSesion(conSesion);
+  }, [loading, conSesion]);
 
   const login = useCallback(async (email, password) => {
     const res = await api.post('/api/auth/login', { email, password });

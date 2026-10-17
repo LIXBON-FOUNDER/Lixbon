@@ -12,6 +12,7 @@ import './styles/admin.css';
 import './styles/pagos.css';
 import './styles/public.css';
 import './styles/landing.css';
+import './styles/laminas.css';
 import './styles/web.css';
 import './styles/remote.css';
 import './styles/mascota.css';
