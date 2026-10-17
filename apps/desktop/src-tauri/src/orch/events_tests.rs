@@ -532,7 +532,7 @@ fn el_mismo_borrador_invalido_da_el_mismo_rejected_con_sqlite_y_con_state_json()
 fn las_migraciones_post_authority_se_aplican_en_el_arranque() {
     let (_l, _d, _c, core) = core_listo();
     let v = core.storage.with_store(|s| s.schema_version().unwrap()).unwrap();
-    assert_eq!(v, 5);
+    assert_eq!(v, crate::store::embedded().last().unwrap().version, "el arranque autoritativo aplica TODAS las migraciones del binario");
     assert_eq!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap(), 0);
 }
 

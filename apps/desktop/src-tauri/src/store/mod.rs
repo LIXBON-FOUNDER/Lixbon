@@ -31,6 +31,7 @@
 //! referencia); la base no lo impone. El resto de relaciones del esquema SÍ
 //! son FK reales. Detalle en `migrations/001_core.sql`.
 
+mod attention;
 mod authority;
 mod backup;
 mod clients;
@@ -42,6 +43,8 @@ mod lock;
 mod migrate;
 mod private;
 mod projects;
+#[cfg(test)]
+mod attention_tests;
 #[cfg(test)]
 mod authority_tests;
 #[cfg(test)]
@@ -55,6 +58,12 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
+// Attention (LXO-87): hasta que LXO-88 (reglas) y LXO-89 (lectura) la consuman, solo la usan las pruebas.
+#[allow(unused_imports)]
+pub use attention::{AttentionCategory, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate, NewAttention, Raised, Resolution, ResolveOutcome, Severity, TargetKind, UpdateOutcome, MAX_FACTS_BYTES};
+// Variante transaccional de la actualización: LXO-88 la aplica en la transacción del Event (`Store::write`).
+#[allow(unused_imports)]
+pub(crate) use attention::attention_update_active_in;
 pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 #[allow(unused_imports)]

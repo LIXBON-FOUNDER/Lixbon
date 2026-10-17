@@ -74,7 +74,8 @@ Hoy se calcula **solo en el frontend** (`src/orch/attention.js`); el slice G lo 
 
 - Una revisión **rechazada** no genera Attention (el coordinador debe corregir). `exited` tampoco: solo `failed`.
 - **Reservados:** `pending_spawn` (lanzamiento pendiente de aprobación) y `unanswered_question` (pregunta sin respuesta). Hoy el frontend los cuenta aparte (`useAttentionTotals`: `pending` y `questions`) sin un `kind`; G decide si pasan a ser kinds.
-- **Severidad:** no existe hoy. El plan de la Fase 1 dice que G toma los nombres de severidad de H; **H no los inventa**: mientras no se decida, la prioridad es la posición en la lista. Decisión pendiente del usuario/G (ver informe).
+- **Modelo del Core (LXO-87):** `docs/core/ATTENTION.md` define las categorías cerradas (`question`, `approval`, `review_ready`, `conflict`, `failed`, `environment_blocked`, `risk`), la severidad (`critical`, `high`, `medium`, `low`) y el ciclo de vida (`active`/`resolved`). Los kinds de arriba son los del frontend vigente; LXO-88 los mapea a esas categorías.
+- **Severidad (frontend):** no existe hoy. El plan de la Fase 1 dice que G toma los nombres de severidad de H; **H no los inventa**: mientras no se decida, la prioridad es la posición en la lista. Decisión pendiente del usuario/G (ver informe).
 - Estado por persona y dispositivo (`visto`, `pospuesto`, `resuelto`) es del slice G, no del vocabulario de H.
 
 ## 6. Eventos y colisiones de palabras

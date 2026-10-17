@@ -100,7 +100,7 @@
       "ids": ["approve_in_terminal", "integrate", "review", "failed"],
       "reservados": ["pending_spawn", "unanswered_question"],
       "nota_reservados": "Hoy el frontend los cuenta aparte (useAttentionTotals: `pending` y `questions`), sin un `kind`. El slice G decide si pasan a ser kinds.",
-      "severidad": "sin definir: no existe hoy. Mientras no se decida, la prioridad es la posicion en `ids`."
+      "severidad": "sin definir en el frontend. El modelo del Core (LXO-87, docs/core/ATTENTION.md) fija categorias (question, approval, review_ready, conflict, failed, environment_blocked, risk) y severidad (critical, high, medium, low); LXO-88 mapea estos kinds a las categorias del Core. Mientras tanto, la prioridad es la posicion en `ids`."
     },
 
     "entity_kind": {

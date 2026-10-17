@@ -12,12 +12,13 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 002 | `authority_fence` | C2b (valla de autoridad) | publicada |
 | 003 | `projects` | D (registro de proyectos) | en revisión (PR de D) |
 | 004 | `events` | E (Event Log; E1a) | en revisión (PR de E1a). Ver `EVENTOS.md` |
-| 005 | clientes | F1 | reservada, sin escribir |
-| 006 | attention | G | reservada, sin escribir |
+| 005 | `clients` | F1 (LXO-85) | publicada. Ver `CLIENT_IDENTITY.md` |
+| 006 | `attention` | G (LXO-87) | en revisión (PR de LXO-87). Ver `ATTENTION.md` |
 
 La numeración inicial (002 proyectos · 003 eventos · 004 clientes · 005 attention) quedó obsoleta
-cuando C2b ocupó la 002 con la valla: D, E, F1 y G pasaron a 003..006. 004–006 son una **reserva
-orientativa**: cada slice toma el siguiente número libre al fusionarse.
+cuando C2b ocupó la 002 con la valla: D, E, F1 y G pasaron a 003..006. Los números aún no escritos son una **reserva
+orientativa**: cada slice toma el siguiente número libre al fusionarse. La tabla se verifica contra
+`src/store/migrations/` antes de elegir número (la 005 figuró como «reservada» mucho después de existir).
 
 ## Los comentarios de una migración publicada NO se tocan
 
