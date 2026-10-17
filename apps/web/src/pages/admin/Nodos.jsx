@@ -5,7 +5,7 @@ import {
   IconCheck, IconCopy, IconPlus, IconRefresh, IconTrash, IconX,
 } from '../../components/Icons';
 import {
-  Aviso, Boton, Cabecera, Cargando, Chip, Medida, Nota, Tarjeta, Vacio,
+  Aviso, Boton, Cabecera, Cargando, Chip, Medida, Nota, ResumenCluster, Tarjeta, Vacio,
   errMsg, fmtFecha, fmtHace,
 } from './comunes';
 
@@ -330,6 +330,8 @@ export default function Nodos() {
 
       <div className="adm__body">
         <Aviso error>{error}</Aviso>
+
+        <ResumenCluster resumen={data?.summary} />
 
         {token && (
           <div className="adm-token">

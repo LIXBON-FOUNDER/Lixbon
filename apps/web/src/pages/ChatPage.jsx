@@ -38,6 +38,22 @@ const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 const estimarTokens = (msgs) => Math.round(msgs.reduce((n, m) => n + (m.content?.length || 0), 0) / 3.5);
 
 
+// «Miércoles 15 de octubre · Buenas tardes, Gabriel», como el eyebrow de founder.
+function fechaSaludo(t, nombre) {
+  const ahora = new Date();
+  const hora = ahora.getHours();
+  const saludo = t(hora < 12 ? 'greetMorning' : hora < 20 ? 'greetAfternoon' : 'greetNight');
+  const fecha = new Intl.DateTimeFormat(t('dateLocale'), { weekday: 'long', day: 'numeric', month: 'long' }).format(ahora);
+  return `${fecha} · ${nombre ? `${saludo}, ${nombre}` : saludo}`;
+}
+
+// La última palabra del titular va en cursiva oliva, como en founder.
+function UltimaEnCursiva({ texto }) {
+  const m = texto.match(/^(.*\s)(\S+?)([?!.]*)$/);
+  if (!m) return texto;
+  return <>{m[1]}<em>{m[2]}</em>{m[3]}</>;
+}
+
 function Sources({ sources, queries }) {
   const t = useT('chat');
   return (
@@ -524,9 +540,12 @@ export default function ChatPage() {
           </>
         ) : empty ? (
           <div className="chat-hero">
-            <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
-              {user ? t('emptyTitleUser') : t('emptyTitleGuest')}
-            </h2>
+            <div className="chat-hero__cabeza">
+              {user && <p className="chat-hero__fecha">{fechaSaludo(t, user.first_name)}</p>}
+              <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
+                {user ? <UltimaEnCursiva texto={t('emptyTitleUser')} /> : t('emptyTitleGuest')}
+              </h2>
+            </div>
             <div className="chat-hero__input">
               {user && <MascotaChat ocupado={busy} escribiendo={escribiendo} />}
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}

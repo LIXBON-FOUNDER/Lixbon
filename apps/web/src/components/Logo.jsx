@@ -20,16 +20,16 @@ export function LogoMark({ size = 26 }) {
   );
 }
 
-// Bruno Ace SC se ve más chica a igual `size` que el isotipo: el wordmark usa
-// un tamaño mayor. `size={null}` deja el cuerpo al CSS.
+// Wordmark de founder: Fraunces cursiva, con la «l» en tinta plena y el resto
+// en tinta media. `size={null}` deja el cuerpo al CSS.
 export function Logo({ size = 15, mark = true, animado = false, className = '' }) {
   return (
     <span className={`logo ${animado ? 'logo--animado' : ''} ${className}`}>
       {mark && <LogoMark size={Math.round((size || 15) * 1.73)} />}
-      <span className="brand" style={size ? { fontSize: Math.round(size * 1.3) } : undefined}>
-        {animado
-          ? [...'LIXBON'].map((l, i) => <span key={i} className="logo__letra" style={{ '--i': i }}>{l}</span>)
-          : 'LIXBON'}
+      <span className="brand" style={size ? { fontSize: Math.round(size * 1.9) } : undefined}>
+        {[...'lixbon'].map((l, i) => (
+          <span key={i} className={`logo__letra ${i === 0 ? 'logo__letra--clave' : ''}`} style={animado ? { '--i': i } : undefined}>{l}</span>
+        ))}
       </span>
     </span>
   );

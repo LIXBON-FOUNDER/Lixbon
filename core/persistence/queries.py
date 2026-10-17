@@ -44,6 +44,7 @@ from core.persistence.models import (
     TokenUsageDaily,
     UsageCreditWindow,
     UsagePolicy,
+    DonationSettings,
     UsageQuota,
     User,
 )
@@ -1112,6 +1113,40 @@ def update_usage_policy(fields: dict[str, Any]) -> dict[str, Any]:
             "session_base_credits": row.session_base_credits,
             "week_base_credits": row.week_base_credits, "updated_at": row.updated_at,
         }
+
+
+def _donation_settings_to_dict(row: DonationSettings | None) -> dict[str, Any]:
+    if not row:
+        return {"enabled": False, "total_cents": 0, "goal_cents": 0, "updated_at": None}
+    return {
+        "enabled": bool(row.enabled), "total_cents": int(row.total_cents),
+        "goal_cents": int(row.goal_cents or 0), "updated_at": row.updated_at,
+    }
+
+
+def get_donation_settings() -> dict[str, Any]:
+    """Fila única de donaciones. Sin fila, las donaciones están apagadas."""
+    with get_session() as s:
+        return _donation_settings_to_dict(s.get(DonationSettings, 1))
+
+
+def update_donation_settings(fields: dict[str, Any]) -> dict[str, Any]:
+    """Activa o apaga las donaciones y fija el total donado. Admin-only."""
+    ts = now_iso()
+    with get_session() as s:
+        row = s.get(DonationSettings, 1)
+        if not row:
+            row = DonationSettings(id=1, enabled=0, total_cents=0, goal_cents=0, updated_at=ts)
+            s.add(row)
+        if fields.get("enabled") is not None:
+            row.enabled = 1 if fields["enabled"] else 0
+        if fields.get("total_cents") is not None:
+            row.total_cents = max(0, int(fields["total_cents"]))
+        if fields.get("goal_cents") is not None:
+            row.goal_cents = max(0, int(fields["goal_cents"]))
+        row.updated_at = ts
+        s.flush()
+        return _donation_settings_to_dict(row)
 
 
 def _model_weight_to_dict(w: ModelWeight) -> dict[str, Any]:

@@ -455,6 +455,21 @@ export const IconAlert = (p) => {
   );
 };
 
+export const IconCorazon = (p) => (
+  <Svg {...p}><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></Svg>
+);
+
+export const IconCorreo = (p) => {
+  const d = 'M4.5 6h15a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z';
+  return (
+    <Svg {...p}>
+      <Tinta d={d} />
+      <path d={d} />
+      <path d="m4 7 8 6 8-6" />
+    </Svg>
+  );
+};
+
 export const IconSun = (p) => (
   <Svg {...p}>
     <Tinta d="M12 8.25a3.75 3.75 0 1 1 0 7.5 3.75 3.75 0 0 1 0-7.5Z" />

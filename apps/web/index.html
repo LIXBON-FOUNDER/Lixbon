@@ -9,7 +9,7 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#F5F4EE" />
-    <script>try{var t=localStorage.getItem('lixbon-tema');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+    <script>try{var t=localStorage.getItem('lixbon-tema');if(localStorage.getItem('lixbon-sesion')==='1'&&(t==='light'||t==='dark'))document.documentElement.dataset.theme=t}catch(e){}</script>
     <title>lixbon — AI on GPUs we operate</title>
     <meta name="description" content="Chat with AI models on GPUs we operate: web, CLI with agent mode, desktop app, Visuals to design websites, and an OpenAI-compatible API." />
     <link rel="canonical" href="https://lixbon.com/" />

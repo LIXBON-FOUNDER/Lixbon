@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useLocale } from '../i18n/LocaleContext';
+import { transicion } from '../i18n/link';
 
 function seccionDe(pathname) {
   const partes = pathname.split('/').filter(Boolean);
@@ -21,6 +22,8 @@ export function RouteFade({ children }) {
   useEffect(() => {
     if (anterior.current === clave) return;
     anterior.current = clave;
+    // La View Transition ya fundió una página con otra: repetirlo parpadea.
+    if (transicion.activa) return;
     const el = caja.current;
     if (!el) return;
     el.classList.remove('is-entering');

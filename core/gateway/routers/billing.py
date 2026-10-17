@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from core.billing import stripe_gateway
+from core.config import PAYPAL_DONATION_BUSINESS
 from core.billing.quota import credit_buckets_snapshot, usage_snapshot
 from core.persistence.queries import (
     check_user_password,
@@ -16,6 +17,7 @@ from core.persistence.queries import (
     delete_user_account,
     export_user_data,
     get_daily_metrics,
+    get_donation_settings,
     get_plan_for_user,
     get_user_by_id,
     get_user_settings,
@@ -50,6 +52,13 @@ class SettingsPayload(BaseModel):
 async def api_list_plans():
     """Planes activos para la página de precios. Público."""
     return {"plans": list_plans(active_only=True)}
+
+
+@router.get("/api/donations")
+async def api_donations():
+    """Si las donaciones sustituyen ahora a las suscripciones y cuánto se ha
+    donado. Público: lo leen /plans y Ajustes › Facturación."""
+    return {"donations": {**get_donation_settings(), "paypal_business": PAYPAL_DONATION_BUSINESS}}
 
 
 @router.get("/api/pricing")

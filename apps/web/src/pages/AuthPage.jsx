@@ -8,7 +8,7 @@ import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
-import { ClusterFondo } from '../components/ClusterFondo';
+import { LaminaAuth } from '../components/LaminaAuth';
 import { api } from '../lib/api';
 
 function GoogleLogo() {
@@ -147,7 +147,7 @@ export default function AuthPage() {
 
   return (
     <div className="auth">
-      <ClusterFondo />
+      <LaminaAuth />
 
       <div className="auth__panel">
         <span className="tab" aria-hidden="true" />
