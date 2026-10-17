@@ -208,7 +208,10 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        *store_slot = Some(Store::open_boot_under_lock(core_dir, lock, catalog, env!("CARGO_PKG_VERSION"))?);
+        let mut store = Store::open_boot_under_lock(core_dir, lock, catalog, env!("CARGO_PKG_VERSION"))?;
+        // Attention (LXO-88): cada inserción de Events del Core proyecta en su misma transacción.
+        store.set_event_projector(Arc::new(store::AttentionProjection::new(Arc::new(super::attention_rules::EventRules))));
+        *store_slot = Some(store);
         Ok(())
     }
 

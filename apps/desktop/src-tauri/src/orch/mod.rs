@@ -5,6 +5,8 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+// Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
+mod attention_rules;
 mod authority;
 mod boot_authority;
 mod client_identity;
@@ -28,7 +30,13 @@ mod tx_ops_tests;
 #[cfg(test)]
 mod attention_update_api_tests;
 #[cfg(test)]
+mod attention_rules_tests;
+#[cfg(test)]
+mod attention_writers_tests;
+#[cfg(test)]
 mod spawn_cleanup_tests;
+#[cfg(test)]
+mod spawn_blocked_tests;
 #[cfg(test)]
 mod hardening_tests;
 mod projects;

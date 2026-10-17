@@ -35,7 +35,7 @@ relleno histórico.
   tabla append-only con los triggers desactivados. `class` y `actor_kind` son conjuntos cerrados.
 * **Referencias blandas:** archivar un proyecto, borrar un run o revocar un cliente no toca su historia.
   "Blanda" no es "sin validar": el Core comprueba al emitir.
-* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `core`. Una Attempt
+* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `core`. Una Attempt
   futura será un valor nuevo.
 
 ## Cómo nace un evento (outbox en `Tx`, no en `State`)
@@ -93,7 +93,7 @@ Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un 
 | `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
 | `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
 | `project` · `run` | igualdad con `project_id` / `run_id`. |
-| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`core`); `entity_id` exige `entity_kind`. |
+| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`core`); `entity_id` exige `entity_kind`. |
 | `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
 | `class` | `state` · `effect` · `decision` · `system`. |
 
@@ -740,10 +740,65 @@ Core::record_facts(ctx, drafts)
 * Los eventos y el aviso de una solicitud se emiten bajo esa misma compuerta, antes de permitir una resolución
   concurrente. Por eso la UI nunca recibe una tarjeta pendiente después de su resolución.
 
+### Denegación explícita de policy: `spawn.requested` con `policy_status = blocked` (LXO-88)
+Una solicitud **válida** que una decisión explícita de policy deniega deja `spawn.requested` con
+`policy_status = blocked` **antes** de devolver la denegación. Nada más cambia en el contrato del Event (sin campo
+nuevo, sin motivo de policy, sin `argv`/`cwd`/`env`).
+
+```text
+spawn_request(caller, args)
+  plan_spawn                       -> entrada inválida?  Err, SIN Event   (agente/modelo/esfuerzo/perfil/rol/combinación
+                                                                           proveedor × perfil; padre sin vida; profundidad)
+  task_policy(...)                 -> status = Blocked?
+      agents::explicit_denial(...) -> None   (CLI ausente, flags, sandbox, ruta…): Err como siempre, SIN Event
+                                   -> Some(ProfileDisabled): check_parent_live + record_facts(spawn.requested)
+                                        fallo de persistencia -> Err(fallo)           (NO se devuelve una denegación «registrada»)
+                                        éxito                 -> Err(denegación)      (el Event ya es durable)
+  ok / unverified                  -> camino de aprobación de siempre
+```
+
+* **Qué es una denegación explícita** lo decide un tipo, no el texto de `Policy.reason`: `agents::PolicyDenial`
+  (hoy solo `ProfileDisabled`, vía `Profile::disabled_reason()`), y solo si la combinación proveedor × perfil tiene
+  definición (`profile_flags`). Un bloqueo del entorno o del proveedor sigue siendo un error sin Event.
+* **Entrada inválida ≠ policy:** `agents::check_request` conserva la validación que hacía `launch` (agente
+  conocido y no pausado, modelo y esfuerzo admitidos, rol existente, combinación proveedor × perfil definida) y NO
+  aplica la compuerta de policy. Así «`gemini` + perfil» o «rol inventado» son errores, no solicitudes denegadas.
+* **Invariante que sostiene a `risk`:** todo `spawn.requested` con `policy_status = blocked` del log se emitió por
+  este camino, es decir, por una denegación explícita. El Event no lo dice por sí mismo; lo garantiza la emisión
+  (`spawn_blocked_tests`). Si algún día otra causa explícita (o un bloqueo del entorno) debe registrarse, el Event
+  necesitará un discriminador durable (ver `ATTENTION.md`, «Gaps de señal»).
+* **Sin efectos:** la rama bloqueada no crea pendiente en memoria, Task, aprobación, `orch-spawn-pending`, aviso,
+  PTY, proceso ni worktree. **No habrá `spawn.resolved`**: la solicitud nace y termina denegada. Una consulta de
+  `spawn_status` responde `expired` y aprobarla no resuelve nada.
+* **Cada RPC es un intento nuevo** (otro `pending_id`, otro Event); los reintentos del *append* de un mismo Event
+  reutilizan su `(kind, idem_key)` y no duplican.
+* Sin Event Log (`state.json`/degradado) no hay dónde registrar: con el Core en solo lectura la persistencia falla y
+  se informa ese fallo, no la denegación.
+
 ### Reinicio
 Los pendientes viven en memoria y todavía no se reconstruyen ni se reconcilian al arrancar. Este cambio no añade
 `abandoned_on_restart` ni ningún otro outcome de reinicio. La reconciliación durable de solicitudes pendientes
-queda en un seguimiento separado.
+queda en un seguimiento separado. Consecuencia para Attention: el `approval` de un lanzamiento pendiente se
+resuelve con `spawn.resolved`; si el Core reinicia con un pendiente sin resolver, ese `approval` sigue activo hasta
+que la reconciliación emita su resolución. Una solicitud `blocked` no tiene pendiente que reconciliar.
+
+## E1b · Attention: `attention.created` · `attention.resolved` (LXO-88)
+Ciclo de vida de una ocurrencia de Attention (`ATTENTION.md`). `class = state`, entidad `attention`,
+`entity_id = correlation_id = idem_key = attention_items.id` (como mucho UN `created` y UN `resolved` por
+ocurrencia, así que un replay no duplica), actor `system`, canal `core`.
+
+| kind | Payload (solo códigos e ids) |
+|---|---|
+| `attention.created` | `category`, `severity`, `occurrence`, `target_kind`, `target_id`, `source_event_id?` |
+| `attention.resolved` | `resolution` (`acted` · `condition_cleared` · `superseded`), `source_event_id` |
+
+* **Misma transacción que su origen.** Cada escritor del Event Log (`commit_authoritative_with_events`,
+  `append_events` y los cambios de gestión de Project) ejecuta el proyector del almacén después de insertar y antes
+  de confirmar (`EventProjector`): el Event origen, las filas de Attention y estos eventos se confirman o se
+  deshacen juntos. Los eventos derivados se insertan **después** de los de origen de esa transacción
+  (`insert_derived_in`, sin reproyectarlos); el orden entre eventos de origen no cambia.
+* Actualizar `severity`/`facts` de la activa **no** emite nada (no hay `attention.updated`).
+* `source_event_id` es el `events.id` (no el `seq`) del Event que levantó o resolvió.
 
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
@@ -753,5 +808,5 @@ queda en un seguimiento separado.
 * **E2:** SSE/long-poll de seguimiento (el `GET /events` de sondeo ya existe).
 
 ## Fuera de E
-Attention (G), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
+La API de lectura de Attention (LXO-89), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
 (`terminal.output`…), retención/compactación del Event Log, Task/Attempt.

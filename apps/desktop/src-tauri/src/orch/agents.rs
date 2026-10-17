@@ -692,12 +692,47 @@ pub fn launch_with(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
 /// por intento, por eso no va en el argv de la política). Claude con stream-json
 /// corre con la salida canalizada: el JSONL llega sin cortes de ConPTY.
 pub fn launch_task(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>) -> Result<Launch, String> {
+    build_launch(policy, model, effort, prompt, last_message, true)
+}
+
+/// Valida el PEDIDO de un lanzamiento sin aplicar la compuerta de policy: agente conocido y disponible, modelo y
+/// esfuerzo admitidos, rol existente y una combinación proveedor × perfil que tenga definición. Todo eso es
+/// ENTRADA: si falla es un error y no se registra nada. Que una solicitud así de válida acabe `blocked` lo decide
+/// después la policy (ver [`explicit_denial`]); quien llama aplica la compuerta con [`authorize`].
+pub fn check_request(agent: &str, model: Option<&str>, effort: Option<&str>, profile: Profile, role: Option<&str>) -> Result<(), String> {
+    if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
+        return Err(format!("Rol desconocido: {r}"));
+    }
+    let policy = evaluate_for(agent, profile, role, ".", Detected::Skip, false, Delivery::FileOrMarkers);
+    build_launch(&policy, model, effort, "x", None, false)?;
+    profile_flags(agent, profile, ".", codex_exec(agent, profile)).map(|_| ())
+}
+
+/// Denegación EXPLÍCITA de policy: la solicitud es válida y una decisión de producto, no el entorno, la rechaza.
+/// Es lo único que justifica registrar `spawn.requested` con `policy_status = blocked`. Cerrado y tipado: nunca se
+/// deduce del texto de `Policy.reason`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyDenial {
+    /// El perfil está definido pero deshabilitado ([`Profile::disabled_reason`]).
+    ProfileDisabled,
+}
+
+/// ¿Esta solicitud ya VÁLIDA (ver [`check_request`]) la deniega una decisión explícita de policy? Un bloqueo del
+/// entorno (CLI ausente, flags que la versión instalada no trae, sandbox elevado, ruta inservible) o del proveedor
+/// NO lo es: esos no se registran como solicitud denegada y nunca son `risk`.
+pub fn explicit_denial(provider: &str, profile: Profile) -> Option<PolicyDenial> {
+    // Sin definición para este proveedor × perfil la solicitud no es válida: no hay nada que la policy deniegue.
+    profile_flags(provider, profile, ".", codex_exec(provider, profile)).ok()?;
+    profile.disabled_reason().map(|_| PolicyDenial::ProfileDisabled)
+}
+
+fn build_launch(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>, enforce_policy: bool) -> Result<Launch, String> {
     let agent = policy.provider.as_str();
     let a = spec(agent).ok_or_else(|| format!("Agente desconocido: {agent}. Usa uno de `lxo agents`."))?;
     if PAUSED.contains(&agent) {
         return Err(format!("{} no está disponible todavía como agente hijo en Lixbon. Usa uno de `lxo agents`.", a.label));
     }
-    if policy.status == Status::Blocked {
+    if enforce_policy && policy.status == Status::Blocked {
         return Err(format!("{} con el perfil {}: {}", a.label, policy.profile, policy.reason.as_deref().unwrap_or("bloqueado")));
     }
     let model = model.map(safe_token).transpose()?;

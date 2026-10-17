@@ -155,9 +155,17 @@ impl Core {
     pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
         let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
+        // Un perfil bloqueado se rechaza sin preguntar a nadie. SOLO una denegación explícita de policy (tipada,
+        // `agents::explicit_denial`) deja constancia durable de la solicitud antes de devolverla; un bloqueo del
+        // entorno o del proveedor se rechaza como siempre, sin Event, y nunca es `risk`.
+        let mut registrar_denegacion = None;
         if policy.status == agents::Status::Blocked {
-            // Igual que antes: un perfil bloqueado se rechaza sin preguntar a nadie.
-            agents::authorize(&policy, None, true)?;
+            let denial = agents::authorize(&policy, None, true).expect_err("authorize rechaza siempre una policy bloqueada");
+            let profile = agents::Profile::parse(&plan.profile);
+            if profile.and_then(|profile| agents::explicit_denial(&plan.provider, profile)).is_none() {
+                return Err(denial);
+            }
+            registrar_denegacion = Some(denial);
         }
         let now = state::now_ms();
         let mut p = plan;
@@ -170,6 +178,11 @@ impl Core {
             self.check_parent_live(&p)?;
             let fact = spawn_requested_fact(&ctx, &p)?;
             self.record_facts(&ctx, vec![fact]).map_err(String::from)?;
+            if let Some(denial) = registrar_denegacion {
+                // Ya es durable. La denegación NO crea pendiente, Task, aprobación, aviso, terminal, proceso ni
+                // worktree, y no habrá `spawn.resolved`: la solicitud nace y termina denegada.
+                return Err(denial);
+            }
             self.pend().insert(p.pending_id.clone(), Entry { p: p.clone(), state: PendState::Pending, decision: None, resolved_at: None });
             // La fila durable, el estado en memoria, el evento de UI y el aviso quedan serializados contra
             // reject/sweep/approve: nunca se publica una tarjeta después de su resolución.

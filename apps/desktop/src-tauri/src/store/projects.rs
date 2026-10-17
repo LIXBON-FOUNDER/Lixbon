@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::authority::new_uuid_v7;
 use super::error::{StoreError, StoreResult};
-use super::events::{insert_events, Inserted, NewEvent};
+use super::events::{insert_events_projected, EventProjector, Inserted, NewEvent};
 use super::migrate::now_ms;
 use super::Store;
 
@@ -180,8 +180,8 @@ fn check_event_for(id: &str, event: &NewEvent) -> StoreResult<()> {
 }
 
 /// Inserta el evento del cambio: un duplicado por `(kind, idem_key)` deshace el cambio en lugar de dejarlo sin su hecho.
-fn insert_one_event(tx: &Transaction<'_>, id: &str, event: &NewEvent) -> StoreResult<()> {
-    match insert_events(tx, std::slice::from_ref(event), None)?.first() {
+fn insert_one_event(tx: &Transaction<'_>, id: &str, event: &NewEvent, projector: Option<&dyn EventProjector>) -> StoreResult<()> {
+    match insert_events_projected(tx, std::slice::from_ref(event), None, projector)?.first() {
         Some(Inserted::New(_)) => Ok(()),
         _ => Err(StoreError::ProjectConflict(format!("el evento {} de {id} ya existía: el cambio no se confirma sin su hecho", event.kind))),
     }
@@ -189,7 +189,7 @@ fn insert_one_event(tx: &Transaction<'_>, id: &str, event: &NewEvent) -> StoreRe
 
 /// Núcleo común de `join` y `relocate`: ubicación + posible cambio de huella + evento, DENTRO de la transacción
 /// de quien llama.
-fn apply_location(tx: &Transaction<'_>, id: &str, loc: &NewLocation, fp: Option<&FingerprintChange>, event: &NewEvent, guard_primary: bool, now: i64) -> StoreResult<ChangeOutcome> {
+fn apply_location(tx: &Transaction<'_>, id: &str, loc: &NewLocation, fp: Option<&FingerprintChange>, event: &NewEvent, guard_primary: bool, now: i64, projector: Option<&dyn EventProjector>) -> StoreResult<ChangeOutcome> {
     let current: Option<String> = tx.query_row("SELECT fingerprint FROM projects WHERE id = ?1", [id], |r| r.get(0)).optional()?;
     let Some(current) = current else { return Ok(ChangeOutcome::Missing) };
     // Snapshot: la huella que quien llama leyó sigue siendo la guardada.
@@ -232,7 +232,7 @@ fn apply_location(tx: &Transaction<'_>, id: &str, loc: &NewLocation, fp: Option<
             return Err(StoreError::ProjectConflict(format!("no se pudo actualizar la huella del proyecto {id}")));
         }
     }
-    insert_one_event(tx, id, event)?;
+    insert_one_event(tx, id, event, projector)?;
     Ok(ChangeOutcome::Changed)
 }
 
@@ -249,10 +249,11 @@ impl Store {
         check_event_for(id, event)?;
         let fp = fingerprint_to(fingerprint)?;
         let now = now_ms();
+        let projector = self.projector.clone();
         self.write(|tx| {
             tx.execute("INSERT INTO projects (id, name, created_at, updated_at, fingerprint) VALUES (?1, ?2, ?3, ?3, ?4)", params![id, name, now, fp])?;
             put_location(tx, id, &NewLocation { primary: true, ..loc.clone() }, now)?;
-            insert_one_event(tx, id, event)
+            insert_one_event(tx, id, event, projector.as_deref())
         })?;
         self.project(id)?.ok_or_else(|| StoreError::ProjectConflict(format!("el proyecto recién registrado {id} no existe")))
     }
@@ -264,7 +265,8 @@ impl Store {
     pub fn project_join_recorded(&mut self, id: &str, loc: &NewLocation, fingerprint: Option<&FingerprintChange>, event: &NewEvent) -> StoreResult<ChangeOutcome> {
         check_event_for(id, event)?;
         let now = now_ms();
-        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, true, now))
+        let projector = self.projector.clone();
+        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, true, now, projector.as_deref()))
     }
 
     /// `relocate`: la ubicación nueva pasa a ser la principal; igual que [`Store::project_join_recorded`]
@@ -275,7 +277,8 @@ impl Store {
             return Err(StoreError::InvalidEvent("relocate: la ubicación nueva es la principal".into()));
         }
         let now = now_ms();
-        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, false, now))
+        let projector = self.projector.clone();
+        self.write(|tx| apply_location(tx, id, loc, fingerprint, event, false, now, projector.as_deref()))
     }
 
     /// Archiva o restaura. Distingue `Missing` / `Unchanged` / `Changed` ATÓMICAMENTE (el `UPDATE` solo toca la
@@ -283,10 +286,11 @@ impl Store {
     pub fn project_set_archived_recorded(&mut self, id: &str, archived: bool, event: &NewEvent) -> StoreResult<ChangeOutcome> {
         check_event_for(id, event)?;
         let (state, now) = (if archived { "archived" } else { "active" }, now_ms());
+        let projector = self.projector.clone();
         self.write(|tx| {
             let n = tx.execute("UPDATE projects SET state = ?2, updated_at = ?3 WHERE id = ?1 AND state <> ?2", params![id, state, now])?;
             if n == 1 {
-                insert_one_event(tx, id, event)?;
+                insert_one_event(tx, id, event, projector.as_deref())?;
                 return Ok(ChangeOutcome::Changed);
             }
             let exists: i64 = tx.query_row("SELECT COUNT(*) FROM projects WHERE id = ?1", [id], |r| r.get(0))?;

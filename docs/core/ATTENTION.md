@@ -1,8 +1,10 @@
 # Attention del Core: modelo autoritativo y ciclo de vida (LXO-87)
 
-Estado: **modelo y ciclo de vida implementados** (migración `006_attention`). Las reglas que derivan Attention
-de Events/State son **LXO-88**; la API de lectura/consulta y la resolución soportada por cliente son
-**LXO-89**. Aquí no hay interfaz, notificaciones push, ranking personalizado, asignación de equipo ni *unread*.
+Estado: **modelo, ciclo de vida y reglas Events → Attention implementados** (migración `006_attention`; reglas en
+LXO-88, ver «Reglas Events → Attention»). Tres señales **no** tienen aún un Event durable que las respalde y se
+documentan como gaps (`review_ready`, `environment_blocked` y el discriminador durable de `risk`; ver «Gaps de señal»).
+La API de lectura/consulta y la resolución soportada por cliente son **LXO-89**. Aquí no hay interfaz,
+notificaciones push, ranking personalizado, asignación de equipo ni *unread*.
 
 ## Decisión (ADR)
 
@@ -228,9 +230,159 @@ id          = "att_" + hex( SHA-256( "lixbon.attention.id.v1" \0 fingerprint \0 
   **blanda** (sin `REFERENCES`): el origen puede ser de otra instalación y archivar un proyecto no bloquea la
   historia. `correlation_id` repite el del evento cuando existe.
 * Resolver **no** toca `events`. Los eventos de ciclo de vida reservados en el vocabulario
-  (`attention.created`, `attention.resolved`, `entity_kind = attention`) los emite la capa `orch` en la **misma
-  transacción** usando las variantes `*_in`; esa instrumentación pertenece a LXO-88 (decide qué hechos produce
-  qué evento) y no se implementa aquí para no fijar reglas ni duplicar el log.
+  (`attention.created`, `attention.resolved`, `entity_kind = attention`) se emiten en la **misma transacción** que el
+  Event origen y la fila de Attention; lo implementa LXO-88 (ver «Reglas Events → Attention»).
+
+## Reglas Events → Attention (LXO-88)
+
+### Arquitectura y fronteras
+```text
+ escritor del Event Log (una transacción de SQLite)
+   ├─ commit_authoritative_with_events   Core::mutate*     task.*, run.*, decision.recorded, effect.observed, spawn.resolved(+legacy)
+   ├─ append_events                      Core::record_facts spawn.requested, spawn.resolved standalone
+   └─ project_*_recorded                 project_ops        project.*
+        1. INSERT events                         (event_origen, seq)
+        2. EventProjector::project(tx, nuevos)   store::AttentionProjection ── usa ──► AttentionRules::derive   (orch, PURA)
+              · aplica cada intención con attention_raise_in / attention_update_active_in / attention_resolve_in
+              · devuelve attention.created / attention.resolved
+        3. insert_derived_in(tx, derivados)      (sin reproyectar)
+        COMMIT   ── o ROLLBACK de las tres cosas si cualquiera falla ──
+```
+* **Reglas puras en `orch/attention_rules.rs`** (`derive`): función de UN Event; no lee `State`, git, reloj, cliente
+  ni SQL. **Driver SQL en `store/attention_projection.rs`**: aplica las intenciones con las variantes `_in` de LXO-87,
+  descarta señales antiguas y construye los `attention.*`. `orch` no importa `rusqlite`, no inserta Events ni
+  finaliza borradores; solo `store/events.rs` inserta.
+* **Instalación:** `orch::store_boot::open_for_boot` instala `AttentionProjection::new(EventRules)` en el `Store` del
+  Core. Un `Store` sin proyector (pruebas del almacén, copias) inserta Events sin proyectar. Una base aún sin la `006`
+  no proyecta (igual que sin la `004` no hay Event Log); no hay relleno histórico.
+* **Writers cubiertos:** los tres. Todo `insert_events` pasa por `insert_events_projected`; no existe otro INSERT en
+  `events`. `project.*` no es señal de ninguna regla: su writer ejecuta el proyector y no levanta nada.
+* Si la proyección falla, **el writer falla entero**: el Event origen no queda, ni la fila, ni `attention.*`, ni el
+  estado en memoria cambia. Para `spawn`, un fallo así se informa como fallo de persistencia, nunca como denegación.
+
+### Tabla Event → Attention
+Fuente de verdad en código: `orch::attention_rules::derive`. Severidad fijada por la regla; `facts` solo con códigos
+e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
+
+| Event (`kind`, condición) | Transición | Categoría · severidad | Hecho (target · subject) |
+|---|---|---|---|
+| `task.question` | levanta | `question` · medium | `task` que pregunta · id del mensaje |
+| `task.reply` | resuelve `acted` | `question` | `task` que preguntó · `question_id` |
+| `spawn.requested` · `policy_status` `ok` / `unverified` | levanta | `approval` · medium | `spawn_request` · — |
+| `spawn.resolved` · `approved` / `rejected` / `launch_failed` | resuelve `acted` | `approval` | `spawn_request` |
+| `spawn.resolved` · `timeout` / `coordinator_closed` / `cancelled_run_removed` | resuelve `condition_cleared` | `approval` | `spawn_request` |
+| `task.status_changed` → `awaiting_terminal_approval` | levanta | `approval` · medium | `task` · `terminal` |
+| `task.status_changed` desde `awaiting_terminal_approval` a `starting`/`running`/`waiting` | resuelve `acted` | `approval` | `task` · `terminal` |
+| `task.status_changed` desde `awaiting_terminal_approval` a cualquier otro | resuelve `condition_cleared` | `approval` | `task` · `terminal` |
+| `task.status_changed` → `failed` (la causa máquina va en `facts.failure_reason`) | levanta | `failed` · high | `task` |
+| `task.status_changed` desde `failed` | resuelve `condition_cleared` | `failed` | `task` |
+| `decision.recorded` `merge` · `outcome = conflict` | levanta; si ya estaba activa, **actualiza** `facts` (y severidad) | `conflict` · high | `task` |
+| `decision.recorded` `merge` · `outcome = merged` | resuelve `acted` | `conflict` | `task` |
+| `task.removed` | resuelve `condition_cleared` | `failed`, `conflict`, `approval`(terminal) de esa task | `task` |
+| `spawn.requested` · `policy_status = blocked` | levanta | `risk` · high | `spawn_request` · — |
+
+* **`risk` solo nace de `spawn.requested.policy_status = blocked`.** `ok`, `unverified`, un fallo genérico, un
+  bloqueo del entorno o del proveedor, y la entrada inválida no la crean (pruebas
+  `solo_policy_status_blocked_levanta_risk`, `un_bloqueo_del_entorno_no_deja_event_y_por_tanto_no_crea_risk`,
+  `una_entrada_invalida_es_un_error_y_no_se_registra_como_denegada_por_policy`). Ningún Event la resuelve sola: la
+  cierra una persona (LXO-89, `acted`).
+* **Las señales puramente informativas no crean nada:** `task.created`, `task.phase`, transiciones ordinarias,
+  `effect.observed`, `decision.recorded` de `review`/`pr`, `project.*`, `run.*` y los propios `attention.*`.
+* **No hay regla** para `review_ready` ni `environment_blocked` (ver «Gaps de señal»); tampoco una cascada de
+  `run.removed` ni la resolución de `question` al retirar una task (el evento no trae la lista de hechos).
+
+### Camino de `spawn` (preflight y denegación)
+Resumen; contrato completo en `EVENTOS.md`, «Denegación explícita de policy».
+* `agents::check_request` valida el **pedido** (agente, modelo, esfuerzo, rol, proveedor × perfil) y **no** aplica la
+  compuerta de policy: lo inválido es un error sin Event. Sustituye a `agents::launch` en `plan_spawn`.
+* `agents::explicit_denial` (tipado, `PolicyDenial::ProfileDisabled`, vía `Profile::disabled_reason()`) separa la
+  denegación explícita de los bloqueos del entorno/proveedor. Solo la primera se registra (`spawn.requested` con
+  `policy_status = blocked`) **antes** de devolver la denegación, sin pendiente, Task, aprobación, aviso, PTY, proceso
+  ni worktree. Si el Event no se puede persistir se devuelve ese fallo.
+
+### Orden, señales antiguas, replay e idempotencia
+* El proyector recibe solo los Events **nuevos** de la transacción, en orden de `seq` (que es el orden de commit).
+  Un tramo no ascendente estricto se rechaza entero (`ProjectError::OutOfOrder`); manda `seq`, nunca `at`.
+* `after_seq` (marca de agua) descarta lo ya aplicado. Además cada hecho guarda `facts.event_seq`: una señal con
+  `seq <= event_seq` del último Event que lo tocó es **antigua** y no se reaplica (`Report::stale`). Así un
+  `task.reply` viejo no resuelve una pregunta posterior y un replay sobre un estado poblado no duplica nada.
+* **Replay desde cero = estado incremental** (mismos `fingerprint`, ids, ocurrencias y `attention.*`):
+  `replay_desde_cero_es_igual_al_estado_incremental`, y contra los writers reales
+  `el_estado_que_mantienen_los_writers_es_el_de_un_replay_desde_cero_del_log`.
+* **Duplicados/reintentos:** el mismo Event, o el mismo hecho observado otra vez mientras está activo, no crea otra
+  fila; un Event repetido por `(kind, idem_key)` ni siquiera se reproyecta. **Resolver es idempotente** (no
+  reescribe `resolved_at` ni el motivo).
+* **Límite conocido:** no hay una marca de agua durable global; la garantía es por hecho (`event_seq`) más el orden de
+  commit del único escritor. Un replay de un tramo *parcial* sobre un estado poblado puede no distinguir una señal
+  intermedia que no cambió el hecho; el replay desde cero y el incremental sí son exactos.
+* **Reinicio:** las filas y `attention.*` son durables (SQLite); el proyector se reinstala al abrir el almacén. Los
+  pendientes de spawn viven en memoria (ver `EVENTOS.md`, «Reinicio»): su `approval` se resuelve cuando la
+  reconciliación emita `spawn.resolved`.
+
+### Invariantes de LXO-88
+| # | Invariante | Cómo se prueba |
+|---|---|---|
+| 1 | Mismos Events producen misma Attention | `mismos_events_mismos_ids_y_filas_en_una_instalacion_reconstruida`, replay |
+| 2 | Replay no duplica | `reaplicar_todo_el_log_sobre_un_estado_ya_poblado_no_cambia_nada`, `duplicados_y_reintentos_no_duplican_items` |
+| 3 | Un client disconnect no altera Attention | `las_reglas_son_funciones_de_los_events_y_no_leen_estado_de_cliente_ni_de_lectura` (la regla es función del Event; no lee cliente, conexión ni lectura) |
+| 4 | Un unread/read no resuelve Attention | ídem + `attention_sigue_activa_sea_cual_sea_el_estado_de_lectura_de_la_actividad` (LXO-87): ninguna regla consume lectura |
+| 5 | Datos no durables se rechazan o se capturan antes | `review_ready_y_environment_blocked_no_tienen_senal_durable_y_ningun_event_las_infiere` |
+| 6 | Event y Attention se confirman o se deshacen juntos | `si_la_proyeccion_falla_*` (los tres writers), `la_attention_y_sus_events_se_confirman_o_se_deshacen_juntos` |
+
+### Mutation testing (a mano, como en `proctable.rs`)
+No hay `cargo-mutants` en el repo ni en la CI; se aplicaron **32 mutantes** uno a uno sobre el código de producción
+(todos por separado, restaurando el archivo y ejecutando `attention`, `spawn_blocked`). **32 muertos, 0 vivos** (`m02`
+sobrevivió a la primera ronda —equivalente con las reglas actuales— y se mató con una prueba de reglas inyectadas).
+
+| Grupo | Mutantes (cada uno lo mata al menos una prueba) |
+|---|---|
+| create | no emitir `attention.created`; ignorar el guard de señal antigua al levantar (`>=` → `>`); no guardar `event_seq`; marca de agua máxima / `<=` → `<` |
+| resolve | no emitir `attention.resolved`; una resuelta deja de ser no-op; guard de señal antigua (`>=` → `>`, mata `una_resolucion_con_el_mismo_seq…`); `at` sin proteger de `created_at`; fingerprint sin `subject`; `task.reply` resuelve otro hecho; `merged` no resuelve; `timeout` como `acted` |
+| dedupe/update | una activa tratada como resuelta; no actualizar severidad; orden: aceptar `seq` repetido |
+| risk / reglas | `risk` también desde `unverified`; `unverified` sin `approval`; `failed` desde otro estado |
+| spawn | ignorar el fallo de persistencia antes de denegar; la denegación crea pendiente y efectos; cualquier bloqueo es «explícito»; no exigir solicitud válida; `check_request` sin validar rol ni proveedor × perfil |
+| writers | el escritor no proyecta; `append_events`, `commit_authoritative` y cada uno de los cuatro cambios de Project sin proyector |
+
+## Gaps de señal (decisión pendiente)
+Reglas que el issue pide y que **no se infieren**: no hay Event durable autoritativo y no se deducen de Git local, de la
+ausencia de una decisión ni de un `failed`.
+
+### `review_ready` («resultado listo para revisar o integrar»)
+* **Comportamiento requerido (issue):** `review ready/decisión pendiente → review_ready active; decisión → resolve`.
+* **Señales durables hoy:** `task.created{parent}`; `effect.observed{git_worktree, branch}` (la task tiene rama);
+  `task.status_changed{to = done}`; `decision.recorded{review: accepted|rejected, head_commit}`;
+  `decision.recorded{merge: merged|conflict|…}`; `effect.observed{git_merge}`; `decision.recorded{pr}`.
+* **Qué falta:** ningún Event dice «esta task queda lista para revisión». «done + rama + sin decisión» se obtendría
+  **por ausencia de decisión** y combinando tres Events, y la caducidad de una revisión («la rama recibió otro
+  commit») exige el `head_commit` de la task al terminar, que no es durable (hoy solo el de la decisión).
+* **Cambio mínimo a autorizar (Event API):** un Event explícito `task.review_requested` (clase `state`, entidad `task`,
+  `idem_key` por task y `head_commit`) emitido por el mutador que cierra una hija `done` con rama (`Tx::close`), y
+  la regla: levanta `review_ready` (medium); un nuevo `head_commit` actualiza `facts` (revisión caducada);
+  `decision.recorded{review: rejected}`, `{merge: merged}` y `task.removed` la resuelven (`acted` /
+  `condition_cleared`); `review: accepted` la deja activa y actualiza `facts.stage = integrate`. Alternativa más
+  pequeña: añadir `has_branch` y `head_commit` (opcionales, versión 2) al payload de `task.status_changed` a `done`.
+
+### `environment_blocked` («el entorno o el proveedor impide trabajar»)
+* **Comportamiento requerido (issue):** `provider/environment blocked → environment_blocked`, **distinto** de que el
+  Attempt falle, sin reinterpretar errores desconocidos.
+* **Señales durables hoy:** ninguna. `task.status_changed{to = failed, cause}` solo lleva causas máquina de
+  vigilancia (`terminal_approval_timeout`, `agent_idle_timeout`…); `spawn.requested{policy_status = blocked}` mezcla
+  política explícita con entorno (CLI ausente, flags, sandbox elevado) y, por diseño, ya no se emite para estos
+  últimos; `helper_unknown_error: setup refresh had errors` de Codex solo aparece en la salida de la terminal, y
+  Attempt aún no existe. LXO-131 es quien debe detectarlo.
+* **Cambio mínimo a autorizar (Event API):** un Event tipado emitido por el detector (LXO-131), p. ej.
+  `environment.blocked{provider, code}` (conjunto cerrado de `code`, entidad `task`/Attempt, `idem_key` por
+  ocurrencia) y su par `environment.cleared` (preflight o Attempt posterior correctos). La regla: el primero levanta
+  `environment_blocked` (high), el segundo la resuelve `condition_cleared`. Mientras no exista, ningún Event levanta
+  esta categoría (probado).
+
+### Discriminador durable de `risk`
+* **Hoy:** el tipo `agents::PolicyDenial` decide en el momento de emitir; el Event no lo lleva (`policy_status` solo
+  distingue `ok`/`blocked`/`unverified` y se omite el motivo a propósito). `risk` es correcto mientras `blocked` solo
+  se emita para denegaciones explícitas, invariante que fija `spawn_blocked_tests`.
+* **Cuándo hace falta cambiar el contrato:** si otra causa explícita o un bloqueo del entorno debe registrarse como
+  solicitud denegada. Cambio mínimo: campo opcional `denied_by` (código cerrado, p. ej. `profile_disabled`) en
+  `spawn.requested` (versión 1 aditiva) y la regla de `risk` condicionada a su presencia.
 
 ## Esquema (`006_attention.sql`)
 
@@ -345,3 +497,12 @@ Los códigos viajan tal cual; no hay texto para mostrar. Cada superficie lo trad
 * **LXO-89**: API de lectura/consulta, orden de presentación, filtros, resolución soportada por cliente y
   autorización (`ClientAction`).
 * UI, push, ranking personalizado, asignación de equipo (F9), *unread* y `snoozed`.
+
+## Fuera de alcance de LXO-88
+
+* Notificaciones, ranking (ML o personalizado), textos de interfaz, *snooze* personal y políticas de Team.
+* La retirada del cálculo de Attention en el frontend (`src/orch/attention.js`) y su sustitución por la lista
+  autoritativa: la consumirá LXO-89 con la API de lectura. Hasta entonces el frontend sigue calculando lo suyo.
+* `review_ready`, `environment_blocked` y el discriminador durable de `risk`: requieren un Event que hoy no existe
+  (ver «Gaps de señal»); no se infieren.
+* Cascada de `run.removed`, resolución de `question` al retirar una task y una marca de agua durable global.

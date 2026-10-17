@@ -117,7 +117,9 @@ impl Core {
             Some(p) => agents::Profile::parse(&p).ok_or_else(|| format!("Perfil desconocido: {p}"))?,
             None => agents::Profile::for_role(read_only),
         };
-        agents::launch(&agent, model.as_deref(), effort.as_deref(), "x", profile, role.as_deref())?;
+        // Solo el PEDIDO (agente, modelo, esfuerzo): la compuerta de policy la aplica `spawn_request` DESPUÉS de
+        // registrar la solicitud, así que una policy `blocked` ya no se confunde con una entrada inválida.
+        agents::check_request(&agent, model.as_deref(), effort.as_deref(), profile, role.as_deref())?;
         let title = Some(s(args, "name")).filter(|a| !a.is_empty())
             .unwrap_or_else(|| spec.lines().next().unwrap_or("").chars().take(60).collect());
         // Un rol de solo lectura no necesita rama: lee en la carpeta del coordinador.
