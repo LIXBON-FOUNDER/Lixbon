@@ -21,13 +21,15 @@
 --   * REFERENCIAS BLANDAS: `project_id`, `run_id`, `source_event_id` y `correlation_id` no llevan
 --     `REFERENCES`: el origen puede ser de otra instalación y archivar un proyecto no bloquea la
 --     historia. `source_event_id` es el `events.id` (UUID v7), no el `seq` local.
---   * CATEGORÍA / SEVERIDAD: conjuntos cerrados fijados por el Core, inmutables en la fila.
+--   * CATEGORÍA / SEVERIDAD: conjuntos cerrados fijados por el Core. La categoría es inmutable en la
+--     fila; la severidad (y `facts`) solo se actualizan mientras la fila sigue `active`.
 --   * ESTADO: solo `active | resolved`. NO hay `snoozed`: posponer es política por persona/dispositivo
 --     (cliente), no un hecho del dominio. Tampoco hay columnas de lectura, cliente, usuario ni
 --     textos de interfaz (título, mensaje, ayuda): el dominio guarda CÓDIGOS y la interfaz los traduce.
 --   * HISTORIA: resolver marca la fila (`resolved`, `resolved_at`, `resolution`); nunca la borra ni toca
 --     `events`. `resolved` es terminal. Los triggers impiden DELETE y cualquier UPDATE que no sea la
---     transición `active → resolved`.
+--     transición `active → resolved` o la actualización de `severity`/`facts`/`updated_at` de una fila
+--     `active` (identidad, categoría, destino, contexto, origen y `created_at` nunca cambian).
 --   * `facts`: objeto JSON acotado (2 KiB medidos en BYTES) con datos estructurados del hecho; nunca
 --     cuerpos de mensaje, diffs, argv, env ni secretos.
 --   * Marcas de tiempo en milisegundos epoch, FIJADAS por quien llama (no `now()` implícito).
@@ -84,7 +86,6 @@ WHEN OLD.status = 'resolved'
   OR NEW.fingerprint IS NOT OLD.fingerprint
   OR NEW.occurrence IS NOT OLD.occurrence
   OR NEW.category IS NOT OLD.category
-  OR NEW.severity IS NOT OLD.severity
   OR NEW.target_kind IS NOT OLD.target_kind
   OR NEW.target_id IS NOT OLD.target_id
   OR NEW.project_id IS NOT OLD.project_id
@@ -92,8 +93,8 @@ WHEN OLD.status = 'resolved'
   OR NEW.subject IS NOT OLD.subject
   OR NEW.source_event_id IS NOT OLD.source_event_id
   OR NEW.correlation_id IS NOT OLD.correlation_id
-  OR NEW.facts IS NOT OLD.facts
   OR NEW.created_at IS NOT OLD.created_at
+  OR (NEW.status = 'resolved' AND (NEW.severity IS NOT OLD.severity OR NEW.facts IS NOT OLD.facts))
 BEGIN
-  SELECT RAISE(ABORT, 'attention_items solo admite la transición active -> resolved');
+  SELECT RAISE(ABORT, 'attention_items solo admite active -> resolved o actualizar severity/facts de una activa');
 END;

@@ -10,6 +10,9 @@
 //!   `id` = derivado de `(fingerprint, occurrence)`. Mismo historial ⇒ mismos ids al reconstruir.
 //! * **Deduplicación.** Una sola ocurrencia ACTIVA por `fingerprint`: levantar el mismo hecho devuelve
 //!   la activa sin modificarla ([`Raised::Existing`]). La base lo impone con un índice único parcial.
+//! * **Actualizar la activa.** [`attention_update_active_in`] cambia SOLO `severity` y/o `facts` (y
+//!   `updated_at`) de una fila `active`, sin duplicarla; una `resolved` no se toca. Es el punto por el que
+//!   las reglas de LXO-88 escalan o enriquecen un hecho ya levantado.
 //! * **Resolver no borra.** [`attention_resolve_in`] solo hace `active → resolved`; es idempotente y
 //!   no toca `events`. La fila resuelta es historia: terminal, inmutable, no se borra (triggers).
 //! * **Destino lógico.** `(TargetKind, id)`: una identidad del Core, nunca una ruta. Se valida aquí y
@@ -312,14 +315,19 @@ impl NewAttention {
                 return bad(format!("{what} vacío"));
             }
         }
-        if self.facts.len() > MAX_FACTS_BYTES {
-            return bad(format!("facts de {} bytes (el máximo es {MAX_FACTS_BYTES})", self.facts.len()));
-        }
-        match serde_json::from_str::<serde_json::Value>(&self.facts) {
-            Ok(serde_json::Value::Object(_)) => Ok(()),
-            Ok(_) => bad("facts debe ser un objeto JSON"),
-            Err(e) => bad(format!("facts no es JSON válido ({e})")),
-        }
+        check_facts(&self.facts)
+    }
+}
+
+/// `facts`: objeto JSON de como mucho [`MAX_FACTS_BYTES`] bytes (lo mismo que impone el CHECK).
+fn check_facts(facts: &str) -> StoreResult<()> {
+    if facts.len() > MAX_FACTS_BYTES {
+        return bad(format!("facts de {} bytes (el máximo es {MAX_FACTS_BYTES})", facts.len()));
+    }
+    match serde_json::from_str::<serde_json::Value>(facts) {
+        Ok(serde_json::Value::Object(_)) => Ok(()),
+        Ok(_) => bad("facts debe ser un objeto JSON"),
+        Err(e) => bad(format!("facts no es JSON válido ({e})")),
     }
 }
 
@@ -359,6 +367,43 @@ pub enum Raised {
     Created(AttentionRow),
     /// Ya había una activa para el mismo hecho: se devuelve tal cual, sin modificarla.
     Existing(AttentionRow),
+}
+
+/// Qué se actualiza en una Attention ACTIVA: solo `severity` y `facts` (al menos uno), más `updated_at`.
+/// Nada de la identidad, el destino, el contexto ni el origen se puede cambiar por aquí.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionUpdate {
+    /// Nueva severidad, o `None` para conservar la actual.
+    pub severity: Option<Severity>,
+    /// Nuevos `facts` (objeto JSON de como mucho [`MAX_FACTS_BYTES`] bytes; REEMPLAZAN a los anteriores),
+    /// o `None` para conservar los actuales.
+    pub facts: Option<String>,
+    /// ms epoch de la actualización, fijados por quien llama. No puede ser anterior a `created_at`.
+    pub at: i64,
+}
+
+impl AttentionUpdate {
+    /// Lo que la tabla también impone, ANTES de abrir ninguna transacción.
+    pub fn check(&self) -> StoreResult<()> {
+        if self.severity.is_none() && self.facts.is_none() {
+            return bad("actualización vacía: indica severity, facts o ambos");
+        }
+        if let Some(facts) = &self.facts {
+            check_facts(facts)?;
+        }
+        Ok(())
+    }
+}
+
+/// Resultado de actualizar una Attention activa. Solo [`UpdateOutcome::Updated`] es éxito.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateOutcome {
+    /// Se actualizó la fila activa (devuelve la fila ya actualizada).
+    Updated(AttentionRow),
+    /// La fila está resuelta: terminal e inmutable, no se escribe nada (devuelve la fila tal cual).
+    AlreadyResolved(AttentionRow),
+    /// No existe ese id.
+    Missing,
 }
 
 /// Resultado de resolver.
@@ -506,7 +551,37 @@ pub(crate) fn attention_resolve_in(tx: &Transaction<'_>, id: &str, resolution: R
     Ok(ResolveOutcome::Resolved(row))
 }
 
+/// Actualiza `severity` y/o `facts` de una Attention ACTIVA dentro de la transacción de quien llama.
+/// Cambia solo esos campos y `updated_at`; todo lo demás (identidad, destino, contexto, origen,
+/// `created_at`) queda intacto. Una fila resuelta es terminal: se devuelve [`UpdateOutcome::AlreadyResolved`]
+/// sin escribir nada. Todo se valida antes de escribir y el `UPDATE` es una sola sentencia, así que no
+/// hay cambios parciales.
+pub(crate) fn attention_update_active_in(tx: &Transaction<'_>, id: &str, u: &AttentionUpdate) -> StoreResult<UpdateOutcome> {
+    u.check()?;
+    let Some(row) = get(tx, id)? else {
+        return Ok(UpdateOutcome::Missing);
+    };
+    if row.status == AttentionStatus::Resolved {
+        return Ok(UpdateOutcome::AlreadyResolved(row));
+    }
+    if u.at < row.created_at {
+        return bad(format!("{id}: no se puede actualizar en {}, antes de su creación ({})", u.at, row.created_at));
+    }
+    let severity = u.severity.unwrap_or(row.severity);
+    let facts = u.facts.as_deref().unwrap_or(&row.facts);
+    tx.execute("UPDATE attention_items SET severity = ?2, facts = ?3, updated_at = ?4 WHERE id = ?1 AND status = 'active'", params![id, severity.as_str(), facts, u.at])?;
+    let row = get(tx, id)?.ok_or_else(|| StoreError::InvalidAttention("la fila actualizada no se pudo leer".into()))?;
+    Ok(UpdateOutcome::Updated(row))
+}
+
 impl Store {
+    /// Actualiza severity/facts de una Attention activa en UNA transacción ([`attention_update_active_in`]).
+    #[allow(dead_code)] // lo consumen las reglas de LXO-88; hasta entonces, las pruebas.
+    pub fn attention_update_active(&mut self, id: &str, u: &AttentionUpdate) -> StoreResult<UpdateOutcome> {
+        u.check()?;
+        self.write(|tx| attention_update_active_in(tx, id, u))
+    }
+
     /// Levanta un hecho en UNA transacción ([`attention_raise_in`]).
     #[allow(dead_code)] // lo consumen las reglas de LXO-88; hasta entonces, las pruebas.
     pub fn attention_raise(&mut self, n: &NewAttention) -> StoreResult<Raised> {
