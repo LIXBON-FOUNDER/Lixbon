@@ -133,12 +133,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.PasteMsg:
-		if m.secret != nil {
-			var cmd tea.Cmd
-			*m.secret, cmd = m.secret.Update(msg)
-			return m, cmd
-		}
 		if m.picker != nil {
+			if m.picker.form != nil {
+				return m, m.picker.form.paste(msg)
+			}
 			return m, nil
 		}
 		if path, ok := droppedImage(msg.Content, m.chat.Workspace); ok {
@@ -153,7 +151,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.Update(tea.PasteMsg{Content: msg.Content})
 
 	case clipboardImageMsg:
-		if m.picker == nil && m.secret == nil {
+		if m.picker == nil {
 			m.pasteImage()
 		}
 		return m, nil
@@ -269,11 +267,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.runCommand(msg.name, msg.arg)
 
 	case promptMsg:
+		var cmd tea.Cmd
 		if msg.secret {
-			return m, m.promptSecret(msg.label, msg.onSubmit)
+			cmd = m.promptSecret(msg.label, msg.onSubmit)
+		} else {
+			m.promptFor(msg.label, msg.onSubmit)
 		}
-		m.promptFor(msg.label, msg.onSubmit)
-		return m, nil
+		// Llega de un selector silencioso ya cerrado (/provider, /doctor): lo
+		// que haga al guardarse tampoco va al transcript.
+		m.picker.quiet = true
+		return m, cmd
 
 	case doneMsg:
 		if msg.turn != m.turn {
@@ -290,9 +293,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.picker != nil {
 		return m, m.pickerDo(func(p *picker) (tea.Cmd, bool) { return p.key(msg) })
-	}
-	if m.secret != nil {
-		return m, m.handleSecretKey(msg)
 	}
 	if m.shortcutsOpen {
 		m.shortcutsOpen = false

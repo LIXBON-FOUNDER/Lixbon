@@ -526,6 +526,25 @@ func TestFabricatedToolResultIsCut(t *testing.T) {
 
 // ── aprobaciones ──────────────────────────────────────────────────────────
 
+// MiMo, con el formato <tool_call> en el prompt, lo copiaba en el texto en vez
+// de llamar de forma nativa: solo se le recuerda a quien ya escribe así.
+func TestCallFormatOnlyForModelsThatWriteCallsAsText(t *testing.T) {
+	r := newRig(t, []StreamResult{
+		{Text: `<tool_call>{"name": "write_file", "arguments": {"path": "a.txt", "content": "hola"}}</tool_call>`},
+		{Text: "Listo."},
+	})
+	r.run("crea a.txt")
+	if r.read("a.txt") != "hola" {
+		t.Fatalf("la llamada escrita en el texto debe ejecutarse: %q", r.read("a.txt"))
+	}
+	if strings.Contains(r.model.calls[0][0].Content, "FORMATO DE LLAMADA") {
+		t.Fatal("el primer paso no debe pedir escribir las llamadas en el texto")
+	}
+	if !strings.Contains(r.model.calls[1][0].Content, "FORMATO DE LLAMADA") {
+		t.Fatal("tras una llamada en el texto, el prompt debe recordar el formato")
+	}
+}
+
 func writeCall(rel, content string) StreamResult {
 	return StreamResult{ToolCalls: []json.RawMessage{nativeCall("c", "write_file", map[string]any{"path": rel, "content": content})}}
 }

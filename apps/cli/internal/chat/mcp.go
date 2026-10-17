@@ -52,6 +52,25 @@ func (c *Chat) WaitMCP(ctx context.Context) {
 	}
 }
 
+// MCPFile es el mcp.json donde se declaran servidores: el del usuario
+// (~/.lixbon) o, con project, el del workspace (.lixbon/mcp.json).
+func (c *Chat) MCPFile(project bool) string {
+	if project {
+		return filepath.Join(c.Workspace, ".lixbon", mcp.FileName)
+	}
+	return filepath.Join(filepath.Dir(c.ConfigPath), mcp.FileName)
+}
+
+// ReloadMCP vuelve a leer mcp.json y arranca los servidores de nuevo. Los
+// anteriores se cierran en segundo plano para no congelar la interfaz.
+func (c *Chat) ReloadMCP() {
+	if old := c.MCP; old != nil {
+		c.MCP, c.Session.MCP = nil, nil
+		go old.Close()
+	}
+	c.StartMCP()
+}
+
 // StopMCP cierra los servidores MCP y sus procesos.
 func (c *Chat) StopMCP() {
 	if c.MCP != nil {

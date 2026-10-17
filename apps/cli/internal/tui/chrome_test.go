@@ -189,7 +189,7 @@ func TestSecretPromptsNeverLeakTheKey(t *testing.T) {
 	const secret = "lixbon_sk_supersecreta123"
 	var got string
 	h.update(promptMsg{label: "API key de «groq»", secret: true, onSubmit: func(v string) tea.Cmd { got = v; return nil }})
-	if h.m.secret == nil {
+	if h.m.picker == nil || h.m.picker.form == nil {
 		t.Fatal("las claves se piden enmascaradas")
 	}
 	h.typeText(secret[:15])

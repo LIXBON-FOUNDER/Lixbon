@@ -93,14 +93,14 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdModel(arg)
 	case "mode":
 		return m.cmdMode(arg)
-	case "new":
-		m.newConversation("conversación nueva")
-		m.add(note("Conversación nueva: contexto vacío. La anterior queda en /history."))
-	case "clear":
-		m.log.reset()
-		m.scroll, m.sel = 0, nil
-		m.printHeader()
-		m.newConversation("contexto limpio")
+	case "new", "clear":
+		if m.busyNow() {
+			m.add(errLine("Espera a que termine lo que está en marcha antes de empezar otra conversación."))
+			return nil
+		}
+		m.cleanScreen()
+		m.newConversation(map[string]string{"new": "conversación nueva", "clear": "contexto limpio"}[name])
+		m.add(note("La anterior queda en /history."))
 	case "compact":
 		return m.cmdCompact()
 	case "history":
@@ -399,13 +399,28 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
+	m.forgetConversation()
+	m.gap()
+	m.add(separator(label))
+}
+
+// cleanScreen deja solo la cabecera: cada conversación ocupa la pantalla
+// entera, sin lo que se habló en otra.
+func (m *Model) cleanScreen() {
+	m.log.reset()
+	m.scroll, m.sel = 0, nil
+	m.openTool = nil
+	m.printHeader()
+}
+
+// forgetConversation suelta lo que era de la conversación anterior.
+func (m *Model) forgetConversation() {
 	if m.remote != nil {
 		m.remote.reset()
 	}
 	m.lastAnswer = ""
 	m.todo = nil
-	m.gap()
-	m.add(separator(label))
+	m.files = nil
 }
 
 func (m *Model) cmdHistory(arg string) tea.Cmd {
@@ -462,11 +477,14 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 		case cancelled:
 		case value == m.chat.ConversationID:
 			m.add(note("Ya estás en esa conversación."))
+		case m.busyNow():
+			m.add(errLine("Espera a que termine lo que está en marcha antes de cambiar de conversación."))
 		case !m.chat.Open(value):
 			m.add(errLine("Esa conversación ya no está disponible."))
 		default:
 			m.refreshGit()
-			m.files = nil
+			m.forgetConversation()
+			m.cleanScreen()
 			m.replayTranscript()
 			m.add(okLine("Conversación reabierta: " + firstNonEmpty(m.chat.Title(), "sin título")))
 			m.refreshContext()
@@ -1433,43 +1451,16 @@ func (m *Model) cmdLogout() tea.Cmd {
 
 // ── utilidades ───────────────────────────────────────────────────────────
 
+// promptFor pide un dato en su propio modal, no en la caja del chat.
 func (m *Model) promptFor(label string, onSubmit func(string) tea.Cmd) {
-	m.add(askLine(label))
-	m.prompt = &promptState{label: label, onSubmit: onSubmit}
+	m.picker = newForm(label, []*formField{field("")}, func(v []string) (tea.Cmd, error) { return onSubmit(v[0]), nil })
 }
 
-// promptSecret pide una clave: lo escrito sale como • y no llega ni al
-// transcript ni al historial.
+// promptSecret pide una clave en un modal: lo escrito sale como • y no llega
+// ni al transcript ni al historial.
 func (m *Model) promptSecret(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
-	m.add(askLine(label))
-	m.prompt = &promptState{label: label, onSubmit: onSubmit}
-	ti, cmd := newSecretInput(m.width)
-	m.secret = ti
-	return cmd
-}
-
-func (m *Model) handleSecretKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "enter":
-		value := strings.TrimSpace(m.secret.Value())
-		if value == "" {
-			return nil
-		}
-		p := m.prompt
-		m.secret, m.prompt = nil, nil
-		return p.onSubmit(value)
-	case "esc", "ctrl+c":
-		p := m.prompt
-		m.secret, m.prompt = nil, nil
-		if p != nil && p.onCancel != nil {
-			p.onCancel()
-		}
-		m.add(note("cancelado"))
-		return nil
-	}
-	var cmd tea.Cmd
-	*m.secret, cmd = m.secret.Update(msg)
-	return cmd
+	m.picker = newForm(label, []*formField{field("", secretField())}, func(v []string) (tea.Cmd, error) { return onSubmit(v[0]), nil })
+	return m.picker.form.focusField(0)
 }
 
 func maskKeyCommand(s string) string {

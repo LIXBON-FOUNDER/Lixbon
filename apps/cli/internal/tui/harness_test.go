@@ -280,6 +280,9 @@ func (h *harness) typeText(s string) {
 	}
 }
 
+// formOpen: hay un formulario modal abierto (alta de proveedor, de MCP…).
+func (h *harness) formOpen() bool { return h.m.picker != nil && h.m.picker.form != nil }
+
 func (h *harness) send(text string) {
 	h.t.Helper()
 	h.typeText(text)
