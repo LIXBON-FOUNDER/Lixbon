@@ -95,7 +95,8 @@ func TestNewAndClearStartFromScratchAndHistoryReopens(t *testing.T) {
 	first := h.chat.ConversationID
 
 	h.send("/new")
-	contains(t, h.out(), "conversación nueva")
+	contains(t, h.view(), "conversación nueva")
+	notContains(t, h.view(), "respuesta uno")
 	if len(h.chat.History) != 0 || h.chat.ConversationID == first {
 		t.Fatal("/new debe vaciar el contexto")
 	}
@@ -114,10 +115,13 @@ func TestNewAndClearStartFromScratchAndHistoryReopens(t *testing.T) {
 	}
 	contains(t, h.out(), "Conversación reabierta")
 	contains(t, h.out(), "continúa la conversación")
-	contains(t, h.out(), "respuesta uno")
+	contains(t, h.view(), "respuesta uno")
+	// Cada conversación ocupa la pantalla sola: la que se deja no se queda debajo.
+	notContains(t, h.view(), "respuesta dos")
 
 	h.send("/clear")
-	contains(t, h.out(), "contexto limpio")
+	contains(t, h.view(), "contexto limpio")
+	notContains(t, h.view(), "respuesta uno")
 	if len(h.chat.History) != 0 {
 		t.Fatal("/clear vacía el historial")
 	}

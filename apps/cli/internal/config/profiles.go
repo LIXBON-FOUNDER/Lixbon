@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -27,6 +28,47 @@ var Presets = map[string]string{
 	"deepseek":   "https://api.deepseek.com/v1",
 	"mistral":    "https://api.mistral.ai/v1",
 	"gemini":     "https://generativelanguage.googleapis.com/v1beta/openai",
+	// xiaomi es el pago por uso de MiMo; el Token Plan tiene su propia URL
+	// por región (token-plan-sgp.xiaomimimo.com/v1, token-plan-cn…).
+	"xiaomi": "https://api.xiaomimimo.com/v1",
+}
+
+// mimoContext es prudente: los modelos MiMo de chat admiten bastante más, y
+// con 8192 el prompt y las herramientas del agente casi llenan la ventana.
+const mimoContext = 128000
+
+// IsMiMo: la API de Xiaomi MiMo (api.xiaomimimo.com y los token-plan-*).
+func IsMiMo(baseURL string) bool {
+	_, ok := mimoHost(baseURL)
+	return ok
+}
+
+func mimoHost(baseURL string) (host string, ok bool) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", false
+	}
+	host = strings.ToLower(u.Hostname())
+	return host, host == "xiaomimimo.com" || strings.HasSuffix(host, ".xiaomimimo.com")
+}
+
+// DefaultContext es la ventana de un proveedor genérico nuevo: la conocida
+// del servidor o, si no, DefaultGenericContext.
+func DefaultContext(baseURL string) int {
+	if IsMiMo(baseURL) {
+		return mimoContext
+	}
+	return DefaultGenericContext
+}
+
+// KeyHint avisa de una clave que no va con esa URL: las del Token Plan de MiMo
+// (tp-…) solo valen en la URL del Token Plan, no en la de pago por uso.
+func KeyHint(baseURL, key string) string {
+	if host, ok := mimoHost(baseURL); ok && strings.HasPrefix(key, "tp-") && !strings.HasPrefix(host, "token-plan-") {
+		return "Las claves del Token Plan de MiMo (tp-…) van con la URL de tu Token Plan, " +
+			"p. ej. https://token-plan-sgp.xiaomimimo.com/v1: cámbiala con /provider o lixbon profile set --base-url."
+	}
+	return ""
 }
 
 // LocalPresets no piden clave.

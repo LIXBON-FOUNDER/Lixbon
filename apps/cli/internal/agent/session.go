@@ -140,6 +140,9 @@ type Session struct {
 	AutoApprove     bool
 	AutoRunCommands bool
 	NativeTools     bool
+	// TextCalls: con tools nativas, el modelo ha escrito alguna llamada en el
+	// texto; desde entonces el prompt le recuerda el formato (NativeFormatPrompt).
+	TextCalls       bool
 	PlanMode        bool
 	AutoCheck       bool
 	AllowedCommands []string

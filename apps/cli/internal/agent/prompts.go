@@ -120,17 +120,20 @@ func NativeSystemPrompt(workspace string) string {
 		"6. Tras cambiar código, si hay tests o build, verifícalo con run_command y corrige si el " +
 		"EXIT es distinto de 0.\n" +
 		"7. Cuando ya no quede nada que hacer, responde con texto normal resumiendo lo hecho.\n\n" +
-		// Los modelos chicos conocen el formato pero se saltan los tags
-		// <tool_call>; repetirlo hace que el JSON salga bien formado y el CLI
-		// lo parsee igual desde el texto.
-		"=== FORMATO DE LLAMADA ===\n" +
-		"Cada llamada va EXACTAMENTE así, sin " + fence + " alrededor:\n" +
-		"<tool_call>\n" +
-		`{"name": "write_file", "arguments": {"path": "…", "content": "…"}}` + "\n" +
-		"</tool_call>\n\n" +
 		"=== ARCHIVOS DEL WORKSPACE ===\n" +
 		tools.WorkspaceTree(workspace, tools.MaxTreeEntries)
 }
+
+// NativeFormatPrompt solo se añade cuando el modelo, con tools nativas, ya ha
+// escrito una llamada en el texto: los modelos chicos conocen el formato pero
+// se saltan los tags <tool_call>, y repetirlo hace que el JSON salga bien
+// formado para que el CLI lo parsee. Dárselo de entrada a uno que sí llama de
+// forma nativa (MiMo) hace que copie el formato en el texto en vez de llamar.
+const NativeFormatPrompt = "\n\n=== FORMATO DE LLAMADA ===\n" +
+	"Si escribes una llamada en el texto, va EXACTAMENTE así, sin " + fence + " alrededor:\n" +
+	"<tool_call>\n" +
+	`{"name": "write_file", "arguments": {"path": "…", "content": "…"}}` + "\n" +
+	"</tool_call>"
 
 // TextSystemPrompt es el prompt del protocolo de texto: describe cada
 // herramienta con un JSON de ejemplo.

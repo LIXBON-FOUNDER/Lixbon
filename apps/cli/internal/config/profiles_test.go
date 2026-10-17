@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestMiMoGetsItsWindowAndTokenPlanHint(t *testing.T) {
+	for base, want := range map[string]bool{
+		"https://token-plan-sgp.xiaomimimo.com/v1": true, Presets["xiaomi"]: true,
+		"https://xiaomimimo.com.evil.example/v1": false, Presets["openrouter"]: false,
+	} {
+		if IsMiMo(base) != want {
+			t.Errorf("IsMiMo(%s) debería ser %v", base, want)
+		}
+	}
+	if DefaultContext(Presets["xiaomi"]) != mimoContext || DefaultContext(Presets["openai"]) != DefaultGenericContext {
+		t.Fatal("la ventana por defecto de MiMo no debe ser la de un modelo local")
+	}
+	if KeyHint(Presets["xiaomi"], "tp-abc") == "" {
+		t.Fatal("una clave del Token Plan en la URL de pago por uso debe avisar")
+	}
+	for base, key := range map[string]string{
+		"https://token-plan-sgp.xiaomimimo.com/v1": "tp-abc", Presets["xiaomi"]: "sk-abc", Presets["openai"]: "tp-abc",
+	} {
+		if hint := KeyHint(base, key); hint != "" {
+			t.Errorf("KeyHint(%s, %s) no debería avisar: %s", base, key, hint)
+		}
+	}
+}
+
 func lixbonConfig() Config {
 	cfg := Default()
 	cfg.APIKey, cfg.Model, cfg.KeyModel = "lixbon_sk_abc", "qwen", "qwen"

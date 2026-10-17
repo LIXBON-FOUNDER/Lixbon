@@ -44,6 +44,8 @@ type picker struct {
 	// texto que devuelve a ese ancho y desplazable con las flechas.
 	content func(width int) []string
 	scroll  int
+	// form convierte el panel en un formulario (newForm).
+	form *form
 	// quiet: lo que imprima done va al pie o a un panel, no al transcript.
 	quiet bool
 	// token identifica a quién responde el panel (la aprobación en curso).
@@ -142,6 +144,9 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 	if p.content != nil {
 		return p.infoKey(msg.String())
 	}
+	if p.form != nil {
+		return p.form.key(msg)
+	}
 	switch k := msg.String(); k {
 	case "up", "ctrl+p", "shift+tab":
 		p.move(-1)
@@ -179,7 +184,7 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 
 // click elige la fila row del panel (contando desde su borde superior).
 func (p *picker) click(row int) (tea.Cmd, bool) {
-	if p.content != nil {
+	if p.content != nil || p.form != nil {
 		return nil, false
 	}
 	i := row - p.optionTop
@@ -190,6 +195,9 @@ func (p *picker) click(row int) (tea.Cmd, bool) {
 }
 
 func (p *picker) hints() string {
+	if p.form != nil {
+		return p.form.hints()
+	}
 	if p.content != nil && len(p.keys) == 0 {
 		return keyHints([2]string{"↑↓", "desplazar"}, [2]string{"esc", "cerrar"})
 	}
@@ -222,6 +230,9 @@ func (p *picker) view(width, maxRows int) []string {
 	inner := max(1, width-4)
 	if p.content != nil {
 		return p.infoView(width, inner, maxRows)
+	}
+	if p.form != nil {
+		return panel(p.form.view(inner), width, pal.acc, p.title)
 	}
 	var rows []panelRow
 	for _, b := range p.body {

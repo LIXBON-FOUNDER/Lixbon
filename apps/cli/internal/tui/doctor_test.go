@@ -24,16 +24,17 @@ func TestConfigMenuChangesMessagesAndRunsCommands(t *testing.T) {
 		h.key("down")
 	}
 	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	h.pump(h.formOpen)
 	h.send("7")
-	h.pump(func() bool { return h.m.prompt == nil })
+	h.pump(func() bool { return !h.formOpen() })
 	if h.chat.Cfg.MaxContextMessages != 7 {
 		t.Fatalf("mensajes: %d", h.chat.Cfg.MaxContextMessages)
 	}
 	if got := configLoad(h.chat.ConfigPath).MaxContextMessages; got != 7 {
 		t.Fatalf("no se guardó: %d", got)
 	}
-	contains(t, h.out(), "Se enviarán los últimos 7 mensajes")
+	contains(t, h.view(), "Se enviarán los últimos 7 mensajes")
+	notContains(t, h.out(), "Mensajes de historial")
 
 	h.send("/config")
 	for i := 0; i < 2; i++ {
@@ -53,10 +54,10 @@ func TestConfigRejectsInvalidMessageCount(t *testing.T) {
 		h.key("down")
 	}
 	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	h.pump(h.formOpen)
 	h.send("muchos")
-	h.pump(func() bool { return h.m.prompt == nil })
-	contains(t, h.out(), "Valor no válido.")
+	h.pump(func() bool { return !h.formOpen() })
+	contains(t, h.view(), "Valor no válido.")
 	if h.chat.Cfg.MaxContextMessages != 12 {
 		t.Fatalf("no debe cambiar: %d", h.chat.Cfg.MaxContextMessages)
 	}

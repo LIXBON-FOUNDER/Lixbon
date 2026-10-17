@@ -79,7 +79,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 	return 0
 }
 
-const noSessionHint = "Sin sesión en lixbon.com. /login inicia sesión; /provider conecta otro proveedor (OpenRouter, OpenAI, Kilo, LM Studio, Ollama…)."
+const noSessionHint = "Sin sesión en lixbon.com. /login inicia sesión; /provider conecta otro proveedor (OpenRouter, OpenAI, Xiaomi MiMo, Kilo, LM Studio, Ollama…)."
 
 // startupAccount sondea el proveedor activo. Sin sesión o con la clave
 // rechazada el chat arranca igual: así se puede conectar otro proveedor desde
