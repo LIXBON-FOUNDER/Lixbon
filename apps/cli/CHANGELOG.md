@@ -4,6 +4,13 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.9.0
+- Xiaomi MiMo funciona como proveedor: llama a las herramientas del CLI (leer, editar, `fetch_url`, preguntas con opciones…) en vez de escribirlas como texto, recibe su razonamiento de vuelta entre pasos y `/effort off` le apaga el razonamiento. Hay un preset `xiaomi`, la ventana de contexto por defecto es de 128000 tokens y, si pegas una clave del Token Plan (`tp-…`) con la URL de pago por uso, el CLI te avisa de que va con la URL de tu plan.
+- Con cualquier modelo que llama a las herramientas de forma nativa, el prompt ya no le pide escribir las llamadas en el texto; solo se lo recuerda a los modelos que ya las escriben así.
+- `/new`, `/clear` y reabrir una conversación desde `/history` muestran una pantalla limpia con solo esa conversación, sin lo que se habló en otra.
+- Dar de alta o cambiar algo (un proveedor, su clave, los ajustes de `/config`, el nombre de una rama, el mensaje de un commit) se hace en un formulario modal propio, con sus campos, pistas y errores dentro; ya no ocupa la caja del chat ni el transcript.
+- `/mcp` lista los servidores (elegir uno enseña sus herramientas) y permite añadir otro desde un formulario: nombre, comando o URL, variables o cabeceras, y si se guarda solo para ti o en el proyecto. El servidor arranca sin reiniciar el CLI.
+
 ## 2.8.0
 - El agente puede usar un navegador: abre páginas en tu navegador (el predeterminado si es Chrome, Brave, Chromium o Edge), las lee, hace clic, escribe en formularios, cambia de pestaña y, con modelos que ven imágenes, hace capturas. Sirve para páginas con JavaScript, formularios, sesiones iniciadas o tu app en `localhost`.
 - El navegador usa un perfil propio de Lixbon, separado del tuyo: inicia sesión donde haga falta con `/browser open <url>` y el agente la reutiliza. `/browser` muestra su estado; `/browser off` lo desactiva.

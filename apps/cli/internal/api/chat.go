@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/sse"
 )
 
@@ -34,10 +35,14 @@ type ChatRequest struct {
 
 // generic es el cuerpo para un servidor compatible con OpenAI: OpenAI y otros
 // rechazan los parámetros desconocidos (conversation_id, client_id, source…).
-func (r ChatRequest) generic() map[string]any {
+func (r ChatRequest) generic(mimo bool) map[string]any {
+	messages := openAIVision(r.Messages)
 	body := map[string]any{
-		"model": r.Model, "messages": openAIVision(r.Messages), "stream": true,
+		"model": r.Model, "messages": messages, "stream": true,
 		"stream_options": map[string]any{"include_usage": true},
+	}
+	if mimo {
+		mimoThinking(body, messages, r.Think == false)
 	}
 	if len(r.Tools) > 0 {
 		body["tools"] = r.Tools
@@ -49,6 +54,21 @@ func (r ChatRequest) generic() map[string]any {
 		body["reasoning_effort"] = r.Effort
 	}
 	return body
+}
+
+// mimoThinking adapta el razonamiento a MiMo: lo espera de vuelta como
+// reasoning_content en los pasos con tool_calls, y piensa por defecto, así que
+// para no razonar hay que apagarlo con thinking.type.
+func mimoThinking(body map[string]any, messages []map[string]any, off bool) {
+	for _, m := range messages {
+		if thinking, ok := m["thinking"]; ok {
+			m["reasoning_content"] = thinking
+			delete(m, "thinking")
+		}
+	}
+	if off {
+		body["thinking"] = map[string]any{"type": "disabled"}
+	}
 }
 
 type ChatStream struct {
@@ -67,7 +87,7 @@ func (c *Client) ChatStream(ctx context.Context, req ChatRequest) (*ChatStream, 
 	idle := newIdleReader(cancel, c.streamIdle())
 	var payload any = req
 	if c.Generic {
-		payload = req.generic()
+		payload = req.generic(config.IsMiMo(c.BaseURL))
 	}
 	resp, err := c.open(ctx, http.MethodPost, c.BaseURL+"/chat/completions", payload, true)
 	if err != nil {
@@ -151,7 +171,11 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 		"think": false,
 	}
 	if c.Generic {
-		payload = map[string]any{"model": model, "messages": openAIVision(messages)}
+		converted := openAIVision(messages)
+		payload = map[string]any{"model": model, "messages": converted}
+		if config.IsMiMo(c.BaseURL) {
+			mimoThinking(payload, converted, true)
+		}
 	}
 	var data struct {
 		Choices []struct {

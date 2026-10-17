@@ -173,6 +173,30 @@ func TestConfigureSwitchesTheSameClient(t *testing.T) {
 	}
 }
 
+func TestMiMoGetsReasoningBackAndCanStopThinking(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "user", "content": "x"},
+		{"role": "assistant", "content": "", "thinking": "leo el archivo", "tool_calls": []any{}},
+	}
+	body := ChatRequest{Model: "mimo-v2.5", Messages: messages, Think: false}.generic(true)
+	sent := body["messages"].([]map[string]any)[1]
+	if _, has := sent["thinking"]; has || sent["reasoning_content"] != "leo el archivo" {
+		t.Fatalf("el razonamiento debe volver como reasoning_content: %v", sent)
+	}
+	if _, has := messages[1]["reasoning_content"]; has {
+		t.Fatal("no debe tocar el historial original")
+	}
+	if thinking, _ := body["thinking"].(map[string]any); thinking["type"] != "disabled" {
+		t.Fatalf("Think false debe apagar el razonamiento de MiMo: %v", body["thinking"])
+	}
+	if body := (ChatRequest{Model: "m", Messages: messages, Think: "high"}).generic(true); body["thinking"] != nil {
+		t.Fatalf("sin pedir apagarlo, MiMo decide: %v", body["thinking"])
+	}
+	if sent := (ChatRequest{Model: "m", Messages: messages}).generic(false)["messages"].([]map[string]any)[1]; sent["reasoning_content"] != nil {
+		t.Fatalf("otros proveedores no cambian: %v", sent)
+	}
+}
+
 func TestGenericChatSendsReasoningEffortOnlyWhenAsked(t *testing.T) {
 	rec, base := newRecorder(t)
 	c := genericClient(base, "")

@@ -9,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 
@@ -95,9 +94,7 @@ type Model struct {
 	barModel, barPlan span
 	footMode          span
 
-	// secret sustituye a la caja mientras se pide una clave: lo escrito sale
-	// como •. alwaysAllowed avisa en el pie de que no se pregunta más.
-	secret        *textinput.Model
+	// alwaysAllowed avisa en el pie de que no se pregunta más.
 	alwaysAllowed bool
 
 	// liveReal son los tokens reales de los pasos terminados; liveChars y
@@ -123,7 +120,7 @@ type Model struct {
 	readGroup    *entry
 	browserGroup *entry
 	todoEntry    *entry
-	todoTurn  int
+	todoTurn     int
 
 	// chips son las imágenes en cola, en el orden de las de chat: el marcador
 	// [IMG#n] apunta a la n-ésima.

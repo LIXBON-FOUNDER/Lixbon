@@ -333,6 +333,7 @@ func (c *Chat) UseProfile(name string) error {
 	c.Model = firstNonEmpty(c.Cfg.KeyModel, c.Cfg.Model)
 	c.Session.Model = c.Model
 	c.Session.ContextWindow = c.Cfg.ContextWindow
+	c.Session.TextCalls = false
 	if c.Client.Generic && c.Mode == ModeDelegate {
 		c.Mode, c.Cfg.Mode = ModeAsk, ModeAsk
 	}
@@ -391,6 +392,7 @@ func (c *Chat) SetModel(model string) {
 	c.mu.Lock()
 	c.Model = model
 	c.Session.Model = model
+	c.Session.TextCalls = false
 	c.mu.Unlock()
 	c.Cfg.Model = model
 	_ = c.SaveConfig()

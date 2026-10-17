@@ -140,7 +140,7 @@ func (a *App) authLogin(ctx context.Context, args []string) int {
 		profile.BaseURL = resolved
 	}
 	if !exists {
-		profile.ContextWindow, profile.Generic = config.DefaultGenericContext, true
+		profile.ContextWindow, profile.Generic = config.DefaultContext(profile.BaseURL), true
 	}
 	key, ok := a.providerKey(prompts, name, profile.BaseURL, given["api-key"], *apiKey)
 	if !ok {
@@ -167,6 +167,9 @@ func (a *App) authLogin(ctx context.Context, args []string) int {
 		return 1
 	}
 	fmt.Fprintf(a.Stdout, "Proveedor «%s» guardado y activo (%s).\n", name, hostOf(profile.BaseURL))
+	if hint := config.KeyHint(profile.BaseURL, key); hint != "" {
+		fmt.Fprintln(a.Stderr, hint)
+	}
 	return a.reportModels(ctx, cfg)
 }
 

@@ -62,7 +62,7 @@ func (m *Model) cmdProvider(arg string) tea.Cmd {
 		options = append(options, o)
 	}
 	options = append(options, option{Label: "Añadir proveedor…", Value: addProviderValue,
-		Desc: "OpenRouter, OpenAI, Kilo, LM Studio, Ollama u otro servidor compatible"})
+		Desc: "OpenRouter, OpenAI, Xiaomi MiMo, Kilo, LM Studio, Ollama u otro servidor compatible"})
 	p := newPicker("Proveedor de modelos", options, func(value string, cancelled bool) tea.Cmd {
 		switch {
 		case cancelled:
@@ -92,11 +92,14 @@ func (m *Model) pickPresetToAdd() {
 		case cancelled:
 			return nil
 		case value == customValue:
-			return promptCmd("Nombre del proveedor", m.askProviderURL)
+			m.customProviderForm()
+			return nil
 		}
 		return func() tea.Msg { return runCommandMsg{name: "provider", arg: addArg + " " + value} }
 	})
 }
+
+const optionalKeyHint = "déjala vacía si el servidor no la pide"
 
 func (m *Model) addPreset(name string) tea.Cmd {
 	baseURL, ok := config.Presets[name]
@@ -107,59 +110,66 @@ func (m *Model) addPreset(name string) tea.Cmd {
 	if slices.Contains(config.LocalPresets, name) {
 		return m.addProvider(name, baseURL, "")
 	}
-	return m.promptSecret("API key de «"+name+"» (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
-		return m.addProvider(name, baseURL, strings.TrimSpace(key))
+	urlHint := "la del preset; cámbiala si tu cuenta usa otra"
+	if config.IsMiMo(baseURL) {
+		urlHint = "pago por uso; con el Token Plan, la URL de tu plan (p. ej. https://token-plan-sgp.xiaomimimo.com/v1)"
+	}
+	m.picker = newForm("Añadir «"+name+"»", []*formField{
+		field("URL base", withValue(baseURL), withHint(urlHint)),
+		field("API key", secretField(), optionalField(), withHint(optionalKeyHint)),
+	}, func(v []string) (tea.Cmd, error) {
+		url, err := config.NormalizeBaseURL(v[0])
+		if err != nil {
+			return nil, err
+		}
+		return m.saveProvider(name, url, v[1])
 	})
+	// La clave es lo único que suele faltar: el cursor empieza ahí.
+	return m.picker.form.focusField(1)
 }
 
-func promptCmd(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
-	return func() tea.Msg { return promptMsg{label: label, onSubmit: onSubmit} }
-}
-
-func promptSecretCmd(label string, onSubmit func(string) tea.Cmd) tea.Cmd {
-	return func() tea.Msg { return promptMsg{label: label, onSubmit: onSubmit, secret: true} }
-}
-
-func (m *Model) askProviderURL(text string) tea.Cmd {
-	name, err := config.NormalizeProfileName(text)
-	if err != nil {
-		m.add(errLine(err.Error()))
-		return nil
-	}
-	if _, exists := m.chat.Cfg.Profiles()[name]; exists {
-		m.add(errLine(fmt.Sprintf("Ya existe el proveedor «%s».", name)))
-		return nil
-	}
-	label := "URL base o preset (" + strings.Join(config.PresetNames(), ", ") + ")"
-	if preset, ok := config.Presets[name]; ok {
-		label += " " + glyphSep + " escribe " + name + " para " + preset
-	}
-	return promptCmd(label, func(text string) tea.Cmd { return m.askProviderKey(name, text) })
-}
-
-func (m *Model) askProviderKey(name, text string) tea.Cmd {
-	baseURL, err := config.NormalizeBaseURL(text)
-	if err != nil {
-		m.add(errLine(err.Error()))
-		return nil
-	}
-	return promptSecretCmd("API key (escribe - si el servidor no la pide)", func(key string) tea.Cmd {
-		return m.addProvider(name, baseURL, strings.TrimSpace(key))
+func (m *Model) customProviderForm() {
+	m.picker = newForm("Añadir proveedor", []*formField{
+		field("Nombre", withHint("letras, números, punto o guion; p. ej. mi-servidor")),
+		field("URL base", withHint("termina en /v1, o un preset: "+strings.Join(config.PresetNames(), ", "))),
+		field("API key", secretField(), optionalField(), withHint(optionalKeyHint)),
+	}, func(v []string) (tea.Cmd, error) {
+		name, err := config.NormalizeProfileName(v[0])
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := m.chat.Cfg.Profiles()[name]; exists {
+			return nil, fmt.Errorf("Ya existe el proveedor «%s».", name)
+		}
+		url, err := config.NormalizeBaseURL(v[1])
+		if err != nil {
+			return nil, err
+		}
+		return m.saveProvider(name, url, v[2])
 	})
 }
 
 func (m *Model) addProvider(name, baseURL, key string) tea.Cmd {
-	if key == "-" {
-		key = ""
-	}
-	profile := config.Profile{BaseURL: baseURL, APIKey: key, ContextWindow: config.DefaultGenericContext, Generic: true}
-	if err := m.chat.Cfg.AddProfile(name, profile); err != nil {
+	cmd, err := m.saveProvider(name, baseURL, key)
+	if err != nil {
 		m.add(errLine(err.Error()))
-		return nil
+	}
+	return cmd
+}
+
+// saveProvider guarda el proveedor y lo activa; el error deja abierto el
+// formulario que lo pidió.
+func (m *Model) saveProvider(name, baseURL, key string) (tea.Cmd, error) {
+	profile := config.Profile{BaseURL: baseURL, APIKey: key, ContextWindow: config.DefaultContext(baseURL), Generic: true}
+	if err := m.chat.Cfg.AddProfile(name, profile); err != nil {
+		return nil, err
 	}
 	m.saveConfig()
 	m.add(okLine(fmt.Sprintf("Proveedor «%s» añadido (%s)", name, baseURL)))
-	return m.switchProvider(name)
+	if hint := config.KeyHint(baseURL, key); hint != "" {
+		m.add(warnLine(hint))
+	}
+	return m.switchProvider(name), nil
 }
 
 func (m *Model) switchProvider(name string) tea.Cmd {
@@ -226,7 +236,7 @@ func (m *Model) offerNewKey(name string, generic bool) {
 		m.add(note("/login inicia sesión de nuevo y /key pega otra API key."))
 		return
 	}
-	m.promptSecret("Nueva API key para «"+name+"» (Esc cancela)", func(key string) tea.Cmd {
+	m.promptSecret("Nueva API key para «"+name+"»", func(key string) tea.Cmd {
 		return m.setProviderKey(name, strings.TrimSpace(key))
 	})
 }

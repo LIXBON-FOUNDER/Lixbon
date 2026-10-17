@@ -74,14 +74,15 @@ func TestProviderAddFlowCreatesAndActivatesAGenericProvider(t *testing.T) {
 	h := newHarness(t, nil)
 
 	openCustomProviderPrompt(h)
+	for _, want := range []string{"Nombre", "URL base", "API key", "opcional"} {
+		contains(t, h.view(), want)
+	}
 	h.send("Mi-Local")
-	h.pump(func() bool { return h.m.prompt != nil })
 	h.send(url)
-	h.pump(func() bool { return h.m.prompt != nil })
-	h.send("-")
-	h.pump(func() bool { return h.m.picker != nil && h.m.busy == "" })
+	h.key("enter")
+	h.pump(func() bool { return !h.formOpen() && h.m.picker != nil && h.m.busy == "" })
 
-	contains(t, h.out(), "Proveedor «mi-local» añadido")
+	notContains(t, h.out(), "Nombre del proveedor")
 	contains(t, h.view(), "Modelo")
 	p := h.chat.Cfg.Profiles()["mi-local"]
 	if !p.Generic || p.BaseURL != url || p.APIKey != "" || p.ContextWindow != config.DefaultGenericContext {
@@ -101,16 +102,19 @@ func TestProviderAddFlowRejectsBadInput(t *testing.T) {
 	h := newHarness(t, nil)
 	openCustomProviderPrompt(h)
 	h.send("con espacios")
-	contains(t, h.out(), "Nombre no válido")
-	if h.m.prompt != nil {
-		t.Fatal("un nombre inválido cancela el alta")
+	h.send("http://localhost:1234/v1")
+	h.key("enter")
+	contains(t, h.view(), "Nombre no válido")
+	if !h.formOpen() {
+		t.Fatal("un dato inválido se explica en el formulario, que sigue abierto")
 	}
+	h.key("esc")
 
 	openCustomProviderPrompt(h)
 	h.send("ok")
-	h.pump(func() bool { return h.m.prompt != nil })
 	h.send("localhost:1234")
-	contains(t, h.out(), "La URL debe empezar por http")
+	h.key("enter")
+	contains(t, h.view(), "La URL debe empezar por http")
 	if len(h.chat.Cfg.Profiles()) != 1 {
 		t.Fatal("no debe crearse ningún perfil")
 	}
@@ -206,13 +210,11 @@ func TestProviderRejectedKeyAsksForANewOneAndReconnects(t *testing.T) {
 		}
 	})
 	h.send("/provider local")
-	h.pump(func() bool { return h.m.prompt != nil })
-	contains(t, h.out(), "rechazó la clave")
+	h.pump(h.formOpen)
+	contains(t, h.view(), "Nueva API key para «local»")
 
 	h.send("buena")
-	h.pump(func() bool { return strings.Contains(h.out(), "modelos disponibles") })
-	contains(t, h.out(), "Clave de «local» actualizada")
-	contains(t, h.out(), "Modelo: Llama")
+	h.pump(func() bool { return strings.Contains(h.out()+h.view(), "modelos disponibles") })
 	if got := configLoad(h.chat.ConfigPath).Profiles()["local"].APIKey; got != "buena" {
 		t.Fatalf("clave guardada: %q", got)
 	}
@@ -222,9 +224,9 @@ func TestProviderKeyCommandEditsAnotherProviderWithoutSwitching(t *testing.T) {
 	_, _, add := withExternalProvider(t)
 	h := newHarness(t, add)
 	h.send("/provider key local")
-	h.pump(func() bool { return h.m.prompt != nil })
+	h.pump(h.formOpen)
 	h.send("nueva-clave")
-	h.pump(func() bool { return h.m.prompt == nil })
+	h.pump(func() bool { return !h.formOpen() })
 	cfg := configLoad(h.chat.ConfigPath)
 	if cfg.ActiveProfile() != "lixbon" || cfg.Profiles()["local"].APIKey != "nueva-clave" || cfg.APIKey != "k" {
 		t.Fatalf("activo=%q local=%+v clave activa=%q", cfg.ActiveProfile(), cfg.Profiles()["local"], cfg.APIKey)
@@ -246,7 +248,7 @@ func openCustomProviderPrompt(h *harness) {
 		h.key("down")
 	}
 	h.key("enter")
-	h.pump(func() bool { return h.m.prompt != nil })
+	h.pump(h.formOpen)
 }
 
 func TestProviderAddOffersThePresetsAndAsksOnlyForTheKey(t *testing.T) {
@@ -261,8 +263,9 @@ func TestProviderAddOffersThePresetsAndAsksOnlyForTheKey(t *testing.T) {
 	h.key("esc")
 
 	h.send("/provider --add groq")
-	h.pump(func() bool { return h.m.prompt != nil })
-	contains(t, h.out(), "API key de «groq»")
+	h.pump(h.formOpen)
+	contains(t, h.view(), "Añadir «groq»")
+	contains(t, h.view(), "https://api.groq.com/openai/v1")
 	h.key("esc")
 	if len(h.chat.Cfg.Profiles()) != 1 {
 		t.Fatal("cancelar no debe crear el proveedor")
