@@ -350,17 +350,7 @@
 .web .plans { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 48px; }
 
 .web .plan-card,
-.web .plan-card:hover,
-.web .plan-card--featured,
-.web .plan-card--featured:hover {
-  gap: 22px;
-  padding: 28px 0 0;
-  border-radius: 0;
-  background: none;
-  border-top: 1px solid var(--linea-fuerte);
-  transform: none;
-}
-.web .plan-card--featured { border-top-color: var(--ink); }
+.web .plan-card--featured { gap: 22px; }
 
 .web .plan-card__name { font-family: var(--font-display); font-weight: var(--display-peso); letter-spacing: var(--display-tracking); font-size: 32px; line-height: 1; }
 .web .plan-card__tag { padding: 0; background: none; font-family: var(--font-sub); font-size: 13px; color: var(--accent); }
@@ -471,13 +461,6 @@
 .web .release__changelog { max-width: 760px; font-size: 16px; line-height: 1.6; color: var(--ink-soft); }
 
 .web .sk-grid { max-width: none; margin: 0; gap: 0 48px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
-.web .sk-card,
-.web .sk-card:hover {
-  padding: 24px 0 32px;
-  border-radius: 0;
-  background: none;
-  border-top: 1px solid var(--linea);
-}
 .web .sk-card__title { font-family: var(--font-display); letter-spacing: var(--display-tracking); font-weight: var(--display-peso); font-size: 26px; line-height: 1.1; transition: color 0.15s ease; }
 .web .sk-card:hover .sk-card__title { color: var(--accent); }
 .web .sk-card__summary { font-size: 15px; line-height: 1.55; }
@@ -502,15 +485,7 @@
 .web .guias__cabecera { max-width: none; margin-bottom: 64px; }
 .web .guias__lead { max-width: 620px; margin-top: 24px; font-size: 19px; }
 .web .guias__lista { gap: 0 48px; }
-.web .guias__item,
-.web .guias__item:hover {
-  gap: 10px;
-  padding: 28px 0 36px;
-  border-radius: 0;
-  background: none;
-  border-top: 1px solid var(--linea);
-  transform: none;
-}
+.web .guias__item { gap: 10px; }
 .web .guias__item h2 { font-family: var(--font-display); letter-spacing: var(--display-tracking); font-weight: var(--display-peso); font-size: 30px; line-height: 1.08; transition: color 0.15s ease; }
 .web .guias__item:hover h2 { color: var(--accent); }
 .web .guias__item p { font-size: 16px; line-height: 1.55; }
