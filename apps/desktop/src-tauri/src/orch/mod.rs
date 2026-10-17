@@ -26,6 +26,8 @@ mod events_tests;
 #[cfg(test)]
 mod tx_ops_tests;
 #[cfg(test)]
+mod attention_update_api_tests;
+#[cfg(test)]
 mod spawn_cleanup_tests;
 #[cfg(test)]
 mod hardening_tests;
