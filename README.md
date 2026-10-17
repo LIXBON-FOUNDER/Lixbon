@@ -52,7 +52,7 @@ por PR; cada producto se publica con su propia etiqueta.
 | **Web** — lixbon.com | `apps/web` | React 19 · Vite · SSR estático | — | Dentro de la imagen del gateway |
 | **Desktop** — Windows / macOS | `apps/desktop` | Tauri 2 · Rust · React | 2.0.29 | Tag `desktop-vX.Y.Z` → `tauri.yml` → MSI/DMG con auto-update |
 | **CLI** | `apps/cli` | Go · un solo ejecutable | 2.8.0 | Tag `cli-vX.Y.Z` → `release-cli.yml` → binarios servidos desde lixbon.com (R2) y registrados en el gateway |
-| **Móvil** — Android | `apps/mobile` | React Native · Expo | 0.6.1 | Tag `mobile-vX.Y.Z` → `mobile.yml` → APK |
+| **Móvil** — Android | `apps/mobile` | React Native · Expo | 0.7.0 | Tag `mobile-vX.Y.Z` → `mobile.yml` → APK |
 
 Flujo de ramas, commits y releases: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
