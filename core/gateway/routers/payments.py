@@ -16,6 +16,7 @@ from core.billing import stripe_gateway as sg
 from core.billing.credits import MICRO_PER_USD, microusd_to_usd
 from core.config import STRIPE_PUBLISHABLE_KEY
 from core.persistence.queries import (
+    get_donation_settings,
     credit_usage_daily,
     get_credit_account,
     get_credit_pack,
@@ -63,6 +64,16 @@ def _require_enabled():
         raise HTTPException(status_code=503, detail={
             "code": "billing_disabled",
             "message": "Los pagos en línea aún no están disponibles.",
+        })
+
+
+def _require_subscriptions_open():
+    """Mientras las donaciones sustituyen a las suscripciones no se dan de alta
+    planes nuevos. Quien ya paga puede cancelar o reactivar el suyo."""
+    if get_donation_settings()["enabled"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "subscriptions_paused",
+            "message": "Las suscripciones están en pausa: ahora lixbon se sostiene con donaciones.",
         })
 
 
@@ -162,6 +173,7 @@ async def subscribe(
     """Alta o cambio de plan con una tarjeta guardada. Si el banco pide
     confirmación, devuelve el secreto para que el navegador la resuelva."""
     _require_enabled()
+    _require_subscriptions_open()
     try:
         return sg.subscribe(user_data, payload.plan_id, payload.payment_method_id)
     except Exception as exc:
