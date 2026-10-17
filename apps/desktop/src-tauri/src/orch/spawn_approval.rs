@@ -183,6 +183,16 @@ impl Core {
             let _gate = self.gate();
             self.check_parent_live(&p)?;
             let fact = spawn_requested_fact(&ctx, &p)?;
+            // `record_facts` devuelve éxito SIN guardar nada cuando el backend no tiene Event Log (`state.json`). Una
+            // denegación solo se devuelve con su Event durable: sin Event Log no hay dónde dejarlo, así que se informa
+            // de eso (no de una denegación «registrada»). Sigue sin pendiente ni efecto alguno.
+            if let Some(denial) = &registrar_denegacion {
+                if !self.event_log_available() {
+                    return Err(format!(
+                        "No se pudo dejar constancia durable de la solicitud denegada: este modo (state.json) no tiene Event Log. No se lanza nada. Motivo de la denegación: {denial}"
+                    ));
+                }
+            }
             self.record_facts(&ctx, vec![fact]).map_err(String::from)?;
             if let Some(denial) = registrar_denegacion {
                 // Ya es durable. La denegación NO crea pendiente, Task, aprobación, aviso, terminal, proceso ni

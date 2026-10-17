@@ -248,6 +248,49 @@ fn denial_policy_es_estatica_y_coincide_con_la_resolucion_sin_cli() {
     assert_eq!(p, esperada);
 }
 
+/// Un Core en modo legacy (`state.json`, sin Event Log) con una tarea anterior a los Projects (sin `project_id`).
+fn core_legacy_sin_event_log() -> (super::boot_tests::Limpia, std::sync::Arc<super::Core>, String) {
+    let (limpia, _data, _core_dir) = super::boot_tests::dirs();
+    let mut orch = super::Orch::default();
+    std::sync::Arc::get_mut(&mut orch.0).unwrap().resolver = fake;
+    let core = orch.0;
+    core.settings.lock().unwrap().enabled = true;
+    let tarea = super::boot_tests::nueva_tarea(&core, "legacy");
+    assert_eq!(core.lock().tasks.get(&tarea).unwrap().project_id, None, "tarea anterior a Projects");
+    (limpia, core, tarea)
+}
+
+#[test]
+fn sin_event_log_una_denegacion_explicita_no_se_devuelve_como_registrada() {
+    // En `state.json` `record_facts` devuelve éxito sin guardar nada: devolver la denegación sería afirmar un Event que no existe.
+    let (_l, core, tarea) = core_legacy_sin_event_log();
+    assert!(!core.event_log_available(), "el modo legacy no tiene Event Log");
+    let args = json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true, "profile": EXPLICITA });
+    let error = core.rpc(Caller::Agent(Some(tarea.clone())), "", "spawn", &args).expect_err("no se lanza");
+    assert!(error.contains("no tiene Event Log") && error.contains("No se pudo dejar constancia"), "se informa que no quedó registrada: {error}");
+    assert!(error.contains("bloqueado"), "y se conserva el motivo para quien lo lee: {error}");
+    assert!(!error.starts_with("Perfil"), "no es la denegación a secas: {error}");
+    // Ningún efecto: ni pendiente, ni hija, ni terminal, ni aviso a la interfaz.
+    assert!(core.list_pending_spawns().is_empty());
+    assert_eq!(core.lock().tasks.len(), 1, "solo la tarea original");
+    assert!(core.terms.lock().unwrap().is_empty());
+}
+
+#[test]
+fn sin_event_log_un_bloqueo_del_entorno_o_una_entrada_invalida_siguen_como_siempre() {
+    let (_l, core, tarea) = core_legacy_sin_event_log();
+    let pide = |extra: Value| {
+        let mut args = json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true });
+        for (k, v) in extra.as_object().unwrap() {
+            args[k] = v.clone();
+        }
+        core.rpc(Caller::Agent(Some(tarea.clone())), "", "spawn", &args)
+    };
+    assert!(pide(json!({ "agent": "inventado" })).unwrap_err().contains("Agente desconocido"));
+    // Sin denegación explícita el camino de aprobación no cambia: queda pendiente (como antes de LXO-88).
+    assert_eq!(pide(json!({ "profile": "explorar" })).unwrap()["status"], "pending");
+}
+
 #[test]
 fn ok_y_unverified_siguen_el_camino_de_aprobacion_y_no_son_denegaciones() {
     let casos: [(&str, Resolver, &str); 2] = [("spawn-ok", verificada, "ok"), ("spawn-unverified", fake, "unverified")];

@@ -671,6 +671,12 @@ impl Core {
         self.persister.health()
     }
 
+    /// ¿La persistencia vigente guarda el Event Log? En `state.json` (arranque legacy o degradado) NO: ahí
+    /// `record_facts` devuelve éxito sin guardar nada, así que quien necesite un Event durable debe comprobarlo antes.
+    pub(super) fn event_log_available(&self) -> bool {
+        self.persister.records_events()
+    }
+
     /// Prueba: deja el Core en solo lectura sin pasar por un fallo real del almacén.
     #[cfg(test)]
     pub(super) fn degrade_for_tests(&self, reason: &str) {

@@ -781,7 +781,12 @@ spawn_request(caller, args)
 * **Cada RPC es un intento nuevo** (otro `pending_id`, otro Event); los reintentos del *append* de un mismo Event
   reutilizan su `(kind, idem_key)` y no duplican.
 * Sin Event Log (`state.json`/degradado) no hay dónde registrar: con el Core en solo lectura la persistencia falla y
-  se informa ese fallo, no la denegación.
+  se informa ese fallo, no la denegación. En modo legacy `record_facts` devuelve éxito **sin guardar nada**, así que
+  la rama de denegación comprueba `Core::event_log_available()` ANTES y, si no hay Event Log, devuelve el error «No
+  se pudo dejar constancia durable de la solicitud denegada…» (con el motivo de la denegación al final), nunca la
+  denegación a secas: no se afirma un Event que no existe. Sigue sin pendiente, Task, aviso, PTY, proceso ni worktree
+  (`sin_event_log_una_denegacion_explicita_no_se_devuelve_como_registrada`, con una tarea sin `project_id`). El resto del
+  modo legacy (entrada inválida, bloqueo del entorno, `ok`/`unverified`) no cambia.
 
 ### Reinicio
 Los pendientes viven en memoria y todavía no se reconstruyen ni se reconcilian al arrancar. Este cambio no añade
