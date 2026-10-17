@@ -83,7 +83,7 @@ def target_or_503(model: str, strict: bool = True) -> tuple[str, dict, str]:
     ese es el camino de desarrollo, no un error.
     """
     try:
-        return deps.orquestador.ollama_target(model, strict=strict)
+        destino = deps.orquestador.ollama_target(model, strict=strict)
     except ModelUnavailable as exc:
         raise HTTPException(status_code=503, detail={
             "code": "model_not_available",
@@ -92,3 +92,5 @@ def target_or_503(model: str, strict: bool = True) -> tuple[str, dict, str]:
             "model": exc.model,
             "nodes_online": exc.nodes_online,
         }) from exc
+    deps.orquestador.registrar_peticion()
+    return destino

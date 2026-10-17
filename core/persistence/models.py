@@ -338,6 +338,21 @@ class UsagePolicy(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class DonationSettings(Base):
+    """Fila única (id=1). Mientras `enabled` valga 1, la web muestra las
+    donaciones donde iban las suscripciones. Es temporal: la configuración de
+    planes y tarifas no se toca. `total_cents` lo ajusta el admin a mano con lo
+    recibido en PayPal."""
+    __tablename__ = "donation_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    enabled: Mapped[int] = mapped_column(nullable=False, default=0)
+    total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Meta que dibuja la barra de progreso de /plans; 0 = sin barra.
+    goal_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class ModelWeight(Base):
     """Peso en créditos por millón de tokens, por modelo (longest-prefix match,
     '*' es el default). Separada de `model_pricing` a propósito: esa tabla es

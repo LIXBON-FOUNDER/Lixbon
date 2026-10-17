@@ -1,4 +1,5 @@
 // Si falta la clave cae al español y, si tampoco existe, devuelve la clave.
+import { useCallback } from 'react';
 import { useLocale } from './LocaleContext';
 import { DICTIONARIES } from './dictionaries';
 import { SOURCE_LOCALE } from './LocaleContext';
@@ -18,8 +19,10 @@ export function useT(namespace) {
   if (!dict && import.meta.env.DEV) {
     throw new Error(`useT: namespace desconocido "${namespace}"`);
   }
-  return (key, vars) => {
+  // Estable entre renders: hay efectos con `t` en sus dependencias (Facturación)
+  // y una función nueva en cada render los repetía sin fin.
+  return useCallback((key, vars) => {
     const value = lookup(dict[locale], key) ?? lookup(dict[SOURCE_LOCALE], key) ?? key;
     return interpolate(value, vars);
-  };
+  }, [dict, locale]);
 }

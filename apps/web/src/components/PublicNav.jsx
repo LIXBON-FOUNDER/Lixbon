@@ -5,9 +5,41 @@ import { stripLocale } from '../i18n/paths';
 import { useAuth } from '../hooks/useAuth';
 import { useDismiss } from '../hooks/useDismiss';
 import { useT } from '../i18n/useT';
+import { useLocale } from '../i18n/LocaleContext';
+import { urlFounder } from '../lib/founder';
 import { Logo } from './Logo';
-import { IconChevron, IconMenu, IconX } from './Icons';
+import { IconChevron, IconCorazon, IconMenu, IconX } from './Icons';
 import { LanguageSwitch } from './LanguageSwitch';
+import { useDonaciones } from '../lib/donaciones';
+
+const CLAVE_FRANJA = 'lixbon-franja-cerrada';
+
+// La misma franja que founder.lixbon.com. Empieza visible para que el
+// prerender y la primera pintura coincidan; se oculta tras montar si el
+// visitante ya la cerró.
+function Franja() {
+  const t = useT('nav');
+  const donaciones = useDonaciones();
+  const locale = useLocale();
+  const [cerrada, setCerrada] = useState(false);
+  useEffect(() => {
+    try { if (localStorage.getItem(CLAVE_FRANJA) === '1') setCerrada(true); } catch { /* sin almacenamiento */ }
+  }, []);
+  if (cerrada || !donaciones?.enabled) return null;
+  const cerrar = () => {
+    setCerrada(true);
+    try { localStorage.setItem(CLAVE_FRANJA, '1'); } catch { /* sin almacenamiento */ }
+  };
+  return (
+    <div className="franja">
+      <p>{t('bannerText')}</p>
+      <a href={urlFounder('/donate', locale)}>{t('bannerLink')}</a>
+      <button type="button" className="franja__cerrar" onClick={cerrar} aria-label={t('bannerClose')}>
+        <IconX size={14} />
+      </button>
+    </div>
+  );
+}
 
 function useMenu(t) {
   return [
@@ -42,11 +74,14 @@ export function PublicNav() {
   const { user } = useAuth();
   const t = useT('nav');
   const tc = useT('common');
+  const locale = useLocale();
   const [menuOpen, setMenuOpen] = useState(false);
   const [abierto, setAbierto] = useState(null);
   const navRef = useRef(null);
   const [scrolled, setScrolled] = useState(false);
   const menu = useMenu(t);
+  // Donar solo aparece mientras el admin tenga las donaciones activas.
+  const donar = useDonaciones()?.enabled;
 
   useEffect(() => {
     const alMover = () => setScrolled(window.scrollY > 8);
@@ -62,6 +97,8 @@ export function PublicNav() {
   const grupoActivo = (g) => (g.to ? coincide(ruta, g.to) : g.items.some((i) => coincide(ruta, i.to)));
 
   return (
+    <>
+    <Franja />
     <header className={`pubnav ${scrolled ? 'is-scrolled' : ''}`} ref={navRef}>
       <div className="pubnav__in">
         <Link to="/chat" className="pubnav__logo" aria-label={t('home')}><Logo /></Link>
@@ -98,10 +135,9 @@ export function PublicNav() {
         </nav>
 
         <div className="pubnav__actions">
-          <div className="btn-grupo pubnav__cta">
-            <LanguageSwitch className="btn-grupo__item btn-grupo__item--sec pubnav__idioma" conCodigo />
-            <Link to="/chat" className="btn-grupo__item">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
-          </div>
+          <LanguageSwitch className="pubnav__icono pubnav__idioma" conCodigo />
+          <Link to="/chat" className="pill pill--tinta pubnav__cta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
+          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva pubnav__donar"><IconCorazon size={16} />{t('donate')}</a>}
 
           <button
             className="icon-btn pubnav__toggle"
@@ -126,7 +162,12 @@ export function PublicNav() {
             ))}
           </div>
         )))}
+        <div className="pubnav__menu-botones">
+          <Link to="/chat" className="pill pill--tinta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
+          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva"><IconCorazon size={16} />{t('donate')}</a>}
+        </div>
       </div>
     </header>
+    </>
   );
 }

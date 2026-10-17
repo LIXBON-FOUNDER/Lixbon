@@ -43,9 +43,10 @@ const AdminAuditoria = perezosa(admin, 'AdminAuditoria');
 const AdminTransacciones = perezosa(admin, 'AdminTransacciones');
 const AdminLiquidaciones = perezosa(admin, 'AdminLiquidaciones');
 const AdminPasarela = perezosa(admin, 'AdminPasarela');
+const AdminDonaciones = perezosa(admin, 'AdminDonaciones');
 const AdminSkills = perezosa(admin, 'AdminSkills');
 const AdminCorreos = perezosa(admin, 'AdminCorreos');
-const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminSkills, AdminCorreos];
+const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminDonaciones, AdminSkills, AdminCorreos];
 
 const POR_SECCION = {
   chat: [ChatPage], c: [ChatPage], guides: [GuiasPage], visuals: [VisualsPage], auth: [AuthPage],
@@ -95,6 +96,7 @@ function LocalizedRoutes() {
         <Route path="pagos" element={<Navigate to="/admin/pagos/transacciones" replace />} />
         <Route path="pagos/transacciones" element={<AdminTransacciones />} />
         <Route path="pagos/liquidaciones" element={<AdminLiquidaciones />} />
+        <Route path="pagos/donaciones" element={<AdminDonaciones />} />
         <Route path="pagos/pasarela" element={<AdminPasarela />} />
         <Route path="usuarios" element={<AdminUsuarios />} />
         <Route path="releases" element={<AdminReleases />} />
@@ -125,7 +127,9 @@ export function AppRoutes() {
   // <Routes>, así que si LocaleProvider estuviera solo ahí dentro los
   // confirmar() saldrían siempre en español).
   const { pathname, search, hash } = useLocation();
-  const locale = localeDePath(pathname);
+  // El admin está escrito en español y no lleva prefijo: sin esto, lo que
+  // comparte con la web (gráfico de uso, confirmar()) le salía en inglés.
+  const locale = /^\/admin(\/|$)/.test(pathname) ? 'es' : localeDePath(pathname);
 
   // La web arranca en inglés; solo se abre en español si el usuario lo eligió.
   // Se mira una vez, al entrar, para no pelear con los enlaces sin prefijo.

@@ -13,5 +13,6 @@ export { default as AdminAuditoria } from './Auditoria';
 export { default as AdminTransacciones } from './Transacciones';
 export { default as AdminLiquidaciones } from './Liquidaciones';
 export { default as AdminPasarela } from './Pasarela';
+export { default as AdminDonaciones } from './Donaciones';
 export { default as AdminSkills } from './Skills';
 export { default as AdminCorreos } from './Correos';

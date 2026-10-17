@@ -64,6 +64,7 @@ async def get_nodes(_admin: dict[str, Any] = Depends(admin_required)) -> dict[st
     return {
         "nodes": list_nodes(mask_token=True),
         "live_status": deps.orquestador.estado_nodos(),
+        "summary": deps.orquestador.resumen_cluster(),
     }
 
 

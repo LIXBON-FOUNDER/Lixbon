@@ -1,4 +1,5 @@
 import { tieneVisuals } from '../lib/planes';
+import { useDonaciones } from '../lib/donaciones';
 import { useTema } from '../hooks/useTema';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate as useRawNavigate } from 'react-router-dom';
@@ -13,7 +14,7 @@ import { Desplegable } from './Desplegable';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX, IconSun, IconMoon,
-  IconBook, IconBolt, IconGlobe, IconUser, IconLayers,
+  IconBook, IconBolt, IconGlobe, IconUser, IconLayers, IconCorazon,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
@@ -117,6 +118,7 @@ export function Sidebar({
   const tc = useT('common');
   const tn = useT('nav');
   const locale = useLocale();
+  const donaciones = useDonaciones();
   const { pathname } = useLocation();
   const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -295,8 +297,13 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* Solo la cuenta gratuita ve el atajo; en Pro/Advance se cambia de plan desde Ajustes. */}
-        {user && (!user.plan_id || user.plan_id === 'free') && (
+        {/* Con las donaciones activas, «Donar» lo ve todo el mundo; si no, solo
+            la cuenta gratuita ve el atajo a los planes. */}
+        {donaciones?.enabled ? (
+          <button className="sidebar__upgrade sidebar__upgrade--donar" onClick={() => go('/plans')}>
+            <IconCorazon size={16} /> <span>{t('donate')}</span>
+          </button>
+        ) : user && (!user.plan_id || user.plan_id === 'free') && (
           <button className="sidebar__upgrade" onClick={() => go('/plans')}>
             <IconBolt size={16} /> <span>{tc('upgrade')}</span>
           </button>
@@ -388,7 +395,7 @@ export function Sidebar({
                   {tc('logIn')}
                 </Link>
                 <Link to="/plans" className="sidebar__plan-link" onClick={compact ? onClose : undefined}>
-                  {t('seePlans')}
+                  {donaciones?.enabled ? t('donate') : t('seePlans')}
                 </Link>
               </div>
             </>

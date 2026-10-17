@@ -9,6 +9,8 @@ import { IconBolt, IconPlus, IconTrash } from '../Icons';
 import { DialogoTarjeta } from './DialogoTarjeta';
 import { PagoCreditos } from './PagoCreditos';
 import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
+import { useDonaciones } from '../../lib/donaciones';
+import { TarjetaAportes } from '../Donaciones';
 
 function Fila({ titulo, sub, children }) {
   return (
@@ -54,6 +56,7 @@ export function SeccionFacturacion({ plan }) {
   const [aviso, setAviso] = useState('');
   const [busy, setBusy] = useState(null);
   const [dialogo, setDialogo] = useState(null);
+  const donaciones = useDonaciones();
 
   const cargarBilling = useCallback(() => api.get('/api/billing/status')
     .then((res) => setBilling(res.data))
@@ -149,6 +152,9 @@ export function SeccionFacturacion({ plan }) {
       {aviso && <p className="page__ok" role="status">{aviso}</p>}
       {error && <p className="page__error" role="alert">{error}</p>}
 
+      {/* Con las donaciones activas, quien no paga una suscripción ve sus
+          aportes; quien ya paga sigue viendo su plan hasta que lo cancele. */}
+      {donaciones?.enabled && !pagado ? <TarjetaAportes /> : (
       <div className="set-card set-plan">
         <h2 className="set-title">{t('billing.planTitle')}</h2>
         <div className="set-plan__info">
@@ -177,6 +183,7 @@ export function SeccionFacturacion({ plan }) {
           <IconBolt size={15} /> {pagado ? t('billing.changePlan') : t('billing.upgradePlan')}
         </Link>
       </div>
+      )}
 
       <div className="set-card">
         <div className="set-row set-row--head">
@@ -221,6 +228,7 @@ export function SeccionFacturacion({ plan }) {
       <div className="pago-cols">
         <div className="set-card">
           <h2 className="set-title">{t('billing.autoChargesTitle')}</h2>
+          {!(donaciones?.enabled && !pagado) && (
           <Fila
             titulo={billing?.cancel_at_period_end ? t('billing.planEnd') : t('billing.planRenewal')}
             sub={pagado && billing?.current_period_end
@@ -231,6 +239,7 @@ export function SeccionFacturacion({ plan }) {
           >
             <Link to="/plans" className="pill-btn pill-btn--outline set-btn">{t('billing.changePlan')}</Link>
           </Fila>
+          )}
 
           <Fila
             titulo={t('billing.autoReload')}

@@ -1645,3 +1645,48 @@ a.adm-btn {
     justify-self: start;
   }
 }
+
+/* Piel de founder: la barra del admin es la noche de founder en ambos temas. */
+.adm { gap: 0; padding: 0; }
+.adm__nav { border-radius: 0; background: #1F1B14; color: #CFC6B3; }
+:root[data-theme="dark"] .adm__nav { background: #000000; }
+.adm__nav .brand { color: #CFC6B3; }
+.adm__nav .brand .logo__letra--clave { color: #F6EEDC; }
+.adm__brand-tag { background: #2B261E; color: #B4C64E; }
+.adm-link { border-radius: 12px; font-family: var(--font-ui); color: #CFC6B3; }
+.adm-link:hover { background: #2B261E; color: #F6EEDC; }
+.adm-link.is-active { background: #2B261E; color: #F6EEDC; font-weight: 600; }
+.adm-sublink { border-radius: 12px; font-family: var(--font-ui); color: #9A907C; }
+.adm-sublink:hover { color: #F6EEDC; }
+.adm-sublink.is-active { background: #2B261E; color: #B4C64E; }
+.adm__back { color: #9A907C; }
+.adm__tema { color: #CFC6B3; }
+.adm__tema:hover { background: #2B261E; color: #F6EEDC; }
+.adm__who { background: #2B261E; color: #F6EEDC; }
+.adm__name { color: #F6EEDC; }
+.adm__avatar { background: #3A342A; color: #F6EEDC; }
+.adm__foot > .tab { display: none; }
+/* La barra va a sangre; el contenido conserva su margen propio. */
+.adm__main { padding: 0 28px 20px; }
+@media (max-width: 860px) {
+  .adm__main { padding: 0 16px 16px; }
+}
+
+.adm-donaciones { display: flex; flex-direction: column; gap: 16px; }
+.adm-donaciones__fila { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.adm-switch { position: relative; flex: 0 0 52px; width: 52px; height: 30px; border-radius: 12px; background: var(--surface-5); transition: background-color 0.2s ease; }
+.adm-switch span { position: absolute; top: 4px; left: 4px; width: 22px; height: 22px; border-radius: 12px; background: #FFFFFF; transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.adm-switch.is-on { background: var(--accent); }
+.adm-switch.is-on span { transform: translateX(22px); }
+.adm-switch:disabled { opacity: 0.6; cursor: wait; }
+.adm-sublink { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 26px; }
+.adm-sublink svg { flex: 0 0 auto; opacity: 0.85; }
+:root[data-theme="dark"] .adm-link:hover,
+:root[data-theme="dark"] .adm-link.is-active,
+:root[data-theme="dark"] .adm-sublink.is-active,
+:root[data-theme="dark"] .adm__who,
+:root[data-theme="dark"] .adm__brand-tag,
+:root[data-theme="dark"] .adm__tema:hover { background: #1E1E1C; }
+
+/* Los estados se dicen con color y punto, sin píldora. */
+.adm-chip, .adm-chip--ok, .adm-chip--warn, .adm-chip--bad, .adm-chip--off { padding: 0; background: none; }

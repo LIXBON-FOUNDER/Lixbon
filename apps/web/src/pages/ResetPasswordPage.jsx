@@ -6,7 +6,7 @@ import { useNavigate, Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { FloatingField } from '../components/FloatingField';
 import { Logo } from '../components/Logo';
-import { ClusterFondo } from '../components/ClusterFondo';
+import { LaminaAuth } from '../components/LaminaAuth';
 import { api } from '../lib/api';
 
 export default function ResetPasswordPage() {
@@ -41,7 +41,7 @@ export default function ResetPasswordPage() {
   if (!token) {
     return (
       <div className="auth">
-        <ClusterFondo />
+        <LaminaAuth />
         <div className="auth__panel">
           <span className="tab" aria-hidden="true" />
           <div className="auth__card">
@@ -59,7 +59,7 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="auth">
-      <ClusterFondo />
+      <LaminaAuth />
       <div className="auth__panel">
         <span className="tab" aria-hidden="true" />
         <form className="auth__card" onSubmit={handleSubmit}>

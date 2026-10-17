@@ -14,6 +14,23 @@ export function fijarTema(tema) {
   oyentes.forEach((f) => f());
 }
 
+// index.html solo aplica el tema guardado si hay esta marca: así la primera
+// pintura de un visitante sin sesión es siempre clara.
+const CLAVE_SESION = 'lixbon-sesion';
+
+export function aplicarTemaDeSesion(conSesion) {
+  let guardado = null;
+  try {
+    if (conSesion) localStorage.setItem(CLAVE_SESION, '1');
+    else localStorage.removeItem(CLAVE_SESION);
+    guardado = localStorage.getItem(CLAVE_TEMA);
+  } catch { /* sin almacenamiento */ }
+  const tema = conSesion && guardado === 'dark' ? 'dark' : 'light';
+  if (document.documentElement.dataset.theme === tema) return;
+  document.documentElement.dataset.theme = tema;
+  oyentes.forEach((f) => f());
+}
+
 function suscribir(f) {
   oyentes.add(f);
   return () => oyentes.delete(f);
