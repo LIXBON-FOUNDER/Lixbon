@@ -246,7 +246,7 @@ pub(crate) fn project_attention_in(tx: &Transaction<'_>, rules: &dyn AttentionRu
 #[allow(dead_code)] // lo usan las pruebas; en producción lo ejecuta `AttentionProjection` a través del escritor.
 pub(crate) fn apply_attention_in(tx: &Transaction<'_>, rules: &dyn AttentionRules, after_seq: i64, events: &[EventRow]) -> Result<Report, ProjectError> {
     let (report, derived) = project_attention_in(tx, rules, after_seq, events)?;
-    insert_derived_in(tx, &derived)?;
+    insert_derived_in(tx, &derived, None)?;
     Ok(report)
 }
 

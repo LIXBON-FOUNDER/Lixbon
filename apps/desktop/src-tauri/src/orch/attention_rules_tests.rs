@@ -635,7 +635,7 @@ fn la_attention_y_sus_events_se_confirman_o_se_deshacen_juntos() {
     let (_d, mut s) = abre();
     let r: Result<(), StoreError> = s.write(|tx| {
         let (rep, derivados) = project_attention_in(tx, &EventRules, 0, &[pregunta(1, "t1", 7)]).map_err(StoreError::from)?;
-        crate::store::insert_derived_in(tx, &derivados)?;
+        crate::store::insert_derived_in(tx, &derivados, None)?;
         assert_eq!((rep.created.len(), rep.lifecycle_events), (1, 1));
         Err(StoreError::InvalidEvent("se deshace".into()))
     });

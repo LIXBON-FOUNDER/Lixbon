@@ -154,15 +154,21 @@ impl Core {
     /// se persiste nada: nunca existió una solicitud durable.
     pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
-        let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
         // Un perfil bloqueado se rechaza sin preguntar a nadie. SOLO una denegación explícita de policy (tipada,
-        // `agents::explicit_denial`) deja constancia durable de la solicitud antes de devolverla; un bloqueo del
-        // entorno o del proveedor se rechaza como siempre, sin Event, y nunca es `risk`.
+        // `agents::explicit_denial`, sobre el worktree real) deja constancia durable de la solicitud antes de devolverla;
+        // un bloqueo del entorno o del proveedor se rechaza como siempre, sin Event, y nunca es `risk`.
+        //
+        // La denegación explícita se decide por tipos y su política es estática (`agents::denial_policy`): ANTES de
+        // denegar no se lanza ningún subproceso de la CLI del proveedor (sonda de `--version`/`--help`, lista de modelos).
+        let explicit = agents::Profile::parse(&plan.profile).filter(|profile| agents::explicit_denial(&plan.provider, *profile, &plan.cwd).is_some());
+        let policy = match explicit {
+            Some(profile) => agents::denial_policy(&plan.provider, profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref()),
+            None => self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref()),
+        };
         let mut registrar_denegacion = None;
         if policy.status == agents::Status::Blocked {
             let denial = agents::authorize(&policy, None, true).expect_err("authorize rechaza siempre una policy bloqueada");
-            let profile = agents::Profile::parse(&plan.profile);
-            if profile.and_then(|profile| agents::explicit_denial(&plan.provider, profile)).is_none() {
+            if explicit.is_none() {
                 return Err(denial);
             }
             registrar_denegacion = Some(denial);

@@ -431,6 +431,12 @@ fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option
     Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None }
 }
 
+/// La ruta del worktree se puede pasar a la CLI (sin caracteres de cmd). Es el MISMO criterio con el que `evaluate`
+/// bloquea por entorno ANTES de mirar el perfil: [`explicit_denial`] lo comparte para respetar esa precedencia.
+fn worktree_is_passable(worktree: &str) -> bool {
+    !worktree.chars().any(|c| "\"%^&|<>\r\n".contains(c))
+}
+
 /// Resuelve la política sin efectos: todo lo de la CLI llega en `detected`.
 /// `exec` pide `codex exec`; el perfil read-only de Codex lo usa siempre.
 pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Detected, exec: bool) -> Policy {
@@ -439,7 +445,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     let Some(a) = spec(provider) else {
         return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"));
     };
-    if worktree.chars().any(|c| "\"%^&|<>\r\n".contains(c)) {
+    if !worktree_is_passable(worktree) {
         return blocked(provider, pid, vec![], None, vec![], "La ruta del worktree tiene caracteres que no se pueden pasar a la CLI".into());
     }
     let (flags, warnings) = match profile_flags(provider, profile, worktree, exec) {
@@ -709,6 +715,8 @@ pub fn check_request(agent: &str, model: Option<&str>, effort: Option<&str>, pro
 }
 
 /// Denegación EXPLÍCITA de policy: la solicitud es válida y una decisión de producto, no el entorno, la rechaza.
+/// Es la causa EFECTIVA del bloqueo: si el entorno (ruta del worktree inservible) o una combinación sin definición
+/// ya bloquean antes que el perfil —en el orden de [`evaluate`]—, el bloqueo NO es una denegación de policy.
 /// Es lo único que justifica registrar `spawn.requested` con `policy_status = blocked`. Cerrado y tipado: nunca se
 /// deduce del texto de `Policy.reason`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -717,13 +725,26 @@ pub enum PolicyDenial {
     ProfileDisabled,
 }
 
-/// ¿Esta solicitud ya VÁLIDA (ver [`check_request`]) la deniega una decisión explícita de policy? Un bloqueo del
-/// entorno (CLI ausente, flags que la versión instalada no trae, sandbox elevado, ruta inservible) o del proveedor
-/// NO lo es: esos no se registran como solicitud denegada y nunca son `risk`.
-pub fn explicit_denial(provider: &str, profile: Profile) -> Option<PolicyDenial> {
-    // Sin definición para este proveedor × perfil la solicitud no es válida: no hay nada que la policy deniegue.
-    profile_flags(provider, profile, ".", codex_exec(provider, profile)).ok()?;
+/// ¿Esta solicitud ya VÁLIDA (ver [`check_request`]) la deniega, en el worktree REAL donde correría, una decisión
+/// explícita de policy? Un bloqueo del entorno (CLI ausente, flags que la versión instalada no trae, sandbox elevado,
+/// ruta del worktree inservible) o del proveedor NO lo es: esos no se registran como solicitud denegada y nunca son
+/// `risk`, aunque el perfil esté además deshabilitado. Es una función de tipos y de la ruta: no consulta la CLI.
+pub fn explicit_denial(provider: &str, profile: Profile, worktree: &str) -> Option<PolicyDenial> {
+    // Mismo orden que `evaluate`: primero el entorno (ruta) y la definición de proveedor × perfil, después el perfil.
+    if !worktree_is_passable(worktree) {
+        return None;
+    }
+    profile_flags(provider, profile, worktree, codex_exec(provider, profile)).ok()?;
     profile.disabled_reason().map(|_| PolicyDenial::ProfileDisabled)
+}
+
+/// La política de una denegación explícita, SIN consultar la CLI del proveedor (ni `--version`/`--help` ni su lista de
+/// modelos): con el perfil deshabilitado el resultado es el mismo que el de la resolución completa, así que no hay
+/// nada que sondear antes de denegar.
+pub fn denial_policy(provider: &str, profile: Profile, role: Option<&str>, worktree: &str, model: Option<&str>) -> Policy {
+    let mut policy = evaluate_for(provider, profile, role, worktree, Detected::Skip, false, Delivery::FileOrMarkers);
+    set_model(&mut policy, model);
+    policy
 }
 
 fn build_launch(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>, enforce_policy: bool) -> Result<Launch, String> {

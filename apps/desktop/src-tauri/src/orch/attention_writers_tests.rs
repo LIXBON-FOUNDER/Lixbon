@@ -73,6 +73,7 @@ fn el_writer_de_mutaciones_proyecta_en_la_transaccion_del_event() {
 
     let nuevos = desde(&e.core, antes);
     assert_eq!(kinds(&nuevos), vec!["task.question", "task.status_changed", "attention.created"], "el Event origen y su attention.created salen del mismo commit");
+    assert!(nuevos[0].state_rev.is_some() && nuevos.iter().all(|ev| ev.state_rev == nuevos[0].state_rev), "el attention.created lleva el state_rev de su commit");
     assert_eq!(en_el_core(&e, |s| categorias_activas(s)), vec!["question"], "sin invocar project_in");
     let origen = nuevos.iter().find(|ev| ev.kind == "task.question").unwrap();
     let fila = en_el_core(&e, |s| instantanea(s)).into_iter().find(|f| f[3] == "question").unwrap();
@@ -88,7 +89,9 @@ fn el_writer_de_hechos_sin_estado_proyecta_el_risk_y_el_approval_de_spawn() {
     let e = setup_con("wr-append", fake);
     let antes = head(&e.core);
     pide(&e, "autonomia_amplia").expect_err("denegación explícita de policy");
-    assert_eq!(kinds(&desde(&e.core, antes)), vec!["spawn.requested", "attention.created"], "record_facts → append_events proyecta");
+    let nuevos = desde(&e.core, antes);
+    assert_eq!(kinds(&nuevos), vec!["spawn.requested", "attention.created"], "record_facts → append_events proyecta");
+    assert!(nuevos.iter().all(|ev| ev.state_rev.is_none()), "un hecho que no confirma legacy_state no lleva state_rev, tampoco su attention.created");
     assert_eq!(en_el_core(&e, |s| categorias_activas(s)), vec!["risk"]);
 
     let pendiente = pide(&e, "explorar").unwrap();

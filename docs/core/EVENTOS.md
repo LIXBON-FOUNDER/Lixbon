@@ -760,6 +760,14 @@ spawn_request(caller, args)
 * **Qué es una denegación explícita** lo decide un tipo, no el texto de `Policy.reason`: `agents::PolicyDenial`
   (hoy solo `ProfileDisabled`, vía `Profile::disabled_reason()`), y solo si la combinación proveedor × perfil tiene
   definición (`profile_flags`). Un bloqueo del entorno o del proveedor sigue siendo un error sin Event.
+* **Causa efectiva, en el worktree real:** `explicit_denial(provider, profile, worktree)` respeta la precedencia de
+  `agents::evaluate`: si la ruta del worktree no se puede pasar a la CLI (o la combinación no tiene definición) el
+  entorno bloquea ANTES que el perfil, así que un perfil deshabilitado en una ruta inservible NO es una denegación
+  explícita: error sin Event y sin `risk` (`un_perfil_deshabilitado_en_una_ruta_inservible_…`).
+* **Sin sondear la CLI antes de denegar:** la denegación explícita usa una política estática
+  (`agents::denial_policy`, `Detected::Skip`); no se llama al resolvedor (que en producción lanza `--version`/`--help`
+  y consulta la lista de modelos del proveedor). Con el perfil deshabilitado el resultado es el mismo, así que no hay
+  nada que sondear (`la_denegacion_explicita_no_sondea_la_cli_del_proveedor_antes_de_denegar`).
 * **Entrada inválida ≠ policy:** `agents::check_request` conserva la validación que hacía `launch` (agente
   conocido y no pausado, modelo y esfuerzo admitidos, rol existente, combinación proveedor × perfil definida) y NO
   aplica la compuerta de policy. Así «`gemini` + perfil» o «rol inventado» son errores, no solicitudes denegadas.
@@ -796,7 +804,8 @@ ocurrencia, así que un replay no duplica), actor `system`, canal `core`.
   `append_events` y los cambios de gestión de Project) ejecuta el proyector del almacén después de insertar y antes
   de confirmar (`EventProjector`): el Event origen, las filas de Attention y estos eventos se confirman o se
   deshacen juntos. Los eventos derivados se insertan **después** de los de origen de esa transacción
-  (`insert_derived_in`, sin reproyectarlos); el orden entre eventos de origen no cambia.
+  (`insert_derived_in`, sin reproyectarlos); el orden entre eventos de origen no cambia. Llevan el `state_rev` del
+  commit que los origina (`NULL` si el origen no confirmó `legacy_state`, p. ej. `spawn.requested`).
 * Actualizar `severity`/`facts` de la activa **no** emite nada (no hay `attention.updated`).
 * `source_event_id` es el `events.id` (no el `seq`) del Event que levantó o resolvió.
 

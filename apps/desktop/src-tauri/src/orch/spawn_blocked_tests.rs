@@ -7,6 +7,8 @@
 //! definición) y el bloqueo del entorno/proveedor (CLI ausente, flags, sandbox). Si el Event no se puede persistir, el
 //! error es el de la persistencia: nunca una denegación «registrada».
 
+use std::cell::Cell;
+
 use serde_json::{json, Value};
 
 use super::agents;
@@ -24,6 +26,17 @@ fn bloqueada_por_entorno(provider: &str, profile: &str, role: Option<&str>, work
     p.status = agents::Status::Blocked;
     p.reason = Some("CLI ausente en la prueba".into());
     p
+}
+
+thread_local! {
+    /// Cuántas veces se resolvió la policy «de verdad» (en producción: sondear la CLI del proveedor) en este hilo.
+    static RESOLUCIONES: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Como `fake`, pero cuenta cada resolución: es el punto donde producción lanzaría `--version`/`--help` de la CLI.
+fn cuenta_resoluciones(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
+    RESOLUCIONES.with(|c| c.set(c.get() + 1));
+    fake(provider, profile, role, worktree)
 }
 
 fn verificada(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
@@ -78,6 +91,46 @@ fn una_denegacion_explicita_de_policy_deja_el_event_durable_y_se_deniega_sin_efe
         assert!(payload.get(omitido).is_none(), "el payload no lleva {omitido}");
     }
     sin_efectos(&e, antes, 1);
+}
+
+#[test]
+fn un_perfil_deshabilitado_en_una_ruta_inservible_es_un_bloqueo_del_entorno_y_no_deja_event_ni_risk() {
+    // El entorno (ruta del worktree con caracteres que no se pueden pasar a la CLI) bloquea ANTES que el perfil: la causa
+    // efectiva no es una decisión de policy, aunque el perfil esté además deshabilitado.
+    for compartida in [true, false] {
+        let e = setup_con("spawn&ruta-inservible", fake);
+        let antes = head(&e.core);
+        let error = pide(&e, json!({ "profile": EXPLICITA, "shared": compartida })).expect_err("bloqueado por el entorno");
+        assert!(error.contains("bloqueado"), "se informa el bloqueo de siempre: {error}");
+        assert!(desde(&e.core, antes).is_empty(), "compartida = {compartida}: ni spawn.requested ni attention.created");
+        sin_efectos(&e, antes, 0);
+        assert!(e.core.storage.with_store(|s| super::attention_rules_tests::categorias_activas(s)).unwrap().is_empty(), "no hay risk");
+    }
+    // Control: el mismo perfil en una ruta utilizable SÍ es una denegación explícita.
+    let e = setup_con("spawn-ruta-buena", fake);
+    let antes = head(&e.core);
+    pide(&e, json!({ "profile": EXPLICITA })).expect_err("denegada");
+    assert_eq!(kinds(&desde(&e.core, antes)), vec!["spawn.requested", "attention.created"]);
+}
+
+#[test]
+fn la_denegacion_explicita_no_sondea_la_cli_del_proveedor_antes_de_denegar() {
+    let e = setup_con("spawn-sin-sonda", cuenta_resoluciones);
+    RESOLUCIONES.with(|c| c.set(0));
+    let antes = head(&e.core);
+    // Con modelo: producción también consultaría la lista de modelos de la CLI.
+    pide(&e, json!({ "profile": EXPLICITA, "model": "opus" })).expect_err("denegada");
+    assert_eq!(RESOLUCIONES.with(Cell::get), 0, "denegar de forma explícita no resuelve la policy (no hay subproceso de la CLI)");
+    assert_eq!(kinds(&desde(&e.core, antes)), vec!["spawn.requested", "attention.created"], "y el Event sigue siendo durable antes de la denegación");
+
+    // Sanidad del contador: un bloqueo del entorno y una solicitud normal SÍ resuelven la policy.
+    pide(&e, json!({ "profile": "explorar" })).expect("pendiente");
+    assert_eq!(RESOLUCIONES.with(Cell::get), 1);
+    // Un perfil deshabilitado en una ruta inservible no es denegación explícita: se resuelve como el resto del entorno.
+    let e2 = setup_con("spawn&sin-sonda", cuenta_resoluciones);
+    RESOLUCIONES.with(|c| c.set(0));
+    pide(&e2, json!({ "profile": EXPLICITA })).expect_err("entorno");
+    assert_eq!(RESOLUCIONES.with(Cell::get), 1);
 }
 
 #[test]
@@ -152,14 +205,47 @@ fn check_request_conserva_la_validacion_de_entrada_que_hacia_launch() {
 fn solo_el_perfil_deshabilitado_es_una_denegacion_explicita_y_se_decide_por_tipos() {
     use agents::{explicit_denial, PolicyDenial, Profile};
     for provider in ["claude", "codex", agents::LIXBON_CLI] {
-        assert_eq!(explicit_denial(provider, Profile::AutonomiaAmplia), Some(PolicyDenial::ProfileDisabled), "{provider}");
+        assert_eq!(explicit_denial(provider, Profile::AutonomiaAmplia, "wt"), Some(PolicyDenial::ProfileDisabled), "{provider}");
         for perfil in [Profile::Explorar, Profile::Proponer, Profile::DelegarConRevision] {
-            assert_eq!(explicit_denial(provider, perfil), None, "{provider} {perfil:?} no está deshabilitado");
+            assert_eq!(explicit_denial(provider, perfil, "wt"), None, "{provider} {perfil:?} no está deshabilitado");
+        }
+        // El entorno bloquea antes que el perfil: con una ruta que no se puede pasar a la CLI no hay denegación explícita.
+        for ruta in ["w&t", "w%t", "w\"t", "w^t", "w|t", "w<t", "w>t", "w
+t"] {
+            assert_eq!(explicit_denial(provider, Profile::AutonomiaAmplia, ruta), None, "{provider} {ruta:?}");
         }
     }
     // Sin definición para el proveedor no hay solicitud válida que denegar.
-    assert_eq!(explicit_denial("gemini", Profile::AutonomiaAmplia), None);
-    assert_eq!(explicit_denial("inventado", Profile::AutonomiaAmplia), None);
+    assert_eq!(explicit_denial("gemini", Profile::AutonomiaAmplia, "wt"), None);
+    assert_eq!(explicit_denial("inventado", Profile::AutonomiaAmplia, "wt"), None);
+}
+
+#[test]
+fn explicit_denial_respeta_la_precedencia_de_evaluate_sin_leer_el_motivo() {
+    // `explicit_denial` solo dice Some cuando `evaluate` bloquea por el PERFIL (con argv ya armado) y nunca cuando bloquea
+    // antes por proveedor, ruta o combinación (que devuelven argv vacío). No se lee `reason`.
+    use agents::{evaluate, explicit_denial, Detected, Profile};
+    for provider in ["claude", "codex", "gemini", agents::LIXBON_CLI, "inventado"] {
+        for perfil in Profile::ALL {
+            for ruta in ["wt", "", "w&t", "w%t"] {
+                let politica = evaluate(provider, perfil, ruta, Detected::Skip, false);
+                if explicit_denial(provider, perfil, ruta).is_some() {
+                    assert_eq!(politica.status, agents::Status::Blocked, "{provider} {perfil:?} {ruta:?}");
+                    assert!(!politica.argv.is_empty(), "{provider} {perfil:?} {ruta:?}: bloqueó por el perfil, no antes");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn denial_policy_es_estatica_y_coincide_con_la_resolucion_sin_cli() {
+    use agents::{denial_policy, evaluate_for, Delivery, Detected, Profile};
+    let p = denial_policy("claude", Profile::AutonomiaAmplia, Some("implementador"), "wt", Some("opus"));
+    assert_eq!(p.status, agents::Status::Blocked);
+    let mut esperada = evaluate_for("claude", Profile::AutonomiaAmplia, Some("implementador"), "wt", Detected::Skip, false, Delivery::FileOrMarkers);
+    agents::set_model(&mut esperada, Some("opus"));
+    assert_eq!(p, esperada);
 }
 
 #[test]

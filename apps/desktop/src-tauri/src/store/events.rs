@@ -322,9 +322,10 @@ pub trait EventProjector: Send + Sync + std::fmt::Debug {
 }
 
 /// Inserta los eventos que una proyección derivó DENTRO de la transacción de quien llama, sin volver a proyectarlos.
-/// Devuelve cuántos eran nuevos (un duplicado por `(kind, idem_key)` no se inserta).
-pub(crate) fn insert_derived_in(tx: &Transaction<'_>, derived: &[NewEvent]) -> StoreResult<usize> {
-    Ok(insert_events(tx, derived, None)?.iter().filter(|i| matches!(i, Inserted::New(_))).count())
+/// Llevan el `state_rev` del commit que los origina (`None` si el origen no confirmó `legacy_state`), así que agrupan con
+/// él. Devuelve cuántos eran nuevos (un duplicado por `(kind, idem_key)` no se inserta).
+pub(crate) fn insert_derived_in(tx: &Transaction<'_>, derived: &[NewEvent], state_rev: Option<i64>) -> StoreResult<usize> {
+    Ok(insert_events(tx, derived, state_rev)?.iter().filter(|i| matches!(i, Inserted::New(_))).count())
 }
 
 /// Los eventos recién insertados, como filas del log (los duplicados no entran).
@@ -366,7 +367,7 @@ pub(crate) fn insert_events_projected(tx: &Transaction<'_>, events: &[NewEvent],
         let rows = inserted_rows(events, &inserted, state_rev);
         if !rows.is_empty() {
             let derived = projector.project(tx, &rows)?;
-            insert_derived_in(tx, &derived)?;
+            insert_derived_in(tx, &derived, state_rev)?;
         }
     }
     Ok(inserted)
