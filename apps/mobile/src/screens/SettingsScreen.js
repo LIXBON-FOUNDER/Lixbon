@@ -10,7 +10,7 @@ import { ApiException } from '../api';
 import { pickAvatar } from '../attachments';
 import Icon from '../components/Icon';
 import { SheetTitle, useDialogs } from '../components/dialogs';
-import { Avatar, EASE, FadeUp, Meter, PlanPill, Row, Section, Segmented, StackHeader, Toggle, avatarUri, useColors, useReducedMotion } from '../components/ui';
+import { Avatar, EASE, FadeUp, Meter, PlanPill, Row, RowIcon, Section, Segmented, StackHeader, Toggle, avatarUri, useColors, useReducedMotion } from '../components/ui';
 import { useApi, useAuth, useChat, usePrefs } from '../state';
 import { ACCENTS, FONTS, RADIUS, RADIUS_SM } from '../theme';
 
@@ -121,21 +121,29 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         <FadeUp>
           <Pressable
             onPress={editProfile}
-            style={({ pressed }) => ({ padding: 14, borderRadius: RADIUS, backgroundColor: pressed ? c.surface3 : c.sheet, flexDirection: 'row', alignItems: 'center', gap: 14 })}
+            style={({ pressed }) => ({ padding: 16, borderRadius: RADIUS, backgroundColor: pressed ? c.surface3 : c.surface2, gap: 14 })}
           >
-            <Avatar name={fullName || email} size={52} uri={avatarUri(api.base, user)} />
-            <View style={{ flex: 1, gap: 2 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 16, color: c.ink }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Avatar name={fullName || email} size={52} uri={avatarUri(api.base, user)} />
+              <View style={{ flex: 1, gap: 3 }}>
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.serif, fontSize: 21, lineHeight: 26, color: c.ink }}>
                   {fullName || user.username || '—'}
                 </Text>
-                {typeof user.plan_name === 'string' && <PlanPill size={12}>{user.plan_name}</PlanPill>}
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+                  {email}
+                </Text>
               </View>
-              <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
-                {email}
-              </Text>
+              {typeof user.plan_name === 'string' && <PlanPill size={12}>{user.plan_name}</PlanPill>}
             </View>
-            <Icon name="chevron-right" size={16} color={c.inkFaint} />
+            {usage != null && (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.ink70 }}>Sesión actual</Text>
+                  <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>{Math.round(usage * 100)} %</Text>
+                </View>
+                <Meter value={usage} color={usage >= 0.9 ? c.danger : c.accent} />
+              </View>
+            )}
           </Pressable>
           {Object.keys(user).length > 0 && user.email_verified !== true && (
             <Pressable
@@ -149,23 +157,13 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         </FadeUp>
 
         <Section title="Plan" delay={30}>
-          <Row
-            title="Uso y límites"
-            onPress={() => onNavigate('usage')}
-            right={
-              usage != null ? (
-                <>
-                  <Meter value={usage} width={64} />
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>{Math.round(usage * 100)}%</Text>
-                </>
-              ) : null
-            }
-          />
-          <Row title="Cambiar de plan" external onPress={() => Linking.openURL(`${api.base}/plans`)} />
+          <Row title="Uso y límites" icon="chart" onPress={() => onNavigate('usage')} />
+          <Row title="Cambiar de plan" icon="bolt" external onPress={() => Linking.openURL(`${api.base}/plans`)} />
         </Section>
 
         <Section title="Apariencia" delay={60}>
           <View style={{ minHeight: 56, paddingLeft: 14, paddingRight: 10, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <RowIcon name={prefs.themeMode === 'light' ? 'sun' : 'moon'} />
             <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}>Tema</Text>
             <Segmented
               value={prefs.themeMode}
@@ -179,6 +177,7 @@ export default function SettingsScreen({ onBack, onNavigate }) {
           </View>
           <Row
             title="Personalizar"
+            icon="palette"
             onPress={() => onNavigate('appearance')}
             right={<View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: c.accent }} />}
             value={`${accent.label} · ${TEXT_LABEL[prefs.ui.textSize] || 'Normal'}`}
@@ -186,25 +185,25 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         </Section>
 
         <Section title="Chat" delay={90}>
-          <Row title="Modelo por defecto" value={chat.defaultModel || chat.model || '—'} onPress={pickDefaultModel} />
-          <Row title="Enviar con Enter" right={<Toggle label="Enviar con Enter" value={prefs.ui.sendOnEnter} onChange={(sendOnEnter) => prefs.setUi({ sendOnEnter })} />} />
+          <Row title="Modelo por defecto" icon="layers" value={chat.defaultModel || chat.model || '—'} onPress={pickDefaultModel} />
+          <Row title="Enviar con Enter" icon="arrow-up" right={<Toggle label="Enviar con Enter" value={prefs.ui.sendOnEnter} onChange={(sendOnEnter) => prefs.setUi({ sendOnEnter })} />} />
         </Section>
 
         <Section title="Privacidad" delay={120}>
-          <Row title="Guardar historial" right={<Toggle label="Guardar historial" value={settings.save_history !== false} onChange={(v) => toggleSetting('save_history', v)} />} />
-          <Row title="Métricas anónimas" right={<Toggle label="Métricas anónimas" value={settings.anonymous_usage !== false} onChange={(v) => toggleSetting('anonymous_usage', v)} />} />
+          <Row title="Guardar historial" icon="clock" right={<Toggle label="Guardar historial" value={settings.save_history !== false} onChange={(v) => toggleSetting('save_history', v)} />} />
+          <Row title="Métricas anónimas" icon="activity" right={<Toggle label="Métricas anónimas" value={settings.anonymous_usage !== false} onChange={(v) => toggleSetting('anonymous_usage', v)} />} />
         </Section>
 
         <Section title="Desarrolladores" delay={150}>
-          <Row title="API keys" external onPress={() => Linking.openURL(`${api.base}/account/profile`)} />
-          <Row title="Documentación" external onPress={() => Linking.openURL(`${api.base}/docs`)} />
+          <Row title="API keys" icon="key" external onPress={() => Linking.openURL(`${api.base}/account/profile`)} />
+          <Row title="Documentación" icon="book" external onPress={() => Linking.openURL(`${api.base}/docs`)} />
         </Section>
 
         <Section title="Sesión y datos" delay={180}>
-          <Row title="Cerrar las demás sesiones" onPress={closeOtherSessions} chevron={false} />
-          <Row title="Cerrar sesión" onPress={logout} chevron={false} />
-          <Row title="Borrar historial de conversaciones" danger onPress={clearHistory} chevron={false} />
-          <Row title="Eliminar cuenta" danger onPress={deleteAccount} chevron={false} />
+          <Row title="Cerrar las demás sesiones" icon="x" onPress={closeOtherSessions} chevron={false} />
+          <Row title="Cerrar sesión" icon="logout" onPress={logout} chevron={false} />
+          <Row title="Borrar historial de conversaciones" icon="trash" danger onPress={clearHistory} chevron={false} />
+          <Row title="Eliminar cuenta" icon="warning" danger onPress={deleteAccount} chevron={false} />
         </Section>
 
         <Text style={{ marginTop: 4, textAlign: 'center', fontFamily: FONTS.mono, fontSize: 12, color: c.inkFaint }}>
