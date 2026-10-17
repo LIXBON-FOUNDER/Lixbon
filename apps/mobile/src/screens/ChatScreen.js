@@ -4,7 +4,7 @@
 // búsqueda web), modelo y enviar.
 import * as Clipboard from 'expo-clipboard';
 import React, { useState } from 'react';
-import { FlatList, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { FlatList, Linking, Pressable, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,7 +20,6 @@ import {
   ChatHeader,
   FadeUp,
   KeyboardAware,
-  LogoMark,
   Meter,
   ScreenTitle,
   SkeletonLines,
@@ -170,7 +169,7 @@ export default function ChatScreen({ onMenu, onSearch, onPickModel, inputRef: ex
   return (
     <KeyboardAware>
       {empty ? (
-        <ChatHeader onLeading={onMenu} trailing="search" trailingLabel="Buscar" onTrailing={onSearch} />
+        <ChatHeader title="Nueva conversación" onLeading={onMenu} trailing="search" trailingLabel="Buscar" onTrailing={onSearch} />
       ) : (
         <ChatHeader
           title={chat.title || 'Nueva conversación'}
@@ -226,52 +225,47 @@ ${text}` : text);
   );
 }
 
+// Saludo y titular abajo, cerca del compositor: al alcance del pulgar.
 function Hero({ firstName }) {
   const c = useColors();
   return (
-    <FadeUp style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 22, paddingHorizontal: 32, paddingBottom: 48 }}>
-      <LogoMark size={38} />
-      <View style={{ alignItems: 'center', gap: 10 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>
-          {greeting()}
-          {firstName ? `, ${firstName}` : ''}
-        </Text>
-        <ScreenTitle style={{ textAlign: 'center' }}>¿Qué investigamos hoy?</ScreenTitle>
-      </View>
+    <FadeUp style={{ flex: 1, justifyContent: 'flex-end', gap: 10, paddingHorizontal: 24, paddingBottom: 22 }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>
+        {greeting()}
+        {firstName ? `, ${firstName}` : ''}
+      </Text>
+      <ScreenTitle style={{ fontSize: 32, lineHeight: 36 }}>¿Qué investigamos hoy?</ScreenTitle>
     </FadeUp>
   );
 }
 
+// Las sugerencias, a la vista en una lista agrupada (antes era un carrusel
+// que escondía la mitad).
 function Starters({ onPick }) {
   const c = useColors();
   return (
-    <FadeUp delay={120}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ gap: 8, paddingHorizontal: 12, paddingBottom: 10 }}
-      >
-        {STARTERS.map((s) => (
+    <FadeUp delay={120} style={{ marginHorizontal: 20, marginBottom: 22, borderRadius: RADIUS, backgroundColor: c.sheet, overflow: 'hidden' }}>
+      {STARTERS.map((s, i) => (
+        <View key={s.label}>
+          {i > 0 && <View style={{ height: 1, marginLeft: 44, backgroundColor: c.surface3 }} />}
           <Pressable
-            key={s.label}
             onPress={() => onPick(s)}
+            accessibilityRole="button"
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 8,
-              height: 40,
-              paddingLeft: 12,
-              paddingRight: 14,
-              borderRadius: RADIUS,
-              backgroundColor: pressed ? c.surface4 : c.sheet,
+              gap: 12,
+              height: 52,
+              paddingHorizontal: 14,
+              backgroundColor: pressed ? c.surface4 : 'transparent',
             })}
           >
-            <Icon name={s.icon} size={16} color={c.accent} strokeWidth={1.8} />
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkBody }}>{s.label}</Text>
+            <Icon name={s.icon} size={18} color={c.accent} strokeWidth={1.7} />
+            <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 15, color: c.inkBody }}>{s.label}</Text>
+            <Icon name="chevron-right" size={14} color={c.inkFaint} />
           </Pressable>
-        ))}
-      </ScrollView>
+        </View>
+      ))}
     </FadeUp>
   );
 }
