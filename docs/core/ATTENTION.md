@@ -39,7 +39,8 @@ Pruebas en `apps/desktop/src-tauri/src/store/attention_tests.rs`.
 | 3 | Resolver no borra Events ni historia | `active → resolved` sobre la fila; triggers prohíben DELETE y reabrir | `resolver_no_borra_ni_toca_los_eventos…`, `una_fila_resuelta_no_vuelve_a_activa…` |
 | 4 | Un mismo hecho no crea duplicados activos equivalentes | `fingerprint` + índice único parcial `WHERE status = 'active'` | `un_mismo_hecho_no_crea_dos_activos`, `la_base_impone_un_solo_activo…` |
 | 5 | El destino sigue resoluble si cambia una ruta local | destino lógico `(target_kind, target_id)`; rutas rechazadas en Rust y en la base | `el_destino_sigue_resolviendo_aunque_cambie_la_ruta_local_del_proyecto`, `el_destino_rechaza_rutas…` |
-| 6 | Categoría/severidad no se derivan en frontend | conjuntos cerrados en Rust **y** CHECK; inmutables en la fila | `las_categorias_iniciales…`, `la_base_impone_los_conjuntos_cerrados` |
+| 6 | Categoría/severidad no se derivan en frontend | conjuntos cerrados en Rust **y** CHECK; la categoría es inmutable y la severidad solo cambia en la activa, vía el Core | `las_categorias_iniciales…`, `la_base_impone_los_conjuntos_cerrados`, `la_severidad_de_una_actualizacion_es_un_conjunto_cerrado` |
+| 7 | Actualizar severity/facts de la activa no duplica ni altera la identidad ni la historia | `attention_update_active_in`; trigger que solo libera `severity`/`facts`/`updated_at` en filas `active` | `actualizar_*`, `raise_duplicado_tras_actualizar…`, `una_actualizacion_invalida_se_rechaza_sin_cambios_parciales`, `actualizar_una_resuelta_se_rechaza_y_no_la_reabre`, `el_limite_sql_de_campos_protegidos_de_una_activa` |
 | — | Attention ≠ unread | el esquema no tiene columnas de lectura, cliente, usuario ni snooze | `attention_no_es_unread…`, `attention_sigue_activa_sea_cual_sea_el_estado_de_lectura…` |
 | — | Sin strings de interfaz en el dominio | solo códigos `snake_case` ASCII; no hay título/mensaje/ayuda | `el_dominio_solo_usa_codigos_estables_sin_textos_de_interfaz` |
 
@@ -73,8 +74,10 @@ decidirá la API de lectura (LXO-89); aquí solo se define la escala.
 | `medium` | 2 |
 | `low` | 3 |
 
-La severidad **no cambia** en una fila: si el mismo hecho se levanta de nuevo con otra severidad mientras hay una
-ocurrencia activa, se devuelve la activa sin modificarla (escalado de severidad queda fuera de LXO-87).
+La severidad la fija el Core al levantar el hecho y **solo puede cambiar mientras la fila sigue `active`**, y solo
+por la operación de actualización de la activa (ver «Actualizar la Attention activa»). Levantar de nuevo el mismo
+hecho con otra severidad mientras hay una ocurrencia activa **no** la modifica: devuelve la activa tal cual
+(`Raised::Existing`). Una fila `resolved` conserva su severidad para siempre.
 
 ## Estados y ciclo de vida
 
@@ -87,6 +90,8 @@ ocurrencia activa, se devuelve la activa sin modificarla (escalado de severidad 
           ▲                                            │ active │◄─┐ attention_raise(mismo hecho)
           │                                            └───┬────┘  │ = Existing: devuelve la activa,
           │                                                │       │   no escribe nada
+          │                                                │       │ attention_update_active(id, severity?, facts?, at)
+          │                                                │       │   = Updated: cambia severity/facts/updated_at
           │                                                │ attention_resolve(id, motivo, at)
           │                                                ▼
           │                                           ┌──────────┐
@@ -101,8 +106,10 @@ ocurrencia activa, se devuelve la activa sin modificarla (escalado de severidad 
 stateDiagram-v2
     [*] --> active: raise (hecho sin activa)
     active --> active: raise del mismo hecho (Existing, sin cambios)
+    active --> active: update_active (severity y/o facts, updated_at = at)
     active --> resolved: resolve(acted | condition_cleared | superseded)
     resolved --> resolved: resolve (AlreadyResolved, no-op)
+    resolved --> resolved: update_active (AlreadyResolved, rechazado, sin escribir)
     resolved --> [*]: la fila se conserva
     note right of resolved
       Si el hecho recurre: raise crea otra fila
@@ -112,14 +119,42 @@ stateDiagram-v2
 
 | Estado | `resolved_at` | `resolution` | `updated_at` |
 |---|---|---|---|
-| `active` | `NULL` | `NULL` | = `created_at` |
+| `active` | `NULL` | `NULL` | = `created_at` al levantar; = `at` de la última actualización (≥ `created_at`) |
 | `resolved` | ms epoch, ≥ `created_at` | `acted` · `condition_cleared` · `superseded` | = `resolved_at` |
 
 Motivos de resolución: `acted` (una persona, o su agente delegado, actuó), `condition_cleared` (la condición dejó
 de cumplirse sin acción directa), `superseded` (la sustituye otra Attention o un hecho posterior).
 
-Las marcas de tiempo (`at`) las **fija quien llama**; el almacén no llama a `now()`. Resolver con `at <
-created_at` se rechaza (`InvalidAttention`).
+Las marcas de tiempo (`at`) las **fija quien llama**; el almacén no llama a `now()`. Resolver o actualizar con
+`at < created_at` se rechaza (`InvalidAttention`).
+
+### Actualizar la Attention activa (seam para LXO-88)
+
+LXO-88 necesita subir/bajar la severidad y refrescar los `facts` de un hecho que **ya está activo** sin duplicarlo
+(si la regla vuelve a observar el mismo hecho con otra severidad, `attention_raise` devuelve `Existing` sin
+tocarla). Para eso existe una operación tipada, con el mismo patrón que `raise`/`resolve`:
+
+```text
+attention_update_active_in(tx, id, &AttentionUpdate { severity: Option<Severity>, facts: Option<String>, at })
+    -> UpdateOutcome::{ Updated(row) | AlreadyResolved(row) | Missing }
+Store::attention_update_active(id, &AttentionUpdate)        // una sola transacción
+```
+
+| Aspecto | Contrato |
+|---|---|
+| Qué cambia | **solo** `severity` (si es `Some`), `facts` (si es `Some`; REEMPLAZAN a los anteriores, no se fusionan) y `updated_at = at` |
+| Qué no cambia | `id`, `fingerprint`, `occurrence`, `category`, destino, `project_id`, `run_id`, `subject`, `source_event_id`, `correlation_id`, `created_at`, `status`, `resolved_at`, `resolution` |
+| Validación | al menos uno de `severity`/`facts` (si no, `InvalidAttention`); `severity` del conjunto cerrado (el tipo `Severity`); `facts` = objeto JSON ≤ 2048 **bytes**; `at ≥ created_at` (sin exigir monotonicidad respecto de `updated_at`) |
+| Sin cambios parciales | todo se valida antes de escribir y el `UPDATE` es una sola sentencia sobre `status = 'active'`; si algo falla, la fila queda idéntica |
+| Fila `resolved` | terminal e inmutable: devuelve `AlreadyResolved(fila)` **sin escribir** (no es `Updated`, no se confunde con éxito) y nunca se reabre; el hecho recurrente es otra ocurrencia (`raise`) |
+| Id desconocido | `Missing` |
+| Transacción | la variante `_in` corre dentro de la transacción de quien llama (p. ej. junto al evento que motivó el cambio); si esa transacción se deshace, la actualización también |
+| Eventos | **no emite nada**: no hay `attention.updated`. El Event Log, el vocabulario y los clientes (RPC/HTTP/CLI) no cambian; qué evento acompaña a una actualización lo decide LXO-88 |
+
+Lo impone también la base: el trigger `attention_only_resolve` deja de proteger `severity` y `facts` **solo en filas
+`active`** (más `updated_at`, que nunca estuvo protegido); sigue prohibiendo cambiar el resto de columnas, tocar
+cualquier fila `resolved`, y resolver cambiando a la vez `severity` o `facts` (resolver es una transición pura).
+Prueba: `el_limite_sql_de_campos_protegidos_de_una_activa`.
 
 ### Por qué no hay `snoozed`
 
@@ -179,10 +214,13 @@ id          = "att_" + hex( SHA-256( "lixbon.attention.id.v1" \0 fingerprint \0 
   relleno histórico en la migración (Attention empieza vacía).
 * **Atomicidad**: `attention_raise_in` / `attention_resolve_in` corren **dentro de la transacción de quien
   llama**, como el registro de proyectos con su evento. Así el evento origen y la Attention se confirman o se
-  deshacen juntos (`el_evento_origen_y_la_attention_se_confirman_o_se_deshacen_juntos`). Los métodos de `Store`
-  (`attention_raise`, `attention_resolve`, `attention_get`) son la vía de una operación.
+  deshacen juntos (`el_evento_origen_y_la_attention_se_confirman_o_se_deshacen_juntos`). Lo mismo vale para
+  `attention_update_active_in` (`la_actualizacion_participa_en_la_transaccion_de_quien_llama`). Los métodos de
+  `Store` (`attention_raise`, `attention_update_active`, `attention_resolve`, `attention_get`) son la vía de una
+  operación.
 * **Un solo escritor** (el Core), `BEGIN IMMEDIATE`, tiempos fijados por quien llama: reintentar una escritura
-  idempotente no cambia el resultado (`raise` → `Existing`, `resolve` → `AlreadyResolved`).
+  idempotente no cambia el resultado (`raise` → `Existing`, `resolve` → `AlreadyResolved`; repetir un
+  `update_active` con los mismos valores y `at` deja la fila igual).
 
 ### Relación con el Event Log
 
@@ -213,8 +251,8 @@ id          = "att_" + hex( SHA-256( "lixbon.attention.id.v1" \0 fingerprint \0 
   impuesto por la base aunque el código falle.
 * Índice `attention_by_target (target_kind, target_id, status)`.
 * Triggers: `attention_no_delete` (la historia no se borra) y `attention_only_resolve` (solo se admite la
-  transición `active → resolved`; identidad, categoría, severidad, destino, origen y `facts` son inmutables y
-  `resolved` es terminal).
+  transición `active → resolved` o, en una fila `active`, cambiar `severity`/`facts`/`updated_at`; identidad,
+  categoría, destino, contexto, origen y `created_at` son inmutables y `resolved` es terminal).
 * No hay columnas de título, mensaje, ayuda, lectura, cliente, usuario, asignado ni contadores: el dominio guarda
   **códigos** y cada superficie los traduce a texto.
 
@@ -301,8 +339,9 @@ Los códigos viajan tal cual; no hay texto para mostrar. Cada superficie lo trad
 
 ## Fuera de alcance de LXO-87
 
-* **LXO-88**: qué Events/State levantan o resuelven cada categoría, severidades por regla, eventos
-  `attention.created|resolved`, retirada del cálculo en `attention.js`.
+* **LXO-88**: qué Events/State levantan, actualizan o resuelven cada categoría, severidades por regla (que
+  consumirán `attention_update_active`), eventos `attention.created|resolved` (y, si hiciera falta, uno de
+  actualización: hoy no existe `attention.updated`), retirada del cálculo en `attention.js`.
 * **LXO-89**: API de lectura/consulta, orden de presentación, filtros, resolución soportada por cliente y
   autorización (`ClientAction`).
 * UI, push, ranking personalizado, asignación de equipo (F9), *unread* y `snoozed`.

@@ -1,8 +1,8 @@
 //! Pruebas del modelo autoritativo de Attention (migración 006, LXO-87).
 //!
 //! Cubren el contrato de `docs/core/ATTENTION.md`: identidad, deduplicación, resolver sin borrar
-//! historia, Attention ≠ unread, ausencia de textos de interfaz en el dominio y destino resoluble sin
-//! rutas absolutas. Los tiempos (`at`) los fija quien llama: todo es determinista.
+//! historia, actualizar severity/facts de la activa, Attention ≠ unread, ausencia de textos de interfaz
+//! en el dominio y destino resoluble sin rutas absolutas. Los tiempos (`at`) los fija quien llama: todo es determinista.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -301,12 +301,233 @@ fn una_fila_resuelta_no_vuelve_a_activa_ni_se_borra_ni_cambia_su_identidad() {
     let mut s = abre(tmp.path());
     let a = creada(s.attention_raise(&nuevo(AttentionCategory::Failed)).unwrap());
     assert!(falla(&mut s, &format!("UPDATE attention_items SET category = 'risk' WHERE id = '{}'", a.id)).is_some(), "categoría inmutable");
-    assert!(falla(&mut s, &format!("UPDATE attention_items SET severity = 'low' WHERE id = '{}'", a.id)).is_some(), "severidad inmutable");
     assert!(falla(&mut s, &format!("UPDATE attention_items SET target_id = 't9' WHERE id = '{}'", a.id)).is_some(), "destino inmutable");
     assert!(falla(&mut s, &format!("DELETE FROM attention_items WHERE id = '{}'", a.id)).is_some(), "no se borra");
     s.attention_resolve(&a.id, Resolution::Acted, 2_000).unwrap();
     assert!(falla(&mut s, &format!("UPDATE attention_items SET status = 'active', resolved_at = NULL, resolution = NULL WHERE id = '{}'", a.id)).is_some(), "resolved es terminal");
+    assert!(falla(&mut s, &format!("UPDATE attention_items SET severity = 'low' WHERE id = '{}'", a.id)).is_some(), "severidad inmutable una vez resuelta");
     assert_eq!(cuenta(&s, "attention_items"), 1);
+}
+
+// ── Actualizar la Attention activa (severity / facts) ───────────────────────────────────────────
+
+fn upd(severity: Option<Severity>, facts: Option<&str>, at: i64) -> AttentionUpdate {
+    AttentionUpdate { severity, facts: facts.map(String::from), at }
+}
+
+fn actualizada(r: UpdateOutcome) -> AttentionRow {
+    match r {
+        UpdateOutcome::Updated(row) => row,
+        other => panic!("se esperaba Updated: {other:?}"),
+    }
+}
+
+/// Un hecho con todo el contexto relleno, para ver que la actualización no toca nada más.
+fn completo() -> NewAttention {
+    NewAttention {
+        subject: Some("q-1".into()),
+        source_event_id: Some("0192f0a1-0000-7000-8000-0000000000c3".into()),
+        correlation_id: Some("corr-1".into()),
+        facts: r#"{"a":1}"#.into(),
+        ..nuevo(AttentionCategory::Question)
+    }
+}
+
+#[test]
+fn actualizar_solo_la_severidad_conserva_facts_e_identidad() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let b = actualizada(s.attention_update_active(&a.id, &upd(Some(Severity::Critical), None, 2_000)).unwrap());
+    assert_eq!(b, AttentionRow { severity: Severity::Critical, updated_at: 2_000, ..a.clone() }, "cambian severity y updated_at, nada más");
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), b, "persistido tal cual");
+    assert_eq!(cuenta(&s, "attention_items"), 1, "no se duplica");
+}
+
+#[test]
+fn actualizar_solo_los_facts_conserva_la_severidad_e_identidad() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let b = actualizada(s.attention_update_active(&a.id, &upd(None, Some(r#"{"b":2}"#), 2_000)).unwrap());
+    assert_eq!(b, AttentionRow { facts: r#"{"b":2}"#.into(), updated_at: 2_000, ..a.clone() }, "los facts REEMPLAZAN a los anteriores");
+    assert_eq!(cuenta(&s, "attention_items"), 1);
+}
+
+#[test]
+fn actualizar_severidad_y_facts_a_la_vez_y_repetidas_veces() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let b = actualizada(s.attention_update_active(&a.id, &upd(Some(Severity::Low), Some(r#"{"c":3}"#), 2_000)).unwrap());
+    assert_eq!(b, AttentionRow { severity: Severity::Low, facts: r#"{"c":3}"#.into(), updated_at: 2_000, ..a.clone() });
+    // Se puede escalar y bajar: la severidad no es monótona. `at` tampoco tiene que crecer (solo ≥ created_at).
+    let c = actualizada(s.attention_update_active(&a.id, &upd(Some(Severity::High), None, 1_500)).unwrap());
+    assert_eq!((c.severity, c.facts.as_str(), c.updated_at), (Severity::High, r#"{"c":3}"#, 1_500));
+    // `at == created_at` es válido.
+    assert_eq!(actualizada(s.attention_update_active(&a.id, &upd(None, Some("{}"), 1_000)).unwrap()).updated_at, 1_000);
+    assert_eq!(cuenta(&s, "attention_items"), 1);
+    // Facts exactamente en el límite de 2048 bytes.
+    let limite = format!(r#"{{"k":"{}"}}"#, "x".repeat(MAX_FACTS_BYTES - 8));
+    assert_eq!(limite.len(), MAX_FACTS_BYTES);
+    assert_eq!(actualizada(s.attention_update_active(&a.id, &upd(None, Some(&limite), 3_000)).unwrap()).facts, limite);
+}
+
+#[test]
+fn actualizar_la_activa_no_cambia_nunca_la_identidad_ni_el_ciclo_de_vida() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let b = actualizada(s.attention_update_active(&a.id, &upd(Some(Severity::Critical), Some(r#"{"z":9}"#), 9_000)).unwrap());
+    assert_eq!(
+        (&b.id, &b.fingerprint, b.occurrence, b.category, &b.target, &b.project_id, &b.run_id, &b.subject, &b.source_event_id, &b.correlation_id, b.created_at),
+        (&a.id, &a.fingerprint, a.occurrence, a.category, &a.target, &a.project_id, &a.run_id, &a.subject, &a.source_event_id, &a.correlation_id, a.created_at)
+    );
+    assert_eq!((b.status, b.resolved_at, b.resolution), (AttentionStatus::Active, None, None), "sigue activa");
+}
+
+#[test]
+fn raise_duplicado_tras_actualizar_devuelve_la_activa_actualizada_sin_escribir() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let b = actualizada(s.attention_update_active(&a.id, &upd(Some(Severity::Critical), Some(r#"{"z":9}"#), 2_000)).unwrap());
+    // Levantar el mismo hecho con otra severidad/facts/hora/origen NO modifica la activa (Existing intacto).
+    let c = existente(s.attention_raise(&NewAttention { severity: Severity::Low, facts: "{}".into(), at: 5_000, source_event_id: Some("e-9".into()), ..completo() }).unwrap());
+    assert_eq!(c, b);
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), b);
+    assert_eq!(cuenta(&s, "attention_items"), 1);
+}
+
+#[test]
+fn una_actualizacion_invalida_se_rechaza_sin_cambios_parciales() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let demasiado = format!(r#"{{"k":"{}"}}"#, "x".repeat(MAX_FACTS_BYTES));
+    let casos = [
+        ("facts no objeto", upd(Some(Severity::Critical), Some("[1]"), 2_000)),
+        ("facts escalar", upd(Some(Severity::Critical), Some("1"), 2_000)),
+        ("facts null", upd(Some(Severity::Critical), Some("null"), 2_000)),
+        ("facts JSON roto", upd(Some(Severity::Critical), Some("{"), 2_000)),
+        ("facts vacío", upd(Some(Severity::Critical), Some(""), 2_000)),
+        ("facts de más de 2048 bytes", upd(Some(Severity::Critical), Some(&demasiado), 2_000)),
+        ("hora anterior a la creación (con severidad válida)", upd(Some(Severity::Critical), Some(r#"{"b":2}"#), 999)),
+        ("hora anterior a la creación solo severidad", upd(Some(Severity::Critical), None, -5)),
+        ("actualización vacía", upd(None, None, 2_000)),
+    ];
+    for (que, u) in casos {
+        let e = s.attention_update_active(&a.id, &u).unwrap_err();
+        assert!(matches!(e, StoreError::InvalidAttention(_)), "{que}: {e:?}");
+        assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), a, "{que}: la fila no cambió (ni severidad ni updated_at)");
+    }
+    // Los facts se miden en BYTES, no en caracteres: 1100 «é» (2 bytes) superan el límite.
+    let multibyte = format!(r#"{{"k":"{}"}}"#, "é".repeat(1100));
+    assert!(multibyte.chars().count() < MAX_FACTS_BYTES && multibyte.len() > MAX_FACTS_BYTES);
+    assert!(matches!(s.attention_update_active(&a.id, &upd(None, Some(&multibyte), 2_000)).unwrap_err(), StoreError::InvalidAttention(_)));
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), a);
+}
+
+#[test]
+fn la_severidad_de_una_actualizacion_es_un_conjunto_cerrado() {
+    // El tipo `Severity` no admite valores fuera del conjunto; un código desconocido ni siquiera se parsea.
+    assert!(matches!(Severity::parse("urgent"), Err(StoreError::InvalidAttention(_))));
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    assert!(falla(&mut s, &format!("UPDATE attention_items SET severity = 'urgent' WHERE id = '{}'", a.id)).is_some(), "y la base lo rechaza igualmente");
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), a);
+}
+
+#[test]
+fn actualizar_una_resuelta_se_rechaza_y_no_la_reabre() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let r = match s.attention_resolve(&a.id, Resolution::Acted, 2_000).unwrap() {
+        ResolveOutcome::Resolved(r) => r,
+        o => panic!("{o:?}"),
+    };
+    let o = s.attention_update_active(&a.id, &upd(Some(Severity::Critical), Some(r#"{"z":9}"#), 3_000)).unwrap();
+    assert_eq!(o, UpdateOutcome::AlreadyResolved(r.clone()), "distinto de Updated: no se confunde con éxito");
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), r, "sigue resuelta, sin tocar severity, facts ni updated_at");
+    // Reabrir tampoco se puede por SQL: levantar el hecho crea OTRA ocurrencia y la resuelta no se toca.
+    let b = creada(s.attention_raise(&NewAttention { at: 4_000, ..completo() }).unwrap());
+    assert_eq!((b.occurrence, b.status, b.severity), (2, AttentionStatus::Active, Severity::High));
+    let b2 = actualizada(s.attention_update_active(&b.id, &upd(Some(Severity::Critical), None, 5_000)).unwrap());
+    assert_eq!(b2.severity, Severity::Critical);
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), r, "la historia resuelta no cambia");
+    assert_eq!(cuenta(&s, "attention_items"), 2);
+}
+
+#[test]
+fn actualizar_un_id_desconocido_es_missing() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    assert_eq!(s.attention_update_active("att_no_existe", &upd(Some(Severity::Low), None, 5)).unwrap(), UpdateOutcome::Missing);
+    assert_eq!(cuenta(&s, "attention_items"), 0);
+}
+
+#[test]
+fn la_actualizacion_participa_en_la_transaccion_de_quien_llama() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    let u = upd(Some(Severity::Critical), Some(r#"{"z":9}"#), 2_000);
+    let r: StoreResult<()> = s.write(|tx| {
+        actualizada(attention_update_active_in(tx, &a.id, &u)?);
+        Err(StoreError::InvalidAttention("se deshace".into()))
+    });
+    assert!(r.is_err());
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), a, "si la transacción se deshace, la actualización también");
+}
+
+#[test]
+fn el_limite_sql_de_campos_protegidos_de_una_activa() {
+    let tmp = Tmp::new();
+    let mut s = abre(tmp.path());
+    let a = creada(s.attention_raise(&completo()).unwrap());
+    // Permitido en una activa: severity, facts y updated_at (también por SQL directo).
+    for ok in [
+        "severity = 'low'",
+        "facts = '{\"q\":1}'",
+        "updated_at = 7000",
+        "severity = 'critical', facts = '{}', updated_at = 8000",
+    ] {
+        assert_eq!(falla(&mut s, &format!("UPDATE attention_items SET {ok} WHERE id = '{}'", a.id)), None, "{ok}");
+    }
+    let tras_ok = s.attention_get(&a.id).unwrap().unwrap();
+    assert_eq!((tras_ok.severity, tras_ok.facts.as_str(), tras_ok.updated_at), (Severity::Critical, "{}", 8_000));
+    // Protegido: todo lo demás.
+    for ko in [
+        "id = 'otro'",
+        "fingerprint = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'",
+        "occurrence = 2",
+        "category = 'risk'",
+        "target_kind = 'run'",
+        "target_id = 't9'",
+        "project_id = 'p9'",
+        "project_id = NULL",
+        "run_id = 'r9'",
+        "subject = 'otro'",
+        "subject = NULL",
+        "source_event_id = 'e9'",
+        "correlation_id = 'c9'",
+        "created_at = 0",
+        "created_at = 500, updated_at = 500",
+    ] {
+        assert!(falla(&mut s, &format!("UPDATE attention_items SET {ko} WHERE id = '{}'", a.id)).is_some(), "{ko} debe seguir prohibido");
+    }
+    // Resolver por SQL: la transición pura sí; resolver ADEMÁS cambiando severity o facts, no.
+    assert!(falla(&mut s, &format!("UPDATE attention_items SET status = 'resolved', resolved_at = 9000, resolution = 'acted', updated_at = 9000, severity = 'low' WHERE id = '{}'", a.id)).is_some());
+    assert!(falla(&mut s, &format!("UPDATE attention_items SET status = 'resolved', resolved_at = 9000, resolution = 'acted', updated_at = 9000, facts = '{{\"x\":1}}' WHERE id = '{}'", a.id)).is_some());
+    assert!(falla(&mut s, &format!("DELETE FROM attention_items WHERE id = '{}'", a.id)).is_some(), "no se borra");
+    assert_eq!(s.attention_get(&a.id).unwrap().unwrap(), tras_ok, "ningún rechazo dejó cambios");
+    assert_eq!(falla(&mut s, &format!("UPDATE attention_items SET status = 'resolved', resolved_at = 9000, resolution = 'acted', updated_at = 9000 WHERE id = '{}'", a.id)), None);
+    // Resuelta: ni siquiera severity, facts o updated_at.
+    for ko in ["severity = 'low'", "facts = '{}'", "updated_at = 9500", "status = 'active', resolved_at = NULL, resolution = NULL"] {
+        assert!(falla(&mut s, &format!("UPDATE attention_items SET {ko} WHERE id = '{}'", a.id)).is_some(), "resuelta: {ko} debe seguir prohibido");
+    }
 }
 
 // ── Attention no copia ni consume el Event Log ──────────────────────────────────────────────────
@@ -544,7 +765,7 @@ fn una_base_con_la_006_no_la_abre_un_binario_que_no_la_conoce() {
 fn la_migracion_006_tiene_el_checksum_congelado() {
     let m = embedded().into_iter().find(|m| m.version == 6).expect("existe la 006");
     assert_eq!(m.name, "attention");
-    assert_eq!(m.checksum(), "93b6f0bc282fca9cece0a95e3eb0eddf30a6f9d226859b181f1452910302eef3", "una migración publicada no se edita");
+    assert_eq!(m.checksum(), "a0c70f9f461e93520466cd2dd31e4051469decd880edd47a65f9fe52f65fe453", "una migración publicada no se edita");
 }
 
 /// Vectores de identidad del contrato (`docs/core/ATTENTION.md`, «Identidad»). Si cambian, cambia la
