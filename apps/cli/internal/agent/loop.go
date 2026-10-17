@@ -81,6 +81,9 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 	content := TextSystemPrompt(s.Workspace)
 	if native {
 		content = NativeSystemPrompt(s.Workspace)
+		if s.TextCalls {
+			content += NativeFormatPrompt
+		}
 	}
 	if s.ProjectContext != "" {
 		content += "\n\n=== CONTEXTO DEL PROYECTO (LIXBON.md) ===\n" + s.ProjectContext
@@ -311,6 +314,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			return assistant, working, nil
 		}
 		usedTools = true
+		if native {
+			s.TextCalls = true
+		}
 
 		signatures := make([]string, len(toolCalls))
 		for i, c := range toolCalls {

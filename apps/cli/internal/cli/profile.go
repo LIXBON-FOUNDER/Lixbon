@@ -10,7 +10,7 @@ import (
 	"lixbon.com/cli/internal/config"
 )
 
-const profileUsage = `Proveedores de modelos (lixbon.com, LM Studio, Ollama, OpenAI, OpenRouter…):
+const profileUsage = `Proveedores de modelos (lixbon.com, LM Studio, Ollama, OpenAI, OpenRouter, Xiaomi MiMo…):
   lixbon profile [list [--json]]         Listar los proveedores
   lixbon profile add NOMBRE --base-url URL|preset [--api-key K] [--model M]
                                        [--context-window N] [--gateway] [--use]
@@ -130,7 +130,7 @@ func (a *App) profileAdd(args []string) int {
 	case window > 0:
 		window = max(1024, window)
 	case !*gateway:
-		window = config.DefaultGenericContext
+		window = config.DefaultContext(url)
 	}
 
 	cfg := config.Load(a.ConfigPath)
@@ -153,6 +153,9 @@ func (a *App) profileAdd(args []string) int {
 		return 1
 	}
 	fmt.Fprintf(a.Stdout, "Proveedor «%s» añadido (%s).\n", name, url)
+	if hint := config.KeyHint(url, p.APIKey); hint != "" {
+		fmt.Fprintln(a.Stderr, hint)
+	}
 	if *use {
 		fmt.Fprintf(a.Stdout, "Ahora usas «%s».\n", name)
 	} else {

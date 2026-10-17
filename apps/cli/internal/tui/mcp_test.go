@@ -5,16 +5,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"lixbon.com/cli/internal/mcp"
 )
 
-func TestMCPCommandWithoutServersExplainsHowToDeclareThem(t *testing.T) {
+func TestMCPCommandWithoutServersOffersToAddOne(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/mcp")
-	contains(t, h.out(), "Sin servidores MCP")
-	contains(t, h.out(), ".lixbon/mcp.json")
+	contains(t, h.view(), "Servidores MCP")
+	contains(t, h.view(), "Añadir servidor MCP")
 }
 
 func TestMCPCommandListsServersAndTools(t *testing.T) {
@@ -47,10 +49,58 @@ func TestMCPCommandListsServersAndTools(t *testing.T) {
 	reg.Start()
 
 	h.send("/mcp")
-	out := h.out()
-	contains(t, out, "demo: 1 herramienta")
-	contains(t, out, "mcp__demo__saludar")
-	contains(t, out, "Saluda a alguien")
-	contains(t, out, "caido: no se pudo conectar")
-	notContains(t, out, "secreto")
+	view := h.view()
+	contains(t, view, "1 herramienta")
+	contains(t, view, "caido")
+	contains(t, view, "no se pudo conectar")
+	notContains(t, view, "secreto")
+	h.key("enter")
+	contains(t, h.view(), "Herramientas de demo")
+	contains(t, h.view(), "saludar")
+	contains(t, h.view(), "Saluda a alguien")
+}
+
+func TestMCPAddFormDeclaresTheServerAndStartsIt(t *testing.T) {
+	h := newHarness(t, nil)
+	h.send("/mcp")
+	h.key("enter")
+	h.pump(h.formOpen)
+	h.send("memoria")
+	h.send(`lixbon-mcp-que-no-existe -y "con espacios"`)
+	h.send("CLAVE=secreta")
+	h.key("enter")
+	h.pump(func() bool { return !h.formOpen() })
+	notContains(t, h.out()+h.view(), "secreta")
+
+	path := h.chat.MCPFile(false)
+	specs := mcp.LoadSpecs(t.TempDir(), filepath.Dir(path))
+	if len(specs) != 1 || specs[0].Name != "memoria" || specs[0].Command != "lixbon-mcp-que-no-existe" ||
+		strings.Join(specs[0].Args, "|") != "-y|con espacios" || specs[0].Env["CLAVE"] != "secreta" {
+		t.Fatalf("servidor guardado: %+v", specs)
+	}
+	if h.chat.MCP == nil {
+		t.Fatal("el servidor nuevo debe arrancar sin reiniciar el CLI")
+	}
+	t.Cleanup(h.chat.StopMCP)
+
+	h.send("/mcp")
+	contains(t, h.view(), "memoria")
+	h.key("up")
+	h.key("enter")
+	h.pump(h.formOpen)
+	h.send("memoria")
+	h.send("https://ejemplo.com/mcp")
+	h.key("enter")
+	h.key("enter")
+	contains(t, h.view(), "Ya hay un servidor «memoria»")
+}
+
+func TestMCPEntryParsesCommandsURLsAndPairs(t *testing.T) {
+	got, err := mcpEntry("https://x.dev/mcp", "Authorization='Bearer abc'")
+	if err != nil || got["url"] != "https://x.dev/mcp" || got["headers"].(map[string]string)["Authorization"] != "Bearer abc" {
+		t.Fatalf("url: %v %v", got, err)
+	}
+	if _, err := mcpEntry("uvx srv", "SIN_IGUAL"); err == nil {
+		t.Fatal("una variable sin = debe rechazarse")
+	}
 }

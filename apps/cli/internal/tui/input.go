@@ -4,8 +4,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -90,10 +88,6 @@ func (m *Model) inputBox() []string {
 	if len(m.chips) > 0 {
 		rows = append(rows, panelRow{text: m.chipsRow(inner)})
 	}
-	if m.secret != nil {
-		rows = append(rows, panelRow{text: m.secret.View()})
-		return panel(rows, width, border, title)
-	}
 	lines := strings.Split(m.input.View(), "\n")
 	hint := ""
 	switch {
@@ -133,20 +127,4 @@ func (m *Model) chipsRow(inner int) string {
 		parts = append(parts, withBackground(" "+sSoft.Render(glyphChip+" "+c.name)+dims+" ", pal.surf2)+chip.Render(""))
 	}
 	return fitRight(strings.Join(parts, "  "), sDim2.Render("alt+v pegar"), inner+1)
-}
-
-// newSecretInput es la caja para claves: lo que se escribe sale como •.
-func newSecretInput(width int) (*textinput.Model, tea.Cmd) {
-	ti := textinput.New()
-	ti.Prompt = glyphPrompt + " "
-	ti.EchoMode = textinput.EchoPassword
-	ti.EchoCharacter = '•'
-	ti.SetWidth(max(10, width-6))
-	styles := textinput.DefaultStyles(pal.dark)
-	styles.Focused.Prompt = sAccent
-	styles.Focused.Text = sInk
-	styles.Blurred.Prompt = sAccent
-	ti.SetStyles(styles)
-	cmd := ti.Focus()
-	return &ti, cmd
 }
