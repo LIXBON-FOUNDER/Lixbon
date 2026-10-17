@@ -90,6 +90,9 @@ def r2_endpoint() -> str:
 STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Cuenta PayPal (correo o merchant ID) que recibe las donaciones de /plans.
+# Es pública: viaja en el enlace de donar. Vacía, el botón de donar sale deshabilitado.
+PAYPAL_DONATION_BUSINESS: str = os.getenv("PAYPAL_DONATION_BUSINESS", "").strip()
 # URL base pública para las páginas de retorno del checkout (success/cancel)
 PUBLIC_BASE_URL: str = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 # El repo es privado, así que los binarios del CLI Go viven en R2 y se sirven

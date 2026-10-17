@@ -35,6 +35,7 @@ from core.persistence.queries import (
     get_daily_metrics,
     get_global_stats,
     get_plan_for_user,
+    get_donation_settings,
     get_usage_policy,
     get_user_by_email,
     get_user_by_id,
@@ -55,6 +56,7 @@ from core.persistence.queries import (
     update_model_pricing,
     update_model_weight,
     update_plan,
+    update_donation_settings,
     update_usage_policy,
     upsert_model_alias,
     upsert_model_role,
@@ -98,11 +100,12 @@ async def api_admin_metrics(
 ):
     """Totales del sistema + serie diaria (requests, tokens, latencia)."""
     stats = get_global_stats(days=days)
-    nodes = deps.orquestador.estado_nodos()
+    resumen = deps.orquestador.resumen_cluster()
     stats["nodes"] = {
-        "total": len(nodes),
-        "online": sum(1 for n in nodes if n["online"]),
+        "total": resumen["nodes_total"],
+        "online": resumen["nodes_online"],
     }
+    stats["cluster"] = resumen
     return stats
 
 
@@ -214,6 +217,28 @@ async def api_admin_update_usage_policy(
     policy = update_usage_policy(fields)
     log_audit_event("usage_policy_updated", user_id=admin["id"], fields=sorted(fields))
     return {"usage_policy": policy}
+
+
+class DonationSettingsPayload(BaseModel):
+    enabled: bool | None = None
+    total_cents: int | None = Field(default=None, ge=0)
+    goal_cents: int | None = Field(default=None, ge=0)
+
+
+@router.get("/donations")
+async def api_admin_get_donations(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"donations": get_donation_settings()}
+
+
+@router.patch("/donations")
+async def api_admin_update_donations(
+    payload: DonationSettingsPayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    fields = payload.model_dump(exclude_unset=True)
+    donations = update_donation_settings(fields)
+    log_audit_event("donation_settings_updated", user_id=admin["id"], fields=sorted(fields))
+    return {"donations": donations}
 
 
 class ModelWeightCreatePayload(BaseModel):

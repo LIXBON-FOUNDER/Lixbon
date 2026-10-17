@@ -19,6 +19,7 @@ Dos modos de nodo:
 import logging
 import threading
 import time
+from collections import deque
 
 import httpx
 
@@ -39,6 +40,9 @@ CIRCUIT_BACKOFF = {2: 60, 4: 300, 8: 900}   # 1 min, 5 min, 15 min
 PESO_CPU = 0.25
 PESO_RAM = 0.35
 PESO_GPU = 0.40
+
+# Ventana del contador de peticiones del panel admin (segundos)
+VENTANA_PETICIONES = 3600
 
 
 class ModelUnavailable(RuntimeError):
@@ -80,6 +84,9 @@ class NodeOrchestrator:
         self._activo = False
         self._cliente = httpx.Client(timeout=8.0)
         self._links_activos: set[str] = set()
+        # Marcas de tiempo de las peticiones enrutadas en la última hora, para
+        # «peticiones por minuto» en el panel. Solo vive en memoria del proceso.
+        self._peticiones: deque[float] = deque()
 
     # Carga de nodos (desde BD)
     # ──────────────────────────────────────────
@@ -325,6 +332,55 @@ class NodeOrchestrator:
     def nodos_online(self) -> list[str]:
         with self._lock:
             return [est["config"]["id"] for est in self._estado.values() if est["online"]]
+
+    def registrar_peticion(self, ahora: float | None = None) -> None:
+        """Cuenta una petición de inferencia enrutada (para el resumen del panel)."""
+        ahora = time.time() if ahora is None else ahora
+        with self._lock:
+            self._peticiones.append(ahora)
+            self._podar_peticiones(ahora)
+
+    def _podar_peticiones(self, ahora: float) -> None:
+        limite = ahora - VENTANA_PETICIONES
+        while self._peticiones and self._peticiones[0] < limite:
+            self._peticiones.popleft()
+
+    def resumen_cluster(self, ahora: float | None = None) -> dict:
+        """Nodos en línea, VRAM sumada de los nodos en línea con GPU y peticiones.
+
+        La VRAM sale de lo que cada node_agent mide con nvidia-smi
+        (`gpu_total_mb`, `gpu_free_mb`); un nodo sin GPU o con un agente que
+        no la reporta no suma. Un nodo caído no cuenta: su VRAM no está
+        disponible para inferencia.
+        """
+        ahora = time.time() if ahora is None else ahora
+        with self._lock:
+            self._podar_peticiones(ahora)
+            estados = list(self._estado.values())
+            ultimo_minuto = sum(1 for t in self._peticiones if t >= ahora - 60)
+            ultima_hora = len(self._peticiones)
+
+        online = [e for e in estados if e["online"]]
+        con_gpu = [
+            e["metricas"] for e in online
+            if e["metricas"].get("gpu_available") and float(e["metricas"].get("gpu_total_mb") or 0) > 0
+        ]
+        total_mb = sum(float(m["gpu_total_mb"]) for m in con_gpu)
+        libre_mb = sum(min(float(m.get("gpu_free_mb") or 0), float(m["gpu_total_mb"])) for m in con_gpu)
+        uso_medio = (sum(float(m.get("gpu_used_percent") or 0) for m in con_gpu) / len(con_gpu)) if con_gpu else None
+
+        return {
+            "nodes_total": len(estados),
+            "nodes_online": len(online),
+            "gpus_online": len(con_gpu),
+            "vram_total_mb": round(total_mb, 1),
+            "vram_free_mb": round(libre_mb, 1),
+            "vram_used_mb": round(total_mb - libre_mb, 1),
+            "gpu_used_percent_avg": round(uso_medio, 1) if uso_medio is not None else None,
+            "requests_last_minute": ultimo_minuto,
+            "requests_last_hour": ultima_hora,
+            "requests_per_minute_avg": round(ultima_hora / (VENTANA_PETICIONES / 60), 1),
+        }
 
     def ollama_target(self, model: str | None = None, strict: bool = False) -> tuple[str, dict, str]:
         """
