@@ -177,3 +177,31 @@ func TestALiveAreaThatGrowsDoesNotMoveAScrolledView(t *testing.T) {
 		t.Fatalf("al irse lo pensado la ventana se movió de %d a %d", top, h.m.winTop)
 	}
 }
+
+// Con poco escrito, lo que hace el agente ahora (pensando, escribiendo…) va
+// justo detrás del último mensaje; la caja y el pie siguen fijos abajo.
+func TestTheLiveStatusFollowsTheLastMessage(t *testing.T) {
+	h := newHarness(t, nil)
+	h.m.print("primer mensaje")
+	h.m.running = true
+	h.m.live.reasoning.WriteString("pienso")
+	rows := strings.Split(h.view(), "\n")
+	msg, live, box := -1, -1, -1
+	for i, r := range rows {
+		switch {
+		case strings.Contains(r, "primer mensaje"):
+			msg = i
+		case strings.Contains(r, "Pensando"):
+			live = i
+		case strings.Contains(r, glyphs.boxTL):
+			box = i
+		}
+	}
+	if msg < 0 || live != msg+1 {
+		t.Fatalf("el estado va justo detrás del mensaje: mensaje %d, estado %d\n%s", msg, live, h.view())
+	}
+	if box != len(rows)-4 || !strings.Contains(rows[len(rows)-1], "shift+tab") && !strings.Contains(rows[len(rows)-1], "esc") {
+		t.Fatalf("la caja y el pie siguen abajo: caja %d de %d\n%s", box, len(rows), h.view())
+	}
+	h.m.running = false
+}
