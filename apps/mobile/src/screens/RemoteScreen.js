@@ -6,7 +6,7 @@
 // preguntas y el compact van encima del compositor. Todo se ejecuta en la
 // máquina host; esto es un mando.
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, AppState, Easing, FlatList, Keyboard, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, AppState, BackHandler, Easing, FlatList, Keyboard, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -26,7 +26,7 @@ import { agentOf } from '../remoteSessions';
 import { buildBlocks, changedTurns, contextLevels, diffLines, fmtSecs, fmtTokens, toolState } from '../remoteTurns';
 import { useApi, useAuth } from '../state';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
-import { toolKind, toolParts } from '../toolText';
+import { summarizeRemoteTools, toolKind, toolParts } from '../toolText';
 import RemoteOrch from './RemoteOrch';
 import { GrowBar, Quota } from './UsageScreen';
 
@@ -38,6 +38,13 @@ const EMPTY_TURN = { type: 'turn', key: 'live', work: [], qa: [], end: null, ans
 const BIG_RING = 2 * Math.PI * 18;
 // Las filas del hilo miden 34 como en el lienzo; el toque llega a 44.
 const ROW_SLOP = { top: 5, bottom: 5 };
+// Lo que piensa el agente en vivo: solo las últimas líneas.
+const THINK_LINES = 3;
+const THINK_LH = 20;
+// Más arriba de esto el usuario está leyendo: el hilo deja de seguir al
+// agente y conserva lo que tiene a la vista aunque llegue salida nueva.
+const FOLLOW_SLACK = 60;
+const HOLD_POSITION = { minIndexForVisible: 0 };
 
 // Catálogo de reserva: si el host es de una versión anterior a que el `hello`
 // publicara sus comandos, la hoja sigue ofreciendo lo básico en vez de nada.
@@ -180,6 +187,8 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   const [overlay, setOverlayState] = useState(null);
   const [composerH, setComposerH] = useState(70);
   const [open, setOpen] = useState({});
+  const [timeline, setTimeline] = useState(null);
+  const [following, setFollowing] = useState(true);
   const aliveRef = useRef(true);
   const seqRef = useRef(0);
   const inputRef = useRef(null);
@@ -191,6 +200,13 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   const caps = state.meta?.capabilities || [];
   const attachments = useAttachments({ describeImages: false, allowImages: caps.includes('images') });
   const toggle = useCallback((key) => setOpen((cur) => ({ ...cur, [key]: !cur[key] })), []);
+  const openTimeline = useCallback((turn, focus) => setTimeline({ turn, focus }), []);
+  const closeTimeline = useCallback(() => setTimeline(null), []);
+  // La lista está invertida: el desplazamiento 0 es el final del hilo.
+  const onListScroll = useCallback((e) => {
+    const near = e.nativeEvent.contentOffset.y <= FOLLOW_SLACK;
+    setFollowing((cur) => (cur === near ? cur : near));
+  }, []);
   // Las capas se anclan al compositor: con el teclado abierto quedarían debajo.
   const setOverlay = useCallback((next) => {
     if (next) Keyboard.dismiss();
@@ -463,7 +479,7 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   const canOrch = !state.ended && caps.includes('orch');
   const orchBusy = !!state.orch?.tasks?.some((x) => !['done', 'failed', 'stopped', 'exited'].includes(x.status));
   const waitingTool = state.approvals[0]?.tool;
-  const live = { busy, activity: state.activity, since: state.busySince, waitingTool, context: state.context };
+  const live = { busy, activity: state.activity, activityLabel: state.activityLabel, since: state.busySince, waitingTool, context: state.context };
 
   return (
     <KeyboardAware>
@@ -510,8 +526,11 @@ function RemoteSessionView({ session, onBack, onUsage }) {
             keyExtractor={(b) => b.key}
             contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
             keyboardShouldPersistTaps="handled"
-            renderItem={({ item, index }) => <Block block={item} last={index === 0} agent={agent} live={live} open={open} toggle={toggle} />}
-            extraData={[busy, state.activity, waitingTool, open, state.context]}
+            onScroll={onListScroll}
+            scrollEventThrottle={100}
+            maintainVisibleContentPosition={following ? undefined : HOLD_POSITION}
+            renderItem={({ item, index }) => <Block block={item} last={index === 0} agent={agent} live={live} open={open} toggle={toggle} onTimeline={openTimeline} />}
+            extraData={[busy, state.activity, state.activityLabel, waitingTool, open, state.context]}
           />
         )}
       </View>
@@ -569,6 +588,14 @@ function RemoteSessionView({ session, onBack, onUsage }) {
           onClose={() => setOverlay(null)}
         />
       )}
+      {!!timeline &&
+        (() => {
+          const turn = turnBlocks.find((b) => b.key === timeline.turn);
+          if (!turn) return null;
+          const lastTurn = turnBlocks[turnBlocks.length - 1];
+          const turnLive = turn === lastTurn && busy && !turn.end ? live : null;
+          return <TimelineSheet turn={turn} focus={timeline.focus} live={turnLive} agent={agent} open={open} toggle={toggle} onClose={closeTimeline} />;
+        })()}
       {overlay === 'quota' && (
         <QuotaModal
           usage={usage}
@@ -583,6 +610,11 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   );
 }
 
+// La acción que el modelo está escribiendo y cuánto lleva («Escribiendo
+// index.html · 12.4 kB»): con una larga es lo único que avanza, y sin ella el
+// turno parece trabado.
+const preparingText = (label) => label || 'Preparando una acción';
+
 // La fase del agente en palabras: es lo que dice la cabecera bajo el título.
 function phaseOf(state, { question, compacting }) {
   if (compacting) return 'compactando';
@@ -592,6 +624,7 @@ function phaseOf(state, { question, compacting }) {
     if (state.activity === 'command') return 'ejecutando un comando';
     if (state.activity === 'reasoning') return 'pensando';
     if (state.activity === 'writing') return 'escribiendo';
+    if (state.activity === 'preparing') return preparingText(state.activityLabel).toLowerCase();
     return 'trabajando';
   }
   if (state.background.length) return 'esperando';
@@ -686,13 +719,23 @@ function SessionEmpty({ state, agent }) {
 
 // ── Hilo ────────────────────────────────────────────────────────────────────
 
-function Block({ block, last, agent, live, open, toggle }) {
+function Block({ block, last, agent, live, open, toggle, onTimeline }) {
   const { s } = useScale();
   switch (block.type) {
     case 'user':
       return <UserRow item={block.item} busy={live.busy} />;
     case 'turn':
-      return <TurnBlock turn={block} live={last && live.busy && !block.end ? live : null} waitingTool={last ? live.waitingTool : null} agent={agent} open={open} toggle={toggle} />;
+      return (
+        <TurnBlock
+          turn={block}
+          live={last && live.busy && !block.end ? live : null}
+          waitingTool={last ? live.waitingTool : null}
+          agent={agent}
+          open={open}
+          toggle={toggle}
+          onTimeline={onTimeline}
+        />
+      );
     case 'command':
       return <CommandCard item={block.item} agent={agent} context={live.context} />;
     case 'compacted':
@@ -741,7 +784,7 @@ function ErrorBox({ text, style }) {
 /** Un turno del agente. En marcha: lo que piensa, cada herramienta y la
     respuesta según llega. Terminado: una fila resumen que despliega todo,
     la respuesta, lo que preguntó y los cambios. */
-function TurnBlock({ turn, live, waitingTool, agent, open, toggle }) {
+function TurnBlock({ turn, live, waitingTool, agent, open, toggle, onTimeline }) {
   const c = useColors();
   const { s } = useScale();
   const now = useNow(!!live);
@@ -750,10 +793,11 @@ function TurnBlock({ turn, live, waitingTool, agent, open, toggle }) {
   const answer = turn.answer;
   const elapsed = live?.since ? now - live.since : null;
 
+  const preparing = live?.activity === 'preparing';
   if (live && !turn.work.some((it) => it.kind !== 'thinking') && !answer?.text) {
     const thinking = turn.work.filter((it) => it.kind === 'thinking');
-    const text = thinking.map((it) => it.text).join('\n\n');
-    return <ThinkLive label={`${label} está pensando…`} secs={elapsed} text={text} />;
+    const text = preparing ? '' : thinking.map((it) => it.text).join('\n\n');
+    return <ThinkLive label={preparing ? `${preparingText(live.activityLabel)}…` : `${label} está pensando…`} secs={elapsed} text={text} />;
   }
 
   // Mientras escribe la respuesta, el trabajo ya hecho se pliega en el resumen.
@@ -776,9 +820,19 @@ function TurnBlock({ turn, live, waitingTool, agent, open, toggle }) {
         />
       )}
       {(!collapsed || summaryOpen) && (
-        <WorkList work={turn.work} live={live} waitingTool={waitingTool} label={label} open={open} toggle={toggle} elapsed={elapsed} />
+        <WorkList
+          work={turn.work}
+          live={live}
+          waitingTool={waitingTool}
+          label={label}
+          open={open}
+          toggle={toggle}
+          elapsed={elapsed}
+          onTimeline={(focus) => onTimeline?.(turn.key, focus)}
+        />
       )}
-      {!!answer?.text && <AnswerBlock text={answer.text} streaming={!!live && answer.open} />}
+      {!!answer?.text && <AnswerBlock text={answer.text} streaming={!!live && answer.open && !preparing} />}
+      {preparing && <ThinkLive label={`${preparingText(live.activityLabel)}…`} secs={null} text="" compact />}
       {interrupted && <NoticeBox text="Interrumpiste al agente. Lo que ya hizo se queda en el equipo." />}
     </View>
   );
@@ -790,17 +844,32 @@ function summaryLabel({ interrupted, ms, actions }) {
   return typeof ms === 'number' ? `Trabajó ${fmtSecs(ms)} · ${n}` : `Trabajó · ${n}`;
 }
 
-function WorkList({ work, live, waitingTool, label, open, toggle, elapsed }) {
+/** Las herramientas seguidas van juntas en una fila; lo pensado y lo que el
+    agente cuenta entre ellas cortan el tramo. */
+function workSegments(work) {
+  const out = [];
+  for (const it of work) {
+    const prev = out[out.length - 1];
+    if (it.kind !== 'tool') out.push(it);
+    else if (prev?.kind === 'tools') prev.items.push(it);
+    else out.push({ kind: 'tools', key: it.key, items: [it] });
+  }
+  return out;
+}
+
+function WorkList({ work, live, waitingTool, label, open, toggle, elapsed, onTimeline }) {
+  const lastItem = work[work.length - 1];
   return (
     <View>
-      {work.map((it, i) => {
+      {workSegments(work).map((it) => {
         if (it.kind === 'thinking') {
           if (it.open && live) return <ThinkLive key={it.key} label={`${label} está pensando…`} secs={Date.now() - (it.since || Date.now())} text={it.text} compact />;
           return <ThoughtRow key={it.key} item={it} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
         }
-        if (it.kind === 'tool') {
-          const lastRunning = !!live && it.running && i === work.length - 1;
-          return <ToolRow key={it.key} it={it} waitingTool={lastRunning ? waitingTool : null} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
+        if (it.kind === 'tools') {
+          const tail = it.items[it.items.length - 1];
+          const running = !!live && tail.running && tail === lastItem;
+          return <ActionsRow key={it.key} items={it.items} running={running} waitingTool={running ? waitingTool : null} onPress={() => onTimeline(it.key)} />;
         }
         if (it.kind === 'notice') return <NoticeBox key={it.key} text={it.text} />;
         if (it.kind === 'qa') return <QaRecord key={it.key} item={it} label={label} />;
@@ -817,14 +886,20 @@ function WorkList({ work, live, waitingTool, label, open, toggle, elapsed }) {
 function ThinkLive({ label, secs, text, compact = false }) {
   const c = useColors();
   const { s } = useScale();
-  const tail = text.length > 700 ? `…${text.slice(-700)}` : text;
+  const tail = text.length > 400 ? `…${text.slice(-400)}` : text;
   return (
     <FadeUp style={{ marginVertical: compact ? s(4) : s(9), gap: 6 }} accessibilityRole="progressbar" accessibilityLabel={label}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
         <ShimmerText text={label} style={{ fontFamily: FONTS.uiMedium, fontSize: compact ? 13.5 : 15 }} />
         {typeof secs === 'number' && secs >= 0 && <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkFaint }}>{`${Math.max(1, Math.round(secs / 1000))} s`}</Text>}
       </View>
-      {!!tail.trim() && <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted }}>{tail.trim()}</Text>}
+      {/* Alto fijo y pegado abajo: se ven las últimas líneas y el hilo no
+          crece mientras el modelo piensa. Entero queda en «Pensó». */}
+      {!!tail.trim() && (
+        <View style={{ maxHeight: THINK_LINES * THINK_LH, overflow: 'hidden', justifyContent: 'flex-end' }}>
+          <Text style={{ flexShrink: 0, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: THINK_LH, color: c.inkMuted }}>{tail.trim()}</Text>
+        </View>
+      )}
     </FadeUp>
   );
 }
@@ -921,14 +996,21 @@ function toolMeta(it, kind) {
 
 /** Una herramienta en una fila: icono por tipo, verbo, destino, líneas
     cambiadas y su medida; se despliega a la lista, al diff o a la salida. */
-function ToolRow({ it, waitingTool, open, onToggle }) {
-  const c = useColors();
+/** Verbo, destino e icono de una herramienta según cómo quedó. */
+function toolRowParts(it, waitingTool) {
   const kind = toolKind(it);
   const st = toolState(it, waitingTool);
   const { verb: baseVerb, target: baseTarget, mono } = toolParts(it, st.waiting);
   const git = kind === 'cmd' && /^git\b/.test(String(it.summary || '').trim());
   const verb = st.denied ? (kind === 'edit' ? 'No editó' : kind === 'cmd' ? 'No ejecutó' : 'Rechazado') : st.cut ? 'Cortado' : baseVerb;
   const target = st.waiting ? `tu permiso · ${baseTarget}` : baseTarget;
+  const icon = st.bad ? 'warning' : git ? 'git' : ICON_OF[kind] || 'layers';
+  return { kind, st, verb, target, mono, git, icon };
+}
+
+function ToolRow({ it, waitingTool, open, onToggle }) {
+  const c = useColors();
+  const { kind, st, verb, target, mono, icon } = toolRowParts(it, waitingTool);
   const hasDiff = !!(it.rows?.length || it.diff);
   const hasList = !!it.lines?.length;
   const isCmd = kind === 'cmd';
@@ -937,7 +1019,6 @@ function ToolRow({ it, waitingTool, open, onToggle }) {
   const isOpen = expandable && open;
   const showOut = isCmd && (it.running || isOpen) && !st.waiting;
   const meta = st.bad && !(isCmd && typeof it.exit === 'number') ? '' : toolMeta(it, kind);
-  const icon = st.bad ? 'warning' : git ? 'git' : ICON_OF[kind] || 'layers';
   const tone = st.bad ? c.danger : c.inkMuted;
 
   return (
@@ -990,6 +1071,159 @@ function ToolRow({ it, waitingTool, open, onToggle }) {
         </Text>
       )}
     </View>
+  );
+}
+
+/** Un tramo de herramientas seguidas en una sola fila: el icono de cada tipo
+    que usó, qué hizo en palabras y las líneas cambiadas. Mientras una corre
+    dice cuál; un toque abre la línea de tiempo del turno. */
+function ActionsRow({ items, running, waitingTool, onPress }) {
+  const c = useColors();
+  const tail = items[items.length - 1];
+  const now = toolRowParts(tail, waitingTool);
+  const parts = items.map((it) => toolRowParts(it));
+  const icons = [...new Set(parts.map((p) => p.icon))];
+  const bad = parts.some((p) => p.st.bad);
+  let adds = 0;
+  let dels = 0;
+  for (const it of items) {
+    if ((it.rows?.length || it.diff) && !toolState(it).denied) {
+      adds += it.adds || 0;
+      dels += it.dels || 0;
+    }
+  }
+  const single = items.length === 1 || running;
+  const one = running ? now : parts[0];
+  const label = single ? `${one.verb} ${one.target}` : summarizeRemoteTools(items);
+  const showOut = running && now.kind === 'cmd' && !now.st.waiting;
+  return (
+    <View>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}. Ver la línea de tiempo`}
+        hitSlop={ROW_SLOP}
+        style={({ pressed }) => ({ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, opacity: pressed ? 0.7 : 1 })}
+      >
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          {icons.slice(0, 4).map((name) => (
+            <Icon key={name} name={name} size={15} color={name === 'warning' ? c.danger : c.inkMuted} strokeWidth={1.7} />
+          ))}
+        </View>
+        {running && !now.st.waiting ? (
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <ShimmerText text={label} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
+          </View>
+        ) : single ? (
+          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: 13.5, color: one.st.bad ? c.danger : c.inkMuted }}>
+            {`${one.verb} `}
+            <Text style={{ fontFamily: one.mono ? FONTS.mono : FONTS.ui, fontSize: one.mono ? 12.5 : 13.5, color: c.inkBody }}>{one.target}</Text>
+          </Text>
+        ) : (
+          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: 13.5, color: bad ? c.danger : c.inkBody }}>
+            {label}
+          </Text>
+        )}
+        {(adds > 0 || dels > 0) && <LineCounts adds={adds} dels={dels} />}
+        <Icon name="chevron-right" size={13} color={c.inkFaint} strokeWidth={2} />
+      </Pressable>
+      {showOut && <CommandBox it={tail} state={now.st} />}
+    </View>
+  );
+}
+
+/** Todo lo que hizo el turno en orden, de arriba abajo: lo pensado, lo que
+    contó y cada herramienta con su diff o su salida. Se abre en el tramo
+    que se tocó. */
+function TimelineSheet({ turn, focus, live, agent, open, toggle, onClose }) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef(null);
+  const placed = useRef(false);
+  const label = agentStyle(agent, c).label;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [onClose]);
+  const work = turn.work.filter((it) => it.kind !== 'assistant' || it.text.trim());
+  const lastItem = turn.work[turn.work.length - 1];
+  const actions = turn.work.filter((it) => it.kind === 'tool').length;
+  const ms = turn.end?.ms ?? (live?.since ? Date.now() - live.since : null);
+  const sub = [`${actions} ${actions === 1 ? 'acción' : 'acciones'}`, typeof ms === 'number' ? fmtSecs(ms) : ''].filter(Boolean).join(' · ');
+  return (
+    <Overlay onClose={onClose} label="Cerrar la línea de tiempo">
+      <FadeUp
+        distance={12}
+        accessibilityViewIsModal
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '88%', borderTopLeftRadius: 16, borderTopRightRadius: 16, backgroundColor: c.sheet, paddingBottom: insets.bottom + 8 }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 18, paddingHorizontal: 16, paddingBottom: 10 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text accessibilityRole="header" style={{ fontFamily: FONTS.serif, fontSize: 22, lineHeight: 26, color: c.ink }}>
+              Línea de tiempo
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{sub}</Text>
+              {(turn.adds > 0 || turn.dels > 0) && <LineCounts adds={turn.adds} dels={turn.dels} />}
+            </View>
+          </View>
+          <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar" style={{ width: 44, height: 44, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="x" size={18} color={c.inkMuted} strokeWidth={1.8} />
+          </Pressable>
+        </View>
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+          {work.map((it, i) => {
+            const onLayout =
+              it.key === focus
+                ? (e) => {
+                    if (placed.current) return;
+                    placed.current = true;
+                    scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 8), animated: false });
+                  }
+                : undefined;
+            let body = null;
+            if (it.kind === 'thinking') {
+              body =
+                it.open && live ? (
+                  <ThinkLive label={`${label} está pensando…`} secs={Date.now() - (it.since || Date.now())} text={it.text} compact />
+                ) : (
+                  <ThoughtRow item={it} open={!!open[it.key]} onToggle={() => toggle(it.key)} />
+                );
+            } else if (it.kind === 'tool') {
+              const lastRunning = !!live && it.running && it === lastItem;
+              body = <ToolRow it={it} waitingTool={lastRunning ? live.waitingTool : null} open={!!open[it.key]} onToggle={() => toggle(it.key)} />;
+            } else if (it.kind === 'notice') body = <NoticeBox text={it.text} />;
+            else if (it.kind === 'qa') body = <QaRecord item={it} label={label} />;
+            else if (it.kind === 'assistant') body = <ProseLine text={it.text} />;
+            if (!body) return null;
+            return (
+              <View key={it.key} onLayout={onLayout} style={{ flexDirection: 'row' }}>
+                <View style={{ width: 14 }}>
+                  {work.length > 1 && (
+                    <View
+                      style={{
+                        position: 'absolute',
+                        left: 6,
+                        width: 1.5,
+                        top: i === 0 ? 17 : 0,
+                        bottom: i === work.length - 1 ? undefined : 0,
+                        height: i === work.length - 1 ? 17 : undefined,
+                        backgroundColor: c.surface4,
+                      }}
+                    />
+                  )}
+                  <View style={{ position: 'absolute', left: 3, top: 14, width: 7.5, height: 7.5, borderRadius: 4, backgroundColor: it.kind === 'tool' ? c.inkFaint : c.surface4 }} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0, paddingLeft: 8 }}>{body}</View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </FadeUp>
+    </Overlay>
   );
 }
 
