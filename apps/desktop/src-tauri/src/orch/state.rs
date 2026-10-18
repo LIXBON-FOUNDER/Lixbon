@@ -1041,4 +1041,15 @@ mod tests {
         assert!(s.fail_with(&h, "agent_idle_timeout", "x").unwrap().is_none());
         assert_eq!(s.task(&h).unwrap().failure_reason.as_deref(), Some("terminal_approval_timeout"));
     }
+
+    /// LXO-88: un alcance sin causas no es un bloqueo vigente (no debe disparar la observación del entorno).
+    #[test]
+    fn un_alcance_vacio_no_cuenta_como_bloqueo_vigente_del_proveedor() {
+        let mut s = State::default();
+        s.env_blocks.insert("claude/explorar".into(), BTreeSet::new());
+        assert!(!s.has_env_blocks_of("claude"), "un conjunto vacío no es un bloqueo");
+        assert!(s.set_env_block("claude", "explorar", EnvBlock::CliMissing));
+        assert!(s.has_env_blocks_of("claude") && !s.has_env_blocks_of("codex"), "es por proveedor");
+        assert!(!s.has_env_blocks_of("clau"), "el proveedor se compara entero");
+    }
 }

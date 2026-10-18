@@ -1702,4 +1702,21 @@ sandbox = \"mxc\"", false)] {
         assert!(EnvBlock::ALL.into_iter().all(|c| EnvBlock::parse(c.code()) == Some(c)));
         assert_eq!(EnvBlock::parse("worktree_path_unusable"), None);
     }
+
+    /// LXO-88: `EnvProof::any` solo es cierto si ALGUNA prueba demuestra algo (guarda de `observe_environment`).
+    #[test]
+    fn env_proof_any_solo_es_cierto_con_alguna_prueba() {
+        assert!(!EnvProof::default().any(), "sin ninguna prueba no demuestra nada");
+        for (proof, causa) in [
+            (EnvProof { cli_present: true, ..EnvProof::default() }, EnvBlock::CliMissing),
+            (EnvProof { flags_supported: true, ..EnvProof::default() }, EnvBlock::CliFlagsUnsupported),
+            (EnvProof { sandbox_not_elevated: true, ..EnvProof::default() }, EnvBlock::WindowsSandboxElevated),
+        ] {
+            assert!(proof.any(), "{causa:?}");
+            assert!(proof.demonstrates(causa), "{causa:?}");
+            for otra in EnvBlock::ALL.into_iter().filter(|o| *o != causa) {
+                assert!(!proof.demonstrates(otra), "{proof:?} solo demuestra {causa:?}, no {otra:?}");
+            }
+        }
+    }
 }

@@ -1124,4 +1124,32 @@ mod tests {
         assert!(invoke("orch_list_pending_spawns", json!({})).unwrap().as_array().unwrap().is_empty());
         assert_eq!(e.launched().len(), 1);
     }
+
+    /// LXO-88: `observe_environment` solo muta cuando hay algo que decir. Con el Core en solo lectura cualquier mutación falla,
+    /// así que el no-intento es observable: sin prueba, o sin bloqueos de ESE proveedor, devuelve `Ok` sin tocar el almacén.
+    #[test]
+    fn observe_environment_no_intenta_mutar_si_no_hay_prueba_o_no_hay_bloqueos_que_levantar() {
+        let (_l, data, core_dir) = boot_tests::dirs();
+        let (core, _h, arranque) = boot_tests::arranca(&data, &core_dir);
+        arranque.unwrap();
+        core.mutate_as(&MutationContext::core(), |tx| {
+            assert!(tx.environment_blocked("claude", "explorar", agents::EnvBlock::CliFlagsUnsupported));
+            Ok(())
+        })
+        .unwrap();
+        core.degrade_for_tests("fallo de almacenamiento preparado");
+        let con = |provider: &str, proof: agents::EnvProof| {
+            let mut p = fake(provider, "explorar", None, "wt");
+            p.status = agents::Status::Unverified;
+            p.env_proof = proof;
+            p
+        };
+        let prueba = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        // Hay un bloqueo de `claude` pero la comprobación no demuestra nada: no se intenta mutar.
+        assert!(core.observe_environment(&con("claude", agents::EnvProof::default())).is_ok(), "sin prueba no se muta");
+        // Hay prueba pero `codex` no tiene ningún bloqueo que levantar: tampoco.
+        assert!(core.observe_environment(&con("codex", prueba)).is_ok(), "sin bloqueos del proveedor no se muta");
+        // Control: con prueba Y un bloqueo del proveedor sí se intenta, y el solo lectura lo rechaza.
+        assert!(core.observe_environment(&con("claude", prueba)).is_err(), "con prueba y bloqueo vigente sí se intenta");
+    }
 }

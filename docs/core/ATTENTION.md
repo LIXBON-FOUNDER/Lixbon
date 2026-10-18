@@ -335,12 +335,15 @@ Resumen; contrato completo en `EVENTOS.md`, «Denegación explícita de policy»
 | 6 | Event y Attention se confirman o se deshacen juntos | `si_la_proyeccion_falla_*` (los tres writers), `la_attention_y_sus_events_se_confirman_o_se_deshacen_juntos` |
 
 ### Mutation testing (a mano, como en `proctable.rs`)
-No hay `cargo-mutants` en el repo ni en la CI. La ronda final sobre el árbol estable aplicó **71 mutantes** uno a uno
-(motor create/resolve/dedupe/orden, writers, camino de `spawn`, y las reglas y productores nuevos de `review_ready` y
-`environment_blocked`): **71 muertos, 0 supervivientes, 0 no aplicables, 0 errores de compilación**, con el archivo
-restaurado tras cada uno (el árbol final es idéntico a la copia previa). El inventario completo —cada mutante, la prueba
-que lo mata y la explicación de los supervivientes/no aplicables de rondas intermedias— está en
-[`ATTENTION_MUTACION.md`](ATTENTION_MUTACION.md).
+No hay `cargo-mutants` en el repo ni en la CI. Hay dos rondas con evidencia distinta (detalle, comandos, SHAs y la prueba que mata
+cada mutante en [`ATTENTION_MUTACION.md`](ATTENTION_MUTACION.md)):
+
+* **Ronda 1** (71 mutantes): sobre un árbol de contenido idéntico a `1480b9d`, **no** sobre `cee685b`. 71 muertos.
+* **Ronda 2** (sobre el HEAD exacto `cee685b`): 35 mutantes nuevos del delta posterior (causas acumuladas, `EnvProof`, predicado
+  del sandbox) y re-ejecución completa del inventario de 71. Delta: 31 muertos a la primera y 4 supervivientes que eran un
+  defecto de cobertura (guardas que solo evitan intentar una mutación inútil), cerrados con tres regresiones y re-ejecutados
+  → muertos. Inventario: 66 muertos y 5 no aplicables (`e01`, `e02`, `e04`, `e05`, `e06`: su sitio de mutación ya no existe tras el
+  rediseño; se cuentan aparte y con su sucesor). Árbol restaurado byte a byte (hashes) tras cada ronda.
 
 ## Señales fuente de `review_ready` y `environment_blocked`
 Las dos categorías nacen SOLO de un Event fuente **explícito, causal, secuenciado y reproducible**, emitido en la frontera
