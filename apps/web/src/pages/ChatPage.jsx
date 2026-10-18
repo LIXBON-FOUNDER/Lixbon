@@ -31,6 +31,7 @@ import {
 
 const SEPARADOR_ADJUNTOS = '\n\n---\n\n';
 
+const CONV_PAGE = 30; // conversaciones por página del historial
 const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 
 // Sin datos de tokens (conversación recién cargada o sin respuesta aún) el
@@ -87,6 +88,10 @@ export default function ChatPage() {
 
   const [conversations, setConversations] = useState([]);
   const [convsLoading, setConvsLoading] = useState(true);
+  const [convsMore, setConvsMore] = useState(false);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+  const moreRef = useRef(false);
   const [messages, setMessages] = useState([]);
   const [msgsLoading, setMsgsLoading] = useState(false);
   const [title, setTitle] = useState(null);
@@ -131,13 +136,39 @@ export default function ChatPage() {
     if (!compact) setDrawerOpen(false);
   }, [compact]);
 
+  // El historial llega por páginas: la primera al entrar y las siguientes
+  // cuando la lista se acerca al final. Los mensajes, solo al abrir una.
   const loadConversations = useCallback(async () => {
     try {
-      const res = await api.get('/api/conversations');
+      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}`);
       setConversations(res.data.conversations);
+      setConvsMore(res.data.conversations.length === CONV_PAGE);
     } catch { /* sin sesión o error transitorio */ } finally {
       setConvsLoading(false);
     }
+  }, []);
+
+  const loadMoreConversations = useCallback(async () => {
+    if (moreRef.current) return;
+    moreRef.current = true;
+    try {
+      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}&offset=${conversationsRef.current.length}`);
+      const page = res.data.conversations;
+      setConversations((prev) => {
+        const seen = new Set(prev.map((c) => c.id));
+        return [...prev, ...page.filter((c) => !seen.has(c.id))];
+      });
+      setConvsMore(page.length === CONV_PAGE);
+    } catch { /* se reintenta al volver a bajar */ } finally {
+      moreRef.current = false;
+    }
+  }, []);
+
+  // La búsqueda va al servidor: con el historial por páginas, filtrar lo
+  // cargado dejaría fuera las conversaciones antiguas.
+  const searchConversations = useCallback(async (q) => {
+    const res = await api.get(`/api/conversations?limit=50&q=${encodeURIComponent(q)}`);
+    return res.data.conversations;
   }, []);
 
   const loadModels = useCallback(async () => {
@@ -457,6 +488,7 @@ export default function ChatPage() {
     if (!ok) return;
     await logout();
     setConversations([]);
+    setConvsMore(false);
     navigate('/chat');
   };
 
@@ -479,6 +511,9 @@ export default function ChatPage() {
         user={user}
         conversations={conversations}
         loadingConversations={convsLoading}
+        hasMoreConversations={convsMore}
+        onLoadMore={loadMoreConversations}
+        onSearch={searchConversations}
         activeId={routeConvId}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}

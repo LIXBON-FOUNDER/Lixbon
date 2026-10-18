@@ -178,7 +178,7 @@ func TestBranchPickerSwitchesBranches(t *testing.T) {
 
 func TestFetchShowsURLSizeAndStatus(t *testing.T) {
 	b := newToolBlock(agent.Event{Tool: "fetch_url", Text: "https://lixbon.com/docs"}, nil)
-	contains(t, ansi.Strip(b.render(80, false)), "Fetch(https://lixbon.com/docs)")
+	contains(t, ansi.Strip(b.render(80, false)), "Fetch  https://lixbon.com/docs")
 	contains(t, ansi.Strip(b.render(80, false)), "Descargando")
 	b.finish(agent.Event{Summary: "Recibido 196.6 KB (200 OK)"})
 	contains(t, ansi.Strip(b.render(80, false)), "Recibido 196.6 KB (200 OK)")
@@ -209,7 +209,7 @@ func TestAgentFetchShowsItsOwnBlock(t *testing.T) {
 	h.send("busca la documentación")
 	h.settle()
 	out := ansi.Strip(h.m.log.text())
-	contains(t, out, "Fetch("+page.URL+"/docs)")
+	contains(t, out, "Fetch  "+page.URL+"/docs")
 	contains(t, out, "Recibido 2.0 KB (200 OK)")
 }
 

@@ -130,7 +130,11 @@ func TestGoldenBlocks(t *testing.T) {
 		{"diff_folded", bigEdit, false},
 		{"todo", &todoBlock{items: []todoItem{{Text: "Leer el cliente", Status: "done"}, {Text: "Añadir pruebas", Status: "doing"}, {Text: "Revisar el CI", Status: "pending"}}}, false},
 		{"answer", answerBlock{text: "Listo. Separé la creación de la sesión.\nLas pruebas cubren los dos casos."}, false},
-		{"summary", summaryBlock{actions: 3, files: 1, adds: 4, dels: 1, secs: 9.8}, false},
+		{"turn", composite{&turnHeadBlock{actions: 3, adds: 4, dels: 1, secs: 9.8},
+			railed{narrationBlock{text: "Miro primero cómo se crea la sesión."}, false},
+			railed{group, false}, railed{edit, false}, railed{long, true},
+			textBlock(""), answerBlock{text: "Listo: la sesión se crea con su fecha.", bare: true}}, false},
+		{"system", systemBlock("La conversación llenaba la ventana de contexto: se han recortado los pasos más antiguos para poder seguir."), false},
 		{"notices", composite{note("nota al margen"), okLine("Modelo: Qwen"), errLine("Comando desconocido"), warnLine("Hay una versión nueva"),
 			infoLine("LIXBON.md encontrado", "se usa como contexto"), askLine("¿Qué base de datos?"), separator("conversación nueva")}, false},
 		{"sources", sourcesBlock{"https://go.dev/doc", "Effective Go"}, false},
@@ -140,6 +144,16 @@ func TestGoldenBlocks(t *testing.T) {
 	for _, c := range cases {
 		golden(t, c.name, c.b, c.open)
 	}
+}
+
+// railed pinta un bloque como paso del riel, igual que el transcript.
+type railed struct {
+	b   block
+	end bool
+}
+
+func (r railed) render(width int, open bool) string {
+	return withRail(r.b.render(max(10, width-2), open), r.end)
 }
 
 // composite junta varios bloques para un solo golden.

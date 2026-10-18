@@ -1,12 +1,12 @@
 ── 40 ──
- ● Ejecutar  sleep 99
+ ✗  $  sleep 99
    │ El comando superó 30 s.
    └ tiempo agotado · 1 línea
 ── 80 ──
- ● Ejecutar  sleep 99
+ ✗  $  sleep 99
    │ El comando superó 30 s.
    └ tiempo agotado · 1 línea
 ── 120 ──
- ● Ejecutar  sleep 99
+ ✗  $  sleep 99
    │ El comando superó 30 s.
    └ tiempo agotado · 1 línea

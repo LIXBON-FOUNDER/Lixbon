@@ -198,22 +198,20 @@ export function AmbientGlow() {
   );
 }
 
-/// Lámina de las pantallas de acceso. En oscuro va a sangre detrás de la barra
-/// de estado y su mitad de abajo se funde con el fondo; en claro va enmarcada
-/// (un fundido de noche a crema ensucia el fondo). `focus` es la altura de la
-/// imagen (0 arriba, 1 abajo) que queda a la vista al recortarla, y `compact`
-/// la encoge para que el teclado no tape el formulario.
+/// Lámina de las pantallas de acceso: va a sangre detrás de la barra de
+/// estado y su mitad de abajo se funde con el fondo, en claro y en oscuro.
+/// `focus` es la altura de la imagen (0 arriba, 1 abajo) que queda a la vista
+/// al recortarla, y `compact` la encoge para que el teclado no tape el
+/// formulario.
 const LAMINA_RATIO = 1448 / 1086;
 
 export function Lamina({ source, height, compactHeight = 120, compact = false, focus = 0.5, label, children }) {
   const c = useColors();
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
-  const { width: screen } = useWindowDimensions();
-  const framed = !c.dark;
-  const width = framed ? screen - 24 : screen;
-  const full = framed ? Math.round(height * 0.74) : height + insets.top;
-  const small = framed ? compactHeight : compactHeight + insets.top;
+  const { width } = useWindowDimensions();
+  const full = height + insets.top;
+  const small = compactHeight + insets.top;
   const anim = useRef(new Animated.Value(compact ? small : full)).current;
 
   useEffect(() => {
@@ -224,33 +222,21 @@ export function Lamina({ source, height, compactHeight = 120, compact = false, f
   const top = -Math.max(0, imageHeight - full) * focus;
 
   return (
-    <Animated.View
-      style={{
-        width,
-        height: anim,
-        overflow: 'hidden',
-        marginTop: framed ? insets.top + 8 : 0,
-        marginHorizontal: framed ? 12 : 0,
-        borderRadius: framed ? RADIUS : 0,
-        backgroundColor: c.surface2,
-      }}
-    >
+    <Animated.View style={{ width, height: anim, overflow: 'hidden', backgroundColor: c.surface2 }}>
       <Image source={source} accessible={!!label} accessibilityLabel={label} style={{ position: 'absolute', left: 0, top, width, height: imageHeight }} />
-      {!framed && (
-        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' }}>
-          <Svg width="100%" height="100%">
-            <Defs>
-              <LinearGradient id="lxLamina" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={c.bg} stopOpacity={0} />
-                <Stop offset="0.45" stopColor={c.bg} stopOpacity={0.55} />
-                <Stop offset="1" stopColor={c.bg} stopOpacity={1} />
-              </LinearGradient>
-            </Defs>
-            <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxLamina)" />
-          </Svg>
-        </View>
-      )}
-      {children && <View style={{ position: 'absolute', left: 0, right: 0, top: framed ? 0 : insets.top }}>{children}</View>}
+      <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '60%' }}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <LinearGradient id="lxLamina" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={c.bg} stopOpacity={0} />
+              <Stop offset="0.45" stopColor={c.bg} stopOpacity={0.55} />
+              <Stop offset="1" stopColor={c.bg} stopOpacity={1} />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#lxLamina)" />
+        </Svg>
+      </View>
+      {children && <View style={{ position: 'absolute', left: 0, right: 0, top: insets.top }}>{children}</View>}
     </Animated.View>
   );
 }

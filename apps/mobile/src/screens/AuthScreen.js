@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 import { ApiException } from '../api';
 import Icon from '../components/Icon';
@@ -129,6 +130,8 @@ export default function AuthScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
+      {/* La lámina queda detrás de la barra de estado también en claro. */}
+      <StatusBar style="light" />
       {/* Con edge-to-edge la ventana no se encoge con el teclado: sin esto el
           formulario quedaba tapado y el ScrollView no tenía nada que mover. */}
       <KeyboardAware bottomInset={insets.bottom}>
@@ -146,25 +149,25 @@ export default function AuthScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Volver"
                 style={({ pressed }) => ({
-                  margin: c.dark ? 6 : 8,
-                  marginLeft: c.dark ? 14 : 8,
+                  margin: 6,
+                  marginLeft: 14,
                   width: 44,
                   height: 44,
                   borderRadius: 22,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: c.dark ? 'rgba(14,14,14,0.42)' : 'rgba(246,245,241,0.72)',
+                  backgroundColor: 'rgba(14,14,14,0.42)',
                   opacity: pressed ? 0.7 : 1,
                 })}
               >
-                <Icon name="arrow-left" size={20} color={c.ink} />
+                <Icon name="arrow-left" size={20} color="#FCFAEF" />
               </Pressable>
             ) : (
               <FadeUp>
                 <Pressable
                   onLongPress={changeServer}
                   delayLongPress={800}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', margin: 14, marginLeft: c.dark ? 24 : 14 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'flex-start', margin: 14, marginLeft: 24 }}
                 >
                   <LogoMark size={28} />
                   <LixLogo size={16} color="#FCFAEF" />
@@ -173,7 +176,7 @@ export default function AuthScreen() {
             )}
           </Lamina>
 
-          <View style={{ flexGrow: 1, paddingHorizontal: 24, marginTop: c.dark ? (keyboard ? -24 : register ? -46 : -60) : 20 }}>
+          <View style={{ flexGrow: 1, paddingHorizontal: 24, marginTop: keyboard ? -24 : register ? -46 : -60 }}>
             <FadeUp delay={60}>
               <ScreenTitle style={{ fontSize: 36, lineHeight: 40, marginBottom: 24 }}>
                 {register ? 'Crea tu cuenta' : 'Bienvenido\nde nuevo'}

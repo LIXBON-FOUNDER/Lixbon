@@ -262,6 +262,9 @@
   gap: 2px;
 }
 
+/* Centinela del historial: al verse, se pide la página siguiente. */
+.sidebar__more { height: 1px; flex: none; }
+
 .sidebar__empty {
   padding: 8px 10px;
   font-size: 13px;

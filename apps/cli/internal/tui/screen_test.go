@@ -171,7 +171,7 @@ func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	rig.waitFor("LIXBON CLI")
 	rig.type_("mensaje viejo\r")
 	rig.waitFor("respuesta vieja")
-	rig.waitGone("Trabajando…")
+	rig.waitGone("esc interrumpe")
 
 	rig.type_("/clear\r")
 	rig.waitFor("contexto limpio")

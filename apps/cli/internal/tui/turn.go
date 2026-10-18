@@ -88,6 +88,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	m.notice = ""
 	m.openTool, m.readGroup, m.browserGroup, m.todoEntry = nil, nil, nil, nil
 	m.answerEntry = nil
+	m.turnHead, m.railTail, m.railing = nil, nil, false
 	var chips []imageChip
 	if m.remote != nil && m.remoteOrigin {
 		chips, m.remote.next.chips = m.remote.next.chips, nil
@@ -99,6 +100,7 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 		m.add(userBlock{text: shown, chips: chips})
 		m.print("")
 	}
+	m.turnStart = len(m.log.entries)
 	ui := &uiSink{send: m.send, turn: id}
 	var sink chat.Sink = ui
 	if m.remote != nil {
@@ -184,16 +186,20 @@ func (m *Model) streamAnswer(tick bool) {
 
 func (m *Model) drawAnswer(prose string) {
 	live := &m.live
-	live.answer.b = answerBlock{text: prose, md: m.renderMarkdown}
+	live.answer.b = answerBlock{text: prose, md: m.renderMarkdown, bare: m.turnHead != nil}
 	m.refresh(live.answer)
 	m.answerEntry = live.answer
 	live.drawn, live.drawAt = prose, time.Now()
 }
 
+// printAnswer escribe prosa del modelo. En un turno con riel lo cierra: la
+// respuesta va fuera; si luego llega otra acción, era narración y openRail la
+// vuelve a colgar del riel.
 func (m *Model) printAnswer(prose string) {
 	m.closeGroups()
+	m.closeRail()
 	m.gap()
-	m.answerEntry = m.add(answerBlock{text: prose, md: m.renderMarkdown})
+	m.answerEntry = m.add(answerBlock{text: prose, md: m.renderMarkdown, bare: m.turnHead != nil})
 }
 
 func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
@@ -204,6 +210,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.interrupted = false
 	m.closeTool(toolStopped)
 	m.closeGroups()
+	m.closeRail()
 	if m.remote != nil {
 		m.remoteTurnDone(msg, cancelled)
 	}
@@ -249,10 +256,11 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 		}
 		m.add(sourcesBlock(labels))
 	}
-	if m.turnMode == chat.ModeAgent {
-		if st := m.chat.Session.Stats; st.Actions > 0 {
-			m.add(summaryBlock{actions: st.Actions, files: len(st.Files), adds: st.Adds, dels: st.Dels, secs: time.Since(m.started).Seconds()})
-		}
+	if h, ok := m.turnHeadBlock(); ok {
+		// Las acciones son las del riel (countStep); los cambios, los aplicados.
+		st := m.chat.Session.Stats
+		h.adds, h.dels, h.secs = st.Adds, st.Dels, time.Since(m.started).Seconds()
+		m.refresh(m.turnHead)
 	}
 	m.print("")
 	if h := m.chat.History; len(h) > 0 && h[len(h)-1].Role == "assistant" {

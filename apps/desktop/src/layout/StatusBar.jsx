@@ -8,7 +8,8 @@ import { useChatStore, useOpenSessions, useSessionsStore } from '../store/chatSt
 import { useFileViewStore } from '../store/fileViewStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { languageLabel } from '../editor/languages';
-import { SpinRing, ProgressRing } from '../components/Ring';
+import { ProgressRing } from '../components/Ring';
+import { LogoMark } from '../components/Logo';
 import { IconGitBranch } from '../components/Icons';
 
 const CONN = { connected: 'Conectado', connecting: 'Conectando…', disconnected: 'Sin conexión' };
@@ -49,7 +50,7 @@ export function StatusBar() {
       {changes.length > 0 && <span className="statusbar__item">{changes.length} cambios</span>}
       {(streaming || waiting) && (
         <button className="statusbar__item statusbar__item--agent" onClick={() => setMode('agent')}>
-          {waiting ? <span className="dot dot--pulse" /> : <SpinRing size={11} />}
+          {waiting ? <span className="dot dot--pulse" /> : <LogoMark size={12} motion="destello" />}
           {waiting ? 'El agente espera tu respuesta' : title ? `${title} · trabajando` : 'Agente trabajando'}
         </button>
       )}
@@ -64,7 +65,7 @@ export function StatusBar() {
           onClick={() => { useSessionsStore.getState().activate((bgWaiting || background[0]).key); setMode('agent'); }}
           title="Agentes trabajando en otras conversaciones"
         >
-          {bgWaiting ? <span className="dot dot--accent dot--pulse" /> : <SpinRing size={11} />}
+          {bgWaiting ? <span className="dot dot--accent dot--pulse" /> : <LogoMark size={12} motion="giro" />}
           {bgWaiting ? `«${bgWaiting.title || 'Otro agente'}» espera tu permiso` : `${background.length} ${background.length === 1 ? 'agente más' : 'agentes más'} trabajando`}
         </button>
       )}
