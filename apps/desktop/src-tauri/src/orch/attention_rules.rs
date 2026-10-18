@@ -163,6 +163,9 @@ pub(super) fn derive(e: &EventRow) -> Derived {
                 d.resolve(C::EnvironmentBlocked, TargetKind::Agent, id, Some(env_subject(code, &profile)), Resolution::ConditionCleared);
             }
         }
+        ("attention.risk_acted", "attention") if p["resolution"] == "acted" => {
+            d.resolve_id(C::Risk, id, Resolution::Acted);
+        }
         ("task.removed", "task") => {
             d.resolve(C::Failed, TargetKind::Task, id, None, Resolution::ConditionCleared);
             d.resolve(C::Conflict, TargetKind::Task, id, None, Resolution::ConditionCleared);

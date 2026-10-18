@@ -2,7 +2,7 @@
 
 Estado: **modelo, ciclo de vida y reglas Events → Attention implementados** (migración `006_attention`; reglas en
 LXO-88, ver «Reglas Events → Attention»), con las siete categorías iniciales alimentadas por Events fuente durables
-(`review_ready` y `environment_blocked` incluidas: ver «Señales fuente»). La API de lectura/consulta y la resolución soportada por cliente son **LXO-89**. Aquí no hay interfaz,
+(`review_ready` y `environment_blocked` incluidas: ver «Señales fuente»). La API de lectura/consulta y la resolución soportada por cliente se implementan en **LXO-89** (ver abajo). Aquí no hay interfaz,
 notificaciones push, ranking personalizado, asignación de equipo ni *unread*.
 
 ## Decisión (ADR)
@@ -284,14 +284,16 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `task.status_changed` desde `done` | resuelve `condition_cleared` | `review_ready` | `task` |
 | `environment.blocked` (`code` cerrado, `profile` conocido) | levanta | `environment_blocked` · high | `agent` (proveedor) · `code@profile` |
 | `environment.cleared` (`code`, `profile`) | resuelve `condition_cleared` | `environment_blocked` | `agent` · `code@profile` |
+| `attention.risk_acted` (`resolution = acted`) | resuelve `acted` | `risk` | `attention` · id de Attention |
 
 * **`risk` solo nace de `spawn.requested.policy_status = blocked`.** `ok`, `unverified`, un fallo genérico, un
   bloqueo del entorno o del proveedor, y la entrada inválida no la crean (pruebas
   `solo_policy_status_blocked_levanta_risk`, `un_bloqueo_del_entorno_no_deja_event_y_por_tanto_no_crea_risk`,
   `una_entrada_invalida_es_un_error_y_no_se_registra_como_denegada_por_policy`). Ningún Event la resuelve sola: la
-  cierra una persona (LXO-89, `acted`).
+  cierra una persona con `orch_attention_act_risk` (LXO-89, `acted`).
 * **Las señales puramente informativas no crean nada:** `task.created`, `task.phase`, transiciones ordinarias,
-  `effect.observed`, `decision.recorded` de `pr`, `project.*`, `run.*` y los propios `attention.*`. Una tarea `done`, una
+  `effect.observed`, `decision.recorded` de `pr`, `project.*`, `run.*` y los lifecycle Events `attention.created` /
+  `attention.resolved`. Una tarea `done`, una
   rama, la ausencia de una decisión o un fallo con cualquier causa NO son `review_ready` ni `environment_blocked`.
 * **No hay** una cascada de `run.removed` ni la resolución de `question` al retirar una task (el evento no trae la
   lista de hechos).
@@ -445,18 +447,63 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   denegada. Cambio mínimo: campo opcional `denied_by` (código cerrado, p. ej. `profile_disabled`) en
   `spawn.requested` (versión 1 aditiva) y la regla de `risk` condicionada a su presencia.
 
-## Contrato previsto para LXO-89 (documentado aquí, NO implementado en LXO-88)
-Decisiones fijadas para la API de lectura y resolución; LXO-88 solo deja la lista autoritativa sobre la que se apoya.
-* **Quién ve qué:** un Agent solo ve la Attention de SU Task autenticada; una persona ve las del Core (la identidad sale
-  de `MutationContext`/`ClientAction`, nunca de un parámetro).
-* **DTO público = allowlist:** categoría, severidad, estado, destino lógico, `occurrence`, marcas de tiempo, `resolution` y
-  los `facts` permitidos (códigos e ids). Nunca columnas internas (`fingerprint`, `source_event_id`, `correlation_id`,
-  `event_seq`), rutas ni textos libres.
-* **Paginación:** cursor opaco vinculado al alcance y a los filtros de la consulta, con claves inmutables de orden
-  (severidad, `created_at`, `id`); si cambia el alcance o los filtros el cursor se rechaza. Una reconexión reinicia desde
-  la página 1.
-* **Resolver `risk`:** comando solo de persona que la cierra como `acted`; la resolución y su Event auditable (actor y
-  `client_id`) se confirman ATÓMICAMENTE en una misma transacción.
+## API de lectura y resolución (LXO-89)
+La API se comparte por el RPC autenticado de Desktop/Tauri y el HTTP local `POST /rpc`; no abre una conexión SQLite al
+cliente ni una ruta de escritura en HTTP.
+
+### Lista y detalle
+* `attention_list` devuelve solo filas activas; filtros opcionales: `project_id`, `target_kind`, `target_id`, `category` y
+  `severity`. Los parámetros desconocidos o inválidos se rechazan.
+* La lista se ordena por las claves inmutables `(created_at ASC, id ASC)`. La respuesta lleva `{v, items, next_cursor,
+  has_more, limit}`; el límite por defecto es 100 y el máximo 500.
+* `attention_detail` recibe `attention_id` y puede devolver historia resuelta. Una fila ajena al scope de un Agent se
+  presenta igual que una inexistente.
+* Contrato HTTP/RPC (el cliente envía su credencial autenticada; no declara `caller`):
+
+  ```json
+  {"cmd":"attention_list","args":{"limit":50,"category":"question"}}
+  ```
+
+  La siguiente página usa el mismo límite y filtros, añadiendo `cursor` con el valor exacto de `next_cursor`:
+
+  ```json
+  {"cmd":"attention_list","args":{"limit":50,"category":"question","cursor":"<next_cursor>"}}
+  ```
+
+  `attention_detail` acepta `{"cmd":"attention_detail","args":{"attention_id":"<id>"}}`. El RPC local
+  responde `{ "ok": true, "data": ... }`; los errores de validación o dominio usan `{ "ok": false, "error": "..." }`.
+* **Quién ve qué:** Person autenticada ve la Attention segura del Core local; Agent ve solo filas cuyo target es su Task
+  autenticada. El scope deriva de la credencial en `MutationContext`/`ClientAction`, nunca del request; los filtros se
+  combinan con el scope obligatorio.
+* El DTO es una allowlist exacta: `id`, `category`, `severity`, `status`, `target_kind`, `target_id`, `project_id`,
+  `run_id`, `occurrence`, `created_at`, `resolved_at`, `resolution`. Nunca incluye `fingerprint`, `facts`, `subject`,
+  `source_event_id`, `correlation_id`, `event_seq`, secretos, rutas ni texto libre.
+* `next_cursor` es un token cifrado y autenticado, ligado a versión, filtros normalizados, límite, principal y `client_id`.
+  Ordena por `(created_at,id)`; modificarlo o usarlo con otro filtro, scope, cliente o versión se rechaza. La clave vive
+  en el proceso Core: al reconectar, el cliente reinicia en la primera página; esto no promete un change feed sin pérdidas.
+* Los Tokens legacy del servidor no autentican esta API de Attention.
+
+### Acciones permitidas y prohibidas
+
+| Attention | Lectura | Acción que resuelve | Acción directa prohibida |
+|---|---|---|---|
+| `question` | Person local; Agent de la Task destino | `reply` del dominio; `task.reply` resuelve solo esa pregunta | resolver Attention manualmente |
+| `approval` | Person local; Agent de la Task destino | Command de aprobación/rechazo correspondiente; Event fuente resuelve según el resultado | editar estado o llamar a `mark_attention_done` |
+| `review_ready` | Person local; Agent de la Task destino | Command de revisión (`orch_review_task`) o integración soportada | resolver sin revisión/integración de dominio |
+| `risk` | Person local; Agent de la Task destino | `orch_attention_act_risk`, únicamente Person/Desktop | HTTP/RPC, Agent, categoría distinta o resolver genérico |
+| `conflict`, `failed`, `environment_blocked` | Person local; Agent de la Task destino | Event fuente de dominio que demuestre que la condición se resolvió | resolución manual genérica |
+
+La lista de arriba contiene activas; `attention_detail` puede devolver una fila resuelta como historial. Los comandos de
+pregunta, aprobación, revisión e integración siguen sujetos a sus permisos y confirmaciones de dominio.
+
+### Resolver un riesgo
+* `orch_attention_act_risk` es un Command exclusivo de Person/Desktop autorizado como `HumanDecision`; no está disponible
+  por HTTP ni por `orch_call`/RPC. Solo admite una fila `risk` activa.
+* El Event fuente `attention.risk_acted` lleva `resolution=acted`, actor y `client_id` autenticados, y una clave de
+  idempotencia igual al `attention_id`. El proyector resuelve la fila y emite `attention.resolved` dentro de la misma
+  transacción que inserta el Event fuente. Un fallo revierte el Event y la resolución.
+* Las preguntas, approvals y reviews se resuelven con sus Commands de dominio existentes; esta API no generaliza sus
+  decisiones ni expone una acción de resolución para esas categorías.
 
 ## Esquema (`006_attention.sql`)
 
@@ -537,7 +584,7 @@ Los códigos viajan tal cual; no hay texto para mostrar. Cada superficie lo trad
 }
 ```
 
-(`facts` viaja como texto JSON, igual que `events.payload`. La forma de la API HTTP/RPC la define LXO-89.)
+(`AttentionRow` es un modelo interno del almacén; el API HTTP/RPC público usa la allowlist documentada arriba.)
 
 ### Entrada (`NewAttention`) que produce esa fila
 
@@ -568,15 +615,15 @@ Los códigos viajan tal cual; no hay texto para mostrar. Cada superficie lo trad
 * **LXO-88**: qué Events/State levantan, actualizan o resuelven cada categoría, severidades por regla (que
   consumirán `attention_update_active`), eventos `attention.created|resolved` (y, si hiciera falta, uno de
   actualización: hoy no existe `attention.updated`), retirada del cálculo en `attention.js`.
-* **LXO-89**: API de lectura/consulta, orden de presentación, filtros, resolución soportada por cliente y
-  autorización (`ClientAction`).
+* **LXO-89** entregó la API de lectura/consulta, orden, filtros, resolución soportada y autorización
+  (`ClientAction`); la interfaz de consumo sigue fuera de este documento de modelo.
 * UI, push, ranking personalizado, asignación de equipo (F9), *unread* y `snoozed`.
 
 ## Fuera de alcance de LXO-88
 
 * Notificaciones, ranking (ML o personalizado), textos de interfaz, *snooze* personal y políticas de Team.
-* La retirada del cálculo de Attention en el frontend (`src/orch/attention.js`) y su sustitución por la lista
-  autoritativa: la consumirá LXO-89 con la API de lectura. Hasta entonces el frontend sigue calculando lo suyo.
+* La retirada del cálculo de Attention en el frontend (`src/orch/attention.js`) y su sustitución completa por la lista
+  autoritativa: LXO-89 proporciona el contrato que consumirá el slice de cliente correspondiente.
 * El detector en tiempo de ejecución de errores de terminal de Codex (LXO-131), la caducidad de una revisión por
   `head_commit` y el discriminador durable de `risk` (ver «Señales fuente»).
 * Cascada de `run.removed`, resolución de `question` al retirar una task y una marca de agua durable global.

@@ -331,7 +331,8 @@ fn solo_la_frontera_de_persistencia_añade_hechos_standalone() {
                 (".append_events(", &["store_boot.rs"][..]),
                 ("fn append(", &["mutation.rs", "store_boot.rs"]),
                 (".append(&finalized)", &["mutation.rs"]),
-                ("record_facts(", &["mutation.rs", "spawn_approval.rs"]),
+                // `attention_action.rs` is the dedicated Person/Desktop risk decision producer.
+                ("record_facts(", &["mutation.rs", "spawn_approval.rs", "attention_action.rs"]),
             ] {
                 assert!(!l.contains(simbolo) || donde.contains(&nombre.as_str()), "{nombre}:{}: «{simbolo}» solo puede aparecer en {donde:?}", n + 1);
             }

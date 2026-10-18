@@ -535,6 +535,12 @@ mod authenticated_client_tests {
             "category", "created_at", "id", "occurrence", "project_id", "resolution",
             "resolved_at", "run_id", "severity", "status", "target_id", "target_kind",
         ].into_iter().collect());
+        let (status, detail) = post(server.port, person_secret, &json!({
+            "cmd": "attention_detail", "args": {"attention_id": items[0]["id"]}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(detail["ok"], true, "detail también pasa por el DTO común: {detail}");
+        assert_eq!(detail["data"]["id"], items[0]["id"]);
 
         let (status, agent) = post(server.port, agent_secret, &json!({
             "cmd": "attention_list", "args": {"limit": 10}

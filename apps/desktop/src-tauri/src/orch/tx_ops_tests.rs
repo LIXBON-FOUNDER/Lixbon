@@ -1585,8 +1585,8 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // El catálogo solo lo importa tx_ops; nadie más nombra sus constructores ni la cola de la transacción.
     let prohibido: [(&str, &[&str]); 16] = [
-        // Dos únicos importadores del catálogo: los mutadores de `Tx` y el registro de proyectos (`project_ops.rs`).
-        ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs"]),
+        // Los mutadores, Projects y el comando dedicado Person/Desktop de Attention importan contratos del catálogo.
+        ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs", "attention_action.rs"]),
         ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs", "tx_ops.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
         ("task_status_changed(", &["event_kinds.rs", "tx_ops.rs"]),

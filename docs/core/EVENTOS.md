@@ -821,7 +821,7 @@ decide el hecho; ningún consumidor los deduce de otros Events.
 * `environment.*` no cambia el estado de ninguna Task: no es un fallo ni un Attempt fallido.
 * Sin informe, resumen, ficheros, rutas, `argv` ni `reason` en ninguno de los tres.
 
-## E1b · Attention: `attention.created` · `attention.resolved` (LXO-88)
+## E1b · Attention: ciclo de vida (LXO-88) y decisión `risk` (LXO-89)
 Ciclo de vida de una ocurrencia de Attention (`ATTENTION.md`). `class = state`, entidad `attention`,
 `entity_id = correlation_id = idem_key = attention_items.id` (como mucho UN `created` y UN `resolved` por
 ocurrencia, así que un replay no duplica), actor `system`, canal `core`.
@@ -830,6 +830,11 @@ ocurrencia, así que un replay no duplica), actor `system`, canal `core`.
 |---|---|
 | `attention.created` | `category`, `severity`, `occurrence`, `target_kind`, `target_id`, `source_event_id?` |
 | `attention.resolved` | `resolution` (`acted` · `condition_cleared` · `superseded`), `source_event_id` |
+
+La decisión de Person/Desktop sobre `risk` añade el Event fuente `attention.risk_acted`, con `class = decision`, entidad
+`attention`, `entity_id = correlation_id = idem_key = attention_items.id`, actor `person` autenticado, canal `ui` y su
+`client_id`. Payload allowlist: `resolution = acted`. La proyección lo resuelve y emite `attention.resolved` después, en
+la misma transacción. El mismo `attention_id` deduplica reintentos. Esta decisión no tiene ruta HTTP/RPC.
 
 * **Misma transacción que su origen.** Cada escritor del Event Log (`commit_authoritative_with_events`,
   `append_events` y los cambios de gestión de Project) ejecuta el proyector del almacén después de insertar y antes

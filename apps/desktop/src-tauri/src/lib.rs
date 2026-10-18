@@ -1558,6 +1558,7 @@ pub fn run() {
             orch::orch_reject_spawn,
             orch::orch_task_diff,
             orch::orch_review_task,
+            orch::orch_attention_act_risk,
             orch::orch_skill_install,
             orch::orch_skill_uninstall,
             skills_catalog::skills_agents,

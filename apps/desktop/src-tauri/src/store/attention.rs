@@ -522,6 +522,11 @@ fn get(conn: &Connection, id: &str) -> StoreResult<Option<AttentionRow>> {
     raw.map(Raw::into_row).transpose()
 }
 
+/// Lee una Attention por id dentro de la transacción que proyecta un Event de dominio.
+pub(crate) fn attention_get_in(conn: &Connection, id: &str) -> StoreResult<Option<AttentionRow>> {
+    get(conn, id)
+}
+
 fn active_by_fingerprint(conn: &Connection, fingerprint: &str) -> StoreResult<Option<AttentionRow>> {
     let raw = conn.query_row(&format!("SELECT {COLS} FROM attention_items WHERE fingerprint = ?1 AND status = 'active'"), [fingerprint], Raw::read).optional()?;
     raw.map(Raw::into_row).transpose()

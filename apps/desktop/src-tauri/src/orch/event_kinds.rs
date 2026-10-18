@@ -30,7 +30,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{EventClass, Fingerprint};
+use crate::store::{EventClass, Fingerprint, Resolution};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -672,6 +672,31 @@ impl EventPayload for ProjectLocationAdded {
 pub(super) fn project_location_added(project_id: &str, primary: bool, fingerprint_adopted: bool) -> Result<EventDraft, EventError> {
     let p = ProjectLocationAdded { primary, fingerprint_adopted };
     Ok(EventDraft::new(EntityKind::Project, project_id, &p)?.project(Some(project_id.to_string())).run(None))
+}
+
+// ---------------------------------------------------------------------------------------------
+// attention.risk_acted
+// ---------------------------------------------------------------------------------------------
+
+/// Decisión humana de cerrar un riesgo explícito. Sin facts ni credenciales; el id también deduplica reintentos.
+#[derive(Serialize)]
+pub(super) struct AttentionRiskActed {
+    resolution: Resolution,
+}
+
+impl EventPayload for AttentionRiskActed {
+    const KIND: &'static str = "attention.risk_acted";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+pub(super) fn attention_risk_acted(attention_id: &str, project_id: Option<String>, run_id: Option<String>) -> Result<EventDraft, EventError> {
+    let payload = AttentionRiskActed { resolution: Resolution::Acted };
+    Ok(EventDraft::new(EntityKind::Attention, attention_id, &payload)?
+        .project(project_id)
+        .run(run_id)
+        .correlated(attention_id)
+        .idempotent(attention_id))
 }
 
 /// El proyecto pasó de activo a archivado. El estado anterior y el nuevo los dice el `kind`.
