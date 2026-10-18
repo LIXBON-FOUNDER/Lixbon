@@ -79,7 +79,7 @@ func TestClickingTheModelOpensThePicker(t *testing.T) {
 		t.Fatalf("un clic en una fila la elige: modelo %q", h.chat.Model)
 	}
 	h.m.View()
-	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.height - 1, Button: tea.MouseLeft})
+	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.footY, Button: tea.MouseLeft})
 	if h.m.modeName() != "agent" {
 		t.Fatalf("un clic en el modo del pie lo cambia: %s", h.m.modeName())
 	}
@@ -102,16 +102,16 @@ func TestChromeButtonsWorkWhileTheAgentRuns(t *testing.T) {
 		t.Fatal("un clic fuera del panel lo cierra")
 	}
 	h.m.View()
-	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.height - 1, Button: tea.MouseLeft})
+	h.update(tea.MouseClickMsg{X: h.m.footMode.x0 + 1, Y: h.m.footY, Button: tea.MouseLeft})
 	if h.m.modeName() != "agent" {
 		t.Fatalf("el modo cambia aunque el agente trabaje: %s", h.m.modeName())
 	}
-	h.update(tea.MouseClickMsg{X: h.m.footEffort.x0, Y: h.m.height - 1, Button: tea.MouseLeft})
+	h.update(tea.MouseClickMsg{X: h.m.footEffort.x0, Y: h.m.footY, Button: tea.MouseLeft})
 	if h.m.picker == nil || h.m.picker.anchor == nil {
 		t.Fatal("el razonamiento abre su selector anclado al pie")
 	}
 	h.m.View()
-	if h.m.panelY+h.m.panelH != h.m.height-1 {
+	if h.m.panelY+h.m.panelH != h.m.footY {
 		t.Fatalf("el panel del pie termina justo encima: y=%d h=%d alto=%d", h.m.panelY, h.m.panelH, h.m.height)
 	}
 }

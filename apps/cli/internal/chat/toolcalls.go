@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -110,6 +111,38 @@ func (c *pendingCall) merge(d toolCallDelta, raw json.RawMessage) {
 			}
 		}
 	}
+}
+
+// progress es la llamada que el modelo está escribiendo: su nombre, la ruta
+// (o URL, o comando) si ya llegó y cuántos caracteres de argumentos lleva.
+// Con una llamada larga (un archivo entero) es lo único que avanza.
+func (a *toolCallAssembler) progress() (name, target string, chars int) {
+	if len(a.pending) == 0 {
+		return "", "", 0
+	}
+	c := a.pending[len(a.pending)-1]
+	args := c.args.String()
+	if len(c.objectArgs) > 0 {
+		args = string(c.objectArgs)
+	}
+	return c.name, CallTarget(args), len(args)
+}
+
+var callTargetPattern = regexp.MustCompile(`"(?:path|file_path|url|command|query)"\s*:\s*"((?:[^"\\]|\\.){1,300})`)
+
+// CallTarget saca de unos argumentos a medio escribir el destino de la
+// llamada: la ruta, la URL, el comando o la búsqueda.
+func CallTarget(args string) string {
+	head := args[:min(len(args), 1024)]
+	m := callTargetPattern.FindStringSubmatch(head)
+	if m == nil {
+		return ""
+	}
+	var s string
+	if json.Unmarshal([]byte(`"`+m[1]+`"`), &s) != nil {
+		return m[1]
+	}
+	return s
 }
 
 // calls devuelve las llamadas completas. Un fragmento sin nombre no se puede

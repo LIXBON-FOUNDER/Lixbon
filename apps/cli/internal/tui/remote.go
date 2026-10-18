@@ -396,8 +396,12 @@ type remoteSink struct {
 	// falla, así que no queda abierta como toolID.
 	readID, readTool string
 	activity         string
-	thinking         strings.Builder
-	thinkSince       time.Time
+	// callAt es cuándo se mandó el último avance de una llamada larga: va
+	// como mucho dos veces por segundo.
+	callAt     time.Time
+	callKey    string
+	thinking   strings.Builder
+	thinkSince time.Time
 	// output es la línea a medias de la salida del comando en curso.
 	output []byte
 }
@@ -410,6 +414,21 @@ func (s *remoteSink) setActivity(activity, tool, label string) {
 		s.host.link.Emit("status", map[string]any{"state": "thinking", "activity": activity, "tool": tool, "label": label})
 	}
 }
+
+// sendCall le cuenta al móvil la acción que el modelo está escribiendo y
+// cuánto lleva («Escribiendo index.html · 12.4 kB»), como la etiqueta de la
+// terminal.
+func (s *remoteSink) sendCall(c callProgress) {
+	label := strings.TrimSuffix(callLabel(c), "…")
+	key := c.tool + "|" + c.target
+	if key != s.callKey || time.Since(s.callAt) >= remoteCallEvery {
+		s.callKey, s.callAt = key, time.Now()
+		s.endThinking()
+		s.setActivity("preparing", c.tool, label)
+	}
+}
+
+const remoteCallEvery = 500 * time.Millisecond
 
 func (s *remoteSink) prose() string {
 	text := s.raw.String()
@@ -437,12 +456,21 @@ func (s *remoteSink) Delta(kind sse.Kind, text string) {
 		}
 		return
 	}
+	if kind == sse.ToolCalls {
+		if c, ok := parseCall(text); ok {
+			s.sendCall(c)
+		}
+		return
+	}
 	if kind != sse.Content {
 		return
 	}
 	s.raw.WriteString(text)
 	prose := s.prose()
 	if prose == s.sent {
+		if c, ok := textCall(s.raw.String()); ok && s.agent {
+			s.sendCall(c)
+		}
 		return
 	}
 	s.endThinking()

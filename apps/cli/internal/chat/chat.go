@@ -28,6 +28,7 @@ import (
 	"lixbon.com/cli/internal/toolparse"
 	"lixbon.com/cli/internal/tools"
 	"lixbon.com/cli/internal/toolspec"
+	"lixbon.com/cli/internal/usage"
 	"lixbon.com/cli/internal/workspace"
 )
 
@@ -104,6 +105,9 @@ type Chat struct {
 	Sources        []map[string]any
 	ProjectContext string
 	Custom         map[string]workspace.Command
+	// Usage apunta los tokens de cada petición por proveedor y modelo; nil
+	// no apunta nada.
+	Usage *usage.Log
 
 	ephemeral     bool
 	reserved      []string
@@ -181,6 +185,9 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 	orchDir := filepath.Dir(opts.ConfigPath)
 	s.Orch = func() orch.Info { return orch.Discover(orchDir) }
 	c.Session = s
+	if !opts.Ephemeral && opts.ConfigPath != "" {
+		c.Usage = usage.Open(filepath.Join(filepath.Dir(opts.ConfigPath), usage.FileName))
+	}
 	c.setupBrowser(opts.ConfigPath)
 	return c, nil
 }
@@ -387,14 +394,17 @@ func (c *Chat) SetEffort(effort string) {
 	_ = c.SaveConfig()
 }
 
-// SetModel cambia de modelo y lo recuerda como predeterminado.
+// SetModel cambia de modelo y lo recuerda como predeterminado. En MiMo la
+// ventana sigue al modelo.
 func (c *Chat) SetModel(model string) {
+	c.Cfg.Model = model
+	c.Cfg.FixMiMoWindow()
 	c.mu.Lock()
 	c.Model = model
 	c.Session.Model = model
+	c.Session.ContextWindow = c.Cfg.ContextWindow
 	c.Session.TextCalls = false
 	c.mu.Unlock()
-	c.Cfg.Model = model
 	_ = c.SaveConfig()
 }
 
@@ -804,16 +814,40 @@ func (c *Chat) summarize(ctx context.Context, messages []history.Message, progre
 	}
 	defer stream.Close()
 	var text strings.Builder
+	var spent tokenUsage
 	for ev, err := range stream.Events() {
 		if err != nil {
 			return "", err
 		}
-		if ev.Kind == sse.Content {
+		switch ev.Kind {
+		case sse.Content:
 			text.WriteString(ev.Text)
 			progress(text.Len())
+		case sse.Usage:
+			_ = json.Unmarshal(ev.Value, &spent)
 		}
 	}
+	c.recordUsage(c.Model, spent)
 	return text.String(), nil
+}
+
+// tokenUsage es el bloque usage de una respuesta en streaming.
+type tokenUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+}
+
+// recordUsage apunta lo que gastó una petición en el registro del equipo,
+// con el proveedor activo y el modelo que respondió.
+func (c *Chat) recordUsage(model string, u tokenUsage) {
+	_ = c.Usage.Add(usage.Record{
+		At: time.Now().Unix(), Provider: c.Cfg.ActiveProfile(), Model: model,
+		Prompt: u.PromptTokens, Completion: u.CompletionTokens, Cached: u.PromptTokensDetails.CachedTokens,
+	})
 }
 
 // AskQuiet es un chat sin streaming ni historial, para trabajo interno.
@@ -864,11 +898,7 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 
 		var text, reasoning strings.Builder
 		var assembler toolCallAssembler
-		var usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		}
+		var spent tokenUsage
 		for ev, err := range stream.Events() {
 			if err != nil {
 				if ctx.Err() != nil && (text.Len() > 0 || reasoning.Len() > 0) {
@@ -887,6 +917,9 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 				var batch []json.RawMessage
 				if json.Unmarshal(ev.Value, &batch) == nil {
 					assembler.add(batch)
+					if name, target, n := assembler.progress(); name != "" && !step.Quiet {
+						sink.Delta(sse.ToolCalls, fmt.Sprintf("%s\t%s\t%d", name, target, n))
+					}
 				}
 			case sse.Sources:
 				var found []map[string]any
@@ -894,13 +927,14 @@ func (c *Chat) streamer(sink Sink, agentMode bool) agent.Streamer {
 					c.Sources = found
 				}
 			case sse.Usage:
-				_ = json.Unmarshal(ev.Value, &usage)
+				_ = json.Unmarshal(ev.Value, &spent)
 			}
 		}
 		calls := assembler.calls()
-		c.registerUsage(agentMode, messages, toolList, usage.PromptTokens, usage.TotalTokens)
-		if usage.CompletionTokens > 0 {
-			sink.Delta(sse.Usage, strconv.Itoa(usage.CompletionTokens))
+		c.recordUsage(now.model, spent)
+		c.registerUsage(agentMode, messages, toolList, spent.PromptTokens, spent.TotalTokens)
+		if spent.CompletionTokens > 0 {
+			sink.Delta(sse.Usage, strconv.Itoa(spent.CompletionTokens))
 		}
 		return agent.StreamResult{Text: text.String(), ToolCalls: calls, Reasoning: textutil.Strip(reasoning.String())}, nil
 	}

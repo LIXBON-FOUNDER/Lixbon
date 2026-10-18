@@ -72,11 +72,16 @@ func TestAgentOnceUsesMCPToolsWithApproval(t *testing.T) {
 	first := script.bodies[0]
 	tools, _ := first["tools"].([]any)
 	if len(tools) != 21 {
-		t.Fatalf("el modelo debe recibir las 20 herramientas más la de MCP, recibió %d", len(tools))
+		t.Fatalf("el modelo debe recibir las 20 herramientas más mcp_tools, recibió %d", len(tools))
 	}
+	// Las del servidor no viajan hasta que el modelo las carga: ve el
+	// servidor por su nombre y mcp_tools.
 	last := tools[len(tools)-1].(map[string]any)["function"].(map[string]any)
-	if last["name"] != "mcp__demo__saludar" || last["description"] != "[MCP demo] Saluda" {
+	if last["name"] != "mcp_tools" {
 		t.Fatalf("herramienta MCP: %v", last)
+	}
+	if system := bodyMessages(first)[0]["content"].(string); !strings.Contains(system, "- demo: 1 herramienta.") {
+		t.Fatalf("el prompt lista el servidor por su nombre:\n%s", system)
 	}
 	second := bodyMessages(script.bodies[1])
 	if tail := second[len(second)-1]; tail["role"] != "tool" || tail["content"] != "hola desde mcp" || tail["name"] != "mcp__demo__saludar" {

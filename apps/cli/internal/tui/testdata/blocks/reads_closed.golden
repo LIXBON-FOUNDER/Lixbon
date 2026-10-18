@@ -1,6 +1,9 @@
 ── 40 ──
- ✗  Exploró  2 archivos · 1 bús…  0.8 s
+ ▸ Exploró 2 arc…                 0.8 s
+   ✗  Leer  falta.go      no existe el…
 ── 80 ──
- ✗  Exploró  2 archivos · 1 búsqueda · 1 error                            0.8 s
+ ▸ Exploró 2 archivos · 1 búsqueda                                        0.8 s
+   ✗  Leer  falta.go                                       no existe el archivo
 ── 120 ──
- ✗  Exploró  2 archivos · 1 búsqueda · 1 error                                                                    0.8 s
+ ▸ Exploró 2 archivos · 1 búsqueda                                                                                0.8 s
+   ✗  Leer  falta.go                                                                               no existe el archivo

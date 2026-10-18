@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -245,5 +246,25 @@ func TestAStaleMiMoProfileGetsItsWindowBack(t *testing.T) {
 	}
 	if err := cfg.UseProfile("xiaomi"); err != nil || cfg.ContextWindow != mimoContext {
 		t.Fatalf("al volver a MiMo: %d (%v)", cfg.ContextWindow, err)
+	}
+}
+
+// MiMo-V2.6-Pro admite 1.048.576 tokens: un perfil con la ventana que puso
+// el CLI la recupera; una que eligió el usuario se respeta.
+func TestMiMoProGetsItsMillionTokenWindow(t *testing.T) {
+	for _, tc := range []struct {
+		model  string
+		window int
+		want   int
+	}{
+		{"mimo-v2.6-pro", mimoContext, 1048576},
+		{"xiaomi/MiMo-V2.6-Pro", DefaultGenericContext, 1048576},
+		{"mimo-v2.6-pro", 200000, 200000},
+		{"mimo-v2-flash", mimoContext, mimoContext},
+	} {
+		raw := fmt.Sprintf(`{"base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "model": %q, "context_window": %d}`, tc.model, tc.window)
+		if got := Load(writeFile(t, raw)).ContextWindow; got != tc.want {
+			t.Errorf("%s con %d: ventana %d, quiero %d", tc.model, tc.window, got, tc.want)
+		}
 	}
 }

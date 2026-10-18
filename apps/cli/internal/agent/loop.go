@@ -42,15 +42,31 @@ type Turn struct {
 	Emit   func(Event)
 
 	readOnly bool
+	// failed: la última acción ejecutada terminó en error.
+	failed bool
 }
 
 func (t *Turn) emit(e Event) {
+	if e.Failed {
+		t.failed = true
+	}
 	if t.Emit != nil {
 		t.Emit(e)
 	}
 }
 
 func (t *Turn) note(text string) { t.emit(Event{Kind: EventNote, Text: text}) }
+
+// tokensText es «92.1k»: los tokens en las notas de la compactación.
+func tokensText(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	}
+	return fmt.Sprint(n)
+}
 
 type apiError interface{ APIStatus() int }
 
@@ -107,7 +123,17 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 		content += orch.PromptSection(info)
 	}
 	var extra []json.RawMessage
-	if s.MCP != nil {
+	catalog, byServer := s.catalog()
+	switch {
+	case byServer:
+		servers := catalog.Summary()
+		for _, info := range servers {
+			if s.MCPLoaded[info.Name] && info.Err == "" {
+				extra = append(extra, catalog.ServerSchemas(info.Name)...)
+			}
+		}
+		content += mcpCatalogPrompt(servers, s.MCPLoaded, native)
+	case s.MCP != nil:
 		extra = s.MCP.ToolSchemas()
 	}
 	if len(extra) > 0 && !native {
@@ -126,15 +152,28 @@ func (t *Turn) systemMessage(native bool) (history.Message, []map[string]any) {
 				toolList = append(toolList, schema)
 			}
 		}
+		if byServer && anyUp(catalog.Summary()) {
+			toolList = append(toolList, mcpToolsSchema())
+		}
 	}
 	return history.Message{Role: "system", Content: content}, toolList
 }
 
 // Run ejecuta el turno sobre hist y devuelve la respuesta final y el
-// historial de trabajo actualizado. El turno solo termina cuando el modelo
-// deja de pedir herramientas, se detecta que está atascado o se agotan los
-// pasos, y en los dos últimos casos lo dice: nunca se queda callado.
+// historial de trabajo actualizado. No hay tope de pasos: el turno termina
+// cuando el modelo deja de pedir herramientas o cuando se detecta que está
+// atascado, y en ese caso lo dice. Lo que se dejó de intentar por fallar
+// demasiadas veces se cuenta al final.
 func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []history.Message, error) {
+	g := newRetries()
+	answer, working, err := t.loop(ctx, hist, g)
+	if report := g.report(); report != "" && ctx.Err() == nil {
+		t.note(report)
+	}
+	return answer, working, err
+}
+
+func (t *Turn) loop(ctx context.Context, hist []history.Message, g *retries) (string, []history.Message, error) {
 	s := t.S
 	working := append([]history.Message{}, hist...)
 	window := s.ContextWindow
@@ -155,7 +194,7 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 	nudgeAt, nudgeAnswer := -1, ""
 	var next StepOptions
 
-	for step := 0; step < MaxSteps; step++ {
+	for {
 		if err := ctx.Err(); err != nil {
 			return "", working, err
 		}
@@ -163,7 +202,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 		next = StepOptions{}
 		s.Working = working
 		if s.Ask != nil && est.NeedsCompaction(working, window) {
-			t.note("La conversación llena la ventana de contexto: compactando…")
+			before := est.EstimateTokens(working)
+			t.emit(Event{Kind: EventNote, Compacting: true, Text: fmt.Sprintf(
+				"El contexto llegó al %d %% de la ventana: compactando la conversación…", min(100, before*100/window))})
 			compacted, err := history.CompactMessages(working, func(m []history.Message) (string, error) {
 				return s.Ask(ctx, m)
 			}, history.CompactKeepRecent)
@@ -174,7 +215,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				t.note(fmt.Sprintf("No se pudo compactar (%v); se recortarán los pasos antiguos.", err))
 			} else {
 				working = compacted
-				t.note(fmt.Sprintf("Contexto compactado a ~%d tokens.", est.EstimateTokens(working)))
+				s.Working = working
+				t.note(fmt.Sprintf("Conversación compactada: de ~%s a ~%s tokens. Un resumen sustituye a lo anterior.",
+					tokensText(before), tokensText(est.EstimateTokens(working))))
 			}
 		}
 
@@ -219,14 +262,16 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 				repeated = 0
 			}
 			lastSignature = signature
-			if repeated >= MaxRepeatedCalls {
-				return t.wrapUp(ctx, working, repeatedMessage)
-			}
+			looping := repeated >= MaxRepeatedCalls
 			working = append(working, history.Message{Role: "assistant", Content: assistant, ToolCalls: res.ToolCalls, Thinking: res.Reasoning})
+			skipped := 0
 			for i, call := range calls {
-				result, err := t.approveAndRun(ctx, call.Tool, call.Args)
+				result, skip, err := t.attempt(ctx, g, call.Tool, call.Args, signatures[i], looping)
 				if err != nil {
 					return "", working, err
+				}
+				if skip {
+					skipped++
 				}
 				var meta struct {
 					ID string `json:"id"`
@@ -245,6 +290,9 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			if images := s.popToolImages(); len(images) > 0 {
 				dropOldImages(working, maxLiveImageGroups-1)
 				working = append(working, history.Message{Role: "user", Content: ToolImagesPrompt, Images: images})
+			}
+			if g.step(len(calls), skipped) {
+				return t.wrapUp(ctx, working, repeatedMessage)
 			}
 			continue
 		}
@@ -329,21 +377,25 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 			repeated = 0
 		}
 		lastSignature = signature
-		if repeated >= MaxRepeatedCalls {
-			return t.wrapUp(ctx, working, repeatedMessage)
-		}
+		looping := repeated >= MaxRepeatedCalls
 
 		var combined []string
+		skipped := 0
 		for _, group := range groupReads(toolCalls) {
 			var results []string
-			if len(group) > 1 {
+			if len(group) > 1 && !looping && !g.anyDropped(group) {
 				results = t.runReadGroup(ctx, group)
 			} else {
-				result, err := t.approveAndRun(ctx, group[0].Tool, group[0].Args)
-				if err != nil {
-					return "", working, err
+				for _, call := range group {
+					result, skip, err := t.attempt(ctx, g, call.Tool, call.Args, CallSignature(call.Tool, call.Args), looping)
+					if err != nil {
+						return "", working, err
+					}
+					if skip {
+						skipped++
+					}
+					results = append(results, result)
 				}
-				results = []string{result}
 			}
 			if err := ctx.Err(); err != nil {
 				return "", working, err
@@ -359,9 +411,10 @@ func (t *Turn) Run(ctx context.Context, hist []history.Message) (string, []histo
 		}
 		working = append(working, results)
 		collapseOldSnapshots(working)
+		if g.step(len(toolCalls), skipped) {
+			return t.wrapUp(ctx, working, repeatedMessage)
+		}
 	}
-	return "", working, &Stopped{Reason: fmt.Sprintf("El agente llegó al tope de %d pasos en este turno. "+
-		"Escribe «continúa» para que siga desde donde iba.", MaxSteps)}
 }
 
 // pastesCode dice si la respuesta trae código que parece para un archivo:
@@ -594,6 +647,8 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(stringArg(args, "question"), 100), ReadOnly: true})
 		s.Stats.Actions++
 		return s.Tools.Execute(ctx, tool, args), nil
+	case MCPToolsTool:
+		return t.loadMCPServer(args), nil
 	}
 	if s.MCP != nil && s.MCP.IsMCPTool(tool) {
 		return t.runMCP(ctx, tool, args)
@@ -751,7 +806,7 @@ func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
 // preguntar, nunca cambiar nada. En el navegador abre y lee, sin clics.
 var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user",
 	"browser_navigate", "browser_snapshot", "browser_get_text", "browser_screenshot", "browser_scroll", "browser_back",
-	"browser_tabs", "browser_wait"}
+	"browser_tabs", "browser_wait", "browser_viewport"}
 
 const askBlockedMessage = "[modo ask] Solo puedes leer el proyecto, buscar en internet y preguntar. Para cambiar " +
 	"archivos o ejecutar comandos, explica qué harías y pide al usuario que pase al modo agent (/mode agent o Mayús+Tab)."

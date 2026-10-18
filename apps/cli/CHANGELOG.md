@@ -4,6 +4,19 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.11.0
+- El turno del agente se lee de un vistazo: leer, buscar y los pasos del navegador seguidos van en una sola fila tenue («▸ Exploró 2 archivos · 1 búsqueda», «▸ Navegador · 4 pasos…») que ctrl+o o un clic despliegan. Lo pensado ya no ocupa filas «Pensó»: va en el ✦ de cada acción. Un paso que falla siempre queda a la vista.
+- Las ediciones enseñan solo las líneas cambiadas (hasta 5) en rojo y verde más profundos; ctrl+o abre el diff entero. Un comando que va bien es una fila con «exit 0 · 3.4 s»; si falla, se ven sus últimas líneas. Lo que el agente cuenta entre acciones va en tinta más clara.
+- Mientras el modelo escribe una acción larga (un archivo entero), la etiqueta dice qué prepara y cuánto lleva («Escribiendo index.html · 12.4 kB…») y los tokens de abajo avanzan; también en la app móvil.
+- Ya no hay tope de pasos por turno. Una acción que falla 3 veces se deja y el agente sigue con lo demás; al final se cuenta qué no se pudo hacer y por qué.
+- Los servidores MCP se ven por nombre: el modelo carga las herramientas de uno solo cuando lo necesita, y sabe qué servidores están caídos para avisarte en vez de buscar otra vía.
+- La barra de contexto se actualiza en cada paso. La compactación automática se ve: «Compactando la conversación…» mientras dura y un aviso con los tokens de antes y después.
+- `/usage` funciona con cualquier proveedor y enseña lo que gastaste en este equipo con cada proveedor y modelo (hoy, 7 y 30 días, con entrada, caché, salida y peticiones), guardado en `~/.lixbon/usage.jsonl`.
+- Lixbon se actualiza solo: descarga e instala la versión nueva en segundo plano y te avisa de que reinicies para usarla. También con proveedores que no son Lixbon. `auto_update: false` lo deja en un aviso.
+- El navegador del agente se abre maximizado, y el agente puede ver la página a tamaño de móvil, tableta o escritorio (`browser_viewport`) y ejecutar JavaScript en ella como en la consola de DevTools (`browser_eval`; fuera de localhost pide permiso).
+- Con poco escrito, el turno empieza arriba y la caja va justo detrás, no pegada abajo. Si subes para leer, lo que aparece abajo ya no mueve la pantalla.
+- MiMo-V2.6-Pro usa su ventana de 1.048.576 tokens; cambiar de modelo con `/model` ajusta la ventana.
+
 ## 2.10.0
 - Cada turno del agente se ve como una pieza: «◆ Lixbon» con sus acciones, líneas cambiadas y segundos, y debajo cada paso colgando de un riel hasta el cierre. La respuesta final queda fuera del riel; lo que el agente cuenta entre acciones va dentro, en gris.
 - Las herramientas llevan su nombre como etiqueta con fondo y color según lo que hacen (leer, cambiar, comandos, navegador), y el estado va delante: en marcha, hecho, fallido o en espera. Los comandos se muestran como `$  comando`.

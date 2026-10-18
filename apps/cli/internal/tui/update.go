@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -190,12 +189,20 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.liveReal += n
 				m.liveChars = 0
 			}
+		case sse.ToolCalls:
+			m.trackCall(msg.text)
 		}
 		return m, nil
 
 	case eventMsg:
 		if msg.turn == m.turn {
 			m.handleEvent(msg.e)
+		}
+		return m, nil
+
+	case ctxMsg:
+		if msg.turn == m.turn {
+			m.ctxTokens, m.ctxPct, m.sessionTokens = msg.tokens, msg.pct, msg.session
 		}
 		return m, nil
 
@@ -260,7 +267,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.finishAsync(msg)
 
 	case updateNoticeMsg:
-		m.add(note(fmt.Sprintf("Hay una versión nueva (v%s). Ejecuta /update.", msg.version)))
+		m.onUpdateNotice(msg.Outcome)
 		return m, nil
 
 	case runCommandMsg:
