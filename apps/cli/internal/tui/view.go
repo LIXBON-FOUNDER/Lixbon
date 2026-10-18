@@ -76,6 +76,12 @@ func (m *Model) View() tea.View {
 	}
 	m.barShown = len(top) > 0
 	rows := height - len(top) - len(bottom)
+	// Con la vista subida, si la zona de abajo crece o encoge (lo que piensa,
+	// la salida en vivo) la ventana conserva su primera fila: lo que se está
+	// leyendo no se mueve.
+	if m.scroll > 0 && m.winRows > 0 && rows != m.winRows {
+		m.scroll = max(0, m.scroll+m.winRows-rows)
+	}
 	if e := m.anchorTop; e != nil {
 		m.anchorTop = nil
 		if start, total := m.log.start(e), m.log.total(); total-start > rows {
@@ -83,14 +89,24 @@ func (m *Model) View() tea.View {
 		}
 	}
 	m.scroll = min(m.scroll, m.log.maxScroll(rows))
+	window := m.log.window(rows, m.scroll)
+	m.winY, m.winRows, m.winTop = len(top), rows, max(0, m.log.total()-m.scroll-rows)
+	// Mientras el transcript cabe, lo de abajo (lo que hace el agente, la caja
+	// y el pie) va justo detrás y el hueco queda al final: el turno empieza
+	// arriba y no pegado a la caja.
+	gap := 0
+	if total := m.log.total(); m.scroll == 0 && total < rows {
+		gap = rows - total
+		window = window[:total]
+		m.winRows = total
+	}
+	m.footY = height - 1 - gap
 	if len(bottom) > 0 && footerShown {
 		bottom[len(bottom)-1] = ansi.Truncate(m.footer(), width, "")
 	}
-	window := m.log.window(rows, m.scroll)
-	m.winY, m.winRows, m.winTop = len(top), rows, max(0, m.log.total()-m.scroll-rows)
 	m.panelY = -1
 	if panelAt >= 0 {
-		m.panelY = len(top) + rows + panelAt
+		m.panelY = len(top) + rows - gap + panelAt
 	}
 	if !m.sel.empty() {
 		for y, line := range window {
@@ -104,6 +120,9 @@ func (m *Model) View() tea.View {
 	}
 
 	screen := append(append(top, window...), bottom...)
+	for range gap {
+		screen = append(screen, "")
+	}
 	if anchored {
 		m.popover(screen, width, height)
 	}
@@ -155,7 +174,7 @@ func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
 		case m.barBranch.has(msg.X):
 			return m.openFrom(0, m.barBranch, "/branch"), true
 		}
-	case msg.Y == m.height-1 && m.picker == nil:
+	case msg.Y == m.footY && m.picker == nil:
 		switch {
 		case m.footProcs.has(msg.X):
 			return m.openFrom(msg.Y, m.footProcs, "/ps"), true

@@ -1,12 +1,9 @@
 ── 40 ──
- ✗  $  sleep 99
+ ✗  $  sleep 99          tiempo agotado
    │ El comando superó 30 s.
-   └ tiempo agotado · 1 línea
 ── 80 ──
- ✗  $  sleep 99
+ ✗  $  sleep 99                                                  tiempo agotado
    │ El comando superó 30 s.
-   └ tiempo agotado · 1 línea
 ── 120 ──
- ✗  $  sleep 99
+ ✗  $  sleep 99                                                                                          tiempo agotado
    │ El comando superó 30 s.
-   └ tiempo agotado · 1 línea

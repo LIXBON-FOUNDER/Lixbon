@@ -93,7 +93,9 @@ func (r *screenRig) count(text string) int { return strings.Count(r.screen(), te
 
 func (r *screenRig) dump() string { return fmt.Sprintf("\n%s", r.screen()) }
 
-func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
+// La caja va justo detrás de lo escrito, con el pie debajo, y nunca se
+// duplica.
+func TestInputBarFollowsTheTranscriptAndNeverDuplicates(t *testing.T) {
 	h := newHarness(t, func(c *configT) { c.Model = "" })
 	rig := startScreen(t, h, 100, 30)
 	rig.waitFor("LIXBON CLI")
@@ -101,8 +103,8 @@ func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 
 	status := rig.rowOf("shift+tab")
 	box := rig.rowOf("╭")
-	if status != rig.rows-1 || box != rig.rows-4 {
-		t.Fatalf("la barra debe ir en las últimas filas: caja=%d estado=%d%s", box, status, rig.dump())
+	if status != box+3 || box >= rig.rows-4 {
+		t.Fatalf("con poco escrito la caja sigue al contenido y el pie va debajo: caja=%d estado=%d%s", box, status, rig.dump())
 	}
 
 	for _, step := range []string{"/", "c", "l", "\x7f", "\x7f", "\x7f", "/", "c", "o", "\x7f", "\x7f", "\x7f"} {
@@ -110,12 +112,12 @@ func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 		if got := rig.count("╭"); got != 1 {
 			t.Fatalf("tras %q hay %d cajas de entrada%s", step, got, rig.dump())
 		}
-		if rig.rowOf("╭") != box || rig.rowOf("shift+tab") != status {
-			t.Fatalf("tras %q la barra se movió%s", step, rig.dump())
+		if rig.rowOf("shift+tab") != rig.rowOf("╭")+3 {
+			t.Fatalf("tras %q el pie no va justo debajo de la caja%s", step, rig.dump())
 		}
 	}
 	rig.type_("/")
-	if rig.rowOf("/clear") < 0 || rig.rowOf("/clear") >= box {
+	if rig.rowOf("/clear") < 0 || rig.rowOf("/clear") >= rig.rowOf("╭") {
 		t.Fatalf("el menú debe abrirse sobre la caja%s", rig.dump())
 	}
 }
@@ -187,8 +189,8 @@ func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	if !strings.ContainsAny(screen, "▀▄") {
 		t.Fatalf("tras /clear debe seguir el logo%s", rig.dump())
 	}
-	if rig.rowOf("╭") != rig.rows-4 {
-		t.Fatalf("la caja debe seguir fija abajo%s", rig.dump())
+	if box := rig.rowOf("╭"); box < 0 || rig.rowOf("shift+tab") != box+3 {
+		t.Fatalf("la caja sigue al contenido, con el pie debajo%s", rig.dump())
 	}
 }
 

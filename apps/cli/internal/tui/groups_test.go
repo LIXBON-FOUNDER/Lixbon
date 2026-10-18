@@ -75,7 +75,7 @@ func TestReadGroupAbsorbsThinkingAndNamesTheLastRead(t *testing.T) {
 	contains(t, view, "Leer b.go")
 	m.closeGroups()
 	view = h.view()
-	contains(t, view, "Exploró  2 archivos")
+	contains(t, view, glyphs.fold+" Exploró 2 archivos")
 	notContains(t, view, "Leer b.go")
 	m.running = false
 }

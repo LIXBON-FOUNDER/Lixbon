@@ -736,6 +736,59 @@
           "properties": {}
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_viewport",
+        "description": "Cambia el tamaño de la página para ver cómo responde (diseño responsive): un preajuste (mobile 390×844, tablet 820×1180, desktop 1440×900, reset vuelve al tamaño de la ventana) o un ancho y alto. Después mira el resultado con browser_screenshot o browser_snapshot.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": [
+                "mobile",
+                "tablet",
+                "desktop",
+                "reset"
+              ],
+              "description": "Preajuste"
+            },
+            "width": {
+              "type": "integer",
+              "description": "Ancho en px (si no hay preajuste)"
+            },
+            "height": {
+              "type": "integer",
+              "description": "Alto en px (si no hay preajuste)"
+            },
+            "mobile": {
+              "type": "boolean",
+              "description": "Simular un móvil táctil (con width y height)"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_eval",
+        "description": "Ejecuta JavaScript en la página, como la consola de DevTools, y devuelve el resultado en JSON (admite await). Sirve para comprobar el DOM, el estado de la app o estilos calculados. No lo uses para rellenar formularios ni hacer clic: para eso están browser_type y browser_click.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Expresión o bloque de JavaScript; el valor de la última expresión es el resultado"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
     }
   ],
   "specs": [
@@ -893,6 +946,16 @@
       "name": "browser_back",
       "args": "",
       "description": "Volver a la página anterior"
+    },
+    {
+      "name": "browser_viewport",
+      "args": "preset?, width?, height?, mobile?",
+      "description": "Cambiar el tamaño de la página"
+    },
+    {
+      "name": "browser_eval",
+      "args": "expression",
+      "description": "Ejecutar JavaScript en la página"
     }
   ],
   "read_only": [
@@ -911,7 +974,8 @@
     "search",
     "stop_command",
     "todo",
-    "web_search"
+    "web_search",
+    "browser_viewport"
   ],
   "mutating": [
     "append_file",
@@ -1035,6 +1099,15 @@
     "browser_wait": [
       "text",
       "seconds"
+    ],
+    "browser_viewport": [
+      "preset",
+      "width",
+      "height",
+      "mobile"
+    ],
+    "browser_eval": [
+      "expression"
     ]
   }
 }

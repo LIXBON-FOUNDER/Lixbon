@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,11 +33,17 @@ func (m *Model) liveLabel() (string, bool) {
 	if m.picker != nil && m.openTool != nil {
 		return "Esperando tu respuesta…", false
 	}
+	if m.autoCompacting {
+		return "Compactando la conversación…", false
+	}
 	if b := m.currentTool(); b != nil {
 		if b.state == toolRunning {
 			target := ansi.Truncate(b.target, 32, glyphEllipsis)
 			return strings.TrimSpace(b.gerund+" "+target) + "…", false
 		}
+	}
+	if c, ok := m.writingCall(); ok {
+		return callLabel(c), false
 	}
 	if m.live.content.Len() > 0 {
 		if m.turnMode == chat.ModeAgent && m.live.prose == "" {
@@ -45,6 +55,74 @@ func (m *Model) liveLabel() (string, bool) {
 		return "Pensando…", false
 	}
 	return brilloVerbs[m.spin/brilloVerbTicks%len(brilloVerbs)] + "…", false
+}
+
+// parseCall lee el avance «nombre\tdestino\tcaracteres» que manda el chat.
+func parseCall(text string) (callProgress, bool) {
+	parts := strings.SplitN(text, "\t", 3)
+	if len(parts) != 3 {
+		return callProgress{}, false
+	}
+	n, _ := strconv.Atoi(parts[2])
+	return callProgress{tool: parts[0], target: parts[1], chars: n}, true
+}
+
+// trackCall apunta el avance de la llamada que llega por tool_calls nativas:
+// «nombre\tdestino\tcaracteres». Lo escrito cuenta para los tokens de abajo.
+func (m *Model) trackCall(text string) {
+	c, ok := parseCall(text)
+	if !ok {
+		return
+	}
+	m.liveChars += max(0, c.chars-m.live.calling.chars)
+	m.live.calling = c
+}
+
+// textCallStart encuentra una llamada escrita en el texto (modelos sin tools
+// nativas): {"tool":"write_file","args":{….
+var textCallStart = regexp.MustCompile(`\{\s*"tool"\s*:\s*"([A-Za-z0-9_]+)"`)
+
+// writingCall es la llamada que el modelo está escribiendo, nativa o en el
+// texto. Sin ella, una acción larga deja la etiqueta quieta minutos.
+func (m *Model) writingCall() (callProgress, bool) {
+	if c := m.live.calling; c.tool != "" {
+		return c, true
+	}
+	if m.turnMode != chat.ModeAgent || m.live.content.Len() == 0 {
+		return callProgress{}, false
+	}
+	return textCall(m.live.content.String())
+}
+
+// textCall es la llamada a medio escribir al final del texto del modelo.
+func textCall(raw string) (callProgress, bool) {
+	locs := textCallStart.FindAllStringSubmatchIndex(raw, -1)
+	if len(locs) == 0 {
+		return callProgress{}, false
+	}
+	last := locs[len(locs)-1]
+	call := raw[last[0]:]
+	if json.Valid([]byte(call)) {
+		return callProgress{}, false
+	}
+	return callProgress{tool: raw[last[2]:last[3]], target: chat.CallTarget(call), chars: len(call)}, true
+}
+
+// callLabel es «Escribiendo index.html · 12.4 kB…»: qué prepara y cuánto
+// lleva, que crece mientras el modelo escribe.
+func callLabel(c callProgress) string {
+	label := verbs(c.tool)[1]
+	if c.target != "" {
+		target := c.target
+		if strings.ContainsAny(target, `/\`) && !strings.Contains(target, " ") {
+			target = filepath.Base(target)
+		}
+		label += " " + ansi.Truncate(target, 40, glyphEllipsis)
+	}
+	if c.chars >= 200 {
+		label += fmt.Sprintf(" %s %.1f kB", glyphSep, float64(c.chars)/1000)
+	}
+	return label + "…"
 }
 
 // brilloVerbs nombran la espera sin nada más concreto que decir; cambian cada

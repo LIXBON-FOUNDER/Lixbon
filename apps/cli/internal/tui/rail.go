@@ -56,7 +56,7 @@ func (b *turnHeadBlock) render(width int, _ bool) string {
 }
 
 // narrationBlock es lo que el modelo dijo entre acciones: no es la respuesta,
-// así que va en gris y sin marcador.
+// así que va sin marcador, pero en tinta clara: es lo que se lee del turno.
 type narrationBlock struct {
 	text string
 	md   func(text string, width int) string
@@ -76,7 +76,7 @@ func (b narrationBlock) render(width int, _ bool) string {
 		lines = lines[:len(lines)-1]
 	}
 	for i, l := range lines {
-		lines[i] = pad + sSoft.Render(strings.TrimRight(l, " "))
+		lines[i] = pad + sPrimary.Render(strings.TrimRight(l, " "))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -142,7 +142,7 @@ func chip(label string, tone chipTone, live bool) string {
 
 var readTools = map[string]bool{
 	"read_file": true, "search": true, "list_files": true, "find_files": true, "outline": true,
-	"read_output": true, "web_search": true, "fetch_url": true,
+	"read_output": true, "web_search": true, "fetch_url": true, "mcp_tools": true,
 }
 
 func toneFor(e agent.Event) chipTone {

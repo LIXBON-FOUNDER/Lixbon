@@ -25,6 +25,7 @@ import (
 	"lixbon.com/cli/internal/toolparse"
 	"lixbon.com/cli/internal/tools"
 	"lixbon.com/cli/internal/toolspec"
+	"lixbon.com/cli/internal/usage"
 	"lixbon.com/cli/internal/workspace"
 )
 
@@ -1312,31 +1313,76 @@ func (m *Model) cmdCost() {
 	}
 }
 
+// cmdUsage enseña el cupo de la cuenta Lixbon (si el proveedor es el
+// gateway) y lo que se gastó en este equipo con cada proveedor y modelo, que
+// el CLI apunta petición a petición.
 func (m *Model) cmdUsage() tea.Cmd {
+	generic, client, log := m.chat.Client.Generic, m.chat.Client, m.chat.Usage
 	return m.async("consultando uso", func(ctx context.Context) cmdDoneMsg {
-		u, err := m.chat.Client.Usage(ctx)
-		if err != nil {
-			return cmdDoneMsg{lines: []block{errLine("No se pudo obtener el uso. Verifica tu sesión. Error: " + err.Error())}}
-		}
-		report := reportBlock{title: "Uso de la cuenta", rows: [][2]string{{"Plan", sPrimary.Render(firstNonEmpty(u.Plan.Name, "-"))}}}
-		for _, b := range []struct {
-			label  string
-			bucket api.Bucket
-		}{{"Sesión (4h)", u.Buckets.Session}, {"Semana (todos los modelos)", u.Buckets.Week}} {
-			if b.bucket.Unlimited {
-				report.rows = append(report.rows, [2]string{b.label, sDim2.Render(strings.Repeat(glyphMeterOn, 24)) + "  " + sOK.Render("ilimitado")})
-				continue
-			}
-			pct := min(100, int(b.bucket.Percent+0.5))
-			report.rows = append(report.rows, [2]string{b.label, meter(float64(pct), 24) + sPrimary.Render(fmt.Sprintf("  %d%% usado", pct))})
-			if reset := api.ResetIn(b.bucket.ResetAt, time.Now()); reset != "" {
-				report.rows = append(report.rows, [2]string{"", sDim2.Render("Se reinicia " + reset)})
-			} else if b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
-				report.rows = append(report.rows, [2]string{"", sDim2.Render("Empieza con tu próximo mensaje")})
+		var lines []block
+		if !generic {
+			if u, err := client.Usage(ctx); err != nil {
+				lines = append(lines, errLine("No se pudo obtener el uso de la cuenta. Verifica tu sesión. Error: "+err.Error()))
+			} else {
+				lines = append(lines, accountUsage(u))
 			}
 		}
-		return cmdDoneMsg{lines: []block{report}}
+		return cmdDoneMsg{lines: append(lines, localUsage(log, time.Now()))}
 	})
+}
+
+func accountUsage(u api.Usage) reportBlock {
+	report := reportBlock{title: "Uso de la cuenta", rows: [][2]string{{"Plan", sPrimary.Render(firstNonEmpty(u.Plan.Name, "-"))}}}
+	for _, b := range []struct {
+		label  string
+		bucket api.Bucket
+	}{{"Sesión (4h)", u.Buckets.Session}, {"Semana (todos los modelos)", u.Buckets.Week}} {
+		if b.bucket.Unlimited {
+			report.rows = append(report.rows, [2]string{b.label, sDim2.Render(strings.Repeat(glyphMeterOn, 24)) + "  " + sOK.Render("ilimitado")})
+			continue
+		}
+		pct := min(100, int(b.bucket.Percent+0.5))
+		report.rows = append(report.rows, [2]string{b.label, meter(float64(pct), 24) + sPrimary.Render(fmt.Sprintf("  %d%% usado", pct))})
+		if reset := api.ResetIn(b.bucket.ResetAt, time.Now()); reset != "" {
+			report.rows = append(report.rows, [2]string{"", sDim2.Render("Se reinicia " + reset)})
+		} else if b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
+			report.rows = append(report.rows, [2]string{"", sDim2.Render("Empieza con tu próximo mensaje")})
+		}
+	}
+	return report
+}
+
+// localUsage son los tokens que devolvió cada proveedor en este equipo: hoy,
+// los últimos 7 días y los últimos 30, y el desglose del mes.
+func localUsage(log *usage.Log, now time.Time) reportBlock {
+	report := reportBlock{title: "Proveedores y modelos en este equipo"}
+	sums, err := log.Summaries(now)
+	switch {
+	case err != nil:
+		report.rows = append(report.rows, [2]string{"", sErr.Render("No se pudo leer el registro de uso: " + err.Error())})
+		return report
+	case len(sums) == 0:
+		report.rows = append(report.rows, [2]string{"", sDim.Render("Todavía no hay peticiones apuntadas en este equipo.")})
+		return report
+	}
+	sep := sDim2.Render("  " + glyphSep + "  ")
+	for i, s := range sums {
+		if i > 0 {
+			report.rows = append(report.rows, [2]string{"", ""})
+		}
+		report.rows = append(report.rows, [2]string{s.Provider + " " + glyphSep + " " + s.Model,
+			sDim.Render("hoy ") + sPrimary.Render(fmtTokens(s.Today.Tokens())) + sep +
+				sDim.Render("7 días ") + sPrimary.Render(fmtTokens(s.Week.Tokens())) + sep +
+				sDim.Render("30 días ") + sPrimary.Render(fmtTokens(s.Month.Tokens()))})
+		in := "entrada " + fmtTokens(s.Month.Prompt)
+		if s.Month.Cached > 0 {
+			in += " (" + fmtTokens(s.Month.Cached) + " de caché)"
+		}
+		report.rows = append(report.rows, [2]string{"", sDim2.Render(in + " " + glyphSep + " salida " + fmtTokens(s.Month.Completion) +
+			" " + glyphSep + " " + fmt.Sprintf("%d %s", s.Month.Requests, plural(s.Month.Requests, "petición", "peticiones")) + " en 30 días")})
+	}
+	report.foot = []string{sDim2.Render("Tokens que contó cada proveedor en sus respuestas. Se guardan en ~/.lixbon/" + usage.FileName + ".")}
+	return report
 }
 
 func (m *Model) cmdNodes() tea.Cmd {

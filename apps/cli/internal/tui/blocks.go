@@ -249,11 +249,13 @@ var toolVerbs = map[string][2]string{
 	"run_command": {"Ejecutar", "Ejecutando"}, "fetch_url": {"Descargar", "Descargando"}, "web_search": {"Buscar en la web", "Buscando en la web"},
 	"read_output": {"Leer salida", "Leyendo la salida"}, "stop_command": {"Detener", "Deteniendo"}, "outline": {"Esquematizar", "Esquematizando"},
 	"todo": {"Planificar", "Planificando"}, "ask_user": {"Preguntar", "Preguntando"},
+	"mcp_tools":        {"Cargar MCP", "Cargando MCP"},
 	"browser_navigate": {"Abrir", "Abriendo"}, "browser_snapshot": {"Ver página", "Mirando la página"},
 	"browser_click": {"Clic en", "Haciendo clic en"}, "browser_type": {"Escribir en", "Escribiendo en"},
 	"browser_press_key": {"Pulsar", "Pulsando"}, "browser_scroll": {"Desplazar", "Desplazando"},
 	"browser_screenshot": {"Capturar", "Capturando"}, "browser_get_text": {"Leer página", "Leyendo la página"},
-	"browser_tabs": {"Pestañas", "Pestañas"}, "browser_wait": {"Esperar", "Esperando"}, "browser_back": {"Volver", "Volviendo"},
+	"browser_tabs": {"Pestañas", "Pestañas"}, "browser_wait": {"Esperar", "Esperando"},
+	"browser_viewport": {"Tamaño", "Cambiando el tamaño"}, "browser_eval": {"Ejecutar JS", "Ejecutando JS"}, "browser_back": {"Volver", "Volviendo"},
 }
 
 // browserVerb es el verbo en minúscula para la petición de permiso.
@@ -393,7 +395,32 @@ func (b *toolBlock) setOutput(result string) {
 }
 
 func (b *toolBlock) folds() bool {
-	return len(b.output) > outputInline || b.diff != nil && len(b.diff.rows) > diffShownRows || hasThought(b.thought)
+	if b.agentCommand() {
+		return len(b.output) > 0 || hasThought(b.thought)
+	}
+	return len(b.output) > outputInline || b.diff != nil && b.diff.folds() || hasThought(b.thought)
+}
+
+// agentCommand es un comando del agente: plegado enseña solo cómo terminó y,
+// si falló, el final de su salida. Los !comandos del usuario se ven enteros.
+func (b *toolBlock) agentCommand() bool { return b.command && !b.shell }
+
+// commandStatus es cómo terminó un comando: «exit 0» en verde, el código de
+// error en rojo, tiempo agotado o en segundo plano.
+func (b *toolBlock) commandStatus() string {
+	switch {
+	case b.code == "timeout":
+		return sWarn.Render("tiempo agotado")
+	case b.code == "error":
+		return sErr.Render("error")
+	case strings.HasPrefix(b.code, "bg:"):
+		return sDim.Render("en segundo plano " + glyphSep + " " + strings.TrimPrefix(b.code, "bg:"))
+	case b.code == "0":
+		return sOK.Render("exit 0")
+	case b.code != "":
+		return sErr.Render("exit " + b.code)
+	}
+	return sDim.Render(firstNonEmpty(b.result, "hecho"))
 }
 
 // dot es el estado delante de la etiqueta: el brillo mientras corre, ✓ hecho,
@@ -443,6 +470,11 @@ func (b *toolBlock) header(width int) string {
 	switch {
 	case b.state == toolWaiting:
 		right = sWarn.Render("esperando")
+	case b.agentCommand() && b.state != toolRunning && b.state != toolStopped:
+		right = b.commandStatus()
+		if b.meta != "" {
+			right += sDim.Render(" " + glyphSep + " " + b.meta)
+		}
 	case b.counts:
 		right = counts(b.adds, b.dels)
 	case b.meta != "":
@@ -458,6 +490,9 @@ func (b *toolBlock) render(width int, open bool) string {
 	}
 	if b.diff != nil {
 		out = append(out, b.diff.render(width, open)...)
+	}
+	if b.agentCommand() && !open {
+		return strings.Join(append(out, b.commandTail(width)...), "\n")
 	}
 	if len(b.output) > 0 {
 		rail := pad + sDim2.Render(glyphRail) + " "
@@ -481,6 +516,31 @@ func (b *toolBlock) render(width int, open bool) string {
 		out = append(out, footer)
 	}
 	return strings.Join(out, "\n")
+}
+
+// commandTail es lo que se ve de un comando plegado: nada si fue bien; si
+// falló, sus últimas líneas y cuántas hay en total.
+func (b *toolBlock) commandTail(width int) []string {
+	rail := pad + sDim2.Render(glyphRail) + " "
+	corner := pad + sDim2.Render(glyphCorner) + " "
+	switch {
+	case b.state == toolStopped:
+		return []string{corner + sWarn.Render("interrumpido")}
+	case b.state != toolFailed:
+		return nil
+	}
+	var out []string
+	tail := b.output[max(0, len(b.output)-outputHead2):]
+	for _, l := range tail {
+		out = append(out, rail+sPrimary.Render(ansi.Truncate(l, max(1, width-6), glyphEllipsis)))
+	}
+	if len(b.output) > len(tail) {
+		out = append(out, corner+sDim.Render(noun(len(b.output), "línea", "líneas"))+sDim2.Render(" "+glyphSep+" ctrl+o"))
+	}
+	if b.check != "" {
+		out = append(out, corner+sDim2.Render(b.check))
+	}
+	return out
 }
 
 func (b *toolBlock) footer(width int) string {
@@ -524,14 +584,18 @@ func (b *toolBlock) footer(width int) string {
 		return corner + status + sDim.Render(tail) + sDim2.Render(extra)
 	}
 	summary := b.result
-	if summary == "" && b.diff != nil {
-		summary = "aplicado"
+	if b.state == toolFailed {
+		return failRow(corner, firstNonEmpty(summary, "falló")+extra, width)
+	}
+	// Bien hecho, el diff ya lo cuenta.
+	if b.diff != nil {
+		summary = ""
 	}
 	if summary == "" && b.check == "" {
 		return ""
 	}
-	if b.state == toolFailed {
-		return failRow(corner, summary+extra, width)
+	if summary == "" {
+		return corner + sDim2.Render(b.check)
 	}
 	return corner + sDim.Render(summary) + sDim2.Render(extra)
 }
@@ -564,12 +628,76 @@ type readGroupBlock struct {
 	spin    *int
 }
 
-func (b *readGroupBlock) folds() bool {
-	return len(b.items) > 1 || slices.ContainsFunc(b.items, func(it readItem) bool { return hasThought(it.thought) })
+// Mirar se pliega: terminado, el grupo es una fila tenue «▸ Exploró…» que
+// ctrl+o o un clic despliegan.
+func (b *readGroupBlock) folds() bool { return !b.live || len(b.items) > 1 }
+
+// readPast es lo que hizo una lectura, en pasado, para la fila plegada.
+var readPast = map[string]string{
+	"read_file": "Leyó", "outline": "Esquematizó", "read_output": "Leyó la salida de", "search": "Buscó",
+	"find_files": "Buscó archivos", "list_files": "Listó", "web_search": "Buscó en la web", "mcp_tools": "Cargó MCP",
+}
+
+func (b *readGroupBlock) foldedRow(width int) []string {
+	var thoughts []thinkBlock
+	for _, it := range b.items {
+		thoughts = append(thoughts, it.thought)
+	}
+	text := glyphs.fold + " " + b.summaryText()
+	if len(b.items) == 1 {
+		it := b.items[0]
+		text = glyphs.fold + " " + firstNonEmpty(readPast[it.tool], verbs(it.tool)[0]) + " " + it.target
+	}
+	right := sDim2.Render(seconds(b.elapsed))
+	if len(b.items) == 1 {
+		right = sDim2.Render(b.items[0].meta)
+	}
+	out := []string{fitRight(" "+sDim2.Render(ansi.Truncate(text, max(10, width-24), glyphEllipsis)), joinMeta(thoughtMeta(thoughts...), right), width)}
+	for _, it := range b.items {
+		if it.failed {
+			out = append(out, failedStep(chip(verbs(it.tool)[0], toneRead, false), it.target, it.summary, width))
+		}
+	}
+	return out
+}
+
+// failedStep es un paso que falló dentro de un grupo plegado: nunca se pliega.
+func failedStep(label, target, reason string, width int) string {
+	left := pad + stateMark(toolFailed, nil) + " " + label + " " + sBeige.Render(target)
+	return fitRight(left, sErr.Render(ansi.Truncate(reason, max(10, width/3), glyphEllipsis)), width)
+}
+
+// summaryText es «Exploró 2 archivos · 3 búsquedas».
+func (b *readGroupBlock) summaryText() string {
+	files, searches, other := 0, 0, 0
+	for _, it := range b.items {
+		switch it.tool {
+		case "read_file", "outline", "read_output":
+			files++
+		case "search", "find_files", "web_search", "list_files":
+			searches++
+		default:
+			other++
+		}
+	}
+	var parts []string
+	if files > 0 {
+		parts = append(parts, noun(files, "archivo", "archivos"))
+	}
+	if searches > 0 {
+		parts = append(parts, noun(searches, "búsqueda", "búsquedas"))
+	}
+	if other > 0 {
+		parts = append(parts, noun(other, "consulta", "consultas"))
+	}
+	return "Exploró " + strings.Join(parts, " "+glyphSep+" ")
 }
 
 func (b *readGroupBlock) render(width int, open bool) string {
-	if len(b.items) == 1 {
+	if !b.live && !open {
+		return strings.Join(b.foldedRow(width), "\n")
+	}
+	if len(b.items) == 1 && b.live {
 		it := b.items[0]
 		state := toolDone
 		if it.failed {
@@ -626,6 +754,9 @@ func (b *readGroupBlock) render(width int, open bool) string {
 		thoughts = append(thoughts, it.thought)
 	}
 	head := " " + stateMark(state, b.spin) + " " + chip(verb, toneRead, b.live) + " " + summary
+	if !b.live {
+		head = " " + sDim.Render(glyphs.unfold+" "+b.summaryText())
+	}
 	out := []string{fitRight(head, joinMeta(thoughtMeta(thoughts...), sDim.Render(seconds(b.elapsed))), width)}
 	if open {
 		for i, it := range b.items {
@@ -680,10 +811,55 @@ type browserBlock struct {
 func (b *browserBlock) last() *toolBlock { return b.steps[len(b.steps)-1] }
 
 func (b *browserBlock) folds() bool {
-	return len(b.steps) > 1 || slices.ContainsFunc(b.thoughts, hasThought)
+	return !b.live || len(b.steps) > 1 || slices.ContainsFunc(b.thoughts, hasThought)
+}
+
+// stepWords son los verbos de los pasos, sin repetir: «abrir, clic en, capturar».
+func (b *browserBlock) stepWords() string {
+	var words []string
+	for _, s := range b.steps {
+		if w := strings.ToLower(s.verb); !slices.Contains(words, w) {
+			words = append(words, w)
+		}
+	}
+	if len(words) > 4 {
+		words = append(words[:4], glyphEllipsis)
+	}
+	return strings.Join(words, ", ")
+}
+
+func (b *browserBlock) foldedRow(width int, mark string) []string {
+	text := mark + " Navegador " + glyphSep + " "
+	if len(b.steps) == 1 {
+		text += b.steps[0].verb + " " + b.steps[0].target
+	} else {
+		text += fmt.Sprintf("%d pasos: %s", len(b.steps), b.stepWords())
+	}
+	right := ""
+	if t := seconds(time.Duration(b.secs * float64(time.Second))); t != "" {
+		right = sDim2.Render(t)
+	}
+	style := sDim2
+	if mark == glyphs.unfold {
+		style = sDim
+	}
+	return []string{fitRight(" "+style.Render(ansi.Truncate(text, max(10, width-24), glyphEllipsis)), joinMeta(thoughtMeta(b.thoughts...), right), width)}
 }
 
 func (b *browserBlock) render(width int, open bool) string {
+	if !b.live && !open {
+		out := b.foldedRow(width, glyphs.fold)
+		for _, s := range b.steps {
+			if s.state == toolFailed {
+				out = append(out, failedStep(chip("Navegador", toneBrowser, false)+" "+sInk.Render(s.verb), s.target, s.result, width))
+			}
+		}
+		return strings.Join(out, "\n")
+	}
+	if !b.live {
+		out := b.foldedRow(width, glyphs.unfold)
+		return strings.Join(append(out, b.stepRows(width)...), "\n")
+	}
 	cur := b.last()
 	verb := cur.verb
 	if cur.state == toolRunning {
@@ -717,11 +893,20 @@ func (b *browserBlock) render(width int, open bool) string {
 	}
 	out := []string{fitRight(left, joinMeta(thoughtMeta(b.thoughts...), right), width)}
 	if !open {
-		if footer := cur.footer(width); footer != "" {
-			out = append(out, footer)
+		// Mientras corre solo se ve el paso en curso; su «└ Abrí…» repetiría
+		// la fila, así que solo sale si falló.
+		if cur.state == toolFailed {
+			if footer := cur.footer(width); footer != "" {
+				out = append(out, footer)
+			}
 		}
 		return strings.Join(out, "\n")
 	}
+	return strings.Join(append(out, b.stepRows(width)...), "\n")
+}
+
+func (b *browserBlock) stepRows(width int) []string {
+	var out []string
 	for i, s := range b.steps {
 		branch, cont := glyphRail, glyphRail
 		if i == len(b.steps)-1 {
@@ -744,7 +929,7 @@ func (b *browserBlock) render(width int, open bool) string {
 			out = append(out, ansi.Truncate(lead+sDim.Render(s.result), max(1, width-1), glyphEllipsis))
 		}
 	}
-	return strings.Join(out, "\n")
+	return out
 }
 
 // ── plan ─────────────────────────────────────────────────────────────────
