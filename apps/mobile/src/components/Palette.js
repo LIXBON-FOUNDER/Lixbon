@@ -57,8 +57,9 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
     anim.setValue(0);
     Animated.timing(anim, { toValue: 1, duration: reduced ? 0 : MOTION.fade, easing: EASE, useNativeDriver: true }).start();
     let alive = true;
+    // Al abrir basta con las recientes; lo demás lo busca el servidor.
     api
-      .get(`/api/conversations?source=${CHAT_SOURCE}&limit=100`)
+      .get(`/api/conversations?source=${CHAT_SOURCE}&limit=60`)
       .then((res) => {
         if (alive) setConvs((Array.isArray(res?.conversations) ? res.conversations : []).filter(Boolean));
       })
@@ -67,6 +68,31 @@ export default function Palette({ visible, onClose, commands, onOpenConversation
       alive = false;
     };
   }, [visible, api, anim, reduced]);
+
+  // Con texto, el servidor busca en todo el historial (por título); el
+  // resultado se suma a lo cargado y el orden lo pone la búsqueda difusa.
+  useEffect(() => {
+    const text = query.trim();
+    if (!visible || !text) return undefined;
+    let alive = true;
+    const timer = setTimeout(() => {
+      api
+        .get(`/api/conversations?source=${CHAT_SOURCE}&limit=40&q=${encodeURIComponent(text)}`)
+        .then((res) => {
+          const found = (Array.isArray(res?.conversations) ? res.conversations : []).filter(Boolean);
+          if (!alive || !found.length) return;
+          setConvs((cur) => {
+            const seen = new Set((cur || []).map((it) => it.id));
+            return [...(cur || []), ...found.filter((it) => !seen.has(it.id))];
+          });
+        })
+        .catch(() => {});
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query, visible, api]);
 
   const results = useMemo(() => {
     const text = query.trim();
