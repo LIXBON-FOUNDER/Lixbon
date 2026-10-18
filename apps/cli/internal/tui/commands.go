@@ -17,7 +17,7 @@ type Spec struct {
 var Groups = []string{"conversación", "agente", "cuenta", "sistema"}
 
 // NameWidth alinea los argumentos y las descripciones en /help y en el menú.
-const NameWidth = 15
+const NameWidth = 10
 
 var Specs = []Spec{
 	{"help", "", "Ver todos los comandos", "conversación"},
@@ -56,7 +56,6 @@ var Specs = []Spec{
 	{"logout", "", "Cerrar la sesión de esta máquina", "cuenta"},
 	{"key", "<api_key>", "Usar otra API key", "cuenta"},
 	{"config", "", "Ajustes del CLI en un menú", "sistema"},
-	{"context-window", "<n>", "Tokens de la ventana de contexto (para la barra)", "sistema"},
 	{"bar", "[on|off]", "Barra de estado fija al pie de la terminal", "sistema"},
 	{"doctor", "", "Diagnóstico de terminal, conexión y sesión", "sistema"},
 	{"remote", "", "Controlar esta sesión desde la app móvil (link + QR)", "sistema"},

@@ -80,7 +80,6 @@ func (m *Model) cmdConfig() tea.Cmd {
 		{Label: "Modo de trabajo", Value: "mode", Desc: m.chat.Mode},
 		{Label: "Auto-aprobar cambios", Value: "approve", Desc: onOff(m.chat.Session.AutoApprove)},
 		{Label: "Búsqueda web", Value: "web", Desc: m.chat.WebMode},
-		{Label: "Ventana de contexto", Value: "context-window", Desc: fmt.Sprintf("%d tokens", cfg.ContextWindow)},
 		{Label: "Mensajes enviados", Value: "messages", Desc: strconv.Itoa(cfg.MaxContextMessages)},
 		{Label: "Workspace", Value: "workspace", Desc: shortPath(m.chat.Workspace)},
 		{Label: "Tema", Value: "theme", Desc: themeLabel(cfg.ExtraString("theme"))},
@@ -93,10 +92,6 @@ func (m *Model) cmdConfig() tea.Cmd {
 		case value == "messages":
 			return func() tea.Msg {
 				return promptMsg{label: "Mensajes de historial que se envían (2-50)", onSubmit: m.setMessages}
-			}
-		case value == "context-window":
-			return func() tea.Msg {
-				return promptMsg{label: "Tokens de la ventana de contexto", onSubmit: func(v string) tea.Cmd { m.cmdContextWindow(v); return nil }}
 			}
 		case value == "workspace":
 			return func() tea.Msg {

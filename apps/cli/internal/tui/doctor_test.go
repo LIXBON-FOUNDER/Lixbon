@@ -18,9 +18,9 @@ func TestConfigMenuChangesMessagesAndRunsCommands(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/config")
 	contains(t, h.view(), "Ajustes")
-	contains(t, h.view(), "Ventana de contexto")
+	notContains(t, h.view(), "Ventana de contexto")
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		h.key("down")
 	}
 	h.key("enter")
@@ -50,7 +50,7 @@ func TestConfigMenuChangesMessagesAndRunsCommands(t *testing.T) {
 func TestConfigRejectsInvalidMessageCount(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/config")
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		h.key("down")
 	}
 	h.key("enter")
