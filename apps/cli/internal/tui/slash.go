@@ -152,8 +152,6 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdUsage()
 	case "nodes":
 		return m.cmdNodes()
-	case "context-window":
-		m.cmdContextWindow(arg)
 	case "run":
 		return m.cmdRun(arg)
 	case "commit":
@@ -1409,20 +1407,6 @@ func (m *Model) cmdNodes() tea.Cmd {
 		}
 		return cmdDoneMsg{lines: []block{report}}
 	})
-}
-
-func (m *Model) cmdContextWindow(arg string) {
-	var n int
-	if _, err := fmt.Sscanf(strings.TrimSpace(arg), "%d", &n); err != nil {
-		m.add(errLine("Uso: /context-window 8192"))
-		return
-	}
-	n = max(1024, n)
-	m.chat.Cfg.ContextWindow = n
-	m.chat.Session.ContextWindow = n
-	m.saveConfig()
-	m.refreshContext()
-	m.add(okLine(fmt.Sprintf("Ventana de contexto: %d tokens", n)))
 }
 
 func (m *Model) cmdKey(arg string) tea.Cmd {

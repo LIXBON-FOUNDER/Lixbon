@@ -222,6 +222,10 @@ func (m *Model) liveView() []string {
 
 // currentStep es el paso del plan en curso y cuántos van.
 func (m *Model) currentStep() (text string, total, current int) {
+	// Un plan de un turno anterior no es lo que se hace ahora.
+	if m.todoTurn != m.turn {
+		return "", 0, 0
+	}
 	for i, it := range m.todo {
 		if it.Status == "doing" {
 			return it.Text, len(m.todo), i + 1

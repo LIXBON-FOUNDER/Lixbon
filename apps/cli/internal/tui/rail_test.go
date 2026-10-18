@@ -59,3 +59,42 @@ func proseThenTool(prose, id, name string, args map[string]any) func(http.Respon
 		io.WriteString(w, "data: "+string(text)+"\n\ndata: "+string(call)+"\n\ndata: [DONE]\n\n")
 	}
 }
+
+// El paso del plan solo se ve mientras es de este turno: uno que quedó «en
+// curso» en el anterior no acompaña a lo que se hace ahora.
+func TestAPlanFromAnotherTurnIsNotShownLive(t *testing.T) {
+	h := newHarness(t, nil)
+	m := h.m
+	m.running, m.turn = true, 1
+	m.printTodo([]todoItem{{Text: "Verificar en navegador", Status: "doing"}}, nil)
+	if step, _, _ := m.currentStep(); step == "" {
+		t.Fatal("en su turno el paso se ve")
+	}
+	m.turn = 2
+	if step, _, _ := m.currentStep(); step != "" {
+		t.Fatalf("en otro turno no: %q", step)
+	}
+	m.running = false
+}
+
+// Cada paso del turno lleva una fila de aire antes: no se lee todo junto.
+func TestStepsOfATurnAreSeparated(t *testing.T) {
+	h := newHarness(t, nil,
+		proseThenTool("Miro primero el archivo.", "c1", "read_file", map[string]any{"path": "a.txt"}),
+		textReply("Listo."))
+	if err := os.WriteFile(filepath.Join(h.m.chat.Workspace, "a.txt"), []byte("hola\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.send("lee a.txt")
+	h.settle()
+	lines := strings.Split(ansi.Strip(h.m.log.text()), "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "Leyó a.txt") || strings.Contains(l, "Leer") && strings.Contains(l, "a.txt") {
+			if i == 0 || strings.Trim(lines[i-1], " "+glyphs.turnRail) != "" {
+				t.Fatalf("la acción va tras una fila de aire:\n%s", strings.Join(lines, "\n"))
+			}
+			return
+		}
+	}
+	t.Fatalf("no se vio la lectura:\n%s", strings.Join(lines, "\n"))
+}

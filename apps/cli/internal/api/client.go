@@ -3,6 +3,7 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -311,6 +312,13 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 			Capabilities []string `json:"capabilities"`
 			NumCtx       int      `json:"num_ctx"`
 			Description  string   `json:"description"`
+			// Cómo dicen la ventana otros proveedores: OpenRouter y Together
+			// (context_length), Groq (context_window), LM Studio
+			// (max_context_length), vLLM (max_model_len).
+			ContextLength    int `json:"context_length"`
+			ContextWindow    int `json:"context_window"`
+			MaxContextLength int `json:"max_context_length"`
+			MaxModelLen      int `json:"max_model_len"`
 		} `json:"data"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, c.BaseURL+"/models", nil, 20*time.Second, true, &data); err != nil {
@@ -335,6 +343,8 @@ func (c *Client) ModelsDetail(ctx context.Context) ([]Model, error) {
 		// nombre y otro significado: solo se leen de un gateway Lixbon.
 		if !c.Generic {
 			model.Capabilities, model.NumCtx, model.Description = m.Capabilities, m.NumCtx, m.Description
+		} else {
+			model.NumCtx = cmp.Or(m.ContextLength, m.ContextWindow, m.MaxContextLength, m.MaxModelLen)
 		}
 		models = append(models, model)
 	}

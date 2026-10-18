@@ -33,6 +33,10 @@ func (m *Model) View() tea.View {
 
 	var bottom []string
 	if m.running {
+		// Una fila de aire entre el último mensaje y lo que hace el agente.
+		if lines := m.log.lines(); len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) != "" {
+			bottom = append(bottom, "")
+		}
 		bottom = append(bottom, m.liveView()...)
 	}
 	if m.compacting != nil {

@@ -280,6 +280,7 @@ func (m *Model) add(b block) *entry {
 	rail := railNone
 	if m.railing {
 		rail = railMid
+		m.stepGap(b)
 	}
 	e := m.log.addRail(b, rail)
 	if m.scroll > 0 {
@@ -289,6 +290,27 @@ func (m *Model) add(b block) *entry {
 		m.observe(e.text)
 	}
 	return e
+}
+
+// stepGap deja una fila del riel en blanco antes de cada paso del turno, para
+// que no se lea todo junto. No va justo debajo de la cabecera ni dobla una
+// fila en blanco.
+func (m *Model) stepGap(b block) {
+	if tb, ok := b.(textBlock); ok && tb == "" {
+		return
+	}
+	n := len(m.log.entries)
+	if n == 0 {
+		return
+	}
+	last := m.log.entries[n-1]
+	if last == m.turnHead || last.b == block(textBlock("")) || last.text == "" {
+		return
+	}
+	m.log.addRail(textBlock(""), railMid)
+	if m.scroll > 0 {
+		m.scroll++
+	}
 }
 
 // addOutside añade un bloque fuera del riel aunque el turno lo tenga abierto.

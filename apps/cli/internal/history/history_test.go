@@ -328,3 +328,18 @@ func TestCompactClipsLongMessagesAndImagesForTheSummary(t *testing.T) {
 		t.Fatalf("resumen: %+v", out[:2])
 	}
 }
+
+// Si la conversación cabe, va entera: nada se adelgaza ni se avisa de recorte.
+func TestFitHistoryLeavesAConversationThatFits(t *testing.T) {
+	msgs := []Message{User("lee"), {Role: "tool", Content: strings.Repeat("x", 20000), Name: "read_file"}}
+	for range 6 {
+		msgs = append(msgs, Assistant("sigo"), User("más"))
+	}
+	got, pruned := (&Estimator{}).FitHistory(msgs, 1_000_000, KeepRecent)
+	if pruned || len(got[1].Content) != 20000 {
+		t.Fatalf("con la ventana casi vacía no se recorta: pruned=%v, resultado de %d", pruned, len(got[1].Content))
+	}
+	if _, pruned := (&Estimator{}).FitHistory(msgs, 2000, KeepRecent); !pruned {
+		t.Fatal("si no cabe, sí se recorta y se avisa")
+	}
+}
