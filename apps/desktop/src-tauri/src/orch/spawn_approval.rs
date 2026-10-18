@@ -156,14 +156,15 @@ impl Core {
         let plan = self.plan_spawn(caller, args)?;
         // Un perfil bloqueado se rechaza sin preguntar a nadie. SOLO una denegación explícita de policy (tipada,
         // `agents::explicit_denial`, sobre el worktree real) deja constancia durable de la solicitud antes de devolverla;
-        // un bloqueo del entorno o del proveedor se rechaza como siempre, sin Event, y nunca es `risk`.
+        // un bloqueo del entorno o del proveedor se rechaza como siempre, sin `spawn.requested`, y nunca es `risk` (si la causa tipada
+        // es del proveedor, `observe_environment` deja `environment.blocked`).
         //
         // La denegación explícita se decide por tipos y su política es estática (`agents::denial_policy`): ANTES de
         // denegar no se lanza ningún subproceso de la CLI del proveedor (sonda de `--version`/`--help`, lista de modelos).
         let explicit = agents::Profile::parse(&plan.profile).filter(|profile| agents::explicit_denial(&plan.provider, *profile, &plan.cwd).is_some());
         let policy = match explicit {
             Some(profile) => agents::denial_policy(&plan.provider, profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref()),
-            None => self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref()),
+            None => self.resolve_and_observe(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref())?,
         };
         let mut registrar_denegacion = None;
         if policy.status == agents::Status::Blocked {
@@ -213,6 +214,54 @@ impl Core {
         }))
     }
 
+    /// Resuelve la policy del host Y deja constancia durable de lo que dice del entorno, en UN solo paso serializado
+    /// (`env_gate`). Es el único punto por el que `spawn_request`, `approve_spawn` y el recheck de `launch` consultan la
+    /// policy real: la resolución y la observación son atómicas entre sí, así que una comprobación más vieja no puede
+    /// escribir después de una más nueva (carrera de frescura). El orden de bloqueos es `pend_gate → env_gate → estado →
+    /// almacén`: ningún camino toma `pend_gate` con `env_gate` ya tomado.
+    pub(super) fn resolve_and_observe(&self, provider: &str, profile: &str, role: Option<&str>, cwd: &str, model: Option<&str>) -> Result<agents::Policy, String> {
+        let _env = self.env_gate.lock().unwrap_or_else(|e| e.into_inner());
+        let policy = self.task_policy(provider, profile, role, cwd, model);
+        self.observe_environment(&policy)?;
+        Ok(policy)
+    }
+
+    /// Deja constancia durable de lo que la policy resuelta dice del ENTORNO del proveedor en el perfil comprobado
+    /// (`environment.blocked` / `environment.cleared`, ver `Tx::environment_blocked`). Solo mira la causa TIPADA
+    /// (`Policy.block`), nunca el texto de `reason`, y solo escribe cuando el bloqueo vigente cambia.
+    ///
+    /// * `Blocked` por una causa de ENTORNO → `environment.blocked`. Cualquier otro bloqueo (perfil deshabilitado, entrada
+    ///   inválida, ruta de la solicitud) no dice nada del entorno: ni lo bloquea ni lo levanta.
+    /// * SOLO una policy `ok` (comprobación positiva y verificada) levanta un bloqueo. `unverified` o un estado desconocido
+    ///   lo CONSERVAN: sin evidencia suficiente no se asume que el entorno se recuperó.
+    /// * Sin Event Log (`state.json`) no se marca nada: un marcador sin su Event durable ocultaría la señal para siempre.
+    ///   En producción ese modo es solo lectura (arranque `DegradeC1`) y la mutación se rechaza antes de tocar el estado.
+    fn observe_environment(&self, policy: &agents::Policy) -> Result<(), String> {
+        if !self.event_log_available() {
+            return Ok(());
+        }
+        let (provider, profile) = (policy.provider.as_str(), policy.profile.as_str());
+        match (policy.status, policy.block) {
+            (agents::Status::Blocked, Some(agents::BlockCause::Environment(code))) => self
+                .mutate_as(&MutationContext::core(), |tx| {
+                    if !tx.environment_blocked(provider, profile, code) {
+                        tx.no_change();
+                    }
+                    Ok(())
+                })
+                .map_err(String::from),
+            (agents::Status::Ok, _) if self.lock().has_env_blocks_of(provider) => self
+                .mutate_as(&MutationContext::core(), |tx| {
+                    if !tx.environment_verified(provider, profile) {
+                        tx.no_change();
+                    }
+                    Ok(())
+                })
+                .map_err(String::from),
+            _ => Ok(()),
+        }
+    }
+
     /// El pendiente vence solo: avisa aunque la persona esté en otro modo o ventana.
     fn notify_pending(&self, p: &PendingSpawn) {
         let Some(host) = self.host.get() else { return };
@@ -239,7 +288,7 @@ impl Core {
             pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), project_id: parent.project_id.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
             env: if f.shared { worktree_env::Plan::default() } else { worktree_env::plan(&parent.repo) },
-            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None },
+            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None, block: None },
             created_at: 0, expires_at: 0, spec: f.spec, base: f.base
         }
     }
@@ -377,7 +426,7 @@ impl Core {
             return Err(format!("El Core está en solo lectura ({why}): no se puede aprobar un lanzamiento hasta que se recupere el almacenamiento"));
         }
         let p = self.pend().get(pending_id).map(|e| e.p.clone()).ok_or("Pendiente desaparecido")?;
-        let policy = self.task_policy(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref());
+        let policy = self.resolve_and_observe(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref())?;
         // Errores de uso (argv distinto, sin ack, bloqueado ahora): no se lanza y sigue pendiente.
         agents::authorize(&policy, Some(argv), ack_unverified)?;
         let _gate = self.gate();
@@ -613,7 +662,7 @@ impl Core {
         self.spawn_hook(super::spawn::SpawnStep::InLaunch, id)?;
         let t = self.lock().task(id)?.clone();
         let profile = t.profile.clone().unwrap_or_default();
-        let policy = self.task_policy(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref());
+        let policy = self.resolve_and_observe(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref())?;
         let record = agents::authorize(&policy, t.requested_argv.as_deref(), t.ack_unverified)?;
         self.mutate(|st| {
             st.task_mut(id)?.policy = Some(record);

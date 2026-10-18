@@ -70,6 +70,7 @@ pub(crate) use attention::attention_update_active_in;
 // `project_attention_in`, `Intent`, `Key`, `ProjectError` y `Report` los consumen las pruebas.
 #[allow(unused_imports)]
 pub(crate) use attention_projection::{apply_attention_in, project_attention_in, AttentionProjection, AttentionRules, Derived, Intent, Key, ProjectError, Report};
+#[allow(unused_imports)]
 pub(crate) use events::{insert_derived_in, EventProjector};
 pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;

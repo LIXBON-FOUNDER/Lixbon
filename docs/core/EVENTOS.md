@@ -35,7 +35,7 @@ relleno histórico.
   tabla append-only con los triggers desactivados. `class` y `actor_kind` son conjuntos cerrados.
 * **Referencias blandas:** archivar un proyecto, borrar un run o revocar un cliente no toca su historia.
   "Blanda" no es "sin validar": el Core comprueba al emitir.
-* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `core`. Una Attempt
+* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `agent` · `core`. Una Attempt
   futura será un valor nuevo.
 
 ## Cómo nace un evento (outbox en `Tx`, no en `State`)
@@ -93,7 +93,7 @@ Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un 
 | `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
 | `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
 | `project` · `run` | igualdad con `project_id` / `run_id`. |
-| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`core`); `entity_id` exige `entity_kind`. |
+| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`agent`·`core`); `entity_id` exige `entity_kind`. |
 | `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
 | `class` | `state` · `effect` · `decision` · `system`. |
 
@@ -759,11 +759,11 @@ spawn_request(caller, args)
 
 * **Qué es una denegación explícita** lo decide un tipo, no el texto de `Policy.reason`: `agents::PolicyDenial`
   (hoy solo `ProfileDisabled`, vía `Profile::disabled_reason()`), y solo si la combinación proveedor × perfil tiene
-  definición (`profile_flags`). Un bloqueo del entorno o del proveedor sigue siendo un error sin Event.
+  definición (`profile_flags`). Un bloqueo del entorno o del proveedor sigue siendo un error sin `spawn.requested`: si su causa tipada es del PROVEEDOR deja `environment.blocked` (no `risk`); la ruta inservible no deja nada.
 * **Causa efectiva, en el worktree real:** `explicit_denial(provider, profile, worktree)` respeta la precedencia de
   `agents::evaluate`: si la ruta del worktree no se puede pasar a la CLI (o la combinación no tiene definición) el
   entorno bloquea ANTES que el perfil, así que un perfil deshabilitado en una ruta inservible NO es una denegación
-  explícita: error sin Event y sin `risk` (`un_perfil_deshabilitado_en_una_ruta_inservible_…`).
+  explícita: error sin `spawn.requested` y sin `risk` (`un_perfil_deshabilitado_en_una_ruta_inservible_…`).
 * **Sin sondear la CLI antes de denegar:** la denegación explícita usa una política estática
   (`agents::denial_policy`, `Detected::Skip`); no se llama al resolvedor (que en producción lanza `--version`/`--help`
   y consulta la lista de modelos del proveedor). Con el perfil deshabilitado el resultado es el mismo, así que no hay
@@ -794,6 +794,28 @@ Los pendientes viven en memoria y todavía no se reconstruyen ni se reconcilian 
 queda en un seguimiento separado. Consecuencia para Attention: el `approval` de un lanzamiento pendiente se
 resuelve con `spawn.resolved`; si el Core reinicia con un pendiente sin resolver, ese `approval` sigue activo hasta
 que la reconciliación emita su resolución. Una solicitud `blocked` no tiene pendiente que reconciliar.
+
+## E1b · Señales fuente de Attention: `task.review_requested` · `environment.blocked` · `environment.cleared` (LXO-88)
+Events explícitos que alimentan `review_ready` y `environment_blocked`. Se emiten SOLO en la frontera de dominio que
+decide el hecho; ningún consumidor los deduce de otros Events.
+
+| kind | class · entidad | Payload | Productor |
+|---|---|---|---|
+| `task.review_requested` | state · `task` | `branch` | `Tx::done` (entrega correcta de una hija con padre y rama propia), tras `task.status_changed` y en la misma mutación; sin `idem_key` (cada entrega es otro hecho); actor y canal los del contexto de la entrega |
+| `environment.blocked` | state · `agent` (`entity_id` = proveedor) | `profile`, `code` | `Tx::environment_blocked`, desde `Core::resolve_and_observe` (`spawn_request`, `approve_spawn` y el recheck final de `launch`); `system` / `core` |
+| `environment.cleared` | state · `agent` | `profile`, `code` (el que se levanta) | `Tx::environment_verified` (comprobación positiva `ok`) o cambio de causa; `system` / `core` |
+
+* `code` es el conjunto cerrado y TIPADO de `agents::EnvBlock` (`cli_missing` · `cli_flags_unsupported` ·
+  `windows_sandbox_elevated`), `profile` uno de los perfiles conocidos. La causa sale de un tipo (`Policy.block`), nunca
+  del texto de `reason`; un código o un perfil fuera de esos conjuntos no es una señal.
+* **Alcance proveedor + perfil:** `cli_missing` lo levanta una comprobación positiva de cualquier perfil del proveedor;
+  las banderas y el sandbox, solo la del mismo perfil.
+* **Solo al cambiar y solo con evidencia positiva:** `State.env_blocks` (`proveedor/perfil` → causa, parte del documento
+  de `legacy_state`) hace que repetir una comprobación no emita nada y que `environment.cleared` pueda emitirse tras un
+  reinicio. Solo una policy `ok` levanta; `unverified` o un bloqueo ajeno al entorno lo conservan. Un cambio de causa son
+  DOS Events en la misma mutación (`cleared` de la anterior, `blocked` de la nueva). Sin Event Log no se marca nada.
+* `environment.*` no cambia el estado de ninguna Task: no es un fallo ni un Attempt fallido.
+* Sin informe, resumen, ficheros, rutas, `argv` ni `reason` en ninguno de los tres.
 
 ## E1b · Attention: `attention.created` · `attention.resolved` (LXO-88)
 Ciclo de vida de una ocurrencia de Attention (`ATTENTION.md`). `class = state`, entidad `attention`,

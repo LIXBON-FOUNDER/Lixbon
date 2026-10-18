@@ -414,7 +414,8 @@ impl Core {
         // orch_resolve_policy); un perfil bloqueado no arranca.
         let profile = task.profile.clone().unwrap_or_else(|| agents::Profile::for_role(read_only).id().to_string());
         // Toda hija entrega con lxo done; se resuelve con el mismo rol que muestra la UI.
-        let policy = self.task_policy(&task.agent, &profile, task.role.as_deref(), &task.cwd, task.model.as_deref());
+        // Recheck final: lo que dice el entorno justo antes de lanzar también queda como `environment.blocked` / `cleared`.
+        let policy = self.resolve_and_observe(&task.agent, &profile, task.role.as_deref(), &task.cwd, task.model.as_deref())?;
         let plan_mode = agents::is_plan(&policy);
         let record = agents::authorize(&policy, task.requested_argv.as_deref(), task.ack_unverified)?;
         // Codex read-only: `codex exec -o`; Claude Explorar/Proponer: stream-json.

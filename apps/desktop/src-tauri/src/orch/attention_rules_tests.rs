@@ -381,7 +381,6 @@ fn las_senales_informativas_y_los_estados_ordinarios_no_crean_attention() {
         fila(8, "run.closed", ("run", "r1"), json!({ "forced": false, "stopped": [], "stopped_total": 0 })),
         fila(9, "effect.observed", ("task", "t1"), json!({ "effect_kind": "git_worktree", "effect_id": "e", "operation": "spawn", "branch": "lx/r1/t2" })),
         fila(10, "effect.observed", ("task", "t1"), json!({ "effect_kind": "git_merge", "effect_id": "e2", "operation": "integrate", "result": "conflict", "branch": "b" })),
-        fila(11, "decision.recorded", ("task", "t1"), json!({ "decision_kind": "review", "decision_id": 1, "outcome": "accepted", "head_commit": "abc", "has_comment": false })),
         fila(12, "decision.recorded", ("task", "t1"), json!({ "decision_kind": "pr", "decision_id": 2, "outcome": "created", "branch": "b" })),
         fila(13, "project.registered", ("project", "p1"), json!({ "origin": "manual", "name": "n", "has_remote": false, "root_commit_count": 1 })),
         fila(14, "attention.created", ("attention", "att_x"), json!({ "category": "failed" })),
@@ -739,4 +738,106 @@ fn una_resolucion_con_el_mismo_seq_que_la_ultima_senal_del_hecho_se_descarta_y_u
     let r = aplica_con(&mut s, 5, ev(6, "test.resuelve"));
     assert_eq!(r.resolved.len(), 1);
     assert!(categorias_activas(&s).is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// review_ready / environment_blocked: reglas puras y orden
+// ---------------------------------------------------------------------------------------------
+
+fn revision_pedida(seq: i64, tarea: &str) -> EventRow {
+    fila(seq, "task.review_requested", ("task", tarea), json!({ "branch": "lx/r1/t2" }))
+}
+fn entorno_bloqueado(seq: i64, proveedor: &str, code: &str) -> EventRow {
+    fila(seq, "environment.blocked", ("agent", proveedor), json!({ "profile": "explorar", "code": code }))
+}
+fn entorno_libre(seq: i64, proveedor: &str, code: &str) -> EventRow {
+    fila(seq, "environment.cleared", ("agent", proveedor), json!({ "profile": "explorar", "code": code }))
+}
+fn revision(seq: i64, tarea: &str, outcome: &str) -> EventRow {
+    fila(seq, "decision.recorded", ("task", tarea), json!({ "decision_kind": "review", "decision_id": 1, "outcome": outcome, "head_commit": "abc", "has_comment": false }))
+}
+
+#[test]
+fn las_reglas_de_las_senales_fuente_son_exactas_y_cerradas() {
+    let intents = derive(&revision_pedida(1, "t2")).intents;
+    assert!(matches!(intents.as_slice(), [Intent::Raise { key, severity: Severity::Medium, facts }]
+        if key.category == AttentionCategory::ReviewReady && key.target.id == "t2" && key.subject.is_none() && facts["branch"] == "lx/r1/t2"));
+    let intents = derive(&entorno_bloqueado(2, "claude", "cli_missing")).intents;
+    assert!(matches!(intents.as_slice(), [Intent::Raise { key, severity: Severity::High, facts }]
+        if key.category == AttentionCategory::EnvironmentBlocked && key.target.id == "claude" && key.target.kind.as_str() == "agent"
+            && key.subject.as_deref() == Some("cli_missing@explorar") && facts["provider"] == "claude" && facts["profile"] == "explorar" && facts["code"] == "cli_missing"));
+    let intents = derive(&entorno_libre(3, "claude", "cli_missing")).intents;
+    assert!(matches!(intents.as_slice(), [Intent::Resolve { key, resolution: Resolution::ConditionCleared }]
+        if key.category == AttentionCategory::EnvironmentBlocked && key.subject.as_deref() == Some("cli_missing@explorar")));
+    // Un código fuera del conjunto cerrado, o la entidad equivocada, no es una señal.
+    assert!(derive(&entorno_bloqueado(4, "claude", "algo_raro")).intents.is_empty());
+    assert!(derive(&entorno_libre(5, "claude", "worktree_path_unusable")).intents.is_empty());
+    assert!(derive(&fila(6, "environment.blocked", ("task", "t1"), json!({ "profile": "explorar", "code": "cli_missing" }))).intents.is_empty());
+    // El perfil es parte del alcance: sin perfil o con un perfil que no existe no es una señal.
+    assert!(derive(&fila(6, "environment.blocked", ("agent", "claude"), json!({ "code": "cli_missing" }))).intents.is_empty());
+    assert!(derive(&fila(6, "environment.cleared", ("agent", "claude"), json!({ "profile": "inventado", "code": "cli_missing" }))).intents.is_empty());
+    // Otro perfil es otro hecho: su `cleared` no resuelve el de `explorar`.
+    let otro = derive(&fila(6, "environment.cleared", ("agent", "claude"), json!({ "profile": "proponer", "code": "cli_missing" }))).intents;
+    assert!(matches!(otro.as_slice(), [Intent::Resolve { key, .. }] if key.subject.as_deref() == Some("cli_missing@proponer")));
+    assert!(derive(&fila(7, "task.review_requested", ("project", "p1"), json!({ "branch": "b" }))).intents.is_empty());
+    // La decisión de revisión: aceptar o rechazar resuelven; cualquier otro resultado no.
+    for outcome in ["accepted", "rejected"] {
+        assert!(matches!(derive(&revision(8, "t2", outcome)).intents.as_slice(), [Intent::Resolve { key, resolution: Resolution::Acted }] if key.category == AttentionCategory::ReviewReady));
+    }
+    assert!(derive(&revision(9, "t2", "pendiente")).intents.is_empty());
+}
+
+#[test]
+fn environment_blocked_es_distinto_de_failed_y_solo_lo_levanta_su_event() {
+    let (_d, mut s) = abre();
+    // Un fallo con la causa que usaría el detector de Codex NO es environment_blocked.
+    aplica(&mut s, 0, &[estado(1, "t1", "running", "failed", Some("helper_unknown_error"))]);
+    assert_eq!(categorias_activas(&s), vec!["failed"]);
+    aplica(&mut s, 1, &[entorno_bloqueado(2, "codex", "cli_flags_unsupported")]);
+    assert_eq!(categorias_activas(&s), vec!["environment_blocked", "failed"], "dos hechos distintos, cada uno con su Event");
+    // Levantar el entorno no toca el fallo de la tarea ni al revés.
+    aplica(&mut s, 2, &[entorno_libre(3, "codex", "cli_flags_unsupported")]);
+    assert_eq!(categorias_activas(&s), vec!["failed"]);
+    aplica(&mut s, 3, &[estado(4, "t1", "failed", "running", None)]);
+    assert!(categorias_activas(&s).is_empty());
+}
+
+#[test]
+fn las_senales_fuente_fuera_de_orden_se_descartan_por_seq() {
+    let (_d, mut s) = abre();
+    // blocked (5) → cleared (7) → blocked otra vez (9): la ocurrencia 2 sigue activa aunque lleguen señales viejas.
+    aplica(&mut s, 0, &[entorno_bloqueado(5, "claude", "cli_missing"), entorno_libre(7, "claude", "cli_missing"), entorno_bloqueado(9, "claude", "cli_missing")]);
+    let foto = instantanea(&s);
+    let r = aplica(&mut s, 0, &[entorno_bloqueado(5, "claude", "cli_missing"), entorno_libre(7, "claude", "cli_missing")]);
+    assert_eq!((r.stale, r.created.len(), r.resolved.len()), (2, 0, 0));
+    assert_eq!(instantanea(&s), foto);
+    // Lo mismo con la revisión: una decisión con seq anterior a la nueva petición no la resuelve.
+    aplica(&mut s, 9, &[revision_pedida(20, "t2")]);
+    let r = aplica(&mut s, 0, &[revision(12, "t2", "accepted")]);
+    assert_eq!((r.stale, r.resolved.len()), (1, 0));
+    assert_eq!(categorias_activas(&s), vec!["environment_blocked", "review_ready"]);
+    // Un tramo descendente se rechaza entero.
+    assert!(matches!(intenta(&mut s, 0, &[revision(30, "t2", "accepted"), revision_pedida(25, "t2")]), Err(ProjectError::OutOfOrder { .. })));
+    assert_eq!(categorias_activas(&s), vec!["environment_blocked", "review_ready"]);
+}
+
+#[test]
+fn review_ready_y_environment_blocked_son_idempotentes_y_deduplican() {
+    let (_d, mut s) = abre();
+    let evs = [revision_pedida(1, "t2"), entorno_bloqueado(2, "claude", "cli_missing")];
+    aplica(&mut s, 0, &evs);
+    let (foto, vida) = (instantanea(&s), ciclo_de_vida(&s));
+    for _ in 0..2 {
+        let r = aplica(&mut s, 0, &evs);
+        assert_eq!((r.created.len(), r.updated.len(), r.resolved.len(), r.lifecycle_events), (0, 0, 0, 0));
+        assert_eq!((instantanea(&s), ciclo_de_vida(&s)), (foto.clone(), vida.clone()));
+    }
+    // El mismo hecho observado otra vez mientras sigue activo actualiza sus facts, no crea otro item.
+    let r = aplica(&mut s, 2, &[revision_pedida(3, "t2"), entorno_bloqueado(4, "claude", "cli_missing")]);
+    assert_eq!((r.created.len(), r.updated.len()), (0, 2));
+    assert_eq!(instantanea(&s).len(), 2);
+    // Resolver dos veces: la segunda es no-op.
+    aplica(&mut s, 4, &[revision(5, "t2", "accepted"), entorno_libre(6, "claude", "cli_missing")]);
+    let r = aplica(&mut s, 6, &[revision(7, "t2", "rejected"), entorno_libre(8, "claude", "cli_missing")]);
+    assert_eq!((r.noop, r.resolved.len()), (2, 0));
 }

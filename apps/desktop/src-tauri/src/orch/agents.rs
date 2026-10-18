@@ -358,6 +358,53 @@ pub enum Status {
     Unverified,
 }
 
+/// Por qué una política quedó `blocked`, como TIPO: nunca se deduce del texto de `Policy.reason`. Lo fijan los puntos de
+/// `evaluate`/`evaluate_for`/`resolve_task_policy` que bloquean.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockCause {
+    /// El pedido no es válido (proveedor, perfil o rol desconocidos; combinación proveedor × perfil sin definición).
+    Invalid,
+    /// El perfil está definido pero deshabilitado ([`Profile::disabled_reason`]): decisión explícita de policy.
+    ProfileDisabled,
+    /// La entrega por `lxo done` no es posible en el sandbox (Codex sin red local).
+    Delivery,
+    /// La ruta del worktree de ESTA solicitud no se puede pasar a la CLI. No es una condición del proveedor (otra ruta
+    /// funcionaría), así que no es `Environment`: no produce `environment.blocked`.
+    WorktreePath,
+    /// El entorno o el proveedor impide lanzar. Es la única causa que produce `environment.blocked`.
+    Environment(EnvBlock),
+}
+
+/// Bloqueos del entorno/proveedor que el host comprueba antes de lanzar. Conjunto CERRADO: viaja TIPADO hasta la
+/// frontera `Tx`/Event (`environment.blocked` / `environment.cleared` lo serializan con `code()`) y se guarda en
+/// `State.env_blocks`; no hay cadenas libres que puedan persistirse y que el proyector ignore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvBlock {
+    /// La CLI del proveedor no está en el PATH.
+    CliMissing,
+    /// La versión instalada de la CLI no trae los flags que exige el perfil.
+    CliFlagsUnsupported,
+    /// El sandbox elevado de Codex en Windows impide el perfil de solo lectura.
+    WindowsSandboxElevated,
+}
+
+impl EnvBlock {
+    pub const ALL: [EnvBlock; 3] = [EnvBlock::CliMissing, EnvBlock::CliFlagsUnsupported, EnvBlock::WindowsSandboxElevated];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            EnvBlock::CliMissing => "cli_missing",
+            EnvBlock::CliFlagsUnsupported => "cli_flags_unsupported",
+            EnvBlock::WindowsSandboxElevated => "windows_sandbox_elevated",
+        }
+    }
+
+    pub fn parse(code: &str) -> Option<EnvBlock> {
+        EnvBlock::ALL.into_iter().find(|b| b.code() == code)
+    }
+}
+
 /// Política efectiva: lo que devuelve `orch_resolve_policy` y lo que se lanza.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Policy {
@@ -378,6 +425,9 @@ pub struct Policy {
     /// Modelo que se pedirá; con Codex sin modelo, MODEL_FROM_CONFIG (nunca un
     /// nombre inventado). `null` en Claude sin modelo.
     pub model: Option<String>,
+    /// Por qué está `blocked` (solo entonces). Tipado; no forma parte del contrato hacia la interfaz.
+    #[serde(skip)]
+    pub block: Option<BlockCause>,
 }
 
 pub const MODEL_FROM_CONFIG: &str = "el que defina config.toml";
@@ -426,9 +476,9 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
     missing
 }
 
-fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
+fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String, cause: BlockCause) -> Policy {
     let interactive = !(argv.get(1).is_some_and(|a| a == "exec" || a == "worker") || argv.iter().any(|a| a == "stream-json"));
-    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None }
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None, block: Some(cause) }
 }
 
 /// La ruta del worktree se puede pasar a la CLI (sin caracteres de cmd). Es el MISMO criterio con el que `evaluate`
@@ -443,26 +493,26 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     let exec = exec || codex_exec(provider, profile);
     let pid = profile.id();
     let Some(a) = spec(provider) else {
-        return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"));
+        return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"), BlockCause::Invalid);
     };
     if !worktree_is_passable(worktree) {
-        return blocked(provider, pid, vec![], None, vec![], "La ruta del worktree tiene caracteres que no se pueden pasar a la CLI".into());
+        return blocked(provider, pid, vec![], None, vec![], "La ruta del worktree tiene caracteres que no se pueden pasar a la CLI".into(), BlockCause::WorktreePath);
     }
     let (flags, warnings) = match profile_flags(provider, profile, worktree, exec) {
         Ok(f) => f,
-        Err(e) => return blocked(provider, pid, vec![], None, vec![], e),
+        Err(e) => return blocked(provider, pid, vec![], None, vec![], e, BlockCause::Invalid),
     };
     let mut argv = vec![a.bin.to_string()];
     if exec { argv.push("exec".into()); }
     argv.extend(flags);
     if let Some(r) = profile.disabled_reason() {
-        return blocked(provider, pid, argv, None, warnings, r.into());
+        return blocked(provider, pid, argv, None, warnings, r.into(), BlockCause::ProfileDisabled);
     }
     let interactive = !(exec || provider == LIXBON_CLI || argv.iter().any(|a| a == "stream-json"));
-    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None };
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None, block: None };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
-        Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin)),
+        Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin), BlockCause::Environment(EnvBlock::CliMissing)),
         Detected::Found(p) => {
             let version = p.version.clone();
             let help = if exec { p.exec_help.as_ref().or(p.help.as_ref()) } else { p.help.as_ref() };
@@ -477,12 +527,12 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
             if !missing.is_empty() {
                 let v = version.as_deref().unwrap_or("versión desconocida");
                 return blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
-                    format!("{} {v} no admite: {}", a.label, missing.join(", ")));
+                    format!("{} {v} no admite: {}", a.label, missing.join(", ")), BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
             }
             if codex_exec(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 let mut w = warnings.clone();
                 w.push(ELEVATED.into());
-                return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into());
+                return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into(), BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
             let mut pol = match version.as_deref() {
@@ -546,6 +596,7 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
     if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
         p.status = Status::Blocked;
         p.reason = Some(format!("Rol desconocido: {r}"));
+        p.block = Some(BlockCause::Invalid);
         return p;
     }
     if p.status != Status::Blocked && provider == "codex" && !codex_allows_local_network(&p.argv) {
@@ -553,6 +604,7 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
             Delivery::LxoOnly => {
                 p.status = Status::Blocked;
                 p.reason = Some(CODEX_NO_LXO.into());
+                p.block = Some(BlockCause::Delivery);
             }
             Delivery::FileOrMarkers => {
                 let read_only = p.argv.iter().any(|a| a == "read-only");
@@ -609,7 +661,7 @@ pub fn resolve_policy(provider: &str, profile: &str, role: &str, worktree: &str)
 pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str, delivery: Delivery) -> Policy {
     let Some(prof) = Profile::parse(profile) else {
         let mut p = blocked(provider, profile, vec![], None, vec![], format!(
-            "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")));
+            "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")), BlockCause::Invalid);
         p.role = role.map(str::to_string);
         return p;
     };
@@ -1511,5 +1563,33 @@ mod tests {
         let m = parse_lines("Available models:\n- auto (default)\n- gpt-5.5\nanthropic/claude-sonnet-5\n");
         let ids: Vec<&str> = m.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["auto", "gpt-5.5", "anthropic/claude-sonnet-5"]);
+    }
+
+    /// LXO-88: la causa de un bloqueo es un TIPO que fija cada punto de `evaluate`; nadie lee `reason`.
+    #[test]
+    fn cada_bloqueo_lleva_su_causa_tipada() {
+        use BlockCause::{Environment, Invalid, ProfileDisabled, WorktreePath};
+        let causa = |p: Policy| (p.status, p.block);
+        let b = Status::Blocked;
+        // Pedido inválido: proveedor desconocido, combinación sin definición, rol desconocido, perfil desconocido.
+        assert_eq!(causa(evaluate("inventado", Profile::Explorar, "wt", Detected::Skip, false)), (b, Some(Invalid)));
+        assert_eq!(causa(evaluate("gemini", Profile::Explorar, "wt", Detected::Skip, false)), (b, Some(Invalid)));
+        assert_eq!(causa(evaluate_for("claude", Profile::Explorar, Some("inventado"), "wt", Detected::Skip, false, Delivery::FileOrMarkers)), (b, Some(Invalid)));
+        assert_eq!(causa(resolve_task_policy("claude", "inventado", None, "wt", Delivery::Query)), (b, Some(Invalid)));
+        // Decisión de policy y ruta de ESTA solicitud: no son condiciones del proveedor.
+        assert_eq!(causa(evaluate("claude", Profile::AutonomiaAmplia, "wt", Detected::Skip, false)), (b, Some(ProfileDisabled)));
+        assert_eq!(causa(evaluate("claude", Profile::Explorar, "w&t", Detected::Skip, false)), (b, Some(WorktreePath)));
+        // Entorno / proveedor.
+        assert_eq!(causa(evaluate("claude", Profile::Explorar, "wt", Detected::Missing, false)), (b, Some(Environment(EnvBlock::CliMissing))));
+        let sin_o = Probe { exec_help: Some(CODEX_EXEC_HELP_162.replace("--output-last-message", "--x")), ..probe("0.162.1", CODEX_HELP) };
+        assert_eq!(causa(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&sin_o), false)), (b, Some(Environment(EnvBlock::CliFlagsUnsupported))));
+        let elevado = Probe { windows_sandbox: Some("elevated".into()), ..probe("0.162.1", CODEX_HELP) };
+        assert_eq!(causa(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&elevado), false)), (b, Some(Environment(EnvBlock::WindowsSandboxElevated))));
+        // Lo que no está bloqueado no lleva causa.
+        assert_eq!(evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false).block, None);
+        // Solo estas tres causas son del entorno, y sus códigos son un conjunto cerrado y estable.
+        assert_eq!(EnvBlock::ALL.map(EnvBlock::code), ["cli_missing", "cli_flags_unsupported", "windows_sandbox_elevated"]);
+        assert!(EnvBlock::ALL.into_iter().all(|c| EnvBlock::parse(c.code()) == Some(c)));
+        assert_eq!(EnvBlock::parse("worktree_path_unusable"), None);
     }
 }

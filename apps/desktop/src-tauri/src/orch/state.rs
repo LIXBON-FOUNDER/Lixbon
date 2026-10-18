@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+use super::agents::EnvBlock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> u64 {
@@ -221,6 +223,12 @@ pub struct State {
     /// `decisions` del diseño SQLite para que S1 las importe tal cual.
     #[serde(default)]
     pub decisions: Vec<Decision>,
+    /// Bloqueo de ENTORNO vigente por ALCANCE `proveedor/perfil` (`agents::EnvBlock`, tipado). Un bloqueo de banderas o
+    /// de sandbox depende del perfil; `CliMissing` es de todo el proveedor. Lo mantiene el host al comprobar la policy antes
+    /// de lanzar; permite emitir `environment.blocked` solo al cambiar y `environment.cleared` aunque el Core se haya
+    /// reiniciado entre medias.
+    #[serde(default)]
+    pub env_blocks: BTreeMap<String, EnvBlock>,
 }
 
 /// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),
@@ -236,6 +244,35 @@ pub struct Decision {
 }
 
 impl State {
+    /// Clave de alcance de un bloqueo de entorno.
+    pub fn env_scope(provider: &str, profile: &str) -> String {
+        format!("{provider}/{profile}")
+    }
+
+    /// ¿Hay algún bloqueo de entorno vigente de este proveedor (de cualquier perfil)?
+    pub fn has_env_blocks_of(&self, provider: &str) -> bool {
+        let prefijo = format!("{provider}/");
+        self.env_blocks.keys().any(|k| k.starts_with(&prefijo))
+    }
+
+    /// Fija el bloqueo de entorno de `proveedor/perfil`. `None` = ya era ese (sin cambio); `Some(previo)` = cambió.
+    pub fn set_env_block(&mut self, provider: &str, profile: &str, code: EnvBlock) -> Option<Option<EnvBlock>> {
+        match self.env_blocks.insert(State::env_scope(provider, profile), code) {
+            Some(prev) if prev == code => None,
+            prev => Some(prev),
+        }
+    }
+
+    /// Una comprobación POSITIVA (policy `ok`) de `proveedor/perfil` levanta lo que esa evidencia demuestra: el bloqueo de
+    /// ese mismo alcance y los de `CliMissing` del proveedor (la CLI existe). Un bloqueo de otro perfil por banderas o
+    /// sandbox NO se toca. Devuelve lo levantado, por orden de alcance, como `(perfil, causa)`.
+    pub fn verify_env(&mut self, provider: &str, profile: &str) -> Vec<(String, EnvBlock)> {
+        let prefijo = format!("{provider}/");
+        let propio = State::env_scope(provider, profile);
+        let claves: Vec<String> = self.env_blocks.iter().filter(|(k, v)| **k == propio || (k.starts_with(&prefijo) && **v == EnvBlock::CliMissing)).map(|(k, _)| k.clone()).collect();
+        claves.into_iter().filter_map(|k| self.env_blocks.remove(&k).map(|c| (k[prefijo.len()..].to_string(), c))).collect()
+    }
+
     pub fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> u64 {
         let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0) + 1;
         self.decisions.push(Decision { id, task: task.into(), kind: kind.into(), actor: actor.into(), detail_json: Some(detail.to_string()), at: now_ms() });

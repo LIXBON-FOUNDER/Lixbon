@@ -20,18 +20,27 @@
 //! | `task.status_changed` a `failed` | levanta `failed` | high | task |
 //! | `task.status_changed` desde `failed` | resuelve `failed` (`condition_cleared`) | | task |
 //! | `decision.recorded` `merge` con `outcome = conflict` | levanta `conflict` (si ya estaba activo, actualiza sus `facts`) | high | task |
-//! | `decision.recorded` `merge` con `outcome = merged` | resuelve `conflict` (`acted`) | | task |
-//! | `task.removed` | resuelve `failed`, `conflict` y `approval` (terminal) de esa task (`condition_cleared`) | | task |
+//! | `decision.recorded` `merge` con `outcome = merged` | resuelve `conflict` y `review_ready` (`acted`) | | task |
+//! | `task.review_requested` | levanta `review_ready` | medium | task |
+//! | `decision.recorded` `review` con `outcome` `accepted` / `rejected` | resuelve `review_ready` (`acted`) | | task |
+//! | `task.status_changed` desde `done` (la entrega se reabre) | resuelve `review_ready` (`condition_cleared`) | | task |
+//! | `environment.blocked` (`code` cerrado, `profile` conocido) | levanta `environment_blocked` | high | agent (proveedor) · `code@profile` |
+//! | `environment.cleared` (`code`, `profile`) | resuelve `environment_blocked` (`condition_cleared`) | | agent · `code@profile` |
+//! | `task.removed` | resuelve `failed`, `conflict`, `review_ready` y `approval` (terminal) de esa task (`condition_cleared`) | | task |
 //!
 //! `risk` nace SOLO de `spawn.requested.policy_status = blocked`, y ese Event solo se emite para una denegación
-//! explícita de policy (`agents::explicit_denial`); los bloqueos del entorno y la entrada inválida no dejan Event
-//! (ver `spawn_approval::spawn_request`). No hay regla que lo resuelva sola: no hay un Event que lo cierre.
+//! explícita de policy (`agents::explicit_denial`); los bloqueos del entorno y la entrada inválida no dejan
+//! `spawn.requested` (ver `spawn_approval::spawn_request`): el entorno deja `environment.blocked`. No hay regla que
+//! resuelva `risk` sola: no hay un Event que lo cierre.
 //!
-//! Todo lo demás (incluidos `ok` y `unverified` como riesgo, un fallo genérico, `review_ready` y
-//! `environment_blocked`) NO produce Attention desde aquí; ver `docs/core/ATTENTION.md`.
+//! `review_ready` y `environment_blocked` nacen SOLO de sus Events fuente explícitos (`Tx::done` y la comprobación de
+//! policy del host); ninguna regla los deduce de la rama, del estado, de la ausencia de una decisión ni de un `failed`.
+//! Todo lo demás (incluidos `ok` y `unverified` como riesgo y un fallo genérico) NO produce Attention desde aquí;
+//! ver `docs/core/ATTENTION.md`.
 
 use serde_json::{json, Map, Value};
 
+use super::agents::{EnvBlock, Profile};
 use crate::store::{AttentionCategory, AttentionRules, Derived, EventRow, Resolution, Severity, TargetKind};
 
 /// Un código o id corto del payload (nunca texto libre): como mucho 64 caracteres y sin controles.
@@ -51,6 +60,19 @@ fn copy_codes(from: &Value, keys: &[&str]) -> Value {
 }
 
 const TERMINAL: &str = "terminal";
+
+/// El alcance de un `environment.*`: la causa (del conjunto cerrado `EnvBlock`) y el perfil (de los conocidos). Un código
+/// o un perfil fuera de esos conjuntos no es una señal y no levanta ni resuelve nada.
+fn env_scope(p: &Value) -> Option<(EnvBlock, String)> {
+    let code = EnvBlock::parse(p["code"].as_str()?)?;
+    let profile = p["profile"].as_str().filter(|prof| Profile::parse(prof).is_some_and(|known| known.id() == *prof))?;
+    Some((code, profile.to_string()))
+}
+
+/// Un hecho por causa Y perfil: un preflight de otro perfil no resuelve el de éste.
+fn env_subject(code: EnvBlock, profile: &str) -> String {
+    format!("{}@{profile}", code.code())
+}
 
 /// LAS REGLAS. Función pura de un Event: sin estado, sin reloj, sin E/S.
 pub(super) fn derive(e: &EventRow) -> Derived {
@@ -99,6 +121,10 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             if from == "failed" && to != from {
                 d.resolve(C::Failed, TargetKind::Task, id, None, Resolution::ConditionCleared);
             }
+            // La tarea entregada se reabre: la revisión pendiente queda superada (la nueva entrega pedirá otra).
+            if from == "done" && to != from {
+                d.resolve(C::ReviewReady, TargetKind::Task, id, None, Resolution::ConditionCleared);
+            }
             if to == "failed" && from != to {
                 let mut facts = Map::new();
                 if let Some(cause) = code(&p["cause"]) {
@@ -115,12 +141,32 @@ pub(super) fn derive(e: &EventRow) -> Derived {
                 }
                 d.raise(C::Conflict, TargetKind::Task, id, None, Severity::High, facts);
             }
-            Some("merged") => d.resolve(C::Conflict, TargetKind::Task, id, None, Resolution::Acted),
+            Some("merged") => {
+                d.resolve(C::Conflict, TargetKind::Task, id, None, Resolution::Acted);
+                d.resolve(C::ReviewReady, TargetKind::Task, id, None, Resolution::Acted);
+            }
             _ => {}
         },
+        // La revisión de la persona (aceptar o rechazar) es la decisión que cierra la espera de revisión.
+        ("decision.recorded", "task") if p["decision_kind"] == "review" && matches!(p["outcome"].as_str(), Some("accepted" | "rejected")) => {
+            d.resolve(C::ReviewReady, TargetKind::Task, id, None, Resolution::Acted)
+        }
+        ("task.review_requested", "task") => d.raise(C::ReviewReady, TargetKind::Task, id, None, Severity::Medium, copy_codes(&p, &["branch"])),
+        ("environment.blocked", "agent") => {
+            if let Some((code, profile)) = env_scope(&p) {
+                let facts = json!({ "provider": id, "profile": profile, "code": code.code() });
+                d.raise(C::EnvironmentBlocked, TargetKind::Agent, id, Some(env_subject(code, &profile)), Severity::High, facts);
+            }
+        }
+        ("environment.cleared", "agent") => {
+            if let Some((code, profile)) = env_scope(&p) {
+                d.resolve(C::EnvironmentBlocked, TargetKind::Agent, id, Some(env_subject(code, &profile)), Resolution::ConditionCleared);
+            }
+        }
         ("task.removed", "task") => {
             d.resolve(C::Failed, TargetKind::Task, id, None, Resolution::ConditionCleared);
             d.resolve(C::Conflict, TargetKind::Task, id, None, Resolution::ConditionCleared);
+            d.resolve(C::ReviewReady, TargetKind::Task, id, None, Resolution::ConditionCleared);
             d.resolve(C::Approval, TargetKind::Task, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
         }
         _ => {}

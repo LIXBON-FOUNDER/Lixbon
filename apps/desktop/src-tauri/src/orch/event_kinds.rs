@@ -21,6 +21,8 @@
 //! | `project.registered` (`manual` · `auto` · `backfill` · `import`) | state | `project` |
 //! | `spawn.requested` | state | `spawn_request` |
 //! | `spawn.resolved` (`approved` · `rejected` · `launch_failed` · `timeout` · `coordinator_closed` · `cancelled_run_removed`) | decision | `spawn_request` |
+//! | `task.review_requested` | state | `task` |
+//! | `environment.blocked` · `environment.cleared` | state | `agent` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
 
 use serde::Serialize;
@@ -834,4 +836,72 @@ pub(super) fn spawn_resolved(pending_id: &str, run: &str, project: Option<String
         .project(project)
         .correlated(pending_id)
         .idempotent(pending_id))
+}
+
+// ---------------------------------------------------------------------------------------------
+// task.review_requested
+// ---------------------------------------------------------------------------------------------
+//
+// «Esta hija entregó con éxito y su resultado espera la revisión de la persona.» Lo emite UN sitio —`Tx::done`— en la
+// transición `→ done` de una Task con padre y rama propia. Es la señal fuente de `review_ready` (LXO-88): la
+// proyección no lo deduce de la rama, del estado ni de la ausencia de una decisión. No hay `idem_key`: cada entrega
+// (también tras reabrir la tarea) es otro hecho. Sin informe, resumen, ficheros ni rutas.
+
+#[derive(Serialize)]
+pub(super) struct TaskReviewRequested {
+    branch: String,
+}
+
+impl EventPayload for TaskReviewRequested {
+    const KIND: &'static str = "task.review_requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn task_review_requested(task: &str, run: &str, branch: &str) -> Result<EventDraft, EventError> {
+    let p = TaskReviewRequested { branch: clip(branch, 300) };
+    Ok(EventDraft::new(EntityKind::Task, task, &p)?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project_from_task(task))
+}
+
+// ---------------------------------------------------------------------------------------------
+// environment.blocked · environment.cleared
+// ---------------------------------------------------------------------------------------------
+//
+// El host comprobó (policy, antes de lanzar) que el ENTORNO o el proveedor impide trabajar con `provider` en el perfil
+// `profile` (`code` cerrado y TIPADO: `agents::EnvBlock`), y más tarde que dejó de impedirlo. Es una condición del proveedor, no de una
+// Task ni de un intento: no cambia el estado de ninguna Task (en particular, no es un fallo). Lo emiten solo
+// `Tx::environment_blocked` / `Tx::environment_cleared`, y únicamente cuando el bloqueo vigente CAMBIA (el mapa
+// `State.env_blocks` hace de memoria durable), así que no hay un evento por cada comprobación. Un cambio de causa son
+// DOS hechos en la misma mutación: `cleared` de la anterior y `blocked` de la nueva. Actor `system`, canal `core`.
+
+#[derive(Serialize)]
+pub(super) struct EnvironmentBlocked {
+    profile: String,
+    code: agents::EnvBlock,
+}
+
+impl EventPayload for EnvironmentBlocked {
+    const KIND: &'static str = "environment.blocked";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[derive(Serialize)]
+pub(super) struct EnvironmentCleared {
+    profile: String,
+    code: agents::EnvBlock,
+}
+
+impl EventPayload for EnvironmentCleared {
+    const KIND: &'static str = "environment.cleared";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn environment_blocked(provider: &str, profile: &str, code: agents::EnvBlock) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Agent, provider, &EnvironmentBlocked { profile: profile.into(), code })?.run(None).project(None))
+}
+
+pub(super) fn environment_cleared(provider: &str, profile: &str, code: agents::EnvBlock) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Agent, provider, &EnvironmentCleared { profile: profile.into(), code })?.run(None).project(None))
 }
