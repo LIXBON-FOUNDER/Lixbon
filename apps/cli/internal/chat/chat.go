@@ -122,6 +122,9 @@ type Chat struct {
 	titling    bool
 	anchor     *anchor
 	overhead   map[string]overhead
+	// windows son las ventanas que informó cada proveedor de sus modelos
+	// («proveedor/modelo» → tokens).
+	windows map[string]int
 }
 
 // anchor son los tokens reales de la conversación en la última petición:
@@ -327,6 +330,33 @@ func (c *Chat) ApplyAccount(acc Account) {
 		c.Cfg.SetExtraString("plan_name", acc.PlanName)
 		_ = c.SaveConfig()
 	}
+	for _, m := range acc.Models {
+		if m.NumCtx > 0 {
+			if c.windows == nil {
+				c.windows = map[string]int{}
+			}
+			c.windows[c.Cfg.ActiveProfile()+"/"+m.ID] = m.NumCtx
+		}
+	}
+	c.SyncWindow()
+}
+
+// SyncWindow pone la ventana de contexto del modelo en uso: la que informa su
+// proveedor o, si no la informa, la de los modelos conocidos. Si no se sabe,
+// se queda la que había. El usuario no tiene que configurarla.
+func (c *Chat) SyncWindow() {
+	w := c.windows[c.Cfg.ActiveProfile()+"/"+c.Model]
+	if w == 0 {
+		w = config.KnownWindow(c.Model)
+	}
+	if w <= 0 || w == c.Cfg.ContextWindow {
+		return
+	}
+	c.mu.Lock()
+	c.Cfg.ContextWindow = w
+	c.Session.ContextWindow = w
+	c.mu.Unlock()
+	_ = c.SaveConfig()
 }
 
 // UseProfile cambia de proveedor: guarda el que se deja, apunta el cliente al
@@ -406,6 +436,7 @@ func (c *Chat) SetModel(model string) {
 	c.Session.TextCalls = false
 	c.mu.Unlock()
 	_ = c.SaveConfig()
+	c.SyncWindow()
 }
 
 // ResolveModel decide el modelo sin preguntar: el de la clave, el pedido o el

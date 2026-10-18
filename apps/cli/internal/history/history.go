@@ -150,12 +150,14 @@ func safeStart(messages []Message, index int) int {
 // adelgaza resultados antiguos, luego suelta mensajes viejos conservando
 // siempre la petición original y, como último recurso, solo los últimos.
 func (e *Estimator) FitHistory(messages []Message, budget, keepRecent int) ([]Message, bool) {
-	if budget <= 0 || len(messages) == 0 {
+	if budget <= 0 || len(messages) == 0 || e.EstimateTokens(messages) <= budget {
+		// Si cabe, va entero: adelgazar resultados viejos con la ventana
+		// medio vacía solo hacía que el agente volviera a leer lo mismo.
 		return messages, false
 	}
 	working := ShrinkOldResults(messages, keepRecent, MaxOldToolOutputChar)
 	if e.EstimateTokens(working) <= budget {
-		return working, !equal(working, messages)
+		return working, true
 	}
 
 	var head []Message

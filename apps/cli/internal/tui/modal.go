@@ -19,7 +19,7 @@ var quietCommands = map[string]bool{
 	"help": true, "model": true, "mode": true, "web": true, "copy": true, "save": true,
 	"approve": true, "plan": true, "tools": true, "ps": true, "check": true, "allow": true,
 	"workspace": true, "status": true, "cost": true, "usage": true, "nodes": true,
-	"context-window": true, "key": true, "logout": true, "mcp": true, "provider": true,
+	"key": true, "logout": true, "mcp": true, "provider": true,
 	"doctor": true, "config": true, "theme": true, "bar": true, "effort": true, "branch": true,
 	"login": true,
 }

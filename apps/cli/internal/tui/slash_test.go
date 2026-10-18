@@ -190,16 +190,6 @@ func TestSettingsCommands(t *testing.T) {
 	if h.chat.Session.AutoCheck {
 		t.Fatal("/check off")
 	}
-	h.send("/context-window 4096")
-	if h.chat.Cfg.ContextWindow != 4096 || h.chat.Session.ContextWindow != 4096 {
-		t.Fatal("/context-window")
-	}
-	h.send("/context-window 10")
-	if h.chat.Cfg.ContextWindow != 1024 {
-		t.Fatalf("mínimo de 1024: %d", h.chat.Cfg.ContextWindow)
-	}
-	h.send("/context-window abc")
-	contains(t, h.out(), "Uso: /context-window 8192")
 	h.send("/plan on")
 	if !h.chat.Session.PlanMode || h.chat.Mode != "agent" {
 		t.Fatal("/plan on pasa a agent")
@@ -209,7 +199,7 @@ func TestSettingsCommands(t *testing.T) {
 		t.Fatal("/plan off")
 	}
 	reloaded := configLoad(h.chat.ConfigPath)
-	if reloaded.WebMode() != "on" || reloaded.ContextWindow != 1024 || reloaded.AutoApproveTools {
+	if reloaded.WebMode() != "on" || reloaded.AutoApproveTools {
 		t.Fatalf("la config no se guardó: %+v", reloaded)
 	}
 }

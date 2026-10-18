@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.11.2
+- Cada modelo usa su ventana de contexto máxima, la que informa su proveedor (o la de los modelos conocidos, como MiMo), y se ajusta sola al cambiar de modelo o de proveedor. Desaparece `/context-window`.
+- Ya no salta «la conversación llenaba la ventana de contexto» con la ventana casi vacía: si la conversación cabe, va entera y el agente no tiene que volver a leer lo que ya leyó.
+- El paso del plan en curso deja de verse cuando ese plan es de un turno anterior.
+- Más aire: una fila en blanco entre cada paso del turno y entre el último mensaje y lo que el agente está haciendo.
+
 ## 2.11.1
 - La caja de escribir y el pie vuelven a estar fijos abajo. Lo que hace el agente en ese momento (pensando, escribiendo, el avance de una acción larga) va justo debajo del último mensaje mientras la conversación cabe en pantalla.
 
