@@ -992,7 +992,7 @@ func (m *Model) cmdAllow(arg string) tea.Cmd {
 // el historial para que el modelo la vea en el siguiente turno.
 func (m *Model) execShell(command string) tea.Cmd {
 	m.gap()
-	shell := &toolBlock{shell: true, verb: "Ejecutar", gerund: "Ejecutando", target: command, command: true, spin: &m.spin}
+	shell := &toolBlock{shell: true, verb: "Ejecutar", gerund: "Ejecutando", target: command, command: true, spin: &m.spin, tone: toneCommand}
 	m.openTool = m.add(shell)
 	started := time.Now()
 	return m.async("ejecutando "+truncateRunes(command, 40), func(ctx context.Context) cmdDoneMsg {

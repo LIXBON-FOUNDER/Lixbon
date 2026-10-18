@@ -208,6 +208,16 @@ func (c *Config) applyTopLevel(p Profile) {
 	if p.ContextWindow > 0 {
 		c.ContextWindow = p.ContextWindow
 	}
+	c.fixMiMoWindow()
+}
+
+// fixMiMoWindow: un perfil MiMo guardado antes de que el CLI conociera su
+// ventana quedó con la genérica, y con ella el agente recortaba la
+// conversación desde el primer paso.
+func (c *Config) fixMiMoWindow() {
+	if IsMiMo(c.BaseURL) && c.ContextWindow == DefaultGenericContext {
+		c.ContextWindow = mimoContext
+	}
 }
 
 // UpdateProfile edita un proveedor existente, sea el activo o no. Cambiar la

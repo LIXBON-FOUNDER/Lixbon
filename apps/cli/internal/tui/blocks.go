@@ -300,6 +300,8 @@ type toolBlock struct {
 	counts       bool
 	state        toolState
 	spin         *int
+	tone         chipTone
+	thought      thinkBlock
 
 	result  string
 	check   string
@@ -312,7 +314,7 @@ type toolBlock struct {
 
 func newToolBlock(e agent.Event, spin *int) *toolBlock {
 	v := verbs(e.Tool)
-	b := &toolBlock{verb: v[0], gerund: v[1], target: e.Text, meta: e.Meta, spin: spin, state: toolRunning}
+	b := &toolBlock{verb: v[0], gerund: v[1], target: e.Text, meta: e.Meta, spin: spin, state: toolRunning, tone: toneFor(e)}
 	if e.Change != nil {
 		if kv, ok := kindVerbs[e.Change.Kind]; ok {
 			b.verb, b.gerund = kv[0], kv[1]
@@ -391,41 +393,51 @@ func (b *toolBlock) setOutput(result string) {
 }
 
 func (b *toolBlock) folds() bool {
-	return len(b.output) > outputInline || b.diff != nil && len(b.diff.rows) > diffShownRows
+	return len(b.output) > outputInline || b.diff != nil && len(b.diff.rows) > diffShownRows || hasThought(b.thought)
 }
 
-func (b *toolBlock) dot() string {
-	glyph := glyphDot
-	if b.shell {
-		glyph = "$"
-	}
-	switch b.state {
+// dot es el estado delante de la etiqueta: el brillo mientras corre, ✓ hecho,
+// ✗ fallido, ◌ esperando y − interrumpido.
+func (b *toolBlock) dot() string { return stateMark(b.state, b.spin) }
+
+func stateMark(state toolState, spin *int) string {
+	switch state {
 	case toolRunning:
 		frame := glyphs.spin[0]
-		if b.spin != nil {
-			frame = glyphs.spin[*b.spin%len(glyphs.spin)]
+		if spin != nil && !reducedMotion() {
+			frame = glyphs.spin[*spin%len(glyphs.spin)]
 		}
-		if b.shell {
-			return sAccent.Bold(true).Render("$")
-		}
-		return sAccent.Render(frame)
+		return sBeige.Render(frame)
 	case toolWaiting:
 		return sWarn.Render(glyphWait)
 	case toolFailed:
-		return sErr.Render(glyph)
+		return sErr.Render(glyphs.cross)
 	case toolStopped:
-		return sDim2.Render(glyph)
+		return sDim2.Render(glyphMinus)
 	}
-	return sOK.Render(glyph)
+	return sOK.Render(glyphs.check)
+}
+
+// label es la etiqueta de la herramienta: «$» para un comando, el verbo para
+// lo demás.
+func (b *toolBlock) label() string {
+	switch {
+	case b.command || b.shell || b.tone == toneCommand:
+		return "$"
+	case b.fetch:
+		return "Fetch"
+	}
+	return b.verb
 }
 
 func (b *toolBlock) header(width int) string {
-	left := " " + b.dot() + " " + sBold.Render(b.verb)
-	switch {
-	case b.fetch:
-		left = " " + b.dot() + " " + sBold.Render("Fetch") + sDim.Render("(") + sBeige.Render(b.target) + sDim.Render(")")
-	case b.target != "":
-		left += "  " + sBeige.Render(b.target)
+	left := " " + b.dot() + " " + chip(b.label(), b.tone, b.state == toolRunning)
+	if b.target != "" {
+		target := sBeige.Render(b.target)
+		if b.label() == "$" {
+			target = sInk.Render(b.target)
+		}
+		left += " " + target
 	}
 	right := ""
 	switch {
@@ -436,11 +448,14 @@ func (b *toolBlock) header(width int) string {
 	case b.meta != "":
 		right = sDim.Render(b.meta)
 	}
-	return fitRight(left, right, width)
+	return fitRight(left, joinMeta(thoughtMeta(b.thought), right), width)
 }
 
 func (b *toolBlock) render(width int, open bool) string {
 	out := []string{b.header(width)}
+	if open {
+		out = append(out, thoughtRows(b.thought, pad, width)...)
+	}
 	if b.diff != nil {
 		out = append(out, b.diff.render(width, open)...)
 	}
@@ -546,6 +561,7 @@ type readGroupBlock struct {
 	items   []readItem
 	elapsed time.Duration
 	live    bool
+	spin    *int
 }
 
 func (b *readGroupBlock) folds() bool {
@@ -555,12 +571,12 @@ func (b *readGroupBlock) folds() bool {
 func (b *readGroupBlock) render(width int, open bool) string {
 	if len(b.items) == 1 {
 		it := b.items[0]
-		dot := sOK.Render(glyphDot)
+		state := toolDone
 		if it.failed {
-			dot = sErr.Render(glyphDot)
+			state = toolFailed
 		}
-		left := " " + dot + " " + sBold.Render(verbs(it.tool)[0]) + "  " + sBeige.Render(it.target)
-		out := []string{fitRight(left, sDim.Render(it.meta), width)}
+		left := " " + stateMark(state, nil) + " " + chip(verbs(it.tool)[0], toneRead, false) + " " + sBeige.Render(it.target)
+		out := []string{fitRight(left, joinMeta(thoughtMeta(it.thought), sDim.Render(it.meta)), width)}
 		if open {
 			out = append(out, thoughtRows(it.thought, pad, width)...)
 		}
@@ -593,19 +609,24 @@ func (b *readGroupBlock) render(width int, open bool) string {
 	if other > 0 {
 		parts = append(parts, noun(other, "consulta", "consultas"))
 	}
-	summary := sSoft.Render(strings.Join(parts, " "+glyphSep+" "))
-	dot := sOK.Render(glyphDot)
+	summary := sInk.Render(strings.Join(parts, " "+glyphSep+" "))
+	state := toolDone
 	if failed > 0 {
-		dot = sErr.Render(glyphDot)
+		state = toolFailed
 		summary += sErr.Render(" " + glyphSep + " " + noun(failed, "error", "errores"))
 	}
 	verb := "Exploró"
 	if b.live {
 		last := b.items[len(b.items)-1]
-		verb = "Explorando"
+		verb, state = "Explorando", toolRunning
 		summary += sDim2.Render("  "+glyphSep+"  ") + sSoft.Render(verbs(last.tool)[0]) + " " + sBeige.Render(last.target)
 	}
-	out := []string{fitRight(" "+dot+" "+sBold.Render(verb)+"  "+summary, sDim.Render(seconds(b.elapsed)), width)}
+	var thoughts []thinkBlock
+	for _, it := range b.items {
+		thoughts = append(thoughts, it.thought)
+	}
+	head := " " + stateMark(state, b.spin) + " " + chip(verb, toneRead, b.live) + " " + summary
+	out := []string{fitRight(head, joinMeta(thoughtMeta(thoughts...), sDim.Render(seconds(b.elapsed))), width)}
 	if open {
 		for i, it := range b.items {
 			rail := glyphRail
@@ -668,8 +689,11 @@ func (b *browserBlock) render(width int, open bool) string {
 	if cur.state == toolRunning {
 		verb = cur.gerund
 	}
-	left := " " + cur.dot() + " " + sBold.Render("Navegador") + sDim2.Render("  "+glyphSep+"  ") +
-		sSoft.Render(verb) + "  " + sBeige.Render(cur.target)
+	left := " " + cur.dot() + " " + chip("Navegador", toneBrowser, cur.state == toolRunning) + " " +
+		sInk.Render(verb)
+	if cur.target != "" {
+		left += "  " + sBeige.Render(cur.target)
+	}
 	failed := 0
 	for _, s := range b.steps {
 		if s.state == toolFailed {
@@ -691,7 +715,7 @@ func (b *browserBlock) render(width int, open bool) string {
 			right += sDim.Render(" " + glyphSep + " " + t)
 		}
 	}
-	out := []string{fitRight(left, right, width)}
+	out := []string{fitRight(left, joinMeta(thoughtMeta(b.thoughts...), right), width)}
 	if !open {
 		if footer := cur.footer(width); footer != "" {
 			out = append(out, footer)
@@ -759,6 +783,8 @@ func (b *todoBlock) render(width int, _ bool) string {
 type answerBlock struct {
 	text string
 	md   func(text string, width int) string
+	// bare: la respuesta de un turno con riel va sin ◆; la cabecera ya lo lleva.
+	bare bool
 }
 
 func (answerBlock) lazy() bool { return true }
@@ -777,7 +803,7 @@ func (b answerBlock) render(width int, _ bool) string {
 		lines = lines[:len(lines)-1]
 	}
 	for i, l := range lines {
-		if i == 0 {
+		if i == 0 && !b.bare {
 			lines[i] = mark(glyphBrand, sAccent) + l
 		} else {
 			lines[i] = pad + l
@@ -800,26 +826,6 @@ func trimRightANSI(line string) string {
 }
 
 // ── cierre del turno ─────────────────────────────────────────────────────
-
-type summaryBlock struct {
-	actions, files, adds, dels int
-	secs                       float64
-}
-
-func (b summaryBlock) render(width int, _ bool) string {
-	dot := sDim2.Render(" " + glyphSep + " ")
-	out := pad + sDim.Render(noun(b.actions, "acción", "acciones"))
-	if b.files > 0 {
-		out += dot + sDim.Render(noun(b.files, "archivo", "archivos"))
-	}
-	if b.adds != 0 || b.dels != 0 {
-		out += dot + counts(b.adds, b.dels)
-	}
-	if b.secs >= 0.1 {
-		out += dot + sDim.Render(fmt.Sprintf("%.1f s", b.secs))
-	}
-	return ansi.Truncate(out, max(1, width-1), glyphEllipsis)
-}
 
 type sourcesBlock []string
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/chat"
@@ -43,31 +44,41 @@ func (m *Model) liveLabel() (string, bool) {
 	if m.live.reasoning.Len() > 0 {
 		return "Pensando…", false
 	}
-	return "Trabajando…", false
+	return brilloVerbs[m.spin/brilloVerbTicks%len(brilloVerbs)] + "…", false
 }
 
-// shimmer recorre la etiqueta con un brillo en acento.
+// brilloVerbs nombran la espera sin nada más concreto que decir; cambian cada
+// brilloVerbTicks fotogramas (unos 3 s).
+var brilloVerbs = []string{"Tallando", "Puliendo", "Refractando", "Facetando", "Engarzando", "Destellando"}
+
+const brilloVerbTicks = 25
+
+// shimmer recorre la etiqueta con un brillo de arena a destello, como la luz
+// sobre una cara del prisma.
 func (m *Model) shimmer(text string) string {
+	fg := func(hex string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)) }
+	base := fg(pal.shBase)
 	if reducedMotion() {
-		return sSoft.Render(text)
+		return base.Render(text)
 	}
+	mid, high := fg(pal.shMid), fg(pal.shHigh)
 	chars := []rune(text)
-	p := m.spin%(len(chars)+8) - 4
+	p := m.spin%(len(chars)+6) - 3
 	var b strings.Builder
 	for i, c := range chars {
-		d := abs(i - p)
-		switch {
-		case d <= 1:
-			b.WriteString(sAccent.Render(string(c)))
-		case d <= 3:
-			b.WriteString(sInk.Render(string(c)))
+		switch d := abs(i - p); {
+		case d < 1:
+			b.WriteString(high.Render(string(c)))
+		case d < 2:
+			b.WriteString(mid.Render(string(c)))
 		default:
-			b.WriteString(sSoft.Render(string(c)))
+			b.WriteString(base.Render(string(c)))
 		}
 	}
 	return b.String()
 }
 
+// spinFrame es el destello que crece de punto a estrella y vuelve.
 func (m *Model) spinFrame() string {
 	if reducedMotion() {
 		return glyphSpark
@@ -91,7 +102,7 @@ func (m *Model) liveView() []string {
 	width := m.width
 	var lines []string
 	label, warn := m.liveLabel()
-	head := " " + sAccent.Render(m.spinFrame()) + " "
+	head := " " + sBeige.Render(m.spinFrame()) + " "
 	if warn {
 		head += sWarn.Render(label)
 	} else {
