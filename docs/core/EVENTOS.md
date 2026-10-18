@@ -803,17 +803,21 @@ decide el hecho; ningún consumidor los deduce de otros Events.
 |---|---|---|---|
 | `task.review_requested` | state · `task` | `branch` | `Tx::done` (entrega correcta de una hija con padre y rama propia), tras `task.status_changed` y en la misma mutación; sin `idem_key` (cada entrega es otro hecho); actor y canal los del contexto de la entrega |
 | `environment.blocked` | state · `agent` (`entity_id` = proveedor) | `profile`, `code` | `Tx::environment_blocked`, desde `Core::resolve_and_observe` (`spawn_request`, `approve_spawn` y el recheck final de `launch`); `system` / `core` |
-| `environment.cleared` | state · `agent` | `profile`, `code` (el que se levanta) | `Tx::environment_verified` (comprobación positiva `ok`) o cambio de causa; `system` / `core` |
+| `environment.cleared` | state · `agent` | `profile`, `code` (el que se levanta) | `Tx::environment_verified`, SOLO con prueba positiva tipada de esa causa concreta (nunca por un cambio de causa); `system` / `core` |
 
 * `code` es el conjunto cerrado y TIPADO de `agents::EnvBlock` (`cli_missing` · `cli_flags_unsupported` ·
   `windows_sandbox_elevated`), `profile` uno de los perfiles conocidos. La causa sale de un tipo (`Policy.block`), nunca
   del texto de `reason`; un código o un perfil fuera de esos conjuntos no es una señal.
 * **Alcance proveedor + perfil:** `cli_missing` lo levanta una comprobación positiva de cualquier perfil del proveedor;
   las banderas y el sandbox, solo la del mismo perfil.
-* **Solo al cambiar y solo con evidencia positiva:** `State.env_blocks` (`proveedor/perfil` → causa, parte del documento
-  de `legacy_state`) hace que repetir una comprobación no emita nada y que `environment.cleared` pueda emitirse tras un
-  reinicio. Solo una policy `ok` levanta; `unverified` o un bloqueo ajeno al entorno lo conservan. Un cambio de causa son
-  DOS Events en la misma mutación (`cleared` de la anterior, `blocked` de la nueva). Sin Event Log no se marca nada.
+* **Solo al cambiar y solo con evidencia positiva:** `State.env_blocks` (`proveedor/perfil` → CONJUNTO de causas, parte del
+  documento de `legacy_state`; se lee también el formato anterior de una sola causa) hace que repetir una comprobación no
+  emita nada y que `environment.cleared` pueda emitirse tras un reinicio. Una causa nueva se SUMA a las activas del alcance y
+  no emite `cleared` de ninguna: solo `environment.cleared` con la prueba positiva tipada (`Policy.env_proof`, independiente
+  de `status`) de ESA causa la quita; `unverified`, un valor desconocido de `[windows] sandbox` o un bloqueo ajeno al entorno
+  conservan las causas. Solo `mxc` y `unelevated` demuestran un sandbox no elevado (`elevated` es el bloqueo). Una policy
+  bloqueada aporta únicamente la prueba de lo que llegó a examinar (por flags: la CLI existe; por sandbox elevado: la CLI y
+  los flags), y entonces `cleared` y `blocked` salen en la misma mutación. Sin Event Log no se marca nada.
 * `environment.*` no cambia el estado de ninguna Task: no es un fallo ni un Attempt fallido.
 * Sin informe, resumen, ficheros, rutas, `argv` ni `reason` en ninguno de los tres.
 

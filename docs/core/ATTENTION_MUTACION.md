@@ -83,8 +83,8 @@ Ninguno.
 | `r12` | review_ready · resolución | `orch/attention_rules.rs` | merged no resuelve review_ready | `integrar_retirar_o_reabrir_cierran_la_espera_y_una_nueva_entrega_es_otra_ocurrencia` |
 | `r13` | review_ready · resolución | `orch/attention_rules.rs` | task.removed no resuelve review_ready | `retirar_la_task_resuelve_su_review_ready` |
 | `r14` | review_ready · resolución | `orch/attention_rules.rs` | reabrir resuelve como acted | `integrar_retirar_o_reabrir_cierran_la_espera_y_una_nueva_entrega_es_otra_ocurrencia` |
-| `e01` | environment · dedupe | `orch/state.rs` | environment.blocked se re-emite con la misma causa | `repetir_la_misma_comprobacion_no_emite_y_un_cambio_de_causa_son_dos_hechos` |
-| `e02` | environment · causa | `orch/tx_ops.rs` | un cambio de causa no emite cleared de la anterior | `repetir_la_misma_comprobacion_no_emite_y_un_cambio_de_causa_son_dos_hechos` |
+| `e01` | environment · dedupe | `orch/state.rs` | environment.blocked se re-emite con la misma causa | `repetir_la_misma_comprobacion_no_emite_y_una_causa_que_demuestra_la_anterior_son_dos_hechos`, `un_sandbox_elevado_activo_no_lo_levanta_un_cli_flags_unsupported_posterior` |
+| `e02` | environment · causa | `orch/tx_ops.rs` | un cambio de causa no emite cleared de la anterior | `repetir_la_misma_comprobacion_no_emite_y_una_causa_que_demuestra_la_anterior_son_dos_hechos` (ver la nota posterior: ya no hay `cleared` por cambio de causa, solo por prueba positiva) |
 | `e03` | environment · clear | `orch/tx_ops.rs` | la verificación positiva no emite cleared | `el_bloqueo_vigente_sobrevive_a_un_reinicio_y_se_levanta_despues`, `la_aprobacion_vuelve_a_comprobar_el_entorno_y_deja_constancia`, `solo_una_comprobacion_positiva_y_verificada_levanta_el_bloqueo` (+1 más) |
 | `e04` | environment · alcance | `orch/state.rs` | verificar un perfil levanta los bloqueos de todos los perfiles | `el_alcance_es_proveedor_y_perfil_y_cli_missing_es_de_todo_el_proveedor` |
 | `e05` | environment · alcance | `orch/state.rs` | cli_missing deja de ser de todo el proveedor | `el_alcance_es_proveedor_y_perfil_y_cli_missing_es_de_todo_el_proveedor` |
@@ -125,3 +125,17 @@ del árbol final:
   `task.review_requested`).
 * **Superviviente `m02` (guarda de resolución con el mismo `seq`):** equivalente con las reglas actuales; se mató con una prueba de
   reglas inyectadas (`una_resolucion_con_el_mismo_seq_que_la_ultima_senal_del_hecho…`).
+
+## Nota posterior: causas simultáneas y prueba del sandbox (P1 de revisión de LXO-88)
+
+Cambios posteriores a la ronda FINAL, sin mutación manual re-ejecutada sobre ellos (este inventario no los cuenta):
+
+* `Tx::environment_blocked` ya no emite `environment.cleared` al cambiar la causa de un alcance: `State.env_blocks` guarda un
+  CONJUNTO de causas por `proveedor/perfil` y una causa nueva se suma. El mutante `e02` («un cambio de causa no emite cleared de la
+  anterior») dejó de describir un comportamiento que exista; su protección es ahora la inversa: ninguna causa cae sin prueba
+  positiva (`un_sandbox_elevado_activo_no_lo_levanta_un_cli_flags_unsupported_posterior`,
+  `una_causa_nueva_sin_prueba_de_la_anterior_no_emite_cleared_y_el_replay_reproduce_el_estado`,
+  `con_la_sonda_real_de_codex_flags_que_faltan_no_levantan_el_sandbox_elevado_aun_si_sigue_elevado`).
+* Candidatos de mutación para la próxima ronda: volver a reemplazar la causa del alcance en `set_env_block`; que una policy
+  bloqueada por flags lleve `sandbox_not_elevated: true`; volver a `s != "elevated"` en `EnvProof.sandbox_not_elevated`
+  (`solo_mxc_y_unelevated_demuestran_un_sandbox_no_elevado`, `un_valor_ausente_o_desconocido_del_sandbox_nunca_emite_environment_cleared`).

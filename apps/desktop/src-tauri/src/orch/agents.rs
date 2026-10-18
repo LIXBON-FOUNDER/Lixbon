@@ -378,7 +378,7 @@ pub enum BlockCause {
 /// Bloqueos del entorno/proveedor que el host comprueba antes de lanzar. Conjunto CERRADO: viaja TIPADO hasta la
 /// frontera `Tx`/Event (`environment.blocked` / `environment.cleared` lo serializan con `code()`) y se guarda en
 /// `State.env_blocks`; no hay cadenas libres que puedan persistirse y que el proyector ignore.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EnvBlock {
     /// La CLI del proveedor no está en el PATH.
@@ -408,15 +408,18 @@ impl EnvBlock {
 /// Evidencia POSITIVA de entorno de una comprobación real de la CLI, separada de `Policy.status`: la versión (`VERIFIED`) y
 /// el modelo (`mark_model`) deciden si se pide `ack_unverified`, pero no dicen nada de si el entorno funciona. Solo
 /// [`evaluate`] la fija, y solo con la CLI hallada y su `--help` LEGIBLE (`Skip`, CLI ausente o ayuda ilegible: nada
-/// demostrado). Cada campo demuestra una causa de [`EnvBlock`]; lo ambiguo queda en `false` y conserva el bloqueo.
+/// demostrado). Cada campo demuestra una causa de [`EnvBlock`]; lo ambiguo queda en `false` y conserva el bloqueo. Una
+/// policy bloqueada por flags o por sandbox elevado solo lleva lo que esa comprobación llegó a demostrar (la CLI está;
+/// con el sandbox, además los flags), nunca lo que no llegó a examinar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EnvProof {
     /// La CLI está en el PATH y respondió a `--help`.
     pub cli_present: bool,
     /// Todos los flags del perfil (y `-o` de `codex exec`) aparecen en el `--help` de esa versión.
     pub flags_supported: bool,
-    /// La config de Codex declara un sandbox de Windows que NO es `elevated`. Sin valor leído (no es Windows, no es
-    /// Codex o el fichero no dice nada) no se demuestra nada.
+    /// La config de Codex declara un sandbox de Windows que es POSITIVAMENTE no elevado (`mxc` o `unelevated`, ver
+    /// [`sandbox_proves_not_elevated`]). Sin valor leído (no es Windows, no es Codex o el fichero no dice nada) o con un
+    /// valor desconocido no se demuestra nada.
     pub sandbox_not_elevated: bool,
 }
 
@@ -433,6 +436,13 @@ impl EnvProof {
     pub fn any(self) -> bool {
         EnvBlock::ALL.into_iter().any(|b| self.demonstrates(b))
     }
+}
+
+/// Valores oficiales de `[windows] sandbox` en la config de Codex: `mxc`, `elevated` y `unelevated`. Solo `mxc` y
+/// `unelevated` son evidencia POSITIVA de que el sandbox no es el elevado; `elevated` es el bloqueo, y un valor ausente
+/// o desconocido (otra versión, una errata, otra mayúscula) no demuestra nada: la comparación es exacta.
+pub fn sandbox_proves_not_elevated(value: Option<&str>) -> bool {
+    matches!(value, Some("mxc" | "unelevated"))
 }
 
 /// Política efectiva: lo que devuelve `orch_resolve_policy` y lo que se lanza.
@@ -559,13 +569,20 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
             }
             if !missing.is_empty() {
                 let v = version.as_deref().unwrap_or("versión desconocida");
-                return blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
+                let mut pol = blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
                     format!("{} {v} no admite: {}", a.label, missing.join(", ")), BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
+                // La CLI se halló y su ayuda se leyó: eso desmiente `cli_missing`. Los flags faltan y el sandbox NO se
+                // examina antes de bloquear por flags, así que ni uno ni otro se demuestran.
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+                return pol;
             }
             if codex_exec(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 let mut w = warnings.clone();
                 w.push(ELEVATED.into());
-                return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into(), BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
+                let mut pol = blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into(), BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
+                // Llegar aquí demuestra la CLI hallada y todos los flags del perfil; del sandbox solo que SIGUE elevado.
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+                return pol;
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
             let mut pol = match version.as_deref() {
@@ -578,7 +595,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
             pol.env_proof = EnvProof {
                 cli_present: true,
                 flags_supported: true,
-                sandbox_not_elevated: matches!(p.windows_sandbox.as_deref(), Some(s) if s != "elevated"),
+                sandbox_not_elevated: sandbox_proves_not_elevated(p.windows_sandbox.as_deref()),
             };
             if codex_elevated_warns(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 pol.warnings.push(WARN_ELEVATED_RW.into());
@@ -1435,6 +1452,60 @@ mod tests {
         let normal = Probe { windows_sandbox: Some("unelevated".into()), ..probe("0.162.1", CODEX_HELP) };
         assert_eq!(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&normal), false).status, Status::Ok);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn solo_mxc_y_unelevated_demuestran_un_sandbox_no_elevado() {
+        // Valores oficiales de `[windows] sandbox`: mxc, elevated, unelevated. Los desconocidos no prueban nada.
+        let completa = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true };
+        let sin_sandbox = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        for (valor, prueba) in [(Some("mxc"), true), (Some("unelevated"), true), (Some("elevated"), false), (None, false)] {
+            assert_eq!(sandbox_proves_not_elevated(valor), prueba, "{valor:?}");
+        }
+        for desconocido in ["", "Elevated", "ELEVATED", "UNELEVATED", "Mxc", "mxc2", "elevated2", "disabled", "none", "read-only", " unelevated", "unelevated "] {
+            assert!(!sandbox_proves_not_elevated(Some(desconocido)), "{desconocido:?} no prueba nada");
+        }
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            for (valor, esperada) in [(Some("mxc"), completa), (Some("unelevated"), completa), (None, sin_sandbox)] {
+                let found = Probe { windows_sandbox: valor.map(String::from), ..probe("0.162.1", CODEX_HELP) };
+                let p = evaluate("codex", prof, "wt", Detected::Found(&found), false);
+                assert_eq!((p.status, p.block, p.env_proof), (Status::Ok, None, esperada), "{prof:?} {valor:?}");
+            }
+            // Un valor desconocido NO bloquea (no es `elevated`) pero tampoco demuestra el sandbox: conserva su bloqueo.
+            for desconocido in ["", "Elevated", "ELEVATED", "mxc2", "disabled", "otro"] {
+                let found = Probe { windows_sandbox: Some(desconocido.into()), ..probe("0.162.1", CODEX_HELP) };
+                let p = evaluate("codex", prof, "wt", Detected::Found(&found), false);
+                assert_eq!((p.status, p.block, p.env_proof), (Status::Ok, None, sin_sandbox), "{prof:?} {desconocido:?}");
+            }
+            // `elevated` sigue siendo el bloqueo y no prueba el sandbox, solo lo que se llegó a examinar.
+            let elev = Probe { windows_sandbox: Some("elevated".into()), ..probe("0.162.1", CODEX_HELP) };
+            let p = evaluate("codex", prof, "wt", Detected::Found(&elev), false);
+            assert_eq!((p.status, p.block, p.env_proof), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::WindowsSandboxElevated)), sin_sandbox), "{prof:?}");
+        }
+        // Lo que lee la config llega tal cual: `mxc` y `unelevated` prueban; `elevated` y lo ajeno, no.
+        for (toml, prueba) in [("[windows]
+sandbox = \"mxc\"", true), ("windows.sandbox = 'unelevated'", true), ("[windows]
+sandbox = \"elevated\"", false), ("[windows]
+sandbox = \"Mxc\"", false), ("[otra]
+sandbox = \"mxc\"", false)] {
+            assert_eq!(sandbox_proves_not_elevated(codex_windows_sandbox(toml).as_deref()), prueba, "{toml}");
+        }
+    }
+
+    #[test]
+    fn un_bloqueo_solo_lleva_la_evidencia_que_llego_a_demostrar() {
+        // Flags que faltan: la CLI está (desmiente `cli_missing`), pero ni los flags ni el sandbox se demuestran.
+        let vieja = CODEX_EXEC_HELP_162.replace("--sandbox", "--sbx");
+        let found = Probe { exec_help: Some(vieja.clone()), ..probe("0.159.0", CODEX_HELP) };
+        let p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&found), false);
+        assert_eq!((p.status, p.block), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported))));
+        assert_eq!(p.env_proof, EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false });
+        // CLI ausente: nada.
+        let ausente = evaluate("codex", Profile::Explorar, "wt", Detected::Missing, false);
+        assert_eq!(ausente.env_proof, EnvProof::default());
+        // Flags que faltan Y sandbox no elevado en la config: el sandbox no se examina antes de bloquear por flags.
+        let ambas = Probe { windows_sandbox: Some("unelevated".into()), ..found.clone() };
+        assert!(!evaluate("codex", Profile::Explorar, "wt", Detected::Found(&ambas), false).env_proof.sandbox_not_elevated);
     }
 
     #[test]

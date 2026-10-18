@@ -189,20 +189,21 @@ impl Tx {
     }
 
     /// El host comprobó que el ENTORNO impide trabajar con `provider` en el perfil `profile` (`code`: el enum tipado
-    /// `agents::EnvBlock`; no hay cadenas libres). Emite solo si el bloqueo vigente de ese alcance cambia (`false` = ya
-    /// era ese). Un cambio de causa emite antes `environment.cleared` de la anterior. No toca el estado de ninguna Task.
+    /// `agents::EnvBlock`; no hay cadenas libres). Emite solo si esa causa NO estaba ya activa en ese alcance (`false` =
+    /// ya lo estaba). La causa se SUMA a las que haya: una causa nueva no demuestra que otra haya terminado, así que
+    /// nunca emite `environment.cleared` (eso solo lo hace [`Tx::environment_verified`] con prueba positiva). No toca el
+    /// estado de ninguna Task.
     pub(super) fn environment_blocked(&mut self, provider: &str, profile: &str, code: EnvBlock) -> bool {
-        let Some(previo) = self.state_mut().set_env_block(provider, profile, code) else { return false };
-        if let Some(anterior) = previo {
-            self.try_push_event(ev::environment_cleared(provider, profile, anterior));
+        if !self.state_mut().set_env_block(provider, profile, code) {
+            return false;
         }
         self.try_push_event(ev::environment_blocked(provider, profile, code));
         true
     }
 
     /// El host obtuvo una comprobación POSITIVA de `provider` en el perfil `profile` (`proof`: evidencia tipada de
-    /// entorno, no el `status` de la policy): emite `environment.cleared` solo por cada bloqueo que esa evidencia
-    /// DEMUESTRA levantado (el de ese alcance y los de `CliMissing` del proveedor). `false` = no había nada que levantar.
+    /// entorno, no el `status` de la policy): emite `environment.cleared` solo por cada causa que esa evidencia
+    /// DEMUESTRA terminada (las de ese alcance que desmiente y los `CliMissing` del proveedor). `false` = no había nada que levantar.
     /// Lo no demostrado (versión o modelo sin fijar no cuentan; ayuda ilegible, `Skip`, ambigüedad) conserva el bloqueo.
     pub(super) fn environment_verified(&mut self, provider: &str, profile: &str, proof: agents::EnvProof) -> bool {
         let levantados = self.state_mut().verify_env(provider, profile, proof);

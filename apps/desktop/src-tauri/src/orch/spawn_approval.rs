@@ -230,7 +230,8 @@ impl Core {
     /// (`environment.blocked` / `environment.cleared`, ver `Tx::environment_blocked`). Solo mira la causa TIPADA
     /// (`Policy.block`), nunca el texto de `reason`, y solo escribe cuando el bloqueo vigente cambia.
     ///
-    /// * `Blocked` por una causa de ENTORNO → `environment.blocked`. Cualquier otro bloqueo (perfil deshabilitado, entrada
+    /// * `Blocked` por una causa de ENTORNO → `environment.blocked` de ESA causa, que se suma a las activas del alcance
+    ///   (nunca reemplaza ni levanta otra); solo cae lo que la propia comprobación demuestra. Cualquier otro bloqueo (perfil deshabilitado, entrada
     ///   inválida, ruta de la solicitud) no dice nada del entorno: ni lo bloquea ni lo levanta.
     /// * SOLO la evidencia positiva tipada (`Policy.env_proof`: CLI hallada con `--help` legible y flags presentes) levanta
     ///   un bloqueo, y únicamente las causas que demuestra. NO depende de `status`: una versión sin fijar o un modelo no
@@ -245,7 +246,11 @@ impl Core {
         match (policy.status, policy.block) {
             (agents::Status::Blocked, Some(agents::BlockCause::Environment(code))) => self
                 .mutate_as(&MutationContext::core(), |tx| {
-                    if !tx.environment_blocked(provider, profile, code) {
+                    // La causa nueva se SUMA a las activas y no levanta ninguna. Lo único que levanta es lo que la propia
+                    // comprobación bloqueada demuestra (p. ej. `cli_missing` si la CLI se halló pero faltan flags).
+                    let levantado = tx.environment_verified(provider, profile, policy.env_proof);
+                    let bloqueado = tx.environment_blocked(provider, profile, code);
+                    if !(levantado || bloqueado) {
                         tx.no_change();
                     }
                     Ok(())

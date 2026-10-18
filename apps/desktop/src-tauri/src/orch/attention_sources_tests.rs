@@ -8,6 +8,7 @@
 //! La proyección no infiere nada: sin estos Events no hay Attention de estas categorías.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -213,6 +214,10 @@ fn retirar_la_task_resuelve_su_review_ready() {
 thread_local! {
     /// Qué resuelve el host (por perfil) en este hilo de prueba: un valor por defecto y excepciones por perfil.
     static MODOS: RefCell<(u8, Vec<(String, u8)>)> = const { RefCell::new((0, Vec::new())) };
+    /// Valor de `[windows] sandbox` que lee la sonda de Codex en el modo `CODEX_SONDA`.
+    static VALOR_SANDBOX: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Flags de `codex exec` que lista su `--help` en el modo `CODEX_SONDA`.
+    static CODEX_CON_FLAGS: RefCell<bool> = const { RefCell::new(true) };
 }
 const OK: u8 = 0;
 const SIN_CLI: u8 = 1;
@@ -227,6 +232,9 @@ const VERSION_NO_FIJADA: u8 = 8;
 const MODELO_NO_LISTADO: u8 = 9;
 const SIN_AYUDA: u8 = 10;
 const AYUDA_SIN_FLAGS: u8 = 11;
+const SIN_FLAGS_SIN_PRUEBA: u8 = 12;
+/// Sonda REAL de Codex (`evaluate_for` con el `[windows] sandbox` de `VALOR_SANDBOX`) para el perfil de solo lectura.
+const CODEX_SONDA: u8 = 13;
 
 /// La policy que `evaluate_for` resolvería con una CLI hallada de esa `version` y, si `ayuda`, un `--help` que lista los flags
 /// del perfil (`flags = false`: la ayuda existe pero no trae ninguno). Sin ayuda legible no hay evidencia de entorno.
@@ -235,6 +243,15 @@ fn con_sonda(provider: &str, profile: &str, role: Option<&str>, worktree: &str, 
     let help = ayuda.then(|| if flags { base.argv[1..].join(" ") } else { "Usage: claude [options]".to_string() });
     let sonda = agents::Probe { version: Some(version.into()), help, exec_help: None, windows_sandbox: None };
     agents::evaluate_for(provider, agents::Profile::parse(profile).expect("perfil"), role, worktree, agents::Detected::Found(&sonda), false, agents::Delivery::FileOrMarkers)
+}
+
+/// La policy que `evaluate_for` resolvería para Codex con el `[windows] sandbox` indicado y, si `flags`, un `--help` que lista los
+/// flags del perfil de solo lectura (`codex exec`).
+fn con_sonda_codex(profile: &str, role: Option<&str>, worktree: &str, sandbox: Option<&str>, flags: bool) -> agents::Policy {
+    let base = fake("codex", profile, role, worktree);
+    let help = if flags { format!("{} --output-last-message", base.argv[1..].join(" ")) } else { "Usage: codex exec [options]".to_string() };
+    let sonda = agents::Probe { version: Some("0.162.1".into()), help: Some(help.clone()), exec_help: Some(help), windows_sandbox: sandbox.map(String::from) };
+    agents::evaluate_for("codex", agents::Profile::parse(profile).expect("perfil"), role, worktree, agents::Detected::Found(&sonda), false, agents::Delivery::FileOrMarkers)
 }
 
 /// La evidencia completa de entorno de una policy `ok` (versión fijada) en estas pruebas.
@@ -256,8 +273,17 @@ fn segun_modo(provider: &str, profile: &str, role: Option<&str>, worktree: &str)
     };
     match modo {
         SIN_CLI => bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliMissing)),
-        SIN_FLAGS => bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliFlagsUnsupported)),
-        SANDBOX => bloqueo(&mut p, BlockCause::Environment(EnvBlock::WindowsSandboxElevated)),
+        // Como la policy real: bloquear por flags demuestra que la CLI está; bloquear por sandbox, además los flags.
+        SIN_FLAGS => {
+            bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
+            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+        }
+        SANDBOX => {
+            bloqueo(&mut p, BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
+            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        }
+        // Flags que faltan SIN evidencia alguna (p. ej. una policy que no llegó a demostrar nada).
+        SIN_FLAGS_SIN_PRUEBA => bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliFlagsUnsupported)),
         PERFIL => bloqueo(&mut p, BlockCause::ProfileDisabled),
         INVALIDO => bloqueo(&mut p, BlockCause::Invalid),
         RUTA => bloqueo(&mut p, BlockCause::WorktreePath),
@@ -266,6 +292,10 @@ fn segun_modo(provider: &str, profile: &str, role: Option<&str>, worktree: &str)
         MODELO_NO_LISTADO => {
             p = con_sonda(provider, profile, role, worktree, "2.1.296", true, true);
             agents::mark_model(&mut p, Some("modelo-no-listado"), Some(false));
+        }
+        CODEX_SONDA => {
+            let valor = VALOR_SANDBOX.with(|v| v.borrow().clone());
+            p = con_sonda_codex(profile, role, worktree, valor.as_deref(), CODEX_CON_FLAGS.with(|f| *f.borrow()));
         }
         SIN_AYUDA => p = con_sonda(provider, profile, role, worktree, "9.9.9", false, true),
         AYUDA_SIN_FLAGS => p = con_sonda(provider, profile, role, worktree, "9.9.9", true, false),
@@ -291,12 +321,16 @@ fn pide_perfil(e: &Env, perfil: &str) -> Result<Value, String> {
     e.core.rpc(Caller::Agent(Some(e.root.clone())), "", "spawn", &json!({ "agent": "claude", "task": "Encargo", "name": "Hija", "shared": true, "profile": perfil }))
 }
 
+fn pide_codex(e: &Env, perfil: &str) -> Result<Value, String> {
+    e.core.rpc(Caller::Agent(Some(e.root.clone())), "", "spawn", &json!({ "agent": "codex", "task": "Encargo", "name": "Hija", "shared": true, "profile": perfil }))
+}
+
 fn pide(e: &Env) -> Result<Value, String> {
     pide_perfil(e, "explorar")
 }
 
 fn bloqueos(e: &Env) -> Vec<(String, EnvBlock)> {
-    e.core.lock().env_blocks.iter().map(|(k, v)| (k.clone(), *v)).collect()
+    e.core.lock().env_blocks.iter().flat_map(|(k, causas)| causas.iter().map(|c| (k.clone(), *c))).collect()
 }
 
 fn entorno_activo(e: &Env) -> Vec<(String, String)> {
@@ -327,7 +361,7 @@ fn un_bloqueo_tipado_del_entorno_levanta_environment_blocked_sin_ser_un_fallo_ni
 }
 
 #[test]
-fn repetir_la_misma_comprobacion_no_emite_y_un_cambio_de_causa_son_dos_hechos() {
+fn repetir_la_misma_comprobacion_no_emite_y_una_causa_que_demuestra_la_anterior_son_dos_hechos() {
     let e = setup_con("src-env-cambio", segun_modo);
     modo(SIN_CLI);
     pide(&e).expect_err("1");
@@ -530,13 +564,13 @@ fn la_sonda_real_separa_la_evidencia_de_entorno_del_estado_de_version_y_modelo()
     assert_eq!((fijada.status, fijada.env_proof), (agents::Status::Ok, completa));
     assert_eq!((sin_fijar.status, sin_fijar.env_proof), (agents::Status::Unverified, completa), "versión sin fijar: sus flags sí están en --help");
     assert_eq!((modelo.status, modelo.env_proof), (agents::Status::Unverified, completa), "mark_model degrada el status, no la evidencia");
-    // Sin ayuda legible, `Skip` o ayuda sin los flags del perfil: nada demostrado.
+    // Sin ayuda legible o `Skip`: nada demostrado. Con ayuda legible pero sin los flags del perfil solo se demuestra la CLI.
     let sin_ayuda = con_sonda("claude", "explorar", None, wt, "9.9.9", false, true);
     assert_eq!((sin_ayuda.status, sin_ayuda.env_proof), (agents::Status::Unverified, agents::EnvProof::default()));
     let skip = fake("claude", "explorar", None, wt);
     assert_eq!((skip.status, skip.env_proof), (agents::Status::Unverified, agents::EnvProof::default()));
     let sin_flags = con_sonda("claude", "explorar", None, wt, "9.9.9", true, false);
-    assert_eq!((sin_flags.status, sin_flags.block, sin_flags.env_proof), (agents::Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported)), agents::EnvProof::default()));
+    assert_eq!((sin_flags.status, sin_flags.block, sin_flags.env_proof), (agents::Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported)), agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false }));
 }
 
 #[test]
@@ -638,6 +672,213 @@ fn la_evidencia_levanta_solo_lo_que_demuestra() {
     let nada = e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", agents::EnvProof::default()))).unwrap();
     assert!(!nada);
     assert_eq!(bloqueos(&e).len(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// environment_blocked · varias causas simultáneas en un alcance: una causa nueva no levanta una activa sin prueba
+// ---------------------------------------------------------------------------------------------
+
+fn ordenadas(mut v: Vec<(String, String)>) -> Vec<(String, String)> {
+    v.sort();
+    v
+}
+
+fn activas_explorar(subjects: &[&str]) -> Vec<(String, String)> {
+    ordenadas(subjects.iter().map(|s| ("claude".to_string(), format!("{s}@explorar"))).collect())
+}
+
+#[test]
+fn un_sandbox_elevado_activo_no_lo_levanta_un_cli_flags_unsupported_posterior() {
+    let e = setup_con("src-env-multi", segun_modo);
+    modo(SANDBOX);
+    pide(&e).expect_err("sandbox elevado");
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+    // Tras ello, el mismo alcance falla por flags (el sandbox sigue elevado, pero esa comprobación no lo examina).
+    modo(SIN_FLAGS);
+    let antes = head(&e.core);
+    pide(&e).expect_err("flags no soportados");
+    let evs = desde(&e.core, antes);
+    assert_eq!(kinds(&evs), vec!["environment.blocked", "attention.created"], "ningún environment.cleared del sandbox: {:?}", kinds(&evs));
+    assert_eq!(pl(&evs[0]), json!({ "profile": "explorar", "code": "cli_flags_unsupported" }));
+    assert_eq!(
+        bloqueos(&e),
+        vec![
+            ("claude/explorar".to_string(), EnvBlock::CliFlagsUnsupported),
+            ("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated),
+        ],
+        "las dos causas conviven en el alcance"
+    );
+    assert_eq!(ordenadas(entorno_activo(&e)), activas_explorar(&["cli_flags_unsupported", "windows_sandbox_elevated"]), "y las dos Attentions siguen activas");
+    // Repetir la misma comprobación no emite nada (idempotente).
+    let antes = head(&e.core);
+    pide(&e).expect_err("repetida");
+    assert_eq!(head(&e.core), antes, "misma causa ya activa: ni Event ni Attention");
+    assert_eq!(bloqueos(&e).len(), 2);
+    // Una comprobación bloqueada por el sandbox SÍ demuestra que los flags existen: cae esa causa y solo ésa.
+    modo(SANDBOX);
+    let antes = head(&e.core);
+    pide(&e).expect_err("el sandbox sigue elevado");
+    assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "cli_flags_unsupported" })]);
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+    assert_eq!(entorno_activo(&e), activas_explorar(&["windows_sandbox_elevated"]));
+}
+
+#[test]
+fn una_causa_nueva_sin_prueba_de_la_anterior_no_emite_cleared_y_el_replay_reproduce_el_estado() {
+    let e = setup_con("src-env-multi-sin-prueba", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("sin CLI");
+    // Un bloqueo posterior que NO demuestra que la CLI exista (ninguna evidencia): `cli_missing` se conserva.
+    modo(SIN_FLAGS_SIN_PRUEBA);
+    let antes = head(&e.core);
+    pide(&e).expect_err("flags sin evidencia");
+    assert_eq!(kinds(&desde(&e.core, antes)), vec!["environment.blocked", "attention.created"]);
+    assert_eq!(ordenadas(entorno_activo(&e)), activas_explorar(&["cli_flags_unsupported", "cli_missing"]));
+    // Y uno que SÍ lo demuestra (CLI hallada, faltan flags) levanta `cli_missing` y solo ése.
+    modo(SIN_FLAGS);
+    let antes = head(&e.core);
+    pide(&e).expect_err("repetida, ahora con la CLI hallada");
+    let evs = desde(&e.core, antes);
+    assert_eq!(kinds(&evs), vec!["environment.cleared", "attention.resolved"], "{:?}", kinds(&evs));
+    assert_eq!(pl(&evs[0]), json!({ "profile": "explorar", "code": "cli_missing" }));
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliFlagsUnsupported)]);
+    // Se suma un sandbox elevado (la comprobación bloqueada demuestra los flags: cae esa causa) y otra vez flags sin evidencia.
+    modo(SANDBOX);
+    pide(&e).expect_err("sandbox elevado");
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+    modo(SIN_FLAGS_SIN_PRUEBA);
+    pide(&e).expect_err("flags sin evidencia: el sandbox no se toca");
+    // Replay desde cero = lo que mantuvieron los writers.
+    let mantenido = en_el_core(&e, |s| instantanea(s));
+    let log = desde(&e.core, 0);
+    let (_d, mut limpio) = abre();
+    aplica(&mut limpio, 0, &log);
+    assert_eq!(instantanea(&limpio), mantenido);
+    en_el_core(&e, |s| {
+        let r = aplica(s, 0, &log);
+        assert!(r.created.is_empty() && r.updated.is_empty() && r.resolved.is_empty() && r.lifecycle_events == 0, "{r:?}");
+    });
+    assert_eq!(ordenadas(entorno_activo(&e)), activas_explorar(&["cli_flags_unsupported", "windows_sandbox_elevated"]));
+    // Prueba positiva del sandbox y de los flags: solo entonces caen ambas, cada una con su `cleared`.
+    modo(OK);
+    let antes = head(&e.core);
+    pide(&e).expect("pendiente");
+    let nuevos = cleared_de(&desde(&e.core, antes));
+    assert_eq!(
+        nuevos,
+        vec![json!({ "profile": "explorar", "code": "cli_flags_unsupported" }), json!({ "profile": "explorar", "code": "windows_sandbox_elevated" })]
+    );
+    assert!(bloqueos(&e).is_empty() && entorno_activo(&e).is_empty());
+}
+
+#[test]
+fn si_la_proyeccion_falla_la_causa_nueva_de_un_alcance_con_otra_activa_no_se_confirma() {
+    let e = setup_con("src-env-multi-rollback", segun_modo);
+    modo(SANDBOX);
+    pide(&e).expect_err("sandbox elevado");
+    let (antes, foto, estado) = (head(&e.core), en_el_core(&e, |s| instantanea(s)), bloqueos(&e));
+    en_el_core(&e, |s| s.set_event_projector(Arc::new(ProyectaYFalla)));
+    modo(SIN_FLAGS);
+    let error = pide(&e).expect_err("la causa nueva no se confirma");
+    assert!(error.contains("proyección rota a propósito"), "{error}");
+    assert_eq!(bloqueos(&e), estado, "ni la causa nueva quedó en el estado ni la activa se perdió");
+    assert_eq!((head(&e.core), en_el_core(&e, |s| instantanea(s))), (antes, foto));
+}
+
+#[test]
+fn varias_causas_por_alcance_se_persisten_y_se_lee_el_formato_de_una_sola_causa() {
+    let e = setup_con("src-env-multi-formato", segun_modo);
+    modo(SANDBOX);
+    pide(&e).expect_err("sandbox elevado");
+    modo(SIN_FLAGS);
+    pide(&e).expect_err("flags");
+    let doc = e.core.storage.with_store(|s| s.legacy_state().unwrap().unwrap().doc).unwrap();
+    let mut json: Value = serde_json::from_str(&doc).unwrap();
+    assert_eq!(json["env_blocks"], json!({ "claude/explorar": ["cli_flags_unsupported", "windows_sandbox_elevated"] }));
+    let estado: super::state::State = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(estado.env_blocks, e.core.lock().env_blocks, "el documento reabierto conserva las dos causas");
+    // El formato anterior (una causa por alcance) y un alcance vacío siguen leyéndose.
+    json["env_blocks"] = json!({ "claude/explorar": "cli_missing", "codex/proponer": [], "codex/explorar": ["windows_sandbox_elevated"] });
+    let antiguo: super::state::State = serde_json::from_value(json).unwrap();
+    assert_eq!(antiguo.env_blocks.len(), 2);
+    assert_eq!(antiguo.env_blocks["claude/explorar"], BTreeSet::from([EnvBlock::CliMissing]));
+    assert_eq!(antiguo.env_blocks["codex/explorar"], BTreeSet::from([EnvBlock::WindowsSandboxElevated]));
+}
+
+// ---------------------------------------------------------------------------------------------
+// environment_blocked · `[windows] sandbox` de Codex: solo `mxc` y `unelevated` demuestran un sandbox no elevado
+// ---------------------------------------------------------------------------------------------
+
+fn sandbox_de_codex(valor: Option<&str>, flags: bool) {
+    modo(CODEX_SONDA);
+    VALOR_SANDBOX.with(|v| *v.borrow_mut() = valor.map(String::from));
+    CODEX_CON_FLAGS.with(|f| *f.borrow_mut() = flags);
+}
+
+#[test]
+fn solo_mxc_y_unelevated_levantan_windows_sandbox_elevated() {
+    for valor in ["mxc", "unelevated"] {
+        let e = setup_con("src-env-sandbox-valor", segun_modo);
+        sandbox_de_codex(Some("elevated"), true);
+        pide_codex(&e, "explorar").expect_err("sandbox elevado");
+        assert_eq!(bloqueos(&e), vec![("codex/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+        sandbox_de_codex(Some(valor), true);
+        let antes = head(&e.core);
+        pide_codex(&e, "explorar").unwrap_or_else(|er| panic!("{valor}: {er}"));
+        assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "windows_sandbox_elevated" })], "{valor}");
+        assert!(bloqueos(&e).is_empty() && entorno_activo(&e).is_empty(), "{valor}");
+    }
+}
+
+#[test]
+fn un_valor_ausente_o_desconocido_del_sandbox_nunca_emite_environment_cleared() {
+    for valor in [None, Some(""), Some("Elevated"), Some("ELEVATED"), Some("Unelevated"), Some("MXC"), Some("mxc2"), Some("disabled"), Some("otro")] {
+        let e = setup_con("src-env-sandbox-desconocido", segun_modo);
+        sandbox_de_codex(Some("elevated"), true);
+        pide_codex(&e, "explorar").expect_err("sandbox elevado");
+        let antes = head(&e.core);
+        sandbox_de_codex(valor, true);
+        // La policy no está bloqueada (no es `elevated`), pero tampoco demuestra el sandbox.
+        let _ = pide_codex(&e, "explorar");
+        let evs = desde(&e.core, antes);
+        assert!(cleared_de(&evs).is_empty(), "{valor:?}: {:?}", kinds(&evs));
+        assert_eq!(bloqueos(&e), vec![("codex/explorar".to_string(), EnvBlock::WindowsSandboxElevated)], "{valor:?}");
+        assert_eq!(entorno_activo(&e), vec![("codex".to_string(), "windows_sandbox_elevated@explorar".to_string())], "{valor:?}");
+    }
+}
+
+#[test]
+fn con_la_sonda_real_de_codex_flags_que_faltan_no_levantan_el_sandbox_elevado_aun_si_sigue_elevado() {
+    let e = setup_con("src-env-sandbox-adversarial", segun_modo);
+    // 1. El sandbox es elevado y bloquea el perfil de solo lectura.
+    sandbox_de_codex(Some("elevated"), true);
+    pide_codex(&e, "explorar").expect_err("sandbox elevado");
+    // 2. Cambia la CLI y faltan flags. La config sigue diciendo `elevated`.
+    sandbox_de_codex(Some("elevated"), false);
+    let antes = head(&e.core);
+    pide_codex(&e, "explorar").expect_err("flags no soportados");
+    let evs = desde(&e.core, antes);
+    assert_eq!(kinds(&evs), vec!["environment.blocked", "attention.created"], "{:?}", kinds(&evs));
+    assert_eq!(
+        bloqueos(&e),
+        vec![
+            ("codex/explorar".to_string(), EnvBlock::CliFlagsUnsupported),
+            ("codex/explorar".to_string(), EnvBlock::WindowsSandboxElevated),
+        ]
+    );
+    // 3. Vuelven los flags y el sandbox sigue elevado: cae `cli_flags_unsupported` (demostrado) y NO el sandbox.
+    sandbox_de_codex(Some("elevated"), true);
+    let antes = head(&e.core);
+    pide_codex(&e, "explorar").expect_err("sigue el sandbox elevado");
+    assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "cli_flags_unsupported" })]);
+    assert_eq!(bloqueos(&e), vec![("codex/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+    assert_eq!(entorno_activo(&e), vec![("codex".to_string(), "windows_sandbox_elevated@explorar".to_string())]);
+    // 4. Solo la lectura positiva (`mxc`) del sandbox lo levanta.
+    sandbox_de_codex(Some("mxc"), true);
+    let antes = head(&e.core);
+    pide_codex(&e, "explorar").expect("pendiente");
+    assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "windows_sandbox_elevated" })]);
+    assert!(bloqueos(&e).is_empty() && entorno_activo(&e).is_empty());
 }
 
 #[test]
@@ -880,12 +1121,12 @@ fn el_bloqueo_vigente_sobrevive_a_un_reinicio_y_se_levanta_despues() {
     core1.rpc(Caller::Agent(Some(raiz.clone())), "", "spawn", &args).expect_err("bloqueado");
     assert_eq!(core1.lock().env_blocks.len(), 1);
     let doc = core1.storage.with_store(|s| s.legacy_state().unwrap().unwrap().doc).unwrap();
-    assert_eq!(serde_json::from_str::<Value>(&doc).unwrap()["env_blocks"], json!({ "claude/explorar": "cli_missing" }));
+    assert_eq!(serde_json::from_str::<Value>(&doc).unwrap()["env_blocks"], json!({ "claude/explorar": ["cli_missing"] }));
     drop(core1);
     super::boot_tests::espera_lock_libre(&core_dir);
 
     let core2 = arranca(&host);
-    assert_eq!(core2.lock().env_blocks.get("claude/explorar"), Some(&EnvBlock::CliMissing), "reabierto desde SQLite");
+    assert_eq!(core2.lock().env_blocks.get("claude/explorar"), Some(&BTreeSet::from([EnvBlock::CliMissing])), "reabierto desde SQLite");
     let activas_tras = core2.storage.with_store(|s| categorias_activas(s)).unwrap();
     assert_eq!(activas_tras, vec!["environment_blocked"], "y la Attention también");
     // Tras el reinicio, una comprobación verificada puede emitir `cleared`: el Event existe aunque el proceso sea otro.

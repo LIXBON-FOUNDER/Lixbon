@@ -372,9 +372,10 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   la frontera `Tx`/Event (`Tx::environment_blocked` recibe el enum; `Serialize` lo escribe con el mismo código): no hay
   cadenas libres que puedan persistirse y que el proyector ignore.
 * **Alcance = proveedor + perfil.** Un bloqueo por banderas o por sandbox depende del perfil (`codex exec` solo para los
-  perfiles de solo lectura); `cli_missing` es de todo el proveedor. El bloqueo vigente se guarda por `proveedor/perfil`
-  en `State.env_blocks` (varias causas simultáneas en alcances distintos) y la identidad de la Attention es
-  `(agent:<proveedor>, subject = "<code>@<perfil>")`. Un preflight de otro perfil NO desmiente el bloqueo de éste.
+  perfiles de solo lectura); `cli_missing` es de todo el proveedor. Los bloqueos vigentes se guardan por `proveedor/perfil`
+  en `State.env_blocks` como un CONJUNTO de causas (varias causas simultáneas, también dentro de un mismo alcance) y la
+  identidad de la Attention es `(agent:<proveedor>, subject = "<code>@<perfil>")`, así que cada causa tiene su propia
+  Attention. Un preflight de otro perfil NO desmiente el bloqueo de éste.
 * **Productor:** `Core::resolve_and_observe`, el único camino por el que se consulta la policy real: `spawn_request`,
   `approve_spawn` y el recheck final de `launch` (justo antes de lanzar; en pruebas lo refleja `fake_launch`, y una guarda
   estática fija que ningún otro sitio llama a `task_policy`). Con `Blocked` + `Environment(code)` →
@@ -384,16 +385,25 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
 * **Solo la evidencia POSITIVA tipada levanta, y solo lo que demuestra:** `Policy.env_proof` (`agents::EnvProof`) es
   independiente de `Policy.status`. La fija `agents::evaluate` únicamente con la CLI hallada, su `--help` LEGIBLE y todos
   los flags del perfil presentes; cada campo desmiente una causa (`cli_present` → `cli_missing`, `flags_supported` →
-  `cli_flags_unsupported`, `sandbox_not_elevated` → `windows_sandbox_elevated`, este último solo si la config de Codex
-  declara un sandbox que no es `elevated`: sin valor leído no se demuestra). `Tx::environment_verified(proveedor, perfil,
-  prueba)` emite `environment.cleared` por el bloqueo de ese mismo alcance cuya causa la prueba desmiente y por los
-  `cli_missing` del proveedor si la CLI existe. Una versión sin fijar (`VERIFIED`) o un modelo no listado (`mark_model`)
+  `cli_flags_unsupported`, `sandbox_not_elevated` → `windows_sandbox_elevated`). Los valores oficiales de `[windows] sandbox` son `mxc`,
+  `elevated` y `unelevated`: SOLO `mxc` y `unelevated` demuestran un sandbox no elevado (`agents::sandbox_proves_not_elevated`,
+  comparación exacta); `elevated` es el bloqueo, y un valor ausente o desconocido (`""`, otra capitalización, un valor
+  futuro) no demuestra nada y conserva el bloqueo. Una policy BLOQUEADA lleva solo lo que llegó a demostrar: por flags,
+  que la CLI existe (`cli_present`); por sandbox elevado, la CLI y los flags; el sandbox no se examina antes de bloquear por
+  flags, así que nunca lleva `sandbox_not_elevated`. `Tx::environment_verified(proveedor, perfil, prueba)` emite
+  `environment.cleared` por cada causa del conjunto de ese mismo alcance que la prueba desmiente y por los `cli_missing`
+  del proveedor si la CLI existe; las causas que la prueba no desmiente siguen activas aunque otra del mismo alcance caiga. Una versión sin fijar (`VERIFIED`) o un modelo no listado (`mark_model`)
   dejan la policy en `unverified` (piden `ack_unverified` al lanzar) pero NO impiden levantar un bloqueo de entorno
   demostrado. `Skip`, una ayuda ilegible, una ayuda sin los flags (sigue bloqueada), un bloqueo que no es del entorno o
   cualquier ambigüedad CONSERVAN el bloqueo y su Attention (`attention_sources_tests`: `una_cli_funcional_de_version_no_fijada_…`,
   `sin_ayuda_legible_o_sin_comprobar_…`, `un_modelo_no_listado_…`, `la_evidencia_levanta_solo_lo_que_demuestra`).
-* **Solo al cambiar:** repetir la misma comprobación no emite; un cambio de causa en el mismo alcance emite
-  `environment.cleared` de la anterior y `environment.blocked` de la nueva en la misma mutación.
+* **Solo al cambiar, y una causa nueva nunca levanta otra:** repetir la misma comprobación no emite. Una causa distinta en
+  el mismo alcance se SUMA (`environment.blocked` de la nueva, sin `cleared`): que el perfil falle ahora por
+  `cli_flags_unsupported` no demuestra que el sandbox elevado haya terminado. Una causa cae únicamente con
+  `environment.cleared` tras prueba positiva de ESA causa; si la propia comprobación bloqueada demuestra otra (p. ej. la CLI
+  existe y faltan flags desmiente `cli_missing`; el sandbox elevado desmiente `cli_flags_unsupported`), `cleared` y `blocked`
+  salen en la misma mutación, con rollback conjunto si falla la proyección. `State.env_blocks` se serializa como lista de
+  causas por alcance y se sigue leyendo el formato anterior (una sola causa).
 * **Frescura:** resolver la policy y observarla son atómicos entre sí: `resolve_and_observe` hace la sonda y la observación
   bajo `env_gate` (por delante del estado y el almacén), así que una observación vieja no puede aplicarse DESPUÉS de una más
   nueva y dejar un bloqueo que ya no existe (`una_observacion_vieja_no_se_aplica_despues_de_una_mas_nueva`, con barrera).
@@ -406,7 +416,7 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   `review_ready` huérfana; el recheck final de `launch` solo se ejercita con la CLI real fuera de las pruebas (aquí lo refleja
   `fake_launch`); `env_gate` se retiene durante la sonda de la CLI (serializa spawns de
   proveedores distintos mientras dura); `EnvBlock` se persiste en `State.env_blocks` sin versión de compatibilidad si el
-  enum crece. Ninguna bloquea la aceptación actual; quedan como seguimiento.
+  enum crece (un código desconocido en un documento persistido haría fallar su lectura). Ninguna bloquea la aceptación actual; quedan como seguimiento.
 * **Sin Event Log no se marca nada:** en `state.json` los Events se descartan, así que `observe_environment` no toca
   `State.env_blocks` (un marcador sin su Event durable ocultaría la señal para siempre). En producción ese modo es solo
   lectura (`DegradeC1`/`DegradedReadOnly`): la mutación se rechaza antes del closure y tampoco muta `env_blocks`

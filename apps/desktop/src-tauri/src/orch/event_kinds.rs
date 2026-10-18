@@ -870,9 +870,9 @@ pub(super) fn task_review_requested(task: &str, run: &str, branch: &str) -> Resu
 // El host comprobó (policy, antes de lanzar) que el ENTORNO o el proveedor impide trabajar con `provider` en el perfil
 // `profile` (`code` cerrado y TIPADO: `agents::EnvBlock`), y más tarde que dejó de impedirlo. Es una condición del proveedor, no de una
 // Task ni de un intento: no cambia el estado de ninguna Task (en particular, no es un fallo). Lo emiten solo
-// `Tx::environment_blocked` / `Tx::environment_cleared`, y únicamente cuando el bloqueo vigente CAMBIA (el mapa
-// `State.env_blocks` hace de memoria durable), así que no hay un evento por cada comprobación. Un cambio de causa son
-// DOS hechos en la misma mutación: `cleared` de la anterior y `blocked` de la nueva. Actor `system`, canal `core`.
+// `Tx::environment_blocked` / `Tx::environment_verified`, y únicamente cuando el conjunto de causas vigentes CAMBIA (el mapa
+// `State.env_blocks` hace de memoria durable), así que no hay un evento por cada comprobación. Una causa nueva no
+// reemplaza a las activas: se suma, y `cleared` se emite solo con prueba positiva de ESA causa. Actor `system`, canal `core`.
 
 #[derive(Serialize)]
 pub(super) struct EnvironmentBlocked {
