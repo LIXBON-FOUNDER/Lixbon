@@ -226,12 +226,6 @@
     "sistema"
    ],
    [
-    "context-window",
-    "<n>",
-    "Tokens de la ventana de contexto (para la barra)",
-    "sistema"
-   ],
-   [
     "bar",
     "[on|off]",
     "Barra de estado fija al pie de la terminal",
@@ -300,13 +294,12 @@
    "usage",
    "bar",
    "config",
-   "context-window",
    "doctor",
    "exit",
    "remote",
    "update"
   ],
-  "name_width": 15,
+  "name_width": 10,
   "matches": {
    "": [
     "clear",
@@ -346,7 +339,6 @@
     "usage",
     "bar",
     "config",
-    "context-window",
     "doctor",
     "exit",
     "remote",
@@ -371,16 +363,14 @@
     "check",
     "commit",
     "cost",
-    "config",
-    "context-window"
+    "config"
    ],
    "co": [
     "compact",
     "copy",
     "commit",
     "cost",
-    "config",
-    "context-window"
+    "config"
    ],
    "u": [
     "undo",
@@ -399,8 +389,7 @@
     "workspace"
    ],
    "con": [
-    "config",
-    "context-window"
+    "config"
    ],
    "s": [
     "save",
@@ -1017,7 +1006,6 @@
    "logout",
    "key",
    "config",
-   "context-window",
    "bar",
    "doctor",
    "remote",

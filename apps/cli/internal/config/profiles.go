@@ -211,18 +211,22 @@ func (c *Config) applyTopLevel(p Profile) {
 	c.FixMiMoWindow()
 }
 
-// mimoWindows son las ventanas conocidas de cada modelo MiMo; el resto se
-// queda en mimoContext.
-var mimoWindows = map[string]int{
+// knownWindows son las ventanas máximas de modelos cuyo proveedor no las
+// informa al listar los modelos.
+var knownWindows = map[string]int{
 	"mimo-v2.6-pro":            1048576,
 	"mimo-v2.6-pro-ultraspeed": 1048576,
 }
 
+// KnownWindow es la ventana máxima de un modelo conocido por su id, o 0.
+func KnownWindow(model string) int {
+	id := strings.ToLower(strings.TrimSpace(model))
+	return knownWindows[id[strings.LastIndex(id, "/")+1:]]
+}
+
 // MiMoWindow es la ventana de un modelo MiMo, o mimoContext si no se conoce.
 func MiMoWindow(model string) int {
-	id := strings.ToLower(strings.TrimSpace(model))
-	id = id[strings.LastIndex(id, "/")+1:]
-	if w, ok := mimoWindows[id]; ok {
+	if w := KnownWindow(model); w > 0 {
 		return w
 	}
 	return mimoContext
@@ -237,7 +241,7 @@ func (c *Config) FixMiMoWindow() {
 		return
 	}
 	auto := c.ContextWindow == DefaultGenericContext || c.ContextWindow == mimoContext
-	for _, w := range mimoWindows {
+	for _, w := range knownWindows {
 		auto = auto || c.ContextWindow == w
 	}
 	if auto {
