@@ -358,6 +358,93 @@ pub enum Status {
     Unverified,
 }
 
+/// Por qué una política quedó `blocked`, como TIPO: nunca se deduce del texto de `Policy.reason`. Lo fijan los puntos de
+/// `evaluate`/`evaluate_for`/`resolve_task_policy` que bloquean.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockCause {
+    /// El pedido no es válido (proveedor, perfil o rol desconocidos; combinación proveedor × perfil sin definición).
+    Invalid,
+    /// El perfil está definido pero deshabilitado ([`Profile::disabled_reason`]): decisión explícita de policy.
+    ProfileDisabled,
+    /// La entrega por `lxo done` no es posible en el sandbox (Codex sin red local).
+    Delivery,
+    /// La ruta del worktree de ESTA solicitud no se puede pasar a la CLI. No es una condición del proveedor (otra ruta
+    /// funcionaría), así que no es `Environment`: no produce `environment.blocked`.
+    WorktreePath,
+    /// El entorno o el proveedor impide lanzar. Es la única causa que produce `environment.blocked`.
+    Environment(EnvBlock),
+}
+
+/// Bloqueos del entorno/proveedor que el host comprueba antes de lanzar. Conjunto CERRADO: viaja TIPADO hasta la
+/// frontera `Tx`/Event (`environment.blocked` / `environment.cleared` lo serializan con `code()`) y se guarda en
+/// `State.env_blocks`; no hay cadenas libres que puedan persistirse y que el proyector ignore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvBlock {
+    /// La CLI del proveedor no está en el PATH.
+    CliMissing,
+    /// La versión instalada de la CLI no trae los flags que exige el perfil.
+    CliFlagsUnsupported,
+    /// El sandbox elevado de Codex en Windows impide el perfil de solo lectura.
+    WindowsSandboxElevated,
+}
+
+impl EnvBlock {
+    pub const ALL: [EnvBlock; 3] = [EnvBlock::CliMissing, EnvBlock::CliFlagsUnsupported, EnvBlock::WindowsSandboxElevated];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            EnvBlock::CliMissing => "cli_missing",
+            EnvBlock::CliFlagsUnsupported => "cli_flags_unsupported",
+            EnvBlock::WindowsSandboxElevated => "windows_sandbox_elevated",
+        }
+    }
+
+    pub fn parse(code: &str) -> Option<EnvBlock> {
+        EnvBlock::ALL.into_iter().find(|b| b.code() == code)
+    }
+}
+
+/// Evidencia POSITIVA de entorno de una comprobación real de la CLI, separada de `Policy.status`: la versión (`VERIFIED`) y
+/// el modelo (`mark_model`) deciden si se pide `ack_unverified`, pero no dicen nada de si el entorno funciona. Solo
+/// [`evaluate`] la fija, y solo con la CLI hallada y su `--help` LEGIBLE (`Skip`, CLI ausente o ayuda ilegible: nada
+/// demostrado). Cada campo demuestra una causa de [`EnvBlock`]; lo ambiguo queda en `false` y conserva el bloqueo. Una
+/// policy bloqueada por flags o por sandbox elevado solo lleva lo que esa comprobación llegó a demostrar (la CLI está;
+/// con el sandbox, además los flags), nunca lo que no llegó a examinar.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvProof {
+    /// La CLI está en el PATH y respondió a `--help`.
+    pub cli_present: bool,
+    /// Todos los flags del perfil (y `-o` de `codex exec`) aparecen en el `--help` de esa versión.
+    pub flags_supported: bool,
+    /// La config de Codex declara un sandbox de Windows que es POSITIVAMENTE no elevado (`mxc` o `unelevated`, ver
+    /// [`sandbox_proves_not_elevated`]). Sin valor leído (no es Windows, no es Codex o el fichero no dice nada) o con un
+    /// valor desconocido no se demuestra nada.
+    pub sandbox_not_elevated: bool,
+}
+
+impl EnvProof {
+    /// ¿Esta evidencia demuestra que `block` ya no se da?
+    pub fn demonstrates(self, block: EnvBlock) -> bool {
+        match block {
+            EnvBlock::CliMissing => self.cli_present,
+            EnvBlock::CliFlagsUnsupported => self.flags_supported,
+            EnvBlock::WindowsSandboxElevated => self.sandbox_not_elevated,
+        }
+    }
+
+    pub fn any(self) -> bool {
+        EnvBlock::ALL.into_iter().any(|b| self.demonstrates(b))
+    }
+}
+
+/// Valores oficiales de `[windows] sandbox` en la config de Codex: `mxc`, `elevated` y `unelevated`. Solo `mxc` y
+/// `unelevated` son evidencia POSITIVA de que el sandbox no es el elevado; `elevated` es el bloqueo, y un valor ausente
+/// o desconocido (otra versión, una errata, otra mayúscula) no demuestra nada: la comparación es exacta.
+pub fn sandbox_proves_not_elevated(value: Option<&str>) -> bool {
+    matches!(value, Some("mxc" | "unelevated"))
+}
+
 /// Política efectiva: lo que devuelve `orch_resolve_policy` y lo que se lanza.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Policy {
@@ -378,6 +465,12 @@ pub struct Policy {
     /// Modelo que se pedirá; con Codex sin modelo, MODEL_FROM_CONFIG (nunca un
     /// nombre inventado). `null` en Claude sin modelo.
     pub model: Option<String>,
+    /// Por qué está `blocked` (solo entonces). Tipado; no forma parte del contrato hacia la interfaz.
+    #[serde(skip)]
+    pub block: Option<BlockCause>,
+    /// Evidencia positiva de entorno de esta comprobación. Tipada y fuera del contrato hacia la interfaz.
+    #[serde(skip)]
+    pub env_proof: EnvProof,
 }
 
 pub const MODEL_FROM_CONFIG: &str = "el que defina config.toml";
@@ -426,9 +519,15 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
     missing
 }
 
-fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String) -> Policy {
+fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String, cause: BlockCause) -> Policy {
     let interactive = !(argv.get(1).is_some_and(|a| a == "exec" || a == "worker") || argv.iter().any(|a| a == "stream-json"));
-    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None }
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None, block: Some(cause), env_proof: EnvProof::default() }
+}
+
+/// La ruta del worktree se puede pasar a la CLI (sin caracteres de cmd). Es el MISMO criterio con el que `evaluate`
+/// bloquea por entorno ANTES de mirar el perfil: [`explicit_denial`] lo comparte para respetar esa precedencia.
+fn worktree_is_passable(worktree: &str) -> bool {
+    !worktree.chars().any(|c| "\"%^&|<>\r\n".contains(c))
 }
 
 /// Resuelve la política sin efectos: todo lo de la CLI llega en `detected`.
@@ -437,26 +536,26 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
     let exec = exec || codex_exec(provider, profile);
     let pid = profile.id();
     let Some(a) = spec(provider) else {
-        return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"));
+        return blocked(provider, pid, vec![], None, vec![], format!("Proveedor desconocido: {provider}"), BlockCause::Invalid);
     };
-    if worktree.chars().any(|c| "\"%^&|<>\r\n".contains(c)) {
-        return blocked(provider, pid, vec![], None, vec![], "La ruta del worktree tiene caracteres que no se pueden pasar a la CLI".into());
+    if !worktree_is_passable(worktree) {
+        return blocked(provider, pid, vec![], None, vec![], "La ruta del worktree tiene caracteres que no se pueden pasar a la CLI".into(), BlockCause::WorktreePath);
     }
     let (flags, warnings) = match profile_flags(provider, profile, worktree, exec) {
         Ok(f) => f,
-        Err(e) => return blocked(provider, pid, vec![], None, vec![], e),
+        Err(e) => return blocked(provider, pid, vec![], None, vec![], e, BlockCause::Invalid),
     };
     let mut argv = vec![a.bin.to_string()];
     if exec { argv.push("exec".into()); }
     argv.extend(flags);
     if let Some(r) = profile.disabled_reason() {
-        return blocked(provider, pid, argv, None, warnings, r.into());
+        return blocked(provider, pid, argv, None, warnings, r.into(), BlockCause::ProfileDisabled);
     }
     let interactive = !(exec || provider == LIXBON_CLI || argv.iter().any(|a| a == "stream-json"));
-    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None };
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None, block: None, env_proof: EnvProof::default() };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
-        Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin)),
+        Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin), BlockCause::Environment(EnvBlock::CliMissing)),
         Detected::Found(p) => {
             let version = p.version.clone();
             let help = if exec { p.exec_help.as_ref().or(p.help.as_ref()) } else { p.help.as_ref() };
@@ -470,13 +569,20 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
             }
             if !missing.is_empty() {
                 let v = version.as_deref().unwrap_or("versión desconocida");
-                return blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
-                    format!("{} {v} no admite: {}", a.label, missing.join(", ")));
+                let mut pol = blocked(provider, pid, argv.clone(), version.clone(), warnings.clone(),
+                    format!("{} {v} no admite: {}", a.label, missing.join(", ")), BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
+                // La CLI se halló y su ayuda se leyó: eso desmiente `cli_missing`. Los flags faltan y el sandbox NO se
+                // examina antes de bloquear por flags, así que ni uno ni otro se demuestran.
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+                return pol;
             }
             if codex_exec(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 let mut w = warnings.clone();
                 w.push(ELEVATED.into());
-                return blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into());
+                let mut pol = blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into(), BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
+                // Llegar aquí demuestra la CLI hallada y todos los flags del perfil; del sandbox solo que SIGUE elevado.
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+                return pol;
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
             let mut pol = match version.as_deref() {
@@ -484,6 +590,12 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 v => ok(Status::Unverified, version.clone(), Some(format!(
                     "Versión {} no verificada (verificadas: {}); sus flags sí aparecen en --help",
                     v.unwrap_or("desconocida"), verified.join(", ")))),
+            };
+            // La evidencia de entorno no depende de la versión: CLI hallada con ayuda legible y todos los flags presentes.
+            pol.env_proof = EnvProof {
+                cli_present: true,
+                flags_supported: true,
+                sandbox_not_elevated: sandbox_proves_not_elevated(p.windows_sandbox.as_deref()),
             };
             if codex_elevated_warns(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 pol.warnings.push(WARN_ELEVATED_RW.into());
@@ -540,6 +652,7 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
     if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
         p.status = Status::Blocked;
         p.reason = Some(format!("Rol desconocido: {r}"));
+        p.block = Some(BlockCause::Invalid);
         return p;
     }
     if p.status != Status::Blocked && provider == "codex" && !codex_allows_local_network(&p.argv) {
@@ -547,6 +660,7 @@ pub fn evaluate_for(provider: &str, profile: Profile, role: Option<&str>, worktr
             Delivery::LxoOnly => {
                 p.status = Status::Blocked;
                 p.reason = Some(CODEX_NO_LXO.into());
+                p.block = Some(BlockCause::Delivery);
             }
             Delivery::FileOrMarkers => {
                 let read_only = p.argv.iter().any(|a| a == "read-only");
@@ -603,7 +717,7 @@ pub fn resolve_policy(provider: &str, profile: &str, role: &str, worktree: &str)
 pub fn resolve_task_policy(provider: &str, profile: &str, role: Option<&str>, worktree: &str, delivery: Delivery) -> Policy {
     let Some(prof) = Profile::parse(profile) else {
         let mut p = blocked(provider, profile, vec![], None, vec![], format!(
-            "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")));
+            "Perfil desconocido: {profile}. Usa uno de: {}", Profile::ALL.map(|p| p.id()).join(", ")), BlockCause::Invalid);
         p.role = role.map(str::to_string);
         return p;
     };
@@ -692,12 +806,62 @@ pub fn launch_with(policy: &Policy, model: Option<&str>, effort: Option<&str>, p
 /// por intento, por eso no va en el argv de la política). Claude con stream-json
 /// corre con la salida canalizada: el JSONL llega sin cortes de ConPTY.
 pub fn launch_task(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>) -> Result<Launch, String> {
+    build_launch(policy, model, effort, prompt, last_message, true)
+}
+
+/// Valida el PEDIDO de un lanzamiento sin aplicar la compuerta de policy: agente conocido y disponible, modelo y
+/// esfuerzo admitidos, rol existente y una combinación proveedor × perfil que tenga definición. Todo eso es
+/// ENTRADA: si falla es un error y no se registra nada. Que una solicitud así de válida acabe `blocked` lo decide
+/// después la policy (ver [`explicit_denial`]); quien llama aplica la compuerta con [`authorize`].
+pub fn check_request(agent: &str, model: Option<&str>, effort: Option<&str>, profile: Profile, role: Option<&str>) -> Result<(), String> {
+    if let Some(r) = role.filter(|r| super::roles::spec(r).is_none()) {
+        return Err(format!("Rol desconocido: {r}"));
+    }
+    let policy = evaluate_for(agent, profile, role, ".", Detected::Skip, false, Delivery::FileOrMarkers);
+    build_launch(&policy, model, effort, "x", None, false)?;
+    profile_flags(agent, profile, ".", codex_exec(agent, profile)).map(|_| ())
+}
+
+/// Denegación EXPLÍCITA de policy: la solicitud es válida y una decisión de producto, no el entorno, la rechaza.
+/// Es la causa EFECTIVA del bloqueo: si el entorno (ruta del worktree inservible) o una combinación sin definición
+/// ya bloquean antes que el perfil —en el orden de [`evaluate`]—, el bloqueo NO es una denegación de policy.
+/// Es lo único que justifica registrar `spawn.requested` con `policy_status = blocked`. Cerrado y tipado: nunca se
+/// deduce del texto de `Policy.reason`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyDenial {
+    /// El perfil está definido pero deshabilitado ([`Profile::disabled_reason`]).
+    ProfileDisabled,
+}
+
+/// ¿Esta solicitud ya VÁLIDA (ver [`check_request`]) la deniega, en el worktree REAL donde correría, una decisión
+/// explícita de policy? Un bloqueo del entorno (CLI ausente, flags que la versión instalada no trae, sandbox elevado,
+/// ruta del worktree inservible) o del proveedor NO lo es: esos no se registran como solicitud denegada y nunca son
+/// `risk`, aunque el perfil esté además deshabilitado. Es una función de tipos y de la ruta: no consulta la CLI.
+pub fn explicit_denial(provider: &str, profile: Profile, worktree: &str) -> Option<PolicyDenial> {
+    // Mismo orden que `evaluate`: primero el entorno (ruta) y la definición de proveedor × perfil, después el perfil.
+    if !worktree_is_passable(worktree) {
+        return None;
+    }
+    profile_flags(provider, profile, worktree, codex_exec(provider, profile)).ok()?;
+    profile.disabled_reason().map(|_| PolicyDenial::ProfileDisabled)
+}
+
+/// La política de una denegación explícita, SIN consultar la CLI del proveedor (ni `--version`/`--help` ni su lista de
+/// modelos): con el perfil deshabilitado el resultado es el mismo que el de la resolución completa, así que no hay
+/// nada que sondear antes de denegar.
+pub fn denial_policy(provider: &str, profile: Profile, role: Option<&str>, worktree: &str, model: Option<&str>) -> Policy {
+    let mut policy = evaluate_for(provider, profile, role, worktree, Detected::Skip, false, Delivery::FileOrMarkers);
+    set_model(&mut policy, model);
+    policy
+}
+
+fn build_launch(policy: &Policy, model: Option<&str>, effort: Option<&str>, prompt: &str, last_message: Option<&str>, enforce_policy: bool) -> Result<Launch, String> {
     let agent = policy.provider.as_str();
     let a = spec(agent).ok_or_else(|| format!("Agente desconocido: {agent}. Usa uno de `lxo agents`."))?;
     if PAUSED.contains(&agent) {
         return Err(format!("{} no está disponible todavía como agente hijo en Lixbon. Usa uno de `lxo agents`.", a.label));
     }
-    if policy.status == Status::Blocked {
+    if enforce_policy && policy.status == Status::Blocked {
         return Err(format!("{} con el perfil {}: {}", a.label, policy.profile, policy.reason.as_deref().unwrap_or("bloqueado")));
     }
     let model = model.map(safe_token).transpose()?;
@@ -1291,6 +1455,60 @@ mod tests {
     }
 
     #[test]
+    fn solo_mxc_y_unelevated_demuestran_un_sandbox_no_elevado() {
+        // Valores oficiales de `[windows] sandbox`: mxc, elevated, unelevated. Los desconocidos no prueban nada.
+        let completa = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true };
+        let sin_sandbox = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        for (valor, prueba) in [(Some("mxc"), true), (Some("unelevated"), true), (Some("elevated"), false), (None, false)] {
+            assert_eq!(sandbox_proves_not_elevated(valor), prueba, "{valor:?}");
+        }
+        for desconocido in ["", "Elevated", "ELEVATED", "UNELEVATED", "Mxc", "mxc2", "elevated2", "disabled", "none", "read-only", " unelevated", "unelevated "] {
+            assert!(!sandbox_proves_not_elevated(Some(desconocido)), "{desconocido:?} no prueba nada");
+        }
+        for prof in [Profile::Explorar, Profile::Proponer] {
+            for (valor, esperada) in [(Some("mxc"), completa), (Some("unelevated"), completa), (None, sin_sandbox)] {
+                let found = Probe { windows_sandbox: valor.map(String::from), ..probe("0.162.1", CODEX_HELP) };
+                let p = evaluate("codex", prof, "wt", Detected::Found(&found), false);
+                assert_eq!((p.status, p.block, p.env_proof), (Status::Ok, None, esperada), "{prof:?} {valor:?}");
+            }
+            // Un valor desconocido NO bloquea (no es `elevated`) pero tampoco demuestra el sandbox: conserva su bloqueo.
+            for desconocido in ["", "Elevated", "ELEVATED", "mxc2", "disabled", "otro"] {
+                let found = Probe { windows_sandbox: Some(desconocido.into()), ..probe("0.162.1", CODEX_HELP) };
+                let p = evaluate("codex", prof, "wt", Detected::Found(&found), false);
+                assert_eq!((p.status, p.block, p.env_proof), (Status::Ok, None, sin_sandbox), "{prof:?} {desconocido:?}");
+            }
+            // `elevated` sigue siendo el bloqueo y no prueba el sandbox, solo lo que se llegó a examinar.
+            let elev = Probe { windows_sandbox: Some("elevated".into()), ..probe("0.162.1", CODEX_HELP) };
+            let p = evaluate("codex", prof, "wt", Detected::Found(&elev), false);
+            assert_eq!((p.status, p.block, p.env_proof), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::WindowsSandboxElevated)), sin_sandbox), "{prof:?}");
+        }
+        // Lo que lee la config llega tal cual: `mxc` y `unelevated` prueban; `elevated` y lo ajeno, no.
+        for (toml, prueba) in [("[windows]
+sandbox = \"mxc\"", true), ("windows.sandbox = 'unelevated'", true), ("[windows]
+sandbox = \"elevated\"", false), ("[windows]
+sandbox = \"Mxc\"", false), ("[otra]
+sandbox = \"mxc\"", false)] {
+            assert_eq!(sandbox_proves_not_elevated(codex_windows_sandbox(toml).as_deref()), prueba, "{toml}");
+        }
+    }
+
+    #[test]
+    fn un_bloqueo_solo_lleva_la_evidencia_que_llego_a_demostrar() {
+        // Flags que faltan: la CLI está (desmiente `cli_missing`), pero ni los flags ni el sandbox se demuestran.
+        let vieja = CODEX_EXEC_HELP_162.replace("--sandbox", "--sbx");
+        let found = Probe { exec_help: Some(vieja.clone()), ..probe("0.159.0", CODEX_HELP) };
+        let p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&found), false);
+        assert_eq!((p.status, p.block), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported))));
+        assert_eq!(p.env_proof, EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false });
+        // CLI ausente: nada.
+        let ausente = evaluate("codex", Profile::Explorar, "wt", Detected::Missing, false);
+        assert_eq!(ausente.env_proof, EnvProof::default());
+        // Flags que faltan Y sandbox no elevado en la config: el sandbox no se examina antes de bloquear por flags.
+        let ambas = Probe { windows_sandbox: Some("unelevated".into()), ..found.clone() };
+        assert!(!evaluate("codex", Profile::Explorar, "wt", Detected::Found(&ambas), false).env_proof.sandbox_not_elevated);
+    }
+
+    #[test]
     fn claude_stream_json_y_lxo_report_en_la_politica() {
         let found = probe("2.1.296", CLAUDE_HELP);
         for prof in [Profile::Explorar, Profile::Proponer] {
@@ -1455,5 +1673,50 @@ mod tests {
         let m = parse_lines("Available models:\n- auto (default)\n- gpt-5.5\nanthropic/claude-sonnet-5\n");
         let ids: Vec<&str> = m.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["auto", "gpt-5.5", "anthropic/claude-sonnet-5"]);
+    }
+
+    /// LXO-88: la causa de un bloqueo es un TIPO que fija cada punto de `evaluate`; nadie lee `reason`.
+    #[test]
+    fn cada_bloqueo_lleva_su_causa_tipada() {
+        use BlockCause::{Environment, Invalid, ProfileDisabled, WorktreePath};
+        let causa = |p: Policy| (p.status, p.block);
+        let b = Status::Blocked;
+        // Pedido inválido: proveedor desconocido, combinación sin definición, rol desconocido, perfil desconocido.
+        assert_eq!(causa(evaluate("inventado", Profile::Explorar, "wt", Detected::Skip, false)), (b, Some(Invalid)));
+        assert_eq!(causa(evaluate("gemini", Profile::Explorar, "wt", Detected::Skip, false)), (b, Some(Invalid)));
+        assert_eq!(causa(evaluate_for("claude", Profile::Explorar, Some("inventado"), "wt", Detected::Skip, false, Delivery::FileOrMarkers)), (b, Some(Invalid)));
+        assert_eq!(causa(resolve_task_policy("claude", "inventado", None, "wt", Delivery::Query)), (b, Some(Invalid)));
+        // Decisión de policy y ruta de ESTA solicitud: no son condiciones del proveedor.
+        assert_eq!(causa(evaluate("claude", Profile::AutonomiaAmplia, "wt", Detected::Skip, false)), (b, Some(ProfileDisabled)));
+        assert_eq!(causa(evaluate("claude", Profile::Explorar, "w&t", Detected::Skip, false)), (b, Some(WorktreePath)));
+        // Entorno / proveedor.
+        assert_eq!(causa(evaluate("claude", Profile::Explorar, "wt", Detected::Missing, false)), (b, Some(Environment(EnvBlock::CliMissing))));
+        let sin_o = Probe { exec_help: Some(CODEX_EXEC_HELP_162.replace("--output-last-message", "--x")), ..probe("0.162.1", CODEX_HELP) };
+        assert_eq!(causa(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&sin_o), false)), (b, Some(Environment(EnvBlock::CliFlagsUnsupported))));
+        let elevado = Probe { windows_sandbox: Some("elevated".into()), ..probe("0.162.1", CODEX_HELP) };
+        assert_eq!(causa(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&elevado), false)), (b, Some(Environment(EnvBlock::WindowsSandboxElevated))));
+        // Lo que no está bloqueado no lleva causa.
+        assert_eq!(evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false).block, None);
+        // Solo estas tres causas son del entorno, y sus códigos son un conjunto cerrado y estable.
+        assert_eq!(EnvBlock::ALL.map(EnvBlock::code), ["cli_missing", "cli_flags_unsupported", "windows_sandbox_elevated"]);
+        assert!(EnvBlock::ALL.into_iter().all(|c| EnvBlock::parse(c.code()) == Some(c)));
+        assert_eq!(EnvBlock::parse("worktree_path_unusable"), None);
+    }
+
+    /// LXO-88: `EnvProof::any` solo es cierto si ALGUNA prueba demuestra algo (guarda de `observe_environment`).
+    #[test]
+    fn env_proof_any_solo_es_cierto_con_alguna_prueba() {
+        assert!(!EnvProof::default().any(), "sin ninguna prueba no demuestra nada");
+        for (proof, causa) in [
+            (EnvProof { cli_present: true, ..EnvProof::default() }, EnvBlock::CliMissing),
+            (EnvProof { flags_supported: true, ..EnvProof::default() }, EnvBlock::CliFlagsUnsupported),
+            (EnvProof { sandbox_not_elevated: true, ..EnvProof::default() }, EnvBlock::WindowsSandboxElevated),
+        ] {
+            assert!(proof.any(), "{causa:?}");
+            assert!(proof.demonstrates(causa), "{causa:?}");
+            for otra in EnvBlock::ALL.into_iter().filter(|o| *o != causa) {
+                assert!(!proof.demonstrates(otra), "{proof:?} solo demuestra {causa:?}, no {otra:?}");
+            }
+        }
     }
 }

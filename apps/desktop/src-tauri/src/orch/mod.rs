@@ -5,6 +5,8 @@
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
 mod agents;
+// Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
+mod attention_rules;
 mod authority;
 mod boot_authority;
 mod client_identity;
@@ -28,7 +30,15 @@ mod tx_ops_tests;
 #[cfg(test)]
 mod attention_update_api_tests;
 #[cfg(test)]
+mod attention_rules_tests;
+#[cfg(test)]
+mod attention_writers_tests;
+#[cfg(test)]
+mod attention_sources_tests;
+#[cfg(test)]
 mod spawn_cleanup_tests;
+#[cfg(test)]
+mod spawn_blocked_tests;
 #[cfg(test)]
 mod hardening_tests;
 mod projects;
@@ -152,6 +162,9 @@ pub struct Core {
     pending: Mutex<HashMap<String, spawn_approval::Entry>>,
     /// Serializa las transiciones de un pendiente (ver `spawn_approval::Core::gate`).
     pend_gate: Mutex<()>,
+    /// Serializa «resolver la policy del host + dejar constancia de lo que dice del entorno» (`resolve_and_observe`):
+    /// una observación vieja no puede aplicarse DESPUÉS de una más nueva y dejar un bloqueo que ya no existe.
+    env_gate: Mutex<()>,
     /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
     resolver: Resolver,
     ttl_ms: u64,
@@ -188,6 +201,7 @@ impl Default for Orch {
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             pend_gate: Mutex::new(()),
+            env_gate: Mutex::new(()),
             resolver: resolve_real,
             ttl_ms: spawn_approval::ttl_ms(),
             #[cfg(test)]

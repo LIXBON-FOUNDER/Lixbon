@@ -284,17 +284,20 @@ fn ask_y_reply_emiten_contenido_y_la_transicion_real() {
     let ctx_hija = MutationContext::agent(&a, Channel::Lxo);
     let (r, evs) = paso_como(&core, &ctx_hija, |tx| tx.ask(&a, "¿qué rama uso?"));
     let q = r.unwrap();
-    assert_eq!(kinds(&evs), vec!["task.question", "task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.question", "task.status_changed", "attention.created"]);
     assert_eq!(pl(&evs[0]), json!({ "message_id": q, "to": root }), "el cuerpo de la pregunta no viaja en el evento");
     assert_eq!(pl(&evs[1]), json!({ "from": "running", "to": "waiting", "cause": "question" }));
-    assert!(evs.iter().all(|e| e.actor_kind.as_str() == "agent" && e.actor_id.as_deref() == Some(a.as_str()) && e.channel.as_deref() == Some("lxo")));
+    assert!(evs.iter().filter(|e| e.entity_kind != "attention").all(|e| e.actor_kind.as_str() == "agent" && e.actor_id.as_deref() == Some(a.as_str()) && e.channel.as_deref() == Some("lxo")));
+    // El `attention.created` de la pregunta lo emite el Core en la misma transacción, referido a su Event origen.
+    assert_eq!((evs[2].actor_kind.as_str(), evs[2].channel.as_deref()), ("system", Some("core")));
+    assert_eq!(pl(&evs[2])["source_event_id"], evs[0].id.as_str());
     assert_eq!(evs[0].correlation_id.as_deref(), Some(format!("q{q}").as_str()));
 
     // La respuesta: la entidad es la tarea que PREGUNTÓ; el actor, quien responde.
     let ctx_raiz = MutationContext::agent(&root, Channel::Lxo);
     let (r, evs) = paso_como(&core, &ctx_raiz, |tx| tx.reply(&root, q, "la principal"));
     let reply = r.unwrap();
-    assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed", "attention.resolved"]);
     assert_eq!((evs[0].entity_id.as_str(), evs[0].actor_id.as_deref()), (a.as_str(), Some(root.as_str())));
     assert_eq!(pl(&evs[0]), json!({ "question_id": q, "message_id": reply }), "quien responde es el actor del evento, no un campo");
     assert_eq!(evs[0].correlation_id, Some(format!("q{q}")), "la respuesta se correlaciona con la pregunta");
@@ -309,7 +312,7 @@ fn una_respuesta_a_quien_ya_termino_no_emite_transicion() {
     core.mutate(|tx| tx.close(&a, Status::Stopped, "detenida").map(|_| ())).unwrap();
     let (r, evs) = paso(&core, |tx| tx.reply(&root, q, "tarde"));
     r.unwrap();
-    assert_eq!(kinds(&evs), vec!["task.reply"], "la que preguntó ya era final: no hay cambio de estado");
+    assert_eq!(kinds(&evs), vec!["task.reply", "attention.resolved"], "la que preguntó ya era final: no hay cambio de estado");
 }
 
 #[test]
@@ -400,7 +403,7 @@ fn los_vigilantes_de_terminal_emiten_como_el_core_una_sola_transicion() {
     let antes = head(&core);
     core.on_approval_change(&a, Change::Entered(999));
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.status_changed", "attention.created"]);
     assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "awaiting_terminal_approval", "cause": "terminal_approval" }));
     assert_eq!((evs[0].actor_kind.as_str(), evs[0].actor_id.as_deref(), evs[0].channel.as_deref()), ("system", None, Some("core")));
     // Repetir la observación con otro plazo cambia el plazo (una mutación) pero NO el estado: sin evento.
@@ -416,7 +419,7 @@ fn los_vigilantes_de_terminal_emiten_como_el_core_una_sola_transicion() {
     let antes = head(&core);
     core.on_guard_timeout(&b, Timeout::Idle);
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.status_changed", "attention.created"], "el fallo por inactividad pide atención en su misma transacción");
     assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed", "cause": "agent_idle_timeout" }));
     assert_eq!((evs[0].actor_kind.as_str(), evs[0].channel.as_deref()), ("system", Some("core")));
 }
@@ -514,13 +517,13 @@ fn cada_comando_de_rpc_deja_exactamente_los_eventos_de_su_mutador_con_su_actor()
     assert_eq!((evs[0].actor_kind.as_str(), evs[0].actor_id.as_deref(), evs[0].channel.as_deref()), ("agent", Some(hija.as_str()), Some("lxo")));
     // ask (agente) -> pregunta + espera
     let evs = ejecuta(agente(&hija), "ask", json!({ "question": "¿rama?" }));
-    assert_eq!(kinds(&evs), vec!["task.question", "task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.question", "task.status_changed", "attention.created"]);
     let q = pl(&evs[0])["message_id"].as_u64().unwrap();
     // reply (PERSONA desde la interfaz) -> respuesta + vuelve a correr
     let evs = ejecuta(Caller::User, "reply", json!({ "question": q, "answer": "main" }));
-    assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.reply", "task.status_changed", "attention.resolved"]);
     let client_id = evs[0].client_id.as_deref().expect("client_id autenticado");
-    assert!(evs.iter().all(|e| {
+    assert!(evs.iter().filter(|e| e.entity_kind != "attention").all(|e| {
         e.actor_kind.as_str() == "person"
             && e.actor_id.as_deref() == Some("user")
             && e.channel.as_deref() == Some("ui")
@@ -693,7 +696,7 @@ fn collect_atribuye_el_informe_valido_al_agente_y_el_resto_al_core() {
     let antes = head(&core);
     core.apply_found(&b, Found::Invalid("roto".into()), true);
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.status_changed", "attention.created"]);
     assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed" }));
     assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "informe inválido: lo decide el Core");
 
@@ -729,7 +732,7 @@ fn collect_no_entregado_y_el_fallback_de_aplicacion_son_del_core() {
     let antes = head(&core);
     core.apply_found(&b, Found::Valid(informe("hecho")), true);
     let evs = desde(&core, antes);
-    assert_eq!(kinds(&evs), vec!["task.status_changed"]);
+    assert_eq!(kinds(&evs), vec!["task.status_changed", "attention.created"]);
     assert_eq!(pl(&evs[0]), json!({ "from": "running", "to": "failed" }));
     assert_eq!(actor_y_canal(&evs[0]), ("system", None, Some("core")), "fallback del Core tras fallar la aplicación");
 }
@@ -830,10 +833,24 @@ fn cada_decision_de_una_persona_emite_un_decision_recorded_con_su_payload_cerrad
         ),
     ];
     let mut ultimo_seq = head(&core);
+    let mut conflicto_abierto = false;
     for (kind, detail, esperado) in casos {
         let (r, evs) = decide(&core, &a, kind, detail);
         let id = r.unwrap_or_else(|e| panic!("{kind}: {e:?}"));
-        assert_eq!(kinds(&evs), vec!["decision.recorded"], "{kind}: una decisión, un evento");
+        // Solo una integración con conflicto pide atención (`attention.created`, en la misma transacción).
+        // Una integración con conflicto levanta `conflict`; la siguiente que integra la resuelve.
+        let esperados = match (kind, esperado["outcome"].as_str()) {
+            ("merge", Some("conflict")) if !conflicto_abierto => {
+                conflicto_abierto = true;
+                vec!["decision.recorded", "attention.created"]
+            }
+            ("merge", Some("merged")) if conflicto_abierto => {
+                conflicto_abierto = false;
+                vec!["decision.recorded", "attention.resolved"]
+            }
+            _ => vec!["decision.recorded"],
+        };
+        assert_eq!(kinds(&evs), esperados, "{kind}: una decisión, un evento");
         let mut con_id = esperado.clone();
         con_id["decision_id"] = json!(id);
         assert_eq!(pl(&evs[0]), con_id, "{kind}");
