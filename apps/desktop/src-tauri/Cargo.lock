@@ -2504,12 +2504,14 @@ name = "lixbon"
 version = "2.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "ignore",
  "keyring",
  "libc",
  "notify",
  "portable-pty",
  "regex",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

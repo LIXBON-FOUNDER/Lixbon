@@ -42,4 +42,5 @@ impl Core {
     pub fn publish_pr_from_ui(&self, task: &str, confirm: bool) -> Result<Value, String> {
         integration::publish_pr(&self.acting(person_ui(self)?), true, &json!({ "task": task, "confirm": confirm }), &git::gh_pr)
     }
+
 }

@@ -26,7 +26,7 @@ use rusqlite::Transaction;
 use serde_json::{json, Map, Value};
 
 use super::attention::{
-    attention_latest_in, attention_raise_in, attention_resolve_in, attention_update_active_in, AttentionCategory, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate,
+    attention_get_in, attention_latest_in, attention_raise_in, attention_resolve_in, attention_update_active_in, AttentionCategory, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate,
     NewAttention, Raised, Resolution, ResolveOutcome, Severity, TargetKind, UpdateOutcome,
 };
 use super::authority::new_uuid_v7;
@@ -47,6 +47,8 @@ pub(crate) struct Key {
 pub(crate) enum Intent {
     Raise { key: Key, severity: Severity, facts: Map<String, Value> },
     Resolve { key: Key, resolution: Resolution },
+    /// Resuelve una fila concreta tras una decisión explícita de la persona.
+    ResolveId { id: String, category: AttentionCategory, resolution: Resolution },
 }
 
 /// Lo que las reglas derivan de UN Event.
@@ -78,6 +80,10 @@ impl Derived {
         if let Some(key) = self.key(category, kind, id, subject) {
             self.intents.push(Intent::Resolve { key, resolution });
         }
+    }
+
+    pub(crate) fn resolve_id(&mut self, category: AttentionCategory, id: &str, resolution: Resolution) {
+        self.intents.push(Intent::ResolveId { id: id.to_string(), category, resolution });
     }
 }
 
@@ -235,6 +241,7 @@ pub(crate) fn project_attention_in(tx: &Transaction<'_>, rules: &dyn AttentionRu
             match intent {
                 Intent::Raise { key, severity, facts } => raise(tx, e, &key, severity, facts, &mut report, &mut emitted)?,
                 Intent::Resolve { key, resolution } => resolve(tx, e, &key, resolution, &mut report, &mut emitted)?,
+                Intent::ResolveId { id, category, resolution } => resolve_id(tx, e, &id, category, resolution, &mut report, &mut emitted)?,
             }
         }
     }
@@ -288,6 +295,30 @@ fn resolve(tx: &Transaction<'_>, e: &EventRow, key: &Key, resolution: Resolution
             }
         }
     }
+    Ok(())
+}
+
+fn resolve_id(
+    tx: &Transaction<'_>,
+    e: &EventRow,
+    id: &str,
+    category: AttentionCategory,
+    resolution: Resolution,
+    report: &mut Report,
+    emitted: &mut Vec<NewEvent>,
+) -> Result<(), ProjectError> {
+    let row = attention_get_in(tx, id)?.ok_or_else(|| StoreError::InvalidAttention(format!("risk {id} inexistente")))?;
+    if row.category != category {
+        return Err(StoreError::InvalidAttention(format!("{id}: se esperaba una Attention de categoría {}", category.as_str())).into());
+    }
+    if row.status != AttentionStatus::Active {
+        return Err(StoreError::InvalidAttention(format!("{id}: la Attention risk no está activa")).into());
+    }
+    let ResolveOutcome::Resolved(done) = attention_resolve_in(tx, id, resolution, e.at.max(row.created_at))? else {
+        return Err(StoreError::InvalidAttention(format!("{id}: la Attention risk dejó de estar activa")).into());
+    };
+    emitted.push(resolved_event(&done, &e.id, e.at));
+    report.resolved.push(done);
     Ok(())
 }
 

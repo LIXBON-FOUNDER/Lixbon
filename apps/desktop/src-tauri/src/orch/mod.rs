@@ -7,6 +7,8 @@
 mod agents;
 // Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
 mod attention_rules;
+mod attention_read;
+mod attention_action;
 mod authority;
 mod boot_authority;
 mod client_identity;
@@ -29,6 +31,10 @@ mod events_tests;
 mod tx_ops_tests;
 #[cfg(test)]
 mod attention_update_api_tests;
+#[cfg(test)]
+mod attention_read_tests;
+#[cfg(test)]
+mod attention_action_tests;
 #[cfg(test)]
 mod attention_rules_tests;
 #[cfg(test)]
@@ -157,6 +163,8 @@ pub struct Core {
     settings: Mutex<Settings>,
     /// Identidad autenticada del límite Tauri, estable para esta instalación.
     desktop_identity: Mutex<Option<crate::store::AuthenticatedClient>>,
+    /// Clave AEAD efímera de cursores de Attention; rota al reiniciar el Core, por lo que reconectar empieza en página 1.
+    attention_cursor_key: Mutex<Option<[u8; 32]>>,
     server: Mutex<Option<server::Handle>>,
     /// Lanzamientos esperando la aprobación de la persona (solo en memoria).
     pending: Mutex<HashMap<String, spawn_approval::Entry>>,
@@ -198,6 +206,7 @@ impl Default for Orch {
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             desktop_identity: Mutex::new(None),
+            attention_cursor_key: Mutex::new(None),
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             pend_gate: Mutex::new(()),

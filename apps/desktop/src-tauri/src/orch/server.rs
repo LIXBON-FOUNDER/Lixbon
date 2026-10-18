@@ -273,7 +273,10 @@ mod tests {
 mod authenticated_client_tests {
     use super::*;
     use crate::orch::boot_tests;
-    use crate::store::{ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, EventQuery};
+    use crate::store::{
+        AttentionCategory, AttentionTarget, ClientCredential, ClientPrincipal, ClientRegistration,
+        ClientSurface, DeviceIdentity, EventQuery, NewAttention, Raised, Severity, TargetKind,
+    };
 
     fn register(core: &Core, surface: ClientSurface, principal: ClientPrincipal, installation: &str, secret: &str) -> String {
         let registration = ClientRegistration::new(surface, DeviceIdentity::new(installation, None).unwrap()).unwrap();
@@ -469,6 +472,109 @@ mod authenticated_client_tests {
 
         assert_eq!(status, 403, "Person/Cli no hereda la lectura de eventos de Desktop: {response}");
         assert_eq!(response["ok"], false);
+        server.stop();
+    }
+
+    #[test]
+    fn http_rpc_attention_aplica_scope_autenticado_y_comparte_dto() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let own_task = create_ui_task(&core, "attention HTTP own task");
+        let other_task = create_ui_task(&core, "attention HTTP other task");
+        let person_secret = "person-attention-http-secret-at-least-32-bytes";
+        let agent_secret = "agent-attention-http-secret-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-attention-http".into()),
+            "install-person-attention-http",
+            person_secret,
+        );
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Agent(own_task.clone()),
+            "install-agent-attention-http",
+            agent_secret,
+        );
+        let make_attention = |target: &str, at| NewAttention {
+            category: AttentionCategory::Failed,
+            severity: Severity::High,
+            target: AttentionTarget::new(TargetKind::Task, target).unwrap(),
+            project_id: Some("project-http".into()),
+            run_id: None,
+            subject: Some(format!("private-{target}")),
+            source_event_id: None,
+            correlation_id: None,
+            facts: "{\"internal\":\"must-not-leak\"}".into(),
+            at,
+        };
+        let add_attention = |new: NewAttention| {
+            core.storage
+                .with_store(|store| match store.attention_raise(&new).unwrap() {
+                    Raised::Created(row) => row.id,
+                    other => panic!("se esperaba una fila nueva, salió {other:?}"),
+                })
+                .unwrap()
+        };
+        let own_id = add_attention(make_attention(&own_task, 1_000));
+        let other_id = add_attention(make_attention(&other_task, 2_000));
+        let server = start(core).unwrap();
+
+        let (status, person) = post(server.port, person_secret, &json!({
+            "cmd": "attention_list", "args": {"limit": 10}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(person["ok"], true, "Person CLI puede leer el Core local: {person}");
+        let items = person["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        let fields: std::collections::BTreeSet<_> = items[0].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(fields, [
+            "category", "created_at", "id", "occurrence", "project_id", "resolution",
+            "resolved_at", "run_id", "severity", "status", "target_id", "target_kind",
+        ].into_iter().collect());
+        let (status, detail) = post(server.port, person_secret, &json!({
+            "cmd": "attention_detail", "args": {"attention_id": items[0]["id"]}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(detail["ok"], true, "detail también pasa por el DTO común: {detail}");
+        assert_eq!(detail["data"]["id"], items[0]["id"]);
+
+        let (status, agent) = post(server.port, agent_secret, &json!({
+            "cmd": "attention_list", "args": {"limit": 10}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(agent["ok"], true, "Agent puede leer su Task: {agent}");
+        assert_eq!(agent["data"]["items"].as_array().unwrap().len(), 1);
+        assert_eq!(agent["data"]["items"][0]["id"], own_id);
+
+        let (status, scoped) = post(server.port, agent_secret, &json!({
+            "cmd": "attention_list", "args": {"target_id": other_task}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(scoped["ok"], true);
+        assert_eq!(scoped["data"]["items"].as_array().unwrap().len(), 0, "filtro no amplía scope Agent");
+
+        let (status, detail) = post(server.port, agent_secret, &json!({
+            "cmd": "attention_detail", "args": {"attention_id": other_id}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(detail["ok"], false, "detail ajeno se oculta igual que inexistente");
+
+        let (status, spoofed) = post(server.port, person_secret, &json!({
+            "cmd": "attention_list", "caller": own_task, "args": {}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(spoofed["ok"], false, "claims del request no cambian el principal autenticado");
+
+        let (status, legacy) = post(server.port, &server.token, &json!({
+            "cmd": "attention_list", "caller": own_task, "args": {}
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(legacy["ok"], false, "el token legacy del servidor no habilita la nueva API de Attention");
+        assert!(legacy["error"].as_str().unwrap().contains("attention_auth_required"));
         server.stop();
     }
 

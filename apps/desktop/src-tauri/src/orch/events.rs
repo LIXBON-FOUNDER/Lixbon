@@ -182,6 +182,7 @@ pub(super) enum EntityKind {
     Run,
     Project,
     SpawnRequest,
+    Attention,
     /// Un proveedor de agentes (`claude`, `codex`…): condiciones de su entorno (`environment.*`).
     Agent,
     /// Hechos del sistema sin Task ni Project natural.
@@ -195,6 +196,7 @@ impl EntityKind {
             EntityKind::Run => "run",
             EntityKind::Project => "project",
             EntityKind::SpawnRequest => "spawn_request",
+            EntityKind::Attention => "attention",
             EntityKind::Agent => "agent",
             EntityKind::Core => "core",
         }
