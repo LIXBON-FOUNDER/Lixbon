@@ -367,6 +367,7 @@ impl Store {
         for e in events {
             e.check()?;
         }
+        let projector = self.projector.clone();
         self.write(|tx| {
             if meta_get(tx, META_MODE)?.as_deref() != Some(MODE_SQLITE_AUTHORITATIVE) {
                 return Err(StoreError::NotAuthoritative);
@@ -381,7 +382,7 @@ impl Store {
                 return Err(StoreError::RevConflict { expected: expected_rev, actual: current_rev(tx)? });
             }
             crash_point("mutate_in_tx");
-            super::events::insert_events(tx, events, Some(next))?;
+            super::events::insert_events_projected(tx, events, Some(next), projector.as_deref())?;
             crash_point("mutate_events_in_tx");
             Ok(next)
         })

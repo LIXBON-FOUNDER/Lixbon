@@ -154,10 +154,25 @@ impl Core {
     /// se persiste nada: nunca existió una solicitud durable.
     pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
         let plan = self.plan_spawn(caller, args)?;
-        let policy = self.task_policy(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref());
+        // Un perfil bloqueado se rechaza sin preguntar a nadie. SOLO una denegación explícita de policy (tipada,
+        // `agents::explicit_denial`, sobre el worktree real) deja constancia durable de la solicitud antes de devolverla;
+        // un bloqueo del entorno o del proveedor se rechaza como siempre, sin `spawn.requested`, y nunca es `risk` (si la causa tipada
+        // es del proveedor, `observe_environment` deja `environment.blocked`).
+        //
+        // La denegación explícita se decide por tipos y su política es estática (`agents::denial_policy`): ANTES de
+        // denegar no se lanza ningún subproceso de la CLI del proveedor (sonda de `--version`/`--help`, lista de modelos).
+        let explicit = agents::Profile::parse(&plan.profile).filter(|profile| agents::explicit_denial(&plan.provider, *profile, &plan.cwd).is_some());
+        let policy = match explicit {
+            Some(profile) => agents::denial_policy(&plan.provider, profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref()),
+            None => self.resolve_and_observe(&plan.provider, &plan.profile, plan.role.as_deref(), &plan.cwd, plan.model.as_deref())?,
+        };
+        let mut registrar_denegacion = None;
         if policy.status == agents::Status::Blocked {
-            // Igual que antes: un perfil bloqueado se rechaza sin preguntar a nadie.
-            agents::authorize(&policy, None, true)?;
+            let denial = agents::authorize(&policy, None, true).expect_err("authorize rechaza siempre una policy bloqueada");
+            if explicit.is_none() {
+                return Err(denial);
+            }
+            registrar_denegacion = Some(denial);
         }
         let now = state::now_ms();
         let mut p = plan;
@@ -169,7 +184,22 @@ impl Core {
             let _gate = self.gate();
             self.check_parent_live(&p)?;
             let fact = spawn_requested_fact(&ctx, &p)?;
+            // `record_facts` devuelve éxito SIN guardar nada cuando el backend no tiene Event Log (`state.json`). Una
+            // denegación solo se devuelve con su Event durable: sin Event Log no hay dónde dejarlo, así que se informa
+            // de eso (no de una denegación «registrada»). Sigue sin pendiente ni efecto alguno.
+            if let Some(denial) = &registrar_denegacion {
+                if !self.event_log_available() {
+                    return Err(format!(
+                        "No se pudo dejar constancia durable de la solicitud denegada: este modo (state.json) no tiene Event Log. No se lanza nada. Motivo de la denegación: {denial}"
+                    ));
+                }
+            }
             self.record_facts(&ctx, vec![fact]).map_err(String::from)?;
+            if let Some(denial) = registrar_denegacion {
+                // Ya es durable. La denegación NO crea pendiente, Task, aprobación, aviso, terminal, proceso ni
+                // worktree, y no habrá `spawn.resolved`: la solicitud nace y termina denegada.
+                return Err(denial);
+            }
             self.pend().insert(p.pending_id.clone(), Entry { p: p.clone(), state: PendState::Pending, decision: None, resolved_at: None });
             // La fila durable, el estado en memoria, el evento de UI y el aviso quedan serializados contra
             // reject/sweep/approve: nunca se publica una tarjeta después de su resolución.
@@ -182,6 +212,60 @@ impl Core {
             "provider": p.provider, "profile": p.profile, "role": p.role, "title": p.title,
             "policy_status": p.policy.status,
         }))
+    }
+
+    /// Resuelve la policy del host Y deja constancia durable de lo que dice del entorno, en UN solo paso serializado
+    /// (`env_gate`). Es el único punto por el que `spawn_request`, `approve_spawn` y el recheck de `launch` consultan la
+    /// policy real: la resolución y la observación son atómicas entre sí, así que una comprobación más vieja no puede
+    /// escribir después de una más nueva (carrera de frescura). El orden de bloqueos es `pend_gate → env_gate → estado →
+    /// almacén`: ningún camino toma `pend_gate` con `env_gate` ya tomado.
+    pub(super) fn resolve_and_observe(&self, provider: &str, profile: &str, role: Option<&str>, cwd: &str, model: Option<&str>) -> Result<agents::Policy, String> {
+        let _env = self.env_gate.lock().unwrap_or_else(|e| e.into_inner());
+        let policy = self.task_policy(provider, profile, role, cwd, model);
+        self.observe_environment(&policy)?;
+        Ok(policy)
+    }
+
+    /// Deja constancia durable de lo que la policy resuelta dice del ENTORNO del proveedor en el perfil comprobado
+    /// (`environment.blocked` / `environment.cleared`, ver `Tx::environment_blocked`). Solo mira la causa TIPADA
+    /// (`Policy.block`), nunca el texto de `reason`, y solo escribe cuando el bloqueo vigente cambia.
+    ///
+    /// * `Blocked` por una causa de ENTORNO → `environment.blocked` de ESA causa, que se suma a las activas del alcance
+    ///   (nunca reemplaza ni levanta otra); solo cae lo que la propia comprobación demuestra. Cualquier otro bloqueo (perfil deshabilitado, entrada
+    ///   inválida, ruta de la solicitud) no dice nada del entorno: ni lo bloquea ni lo levanta.
+    /// * SOLO la evidencia positiva tipada (`Policy.env_proof`: CLI hallada con `--help` legible y flags presentes) levanta
+    ///   un bloqueo, y únicamente las causas que demuestra. NO depende de `status`: una versión sin fijar o un modelo no
+    ///   listado (`unverified`) no impiden levantarlo, y `Skip`, una ayuda ilegible o lo ambiguo lo CONSERVAN.
+    /// * Sin Event Log (`state.json`) no se marca nada: un marcador sin su Event durable ocultaría la señal para siempre.
+    ///   En producción ese modo es solo lectura (arranque `DegradeC1`) y la mutación se rechaza antes de tocar el estado.
+    fn observe_environment(&self, policy: &agents::Policy) -> Result<(), String> {
+        if !self.event_log_available() {
+            return Ok(());
+        }
+        let (provider, profile) = (policy.provider.as_str(), policy.profile.as_str());
+        match (policy.status, policy.block) {
+            (agents::Status::Blocked, Some(agents::BlockCause::Environment(code))) => self
+                .mutate_as(&MutationContext::core(), |tx| {
+                    // La causa nueva se SUMA a las activas y no levanta ninguna. Lo único que levanta es lo que la propia
+                    // comprobación bloqueada demuestra (p. ej. `cli_missing` si la CLI se halló pero faltan flags).
+                    let levantado = tx.environment_verified(provider, profile, policy.env_proof);
+                    let bloqueado = tx.environment_blocked(provider, profile, code);
+                    if !(levantado || bloqueado) {
+                        tx.no_change();
+                    }
+                    Ok(())
+                })
+                .map_err(String::from),
+            _ if policy.env_proof.any() && self.lock().has_env_blocks_of(provider) => self
+                .mutate_as(&MutationContext::core(), |tx| {
+                    if !tx.environment_verified(provider, profile, policy.env_proof) {
+                        tx.no_change();
+                    }
+                    Ok(())
+                })
+                .map_err(String::from),
+            _ => Ok(()),
+        }
     }
 
     /// El pendiente vence solo: avisa aunque la persona esté en otro modo o ventana.
@@ -210,7 +294,7 @@ impl Core {
             pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), project_id: parent.project_id.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
             env: if f.shared { worktree_env::Plan::default() } else { worktree_env::plan(&parent.repo) },
-            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None },
+            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None, block: None, env_proof: agents::EnvProof::default() },
             created_at: 0, expires_at: 0, spec: f.spec, base: f.base
         }
     }
@@ -348,7 +432,7 @@ impl Core {
             return Err(format!("El Core está en solo lectura ({why}): no se puede aprobar un lanzamiento hasta que se recupere el almacenamiento"));
         }
         let p = self.pend().get(pending_id).map(|e| e.p.clone()).ok_or("Pendiente desaparecido")?;
-        let policy = self.task_policy(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref());
+        let policy = self.resolve_and_observe(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref())?;
         // Errores de uso (argv distinto, sin ack, bloqueado ahora): no se lanza y sigue pendiente.
         agents::authorize(&policy, Some(argv), ack_unverified)?;
         let _gate = self.gate();
@@ -584,7 +668,7 @@ impl Core {
         self.spawn_hook(super::spawn::SpawnStep::InLaunch, id)?;
         let t = self.lock().task(id)?.clone();
         let profile = t.profile.clone().unwrap_or_default();
-        let policy = self.task_policy(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref());
+        let policy = self.resolve_and_observe(&t.agent, &profile, t.role.as_deref(), &t.cwd, t.model.as_deref())?;
         let record = agents::authorize(&policy, t.requested_argv.as_deref(), t.ack_unverified)?;
         self.mutate(|st| {
             st.task_mut(id)?.policy = Some(record);
@@ -1039,5 +1123,33 @@ mod tests {
         assert_eq!(rej["outcome"], "rejected");
         assert!(invoke("orch_list_pending_spawns", json!({})).unwrap().as_array().unwrap().is_empty());
         assert_eq!(e.launched().len(), 1);
+    }
+
+    /// LXO-88: `observe_environment` solo muta cuando hay algo que decir. Con el Core en solo lectura cualquier mutación falla,
+    /// así que el no-intento es observable: sin prueba, o sin bloqueos de ESE proveedor, devuelve `Ok` sin tocar el almacén.
+    #[test]
+    fn observe_environment_no_intenta_mutar_si_no_hay_prueba_o_no_hay_bloqueos_que_levantar() {
+        let (_l, data, core_dir) = boot_tests::dirs();
+        let (core, _h, arranque) = boot_tests::arranca(&data, &core_dir);
+        arranque.unwrap();
+        core.mutate_as(&MutationContext::core(), |tx| {
+            assert!(tx.environment_blocked("claude", "explorar", agents::EnvBlock::CliFlagsUnsupported));
+            Ok(())
+        })
+        .unwrap();
+        core.degrade_for_tests("fallo de almacenamiento preparado");
+        let con = |provider: &str, proof: agents::EnvProof| {
+            let mut p = fake(provider, "explorar", None, "wt");
+            p.status = agents::Status::Unverified;
+            p.env_proof = proof;
+            p
+        };
+        let prueba = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        // Hay un bloqueo de `claude` pero la comprobación no demuestra nada: no se intenta mutar.
+        assert!(core.observe_environment(&con("claude", agents::EnvProof::default())).is_ok(), "sin prueba no se muta");
+        // Hay prueba pero `codex` no tiene ningún bloqueo que levantar: tampoco.
+        assert!(core.observe_environment(&con("codex", prueba)).is_ok(), "sin bloqueos del proveedor no se muta");
+        // Control: con prueba Y un bloqueo del proveedor sí se intenta, y el solo lectura lo rechaza.
+        assert!(core.observe_environment(&con("claude", prueba)).is_err(), "con prueba y bloqueo vigente sí se intenta");
     }
 }

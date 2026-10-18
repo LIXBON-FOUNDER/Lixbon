@@ -22,6 +22,7 @@
 
 use std::collections::BTreeMap;
 
+use super::agents::{self, EnvBlock};
 use super::event_kinds as ev;
 pub(super) use super::event_kinds::SpawnOutcome;
 use super::events::{Actor, Channel, EventDraft, MutationContext};
@@ -172,11 +173,44 @@ impl Tx {
         Ok(msg)
     }
 
+    /// La entrega de una hija. Una entrega CORRECTA de una Task con padre y rama propia (`State.branch`) pide la
+    /// revisión de la persona: además de `task.status_changed`, emite `task.review_requested` (fuente de
+    /// `review_ready`). Una entrega fallida, la de una raíz o la de una hija sin rama (`shared`) no.
     pub(super) fn done(&mut self, id: &str, ok: bool, summary: &str, files: Vec<String>, report: Option<String>) -> Result<Option<u64>, String> {
         let before = self.snapshot_run_of(id);
         let msg = self.state_mut().done(id, ok, summary, files, report)?;
         self.push_status_changes(before, None);
+        // Solo una entrega correcta deja la Task en `Done` (`ok = false` la deja en `Failed`): ese estado es la guarda.
+        let pedida = self.tasks.get(id).filter(|t| t.status == Status::Done && t.parent.is_some()).and_then(|t| Some((t.run.clone(), t.branch.clone()?)));
+        if let Some((run, branch)) = pedida {
+            self.try_push_event(ev::task_review_requested(id, &run, &branch));
+        }
         Ok(msg)
+    }
+
+    /// El host comprobó que el ENTORNO impide trabajar con `provider` en el perfil `profile` (`code`: el enum tipado
+    /// `agents::EnvBlock`; no hay cadenas libres). Emite solo si esa causa NO estaba ya activa en ese alcance (`false` =
+    /// ya lo estaba). La causa se SUMA a las que haya: una causa nueva no demuestra que otra haya terminado, así que
+    /// nunca emite `environment.cleared` (eso solo lo hace [`Tx::environment_verified`] con prueba positiva). No toca el
+    /// estado de ninguna Task.
+    pub(super) fn environment_blocked(&mut self, provider: &str, profile: &str, code: EnvBlock) -> bool {
+        if !self.state_mut().set_env_block(provider, profile, code) {
+            return false;
+        }
+        self.try_push_event(ev::environment_blocked(provider, profile, code));
+        true
+    }
+
+    /// El host obtuvo una comprobación POSITIVA de `provider` en el perfil `profile` (`proof`: evidencia tipada de
+    /// entorno, no el `status` de la policy): emite `environment.cleared` solo por cada causa que esa evidencia
+    /// DEMUESTRA terminada (las de ese alcance que desmiente y los `CliMissing` del proveedor). `false` = no había nada que levantar.
+    /// Lo no demostrado (versión o modelo sin fijar no cuentan; ayuda ilegible, `Skip`, ambigüedad) conserva el bloqueo.
+    pub(super) fn environment_verified(&mut self, provider: &str, profile: &str, proof: agents::EnvProof) -> bool {
+        let levantados = self.state_mut().verify_env(provider, profile, proof);
+        for (perfil, causa) in &levantados {
+            self.try_push_event(ev::environment_cleared(provider, perfil, *causa));
+        }
+        !levantados.is_empty()
     }
 
     /// `task.question` (solo el id del mensaje: el cuerpo se queda en `messages`) y `task.status_changed`

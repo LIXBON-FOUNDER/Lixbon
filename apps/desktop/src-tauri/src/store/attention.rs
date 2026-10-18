@@ -497,6 +497,16 @@ fn active_by_fingerprint(conn: &Connection, fingerprint: &str) -> StoreResult<Op
     raw.map(Raw::into_row).transpose()
 }
 
+/// La ocurrencia MÁS RECIENTE de un hecho (la activa si la hay: una activa siempre es la de mayor `occurrence`),
+/// o `None` si nunca se levantó. Lectura pura dentro de la transacción de quien llama: la usan las reglas de
+/// LXO-88 para resolver o actualizar por hecho sin conocer el `id` y para no reaplicar una señal antigua.
+pub(crate) fn attention_latest_in(tx: &Transaction<'_>, fingerprint: &str) -> StoreResult<Option<AttentionRow>> {
+    let raw = tx
+        .query_row(&format!("SELECT {COLS} FROM attention_items WHERE fingerprint = ?1 ORDER BY occurrence DESC LIMIT 1"), [fingerprint], Raw::read)
+        .optional()?;
+    raw.map(Raw::into_row).transpose()
+}
+
 /// Levanta un hecho dentro de la transacción de quien llama (p. ej. junto al evento que lo origina).
 /// Si ya hay una ocurrencia activa del mismo hecho la devuelve sin tocarla; si no, crea la siguiente.
 pub(crate) fn attention_raise_in(tx: &Transaction<'_>, n: &NewAttention) -> StoreResult<Raised> {

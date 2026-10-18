@@ -63,7 +63,7 @@ impl TimedBarrier {
     }
 }
 
-fn fake(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
+pub(super) fn fake(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
     let prof = agents::Profile::parse(profile).expect("perfil");
     agents::evaluate_for(provider, prof, role, worktree, agents::Detected::Skip, false, agents::Delivery::FileOrMarkers)
 }
@@ -97,6 +97,11 @@ pub(super) struct Env {
 }
 
 pub(super) fn setup(nombre: &str) -> Env {
+    setup_con(nombre, fake)
+}
+
+/// Como `setup`, con otro resolvedor de policy (p. ej. uno que devuelva `ok`).
+pub(super) fn setup_con(nombre: &str, resolver: super::Resolver) -> Env {
     let (l, data, core_dir) = dirs();
     let repo = data.parent().unwrap().join("repos").join(nombre);
     std::fs::create_dir_all(&repo).unwrap();
@@ -107,7 +112,7 @@ pub(super) fn setup(nombre: &str) -> Env {
     g(&repo, &["add", "."]);
     g(&repo, &["commit", "-qm", "base"]);
     let mut orch = Orch::default();
-    Arc::get_mut(&mut orch.0).unwrap().resolver = fake;
+    Arc::get_mut(&mut orch.0).unwrap().resolver = resolver;
     let core = orch.0;
     let host = RecordingHost::new();
     core.init_in(host.clone(), &data, &core_dir).unwrap();
@@ -232,7 +237,7 @@ fn add_worktree_que_falla_no_toca_una_ruta_ajena_y_retira_la_task_con_run_y_proy
     assert_eq!(std::fs::read_to_string(ajena.join("ajeno.txt")).unwrap(), "mío", "una ruta que add_worktree no creó nunca se borra");
     assert!(e.hijas().is_empty(), "la Task retirada ya no está en el estado");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed"], "sin worktree no hay effect.observed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed", "attention.resolved"], "sin worktree no hay effect.observed");
     let quitada = &evs[1];
     assert_eq!(pl(quitada), json!({ "cause": "launch_failed" }));
     assert_eq!(actor(quitada), ("system", Some("core")), "lo decide el Core aunque la persona aprobara el lanzamiento");
@@ -263,7 +268,7 @@ fn worktree_registrado_con_el_run_cerrado_conserva_la_task_y_limpia_solo_los_art
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed"], "ni task.removed: el run ya estaba cerrado");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "attention.resolved"], "ni task.removed: el run ya estaba cerrado");
     let hija = e.hijas().pop().expect("la Task se conserva");
     let limpieza = &evs[2];
     assert_eq!(pl(limpieza)["effect_kind"], "git_worktree_removed");
@@ -289,7 +294,7 @@ fn una_task_ya_final_antes_del_cleanup_se_conserva() {
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.status_changed", "effect.observed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.status_changed", "effect.observed", "attention.resolved"]);
     assert!(!kinds_sin_resolucion(&evs).contains(&"task.removed"));
     assert_eq!(e.hijas().len(), 1);
     let hija = e.hijas()[0].clone();
@@ -342,7 +347,7 @@ fn worktree_fisico_con_registro_rechazado_y_core_sano_se_limpia_sin_depender_del
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     // State nunca llegó a conocer el worktree: el cleanup usó los datos del intento.
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "task.removed", "attention.resolved"]);
     assert_eq!(pl(&evs[1])["operation"], "spawn_cleanup");
     assert_eq!(pl(&evs[1])["worktree_removed"], true);
     assert_eq!((actor(&evs[1]), actor(&evs[2])), (("system", Some("core")), ("system", Some("core"))));
@@ -386,7 +391,7 @@ fn launch_que_falla_antes_del_proceso_limpia_y_retira_con_orden_actor_y_pertenen
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "effect.observed del cleanup antes que task.removed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed", "attention.resolved"], "effect.observed del cleanup antes que task.removed");
     let (limpieza, quitada) = (&evs[2], &evs[3]);
     assert_eq!((actor(limpieza), actor(quitada)), (("system", Some("core")), ("system", Some("core"))));
     for ev in [&evs[1], limpieza, quitada] {
@@ -422,7 +427,7 @@ fn pty_process_rechazado_con_el_core_sano_mata_el_proceso_y_limpia() {
     assert!(pruebas::espera_muerto(pid_proceso), "el proceso vivo y no registrado se mata");
     assert_eq!(terminales(&e.core), 0, "y se retira del mapa");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"], "el kill no tiene evento propio");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed", "attention.resolved"], "el kill no tiene evento propio");
     assert!(evs.iter().all(|ev| pl(ev).get("launched").is_none()), "pty_process no se registró: no hay evento de proceso");
     assert!(e.hijas().is_empty() && e.ramas().is_empty());
     assert_eq!(kinds_del_diario(), vec!["pty_process"]);
@@ -487,7 +492,7 @@ fn si_no_hay_control_fiable_sobre_el_proceso_se_conserva_todo() {
     assert_eq!(e.hijas().len(), 1, "sin control sobre el proceso no se retira la Task");
     assert!(e.ramas().contains("lx/"), "ni se borra su worktree");
     assert_eq!(terminales(&e.core), 1, "el terminal vuelve al mapa para poder reintentar el kill");
-    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed"]);
+    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed", "attention.resolved"]);
     e.core.terms.lock().unwrap().clear();
 }
 
@@ -503,7 +508,7 @@ fn una_hija_shared_que_falla_al_lanzar_solo_retira_la_task_sin_efecto_git() {
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "task.removed", "attention.resolved"]);
     assert_eq!(actor(&evs[1]), ("system", Some("core")));
     assert!(e.hijas().is_empty() && e.ramas().is_empty());
 }
@@ -533,7 +538,7 @@ fn si_remove_worktree_falla_se_conserva_la_task() {
     let wt = e.core.lock().tasks.get(&hija).and_then(|t| t.worktree.clone()).unwrap();
     assert!(Path::new(&wt).exists());
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed"], "ni cleanup registrado ni task.removed");
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "attention.resolved"], "ni cleanup registrado ni task.removed");
     g(&e.repo, &["worktree", "unlock", &wt]);
 }
 
@@ -555,7 +560,7 @@ fn si_branch_d_falla_la_task_se_retira_con_branch_deleted_false_y_nunca_se_usa_d
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs = desde(&e.core, antes);
-    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed", "attention.resolved"]);
     assert_eq!((pl(&evs[2])["worktree_removed"].as_bool(), pl(&evs[2])["branch_deleted"].as_bool()), (Some(true), Some(false)));
     assert!(e.ramas().contains("lx/"), "la rama con trabajo sobrevive: nunca branch -D");
     assert!(e.hijas().is_empty(), "un fallo de branch -d no impide retirar la Task");
@@ -691,7 +696,7 @@ fn un_proceso_en_custodia_que_no_se_puede_matar_conserva_task_worktree_y_rama() 
     let wt = e.core.lock().tasks.get(&hija).and_then(|t| t.worktree.clone()).expect("el estado conserva el worktree");
     assert!(Path::new(&wt).exists(), "el worktree sigue en disco");
     assert!(e.ramas().contains("lx/"), "y su rama (nunca branch -D)");
-    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed"], "ni cleanup registrado ni task.removed");
+    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed", "attention.resolved"], "ni cleanup registrado ni task.removed");
 
     // Mientras no haya control fiable, ni liberar ni detener ni liberar worktrees tocan nada.
     pruebas::con_matadores_rotos(|| {
@@ -730,7 +735,7 @@ fn un_proceso_en_custodia_que_se_mata_al_reintentar_permite_el_cleanup_completo(
     assert_eq!(e.aprobar(&pend)["outcome"], "launch_failed");
     let pid = proceso.lock().unwrap().expect("el proceso llegó a crearse");
     assert!(pruebas::espera_muerto(pid), "el cleanup resolvió la custodia matando el proceso");
-    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed", "effect.observed", "task.removed"]);
+    assert_eq!(kinds_sin_resolucion(&desde(&e.core, antes)), vec!["task.created", "effect.observed", "effect.observed", "task.removed", "attention.resolved"]);
     assert!(e.hijas().is_empty() && e.ramas().is_empty());
 }
 
@@ -1385,8 +1390,9 @@ fn spawn_request_no_emite_un_pending_despues_de_su_resolucion() {
     let rows = desde(&e.core, before);
     assert_eq!(ui_events, vec![EV_PENDING, EV_RESOLVED], "el UI recibe request antes de resolution");
     assert_eq!(visible_order, vec!["pending", "notification", "resolved"], "ni el evento UI ni el aviso aparecen después de la resolución");
-    assert_eq!(kinds(&rows), vec!["spawn.requested", "spawn.resolved"], "los hechos durables siguen el mismo orden");
-    assert_eq!(pl(&rows[1])["outcome"], "rejected", "`expired` es solo estado/API, nunca outcome del Event Log");
+    assert_eq!(kinds(&rows), vec!["spawn.requested", "attention.created", "spawn.resolved", "attention.resolved"], "los hechos durables siguen el mismo orden");
+    assert_eq!(pl(&rows[2])["outcome"], "rejected", "`expired` es solo estado/API, nunca outcome del Event Log");
+    assert_eq!(pl(&rows[3])["resolution"], "acted", "rechazar es una acción de la persona: resuelve el approval");
     assert_eq!(e.host.notifications().len(), 1, "el aviso del sistema se emite para la solicitud persistida");
     assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Rejected("resolución concurrente".into())));
 }
@@ -1501,9 +1507,10 @@ fn spawn_request_persistido_se_cancela_antes_de_run_removed_y_su_aviso_va_primer
 
     let events = desde(&e.core, before);
     assert!(!removal_bypassed_gate, "remove_run no debe limpiar ni resolver mientras spawn_request conserva pend_gate");
-    assert_eq!(kinds(&events), vec!["spawn.requested", "spawn.resolved", "run.removed"]);
-    assert_eq!(pl(&events[1])["outcome"], "cancelled_run_removed");
-    assert_eq!(events[1].state_rev, events[2].state_rev, "cancelación y run.removed comparten una mutación");
+    assert_eq!(kinds(&events), vec!["spawn.requested", "attention.created", "spawn.resolved", "run.removed", "attention.resolved"]);
+    assert_eq!(pl(&events[2])["outcome"], "cancelled_run_removed");
+    assert_eq!(events[2].state_rev, events[3].state_rev, "cancelación y run.removed comparten una mutación");
+    assert_eq!(pl(&events[4])["resolution"], "condition_cleared", "el run desaparece: el approval se resuelve sin acción de nadie");
     let visible_order: Vec<&str> = e
         .host
         .calls()
@@ -1603,7 +1610,7 @@ fn timeout_se_persiste_como_outcome_timeout_y_no_expired() {
     let before = head(&e.core);
     e.core.sweep_pending();
     let events = desde(&e.core, before);
-    assert_eq!(kinds(&events), vec!["spawn.resolved"]);
+    assert_eq!(kinds(&events), vec!["spawn.resolved", "attention.resolved"]);
     assert_eq!(pl(&events[0])["outcome"], "timeout");
     assert_ne!(pl(&events[0])["outcome"], "expired");
 }
@@ -1625,7 +1632,7 @@ fn resolucion_standalone_conserva_el_project_id_capturado_en_el_pendiente() {
     .unwrap();
     e.core.record_facts(&MutationContext::core(), vec![fact]).unwrap();
     let events = desde(&e.core, before);
-    assert_eq!(kinds(&events), vec!["spawn.resolved"]);
+    assert_eq!(kinds(&events), vec!["spawn.resolved", "attention.resolved"]);
     assert_eq!(events[0].project_id.as_deref(), Some(e.project.as_str()));
 }
 
@@ -1668,7 +1675,7 @@ fn coordinator_closed_y_remove_run_persisten_outcomes_canónicos() {
     let before_removed = head(&removed.core);
     removed.core.rpc(Caller::User, "", "remove_run", &json!({ "run": removed.run })).unwrap();
     let removed_events = desde(&removed.core, before_removed);
-    assert_eq!(kinds(&removed_events), vec!["spawn.resolved", "run.removed"]);
+    assert_eq!(kinds(&removed_events), vec!["spawn.resolved", "run.removed", "attention.resolved"]);
     let cancellation = &removed_events[0];
     assert_eq!(pl(cancellation)["outcome"], "cancelled_run_removed");
     assert_eq!(cancellation.entity_id, removed_id);

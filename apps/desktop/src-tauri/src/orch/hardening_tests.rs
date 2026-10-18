@@ -318,7 +318,7 @@ fn effect_observed_y_task_removed_comparten_transaccion_y_van_en_orden() {
     let antes = head(&e.core);
     assert_eq!(e.aprobar(&pid)["outcome"], "launch_failed");
     let evs: Vec<_> = desde(&e.core, antes).into_iter().filter(|ev| ev.kind != "spawn.resolved").collect();
-    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed"]);
+    assert_eq!(kinds(&evs), vec!["task.created", "effect.observed", "effect.observed", "task.removed", "attention.resolved"]);
     let (registro, limpieza, quitada) = (&evs[1], &evs[2], &evs[3]);
     assert_eq!(pl(limpieza)["operation"], "spawn_cleanup");
     assert_eq!(quitada.seq, limpieza.seq + 1, "contiguos: nada se interpone entre el efecto y la retirada");

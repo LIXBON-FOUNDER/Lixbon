@@ -3,7 +3,9 @@
 //! la persistencia y los efectos.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::agents::{self, EnvBlock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> u64 {
@@ -211,6 +213,23 @@ pub struct Run {
     pub last_activity: u64,
 }
 
+/// `State.env_blocks` admite el formato anterior (una sola causa por alcance: `"claude/explorar": "cli_missing"`) y el
+/// actual (lista de causas); se escribe siempre el actual.
+fn de_env_blocks<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, BTreeSet<EnvBlock>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Causas {
+        Una(EnvBlock),
+        Varias(BTreeSet<EnvBlock>),
+    }
+    let mapa = BTreeMap::<String, Causas>::deserialize(d)?;
+    Ok(mapa
+        .into_iter()
+        .map(|(k, c)| (k, match c { Causas::Una(c) => BTreeSet::from([c]), Causas::Varias(v) => v }))
+        .filter(|(_, v)| !v.is_empty())
+        .collect())
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct State {
     pub runs: BTreeMap<String, Run>,
@@ -221,6 +240,14 @@ pub struct State {
     /// `decisions` del diseño SQLite para que S1 las importe tal cual.
     #[serde(default)]
     pub decisions: Vec<Decision>,
+    /// Bloqueos de ENTORNO vigentes por ALCANCE `proveedor/perfil` (`agents::EnvBlock`, tipado). Un alcance puede tener
+    /// VARIAS causas activas a la vez (p. ej. sandbox elevado y flags no soportados): una causa nueva se SUMA y nunca
+    /// reemplaza ni levanta a otra; solo la prueba positiva de esa causa concreta la quita. Un bloqueo de banderas o de
+    /// sandbox depende del perfil; `CliMissing` es de todo el proveedor. Lo mantiene el host al comprobar la policy antes
+    /// de lanzar; permite emitir `environment.blocked` solo al cambiar y `environment.cleared` aunque el Core se haya
+    /// reiniciado entre medias. Se lee también el formato anterior (una sola causa por alcance).
+    #[serde(default, deserialize_with = "de_env_blocks")]
+    pub env_blocks: BTreeMap<String, BTreeSet<EnvBlock>>,
 }
 
 /// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),
@@ -236,6 +263,44 @@ pub struct Decision {
 }
 
 impl State {
+    /// Clave de alcance de un bloqueo de entorno.
+    pub fn env_scope(provider: &str, profile: &str) -> String {
+        format!("{provider}/{profile}")
+    }
+
+    /// ¿Hay algún bloqueo de entorno vigente de este proveedor (de cualquier perfil)?
+    pub fn has_env_blocks_of(&self, provider: &str) -> bool {
+        let prefijo = format!("{provider}/");
+        self.env_blocks.iter().any(|(k, causas)| k.starts_with(&prefijo) && !causas.is_empty())
+    }
+
+    /// Añade la causa `code` al bloqueo de entorno de `proveedor/perfil`, SIN tocar las otras causas activas del alcance.
+    /// `false` = ya estaba (sin cambio).
+    pub fn set_env_block(&mut self, provider: &str, profile: &str, code: EnvBlock) -> bool {
+        self.env_blocks.entry(State::env_scope(provider, profile)).or_default().insert(code)
+    }
+
+    /// Una comprobación POSITIVA de `proveedor/perfil` (`proof`, la evidencia tipada de entorno, no `Policy.status`)
+    /// levanta SOLO lo que demuestra: de las causas de ese mismo alcance, las que `proof` desmiente, y los de
+    /// `CliMissing` del proveedor si la CLI existe. Una causa que `proof` no desmiente sigue activa aunque otra del mismo
+    /// alcance sí caiga, y un bloqueo de otro perfil por banderas o sandbox NO se toca.
+    /// Devuelve lo levantado, por orden de alcance y de causa, como `(perfil, causa)`.
+    pub fn verify_env(&mut self, provider: &str, profile: &str, proof: agents::EnvProof) -> Vec<(String, EnvBlock)> {
+        let prefijo = format!("{provider}/");
+        let propio = State::env_scope(provider, profile);
+        let mut levantados = vec![];
+        for (k, causas) in self.env_blocks.iter_mut().filter(|(k, _)| k.starts_with(&prefijo)) {
+            let del_propio = **k == propio;
+            let caen: Vec<EnvBlock> = causas.iter().copied().filter(|c| (del_propio || *c == EnvBlock::CliMissing) && proof.demonstrates(*c)).collect();
+            for c in caen {
+                causas.remove(&c);
+                levantados.push((k[prefijo.len()..].to_string(), c));
+            }
+        }
+        self.env_blocks.retain(|_, causas| !causas.is_empty());
+        levantados
+    }
+
     pub fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> u64 {
         let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0) + 1;
         self.decisions.push(Decision { id, task: task.into(), kind: kind.into(), actor: actor.into(), detail_json: Some(detail.to_string()), at: now_ms() });
@@ -975,5 +1040,16 @@ mod tests {
         assert!(!s.await_terminal_approval(&h, 1).unwrap());
         assert!(s.fail_with(&h, "agent_idle_timeout", "x").unwrap().is_none());
         assert_eq!(s.task(&h).unwrap().failure_reason.as_deref(), Some("terminal_approval_timeout"));
+    }
+
+    /// LXO-88: un alcance sin causas no es un bloqueo vigente (no debe disparar la observación del entorno).
+    #[test]
+    fn un_alcance_vacio_no_cuenta_como_bloqueo_vigente_del_proveedor() {
+        let mut s = State::default();
+        s.env_blocks.insert("claude/explorar".into(), BTreeSet::new());
+        assert!(!s.has_env_blocks_of("claude"), "un conjunto vacío no es un bloqueo");
+        assert!(s.set_env_block("claude", "explorar", EnvBlock::CliMissing));
+        assert!(s.has_env_blocks_of("claude") && !s.has_env_blocks_of("codex"), "es por proveedor");
+        assert!(!s.has_env_blocks_of("clau"), "el proveedor se compara entero");
     }
 }

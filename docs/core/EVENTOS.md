@@ -35,7 +35,7 @@ relleno histórico.
   tabla append-only con los triggers desactivados. `class` y `actor_kind` son conjuntos cerrados.
 * **Referencias blandas:** archivar un proyecto, borrar un run o revocar un cliente no toca su historia.
   "Blanda" no es "sin validar": el Core comprueba al emitir.
-* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `core`. Una Attempt
+* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `agent` · `core`. Una Attempt
   futura será un valor nuevo.
 
 ## Cómo nace un evento (outbox en `Tx`, no en `State`)
@@ -93,7 +93,7 @@ Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un 
 | `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
 | `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
 | `project` · `run` | igualdad con `project_id` / `run_id`. |
-| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`core`); `entity_id` exige `entity_kind`. |
+| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`agent`·`core`); `entity_id` exige `entity_kind`. |
 | `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
 | `class` | `state` · `effect` · `decision` · `system`. |
 
@@ -740,10 +740,105 @@ Core::record_facts(ctx, drafts)
 * Los eventos y el aviso de una solicitud se emiten bajo esa misma compuerta, antes de permitir una resolución
   concurrente. Por eso la UI nunca recibe una tarjeta pendiente después de su resolución.
 
+### Denegación explícita de policy: `spawn.requested` con `policy_status = blocked` (LXO-88)
+Una solicitud **válida** que una decisión explícita de policy deniega deja `spawn.requested` con
+`policy_status = blocked` **antes** de devolver la denegación. Nada más cambia en el contrato del Event (sin campo
+nuevo, sin motivo de policy, sin `argv`/`cwd`/`env`).
+
+```text
+spawn_request(caller, args)
+  plan_spawn                       -> entrada inválida?  Err, SIN Event   (agente/modelo/esfuerzo/perfil/rol/combinación
+                                                                           proveedor × perfil; padre sin vida; profundidad)
+  task_policy(...)                 -> status = Blocked?
+      agents::explicit_denial(...) -> None   (CLI ausente, flags, sandbox, ruta…): Err como siempre, SIN Event
+                                   -> Some(ProfileDisabled): check_parent_live + record_facts(spawn.requested)
+                                        fallo de persistencia -> Err(fallo)           (NO se devuelve una denegación «registrada»)
+                                        éxito                 -> Err(denegación)      (el Event ya es durable)
+  ok / unverified                  -> camino de aprobación de siempre
+```
+
+* **Qué es una denegación explícita** lo decide un tipo, no el texto de `Policy.reason`: `agents::PolicyDenial`
+  (hoy solo `ProfileDisabled`, vía `Profile::disabled_reason()`), y solo si la combinación proveedor × perfil tiene
+  definición (`profile_flags`). Un bloqueo del entorno o del proveedor sigue siendo un error sin `spawn.requested`: si su causa tipada es del PROVEEDOR deja `environment.blocked` (no `risk`); la ruta inservible no deja nada.
+* **Causa efectiva, en el worktree real:** `explicit_denial(provider, profile, worktree)` respeta la precedencia de
+  `agents::evaluate`: si la ruta del worktree no se puede pasar a la CLI (o la combinación no tiene definición) el
+  entorno bloquea ANTES que el perfil, así que un perfil deshabilitado en una ruta inservible NO es una denegación
+  explícita: error sin `spawn.requested` y sin `risk` (`un_perfil_deshabilitado_en_una_ruta_inservible_…`).
+* **Sin sondear la CLI antes de denegar:** la denegación explícita usa una política estática
+  (`agents::denial_policy`, `Detected::Skip`); no se llama al resolvedor (que en producción lanza `--version`/`--help`
+  y consulta la lista de modelos del proveedor). Con el perfil deshabilitado el resultado es el mismo, así que no hay
+  nada que sondear (`la_denegacion_explicita_no_sondea_la_cli_del_proveedor_antes_de_denegar`).
+* **Entrada inválida ≠ policy:** `agents::check_request` conserva la validación que hacía `launch` (agente
+  conocido y no pausado, modelo y esfuerzo admitidos, rol existente, combinación proveedor × perfil definida) y NO
+  aplica la compuerta de policy. Así «`gemini` + perfil» o «rol inventado» son errores, no solicitudes denegadas.
+* **Invariante que sostiene a `risk`:** todo `spawn.requested` con `policy_status = blocked` del log se emitió por
+  este camino, es decir, por una denegación explícita. El Event no lo dice por sí mismo; lo garantiza la emisión
+  (`spawn_blocked_tests`). Si algún día otra causa explícita (o un bloqueo del entorno) debe registrarse, el Event
+  necesitará un discriminador durable (ver `ATTENTION.md`, «Gaps de señal»).
+* **Sin efectos:** la rama bloqueada no crea pendiente en memoria, Task, aprobación, `orch-spawn-pending`, aviso,
+  PTY, proceso ni worktree. **No habrá `spawn.resolved`**: la solicitud nace y termina denegada. Una consulta de
+  `spawn_status` responde `expired` y aprobarla no resuelve nada.
+* **Cada RPC es un intento nuevo** (otro `pending_id`, otro Event); los reintentos del *append* de un mismo Event
+  reutilizan su `(kind, idem_key)` y no duplican.
+* Sin Event Log (`state.json`/degradado) no hay dónde registrar: con el Core en solo lectura la persistencia falla y
+  se informa ese fallo, no la denegación. En modo legacy `record_facts` devuelve éxito **sin guardar nada**, así que
+  la rama de denegación comprueba `Core::event_log_available()` ANTES y, si no hay Event Log, devuelve el error «No
+  se pudo dejar constancia durable de la solicitud denegada…» (con el motivo de la denegación al final), nunca la
+  denegación a secas: no se afirma un Event que no existe. Sigue sin pendiente, Task, aviso, PTY, proceso ni worktree
+  (`sin_event_log_una_denegacion_explicita_no_se_devuelve_como_registrada`, con una tarea sin `project_id`). El resto del
+  modo legacy (entrada inválida, bloqueo del entorno, `ok`/`unverified`) no cambia.
+
 ### Reinicio
 Los pendientes viven en memoria y todavía no se reconstruyen ni se reconcilian al arrancar. Este cambio no añade
 `abandoned_on_restart` ni ningún otro outcome de reinicio. La reconciliación durable de solicitudes pendientes
-queda en un seguimiento separado.
+queda en un seguimiento separado. Consecuencia para Attention: el `approval` de un lanzamiento pendiente se
+resuelve con `spawn.resolved`; si el Core reinicia con un pendiente sin resolver, ese `approval` sigue activo hasta
+que la reconciliación emita su resolución. Una solicitud `blocked` no tiene pendiente que reconciliar.
+
+## E1b · Señales fuente de Attention: `task.review_requested` · `environment.blocked` · `environment.cleared` (LXO-88)
+Events explícitos que alimentan `review_ready` y `environment_blocked`. Se emiten SOLO en la frontera de dominio que
+decide el hecho; ningún consumidor los deduce de otros Events.
+
+| kind | class · entidad | Payload | Productor |
+|---|---|---|---|
+| `task.review_requested` | state · `task` | `branch` | `Tx::done` (entrega correcta de una hija con padre y rama propia), tras `task.status_changed` y en la misma mutación; sin `idem_key` (cada entrega es otro hecho); actor y canal los del contexto de la entrega |
+| `environment.blocked` | state · `agent` (`entity_id` = proveedor) | `profile`, `code` | `Tx::environment_blocked`, desde `Core::resolve_and_observe` (`spawn_request`, `approve_spawn` y el recheck final de `launch`); `system` / `core` |
+| `environment.cleared` | state · `agent` | `profile`, `code` (el que se levanta) | `Tx::environment_verified`, SOLO con prueba positiva tipada de esa causa concreta (nunca por un cambio de causa); `system` / `core` |
+
+* `code` es el conjunto cerrado y TIPADO de `agents::EnvBlock` (`cli_missing` · `cli_flags_unsupported` ·
+  `windows_sandbox_elevated`), `profile` uno de los perfiles conocidos. La causa sale de un tipo (`Policy.block`), nunca
+  del texto de `reason`; un código o un perfil fuera de esos conjuntos no es una señal.
+* **Alcance proveedor + perfil:** `cli_missing` lo levanta una comprobación positiva de cualquier perfil del proveedor;
+  las banderas y el sandbox, solo la del mismo perfil.
+* **Solo al cambiar y solo con evidencia positiva:** `State.env_blocks` (`proveedor/perfil` → CONJUNTO de causas, parte del
+  documento de `legacy_state`; se lee también el formato anterior de una sola causa) hace que repetir una comprobación no
+  emita nada y que `environment.cleared` pueda emitirse tras un reinicio. Una causa nueva se SUMA a las activas del alcance y
+  no emite `cleared` de ninguna: solo `environment.cleared` con la prueba positiva tipada (`Policy.env_proof`, independiente
+  de `status`) de ESA causa la quita; `unverified`, un valor desconocido de `[windows] sandbox` o un bloqueo ajeno al entorno
+  conservan las causas. Solo `mxc` y `unelevated` demuestran un sandbox no elevado (`elevated` es el bloqueo). Una policy
+  bloqueada aporta únicamente la prueba de lo que llegó a examinar (por flags: la CLI existe; por sandbox elevado: la CLI y
+  los flags), y entonces `cleared` y `blocked` salen en la misma mutación. Sin Event Log no se marca nada.
+* `environment.*` no cambia el estado de ninguna Task: no es un fallo ni un Attempt fallido.
+* Sin informe, resumen, ficheros, rutas, `argv` ni `reason` en ninguno de los tres.
+
+## E1b · Attention: `attention.created` · `attention.resolved` (LXO-88)
+Ciclo de vida de una ocurrencia de Attention (`ATTENTION.md`). `class = state`, entidad `attention`,
+`entity_id = correlation_id = idem_key = attention_items.id` (como mucho UN `created` y UN `resolved` por
+ocurrencia, así que un replay no duplica), actor `system`, canal `core`.
+
+| kind | Payload (solo códigos e ids) |
+|---|---|
+| `attention.created` | `category`, `severity`, `occurrence`, `target_kind`, `target_id`, `source_event_id?` |
+| `attention.resolved` | `resolution` (`acted` · `condition_cleared` · `superseded`), `source_event_id` |
+
+* **Misma transacción que su origen.** Cada escritor del Event Log (`commit_authoritative_with_events`,
+  `append_events` y los cambios de gestión de Project) ejecuta el proyector del almacén después de insertar y antes
+  de confirmar (`EventProjector`): el Event origen, las filas de Attention y estos eventos se confirman o se
+  deshacen juntos. Los eventos derivados se insertan **después** de los de origen de esa transacción
+  (`insert_derived_in`, sin reproyectarlos); el orden entre eventos de origen no cambia. Llevan el `state_rev` del
+  commit que los origina (`NULL` si el origen no confirmó `legacy_state`, p. ej. `spawn.requested`).
+* Actualizar `severity`/`facts` de la activa **no** emite nada (no hay `attention.updated`).
+* `source_event_id` es el `events.id` (no el `seq`) del Event que levantó o resolvió.
 
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
@@ -753,5 +848,5 @@ queda en un seguimiento separado.
 * **E2:** SSE/long-poll de seguimiento (el `GET /events` de sondeo ya existe).
 
 ## Fuera de E
-Attention (G), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
+La API de lectura de Attention (LXO-89), clientes e identidad por credencial (F1), la vista Activity, eventos efímeros
 (`terminal.output`…), retención/compactación del Event Log, Task/Attempt.

@@ -310,7 +310,76 @@ pub(crate) fn insert_events(tx: &Transaction<'_>, events: &[NewEvent], state_rev
     Ok(out)
 }
 
+/// Una proyección que corre DENTRO de la transacción que inserta Events (LXO-88: Attention).
+///
+/// Se invoca después de insertar y con SOLO los eventos realmente nuevos (un duplicado por `(kind, idem_key)` no se
+/// reproyecta), ya con su `seq`, en el orden de inserción (= orden de `seq`). Si devuelve `Err`, la transacción de
+/// quien llama se deshace entera: el Event origen y todo lo que proyecte se confirman o se revierten juntos. Lo que
+/// la proyección devuelve son los eventos DERIVADOS (p. ej. `attention.created`) que se insertan a continuación, en
+/// esa misma transacción y sin reproyectarlos ([`insert_derived_in`]).
+pub trait EventProjector: Send + Sync + std::fmt::Debug {
+    fn project(&self, tx: &Transaction<'_>, events: &[EventRow]) -> StoreResult<Vec<NewEvent>>;
+}
+
+/// Inserta los eventos que una proyección derivó DENTRO de la transacción de quien llama, sin volver a proyectarlos.
+/// Llevan el `state_rev` del commit que los origina (`None` si el origen no confirmó `legacy_state`), así que agrupan con
+/// él. Devuelve cuántos eran nuevos (un duplicado por `(kind, idem_key)` no se inserta).
+pub(crate) fn insert_derived_in(tx: &Transaction<'_>, derived: &[NewEvent], state_rev: Option<i64>) -> StoreResult<usize> {
+    Ok(insert_events(tx, derived, state_rev)?.iter().filter(|i| matches!(i, Inserted::New(_))).count())
+}
+
+/// Los eventos recién insertados, como filas del log (los duplicados no entran).
+fn inserted_rows(events: &[NewEvent], inserted: &[Inserted], state_rev: Option<i64>) -> Vec<EventRow> {
+    events
+        .iter()
+        .zip(inserted)
+        .filter_map(|(e, i)| match i {
+            Inserted::New(seq) => Some(EventRow {
+                seq: *seq,
+                id: e.id.clone(),
+                at: e.at,
+                v: e.v,
+                kind: e.kind.clone(),
+                class: e.class,
+                actor_kind: e.actor_kind,
+                actor_id: e.actor_id.clone(),
+                channel: e.channel.clone(),
+                client_id: e.client_id.clone(),
+                project_id: e.project_id.clone(),
+                run_id: e.run_id.clone(),
+                entity_kind: e.entity_kind.clone(),
+                entity_id: e.entity_id.clone(),
+                correlation_id: e.correlation_id.clone(),
+                idem_key: e.idem_key.clone(),
+                state_rev,
+                payload: e.payload.clone(),
+            }),
+            Inserted::Duplicate => None,
+        })
+        .collect()
+}
+
+/// [`insert_events`] seguido de la proyección, en la MISMA transacción. ÚNICA vía de los escritores autoritativos
+/// del Event Log (`commit_authoritative_with_events`, `append_events` y los cambios de gestión de Project).
+pub(crate) fn insert_events_projected(tx: &Transaction<'_>, events: &[NewEvent], state_rev: Option<i64>, projector: Option<&dyn EventProjector>) -> StoreResult<Vec<Inserted>> {
+    let inserted = insert_events(tx, events, state_rev)?;
+    if let Some(projector) = projector {
+        let rows = inserted_rows(events, &inserted, state_rev);
+        if !rows.is_empty() {
+            let derived = projector.project(tx, &rows)?;
+            insert_derived_in(tx, &derived, state_rev)?;
+        }
+    }
+    Ok(inserted)
+}
+
 impl Store {
+    /// Instala la proyección que acompaña a cada inserción de Events (ver [`EventProjector`]). La instala quien
+    /// abre el almacén del Core; sin ella (pruebas del almacén, copias) los eventos se insertan sin proyectar.
+    pub(crate) fn set_event_projector(&mut self, projector: std::sync::Arc<dyn EventProjector>) {
+        self.projector = Some(projector);
+    }
+
     /// Añade eventos que NO acompañan a una mutación de `legacy_state` (`state_rev` queda NULL), en
     /// su propia transacción. Si el hecho también cambia otras filas, esas filas y su evento van en
     /// UNA transacción (no se usa esta vía).
@@ -318,7 +387,8 @@ impl Store {
         for e in events {
             e.check()?;
         }
-        self.write(|tx| insert_events(tx, events, None))
+        let projector = self.projector.clone();
+        self.write(|tx| insert_events_projected(tx, events, None, projector.as_deref()))
     }
 
     /// Una página de eventos por cursor de `seq` (ver [`EventQuery`]). Las filas y `head_seq` salen de

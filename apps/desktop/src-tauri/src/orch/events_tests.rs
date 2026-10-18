@@ -298,7 +298,7 @@ fn el_tx_publicado_no_conserva_borradores_y_el_estado_no_transporta_eventos() {
     .unwrap();
     // `State` no tiene ningún campo de eventos: ni en memoria ni en el documento de SQLite.
     let claves: Vec<String> = serde_json::to_value(&*core.lock()).unwrap().as_object().unwrap().keys().cloned().collect();
-    assert_eq!(claves, vec!["decisions", "messages", "runs", "seq", "tasks"]);
+    assert_eq!(claves, vec!["decisions", "env_blocks", "messages", "runs", "seq", "tasks"]);
     let (_, doc) = fila(&core);
     assert!(!doc.contains("outbox") && !doc.contains("\"events\"") && !doc.contains("test.hecho"), "el documento autoritativo no lleva metadatos de la transacción");
 }

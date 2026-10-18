@@ -32,6 +32,7 @@
 //! son FK reales. Detalle en `migrations/001_core.sql`.
 
 mod attention;
+mod attention_projection;
 mod authority;
 mod backup;
 mod clients;
@@ -58,12 +59,19 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
 
+
 // Attention (LXO-87): hasta que LXO-88 (reglas) y LXO-89 (lectura) la consuman, solo la usan las pruebas.
 #[allow(unused_imports)]
 pub use attention::{AttentionCategory, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate, NewAttention, Raised, Resolution, ResolveOutcome, Severity, TargetKind, UpdateOutcome, MAX_FACTS_BYTES};
 // Variante transaccional de la actualización: LXO-88 la aplica en la transacción del Event (`Store::write`).
 #[allow(unused_imports)]
 pub(crate) use attention::attention_update_active_in;
+// Proyección Events → Attention (LXO-88): el driver transaccional vive en el almacén; las reglas, en `orch`.
+// `project_attention_in`, `Intent`, `Key`, `ProjectError` y `Report` los consumen las pruebas.
+#[allow(unused_imports)]
+pub(crate) use attention_projection::{apply_attention_in, project_attention_in, AttentionProjection, AttentionRules, Derived, Intent, Key, ProjectError, Report};
+#[allow(unused_imports)]
+pub(crate) use events::{insert_derived_in, EventProjector};
 pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 #[allow(unused_imports)]
@@ -104,6 +112,8 @@ pub struct Store {
     db_path: PathBuf,
     backup_dir: PathBuf,
     report: MigrationReport,
+    /// Proyección que corre dentro de la transacción de cada inserción de Events (ver [`EventProjector`]).
+    projector: Option<std::sync::Arc<dyn EventProjector>>,
     // `None` cuando quien abre ya tenía el bloqueo (ver `open_under_lock`).
     _lock: Option<InstanceLock>,
 }
@@ -192,7 +202,7 @@ impl Store {
                 private::restrict_file(&side);
             }
         }
-        Ok(Store { conn, db_path, backup_dir, report, _lock: lock })
+        Ok(Store { conn, db_path, backup_dir, report, projector: None, _lock: lock })
     }
 
     /// Valor de una clave de `meta`, si existe.
