@@ -168,10 +168,15 @@ func (c composite) render(width int, open bool) string {
 }
 
 func TestToolBlocksFoldOnlyWhenLong(t *testing.T) {
-	short := &toolBlock{command: true}
+	short := &toolBlock{command: true, shell: true}
 	short.setOutput("[EXIT 0] uno\ndos")
 	if short.folds() {
-		t.Error("una salida corta no se pliega")
+		t.Error("un !comando con salida corta no se pliega")
+	}
+	agentShort := &toolBlock{command: true}
+	agentShort.setOutput("[EXIT 0] uno\ndos")
+	if !agentShort.folds() {
+		t.Error("el comando del agente pliega su salida: ctrl+o la enseña")
 	}
 	long := &toolBlock{command: true}
 	long.setOutput("[EXIT 0] " + outputLines(7))

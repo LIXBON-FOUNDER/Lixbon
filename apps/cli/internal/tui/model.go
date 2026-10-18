@@ -15,6 +15,7 @@ import (
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/tools"
+	"lixbon.com/cli/internal/update"
 )
 
 // Options configura la interfaz.
@@ -30,7 +31,7 @@ type Options struct {
 	// Notes se imprimen bajo la cabecera: por qué no hay sesión o proveedor y qué hacer.
 	Notes []string
 	// UpdateNotice consulta en segundo plano si hay una versión nueva; nil la desactiva.
-	UpdateNotice func(ctx context.Context) (version string, ok bool)
+	UpdateNotice func(ctx context.Context) (update.Outcome, bool)
 }
 
 type liveState struct {
@@ -47,6 +48,14 @@ type liveState struct {
 	answer *entry
 	drawn  string
 	drawAt time.Time
+	// calling es la llamada que el modelo está escribiendo (herramienta,
+	// destino y caracteres de argumentos).
+	calling callProgress
+}
+
+type callProgress struct {
+	tool, target string
+	chars        int
 }
 
 // promptState captura el siguiente Enter como respuesta a una pregunta de
@@ -109,6 +118,13 @@ type Model struct {
 	cancel      context.CancelFunc
 	started     time.Time
 	live        liveState
+	// autoCompacting: el agente está compactando el contexto por su cuenta.
+	autoCompacting bool
+	// pendingThought es lo pensado en el turno que aún espera la acción a la
+	// que se pega.
+	pendingThought thinkBlock
+	// updateReady es la versión ya instalada que espera a que se reinicie.
+	updateReady string
 	queue       []string
 	spin        int
 	tickOn      bool
@@ -136,6 +152,9 @@ type Model struct {
 	// answerEntry es la última respuesta del turno; anchorTop, la que el
 	// siguiente fotograma debe dejar arriba de la ventana.
 	answerEntry, anchorTop *entry
+	// footY es la fila del pie en el último fotograma: con un transcript
+	// corto no es la última de la pantalla.
+	footY int
 	// moreY es la fila del botón «↓ n líneas más» (-1 si no está).
 	moreY   int
 	moreBtn span

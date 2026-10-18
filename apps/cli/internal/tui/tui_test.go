@@ -253,7 +253,6 @@ func TestAgentTurnShowsActionsDiffAndSummary(t *testing.T) {
 	contains(t, out, "hola.txt")
 	contains(t, out, "+2 "+glyphMinus+"0")
 	contains(t, out, "uno")
-	contains(t, out, "8 chars")
 	contains(t, out, "Listo, creé el archivo.")
 	contains(t, out, "1 acción")
 	if data, _ := os.ReadFile(filepath.Join(h.root, "hola.txt")); string(data) != "uno\ndos\n" {

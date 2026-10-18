@@ -123,6 +123,13 @@ func ArgsSummary(tool string, args map[string]any) string {
 		return fmt.Sprintf("%s «%s»", stringArg(args, "ref"), textutil.Head(stringArg(args, "text"), 60))
 	case "browser_press_key":
 		return stringArg(args, "key")
+	case "browser_viewport":
+		if preset := stringArg(args, "preset"); preset != "" {
+			return preset
+		}
+		return fmt.Sprintf("%s×%s", orQuestion(args, "width"), orQuestion(args, "height"))
+	case "browser_eval":
+		return textutil.Head(strings.Join(strings.Fields(stringArg(args, "expression")), " "), 80)
 	case "browser_scroll":
 		if ref := stringArg(args, "ref"); ref != "" {
 			return "hasta " + ref

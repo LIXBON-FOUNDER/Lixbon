@@ -34,7 +34,7 @@ var darkPalette = palette{
 	rule: "#2A2A2A", surf: "#1C1C1C", surf2: "#262626",
 	acc: "#B4C64E", accDeep: "#8CA038", olive: "#66733A", ivory: "#DCD6BC", sand: "#C7BE9F",
 	ok: "#86D694", warn: "#E8C872", err: "#F08C7C", info: "#8EC5FF", code: "#CBD69B",
-	addBg: "#1B2A1E", addFg: "#B4E4BC", delBg: "#2E1A17", delFg: "#F4B3A8",
+	addBg: "#0D3A17", addFg: "#7EE08F", delBg: "#4A1214", delFg: "#FF9C92",
 	kw: "#E59AD6", str: "#F2C98A", fn: "#8EC5FF", ty: "#C3B4FF", num: "#F5D98A", com: "#6A6A65",
 	f1: "#DCD6BC", f2: "#C7BE9F", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#FCFAEF",
 	shBase: "#9E9681", shMid: "#D8CFAD", shHigh: "#FCFAEF", chipLive: "#2A2F18",
@@ -45,7 +45,7 @@ var lightPalette = palette{
 	rule: "#DEDCD2", surf: "#ECEAE1", surf2: "#E3E1D7",
 	acc: "#7E9430", accDeep: "#6A7D28", olive: "#A3B068", ivory: "#4B5327", sand: "#6A6346",
 	ok: "#5E8A32", warn: "#A8842A", err: "#B8462F", info: "#2B63A6", code: "#4F6320",
-	addBg: "#E4EDD3", addFg: "#2E5A1E", delBg: "#F5DDD6", delFg: "#8A2E1E",
+	addBg: "#CDEFC4", addFg: "#1F6B1A", delBg: "#FAC9C4", delFg: "#9E1F14",
 	kw: "#9B3D86", str: "#8A5A12", fn: "#2B63A6", ty: "#6046B0", num: "#7A6210", com: "#A3A39B",
 	f1: "#BDB38E", f2: "#A89D76", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#4B5327",
 	shBase: "#8A8574", shMid: "#5E594B", shHigh: "#1B1A17", chipLive: "#DCE5C4",
@@ -95,6 +95,7 @@ type glyphSet struct {
 	chip, info, todo, doing, done, minus, check, cross, rule             string
 	boxTL, boxTR, boxBL, boxBR, boxH, boxV                               string
 	turnRail, turnEnd                                                    string
+	fold, unfold                                                         string
 	spin                                                                 []string
 	halfBlocks                                                           bool
 }
@@ -104,7 +105,7 @@ var richGlyphs = glyphSet{
 	brand: "◆", wait: "◌", thinkRail: "┊", gap: "⋯", prompt: "›", meterOn: "▰", meterOff: "▱", branch: "⎇",
 	chip: "⧉", info: "◇", todo: "○", doing: "▸", done: "✓", minus: "−", check: "✓", cross: "✗", rule: "─",
 	boxTL: "╭", boxTR: "╮", boxBL: "╰", boxBR: "╯", boxH: "─", boxV: "│",
-	turnRail: "┃", turnEnd: "┗",
+	turnRail: "┃", turnEnd: "┗", fold: "▸", unfold: "▾",
 	spin: []string{"·", "⋄", "◇", "◈", "◆", "✦", "◆", "◈", "◇", "⋄"}, halfBlocks: true,
 }
 
@@ -113,7 +114,7 @@ var safeGlyphs = glyphSet{
 	brand: "♦", wait: "○", thinkRail: "│", gap: "…", prompt: "›", meterOn: "▓", meterOff: "░", branch: "≡",
 	chip: "□", info: "◊", todo: "○", doing: "►", done: "√", minus: "−", check: "√", cross: "×", rule: "─",
 	boxTL: "┌", boxTR: "┐", boxBL: "└", boxBR: "┘", boxH: "─", boxV: "│",
-	turnRail: "│", turnEnd: "└",
+	turnRail: "│", turnEnd: "└", fold: "►", unfold: "▼",
 	spin: []string{"·", "•", "●", "•"}, halfBlocks: true,
 }
 
@@ -122,7 +123,7 @@ var asciiGlyphs = glyphSet{
 	brand: "*", wait: "o", thinkRail: ":", gap: "...", prompt: ">", meterOn: "#", meterOff: "-", branch: "@",
 	chip: "#", info: "i", todo: "-", doing: ">", done: "x", minus: "-", check: "v", cross: "x", rule: "-",
 	boxTL: "+", boxTR: "+", boxBL: "+", boxBR: "+", boxH: "-", boxV: "|",
-	turnRail: "|", turnEnd: "'",
+	turnRail: "|", turnEnd: "'", fold: ">", unfold: "v",
 	spin: []string{".", "o", "O", "o"},
 }
 

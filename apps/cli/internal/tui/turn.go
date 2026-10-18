@@ -102,6 +102,11 @@ func (m *Model) startTurn(prompt, shown string) tea.Cmd {
 	}
 	m.turnStart = len(m.log.entries)
 	ui := &uiSink{send: m.send, turn: id}
+	measured := m.chat
+	ui.measure = func() ctxMsg {
+		tokens, pct := measured.ContextUsage()
+		return ctxMsg{turn: id, tokens: tokens, pct: pct, session: measured.SessionTokens}
+	}
 	var sink chat.Sink = ui
 	if m.remote != nil {
 		c := m.chat
@@ -141,14 +146,22 @@ func (m *Model) flushLive() {
 		live.lastProse = prose
 	}
 	live.answer, live.prose, live.drawn = nil, "", ""
+	live.calling = callProgress{}
 	live.content.Reset()
 }
 
 func (m *Model) flushThinking() {
 	live := &m.live
-	if strings.TrimSpace(live.reasoning.String()) != "" {
-		m.closeGroups()
-		m.add(thinkBlock{text: live.reasoning.String(), secs: live.reasoningSecs})
+	if text := strings.TrimSpace(live.reasoning.String()); text != "" {
+		thought := thinkBlock{text: text, secs: live.reasoningSecs}
+		if m.turnMode == chat.ModeAgent {
+			// En un turno del agente lo pensado no ocupa fila: va al ✦ de la
+			// acción siguiente, que lo enseña con ctrl+o.
+			m.pendingThought = joinThoughts(m.pendingThought, thought)
+		} else {
+			m.closeGroups()
+			m.add(thought)
+		}
 	}
 	live.reasoning.Reset()
 	live.reasoningSecs = 0
@@ -205,6 +218,7 @@ func (m *Model) printAnswer(prose string) {
 func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	m.flushLive()
 	m.running = false
+	m.autoCompacting = false
 	m.notice = ""
 	cancelled := m.interrupted || errors.Is(msg.err, context.Canceled)
 	m.interrupted = false

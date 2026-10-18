@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -149,5 +150,30 @@ func TestClickOnAFoldHeaderTogglesIt(t *testing.T) {
 	m.toggleDetail()
 	if !m.log.detail {
 		t.Error("ctrl+o activa el detalle global")
+	}
+}
+
+// Con la vista subida, que aparezca o se vaya lo que piensa el modelo (la zona
+// de abajo cambia de alto) no mueve lo que se está leyendo.
+func TestALiveAreaThatGrowsDoesNotMoveAScrolledView(t *testing.T) {
+	h := newHarness(t, nil)
+	for i := 1; i <= 100; i++ {
+		h.m.print(fmt.Sprintf("línea %03d", i))
+	}
+	h.m.View()
+	h.m.scroll = 20
+	h.m.View()
+	top := h.m.winTop
+	h.m.running = true
+	h.m.live.reasoning.WriteString("uno dos tres cuatro cinco seis siete ocho nueve diez " + strings.Repeat("palabra ", 60))
+	h.m.View()
+	if h.m.winTop != top {
+		t.Fatalf("la primera fila de la ventana se movió de %d a %d", top, h.m.winTop)
+	}
+	h.m.live.reasoning.Reset()
+	h.m.running = false
+	h.m.View()
+	if h.m.winTop != top {
+		t.Fatalf("al irse lo pensado la ventana se movió de %d a %d", top, h.m.winTop)
 	}
 }

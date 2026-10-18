@@ -116,6 +116,9 @@ type Event struct {
 	Elapsed  time.Duration
 	Names    []string
 	Lines    int
+	// Compacting marca la nota con la que empieza una compactación
+	// automática; la siguiente nota dice cómo acabó.
+	Compacting bool
 }
 
 type TurnStats struct {
@@ -131,6 +134,9 @@ type Session struct {
 	Tools     *tools.Toolbox
 	Approver  Approver
 	MCP       MCPClient
+	// MCPLoaded son los servidores MCP cuyas herramientas ya cargó el modelo
+	// con mcp_tools; las de los demás no viajan en cada petición.
+	MCPLoaded map[string]bool
 	Estimator *history.Estimator
 	// Model es el nombre mostrado al avisar de que no admite herramientas nativas.
 	Model string

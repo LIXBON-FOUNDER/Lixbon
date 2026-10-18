@@ -193,6 +193,19 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// ServerSchemas son las herramientas de un servidor, en formato de función.
+func (r *Registry) ServerSchemas(server string) []json.RawMessage {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []json.RawMessage
+	for i, info := range r.infos {
+		if ref := r.exposed[info.Name]; ref.server != nil && ref.server.Spec.Name == server {
+			out = append(out, r.schemas[i])
+		}
+	}
+	return out
+}
+
 // ToolSchemas son las herramientas listas hasta ahora, en formato de función.
 func (r *Registry) ToolSchemas() []json.RawMessage {
 	r.mu.RLock()

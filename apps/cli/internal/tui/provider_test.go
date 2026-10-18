@@ -131,10 +131,10 @@ func TestProviderUnknownAndAlreadyActive(t *testing.T) {
 func TestGatewayOnlyCommandsAreExplainedOnAnExternalProvider(t *testing.T) {
 	h := newHarness(t, nil)
 	h.chat.Client.Generic = true
-	for _, cmd := range []string{"/usage", "/nodes", "/login", "/logout", "/key abc", "/web on"} {
+	for _, cmd := range []string{"/nodes", "/login", "/logout", "/key abc", "/web on"} {
 		h.send(cmd)
 	}
-	for _, cmd := range []string{"usage", "nodes", "login", "logout", "key", "web"} {
+	for _, cmd := range []string{"nodes", "login", "logout", "key", "web"} {
 		contains(t, h.out(), "«/"+cmd+"» solo funciona con un gateway Lixbon")
 	}
 }

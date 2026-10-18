@@ -13,7 +13,7 @@ import (
 func (m *Model) footer() string {
 	width := max(1, m.width)
 	sep := sDim2.Render(" " + glyphSep + " ")
-	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Bold(true).Render(m.modeName()), m.height-1, m.footMode)
+	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Bold(true).Render(m.modeName()), m.footY, m.footMode)
 
 	var hint string
 	switch {
@@ -47,6 +47,9 @@ func (m *Model) footer() string {
 	if n := len(m.queue); n > 0 {
 		notices = append(notices, sSoft.Render(fmt.Sprintf("%d en cola", n)))
 	}
+	if m.updateReady != "" {
+		notices = append(notices, sOK.Render("v"+m.updateReady+" lista")+sDim.Render(" "+glyphSep+" reinicia"))
+	}
 	if w := m.visionWarning(); w != "" {
 		notices = append(notices, sWarn.Bold(true).Render("!")+" "+sWarn.Render(w)+sDim.Render(" "+glyphSep+" ")+sSoft.Render("/model"))
 	}
@@ -78,12 +81,12 @@ func (m *Model) footer() string {
 		if l.effort && effort != "" {
 			left += sep
 			effortAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(effort)}
-			left += m.lit(effort, m.height-1, m.footEffort)
+			left += m.lit(effort, m.footY, m.footEffort)
 		}
 		if l.procs && procs != "" {
 			left += sep
 			procsAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(procs)}
-			left += m.lit(procs, m.height-1, m.footProcs)
+			left += m.lit(procs, m.footY, m.footProcs)
 		}
 		for _, n := range notices[:l.notices] {
 			left += sep + n

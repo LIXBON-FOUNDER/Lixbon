@@ -11,10 +11,9 @@ import (
 	"lixbon.com/cli/internal/tools"
 )
 
-const (
-	MaxSteps         = 40
-	MaxRepeatedCalls = 3
-)
+// MaxRepeatedCalls son los intentos de una acción que falla, o las llamadas
+// idénticas seguidas, antes de dejarla. El turno no tiene tope de pasos.
+const MaxRepeatedCalls = 3
 
 const fence = "```"
 
@@ -198,8 +197,15 @@ func TextSystemPrompt(workspace string) string {
 // MCPTextPrompt describe las herramientas MCP para el protocolo de texto:
 // nombre, argumentos (en el orden del servidor) y descripción.
 func MCPTextPrompt(schemas []json.RawMessage) string {
-	lines := []string{"\n\n=== HERRAMIENTAS EXTERNAS (MCP) ==="}
-	for _, raw := range schemas[:min(len(schemas), 40)] {
+	lines := append([]string{"\n\n=== HERRAMIENTAS EXTERNAS (MCP) ==="}, mcpToolLines(schemas[:min(len(schemas), 40)])...)
+	return strings.Join(lines, "\n")
+}
+
+// mcpToolLines es una línea por herramienta: la llamada con sus argumentos y
+// lo que hace.
+func mcpToolLines(schemas []json.RawMessage) []string {
+	var lines []string
+	for _, raw := range schemas {
 		var schema struct {
 			Function struct {
 				Name        string          `json:"name"`
@@ -218,7 +224,7 @@ func MCPTextPrompt(schemas []json.RawMessage) string {
 		lines = append(lines, fmt.Sprintf(`{"tool":"%s","args":{%s}}  %s`,
 			schema.Function.Name, strings.Join(args, ", "), textutil.Head(schema.Function.Description, 120)))
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // propertyKeys devuelve las claves de parameters.properties en el orden en que

@@ -221,8 +221,9 @@ func TestConstantsMatchPython(t *testing.T) {
 			t.Errorf("%s distinto:\n got: %q\nwant: %q", name, got, consts[name])
 		}
 	}
-	if consts["MAX_AGENT_STEPS"] != float64(MaxSteps) || consts["MAX_REPEATED_CALLS"] != float64(MaxRepeatedCalls) {
-		t.Errorf("límites: %v %v", consts["MAX_AGENT_STEPS"], consts["MAX_REPEATED_CALLS"])
+	// MAX_AGENT_STEPS ya no existe en Go: el turno no tiene tope de pasos.
+	if consts["MAX_REPEATED_CALLS"] != float64(MaxRepeatedCalls) {
+		t.Errorf("límite de repeticiones: %v", consts["MAX_REPEATED_CALLS"])
 	}
 }
 

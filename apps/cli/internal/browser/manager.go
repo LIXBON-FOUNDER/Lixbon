@@ -55,16 +55,18 @@ type targetInfo struct {
 type Manager struct {
 	opts Options
 
-	mu       sync.Mutex
-	conn     *conn
-	proc     *process
-	owned    bool
-	tabs     map[string]*tab
-	order    []string
-	cur      *tab
-	labels   map[string]label
-	nextRef  int
-	lastSent string
+	mu    sync.Mutex
+	conn  *conn
+	proc  *process
+	owned bool
+	// maximized: ya se maximizó la ventana en esta conexión.
+	maximized bool
+	tabs      map[string]*tab
+	order     []string
+	cur       *tab
+	labels    map[string]label
+	nextRef   int
+	lastSent  string
 	// Última posición del cursor visible, para que siga desde ahí tras navegar.
 	cursorX, cursorY float64
 	hasCursor        bool
@@ -128,6 +130,10 @@ func (m *Manager) Run(ctx context.Context, tool string, args map[string]any) (st
 		out, err = m.wait(ctx, strArg(args, "text"), intArg(args, "seconds"))
 	case "browser_back":
 		out, err = m.back(ctx)
+	case "browser_viewport":
+		out, err = m.viewport(ctx, strArg(args, "preset"), intArg(args, "width"), intArg(args, "height"), boolArg(args, "mobile"))
+	case "browser_eval":
+		out, err = m.eval(ctx, strArg(args, "expression"))
 	default:
 		err = fmt.Errorf("herramienta de navegador desconocida: %s", tool)
 	}
@@ -332,7 +338,7 @@ func (m *Manager) arm(ctx context.Context, t *tab) {
 }
 
 func (m *Manager) reset() {
-	m.conn, m.proc, m.owned, m.cur, m.active = nil, nil, false, nil, false
+	m.conn, m.proc, m.owned, m.cur, m.active, m.maximized = nil, nil, false, nil, false, false
 	m.tabs, m.order, m.lastSent = map[string]*tab{}, nil, ""
 	m.evMu.Lock()
 	m.resume = ""
@@ -691,6 +697,7 @@ func (m *Manager) attach(ctx context.Context, targetID string) (*tab, error) {
 	m.tabs[targetID] = t
 	m.cur = t
 	m.arm(ctx, t)
+	m.maximize(ctx, targetID)
 	return t, nil
 }
 

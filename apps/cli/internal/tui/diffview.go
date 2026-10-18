@@ -65,6 +65,34 @@ func tokenColor(t chroma.TokenType, base string) string {
 	return base
 }
 
+// diffFoldedRows son las líneas cambiadas que se ven con el diff plegado.
+const diffFoldedRows = 5
+
+// changed son los índices de las filas añadidas o borradas.
+func (d *diffView) changed() []int {
+	var out []int
+	for i, r := range d.rows {
+		if r.Kind == "add" || r.Kind == "del" {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// folds: plegado se ven solo las líneas cambiadas, hasta diffFoldedRows; si
+// hay contexto o más cambios, ctrl+o enseña el diff entero.
+func (d *diffView) folds() bool {
+	changed := 0
+	for _, r := range d.rows {
+		if r.Kind == "add" || r.Kind == "del" {
+			changed++
+		} else if r.Kind != "gap" {
+			return true
+		}
+	}
+	return changed > diffFoldedRows
+}
+
 func (d *diffView) render(width int, open bool) []string {
 	if len(d.rows) == 0 {
 		return nil
@@ -75,12 +103,19 @@ func (d *diffView) render(width int, open bool) []string {
 	}
 	numWidth := max(3, len(strconv.Itoa(number)))
 	codeWidth := max(4, width-len(pad)-numWidth-1-2-1)
-	shown := d.rows
-	if !open && len(shown) > diffShownRows {
-		shown = shown[:diffShownRows]
+	idx := make([]int, 0, len(d.rows))
+	for i := range d.rows {
+		idx = append(idx, i)
+	}
+	more := 0
+	if !open {
+		changed := d.changed()
+		idx = changed[:min(len(changed), diffFoldedRows)]
+		more = len(changed) - len(idx)
 	}
 	var out []string
-	for i, r := range shown {
+	for _, i := range idx {
+		r := d.rows[i]
 		if r.Kind == "gap" {
 			out = append(out, pad+sDim2.Render(strings.Repeat(" ", numWidth+1)+glyphGap))
 			continue
@@ -122,8 +157,8 @@ func (d *diffView) render(width int, open bool) []string {
 		fill := style(base).Render(strings.Repeat(" ", max(0, codeWidth-used)))
 		out = append(out, pad+style(pal.faint).Render(fmt.Sprintf("%*d ", numWidth, n))+style(signColor).Render(sign)+code.String()+fill)
 	}
-	if len(shown) < len(d.rows) {
-		out = append(out, pad+sDim.Render(fmt.Sprintf("%s %d líneas", glyphEllipsis, len(d.rows)-len(shown)))+sDim2.Render(" "+glyphSep+" ctrl+o"))
+	if more > 0 {
+		out = append(out, pad+sDim.Render(fmt.Sprintf("%s %s más", glyphEllipsis, noun(more, "cambio", "cambios")))+sDim2.Render(" "+glyphSep+" ctrl+o"))
 	}
 	return out
 }
