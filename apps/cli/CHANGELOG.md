@@ -4,6 +4,9 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.11.1
+- La caja de escribir y el pie vuelven a estar fijos abajo. Lo que hace el agente en ese momento (pensando, escribiendo, el avance de una acción larga) va justo debajo del último mensaje mientras la conversación cabe en pantalla.
+
 ## 2.11.0
 - El turno del agente se lee de un vistazo: leer, buscar y los pasos del navegador seguidos van en una sola fila tenue («▸ Exploró 2 archivos · 1 búsqueda», «▸ Navegador · 4 pasos…») que ctrl+o o un clic despliegan. Lo pensado ya no ocupa filas «Pensó»: va en el ✦ de cada acción. Un paso que falla siempre queda a la vista.
 - Las ediciones enseñan solo las líneas cambiadas (hasta 5) en rojo y verde más profundos; ctrl+o abre el diff entero. Un comando que va bien es una fila con «exit 0 · 3.4 s»; si falla, se ven sus últimas líneas. Lo que el agente cuenta entre acciones va en tinta más clara.

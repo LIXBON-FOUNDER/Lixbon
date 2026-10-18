@@ -38,6 +38,9 @@ func (m *Model) View() tea.View {
 	if m.compacting != nil {
 		bottom = append(bottom, m.compactView()...)
 	}
+	// liveN son las filas de lo que hace el agente ahora (pensando,
+	// escribiendo…): con poco escrito suben detrás del último mensaje.
+	liveN := len(bottom)
 	// Aire entre lo que hace el agente y la caja o el panel de abajo.
 	if height >= breathMinHeight {
 		bottom = append(bottom, "")
@@ -73,6 +76,7 @@ func (m *Model) View() tea.View {
 		cut := len(bottom) - height
 		bottom = bottom[cut:]
 		panelAt -= cut
+		liveN = max(0, liveN-cut)
 	}
 	m.barShown = len(top) > 0
 	rows := height - len(top) - len(bottom)
@@ -91,22 +95,22 @@ func (m *Model) View() tea.View {
 	m.scroll = min(m.scroll, m.log.maxScroll(rows))
 	window := m.log.window(rows, m.scroll)
 	m.winY, m.winRows, m.winTop = len(top), rows, max(0, m.log.total()-m.scroll-rows)
-	// Mientras el transcript cabe, lo de abajo (lo que hace el agente, la caja
-	// y el pie) va justo detrás y el hueco queda al final: el turno empieza
-	// arriba y no pegado a la caja.
+	// Mientras el transcript cabe, lo que hace el agente ahora (pensando,
+	// escribiendo…) va justo detrás del último mensaje y el hueco queda entre
+	// eso y la caja, que sigue abajo con el pie.
 	gap := 0
-	if total := m.log.total(); m.scroll == 0 && total < rows {
+	if total := m.log.total(); liveN > 0 && m.scroll == 0 && total < rows {
 		gap = rows - total
 		window = window[:total]
 		m.winRows = total
 	}
-	m.footY = height - 1 - gap
+	m.footY = height - 1
 	if len(bottom) > 0 && footerShown {
 		bottom[len(bottom)-1] = ansi.Truncate(m.footer(), width, "")
 	}
 	m.panelY = -1
 	if panelAt >= 0 {
-		m.panelY = len(top) + rows - gap + panelAt
+		m.panelY = len(top) + rows + panelAt
 	}
 	if !m.sel.empty() {
 		for y, line := range window {
@@ -119,10 +123,11 @@ func (m *Model) View() tea.View {
 		window[rows-1] = m.moreButton(width)
 	}
 
-	screen := append(append(top, window...), bottom...)
+	screen := append(append(top, window...), bottom[:liveN]...)
 	for range gap {
 		screen = append(screen, "")
 	}
+	screen = append(screen, bottom[liveN:]...)
 	if anchored {
 		m.popover(screen, width, height)
 	}
