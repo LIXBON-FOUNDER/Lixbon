@@ -44,10 +44,13 @@ func launchArgs(opts Options) []string {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--disable-search-engine-choice-screen",
-		fmt.Sprintf("--window-size=%d,%d", windowWidth, windowHeight),
 	}
+	// Con ventana, maximizada: el agente y el usuario ven la página entera.
+	// Sin ventana no hay pantalla que llenar y se fija el tamaño.
 	if opts.Headless {
-		args = append(args, "--headless=new")
+		args = append(args, fmt.Sprintf("--window-size=%d,%d", windowWidth, windowHeight), "--headless=new")
+	} else {
+		args = append(args, "--start-maximized")
 	}
 	return append(args, "about:blank")
 }

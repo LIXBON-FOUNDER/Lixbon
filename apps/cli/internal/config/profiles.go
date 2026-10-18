@@ -208,15 +208,40 @@ func (c *Config) applyTopLevel(p Profile) {
 	if p.ContextWindow > 0 {
 		c.ContextWindow = p.ContextWindow
 	}
-	c.fixMiMoWindow()
+	c.FixMiMoWindow()
 }
 
-// fixMiMoWindow: un perfil MiMo guardado antes de que el CLI conociera su
-// ventana quedó con la genérica, y con ella el agente recortaba la
-// conversación desde el primer paso.
-func (c *Config) fixMiMoWindow() {
-	if IsMiMo(c.BaseURL) && c.ContextWindow == DefaultGenericContext {
-		c.ContextWindow = mimoContext
+// mimoWindows son las ventanas conocidas de cada modelo MiMo; el resto se
+// queda en mimoContext.
+var mimoWindows = map[string]int{
+	"mimo-v2.6-pro":            1048576,
+	"mimo-v2.6-pro-ultraspeed": 1048576,
+}
+
+// MiMoWindow es la ventana de un modelo MiMo, o mimoContext si no se conoce.
+func MiMoWindow(model string) int {
+	id := strings.ToLower(strings.TrimSpace(model))
+	id = id[strings.LastIndex(id, "/")+1:]
+	if w, ok := mimoWindows[id]; ok {
+		return w
+	}
+	return mimoContext
+}
+
+// FixMiMoWindow: un perfil MiMo con una ventana que puso el CLI (la genérica
+// de antes, la prudente de mimoContext o la de otro modelo MiMo) pasa a la de
+// su modelo. Con la genérica, el agente recortaba la conversación desde el
+// primer paso; una ventana que eligió el usuario no se toca.
+func (c *Config) FixMiMoWindow() {
+	if !IsMiMo(c.BaseURL) {
+		return
+	}
+	auto := c.ContextWindow == DefaultGenericContext || c.ContextWindow == mimoContext
+	for _, w := range mimoWindows {
+		auto = auto || c.ContextWindow == w
+	}
+	if auto {
+		c.ContextWindow = MiMoWindow(c.Model)
 	}
 }
 

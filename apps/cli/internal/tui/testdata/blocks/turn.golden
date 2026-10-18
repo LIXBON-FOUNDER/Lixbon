@@ -2,64 +2,40 @@
  ◆ Lixbon    3 acciones · +4 −1 · 9.8 s
  ┃   Miro primero cómo se crea la
  ┃   sesión.
- ┃ ✗  Exploró  2 archivos · 1 b…  0.8 s
+ ┃ ▸ Exploró 2 a…                 0.8 s
+ ┃   ✗  Leer  falta.go     no existe e…
  ┃ ✓  Editar  session.go          +2 −1
- ┃     1   func New() *S {             
  ┃     2 −     return &S{}             
  ┃     2 +     s := &S{created: time.No
  ┃     3 +     return s                
- ┃     4   }                           
- ┃   └ 1 reemplazo · gofmt: sin errores
- ┃ ✓  $  go test ./internal/...   3.4 s
- ┃   │ línea 1
- ┃   │ línea 2
- ┃   │ … 6 líneas · ctrl+o
- ┃   │ línea 9
- ┃   │ línea 10
- ┃   │ línea 11
- ┗   └ exit 0 · 11 líneas
+ ┃   └ gofmt: sin errores
+ ┗ ✓  $  go test ./int…  exit 0 · 3.4 s
 
    Listo: la sesión se crea con su
    fecha.
 ── 80 ──
  ◆ Lixbon                                            3 acciones · +4 −1 · 9.8 s
  ┃   Miro primero cómo se crea la sesión.
- ┃ ✗  Exploró  2 archivos · 1 búsqueda · 1 error                          0.8 s
+ ┃ ▸ Exploró 2 archivos · 1 búsqueda                                      0.8 s
+ ┃   ✗  Leer  falta.go                                     no existe el archivo
  ┃ ✓  Editar  session.go                                                  +2 −1
- ┃     1   func New() *S {                                                     
  ┃     2 −     return &S{}                                                     
  ┃     2 +     s := &S{created: time.Now()}                                    
  ┃     3 +     return s                                                        
- ┃     4   }                                                                   
- ┃   └ 1 reemplazo · gofmt: sin errores
- ┃ ✓  $  go test ./internal/...                                           3.4 s
- ┃   │ línea 1
- ┃   │ línea 2
- ┃   │ … 6 líneas · ctrl+o
- ┃   │ línea 9
- ┃   │ línea 10
- ┃   │ línea 11
- ┗   └ exit 0 · 11 líneas
+ ┃   └ gofmt: sin errores
+ ┗ ✓  $  go test ./internal/...                                  exit 0 · 3.4 s
 
    Listo: la sesión se crea con su fecha.
 ── 120 ──
  ◆ Lixbon                                                                                    3 acciones · +4 −1 · 9.8 s
  ┃   Miro primero cómo se crea la sesión.
- ┃ ✗  Exploró  2 archivos · 1 búsqueda · 1 error                                                                  0.8 s
+ ┃ ▸ Exploró 2 archivos · 1 búsqueda                                                                              0.8 s
+ ┃   ✗  Leer  falta.go                                                                             no existe el archivo
  ┃ ✓  Editar  session.go                                                                                          +2 −1
- ┃     1   func New() *S {                                                                                             
  ┃     2 −     return &S{}                                                                                             
  ┃     2 +     s := &S{created: time.Now()}                                                                            
  ┃     3 +     return s                                                                                                
- ┃     4   }                                                                                                           
- ┃   └ 1 reemplazo · gofmt: sin errores
- ┃ ✓  $  go test ./internal/...                                                                                   3.4 s
- ┃   │ línea 1
- ┃   │ línea 2
- ┃   │ … 6 líneas · ctrl+o
- ┃   │ línea 9
- ┃   │ línea 10
- ┃   │ línea 11
- ┗   └ exit 0 · 11 líneas
+ ┃   └ gofmt: sin errores
+ ┗ ✓  $  go test ./internal/...                                                                          exit 0 · 3.4 s
 
    Listo: la sesión se crea con su fecha.

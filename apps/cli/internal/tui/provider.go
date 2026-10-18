@@ -23,7 +23,8 @@ const (
 
 // gatewayOnly son los comandos que dependen de endpoints del gateway Lixbon.
 // /remote no está: con otro proveedor pasa por la cuenta Lixbon (remoteRelay).
-var gatewayOnly = []string{"usage", "nodes", "key", "login", "logout", "web", "visual"}
+// /usage tampoco: enseña lo gastado con cada proveedor y modelo.
+var gatewayOnly = []string{"nodes", "key", "login", "logout", "web", "visual"}
 
 func providerHost(baseURL string) string {
 	if u, err := url.Parse(baseURL); err == nil && u.Host != "" {

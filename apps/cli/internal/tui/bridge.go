@@ -28,6 +28,12 @@ type (
 		turn int
 		text string
 	}
+	// ctxMsg es el contexto medido en la goroutine del turno, que es la que
+	// cambia el trabajo del agente: la barra lo sigue paso a paso.
+	ctxMsg struct {
+		turn, tokens, session int
+		pct                   float64
+	}
 	titleMsg struct{ title string }
 	doneMsg  struct {
 		turn   int
@@ -66,6 +72,8 @@ var deltaEvery = 40 * time.Millisecond
 type uiSink struct {
 	send func(tea.Msg)
 	turn int
+	// measure mide el contexto; se llama desde la goroutine del turno.
+	measure func() ctxMsg
 
 	// mu se mantiene durante los envíos para que un evento nunca adelante a
 	// los fragmentos que llegaron antes que él.
@@ -75,13 +83,19 @@ type uiSink struct {
 }
 
 func (s *uiSink) Delta(kind sse.Kind, text string) {
+	if kind == sse.Usage && s.measure != nil {
+		s.send(s.measure())
+	}
 	if deltaEvery <= 0 {
 		s.send(deltaMsg{s.turn, kind, text})
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if n := len(s.pending); n > 0 && s.pending[n-1].kind == kind && kind != sse.Usage {
+	if n := len(s.pending); n > 0 && s.pending[n-1].kind == kind && kind == sse.ToolCalls {
+		// El avance de una llamada no se suma: vale el último.
+		s.pending[n-1].text = text
+	} else if n > 0 && s.pending[n-1].kind == kind && kind != sse.Usage {
 		s.pending[n-1].text += text
 	} else {
 		s.pending = append(s.pending, deltaMsg{s.turn, kind, text})
@@ -114,6 +128,9 @@ func (s *uiSink) Event(e agent.Event) {
 	defer s.mu.Unlock()
 	s.flushLocked()
 	s.send(eventMsg{s.turn, e})
+	if e.Kind == agent.EventStep && s.measure != nil {
+		s.send(s.measure())
+	}
 }
 
 func (s *uiSink) Note(text string) {

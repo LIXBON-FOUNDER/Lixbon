@@ -276,19 +276,45 @@ func TestPromptFitsTheWindowWithSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestStepCapIsWideAndExplained(t *testing.T) {
-	if MaxSteps < 30 {
-		t.Fatalf("MaxSteps = %d", MaxSteps)
-	}
+// Un turno que avanza no tiene tope: 200 pasos distintos y luego responde.
+func TestATurnHasNoStepCap(t *testing.T) {
 	replies := make([]StreamResult, 200)
 	for i := range replies {
 		replies[i] = StreamResult{Text: `{"tool":"list_files","args":{"path":".","n":` + strconv.Itoa(i) + `}}`}
 	}
+	replies = append(replies, StreamResult{Text: "Listo."})
 	r := newRig(t, replies)
 	r.turn.S.NativeTools = false
-	reason := r.stop("explora")
-	if len(r.model.calls) != MaxSteps || !strings.Contains(reason, "continúa") {
-		t.Fatalf("calls=%d reason=%q", len(r.model.calls), reason)
+	if answer, _ := r.run("explora"); answer != "Listo." || len(r.model.calls) != 201 {
+		t.Fatalf("answer=%q calls=%d", answer, len(r.model.calls))
+	}
+}
+
+// Lo que falla tres veces se deja: el agente sigue y al final se cuenta.
+func TestAnActionThatFailsThreeTimesIsDroppedAndReported(t *testing.T) {
+	failing := func(id string) StreamResult {
+		return StreamResult{ToolCalls: []json.RawMessage{nativeCall(id, "run_command", map[string]any{"command": "exit 3"})}}
+	}
+	other := StreamResult{ToolCalls: []json.RawMessage{nativeCall("o", "read_file", map[string]any{"path": "a.txt"})}}
+	r := newRig(t, []StreamResult{failing("1"), failing("2"), failing("3"), failing("4"), other, {Text: "Leí a.txt; el comando no funciona."}})
+	r.turn.S.AutoRunCommands = true
+	r.write("a.txt", "hola")
+	answer, working := r.run("prueba y lee")
+	if answer != "Leí a.txt; el comando no funciona." {
+		t.Fatalf("el turno sigue tras dejar la acción: %q", answer)
+	}
+	notes := r.notes()
+	if !strings.Contains(notes, "Se deja de intentar «run_command exit 3»") || !strings.Contains(notes, "No se pudo hacer:") {
+		t.Fatalf("notas: %q", notes)
+	}
+	var results []string
+	for _, m := range working {
+		if m.Role == "tool" {
+			results = append(results, m.Content)
+		}
+	}
+	if len(results) != 5 || !strings.Contains(results[2], "ya falló 3 veces") || !strings.Contains(results[3], "No se ejecutó") {
+		t.Fatalf("resultados: %q", results)
 	}
 }
 
@@ -361,7 +387,7 @@ func TestRepeatedNativeCallsAreCut(t *testing.T) {
 		replies[i] = StreamResult{ToolCalls: []json.RawMessage{call}}
 	}
 	r := newRig(t, replies)
-	if reason := r.stop("lista"); !strings.Contains(reason, "repetía") || len(r.model.calls) > MaxRepeatedCalls+2 {
+	if reason := r.stop("lista"); !strings.Contains(reason, "repetía") || len(r.model.calls) > 2*MaxRepeatedCalls+1 {
 		t.Fatalf("reason=%q calls=%d", reason, len(r.model.calls))
 	}
 }
@@ -467,7 +493,7 @@ func TestCodeAfterUsingToolsIsTheAnswer(t *testing.T) {
 func TestStuckTurnAnswersWithWhatItHas(t *testing.T) {
 	call := nativeCall("c", "list_files", map[string]any{"path": "."})
 	replies := []StreamResult{}
-	for range MaxRepeatedCalls + 1 {
+	for range 2 * MaxRepeatedCalls {
 		replies = append(replies, StreamResult{ToolCalls: []json.RawMessage{call}})
 	}
 	replies = append(replies, StreamResult{Text: "Veo a.txt."})
@@ -833,7 +859,7 @@ func TestCompactionRunsWhenTheWindowFills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked == nil || !strings.Contains(r.notes(), "Contexto compactado") {
+	if asked == nil || !strings.Contains(r.notes(), "Conversación compactada: de ~") {
 		t.Fatalf("no compactó. notas: %q", r.notes())
 	}
 	if !strings.Contains(working[0].Content, "resumen de lo hablado") {

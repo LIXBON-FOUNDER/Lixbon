@@ -58,7 +58,9 @@ func (m *Model) popover(screen []string, width, height int) {
 	p := m.picker
 	a := p.anchor
 	w := min(width, max(44, min(72, width*3/5)))
-	below := a.y < height/2
+	// Los del pie se abren siempre encima, aunque con poco escrito el pie
+	// quede en la mitad de arriba.
+	below := a.y < height/2 && a.y != m.footY
 	avail := a.y
 	if below {
 		avail = height - a.y - 2

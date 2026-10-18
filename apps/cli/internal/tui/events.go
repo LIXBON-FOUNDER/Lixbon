@@ -14,6 +14,7 @@ import (
 func (m *Model) handleEvent(e agent.Event) {
 	thought := m.takeThought(e)
 	m.flushLive()
+	m.autoCompacting = e.Compacting
 	if e.Kind == agent.EventStep {
 		return
 	}
@@ -88,10 +89,22 @@ func (m *Model) takeThought(e agent.Event) thinkBlock {
 	if e.Kind != agent.EventReadGroup && e.Kind != agent.EventAction || live.answer != nil || m.liveProse() != "" {
 		return thinkBlock{}
 	}
-	t := thinkBlock{text: strings.TrimSpace(live.reasoning.String()), secs: live.reasoningSecs}
+	t := joinThoughts(m.pendingThought, thinkBlock{text: strings.TrimSpace(live.reasoning.String()), secs: live.reasoningSecs})
+	m.pendingThought = thinkBlock{}
 	live.reasoning.Reset()
 	live.reasoningSecs = 0
 	return t
+}
+
+// joinThoughts junta lo pensado en varios trozos del mismo paso.
+func joinThoughts(a, b thinkBlock) thinkBlock {
+	switch {
+	case !hasThought(a):
+		return b
+	case !hasThought(b):
+		return a
+	}
+	return thinkBlock{text: a.text + "\n\n" + b.text, secs: a.secs + b.secs}
 }
 
 func (m *Model) addRead(it readItem) {
