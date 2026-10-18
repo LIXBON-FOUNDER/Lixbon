@@ -8,11 +8,10 @@ import { showConfirm } from '../lib/confirm';
 import { useChatStore, useOpenSessions, useSessionsStore, spawnSessionOf } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
 import { claudeSessions, claudeDeleteSession, claudeArchiveSession } from '../lib/claudeCode';
-import { ClaudeMark } from '../components/Logo';
+import { ClaudeMark, LogoMark } from '../components/Logo';
 import { codexTerm } from '../orch/codexterm/codexTermContract';
 import { useCodexTermStore } from '../orch/codexterm/codexTermStore';
 import { engineOf, ENGINE_IDS } from '../lib/engines';
-import { SpinRing } from '../components/Ring';
 import { IconPencil, IconTrash, IconSearch, IconArchive, IconChevronRight, IconChevronDown } from '../components/Icons';
 
 const FILTER_KEY = 'lixbon_hist_filter';
@@ -245,7 +244,7 @@ export function HistoryList() {
                       const working = c.streaming && !c.waiting;
                       return (
                         <>
-                          {working && (eng === 'claude' ? <ClaudeMark size={12} className="claudemark--live" /> : <SpinRing size={11} />)}
+                          {working && (eng === 'claude' ? <ClaudeMark size={12} className="claudemark--live" /> : <LogoMark size={12} motion="giro" />)}
                           {c.waiting && <span className="dot dot--accent dot--pulse" title="Espera tu permiso" />}
                           {c.live && !c.streaming && !c.waiting && <span className="dot dot--good" title="Terminó" />}
                           {!working && (eng !== 'lixbon' || filter === 'all') && <span className="hist__mark" title={engineOf(eng).label}><Mark size={11} /></span>}

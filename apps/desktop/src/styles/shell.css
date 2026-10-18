@@ -708,6 +708,42 @@
 
 .team__badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-size: 10px; }
 
+/* Prisma de lixbon: caras «sobre negro» en oscuro y las de la marca en claro. */
+.logomark { flex-shrink: 0; overflow: visible; --lx-f1: #E6DEC0; --lx-f2: #BFB48C; --lx-f3: #737D3E; --lx-f4: #454D25; }
+[data-theme='light'] .logomark { --lx-f1: #D8CFAD; --lx-f2: #B3A880; --lx-f3: #5A632D; --lx-f4: #2C3216; }
+.logomark__f1 { fill: var(--lx-f1); stroke: var(--lx-f1); }
+.logomark__f2 { fill: var(--lx-f2); stroke: var(--lx-f2); }
+.logomark__f3 { fill: var(--lx-f3); stroke: var(--lx-f3); }
+.logomark__f4 { fill: var(--lx-f4); stroke: var(--lx-f4); }
+.logomark__star { fill: #FCFAEF; transform-box: fill-box; transform-origin: center; }
+.logomark__luz { fill: #FCFAEF; opacity: 0; }
+
+/* Destello: la estrella da media vuelta y se encoge. */
+.logomark--destello .logomark__star { animation: lx-destello 1.6s cubic-bezier(.65, 0, .35, 1) infinite; }
+@keyframes lx-destello { 0% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(90deg) scale(.5); } 100% { transform: rotate(180deg) scale(1); } }
+/* Refracción: la luz recorre las caras una tras otra. */
+.logomark--refraccion .logomark__luz { animation: lx-luz 2.4s ease-in-out infinite; }
+.logomark--refraccion .logomark__luz--2 { animation-delay: .6s; }
+.logomark--refraccion .logomark__luz--3 { animation-delay: 1.2s; }
+.logomark--refraccion .logomark__luz--4 { animation-delay: 1.8s; }
+@keyframes lx-luz { 0% { opacity: 0; } 14% { opacity: .6; } 38%, 100% { opacity: 0; } }
+/* Talla: las caras se abren y vuelven a encajar, escalonadas. */
+.logomark--talla .logomark__f1, .logomark--talla .logomark__f2, .logomark--talla .logomark__f3, .logomark--talla .logomark__f4g { animation: 2.2s cubic-bezier(.65, 0, .35, 1) infinite; }
+.logomark--talla .logomark__f1 { animation-name: lx-t1; }
+.logomark--talla .logomark__f2 { animation-name: lx-t2; animation-delay: .08s; }
+.logomark--talla .logomark__f3 { animation-name: lx-t3; animation-delay: .16s; }
+.logomark--talla .logomark__f4g { animation-name: lx-t4; animation-delay: .24s; }
+@keyframes lx-t1 { 0%, 12% { transform: translate(0, 0); } 42%, 58% { transform: translate(-1.05px, -2.8px); } 88%, 100% { transform: translate(0, 0); } }
+@keyframes lx-t2 { 0%, 12% { transform: translate(0, 0); } 42%, 58% { transform: translate(2.25px, -1.98px); } 88%, 100% { transform: translate(0, 0); } }
+@keyframes lx-t3 { 0%, 12% { transform: translate(0, 0); } 42%, 58% { transform: translate(-.93px, 2.85px); } 88%, 100% { transform: translate(0, 0); } }
+@keyframes lx-t4 { 0%, 12% { transform: translate(0, 0); } 42%, 58% { transform: translate(2.13px, 2.13px); } 88%, 100% { transform: translate(0, 0); } }
+/* Giro: el prisma gira con SMIL; la estrella titila. */
+.logomark--giro .logomark__star { animation: lx-titila 1.4s ease-in-out infinite; }
+@keyframes lx-titila { 0%, 100% { transform: scale(1); } 50% { transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) {
+  .logomark * { animation: none !important; }
+}
+
 .teammark { flex-shrink: 0; }
 .teammark__cut { fill: var(--teammark-cut, var(--surface-1)); stroke: var(--teammark-cut, var(--surface-1)); stroke-width: 3; stroke-linejoin: round; }
 .wbpanel.is-focused .teammark { --teammark-cut: var(--surface-2); }

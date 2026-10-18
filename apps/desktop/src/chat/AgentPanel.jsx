@@ -4,10 +4,9 @@ import { useCallback, useRef, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { Popover } from '../components/Popover';
-import { SpinRing } from '../components/Ring';
 import { ChatPanel } from './ChatPanel';
 import { HistoryList } from './HistoryList';
-import { TeamMark } from '../components/Logo';
+import { LogoMark, TeamMark } from '../components/Logo';
 import { IconChevronDown, IconExpand, IconPlus, IconX } from '../components/Icons';
 
 export function AgentHeaderTitle() {
@@ -21,7 +20,7 @@ export function AgentHeaderTitle() {
   return (
     <>
       <button ref={ref} className="agenttitle" onClick={() => setOpen((v) => !v)}>
-        {streaming && !waiting ? <SpinRing size={12} /> : <span className={`dot ${waiting ? 'dot--accent dot--pulse' : streaming ? 'dot--accent' : ''}`} />}
+        {streaming && !waiting ? <LogoMark size={13} motion="destello" /> : <span className={`dot ${waiting ? 'dot--accent dot--pulse' : streaming ? 'dot--accent' : ''}`} />}
         <span className="agenttitle__text">{title || 'Nueva conversación'}</span>
         <IconChevronDown size={12} className={`chev ${open ? 'is-flipped' : ''}`} />
       </button>
