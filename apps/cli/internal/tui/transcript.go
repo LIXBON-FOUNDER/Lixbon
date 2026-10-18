@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -36,7 +37,17 @@ type entry struct {
 	dirty bool
 	// detached: la entrada se mostró fuera del transcript (pie o panel).
 	detached bool
+	// rail: la entrada es un paso del agente y cuelga del riel de su turno.
+	rail railMark
 }
+
+type railMark int
+
+const (
+	railNone railMark = iota
+	railMid
+	railEnd // el último paso: el riel se cierra en él
+)
 
 func (e *entry) folds() bool {
 	f, ok := e.b.(folder)
@@ -62,8 +73,17 @@ func (t *transcript) wrapLine(line string) []string {
 	return strings.Split(ansi.Hardwrap(line, t.width, true), "\n")
 }
 
+// render pinta la entrada; un paso del riel se pinta dos columnas más
+// estrecho y con el riel delante.
+func (t *transcript) render(e *entry, open bool) string {
+	if e.rail == railNone {
+		return e.b.render(t.width, open)
+	}
+	return withRail(e.b.render(max(10, t.width-2), open), e.rail == railEnd)
+}
+
 func (t *transcript) paint(e *entry) {
-	e.text = e.b.render(t.width, e.open || t.detail)
+	e.text = t.render(e, e.open || t.detail)
 	e.dirty = false
 	t.rewrap(e)
 }
@@ -76,8 +96,10 @@ func (t *transcript) rewrap(e *entry) {
 	e.rows = rows
 }
 
-func (t *transcript) add(b block) *entry {
-	e := &entry{b: b}
+func (t *transcript) add(b block) *entry { return t.addRail(b, railNone) }
+
+func (t *transcript) addRail(b block, rail railMark) *entry {
+	e := &entry{b: b, rail: rail}
 	t.paint(e)
 	t.entries = append(t.entries, e)
 	if !t.stale {
@@ -88,6 +110,18 @@ func (t *transcript) add(b block) *entry {
 	}
 	return e
 }
+
+// insert mete un bloque en la posición i (la cabecera de un turno, que se
+// sabe que hace falta cuando ya hay pasos debajo).
+func (t *transcript) insert(i int, b block) *entry {
+	e := &entry{b: b}
+	t.paint(e)
+	t.entries = slices.Insert(t.entries, i, e)
+	t.stale = true
+	return e
+}
+
+func (t *transcript) index(e *entry) int { return slices.Index(t.entries, e) }
 
 func (t *transcript) flatten() {
 	if !t.stale {
@@ -253,7 +287,7 @@ func (t *transcript) expanded() []string {
 	for _, e := range t.entries {
 		text := e.text
 		if e.folds() {
-			text = e.b.render(t.width, true)
+			text = t.render(e, true)
 		}
 		for _, line := range strings.Split(text, "\n") {
 			out = append(out, t.wrapLine(line)...)

@@ -18,10 +18,18 @@ func (m *Model) handleEvent(e agent.Event) {
 		return
 	}
 	m.live.usedTools = true
-	switch e.Kind {
-	case agent.EventNote, agent.EventRescued:
+	if e.Kind == agent.EventNote || e.Kind == agent.EventRescued {
 		m.closeGroups()
-		m.add(note(e.Text))
+		if m.turnHead != nil {
+			m.addOutside(systemBlock(e.Text))
+		} else {
+			m.add(note(e.Text))
+		}
+		return
+	}
+	m.openRail()
+	m.countStep(e)
+	switch e.Kind {
 	case agent.EventReadGroup:
 		m.closeTool(toolDone)
 		m.closeBrowser()
@@ -45,6 +53,7 @@ func (m *Model) handleEvent(e agent.Event) {
 		}
 		m.closeReads()
 		b := newToolBlock(e, &m.spin)
+		b.thought = thought
 		entry := m.add(b)
 		if e.ReadOnly {
 			b.state = toolDone
@@ -72,13 +81,11 @@ func (m *Model) handleEvent(e agent.Event) {
 	}
 }
 
-// takeThought aparta lo pensado antes de una acción que va a un grupo: se
-// guarda dentro del grupo (ctrl+o lo enseña) en vez de como otra fila «Pensó».
+// takeThought aparta lo pensado antes de una acción: se guarda en ella (su
+// «✦ 1,2 s»; ctrl+o lo enseña) en vez de como otra fila «Pensó».
 func (m *Model) takeThought(e agent.Event) thinkBlock {
 	live := &m.live
-	grouped := e.Kind == agent.EventReadGroup ||
-		e.Kind == agent.EventAction && (toolspec.IsBrowser(e.Tool) || e.ReadOnly && e.Tool != "ask_user")
-	if !grouped || live.answer != nil || m.liveProse() != "" {
+	if e.Kind != agent.EventReadGroup && e.Kind != agent.EventAction || live.answer != nil || m.liveProse() != "" {
 		return thinkBlock{}
 	}
 	t := thinkBlock{text: strings.TrimSpace(live.reasoning.String()), secs: live.reasoningSecs}
@@ -89,7 +96,7 @@ func (m *Model) takeThought(e agent.Event) thinkBlock {
 
 func (m *Model) addRead(it readItem) {
 	if m.readGroup == nil {
-		m.readGroup = m.add(&readGroupBlock{items: []readItem{it}, live: true})
+		m.readGroup = m.add(&readGroupBlock{items: []readItem{it}, live: true, spin: &m.spin})
 		return
 	}
 	g := m.readGroup.b.(*readGroupBlock)
@@ -106,12 +113,11 @@ func (m *Model) addBrowserStep(e agent.Event, thought thinkBlock) {
 		step.state = toolDone
 	}
 	if m.browserGroup == nil {
-		m.browserGroup = m.add(&browserBlock{live: true, steps: []*toolBlock{step}, thoughts: []thinkBlock{thought}, secs: thought.secs})
+		m.browserGroup = m.add(&browserBlock{live: true, steps: []*toolBlock{step}, thoughts: []thinkBlock{thought}})
 	} else {
 		g := m.browserGroup.b.(*browserBlock)
 		g.steps = append(g.steps, step)
 		g.thoughts = append(g.thoughts, thought)
-		g.secs += thought.secs
 		m.refresh(m.browserGroup)
 	}
 	m.openTool = m.browserGroup
@@ -196,7 +202,7 @@ func (m *Model) gap() {
 	if n == 0 {
 		return
 	}
-	if last := m.log.entries[n-1]; last.text == "" {
+	if last := m.log.entries[n-1]; last.text == "" || last.b == block(textBlock("")) {
 		return
 	}
 	m.print("")

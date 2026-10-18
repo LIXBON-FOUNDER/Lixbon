@@ -7,7 +7,6 @@ import { splitThinking } from '../lib/agentProtocol';
 import { getActiveView } from './CodeEditor';
 import { inlineTarget, applyInline, acceptInline, rejectInline } from './inlineState';
 import { languageLabel } from './languages';
-import { SpinRing } from '../components/Ring';
 import { LogoMark } from '../components/Logo';
 import { IconArrowUp } from '../components/Icons';
 
@@ -135,7 +134,7 @@ export function InlineEdit({ path, relPath, onClose }) {
 
   return (
     <div className="inlineedit" style={{ top }}>
-      {phase === 'running' ? <SpinRing size={14} /> : <LogoMark size={13} />}
+      <LogoMark size={phase === 'running' ? 14 : 13} motion={phase === 'running' ? 'talla' : undefined} />
       <input
         ref={inputRef}
         autoFocus

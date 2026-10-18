@@ -1,7 +1,8 @@
-// Sidebar.js — menú lateral: marca y nueva conversación, selector Chat ·
-// Remoto y debajo lo de cada uno: buscar y el historial por fechas (mantener
-// pulsado para fijar, renombrar, compartir o eliminar con "Deshacer"), o las
-// sesiones remotas. Abajo, la tarjeta de cuenta con el uso, que lleva a Ajustes.
+// Sidebar.js — menú lateral: marca, botón de nueva conversación, selector
+// Chat · Remoto y debajo lo de cada uno: buscar y el historial por fechas,
+// plegable y por páginas (mantener pulsado para fijar, renombrar, compartir o
+// eliminar con "Deshacer"), o las sesiones remotas. Abajo, la tarjeta de
+// cuenta (foto, nombre y uso de la sesión), que entera lleva a Ajustes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +16,9 @@ import { FONTS, RADIUS } from '../theme';
 import Icon from './Icon';
 import RemoteSessionList from './RemoteSessionList';
 import { useDialogs } from './dialogs';
-import { Avatar, avatarUri, Eyebrow, FadeUp, IconButton, LixLogo, LogoMark, Meter, PlanPill, Segmented, SkeletonLines, useColors } from './ui';
+import { Avatar, avatarUri, Eyebrow, FadeUp, LixLogo, LogoMark, Meter, Segmented, SkeletonLines, useColors } from './ui';
+
+const PAGE = 30; // conversaciones por página del historial
 
 export default function Sidebar({ open, onClose, onNavigate, section, onSection, onSearch, remote, activeRemoteId, onOpenSession }) {
   const c = useColors();
@@ -30,21 +33,49 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
   const [hidden, setHidden] = useState([]);
   const [usage, setUsage] = useState(null);
   const [tab, setTab] = useState(section);
+  const [more, setMore] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(true);
+  const fetchingMore = useRef(false);
   const loadedOnce = useRef(false);
   const user = auth.user || {};
   const pins = usePins(user.id);
 
+  // El historial llega por páginas: la primera al abrir el menú y las
+  // siguientes al bajar hasta el final de la lista.
+  const page = async (offset) => {
+    // Historial propio de la app: sin `source` el gateway devolvería también
+    // lo del CLI, el IDE y la web (la app se autentica con API key).
+    const res = await api.get(`/api/conversations?source=${CHAT_SOURCE}&limit=${PAGE}&offset=${offset}`);
+    return (Array.isArray(res?.conversations) ? res.conversations : []).filter((it) => it && typeof it === 'object');
+  };
+
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      // Historial propio de la app: sin `source` el gateway devolvería también
-      // lo del CLI, el IDE y la web (la app se autentica con API key).
-      const res = await api.get(`/api/conversations?source=${CHAT_SOURCE}&limit=100`);
-      setItems((Array.isArray(res?.conversations) ? res.conversations : []).filter((it) => it && typeof it === 'object'));
+      const first = await page(0);
+      setItems(first);
+      setMore(first.length === PAGE);
     } catch {
       // offline: se queda la lista anterior
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (!more || fetchingMore.current) return;
+    fetchingMore.current = true;
+    try {
+      const next = await page(items.length);
+      setItems((cur) => {
+        const seen = new Set(cur.map((it) => it.id));
+        return [...cur, ...next.filter((it) => !seen.has(it.id))];
+      });
+      setMore(next.length === PAGE);
+    } catch {
+      // se reintenta al volver a llegar al final
+    } finally {
+      fetchingMore.current = false;
     }
   };
 
@@ -165,10 +196,25 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
           <LogoMark size={24} />
           <LixLogo size={14} />
         </View>
-        <IconButton onPress={newChat} label="Nueva conversación">
-          <Icon name="compose" size={20} color={c.inkBody} />
-        </IconButton>
       </View>
+
+      <Pressable
+        onPress={newChat}
+        accessibilityRole="button"
+        style={({ pressed }) => ({
+          marginTop: 8,
+          height: 42,
+          paddingHorizontal: 12,
+          borderRadius: RADIUS,
+          backgroundColor: pressed ? c.surface4 : c.surface2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+        })}
+      >
+        <Icon name="plus" size={18} color={c.ink} />
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>Nueva conversación</Text>
+      </Pressable>
 
       <View style={{ marginTop: 10 }}>
         <Segmented
@@ -204,7 +250,17 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
             <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkMuted }}>Buscar</Text>
           </Pressable>
     
-          <View style={{ flex: 1, marginTop: 18 }}>
+          <Pressable
+            onPress={() => setHistoryOpen((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: historyOpen }}
+            style={{ marginTop: 14, height: 32, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+          >
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.inkMuted }}>Historial</Text>
+            <Icon name={historyOpen ? 'chevron-up' : 'chevron-down'} size={15} color={c.inkMuted} />
+          </Pressable>
+
+          <View style={{ flex: 1, marginTop: 6, display: historyOpen ? 'flex' : 'none' }}>
             {loading && items.length === 0 ? (
               <SkeletonLines widths={['70%', '52%', '62%', '44%', '58%']} style={{ paddingHorizontal: 12, paddingTop: 6 }} />
             ) : visible.length === 0 ? (
@@ -214,6 +270,8 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
                 data={rows}
                 keyExtractor={(r) => r.key}
                 showsVerticalScrollIndicator={false}
+                onEndReached={loadMore}
+                onEndReachedThreshold={0.6}
                 renderItem={({ item: row, index }) => {
                   if (row.label) {
                     return <Eyebrow style={{ paddingHorizontal: 12, paddingTop: index === 0 ? 0 : 18, paddingBottom: 4 }}>{row.label}</Eyebrow>;
@@ -247,6 +305,7 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
               />
             )}
           </View>
+          {!historyOpen && <View style={{ flex: 1 }} />}
         </>
       )}
 
@@ -261,27 +320,20 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
           gap: 10,
         })}
       >
+        {/* Toda la tarjeta lleva a Ajustes: el engranaje solo lo indica. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Avatar name={displayName} size={36} uri={avatarUri(api.base, user)} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
-                {displayName}
-              </Text>
-              {typeof user.plan_name === 'string' && <PlanPill>{user.plan_name}</PlanPill>}
-            </View>
-            {!!user.email && user.email !== displayName && (
-              <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
-                {user.email}
-              </Text>
-            )}
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>
+            {displayName}
+          </Text>
+          <View pointerEvents="none" importantForAccessibility="no-hide-descendants">
+            <Icon name="gear" size={18} color={c.inkMuted} strokeWidth={1.7} />
           </View>
-          <Icon name="gear" size={18} color={c.inkMuted} strokeWidth={1.7} />
         </View>
         {usage != null && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Meter value={usage} color={usage >= 0.9 ? c.danger : c.accent} />
-            <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>{Math.round(usage * 100)} % de la sesión</Text>
+            <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>{Math.round(usage * 100)} %</Text>
           </View>
         )}
       </Pressable>

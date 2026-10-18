@@ -1,5 +1,5 @@
 ── 40 ──
- ● Crear  big.go                 +45 −0
+ ✓  Crear  big.go                +45 −0
      1 + x := 0                        
      2 + x := 1                        
      3 + x := 2                        
@@ -43,7 +43,7 @@
    … 5 líneas · ctrl+o
    └ aplicado
 ── 80 ──
- ● Crear  big.go                                                         +45 −0
+ ✓  Crear  big.go                                                        +45 −0
      1 + x := 0                                                                
      2 + x := 1                                                                
      3 + x := 2                                                                
@@ -87,7 +87,7 @@
    … 5 líneas · ctrl+o
    └ aplicado
 ── 120 ──
- ● Crear  big.go                                                                                                 +45 −0
+ ✓  Crear  big.go                                                                                                +45 −0
      1 + x := 0                                                                                                        
      2 + x := 1                                                                                                        
      3 + x := 2                                                                                                        

@@ -112,6 +112,7 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
 export function Sidebar({
   user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
+  hasMoreConversations = false, onLoadMore, onSearch,
   historyBase = '/c', newPath = '/chat', seccion = 'chat',
 }) {
   const t = useT('sidebar');
@@ -164,9 +165,37 @@ export function Sidebar({
     if (compact) onClose?.();
   };
 
-  const visible = query
+  // Con onSearch la búsqueda la resuelve el servidor (el historial llega por
+  // páginas); mientras responde, se filtra lo que ya está cargado.
+  const [found, setFound] = useState(null);
+  useEffect(() => {
+    const q = query.trim();
+    setFound(null);
+    if (!q || !onSearch) return undefined;
+    let vigente = true;
+    const timer = setTimeout(() => {
+      onSearch(q).then((items) => { if (vigente) setFound({ q, items }); }).catch(() => {});
+    }, 250);
+    return () => { vigente = false; clearTimeout(timer); };
+  }, [query, onSearch]);
+
+  const local = query
     ? conversations.filter((c) => (c.title || '').toLowerCase().includes(query.toLowerCase()))
     : conversations;
+  const visible = query && found?.q === query.trim() ? found.items : local;
+
+  // Al acercarse al final de la lista se pide la página siguiente.
+  const moreRef = useRef(null);
+  const wantsMore = !query && hasMoreConversations && Boolean(onLoadMore);
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!wantsMore || !el || typeof IntersectionObserver === 'undefined') return undefined;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) onLoadMore();
+    }, { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [wantsMore, onLoadMore, conversations.length]);
 
   const drawerHidden = compact && !open;
   const nuevoLabel = seccion === 'visuals' ? t('newDesign') : t('newConversation');
@@ -250,11 +279,11 @@ export function Sidebar({
           <span className="sidebar__label">{t('spaces')}</span>
           <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/chat'))}>
             <IconChat /> <span>{t('conversations')}</span>
-            {seccion === 'chat' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}</span>}
+            {seccion === 'chat' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}{hasMoreConversations ? '+' : ''}</span>}
           </button>
           <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
             <IconLayers /> <span>{t('visuals')}</span>
-            {seccion === 'visuals' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}</span>}
+            {seccion === 'visuals' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}{hasMoreConversations ? '+' : ''}</span>}
             {!tieneVisuals(user) && <span className="sb-menu__tag">Pro</span>}
           </button>
           <button className="sb-nav" onClick={() => go('/apps')}>
@@ -285,6 +314,7 @@ export function Sidebar({
                         base={historyBase}
                       />
                     ))}
+                    {wantsMore && <div ref={moreRef} className="sidebar__more" aria-hidden="true" />}
                     {visible.length === 0 && (
                       <p className="sidebar__empty">
                         {user ? t('noConversations') : t('logInToSaveHistory')}

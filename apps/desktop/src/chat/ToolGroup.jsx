@@ -7,6 +7,7 @@
 import { useMemo, useState } from 'react';
 import { describeTool, summarizeTools } from '../lib/toolText';
 import { IconChevronRight } from '../components/Icons';
+import { LogoMark, toolMotion } from '../components/Logo';
 import { useChatStore } from '../store/chatStore';
 import { useAppStore } from '../store/appStore';
 import { absFromRoot, openFilePreview, previewKind } from '../lib/preview';
@@ -177,7 +178,7 @@ export function ToolGroup({ messages, startIndex }) {
         title={open ? 'Ocultar el detalle' : 'Ver el detalle'}
       >
         <span className="actline__icon" aria-hidden="true">
-          {running ? <span className="actline__pulse" /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
+          {running ? <LogoMark size={14} motion={toolMotion(messages[pendingIdx].tool)} /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
         </span>
         {running ? <WaveText key={text} text={text} /> : <span className="actline__text">{text}</span>}
         <span className="actline__meta">

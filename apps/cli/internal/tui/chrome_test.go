@@ -156,7 +156,7 @@ func TestLiveLabelFollowsTheTurn(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.running = true
 	label := func() string { l, _ := h.m.liveLabel(); return l }
-	if label() != "Trabajando…" {
+	if label() != brilloVerbs[0]+"…" {
 		t.Errorf("sin nada: %q", label())
 	}
 	h.m.live.reasoning.WriteString("pienso")

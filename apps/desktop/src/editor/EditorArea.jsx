@@ -11,7 +11,6 @@ import { acceptFile, acceptHunk, rejectFile, rejectHunk, jumpHunk } from './revi
 import { useBaseline } from '../store/reviewStore';
 import { useProblemsStore } from '../store/problemsStore';
 import { diffHunks, diffStats } from '../lib/lineDiff';
-import { SpinRing } from '../components/Ring';
 import { LogoMark } from '../components/Logo';
 import { IconX, IconChevronRight, IconChevronUp, IconChevronDown, IconFolderOpen } from '../components/Icons';
 import { runCommand } from '../lib/commands';
@@ -150,7 +149,7 @@ export function EditorArea() {
       <div className="editorarea__head">
         <Tabs />
         {streaming && tab && !tab.virtual && (
-          <span className="editorarea__agent"><SpinRing size={11} /> El agente está trabajando</span>
+          <span className="editorarea__agent"><LogoMark size={12} motion="talla" /> El agente está trabajando</span>
         )}
       </div>
       {tab && !tab.virtual && (

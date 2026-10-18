@@ -497,16 +497,18 @@ func TestRemoteByeFromTheServerEndsItWithoutClosingTwice(t *testing.T) {
 	}
 }
 
-func TestRemoteNeedsAnAccountAndAGatewayProvider(t *testing.T) {
+func TestRemoteNeedsAnAccount(t *testing.T) {
 	h, _ := remoteHarness(t, nil)
 	h.chat.Cfg.APIKey = ""
 	h.send("/remote")
 	contains(t, h.out(), "Necesitas una sesión activa (/login) para usar /remote.")
 
-	h, _ = remoteHarness(t, nil)
-	h.chat.Client.Generic = true
+	_, _, add := withExternalProvider(t)
+	h, _ = remoteHarness(t, func(cfg *config.Config) { cfg.APIKey = ""; add(cfg) })
+	h.send("/provider local")
+	h.settle()
 	h.send("/remote")
-	contains(t, h.out(), "solo funciona con un gateway Lixbon")
+	contains(t, h.out(), "Necesitas una sesión activa (/login) para usar /remote.")
 
 	h, _ = remoteHarness(t, nil)
 	h.send("/remote nada")
@@ -535,4 +537,21 @@ func TestRemoteCannotRunShellCommandsWithBang(t *testing.T) {
 	}
 	h.key("ctrl+c")
 	h.waitFor("sesión terminada", relay.isEnded)
+}
+
+// Con otro proveedor activo el control remoto pasa por la cuenta Lixbon
+// guardada y la sesión se presenta como Lixbon.
+func TestRemoteWithAnExternalProviderUsesTheLixbonAccount(t *testing.T) {
+	_, _, add := withExternalProvider(t)
+	h, relay := remoteHarness(t, add)
+	h.send("/provider local")
+	h.settle()
+	if !h.chat.Client.Generic {
+		t.Fatal("el proveedor activo debería ser el externo")
+	}
+	startRemote(t, h, relay)
+	contains(t, h.out(), "Control remoto activo")
+	if hello := relay.find("hello"); hello["agent"] != "lixbon" || hello["model"] != h.chat.Model {
+		t.Fatalf("hello: %v", hello)
+	}
 }

@@ -4,17 +4,17 @@ import { memo, useEffect, useState } from 'react';
 import { ChatMarkdown } from './ChatMarkdown';
 import { useChatStore } from '../store/chatStore';
 import { IconGlobe, IconFileCode, IconCheck } from '../components/Icons';
-import { ClaudeMark } from '../components/Logo';
+import { ClaudeMark, LogoMark } from '../components/Logo';
 import { IdeCard } from './ClaudeCards';
 import { splitDocs } from '../lib/docBlocks';
 import { useThemeMode } from '../editor/themeMode';
 
-/** Línea "en vivo" del agente entre acciones: punto pulsante + texto mono +
+/** Línea "en vivo" del agente entre acciones: el prisma animado + texto mono +
     cursor parpadeante, como la última línea del mockup. */
-function LiveStatus({ text }) {
+function LiveStatus({ text, motion = 'destello' }) {
   return (
     <div className="msg__live">
-      <span className="activity-row__dot" aria-hidden />
+      <LogoMark size={16} motion={motion} />
       <span className="msg__live-text">{text}</span>
       <span className="msg__caret" aria-hidden="true" />
     </div>
@@ -461,7 +461,7 @@ export const ChatMessage = memo(function ChatMessage({ message, streaming }) {
           {streaming && <span className="msg__caret" aria-hidden="true" />}
         </>
       ) : message.generating ? (
-        <LiveStatus text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
+        <LiveStatus motion="talla" text={`Generando cambio… (${(message.generating / 1000).toFixed(1)}k caracteres)`} />
       ) : (
         streaming && (message.engine === 'claude' ? <ClaudeLive /> : <LiveStatus text="Pensando…" />)
       )}

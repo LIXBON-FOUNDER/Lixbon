@@ -1,15 +1,15 @@
 ── 40 ──
- ● Ejecutar  npm test             2.0 s
+ ✗  $  npm test                   2.0 s
    │ FAIL src/app.test.js
    │ 1 failed
    └ exit 1 · 2 líneas
 ── 80 ──
- ● Ejecutar  npm test                                                     2.0 s
+ ✗  $  npm test                                                           2.0 s
    │ FAIL src/app.test.js
    │ 1 failed
    └ exit 1 · 2 líneas
 ── 120 ──
- ● Ejecutar  npm test                                                                                             2.0 s
+ ✗  $  npm test                                                                                                   2.0 s
    │ FAIL src/app.test.js
    │ 1 failed
    └ exit 1 · 2 líneas

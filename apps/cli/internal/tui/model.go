@@ -121,6 +121,11 @@ type Model struct {
 	browserGroup *entry
 	todoEntry    *entry
 	todoTurn     int
+	// El riel del turno (rail.go): dónde empieza el turno en el transcript,
+	// su cabecera, el último paso del riel y si lo que se añade cuelga de él.
+	turnStart          int
+	turnHead, railTail *entry
+	railing            bool
 
 	// chips son las imágenes en cola, en el orden de las de chat: el marcador
 	// [IMG#n] apunta a la n-ésima.
@@ -253,13 +258,35 @@ func (m *Model) add(b block) *entry {
 		}
 		return e
 	}
-	e := m.log.add(b)
+	rail := railNone
+	if m.railing {
+		rail = railMid
+	}
+	e := m.log.addRail(b, rail)
 	if m.scroll > 0 {
 		m.scroll += len(e.rows)
 	}
 	if m.observe != nil {
 		m.observe(e.text)
 	}
+	return e
+}
+
+// addOutside añade un bloque fuera del riel aunque el turno lo tenga abierto.
+func (m *Model) addOutside(b block) *entry {
+	railing := m.railing
+	m.railing = false
+	defer func() { m.railing = railing }()
+	return m.add(b)
+}
+
+// insertAt mete un bloque en medio del transcript (la cabecera del turno).
+func (m *Model) insertAt(i int, b block) *entry {
+	e := m.log.insert(i, b)
+	if m.scroll > 0 {
+		m.scroll += len(e.rows)
+	}
+	m.sel = nil
 	return e
 }
 

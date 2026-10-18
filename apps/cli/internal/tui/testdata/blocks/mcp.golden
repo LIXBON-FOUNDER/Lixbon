@@ -1,9 +1,9 @@
 ── 40 ──
- ● git › status  {"path":"."}
+ ✓  git › status  {"path":"."}
    └ limpio
 ── 80 ──
- ● git › status  {"path":"."}
+ ✓  git › status  {"path":"."}
    └ limpio
 ── 120 ──
- ● git › status  {"path":"."}
+ ✓  git › status  {"path":"."}
    └ limpio
