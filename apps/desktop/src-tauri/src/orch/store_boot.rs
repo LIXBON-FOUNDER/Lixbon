@@ -44,7 +44,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError, StoreResult};
+use crate::store::{self, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -260,6 +260,16 @@ impl CoreStorage {
     /// Una página del Event Log. `None` = el almacén no está abierto. Solo lee.
     pub(super) fn events_page(&self, q: &EventQuery) -> Option<StoreResult<EventPage>> {
         self.slot().store.as_ref().map(|s| s.events_page(q))
+    }
+
+    /// Una página de Attention activa, solo lectura.
+    pub(super) fn attention_page(&self, q: &AttentionQuery) -> Option<StoreResult<AttentionPage>> {
+        self.slot().store.as_ref().map(|s| s.attention_page(q))
+    }
+
+    /// Detalle de Attention limitado al Task autenticado de un Agent, si aplica.
+    pub(super) fn attention_get_scoped(&self, id: &str, scope_task_id: Option<&str>) -> Option<StoreResult<Option<AttentionRow>>> {
+        self.slot().store.as_ref().map(|s| s.attention_get_scoped(id, scope_task_id))
     }
 
     /// La persistencia autoritativa: escribe en SQLite (y, después de publicar, el espejo).

@@ -62,10 +62,10 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, Transactio
 
 // Attention (LXO-87): hasta que LXO-88 (reglas) y LXO-89 (lectura) la consuman, solo la usan las pruebas.
 #[allow(unused_imports)]
-pub use attention::{AttentionCategory, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate, NewAttention, Raised, Resolution, ResolveOutcome, Severity, TargetKind, UpdateOutcome, MAX_FACTS_BYTES};
+pub use attention::{AttentionCategory, AttentionCursorKey, AttentionPage, AttentionQuery, AttentionRow, AttentionStatus, AttentionTarget, AttentionUpdate, NewAttention, Raised, Resolution, ResolveOutcome, Severity, TargetKind, UpdateOutcome, MAX_FACTS_BYTES};
 // Variante transaccional de la actualización: LXO-88 la aplica en la transacción del Event (`Store::write`).
 #[allow(unused_imports)]
-pub(crate) use attention::attention_update_active_in;
+pub(crate) use attention::{attention_get_in, attention_update_active_in};
 // Proyección Events → Attention (LXO-88): el driver transaccional vive en el almacén; las reglas, en `orch`.
 // `project_attention_in`, `Intent`, `Key`, `ProjectError` y `Report` los consumen las pruebas.
 #[allow(unused_imports)]

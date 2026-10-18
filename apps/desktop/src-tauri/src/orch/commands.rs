@@ -188,6 +188,12 @@ pub fn orch_review_task(orch: TauriState<'_, Orch>, task_id: String, decision: S
     orch.0.review_from_ui(&task_id, &decision, &head_commit, comment.as_deref(), confirm)
 }
 
+/// Registra la decisión de una Person/Desktop de actuar sobre un riesgo de policy. No tiene ruta HTTP/RPC.
+#[tauri::command(async, rename_all = "snake_case")]
+pub fn orch_attention_act_risk(orch: TauriState<'_, Orch>, attention_id: String) -> Result<Value, String> {
+    orch.0.attention_act_risk_from_ui(&attention_id)
+}
+
 #[tauri::command]
 pub fn orch_agents() -> Vec<skill::Detected> {
     skill::detect(&lxo_path().to_string_lossy())

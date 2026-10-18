@@ -24,11 +24,13 @@
 //! evento que origina la Attention, como hace el registro de proyectos); los métodos de [`Store`] son
 //! la vía de una sola operación.
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::types::Value;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
 use serde::Serialize;
 
 use super::authority::sha256_hex;
 use super::error::{StoreError, StoreResult};
+use super::events::{DEFAULT_PAGE, MAX_PAGE};
 use super::Store;
 
 /// Tamaño máximo de `facts`, en BYTES de su texto JSON.
@@ -360,6 +362,34 @@ pub struct AttentionRow {
     pub resolution: Option<Resolution>,
 }
 
+/// Clave inmutable de paginación de Attention. `created_at` nunca cambia y `id` desempata de forma estable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionCursorKey {
+    pub created_at: i64,
+    pub id: String,
+}
+
+/// Consulta de la lista activa de Attention. `scope_task_id`, cuando existe, es un límite obligatorio
+/// del Store y siempre restringe a `target_kind='task'`; los filtros pedidos por el cliente se AND-ean.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttentionQuery {
+    pub after: Option<AttentionCursorKey>,
+    pub limit: Option<usize>,
+    pub project_id: Option<String>,
+    pub target_kind: Option<TargetKind>,
+    pub target_id: Option<String>,
+    pub category: Option<AttentionCategory>,
+    pub severity: Option<Severity>,
+    pub scope_task_id: Option<String>,
+}
+
+/// Una página ordenada ascendentemente por `(created_at,id)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttentionPage {
+    pub items: Vec<AttentionRow>,
+    pub has_more: bool,
+}
+
 /// Resultado de levantar un hecho.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Raised {
@@ -492,6 +522,11 @@ fn get(conn: &Connection, id: &str) -> StoreResult<Option<AttentionRow>> {
     raw.map(Raw::into_row).transpose()
 }
 
+/// Lee una Attention por id dentro de la transacción que proyecta un Event de dominio.
+pub(crate) fn attention_get_in(conn: &Connection, id: &str) -> StoreResult<Option<AttentionRow>> {
+    get(conn, id)
+}
+
 fn active_by_fingerprint(conn: &Connection, fingerprint: &str) -> StoreResult<Option<AttentionRow>> {
     let raw = conn.query_row(&format!("SELECT {COLS} FROM attention_items WHERE fingerprint = ?1 AND status = 'active'"), [fingerprint], Raw::read).optional()?;
     raw.map(Raw::into_row).transpose()
@@ -609,5 +644,92 @@ impl Store {
     #[allow(dead_code)] // idem
     pub fn attention_get(&self, id: &str) -> StoreResult<Option<AttentionRow>> {
         self.read(|c| get(c, id))
+    }
+
+    /// Lista solo filas activas, con filtros combinados y keyset ascendente por `(created_at,id)`.
+    /// Las páginas son consultas de solo lectura; el scope de Agent queda como predicado obligatorio del SQL.
+    pub fn attention_page(&self, query: &AttentionQuery) -> StoreResult<AttentionPage> {
+        if query.after.as_ref().is_some_and(|key| key.created_at < 0 || key.id.is_empty()) {
+            return bad("cursor de Attention inválido");
+        }
+        if let Some(limit) = query.limit {
+            if limit == 0 {
+                return bad("`limit` debe ser al menos 1");
+            }
+        }
+        for (name, value) in [
+            ("project_id", query.project_id.as_deref()),
+            ("target_id", query.target_id.as_deref()),
+            ("scope_task_id", query.scope_task_id.as_deref()),
+        ] {
+            if value.is_some_and(|value| value.is_empty() || value.chars().count() > MAX_ID_CHARS) {
+                return bad(format!("`{name}` debe contener de 1 a {MAX_ID_CHARS} caracteres"));
+            }
+        }
+
+        let limit = query.limit.unwrap_or(DEFAULT_PAGE).min(MAX_PAGE);
+        let mut conditions = vec!["status = 'active'".to_string()];
+        let mut values: Vec<Value> = Vec::new();
+        let mut bind_text = |column: &str, value: Option<&str>| {
+            if let Some(value) = value {
+                values.push(Value::Text(value.to_string()));
+                conditions.push(format!("{column} = ?{}", values.len()));
+            }
+        };
+        bind_text("project_id", query.project_id.as_deref());
+        bind_text("target_id", query.target_id.as_deref());
+        drop(bind_text);
+        if let Some(kind) = query.target_kind {
+            values.push(Value::Text(kind.as_str().into()));
+            conditions.push(format!("target_kind = ?{}", values.len()));
+        }
+        if let Some(category) = query.category {
+            values.push(Value::Text(category.as_str().into()));
+            conditions.push(format!("category = ?{}", values.len()));
+        }
+        if let Some(severity) = query.severity {
+            values.push(Value::Text(severity.as_str().into()));
+            conditions.push(format!("severity = ?{}", values.len()));
+        }
+        if let Some(task) = query.scope_task_id.as_deref() {
+            values.push(Value::Text(task.to_string()));
+            conditions.push(format!("target_kind = 'task' AND target_id = ?{}", values.len()));
+        }
+        if let Some(after) = &query.after {
+            values.push(Value::Integer(after.created_at));
+            let created_at = values.len();
+            values.push(Value::Text(after.id.clone()));
+            let id = values.len();
+            conditions.push(format!("(created_at > ?{created_at} OR (created_at = ?{created_at} AND id > ?{id}))"));
+        }
+        values.push(Value::Integer((limit + 1) as i64));
+        let sql = format!(
+            "SELECT {COLS} FROM attention_items WHERE {} ORDER BY created_at ASC, id ASC LIMIT ?{}",
+            conditions.join(" AND "),
+            values.len()
+        );
+
+        self.read(|connection| {
+            let mut statement = connection.prepare(&sql)?;
+            let raw = statement
+                .query_map(params_from_iter(values.iter()), Raw::read)?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut items = raw.into_iter().map(Raw::into_row).collect::<StoreResult<Vec<_>>>()?;
+            let has_more = items.len() > limit;
+            items.truncate(limit);
+            Ok(AttentionPage { items, has_more })
+        })
+    }
+
+    /// Lee un detalle respetando el límite autenticado del Agent, si corresponde.
+    /// Las filas resueltas siguen disponibles como historial de su mismo scope.
+    pub fn attention_get_scoped(&self, id: &str, scope_task_id: Option<&str>) -> StoreResult<Option<AttentionRow>> {
+        self.read(|connection| {
+            let Some(row) = get(connection, id)? else { return Ok(None) };
+            if scope_task_id.is_some_and(|task| row.target.kind != TargetKind::Task || row.target.id != task) {
+                return Ok(None);
+            }
+            Ok(Some(row))
+        })
     }
 }
