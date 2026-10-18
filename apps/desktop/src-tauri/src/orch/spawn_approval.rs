@@ -232,8 +232,9 @@ impl Core {
     ///
     /// * `Blocked` por una causa de ENTORNO → `environment.blocked`. Cualquier otro bloqueo (perfil deshabilitado, entrada
     ///   inválida, ruta de la solicitud) no dice nada del entorno: ni lo bloquea ni lo levanta.
-    /// * SOLO una policy `ok` (comprobación positiva y verificada) levanta un bloqueo. `unverified` o un estado desconocido
-    ///   lo CONSERVAN: sin evidencia suficiente no se asume que el entorno se recuperó.
+    /// * SOLO la evidencia positiva tipada (`Policy.env_proof`: CLI hallada con `--help` legible y flags presentes) levanta
+    ///   un bloqueo, y únicamente las causas que demuestra. NO depende de `status`: una versión sin fijar o un modelo no
+    ///   listado (`unverified`) no impiden levantarlo, y `Skip`, una ayuda ilegible o lo ambiguo lo CONSERVAN.
     /// * Sin Event Log (`state.json`) no se marca nada: un marcador sin su Event durable ocultaría la señal para siempre.
     ///   En producción ese modo es solo lectura (arranque `DegradeC1`) y la mutación se rechaza antes de tocar el estado.
     fn observe_environment(&self, policy: &agents::Policy) -> Result<(), String> {
@@ -250,9 +251,9 @@ impl Core {
                     Ok(())
                 })
                 .map_err(String::from),
-            (agents::Status::Ok, _) if self.lock().has_env_blocks_of(provider) => self
+            _ if policy.env_proof.any() && self.lock().has_env_blocks_of(provider) => self
                 .mutate_as(&MutationContext::core(), |tx| {
-                    if !tx.environment_verified(provider, profile) {
+                    if !tx.environment_verified(provider, profile, policy.env_proof) {
                         tx.no_change();
                     }
                     Ok(())
@@ -288,7 +289,7 @@ impl Core {
             pending_id, parent_task: parent.id.clone(), run: parent.run.clone(), project_id: parent.project_id.clone(), agent: f.provider.clone(), provider: f.provider, profile: f.profile,
             role: f.role, model: f.model, effort: f.effort, spec_summary: summary(&f.spec), title: f.title, cwd, shared: f.shared,
             env: if f.shared { worktree_env::Plan::default() } else { worktree_env::plan(&parent.repo) },
-            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None, block: None },
+            policy: agents::Policy { profile: String::new(), role: None, provider: String::new(), argv: vec![], cli_version: None, warnings: vec![], status: agents::Status::Unverified, reason: None, interactive: false, model: None, block: None, env_proof: agents::EnvProof::default() },
             created_at: 0, expires_at: 0, spec: f.spec, base: f.base
         }
     }

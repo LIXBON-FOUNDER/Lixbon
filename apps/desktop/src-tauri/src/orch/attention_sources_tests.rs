@@ -222,6 +222,25 @@ const INVALIDO: u8 = 4;
 const RUTA: u8 = 5;
 const SIN_VERIFICAR: u8 = 6;
 const SANDBOX: u8 = 7;
+/// Sondas REALES (`agents::evaluate_for` con `Detected::Found`): lo que la CLI instalada dejaría ver.
+const VERSION_NO_FIJADA: u8 = 8;
+const MODELO_NO_LISTADO: u8 = 9;
+const SIN_AYUDA: u8 = 10;
+const AYUDA_SIN_FLAGS: u8 = 11;
+
+/// La policy que `evaluate_for` resolvería con una CLI hallada de esa `version` y, si `ayuda`, un `--help` que lista los flags
+/// del perfil (`flags = false`: la ayuda existe pero no trae ninguno). Sin ayuda legible no hay evidencia de entorno.
+fn con_sonda(provider: &str, profile: &str, role: Option<&str>, worktree: &str, version: &str, ayuda: bool, flags: bool) -> agents::Policy {
+    let base = fake(provider, profile, role, worktree);
+    let help = ayuda.then(|| if flags { base.argv[1..].join(" ") } else { "Usage: claude [options]".to_string() });
+    let sonda = agents::Probe { version: Some(version.into()), help, exec_help: None, windows_sandbox: None };
+    agents::evaluate_for(provider, agents::Profile::parse(profile).expect("perfil"), role, worktree, agents::Detected::Found(&sonda), false, agents::Delivery::FileOrMarkers)
+}
+
+/// La evidencia completa de entorno de una policy `ok` (versión fijada) en estas pruebas.
+fn prueba_completa() -> agents::EnvProof {
+    agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true }
+}
 
 /// La policy que el host resolvería según el modo del perfil pedido.
 fn segun_modo(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
@@ -243,7 +262,17 @@ fn segun_modo(provider: &str, profile: &str, role: Option<&str>, worktree: &str)
         INVALIDO => bloqueo(&mut p, BlockCause::Invalid),
         RUTA => bloqueo(&mut p, BlockCause::WorktreePath),
         SIN_VERIFICAR => p.status = agents::Status::Unverified,
-        _ => p.status = agents::Status::Ok,
+        VERSION_NO_FIJADA => p = con_sonda(provider, profile, role, worktree, "9.9.9", true, true),
+        MODELO_NO_LISTADO => {
+            p = con_sonda(provider, profile, role, worktree, "2.1.296", true, true);
+            agents::mark_model(&mut p, Some("modelo-no-listado"), Some(false));
+        }
+        SIN_AYUDA => p = con_sonda(provider, profile, role, worktree, "9.9.9", false, true),
+        AYUDA_SIN_FLAGS => p = con_sonda(provider, profile, role, worktree, "9.9.9", true, false),
+        _ => {
+            p.status = agents::Status::Ok;
+            p.env_proof = prueba_completa();
+        }
     }
     p
 }
@@ -480,6 +509,172 @@ fn un_fallo_generico_de_una_tarea_no_es_environment_blocked() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// environment_blocked · la evidencia positiva es tipada y no depende de la versión ni del modelo
+// ---------------------------------------------------------------------------------------------
+
+fn cleared_de(evs: &[EventRow]) -> Vec<Value> {
+    evs.iter().filter(|ev| ev.kind == "environment.cleared").map(pl).collect()
+}
+
+#[test]
+fn la_sonda_real_separa_la_evidencia_de_entorno_del_estado_de_version_y_modelo() {
+    let wt = "C:/wt";
+    let fijada = con_sonda("claude", "explorar", None, wt, "2.1.296", true, true);
+    let sin_fijar = con_sonda("claude", "explorar", None, wt, "9.9.9", true, true);
+    let modelo = {
+        let mut p = con_sonda("claude", "explorar", None, wt, "2.1.296", true, true);
+        agents::mark_model(&mut p, Some("modelo-no-listado"), Some(false));
+        p
+    };
+    let completa = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+    assert_eq!((fijada.status, fijada.env_proof), (agents::Status::Ok, completa));
+    assert_eq!((sin_fijar.status, sin_fijar.env_proof), (agents::Status::Unverified, completa), "versión sin fijar: sus flags sí están en --help");
+    assert_eq!((modelo.status, modelo.env_proof), (agents::Status::Unverified, completa), "mark_model degrada el status, no la evidencia");
+    // Sin ayuda legible, `Skip` o ayuda sin los flags del perfil: nada demostrado.
+    let sin_ayuda = con_sonda("claude", "explorar", None, wt, "9.9.9", false, true);
+    assert_eq!((sin_ayuda.status, sin_ayuda.env_proof), (agents::Status::Unverified, agents::EnvProof::default()));
+    let skip = fake("claude", "explorar", None, wt);
+    assert_eq!((skip.status, skip.env_proof), (agents::Status::Unverified, agents::EnvProof::default()));
+    let sin_flags = con_sonda("claude", "explorar", None, wt, "9.9.9", true, false);
+    assert_eq!((sin_flags.status, sin_flags.block, sin_flags.env_proof), (agents::Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported)), agents::EnvProof::default()));
+}
+
+#[test]
+fn una_cli_funcional_de_version_no_fijada_levanta_cli_missing() {
+    let e = setup_con("src-env-version", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("bloqueado");
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliMissing)]);
+    // Se instala una CLI que funciona, de una versión que Lixbon no tiene fijada: la policy es `unverified`.
+    modo(VERSION_NO_FIJADA);
+    let antes = head(&e.core);
+    let pendiente = pide(&e).expect("unverified no bloquea: queda pendiente (pide ack al aprobar)");
+    assert_eq!(pendiente["policy_status"], "unverified");
+    assert_eq!(e.core.list_pending_spawns()[0].policy.status, agents::Status::Unverified);
+    let evs = desde(&e.core, antes);
+    assert_eq!(kinds(&evs), vec!["environment.cleared", "attention.resolved", "spawn.requested", "attention.created"]);
+    assert_eq!(cleared_de(&evs), vec![json!({ "profile": "explorar", "code": "cli_missing" })]);
+    assert_eq!(pl(&evs[1]), json!({ "resolution": "condition_cleared", "source_event_id": evs[0].id }));
+    assert!(bloqueos(&e).is_empty() && entorno_activo(&e).is_empty());
+}
+
+#[test]
+fn una_cli_que_no_trae_los_flags_del_perfil_conserva_y_con_los_flags_levanta_cli_flags_unsupported() {
+    let e = setup_con("src-env-flags", segun_modo);
+    modo(SIN_FLAGS);
+    pide(&e).expect_err("bloqueado por flags");
+    // Versión desconocida y `--help` sin los flags: el propio evaluate la bloquea de nuevo (misma causa: no hay evento).
+    modo(AYUDA_SIN_FLAGS);
+    let antes = head(&e.core);
+    pide(&e).expect_err("sigue sin los flags");
+    assert_eq!(head(&e.core), antes, "mismo bloqueo vigente: ni cleared ni blocked");
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliFlagsUnsupported)]);
+    // La versión nueva sí los trae, aunque no esté fijada: se levanta ese bloqueo del perfil.
+    modo(VERSION_NO_FIJADA);
+    let antes = head(&e.core);
+    pide(&e).expect("pendiente");
+    assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "cli_flags_unsupported" })]);
+    assert!(bloqueos(&e).is_empty());
+}
+
+#[test]
+fn sin_ayuda_legible_o_sin_comprobar_ningun_bloqueo_se_levanta() {
+    let e = setup_con("src-env-ambiguo", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("bloqueado");
+    // `Skip` y versión desconocida sin `--help` legible: se CONSERVA, aunque la CLI exista.
+    for (m, que) in [(SIN_VERIFICAR, "Skip"), (SIN_AYUDA, "ayuda ilegible")] {
+        modo(m);
+        let antes = head(&e.core);
+        let _ = pide(&e);
+        let evs = desde(&e.core, antes);
+        assert!(cleared_de(&evs).is_empty(), "{que}: {:?}", kinds(&evs));
+        assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliMissing)], "{que}");
+        assert_eq!(entorno_activo(&e).len(), 1, "{que}");
+    }
+    // Lo mismo con un bloqueo de sandbox: ni la versión ni los flags demuestran que ya no esté elevado.
+    let e = setup_con("src-env-sandbox", segun_modo);
+    modo(SANDBOX);
+    pide(&e).expect_err("sandbox elevado");
+    modo(VERSION_NO_FIJADA);
+    let antes = head(&e.core);
+    let _ = pide(&e);
+    assert!(cleared_de(&desde(&e.core, antes)).is_empty(), "flags correctos no desmienten el sandbox elevado");
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
+    // Solo una lectura del sandbox NO elevado lo demuestra.
+    let proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true };
+    e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", proof))).unwrap();
+    assert!(bloqueos(&e).is_empty());
+}
+
+#[test]
+fn un_modelo_no_listado_no_impide_levantar_el_bloqueo_de_entorno() {
+    let e = setup_con("src-env-modelo", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("bloqueado");
+    modo(MODELO_NO_LISTADO);
+    let antes = head(&e.core);
+    let pendiente = pide(&e).expect("unverified por el modelo: pendiente");
+    assert_eq!(pendiente["policy_status"], "unverified");
+    assert_eq!(cleared_de(&desde(&e.core, antes)), vec![json!({ "profile": "explorar", "code": "cli_missing" })]);
+    assert!(bloqueos(&e).is_empty() && entorno_activo(&e).is_empty());
+}
+
+#[test]
+fn la_evidencia_levanta_solo_lo_que_demuestra() {
+    let e = setup_con("src-env-demuestra", segun_modo);
+    // Dos alcances: flags del perfil `explorar` y `cli_missing` de `proponer`.
+    modo(SIN_FLAGS);
+    pide_perfil(&e, "explorar").expect_err("explorar");
+    modo(SIN_CLI);
+    pide_perfil(&e, "proponer").expect_err("proponer");
+    assert_eq!(bloqueos(&e).len(), 2);
+    // Evidencia de CLI presente SIN flags demostrados: solo cae `cli_missing`; los flags de `explorar` se conservan.
+    let solo_cli = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+    let levantado = e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", solo_cli))).unwrap();
+    assert!(levantado);
+    assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliFlagsUnsupported)], "los flags no están demostrados");
+    // Sin ninguna evidencia no se levanta nada.
+    let nada = e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", agents::EnvProof::default()))).unwrap();
+    assert!(!nada);
+    assert_eq!(bloqueos(&e).len(), 1);
+}
+
+#[test]
+fn si_la_proyeccion_falla_el_clear_por_evidencia_positiva_tampoco_se_confirma() {
+    let e = setup_con("src-env-clear-rollback", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("bloqueado");
+    let (antes, foto, estado) = (head(&e.core), en_el_core(&e, |s| instantanea(s)), bloqueos(&e));
+    en_el_core(&e, |s| s.set_event_projector(Arc::new(ProyectaYFalla)));
+    modo(VERSION_NO_FIJADA);
+    let error = pide(&e).expect_err("el clear no se confirma");
+    assert!(error.contains("proyección rota a propósito"), "{error}");
+    assert_eq!(bloqueos(&e), estado, "el bloqueo sigue en el estado");
+    assert_eq!((head(&e.core), en_el_core(&e, |s| instantanea(s))), (antes, foto), "ni Event ni Attention");
+}
+
+#[test]
+fn el_replay_de_un_clear_por_evidencia_positiva_con_version_no_fijada_es_el_estado_incremental() {
+    let e = setup_con("src-env-clear-replay", segun_modo);
+    modo(SIN_CLI);
+    pide(&e).expect_err("1");
+    modo(VERSION_NO_FIJADA);
+    pide(&e).expect("pendiente");
+    modo(SIN_FLAGS);
+    pide_perfil(&e, "proponer").expect_err("2");
+    modo(MODELO_NO_LISTADO);
+    pide_perfil(&e, "proponer").expect("pendiente");
+    let mantenido = en_el_core(&e, |s| instantanea(s));
+    let log = desde(&e.core, 0);
+    assert_eq!(log.iter().filter(|ev| ev.kind == "environment.cleared").count(), 2);
+    let (_d, mut limpio) = abre();
+    aplica(&mut limpio, 0, &log);
+    assert_eq!(instantanea(&limpio), mantenido, "replay desde cero = lo que mantuvieron los writers");
+    assert!(en_el_core(&e, |s| categorias_activas(s)).iter().all(|c| c != "environment_blocked"));
+}
+
+// ---------------------------------------------------------------------------------------------
 // Sin Event Log, solo lectura y carreras
 // ---------------------------------------------------------------------------------------------
 
@@ -533,6 +728,7 @@ fn resolvedor_de_carrera(provider: &str, profile: &str, role: Option<&str>, work
         p.reason = Some("irrelevante".into());
     } else {
         p.status = agents::Status::Ok;
+        p.env_proof = prueba_completa();
     }
     p
 }

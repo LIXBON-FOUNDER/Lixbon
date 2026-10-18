@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use super::agents::EnvBlock;
+use super::agents::{self, EnvBlock};
 use super::event_kinds as ev;
 pub(super) use super::event_kinds::SpawnOutcome;
 use super::events::{Actor, Channel, EventDraft, MutationContext};
@@ -200,11 +200,12 @@ impl Tx {
         true
     }
 
-    /// El host obtuvo una comprobación POSITIVA (policy `ok`) de `provider` en el perfil `profile`: emite
-    /// `environment.cleared` por cada bloqueo que esa evidencia levanta (el de ese alcance y los de `CliMissing` del
-    /// proveedor). `false` = no había nada que levantar. Un resultado no verificado no pasa por aquí: conserva el bloqueo.
-    pub(super) fn environment_verified(&mut self, provider: &str, profile: &str) -> bool {
-        let levantados = self.state_mut().verify_env(provider, profile);
+    /// El host obtuvo una comprobación POSITIVA de `provider` en el perfil `profile` (`proof`: evidencia tipada de
+    /// entorno, no el `status` de la policy): emite `environment.cleared` solo por cada bloqueo que esa evidencia
+    /// DEMUESTRA levantado (el de ese alcance y los de `CliMissing` del proveedor). `false` = no había nada que levantar.
+    /// Lo no demostrado (versión o modelo sin fijar no cuentan; ayuda ilegible, `Skip`, ambigüedad) conserva el bloqueo.
+    pub(super) fn environment_verified(&mut self, provider: &str, profile: &str, proof: agents::EnvProof) -> bool {
+        let levantados = self.state_mut().verify_env(provider, profile, proof);
         for (perfil, causa) in &levantados {
             self.try_push_event(ev::environment_cleared(provider, perfil, *causa));
         }

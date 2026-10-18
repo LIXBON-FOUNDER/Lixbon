@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::agents::EnvBlock;
+use super::agents::{self, EnvBlock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> u64 {
@@ -263,13 +263,19 @@ impl State {
         }
     }
 
-    /// Una comprobación POSITIVA (policy `ok`) de `proveedor/perfil` levanta lo que esa evidencia demuestra: el bloqueo de
-    /// ese mismo alcance y los de `CliMissing` del proveedor (la CLI existe). Un bloqueo de otro perfil por banderas o
-    /// sandbox NO se toca. Devuelve lo levantado, por orden de alcance, como `(perfil, causa)`.
-    pub fn verify_env(&mut self, provider: &str, profile: &str) -> Vec<(String, EnvBlock)> {
+    /// Una comprobación POSITIVA de `proveedor/perfil` (`proof`, la evidencia tipada de entorno, no `Policy.status`)
+    /// levanta SOLO lo que demuestra: del bloqueo de ese mismo alcance, la causa que `proof` desmiente, y los de
+    /// `CliMissing` del proveedor si la CLI existe. Un bloqueo de otro perfil por banderas o sandbox NO se toca.
+    /// Devuelve lo levantado, por orden de alcance, como `(perfil, causa)`.
+    pub fn verify_env(&mut self, provider: &str, profile: &str, proof: agents::EnvProof) -> Vec<(String, EnvBlock)> {
         let prefijo = format!("{provider}/");
         let propio = State::env_scope(provider, profile);
-        let claves: Vec<String> = self.env_blocks.iter().filter(|(k, v)| **k == propio || (k.starts_with(&prefijo) && **v == EnvBlock::CliMissing)).map(|(k, _)| k.clone()).collect();
+        let claves: Vec<String> = self
+            .env_blocks
+            .iter()
+            .filter(|(k, v)| (**k == propio || (k.starts_with(&prefijo) && **v == EnvBlock::CliMissing)) && proof.demonstrates(**v))
+            .map(|(k, _)| k.clone())
+            .collect();
         claves.into_iter().filter_map(|k| self.env_blocks.remove(&k).map(|c| (k[prefijo.len()..].to_string(), c))).collect()
     }
 

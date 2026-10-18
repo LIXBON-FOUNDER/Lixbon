@@ -381,10 +381,17 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   `Tx::environment_blocked(proveedor, perfil, code)`. La denegación explícita (perfil deshabilitado) no resuelve la
   policy del proveedor (no hay sonda), así que tampoco observa el entorno. Un bloqueo que no es del entorno (perfil
   deshabilitado, entrada inválida, ruta) no bloquea ni levanta nada.
-* **Solo una comprobación POSITIVA levanta:** una policy `ok` (verificada) de `proveedor/perfil` →
-  `Tx::environment_verified`, que emite `environment.cleared` para el bloqueo de ese mismo alcance y para los
-  `cli_missing` del proveedor (la CLI existe). `unverified`, un bloqueo que no es del entorno o cualquier estado
-  desconocido CONSERVAN el bloqueo y su Attention.
+* **Solo la evidencia POSITIVA tipada levanta, y solo lo que demuestra:** `Policy.env_proof` (`agents::EnvProof`) es
+  independiente de `Policy.status`. La fija `agents::evaluate` únicamente con la CLI hallada, su `--help` LEGIBLE y todos
+  los flags del perfil presentes; cada campo desmiente una causa (`cli_present` → `cli_missing`, `flags_supported` →
+  `cli_flags_unsupported`, `sandbox_not_elevated` → `windows_sandbox_elevated`, este último solo si la config de Codex
+  declara un sandbox que no es `elevated`: sin valor leído no se demuestra). `Tx::environment_verified(proveedor, perfil,
+  prueba)` emite `environment.cleared` por el bloqueo de ese mismo alcance cuya causa la prueba desmiente y por los
+  `cli_missing` del proveedor si la CLI existe. Una versión sin fijar (`VERIFIED`) o un modelo no listado (`mark_model`)
+  dejan la policy en `unverified` (piden `ack_unverified` al lanzar) pero NO impiden levantar un bloqueo de entorno
+  demostrado. `Skip`, una ayuda ilegible, una ayuda sin los flags (sigue bloqueada), un bloqueo que no es del entorno o
+  cualquier ambigüedad CONSERVAN el bloqueo y su Attention (`attention_sources_tests`: `una_cli_funcional_de_version_no_fijada_…`,
+  `sin_ayuda_legible_o_sin_comprobar_…`, `un_modelo_no_listado_…`, `la_evidencia_levanta_solo_lo_que_demuestra`).
 * **Solo al cambiar:** repetir la misma comprobación no emite; un cambio de causa en el mismo alcance emite
   `environment.cleared` de la anterior y `environment.blocked` de la nueva en la misma mutación.
 * **Frescura:** resolver la policy y observarla son atómicos entre sí: `resolve_and_observe` hace la sonda y la observación
@@ -395,6 +402,11 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   * Los probes iniciales de `spawn_request` y `approve_spawn` ocurren ANTES de tomar `pend_gate`: solo `env_gate`.
   * La comprobación final del `launch` anidado en `approve_spawn` (`create_child` → `launch`) sí adquiere `env_gate`
     estando `pend_gate` retenido: `pend_gate → env_gate → estado → almacén`.
+* **Fuera del alcance de LXO-88 (observaciones de la revisión, sin ampliar aquí):** `run.removed` podría dejar una
+  `review_ready` huérfana; el recheck final de `launch` solo se ejercita con la CLI real fuera de las pruebas (aquí lo refleja
+  `fake_launch`); `env_gate` se retiene durante la sonda de la CLI (serializa spawns de
+  proveedores distintos mientras dura); `EnvBlock` se persiste en `State.env_blocks` sin versión de compatibilidad si el
+  enum crece. Ninguna bloquea la aceptación actual; quedan como seguimiento.
 * **Sin Event Log no se marca nada:** en `state.json` los Events se descartan, así que `observe_environment` no toca
   `State.env_blocks` (un marcador sin su Event durable ocultaría la señal para siempre). En producción ese modo es solo
   lectura (`DegradeC1`/`DegradedReadOnly`): la mutación se rechaza antes del closure y tampoco muta `env_blocks`

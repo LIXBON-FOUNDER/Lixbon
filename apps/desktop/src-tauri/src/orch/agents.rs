@@ -405,6 +405,36 @@ impl EnvBlock {
     }
 }
 
+/// Evidencia POSITIVA de entorno de una comprobación real de la CLI, separada de `Policy.status`: la versión (`VERIFIED`) y
+/// el modelo (`mark_model`) deciden si se pide `ack_unverified`, pero no dicen nada de si el entorno funciona. Solo
+/// [`evaluate`] la fija, y solo con la CLI hallada y su `--help` LEGIBLE (`Skip`, CLI ausente o ayuda ilegible: nada
+/// demostrado). Cada campo demuestra una causa de [`EnvBlock`]; lo ambiguo queda en `false` y conserva el bloqueo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvProof {
+    /// La CLI está en el PATH y respondió a `--help`.
+    pub cli_present: bool,
+    /// Todos los flags del perfil (y `-o` de `codex exec`) aparecen en el `--help` de esa versión.
+    pub flags_supported: bool,
+    /// La config de Codex declara un sandbox de Windows que NO es `elevated`. Sin valor leído (no es Windows, no es
+    /// Codex o el fichero no dice nada) no se demuestra nada.
+    pub sandbox_not_elevated: bool,
+}
+
+impl EnvProof {
+    /// ¿Esta evidencia demuestra que `block` ya no se da?
+    pub fn demonstrates(self, block: EnvBlock) -> bool {
+        match block {
+            EnvBlock::CliMissing => self.cli_present,
+            EnvBlock::CliFlagsUnsupported => self.flags_supported,
+            EnvBlock::WindowsSandboxElevated => self.sandbox_not_elevated,
+        }
+    }
+
+    pub fn any(self) -> bool {
+        EnvBlock::ALL.into_iter().any(|b| self.demonstrates(b))
+    }
+}
+
 /// Política efectiva: lo que devuelve `orch_resolve_policy` y lo que se lanza.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Policy {
@@ -428,6 +458,9 @@ pub struct Policy {
     /// Por qué está `blocked` (solo entonces). Tipado; no forma parte del contrato hacia la interfaz.
     #[serde(skip)]
     pub block: Option<BlockCause>,
+    /// Evidencia positiva de entorno de esta comprobación. Tipada y fuera del contrato hacia la interfaz.
+    #[serde(skip)]
+    pub env_proof: EnvProof,
 }
 
 pub const MODEL_FROM_CONFIG: &str = "el que defina config.toml";
@@ -478,7 +511,7 @@ fn missing_flags(argv: &[String], help: &str) -> Vec<String> {
 
 fn blocked(provider: &str, profile: &str, argv: Vec<String>, cli_version: Option<String>, warnings: Vec<String>, reason: String, cause: BlockCause) -> Policy {
     let interactive = !(argv.get(1).is_some_and(|a| a == "exec" || a == "worker") || argv.iter().any(|a| a == "stream-json"));
-    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None, block: Some(cause) }
+    Policy { profile: profile.into(), role: None, provider: provider.into(), argv, cli_version, warnings, status: Status::Blocked, reason: Some(reason), interactive, model: None, block: Some(cause), env_proof: EnvProof::default() }
 }
 
 /// La ruta del worktree se puede pasar a la CLI (sin caracteres de cmd). Es el MISMO criterio con el que `evaluate`
@@ -509,7 +542,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
         return blocked(provider, pid, argv, None, warnings, r.into(), BlockCause::ProfileDisabled);
     }
     let interactive = !(exec || provider == LIXBON_CLI || argv.iter().any(|a| a == "stream-json"));
-    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None, block: None };
+    let ok = |status, version, reason| Policy { profile: pid.into(), role: None, provider: provider.into(), argv: argv.clone(), cli_version: version, warnings: warnings.clone(), status, reason, interactive, model: None, block: None, env_proof: EnvProof::default() };
     match detected {
         Detected::Skip => ok(Status::Unverified, None, Some("No verificado: no se consultó --version ni --help".into())),
         Detected::Missing => blocked(provider, pid, argv.clone(), None, warnings.clone(), format!("No se encontró `{}` en el PATH", a.bin), BlockCause::Environment(EnvBlock::CliMissing)),
@@ -540,6 +573,12 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 v => ok(Status::Unverified, version.clone(), Some(format!(
                     "Versión {} no verificada (verificadas: {}); sus flags sí aparecen en --help",
                     v.unwrap_or("desconocida"), verified.join(", ")))),
+            };
+            // La evidencia de entorno no depende de la versión: CLI hallada con ayuda legible y todos los flags presentes.
+            pol.env_proof = EnvProof {
+                cli_present: true,
+                flags_supported: true,
+                sandbox_not_elevated: matches!(p.windows_sandbox.as_deref(), Some(s) if s != "elevated"),
             };
             if codex_elevated_warns(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 pol.warnings.push(WARN_ELEVATED_RW.into());
