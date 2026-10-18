@@ -66,6 +66,24 @@ func TestTheContextBarFollowsTheTurn(t *testing.T) {
 	}
 }
 
+// /new y /clear empiezan con la barra de contexto vacía, sin esperar a que
+// otro comando la vuelva a medir.
+func TestNewAndClearEmptyTheContextBar(t *testing.T) {
+	for _, command := range []string{"/new", "/clear"} {
+		h := newHarness(t, nil, replyWithUsage("hola", 1200, 30, 1000))
+		h.send("buenas")
+		h.settle()
+		if h.m.ctxTokens == 0 {
+			t.Fatal("tras un turno la barra mide algo")
+		}
+		h.send(command)
+		h.settle()
+		if h.m.ctxTokens != 0 || h.m.ctxPct != 0 || h.m.sessionTokens != 0 {
+			t.Fatalf("%s deja la barra en %d tok (%.0f %%), sesión %d", command, h.m.ctxTokens, h.m.ctxPct, h.m.sessionTokens)
+		}
+	}
+}
+
 // La compactación automática se ve: la etiqueta lo dice mientras dura.
 func TestAutoCompactionShowsInTheLiveLabel(t *testing.T) {
 	h := newHarness(t, nil)

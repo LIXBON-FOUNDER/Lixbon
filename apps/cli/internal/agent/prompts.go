@@ -60,7 +60,8 @@ const AskFirstPrompt = "\n\n=== PREGUNTA ANTES DE ASUMIR ===\n" +
 	"qué versión) o hay varias opciones razonables, LLAMA A LA HERRAMIENTA ask_user con UNA pregunta concreta y sus " +
 	"opciones (2 a 6) cuando las haya: al usuario se le abre un panel para elegir o escribir, y su respuesta te llega " +
 	"como resultado. NUNCA hagas la pregunta escribiéndola como respuesta de texto: eso termina tu turno. Si tienes " +
-	"varias dudas, pregunta primero la que más cambia el resultado y sigue con las demás en otras llamadas. No supongas " +
+	"varias dudas, pregúntalas todas en UNA llamada con questions (hasta 4, cada una con un header corto y sus " +
+	"opciones con label y description): el usuario las ve como pestañas y las responde juntas. No supongas " +
 	"ni inventes rutas, nombres, contenidos, resultados o datos que no hayas comprobado. Pregunta solo lo que únicamente " +
 	"el usuario puede decidir: lo que puedas averiguar tú (leyendo archivos, buscando en internet) averígualo sin " +
 	"preguntar, y nunca le pidas que busque, investigue o haga tu trabajo. Si la petición ya es clara, actúa. No uses " +
@@ -161,7 +162,7 @@ func TextSystemPrompt(workspace string) string {
 		`{"tool":"web_search","args":{"query":"fastapi lifespan deprecated on_event","limit":5}}` + "\n" +
 		`{"tool":"fetch_url","args":{"url":"https://ejemplo.com/docs"}}` + "\n" +
 		`{"tool":"todo","args":{"items":[{"text":"leer app.py","status":"done"},{"text":"añadir la ruta","status":"doing"}]}}` + "\n" +
-		`{"tool":"ask_user","args":{"question":"¿SQLite o Postgres?","options":["SQLite","Postgres"]}}` + "\n\n" +
+		`{"tool":"ask_user","args":{"questions":[{"header":"Base","question":"¿SQLite o Postgres?","options":[{"label":"SQLite"},{"label":"Postgres"}]},{"header":"Módulos","question":"¿Qué incluyo?","multiple":true,"options":[{"label":"Login"},{"label":"Pagos"}]}]}}` + "\n\n" +
 		"=== REGLAS OBLIGATORIAS ===\n" +
 		"1. Si el usuario pide crear, modificar, arreglar, eliminar o ejecutar algo, DEBES hacerlo " +
 		"con herramientas EN ESTA MISMA RESPUESTA. Tú ejecutas los cambios; el usuario no copia código.\n" +

@@ -45,9 +45,8 @@ type (
 		reply chan agent.Decision
 	}
 	askMsg struct {
-		question string
-		options  []string
-		reply    chan askReply
+		questions []tools.Question
+		reply     chan askReply
 	}
 	todoMsg struct{ items, previous []tools.TodoItem }
 	// approvalClosedMsg retira el panel de una aprobación que ya no espera
@@ -59,8 +58,8 @@ type (
 )
 
 type askReply struct {
-	answer string
-	ok     bool
+	answers []string
+	ok      bool
 }
 
 // deltaEvery agrupa los fragmentos del modelo: llegan de a un token y cada
@@ -158,16 +157,16 @@ func (a *uiApprover) Approve(ctx context.Context, req agent.Approval) (agent.Dec
 }
 
 // askUser implementa la herramienta ask_user: pregunta al usuario y espera.
-func askUser(send func(tea.Msg)) func(ctx context.Context, question string, options []string) (string, bool) {
-	return func(ctx context.Context, question string, options []string) (string, bool) {
+func askUser(send func(tea.Msg)) func(ctx context.Context, questions []tools.Question) ([]string, bool) {
+	return func(ctx context.Context, questions []tools.Question) ([]string, bool) {
 		reply := make(chan askReply, 1)
-		send(askMsg{question: question, options: options, reply: reply})
+		send(askMsg{questions: questions, reply: reply})
 		select {
 		case r := <-reply:
-			return r.answer, r.ok
+			return r.answers, r.ok
 		case <-ctx.Done():
 			send(askClosedMsg{reply})
-			return "", false
+			return nil, false
 		}
 	}
 }
