@@ -644,7 +644,7 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		s.Stats.Actions++
 		return s.Tools.Execute(ctx, tool, args), nil
 	case "ask_user":
-		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(stringArg(args, "question"), 100), ReadOnly: true})
+		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(tools.AskSummary(args), 100), ReadOnly: true})
 		s.Stats.Actions++
 		return s.Tools.Execute(ctx, tool, args), nil
 	case MCPToolsTool:

@@ -494,24 +494,56 @@
       "type": "function",
       "function": {
         "name": "ask_user",
-        "description": "Pregunta al usuario y espera su respuesta (se le abre un panel para elegir o escribir). Úsala ANTES de actuar cuando falte un dato que cambia el resultado (qué tecnología, qué archivo, qué alcance) en vez de suponerlo, y siempre que quieras preguntarle algo en lugar de escribir la pregunta en el chat. Solo para lo que únicamente el usuario puede decidir: lo que puedas averiguar leyendo o buscando, averígualo tú. No la uses para confirmar cada paso.",
+        "description": "Pregunta al usuario y espera sus respuestas (se le abre un panel para elegir o escribir). Úsala ANTES de actuar cuando falte un dato que cambia el resultado (qué tecnología, qué archivo, qué alcance) en vez de suponerlo, y siempre que quieras preguntarle algo en lugar de escribir la pregunta en el chat. Varias dudas van juntas en una llamada (hasta 4). Solo para lo que únicamente el usuario puede decidir: lo que puedas averiguar leyendo o buscando, averígualo tú. No la uses para confirmar cada paso.",
         "parameters": {
           "type": "object",
           "properties": {
-            "question": {
-              "type": "string",
-              "description": "Pregunta concreta"
-            },
-            "options": {
+            "questions": {
               "type": "array",
+              "description": "1 a 4 preguntas; el usuario las ve como pestañas",
               "items": {
-                "type": "string"
-              },
-              "description": "Opciones cerradas (2 a 6); sin ellas la respuesta es texto libre"
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "description": "Pregunta concreta"
+                  },
+                  "header": {
+                    "type": "string",
+                    "description": "Título de su pestaña (≤ 12 caracteres)"
+                  },
+                  "options": {
+                    "type": "array",
+                    "description": "2 a 6 opciones; sin ellas, texto libre",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Qué implica"
+                        }
+                      },
+                      "required": [
+                        "label"
+                      ]
+                    }
+                  },
+                  "multiple": {
+                    "type": "boolean",
+                    "description": "Puede elegir varias"
+                  }
+                },
+                "required": [
+                  "question"
+                ]
+              }
             }
           },
           "required": [
-            "question"
+            "questions"
           ]
         }
       }
@@ -889,8 +921,8 @@
     },
     {
       "name": "ask_user",
-      "args": "question, options?",
-      "description": "Preguntar al usuario antes de seguir"
+      "args": "questions",
+      "description": "Preguntar al usuario antes de seguir (hasta 4 a la vez)"
     },
     {
       "name": "browser_navigate",

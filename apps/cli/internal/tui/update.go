@@ -133,6 +133,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		if m.picker != nil {
+			if m.picker.ask != nil {
+				return m, m.picker.ask.paste(msg)
+			}
 			if m.picker.form != nil {
 				return m, m.picker.form.paste(msg)
 			}

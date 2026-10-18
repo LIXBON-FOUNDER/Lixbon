@@ -33,6 +33,9 @@ func (m *Model) liveLabel() (string, bool) {
 	if m.picker != nil && m.openTool != nil {
 		return "Esperando tu respuesta…", false
 	}
+	if b := askBlock(m.askEntry); b != nil && b.state == toolWaiting {
+		return "Esperando tus respuestas…", false
+	}
 	if m.autoCompacting {
 		return "Compactando la conversación…", false
 	}
