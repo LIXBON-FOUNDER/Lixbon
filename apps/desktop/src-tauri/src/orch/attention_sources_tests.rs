@@ -156,6 +156,38 @@ fn integrar_retirar_o_reabrir_cierran_la_espera_y_una_nueva_entrega_es_otra_ocur
 }
 
 #[test]
+fn repetir_done_sin_transicion_no_reabre_review_ready_pero_reabrir_y_entregar_de_nuevo_si() {
+    let e = setup_con("src-review-done-repetido", fake);
+    let h = hija(&e, Some("lx/r1/h"));
+    let pedidas = |e: &Env| desde(&e.core, 0).iter().filter(|ev| ev.kind == "task.review_requested").count();
+    let ocurrencias = |e: &Env| en_el_core(e, |s| instantanea(s)).into_iter().filter(|f| f[3] == "review_ready").count();
+    // Primera entrega correcta: review_ready ocurrencia 1.
+    assert_eq!(kinds(&entrega(&e, &h, true)), vec!["task.status_changed", "task.review_requested", "attention.created"]);
+    assert_eq!((pedidas(&e), ocurrencias(&e)), (1, 1));
+    assert_eq!(activas(&e), vec!["review_ready"]);
+    // La persona resuelve la revisión.
+    assert_eq!(kinds(&decide(&e, &h, "review", json!({ "decision": "accepted", "head_commit": "abc123" }))), vec!["decision.recorded", "attention.resolved"]);
+    assert!(activas(&e).is_empty());
+    // Repetir el `done` con éxito NO es una transición (Done → Done): la guarda es `State::done` -> `ensure_open`, que rechaza
+    // una Task final antes de que `Tx::done` llegue a emitir `task.review_requested`. Ni por el mutador ni por el RPC del agente.
+    let antes = head(&e.core);
+    let estado_antes = e.core.lock().tasks.get(&h).unwrap().summary.clone();
+    let error = e.core.mutate(|tx| tx.done(&h, true, "otra vez", vec![], None).map(|_| ())).expect_err("la entrega repetida se rechaza");
+    assert!(String::from(error).contains("ya terminó"));
+    let error = e.core.rpc(Caller::Agent(Some(h.clone())), "", "done", &json!({ "summary": "reintento" })).expect_err("el reintento del RPC también");
+    assert!(error.contains("ya terminó"), "{error}");
+    assert_eq!(head(&e.core), antes, "ni Event ni Attention nueva: el reintento no deja rastro");
+    assert_eq!(e.core.lock().tasks.get(&h).unwrap().summary, estado_antes, "ni siquiera pisa el resumen entregado");
+    assert_eq!((pedidas(&e), ocurrencias(&e)), (1, 1), "sin nuevo task.review_requested ni nueva ocurrencia");
+    assert!(activas(&e).is_empty(), "ni review_ready activa");
+    // El caso legítimo se conserva: reabrir de verdad y entregar de nuevo pide otra revisión (ocurrencia 2).
+    reabre(&e, &h);
+    assert_eq!(kinds(&entrega(&e, &h, true)), vec!["task.status_changed", "task.review_requested", "attention.created"]);
+    assert_eq!((pedidas(&e), ocurrencias(&e)), (2, 2));
+    assert_eq!(activas(&e), vec!["review_ready"]);
+}
+
+#[test]
 fn retirar_la_task_resuelve_su_review_ready() {
     let e = setup_con("src-review-removed", fake);
     let h = hija(&e, Some("lx/r1/h"));

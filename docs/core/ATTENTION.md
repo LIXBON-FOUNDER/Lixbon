@@ -387,9 +387,14 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
   desconocido CONSERVAN el bloqueo y su Attention.
 * **Solo al cambiar:** repetir la misma comprobación no emite; un cambio de causa en el mismo alcance emite
   `environment.cleared` de la anterior y `environment.blocked` de la nueva en la misma mutación.
-* **Frescura:** resolver la policy y observarla son atómicos entre sí (`env_gate`, por detrás de `pend_gate` y por delante
-  del estado y el almacén): una observación vieja no puede aplicarse DESPUÉS de una más nueva y dejar un bloqueo que ya no
-  existe (`una_observacion_vieja_no_se_aplica_despues_de_una_mas_nueva`, con barrera).
+* **Frescura:** resolver la policy y observarla son atómicos entre sí: `resolve_and_observe` hace la sonda y la observación
+  bajo `env_gate` (por delante del estado y el almacén), así que una observación vieja no puede aplicarse DESPUÉS de una más
+  nueva y dejar un bloqueo que ya no existe (`una_observacion_vieja_no_se_aplica_despues_de_una_mas_nueva`, con barrera).
+  No hay un orden global entre `env_gate` y `pend_gate`; hay dos rutas, y ninguna toma `pend_gate` con `env_gate` ya
+  retenido (de ahí que no haya ciclo):
+  * Los probes iniciales de `spawn_request` y `approve_spawn` ocurren ANTES de tomar `pend_gate`: solo `env_gate`.
+  * La comprobación final del `launch` anidado en `approve_spawn` (`create_child` → `launch`) sí adquiere `env_gate`
+    estando `pend_gate` retenido: `pend_gate → env_gate → estado → almacén`.
 * **Sin Event Log no se marca nada:** en `state.json` los Events se descartan, así que `observe_environment` no toca
   `State.env_blocks` (un marcador sin su Event durable ocultaría la señal para siempre). En producción ese modo es solo
   lectura (`DegradeC1`/`DegradedReadOnly`): la mutación se rechaza antes del closure y tampoco muta `env_blocks`
