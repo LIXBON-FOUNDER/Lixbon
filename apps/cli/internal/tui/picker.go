@@ -46,6 +46,8 @@ type picker struct {
 	scroll  int
 	// form convierte el panel en un formulario (newForm).
 	form *form
+	// ask convierte el panel en una tanda de preguntas (newAskForm).
+	ask *askForm
 	// quiet: lo que imprima done va al pie o a un panel, no al transcript.
 	quiet bool
 	// token identifica a quién responde el panel (la aprobación en curso).
@@ -147,6 +149,9 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 	if p.form != nil {
 		return p.form.key(msg)
 	}
+	if p.ask != nil {
+		return p.ask.key(msg)
+	}
 	switch k := msg.String(); k {
 	case "up", "ctrl+p", "shift+tab":
 		p.move(-1)
@@ -184,7 +189,7 @@ func (p *picker) key(msg tea.KeyPressMsg) (cmd tea.Cmd, closed bool) {
 
 // click elige la fila row del panel (contando desde su borde superior).
 func (p *picker) click(row int) (tea.Cmd, bool) {
-	if p.content != nil || p.form != nil {
+	if p.content != nil || p.form != nil || p.ask != nil {
 		return nil, false
 	}
 	i := row - p.optionTop
@@ -197,6 +202,9 @@ func (p *picker) click(row int) (tea.Cmd, bool) {
 func (p *picker) hints() string {
 	if p.form != nil {
 		return p.form.hints()
+	}
+	if p.ask != nil {
+		return p.ask.hints()
 	}
 	if p.content != nil && len(p.keys) == 0 {
 		return keyHints([2]string{"↑↓", "desplazar"}, [2]string{"esc", "cerrar"})
@@ -233,6 +241,9 @@ func (p *picker) view(width, maxRows int) []string {
 	}
 	if p.form != nil {
 		return panel(p.form.view(inner), width, pal.acc, p.title)
+	}
+	if p.ask != nil {
+		return panel(p.ask.view(inner), width, p.tone, p.title)
 	}
 	var rows []panelRow
 	for _, b := range p.body {

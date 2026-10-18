@@ -37,8 +37,10 @@ type Toolbox struct {
 	Web   WebSearcher
 	HTTP  *http.Client
 
-	// AskUser abre la pregunta al usuario; nil si la sesión no es interactiva.
-	AskUser func(ctx context.Context, question string, options []string) (answer string, ok bool)
+	// AskUser abre las preguntas al usuario y devuelve una respuesta por
+	// pregunta (vacía si la dejó sin responder); ok es false si cerró la tanda.
+	// nil si la sesión no es interactiva.
+	AskUser func(ctx context.Context, questions []Question) (answers []string, ok bool)
 	// Remote desactiva ask_user cuando conduce el móvil.
 	Remote bool
 	// OnTodo avisa a la interfaz de que la lista de pasos cambió.
@@ -134,8 +136,7 @@ func (tb *Toolbox) dispatch(ctx context.Context, name string, args map[string]an
 	case "todo":
 		return tb.updateTodo(args["items"]), nil
 	case "ask_user":
-		question, _ := textArg(args, "question", "")
-		return tb.askUser(ctx, question, args["options"]), nil
+		return tb.askUser(ctx, args), nil
 	}
 	return dispatch(ctx, tb.Root, name, args)
 }
@@ -275,31 +276,4 @@ func (tb *Toolbox) updateTodo(items any) string {
 		lines[i] = fmt.Sprintf("[%s] %s", it.Status, it.Text)
 	}
 	return fmt.Sprintf("Lista actualizada: %d/%d hechos.\n%s", done, len(clean), strings.Join(lines, "\n"))
-}
-
-func (tb *Toolbox) askUser(ctx context.Context, question string, options any) string {
-	if tb.AskUser == nil || tb.Remote {
-		return "[ask_user no disponible en esta sesión] Termina el turno formulando la pregunta al " +
-			"usuario en tu respuesta y espera su mensaje."
-	}
-	question = textutil.Strip(question)
-	if question == "" {
-		return "[ERROR] Falta question"
-	}
-	var choices []string
-	if list, ok := options.([]any); ok {
-		for _, o := range list {
-			if text := textutil.Strip(pyStr(o)); text != "" {
-				choices = append(choices, text)
-			}
-		}
-	}
-	if len(choices) > 6 {
-		choices = choices[:6]
-	}
-	answer, ok := tb.AskUser(ctx, question, choices)
-	if !ok {
-		return "El usuario no respondió (canceló). Sigue con tu mejor criterio o termina el turno."
-	}
-	return "Respuesta del usuario: " + answer
 }

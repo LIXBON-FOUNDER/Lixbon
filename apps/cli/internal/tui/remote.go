@@ -85,7 +85,7 @@ var internalPrompts = []string{
 type remoteHost struct {
 	link     *remote.Link
 	approver agent.Approver
-	askUser  func(ctx context.Context, question string, options []string) (string, bool)
+	askUser  func(ctx context.Context, questions []tools.Question) ([]string, bool)
 	onTodo   func(items, previous []tools.TodoItem)
 
 	mu        sync.Mutex
@@ -230,31 +230,51 @@ var errRemoteGone = errors.New("el control remoto se cerró")
 // ── preguntas del agente (ask_user) ──────────────────────────────────────
 
 // ask pregunta a la vez en la terminal y en el móvil, como las aprobaciones:
-// vale la primera respuesta y la otra pregunta se retira. En el hilo de la
-// app queda constancia de lo que se respondió.
-func (h *remoteHost) ask(ctx context.Context, question string, options []string) (string, bool) {
+// vale la primera tanda respondida y la otra se retira. En el hilo de la app
+// queda constancia de lo que se respondió.
+func (h *remoteHost) ask(ctx context.Context, questions []tools.Question) ([]string, bool) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type reply struct {
-		answer string
-		ok     bool
+		answers []string
+		ok      bool
 	}
-	askers := []func(context.Context, string, []string) (string, bool){h.askRemote}
+	askers := []func(context.Context, []tools.Question) ([]string, bool){h.askRemoteBatch}
 	if h.askUser != nil {
 		askers = append(askers, h.askUser)
 	}
 	replies := make(chan reply, len(askers))
 	for _, ask := range askers {
 		go func() {
-			answer, ok := ask(ctx, question, options)
-			replies <- reply{answer, ok}
+			answers, ok := ask(ctx, questions)
+			replies <- reply{answers, ok}
 		}()
 	}
 	r := <-replies
-	if r.ok {
-		h.emit("question_answered", map[string]any{"question": question, "answer": r.answer})
+	for i, q := range questions {
+		if i < len(r.answers) && strings.TrimSpace(r.answers[i]) != "" {
+			h.emit("question_answered", map[string]any{"question": q.Text, "answer": r.answers[i]})
+		}
 	}
-	return r.answer, r.ok
+	return r.answers, r.ok
+}
+
+// askRemoteBatch lleva la tanda al móvil pregunta a pregunta; si cierra una
+// sin responder, la tanda termina ahí con lo que ya respondió.
+func (h *remoteHost) askRemoteBatch(ctx context.Context, questions []tools.Question) ([]string, bool) {
+	answers := make([]string, len(questions))
+	for i, q := range questions {
+		options := make([]string, 0, len(q.Options))
+		for _, o := range q.Options {
+			options = append(options, o.Label)
+		}
+		answer, ok := h.askRemote(ctx, q.Text, options)
+		if !ok {
+			return answers, false
+		}
+		answers[i] = answer
+	}
+	return answers, true
 }
 
 // askRemote abre la pregunta en la app: elige una opción o escribe otra

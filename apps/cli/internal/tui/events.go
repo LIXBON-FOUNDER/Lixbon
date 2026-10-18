@@ -56,6 +56,9 @@ func (m *Model) handleEvent(e agent.Event) {
 		b := newToolBlock(e, &m.spin)
 		b.thought = thought
 		entry := m.add(b)
+		if e.Tool == "ask_user" {
+			m.askEntry = entry
+		}
 		if e.ReadOnly {
 			b.state = toolDone
 			m.refresh(entry)

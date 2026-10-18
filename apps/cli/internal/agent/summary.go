@@ -86,7 +86,7 @@ func ArgsSummary(tool string, args map[string]any) string {
 	case "read_output", "stop_command":
 		return stringArg(args, "id")
 	case "ask_user":
-		return textutil.Head(stringArg(args, "question"), 200)
+		return textutil.Head(tools.AskSummary(args), 200)
 	case "rename_file":
 		return fmt.Sprintf("%s → %s", orQuestion(args, "src"), orQuestion(args, "dst"))
 	case "delete_file":
