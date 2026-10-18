@@ -312,6 +312,7 @@ type toolBlock struct {
 	code    string
 	output  []string
 	diff    *diffView
+	answers *askAnswers
 }
 
 func newToolBlock(e agent.Event, spin *int) *toolBlock {
@@ -488,6 +489,7 @@ func (b *toolBlock) render(width int, open bool) string {
 	if open {
 		out = append(out, thoughtRows(b.thought, pad, width)...)
 	}
+	out = append(out, b.answers.render(width)...)
 	if b.diff != nil {
 		out = append(out, b.diff.render(width, open)...)
 	}

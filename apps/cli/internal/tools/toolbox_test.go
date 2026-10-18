@@ -368,25 +368,60 @@ func TestAskUser(t *testing.T) {
 	if got := tb.run("ask_user", map[string]any{"question": "¿a?"}); !strings.HasPrefix(got, "[ask_user no disponible en esta sesión]") {
 		t.Fatalf("sin callback: %q", got)
 	}
-	var gotQuestion string
-	var gotOptions []string
-	tb.AskUser = func(ctx context.Context, q string, o []string) (string, bool) {
-		gotQuestion, gotOptions = q, o
-		return "azul", true
+	var got []Question
+	tb.AskUser = func(ctx context.Context, qs []Question) ([]string, bool) {
+		got = qs
+		return []string{"azul"}, true
 	}
-	got := tb.run("ask_user", map[string]any{"question": "  ¿color?  ", "options": []any{"rojo", " ", "azul", "a", "b", "c", "d", "e"}})
-	if got != "Respuesta del usuario: azul" || gotQuestion != "¿color?" || len(gotOptions) != 6 || gotOptions[1] != "azul" {
-		t.Fatalf("got %q q=%q o=%v", got, gotQuestion, gotOptions)
+	out := tb.run("ask_user", map[string]any{"question": "  ¿color?  ", "options": []any{"rojo", " ", "azul", "a", "b", "c", "d", "e"}})
+	if out != "Respuesta del usuario: azul" || len(got) != 1 || got[0].Text != "¿color?" || len(got[0].Options) != 6 || got[0].Options[1].Label != "azul" {
+		t.Fatalf("got %q %+v", out, got)
 	}
-	if got := tb.run("ask_user", map[string]any{"question": " "}); got != "[ERROR] Falta question" {
-		t.Fatalf("pregunta vacía: %q", got)
+	if out := tb.run("ask_user", map[string]any{"question": " "}); out != "[ERROR] Falta question" {
+		t.Fatalf("pregunta vacía: %q", out)
 	}
-	tb.AskUser = func(context.Context, string, []string) (string, bool) { return "", false }
+	tb.AskUser = func(context.Context, []Question) ([]string, bool) { return nil, false }
 	if got := tb.run("ask_user", map[string]any{"question": "x"}); !strings.HasPrefix(got, "El usuario no respondió") {
 		t.Fatalf("cancelado: %q", got)
 	}
 	tb.Remote = true
 	if got := tb.run("ask_user", map[string]any{"question": "x"}); !strings.HasPrefix(got, "[ask_user no disponible") {
 		t.Fatalf("remoto: %q", got)
+	}
+}
+
+// Varias preguntas van en una sola llamada; lo que quede sin responder lo
+// decide el modelo, y el resultado se puede volver a leer al reabrir.
+func TestAskUserInOneBatch(t *testing.T) {
+	tb := newBox(t)
+	var got []Question
+	tb.AskUser = func(ctx context.Context, qs []Question) ([]string, bool) {
+		got = qs
+		return []string{"Cálido", "Carta, Ubicación", "", "una serif"}, true
+	}
+	args := map[string]any{"questions": []any{
+		map[string]any{"header": "Estilo", "question": "¿Qué estilo?", "options": []any{
+			map[string]any{"label": "Cálido", "description": "tonos tierra"}, map[string]any{"label": "Frío"}}},
+		map[string]any{"header": "Secciones", "question": "¿Qué secciones?", "multiSelect": true, "options": []any{"Carta", "Ubicación"}},
+		map[string]any{"header": "Idioma", "question": "¿Idioma?"},
+		map[string]any{"question": "¿Tipografía?"},
+		map[string]any{"question": "¿Una quinta?"},
+	}}
+	out := tb.run("ask_user", args)
+	if len(got) != MaxQuestions || got[0].Options[0].Description != "tonos tierra" || !got[1].Multiple || got[0].Multiple {
+		t.Fatalf("preguntas: %+v", got)
+	}
+	want := "Respuestas del usuario:\n- [Estilo] ¿Qué estilo? → Cálido\n- [Secciones] ¿Qué secciones? → Carta, Ubicación\n" +
+		"- [Idioma] ¿Idioma? → " + Unanswered + "\n- ¿Tipografía? → una serif"
+	if out != want {
+		t.Fatalf("resultado:\n%s", out)
+	}
+	if AskSummary(args) != "4 preguntas" {
+		t.Fatalf("resumen: %q", AskSummary(args))
+	}
+	answers, cancelled, ok := ParseAnswers(out)
+	if !ok || cancelled || len(answers) != 4 || answers[1].Label != "Secciones" || answers[1].Text != "Carta, Ubicación" ||
+		!answers[2].Missing || answers[3].Label != "¿Tipografía?" {
+		t.Fatalf("leído de vuelta: %+v", answers)
 	}
 }

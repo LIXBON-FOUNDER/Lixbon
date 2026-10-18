@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.12.0
+- El agente hace varias preguntas en una sola tanda (hasta 4): una pestaña por pregunta, opciones con su descripción y algunas en las que se marcan varias. ← → cambia de pregunta sin perder lo elegido y «Enviar» repasa las respuestas antes de mandarlas.
+- «Otra respuesta» se escribe en su sitio; esc vuelve a las opciones en vez de saltar a la siguiente pregunta. Esc fuera cierra la tanda y lo que no respondiste lo decide el agente.
+- Tus respuestas quedan bajo la fila «Preguntar» del turno, también al reabrir la conversación desde `/history`. Con `/remote`, las preguntas llegan al móvil una tras otra.
+- `/new` y `/clear` dejan la barra de contexto a cero al momento.
+
 ## 2.11.2
 - Cada modelo usa su ventana de contexto máxima, la que informa su proveedor (o la de los modelos conocidos, como MiMo), y se ajusta sola al cambiar de modelo o de proveedor. Desaparece `/context-window`.
 - Ya no salta «la conversación llenaba la ventana de contexto» con la ventana casi vacía: si la conversación cabe, va entera y el agente no tiene que volver a leer lo que ya leyó.

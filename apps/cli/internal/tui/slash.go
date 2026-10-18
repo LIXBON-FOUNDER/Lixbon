@@ -399,6 +399,7 @@ func (m *Model) cmdMode(arg string) tea.Cmd {
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
 	m.forgetConversation()
+	m.refreshContext()
 	m.gap()
 	m.add(separator(label))
 }
@@ -547,6 +548,7 @@ func (m *Model) historyMessages() tea.Cmd {
 func (m *Model) replayTranscript() {
 	m.gap()
 	m.add(separator(firstNonEmpty(m.chat.Title(), "conversación")))
+	asks := map[string]*entry{}
 	for _, msg := range m.chat.History {
 		content := strings.TrimSpace(msg.Content)
 		if history.IsSummary(msg) {
@@ -564,12 +566,28 @@ func (m *Model) replayTranscript() {
 			m.gap()
 			m.add(userBlock{text: content})
 			m.print("")
+		case "tool":
+			// Las respuestas a ask_user vuelven a su fila «Preguntar».
+			if e := asks[msg.ToolCallID]; e != nil {
+				if answers, cancelled, ok := tools.ParseAnswers(content); ok {
+					e.b.(*toolBlock).answers = &askAnswers{rows: answers, cancelled: cancelled}
+					m.refresh(e)
+				}
+			}
 		case "assistant":
 			for _, raw := range msg.ToolCalls {
-				call := toolparse.Native(rawToMap(raw))
-				b := newToolBlock(agent.Event{Tool: firstNonEmpty(call.Tool, "herramienta")}, nil)
+				fields := rawToMap(raw)
+				call := toolparse.Native(fields)
+				ev := agent.Event{Tool: firstNonEmpty(call.Tool, "herramienta")}
+				if call.Tool == "ask_user" {
+					ev.Text = tools.AskSummary(call.Args)
+				}
+				b := newToolBlock(ev, nil)
 				b.state = toolDone
-				m.add(b)
+				e := m.add(b)
+				if id, _ := fields["id"].(string); call.Tool == "ask_user" && id != "" {
+					asks[id] = e
+				}
 			}
 			prose := content
 			if m.chat.Mode == chat.ModeAgent {

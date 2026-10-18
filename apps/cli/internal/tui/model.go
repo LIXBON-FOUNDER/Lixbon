@@ -132,7 +132,10 @@ type Model struct {
 
 	// Bloques del turno que todavía cambian: la herramienta en marcha, el
 	// grupos de lecturas y del navegador en curso y el plan.
-	openTool     *entry
+	openTool *entry
+	// askEntry es la fila «Preguntar» de la última ask_user: sus respuestas
+	// van debajo.
+	askEntry     *entry
 	readGroup    *entry
 	browserGroup *entry
 	todoEntry    *entry
