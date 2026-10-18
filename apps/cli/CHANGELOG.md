@@ -4,6 +4,15 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.10.0
+- Cada turno del agente se ve como una pieza: «◆ Lixbon» con sus acciones, líneas cambiadas y segundos, y debajo cada paso colgando de un riel hasta el cierre. La respuesta final queda fuera del riel; lo que el agente cuenta entre acciones va dentro, en gris.
+- Las herramientas llevan su nombre como etiqueta con fondo y color según lo que hacen (leer, cambiar, comandos, navegador), y el estado va delante: en marcha, hecho, fallido o en espera. Los comandos se muestran como `$  comando`.
+- Lo que el modelo pensó antes de un paso aparece como «✦ 1.2 s» en la fila de ese paso, sin una fila «Pensó» aparte.
+- Los avisos del sistema dentro de un turno (contexto recortado, compactado…) van como una raya a todo el ancho, fuera del riel, para no confundirse con el resultado de una acción.
+- Mientras trabaja, el indicador es un brillo que talla una faceta y el texto cambia entre «Tallando», «Puliendo», «Refractando»… con un destello que lo recorre.
+- `/remote` funciona con cualquier proveedor: la sesión remota pasa por tu cuenta de Lixbon guardada.
+- Los perfiles de Xiaomi MiMo guardados con la ventana de contexto genérica recuperan sus 128000 tokens, así que ya no salta «contexto recortado» al poco de empezar.
+
 ## 2.9.0
 - Xiaomi MiMo funciona como proveedor: llama a las herramientas del CLI (leer, editar, `fetch_url`, preguntas con opciones…) en vez de escribirlas como texto, recibe su razonamiento de vuelta entre pasos y `/effort off` le apaga el razonamiento. Hay un preset `xiaomi`, la ventana de contexto por defecto es de 128000 tokens y, si pegas una clave del Token Plan (`tp-…`) con la URL de pago por uso, el CLI te avisa de que va con la URL de tu plan.
 - Con cualquier modelo que llama a las herramientas de forma nativa, el prompt ya no le pide escribir las llamadas en el texto; solo se lo recuerda a los modelos que ya las escriben así.

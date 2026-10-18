@@ -19,7 +19,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/agent"
+	"lixbon.com/cli/internal/api"
 	"lixbon.com/cli/internal/chat"
+	"lixbon.com/cli/internal/config"
 	"lixbon.com/cli/internal/history"
 	"lixbon.com/cli/internal/process"
 	"lixbon.com/cli/internal/remote"
@@ -742,14 +744,16 @@ func (m *Model) cmdRemote(arg string) tea.Cmd {
 	case m.remote != nil:
 		m.add(note("El control remoto ya está activo."))
 		return nil
-	case m.chat.Cfg.APIKey == "":
+	}
+	relay := m.remoteRelay()
+	if relay == nil {
 		m.add(errLine("Necesitas una sesión activa (/login) para usar /remote."))
 		return nil
 	}
 	title := firstNonEmpty(filepath.Base(m.chat.Workspace), "workspace")
 	machine, _ := os.Hostname()
 	machine = firstNonEmpty(machine, "PC")
-	link := remote.NewLink(m.chat.Client, "cli", title, machine)
+	link := remote.NewLink(relay, "cli", title, machine)
 	hello := m.remoteHello()
 	return m.async("creando sesión remota", func(ctx context.Context) cmdDoneMsg {
 		if err := link.Start(ctx, hello); err != nil {
@@ -758,6 +762,29 @@ func (m *Model) cmdRemote(arg string) tea.Cmd {
 		qr := link.QR(ctx)
 		return cmdDoneMsg{apply: func(m *Model) { m.enterRemote(link, title, machine, qr) }}
 	})
+}
+
+// remoteRelay es el gateway por el que pasa el control remoto: el proveedor
+// activo si es Lixbon y, si no, la cuenta Lixbon guardada en otro perfil. Es
+// temporal: con cualquier proveedor la sesión remota se presenta como Lixbon.
+func (m *Model) remoteRelay() *api.Client {
+	if !m.chat.Client.Generic {
+		if m.chat.Cfg.APIKey == "" {
+			return nil
+		}
+		return m.chat.Client
+	}
+	cfg := m.chat.Cfg
+	profiles := cfg.Profiles()
+	for _, name := range append([]string{config.DefaultProfile}, cfg.ProfileNames()...) {
+		if p, ok := profiles[name]; !ok || p.Generic {
+			continue
+		}
+		if c := api.ForProfile(cfg, name); c.APIKey != "" || c.Session != nil {
+			return c
+		}
+	}
+	return nil
 }
 
 // remoteHello es lo que la app necesita saber del host: comandos, qué puede

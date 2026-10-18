@@ -22,6 +22,10 @@ type palette struct {
 	addBg, addFg, delBg, delFg                           string
 	kw, str, fn, ty, num, com                            string
 	f1, f2, f3, f4, spark, dot                           string
+	// shimmer: base, medio y pico del brillo que recorre la etiqueta viva.
+	shBase, shMid, shHigh string
+	// chipLive es el fondo de la etiqueta de una herramienta en marcha.
+	chipLive string
 }
 
 var darkPalette = palette{
@@ -33,6 +37,7 @@ var darkPalette = palette{
 	addBg: "#1B2A1E", addFg: "#B4E4BC", delBg: "#2E1A17", delFg: "#F4B3A8",
 	kw: "#E59AD6", str: "#F2C98A", fn: "#8EC5FF", ty: "#C3B4FF", num: "#F5D98A", com: "#6A6A65",
 	f1: "#DCD6BC", f2: "#C7BE9F", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#FCFAEF",
+	shBase: "#9E9681", shMid: "#D8CFAD", shHigh: "#FCFAEF", chipLive: "#2A2F18",
 }
 
 var lightPalette = palette{
@@ -43,6 +48,7 @@ var lightPalette = palette{
 	addBg: "#E4EDD3", addFg: "#2E5A1E", delBg: "#F5DDD6", delFg: "#8A2E1E",
 	kw: "#9B3D86", str: "#8A5A12", fn: "#2B63A6", ty: "#6046B0", num: "#7A6210", com: "#A3A39B",
 	f1: "#BDB38E", f2: "#A89D76", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#4B5327",
+	shBase: "#8A8574", shMid: "#5E594B", shHigh: "#1B1A17", chipLive: "#DCE5C4",
 }
 
 // pal es el tema en uso. themeVersion cambia con cada applyTheme para que
@@ -88,6 +94,7 @@ type glyphSet struct {
 	brand, wait, thinkRail, gap, prompt, meterOn, meterOff, branch       string
 	chip, info, todo, doing, done, minus, check, cross, rule             string
 	boxTL, boxTR, boxBL, boxBR, boxH, boxV                               string
+	turnRail, turnEnd                                                    string
 	spin                                                                 []string
 	halfBlocks                                                           bool
 }
@@ -97,7 +104,8 @@ var richGlyphs = glyphSet{
 	brand: "◆", wait: "◌", thinkRail: "┊", gap: "⋯", prompt: "›", meterOn: "▰", meterOff: "▱", branch: "⎇",
 	chip: "⧉", info: "◇", todo: "○", doing: "▸", done: "✓", minus: "−", check: "✓", cross: "✗", rule: "─",
 	boxTL: "╭", boxTR: "╮", boxBL: "╰", boxBR: "╯", boxH: "─", boxV: "│",
-	spin: []string{"·", "✧", "✦", "✧"}, halfBlocks: true,
+	turnRail: "┃", turnEnd: "┗",
+	spin: []string{"·", "⋄", "◇", "◈", "◆", "✦", "◆", "◈", "◇", "⋄"}, halfBlocks: true,
 }
 
 var safeGlyphs = glyphSet{
@@ -105,6 +113,7 @@ var safeGlyphs = glyphSet{
 	brand: "♦", wait: "○", thinkRail: "│", gap: "…", prompt: "›", meterOn: "▓", meterOff: "░", branch: "≡",
 	chip: "□", info: "◊", todo: "○", doing: "►", done: "√", minus: "−", check: "√", cross: "×", rule: "─",
 	boxTL: "┌", boxTR: "┐", boxBL: "└", boxBR: "┘", boxH: "─", boxV: "│",
+	turnRail: "│", turnEnd: "└",
 	spin: []string{"·", "•", "●", "•"}, halfBlocks: true,
 }
 
@@ -113,6 +122,7 @@ var asciiGlyphs = glyphSet{
 	brand: "*", wait: "o", thinkRail: ":", gap: "...", prompt: ">", meterOn: "#", meterOff: "-", branch: "@",
 	chip: "#", info: "i", todo: "-", doing: ">", done: "x", minus: "-", check: "v", cross: "x", rule: "-",
 	boxTL: "+", boxTR: "+", boxBL: "+", boxBR: "+", boxH: "-", boxV: "|",
+	turnRail: "|", turnEnd: "'",
 	spin: []string{".", "o", "O", "o"},
 }
 

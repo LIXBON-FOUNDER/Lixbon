@@ -473,7 +473,7 @@ func TestBangRunsTheCommandWithoutAskingAndFeedsTheModel(t *testing.T) {
 	h.send("!echo hola")
 	h.settle()
 	notContains(t, h.view(), "Ejecutar «")
-	contains(t, h.out(), "Ejecutar  echo hola")
+	contains(t, h.out(), "$  echo hola")
 	contains(t, h.out(), "hola")
 	contains(t, h.out(), "exit 0")
 	last := h.chat.History[len(h.chat.History)-1]

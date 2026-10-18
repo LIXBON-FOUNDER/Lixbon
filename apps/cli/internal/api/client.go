@@ -55,6 +55,18 @@ func FromConfig(cfg config.Config) *Client {
 	return c
 }
 
+// ForProfile es un cliente del perfil name aunque no sea el activo, con su
+// sesión de navegador si la tiene.
+func ForProfile(cfg config.Config, name string) *Client {
+	p := cfg.Profiles()[name]
+	c := New(p.BaseURL, p.APIKey)
+	c.Generic = p.Generic
+	if stored, ok := config.ReadSession(cfg.SessionFile(), name); ok && !p.Generic && stored.Server == c.Server {
+		c.Session = &Session{path: cfg.SessionFile(), profile: name, stored: stored}
+	}
+	return c
+}
+
 // Configure apunta el cliente a otro proveedor conservando su identidad: la
 // caja de herramientas guarda el mismo puntero.
 func (c *Client) Configure(cfg config.Config) {

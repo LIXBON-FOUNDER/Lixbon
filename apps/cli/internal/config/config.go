@@ -101,6 +101,7 @@ func Load(path string) Config {
 		cfg.Extra[key] = value
 	}
 	cfg.adoptActiveProfile()
+	cfg.fixMiMoWindow()
 	return cfg
 }
 

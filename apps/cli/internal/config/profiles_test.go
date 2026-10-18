@@ -228,3 +228,22 @@ func TestSaveWithoutProfilesKeepsTheLegacyShape(t *testing.T) {
 		t.Fatalf("un config de un solo proveedor no debe ganar un campo profiles:\n%s", raw)
 	}
 }
+
+func TestAStaleMiMoProfileGetsItsWindowBack(t *testing.T) {
+	stale := `{"base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "context_window": 8192, "profile": "xiaomi",
+  "profiles": {
+    "xiaomi": {"base_url": "https://token-plan-sgp.xiaomimimo.com/v1", "context_window": 8192, "generic": true},
+    "lixbon": {"base_url": "https://lixbon.com/v1", "context_window": 128000},
+    "local": {"base_url": "http://localhost:11434/v1", "context_window": 8192, "generic": true}
+  }}`
+	cfg := Load(writeFile(t, stale))
+	if cfg.ContextWindow != mimoContext {
+		t.Fatalf("MiMo con la ventana genérica de antes: %d, quiero %d", cfg.ContextWindow, mimoContext)
+	}
+	if err := cfg.UseProfile("local"); err != nil || cfg.ContextWindow != DefaultGenericContext {
+		t.Fatalf("un modelo local conserva su ventana: %d (%v)", cfg.ContextWindow, err)
+	}
+	if err := cfg.UseProfile("xiaomi"); err != nil || cfg.ContextWindow != mimoContext {
+		t.Fatalf("al volver a MiMo: %d (%v)", cfg.ContextWindow, err)
+	}
+}
