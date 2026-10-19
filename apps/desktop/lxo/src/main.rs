@@ -1,13 +1,14 @@
 //! lxo: la CLI con la que cualquier agente habla con el orquestador de Lixbon.
 //! Solo traduce argumentos a peticiones HTTP locales; toda la lógica vive en la app.
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
+
+mod client_auth;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
 const WORKER: &str = include_str!("../guide/worker.md");
@@ -143,31 +144,8 @@ fn call(cmd: &str, mut args: Value, caller: Option<&str>) -> Result<Value, Strin
     res
 }
 
-fn send(cmd: &str, args: Value, caller: Option<&str>) -> Result<Value, String> {
-    let info: Value = std::fs::read(home().join(".lixbon").join("orch.json")).ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .ok_or("Lixbon no está abierto o el orquestador está desactivado (Lixbon → Ajustes → Orquestador)")?;
-    let port = info["port"].as_u64().ok_or("orch.json sin puerto")?;
-    let token = info["token"].as_str().unwrap_or("");
-    let body = json!({ "cmd": cmd, "args": args, "caller": caller, "cwd": cwd() }).to_string();
-    let mut stream = TcpStream::connect(("127.0.0.1", port as u16))
-        .map_err(|_| "Lixbon no está abierto o el orquestador está desactivado (Lixbon → Ajustes → Orquestador)".to_string())?;
-    stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
-    write!(
-        stream,
-        "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    ).map_err(|e| e.to_string())?;
-    let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).map_err(|e| format!("Se cortó la conexión con Lixbon: {e}"))?;
-    let text = String::from_utf8_lossy(&raw);
-    let json_part = text.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let res: Value = serde_json::from_str(json_part).map_err(|_| "Respuesta inválida de Lixbon".to_string())?;
-    if res["ok"].as_bool() == Some(true) {
-        Ok(res["data"].clone())
-    } else {
-        Err(res["error"].as_str().unwrap_or("Error desconocido").to_string())
-    }
+fn send(cmd: &str, args: Value, _caller: Option<&str>) -> Result<Value, String> {
+    client_auth::send(cmd, &args, &cwd())
 }
 
 fn need(v: Option<String>, what: &str) -> Result<String, String> {
