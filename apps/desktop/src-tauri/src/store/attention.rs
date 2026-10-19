@@ -721,6 +721,21 @@ impl Store {
         })
     }
 
+    /// Attention ACTIVA agrupada por proyecto y categoría (`None` = sin proyecto), solo lectura. Son las mismas
+    /// filas que lista [`Store::attention_page`] con el filtro `project_id`, contadas por la base.
+    pub fn attention_active_counts(&self) -> StoreResult<Vec<(Option<String>, AttentionCategory, u64)>> {
+        self.read(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT project_id, category, COUNT(*) FROM attention_items WHERE status = 'active' \
+                 GROUP BY project_id, category ORDER BY project_id, category",
+            )?;
+            let raw = statement
+                .query_map([], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            raw.into_iter().map(|(project, category, n)| Ok((project, AttentionCategory::parse(&category)?, n as u64))).collect()
+        })
+    }
+
     /// Lee un detalle respetando el límite autenticado del Agent, si corresponde.
     /// Las filas resueltas siguen disponibles como historial de su mismo scope.
     pub fn attention_get_scoped(&self, id: &str, scope_task_id: Option<&str>) -> StoreResult<Option<AttentionRow>> {

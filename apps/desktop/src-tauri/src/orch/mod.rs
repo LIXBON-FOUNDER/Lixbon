@@ -8,6 +8,7 @@ mod agents;
 // Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
 mod attention_rules;
 mod attention_read;
+mod projects_overview;
 mod attention_action;
 mod authority;
 mod boot_authority;
@@ -33,6 +34,8 @@ mod tx_ops_tests;
 mod attention_update_api_tests;
 #[cfg(test)]
 mod attention_read_tests;
+#[cfg(test)]
+mod projects_overview_tests;
 #[cfg(test)]
 mod attention_action_tests;
 #[cfg(test)]

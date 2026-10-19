@@ -579,6 +579,67 @@ mod authenticated_client_tests {
     }
 
     #[test]
+    fn http_rpc_projects_overview_es_solo_para_person_autenticada() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let task = create_ui_task(&core, "overview HTTP task");
+        let project_id = core
+            .storage
+            .with_store(|store| {
+                store
+                    .project_create(
+                        "Overview HTTP",
+                        &crate::store::Fingerprint::default(),
+                        &crate::store::NewLocation { machine: "machine-http".into(), path: "/repos/http".into(), display_path: "/repos/http".into(), primary: true },
+                    )
+                    .unwrap()
+                    .id
+            })
+            .unwrap();
+        core.mutate(|tx| {
+            tx.tasks.get_mut(&task).unwrap().project_id = Some(project_id.clone());
+            Ok(())
+        })
+        .unwrap();
+        let person_secret = "person-overview-http-secret-at-least-32-bytes";
+        let agent_secret = "agent-overview-http-secret-at-least-32-bytes";
+        register(&core, ClientSurface::Cli, ClientPrincipal::Person("person-overview-http".into()), "install-person-overview-http", person_secret);
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent(task.clone()), "install-agent-overview-http", agent_secret);
+        let server = start(core).unwrap();
+
+        let (status, person) = post(server.port, person_secret, &json!({ "cmd": "projects_overview", "args": {} }));
+        assert_eq!(status, 200);
+        assert_eq!(person["ok"], true, "Person CLI lee el overview del Core local: {:?}", person["error"]);
+        let data = &person["data"];
+        assert_eq!(data["v"], 1);
+        // `run_create` descubre y registra solo el proyecto del repo en curso: aquí hay ese y el de la prueba.
+        assert_eq!(data["total"], 2);
+        let project = data["projects"].as_array().unwrap().iter().find(|p| p["id"] == project_id.as_str()).expect("el proyecto de la prueba");
+        assert_eq!(project["counts"]["tasks"], 1);
+        assert_eq!(project["counts"]["active"], 1);
+        let fields: std::collections::BTreeSet<_> = project.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(fields, ["counts", "id", "locations", "name", "state", "status"].into_iter().collect());
+
+        let (_, archived) = post(server.port, person_secret, &json!({ "cmd": "projects_overview", "args": { "archived": "only" } }));
+        assert_eq!(archived["data"]["total"], 0, "el filtro viaja por HTTP");
+        let (_, invalid) = post(server.port, person_secret, &json!({ "cmd": "projects_overview", "args": { "limit": 5 } }));
+        assert_eq!(invalid["ok"], false);
+        assert!(invalid["error"].as_str().unwrap().contains("projects_overview_invalid_request"));
+
+        let (status, agent) = post(server.port, agent_secret, &json!({ "cmd": "projects_overview", "args": {} }));
+        assert_eq!(status, 200);
+        assert_eq!(agent["ok"], false, "un Agent no lee el overview multiproyecto");
+        assert!(agent["error"].as_str().unwrap().contains("projects_overview_auth_required"));
+
+        let (_, legacy) = post(server.port, &server.token, &json!({ "cmd": "projects_overview", "caller": task, "args": {} }));
+        assert_eq!(legacy["ok"], false, "el token legacy no habilita la nueva API");
+        assert!(legacy["error"].as_str().unwrap().contains("projects_overview_auth_required"));
+        server.stop();
+    }
+
+    #[test]
     fn credencial_person_cli_no_puede_detener_tarea_de_interfaz() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);

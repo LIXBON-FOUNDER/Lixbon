@@ -262,6 +262,11 @@ impl CoreStorage {
         self.slot().store.as_ref().map(|s| s.events_page(q))
     }
 
+    /// Lectura del `Store` abierto (`None` = cerrado). A diferencia de `with_store`, el closure no puede escribir.
+    pub(super) fn read_store<R>(&self, f: impl FnOnce(&Store) -> R) -> Option<R> {
+        self.slot().store.as_ref().map(f)
+    }
+
     /// Una página de Attention activa, solo lectura.
     pub(super) fn attention_page(&self, q: &AttentionQuery) -> Option<StoreResult<AttentionPage>> {
         self.slot().store.as_ref().map(|s| s.attention_page(q))
