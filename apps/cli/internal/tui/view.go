@@ -135,6 +135,7 @@ func (m *Model) View() tea.View {
 	if anchored {
 		m.popover(screen, width, height)
 	}
+	m.placeImages(screen)
 	v := tea.NewView(strings.Join(screen, "\n"))
 	v.AltScreen = true
 	// AllMotion y no CellMotion: sin botón pulsado también llega el

@@ -1,17 +1,24 @@
 package tools
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"  // DecodeConfig de GIF
 	_ "image/jpeg" // y de JPEG
 	_ "image/png"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "golang.org/x/image/webp" // y de WebP
 )
 
 // ShownImage es una imagen que el agente enseña al usuario con show_image: la
@@ -53,7 +60,7 @@ func ImageMime(path string) string {
 	return ""
 }
 
-func (tb *Toolbox) showImage(args map[string]any) (string, error) {
+func (tb *Toolbox) showImage(ctx context.Context, args map[string]any) (string, error) {
 	path, err := textArg(args, "path", "")
 	if err != nil {
 		return "", err
@@ -63,7 +70,12 @@ func (tb *Toolbox) showImage(args map[string]any) (string, error) {
 		return "", errors.New("falta path")
 	}
 	target := path
-	if !filepath.IsAbs(target) {
+	if lower := strings.ToLower(path); strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		// Una URL se descarga aquí: así el agente no gasta pasos en curl.
+		if target, err = tb.downloadImage(ctx, path); err != nil {
+			return "", err
+		}
+	} else if !filepath.IsAbs(target) {
 		target = filepath.Join(tb.Root, target)
 	}
 	info, err := os.Stat(target)
@@ -82,6 +94,8 @@ func (tb *Toolbox) showImage(args map[string]any) (string, error) {
 	shown := ShownImage{Path: target, Name: path, Mime: mime, Caption: strings.TrimSpace(stringOf(args["caption"]))}
 	if rel, err := filepath.Rel(tb.Root, target); err == nil && !strings.HasPrefix(rel, "..") {
 		shown.Name = filepath.ToSlash(rel)
+	} else if u, err := url.Parse(path); err == nil && u.Host != "" {
+		shown.Name = u.Host + u.EscapedPath()
 	} else {
 		shown.Name = filepath.Base(target)
 	}
@@ -98,7 +112,59 @@ func (tb *Toolbox) showImage(args map[string]any) (string, error) {
 	if shown.W > 0 {
 		size = fmt.Sprintf(" (%d×%d)", shown.W, shown.H)
 	}
-	return "Imagen enseñada al usuario: " + shown.Name + size + ".", nil
+	return "Imagen enseñada al usuario: " + shown.Name + size + ". Ya la ve: no la describas si no te lo pide.", nil
+}
+
+// downloadImage baja una imagen de la web a la carpeta temporal de imágenes y
+// devuelve su ruta.
+func (tb *Toolbox) downloadImage(ctx context.Context, raw string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return "", fmt.Errorf("no se pudo descargar %s: %v", raw, err)
+	}
+	req.Header.Set("User-Agent", fetchUserAgent)
+	req.Header.Set("Accept", "image/png,image/jpeg,image/webp,image/gif,image/*;q=0.8")
+	client := tb.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("no se pudo descargar %s: %v", raw, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP %d al descargar %s", resp.StatusCode, raw)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxShownImage+1))
+	if err != nil {
+		return "", fmt.Errorf("no se pudo descargar %s: %v", raw, err)
+	}
+	if len(data) > MaxShownImage {
+		return "", fmt.Errorf("%s pesa más de 8 MB", raw)
+	}
+	mime := http.DetectContentType(data)
+	ext := ""
+	for e, known := range imageMimes {
+		if known == mime && e != ".jpeg" {
+			ext = e
+		}
+	}
+	if ext == "" {
+		return "", fmt.Errorf("%s no es una imagen PNG, JPEG, GIF o WebP (es %s)", raw, mime)
+	}
+	dir := filepath.Join(os.TempDir(), "lixbon-imagenes")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(raw))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:8])+ext)
+	return path, os.WriteFile(path, data, 0o644)
 }
 
 func stringOf(v any) string {

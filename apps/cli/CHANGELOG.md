@@ -4,6 +4,12 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.13.1
+- Las imágenes se ven tal cual son: en terminales con Sixel (Windows Terminal, WezTerm, foot…) la miniatura se cambia por la imagen con sus píxeles cuando la pantalla está quieta. Sin Sixel queda la miniatura, ahora más grande y suavizada.
+- Miniaturas también para WebP.
+- Un clic en una imagen la abre en el navegador en vez de preguntar con qué aplicación abrirla.
+- `show_image` acepta la URL de una imagen y la descarga sola: el agente la enseña sin dar vueltas ni describirla si no se lo pides.
+
 ## 2.13.0
 - Sin negrita: PowerShell y CMD la pintaban con un trazo raro en títulos, cabecera y teclas. La jerarquía la dan ahora los tonos de tinta, y los títulos de panel llevan una raya hasta el borde.
 - Una sola barra en todas partes: un trazo grueso ━ sobre una pista fina ─, con el porcentaje al lado, en `/usage`, la compactación y el pie. `/usage` dice al lado de cada cupo cuándo se reinicia y añade el contexto de la conversación.

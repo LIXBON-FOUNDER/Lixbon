@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 
 	"lixbon.com/cli/internal/sse"
 )
@@ -251,6 +252,22 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.ColorProfileMsg:
 		setColorProfile(msg.Profile)
 		return m, nil
+
+	case uv.CellSizeEvent:
+		if m.gfx != nil {
+			m.gfx.cellW, m.gfx.cellH = msg.Width, msg.Height
+		}
+		return m, nil
+
+	case uv.PrimaryDeviceAttributesEvent:
+		m.gfx.onDeviceAttributes(msg)
+		return m, nil
+
+	case clearImagesMsg:
+		return m, tea.ClearScreen
+
+	case settleImagesMsg:
+		return m, m.settleImages(msg.gen)
 
 	case approvalMsg:
 		return m, m.openApproval(msg)
