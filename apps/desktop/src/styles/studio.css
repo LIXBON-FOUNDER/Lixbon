@@ -55,7 +55,7 @@ body.is-resizing-x iframe, body.is-resizing-y iframe { pointer-events: none; }
 .scroll { overflow: auto; }
 
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: var(--surface-5); border-radius: 7px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb { background: var(--surface-5); border-radius: var(--radius); border: 2px solid transparent; background-clip: padding-box; }
 *::-webkit-scrollbar-thumb:hover { background-color: var(--surface-6); }
 *::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
 
@@ -362,88 +362,7 @@ kbd {
 }
 .projbtn:hover { color: var(--ink); }
 
-.modeswitch {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  padding: 3px;
-  border-radius: var(--radius);
-  background: var(--surface-1);
-}
-.modeswitch__thumb {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 76px;
-  height: 26px;
-  border-radius: var(--radius);
-  background: var(--surface-5);
-  transition: transform 0.4s var(--spring), opacity 0.25s ease;
-}
-.modeswitch.is-idle .modeswitch__thumb { opacity: 0; }
-.modeswitch.is-idle .modeswitch__tab.is-active { color: var(--ink-50); font-weight: 500; }
-.modeswitch__tab {
-  position: relative;
-  height: 26px;
-  font-size: 13px;
-  color: var(--ink-50);
-  transition: color 0.2s ease;
-}
-.modeswitch__tab:hover, .modeswitch__tab.is-active { color: var(--ink); }
-
-.tsearch-slot { width: 300px; display: flex; justify-content: flex-end; }
-.tsearch {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  border-radius: var(--radius);
-  background: transparent;
-  transition: width 0.42s var(--ease), background-color 0.3s ease;
-}
-.tsearch.is-open { width: 300px; background: var(--surface-4); }
-.tsearch__icon {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink-mid);
-  transition: color 0.15s ease;
-}
-.tsearch__icon:hover, .tsearch.is-open .tsearch__icon { color: var(--ink); }
-.tsearch__input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: none;
-  outline: none;
-  font-size: 13px;
-  color: var(--ink);
-  opacity: 0;
-  transition: opacity 0.25s ease 0.12s;
-}
-.tsearch__input::placeholder { color: var(--ink-dim); }
-.tsearch__kbd {
-  padding-right: 10px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-dim);
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity 0.25s ease 0.12s;
-}
-.tsearch.is-open .tsearch__input, .tsearch.is-open .tsearch__kbd { opacity: 1; }
-.tsearch__results { width: 380px; padding: 4px; }
-.tsearch__results .menu__item { min-height: 28px; }
-
-.ptoggles { display: flex; gap: 4px; }
-.ptoggles .ic { color: var(--ink-35); }
-.ptoggles .ic.is-on { color: var(--ink-70); }
-.ptoggles .ic:hover { color: var(--ink); }
+/* El selector de modo, el buscador y los botones de panel viven ahora en ide.css. */
 
 .acctavatar {
   display: inline-flex;
@@ -477,7 +396,7 @@ kbd {
   position: absolute;
   width: 7px;
   height: 7px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--ink-faint);
   transition: opacity 0.2s ease, transform 0.25s var(--ease);
 }
@@ -663,7 +582,7 @@ kbd {
   position: absolute;
   width: 7px;
   height: 7px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--ink-70);
   opacity: 0;
   transition: opacity 0.15s ease;

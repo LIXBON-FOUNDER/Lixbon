@@ -7,6 +7,8 @@ import { useOrchStore, taskTree, isFinal, STATUS_LABELS } from '../store/orchSto
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
+import { RightDock } from '../layout/RightDock';
+import { AgentPanel } from '../chat/AgentPanel';
 import { Segmented } from '../components/Segmented';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { AgentTerminal } from './AgentTerminal';
@@ -115,7 +117,7 @@ function TaskRow({ task, selected, onSelect, asking, now }) {
   const final = isFinal(task.status);
   const statusLine = (final ? firstLine(task.summary) : phase?.note?.trim()) || '';
   return (
-    <button className={`orch__task orch__task--${task.status} ${selected ? 'is-active' : ''}`} style={{ paddingLeft: 12 + task.depth * 16 }} onClick={() => onSelect(task.id)}>
+    <button className={`orch__task orch__task--${task.status} ${selected ? 'is-active' : ''}`} style={{ paddingLeft: 12 + task.depth * 16 }} onClick={() => onSelect(task.id)} title={statusLine || undefined}>
       <StatusIcon status={task.status} />
       <span className="orch__task-main">
         <span className="orch__task-title">{task.title || task.id}</span>
@@ -370,6 +372,8 @@ function Disabled() {
 export function OrchestratorMode() {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
+  const rightOpen = useWorkbenchStore((s) => s.modePanels.orch?.right ?? true);
+  const toggleAgent = useWorkbenchStore((s) => s.toggleAgent);
   const { snap, selected, select, init, call } = useOrchStore();
   const [allRepos, setAllRepos] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
@@ -409,7 +413,7 @@ export function OrchestratorMode() {
 
   return (
     <div className="wb wb--orch">
-      <Collapse open={open} size={Math.max(sizes.side, 300) + 6}>
+      <Collapse open={open} size={Math.max(sizes.side, 300) + 8}>
         <Panel id="orchtree" className="sidepanel orch__side">
           <div className="panelhead">
             <span className="panelhead__title">{allRepos ? 'Runs · todos los repos' : `Runs · ${root ? root.split(/[\\/]/).pop() : 'sin carpeta'}`}</span>
@@ -453,6 +457,9 @@ export function OrchestratorMode() {
           ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
           : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} /> : <HowTo />}
       </Panel>
+      <RightDock open={rightOpen}>
+        <AgentPanel onClose={toggleAgent} />
+      </RightDock>
     </div>
   );
 }

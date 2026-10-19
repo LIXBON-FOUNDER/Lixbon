@@ -8,6 +8,8 @@ import { useFileViewStore } from '../store/fileViewStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
+import { RightDock } from '../layout/RightDock';
+import { AgentPanel } from '../chat/AgentPanel';
 import { Segmented } from '../components/Segmented';
 import { SourceControl } from '../sections/SourceControl/SourceControl';
 import { DiffView } from '../sections/SourceControl/DiffView';
@@ -19,6 +21,8 @@ const readMode = () => { try { return localStorage.getItem('lx_diff_mode') || 'i
 export function GitMode() {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const open = useWorkbenchStore((s) => s.modePanels.git.left);
+  const rightOpen = useWorkbenchStore((s) => s.modePanels.git.right);
+  const toggleAgent = useWorkbenchStore((s) => s.toggleAgent);
   const diffData = useAppStore((s) => s.diffData);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const { stage, unstage, discard, fileDiff } = useGitStore();
@@ -50,7 +54,7 @@ export function GitMode() {
 
   return (
     <div className="wb wb--git">
-      <Collapse open={open} size={Math.max(sizes.side, 300) + 6}>
+      <Collapse open={open} size={Math.max(sizes.side, 300) + 8}>
         <Panel id="scm" className="sidepanel">
           <SourceControl selected={meta} onSelect={() => setTab('diff')} onOpenPr={() => setTab('pr')} />
         </Panel>
@@ -91,6 +95,9 @@ export function GitMode() {
               : <ActionsView runId={runId} onRunChange={setRunId} />}
         </div>
       </Panel>
+      <RightDock open={rightOpen}>
+        <AgentPanel onClose={toggleAgent} />
+      </RightDock>
     </div>
   );
 }

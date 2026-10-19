@@ -40,7 +40,7 @@
 .filetree__actions .icon-btn {
   width: 26px;
   height: 26px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--ink-soft);
 }
 
@@ -126,7 +126,7 @@
   width: 100%;
   font-size: 13px;
   padding: 5px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg);
   outline: none;
 }

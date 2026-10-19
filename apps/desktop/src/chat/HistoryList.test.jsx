@@ -38,7 +38,7 @@ describe('historial único', () => {
     render(<HistoryList />);
     await waitForAll();
     expect(screen.getByTestId('hist-filter-all').getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByTestId('hist-filter-codex').textContent).toContain('1');
+    expect(screen.getByTestId('hist-filter-codex').getAttribute('title')).toContain('1');
     const marks = Array.from(document.querySelectorAll('.hist__mark')).map((e) => e.getAttribute('title')).sort();
     expect(marks).toEqual(['Claude Code', 'Codex', 'Lixbon']);
   });
@@ -79,7 +79,6 @@ describe('historial único', () => {
   it('la búsqueda también filtra las sesiones locales de Claude y Codex', async () => {
     render(<HistoryList />);
     await waitForAll();
-    fireEvent.click(screen.getByText('Buscar'));
     fireEvent.change(screen.getByPlaceholderText('Buscar conversaciones'), { target: { value: 'estilos' } });
     await waitFor(() => expect(rows()).not.toContain('Revisar el CI de Claude'));
     expect(rows()).toContain('Arreglar los estilos de Codex');

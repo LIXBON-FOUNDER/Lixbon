@@ -43,7 +43,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 14px 5px 6px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-secondary);
   color: var(--ink);
   font-size: 12.5px;
@@ -85,7 +85,7 @@
   bottom: -1px;
   width: 7px;
   height: 7px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--good);
   outline: 1.5px solid var(--bg-secondary);
   animation: team-dot-pulse 2.2s ease-in-out infinite;
@@ -103,7 +103,7 @@
   right: 0;
   width: 336px;
   background: var(--bg);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 18px;
   z-index: 300;
   animation: team-drop-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -136,7 +136,7 @@
   display: inline-block;
   width: 6px;
   height: 6px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: #4c9a4c;
   margin-right: 5px;
 }
@@ -154,7 +154,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 4px;
-  border-radius: 7px;
+  border-radius: var(--radius);
 }
 
 .team__member:hover { background: var(--bg-secondary); }
@@ -170,7 +170,7 @@
   bottom: -1px;
   width: 9px;
   height: 9px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   outline: 2px solid var(--bg);
   background: rgba(var(--ink-rgb), 0.3);
 }
@@ -308,7 +308,7 @@
   z-index: 400;
   min-width: 215px;
   background: var(--bg);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 6px;
 }
 
@@ -319,7 +319,7 @@
   gap: 8px;
   padding: 7px 12px;
   font-size: 13px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   text-align: left;
   color: var(--ink);
   transition: background 0.1s ease;
@@ -360,7 +360,7 @@
 .quickopen {
   width: min(620px, 90vw);
   background: var(--bg);
-  border-radius: 7px;
+  border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -398,7 +398,7 @@
   align-items: center;
   gap: 9px;
   padding: 7px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   font-size: 13.5px;
   cursor: pointer;
   color: var(--ink);
@@ -472,7 +472,7 @@
   gap: 10px;
   width: 100%;
   padding: 9px 13px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--ink-70);
   text-align: left;
   font-size: 12.5px;
@@ -489,7 +489,7 @@
   height: 24px;
   flex-shrink: 0;
   color: var(--ink-50);
-  border-radius: 7px;
+  border-radius: var(--radius);
   transition: background 0.15s ease, color 0.15s ease;
 }
 
@@ -497,7 +497,7 @@
 
 .pillbtn {
   padding: 6px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
   font-size: 11px;
@@ -520,7 +520,7 @@
   gap: 10px;
   width: 100%;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-tertiary);
   cursor: pointer;
   transition: background 0.15s ease;
@@ -560,7 +560,7 @@
   max-height: calc(100vh - 32px);
   overflow-y: auto;
   background: var(--bg-quinary);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 18px;
   z-index: 300;
   animation: menu-pop 0.16s var(--ease) both;
@@ -616,7 +616,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 11px 13px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-quaternary);
   margin: 12px 0 10px;
 }
@@ -631,7 +631,7 @@
   align-items: center;
   gap: 8px;
   padding: 9px 8px 9px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-quaternary);
   margin-bottom: 12px;
 }
@@ -669,7 +669,7 @@
 
 .acctpop__quota {
   padding: 13px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-quaternary);
 }
 
@@ -688,7 +688,7 @@
   display: block;
   width: 100%;
   height: 6px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--bg-quinary);
   overflow: hidden;
 }
@@ -696,7 +696,7 @@
 .acctpop__meter-fill {
   display: block;
   height: 100%;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--accent-deep);
   transition: width 0.4s var(--ease);
 }/* ── Barrita de plegado del sidebar ────────────────────────────────────── */

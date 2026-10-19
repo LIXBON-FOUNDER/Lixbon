@@ -1,8 +1,11 @@
-// SettingsPage.jsx — Ajustes a pantalla completa: navegación por grupos con
-// icono e indicador deslizante a la izquierda, y la sección elegida centrada.
+// SettingsPage.jsx — Ajustes en una ventana centrada sobre el modo activo:
+// navegación por grupos con icono e indicador deslizante a la izquierda y la
+// sección elegida a la derecha. Esc o un clic fuera la cierran, y el modo de
+// debajo sigue donde estaba. Con la ventana estrecha la navegación pasa a un
+// selector encima de la sección.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useWorkbenchStore } from '../store/workbenchStore';
-import { Panel } from '../layout/Panel';
+import { Select } from '../components/Select';
 import { ProfilePage } from '../sections/Settings/pages/ProfilePage';
 import { UsagePage } from '../sections/Settings/pages/UsagePage';
 import { AgentPage } from '../sections/Settings/pages/AgentPage';
@@ -16,7 +19,7 @@ import { MascotaPage } from '../sections/Settings/pages/MascotaPage';
 import { Keybindings } from '../sections/Settings/Keybindings';
 import { getAppVersion } from '../lib/tauri';
 import {
-  IconChevronLeft, IconSearch, IconUser, IconChart, IconShield, IconNodes, IconPuzzle,
+  IconX, IconSearch, IconUser, IconChart, IconShield, IconNodes, IconPuzzle,
   IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota, IconGitBranch, IconBook,
 } from '../components/Icons';
 
@@ -52,7 +55,7 @@ export function SettingsPage() {
 
   useEffect(() => { getAppVersion().then(setVersion).catch(() => {}); }, []);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm__overlay, .modal__overlay')) closePage(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.confirm__overlay, .modal__overlay:not(.sm__overlay), .pop, .select__list')) closePage(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [closePage]);
@@ -75,47 +78,65 @@ export function SettingsPage() {
   }, [current.id, groups]);
 
   return (
-    <div className="wb wb--settings">
-      <Panel id="settingsnav" className="settingsnav" style={{ width: 248 }}>
-        <button className="lk settingsnav__back" onClick={closePage}><IconChevronLeft size={14} /> Volver <kbd>Esc</kbd></button>
-        <div className="field field--strong settingsnav__search">
-          <IconSearch size={13} />
-          <input value={query} placeholder="Buscar ajustes" onChange={(e) => setQuery(e.target.value)} />
-        </div>
-        <nav className="settingsnav__list scroll">
-          {thumb && <span className="settingsnav__thumb" style={{ transform: `translateY(${thumb.top}px)`, height: thumb.height }} />}
-          {groups.length === 0 && <span className="settingsnav__empty">Nada coincide con «{query}»</span>}
-          {groups.map((g) => (
-            <div key={g.label} className="settingsnav__group">
-              <span className="settingsnav__grouplabel">{g.label}</span>
-              {g.items.map((s) => {
-                const Icon = s.icon;
-                return (
-                  <button
-                    key={s.id}
-                    ref={(el) => { itemRefs.current[s.id] = el; }}
-                    className={`settingsnav__item ${s.id === current.id ? 'is-active' : ''}`}
-                    onClick={() => setSettingsSection(s.id)}
-                  >
-                    <Icon size={15} />
-                    <span>{s.label}</span>
-                  </button>
-                );
-              })}
+    <div className="modal__overlay sm__overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) closePage(); }}>
+      <div className="sm" role="dialog" aria-modal="true" aria-label="Ajustes">
+        <header className="sm__head">
+          <h2 className="sm__title">Ajustes</h2>
+          <div className="sm__fill" />
+          <div className="field sm__search">
+            <IconSearch size={15} />
+            <input value={query} placeholder="Buscar ajustes" aria-label="Buscar ajustes" onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <button className="ic" onClick={closePage} title="Cerrar (Esc)" aria-label="Cerrar"><IconX size={17} /></button>
+        </header>
+        <div className="sm__main">
+          <nav className="sm__nav" aria-label="Secciones de ajustes">
+            <div className="sm__list scroll">
+              {thumb && <span className="sm__thumb" style={{ transform: `translateY(${thumb.top}px)`, height: thumb.height }} />}
+              {groups.length === 0 && <span className="sm__empty">Nada coincide con «{query}»</span>}
+              {groups.map((g) => (
+                <div key={g.label} className="sm__group">
+                  <span className="sm__grouplabel">{g.label}</span>
+                  {g.items.map((s) => {
+                    const Icon = s.icon;
+                    return (
+                      <button
+                        key={s.id}
+                        ref={(el) => { itemRefs.current[s.id] = el; }}
+                        className={`sm__item ${s.id === current.id ? 'is-active' : ''}`}
+                        onClick={() => setSettingsSection(s.id)}
+                        aria-current={s.id === current.id ? 'page' : undefined}
+                      >
+                        <Icon size={16} />
+                        <span>{s.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
-          ))}
-        </nav>
-        <button className="lk settingsnav__link" onClick={() => { setMode('editor'); showSide('extensions'); }}>
-          <IconExtensions size={13} /> Extensiones
-        </button>
-        {version && <span className="mono settingsnav__ver">lixbon desktop {version}</span>}
-      </Panel>
-      <div className="gutter gutter--x" style={{ cursor: 'default' }} />
-      <Panel id="settings" className="wb__grow settingsbody scroll">
-        <div className="settingsbody__inner" key={current.id}>
-          <Page />
+            <button className="sm__link" onClick={() => { closePage(); setMode('editor'); showSide('extensions'); }}>
+              <IconExtensions size={15} /> Extensiones
+            </button>
+            {version && <span className="mono sm__ver">lixbon desktop {version}</span>}
+          </nav>
+          <div className="sm__page">
+            <div className="sm__pick">
+              <Select
+                className="select--fill"
+                value={current.id}
+                onChange={setSettingsSection}
+                options={SECTIONS.map((x) => ({ value: x.id, label: x.label }))}
+              />
+            </div>
+            <div className="sm__body scroll">
+              <div className="settingsbody__inner" key={current.id}>
+                <Page />
+              </div>
+            </div>
+          </div>
         </div>
-      </Panel>
+      </div>
     </div>
   );
 }

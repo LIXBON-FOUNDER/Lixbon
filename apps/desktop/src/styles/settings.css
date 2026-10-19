@@ -1,68 +1,7 @@
-/* settings.css — Ajustes a pantalla completa, perfil y uso. */
+/* settings.css — páginas de Ajustes, perfil y uso. */
 
-.wb--settings { padding-bottom: var(--gap); }
+/* La navegación y el marco de Ajustes viven en ide.css (.sm). */
 
-.settingsnav { padding: 14px 10px 12px; gap: 12px; }
-.settingsnav__back { align-self: flex-start; gap: 6px; padding: 4px 6px; font-size: 12.5px; }
-.settingsnav__back kbd {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-35);
-  margin-left: 4px;
-}
-.settingsnav > * { flex-shrink: 0; }
-.settingsnav__search { flex: 0 0 32px; margin: 0 2px; }
-.settingsnav__search svg { color: var(--ink-50); flex-shrink: 0; }
-
-.settingsnav > .settingsnav__list { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
-.settingsnav__thumb {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  border-radius: var(--radius);
-  background: var(--surface-4);
-  transition: transform 0.38s var(--spring), height 0.2s ease;
-  animation: lx-fade 0.2s ease both;
-}
-.settingsnav__group { display: flex; flex-direction: column; }
-.settingsnav__grouplabel {
-  padding: 0 12px 4px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-35);
-}
-.settingsnav__empty { padding: 4px 12px; font-size: 12px; color: var(--ink-50); }
-.settingsnav__item {
-  position: relative;
-  height: 32px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  border: 0;
-  background: none;
-  color: var(--ink-50);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  transition: color 0.2s ease;
-}
-.settingsnav__item svg { flex-shrink: 0; color: var(--ink-35); transition: color 0.2s ease; }
-.settingsnav__item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.settingsnav__item:hover { color: var(--ink-body); }
-.settingsnav__item:hover svg { color: var(--ink-50); }
-.settingsnav__item:active { transform: scale(0.985); }
-.settingsnav__item.is-active { color: var(--ink); font-weight: 600; }
-.settingsnav__item.is-active svg { color: var(--accent); }
-.settingsnav__link { align-self: flex-start; gap: 6px; padding: 4px 12px; font-size: 12.5px; }
-.settingsnav__ver { padding: 0 12px; font-size: 10.5px; color: var(--ink-35); }
-
-.settingsbody { overflow-y: auto; }
 .settingsbody__inner {
   width: 100%;
   max-width: 760px;

@@ -4,10 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useChatStore, newSession, useSessionsStore } from '../store/chatStore';
-import { useClaudeUsage } from '../store/claudeSession';
-import { liveWindow } from '../lib/claudeUsage';
 import { Popover } from '../components/Popover';
-import { LogoMark, ClaudeMark } from '../components/Logo';
+import { LogoMark } from '../components/Logo';
 import { useProviders } from '../orch/providers/RolesSettings';
 import { listProviders } from '../orch/providers/providersContract';
 import { NewAgentItems } from '../orch/providers/NewAgentItems';
@@ -18,57 +16,15 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
+import { RightDock } from '../layout/RightDock';
 import { ChatPanel } from '../chat/ChatPanel';
 import { HistoryList } from '../chat/HistoryList';
 import { ChangesPanel } from '../chat/ChangesPanel';
 import { runCommand } from '../lib/commands';
-import { useUsageStore, resetLabel } from '../store/usageStore';
-import { ProgressRing } from '../components/Ring';
 import { IconPlus, IconDevice, IconDownload, IconChevronDown } from '../components/Icons';
 
-const GAP = 6;
+const GAP = 8;
 const baseName = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
-
-const resetOf = (w) => {
-  if (!w) return '';
-  if (w.expired) return 'ventana nueva';
-  if (w.resetAt) return resetLabel(new Date(w.resetAt * 1000).toISOString());
-  return w.resetText ? `se reinicia ${w.resetText}` : '';
-};
-const pctOf = (w) => Math.min(100, w?.percent ?? 0);
-
-function useMinuteTick() {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-}
-
-function ClaudeQuota() {
-  useMinuteTick();
-  const usage = useClaudeUsage();
-  const session = liveWindow(usage.session);
-  const week = liveWindow(usage.week);
-  if (!session && !week) {
-    return (
-      <div className="quota quota--claude">
-        <ClaudeMark size={18} />
-        <span className="quota__text"><span>Uso de Claude</span><span className="quota__sub">aparece tras el primer mensaje</span></span>
-      </div>
-    );
-  }
-  const limited = (session?.percent ?? 0) >= 100;
-  return (
-    <div className="quota quota--claude" title="Cupo de tu plan de Claude, según Claude Code. Escribe /usage para actualizarlo.">
-      <ProgressRing value={pctOf(session)} size={22} stroke={2.6} />
-      <span className="quota__text">
-        <span>Claude · sesión {pctOf(session)}% · semana {pctOf(week)}%</span>
-        <span className="quota__sub">{limited ? `Límite alcanzado · ${resetOf(session)}` : resetOf(session)}</span>
-      </span>
-    </div>
-  );
-}
 
 function NewMenu({ providers }) {
   const [open, setOpen] = useState(false);
@@ -87,24 +43,6 @@ function NewMenu({ providers }) {
         <NewAgentItems providers={providers} onPick={pick} onOpenTerminal={openCodex} />
       </Popover>
     </>
-  );
-}
-
-function SessionQuota() {
-  const engine = useChatStore((s) => s.engine);
-  const session = useUsageStore((s) => s.buckets?.session);
-  const openModal = useAppStore((s) => s.openModal);
-  if (engine === 'claude') return <ClaudeQuota />;
-  if (!session || session.unlimited) return null;
-  const pct = Math.round(session.percent || 0);
-  return (
-    <button className="quota" onClick={() => openModal('settings', 'usage')}>
-      <ProgressRing value={pct} size={22} stroke={2.6} />
-      <span className="quota__text">
-        <span>Sesión {pct}%</span>
-        <span className="quota__sub">{resetLabel(session.reset_at)}</span>
-      </span>
-    </button>
   );
 }
 
@@ -139,7 +77,6 @@ export function AgentMode() {
           </div>
           <CodexTabList />
           <HistoryList />
-          <SessionQuota />
         </Panel>
         <Gutter sizeKey="sessions" />
       </Collapse>
@@ -164,12 +101,9 @@ export function AgentMode() {
         </div>
       </Panel>
 
-      <Collapse open={panels.right} size={sizes.changes + GAP} from="end">
-        <Gutter sizeKey="changes" invert />
-        <Panel id="changes">
-          <ChangesPanel />
-        </Panel>
-      </Collapse>
+      <RightDock open={panels.right} id="changes" sizeKey="changes">
+        <ChangesPanel />
+      </RightDock>
     </div>
   );
 }
