@@ -77,16 +77,29 @@ impl Core {
     pub(super) fn close_run(&self, ctx: &MutationContext, run: &str, force: bool) -> Result<Value, String> {
         // Primero se persiste el cierre del run; después los efectos (matar terminales,
         // liberar worktrees), que registran cada uno su resultado.
-        let (stopped, ids) = self.mutate_as(ctx, |st| {
-            let (stopped, msgs) = st.close_run(run, force)?;
-            st.notify(&msgs);
-            let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
-            Ok((stopped, ids))
-        })?;
+        let (stopped, ids, pending_resolution_errors) = {
+            // Serializa el cierre con spawn/approve/reject/sweep: el hecho de cierre y la
+            // resolución de todos sus pending quedan antes de admitir otra transición.
+            self.spawn_hook(super::spawn::SpawnStep::BeforeRunCloseGate, run)?;
+            let _gate = self.gate();
+            self.spawn_hook(super::spawn::SpawnStep::AfterRunCloseGate, run)?;
+            let (stopped, ids) = self.mutate_as(ctx, |st| {
+                let (stopped, msgs) = st.close_run(run, force)?;
+                st.notify(&msgs);
+                let ids: Vec<String> = st.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+                Ok((stopped, ids))
+            })?;
+            let pending_resolution_errors = self.resolve_closed_run_pending_locked(run);
+            (stopped, ids, pending_resolution_errors)
+        };
         // Un terminal que no se pudo matar NO cuenta como cerrado: sigue custodiado y `free_worktrees` conserva su worktree.
         let terminals: Vec<&String> = ids.iter().filter(|id| matches!(self.kill_term(id), Ok(true))).collect();
         let (released, kept) = self.free_worktrees(ctx, run, force);
-        Ok(json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept }))
+        let mut result = json!({ "run": run, "stopped": stopped, "terminals": terminals, "released": released, "kept": kept });
+        if !pending_resolution_errors.is_empty() {
+            result["pending_resolution_errors"] = json!(pending_resolution_errors);
+        }
+        Ok(result)
     }
 
     /// Libera los worktrees del run cuyas ramas ya están en la del coordinador; las

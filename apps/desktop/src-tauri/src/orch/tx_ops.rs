@@ -501,11 +501,13 @@ fn check_spawn_actor(outcome: ev::SpawnOutcome, ctx: &MutationContext) -> Result
     }
 }
 
-/// `spawn.requested` listo para `Core::record_facts`: la solicitud la hace SIEMPRE un agente (el padre) por
-/// `lxo` (`Agent(parent_task) / Lxo`). Un agente sin identidad no puede solicitar un lanzamiento.
+/// `spawn.requested` listo para `Core::record_facts`: lo puede solicitar el Agent autenticado que es padre
+/// (`Agent(parent_task) / Lxo`) o la Person coordinadora desde el CLI (`Person / Lxo`).
 pub(super) fn spawn_requested_fact(ctx: &MutationContext, p: &PendingSpawn) -> Result<EventDraft, String> {
-    if ctx.actor != Actor::Agent(p.parent_task.clone()) || ctx.channel != Channel::Lxo {
-        return Err(format!("spawn.requested lo solicita el agente {} por lxo (llegó {:?} por {:?})", p.parent_task, ctx.actor, ctx.channel));
+    let parent_agent = ctx.actor == Actor::Agent(p.parent_task.clone());
+    let cli_person = ctx.is_person();
+    if ctx.channel != Channel::Lxo || !(parent_agent || cli_person) {
+        return Err(format!("spawn.requested requiere el Agent padre o Person coordinadora por lxo (llegó {:?} por {:?})", ctx.actor, ctx.channel));
     }
     let facts = ev::SpawnRequestFacts {
         pending_id: &p.pending_id,
@@ -521,7 +523,9 @@ pub(super) fn spawn_requested_fact(ctx: &MutationContext, p: &PendingSpawn) -> R
         policy_status: p.policy.status,
         expires_at: p.expires_at,
     };
-    ev::spawn_requested(&facts).map_err(|e| e.to_string())
+    ev::spawn_requested(&facts)
+        .map(|event| event.by(ctx.actor.clone(), ctx.channel))
+        .map_err(|e| e.to_string())
 }
 
 /// `spawn.resolved` de una solicitud cuya tarea padre YA no existe (el run desapareció por otra vía): no hay

@@ -1,8 +1,9 @@
 # Event Log del Core (slice E)
 
 Estado: **E1a cerrada; E1b en curso**. E1b instrumenta mutadores de estado, decisiones, efectos, Projects y
-Pending Spawn, y expone la **API de lectura versionada** (LXO-83, ver «API de lectura»). `lxo events` (LXO-84) sigue
-pendiente; SSE/streaming es **E2**. F1 (clientes), G (Attention) y la vista Activity siguen fuera de esta etapa.
+Pending Spawn, y expone la **API de lectura versionada** (LXO-83, ver «API de lectura»). `lxo events` (LXO-84)
+consume esta API autenticada por el contrato F1; SSE/streaming es **E2**. G (Attention) y la vista Activity siguen
+fuera de esta etapa.
 
 ## Qué es
 Un *evento* es un **hecho estructurado y durable**: qué ocurrió (`kind`), quién lo provocó (actor), sobre
@@ -79,11 +80,14 @@ Contrato `v = 1`, **solo lectura**. Dos puertas al mismo documento, ambas del Co
 
 | Puerta | Quién | Cómo |
 |---|---|---|
-| RPC `events` (`orch_call` de la interfaz; `POST /rpc` con `{"cmd":"events","args":{…},"caller":"<tarea>"}`) | persona (interfaz) · agente con identidad | `args` = los parámetros de abajo |
-| `GET /events?<parámetros>` en el servidor local (127.0.0.1, `Authorization: Bearer <token de orch.json>`) | agente con identidad: cabecera `X-Lixbon-Caller: <tarea>` | query string |
+| RPC `events` (`orch_call` autenticado de la interfaz; `POST /rpc` con bearer registrado y `{"cmd":"events","args":{…}}`) | persona (interfaz) · Agent con credencial ligada a su Task | `args` = los parámetros de abajo |
+| `GET /events?<parámetros>` en el servidor local (127.0.0.1, bearer Person CLI del almacén seguro o bearer Agent emitido para la Task) | Person CLI · Agent con credencial ligada a su Task | query string |
 
-Cualquier otro método en `/events` es `405`; sin token válido, `401` (antes de revelar nada más). No hay comando
-RPC ni ruta que escriba, borre o reescriba eventos.
+Cualquier otro método en `/events` es `405`; sin bearer válido, `401` (antes de revelar nada más). El actor y el
+scope derivan de la credencial; `orch.json` contiene metadatos de conexión y no publica secretos. `lxo events`
+negocia versión y capabilities con `/handshake`; el secreto Person CLI proviene del almacén seguro del SO y el
+secreto Agent de `LXO_CLIENT_TOKEN`, ligado a `LXO_TASK_ID`. No se requiere `X-Lixbon-Caller`. No hay comando RPC
+ni ruta que escriba, borre o reescriba eventos.
 
 ### Parámetros
 Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un **error** (`invalid_filter`), nunca se ignora. La lista es cerrada: ningún otro nombre se admite, tampoco los que añaden otros comandos de `lxo` (por ejemplo `session`).
@@ -163,21 +167,17 @@ tienen índice y el esquema no cambia en este corte; quien necesite correlaciona
 | `internal` | 500 | fallo de lectura o payload ilegible (el detalle no sale del Core) |
 
 ### Autorización
-* **Persona (interfaz)**: lee todo el diario.
-* **Agente con identidad** (`Caller::Agent(Some(tarea))`): el Core fuerza `run = <su run>`; pedir otro run es
-  `forbidden`, pedir el suyo es válido. Ve los eventos con `run_id` de su run; **no** ve los de proyecto sin run
-  (`project.*`) ni los de otros runs. Con el orquestador desactivado no lee.
-* **Sin identidad** (`Caller::Agent(None)`, token pero sin tarea): `forbidden`. El token de `orch.json` identifica
-  «una terminal del usuario», no «el usuario»; abrir una lectura global para quien no es una tarea es una decisión
-  de autoridad que queda para el cliente CLI/F1 (identidad por credencial), no para este corte.
-* **La identidad del agente es declarada, no autenticada.** `X-Lixbon-Caller` (y el campo `caller` de
-  `POST /rpc`) lo escribe el cliente y se acepta si la tarea existe; el `Bearer` es **un único token del proceso**
-  publicado en `orch.json` (legible por el usuario, igual que el resto de procesos del usuario), sin credencial
-  por tarea. Una tarea que lea `orch.json` puede declarar el id de otra y leer su run; lo mismo ocurre ya con
-  los demás comandos de `lxo` que identifican por `caller`. El alcance por run acota lecturas por error o por rol,
-  **no es aislamiento frente a un agente hostil** y no debe presentarse como tal. Cerrarlo exige una credencial
-  por tarea emitida al lanzarla (variable de entorno privada) que el servidor compare con el `caller`; eso cambia
-  `orch.json`, `lxo` y el lanzamiento, y queda fuera de este corte. Un id inexistente sigue siendo `forbidden`.
+* **Person (interfaz)** y **Person CLI**: leen todo el diario. La interfaz usa su identidad Desktop; `lxo events`
+  obtiene su identidad Person CLI del almacén seguro del SO. Esta ruta concede Event Log de solo lectura.
+* **Agent con credencial de tarea** (`Agent(task_id)`): la identidad proviene del bearer registrado, no de campos
+  del request. El Core fuerza `run = <su run>`; pedir otro run es `forbidden`, pedir el suyo es válido. Ve los
+  eventos de su run; **no** ve los de proyecto sin run (`project.*`) ni los de otros runs. Con el orquestador
+  desactivado no lee.
+* **Sin bearer válido**, con token inválido, vencido o revocado: se rechaza antes de leer. `X-Lixbon-Caller` no
+  define ni amplía el actor; los claims RPC que contradicen al principal autenticado se rechazan. Cada proceso
+  Agent recibe `LXO_CLIENT_TOKEN` ligado a su Task y Core lo revoca al terminar; si SQLite falla durante la
+  revocación, la identidad queda pendiente en memoria, las solicitudes fallan cerradas y Core reintenta antes de
+  autenticar. El siguiente arranque también revoca las credenciales Agent anteriores.
 * Leer no escribe: no cambia `rev`, no añade eventos, no toca `state.json`.
 
 ### Seguir (follow) y sondeo
@@ -190,7 +190,8 @@ siendo la verdad, el stream solo avisaría). Hasta entonces el contrato de **son
 1. Primera lectura con `cursor=0` (o `cursor=<head_seq>` de una lectura previa para «solo lo nuevo»).
 2. Repetir con `cursor = next_cursor`. Si `has_more` es `true`, repetir **sin esperar**; si es `false`,
    dormir entre 0,5 y 2 s (con retroceso si la respuesta viene vacía repetidamente).
-3. Guardar `next_cursor` de forma durable en el cliente; reanudar con él tras cualquier reinicio.
+3. Guardar `next_cursor` de forma durable en el cliente; reanudar con él al reiniciar el cliente. Si reinicia
+   Core, el cursor sigue siendo válido, pero un cliente Agent debe obtener una credencial nueva antes de continuar.
 4. Ante `cursor_ahead`, descartar el cursor y volver a empezar (la base ya no es la misma).
 
 Una extensión futura **aditiva** (`wait_ms` acotado para long-poll, o SSE) no cambia estas reglas.
@@ -200,7 +201,7 @@ Estable en `v = 1`; cualquier cambio incompatible sube `v` del envoltorio:
 * Ruta `GET /events` y comando RPC `events` con los parámetros y errores de arriba.
 * Los 14 campos de cada evento y su significado; `seq` entero positivo estrictamente creciente.
 * Semántica de `cursor` (exclusivo), `next_cursor`, `has_more`, `head_seq`, `limit` (100/500).
-* Códigos de error y su estado HTTP; alcance por run de los agentes (sobre identidad declarada, ver Autorización).
+* Códigos de error y su estado HTTP; alcance por run de Agent autenticado (ver Autorización).
 * Lista cerrada de parámetros: `session` no es un parámetro válido de `events`, y un cliente `lxo events` no debe reenviarlo ni reenviar ningún otro nombre fuera de la lista.
 
 Abierto (no congelado): sentido inverso, filtros por tiempo/actor/correlación, lectura global sin tarea,
@@ -208,17 +209,16 @@ long-poll/SSE. El contenido de cada `kind`/`payload` lo define su propio `v`.
 
 ### Ejemplos
 ```sh
-# datos de conexión: ~/.lixbon/orch.json (port, token)
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
-  "http://127.0.0.1:$PORT/events?limit=2"
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
-  "http://127.0.0.1:$PORT/events?cursor=2&kind_prefix=task.&limit=100"
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Lixbon-Caller: $LXO_TASK_ID" \
-  "http://127.0.0.1:$PORT/events?entity_kind=task&entity_id=t3"
+# Person CLI: lxo resuelve la credencial desde el almacén seguro; no se lee ningún token de orch.json.
+lxo events --limit 2
+lxo events --after 2 --kind-prefix 'task.' --limit 100 --json
+lxo events --task t3 --json
+lxo events --after 42 --follow --json
 
-# lo mismo por RPC
-curl -s -H "Authorization: Bearer $TOKEN" \
-  -d '{"cmd":"events","args":{"cursor":2,"class":"decision"},"caller":"t3"}' "http://127.0.0.1:$PORT/rpc"
+# Un Agent lanzado por Core ya recibe LXO_CLIENT_TOKEN ligado a LXO_TASK_ID.
+# Para una integración de bajo nivel, Authorization usa ese bearer; no se envía X-Lixbon-Caller.
+curl -s -H "Authorization: Bearer $LXO_CLIENT_TOKEN" \
+  "http://127.0.0.1:$PORT/events?limit=2"
 ```
 Error: `GET /events?cursor=abc` → `400 {"ok":false,"code":"invalid_cursor","error":"`cursor` debe ser un entero decimal >= 0"}`.
 

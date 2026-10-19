@@ -11,12 +11,12 @@
 //!   [`SecretValue`] (no se imprime en `Debug`, se borra de memoria al soltarlo).
 //! * [`SecretError`]: errores tipados que jamás contienen el valor.
 //!
-//! Estado: infraestructura sin consumidores. Los comandos `secret_*` de
-//! `lib.rs` (solo Windows, servicio `com.usuario.app-lixbon`) siguen igual y
-//! `config.json` no cambia; migrar las credenciales actuales es el slice J2.
-//! Contrato y decisiones: `docs/secure-store/README.md`.
+//! Core y el sidecar `lxo` comparten las credenciales CLI Person mediante
+//! servicio `lixbon` y cuenta `client/cli/<installation_id>`. Los comandos
+//! `secret_*` de `lib.rs` (solo Windows, servicio `com.usuario.app-lixbon`)
+//! siguen igual; migrar esas claves API es el slice J2. Contrato y decisiones:
+//! `docs/secure-store/README.md`.
 
-// Aún no hay consumidores (J2 los añade).
 #![allow(dead_code)]
 
 mod error;

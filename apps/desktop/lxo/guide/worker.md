@@ -77,6 +77,14 @@ reconoce y tu terminal se queda esperando una aprobación que nadie va a dar.
    cierre de la issue lo hace tu coordinador; tú solo comentas si tu encargo lo pide, con
    `lxo issue comentar LXB-12 --texto "…"` (sale firmado como informe de tu rol).
 
+## Consultar el Event Log
+
+`lxo events [--after SEQ] [--limit N] [filtros]` lee una página autenticada
+del Core; el permiso de Agent limita el resultado al run de la tarea. `--after` es el `seq` decimal
+exclusivo. Usa `--json` para conservar el documento y cursor exactos, o `--follow` para sondear y
+reanudar desde el último cursor confirmado. El helper no abre SQLite ni lee credenciales desde
+`orch.json`.
+
 ## Si tu rol es adversario
 
 Tu meta no es demostrar que algo funciona sino encontrar cómo se rompe. Eres de solo lectura:

@@ -9,6 +9,28 @@ use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
 
 impl Core {
+    /// Resuelve la raíz que usa un coordinador CLI de Person como selector de contexto. La raíz no
+    /// concede identidad ni permisos: la autorización sigue derivándose de la credencial Person y
+    /// los Agent siempre usan la tarea de su propia credencial.
+    pub(super) fn coordinator_task(&self, channel: Channel, caller: &Caller, args: &Value) -> Result<String, String> {
+        match caller {
+            Caller::Agent(_) => Self::me(caller),
+            Caller::User if channel == Channel::Lxo => {
+                let id = s(args, "root_task");
+                if id.is_empty() {
+                    return Err("Falta root_task para el run del coordinador CLI; crea o selecciona un run con `lxo run create`".into());
+                }
+                let st = self.lock();
+                let task = st.task(&id)?;
+                if task.parent.is_some() || st.runs.get(&task.run).is_none_or(|run| run.root != id) {
+                    return Err(format!("La tarea {id} no es la raíz de un run"));
+                }
+                Ok(id)
+            }
+            _ => Self::me(caller),
+        }
+    }
+
     /// SOLO pruebas: atajo con el canal de cada superficie real (Tauri -> `Ui`, `lxo` -> `Lxo`). La
     /// producción llama a `rpc_via` con el canal que conoce; aquí el mapa es explícito y de prueba.
     #[cfg(test)]
@@ -42,19 +64,7 @@ impl Core {
     ) -> Result<Value, String> {
         let context = MutationContext::authenticated(client, claims, channel)
             .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
-        let action = if review::closed_to_agents(cmd).is_some() {
-            ClientAction::HumanDecision
-        } else if matches!(cmd, "attention_list" | "attention_detail" | "projects_overview") {
-            ClientAction::Read
-        } else if cmd == "events" {
-            ClientAction::EventLogRead
-        } else if matches!(cmd, "project_add" | "project_archive" | "project_locate" | "projects_import_recents" | "remove_run") {
-            ClientAction::UiCommand
-        } else if matches!(cmd, "reply" | "send" | "stop" | "release" | "continue" | "diff") {
-            ClientAction::AgentOrDesktopCommand
-        } else {
-            ClientAction::AgentCommand
-        };
+        let action = rpc_action(cmd);
         client.authorize(action).map_err(|error| format!("Acción no permitida para esta identidad: {error:?}"))?;
         let caller = match client.identity().principal() {
             ClientPrincipal::Person(_) => Caller::User,
@@ -94,6 +104,12 @@ impl Core {
                 return Err("sesion-obsoleta".into());
             }
         }
+        if matches!(&caller, Caller::User) && channel == Channel::Lxo && b(args, "session") && cmd != "run_create" {
+            let root = s(args, "root_task");
+            if root.is_empty() || !self.lock().tasks.contains_key(&root) {
+                return Err("sesion-obsoleta".into());
+            }
+        }
         if let Caller::Agent(Some(id)) = &caller {
             self.touch_activity(id);
         }
@@ -104,9 +120,15 @@ impl Core {
         }
         match cmd {
             "status" => {
+                let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
+                    Some(self.coordinator_task(channel, &caller, args)?)
+                } else {
+                    None
+                };
                 let st = self.lock();
                 let task = match &caller {
                     Caller::Agent(Some(id)) => Some(st.task(id)?.clone()),
+                    Caller::User if person_root.is_some() => Some(st.task(person_root.as_deref().unwrap())?.clone()),
                     _ => None,
                 };
                 let objective = task.as_ref().and_then(|t| st.runs.get(&t.run)).map(|r| r.objective.clone());
@@ -146,6 +168,13 @@ impl Core {
                         return Err(format!("Ya eres la tarea {id}: crea hijos directamente con lxo spawn"));
                     }
                     self.lock().session_replaceable(id)?;
+                }
+                if matches!(&caller, Caller::User) && channel == Channel::Lxo && b(args, "session") {
+                    let root = s(args, "root_task");
+                    if !root.is_empty() && self.lock().tasks.contains_key(&root) {
+                        self.coordinator_task(channel, &caller, args)?;
+                        self.lock().session_replaceable(&root)?;
+                    }
                 }
                 let objective = s(args, "objective");
                 if objective.is_empty() {
@@ -199,7 +228,7 @@ impl Core {
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
             "spawn" => self.spawn_request(ctx_of()?, &caller, args),
-            "spawn_status" => self.spawn_status(&caller, args),
+            "spawn_status" => self.spawn_status(channel, &caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
             "issue" => {
@@ -293,7 +322,7 @@ impl Core {
                 Ok(json!({ "message": id }))
             }
             "wait" => {
-                let me = Self::me(&caller)?;
+                let me = self.coordinator_task(channel, &caller, args)?;
                 let mut k = kinds(args);
                 if k.is_empty() {
                     k = vec![Kind::Done, Kind::Question, Kind::Exited];
@@ -309,7 +338,7 @@ impl Core {
                 Ok(json!({ "messages": found, "timeout": found.is_empty(), "open_children": pending, "hint": hint }))
             }
             "check" | "inbox" => {
-                let me = Self::me(&caller)?;
+                let me = self.coordinator_task(channel, &caller, args)?;
                 let found = if cmd == "check" {
                     self.mutate(|st| {
                         let found = st.unread(&me, &kinds(args), None);
@@ -323,16 +352,21 @@ impl Core {
                 Ok(json!({ "messages": found }))
             }
             "list" => {
-                let st = self.lock();
                 let run = match &caller {
-                    Caller::Agent(Some(id)) => Some(st.task(id)?.run.clone()),
+                    Caller::Agent(Some(id)) => Some(self.lock().task(id)?.run.clone()),
+                    Caller::User if channel == Channel::Lxo && !s(args, "root_task").is_empty() => {
+                        let id = self.coordinator_task(channel, &caller, args)?;
+                        Some(self.lock().task(&id)?.run.clone())
+                    }
                     _ => Some(s(args, "run")).filter(|r| !r.is_empty()),
                 };
+                let st = self.lock();
                 let tasks: Vec<&Task> = st.tree().into_iter().filter(|t| run.as_ref().is_none_or(|r| &t.run == r)).collect();
                 Ok(json!({ "tasks": tasks }))
             }
             "show" => {
-                let id = Some(s(args, "task")).filter(|t| !t.is_empty()).map(Ok).unwrap_or_else(|| Self::me(&caller))?;
+                let id = Some(s(args, "task")).filter(|t| !t.is_empty()).map(Ok)
+                    .unwrap_or_else(|| self.coordinator_task(channel, &caller, args))?;
                 let st = self.lock();
                 let task = st.task(&id)?.clone();
                 let messages: Vec<_> = st.messages.iter().filter(|m| m.from == id || m.to == id).cloned().collect();
@@ -364,14 +398,36 @@ impl Core {
             }
             "release" => self.release(&ctx_of()?, &caller, &s(args, "task"), b(args, "force")),
             "run_close" => {
-                let me = Self::me(&caller)?;
                 let run = {
                     let st = self.lock();
-                    let t = st.task(&me)?;
-                    if t.parent.is_some() {
-                        return Err("Solo el coordinador del run puede cerrarlo".into());
+                    match &caller {
+                        Caller::User => {
+                            let root_task = s(args, "root_task");
+                            if root_task.is_empty() {
+                                return Err("Falta root_task: selecciona el run que quieres cerrar".into());
+                            }
+                            let task = st.task(&root_task)?;
+                            if task.parent.is_some() {
+                                return Err("Solo se puede cerrar el run desde su tarea raíz".into());
+                            }
+                            task.run.clone()
+                        }
+                        Caller::Agent(Some(id)) => {
+                            if let Some(selector) = args.get("root_task") {
+                                let selected = selector.as_str().filter(|s| !s.is_empty())
+                                    .ok_or_else(|| "root_task debe ser el identificador de la tarea raíz autenticada".to_string())?;
+                                if selected != id {
+                                    return Err("Un Agent solo puede cerrar el run de su tarea autenticada".into());
+                                }
+                            }
+                            let task = st.task(id)?;
+                            if task.parent.is_some() {
+                                return Err("Solo el coordinador del run puede cerrarlo".into());
+                            }
+                            task.run.clone()
+                        }
+                        Caller::Agent(None) => return Err(Self::me(&caller).unwrap_err()),
                     }
-                    t.run.clone()
                 };
                 self.close_run(&ctx_of()?, &run, b(args, "force"))
             }
@@ -390,11 +446,155 @@ impl Core {
     }
 }
 
+/// Cada comando expuesto por el sidecar debe tener una clasificación explícita. La
+/// política por principal/superficie está centralizada en `AuthenticatedClient::authorize`.
+fn rpc_action(cmd: &str) -> ClientAction {
+    match cmd {
+        "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail"
+        | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
+        "events" => ClientAction::EventLogRead,
+        "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
+        | "remove_run" => ClientAction::UiCommand,
+        "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
+        | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
+            ClientAction::AgentCommand
+        }
+        "stop" | "release" | "diff" => ClientAction::AgentOrDesktopCommand,
+        "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
+        _ => ClientAction::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::orch::boot_tests;
-    use crate::store::{ClientCredential, ClientRegistration, ClientSurface, DeviceIdentity};
+    use crate::store::{ClientCredential, ClientRegistration, ClientSurface, DeviceIdentity, Store};
+
+    fn cli_commands() -> std::collections::BTreeSet<&'static str> {
+        const CLI_MAIN: &str = include_str!("../../../lxo/src/main.rs");
+        let mut commands = std::collections::BTreeSet::new();
+        let mut remaining = CLI_MAIN;
+        while let Some((_, after_marker)) = remaining.split_once("call(\"") {
+            let (command, after_command) = after_marker.split_once('\"').expect("literal call command closes");
+            commands.insert(command);
+            remaining = after_command;
+        }
+        commands
+    }
+
+    fn expected_cli_action(cmd: &str) -> ClientAction {
+        match cmd {
+            "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail"
+            | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
+            "events" => ClientAction::EventLogRead,
+            "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
+            | "remove_run" => ClientAction::UiCommand,
+            "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
+            | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
+                ClientAction::AgentCommand
+            }
+            "stop" | "release" | "diff" => ClientAction::AgentOrDesktopCommand,
+            "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
+            _ => ClientAction::Unknown,
+        }
+    }
+
+    fn test_client(surface: ClientSurface, principal: ClientPrincipal) -> (Store, AuthenticatedClient, std::path::PathBuf) {
+        let surface_name = match surface {
+            ClientSurface::Desktop => "desktop",
+            ClientSurface::Cli => "cli",
+            _ => panic!("el inventario compara Desktop y CLI"),
+        };
+        let dir = std::env::temp_dir().join(format!(
+            "lixbon-rpc-matrix-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = Store::open(&dir, "test").unwrap();
+        let registration = ClientRegistration::new(
+            surface,
+            DeviceIdentity::new(format!("install-matrix-{surface_name}"), None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(principal, format!("rpc-matrix-secret-{surface_name}-32-bytes-minimum")).unwrap();
+        let client = store.register_client(&registration, &credential, 100).unwrap();
+        (store, client, dir)
+    }
+
+    #[test]
+    fn todos_los_calls_del_cli_tienen_clasificacion_y_matriz_explicitas() {
+        let commands = cli_commands();
+        assert!(!commands.is_empty(), "el inventario real de llamadas del sidecar se debe analizar");
+        let (person_cli_store, person_cli, person_cli_dir) = test_client(
+            ClientSurface::Cli,
+            ClientPrincipal::Person("cli-person".into()),
+        );
+        let (agent_cli_store, agent_cli, agent_cli_dir) = test_client(
+            ClientSurface::Cli,
+            ClientPrincipal::Agent("task-agent".into()),
+        );
+        let (person_desktop_store, person_desktop, person_desktop_dir) = test_client(
+            ClientSurface::Desktop,
+            ClientPrincipal::Person("desktop-person".into()),
+        );
+        assert_eq!(rpc_action("events"), ClientAction::EventLogRead);
+        assert!(person_cli.authorize(ClientAction::EventLogRead).is_ok(), "Person CLI recibe solo lectura del Event Log");
+        assert!(agent_cli.authorize(ClientAction::EventLogRead).is_ok());
+        assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());
+        assert!(person_cli.authorize(ClientAction::UiCommand).is_err());
+        assert!(person_cli.authorize(ClientAction::HumanDecision).is_err());
+
+        for command in &commands {
+            let action = rpc_action(command);
+            assert_ne!(action, ClientAction::Unknown, "call(\"{command}\") del CLI no tiene política explícita");
+            assert_eq!(action, expected_cli_action(command), "clasificación de call(\"{command}\")");
+            let coordinator_cli_allows = matches!(
+                action,
+                ClientAction::Read
+                    | ClientAction::EventLogRead
+                    | ClientAction::AgentCommand
+                    | ClientAction::AgentOrDesktopCommand
+            );
+            let agent_task_allows = matches!(
+                action,
+                ClientAction::Read
+                    | ClientAction::EventLogRead
+                    | ClientAction::AgentCommand
+                    | ClientAction::AgentOrDesktopCommand
+            );
+            let desktop_person_allows = !matches!(action, ClientAction::CoreCommand | ClientAction::Unknown);
+            assert_eq!(
+                person_cli.authorize(action).is_ok(),
+                coordinator_cli_allows,
+                "Person CLI permiso para call(\"{command}\") como coordinador"
+            );
+            assert_eq!(
+                agent_cli.authorize(action).is_ok(),
+                agent_task_allows,
+                "Agent CLI permiso para call(\"{command}\"); relación con task se comprueba al despachar"
+            );
+            assert_eq!(
+                person_desktop.authorize(action).is_ok(),
+                desktop_person_allows,
+                "Person Desktop permiso para call(\"{command}\")"
+            );
+        }
+
+        for action in [ClientAction::Unknown, ClientAction::CoreCommand] {
+            assert!(person_cli.authorize(action).is_err());
+            assert!(agent_cli.authorize(action).is_err());
+            assert!(person_desktop.authorize(action).is_err());
+        }
+        assert_eq!(rpc_action("unknown_future_rpc"), ClientAction::Unknown);
+
+        drop((person_cli_store, agent_cli_store, person_desktop_store));
+        for dir in [person_cli_dir, agent_cli_dir, person_desktop_dir] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 
     #[test]
     fn credencial_agent_no_puede_decidir_revision_antes_de_mutar() {
