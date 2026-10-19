@@ -138,6 +138,11 @@ func reservedNames() []string {
 	for i, s := range all {
 		names[i] = s.Name
 	}
+	// Los alias en español también: un comando propio no puede taparlos.
+	for alias := range aliases {
+		names = append(names, alias)
+	}
+	slices.Sort(names[len(all):])
 	return names
 }
 

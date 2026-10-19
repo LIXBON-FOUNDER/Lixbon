@@ -63,7 +63,7 @@ var (
 	cAddBG, cDelBG, cAddFG, cDelFG, cBubble                       color.Color
 
 	sDim, sDim2, sAccent, sBeige, sPrimary, sBold, sOK, sErr, sWarn, sPlan lipgloss.Style
-	sAddNum, sDelNum, sInk, sSoft, sCode, sSelected                        lipgloss.Style
+	sAddNum, sDelNum, sInk, sSoft, sCode, sSelected, sTrack                lipgloss.Style
 )
 
 func init() {
@@ -81,14 +81,16 @@ func applyTheme(p palette) {
 
 	fg := func(hex string) lipgloss.Style { return lipgloss.NewStyle().Foreground(c(hex)) }
 	sDim, sDim2, sAccent, sBeige = fg(p.muted), fg(p.faint), fg(p.acc), fg(p.sand)
-	sPrimary, sBold, sInk, sSoft = fg(p.body), fg(p.ink).Bold(true), fg(p.ink), fg(p.soft)
+	sPrimary, sBold, sInk, sSoft = fg(p.body), fg(p.ink), fg(p.ink), fg(p.soft)
 	sOK, sErr, sWarn, sPlan = fg(p.ok), fg(p.err), fg(p.warn), fg(p.info)
 	sAddNum, sDelNum, sCode = fg(p.addFg), fg(p.delFg), fg(p.code)
+	sTrack = fg(p.rule)
 	sSelected = fg(p.ink).Background(c(p.olive))
 }
 
 // glyphSet: el rico para terminales modernas, el seguro para la consola
-// clásica de Windows (fuentes sin ✦ ni ▰) y ASCII para LIXBON_ASCII=1.
+// clásica de Windows (fuentes sin ✦) y ASCII para LIXBON_ASCII=1. Las barras
+// son ━ sobre una pista ─: las dos están en Consolas y Cascadia.
 type glyphSet struct {
 	rail, railHot, corner, sep, arrow, ellipsis, dot, spark, think, edge string
 	brand, wait, thinkRail, gap, prompt, meterOn, meterOff, branch       string
@@ -102,7 +104,7 @@ type glyphSet struct {
 
 var richGlyphs = glyphSet{
 	rail: "│", railHot: "┃", corner: "└", sep: "·", arrow: "→", ellipsis: "…", dot: "●", spark: "✦", think: "✻", edge: "▌",
-	brand: "◆", wait: "◌", thinkRail: "┊", gap: "⋯", prompt: "›", meterOn: "▰", meterOff: "▱", branch: "⎇",
+	brand: "◆", wait: "◌", thinkRail: "┊", gap: "⋯", prompt: "›", meterOn: "━", meterOff: "─", branch: "⎇",
 	chip: "⧉", info: "◇", todo: "○", doing: "▸", done: "✓", minus: "−", check: "✓", cross: "✗", rule: "─",
 	boxTL: "╭", boxTR: "╮", boxBL: "╰", boxBR: "╯", boxH: "─", boxV: "│",
 	turnRail: "┃", turnEnd: "┗", fold: "▸", unfold: "▾",
@@ -111,7 +113,7 @@ var richGlyphs = glyphSet{
 
 var safeGlyphs = glyphSet{
 	rail: "│", railHot: "│", corner: "└", sep: "·", arrow: "→", ellipsis: "…", dot: "●", spark: "•", think: "*", edge: "▌",
-	brand: "♦", wait: "○", thinkRail: "│", gap: "…", prompt: "›", meterOn: "▓", meterOff: "░", branch: "≡",
+	brand: "♦", wait: "○", thinkRail: "│", gap: "…", prompt: "›", meterOn: "━", meterOff: "─", branch: "≡",
 	chip: "□", info: "◊", todo: "○", doing: "►", done: "√", minus: "−", check: "√", cross: "×", rule: "─",
 	boxTL: "┌", boxTR: "┐", boxBL: "└", boxBR: "┘", boxH: "─", boxV: "│",
 	turnRail: "│", turnEnd: "└", fold: "►", unfold: "▼",
@@ -120,7 +122,7 @@ var safeGlyphs = glyphSet{
 
 var asciiGlyphs = glyphSet{
 	rail: "|", railHot: "|", corner: "\\", sep: "-", arrow: "->", ellipsis: "...", dot: "*", spark: "*", think: "*", edge: "|",
-	brand: "*", wait: "o", thinkRail: ":", gap: "...", prompt: ">", meterOn: "#", meterOff: "-", branch: "@",
+	brand: "*", wait: "o", thinkRail: ":", gap: "...", prompt: ">", meterOn: "=", meterOff: "-", branch: "@",
 	chip: "#", info: "i", todo: "-", doing: ">", done: "x", minus: "-", check: "v", cross: "x", rule: "-",
 	boxTL: "+", boxTR: "+", boxBL: "+", boxBR: "+", boxH: "-", boxV: "|",
 	turnRail: "|", turnEnd: "'", fold: ">", unfold: "v",

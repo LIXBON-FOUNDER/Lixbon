@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -33,6 +34,26 @@ func (c *Client) RemoteCreate(ctx context.Context, source, title, machine string
 func (c *Client) RemoteEvents(ctx context.Context, sessionID string, events []map[string]any) error {
 	return c.doJSON(ctx, http.MethodPost, c.Server+"/api/remote/sessions/"+sessionID+"/events",
 		map[string]any{"events": events}, 20*time.Second, true, nil)
+}
+
+// RemoteImage sube una imagen del chat remoto con el id que ya viaja en su
+// evento (PUT con los bytes tal cual).
+func (c *Client) RemoteImage(ctx context.Context, sessionID, id, mime string, data []byte) error {
+	if c.Generic {
+		return errNotGateway
+	}
+	target := c.Server + "/api/remote/sessions/" + sessionID + "/images/" + id
+	c.renewIfDue(ctx)
+	token := c.bearer()
+	resp, err := c.sendBody(ctx, http.MethodPut, target, data, mime, token)
+	var apiErr *Error
+	if c.Session != nil && errors.As(err, &apiErr) && apiErr.Status == 401 && c.Session.renew(ctx, c, token) == nil {
+		resp, err = c.sendBody(ctx, http.MethodPut, target, data, mime, c.bearer())
+	}
+	if err != nil {
+		return err
+	}
+	return resp.Body.Close()
 }
 
 func (c *Client) RemoteEnd(ctx context.Context, sessionID string) error {

@@ -38,6 +38,7 @@ from core.persistence.queries import (
     get_plan_for_user,
     get_user_settings,
     record_model_usage,
+    record_service_usage,
     save_message,
     update_message,
     save_task_embedding,
@@ -51,6 +52,7 @@ from core.inference.ollama import (
     stream_chat_openai,
 )
 from core.inference import websearch
+from core.security.acceso import servicio_de
 from core.security.auth import (
     api_key_required,
     session_or_api_key,
@@ -232,7 +234,8 @@ CHECKPOINT_SECONDS = 4.0
 def _persist_assistant(conv_id: str, model: str, text: str,
                        prompt_tokens: int, completion_tokens: int, latency_ms: int,
                        user_id: int | None = None, save_history: bool = True,
-                       bill_credits: bool = False, message_id: int | None = None) -> None:
+                       bill_credits: bool = False, message_id: int | None = None,
+                       service: str | None = None) -> None:
     if save_history:
         if message_id is not None:
             update_message(message_id, text, prompt_tokens, completion_tokens, latency_ms, record_usage=True)
@@ -249,6 +252,7 @@ def _persist_assistant(conv_id: str, model: str, text: str,
         # (tokens por modelo) sí se contabiliza.
         record_model_usage(user_id, model, prompt_tokens, completion_tokens, latency_ms)
     if user_id is not None:
+        record_service_usage(user_id, service, prompt_tokens + completion_tokens)
         if bill_credits:
             # Tráfico de API key externa: se cobra del saldo prepago, no del pool de plan
             credits.debit_usage(user_id, model, prompt_tokens, completion_tokens)
@@ -361,7 +365,8 @@ async def api_chat(
     prompt_tokens = int(ollama_resp.get("prompt_eval_count") or 0)
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
-                       latency_ms, user_id=user_data["id"], save_history=save_history)
+                       latency_ms, user_id=user_data["id"], save_history=save_history,
+                       service=servicio_de(user_data))
 
     return {
         "conversation_id": conv_id if save_history else None,
@@ -557,6 +562,7 @@ async def chat_completions(
                     save_history=save_history and bool(text),
                     bill_credits=bill_credits,
                     message_id=message_id,
+                    service=servicio_de(user_data),
                 )
 
             # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
@@ -604,7 +610,7 @@ async def chat_completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=bill_credits)
+                       bill_credits=bill_credits, service=servicio_de(user_data))
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -660,7 +666,7 @@ async def completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=bill_credits)
+                       bill_credits=bill_credits, service=servicio_de(user_data))
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
@@ -759,6 +765,7 @@ async def vision_describe(
 
     # Uso/cobro (sin persistir contenido: las imágenes no se guardan)
     if user_data.get("id") is not None:
+        record_service_usage(user_data["id"], servicio_de(user_data), prompt_tokens + completion_tokens)
         if bill_credits:
             credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
@@ -834,6 +841,7 @@ async def fim_complete(
     latency_ms = int((time.perf_counter() - started_at) * 1000)
 
     if user_data.get("id") is not None:
+        record_service_usage(user_data["id"], servicio_de(user_data), prompt_tokens + completion_tokens)
         if bill_credits:
             credits.debit_usage(user_data["id"], model, prompt_tokens, completion_tokens)
         else:
@@ -890,6 +898,7 @@ async def embed_texts(
     embeddings = resp.get("embeddings", []) or []
     prompt_tokens = int(resp.get("prompt_eval_count") or 0)
     if user_data.get("id") is not None and prompt_tokens:
+        record_service_usage(user_data["id"], servicio_de(user_data), prompt_tokens)
         try:
             if bill_credits:
                 credits.debit_usage(user_data["id"], model, prompt_tokens, 0)

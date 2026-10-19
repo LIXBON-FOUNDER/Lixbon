@@ -15,7 +15,7 @@ export function buildBlocks(items) {
     turn = null;
   };
   const open = (key) => {
-    if (!turn) turn = { type: 'turn', key: `t${key}`, work: [], end: null };
+    if (!turn) turn = { type: 'turn', key: `t${key}`, work: [], images: [], end: null };
     return turn;
   };
   for (const it of items) {
@@ -30,6 +30,10 @@ export function buildBlocks(items) {
       case 'assistant':
       case 'qa':
         open(it.key).work.push(it);
+        break;
+      // Lo que el agente enseña (show_image) se ve fuera del trabajo plegado.
+      case 'image':
+        open(it.key).images.push(it);
         break;
       case 'end':
         open(it.key).end = it;

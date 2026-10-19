@@ -141,7 +141,7 @@ func TestQuotaIsAccountWideInTheTopBar(t *testing.T) {
 func TestRemoteShowsInTheTopBar(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.remote = &remoteHost{}
-	contains(t, h.view(), "Remote: conectado")
+	contains(t, h.view(), "● remote")
 	h.m.remote = nil
 }
 

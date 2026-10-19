@@ -17,6 +17,7 @@ from core.persistence.queries import (
     delete_user_account,
     export_user_data,
     get_daily_metrics,
+    get_service_usage,
     get_donation_settings,
     get_plan_for_user,
     get_user_by_id,
@@ -97,6 +98,8 @@ async def api_account_usage(user_data: dict[str, Any] = Depends(session_or_api_k
         "usage": usage_snapshot(user_id, plan),
         "buckets": credit_buckets_snapshot(user_id, plan),
         "daily": get_daily_metrics(user_id, days_limit=30),
+        # Panal de uso: tokens por día y servicio (cli, ide, mobile, web, other).
+        "services": get_service_usage(user_id, days=30),
     }
 
 

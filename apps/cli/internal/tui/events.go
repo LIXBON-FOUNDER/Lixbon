@@ -59,6 +59,12 @@ func (m *Model) handleEvent(e agent.Event) {
 		if e.Tool == "ask_user" {
 			m.askEntry = entry
 		}
+		if e.Tool == "show_image" {
+			m.imageEntry = entry
+			if img := m.pendingImage; img != nil {
+				m.attachImage(*img)
+			}
+		}
 		if e.ReadOnly {
 			b.state = toolDone
 			m.refresh(entry)

@@ -152,6 +152,19 @@ CREATE TABLE token_usage_daily (
 );
 CREATE INDEX idx_token_usage_date ON token_usage_daily (usage_date);
 
+CREATE TABLE token_usage_service_daily (
+	id SERIAL NOT NULL, 
+	user_id INTEGER NOT NULL, 
+	usage_date TEXT NOT NULL, 
+	service TEXT NOT NULL, 
+	total_tokens BIGINT NOT NULL, 
+	request_count INTEGER NOT NULL, 
+	created_at TEXT NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_token_usage_service_daily UNIQUE (user_id, usage_date, service), 
+	FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
 CREATE TABLE messages (
 	id SERIAL NOT NULL, 
 	conversation_id TEXT NOT NULL, 

@@ -4,6 +4,15 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.13.0
+- Sin negrita: PowerShell y CMD la pintaban con un trazo raro en títulos, cabecera y teclas. La jerarquía la dan ahora los tonos de tinta, y los títulos de panel llevan una raya hasta el borde.
+- Una sola barra en todas partes: un trazo grueso ━ sobre una pista fina ─, con el porcentaje al lado, en `/usage`, la compactación y el pie. `/usage` dice al lado de cada cupo cuándo se reinicia y añade el contexto de la conversación.
+- «Remote: conectado» pasa a ser un punto lima y la palabra remote.
+- Los comandos van en inglés: nombres, argumentos, grupos y descripciones del menú y de `/help`, también en la app móvil. `/orquestar` pasa a `/orchestrate`, `/orquestador` a `/orchestrator` y `/visual codigo` a `/visual code`; los nombres de antes siguen funcionando.
+- Con `/remote`, la tanda de preguntas llega entera al móvil (con la app 0.10.0) y se responde allí con las mismas pestañas.
+- El agente puede enseñarte imágenes con `show_image`: un archivo del proyecto o la captura que acaba de hacer del navegador. En la terminal se ve una miniatura bajo la fila «Mostrar» y un clic la abre en el visor de imágenes.
+- Las imágenes que adjuntas también se ven en miniatura bajo tu mensaje. Con `/remote` las tuyas y las del agente llegan al móvil y a la web.
+
 ## 2.12.0
 - El agente hace varias preguntas en una sola tanda (hasta 4): una pestaña por pregunta, opciones con su descripción y algunas en las que se marcan varias. ← → cambia de pregunta sin perder lo elegido y «Enviar» repasa las respuestas antes de mandarlas.
 - «Otra respuesta» se escribe en su sitio; esc vuelve a las opciones en vez de saltar a la siguiente pregunta. Esc fuera cierra la tanda y lo que no respondiste lo decide el agente.

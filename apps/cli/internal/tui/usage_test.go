@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"testing"
 	"time"
 
@@ -83,6 +84,29 @@ func TestNewAndClearEmptyTheContextBar(t *testing.T) {
 		}
 	}
 }
+
+// La terminal nunca recibe negrita (PowerShell y CMD la pintan con otra
+// fuente) y /usage añade el contexto de la conversación con la barra nueva.
+func TestNoBoldAndUsageShowsTheContext(t *testing.T) {
+	h := newHarness(t, nil, replyWithUsage("**hecho**\n\n## Resumen\n\nlisto", 1200, 30, 0))
+	h.send("buenas")
+	h.settle()
+	h.send("/usage")
+	h.settle()
+	h.send("/help")
+	for _, frame := range []string{h.view(), h.out()} {
+		if bold.MatchString(frame) {
+			t.Fatalf("hay negrita en la pantalla:\n%q", frame)
+		}
+	}
+	out := ansi.Strip(h.out())
+	contains(t, out, "Contexto")
+	contains(t, out, glyphMeterOn)
+	contains(t, out, glyphMeterOff)
+}
+
+// bold reconoce el SGR 1 solo o dentro de una secuencia con colores.
+var bold = regexp.MustCompile(`\x1b\[(?:[0-9;]*;)?1(?:;[0-9;]*)?m`)
 
 // La compactación automática se ve: la etiqueta lo dice mientras dura.
 func TestAutoCompactionShowsInTheLiveLabel(t *testing.T) {

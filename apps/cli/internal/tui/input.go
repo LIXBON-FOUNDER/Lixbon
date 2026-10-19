@@ -62,7 +62,7 @@ func withBackground(text, bg string) string {
 }
 
 // key pinta una pista de teclado: la tecla destacada y lo que hace atenuado.
-func keyHint(k, label string) string { return sSoft.Bold(true).Render(k) + sDim.Render(" "+label) }
+func keyHint(k, label string) string { return sSoft.Render(k) + sDim.Render(" "+label) }
 
 func keyHints(pairs ...[2]string) string {
 	parts := make([]string, len(pairs))

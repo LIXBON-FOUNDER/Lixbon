@@ -71,12 +71,9 @@ func markdownStyle(p palette, margin uint) ansi.StyleConfig {
 	str := func(v string) *string { return &v }
 	yes := func() *bool { v := true; return &v }
 	num := func(v uint) *uint { return &v }
-	block := func(color string, bold bool) ansi.StyleBlock {
-		s := ansi.StylePrimitive{Color: str(color)}
-		if bold {
-			s.Bold = yes()
-		}
-		return ansi.StyleBlock{StylePrimitive: s}
+	// Sin negrita: PowerShell y CMD la pintan con otra fuente.
+	block := func(color string) ansi.StyleBlock {
+		return ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(color)}}
 	}
 	bullet := "• "
 	if glyphs.prompt == ">" {
@@ -86,17 +83,17 @@ func markdownStyle(p palette, margin uint) ansi.StyleConfig {
 		Document:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(p.body)}, Margin: num(margin)},
 		BlockQuote: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: str(p.soft), Italic: yes()}, Indent: num(1), IndentToken: str(glyphs.rail + " ")},
 		List:       ansi.StyleList{LevelIndent: 2},
-		Heading:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BlockSuffix: "\n", Color: str(p.ink), Bold: yes()}},
-		H1:         block(p.ink, true),
-		H2:         block(p.ink, true),
-		H3:         block(p.ink, true),
-		H4:         block(p.soft, true),
-		H5:         block(p.soft, true),
-		H6:         block(p.muted, true),
+		Heading:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{BlockSuffix: "\n", Color: str(p.ink)}},
+		H1:         block(p.ink),
+		H2:         block(p.ink),
+		H3:         block(p.sand),
+		H4:         block(p.soft),
+		H5:         block(p.soft),
+		H6:         block(p.muted),
 
 		Strikethrough:  ansi.StylePrimitive{CrossedOut: yes()},
 		Emph:           ansi.StylePrimitive{Italic: yes()},
-		Strong:         ansi.StylePrimitive{Bold: yes(), Color: str(p.ink)},
+		Strong:         ansi.StylePrimitive{Color: str(p.ink)},
 		HorizontalRule: ansi.StylePrimitive{Color: str(p.faint), Format: "\n" + strings.Repeat(glyphs.rule, 24) + "\n"},
 
 		Item:        ansi.StylePrimitive{BlockPrefix: bullet},

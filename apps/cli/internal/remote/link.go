@@ -53,6 +53,7 @@ type Relay interface {
 	RemoteEnd(ctx context.Context, sessionID string) error
 	RemoteQR(ctx context.Context, data string) (string, error)
 	RemoteCommands(ctx context.Context, sessionID string, lastCmd int64) (io.ReadCloser, error)
+	RemoteImage(ctx context.Context, sessionID, id, mime string, data []byte) error
 }
 
 // Command es lo que el móvil o la web le pide al host. Las aprobaciones y los
@@ -466,6 +467,44 @@ func (l *Link) dispatch(cmd Command, id, decision string) {
 }
 
 // ── aprobaciones remotas ─────────────────────────────────────────────────
+
+// ImageID es el nombre con el que una imagen del chat viaja en los eventos y
+// se guarda en el gateway: 20 caracteres hex y su extensión.
+func ImageID(mime string) string {
+	ext := map[string]string{"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}[mime]
+	if ext == "" {
+		return ""
+	}
+	return NewID() + NewID() + "." + ext
+}
+
+// UploadImage sube en segundo plano la imagen con el id que ya viaja en su
+// evento: el móvil la pide por ese id y reintenta mientras no llega. Un fallo
+// solo deja la miniatura sin cargar allí.
+func (l *Link) UploadImage(id, mime string, data []byte) {
+	if id == "" || l.ctx == nil {
+		return
+	}
+	go func() {
+		for attempt := range 3 {
+			ctx, cancel := context.WithTimeout(l.ctx, time.Minute)
+			err := l.Relay.RemoteImage(ctx, l.sessionID, id, mime, data)
+			cancel()
+			if err == nil || l.ctx.Err() != nil {
+				return
+			}
+			var apiErr *api.Error
+			if errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500 {
+				return
+			}
+			select {
+			case <-l.ctx.Done():
+				return
+			case <-time.After(time.Duration(attempt+1) * 2 * time.Second):
+			}
+		}
+	}()
+}
 
 // NewID es un identificador corto para aprobaciones, selectores y herramientas.
 func NewID() string {
