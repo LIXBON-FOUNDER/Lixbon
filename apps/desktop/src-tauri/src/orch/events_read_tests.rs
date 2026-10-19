@@ -558,15 +558,7 @@ fn lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates()
     let home = cleanup.0.join("lxo-home");
     let lixbon_dir = home.join(".lixbon");
     std::fs::create_dir_all(&lixbon_dir).unwrap();
-    std::fs::write(
-        lixbon_dir.join("orch.json"),
-        json!({
-            "port": server.0.port,
-            "version": env!("CARGO_PKG_VERSION"),
-            "client_id": "client-agent-lxo-events-e2e",
-            "installation_id": "install-lxo-bin-events-e2e"
-        }).to_string(),
-    ).unwrap();
+    write_lxo_orch(&lixbon_dir, server.0.port);
 
     let head_actual = head(&core);
     assert!(head_actual >= 3, "la escena debe emitir hechos de prueba antes de consultar el cursor");
@@ -650,6 +642,46 @@ fn lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates()
         &["events", "--json", "--follow", "--limit", "2"]);
     after_reconnect.assert_quiet(Duration::from_millis(800));
     after_reconnect.stop();
+
+    // Una caída recuperable del listener no reinicia Core ni revoca el Agent.
+    // El follow debe releer orch.json y continuar con el mismo token/cursor.
+    let outage_cursor = head_with_new_facts;
+    let outage_cursor_text = outage_cursor.to_string();
+    let mut recovering = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2", "--after", &outage_cursor_text]);
+    wait_for_lxo_cursor(&home, outage_cursor as u64);
+    recovering.assert_quiet(Duration::from_millis(150));
+    server.0.stop();
+    thread::sleep(Duration::from_millis(1200));
+
+    core.mutate(|tx| {
+        for n in 0..2 {
+            let task = tx.add_child(&scene.raiz, 2, NewTask {
+                external: false,
+                ..nt(&format!("follow-http-recovery-{n}"))
+            })?;
+            tx.mark_running(&task)?;
+        }
+        Ok(())
+    }).unwrap();
+    let head_after_outage = head(&core);
+    let expected_after_outage = (outage_cursor + 1..=head_after_outage).collect::<Vec<_>>();
+    assert!(!expected_after_outage.is_empty(), "la interrupción debe cubrir hechos pendientes");
+
+    let restored_server = ServerParada(server::start(core.clone()).unwrap());
+    write_lxo_orch(&lixbon_dir, restored_server.0.port);
+    let recovered_lines = (0..expected_after_outage.len())
+        .map(|_| recovering.next_line(Duration::from_secs(30)))
+        .collect::<Vec<_>>();
+    let recovered_seqs = recovered_lines.iter().map(|line| {
+        serde_json::from_str::<Value>(line).unwrap()["seq"].as_i64().unwrap()
+    }).collect::<Vec<_>>();
+    assert_eq!(recovered_seqs, expected_after_outage,
+        "el follow debe recuperar cada evento una vez tras el outage HTTP");
+    wait_for_lxo_cursor(&home, head_after_outage as u64);
+    recovering.assert_quiet(Duration::from_millis(900));
+    recovering.stop();
+    restored_server.0.stop();
     server.0.stop();
 }
 
@@ -657,6 +689,18 @@ struct ServerParada(server::Handle);
 
 impl Drop for ServerParada {
     fn drop(&mut self) { self.0.stop(); }
+}
+
+fn write_lxo_orch(lixbon_dir: &std::path::Path, port: u16) {
+    std::fs::write(
+        lixbon_dir.join("orch.json"),
+        json!({
+            "port": port,
+            "version": env!("CARGO_PKG_VERSION"),
+            "client_id": "client-agent-lxo-events-e2e",
+            "installation_id": "install-lxo-bin-events-e2e"
+        }).to_string(),
+    ).unwrap();
 }
 
 fn lxo_events_json(binary: &std::path::Path, home: &std::path::Path, task_id: &str,
