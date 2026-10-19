@@ -6,6 +6,9 @@ on:
   push:
     branches: [master, cli]
 
+permissions:
+  contents: read
+
 jobs:
   gateway:
     name: Gateway · tests (un proceso por módulo)
