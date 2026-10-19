@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -87,6 +88,7 @@ type remoteHost struct {
 	approver agent.Approver
 	askUser  func(ctx context.Context, questions []tools.Question) ([]string, bool)
 	onTodo   func(items, previous []tools.TodoItem)
+	onImage  func(tools.ShownImage)
 
 	mu        sync.Mutex
 	base      []map[string]any
@@ -143,7 +145,12 @@ func (h *remoteHost) record(kind string, fields map[string]any) {
 	var item map[string]any
 	switch kind {
 	case "user_msg":
-		item = map[string]any{"role": "user", "content": str("text"), "images": fields["images"], "mentions": fields["mentions"]}
+		item = map[string]any{"role": "user", "content": str("text"), "images": fields["images"], "image_ids": fields["image_ids"], "mentions": fields["mentions"]}
+	case "image_shown":
+		item = map[string]any{"role": "image"}
+		for k, v := range fields {
+			item[k] = v
+		}
 	case "assistant_done", "assistant_prose":
 		if strings.TrimSpace(str("text")) != "" {
 			item = map[string]any{"role": "assistant", "content": str("text")}
@@ -154,7 +161,8 @@ func (h *remoteHost) record(kind string, fields map[string]any) {
 	case "reasoning":
 		item = map[string]any{"role": "thinking", "content": str("text"), "ms": fields["ms"]}
 	case "question_answered":
-		item = map[string]any{"role": "qa", "question": str("question"), "content": str("answer")}
+		item = map[string]any{"role": "qa", "question": str("question"), "content": str("answer"),
+			"header": str("header"), "batch": str("batch"), "index": fields["index"], "total": fields["total"]}
 	case "compacted":
 		item = map[string]any{"role": "compacted", "content": str("summary"), "before": fields["before"], "after": fields["after"]}
 	case "notice":
@@ -251,16 +259,58 @@ func (h *remoteHost) ask(ctx context.Context, questions []tools.Question) ([]str
 		}()
 	}
 	r := <-replies
+	// batch, index y total dejan que la app junte las respuestas de una tanda
+	// en una sola tarjeta; una app antigua las enseña una a una.
+	batch := remote.NewID()
 	for i, q := range questions {
 		if i < len(r.answers) && strings.TrimSpace(r.answers[i]) != "" {
-			h.emit("question_answered", map[string]any{"question": q.Text, "answer": r.answers[i]})
+			h.emit("question_answered", map[string]any{"question": q.Text, "answer": r.answers[i],
+				"header": q.Header, "batch": batch, "index": i, "total": len(questions)})
 		}
 	}
 	return r.answers, r.ok
 }
 
-// askRemoteBatch lleva la tanda al móvil pregunta a pregunta; si cierra una
-// sin responder, la tanda termina ahí con lo que ya respondió.
+// uploadChips sube las imágenes del mensaje para que el móvil y la web las
+// enseñen; el evento viaja ya con sus ids.
+func (h *remoteHost) uploadChips(chips []imageChip) []string {
+	ids := []string{}
+	for _, c := range chips {
+		if id := h.uploadImage(c.path); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func (h *remoteHost) uploadImage(path string) string {
+	mime := tools.ImageMime(path)
+	id := remote.ImageID(mime)
+	if id == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) > tools.MaxShownImage {
+		return ""
+	}
+	h.link.UploadImage(id, mime, data)
+	return id
+}
+
+// showImage lleva al móvil la imagen que el agente enseñó con show_image.
+func (h *remoteHost) showImage(img tools.ShownImage) {
+	id := h.uploadImage(img.Path)
+	if id == "" {
+		return
+	}
+	h.emit("image_shown", map[string]any{"id": id, "name": img.Name, "w": img.W, "h": img.H, "caption": img.Caption})
+}
+
+// askRemoteBatch lleva la tanda al móvil. La primera pregunta viaja con la
+// tanda entera (batch): la app que la entiende responde todas a la vez con
+// batchAnswer. Una app antigua responde solo esa y el resto le llega pregunta
+// a pregunta; si cierra una sin responder, la tanda termina ahí con lo que ya
+// respondió.
 func (h *remoteHost) askRemoteBatch(ctx context.Context, questions []tools.Question) ([]string, bool) {
 	answers := make([]string, len(questions))
 	for i, q := range questions {
@@ -268,18 +318,61 @@ func (h *remoteHost) askRemoteBatch(ctx context.Context, questions []tools.Quest
 		for _, o := range q.Options {
 			options = append(options, o.Label)
 		}
-		answer, ok := h.askRemote(ctx, q.Text, options)
+		var batch []map[string]any
+		if i == 0 {
+			batch = remoteBatch(questions)
+		}
+		answer, ok := h.askRemote(ctx, q.Text, options, batch)
 		if !ok {
 			return answers, false
+		}
+		if i == 0 {
+			if all, closed, isBatch := parseBatchAnswer(answer); isBatch {
+				copy(answers, all)
+				return answers, !closed
+			}
 		}
 		answers[i] = answer
 	}
 	return answers, true
 }
 
+// remoteBatch es la tanda tal como la pinta la app: título corto, pregunta,
+// opciones con su descripción y si admite varias.
+func remoteBatch(questions []tools.Question) []map[string]any {
+	out := make([]map[string]any, 0, len(questions))
+	for _, q := range questions {
+		options := make([]map[string]string, 0, len(q.Options))
+		for _, o := range q.Options {
+			options = append(options, map[string]string{"label": o.Label, "description": o.Description})
+		}
+		out = append(out, map[string]any{"header": q.Header, "question": q.Text, "options": options, "multiple": q.Multiple})
+	}
+	return out
+}
+
+// batchAnswer es la respuesta de la app a una tanda entera: una respuesta por
+// pregunta ("" la deja al agente) y closed si la cerró sin terminar.
+type batchAnswer struct {
+	Answers *[]string `json:"answers"`
+	Closed  bool      `json:"closed"`
+}
+
+func parseBatchAnswer(value string) ([]string, bool, bool) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "{") {
+		return nil, false, false
+	}
+	var a batchAnswer
+	if json.Unmarshal([]byte(value), &a) != nil || a.Answers == nil {
+		return nil, false, false
+	}
+	return *a.Answers, a.Closed, true
+}
+
 // askRemote abre la pregunta en la app: elige una opción o escribe otra
 // respuesta. Vacío equivale a cancelar.
-func (h *remoteHost) askRemote(ctx context.Context, question string, options []string) (string, bool) {
+func (h *remoteHost) askRemote(ctx context.Context, question string, options []string, batch []map[string]any) (string, bool) {
 	id := remote.NewID()
 	waiter := make(chan string, 1)
 	h.mu.Lock()
@@ -294,7 +387,11 @@ func (h *remoteHost) askRemote(ctx context.Context, question string, options []s
 	for _, o := range options {
 		choices = append(choices, map[string]string{"label": o, "value": o})
 	}
-	h.link.Emit("choice_request", map[string]any{"id": id, "kind": "question", "title": question, "options": choices, "free": true})
+	request := map[string]any{"id": id, "kind": "question", "title": question, "options": choices, "free": true}
+	if len(batch) > 0 {
+		request["batch"] = batch
+	}
+	h.link.Emit("choice_request", request)
 	select {
 	case answer := <-waiter:
 		h.link.Emit("choice_resolved", map[string]any{"id": id, "value": answer})
@@ -745,7 +842,7 @@ func (m *Model) remoteTurnStarted(prompt string, chips []imageChip) {
 	if m.remoteOrigin {
 		origin = "remote"
 	}
-	h.emit("user_msg", map[string]any{"text": text, "origin": origin, "images": images, "mentions": mentions})
+	h.emit("user_msg", map[string]any{"text": text, "origin": origin, "images": images, "image_ids": h.uploadChips(chips), "mentions": mentions})
 	h.link.Emit("status", map[string]any{"state": "thinking"})
 }
 
@@ -889,7 +986,7 @@ func (m *Model) syncRemote() {
 func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	host := &remoteHost{
 		link: link, approver: m.chat.Session.Approver,
-		askUser: m.chat.Toolbox.AskUser, onTodo: m.chat.Toolbox.OnTodo,
+		askUser: m.chat.Toolbox.AskUser, onTodo: m.chat.Toolbox.OnTodo, onImage: m.chat.Toolbox.OnImage,
 		choices: map[string]*picker{},
 	}
 	host.base = remoteHistory(m.chat.History)
@@ -900,6 +997,12 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 	m.chat.Session.Approver = sharedApprover{local: host.approver, remote: &remoteApprover{link: link}}
 	host.questions = map[string]chan string{}
 	m.chat.Toolbox.AskUser = host.ask
+	m.chat.Toolbox.OnImage = func(img tools.ShownImage) {
+		if host.onImage != nil {
+			host.onImage(img)
+		}
+		host.showImage(img)
+	}
 	m.chat.Toolbox.OnOutput = func(chunk []byte) {
 		if s := host.live.Load(); s != nil {
 			s.outputChunk(chunk)
@@ -993,6 +1096,7 @@ func (m *Model) leaveRemote(endSession bool) {
 	m.chat.Session.Approver = host.approver
 	m.chat.Toolbox.AskUser = host.askUser
 	m.chat.Toolbox.OnTodo = host.onTodo
+	m.chat.Toolbox.OnImage = host.onImage
 	m.chat.Toolbox.OnOutput = nil
 	go host.link.Stop(endSession)
 	m.gap()

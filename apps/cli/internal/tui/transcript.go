@@ -210,6 +210,19 @@ func (t *transcript) foldAt(row int) *entry {
 	return e
 }
 
+// imageAt devuelve la imagen que se pinta en la fila row, o "".
+func (t *transcript) imageAt(row, width int) string {
+	t.flatten()
+	if row < 0 || row >= len(t.owner) {
+		return ""
+	}
+	e := t.entries[t.owner[row]]
+	if b, ok := e.b.(imageBlock); ok {
+		return b.imageAt(row-t.start(e), width)
+	}
+	return ""
+}
+
 func (t *transcript) setDetail(on bool) {
 	if t.detail == on {
 		return

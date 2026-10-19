@@ -38,6 +38,13 @@ func (tb *Toolbox) runBrowser(ctx context.Context, name string, args map[string]
 		return "", err
 	}
 	tb.images = append(tb.images, images...)
+	// La captura también queda en un archivo para que el agente pueda
+	// enseñársela al usuario con show_image.
+	if name == "browser_screenshot" && len(images) > 0 {
+		if path, err := saveScreenshot(images[0]); err == nil {
+			out += "\nGuardada en " + path + " (show_image se la enseña al usuario)."
+		}
+	}
 	return out, nil
 }
 

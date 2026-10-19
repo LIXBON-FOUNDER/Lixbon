@@ -68,7 +68,7 @@ func (m *Model) topBar(width int) string {
 	case !m.online:
 		brandStyle = sErr
 	}
-	ivory := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ivory)).Bold(true)
+	ivory := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ivory))
 	model := sInk.Render(m.modelLabel(m.chat.Model))
 	if m.chat.Model == "" {
 		model = sDim2.Render("sin modelo")
@@ -85,7 +85,7 @@ func (m *Model) topBar(width int) string {
 	}
 	var flags []string
 	if m.remote != nil {
-		flags = append(flags, sDim.Render("Remote: ")+sAccent.Render("conectado"))
+		flags = append(flags, sAccent.Render(glyphDot)+" "+sSoft.Render("remote"))
 	}
 	if m.chat.WebMode == "on" {
 		flags = append(flags, sSoft.Render("web"))
@@ -216,7 +216,7 @@ func (m *Model) printHeader() {
 			place += sDim2.Render("  "+glyphBranch+" ") + sSoft.Render(m.branch)
 		}
 		sep := sDim2.Render("  " + glyphSep + "  ")
-		key := func(k, label string) string { return sSoft.Bold(true).Render(k) + sDim.Render(" "+label) }
+		key := func(k, label string) string { return sSoft.Render(k) + sDim.Render(" "+label) }
 		tips := key("/", "comandos") + sep + key("!", "shell") + sep + key("@", "archivos") + sep + key("?", "atajos")
 		text := []string{"", sBold.Render("LIXBON CLI") + sDim.Render("  "+m.opts.Version), info, place, "", tips}
 		return headerLayout(renderLogo(cardLogoSize), text, cardLogoSize, width)

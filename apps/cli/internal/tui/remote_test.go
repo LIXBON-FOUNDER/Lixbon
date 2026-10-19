@@ -25,6 +25,7 @@ type fakeRelay struct {
 	ended    bool
 	commands chan string
 	streams  int
+	images   map[string]string // id → Content-Type de lo que subió el host
 }
 
 func newFakeRelay() *fakeRelay { return &fakeRelay{commands: make(chan string, 32)} }
@@ -40,6 +41,15 @@ func (f *fakeRelay) serve(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
 		f.events = append(f.events, body.Events...)
+		f.mu.Unlock()
+		io.WriteString(w, `{}`)
+	case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/images/"):
+		io.Copy(io.Discard, r.Body)
+		f.mu.Lock()
+		if f.images == nil {
+			f.images = map[string]string{}
+		}
+		f.images[r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]] = r.Header.Get("Content-Type")
 		f.mu.Unlock()
 		io.WriteString(w, `{}`)
 	case r.Method == http.MethodDelete:

@@ -72,7 +72,7 @@ func TestVisualWithoutArgumentsExplainsUsage(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/visual")
 	contains(t, h.out(), "Uso: /visual <qué diseñar>")
-	contains(t, h.out(), "/visual codigo vis_… react")
+	contains(t, h.out(), "/visual code vis_… react")
 	if h.gw.count() != 0 {
 		t.Fatal("no debe llamar al modelo")
 	}

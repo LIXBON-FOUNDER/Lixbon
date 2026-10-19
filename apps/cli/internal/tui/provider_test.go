@@ -153,7 +153,7 @@ func TestProviderAppearsInTheCommandMenu(t *testing.T) {
 	h := newHarness(t, nil)
 	h.typeText("/prov")
 	contains(t, h.view(), "/provider")
-	contains(t, h.view(), "Cambiar de proveedor")
+	contains(t, h.view(), "Switch model provider")
 }
 
 func TestSwitchingToAnExternalProviderLeavesDelegateMode(t *testing.T) {

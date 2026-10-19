@@ -490,3 +490,13 @@
   .remote__config .chat-input__model { max-width: 140px; }
 }
 .remote__slash-desc { font-family: inherit; font-size: 12px; }
+
+/* Imágenes del chat remoto: miniaturas en el mensaje y lo que enseña el agente. */
+.remote__photos { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-bottom: 8px; }
+.remote__img { display: inline-flex; border-radius: var(--radius); overflow: hidden; background: var(--surface-3); }
+.remote__img img { display: block; width: 120px; height: 90px; object-fit: cover; }
+.remote__img.is-wide img { width: 100%; height: auto; max-height: 420px; object-fit: contain; }
+.remote__img.is-missing { width: 120px; height: 90px; align-items: center; justify-content: center; color: var(--ink-muted); }
+.remote__shown { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
+.remote__shown .remote__img { width: 100%; }
+.remote__shown figcaption { font-size: 12.5px; color: var(--ink-muted); }

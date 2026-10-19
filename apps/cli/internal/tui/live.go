@@ -191,7 +191,7 @@ func (m *Model) liveView() []string {
 	}
 	elapsed := fmt.Sprintf("%.0f s", time.Since(m.started).Seconds())
 	sep := sDim2.Render(" " + glyphSep + " ")
-	esc := sSoft.Bold(true).Render("esc") + sDim.Render(" interrumpe")
+	esc := sSoft.Render("esc") + sDim.Render(" interrumpe")
 	rights := []string{sDim.Render(elapsed) + sep + esc + " ", sDim.Render(elapsed) + " ", ""}
 	if tok := m.liveTokens(); tok > 0 {
 		rights = append([]string{sDim.Render(elapsed) + sep + sDim.Render("↓ "+fmtTokens(tok)+" tok") + sep + esc + " "}, rights...)
@@ -218,7 +218,7 @@ func (m *Model) liveView() []string {
 		}
 	}
 	if step, n, k := m.currentStep(); step != "" {
-		lines = append(lines, ansi.Truncate(pad+sAccent.Render(glyphDoing)+" "+sSoft.Bold(true).Render(fmt.Sprintf("%d/%d", k, n))+" "+sDim.Render(step), max(1, width), glyphEllipsis))
+		lines = append(lines, ansi.Truncate(pad+sAccent.Render(glyphDoing)+" "+sSoft.Render(fmt.Sprintf("%d/%d", k, n))+" "+sDim.Render(step), max(1, width), glyphEllipsis))
 	}
 	return lines
 }

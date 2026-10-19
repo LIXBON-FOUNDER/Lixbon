@@ -43,6 +43,8 @@ type Toolbox struct {
 	AskUser func(ctx context.Context, questions []Question) (answers []string, ok bool)
 	// Remote desactiva ask_user cuando conduce el móvil.
 	Remote bool
+	// OnImage recibe cada imagen que el agente enseña con show_image.
+	OnImage func(ShownImage)
 	// OnTodo avisa a la interfaz de que la lista de pasos cambió.
 	OnTodo func(items, previous []TodoItem)
 	// OnOutput recibe la salida cruda de run_command mientras corre (desde
@@ -137,6 +139,8 @@ func (tb *Toolbox) dispatch(ctx context.Context, name string, args map[string]an
 		return tb.updateTodo(args["items"]), nil
 	case "ask_user":
 		return tb.askUser(ctx, args), nil
+	case "show_image":
+		return tb.showImage(args)
 	}
 	return dispatch(ctx, tb.Root, name, args)
 }

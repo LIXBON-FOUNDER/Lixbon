@@ -155,6 +155,10 @@ def _start_archiver_cron() -> None:
                 a = team.purgar_adjuntos_huerfanos()
                 if a:
                     _log.getLogger("lixbon").info(f"[cron] {a} adjuntos huérfanos de Team borrados.")
+                # Imágenes del chat remoto (adjuntos y show_image): 30 días.
+                i = remote.purge_remote_images()
+                if i:
+                    _log.getLogger("lixbon").info(f"[cron] {i} imágenes de sesiones remotas borradas.")
             except Exception as exc:
                 _log.getLogger("lixbon").warning(f"[cron] Error en tareas de mantenimiento: {exc}")
 

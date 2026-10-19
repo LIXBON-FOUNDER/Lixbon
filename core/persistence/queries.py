@@ -42,6 +42,7 @@ from core.persistence.models import (
     Subscription,
     TaskEmbedding,
     TokenUsageDaily,
+    TokenUsageServiceDaily,
     UsageCreditWindow,
     UsagePolicy,
     DonationSettings,
@@ -1480,6 +1481,65 @@ def record_model_usage(
         s.execute(stmt)
 
 
+USAGE_SERVICES = ("cli", "ide", "mobile", "web")
+
+
+def record_service_usage(user_id: int, service: str | None, tokens: int) -> None:
+    """Suma tokens al servicio que hizo la petición (panal de uso). Nunca
+    lanza: el registro no debe tumbar una respuesta ya servida."""
+    if tokens <= 0:
+        return
+    service = service if service in USAGE_SERVICES else "other"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        with get_session() as s:
+            s.execute(pg_insert(TokenUsageServiceDaily).values(
+                user_id=user_id, usage_date=today, service=service,
+                total_tokens=tokens, request_count=1, created_at=now_iso(),
+            ).on_conflict_do_update(
+                constraint="uq_token_usage_service_daily",
+                set_={
+                    "total_tokens": TokenUsageServiceDaily.total_tokens + tokens,
+                    "request_count": TokenUsageServiceDaily.request_count + 1,
+                },
+            ))
+    except Exception as exc:
+        import logging
+        logging.getLogger("lixbon.usage").error(f"No se pudo registrar el uso por servicio ({exc})")
+
+
+def get_service_usage(user_id: int, days: int = 30) -> list[dict[str, Any]]:
+    """Tokens por día y servicio de los últimos `days` días, del más antiguo al
+    más reciente. Lo que token_usage_daily tiene de más (el uso de antes de
+    contar por servicio) sale como «other»."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    with get_session() as s:
+        by_service = s.execute(
+            select(TokenUsageServiceDaily.usage_date, TokenUsageServiceDaily.service,
+                   TokenUsageServiceDaily.total_tokens)
+            .where(TokenUsageServiceDaily.user_id == user_id, TokenUsageServiceDaily.usage_date >= since)
+        ).all()
+        by_day = s.execute(
+            select(TokenUsageDaily.usage_date, func.coalesce(func.sum(TokenUsageDaily.total_tokens), 0))
+            .where(TokenUsageDaily.user_id == user_id, TokenUsageDaily.usage_date >= since)
+            .group_by(TokenUsageDaily.usage_date)
+        ).all()
+    totals: dict[tuple[str, str], int] = {}
+    attributed: dict[str, int] = {}
+    for date, service, tokens in by_service:
+        totals[(date, service)] = totals.get((date, service), 0) + int(tokens or 0)
+        attributed[date] = attributed.get(date, 0) + int(tokens or 0)
+    for date, tokens in by_day:
+        rest = int(tokens or 0) - attributed.get(date, 0)
+        if rest > 0:
+            totals[(date, "other")] = totals.get((date, "other"), 0) + rest
+    return [
+        {"date": date, "service": service, "tokens": tokens}
+        for (date, service), tokens in sorted(totals.items())
+        if tokens > 0
+    ]
+
+
 def save_message(
     conversation_id: str,
     role: str,
@@ -2693,7 +2753,7 @@ REMOTE_MAX_EVENTS = 2000
 REMOTE_PERSISTED_EVENTS = frozenset({
     "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
     "tool_result", "notice", "command_result", "error", "bye",
-    "reasoning", "question_answered", "compacted", "context",
+    "reasoning", "question_answered", "compacted", "context", "image_shown",
 })
 # Recorte por texto y por evento: un tool_result puede traer un archivo entero
 # y un snapshot, la conversación completa del host.

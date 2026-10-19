@@ -31,6 +31,21 @@ def app_de(user_agent: str | None, key_name: str | None = None) -> str | None:
     return _buscar((user_agent or "").lower(), _APPS_POR_AGENTE) or None
 
 
+# Servicio al que se apunta el uso (panal de la web y el móvil). Un turno del
+# CLI o del IDE mandado desde el móvil lo ejecuta el equipo, así que cuenta
+# para el CLI o el IDE.
+_SERVICIO_POR_CLIENTE = {"web": "web", "cli": "cli", "desktop": "ide", "ide": "ide", "mobile": "mobile"}
+_SERVICIO_POR_APP = {"CLI": "cli", "IDE": "ide", "app móvil": "mobile"}
+
+
+def servicio_de(user_data: dict | None) -> str:
+    user_data = user_data or {}
+    if user_data.get("auth_via") == "session":
+        return _SERVICIO_POR_CLIENTE.get(user_data.get("client") or "", "other")
+    nombre = (user_data.get("key_name") or "").strip().lower()
+    return _SERVICIO_POR_APP.get(_APPS.get(nombre, ""), "other")
+
+
 def clase_de_dispositivo(user_agent: str | None, key_name: str | None = None) -> str:
     # Sin versiones: cada actualización del navegador o de la app cambia el
     # user-agent y con la huella del agente completo cualquier regreso parecía

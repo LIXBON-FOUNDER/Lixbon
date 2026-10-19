@@ -87,6 +87,7 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		m.add(note(fmt.Sprintf("«/%s» solo funciona con un gateway Lixbon (proveedor actual: %s). /provider cambia de proveedor.", name, m.chat.Cfg.ActiveProfile())))
 		return nil
 	}
+	name = canonical(name)
 	switch name {
 	case "help":
 		return m.cmdHelp(arg)
@@ -170,9 +171,9 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 		return m.cmdBrowser(arg)
 	case "provider":
 		return m.cmdProvider(arg)
-	case "orquestar":
+	case "orchestrate":
 		return m.cmdOrquestar(arg)
-	case "orquestador":
+	case "orchestrator":
 		return m.cmdOrquestador()
 	case "doctor":
 		return m.cmdDoctor()
@@ -197,7 +198,7 @@ func (m *Model) runCommand(name, arg string) tea.Cmd {
 
 func (m *Model) cmdHelp(arg string) tea.Cmd {
 	if arg == "plain" || arg == "list" {
-		for _, group := range append(append([]string{}, Groups...), "propios") {
+		for _, group := range append(append([]string{}, Groups...), "custom") {
 			report := reportBlock{title: group, keys: true}
 			for _, s := range m.allSpecs() {
 				if s.Group == group {
@@ -211,7 +212,7 @@ func (m *Model) cmdHelp(arg string) tea.Cmd {
 		return nil
 	}
 	var options []option
-	for _, group := range append(append([]string{}, Groups...), "propios") {
+	for _, group := range append(append([]string{}, Groups...), "custom") {
 		var rows []option
 		for _, s := range m.allSpecs() {
 			if s.Group == group {
@@ -223,7 +224,7 @@ func (m *Model) cmdHelp(arg string) tea.Cmd {
 			options = append(options, rows...)
 		}
 	}
-	p := newPicker("Comandos", options, func(value string, cancelled bool) tea.Cmd {
+	p := newPicker("Commands", options, func(value string, cancelled bool) tea.Cmd {
 		if cancelled {
 			return nil
 		}
@@ -235,7 +236,7 @@ func (m *Model) cmdHelp(arg string) tea.Cmd {
 		return m.dispatch("/" + value)
 	})
 	p.search, p.maxShown = true, 14
-	p.keys = [][2]string{{"escribe", "filtra"}, {"↑↓", "mover"}, {"↵", "ejecutar"}, {"esc", "salir"}}
+	p.keys = [][2]string{{"type", "filter"}, {"↑↓", "move"}, {"↵", "run"}, {"esc", "close"}}
 	m.picker = p
 	return nil
 }
@@ -1334,38 +1335,66 @@ func (m *Model) cmdCost() {
 // el CLI apunta petición a petición.
 func (m *Model) cmdUsage() tea.Cmd {
 	generic, client, log := m.chat.Client.Generic, m.chat.Client, m.chat.Usage
+	ctxPct, ctxTokens := m.ctxPct, m.ctxTokens
 	return m.async("consultando uso", func(ctx context.Context) cmdDoneMsg {
 		var lines []block
 		if !generic {
 			if u, err := client.Usage(ctx); err != nil {
 				lines = append(lines, errLine("No se pudo obtener el uso de la cuenta. Verifica tu sesión. Error: "+err.Error()))
 			} else {
-				lines = append(lines, accountUsage(u))
+				lines = append(lines, accountUsage(u, ctxPct, ctxTokens))
 			}
 		}
 		return cmdDoneMsg{lines: append(lines, localUsage(log, time.Now()))}
 	})
 }
 
-func accountUsage(u api.Usage) reportBlock {
+// accountUsage pinta cada cupo como una barra con su porcentaje y, al lado,
+// cuándo se reinicia. Con una conversación en marcha añade su contexto.
+func accountUsage(u api.Usage, ctxPct float64, ctxTokens int) reportBlock {
 	report := reportBlock{title: "Uso de la cuenta", rows: [][2]string{{"Plan", sPrimary.Render(firstNonEmpty(u.Plan.Name, "-"))}}}
 	for _, b := range []struct {
 		label  string
 		bucket api.Bucket
-	}{{"Sesión (4h)", u.Buckets.Session}, {"Semana (todos los modelos)", u.Buckets.Week}} {
+	}{{"Sesión (4h)", u.Buckets.Session}, {"Semana", u.Buckets.Week}} {
 		if b.bucket.Unlimited {
-			report.rows = append(report.rows, [2]string{b.label, sDim2.Render(strings.Repeat(glyphMeterOn, 24)) + "  " + sOK.Render("ilimitado")})
+			report.rows = append(report.rows, [2]string{b.label, sTrack.Render(strings.Repeat(glyphMeterOn, usageCells)) + "  " + sOK.Render("ilimitado")})
 			continue
 		}
 		pct := min(100, int(b.bucket.Percent+0.5))
-		report.rows = append(report.rows, [2]string{b.label, meter(float64(pct), 24) + sPrimary.Render(fmt.Sprintf("  %d%% usado", pct))})
-		if reset := api.ResetIn(b.bucket.ResetAt, time.Now()); reset != "" {
-			report.rows = append(report.rows, [2]string{"", sDim2.Render("Se reinicia " + reset)})
-		} else if b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
-			report.rows = append(report.rows, [2]string{"", sDim2.Render("Empieza con tu próximo mensaje")})
+		when := api.ResetIn(b.bucket.ResetAt, time.Now())
+		if when == "" && b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
+			when = "empieza con tu próximo mensaje"
 		}
+		report.rows = append(report.rows, [2]string{b.label, usageRow(float64(pct), when)})
+	}
+	if ctxTokens > 0 {
+		hint := fmtTokens(ctxTokens) + " tok"
+		if ctxPct >= ctxFull {
+			hint = "/compact"
+		}
+		report.rows = append(report.rows, [2]string{"Contexto", usageRow(ctxPct, hint)})
 	}
 	return report
+}
+
+const usageCells = 24
+
+// usageRow es una fila de /usage: barra, porcentaje en el color de la barra
+// y la nota (cuándo se reinicia) atenuada.
+func usageRow(pct float64, note string) string {
+	style := sInk
+	switch {
+	case pct >= ctxFull:
+		style = sErr
+	case pct >= ctxWarn:
+		style = sWarn
+	}
+	row := meter(pct, usageCells) + "  " + style.Render(fmt.Sprintf("%.0f %%", pct))
+	if note != "" {
+		row += "  " + sDim2.Render(note)
+	}
+	return row
 }
 
 // localUsage son los tokens que devolvió cada proveedor en este equipo: hoy,

@@ -14,63 +14,77 @@ type Spec struct {
 	Group string
 }
 
-var Groups = []string{"conversación", "agente", "cuenta", "sistema"}
+var Groups = []string{"conversation", "agent", "account", "system"}
 
 // NameWidth alinea los argumentos y las descripciones en /help y en el menú.
 const NameWidth = 10
 
+// Los comandos van en inglés (nombre, argumentos, grupo y descripción); el
+// resto de la interfaz sigue en español.
 var Specs = []Spec{
-	{"help", "", "Ver todos los comandos", "conversación"},
-	{"model", "[nombre]", "Cambiar de modelo (sin argumento abre el selector)", "conversación"},
-	{"mode", "[ask|agent|delegate]", "Cambiar modo de trabajo", "conversación"},
-	{"new", "", "Empezar una conversación nueva", "conversación"},
-	{"compact", "", "Compactar la conversación para liberar contexto", "conversación"},
-	{"history", "[mensajes]", "Ver y reabrir conversaciones anteriores", "conversación"},
-	{"image", "<ruta>", "Escribir una imagen en el mensaje (también @ruta)", "conversación"},
-	{"paste", "", "Escribir la imagen del portapapeles en el mensaje (Alt+V)", "conversación"},
-	{"web", "[auto|on|off]", "Búsqueda web: el modelo decide, siempre o nunca", "conversación"},
-	{"copy", "", "Copiar la última respuesta al portapapeles", "conversación"},
-	{"save", "[ruta]", "Guardar la conversación en un archivo Markdown", "conversación"},
-	{"clear", "", "Vaciar el contexto y empezar de cero", "conversación"},
-	{"approve", "[on|off]", "Auto-aprobar herramientas del agente", "agente"},
-	{"plan", "[on|off]", "Modo plan: el agente solo explora y propone, sin tocar nada", "agente"},
-	{"todo", "", "Ver la lista de pasos del agente", "agente"},
-	{"tools", "", "Ver las herramientas que puede usar el agente", "agente"},
-	{"diff", "[ruta]", "Ver los cambios sin confirmar del workspace", "agente"},
-	{"undo", "", "Revertir los archivos que tocó el último turno del agente", "agente"},
-	{"ps", "", "Comandos en segundo plano del agente (y pararlos)", "agente"},
-	{"check", "[on|off]", "Verificar con el linter cada archivo que edita el agente", "agente"},
-	{"allow", "[comando]", "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)", "agente"},
-	{"commit", "[mensaje]", "Commit de los cambios con mensaje redactado por el modelo", "agente"},
-	{"mcp", "", "Servidores MCP: ver sus herramientas o añadir otro", "agente"},
-	{"browser", "[on|off|auto|close|open <url>]", "Navegador del agente: estado, activar, cerrar o abrir para iniciar sesión", "agente"},
-	{"run", "<comando>", "Ejecutar un comando y darle la salida al modelo", "agente"},
-	{"workspace", "[ruta]", "Carpeta de trabajo del modo agent", "agente"},
-	{"init", "", "Generar LIXBON.md con el contexto del proyecto", "agente"},
-	{"visual", "<qué diseñar> | <id> <cambio> | codigo <id> [stack]", "Diseñar en Lixbon Visuals: crear, editar o pasar a código", "agente"},
-	{"status", "", "Ver estado de la sesión", "cuenta"},
-	{"cost", "", "Tokens y contexto consumidos en esta sesión", "cuenta"},
-	{"usage", "", "Ver uso global de la cuenta", "cuenta"},
-	{"nodes", "", "Ver nodos del clúster", "cuenta"},
-	{"login", "", "Iniciar sesión de nuevo", "cuenta"},
-	{"logout", "", "Cerrar la sesión de esta máquina", "cuenta"},
-	{"key", "<api_key>", "Usar otra API key", "cuenta"},
-	{"config", "", "Ajustes del CLI en un menú", "sistema"},
-	{"bar", "[on|off]", "Barra de estado fija al pie de la terminal", "sistema"},
-	{"doctor", "", "Diagnóstico de terminal, conexión y sesión", "sistema"},
-	{"remote", "", "Controlar esta sesión desde la app móvil (link + QR)", "sistema"},
-	{"update", "", "Actualizar el CLI desde el servidor", "sistema"},
-	{"exit", "", "Salir", "sistema"},
+	{"help", "", "Show all commands", "conversation"},
+	{"model", "[name]", "Switch model (no argument opens the picker)", "conversation"},
+	{"mode", "[ask|agent|delegate]", "Change the working mode", "conversation"},
+	{"new", "", "Start a new conversation", "conversation"},
+	{"compact", "", "Compact the conversation to free up context", "conversation"},
+	{"history", "[messages]", "Browse and reopen past conversations", "conversation"},
+	{"image", "<path>", "Add an image to the message (also @path)", "conversation"},
+	{"paste", "", "Paste the clipboard image into the message (Alt+V)", "conversation"},
+	{"web", "[auto|on|off]", "Web search: the model decides, always or never", "conversation"},
+	{"copy", "", "Copy the last reply to the clipboard", "conversation"},
+	{"save", "[path]", "Save the conversation as a Markdown file", "conversation"},
+	{"clear", "", "Clear the context and start fresh", "conversation"},
+	{"approve", "[on|off]", "Auto-approve the agent's tools", "agent"},
+	{"plan", "[on|off]", "Plan mode: the agent explores and proposes, touching nothing", "agent"},
+	{"todo", "", "Show the agent's step list", "agent"},
+	{"tools", "", "Show the tools the agent can use", "agent"},
+	{"diff", "[path]", "Show the workspace's uncommitted changes", "agent"},
+	{"undo", "", "Revert the files the agent's last turn touched", "agent"},
+	{"ps", "", "The agent's background commands (and stop them)", "agent"},
+	{"check", "[on|off]", "Lint every file the agent edits", "agent"},
+	{"allow", "[command]", "Commands the agent runs without asking (npm test, pytest…)", "agent"},
+	{"commit", "[message]", "Commit the changes with a message written by the model", "agent"},
+	{"mcp", "", "MCP servers: see their tools or add one", "agent"},
+	{"browser", "[on|off|auto|close|open <url>]", "The agent's browser: status, enable, close or open to sign in", "agent"},
+	{"run", "<command>", "Run a command and give its output to the model", "agent"},
+	{"workspace", "[path]", "Working folder for agent mode", "agent"},
+	{"init", "", "Generate LIXBON.md with the project's context", "agent"},
+	{"visual", "<what to design> | <id> <change> | code <id> [stack]", "Design in Lixbon Visuals: create, edit or turn into code", "agent"},
+	{"status", "", "Show the session status", "account"},
+	{"cost", "", "Tokens and context used in this session", "account"},
+	{"usage", "", "Show the account's overall usage", "account"},
+	{"nodes", "", "Show the cluster nodes", "account"},
+	{"login", "", "Sign in again", "account"},
+	{"logout", "", "Sign out on this machine", "account"},
+	{"key", "<api_key>", "Use another API key", "account"},
+	{"config", "", "CLI settings in a menu", "system"},
+	{"bar", "[on|off]", "Status bar pinned to the bottom of the terminal", "system"},
+	{"doctor", "", "Diagnose the terminal, connection and session", "system"},
+	{"remote", "", "Control this session from the mobile app (link + QR)", "system"},
+	{"update", "", "Update the CLI from the server", "system"},
+	{"exit", "", "Quit", "system"},
 }
 
 // GoSpecs son comandos que solo existen en el CLI Go. Quedan fuera de Specs
 // porque este es el contrato con el catálogo de Python.
 var GoSpecs = []Spec{
-	{"provider", "[nombre | key nombre]", "Cambiar de proveedor de modelos o de clave de uno (lixbon.com, LM Studio, Ollama…)", "cuenta"},
-	{"orquestar", "<objetivo>", "El agente coordina un equipo de agentes en Lixbon Desktop", "agente"},
-	{"orquestador", "", "Estado del orquestador de Lixbon Desktop: runs y tareas", "agente"},
-	{"effort", "[auto|off|low|medium|high]", "Cuánto razona el modelo antes de responder", "conversación"},
-	{"branch", "[rama]", "Ver las ramas del repositorio y cambiar de una a otra", "agente"},
+	{"provider", "[name | key name]", "Switch model provider or one's key (lixbon.com, LM Studio, Ollama…)", "account"},
+	{"orchestrate", "<goal>", "The agent coordinates a team of agents in Lixbon Desktop", "agent"},
+	{"orchestrator", "", "Lixbon Desktop orchestrator status: runs and tasks", "agent"},
+	{"effort", "[auto|off|low|medium|high]", "How much the model reasons before answering", "conversation"},
+	{"branch", "[branch]", "List the repository's branches and switch between them", "agent"},
+}
+
+// aliases son los nombres en español de antes: siguen funcionando, pero no
+// salen en el menú ni en /help.
+var aliases = map[string]string{"orquestar": "orchestrate", "orquestador": "orchestrator"}
+
+// canonical devuelve el nombre en inglés de un comando escrito con su alias.
+func canonical(name string) string {
+	if real, ok := aliases[name]; ok {
+		return real
+	}
+	return name
 }
 
 // Ordered devuelve el catálogo por grupo (en el orden de Groups) y, dentro,
@@ -109,6 +123,7 @@ func Match(prefix string) []Spec {
 }
 
 func lookup(name string) (Spec, bool) {
+	name = canonical(name)
 	for _, s := range slices.Concat(Specs, GoSpecs) {
 		if s.Name == name {
 			return s, true
