@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/gif" // las miniaturas leen GIF, JPEG y PNG
+	_ "image/gif" // las miniaturas leen GIF, JPEG, PNG y WebP
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/colorprofile"
-
-	"lixbon.com/cli/internal/weblogin"
+	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 // drawImages dice si la terminal puede pintar miniaturas: hace falta color de
@@ -27,9 +27,9 @@ func setColorProfile(p colorprofile.Profile) {
 
 func canDrawImages() bool { return drawImages && glyphs.halfBlocks }
 
-// openImage abre la imagen entera en el visor del sistema. Las pruebas lo
+// openImage abre la imagen entera en el navegador (viewer.go). Las pruebas lo
 // cambian para no abrir nada.
-var openImage = weblogin.OpenBrowser
+var openImage = openInViewer
 
 // thumb pinta una imagen con medios bloques: cada celda son dos píxeles, el
 // de arriba en la tinta de ▀ y el de abajo en su fondo. La imagen se lee una
@@ -40,8 +40,16 @@ type thumb struct {
 	once sync.Once
 	img  image.Image
 
-	mu    sync.Mutex
-	cache map[[2]int][]string
+	mu     sync.Mutex
+	cache  map[[2]int][]string
+	sixels map[[2]int]string // por tamaño en píxeles (sixel.go)
+}
+
+// cached devuelve la miniatura ya pintada a ese tamaño de celdas, o nil.
+func (t *thumb) cached(key [2]int) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cache[key]
 }
 
 func newThumb(path string) *thumb {
@@ -66,7 +74,7 @@ func (t *thumb) load() image.Image {
 }
 
 // lines devuelve la miniatura en a lo sumo maxCols×maxRows celdas, o nada si
-// la terminal no puede pintarla o la imagen no se puede leer (WebP, BMP…).
+// la terminal no puede pintarla o la imagen no se puede leer (BMP, SVG…).
 func (t *thumb) lines(maxCols, maxRows int) []string {
 	if t == nil || !canDrawImages() || maxCols < 4 || maxRows < 1 {
 		return nil
@@ -100,45 +108,23 @@ func (t *thumb) lines(maxCols, maxRows int) []string {
 		t.cache = map[[2]int][]string{}
 	}
 	t.cache[key] = out
+	thumbIndex.add(out[0], thumbRef{t, key})
 	return out
 }
 
 func halfBlocks(img image.Image, cols, rows int) []string {
-	b := img.Bounds()
+	// Se reduce con Catmull-Rom sobre el fondo de la terminal (lo transparente
+	// se ve sobre él): con muestras sueltas la miniatura salía con ruido.
 	bg := parseHex(pal.bg)
-	sample := func(x, y int) [3]uint32 {
-		// Media de la caja de píxeles que cae en (x, y) de la rejilla.
-		x0 := b.Min.X + x*b.Dx()/cols
-		x1 := max(x0+1, b.Min.X+(x+1)*b.Dx()/cols)
-		y0 := b.Min.Y + y*b.Dy()/(rows*2)
-		y1 := max(y0+1, b.Min.Y+(y+1)*b.Dy()/(rows*2))
-		step := max(1, (x1-x0)*(y1-y0)/64)
-		var r, g, bl, n uint32
-		i := 0
-		for py := y0; py < y1; py++ {
-			for px := x0; px < x1; px++ {
-				if i++; i%step != 0 {
-					continue
-				}
-				cr, cg, cb, ca := img.At(px, py).RGBA()
-				// Lo transparente se ve sobre el fondo de la terminal.
-				r += (cr + bg[0]*(0xffff-ca)/0xffff) >> 8
-				g += (cg + bg[1]*(0xffff-ca)/0xffff) >> 8
-				bl += (cb + bg[2]*(0xffff-ca)/0xffff) >> 8
-				n++
-			}
-		}
-		if n == 0 {
-			return [3]uint32{bg[0] >> 8, bg[1] >> 8, bg[2] >> 8}
-		}
-		return [3]uint32{r / n, g / n, bl / n}
-	}
+	px := image.NewRGBA(image.Rect(0, 0, cols, rows*2))
+	draw.Draw(px, px.Bounds(), image.NewUniform(color.RGBA{uint8(bg[0] >> 8), uint8(bg[1] >> 8), uint8(bg[2] >> 8), 0xff}), image.Point{}, draw.Src)
+	draw.CatmullRom.Scale(px, px.Bounds(), img, img.Bounds(), draw.Over, nil)
 	out := make([]string, rows)
 	for y := range rows {
 		var sb strings.Builder
 		for x := range cols {
-			top, bottom := sample(x, 2*y), sample(x, 2*y+1)
-			fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm▀", top[0], top[1], top[2], bottom[0], bottom[1], bottom[2])
+			top, bottom := px.RGBAAt(x, 2*y), px.RGBAAt(x, 2*y+1)
+			fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm▀", top.R, top.G, top.B, bottom.R, bottom.G, bottom.B)
 		}
 		sb.WriteString("\x1b[0m")
 		out[y] = sb.String()

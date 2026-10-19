@@ -67,6 +67,10 @@ func TestThumbUsesHalfBlocks(t *testing.T) {
 	if len(wide) != 5 || ansi.StringWidth(wide[0]) != 40 {
 		t.Fatalf("proporción: %d filas de %d", len(wide), ansi.StringWidth(wide[0]))
 	}
+	// WebP también, que es lo que sirven casi todas las webs.
+	if lines := newThumb(filepath.Join("testdata", "gopher.webp")).lines(20, 10); len(lines) == 0 {
+		t.Fatal("la miniatura de un WebP no salió")
+	}
 }
 
 func TestThumbIsOffWithoutColorOrReadableImage(t *testing.T) {
