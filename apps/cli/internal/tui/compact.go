@@ -101,7 +101,7 @@ func (m *Model) compactView() []string {
 	} else {
 		pct := min(95, float64(c.written)*100/summaryChars)
 		filled := int(pct*cells/100 + 0.5)
-		bar = sAccent.Render(strings.Repeat(glyphMeterOn, filled)) + sDim2.Render(strings.Repeat(glyphMeterOff, cells-filled))
+		bar = sAccent.Render(strings.Repeat(glyphMeterOn, filled)) + sTrack.Render(strings.Repeat(glyphMeterOff, cells-filled))
 		step = sSoft.Render("2/2 ") + sDim.Render(fmt.Sprintf("escribe el resumen %.0f%%", pct))
 	}
 	return []string{
@@ -119,7 +119,7 @@ func sweep(frame, cells int) string {
 		if i >= pos-span && i < pos {
 			b.WriteString(sAccent.Render(glyphMeterOn))
 		} else {
-			b.WriteString(sDim2.Render(glyphMeterOff))
+			b.WriteString(sTrack.Render(glyphMeterOff))
 		}
 	}
 	return b.String()

@@ -104,3 +104,17 @@ def object_exists(key: str) -> bool:
 def delete_object(key: str) -> None:
     client = _get_client()
     client.delete_object(Bucket=R2_BUCKET, Key=key)
+
+
+def delete_older_than(prefix: str, days: int) -> int:
+    """Borra los objetos bajo `prefix` con más de `days` días. Devuelve cuántos."""
+    from datetime import datetime, timedelta, timezone
+
+    client = _get_client()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    old: list[dict[str, str]] = []
+    for page in client.get_paginator("list_objects_v2").paginate(Bucket=R2_BUCKET, Prefix=prefix):
+        old.extend({"Key": o["Key"]} for o in page.get("Contents", []) if o["LastModified"] < cutoff)
+    for i in range(0, len(old), 1000):
+        client.delete_objects(Bucket=R2_BUCKET, Delete={"Objects": old[i:i + 1000], "Quiet": True})
+    return len(old)

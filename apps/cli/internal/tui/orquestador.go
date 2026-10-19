@@ -24,19 +24,19 @@ var lxoRun = func(ctx context.Context, lxo, dir string, args ...string) (string,
 
 func (m *Model) cmdOrquestar(objective string) tea.Cmd {
 	if objective == "" {
-		m.add(errLine("Uso: /orquestar <objetivo>"))
+		m.add(errLine("Uso: /orchestrate <objetivo>"))
 		m.add(note("El agente reparte el objetivo entre agentes hijos en Lixbon Desktop; cada lanzamiento lo apruebas allí."))
 		return nil
 	}
 	info := m.chat.Session.OrchInfo()
 	if !info.Available() {
 		m.add(errLine(firstNonEmpty(info.Problem, "El orquestador no está disponible.")))
-		m.add(note("/orquestador explica qué falta."))
+		m.add(note("/orchestrator explica qué falta."))
 		return nil
 	}
 	m.chat.Session.PlanMode = false
 	m.setMode(chat.ModeAgent)
-	return m.startTurn("/orquestar "+objective, "")
+	return m.startTurn("/orchestrate "+objective, "")
 }
 
 func (m *Model) cmdOrquestador() tea.Cmd {

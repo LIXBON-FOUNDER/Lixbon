@@ -71,8 +71,8 @@ func TestAgentOnceUsesMCPToolsWithApproval(t *testing.T) {
 	}
 	first := script.bodies[0]
 	tools, _ := first["tools"].([]any)
-	if len(tools) != 21 {
-		t.Fatalf("el modelo debe recibir las 20 herramientas más mcp_tools, recibió %d", len(tools))
+	if len(tools) != 22 {
+		t.Fatalf("el modelo debe recibir las 21 herramientas más mcp_tools, recibió %d", len(tools))
 	}
 	// Las del servidor no viajan hasta que el modelo las carga: ve el
 	// servidor por su nombre y mcp_tools.
@@ -118,7 +118,7 @@ func TestAgentOnceSurvivesABrokenMCPServer(t *testing.T) {
 	if code := h.run("chat", "--once", "hola"); code != 0 {
 		t.Fatalf("code %d: %s", code, h.errOut)
 	}
-	if tools, _ := script.bodies[0]["tools"].([]any); len(tools) != 20 {
+	if tools, _ := script.bodies[0]["tools"].([]any); len(tools) != 21 {
 		t.Fatalf("un servidor roto no debe añadir herramientas: %d", len(tools))
 	}
 }

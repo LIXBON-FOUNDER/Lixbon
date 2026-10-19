@@ -122,7 +122,7 @@ func TestIsLxoCommand(t *testing.T) {
 
 func TestPromptSectionCitaLaRutaYLaAprobacionHumana(t *testing.T) {
 	text := PromptSection(Info{Lxo: `C:\x y\lxo.exe`})
-	for _, want := range []string{`"C:\x y\lxo.exe" guide coordinator`, "/orquestar", "aprueba una persona", "sin encadenar"} {
+	for _, want := range []string{`"C:\x y\lxo.exe" guide coordinator`, "/orchestrate", "aprueba una persona", "sin encadenar"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("falta %q en:\n%s", want, text)
 		}

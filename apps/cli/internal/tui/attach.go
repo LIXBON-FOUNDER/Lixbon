@@ -77,7 +77,7 @@ func droppedImage(content, workspace string) (string, bool) {
 }
 
 func newImageChip(n int, path string) imageChip {
-	c := imageChip{n: n, name: filepath.Base(path)}
+	c := imageChip{n: n, name: filepath.Base(path), path: path, thumb: newThumb(path)}
 	if info, err := os.Stat(path); err == nil {
 		c.size = info.Size()
 	}

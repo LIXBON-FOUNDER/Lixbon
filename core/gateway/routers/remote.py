@@ -17,6 +17,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import socket
 import time
 from typing import Any
@@ -43,6 +44,7 @@ from core.persistence.queries import (
     update_remote_session_meta,
 )
 from core.security.auth import authenticate, session_or_api_key
+from core.storage import r2
 from core.security.ratelimit import check_auth_rate_limit, record_failed_auth
 
 router = APIRouter()
@@ -499,6 +501,78 @@ async def controller_transcript(
         "events": events,
         "last_seq": events[-1].get("seq", from_seq) if events else from_seq,
     }
+
+
+# ── imágenes de la sesión ──────────────────────────────────────────────────
+# Lo que el usuario adjunta y lo que el agente le enseña (show_image). El host
+# elige el id y sube los bytes mientras el evento ya viaja con ese id; el móvil
+# y la web las piden aquí. Viven en R2 y se borran a los 30 días.
+
+REMOTE_IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
+REMOTE_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+REMOTE_IMAGE_DAYS = 30
+_IMAGE_ID = re.compile(r"^[a-f0-9]{8,64}\.(png|jpg|webp|gif)$")
+
+
+def _image_key(session_id: str, image_id: str) -> str:
+    if not _IMAGE_ID.match(image_id):
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    return f"remote/{session_id}/{image_id}"
+
+
+@router.put("/api/remote/sessions/{session_id}/images/{image_id}")
+async def host_upload_image(
+    session_id: str,
+    image_id: str,
+    request: Request,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """El host sube una imagen del chat con el id que ya mandó en el evento."""
+    await _owner(session_id, lixbon_session, authorization)
+    key = _image_key(session_id, image_id)
+    mime = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if REMOTE_IMAGE_TYPES.get(mime) != image_id.rsplit(".", 1)[1]:
+        raise HTTPException(status_code=415, detail="Solo imágenes PNG, JPEG, WebP o GIF")
+    data = await request.body()
+    if not data or len(data) > REMOTE_IMAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="La imagen pasa de 8 MB")
+    try:
+        await asyncio.to_thread(r2.upload_bytes, key, data, mime)
+    except r2.R2NotConfigured:
+        raise HTTPException(status_code=503, detail="El almacén de imágenes no está configurado")
+    return {"id": image_id}
+
+
+@router.get("/api/remote/sessions/{session_id}/images/{image_id}")
+async def remote_image(
+    session_id: str,
+    image_id: str,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """La imagen, para el dueño de la sesión. Pasa por el gateway (el bucket es
+    privado y una redirección a R2 perdería la cabecera de la app)."""
+    await _owner(session_id, lixbon_session, authorization)
+    key = _image_key(session_id, image_id)
+    try:
+        data = await asyncio.to_thread(r2.get_object_bytes, key)
+    except r2.R2NotConfigured:
+        raise HTTPException(status_code=503, detail="El almacén de imágenes no está configurado")
+    except Exception:
+        # Aún subiendo o ya borrada: el cliente reintenta un rato.
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+    ext = image_id.rsplit(".", 1)[1]
+    mime = next(m for m, e in REMOTE_IMAGE_TYPES.items() if e == ext)
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "private, max-age=2592000, immutable"})
+
+
+def purge_remote_images() -> int:
+    """Borra las imágenes de sesiones remotas con más de 30 días."""
+    try:
+        return r2.delete_older_than("remote/", REMOTE_IMAGE_DAYS)
+    except r2.R2NotConfigured:
+        return 0
 
 
 @router.post("/api/remote/sessions/{session_id}/commands")

@@ -57,6 +57,8 @@ func (f *fakeRelay) RemoteEnd(context.Context, string) error {
 
 func (f *fakeRelay) RemoteQR(context.Context, string) (string, error) { return "▀▄ QR", nil }
 
+func (f *fakeRelay) RemoteImage(context.Context, string, string, string, []byte) error { return nil }
+
 func (f *fakeRelay) RemoteCommands(ctx context.Context, _ string, _ int64) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
 	f.mu.Lock()

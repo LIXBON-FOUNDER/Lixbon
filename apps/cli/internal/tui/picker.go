@@ -285,7 +285,7 @@ func (p *picker) view(width, maxRows int) []string {
 	for i := start; i < end; i++ {
 		o := opts[i]
 		if o.Disabled {
-			rows = append(rows, panelRow{text: sDim2.Bold(true).Render(strings.ToUpper(o.Label))})
+			rows = append(rows, panelRow{text: sDim.Render(strings.ToLower(o.Label))})
 			continue
 		}
 		number++

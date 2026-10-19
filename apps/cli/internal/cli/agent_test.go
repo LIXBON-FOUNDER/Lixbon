@@ -101,7 +101,7 @@ func TestAgentOnceWritesFilesAndAnswers(t *testing.T) {
 		}
 	}
 	first := script.bodies[0]
-	if tools, _ := first["tools"].([]any); len(tools) != 20 || first["think"] != "high" || first["stream"] != true {
+	if tools, _ := first["tools"].([]any); len(tools) != 21 || first["think"] != "high" || first["stream"] != true {
 		t.Fatalf("primera petición: tools=%d think=%v", len(tools), first["think"])
 	}
 	msgs := bodyMessages(first)

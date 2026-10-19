@@ -394,7 +394,7 @@ func (m *Model) approvalBody(req agent.Approval) []string {
 	switch req.Kind {
 	case agent.ApproveCommand:
 		return []string{
-			sAccent.Bold(true).Render("$") + " " + sBold.Render(req.Summary),
+			sAccent.Render("$") + " " + sBold.Render(req.Summary),
 			sDim.Render("  en " + shortPath(m.chat.Workspace)),
 		}
 	case agent.ApproveMCP:

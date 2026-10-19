@@ -647,6 +647,14 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(tools.AskSummary(args), 100), ReadOnly: true})
 		s.Stats.Actions++
 		return s.Tools.Execute(ctx, tool, args), nil
+	case "show_image":
+		// Va en su propia fila, no plegada con las lecturas: es para el usuario.
+		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(pyStr(args["path"]), 200)})
+		result, failed, elapsed := t.execute(ctx, tool, args)
+		s.Stats.Actions++
+		t.emit(Event{Kind: EventActionResult, Tool: tool, Result: result, Summary: textutil.Head(firstLine(result), 120),
+			Failed: failed, Elapsed: elapsed})
+		return result, nil
 	case MCPToolsTool:
 		return t.loadMCPServer(args), nil
 	}
@@ -804,7 +812,7 @@ func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
 
 // AskTools son las herramientas del modo ask: ver el proyecto e internet y
 // preguntar, nunca cambiar nada. En el navegador abre y lee, sin clics.
-var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user",
+var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user", "show_image",
 	"browser_navigate", "browser_snapshot", "browser_get_text", "browser_screenshot", "browser_scroll", "browser_back",
 	"browser_tabs", "browser_wait", "browser_viewport"}
 

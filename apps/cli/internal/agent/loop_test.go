@@ -347,7 +347,7 @@ func TestNativeToolCallsRoundTrip(t *testing.T) {
 	if answer != "Listo." || r.read("a.txt") != "hola\n" {
 		t.Fatalf("answer=%q file=%q", answer, r.read("a.txt"))
 	}
-	if len(r.model.toolLists[0]) != 20 {
+	if len(r.model.toolLists[0]) != 21 {
 		t.Fatalf("herramientas enviadas: %d", len(r.model.toolLists[0]))
 	}
 	var toolMsgs []history.Message

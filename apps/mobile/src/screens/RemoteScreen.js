@@ -15,6 +15,8 @@ import { ApiException } from '../api';
 import { composeMessage, splitMessage } from '../attachments';
 import { AttachmentTray, MentionChip, useAttachments } from '../components/Attachments';
 import Icon from '../components/Icon';
+import QuestionBatch, { isBatch } from '../components/QuestionBatch';
+import { ImageThumb, ImageViewer, RemoteImageContext, ShownImageCard, useImageViewer } from '../components/RemoteImages';
 import RemoteSessionList, { LiveDot } from '../components/RemoteSessionList';
 import ShimmerText from '../components/ShimmerText';
 import { useDialogs } from '../components/dialogs';
@@ -34,7 +36,7 @@ const GROUP_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code', skill: 'Skills' }
 const MENTION_AT_END = /(^|\s)@([^\s@]*)$/;
 const CARET = '⁣';
 const RING = 2 * Math.PI * 8;
-const EMPTY_TURN = { type: 'turn', key: 'live', work: [], qa: [], end: null, answer: null, actions: 0, adds: 0, dels: 0, files: [], tests: null, commit: '' };
+const EMPTY_TURN = { type: 'turn', key: 'live', work: [], images: [], qa: [], end: null, answer: null, actions: 0, adds: 0, dels: 0, files: [], tests: null, commit: '' };
 const BIG_RING = 2 * Math.PI * 18;
 // Las filas del hilo miden 34 como en el lienzo; el toque llega a 44.
 const ROW_SLOP = { top: 5, bottom: 5 };
@@ -338,6 +340,24 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   // respuesta a una pregunta del agente viaja como su decisión ('' = cancelar).
   const choose = (id, value) => sendCommand({ type: 'approve', id, decision: value });
   const question = [...state.choices].reverse().find((x) => x.question) || null;
+  const batchRef = useRef(null);
+  // Imágenes del chat: el gateway las sirve al dueño de la sesión.
+  const viewer = useImageViewer();
+  const imageDownload = useCallback(
+    (id) => ({ url: `${api.base}/api/remote/sessions/${session.id}/images/${id}`, headers: { Authorization: `Bearer ${auth.currentToken()}` } }),
+    [api, auth, session.id],
+  );
+  const images = useMemo(
+    () => ({
+      source: (id, attempt = 0) => {
+        const { url, headers } = imageDownload(id);
+        return { uri: attempt ? `${url}?r=${attempt}` : url, headers };
+      },
+      open: viewer.open,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [imageDownload],
+  );
 
   const sendPrompt = async (override) => {
     const text = (override ?? input).trim();
@@ -346,6 +366,11 @@ function RemoteSessionView({ session, onBack, onUsage }) {
     // Con una pregunta del agente abierta, lo escrito es la respuesta.
     if (question && !override && text && !text.startsWith('/') && ready.length === 0) {
       setInput('');
+      // En una tanda, lo escrito es «otra respuesta» de la pregunta a la vista.
+      if (isBatch(question) && batchRef.current) {
+        batchRef.current.answerCurrent(text);
+        return;
+      }
       if (!(await choose(question.id, text))) setInput((cur) => cur || text);
       return;
     }
@@ -367,7 +392,8 @@ function RemoteSessionView({ session, onBack, onUsage }) {
     const local = `l${Date.now()}`;
     const draft = { input, mentions };
     if (optimistic) {
-      dispatch({ type: 'local_user', local, text: command.text, images: ready.filter((a) => a.kind === 'image').length, mentions: command.mentions || [] });
+      const photos = ready.filter((a) => a.kind === 'image');
+      dispatch({ type: 'local_user', local, text: command.text, images: photos.length, localImages: photos.map((a) => a.preview).filter(Boolean), mentions: command.mentions || [] });
     }
     if (!override) {
       setInput('');
@@ -482,131 +508,142 @@ function RemoteSessionView({ session, onBack, onUsage }) {
   const live = { busy, activity: state.activity, activityLabel: state.activityLabel, since: state.busySince, waitingTool, context: state.context };
 
   return (
-    <KeyboardAware>
-      <SessionHeader
-        session={session}
-        state={state}
-        link={link}
-        agent={agent}
-        usage={usage}
-        question={!!question}
-        compacting={compacting}
-        onBack={onBack}
-        onQuota={state.ended ? null : () => setOverlay('quota')}
-        onOptions={state.ended ? null : openCommands}
-      />
+    <RemoteImageContext.Provider value={images}>
+      <KeyboardAware>
+        <SessionHeader
+          session={session}
+          state={state}
+          link={link}
+          agent={agent}
+          usage={usage}
+          question={!!question}
+          compacting={compacting}
+          onBack={onBack}
+          onQuota={state.ended ? null : () => setOverlay('quota')}
+          onOptions={state.ended ? null : openCommands}
+        />
 
-      {!state.ended && (
-        <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
-          <Segmented
-            stretch
-            value={tab}
-            onChange={setTab}
-            bg={c.surface2}
-            options={[
-              { value: 'chat', label: 'Conversación' },
-              { value: 'changes', label: changes.length ? `Cambios · ${changes.length}` : 'Cambios', dot: changes.length > seenChanges && tab !== 'changes' },
-              ...(canOrch ? [{ value: 'orch', label: 'Orquestar', dot: orchBusy && tab !== 'orch' }] : []),
-            ]}
-          />
+        {!state.ended && (
+          <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+            <Segmented
+              stretch
+              value={tab}
+              onChange={setTab}
+              bg={c.surface2}
+              options={[
+                { value: 'chat', label: 'Conversación' },
+                { value: 'changes', label: changes.length ? `Cambios · ${changes.length}` : 'Cambios', dot: changes.length > seenChanges && tab !== 'changes' },
+                ...(canOrch ? [{ value: 'orch', label: 'Orquestar', dot: orchBusy && tab !== 'orch' }] : []),
+              ]}
+            />
+          </View>
+        )}
+
+        <View style={{ flex: 1 }}>
+          {canOrch && tab === 'orch' ? (
+            <RemoteOrch state={state} sendCommand={sendCommand} />
+          ) : tab === 'changes' ? (
+            <ChangesView changes={changes} open={open} toggle={toggle} />
+          ) : state.items.length === 0 ? (
+            <SessionEmpty state={state} agent={agent} />
+          ) : (
+            <FlatList
+              inverted
+              data={blocks}
+              keyExtractor={(b) => b.key}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
+              keyboardShouldPersistTaps="handled"
+              onScroll={onListScroll}
+              scrollEventThrottle={100}
+              maintainVisibleContentPosition={following ? undefined : HOLD_POSITION}
+              renderItem={({ item, index }) => <Block block={item} last={index === 0} agent={agent} live={live} open={open} toggle={toggle} onTimeline={openTimeline} />}
+              extraData={[busy, state.activity, state.activityLabel, waitingTool, open, state.context]}
+            />
+          )}
         </View>
-      )}
 
-      <View style={{ flex: 1 }}>
-        {canOrch && tab === 'orch' ? (
-          <RemoteOrch state={state} sendCommand={sendCommand} />
-        ) : tab === 'changes' ? (
-          <ChangesView changes={changes} open={open} toggle={toggle} />
-        ) : state.items.length === 0 ? (
-          <SessionEmpty state={state} agent={agent} />
-        ) : (
-          <FlatList
-            inverted
-            data={blocks}
-            keyExtractor={(b) => b.key}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
-            keyboardShouldPersistTaps="handled"
-            onScroll={onListScroll}
-            scrollEventThrottle={100}
-            maintainVisibleContentPosition={following ? undefined : HOLD_POSITION}
-            renderItem={({ item, index }) => <Block block={item} last={index === 0} agent={agent} live={live} open={open} toggle={toggle} onTimeline={openTimeline} />}
-            extraData={[busy, state.activity, state.activityLabel, waitingTool, open, state.context]}
+        {!state.ended && !busy && !compacting && state.background.length > 0 && <WaitingStrip tasks={state.background} agent={agent} />}
+
+        {!state.ended && compacting && <CompactCard compact={state.compact} />}
+
+        {state.approvals.map((a) => (
+          <ApprovalCard key={a.id} approval={a} onDecide={approve} />
+        ))}
+
+        {!state.ended &&
+          state.choices
+            .slice(-1)
+            .map((x) =>
+              isBatch(x) ? (
+                <QuestionBatch key={x.id} ref={batchRef} choice={x} agent={agent} onChoose={choose} />
+              ) : x.question ? (
+                <QuestionCard key={x.id} choice={x} agent={agent} onChoose={choose} />
+              ) : (
+                <ChoiceCard key={x.id} choice={x} onChoose={choose} />
+              ),
+            )}
+
+        {!state.ended && (
+          <View onLayout={(e) => setComposerH(e.nativeEvent.layout.height)}>
+            <RemoteComposer
+              input={input}
+              inputRef={inputRef}
+              onChangeInput={setInput}
+              onSend={() => sendPrompt()}
+              onInterrupt={interrupt}
+              onCommands={openCommands}
+              onRunCommand={(text) => sendPrompt(text)}
+              commands={commands}
+              thinking={busy}
+              answering={!!question}
+              disabled={!state.hostConnected}
+              sending={sending}
+              attachments={attachments}
+              mentions={mentions}
+              onRemoveMention={(path) => setMentions((cur) => cur.filter((m) => m.path !== path))}
+              mentionQuery={canMention ? mentionQuery : null}
+              files={state.files}
+              onPickMention={pickMention}
+              context={state.context}
+              compacting={compacting}
+              onContext={() => setOverlay('context')}
+            />
+          </View>
+        )}
+
+        {overlay === 'context' && state.context && (
+          <ContextPopover
+            context={state.context}
+            compacted={state.items.some((it) => it.kind === 'compacted')}
+            bottom={composerH + 4}
+            busy={busy}
+            compacting={compacting}
+            canCompact={canCompact}
+            onCompact={() => runCommand('compact')}
+            onClose={() => setOverlay(null)}
           />
         )}
-      </View>
-
-      {!state.ended && !busy && !compacting && state.background.length > 0 && <WaitingStrip tasks={state.background} agent={agent} />}
-
-      {!state.ended && compacting && <CompactCard compact={state.compact} />}
-
-      {state.approvals.map((a) => (
-        <ApprovalCard key={a.id} approval={a} onDecide={approve} />
-      ))}
-
-      {!state.ended &&
-        state.choices
-          .slice(-1)
-          .map((x) => (x.question ? <QuestionCard key={x.id} choice={x} agent={agent} onChoose={choose} /> : <ChoiceCard key={x.id} choice={x} onChoose={choose} />))}
-
-      {!state.ended && (
-        <View onLayout={(e) => setComposerH(e.nativeEvent.layout.height)}>
-          <RemoteComposer
-            input={input}
-            inputRef={inputRef}
-            onChangeInput={setInput}
-            onSend={() => sendPrompt()}
-            onInterrupt={interrupt}
-            onCommands={openCommands}
-            onRunCommand={(text) => sendPrompt(text)}
-            commands={commands}
-            thinking={busy}
-            answering={!!question}
-            disabled={!state.hostConnected}
-            sending={sending}
-            attachments={attachments}
-            mentions={mentions}
-            onRemoveMention={(path) => setMentions((cur) => cur.filter((m) => m.path !== path))}
-            mentionQuery={canMention ? mentionQuery : null}
-            files={state.files}
-            onPickMention={pickMention}
-            context={state.context}
-            compacting={compacting}
-            onContext={() => setOverlay('context')}
+        {!!timeline &&
+          (() => {
+            const turn = turnBlocks.find((b) => b.key === timeline.turn);
+            if (!turn) return null;
+            const lastTurn = turnBlocks[turnBlocks.length - 1];
+            const turnLive = turn === lastTurn && busy && !turn.end ? live : null;
+            return <TimelineSheet turn={turn} focus={timeline.focus} live={turnLive} agent={agent} open={open} toggle={toggle} onClose={closeTimeline} />;
+          })()}
+        {overlay === 'quota' && (
+          <QuotaModal
+            usage={usage}
+            onClose={() => setOverlay(null)}
+            onDaily={() => {
+              setOverlay(null);
+              onUsage?.();
+            }}
           />
-        </View>
-      )}
-
-      {overlay === 'context' && state.context && (
-        <ContextPopover
-          context={state.context}
-          compacted={state.items.some((it) => it.kind === 'compacted')}
-          bottom={composerH + 4}
-          busy={busy}
-          compacting={compacting}
-          canCompact={canCompact}
-          onCompact={() => runCommand('compact')}
-          onClose={() => setOverlay(null)}
-        />
-      )}
-      {!!timeline &&
-        (() => {
-          const turn = turnBlocks.find((b) => b.key === timeline.turn);
-          if (!turn) return null;
-          const lastTurn = turnBlocks[turnBlocks.length - 1];
-          const turnLive = turn === lastTurn && busy && !turn.end ? live : null;
-          return <TimelineSheet turn={turn} focus={timeline.focus} live={turnLive} agent={agent} open={open} toggle={toggle} onClose={closeTimeline} />;
-        })()}
-      {overlay === 'quota' && (
-        <QuotaModal
-          usage={usage}
-          onClose={() => setOverlay(null)}
-          onDaily={() => {
-            setOverlay(null);
-            onUsage?.();
-          }}
-        />
-      )}
-    </KeyboardAware>
+        )}
+        <ImageViewer image={viewer.image} onClose={viewer.close} download={imageDownload} />
+      </KeyboardAware>
+    </RemoteImageContext.Provider>
   );
 }
 
@@ -711,7 +748,7 @@ function SessionEmpty({ state, agent }) {
         <AgentMark agent={agent} size={agent === 'claude' ? 22 : 26} />
       </View>
       <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
-        {`Conectado con ${a.label}. Pídele algo o toca / para ver sus comandos.`}
+        {`Conectado con ${a.label}. Pídele algo o toca + para adjuntar y ver sus comandos.`}
       </Text>
     </FadeUp>
   );
@@ -831,9 +868,20 @@ function TurnBlock({ turn, live, waitingTool, agent, open, toggle, onTimeline })
           onTimeline={(focus) => onTimeline?.(turn.key, focus)}
         />
       )}
+      {(turn.images || []).length > 0 && <TurnImages images={turn.images} />}
       {!!answer?.text && <AnswerBlock text={answer.text} streaming={!!live && answer.open && !preparing} />}
       {preparing && <ThinkLive label={`${preparingText(live.activityLabel)}…`} secs={null} text="" compact />}
       {interrupted && <NoticeBox text="Interrumpiste al agente. Lo que ya hizo se queda en el equipo." />}
+    </View>
+  );
+}
+
+/** Lo que el agente enseñó en el turno (show_image), a todo el ancho. */
+function TurnImages({ images }) {
+  const [width, setWidth] = useState(0);
+  return (
+    <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {width > 0 && images.map((img) => <ShownImageCard key={img.key} item={img} maxWidth={width} />)}
     </View>
   );
 }
@@ -1362,6 +1410,7 @@ function AnswerBlock({ text, streaming }) {
 
 function QaRecord({ item, label }) {
   const c = useColors();
+  if (item.total > 1) return <QaBatchRecord item={item} />;
   return (
     <FadeUp style={{ marginVertical: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1375,6 +1424,28 @@ function QaRecord({ item, label }) {
         </View>
         <Text selectable style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13.5, color: c.accentDeep }}>{item.answer}</Text>
       </View>
+    </FadeUp>
+  );
+}
+
+/** Lo respondido en una tanda: una fila por pregunta con su título corto. */
+function QaBatchRecord({ item }) {
+  const c = useColors();
+  const n = item.rows.length;
+  return (
+    <FadeUp style={{ marginVertical: 6, paddingHorizontal: 14, paddingVertical: 12, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Icon name="tick" size={13} color={c.good} strokeWidth={2.2} />
+        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+          {n === item.total ? `Respondiste ${n} preguntas` : `Respondiste ${n} de ${item.total} preguntas`}
+        </Text>
+      </View>
+      {item.rows.map((r, i) => (
+        <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{r.header || r.question}</Text>
+          <Text selectable style={{ flexShrink: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.ink }}>{r.answer}</Text>
+        </View>
+      ))}
     </FadeUp>
   );
 }
@@ -1591,14 +1662,26 @@ function UserRow({ item, busy }) {
   const { t, s } = useScale();
   const { files, text } = splitMessage(item.text);
   const mentions = Array.isArray(item.mentions) ? item.mentions : [];
+  const local = Array.isArray(item.localImages) ? item.localImages : [];
+  const remoteIds = Array.isArray(item.imageIds) ? item.imageIds : [];
+  // Lo que se mandó desde este móvil se ve con la foto local; lo demás, del gateway.
+  const photos = local.length ? local.map((uri, i) => ({ uri, name: `imagen ${i + 1}` })) : remoteIds.map((id) => ({ id, name: id }));
   const extras = [
     ...files.map((f) => ({ icon: f.kind === 'image' ? 'image' : 'file', label: f.name })),
-    ...(item.images > 0 ? [{ icon: 'image', label: item.images === 1 ? '1 imagen' : `${item.images} imágenes` }] : []),
+    // Sin ids (un host anterior) solo se sabe cuántas eran.
+    ...(item.images > 0 && !photos.length ? [{ icon: 'image', label: item.images === 1 ? '1 imagen' : `${item.images} imágenes` }] : []),
     ...mentions.map((m) => ({ glyph: '@', label: typeof m === 'string' ? m : m.name })),
   ];
   return (
     <FadeUp style={{ alignItems: 'flex-end', marginVertical: s(9), opacity: item.local && !item.sent ? 0.6 : 1 }}>
       <View style={{ maxWidth: '84%', backgroundColor: c.surface3, paddingHorizontal: 14, paddingVertical: 10, borderRadius: RADIUS }}>
+        {photos.length > 0 && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6, marginBottom: text || extras.length ? 8 : 0 }}>
+            {photos.map((p, i) => (
+              <ImageThumb key={p.id || p.uri || i} image={p} width={photos.length === 1 ? 168 : 92} height={photos.length === 1 ? 120 : 92} />
+            ))}
+          </View>
+        )}
         {extras.length > 0 && (
           <View style={{ gap: 4, marginBottom: text ? 8 : 0 }}>
             {extras.map((x, i) => (
@@ -2152,11 +2235,13 @@ function RemoteComposer({
           <Pressable
             onPress={onCommands}
             accessibilityRole="button"
-            accessibilityLabel="Comandos"
+            accessibilityLabel="Adjuntar, comandos y más"
             hitSlop={{ top: 4, bottom: 4, left: 2 }}
             style={({ pressed }) => ({ width: 40, height: 40, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? c.pressed : 'transparent' })}
           >
-            <Icon name="slash" size={18} color={c.ink70} strokeWidth={1.7} />
+            {/* Un +: el botón abre adjuntar, archivo, estado y uso además de
+                los comandos, que se siguen escribiendo con «/». */}
+            <Icon name="plus" size={20} color={c.ink70} strokeWidth={1.8} />
           </Pressable>
           <TextInput
             ref={inputRef}

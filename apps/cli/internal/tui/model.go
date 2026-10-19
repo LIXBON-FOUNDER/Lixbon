@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -135,7 +136,11 @@ type Model struct {
 	openTool *entry
 	// askEntry es la fila «Preguntar» de la última ask_user: sus respuestas
 	// van debajo.
-	askEntry     *entry
+	askEntry *entry
+	// imageEntry es la fila «Mostrar» abierta; pendingImage, la imagen que
+	// llegó antes que su fila.
+	imageEntry   *entry
+	pendingImage *tools.ShownImage
 	readGroup    *entry
 	browserGroup *entry
 	todoEntry    *entry
@@ -261,6 +266,34 @@ func (m *Model) Wire(send func(tea.Msg), observe func(string)) {
 	m.chat.Session.Approver = &uiApprover{send: send}
 	m.chat.Toolbox.AskUser = askUser(send)
 	m.chat.Toolbox.OnTodo = func(items, previous []tools.TodoItem) { send(todoMsg{items, previous}) }
+	m.chat.Toolbox.OnImage = func(img tools.ShownImage) { send(imageShownMsg{img}) }
+}
+
+// imageShownMsg: el agente enseñó una imagen (show_image).
+type imageShownMsg struct{ img tools.ShownImage }
+
+// attachImage pone la imagen bajo la fila «Mostrar»; si la fila aún no llegó,
+// espera a que llegue.
+func (m *Model) attachImage(img tools.ShownImage) {
+	b, ok := m.imageEntryBlock()
+	if !ok {
+		m.pendingImage = &img
+		return
+	}
+	b.image = &shownImage{path: img.Path, caption: img.Caption, thumb: newThumb(img.Path)}
+	if img.W > 0 {
+		b.meta = fmt.Sprintf("%d×%d", img.W, img.H)
+	}
+	m.pendingImage = nil
+	m.refresh(m.imageEntry)
+}
+
+func (m *Model) imageEntryBlock() (*toolBlock, bool) {
+	if m.imageEntry == nil {
+		return nil, false
+	}
+	b, ok := m.imageEntry.b.(*toolBlock)
+	return b, ok && b.image == nil
 }
 
 // print añade texto ya pintado al transcript.

@@ -1,16 +1,18 @@
 // UsageScreen.js — plan vigente con el atajo para mejorarlo, las dos cuotas
-// (sesión y semana) en porcentaje grande con cuándo se reinician, y los
-// tokens de los últimos 7 días en barras que crecen al entrar.
+// (sesión y semana) en porcentaje grande con cuándo se reinician, y el panal
+// de tokens por servicio de los últimos 7 o 30 días.
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Linking, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Polygon, Text as SvgText } from 'react-native-svg';
 
 import { ApiException } from '../api';
-import { EASE, FadeUp, SkeletonLines, StackHeader, useColors, useReducedMotion } from '../components/ui';
+import { EASE, FadeUp, Segmented, SkeletonLines, StackHeader, useColors, useReducedMotion } from '../components/ui';
+import { HEX_TOKENS, SERVICES, SERVICE_LABEL, cellSize, fmtTokens, layout, serviceCells } from '../honeycomb';
 import { useApi } from '../state';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 
-const DAYS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -26,12 +28,6 @@ export function fmtReset(iso) {
   if (mins < 60) return `Se reinicia en ${mins} min`;
   if (mins < 24 * 60) return `Se reinicia en ${Math.floor(mins / 60)} h ${mins % 60} min`;
   return `Se reinicia el ${WEEKDAYS[d.getDay()]} a las ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function compact(n) {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace('.0', '')} M`;
-  if (n >= 1000) return `${Math.round(n / 1000)} mil`;
-  return String(n);
 }
 
 export default function UsageScreen({ onBack }) {
@@ -115,7 +111,7 @@ export default function UsageScreen({ onBack }) {
 
         {data != null && (
           <FadeUp delay={100} style={[card, { paddingTop: 18, paddingBottom: 14, gap: 16 }]}>
-            <DailyChart daily={data.daily} />
+            <ServiceComb rows={data.services} />
           </FadeUp>
         )}
       </ScrollView>
@@ -157,53 +153,115 @@ export function Quota({ label, bucket, accent = false, delay = 0 }) {
   );
 }
 
-function DailyChart({ daily }) {
+// Un color por servicio; sobre papel claro, el mismo tono más oscuro.
+const SERVICE_COLORS = {
+  dark: { cli: '#B4C64E', ide: '#6FA8F0', mobile: '#F29A6E', web: '#C5B5FF', other: '#5E5E5C' },
+  light: { cli: '#7E9430', ide: '#2F6FB0', mobile: '#C0573F', web: '#7A63D6', other: '#B5AC98' },
+};
+
+function ServiceComb({ rows }) {
   const c = useColors();
-  const byDate = {};
-  if (Array.isArray(daily)) {
-    for (const row of daily) {
-      if (row && typeof row.usage_date === 'string') {
-        byDate[row.usage_date] = (byDate[row.usage_date] || 0) + (typeof row.total_tokens === 'number' ? row.total_tokens : 0);
-      }
-    }
-  }
-  const today = new Date();
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today.getTime() - (6 - i) * 86400000);
-    return { day: DAYS[d.getDay()], tokens: byDate[`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`] || 0 };
-  });
-  const max = Math.max(1, ...days.map((d) => d.tokens));
+  const [days, setDays] = useState(7);
+  const [width, setWidth] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const colors = SERVICE_COLORS[c.dark ? 'dark' : 'light'];
+  const { cells, hidden, totals, total } = serviceCells(rows, days);
+  const s = cellSize(cells.length, width);
+  const comb = layout(cells, s);
+  const showDay = s >= 9;
+  const detail = picked && cells.includes(picked.cell) ? picked.cell : null;
+  const used = SERVICES.filter((x) => totals[x] > 0);
 
   return (
     <>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>Tokens por día</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>Hoy · {compact(days[6].tokens)}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.ink }}>Tokens por servicio</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{`${fmtTokens(total)} en ${days} días`}</Text>
+        </View>
+        <Segmented
+          size="sm"
+          value={days}
+          onChange={(v) => {
+            setDays(v);
+            setPicked(null);
+          }}
+          options={[
+            { value: 7, label: '7 días' },
+            { value: 30, label: '30 días' },
+          ]}
+        />
       </View>
-      <View
-        accessibilityRole="image"
-        accessibilityLabel={`Tokens de los últimos 7 días. Hoy, ${compact(days[6].tokens)}.`}
-        style={{ height: 140, flexDirection: 'row', alignItems: 'flex-end', gap: 10 }}
-      >
-        {days.map((d, i) => (
-          <View key={i} style={{ flex: 1, height: '100%', justifyContent: 'flex-end' }}>
-            <GrowBar
-              vertical
-              delay={i * 40}
-              ratio={d.tokens > 0 ? Math.max(0.03, d.tokens / max) : 0.015}
-              color={i === 6 ? c.accent : c.surface6}
-              style={{ borderRadius: 4 }}
-            />
-          </View>
-        ))}
+
+      <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ alignItems: 'center', paddingVertical: 4 }}>
+        {cells.length === 0 ? (
+          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted, paddingVertical: 24 }}>Sin uso en estos días</Text>
+        ) : (
+          width > 0 && (
+            <Svg
+              width={comb.width}
+              height={comb.height}
+              accessibilityRole="image"
+              accessibilityLabel={`Panal de uso: ${used.map((x) => `${SERVICE_LABEL[x]} ${fmtTokens(totals[x])}`).join(', ')}.`}
+            >
+              {comb.hexes.map((h) => {
+                const color = colors[h.cell.service];
+                const on = detail === h.cell;
+                return (
+                  <React.Fragment key={h.key}>
+                    <Polygon
+                      points={h.points}
+                      fill={color}
+                      fillOpacity={h.full ? 1 : 0.22}
+                      stroke={on ? c.ink : 'none'}
+                      strokeWidth={on ? 1.5 : 0}
+                      onPress={() => setPicked(on ? null : { cell: h.cell })}
+                    />
+                    {!h.full && !!h.partial && <Polygon points={h.partial} fill={color} fillOpacity={0.75} onPress={() => setPicked(on ? null : { cell: h.cell })} />}
+                    {showDay && (
+                      <SvgText
+                        x={h.cx}
+                        y={h.cy + s * 0.2}
+                        fontSize={Math.max(7, s * 0.56)}
+                        fontFamily={FONTS.mono}
+                        textAnchor="middle"
+                        fill={h.full ? (c.dark ? 'rgba(14,14,14,0.68)' : 'rgba(255,255,255,0.9)') : c.ink}
+                        onPress={() => setPicked(on ? null : { cell: h.cell })}
+                      >
+                        {h.cell.day}
+                      </SvgText>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </Svg>
+          )
+        )}
       </View>
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        {days.map((d, i) => (
-          <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: FONTS.ui, fontSize: 12, color: i === 6 ? c.ink : c.inkMuted }}>
-            {d.day}
-          </Text>
-        ))}
-      </View>
+
+      {detail && (
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13, color: c.ink }}>
+          {`${SERVICE_LABEL[detail.service]} · ${parseInt(detail.date.slice(8, 10), 10)} ${MONTHS[parseInt(detail.date.slice(5, 7), 10) - 1]} · ${fmtTokens(detail.tokens)}`}
+        </Text>
+      )}
+
+      {used.length > 0 && (
+        <View style={{ gap: 9 }}>
+          {used.map((x) => (
+            <View key={x} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Svg width={12} height={14}>
+                <Polygon points="6,0 12,3.5 12,10.5 6,14 0,10.5 0,3.5" fill={colors[x]} />
+              </Svg>
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.ink }}>{SERVICE_LABEL[x]}</Text>
+              <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${Math.ceil(totals[x] / HEX_TOKENS)} hex`}</Text>
+              <Text style={{ width: 64, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 12.5, color: c.ink }}>{fmtTokens(totals[x])}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      <Text style={{ fontFamily: FONTS.ui, fontSize: 12, lineHeight: 17, color: c.inkMuted }}>
+        {`Cada hexágono son 200 mil tokens y lleva el día en que se gastaron. Toca uno para ver el detalle.${totals.other > 0 ? ' «Otros» es lo gastado antes de contar por servicio y con API keys propias.' : ''}${hidden > 0 ? ` Hay ${hidden} hexágonos más que no caben.` : ''}`}
+      </Text>
     </>
   );
 }
