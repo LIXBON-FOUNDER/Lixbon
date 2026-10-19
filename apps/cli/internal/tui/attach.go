@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	_ "golang.org/x/image/webp"
 
 	"lixbon.com/cli/internal/clipboard"
 )

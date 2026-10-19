@@ -80,6 +80,9 @@ type Model struct {
 
 	send    func(tea.Msg)
 	observe func(string)
+	// gfx pinta las imágenes con Sixel encima de sus miniaturas; nil sin
+	// terminal (pruebas).
+	gfx *graphics
 
 	log    transcript
 	scroll int
@@ -446,6 +449,9 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.fetchQuota()}
 	if m.login != nil {
 		cmds = append(cmds, m.startTick())
+	}
+	if m.gfx != nil {
+		cmds = append(cmds, queryGraphics())
 	}
 	return tea.Batch(cmds...)
 }
