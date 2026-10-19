@@ -101,7 +101,7 @@ fn de<'a>(out: &'a Value, id: &str) -> &'a Value {
         .unwrap()
         .iter()
         .find(|p| p["id"] == id)
-        .unwrap_or_else(|| panic!("el proyecto {id} no está en {out}"))
+        .unwrap_or_else(|| panic!("el proyecto {id} no está en {:?}", ids(out)))
 }
 
 fn ids(out: &Value) -> Vec<String> {
