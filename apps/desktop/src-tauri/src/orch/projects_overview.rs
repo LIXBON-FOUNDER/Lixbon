@@ -83,7 +83,9 @@ fn parse_params(args: &Value) -> Result<Params, String> {
         Some(Value::String(s)) => {
             let s = s.trim();
             if s.is_empty() || s.chars().count() > MAX_FILTER_CHARS {
-                return Err(invalid(format!("`machine` debe contener de 1 a {MAX_FILTER_CHARS} caracteres")));
+                return Err(invalid(format!(
+                    "`machine` debe contener de 1 a {MAX_FILTER_CHARS} caracteres"
+                )));
             }
             Some(s.to_string())
         }
@@ -94,10 +96,15 @@ fn parse_params(args: &Value) -> Result<Params, String> {
 
 /// Solo una Person autenticada: un Agent ve únicamente su Task y el token legacy no autentica esta API.
 fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<(), String> {
-    let context = context.ok_or_else(|| "projects_overview_auth_required: la lectura requiere un cliente autenticado".to_string())?;
+    let context = context.ok_or_else(|| {
+        "projects_overview_auth_required: la lectura requiere un cliente autenticado".to_string()
+    })?;
     match (&context.actor, caller) {
         (Actor::PersonId(id), Caller::User) if !id.is_empty() => Ok(()),
-        _ => Err("projects_overview_auth_required: solo una Person autenticada puede leer el overview".into()),
+        _ => Err(
+            "projects_overview_auth_required: solo una Person autenticada puede leer el overview"
+                .into(),
+        ),
     }
 }
 
@@ -131,13 +138,24 @@ fn read_stored(store: &Store) -> StoreResult<Stored> {
     let projects = store.projects(true)?;
     let mut locations: HashMap<String, Vec<LocationRow>> = HashMap::new();
     for location in store.project_locations(None)? {
-        locations.entry(location.project_id.clone()).or_default().push(location);
+        locations
+            .entry(location.project_id.clone())
+            .or_default()
+            .push(location);
     }
     let mut attention: HashMap<Option<String>, BTreeMap<&'static str, u64>> = HashMap::new();
     for (project, category, n) in store.attention_active_counts()? {
-        *attention.entry(project).or_default().entry(category.as_str()).or_default() += n;
+        *attention
+            .entry(project)
+            .or_default()
+            .entry(category.as_str())
+            .or_default() += n;
     }
-    Ok(Stored { projects, locations, attention })
+    Ok(Stored {
+        projects,
+        locations,
+        attention,
+    })
 }
 
 /// Las siete categorías siempre presentes (con 0): la forma de la respuesta no depende de los datos.
@@ -145,7 +163,10 @@ fn attention_json(by_category: Option<&BTreeMap<&'static str, u64>>) -> Value {
     let mut categories = Map::new();
     let mut total = 0;
     for category in AttentionCategory::ALL {
-        let n = by_category.and_then(|m| m.get(category.as_str())).copied().unwrap_or(0);
+        let n = by_category
+            .and_then(|m| m.get(category.as_str()))
+            .copied()
+            .unwrap_or(0);
         total += n;
         categories.insert(category.as_str().to_string(), json!(n));
     }
@@ -175,7 +196,12 @@ fn location_json(l: &LocationRow) -> Value {
     })
 }
 
-pub(super) fn overview(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+pub(super) fn overview(
+    core: &Core,
+    caller: &Caller,
+    context: Option<&MutationContext>,
+    args: &Value,
+) -> Result<Value, String> {
     require_person(caller, context)?;
     let params = parse_params(args)?;
 
@@ -186,8 +212,14 @@ pub(super) fn overview(core: &Core, caller: &Caller, context: Option<&MutationCo
     let stored = core
         .storage
         .read_store(read_stored)
-        .ok_or_else(|| "projects_overview_unavailable: el Core no tiene un almacén autoritativo disponible".to_string())?
-        .map_err(|_| "projects_overview_read_failed: no se pudo consultar el registro de proyectos".to_string())?;
+        .ok_or_else(|| {
+            "projects_overview_unavailable: el Core no tiene un almacén autoritativo disponible"
+                .to_string()
+        })?
+        .map_err(|_| {
+            "projects_overview_read_failed: no se pudo consultar el registro de proyectos"
+                .to_string()
+        })?;
     drop(state);
 
     let mut projects: Vec<&ProjectRow> = stored
@@ -196,11 +228,19 @@ pub(super) fn overview(core: &Core, caller: &Caller, context: Option<&MutationCo
         .filter(|p| params.archived.keeps(p.archived))
         .filter(|p| match &params.machine {
             None => true,
-            Some(machine) => stored.locations.get(&p.id).is_some_and(|ls| ls.iter().any(|l| &l.machine == machine)),
+            Some(machine) => stored
+                .locations
+                .get(&p.id)
+                .is_some_and(|ls| ls.iter().any(|l| &l.machine == machine)),
         })
         .collect();
     // Orden documentado: nombre en minúsculas y, a igualdad, `project_id`.
-    projects.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.id.cmp(&b.id)));
+    projects.sort_by(|a, b| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
     let items: Vec<Value> = projects
         .iter()
