@@ -611,7 +611,7 @@ mod authenticated_client_tests {
 
         let (status, person) = post(server.port, person_secret, &json!({ "cmd": "projects_overview", "args": {} }));
         assert_eq!(status, 200);
-        assert_eq!(person["ok"], true, "Person CLI lee el overview del Core local: {:?}", person["error"]);
+        assert_eq!(person["ok"], true, "Person CLI no pudo leer el overview del Core local");
         let data = &person["data"];
         assert_eq!(data["v"], 1);
         // `run_create` descubre y registra solo el proyecto del repo en curso: aquí hay ese y el de la prueba.
