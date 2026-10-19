@@ -58,3 +58,33 @@ jobs:
       - run: python infra/ci/install_e2e.py
         env:
           PYTHONIOENCODING: utf-8
+
+  lxo-events-e2e:
+    name: lxo events · Core HTTP · Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            apps/desktop/lxo -> target
+      - run: npm ci
+      - name: Construir sidecar y frontend requeridos por Tauri
+        run: |
+          npm run build:lxo
+          npm run build
+      - name: Ejecutar E2E de lxo contra el servidor HTTP del Core
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture
+        env:
+          LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe

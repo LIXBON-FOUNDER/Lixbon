@@ -116,6 +116,20 @@ Secrets necesarios en el repo: `TAURI_SIGNING_PRIVATE_KEY`,
 2. Generar el sidecar `lxo` (ignorado por git) antes de `cargo test`: `npm run build:lxo` (ejecuta `node scripts/build-lxo.mjs`). Sin él, el build de Tauri falla porque no encuentra `binaries/lxo-<target>`.
 3. `cd src-tauri && cargo test`
 
+## E2E de `lxo events` contra el Core HTTP real
+
+En Windows, desde `apps/desktop`, instala y construye el sidecar y el frontend que requiere `tauri-build`; luego ejecuta la prueba ignorada con el binario compilado:
+
+```powershell
+npm ci
+npm run build:lxo
+npm run build
+$env:LXO_BIN = (Resolve-Path .\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe).Path
+cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture
+```
+
+El test arranca el servidor HTTP del Core dentro del harness y usa una credencial Agent de fixture. `lxo` recibe un `USERPROFILE` temporal y solo lee el `orch.json` y los cursores de esa carpeta; no utiliza el home ni las credenciales del usuario. La prueba cubre cursor vacío en el head actual, history, paginación y reanudación de `--follow` tras reiniciar el proceso, sin secuencias duplicadas. CI la ejecuta en Windows desde `.github/workflows/ci.yml`.
+
 
 ## Entorno del worktree de una tarea del orquestador
 

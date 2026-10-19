@@ -1,6 +1,6 @@
-//! HTTP local por el que habla `lxo`. Solo 127.0.0.1 y con token: el puerto y
-//! el token se publican en `~/.lixbon/orch.json`, legible solo por el usuario.
-//! `POST /rpc` despacha comandos; `GET /events` es la lectura del Event Log (events_read.rs).
+//! HTTP local por el que habla `lxo`. Solo 127.0.0.1 y con credencial registrada;
+//! el puerto y la identidad pública se publican en `~/.lixbon/orch.json`, nunca el secreto.
+//! `GET /handshake` negocia el contrato; `POST /rpc` despacha comandos; `GET /events` lee el Event Log.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -10,13 +10,12 @@ use std::thread;
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
+use crate::store::{AuthenticatedClient, ClientAction, ClientAuthentication, ClientClaims, ClientPrincipal};
 
 use super::Core;
 
 pub struct Handle {
     pub port: u16,
-    pub token: String,
     stop: Arc<AtomicBool>,
 }
 
@@ -33,44 +32,37 @@ const MAX_BODY: usize = 4 * 1024 * 1024;
 pub fn start(core: Arc<Core>) -> Result<Handle, String> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    let token = super::random_token();
     let stop = Arc::new(AtomicBool::new(false));
-    let (tok, stop_t) = (token.clone(), stop.clone());
+    let stop_t = stop.clone();
     thread::spawn(move || {
         for conn in listener.incoming() {
             if stop_t.load(Ordering::Relaxed) {
                 break;
             }
             let Ok(stream) = conn else { continue };
-            let (core, tok) = (core.clone(), tok.clone());
+            let core = core.clone();
             thread::spawn(move || {
-                let _ = handle(stream, &core, &tok);
+                let _ = handle(stream, &core);
             });
         }
     });
-    Ok(Handle { port, token, stop })
+    Ok(Handle { port, stop })
 }
 
-enum RequestIdentity {
-    LegacyServerToken,
-    Client(AuthenticatedClient),
-}
-
-fn authenticate_request(core: &Core, auth: &str, server_token: &str) -> Result<RequestIdentity, (u16, &'static str)> {
-    if auth == format!("Bearer {server_token}") {
-        return Ok(RequestIdentity::LegacyServerToken);
-    }
+fn authenticate_request(core: &Core, auth: &str) -> Result<AuthenticatedClient, (u16, &'static str, &'static str)> {
     let Some(secret) = auth.strip_prefix("Bearer ").filter(|secret| !secret.is_empty()) else {
-        return Err((401, "Token inválido: vuelve a abrir la terminal o reinicia Lixbon"));
+        return Err((401, "invalid_credential", "Token inválido: vuelve a abrir la terminal o reinicia Lixbon"));
     };
-    match core.authenticate_client(secret) {
-        Ok(Some(client)) => Ok(RequestIdentity::Client(client)),
-        Ok(None) => Err((401, "Token inválido: vuelve a abrir la terminal o reinicia Lixbon")),
-        Err(_) => Err((503, "La autenticación de clientes no está disponible")),
+    match core.authenticate_client_status(secret) {
+        Ok(ClientAuthentication::Active(client)) => Ok(client),
+        Ok(ClientAuthentication::Invalid) => Err((401, "invalid_credential", "Token inválido: vuelve a abrir la terminal o reinicia Lixbon")),
+        Ok(ClientAuthentication::Expired(_)) => Err((401, "credential_expired", "La credencial caducó; vuelve a iniciar Lixbon para rotarla")),
+        Ok(ClientAuthentication::Revoked(_)) => Err((401, "credential_revoked", "La credencial fue revocada; crea una nueva instalación desde Lixbon")),
+        Err(_) => Err((503, "core_unavailable", "La autenticación de clientes no está disponible")),
     }
 }
 
-fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, core: &Arc<Core>) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
@@ -80,7 +72,6 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
 
     let mut len = 0usize;
     let mut auth = String::new();
-    let mut caller_header = String::new();
     loop {
         let mut h = String::new();
         if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
@@ -90,7 +81,6 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
         match k.trim().to_ascii_lowercase().as_str() {
             "content-length" => len = v.trim().parse().unwrap_or(0),
             "authorization" => auth = v.trim().to_string(),
-            "x-lixbon-caller" => caller_header = v.trim().to_string(),
             _ => {}
         }
     }
@@ -101,28 +91,47 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     reader.read_exact(&mut body)?;
 
     let (route, query) = path.split_once('?').unwrap_or((path, ""));
-    if route == "/events" {
-        let identity = match authenticate_request(core, &auth, token) {
+    if route == "/handshake" {
+        if method != "GET" {
+            return reply(&mut stream, 405, &json!({ "ok": false, "code": "method_not_allowed", "error": "El handshake solo admite GET" }));
+        }
+        let client = match authenticate_request(core, &auth) {
             Ok(identity) => identity,
-            Err((code, error)) => return reply(&mut stream, code, &json!({ "ok": false, "error": error })),
+            Err((status, code, error)) => return reply(&mut stream, status, &json!({ "ok": false, "code": code, "error": error })),
+        };
+        if client.identity().surface() != crate::store::ClientSurface::Cli {
+            return reply(&mut stream, 403, &json!({ "ok": false, "code": "forbidden", "error": "El handshake requiere una identidad CLI" }));
+        }
+        let schema_version = match core.storage.read_store(|store| store.schema_version()) {
+            Some(Ok(version)) => version,
+            _ => return reply(&mut stream, 503, &json!({ "ok": false, "code": "core_unavailable", "error": "El almacén del Core no está disponible" })),
+        };
+        return reply(&mut stream, 200, &json!({
+            "ok": true,
+            "data": {
+                "core_version": env!("CARGO_PKG_VERSION"),
+                "protocol_version": 1,
+                "schema_version": schema_version,
+                "capabilities": ["rpc", "events.read"],
+                "client_id": client.identity().client_id(),
+            }
+        }));
+    }
+    if route == "/events" {
+        let client = match authenticate_request(core, &auth) {
+            Ok(identity) => identity,
+            Err((status, code, error)) => return reply(&mut stream, status, &json!({ "ok": false, "code": code, "error": error })),
         };
         if method != "GET" {
             return reply(&mut stream, 405, &json!({ "ok": false, "error": "El Event Log es de solo lectura: usa GET /events" }));
         }
-        let caller_claim = Some(caller_header).filter(|c| !c.is_empty());
-        let caller = match identity {
-            RequestIdentity::LegacyServerToken => super::Caller::Agent(caller_claim),
-            RequestIdentity::Client(client) => {
-                let claims = ClientClaims { caller: caller_claim, ..Default::default() };
-                if client.validate_claims(&claims, "lxo").is_err() || client.authorize(ClientAction::EventLogRead).is_err() {
-                    return reply(&mut stream, 403, &json!({ "ok": false, "error": "Identidad no autorizada para este canal" }));
-                }
-                match client.identity().principal() {
-                    ClientPrincipal::Person(_) => super::Caller::User,
-                    ClientPrincipal::Agent(task) => super::Caller::Agent(Some(task.clone())),
-                    ClientPrincipal::System => return reply(&mut stream, 403, &json!({ "ok": false, "error": "La identidad Core/System está reservada" })),
-                }
-            }
+        if client.validate_claims(&ClientClaims::default(), "lxo").is_err() || client.authorize(ClientAction::EventLogRead).is_err() {
+            return reply(&mut stream, 403, &json!({ "ok": false, "code": "forbidden", "error": "Identidad no autorizada para este canal" }));
+        }
+        let caller = match client.identity().principal() {
+            ClientPrincipal::Person(_) => super::Caller::User,
+            ClientPrincipal::Agent(task) => super::Caller::Agent(Some(task.clone())),
+            ClientPrincipal::System => return reply(&mut stream, 403, &json!({ "ok": false, "code": "forbidden", "error": "La identidad Core/System está reservada" })),
         };
         let (code, body) = core.events_http(caller, query);
         return reply(&mut stream, code, &body);
@@ -130,12 +139,11 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     if method != "POST" || path != "/rpc" {
         return reply(&mut stream, 404, &json!({ "ok": false, "error": "No encontrado" }));
     }
-    let identity = match authenticate_request(core, &auth, token) {
+    let client = match authenticate_request(core, &auth) {
         Ok(identity) => identity,
-        Err((code, error)) => return reply(&mut stream, code, &json!({ "ok": false, "error": error })),
+        Err((status, code, error)) => return reply(&mut stream, status, &json!({ "ok": false, "code": code, "error": error })),
     };
     let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    let caller = req.get("caller").and_then(Value::as_str).filter(|s| !s.is_empty()).map(String::from);
     let cwd = req.get("cwd").and_then(Value::as_str).unwrap_or("").to_string();
     let cmd = req.get("cmd").and_then(Value::as_str).unwrap_or("");
     let args = req.get("args").cloned().unwrap_or(Value::Null);
@@ -143,18 +151,19 @@ fn handle(mut stream: TcpStream, core: &Arc<Core>, token: &str) -> std::io::Resu
     stream.set_read_timeout(None)?;
     // Rechazo explícito antes de despachar: decisiones humanas y lecturas cerradas (review.rs).
     if let Some(why) = super::review::closed_to_agents(cmd) {
-        return reply(&mut stream, 200, &json!({ "ok": false, "error": why }));
+        return reply(&mut stream, 403, &json!({ "ok": false, "code": "forbidden", "error": why }));
     }
-    let res = match identity {
-        RequestIdentity::LegacyServerToken => guarded(cmd, || core.rpc_via(super::events::Channel::Lxo, super::Caller::Agent(caller), &cwd, cmd, &args)),
-        RequestIdentity::Client(client) => {
-            let claims: ClientClaims = match serde_json::from_value(req.clone()) {
-                Ok(claims) => claims,
-                Err(_) => return reply(&mut stream, 400, &json!({ "ok": false, "error": "Claims de cliente inválidos" })),
-            };
-            guarded(cmd, || core.rpc_authenticated_via(&client, &claims, super::events::Channel::Lxo, &cwd, cmd, &args))
-        }
+    let claims: ClientClaims = match serde_json::from_value(req.clone()) {
+        Ok(claims) => claims,
+        Err(_) => return reply(&mut stream, 400, &json!({ "ok": false, "error": "Claims de cliente inválidos" })),
     };
+    let res = guarded(cmd, || core.rpc_authenticated_via(&client, &claims, super::events::Channel::Lxo, &cwd, cmd, &args));
+    if res["ok"] == false {
+        let error = res["error"].as_str().unwrap_or("");
+        if error.contains("Identidad de cliente inválida") || error.contains("Acción no permitida para esta identidad") {
+            return reply(&mut stream, 403, &json!({ "ok": false, "code": "forbidden", "error": error }));
+        }
+    }
     reply(&mut stream, 200, &res)
 }
 
@@ -201,7 +210,7 @@ fn reply(stream: &mut TcpStream, code: u16, body: &Value) -> std::io::Result<()>
 mod tests {
     use super::*;
     use crate::orch::state::NewTask;
-    use crate::orch::Orch;
+    use crate::store::{ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
     #[test]
     fn un_panico_en_un_comando_llega_como_error_con_el_motivo() {
@@ -218,8 +227,14 @@ mod tests {
 
     #[test]
     fn una_respuesta_grande_llega_completa_aunque_el_cliente_lea_despacio() {
-        let core = Orch::default().0;
+        let (_cleanup, data, core_dir) = crate::orch::boot_tests::dirs();
+        let (core, _host, started) = crate::orch::boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
         core.settings.lock().unwrap().enabled = true;
+        let secret = "large-response-cli-token-test-only-32-bytes";
+        let registration = ClientRegistration::new(ClientSurface::Cli, DeviceIdentity::new("install-large-response", None).unwrap()).unwrap();
+        let credential = ClientCredential::new(ClientPrincipal::Person("user".into()), secret).unwrap();
+        core.storage.with_store(|store| store.register_client(&registration, &credential, super::super::state::now_ms() as i64)).unwrap().unwrap();
         let spec = "x".repeat(3 * 1024 * 1024);
         core.lock_unpersisted().create_run("obj", NewTask {
             agent: "coordinador".into(), model: None, effort: None, role: None, title: "t".into(), spec: spec.clone(),
@@ -229,7 +244,7 @@ mod tests {
         let body = r#"{"cmd":"list","args":{}}"#;
         let mut s = TcpStream::connect(("127.0.0.1", h.port)).unwrap();
         // Bytes de más tras el cuerpo: sin leer en el servidor al cerrar, Windows manda un RST.
-        write!(s, "POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{}EXTRA-SIN-LEER", h.token, body.len(), body).unwrap();
+        write!(s, "POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {secret}\r\nContent-Length: {}\r\n\r\n{}EXTRA-SIN-LEER", body.len(), body).unwrap();
         std::thread::sleep(Duration::from_millis(300));
         let mut raw = Vec::new();
         let mut chunk = [0u8; 32 * 1024];
@@ -267,6 +282,7 @@ mod tests {
         assert!(out.starts_with("HTTP/1.1 401"), "{out}");
         h.stop();
     }
+
 }
 
 #[cfg(test)]
@@ -277,6 +293,7 @@ mod authenticated_client_tests {
         AttentionCategory, AttentionTarget, ClientCredential, ClientPrincipal, ClientRegistration,
         ClientSurface, DeviceIdentity, EventQuery, NewAttention, Raised, Severity, TargetKind,
     };
+    use crate::orch::state::NewTask;
 
     fn register(core: &Core, surface: ClientSurface, principal: ClientPrincipal, installation: &str, secret: &str) -> String {
         let registration = ClientRegistration::new(surface, DeviceIdentity::new(installation, None).unwrap()).unwrap();
@@ -305,6 +322,104 @@ mod authenticated_client_tests {
         let (head, payload) = raw.split_once("\r\n\r\n").unwrap();
         let status = head.lines().next().unwrap().split_whitespace().nth(1).unwrap().parse().unwrap();
         (status, serde_json::from_str(payload).unwrap())
+    }
+
+    #[test]
+    fn el_token_compartido_legacy_no_autoriza_rpc_ni_events() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let server = start(core).unwrap();
+
+        let legacy_token = "legacy-shared-server-token-test-only-32-bytes";
+        let (rpc_status, rpc) = post(server.port, legacy_token, &json!({ "cmd": "status", "args": {} }));
+        assert_eq!((rpc_status, rpc["code"].as_str()), (401, Some("invalid_credential")));
+        let (events_status, events) = get(server.port, legacy_token, "/events");
+        assert_eq!((events_status, events["code"].as_str()), (401, Some("invalid_credential")));
+        server.stop();
+    }
+
+    #[test]
+    fn cli_handshake_returns_versions_capabilities_and_authenticated_client_id() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let secret = "handshake-cli-secret-lxo86-test-only-32-bytes";
+        let client_id = register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("user".into()),
+            "install-lxo-handshake-86",
+            secret,
+        );
+        let server = start(core).unwrap();
+
+        let (status, response) = get(server.port, secret, "/handshake");
+
+        assert_eq!(status, 200, "el cliente autenticado debe poder negociar el protocolo: {response}");
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["data"]["core_version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(response["data"]["protocol_version"], 1);
+        assert_eq!(response["data"]["schema_version"], 6);
+        assert_eq!(response["data"]["capabilities"], json!(["rpc", "events.read"]));
+        assert_eq!(response["data"]["client_id"], client_id);
+        assert!(!response.to_string().contains(secret), "el handshake no debe devolver la credencial");
+        server.stop();
+    }
+
+    #[test]
+    fn handshake_distinguishes_missing_credential_from_forbidden_surface() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let secret = "desktop-handshake-secret-lxo86-test-only-32-bytes";
+        register(
+            &core,
+            ClientSurface::Desktop,
+            ClientPrincipal::Person("user".into()),
+            "install-lxo-handshake-desktop-86",
+            secret,
+        );
+        let server = start(core).unwrap();
+
+        let (status, invalid) = get(server.port, "not-a-registered-credential", "/handshake");
+        assert_eq!(status, 401);
+        assert_eq!(invalid["code"], "invalid_credential");
+
+        let (status, forbidden) = get(server.port, secret, "/handshake");
+        assert_eq!(status, 403);
+        assert_eq!(forbidden["code"], "forbidden");
+        server.stop();
+    }
+
+    #[test]
+    fn handshake_distingue_credenciales_vencidas_y_revocadas() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let expired_secret = "expired-handshake-secret-lxo86-test-only-32-bytes";
+        let revoked_secret = "revoked-handshake-secret-lxo86-test-only-32-bytes";
+        let old = super::super::state::now_ms() as i64 - crate::store::CLIENT_CREDENTIAL_TTL_MS - 1;
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new("install-lxo-handshake-expiry-86", None).unwrap(),
+        ).unwrap();
+        let expired = ClientCredential::new(ClientPrincipal::Person("user".into()), expired_secret).unwrap();
+        let revoked = ClientCredential::new(ClientPrincipal::Person("user".into()), revoked_secret).unwrap();
+        core.storage.with_store(|store| {
+            store.register_client(&registration, &expired, old).unwrap();
+            let client = store.register_client(&registration, &revoked, super::super::state::now_ms() as i64).unwrap();
+            store.revoke_credential(client.credential_id(), super::super::state::now_ms() as i64).unwrap();
+        }).unwrap();
+        let server = start(core).unwrap();
+
+        let (status, expired) = get(server.port, expired_secret, "/handshake");
+        assert_eq!(status, 401);
+        assert_eq!(expired["code"], "credential_expired");
+        let (status, revoked) = get(server.port, revoked_secret, "/handshake");
+        assert_eq!(status, 401);
+        assert_eq!(revoked["code"], "credential_revoked");
+        server.stop();
     }
 
     fn create_ui_task(core: &Arc<Core>, objective: &str) -> String {
@@ -364,8 +479,9 @@ mod authenticated_client_tests {
             "client_id": "client-spoofed",
             "args": {"objective": "claim spoof test"}
         }));
-        assert_eq!(status, 200);
+        assert_eq!(status, 403);
         assert_eq!(response["ok"], false, "los claims no pueden elevar ni cambiar identidad");
+        assert_eq!(response["code"], "forbidden");
         assert_eq!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap(), head_before, "rechazo antes de mutar");
 
         let (status, response) = post(server.port, secret, &json!({
@@ -397,9 +513,31 @@ mod authenticated_client_tests {
             "cwd": std::env::current_dir().unwrap().to_string_lossy(),
             "args": {"task": "task-agent-85", "confirm": true}
         }));
-        assert_eq!(status, 200);
+        assert_eq!(status, 403);
         assert_eq!(response["ok"], false, "un Agent no puede ejecutar una decisión humana");
+        assert_eq!(response["code"], "forbidden");
         assert_eq!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap(), head_before, "rechazo antes de mutar");
+        server.stop();
+    }
+
+    #[test]
+    fn comando_rpc_sin_clasificar_se_rechaza_en_la_frontera_agent() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let secret = "agent-unknown-command-secret-lxo86-test-only-32-bytes";
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent("task-unknown-86".into()), "install-agent-unknown-86", secret);
+        let server = start(core.clone()).unwrap();
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let (status, response) = post(server.port, secret, &json!({
+            "cmd": "new_unclassified_rpc",
+            "args": {},
+            "cwd": std::env::current_dir().unwrap().to_string_lossy()
+        }));
+        assert_eq!(status, 403);
+        assert_eq!(response["code"], "forbidden");
+        assert_eq!(core.storage.with_store(|store| store.events_head().unwrap()).unwrap(), head_before);
         server.stop();
     }
 
@@ -440,7 +578,7 @@ mod authenticated_client_tests {
             &json!({ "cmd": "remove_run", "args": { "run": run } }),
         );
 
-        assert_eq!(status, 200);
+        assert_eq!(status, 403);
         assert_eq!(response["ok"], false, "Person/Cli no hereda permisos de la interfaz");
         assert!(core.lock().runs.contains_key(&run), "el run permanece intacto");
         assert_eq!(
@@ -454,7 +592,7 @@ mod authenticated_client_tests {
     }
 
     #[test]
-    fn credencial_person_cli_no_puede_leer_eventos_sin_acotar() {
+    fn credencial_person_cli_puede_leer_eventos_globales() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
         started.unwrap();
@@ -470,8 +608,9 @@ mod authenticated_client_tests {
 
         let (status, response) = get(server.port, secret, "/events");
 
-        assert_eq!(status, 403, "Person/Cli no hereda la lectura de eventos de Desktop: {response}");
-        assert_eq!(response["ok"], false);
+        assert_eq!(status, 200, "Person/Cli coordinador puede leer el diario: {response}");
+        assert_eq!(response["ok"], true);
+        assert!(response["data"]["events"].as_array().is_some());
         server.stop();
     }
 
@@ -566,15 +705,15 @@ mod authenticated_client_tests {
         let (status, spoofed) = post(server.port, person_secret, &json!({
             "cmd": "attention_list", "caller": own_task, "args": {}
         }));
-        assert_eq!(status, 200);
+        assert_eq!(status, 403);
         assert_eq!(spoofed["ok"], false, "claims del request no cambian el principal autenticado");
+        assert_eq!(spoofed["code"], "forbidden");
 
-        let (status, legacy) = post(server.port, &server.token, &json!({
+        let (status, legacy) = post(server.port, "legacy-shared-server-token-test-only-32-bytes", &json!({
             "cmd": "attention_list", "caller": own_task, "args": {}
         }));
-        assert_eq!(status, 200);
-        assert_eq!(legacy["ok"], false, "el token legacy del servidor no habilita la nueva API de Attention");
-        assert!(legacy["error"].as_str().unwrap().contains("attention_auth_required"));
+        assert_eq!(status, 401, "el token legacy del servidor ya no autentica RPC");
+        assert_eq!(legacy["code"], "invalid_credential");
         server.stop();
     }
 
@@ -633,14 +772,14 @@ mod authenticated_client_tests {
         assert_eq!(agent["ok"], false, "un Agent no lee el overview multiproyecto");
         assert!(agent["error"].as_str().unwrap().contains("projects_overview_auth_required"));
 
-        let (_, legacy) = post(server.port, &server.token, &json!({ "cmd": "projects_overview", "caller": task, "args": {} }));
-        assert_eq!(legacy["ok"], false, "el token legacy no habilita la nueva API");
-        assert!(legacy["error"].as_str().unwrap().contains("projects_overview_auth_required"));
+        let (status, legacy) = post(server.port, "legacy-shared-server-token-test-only-32-bytes", &json!({ "cmd": "projects_overview", "caller": task, "args": {} }));
+        assert_eq!(status, 401, "el token legacy ya no autentica RPC");
+        assert_eq!(legacy["code"], "invalid_credential");
         server.stop();
     }
 
     #[test]
-    fn credencial_person_cli_no_puede_detener_tarea_de_interfaz() {
+    fn credencial_person_cli_puede_detener_tarea_de_interfaz_como_persona() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
         started.unwrap();
@@ -658,7 +797,7 @@ mod authenticated_client_tests {
         let initial_status = core.lock().task(&task).unwrap().status;
 
         let secret = "person-cli-stop-secret-85-at-least-32-bytes";
-        register(
+        let client_id = register(
             &core,
             ClientSurface::Cli,
             ClientPrincipal::Person("person-cli-stop-85".into()),
@@ -677,22 +816,22 @@ mod authenticated_client_tests {
             &json!({ "cmd": "stop", "args": { "task": task } }),
         );
 
-        assert_eq!(status, 200);
-        assert_eq!(response["ok"], false, "Person/Cli no hereda stop de Desktop: {response}");
-        assert!(response["error"].as_str().unwrap().contains("Acción no permitida"));
-        assert_eq!(core.lock().task(&task).unwrap().status, initial_status);
-        assert_eq!(
-            core.storage
-                .with_store(|store| store.events_head().unwrap())
-                .unwrap(),
-            head_before,
-            "el rechazo ocurre antes de mutar"
-        );
+        assert_eq!(status, 200, "Person/Cli coordinador puede detener una tarea: {response}");
+        assert_eq!(response["ok"], true);
+        assert_ne!(core.lock().task(&task).unwrap().status, initial_status);
+        let events = core.storage.with_store(|store| {
+            store.events_page(&EventQuery { after: Some(head_before), limit: Some(100), ..Default::default() }).unwrap().events
+        }).unwrap();
+        assert!(!events.is_empty(), "stop debe confirmar un cambio de estado");
+        assert!(events.iter().all(|event| event.client_id.as_deref() == Some(client_id.as_str())));
+        assert!(events.iter().all(|event| event.actor_kind.as_str() == "person"
+            && event.actor_id.as_deref() == Some("person-cli-stop-85")
+            && event.channel.as_deref() == Some("lxo")), "caller y actor se derivan de la credencial");
         server.stop();
     }
 
     #[test]
-    fn credencial_person_cli_no_puede_liberar_tarea_de_interfaz() {
+    fn credencial_person_cli_puede_liberar_tarea_de_interfaz_como_persona() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
         started.unwrap();
@@ -710,7 +849,7 @@ mod authenticated_client_tests {
         let initial_status = core.lock().task(&task).unwrap().status;
 
         let secret = "person-cli-release-secret-85-at-least-32-bytes";
-        register(
+        let client_id = register(
             &core,
             ClientSurface::Cli,
             ClientPrincipal::Person("person-cli-release-85".into()),
@@ -729,22 +868,22 @@ mod authenticated_client_tests {
             &json!({ "cmd": "release", "args": { "task": task, "force": true } }),
         );
 
-        assert_eq!(status, 200);
-        assert_eq!(response["ok"], false, "Person/Cli no hereda release de Desktop: {response}");
-        assert!(response["error"].as_str().unwrap().contains("Acción no permitida"));
-        assert_eq!(core.lock().task(&task).unwrap().status, initial_status);
-        assert_eq!(
-            core.storage
-                .with_store(|store| store.events_head().unwrap())
-                .unwrap(),
-            head_before,
-            "el rechazo ocurre antes de mutar"
-        );
+        assert_eq!(status, 200, "Person/Cli coordinador puede liberar una tarea: {response}");
+        assert_eq!(response["ok"], true);
+        assert_ne!(core.lock().task(&task).unwrap().status, initial_status);
+        let events = core.storage.with_store(|store| {
+            store.events_page(&EventQuery { after: Some(head_before), limit: Some(100), ..Default::default() }).unwrap().events
+        }).unwrap();
+        assert!(!events.is_empty(), "release debe confirmar un cambio de estado");
+        assert!(events.iter().all(|event| event.client_id.as_deref() == Some(client_id.as_str())));
+        assert!(events.iter().all(|event| event.actor_kind.as_str() == "person"
+            && event.actor_id.as_deref() == Some("person-cli-release-85")
+            && event.channel.as_deref() == Some("lxo")), "caller y actor se derivan de la credencial");
         server.stop();
     }
 
     #[test]
-    fn credencial_person_cli_no_puede_seguir_ni_ver_diff_de_cualquier_tarea() {
+    fn credencial_person_cli_coordinador_puede_consultar_continue_y_diff() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
         started.unwrap();
@@ -759,19 +898,188 @@ mod authenticated_client_tests {
         );
         let server = start(core).unwrap();
 
-        for (cmd, args) in [
-            ("continue", json!({ "task": task, "spec": "reopen as CLI Person" })),
-            ("diff", json!({ "task": task })),
-        ] {
-            let (status, response) = post(server.port, secret, &json!({ "cmd": cmd, "args": args }));
-            assert_eq!(status, 200);
-            assert_eq!(response["ok"], false, "{cmd} debe rechazarse: {response}");
-            assert!(
-                response["error"].as_str().unwrap().contains("Acción no permitida"),
-                "{cmd} debe rechazarse antes de consultar o mutar tareas: {response}"
-            );
-        }
+        let (status, response) = post(server.port, secret, &json!({
+            "cmd": "continue",
+            "args": { "task": task, "spec": "reopen as CLI Person" }
+        }));
+        assert_eq!(status, 200, "continue alcanza el coordinador autenticado: {response}");
+        assert_eq!(response["ok"], false, "la fixture no tiene terminal para continue: {response}");
+        assert!(!response["error"].as_str().unwrap_or("").contains("Acción no permitida"),
+            "continue no debe rechazarse por la autorización de superficie: {response}");
+
+        let (status, response) = post(server.port, secret, &json!({
+            "cmd": "diff",
+            "args": { "task": task }
+        }));
+        assert_eq!(status, 200, "diff alcanza el coordinador autenticado: {response}");
+        assert_eq!(response["ok"], true, "diff es una lectura válida aunque no haya commit: {response}");
+        assert_eq!(response["data"]["diff"], "");
+        assert!(response["data"]["stat"].as_str().unwrap_or("").contains("Sin commit"));
         server.stop();
+    }
+
+    #[test]
+    fn person_cli_cierra_el_run_raiz_seleccionado_y_el_evento_conserva_su_actor() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let root = create_ui_task(&core, "Person CLI selected run close");
+        let run = core.lock().task(&root).unwrap().run.clone();
+        let secret = "person-run-close-secret-86-at-least-32-bytes";
+        let client_id = register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-run-close-86".into()),
+            "install-person-run-close-86",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let (status, response) = post(server.port, secret, &json!({
+            "cmd": "run_close",
+            "args": { "root_task": root, "force": false }
+        }));
+
+        assert_eq!(status, 200, "Person CLI coordinador puede cerrar su run seleccionado: {response}");
+        assert_eq!(response["ok"], true, "la raíz seleccionada debe cerrar correctamente: {response}");
+        assert_eq!(response["data"]["run"], run);
+        let events = core.storage.with_store(|store| {
+            store.events_page(&EventQuery { after: Some(head_before), limit: Some(100), ..Default::default() }).unwrap().events
+        }).unwrap();
+        let closed = events.iter().find(|event| event.kind == "run.closed").expect("se persiste run.closed");
+        assert_eq!(closed.client_id.as_deref(), Some(client_id.as_str()));
+        assert_eq!(closed.actor_kind.as_str(), "person");
+        assert_eq!(closed.actor_id.as_deref(), Some("person-run-close-86"));
+        assert_eq!(closed.channel.as_deref(), Some("lxo"));
+        server.stop();
+    }
+
+    #[test]
+    fn person_cli_rechaza_run_close_cuando_el_selector_no_es_raiz() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let root = create_ui_task(&core, "Person CLI invalid run close selector");
+        let child = core.mutate(|tx| {
+            let child = tx.add_child(&root, 2, NewTask {
+                agent: "claude".into(), model: None, effort: None, role: None,
+                title: "child".into(), spec: "child".into(), repo: "repo".into(), cwd: "cwd".into(),
+                branch: None, base: None, worktree: None, external: false,
+            })?;
+            tx.mark_running(&child)?;
+            Ok(child)
+        }).unwrap();
+        let secret = "person-run-close-invalid-86-at-least-32-bytes";
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-run-close-invalid-86".into()),
+            "install-person-run-close-invalid-86",
+            secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let (status, response) = post(server.port, secret, &json!({
+            "cmd": "run_close",
+            "args": { "root_task": child, "force": true }
+        }));
+
+        assert_eq!(status, 200);
+        assert_eq!(response["ok"], false, "una tarea hija no puede seleccionar un run para cerrar: {response}");
+        assert!(response["error"].as_str().unwrap().contains("raíz"), "{response}");
+        assert!(core.lock().runs.values().any(|run| run.root == root && !run.closed), "el run padre permanece abierto");
+        assert_eq!(core.storage.with_store(|store| store.events_head().unwrap()).unwrap(), head_before,
+            "un selector inválido no emite el cierre ni muta estado");
+        server.stop();
+    }
+
+    #[test]
+    fn agent_cierra_su_run_derivado_y_queda_limitado_a_su_task_y_subarbol() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let own_root = create_ui_task(&core, "Agent-owned run close");
+        let own_run = core.lock().task(&own_root).unwrap().run.clone();
+        let outside_root = create_ui_task(&core, "Outside run");
+        let outside_run = core.lock().task(&outside_root).unwrap().run.clone();
+        let child = core.mutate(|tx| {
+            let child = tx.add_child(&own_root, 2, NewTask {
+                agent: "claude".into(), model: None, effort: None, role: None,
+                title: "Agent child".into(), spec: "child".into(), repo: "repo".into(), cwd: "cwd".into(),
+                branch: None, base: None, worktree: None, external: false,
+            })?;
+            tx.mark_running(&child)?;
+            Ok(child)
+        }).unwrap();
+        let agent_secret = "agent-run-close-scope-86-at-least-32-bytes";
+        let person_secret = "person-global-scope-86-at-least-32-bytes";
+        let agent_client_id = register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Agent(own_root.clone()),
+            "install-agent-run-close-scope-86",
+            agent_secret,
+        );
+        register(
+            &core,
+            ClientSurface::Cli,
+            ClientPrincipal::Person("person-global-86".into()),
+            "install-person-global-scope-86",
+            person_secret,
+        );
+        let server = start(core.clone()).unwrap();
+        let head_before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+
+        let (status, in_scope) = post(server.port, agent_secret, &json!({
+            "cmd": "send", "args": { "to": child, "body": "within subtree" }
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(in_scope["ok"], true, "el Agent gestiona descendientes de su Task: {in_scope}");
+
+        let (status, outside) = post(server.port, agent_secret, &json!({
+            "cmd": "send", "args": { "to": outside_root, "body": "outside subtree" }
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(outside["ok"], false, "el Agent no puede actuar fuera de su Task/subárbol: {outside}");
+        assert!(outside["error"].as_str().unwrap().contains("solo puedes gestionar"), "{outside}");
+
+        let (status, person_global) = post(server.port, person_secret, &json!({
+            "cmd": "stop", "args": { "task": outside_root }
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(person_global["ok"], true, "Person CLI es operador local global en esta fase: {person_global}");
+        assert!(core.lock().runs[&outside_run].closed == false, "detener una tarea externa no cierra el run");
+
+        let (status, spoofed_close) = post(server.port, agent_secret, &json!({
+            "cmd": "run_close", "args": { "root_task": outside_root, "force": true }
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(spoofed_close["ok"], false, "Agent no puede seleccionar el run ajeno: {spoofed_close}");
+        assert!(spoofed_close["error"].as_str().unwrap().contains("solo puede cerrar"), "{spoofed_close}");
+        assert!(!core.lock().runs[&own_run].closed, "un selector Agent inválido no cierra su propio run como efecto colateral");
+        assert!(!core.lock().runs[&outside_run].closed, "Agent no puede cerrar un run ajeno usando root_task");
+
+        let (status, close_own) = post(server.port, agent_secret, &json!({
+            "cmd": "run_close", "args": { "force": true }
+        }));
+        assert_eq!(status, 200);
+        assert_eq!(close_own["ok"], true, "Agent deriva el run de su identidad autenticada: {close_own}");
+        assert_eq!(close_own["data"]["run"], own_run);
+        server.stop();
+        let events = core.storage.with_store(|store| {
+            store.events_page(&EventQuery { after: Some(head_before), limit: Some(100), ..Default::default() }).unwrap().events
+        }).unwrap();
+        let closed = events.iter().find(|event| event.kind == "run.closed" && event.run_id.as_deref() == Some(own_run.as_str()))
+            .expect("el Agent autenticado persiste run.closed para su run");
+        assert_eq!(closed.client_id.as_deref(), Some(agent_client_id.as_str()));
+        assert_eq!(closed.actor_kind.as_str(), "agent");
+        assert_eq!(closed.actor_id.as_deref(), Some(own_root.as_str()));
+        assert_eq!(closed.channel.as_deref(), Some("lxo"));
     }
 
     #[test]

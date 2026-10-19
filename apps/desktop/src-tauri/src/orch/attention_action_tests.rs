@@ -358,8 +358,8 @@ fn command_no_actua_otra_categoria_y_rpc_no_expone_la_decision() {
         )
         .unwrap_err();
     assert!(
-        error.contains("desconocido"),
-        "la resolución no se publica como RPC: {error}"
+        error.contains("ForbiddenAction"),
+        "la frontera autenticada rechaza el RPC no clasificado antes del dispatcher: {error}"
     );
     assert_eq!(
         core.storage

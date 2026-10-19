@@ -15,6 +15,8 @@ use super::{new_uuid_v7, sha256_hex, Store, StoreError, StoreResult};
 
 pub const CORE_CLIENT_ID: &str = "core-system";
 const MIN_CLIENT_SECRET_BYTES: usize = 32;
+/// Una credencial local se renueva tras 90 días, aunque el SO siga conservándola.
+pub const CLIENT_CREDENTIAL_TTL_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
@@ -213,11 +215,13 @@ pub enum ClientScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientAction {
+    /// Comando sin clasificación explícita: ninguna credencial externa lo autoriza.
+    Unknown,
     Read,
     EventLogRead,
     AgentCommand,
-    /// Acción que el Agent puede ejecutar con los checks de relación de tarea; una Persona
-    /// solo puede ejecutarla desde Desktop, donde `Caller::User` sí representa a la interfaz.
+    /// Operación de coordinación con comprobaciones de relación de tarea. Agent permanece
+    /// limitado a su task; Person puede usarla como coordinador desde Desktop o CLI.
     AgentOrDesktopCommand,
     UiCommand,
     HumanDecision,
@@ -352,11 +356,11 @@ impl AuthenticatedClient {
     pub fn authorize(&self, action: ClientAction) -> Result<(), ClientIdentityError> {
         let allowed = match self.scope() {
             ClientScope::Person(_) => match action {
-                ClientAction::CoreCommand => false,
-                ClientAction::EventLogRead
-                | ClientAction::AgentOrDesktopCommand
-                | ClientAction::UiCommand
-                | ClientAction::HumanDecision => {
+                ClientAction::CoreCommand | ClientAction::Unknown => false,
+                ClientAction::EventLogRead | ClientAction::AgentOrDesktopCommand => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
+                }
+                ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
                 }
                 _ => true,
@@ -378,6 +382,15 @@ impl AuthenticatedClient {
             Err(ClientIdentityError::ForbiddenAction)
         }
     }
+}
+
+/// Resultado de autenticación necesario para distinguir token desconocido, vencido y revocado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientAuthentication {
+    Active(AuthenticatedClient),
+    Invalid,
+    Expired(AuthenticatedClient),
+    Revoked(AuthenticatedClient),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -536,18 +549,32 @@ impl Store {
 
     /// Resuelve solo credenciales activas y devuelve identidad sin exponer ni retener el secreto.
     pub fn authenticate_client(&self, secret: &str) -> StoreResult<Option<AuthenticatedClient>> {
+        match self.authenticate_client_inner(secret, None)? {
+            ClientAuthentication::Active(client) => Ok(Some(client)),
+            ClientAuthentication::Invalid
+            | ClientAuthentication::Expired(_)
+            | ClientAuthentication::Revoked(_) => Ok(None),
+        }
+    }
+
+    /// Como [`Store::authenticate_client`], pero informa la causa de rechazo y hace cumplir el TTL.
+    pub fn authenticate_client_at(&self, secret: &str, now: i64) -> StoreResult<ClientAuthentication> {
+        self.authenticate_client_inner(secret, Some(now))
+    }
+
+    fn authenticate_client_inner(&self, secret: &str, now: Option<i64>) -> StoreResult<ClientAuthentication> {
         if secret.is_empty() {
-            return Ok(None);
+            return Ok(ClientAuthentication::Invalid);
         }
         let token_hash = sha256_hex(secret.as_bytes());
-        let row: Option<(String, String, String, String, Option<String>, String, String, i64)> = self
+        let row: Option<(String, String, String, String, Option<String>, String, String, i64, Option<i64>, Option<i64>)> = self
             .conn
             .query_row(
-                "SELECT cred.credential_id, cli.client_id, cli.surface, cli.installation_id, cli.device_id, cred.principal_kind, cred.principal_id, cli.created_at \
+                "SELECT cred.credential_id, cli.client_id, cli.surface, cli.installation_id, cli.device_id, cred.principal_kind, cred.principal_id, cred.created_at, cred.revoked_at, cli.revoked_at \
                  FROM client_credentials AS cred JOIN clients AS cli ON cli.client_id = cred.client_id \
-                 WHERE cred.token_hash = ?1 AND cred.revoked_at IS NULL AND cli.revoked_at IS NULL",
+                 WHERE cred.token_hash = ?1",
                 [&token_hash],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?)),
             )
             .optional()?;
         let Some((
@@ -559,9 +586,11 @@ impl Store {
             principal_kind,
             principal_id,
             created_at,
+            credential_revoked_at,
+            client_revoked_at,
         )) = row
         else {
-            return Ok(None);
+            return Ok(ClientAuthentication::Invalid);
         };
         let principal = ClientPrincipal::from_db(&principal_kind, &principal_id)?;
         let identity = ClientIdentity {
@@ -575,10 +604,17 @@ impl Store {
             ),
             created_at,
         };
-        Ok(Some(AuthenticatedClient {
+        let authenticated = AuthenticatedClient {
             credential_id,
             identity,
-        }))
+        };
+        if credential_revoked_at.is_some() || client_revoked_at.is_some() {
+            return Ok(ClientAuthentication::Revoked(authenticated));
+        }
+        if now.is_some_and(|at| at.saturating_sub(created_at) >= CLIENT_CREDENTIAL_TTL_MS) {
+            return Ok(ClientAuthentication::Expired(authenticated));
+        }
+        Ok(ClientAuthentication::Active(authenticated))
     }
 
     pub fn revoke_credential(&mut self, credential_id: &str, at: i64) -> StoreResult<bool> {
@@ -605,6 +641,34 @@ impl Store {
             }
             Ok(changed == 1)
         })
+    }
+
+    /// Revoca todas las credenciales anteriores de una instalación al completar una rotación.
+    pub fn revoke_client_credentials_except(&mut self, client_id: &str, keep_credential_id: &str, at: i64) -> StoreResult<usize> {
+        self.write(|tx| Ok(tx.execute(
+            "UPDATE client_credentials SET revoked_at = ?1 WHERE client_id = ?2 AND credential_id <> ?3 AND revoked_at IS NULL",
+            rusqlite::params![at, client_id, keep_credential_id],
+        )?))
+    }
+
+    /// Core mantiene una sola identidad Person CLI activa por base local. Si se elimina
+    /// metadata para recuperar una credencial perdida o revocada, la nueva inscripción
+    /// invalida cualquier bearer Person CLI previo.
+    pub fn revoke_other_cli_person_credentials(&mut self, client_id: &str, at: i64) -> StoreResult<usize> {
+        self.write(|tx| Ok(tx.execute(
+            "UPDATE client_credentials SET revoked_at = ?1 \
+             WHERE revoked_at IS NULL AND principal_kind = 'person' AND client_id <> ?2 \
+             AND client_id IN (SELECT client_id FROM clients WHERE surface = 'cli')",
+            rusqlite::params![at, client_id],
+        )?))
+    }
+
+    /// El reinicio del Core no conserva procesos Agent vivos: sus credenciales anteriores se invalidan.
+    pub fn revoke_all_agent_credentials(&mut self, at: i64) -> StoreResult<usize> {
+        self.write(|tx| Ok(tx.execute(
+            "UPDATE client_credentials SET revoked_at = ?1 WHERE principal_kind = 'agent' AND revoked_at IS NULL",
+            [at],
+        )?))
     }
 }
 
@@ -833,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn comandos_acotados_permiten_agent_o_persona_desktop_pero_no_persona_cli() {
+    fn comandos_de_coordinador_permiten_agent_persona_desktop_y_persona_cli() {
         let dir = dir();
         let mut store = Store::open(&dir, "test").unwrap();
         let person_desktop = ClientCredential::new(
@@ -874,11 +938,10 @@ mod tests {
             .unwrap();
 
         assert!(desktop.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
-        assert_eq!(
-            cli.authorize(ClientAction::AgentOrDesktopCommand),
-            Err(ClientIdentityError::ForbiddenAction)
-        );
+        assert!(cli.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(worker.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
+        assert_eq!(cli.authorize(ClientAction::UiCommand), Err(ClientIdentityError::ForbiddenAction));
+        assert_eq!(cli.authorize(ClientAction::HumanDecision), Err(ClientIdentityError::ForbiddenAction));
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -954,6 +1017,39 @@ mod tests {
         assert!(store.revoke_credential(auth.credential_id(), 200).unwrap());
         assert!(store.authenticate_client(&secret).unwrap().is_none());
         assert!(!store.revoke_credential(auth.credential_id(), 201).unwrap());
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn autenticacion_distingue_credencial_invalida_vencida_y_revocada() {
+        let dir = dir();
+        let mut store = Store::open(&dir, "test").unwrap();
+        let secret = token("lifetime");
+        let credential = ClientCredential::new(ClientPrincipal::Person("person-ttl".into()), secret.clone()).unwrap();
+        let auth = store.register_client(&registration(ClientSurface::Cli, "install-ttl"), &credential, 10_000).unwrap();
+
+        assert_eq!(store.authenticate_client_at("no-registrada", 10_001).unwrap(), ClientAuthentication::Invalid);
+        assert!(matches!(
+            store.authenticate_client_at(&secret, 10_000 + CLIENT_CREDENTIAL_TTL_MS).unwrap(),
+            ClientAuthentication::Expired(_)
+        ));
+        store.revoke_credential(auth.credential_id(), 10_001).unwrap();
+        assert!(matches!(
+            store.authenticate_client_at(&secret, 10_002).unwrap(),
+            ClientAuthentication::Revoked(_)
+        ));
+        drop(store);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn identidad_externa_no_autoriza_acciones_sin_clasificacion() {
+        let dir = dir();
+        let mut store = Store::open(&dir, "test").unwrap();
+        let cred = ClientCredential::new(ClientPrincipal::Agent("task-unknown".into()), token("unknown-action")).unwrap();
+        let auth = store.register_client(&registration(ClientSurface::Cli, "install-unknown"), &cred, 100).unwrap();
+        assert_eq!(auth.authorize(ClientAction::Unknown), Err(ClientIdentityError::ForbiddenAction));
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }
