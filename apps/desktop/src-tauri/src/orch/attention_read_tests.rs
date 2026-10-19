@@ -18,7 +18,7 @@ use crate::store::{
     TargetKind,
 };
 
-fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
+pub(super) fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     let (l, data, core_dir) = dirs();
     let (core, _host, ready) = arranca(&data, &core_dir);
     ready.unwrap();
@@ -26,7 +26,7 @@ fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     (l, data, core_dir, core)
 }
 
-fn persona(
+pub(super) fn persona(
     core: &Core,
     id: &str,
     installation: &str,
@@ -48,7 +48,7 @@ fn persona(
     core.authenticate_client(secret).unwrap().unwrap()
 }
 
-fn agente(
+pub(super) fn agente(
     core: &Core,
     task: &str,
     installation: &str,
@@ -115,7 +115,7 @@ fn tarea(core: &Core, title: &str) -> String {
     .unwrap()
 }
 
-fn attention(
+pub(super) fn attention(
     category: AttentionCategory,
     target: &str,
     project: &str,
@@ -136,7 +136,7 @@ fn attention(
     }
 }
 
-fn raise(core: &Core, row: NewAttention) -> AttentionRow {
+pub(super) fn raise(core: &Core, row: NewAttention) -> AttentionRow {
     core.storage
         .with_store(|store| match store.attention_raise(&row).unwrap() {
             Raised::Created(row) => row,
@@ -145,7 +145,7 @@ fn raise(core: &Core, row: NewAttention) -> AttentionRow {
         .unwrap()
 }
 
-fn rpc(
+pub(super) fn rpc(
     core: &Arc<Core>,
     client: &crate::store::AuthenticatedClient,
     cmd: &str,
