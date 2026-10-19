@@ -236,7 +236,7 @@ func (h *harness) pump(cond func() bool) {
 
 func (h *harness) settle() {
 	h.t.Helper()
-	h.pump(func() bool { return !h.m.running && h.m.busy == "" })
+	h.pump(func() bool { return !h.m.running && h.m.busy == "" && h.m.compacting == nil })
 }
 
 func (h *harness) key(s string) {

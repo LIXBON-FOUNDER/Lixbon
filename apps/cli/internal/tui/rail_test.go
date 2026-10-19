@@ -25,7 +25,7 @@ func TestAnAgentTurnHangsFromItsRail(t *testing.T) {
 	h.settle()
 	out := ansi.Strip(h.m.log.text())
 	head := strings.Index(out, "◆ Lixbon")
-	narr := strings.Index(out, "┃   Miro primero el archivo.")
+	narr := strings.Index(out, "┃ Miro primero el archivo.")
 	end := strings.Index(out, "┗")
 	answer := strings.Index(out, "El archivo dice hola.")
 	if head < 0 || narr < head || end < narr || answer < end {
@@ -37,15 +37,26 @@ func TestAnAgentTurnHangsFromItsRail(t *testing.T) {
 	notContains(t, out, "Pensó")
 }
 
-// Sin acciones no hay riel: la respuesta va con su ◆ como siempre.
+// Sin acciones no hay riel, pero el turno abre igual con «◆ Lixbon» y la
+// respuesta va debajo, sin ◆ ni fila de aire.
 func TestAChatTurnHasNoRail(t *testing.T) {
 	h := newHarness(t, nil, textReply("Hola."))
 	h.send("buenas")
 	h.settle()
 	out := ansi.Strip(h.m.log.text())
-	contains(t, out, "◆ Hola.")
-	notContains(t, out, "Lixbon  ")
+	contains(t, out, glyphBrand+" Lixbon")
+	notContains(t, out, glyphBrand+" Hola.")
 	notContains(t, out, glyphs.turnRail)
+	notContains(t, out, glyphs.turnEnd)
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "Lixbon") {
+			if i+1 >= len(lines) || strings.TrimSpace(lines[i+1]) != "Hola." {
+				t.Fatalf("la respuesta va justo bajo la cabecera:\n%s", out)
+			}
+			return
+		}
+	}
 }
 
 // proseThenTool responde con algo de prosa y, en el mismo paso, una llamada.
@@ -77,8 +88,9 @@ func TestAPlanFromAnotherTurnIsNotShownLive(t *testing.T) {
 	m.running = false
 }
 
-// Cada paso del turno lleva una fila de aire antes: no se lee todo junto.
-func TestStepsOfATurnAreSeparated(t *testing.T) {
+// El riel es continuo: ningún paso deja una fila vacía antes, y la respuesta
+// va pegada a ┗.
+func TestTheRailHasNoGaps(t *testing.T) {
 	h := newHarness(t, nil,
 		proseThenTool("Miro primero el archivo.", "c1", "read_file", map[string]any{"path": "a.txt"}),
 		textReply("Listo."))
@@ -88,13 +100,21 @@ func TestStepsOfATurnAreSeparated(t *testing.T) {
 	h.send("lee a.txt")
 	h.settle()
 	lines := strings.Split(ansi.Strip(h.m.log.text()), "\n")
+	head, end := -1, -1
 	for i, l := range lines {
-		if strings.Contains(l, "Leyó a.txt") || strings.Contains(l, "Leer") && strings.Contains(l, "a.txt") {
-			if i == 0 || strings.Trim(lines[i-1], " "+glyphs.turnRail) != "" {
-				t.Fatalf("la acción va tras una fila de aire:\n%s", strings.Join(lines, "\n"))
-			}
-			return
+		switch l = strings.TrimSpace(l); {
+		case strings.HasPrefix(l, glyphBrand+" Lixbon"):
+			head = i
+		case l == glyphs.turnEnd:
+			end = i
 		}
 	}
-	t.Fatalf("no se vio la lectura:\n%s", strings.Join(lines, "\n"))
+	if head < 0 || end < head || end+1 >= len(lines) || strings.TrimSpace(lines[end+1]) != "Listo." {
+		t.Fatalf("cabecera %d, cierre %d:\n%s", head, end, strings.Join(lines, "\n"))
+	}
+	for _, l := range lines[head+1 : end] {
+		if strings.TrimSpace(l) == glyphs.turnRail {
+			t.Fatalf("fila vacía en el riel:\n%s", strings.Join(lines, "\n"))
+		}
+	}
 }

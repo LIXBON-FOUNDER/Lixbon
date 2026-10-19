@@ -183,18 +183,21 @@ func (m *Model) liveView() []string {
 	width := m.width
 	var lines []string
 	label, warn := m.liveLabel()
-	head := " " + sBeige.Render(m.spinFrame()) + " "
+	// Fuera del riel: el turno sigue debajo de su último paso.
+	head := " " + sAccent.Render(m.spinFrame()) + " "
 	if warn {
 		head += sWarn.Render(label)
 	} else {
 		head += m.shimmer(label)
 	}
-	elapsed := fmt.Sprintf("%.0f s", time.Since(m.started).Seconds())
-	sep := sDim2.Render(" " + glyphSep + " ")
-	esc := sSoft.Render("esc") + sDim.Render(" interrumpe")
-	rights := []string{sDim.Render(elapsed) + sep + esc + " ", sDim.Render(elapsed) + " ", ""}
+	head += sDim.Render("   " + duration(time.Since(m.started).Seconds()))
 	if tok := m.liveTokens(); tok > 0 {
-		rights = append([]string{sDim.Render(elapsed) + sep + sDim.Render("↓ "+fmtTokens(tok)+" tok") + sep + esc + " "}, rights...)
+		head += sDim.Render("   ↓ " + fmtTokens(tok) + " tokens")
+	}
+	esc := sInk.Render("esc") + sDim.Render(" para")
+	rights := []string{esc + " ", ""}
+	if m.commandRunning() {
+		rights = append([]string{esc + "     " + sInk.Render("ctrl+b") + sDim.Render(" al fondo") + " "}, rights...)
 	}
 	row := ansi.Truncate(head, max(1, width), "")
 	for _, r := range rights {
@@ -218,9 +221,25 @@ func (m *Model) liveView() []string {
 		}
 	}
 	if step, n, k := m.currentStep(); step != "" {
-		lines = append(lines, ansi.Truncate(pad+sAccent.Render(glyphDoing)+" "+sSoft.Render(fmt.Sprintf("%d/%d", k, n))+" "+sDim.Render(step), max(1, width), glyphEllipsis))
+		lines = append(lines, ansi.Truncate(pad+sAccent.Render(glyphDoing)+" "+sInk.Render(step)+sDim.Render(fmt.Sprintf("   %d de %d", k, n)), max(1, width), glyphEllipsis))
 	}
 	return lines
+}
+
+// commandRunning: el paso en curso es un comando que corre y se puede mandar
+// al fondo con ctrl+b.
+func (m *Model) commandRunning() bool {
+	b := m.currentTool()
+	return b != nil && b.state == toolRunning && b.command
+}
+
+// detachCommand manda al fondo el comando en curso: sigue en /ps y el agente
+// continúa con lo que llevaba escrito.
+func (m *Model) detachCommand() bool {
+	if !m.commandRunning() || m.chat.Toolbox == nil {
+		return false
+	}
+	return m.chat.Toolbox.DetachCommand()
 }
 
 // currentStep es el paso del plan en curso y cuántos van.

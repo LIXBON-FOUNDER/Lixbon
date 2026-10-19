@@ -366,75 +366,106 @@ func highlightMatch(text string, pos []int, base, hit lipgloss.Style) string {
 	return b.String()
 }
 
-// menuView pinta el menú encima de la caja: cabeceras de grupo (en «/»), la
-// fila elegida con la barra y el fondo, y las teclas.
+// groupStyle es el color de cada sección del menú «/»: la cabecera y la
+// barra de sus comandos lo llevan, para distinguirlas de un vistazo.
+func groupStyle(group string) lipgloss.Style {
+	hex := pal.kw
+	switch group {
+	case "conversation":
+		hex = pal.info
+	case "agent":
+		hex = pal.acc
+	case "account":
+		hex = pal.ty
+	case "system":
+		hex = pal.str
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(hex))
+}
+
+// menuView pinta el menú encima de la caja: en «/», cada sección con su
+// cabecera en color y una fila de aire antes; la fila elegida con › y la
+// banda; los argumentos y las descripciones en columnas; y las teclas.
 func (m *Model) menuView() []string {
 	width := max(1, m.width)
+	inner := max(1, width-4)
 	start := 0
 	if len(m.menu) > menuVisible {
 		start = max(0, min(m.menuCursor-menuVisible/2, len(m.menu)-menuVisible))
 	}
 	end := min(len(m.menu), start+menuVisible)
-	var lines []string
-	if m.menuFiles {
-		lines = append(lines, sDim.Render(pad+"archivos"))
+	argsWidth := 0
+	for _, it := range m.menu[start:end] {
+		argsWidth = max(argsWidth, ansi.StringWidth(it.args))
 	}
+	argsWidth = min(argsWidth, 16)
+	var rows []panelRow
 	group := ""
 	for i := start; i < end; i++ {
 		it := m.menu[i]
-		if !m.menuFiles && it.group != group {
-			group = it.group
-			lines = append(lines, sDim.Render(pad+group))
+		gs := sDim
+		if !m.menuFiles {
+			gs = groupStyle(it.group)
+			if it.group != group {
+				if group != "" {
+					rows = append(rows, panelRow{})
+				}
+				group = it.group
+				title := strings.ToUpper(group[:1]) + group[1:]
+				rows = append(rows, panelRow{text: gs.Render(glyphDot+" "+title)})
+			}
 		}
 		on := i == m.menuCursor
-		labelStyle, descStyle := sBeige, sDim
+		bar, labelStyle, descStyle, bg := "  ", sSoft, sDim, ""
 		if on {
-			labelStyle, descStyle = sBold, sSoft
-		}
-		label := highlightMatch(it.label, it.pos, labelStyle, sAccent)
-		left := label
-		if m.menuFiles {
-			left = label
-		} else {
-			pad := strings.Repeat(" ", max(0, NameWidth-ansi.StringWidth(it.label)))
-			left = label + pad
-			if it.args != "" {
-				left += sDim2.Render(" " + it.args)
-			}
-			left += "  " + descStyle.Render(it.desc)
+			bar, labelStyle, descStyle, bg = sAccent.Render(glyphPrompt)+" ", sInk, sSoft, pal.surf2
 		}
 		right := ""
+		var left string
 		if m.menuFiles {
+			left = bar + highlightMatch(it.label, it.pos, labelStyle, sInk)
 			right = descStyle.Render(m.fileMeta(it))
+		} else {
+			// La «/» en el color de su sección; el nombre, en tinta.
+			name := strings.TrimPrefix(it.label, "/")
+			pos := make([]int, 0, len(it.pos))
+			for _, p := range it.pos {
+				if p > 0 {
+					pos = append(pos, p-1)
+				}
+			}
+			left = bar + gs.Render("/") + highlightMatch(name, pos, labelStyle, sAccent)
+			left += strings.Repeat(" ", max(1, NameWidth+2-ansi.StringWidth(it.label)))
+			args := ansi.Truncate(it.args, argsWidth, glyphEllipsis)
+			left += sDim2.Render(args) + strings.Repeat(" ", argsWidth-ansi.StringWidth(args)+2)
+			left += descStyle.Render(it.desc)
 		}
-		bar := "   "
-		if on {
-			bar = " " + sAccent.Render(glyphEdge) + " "
-		}
-		row := fitRight(bar+left, right, width)
-		row = ansi.Truncate(row, max(1, width-1), glyphEllipsis)
-		if on {
-			row = withBackground(row+strings.Repeat(" ", max(0, width-1-ansi.StringWidth(row))), pal.surf2)
-		}
-		lines = append(lines, row)
+		rows = append(rows, panelRow{text: ansi.Truncate(fitRight(left, right, inner+1), inner, glyphEllipsis), bg: bg})
 	}
 	if len(m.menu) == 0 && m.menuFiles {
-		lines = append(lines, sDim.Render(pad+"sin coincidencias"))
+		rows = append(rows, panelRow{text: sDim.Render("sin coincidencias")})
+	}
+	switch {
+	case end < len(m.menu):
+		rows = append(rows, panelRow{text: sDim.Render(fmt.Sprintf("  ↓ %d más", len(m.menu)-end))})
+	case start > 0:
+		rows = append(rows, panelRow{text: sDim.Render(fmt.Sprintf("  ↑ %d más", start))})
 	}
 	// El menú de comandos va en inglés, como los comandos; el de archivos no.
-	keys := [][2]string{{"↑↓", "mover"}, {"tab", "completar"}, {"esc", "cerrar"}}
-	if !m.menuFiles {
-		keys = [][2]string{{"↑↓", "move"}, {"↵", "run"}, {"tab", "complete"}, {"esc", "close"}}
+	title, count := "Commands", noun(len(m.menu), "command", "commands")
+	keys := [][2]string{{"↑↓", "move"}, {"tab", "complete"}, {"enter", "run"}, {"esc", "close"}}
+	if m.menuFiles {
+		title, count = "Archivos", noun(len(m.menu), "archivo", "archivos")
+		keys = [][2]string{{"↑↓", "mover"}, {"tab", "completar"}, {"esc", "cerrar"}}
 	}
-	lines = append(lines, ansi.Truncate(pad+keyHints(keys...), width, ""))
-	return lines
+	return sheet(rows, width, "", title, sDim.Render(count), keyHints(keys...))
 }
 
 // ── atajos ───────────────────────────────────────────────────────────────
 
 var shortcuts = [][2]string{
-	{"↵", "enviar"}, {"shift+tab", "cambiar de modo"},
-	{"alt+↵", "nueva línea"}, {"ctrl+o", "plegar o desplegar todo"},
+	{"enter", "enviar"}, {"shift+tab", "cambiar de modo"},
+	{"alt+enter", "nueva línea"}, {"ctrl+o", "plegar o desplegar todo"},
 	{"/", "comandos"}, {"ctrl+t", "transcript completo"},
 	{"@", "adjuntar un archivo"}, {"alt+v", "pegar una imagen"},
 	{"!", "ejecutar en la shell"}, {"esc", "interrumpir o cerrar"},
@@ -448,7 +479,7 @@ func (m *Model) shortcutsView() []string {
 	inner := width - 4
 	var rows []panelRow
 	cell := func(k, label string) string {
-		return sSoft.Render(fmt.Sprintf("%-10s", k)) + sPrimary.Render(label)
+		return sInk.Render(fmt.Sprintf("%-10s", k)) + sDim.Render(label)
 	}
 	if inner >= 70 {
 		for i := 0; i < len(shortcuts); i += 2 {
@@ -461,5 +492,5 @@ func (m *Model) shortcutsView() []string {
 			rows = append(rows, panelRow{text: cell(s[0], s[1])})
 		}
 	}
-	return panel(rows, width, pal.faint, "Atajos")
+	return sheet(rows, width, "", "Atajos", "", keyHints([2]string{"esc", "cerrar"}))
 }

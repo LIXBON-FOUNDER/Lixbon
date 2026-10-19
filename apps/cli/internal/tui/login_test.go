@@ -24,9 +24,9 @@ func TestLoginMethodNavigatesWithArrows(t *testing.T) {
 		t.Fatal("/login abre la pantalla de login")
 	}
 	view := h.view()
-	contains(t, view, "Inicia sesión para empezar")
-	contains(t, view, "Continuar con lixbon.com")
-	contains(t, view, "Usar una API key")
+	contains(t, view, "Entra en lixbon")
+	contains(t, view, "Con el navegador")
+	contains(t, view, "Con una API key")
 	notContains(t, view, "Contraseña")
 	h.key("down")
 	if h.m.login.cursor != 1 {
@@ -57,7 +57,7 @@ func TestLoginWithAnAPIKeySavesItWithoutShowingIt(t *testing.T) {
 	contains(t, h.view(), "22 car.")
 	h.key("enter")
 	h.pump(func() bool { return h.m.login.step == stepDone })
-	contains(t, h.view(), "Clave verificada")
+	contains(t, h.view(), "clave verificada")
 	h.key("enter")
 	h.settle()
 	if h.m.login != nil || h.chat.Cfg.APIKey != key {
@@ -94,7 +94,7 @@ func TestLoginThroughTheBrowser(t *testing.T) {
 	h.openLogin(stepMethod)
 	h.key("enter")
 	h.pump(func() bool { return h.m.login.session != nil })
-	contains(t, h.view(), "Esperando la autorización")
+	contains(t, h.view(), "esperando")
 	contains(t, h.view(), "/ide/connect")
 	s := h.m.login.session
 	u, _ := url.Parse(s.URL)
@@ -131,7 +131,7 @@ func TestLoginPastingTheFinalAddress(t *testing.T) {
 func TestLoginAtStartupCanBeSkipped(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.login = newLoginView(loginStartup, *h.chat.Client, "test", &h.m.spin)
-	contains(t, h.view(), "continuar sin sesión")
+	contains(t, h.view(), "entrar sin sesión")
 	h.key("esc")
 	if h.m.login != nil {
 		t.Fatal("Esc al arrancar deja el chat sin sesión")

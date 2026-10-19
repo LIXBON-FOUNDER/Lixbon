@@ -140,12 +140,14 @@ func (p *loginProgram) View() tea.View {
 	content := p.view.view(width, height)
 	if p.picker != nil {
 		var lines []string
-		for _, r := range renderWordmark() {
-			lines = append(lines, center(r, width))
+		if height >= 30 {
+			lines = append(lines, "")
+			for _, r := range renderLogo(cardLogoSize) {
+				lines = append(lines, center(r, width))
+			}
 		}
-		lines = append(lines, "", center(sSoft.Render("Elige el modelo que se usará por defecto"), width), "")
-		lines = append(lines, p.picker.view(width, max(1, height-12))...)
-		lines = append(lines, "", " "+p.picker.hints())
+		lines = append(lines, "", center(sInk.Render("Elige el modelo que se usará por defecto"), width), "")
+		lines = append(lines, p.picker.view(width, max(1, height-len(lines)-p.picker.chrome()))...)
 		for len(lines) < height {
 			lines = append(lines, "")
 		}

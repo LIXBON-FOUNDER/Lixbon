@@ -193,14 +193,13 @@ func TestTheLiveStatusFollowsTheLastMessage(t *testing.T) {
 			msg = i
 		case strings.Contains(r, "Pensando"):
 			live = i
-		case strings.Contains(r, glyphs.boxTL):
-			box = i
 		}
 	}
 	if msg < 0 || live != msg+2 || strings.TrimSpace(rows[msg+1]) != "" {
 		t.Fatalf("el estado va detrás del mensaje, con una fila de aire: mensaje %d, estado %d\n%s", msg, live, h.view())
 	}
-	if box != len(rows)-4 || !strings.Contains(rows[len(rows)-1], "shift+tab") && !strings.Contains(rows[len(rows)-1], "esc") {
+	box = promptRow(rows)
+	if box != len(rows)-4 || !strings.Contains(rows[len(rows)-1], "contexto") {
 		t.Fatalf("la caja y el pie siguen abajo: caja %d de %d\n%s", box, len(rows), h.view())
 	}
 	h.m.running = false

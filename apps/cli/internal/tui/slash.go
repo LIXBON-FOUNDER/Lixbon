@@ -263,30 +263,7 @@ func (m *Model) cmdModel(arg string) tea.Cmd {
 			m.add(errLine(m.opts.Account.NoModelsError().Error()))
 			return nil
 		}
-		options := make([]option, 0, len(models))
-		cursor := 0
-		for i, mod := range models {
-			o := option{Label: mod.Name, Value: mod.ID, Extra: capabilityLabels(mod.Capabilities)}
-			if mod.Name != mod.ID {
-				o.Desc = mod.ID
-			}
-			if mod.NumCtx > 0 {
-				o.Meta = sDim.Render(fmtContext(mod.NumCtx))
-			}
-			if mod.ID == m.chat.Model {
-				o.Badge, cursor = "actual", i
-			}
-			options = append(options, o)
-		}
-		p := newPicker("Modelo", options, func(value string, cancelled bool) tea.Cmd {
-			if !cancelled {
-				m.chooseModel(value)
-			}
-			return nil
-		})
-		p.search = len(options) > 9
-		p.cursor = cursor
-		m.picker = p
+		m.picker = m.modelPicker(models)
 		return nil
 	}
 	needle := strings.ToLower(arg)
@@ -366,37 +343,6 @@ func (m *Model) setMode(mode string) {
 	m.refreshContext()
 }
 
-func (m *Model) cmdMode(arg string) tea.Cmd {
-	apply := func(mode string) {
-		m.setMode(mode)
-		if mode == chat.ModeAgent {
-			m.add(note("Workspace del agente: " + shortPath(m.chat.Workspace)))
-		}
-	}
-	if slices.Contains([]string{"ask", "agent", "delegate"}, arg) {
-		apply(arg)
-		return nil
-	}
-	options := []option{
-		{Label: "ask", Value: "ask", Desc: "conversa y lee tu proyecto sin modificarlo"},
-		{Label: "agent", Value: "agent", Desc: "el modelo edita código en tu workspace"},
-		{Label: "delegate", Value: "delegate", Desc: "auto-routing inteligente del servidor"},
-	}
-	p := newPicker("Modo de trabajo", options, func(value string, cancelled bool) tea.Cmd {
-		if !cancelled {
-			apply(value)
-		}
-		return nil
-	})
-	for i, o := range options {
-		if o.Value == m.chat.Mode {
-			p.cursor = i
-		}
-	}
-	m.picker = p
-	return nil
-}
-
 func (m *Model) newConversation(label string) {
 	m.chat.NewConversation()
 	m.forgetConversation()
@@ -447,29 +393,8 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 		}
 		return nil
 	}
-	now := float64(time.Now().UnixNano()) / 1e9
-	options := make([]option, len(items))
-	for i, item := range items {
-		title := item.Title
-		if title == "" {
-			title = "Sin título"
-		}
-		if r := []rune(title); len(r) > 60 {
-			title = string(r[:60]) + glyphEllipsis
-		}
-		detail := fmt.Sprintf("%s %s %d mensaje%s", session.RelativeTime(now, item.UpdatedAt), glyphSep, item.Messages, plural(item.Messages, "", "s"))
-		if item.Tools > 0 {
-			detail += fmt.Sprintf(" %s %d acci%s", glyphSep, item.Tools, plural(item.Tools, "ón", "ones"))
-		}
-		if item.ID == m.chat.ConversationID {
-			detail += " " + glyphSep + " actual"
-		}
-		options[i] = option{Label: title, Value: item.ID, Desc: detail}
-		if all {
-			options[i].Meta = sDim.Render(shortPath(item.Workspace))
-		}
-	}
-	heading := "Conversaciones " + glyphSep + " " + shortPath(m.historyScope())
+	options := m.historyOptions(items, all)
+	heading := "Conversaciones   " + filepath.Base(m.historyScope())
 	if all {
 		heading = "Conversaciones de todas las carpetas"
 	}
@@ -493,7 +418,32 @@ func (m *Model) cmdHistory(arg string) tea.Cmd {
 		return nil
 	})
 	p.search = true
-	p.keys = [][2]string{{"escribe", "filtra"}, {"↑↓", "mover"}, {"↵", "abrir"}, {"esc", "salir"}}
+	if !all {
+		total := 0
+		for _, item := range m.chat.Store.List(0) {
+			if m.ownsConversation(item.Workspace) {
+				total++
+			}
+		}
+		foot := sDim.Render(fmt.Sprintf("%d de %d en esta carpeta. ", len(items), total)) + sInk.Render("/history todas") + sDim.Render(" busca en todas.")
+		p.foot = func(option, int) []string { return []string{foot} }
+	}
+	p.onKey = func(p *picker, msg tea.KeyPressMsg) (tea.Cmd, bool, bool) {
+		if msg.String() != "ctrl+d" {
+			return nil, false, false
+		}
+		opts := p.visible()
+		if p.cursor >= len(opts) || opts[p.cursor].Disabled || opts[p.cursor].Value == m.chat.ConversationID {
+			return nil, true, false
+		}
+		id := opts[p.cursor].Value
+		if m.chat.Store.Delete(id) {
+			p.options = slices.DeleteFunc(p.options, func(o option) bool { return o.Value == id })
+			p.moveToEnabled(1)
+		}
+		return nil, true, false
+	}
+	p.keys = [][2]string{{"↑↓", "mover"}, {"enter", "abrir"}, {"ctrl+d", "borrar"}, {"esc", "cerrar"}}
 	m.picker = p
 	return nil
 }
@@ -1336,65 +1286,32 @@ func (m *Model) cmdCost() {
 func (m *Model) cmdUsage() tea.Cmd {
 	generic, client, log := m.chat.Client.Generic, m.chat.Client, m.chat.Usage
 	ctxPct, ctxTokens := m.ctxPct, m.ctxTokens
+	window := m.chat.Cfg.ContextWindow
 	return m.async("consultando uso", func(ctx context.Context) cmdDoneMsg {
-		var lines []block
-		if !generic {
-			if u, err := client.Usage(ctx); err != nil {
-				lines = append(lines, errLine("No se pudo obtener el uso de la cuenta. Verifica tu sesión. Error: "+err.Error()))
-			} else {
-				lines = append(lines, accountUsage(u, ctxPct, ctxTokens))
+		if generic {
+			return cmdDoneMsg{lines: []block{localUsage(log, time.Now())}}
+		}
+		u, err := client.Usage(ctx)
+		if err != nil {
+			return cmdDoneMsg{lines: []block{errLine("No se pudo obtener el uso de la cuenta. Verifica tu sesión. Error: " + err.Error())}}
+		}
+		return cmdDoneMsg{apply: func(m *Model) {
+			p := newInfoPanel("Uso", func(width int) []string { return usageLines(u, ctxPct, ctxTokens, window, time.Now(), width) })
+			if u.Plan.Name != "" {
+				p.title = "Uso   Plan " + u.Plan.Name
 			}
-		}
-		return cmdDoneMsg{lines: append(lines, localUsage(log, time.Now()))}
+			p.right = sInk.Render("/upgrade") + sDim.Render(" más cupo")
+			p.keys = [][2]string{{"r", "actualizar"}, {"esc", "cerrar"}}
+			p.onKey = func(p *picker, msg tea.KeyPressMsg) (tea.Cmd, bool, bool) {
+				if msg.String() != "r" {
+					return nil, false, false
+				}
+				m.picker = nil
+				return m.cmdUsage(), true, true
+			}
+			m.picker = p
+		}}
 	})
-}
-
-// accountUsage pinta cada cupo como una barra con su porcentaje y, al lado,
-// cuándo se reinicia. Con una conversación en marcha añade su contexto.
-func accountUsage(u api.Usage, ctxPct float64, ctxTokens int) reportBlock {
-	report := reportBlock{title: "Uso de la cuenta", rows: [][2]string{{"Plan", sPrimary.Render(firstNonEmpty(u.Plan.Name, "-"))}}}
-	for _, b := range []struct {
-		label  string
-		bucket api.Bucket
-	}{{"Sesión (4h)", u.Buckets.Session}, {"Semana", u.Buckets.Week}} {
-		if b.bucket.Unlimited {
-			report.rows = append(report.rows, [2]string{b.label, sTrack.Render(strings.Repeat(glyphMeterOn, usageCells)) + "  " + sOK.Render("ilimitado")})
-			continue
-		}
-		pct := min(100, int(b.bucket.Percent+0.5))
-		when := api.ResetIn(b.bucket.ResetAt, time.Now())
-		if when == "" && b.bucket.ResetAt == "" && b.bucket.Percent == 0 {
-			when = "empieza con tu próximo mensaje"
-		}
-		report.rows = append(report.rows, [2]string{b.label, usageRow(float64(pct), when)})
-	}
-	if ctxTokens > 0 {
-		hint := fmtTokens(ctxTokens) + " tok"
-		if ctxPct >= ctxFull {
-			hint = "/compact"
-		}
-		report.rows = append(report.rows, [2]string{"Contexto", usageRow(ctxPct, hint)})
-	}
-	return report
-}
-
-const usageCells = 24
-
-// usageRow es una fila de /usage: barra, porcentaje en el color de la barra
-// y la nota (cuándo se reinicia) atenuada.
-func usageRow(pct float64, note string) string {
-	style := sInk
-	switch {
-	case pct >= ctxFull:
-		style = sErr
-	case pct >= ctxWarn:
-		style = sWarn
-	}
-	row := meter(pct, usageCells) + "  " + style.Render(fmt.Sprintf("%.0f %%", pct))
-	if note != "" {
-		row += "  " + sDim2.Render(note)
-	}
-	return row
 }
 
 // localUsage son los tokens que devolvió cada proveedor en este equipo: hoy,

@@ -149,7 +149,7 @@ func TestRemoteShowsLinkAndQRAndKeepsTheKeyboard(t *testing.T) {
 	h.m.toggleDetail()
 	contains(t, ansi.Strip(h.m.log.text()), "QR-FILA-1")
 	h.m.toggleDetail()
-	contains(t, h.view(), "Remote activo")
+	contains(t, h.view(), "ctrl+c con la caja vacía lo termina")
 
 	h.send("hola")
 	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
@@ -338,7 +338,7 @@ func TestRemoteSelectorIsChosenFromThePhone(t *testing.T) {
 	h.waitFor("choice_request", func() bool { return relay.find("choice_request") != nil })
 	choice := relay.find("choice_request")
 	options := choice["options"].([]any)
-	if choice["title"] != "Modo de trabajo" || len(options) != 3 || options[1].(map[string]any)["value"] != "agent" {
+	if choice["title"] != "Modo" || len(options) != 5 || options[1].(map[string]any)["value"] != "agent" {
 		t.Fatalf("choice: %v", choice)
 	}
 	if h.m.picker == nil {

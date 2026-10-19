@@ -21,8 +21,13 @@ import (
 // glifos. Sin eso, una imagen es solo su fila con el nombre.
 var drawImages = true
 
+// noColor: la terminal no pinta colores (NO_COLOR, consola clásica). Las
+// bandas desaparecen y la fila elegida pasa a vídeo inverso.
+var noColor bool
+
 func setColorProfile(p colorprofile.Profile) {
 	drawImages = p == colorprofile.TrueColor || p == colorprofile.ANSI256
+	noColor = p == colorprofile.NoTTY || p == colorprofile.Ascii
 }
 
 func canDrawImages() bool { return drawImages && glyphs.halfBlocks }

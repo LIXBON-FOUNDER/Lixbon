@@ -1,41 +1,44 @@
 ── 40 ──
- ◆ Lixbon    3 acciones · +4 −1 · 9.8 s
- ┃   Miro primero cómo se crea la
- ┃   sesión.
- ┃ ▸ Exploró 2 a…                 0.8 s
- ┃   ✗  Leer  falta.go     no existe e…
- ┃ ✓  Editar  session.go          +2 −1
+ ◆ Lixbon    3 acciones   +4 −1   9.8 s
+ ┃ Miro primero cómo se crea la
+ ┃ sesión.
+ ┃ ▸ Leyó 2 arch…        0.8 s   ctrl+o
+ ┃   ✗ Leer    falta.go    no existe e…
+ ┃ ✓ Editar  session.go           +2 −1
  ┃     2 −     return &S{}             
- ┃     2 +     s := &S{created: time.No
+ ┃     2 +     s := &S{created: time.N…
  ┃     3 +     return s                
- ┃   └ gofmt: sin errores
- ┗ ✓  $  go test ./int…  exit 0 · 3.4 s
+ ┃   gofmt: sin errores
+ ┃ ✓ $       go test .…  exit 0   3.4 s
+ ┗
 
-   Listo: la sesión se crea con su
-   fecha.
+  Listo: la sesión se crea con su
+  fecha.
 ── 80 ──
- ◆ Lixbon                                            3 acciones · +4 −1 · 9.8 s
- ┃   Miro primero cómo se crea la sesión.
- ┃ ▸ Exploró 2 archivos · 1 búsqueda                                      0.8 s
- ┃   ✗  Leer  falta.go                                     no existe el archivo
- ┃ ✓  Editar  session.go                                                  +2 −1
- ┃     2 −     return &S{}                                                     
- ┃     2 +     s := &S{created: time.Now()}                                    
- ┃     3 +     return s                                                        
- ┃   └ gofmt: sin errores
- ┗ ✓  $  go test ./internal/...                                  exit 0 · 3.4 s
+ ◆ Lixbon                                            3 acciones   +4 −1   9.8 s
+ ┃ Miro primero cómo se crea la sesión.
+ ┃ ▸ Leyó 2 archivos y buscó «FromConfig» en src/                0.8 s   ctrl+o
+ ┃   ✗ Leer    falta.go                                    no existe el archivo
+ ┃ ✓ Editar  session.go                                                   +2 −1
+ ┃     2 −     return &S{}                   
+ ┃     2 +     s := &S{created: time.Now()}  
+ ┃     3 +     return s                      
+ ┃   gofmt: sin errores
+ ┃ ✓ $       go test ./internal/...                              exit 0   3.4 s
+ ┗
 
-   Listo: la sesión se crea con su fecha.
+  Listo: la sesión se crea con su fecha.
 ── 120 ──
- ◆ Lixbon                                                                                    3 acciones · +4 −1 · 9.8 s
- ┃   Miro primero cómo se crea la sesión.
- ┃ ▸ Exploró 2 archivos · 1 búsqueda                                                                              0.8 s
- ┃   ✗  Leer  falta.go                                                                             no existe el archivo
- ┃ ✓  Editar  session.go                                                                                          +2 −1
- ┃     2 −     return &S{}                                                                                             
- ┃     2 +     s := &S{created: time.Now()}                                                                            
- ┃     3 +     return s                                                                                                
- ┃   └ gofmt: sin errores
- ┗ ✓  $  go test ./internal/...                                                                          exit 0 · 3.4 s
+ ◆ Lixbon                                                                                    3 acciones   +4 −1   9.8 s
+ ┃ Miro primero cómo se crea la sesión.
+ ┃ ▸ Leyó 2 archivos y buscó «FromConfig» en src/                                                        0.8 s   ctrl+o
+ ┃   ✗ Leer    falta.go                                                                            no existe el archivo
+ ┃ ✓ Editar  session.go                                                                                           +2 −1
+ ┃     2 −     return &S{}                   
+ ┃     2 +     s := &S{created: time.Now()}  
+ ┃     3 +     return s                      
+ ┃   gofmt: sin errores
+ ┃ ✓ $       go test ./internal/...                                                                      exit 0   3.4 s
+ ┗
 
-   Listo: la sesión se crea con su fecha.
+  Listo: la sesión se crea con su fecha.

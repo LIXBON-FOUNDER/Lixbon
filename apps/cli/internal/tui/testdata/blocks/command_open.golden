@@ -1,5 +1,5 @@
 ── 40 ──
- ✓  $  go test ./inter…  exit 0 · 3.4 s
+ ✓ $       go test ./i…  exit 0   3.4 s
    │ línea 1
    │ línea 2
    │ línea 3
@@ -11,9 +11,8 @@
    │ línea 9
    │ línea 10
    │ línea 11
-   └ exit 0 · 11 líneas
 ── 80 ──
- ✓  $  go test ./internal/...                                    exit 0 · 3.4 s
+ ✓ $       go test ./internal/...                                exit 0   3.4 s
    │ línea 1
    │ línea 2
    │ línea 3
@@ -25,9 +24,8 @@
    │ línea 9
    │ línea 10
    │ línea 11
-   └ exit 0 · 11 líneas
 ── 120 ──
- ✓  $  go test ./internal/...                                                                            exit 0 · 3.4 s
+ ✓ $       go test ./internal/...                                                                        exit 0   3.4 s
    │ línea 1
    │ línea 2
    │ línea 3
@@ -39,4 +37,3 @@
    │ línea 9
    │ línea 10
    │ línea 11
-   └ exit 0 · 11 líneas

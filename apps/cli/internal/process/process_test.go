@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -39,6 +40,11 @@ func TestMain(m *testing.M) {
 		fmt.Println("TAIL-MARK")
 	case "tick":
 		fmt.Println("tick")
+		time.Sleep(time.Minute)
+	case "ticktock":
+		fmt.Println("tick")
+		time.Sleep(time.Second)
+		fmt.Println("tock")
 		time.Sleep(time.Minute)
 	}
 	os.Exit(0)
@@ -261,3 +267,53 @@ func TestBackgroundFinishedProcessReportsExit(t *testing.T) {
 		t.Fatalf("alive=%v code=%d", bg.Alive(), bg.ExitCode())
 	}
 }
+
+// Suelto a mitad, el comando sigue vivo como proceso del gestor: el resultado
+// lleva lo escrito hasta entonces y read_output solo lo nuevo. Cancelar el
+// turno después ya no lo mata.
+func TestRunDetachableHandsTheCommandToTheManager(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager()
+	t.Cleanup(m.StopAll)
+	ctx, cancel := context.WithCancel(context.Background())
+	detach := make(chan struct{})
+	var once sync.Once
+	live := writerFunc(func(p []byte) {
+		if strings.Contains(string(p), "tick") {
+			once.Do(func() { close(detach) })
+		}
+	})
+	res, bg, err := m.RunDetachable(ctx, dir, helperCommand(t, "ticktock"), time.Minute, live, detach)
+	cancel()
+	if err != nil || bg == nil {
+		t.Fatalf("RunDetachable: %v %v", bg, err)
+	}
+	if res.Output != "tick" || bg.ID != "p1" {
+		t.Fatalf("resultado %q, id %q", res.Output, bg.ID)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var fresh string
+	for !strings.Contains(fresh, "tock") && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		fresh += bg.ReadNew()
+	}
+	if fresh != "tock" || !bg.Alive() {
+		t.Fatalf("tras soltarlo: %q, vivo %v", fresh, bg.Alive())
+	}
+	if !strings.Contains(bg.Tail(), "tick") {
+		t.Fatalf("la salida completa empieza desde el principio: %q", bg.Tail())
+	}
+}
+
+// Sin soltarlo, es RunLive: espera, y el gestor no se entera.
+func TestRunDetachableWithoutDetachWaits(t *testing.T) {
+	m := NewManager()
+	res, bg, err := m.RunDetachable(context.Background(), t.TempDir(), helperCommand(t, "flood"), time.Minute, nil, nil)
+	if err != nil || bg != nil || res.ExitCode != 0 || !strings.Contains(res.Output, "TAIL-MARK") || len(m.IDs()) != 0 {
+		t.Fatalf("%v %v %d %d", err, bg, res.ExitCode, len(m.IDs()))
+	}
+}
+
+type writerFunc func([]byte)
+
+func (f writerFunc) Write(p []byte) (int, error) { f(p); return len(p), nil }
