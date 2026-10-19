@@ -14,6 +14,7 @@ use super::server;
 use super::state::NewTask;
 use super::store_boot::StorageStatus;
 use super::{Caller, Core, Orch};
+use crate::store::{ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
 fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     let (l, data, core_dir) = dirs();
@@ -46,6 +47,32 @@ fn escena(core: &Core, nombre: &str) -> Escena {
         Ok(Escena { run, raiz, hija })
     })
     .unwrap()
+}
+
+fn registra_agente_http(core: &Core, task_id: &str, installation_id: &str, secret: &str) {
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new(installation_id, None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Agent(task_id.into()), secret).unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64))
+        .unwrap()
+        .unwrap();
+}
+
+fn registra_persona_cli_http(core: &Core, installation_id: &str, secret: &str) {
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new(installation_id, None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Person("user".into()), secret).unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64))
+        .unwrap()
+        .unwrap();
 }
 
 fn head(core: &Core) -> i64 {
@@ -367,10 +394,12 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     let (_l, _d, _c, core) = core_listo();
     let a = escena(&core, "a");
     let b = escena(&core, "b");
+    let token_a = "agent-events-read-a-test-secret-32-bytes";
+    registra_agente_http(&core, &a.hija, "install-events-read-agent-a", token_a);
     let h = server::start(core.clone()).unwrap();
     let (rev_antes, head_antes) = (core.storage.confirmed_rev().unwrap(), head(&core));
 
-    let r = get(h.port, "/events?limit=3", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=3", Some(token_a), None);
     assert_eq!(r.status, 200);
     assert_eq!(r.cuerpo["ok"], true);
     let d = &r.cuerpo["data"];
@@ -379,45 +408,46 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     let por_rpc = core.events_read(&Caller::Agent(Some(a.hija.clone())), &json!({ "limit": 3 })).unwrap();
     assert_eq!(*d, por_rpc, "HTTP y RPC devuelven el mismo documento");
 
-    let paginado = get(h.port, &format!("/events?cursor={}&kind_prefix=task.&limit=500", d["next_cursor"]), Some(&h.token), Some(&a.hija));
+    let paginado = get(h.port, &format!("/events?cursor={}&kind_prefix=task.&limit=500", d["next_cursor"]), Some(token_a), None);
     assert_eq!(paginado.status, 200);
     assert!(kinds(&paginado.cuerpo["data"]).iter().all(|k| k.starts_with("task.")));
 
-    let r = get(h.port, "/events", Some(&h.token), None);
-    assert_eq!((r.status, r.cuerpo["code"].clone(), r.cuerpo["ok"].clone()), (403, json!("forbidden"), json!(false)));
-    let r = get(h.port, &format!("/events?run={}", b.run), Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events", Some(token_a), None);
+    assert_eq!((r.status, r.cuerpo["ok"].clone()), (200, json!(true)));
+    assert!(r.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
+    let r = get(h.port, &format!("/events?run={}", b.run), Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (403, json!("forbidden")));
-    let r = get(h.port, "/events?cursor=abc", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=abc", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_cursor")));
-    let r = get(h.port, "/events?limit=0", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=0", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_limit")));
-    let r = get(h.port, "/events?cursor=1&cursor=2", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=1&cursor=2", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_filter")));
-    let r = get(h.port, "/events?cursor=999999", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=999999", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (409, json!("cursor_ahead")));
     for ruta in ["/events?session=false", "/events?session=true", "/events?nope=1", "/events?class=otra", "/events?run="] {
-        let r = get(h.port, ruta, Some(&h.token), Some(&a.hija));
+        let r = get(h.port, ruta, Some(token_a), None);
         assert_eq!((r.status, r.cuerpo["code"].clone(), r.cuerpo["ok"].clone()), (400, json!("invalid_filter"), json!(false)), "{ruta}");
     }
-    let r = get(h.port, "/events?limit=18446744073709551615", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=18446744073709551615", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["data"]["limit"].clone()), (200, json!(500)));
-    let r = get(h.port, "/events?limit=18446744073709551616", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=18446744073709551616", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_limit")));
-    let r = get(h.port, "/events?cursor=9223372036854775808", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=9223372036854775808", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_cursor")));
 
     assert_eq!(get(h.port, "/events", None, Some(&a.hija)).status, 401);
     assert_eq!(get(h.port, "/events", Some("incorrecto"), Some(&a.hija)).status, 401);
     for metodo in ["POST", "PUT", "DELETE", "PATCH"] {
-        let peticion = format!("{metodo} /events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: 2\r\n\r\n{{}}", h.token);
+        let peticion = format!("{metodo} /events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token_a}\r\nContent-Length: 2\r\n\r\n{{}}");
         let r = http(h.port, &peticion);
         assert_eq!(r.status, 405, "{metodo}");
     }
     let sin_token = http(h.port, "POST /events HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}");
     assert_eq!(sin_token.status, 401, "sin token ni siquiera se revela qué métodos admite");
 
-    let cuerpo = json!({ "cmd": "events", "args": { "limit": 2 }, "caller": a.hija }).to_string();
-    let r = http(h.port, &format!("POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{cuerpo}", h.token, cuerpo.len()));
+    let cuerpo = json!({ "cmd": "events", "args": { "limit": 2 } }).to_string();
+    let r = http(h.port, &format!("POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token_a}\r\nContent-Length: {}\r\n\r\n{cuerpo}", cuerpo.len()));
     assert_eq!((r.status, r.cuerpo["ok"].clone(), r.cuerpo["data"]["limit"].clone()), (200, json!(true), json!(2)));
 
     assert_eq!((core.storage.confirmed_rev().unwrap(), head(&core)), (rev_antes, head_antes), "el servidor no escribió nada");
@@ -425,19 +455,48 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
 }
 
 #[test]
-fn la_identidad_del_agente_es_declarada_y_el_token_compartido_no_la_ata_a_una_tarea() {
+fn person_cli_lee_event_log_global_sin_claims_ni_caller_header() {
+    let (_l, _d, _c, core) = core_listo();
+    let a = escena(&core, "person-cli-a");
+    let b = escena(&core, "person-cli-b");
+    let token = "person-cli-events-read-test-secret-32-bytes";
+    registra_persona_cli_http(&core, "install-person-cli-events", token);
+    let h = server::start(core.clone()).unwrap();
+
+    let todos = get(h.port, "/events?limit=500", Some(token), Some("task-inventada"));
+    assert_eq!(todos.status, 200, "la identidad Person CLI puede leer con su credencial, sin actor declarado");
+    let events = todos.cuerpo["data"]["events"].as_array().unwrap();
+    assert!(events.iter().any(|event| event["run_id"] == a.run));
+    assert!(events.iter().any(|event| event["run_id"] == b.run));
+
+    let run = get(h.port, &format!("/events?run={}", b.run), Some(token), None);
+    assert_eq!(run.status, 200, "Person CLI conserva lectura global incluso con filtro de run");
+    assert!(run.cuerpo["data"]["events"].as_array().unwrap().iter().all(|event| event["run_id"] == b.run));
+    h.stop();
+}
+
+#[test]
+fn la_identidad_del_agente_viene_de_la_credencial_y_caller_no_amplia_el_scope() {
     let (_l, _d, _c, core) = core_listo();
     let a = escena(&core, "a");
     let b = escena(&core, "b");
+    let token_a = "agent-events-scope-a-test-secret-32-bytes";
+    let token_b = "agent-events-scope-b-test-secret-32-bytes";
+    registra_agente_http(&core, &a.hija, "install-events-scope-agent-a", token_a);
+    registra_agente_http(&core, &b.hija, "install-events-scope-agent-b", token_b);
     let h = server::start(core.clone()).unwrap();
 
-    let suplantada = get(h.port, "/events?limit=500", Some(&h.token), Some(&b.hija));
-    assert_eq!(suplantada.status, 200, "limitación documentada en EVENTOS.md: sin credencial por tarea, quien tiene el token puede declarar el id de otra");
-    assert!(suplantada.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == b.run));
+    let suplantada = get(h.port, "/events?limit=500", Some(token_a), Some(&b.hija));
+    assert_eq!(suplantada.status, 200, "un caller header no cambia el actor de la credencial");
+    assert!(suplantada.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
+    let propio_b = get(h.port, "/events?limit=500", Some(token_b), Some(&a.hija));
+    assert_eq!(propio_b.status, 200);
+    assert!(propio_b.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == b.run));
     assert_ne!(a.run, b.run);
 
-    let desconocida = get(h.port, "/events", Some(&h.token), Some("t-inventada"));
-    assert_eq!((desconocida.status, desconocida.cuerpo["code"].clone()), (403, json!("forbidden")));
+    let desconocida = get(h.port, "/events", Some(token_a), Some("t-inventada"));
+    assert_eq!(desconocida.status, 200);
+    assert!(desconocida.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
     h.stop();
 }
 
@@ -466,7 +525,7 @@ fn humo_servidor_local() {
     let a = escena(&core, "humo-a");
     let b = escena(&core, "humo-b");
     let h = server::start(core.clone()).unwrap();
-    let info = json!({ "port": h.port, "token": h.token, "task_a": a.hija, "run_a": a.run, "task_b": b.hija, "run_b": b.run });
+    let info = json!({ "port": h.port, "task_a": a.hija, "run_a": a.run, "task_b": b.hija, "run_b": b.run });
     std::fs::write(dir.join("info.json"), info.to_string()).unwrap();
     while !dir.join("stop").exists() {
         std::thread::sleep(std::time::Duration::from_millis(100));

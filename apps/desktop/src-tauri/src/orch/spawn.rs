@@ -466,6 +466,8 @@ impl Core {
             ("LXO_REPORT_NONCE".to_string(), nonce),
             ("LXO_REPORT_ATTEMPT".to_string(), delivery::ATTEMPT.to_string()),
         ]);
+        let agent_token = self.issue_agent_credential(id)?;
+        env.push(("LXO_CLIENT_TOKEN".to_string(), agent_token));
         let custody = self.custody_key(id);
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
@@ -474,7 +476,7 @@ impl Core {
         // Espera de aprobación en la terminal y agente inactivo (orch/approval.rs).
         let guard = Arc::new(Mutex::new(approval::Guard::from_env(state::now_ms())));
         let (guard_out, weak_out, tid_out) = (guard.clone(), Arc::downgrade(self), id.to_string());
-        let term = pty::spawn(
+        let term = match pty::spawn(
             pty::Launch { cwd: &task.cwd, script_dir: &dir.join(id), command: launch.command, env, inject: launch.inject, piped: launch.piped, owner: Some(&custody) },
             move |text| {
                 let change = guard_out.lock().ok().and_then(|mut g| g.on_output(&text, state::now_ms()));
@@ -489,9 +491,18 @@ impl Core {
                     core.on_exit(&tid);
                 }
             },
-        )?;
+        ) {
+            Ok(term) => term,
+            Err(error) => {
+                self.revoke_agent_credentials(id);
+                return Err(error);
+            }
+        };
         // Si no se puede registrar, el proceso se mata antes de devolver el error (un `AgentTerm` suelto no mata).
-        self.register_term(id, term)?;
+        if let Err(error) = self.register_term(id, term) {
+            self.revoke_agent_credentials(id);
+            return Err(error);
+        }
         // Sondeo del report.json y de la salida mientras la terminal siga abierta.
         let weak = Arc::downgrade(self);
         let tid = id.to_string();
