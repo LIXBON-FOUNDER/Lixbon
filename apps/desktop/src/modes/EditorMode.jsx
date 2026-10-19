@@ -8,6 +8,8 @@ import { useChatStore } from '../store/chatStore';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
+import { RightDock } from '../layout/RightDock';
+import { useIsCompact } from '../lib/frameSize';
 import { ActivityRail } from './ActivityRail';
 import { EditorArea } from '../editor/EditorArea';
 import { BottomDock } from '../editor/BottomDock';
@@ -21,7 +23,7 @@ import { lazy, Suspense } from 'react';
 
 const TeamDock = lazy(() => import('../team/dock/TeamDock'));
 
-const GAP = 6;
+const GAP = 8;
 
 function AgentRail({ visible, onOpen }) {
   const streaming = useChatStore((s) => s.streaming);
@@ -39,6 +41,7 @@ function AgentRail({ visible, onOpen }) {
 
 export function EditorMode({ active }) {
   const { sideOpen, sideView, agentOpen, rightView, sizes, toggleAgent, toggleSide, setSize, persistSizes } = useWorkbenchStore();
+  const compact = useIsCompact();
   const terminalOpen = useAppStore((s) => s.panels.terminal);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
 
@@ -67,15 +70,14 @@ export function EditorMode({ active }) {
         </Collapse>
       </div>
 
-      <Collapse open={agentOpen} size={sizes.agent + GAP} from="end">
-        <Gutter sizeKey="agent" invert onDoubleClick={toggleAgent} />
-        <Panel id="agent">
+      {active && (
+        <RightDock open={agentOpen}>
           {rightView === 'team'
             ? <Suspense fallback={null}><TeamDock onClose={toggleAgent} /></Suspense>
             : <AgentPanel onClose={toggleAgent} />}
-        </Panel>
-      </Collapse>
-      <AgentRail visible={!agentOpen} onOpen={toggleAgent} />
+        </RightDock>
+      )}
+      <AgentRail visible={!agentOpen && !compact} onOpen={toggleAgent} />
     </div>
   );
 }

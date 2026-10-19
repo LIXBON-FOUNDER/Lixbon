@@ -9,6 +9,7 @@ import { usePreviewBridge, Layers, InspectorPanel } from './DesignInspector';
 import { Panel } from '../layout/Panel';
 import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
+import { RightDock } from '../layout/RightDock';
 import { AgentPanel } from '../chat/AgentPanel';
 import { Segmented } from '../components/Segmented';
 import { openExternal } from '../lib/tauri';
@@ -27,7 +28,7 @@ export const DEVICES = [
 const GROUP_DEFAULT = { mobile: 'iphone-15', tablet: 'ipad-air', desktop: 'laptop' };
 const BREAKPOINTS = [['sm', 640], ['md', 768], ['lg', 1024], ['xl', 1280], ['2xl', 1536]];
 const ZOOMS = ['fit', 0.5, 0.75, 1];
-const GAP = 6;
+const GAP = 8;
 
 const breakpointOf = (w) => BREAKPOINTS.filter(([, px]) => w >= px).map(([n]) => n).pop() || 'base';
 
@@ -244,17 +245,14 @@ export function DesignMode() {
         <Viewport url={design.url} src={bridge.src} frameRef={bridge.frameRef} device={device} landscape={design.landscape} zoom={design.zoom} reloadKey={reloadKey} />
       </Panel>
 
-      <Collapse open={panels.right} size={sizes.agent + GAP} from="end">
-        <Gutter sizeKey="agent" invert />
-        <Panel id="agent" className="designright">
-          <div className="designright__tabs">
-            <Segmented size="sm" width={84} value={rightTab} onChange={setRightTab} options={[{ value: 'inspector', label: 'Inspector' }, { value: 'agent', label: 'Agente' }]} />
-          </div>
-          {rightTab === 'inspector'
-            ? <InspectorPanel bridge={bridge} context={viewContext} onAsk={() => askAgent(bridge.selected)} />
-            : <AgentPanel />}
-        </Panel>
-      </Collapse>
+      <RightDock open={panels.right} className="designright">
+        <div className="designright__tabs">
+          <Segmented size="sm" width={84} value={rightTab} onChange={setRightTab} options={[{ value: 'inspector', label: 'Inspector' }, { value: 'agent', label: 'Agente' }]} />
+        </div>
+        {rightTab === 'inspector'
+          ? <InspectorPanel bridge={bridge} context={viewContext} onAsk={() => askAgent(bridge.selected)} />
+          : <AgentPanel />}
+      </RightDock>
     </div>
   );
 }

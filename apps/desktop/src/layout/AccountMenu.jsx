@@ -265,7 +265,7 @@ export function AccountMenu({ compact = false }) {
           onClick={() => { setOpen((v) => !v); setError(''); }}
           title={`${displayName} · Cuenta`}
         >
-          <Avatar user={user} serverUrl={serverUrl} size={26} />
+          <Avatar user={user} serverUrl={serverUrl} size={30} />
         </button>
       ) : (
         <button

@@ -2,6 +2,8 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useUsageStore, resetLabel } from '../store/usageStore';
+import { useClaudeUsage } from '../store/claudeSession';
+import { liveWindow } from '../lib/claudeUsage';
 import { useProblemsStore, problemCounts } from '../store/problemsStore';
 import { useGitStore } from '../store/gitStore';
 import { useChatStore, useOpenSessions, useSessionsStore } from '../store/chatStore';
@@ -11,6 +13,22 @@ import { languageLabel } from '../editor/languages';
 import { ProgressRing } from '../components/Ring';
 import { LogoMark } from '../components/Logo';
 import { IconGitBranch } from '../components/Icons';
+
+// Cupo del plan de Claude (sesión y semana), según Claude Code.
+function ClaudeUsage() {
+  const usage = useClaudeUsage();
+  const session = liveWindow(usage.session);
+  const week = liveWindow(usage.week);
+  if (!session && !week) return null;
+  const pct = Math.min(100, Math.round(session?.percent ?? 0));
+  const wk = Math.min(100, Math.round(week?.percent ?? 0));
+  return (
+    <span className="statusbar__item" title={`Plan de Claude · sesión ${pct}% · semana ${wk}%. Escribe /usage para actualizarlo.`}>
+      <ProgressRing value={pct} size={14} stroke={3} />
+      Claude · {pct}% sesión · {wk}% semana
+    </span>
+  );
+}
 
 const CONN = { connected: 'Conectado', connecting: 'Conectando…', disconnected: 'Sin conexión' };
 
@@ -22,6 +40,7 @@ export function StatusBar() {
   const activePath = useFileViewStore((s) => s.activePath);
   const cursor = useFileViewStore((s) => s.cursor);
   const mode = useWorkbenchStore((s) => s.mode);
+  const engine = useChatStore((s) => s.engine);
   const setMode = useWorkbenchStore((s) => s.setMode);
   const title = useChatStore((s) => s.conversationTitle);
   const background = useOpenSessions().filter((o) => !o.active && (o.streaming || o.waiting));
@@ -77,13 +96,14 @@ export function StatusBar() {
           <span className="statusbar__item statusbar__item--strong">{languageLabel(activePath)}</span>
         </>
       )}
-      {session && !session.unlimited && (
+      {engine === 'claude' && <ClaudeUsage />}
+      {engine !== 'claude' && session && !session.unlimited && (
         <button
           className="statusbar__item"
           onClick={() => useAppStore.getState().openModal('settings', 'usage')}
           title={`Sesión ${Math.round(session.percent || 0)}% · ${resetLabel(session.reset_at)}`}
         >
-          <ProgressRing value={session.percent || 0} size={12} stroke={3} />
+          <ProgressRing value={session.percent || 0} size={14} stroke={3} />
           {Math.round(session.percent || 0)}%
         </button>
       )}

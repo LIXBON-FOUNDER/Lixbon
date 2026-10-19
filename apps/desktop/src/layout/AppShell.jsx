@@ -100,18 +100,18 @@ export function AppShell() {
           <Welcome onSkip={() => setSkipWelcome(true)} />
         ) : (
           <>
-            <EditorMode active={!page && mode === 'editor'} />
-            {page === 'settings' && <SettingsPage />}
-            {!page && mode === 'agent' && <AgentMode />}
-            {!page && mode === 'design' && <DesignMode />}
-            {!page && mode === 'git' && <GitMode />}
-            {!page && mode === 'orch' && <OrchestratorMode />}
+            <EditorMode active={mode === 'editor'} />
+            {mode === 'agent' && <AgentMode />}
+            {mode === 'design' && <DesignMode />}
+            {mode === 'git' && <GitMode />}
+            {mode === 'orch' && <OrchestratorMode />}
           </>
         )}
       </div>
 
       {!showWelcome && <StatusBar />}
 
+      {page === 'settings' && <SettingsPage />}
       {quickOpen && <QuickOpen />}
       {commandPalette && <CommandPalette />}
       <ConfirmDialog />

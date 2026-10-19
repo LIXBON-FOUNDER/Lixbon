@@ -14,6 +14,7 @@ import { useGitStore } from '../store/gitStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { Avatar } from '../components/Avatar';
 import { TeamMark } from '../components/Logo';
+import { IconTeamPeople } from '../components/IdeIcons';
 import { githubSlug } from '../lib/githubSlug';
 import { estadoDef } from '../team/lib/presencia';
 
@@ -97,6 +98,7 @@ export function TeamButton() {
   return (
     <div className="team" ref={rootRef}>
       <button className={`team__btn ${open ? 'is-open' : ''}`} onClick={() => setOpen((v) => !v)} title="Lixbon Team">
+        <IconTeamPeople size={18} className="team__glyph" />
         <span className="team__stack">
           {miembros.slice(0, 3).map((m, i, arr) => (
             <span key={m.usuario.id} className="team__stack-item">
