@@ -25,6 +25,14 @@ sola; si no, la regla de permisos no la reconoce y la terminal se queda esperand
    comentarios. Muévela a su estado de trabajo con `lxo issue mover LXB-12 "En curso"` y pasa la
    clave a cada hija en su `--task`, para que la citen en sus commits.
 
+### Consultar el Event Log
+
+`lxo events [--after SEQ] [--limit N] [filtros]`
+lee una página autenticada del Core. `--after` es un cursor `seq` decimal exclusivo; `--json`
+devuelve el documento v1 compacto y conserva los cursores enteros; `--follow` sondea el Core y
+reanuda desde el último cursor confirmado. El Core aplica los permisos de la credencial Person o
+Agent. El helper no lee SQLite ni toma credenciales de `orch.json`.
+
 ## 2. Explora, planifica y reparte por roles
 
 `lxo roles` muestra el equipo que configuró el usuario en Ajustes → Orquestador: cada rol con su
