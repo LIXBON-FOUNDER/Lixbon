@@ -9,6 +9,28 @@ use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
 
 impl Core {
+    /// Resuelve la raíz que usa un coordinador CLI de Person como selector de contexto. La raíz no
+    /// concede identidad ni permisos: la autorización sigue derivándose de la credencial Person y
+    /// los Agent siempre usan la tarea de su propia credencial.
+    pub(super) fn coordinator_task(&self, channel: Channel, caller: &Caller, args: &Value) -> Result<String, String> {
+        match caller {
+            Caller::Agent(_) => Self::me(caller),
+            Caller::User if channel == Channel::Lxo => {
+                let id = s(args, "root_task");
+                if id.is_empty() {
+                    return Err("Falta root_task para el run del coordinador CLI; crea o selecciona un run con `lxo run create`".into());
+                }
+                let st = self.lock();
+                let task = st.task(&id)?;
+                if task.parent.is_some() || st.runs.get(&task.run).is_none_or(|run| run.root != id) {
+                    return Err(format!("La tarea {id} no es la raíz de un run"));
+                }
+                Ok(id)
+            }
+            _ => Self::me(caller),
+        }
+    }
+
     /// SOLO pruebas: atajo con el canal de cada superficie real (Tauri -> `Ui`, `lxo` -> `Lxo`). La
     /// producción llama a `rpc_via` con el canal que conoce; aquí el mapa es explícito y de prueba.
     #[cfg(test)]
@@ -82,6 +104,12 @@ impl Core {
                 return Err("sesion-obsoleta".into());
             }
         }
+        if matches!(&caller, Caller::User) && channel == Channel::Lxo && b(args, "session") && cmd != "run_create" {
+            let root = s(args, "root_task");
+            if root.is_empty() || !self.lock().tasks.contains_key(&root) {
+                return Err("sesion-obsoleta".into());
+            }
+        }
         if let Caller::Agent(Some(id)) = &caller {
             self.touch_activity(id);
         }
@@ -92,9 +120,15 @@ impl Core {
         }
         match cmd {
             "status" => {
+                let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
+                    Some(self.coordinator_task(channel, &caller, args)?)
+                } else {
+                    None
+                };
                 let st = self.lock();
                 let task = match &caller {
                     Caller::Agent(Some(id)) => Some(st.task(id)?.clone()),
+                    Caller::User if person_root.is_some() => Some(st.task(person_root.as_deref().unwrap())?.clone()),
                     _ => None,
                 };
                 let objective = task.as_ref().and_then(|t| st.runs.get(&t.run)).map(|r| r.objective.clone());
@@ -134,6 +168,13 @@ impl Core {
                         return Err(format!("Ya eres la tarea {id}: crea hijos directamente con lxo spawn"));
                     }
                     self.lock().session_replaceable(id)?;
+                }
+                if matches!(&caller, Caller::User) && channel == Channel::Lxo && b(args, "session") {
+                    let root = s(args, "root_task");
+                    if !root.is_empty() && self.lock().tasks.contains_key(&root) {
+                        self.coordinator_task(channel, &caller, args)?;
+                        self.lock().session_replaceable(&root)?;
+                    }
                 }
                 let objective = s(args, "objective");
                 if objective.is_empty() {
@@ -187,7 +228,7 @@ impl Core {
             }
             // Ningún lanzamiento arranca sin la persona: queda pendiente (approval.rs).
             "spawn" => self.spawn_request(ctx_of()?, &caller, args),
-            "spawn_status" => self.spawn_status(&caller, args),
+            "spawn_status" => self.spawn_status(channel, &caller, args),
             "agents" => Ok(json!({ "agents": agents::available(b(args, "refresh")) })),
             "roles" => Ok(roles::describe(&self.settings().roles)),
             "issue" => {
@@ -281,7 +322,7 @@ impl Core {
                 Ok(json!({ "message": id }))
             }
             "wait" => {
-                let me = Self::me(&caller)?;
+                let me = self.coordinator_task(channel, &caller, args)?;
                 let mut k = kinds(args);
                 if k.is_empty() {
                     k = vec![Kind::Done, Kind::Question, Kind::Exited];
@@ -297,7 +338,7 @@ impl Core {
                 Ok(json!({ "messages": found, "timeout": found.is_empty(), "open_children": pending, "hint": hint }))
             }
             "check" | "inbox" => {
-                let me = Self::me(&caller)?;
+                let me = self.coordinator_task(channel, &caller, args)?;
                 let found = if cmd == "check" {
                     self.mutate(|st| {
                         let found = st.unread(&me, &kinds(args), None);
@@ -311,16 +352,21 @@ impl Core {
                 Ok(json!({ "messages": found }))
             }
             "list" => {
-                let st = self.lock();
                 let run = match &caller {
-                    Caller::Agent(Some(id)) => Some(st.task(id)?.run.clone()),
+                    Caller::Agent(Some(id)) => Some(self.lock().task(id)?.run.clone()),
+                    Caller::User if channel == Channel::Lxo && !s(args, "root_task").is_empty() => {
+                        let id = self.coordinator_task(channel, &caller, args)?;
+                        Some(self.lock().task(&id)?.run.clone())
+                    }
                     _ => Some(s(args, "run")).filter(|r| !r.is_empty()),
                 };
+                let st = self.lock();
                 let tasks: Vec<&Task> = st.tree().into_iter().filter(|t| run.as_ref().is_none_or(|r| &t.run == r)).collect();
                 Ok(json!({ "tasks": tasks }))
             }
             "show" => {
-                let id = Some(s(args, "task")).filter(|t| !t.is_empty()).map(Ok).unwrap_or_else(|| Self::me(&caller))?;
+                let id = Some(s(args, "task")).filter(|t| !t.is_empty()).map(Ok)
+                    .unwrap_or_else(|| self.coordinator_task(channel, &caller, args))?;
                 let st = self.lock();
                 let task = st.task(&id)?.clone();
                 let messages: Vec<_> = st.messages.iter().filter(|m| m.from == id || m.to == id).cloned().collect();

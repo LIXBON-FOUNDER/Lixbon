@@ -1,9 +1,9 @@
-//! Aprobación humana de cada lanzamiento (`lxo spawn`). Cuando un agente pide
-//! una hija, el host resuelve la política y, si no está bloqueada, deja el
+//! Aprobación humana de cada lanzamiento (`lxo spawn`). Cuando el coordinador
+//! autenticado (Agent o Person CLI) pide una hija, el host resuelve la política y, si no está bloqueada, deja el
 //! lanzamiento **pendiente** en memoria: la persona lo aprueba o lo rechaza
 //! desde la ventana del orquestador (comandos Tauri `orch_approve_spawn` y
 //! `orch_reject_spawn`, que no están en `orch_call` ni en el servidor de `lxo`).
-//! El agente consulta el resultado con `spawn_status` (sondeo corto, sin
+//! El solicitante consulta el resultado con `spawn_status` (sondeo corto, sin
 //! peticiones HTTP colgadas).
 //!
 //! - Vencimiento: `DEFAULT_TTL_SECS` (10 min) o la variable de entorno
@@ -130,7 +130,7 @@ impl Core {
     /// en memoria ANTES de que `remove_run` tome su instantánea (y entonces se cancela con el run), o `remove_run`
     /// termina primero y la revalidación del padre rechaza la solicitud. Sin compuerta, una solicitud persistida
     /// entre la instantánea y el COMMIT quedaría sin resolver.
-    fn gate(&self) -> std::sync::MutexGuard<'_, ()> {
+    pub(super) fn gate(&self) -> std::sync::MutexGuard<'_, ()> {
         self.pend_gate.lock().unwrap_or_else(|e| e.into_inner())
     }
 
@@ -145,7 +145,7 @@ impl Core {
         }
     }
 
-    /// `spawn` de un agente: valida, resuelve la política y deja el lanzamiento pendiente.
+    /// `spawn` de un Agent o Person CLI: valida, resuelve la política y deja el lanzamiento pendiente.
     ///
     /// Orden obligatorio, con la compuerta tomada:
     /// `plan → revalidar el padre → record_facts(spawn.requested) → insertar el pendiente → EV_PENDING / aviso`.
@@ -153,7 +153,7 @@ impl Core {
     /// ni aviso, ni lanzamiento posible. Si el padre se perdió en la carrera con `remove_run` o con un cierre, no
     /// se persiste nada: nunca existió una solicitud durable.
     pub(super) fn spawn_request(self: &Arc<Self>, ctx: MutationContext, caller: &Caller, args: &Value) -> Result<Value, String> {
-        let plan = self.plan_spawn(caller, args)?;
+        let plan = self.plan_spawn(ctx.channel, caller, args)?;
         // Un perfil bloqueado se rechaza sin preguntar a nadie. SOLO una denegación explícita de policy (tipada,
         // `agents::explicit_denial`, sobre el worktree real) deja constancia durable de la solicitud antes de devolverla;
         // un bloqueo del entorno o del proveedor se rechaza como siempre, sin `spawn.requested`, y nunca es `risk` (si la causa tipada
@@ -299,9 +299,9 @@ impl Core {
         }
     }
 
-    /// `spawn_status` del agente: pending | approved{task} | rejected{reason} | expired.
-    pub(super) fn spawn_status(&self, caller: &Caller, args: &Value) -> Result<Value, String> {
-        let me = Self::me(caller)?;
+    /// `spawn_status` del solicitante: pending | approved{task} | rejected{reason} | expired.
+    pub(super) fn spawn_status(&self, channel: super::events::Channel, caller: &Caller, args: &Value) -> Result<Value, String> {
+        let me = self.coordinator_task(channel, caller, args)?;
         let id = s(args, "pending_id");
         if id.is_empty() {
             return Err("Falta el pending_id".into());
@@ -435,7 +435,12 @@ impl Core {
         let policy = self.resolve_and_observe(&p.provider, &p.profile, p.role.as_deref(), &p.cwd, p.model.as_deref())?;
         // Errores de uso (argv distinto, sin ack, bloqueado ahora): no se lanza y sigue pendiente.
         agents::authorize(&policy, Some(argv), ack_unverified)?;
+        self.spawn_hook(super::spawn::SpawnStep::BeforeApprovalClaim, pending_id)?;
         let _gate = self.gate();
+        if self.check_parent_live(&p).is_err() {
+            self.resolve_pending_locked(&p, SpawnOutcome::CoordinatorClosed)?;
+            return Ok(self.already(pending_id).unwrap_or(Value::Null));
+        }
         {
             let mut pend = self.pend();
             match pend.get_mut(pending_id) {
@@ -621,16 +626,39 @@ impl Core {
             if !matches!(self.pend().get(&p.pending_id).map(|e| &e.state), Some(PendState::Pending)) {
                 continue;
             }
-            let resolution = Resolution { outcome, actor: "system", legacy_outcome: "expired", task: None, reason: None, launch_error: None, has_reason: false };
-            let Ok(decision) = self.persist_resolution(&p, &resolution) else { continue };
-            if let Some(e) = self.pend().get_mut(&p.pending_id) {
-                e.state = PendState::Expired;
-                e.decision = decision;
-                e.resolved_at = Some(state::now_ms());
-            }
-            let v = self.resolved_payload(&p.pending_id, "expired", None, decision, None);
-            self.emit(EV_RESOLVED, &v);
+            let _ = self.resolve_pending_locked(&p, outcome);
         }
+    }
+
+    /// Persiste y publica una resolución con `pend_gate` ya tomada. Si falla la persistencia, el pending conserva
+    /// su estado para que `sweep_pending` lo vuelva a intentar.
+    fn resolve_pending_locked(&self, p: &PendingSpawn, outcome: SpawnOutcome) -> Result<(), String> {
+        if !matches!(self.pend().get(&p.pending_id).map(|e| &e.state), Some(PendState::Pending)) {
+            return Ok(());
+        }
+        let resolution = Resolution { outcome, actor: "system", legacy_outcome: "expired", task: None, reason: None, launch_error: None, has_reason: false };
+        let decision = self.persist_resolution(p, &resolution)?;
+        if let Some(e) = self.pend().get_mut(&p.pending_id) {
+            e.state = PendState::Expired;
+            e.decision = decision;
+            e.resolved_at = Some(state::now_ms());
+        }
+        let v = self.resolved_payload(&p.pending_id, "expired", None, decision, None);
+        self.emit(EV_RESOLVED, &v);
+        Ok(())
+    }
+
+    /// Resuelve bajo `pend_gate` los lanzamientos que quedarían sin coordinador al cerrar un run.
+    /// Devuelve los ids que no pudieron registrarse; el barrido periódico conserva el reintento.
+    pub(super) fn resolve_closed_run_pending_locked(&self, run: &str) -> Vec<String> {
+        let mut pending: Vec<PendingSpawn> = self.pend().values()
+            .filter(|entry| entry.p.run == run && entry.state == PendState::Pending)
+            .map(|entry| entry.p.clone())
+            .collect();
+        pending.sort_by_key(|entry| entry.created_at);
+        pending.into_iter().filter_map(|entry| {
+            self.resolve_pending_locked(&entry, SpawnOutcome::CoordinatorClosed).err().map(|_| entry.pending_id)
+        }).collect()
     }
 }
 
@@ -682,11 +710,14 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::super::host::RecordingHost;
-    use super::super::{Orch, Status};
+    use super::super::{Orch, Status, MAX_DEPTH};
     use super::*;
     use crate::orch::boot_tests;
     use crate::orch::state::NewTask;
-    use crate::store::{EventQuery, CORE_CLIENT_ID};
+    use crate::store::{
+        AuthenticatedClient, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface,
+        DeviceIdentity, EventQuery, Store, CORE_CLIENT_ID,
+    };
     use std::path::{Path, PathBuf};
 
     fn fake(provider: &str, profile: &str, role: Option<&str>, worktree: &str) -> agents::Policy {
@@ -733,6 +764,36 @@ mod tests {
             (run, root)
         };
         Env { core, host, root, run, dir }
+    }
+
+    fn person_cli(e: &Env) -> (Store, AuthenticatedClient) {
+        let dir = e.dir.join(".test-person-cli-store");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = Store::open(&dir, "test").unwrap();
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new("install-person-cli-spawn-test", None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(
+            ClientPrincipal::Person("person-cli-spawn-test".into()),
+            "person-cli-spawn-test-secret-32-bytes-minimum",
+        )
+        .unwrap();
+        let client = store.register_client(&registration, &credential, 100).unwrap();
+        (store, client)
+    }
+
+    fn person_rpc(e: &Env, client: &AuthenticatedClient, cmd: &str, args: &Value) -> Result<Value, String> {
+        let cwd = e.dir.to_string_lossy().into_owned();
+        e.core.rpc_authenticated_via(
+            client,
+            &Default::default(),
+            super::super::events::Channel::Lxo,
+            &cwd,
+            cmd,
+            args,
+        )
     }
 
     impl Env {
@@ -800,6 +861,103 @@ mod tests {
         // Sin ack con política sin verificar: error de uso, sigue pendiente.
         assert!(e.core.approve_spawn(&pid(&p), true, &e.argv(&pid(&p)), false).is_err());
         assert_eq!(e.core.list_pending_spawns().len(), 1);
+    }
+
+    #[test]
+    fn person_cli_status_show_y_list_usan_la_raiz_de_sesion() {
+        let e = setup("person-cli-context-reads");
+        let (_store, client) = person_cli(&e);
+        let args = json!({ "root_task": e.root });
+
+        let status = person_rpc(&e, &client, "status", &args).unwrap();
+        assert_eq!(status["role"], "coordinator");
+        assert_eq!(status["task"]["id"], e.root);
+        assert_eq!(person_rpc(&e, &client, "show", &args).unwrap()["task"]["id"], e.root);
+        let tasks = person_rpc(&e, &client, "list", &args).unwrap()["tasks"].as_array().unwrap().clone();
+        assert_eq!(tasks.len(), 1, "list sin run explicito conserva el run de sesion");
+        assert_eq!(tasks[0]["id"], e.root);
+    }
+
+    #[test]
+    fn person_cli_check_e_inbox_usan_la_raiz_de_sesion() {
+        let e = setup("person-cli-inbox");
+        let (_store, client) = person_cli(&e);
+        let args = json!({ "root_task": e.root });
+
+        assert!(person_rpc(&e, &client, "check", &args).unwrap()["messages"].as_array().unwrap().is_empty());
+        assert!(person_rpc(&e, &client, "inbox", &args).unwrap()["messages"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn person_cli_run_create_no_reemplaza_un_run_abierto() {
+        let e = setup("person-cli-open-run");
+        let (_store, client) = person_cli(&e);
+        let result = person_rpc(
+            &e,
+            &client,
+            "run_create",
+            &json!({ "session": true, "root_task": e.root, "objective": "otro objetivo" }),
+        );
+        assert!(result.unwrap_err().contains("sigue abierto"));
+    }
+
+    #[test]
+    fn person_cli_spawn_spawn_status_y_wait_usan_la_raiz_de_sesion() {
+        let e = setup("person-cli-spawn");
+        let (_store, client) = person_cli(&e);
+        let root = e.root.clone();
+        let pending = person_rpc(
+            &e,
+            &client,
+            "spawn",
+            &json!({ "root_task": root, "agent": "claude", "task": "Encargo del coordinador" }),
+        )
+        .unwrap();
+        assert_eq!(pending["status"], "pending");
+        let pending_id = pid(&pending);
+        assert_eq!(e.core.list_pending_spawns()[0].parent_task, root);
+        assert_eq!(
+            person_rpc(&e, &client, "spawn_status", &json!({ "root_task": root, "pending_id": pending_id })).unwrap()["status"],
+            "pending"
+        );
+        assert_eq!(
+            person_rpc(&e, &client, "wait", &json!({ "root_task": root, "timeout_ms": 0 })).unwrap()["timeout"],
+            true
+        );
+    }
+
+    #[test]
+    fn person_cli_rechaza_raiz_hija_y_agent_ignora_el_selector() {
+        let e = setup("person-cli-root-validation");
+        let (_store, client) = person_cli(&e);
+        let child = {
+            let mut st = e.core.lock_unpersisted();
+            st.add_child(&e.root, MAX_DEPTH, NewTask {
+                agent: "claude".into(), model: None, effort: None, role: None, title: "child".into(),
+                spec: "child".into(), repo: e.dir.to_string_lossy().into_owned(), cwd: e.dir.to_string_lossy().into_owned(),
+                branch: None, base: None, worktree: None, external: true,
+            }).unwrap()
+        };
+        let bad_root = person_rpc(
+            &e,
+            &client,
+            "spawn",
+            &json!({ "root_task": child, "agent": "claude", "task": "x" }),
+        );
+        assert!(bad_root.unwrap_err().contains("no es la raíz"));
+
+        let agent_pending = e.core.rpc(
+            e.agent(),
+            "",
+            "spawn",
+            &json!({ "root_task": "task-spoofed", "agent": "claude", "task": "Encargo del agente" }),
+        ).unwrap();
+        let pending_id = pid(&agent_pending);
+        assert_eq!(
+            e.core.list_pending_spawns().into_iter().find(|p| p.pending_id == pending_id).unwrap().parent_task,
+            e.root,
+            "un Agent deriva su tarea de la credencial e ignora el selector"
+        );
     }
 
     #[test]
