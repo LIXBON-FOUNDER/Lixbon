@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{attention_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{attention_read, projects_overview, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
@@ -44,7 +44,7 @@ impl Core {
             .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
         let action = if review::closed_to_agents(cmd).is_some() {
             ClientAction::HumanDecision
-        } else if matches!(cmd, "attention_list" | "attention_detail") {
+        } else if matches!(cmd, "attention_list" | "attention_detail" | "projects_overview") {
             ClientAction::Read
         } else if cmd == "events" {
             ClientAction::EventLogRead
@@ -123,6 +123,7 @@ impl Core {
             // relocalizar, archivar, importar) es de la persona; un repositorio inequívocamente nuevo se
             // descubre solo (`run_create`, relleno) y lo ambiguo nunca se une en silencio.
             "projects" => self.projects_list(b(args, "all")),
+            "projects_overview" => projects_overview::overview(self, &caller, authenticated_context.as_ref(), args),
             "events" => self.events_read(&caller, args).map_err(String::from),
             "attention_list" => attention_read::list(self, &caller, authenticated_context.as_ref(), args),
             "attention_detail" => attention_read::detail(self, &caller, authenticated_context.as_ref(), args),
