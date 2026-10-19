@@ -3,7 +3,7 @@ package tui
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"html"
+	"html/template"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -64,18 +64,19 @@ func (v *viewer) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFile(w, r, path)
 	case "v":
-		name := html.EscapeString(filepath.Base(path))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + name + `</title>` +
-			`<style>html,body{margin:0;height:100%;background:#111;color:#999;font:13px system-ui,sans-serif}` +
-			`body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}` +
-			`img{max-width:96vw;max-height:90vh;object-fit:contain;cursor:zoom-in;background:repeating-conic-gradient(#1c1c1c 0 25%,#151515 0 50%) 0 0/16px 16px}` +
-			`img.full{max-width:none;max-height:none;cursor:zoom-out}</style></head>` +
-			`<body><img src="/i/` + token + `" alt="` + name + `" onclick="this.classList.toggle('full')"><div>` + name + `</div></body></html>`))
+		viewerPage.Execute(w, struct{ Name, Src string }{filepath.Base(path), "/i/" + token}) //nolint:errcheck
 	default:
 		http.NotFound(w, r)
 	}
 }
+
+var viewerPage = template.Must(template.New("visor").Parse(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Name}}</title>` +
+	`<style>html,body{margin:0;height:100%;background:#111;color:#999;font:13px system-ui,sans-serif}` +
+	`body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}` +
+	`img{max-width:96vw;max-height:90vh;object-fit:contain;cursor:zoom-in;background:repeating-conic-gradient(#1c1c1c 0 25%,#151515 0 50%) 0 0/16px 16px}` +
+	`img.full{max-width:none;max-height:none;cursor:zoom-out}</style></head>` +
+	`<body><img src="{{.Src}}" alt="{{.Name}}" onclick="this.classList.toggle('full')"><div>{{.Name}}</div></body></html>`))
 
 // openInViewer abre la imagen en el navegador.
 func openInViewer(path string) error {
