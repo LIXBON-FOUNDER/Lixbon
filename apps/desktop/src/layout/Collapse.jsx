@@ -1,6 +1,9 @@
 // Collapse.jsx — despliega y pliega un panel (con su gutter) animando el
 // ancho o el alto. El contenido se queda montado y con su tamaño final para
 // que no se reacomode mientras se anima; solo se recorta.
+// Hueco entre paneles: igual que --gap (ide.css).
+export const GAP = 8;
+
 export function Collapse({ open, size, axis = 'x', from = 'start', children }) {
   const style = axis === 'x' ? { width: open ? size : 0 } : { height: open ? size : 0 };
   const inner = axis === 'x' ? { width: size } : { height: size };

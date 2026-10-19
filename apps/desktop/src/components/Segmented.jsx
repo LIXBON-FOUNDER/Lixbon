@@ -4,7 +4,7 @@ export function Segmented({ options, value, onChange, width = 86, size = 'md', c
   const idx = Math.max(0, options.findIndex((o) => o.value === value));
   const tone = options[idx]?.tone;
   return (
-    <div className={`seg seg--${size} ${className}`} role="radiogroup">
+    <div className={`seg seg--${size} ${className}`} role="radiogroup" style={{ '--seg-i': idx }}>
       <span
         className={`seg__thumb ${tone ? `seg__thumb--${tone}` : ''}`}
         style={{ width, transform: `translateX(${idx * width}px)` }}

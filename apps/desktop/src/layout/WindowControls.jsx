@@ -1,8 +1,11 @@
 // WindowControls.jsx — minimizar, maximizar y cerrar; lo usan el IDE y la ventana de Team.
 import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { IconMinimize, IconMaximize, IconRestore, IconClose } from '../components/IdeIcons';
 
-export function WindowControls() {
+// `flat`: tres botones con su glifo siempre visible (el IDE). Sin él, los tres
+// puntos que se vuelven glifos al acercarse (la ventana de Team).
+export function WindowControls({ flat = false }) {
   const win = getCurrentWindow();
   const [maximized, setMaximized] = useState(false);
 
@@ -15,6 +18,18 @@ export function WindowControls() {
     return () => { alive = false; if (unlisten) unlisten(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (flat) {
+    return (
+      <div className="wctl">
+        <button className="wctl__btn" onClick={() => win.minimize()} aria-label="Minimizar" title="Minimizar"><IconMinimize size={18} /></button>
+        <button className="wctl__btn" onClick={() => win.toggleMaximize()} aria-label={maximized ? 'Restaurar' : 'Maximizar'} title={maximized ? 'Restaurar' : 'Maximizar'}>
+          {maximized ? <IconRestore size={18} /> : <IconMaximize size={18} />}
+        </button>
+        <button className="wctl__btn wctl__btn--close" onClick={() => win.close()} aria-label="Cerrar" title="Cerrar"><IconClose size={18} /></button>
+      </div>
+    );
+  }
 
   return (
     <div className="winctl">
