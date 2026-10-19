@@ -12,6 +12,8 @@ use super::mirror::{self, Reconciled};
 use super::store_boot::{OpenStoreError, StorageReport};
 use super::{Core, IDLE_CLOSE_MS, SWEEP_EVERY, Settings, agents, core_dir, data_dir, discovery_file, lxo_path, read_json, server, skill, state, write_json, write_private_json};
 use super::state::{Kind, State};
+use super::fsio::cli_installation_file;
+use crate::secure_store::{self, SecretStore};
 
 /// Prueba de que se llama desde el arranque: `Core::adopt_state` la exige y solo
 /// este módulo puede crearla (el campo y el constructor son privados aquí).
@@ -234,24 +236,119 @@ impl Core {
     }
 
     pub(super) fn start_server(self: &Arc<Self>) -> Result<(), String> {
+        let secrets = secure_store::default_store();
+        self.start_server_with(secrets.as_ref(), &cli_installation_file(), &discovery_file())
+    }
+
+    fn start_server_with(
+        self: &Arc<Self>,
+        secrets: &dyn SecretStore,
+        installation_file: &Path,
+        discovery: &Path,
+    ) -> Result<(), String> {
         let mut slot = self.server.lock().map_err(|_| "Estado interno corrupto")?;
         if slot.is_some() {
             return Ok(());
         }
+        let _ = std::fs::remove_file(discovery);
+        let identity = self.ensure_cli_identity_with(installation_file, secrets)?;
+        self.revoke_stale_cli_and_agent_credentials(&identity.client_id)?;
         let h = server::start(self.clone())?;
-        write_private_json(&discovery_file(), &json!({
-            "port": h.port, "token": h.token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+        if let Err(error) = write_private_json(discovery, &json!({
+            "port": h.port,
+            "client_id": identity.client_id,
+            "installation_id": identity.installation_id,
+            "pid": std::process::id(),
+            "version": env!("CARGO_PKG_VERSION"),
             "lxo": lxo_path(),
-        }))?;
+        })) {
+            h.stop();
+            return Err(error);
+        }
         *slot = Some(h);
         Ok(())
     }
 
     pub(super) fn stop_server(&self) {
+        self.stop_server_with(&discovery_file());
+    }
+
+    fn stop_server_with(&self, discovery: &Path) {
         if let Some(h) = self.server.lock().ok().and_then(|mut s| s.take()) {
             h.stop();
-            let _ = std::fs::remove_file(discovery_file());
+            let _ = std::fs::remove_file(discovery);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::secure_store::{MemoryStore, SecretKey, SecretStore};
+    use crate::store::{ClientAuthentication, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
+
+    fn register_agent(core: &Core, task: &str, installation: &str, secret: &str) {
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new(installation, None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(ClientPrincipal::Agent(task.into()), secret).unwrap();
+        core.storage
+            .with_store(|store| store.register_client(&registration, &credential, state::now_ms() as i64))
+            .unwrap()
+            .unwrap();
+    }
+
+    #[test]
+    fn arranque_publica_solo_metadatos_y_un_reinicio_revoca_tokens_agent() {
+        let (_cleanup, data, core_dir) = super::super::boot_tests::dirs();
+        let (core, _host, started) = super::super::boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        let secrets = MemoryStore::new();
+        let install_dir = data.join("cli");
+        std::fs::create_dir_all(&install_dir).unwrap();
+        let install_file = install_dir.join("cli-client.json");
+        let discovery = install_dir.join("orch.json");
+        let agent_token_before = "agent-before-restart-token-test-only-32bytes";
+        let old_person_token = "old-person-cli-token-before-recovery-test-32bytes";
+        register_agent(&core, "task-before-restart", "install-agent-before-restart", agent_token_before);
+        let old_person_registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new("old-person-installation", None).unwrap(),
+        ).unwrap();
+        let old_person_credential = ClientCredential::new(ClientPrincipal::Person("user".into()), old_person_token).unwrap();
+        core.storage.with_store(|store| store.register_client(&old_person_registration, &old_person_credential, state::now_ms() as i64)).unwrap().unwrap();
+
+        core.start_server_with(&secrets, &install_file, &discovery).unwrap();
+        let first: serde_json::Value = serde_json::from_slice(&std::fs::read(&discovery).unwrap()).unwrap();
+        assert!(first["port"].as_u64().is_some());
+        assert!(first["client_id"].as_str().is_some());
+        assert!(first["installation_id"].as_str().is_some());
+        assert!(first["version"].as_str().is_some());
+        assert!(first["lxo"].as_str().is_some());
+        assert!(first.get("token").is_none());
+        assert!(!first.to_string().contains(agent_token_before));
+        assert!(matches!(core.authenticate_client_status(agent_token_before).unwrap(), ClientAuthentication::Revoked(_)));
+        assert!(matches!(core.authenticate_client_status(old_person_token).unwrap(), ClientAuthentication::Revoked(_)));
+
+        let installation_id = first["installation_id"].as_str().unwrap().to_string();
+        let client_id = first["client_id"].as_str().unwrap().to_string();
+        let key = SecretKey::lixbon(&format!("client/cli/{installation_id}")).unwrap();
+        let person_secret = secrets.get(&key).unwrap().expose().to_string();
+        assert!(!first.to_string().contains(&person_secret));
+
+        let agent_token_after = "agent-during-run-token-test-only-32-bytes";
+        register_agent(&core, "task-during-run", "install-agent-during-run", agent_token_after);
+        core.stop_server_with(&discovery);
+        core.start_server_with(&secrets, &install_file, &discovery).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&std::fs::read(&discovery).unwrap()).unwrap();
+        assert_eq!(second["installation_id"], installation_id);
+        assert_eq!(second["client_id"], client_id);
+        assert_eq!(secrets.get(&key).unwrap().expose(), person_secret);
+        assert!(matches!(core.authenticate_client_status(agent_token_after).unwrap(), ClientAuthentication::Revoked(_)));
+        core.stop_server_with(&discovery);
+        assert!(!discovery.exists());
     }
 }
 

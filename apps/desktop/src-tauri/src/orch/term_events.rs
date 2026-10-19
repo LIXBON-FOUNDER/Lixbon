@@ -145,6 +145,9 @@ impl Core {
     }
 
     pub(super) fn on_exit(&self, id: &str) {
+        // La credencial no sobrevive al proceso que la recibió; aunque quedara una hija
+        // desprendida, su token ya no puede volver a autorizar comandos en el Core.
+        self.revoke_agent_credentials(id);
         // Un terminal con una terminación en curso NO se retira: seguiría vivo para quien lo está matando, y si ese kill
         // falla, `has_term`, `release`, `abandon_attempt` y `free_worktrees` tienen que seguir viéndolo. Lo retira el
         // propio kill al comprobar el resultado. Se lee su salida igualmente: el proceso ya terminó.

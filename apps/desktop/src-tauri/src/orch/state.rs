@@ -756,7 +756,7 @@ Seguimiento:
     /// cierra por otro chat que comparta carpeta.
     pub fn session_replaceable(&self, id: &str) -> Result<(), String> {
         let Some(t) = self.tasks.get(id) else { return Ok(()) };
-        if t.status.is_final() || self.runs.get(&t.run).is_none_or(|r| r.closed) {
+        if self.runs.get(&t.run).is_none_or(|r| r.closed) {
             return Ok(());
         }
         Err(format!("Tu run anterior {} sigue abierto: ciérralo con `lxo run close` y vuelve a crear el run", t.run))
@@ -985,6 +985,22 @@ mod tests {
         s.mark_running(&root2).unwrap();
         s.remove_run(&run2);
         assert!(s.session_replaceable(&root2).is_ok());
+    }
+
+    #[test]
+    fn sesion_no_sustituye_raiz_final_con_hijas_abiertas() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let hija = s.add_child(&root, 1, nt("hija")).unwrap();
+        s.done(&root, true, "coordinación terminada", vec![], None).unwrap();
+
+        let err = s.session_replaceable(&root).unwrap_err();
+        assert!(err.contains(&run) && err.contains("lxo run close"));
+        assert!(!s.task(&hija).unwrap().status.is_final(), "la hija sigue abierta cuando se rechaza el reemplazo");
+        assert!(!s.runs[&run].closed);
+
+        s.close_run(&run, true).unwrap();
+        assert!(s.session_replaceable(&root).is_ok());
     }
 
     #[test]

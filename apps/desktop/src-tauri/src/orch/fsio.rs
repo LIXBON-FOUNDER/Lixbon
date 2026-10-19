@@ -66,6 +66,11 @@ pub(super) fn discovery_file() -> PathBuf {
     lixbon_dir().join("orch.json")
 }
 
+/// Identificador no secreto que conserva la identidad CLI entre reinicios del Core.
+pub(super) fn cli_installation_file() -> PathBuf {
+    lixbon_dir().join("cli-client.json")
+}
+
 /// `lxo` viaja junto al ejecutable de Lixbon (sidecar de Tauri).
 pub fn lxo_path() -> PathBuf {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default();
@@ -82,8 +87,8 @@ pub(super) fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Stri
 }
 
 /// Como `write_json`, pero el archivo queda legible solo por su propietario antes de
-/// publicarse: lleva el token del host y `~/.lixbon` hereda permisos más anchos (en
-/// Windows, el sandbox de Codex lo podía leer).
+/// publicarse. `orch.json` contiene metadata de conexión e identidad, nunca el secreto;
+/// restringimos permisos también porque `~/.lixbon` puede heredar permisos más amplios.
 pub(super) fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

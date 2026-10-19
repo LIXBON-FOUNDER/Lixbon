@@ -3,11 +3,12 @@ name: Desktop CI
 # Valida el desktop (Core en Rust, CLI `lxo` y frontend) en cada pull request a
 # master. NO empaqueta ni publica nada: eso es `tauri.yml` (tags `desktop-v*`).
 #
-# Por qué dos sistemas operativos, ambos obligatorios:
+# Tres sistemas operativos, todos obligatorios:
 #   * windows-latest  -> rama `MoveFileExW(MOVEFILE_WRITE_THROUGH)` de
 #                        `orch/fsio.rs::publish_durable` y rutas/permisos de Windows.
 #   * ubuntu-latest   -> rama Unix de `publish_durable` (`rename` + `fsync` de la
 #                        carpeta) y la compilación con `keyring`/Secret Service.
+#   * macos-latest    -> Keychain nativo de `keyring` para el cliente CLI.
 #
 # El filtro de rutas evita gastar minutos en PRs que no tocan el desktop. Si este
 # workflow pasa a ser una comprobación OBLIGATORIA de la rama protegida, quita el
@@ -45,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         working-directory: apps/desktop

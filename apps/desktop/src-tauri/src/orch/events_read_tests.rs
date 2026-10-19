@@ -1,10 +1,13 @@
 //! Pruebas de la API de lectura del Event Log (LXO-83): cursor, páginas, filtros, reinicio, errores,
 //! autorización de solo lectura y el servidor HTTP local real.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::process::{Child, Command, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -14,6 +17,7 @@ use super::server;
 use super::state::NewTask;
 use super::store_boot::StorageStatus;
 use super::{Caller, Core, Orch};
+use crate::store::{ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
 fn core_listo() -> (Limpia, PathBuf, PathBuf, Arc<Core>) {
     let (l, data, core_dir) = dirs();
@@ -46,6 +50,32 @@ fn escena(core: &Core, nombre: &str) -> Escena {
         Ok(Escena { run, raiz, hija })
     })
     .unwrap()
+}
+
+fn registra_agente_http(core: &Core, task_id: &str, installation_id: &str, secret: &str) {
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new(installation_id, None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Agent(task_id.into()), secret).unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64))
+        .unwrap()
+        .unwrap();
+}
+
+fn registra_persona_cli_http(core: &Core, installation_id: &str, secret: &str) {
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new(installation_id, None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Person("user".into()), secret).unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64))
+        .unwrap()
+        .unwrap();
 }
 
 fn head(core: &Core) -> i64 {
@@ -367,10 +397,12 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     let (_l, _d, _c, core) = core_listo();
     let a = escena(&core, "a");
     let b = escena(&core, "b");
+    let token_a = "agent-events-read-a-test-secret-32-bytes";
+    registra_agente_http(&core, &a.hija, "install-events-read-agent-a", token_a);
     let h = server::start(core.clone()).unwrap();
     let (rev_antes, head_antes) = (core.storage.confirmed_rev().unwrap(), head(&core));
 
-    let r = get(h.port, "/events?limit=3", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=3", Some(token_a), None);
     assert_eq!(r.status, 200);
     assert_eq!(r.cuerpo["ok"], true);
     let d = &r.cuerpo["data"];
@@ -379,45 +411,46 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
     let por_rpc = core.events_read(&Caller::Agent(Some(a.hija.clone())), &json!({ "limit": 3 })).unwrap();
     assert_eq!(*d, por_rpc, "HTTP y RPC devuelven el mismo documento");
 
-    let paginado = get(h.port, &format!("/events?cursor={}&kind_prefix=task.&limit=500", d["next_cursor"]), Some(&h.token), Some(&a.hija));
+    let paginado = get(h.port, &format!("/events?cursor={}&kind_prefix=task.&limit=500", d["next_cursor"]), Some(token_a), None);
     assert_eq!(paginado.status, 200);
     assert!(kinds(&paginado.cuerpo["data"]).iter().all(|k| k.starts_with("task.")));
 
-    let r = get(h.port, "/events", Some(&h.token), None);
-    assert_eq!((r.status, r.cuerpo["code"].clone(), r.cuerpo["ok"].clone()), (403, json!("forbidden"), json!(false)));
-    let r = get(h.port, &format!("/events?run={}", b.run), Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events", Some(token_a), None);
+    assert_eq!((r.status, r.cuerpo["ok"].clone()), (200, json!(true)));
+    assert!(r.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
+    let r = get(h.port, &format!("/events?run={}", b.run), Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (403, json!("forbidden")));
-    let r = get(h.port, "/events?cursor=abc", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=abc", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_cursor")));
-    let r = get(h.port, "/events?limit=0", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=0", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_limit")));
-    let r = get(h.port, "/events?cursor=1&cursor=2", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=1&cursor=2", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_filter")));
-    let r = get(h.port, "/events?cursor=999999", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=999999", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (409, json!("cursor_ahead")));
     for ruta in ["/events?session=false", "/events?session=true", "/events?nope=1", "/events?class=otra", "/events?run="] {
-        let r = get(h.port, ruta, Some(&h.token), Some(&a.hija));
+        let r = get(h.port, ruta, Some(token_a), None);
         assert_eq!((r.status, r.cuerpo["code"].clone(), r.cuerpo["ok"].clone()), (400, json!("invalid_filter"), json!(false)), "{ruta}");
     }
-    let r = get(h.port, "/events?limit=18446744073709551615", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=18446744073709551615", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["data"]["limit"].clone()), (200, json!(500)));
-    let r = get(h.port, "/events?limit=18446744073709551616", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?limit=18446744073709551616", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_limit")));
-    let r = get(h.port, "/events?cursor=9223372036854775808", Some(&h.token), Some(&a.hija));
+    let r = get(h.port, "/events?cursor=9223372036854775808", Some(token_a), None);
     assert_eq!((r.status, r.cuerpo["code"].clone()), (400, json!("invalid_cursor")));
 
     assert_eq!(get(h.port, "/events", None, Some(&a.hija)).status, 401);
     assert_eq!(get(h.port, "/events", Some("incorrecto"), Some(&a.hija)).status, 401);
     for metodo in ["POST", "PUT", "DELETE", "PATCH"] {
-        let peticion = format!("{metodo} /events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: 2\r\n\r\n{{}}", h.token);
+        let peticion = format!("{metodo} /events HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token_a}\r\nContent-Length: 2\r\n\r\n{{}}");
         let r = http(h.port, &peticion);
         assert_eq!(r.status, 405, "{metodo}");
     }
     let sin_token = http(h.port, "POST /events HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}");
     assert_eq!(sin_token.status, 401, "sin token ni siquiera se revela qué métodos admite");
 
-    let cuerpo = json!({ "cmd": "events", "args": { "limit": 2 }, "caller": a.hija }).to_string();
-    let r = http(h.port, &format!("POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\n\r\n{cuerpo}", h.token, cuerpo.len()));
+    let cuerpo = json!({ "cmd": "events", "args": { "limit": 2 } }).to_string();
+    let r = http(h.port, &format!("POST /rpc HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token_a}\r\nContent-Length: {}\r\n\r\n{cuerpo}", cuerpo.len()));
     assert_eq!((r.status, r.cuerpo["ok"].clone(), r.cuerpo["data"]["limit"].clone()), (200, json!(true), json!(2)));
 
     assert_eq!((core.storage.confirmed_rev().unwrap(), head(&core)), (rev_antes, head_antes), "el servidor no escribió nada");
@@ -425,19 +458,48 @@ fn el_endpoint_http_local_sirve_el_mismo_contrato_y_solo_lee() {
 }
 
 #[test]
-fn la_identidad_del_agente_es_declarada_y_el_token_compartido_no_la_ata_a_una_tarea() {
+fn person_cli_lee_event_log_global_sin_claims_ni_caller_header() {
+    let (_l, _d, _c, core) = core_listo();
+    let a = escena(&core, "person-cli-a");
+    let b = escena(&core, "person-cli-b");
+    let token = "person-cli-events-read-test-secret-32-bytes";
+    registra_persona_cli_http(&core, "install-person-cli-events", token);
+    let h = server::start(core.clone()).unwrap();
+
+    let todos = get(h.port, "/events?limit=500", Some(token), Some("task-inventada"));
+    assert_eq!(todos.status, 200, "la identidad Person CLI puede leer con su credencial, sin actor declarado");
+    let events = todos.cuerpo["data"]["events"].as_array().unwrap();
+    assert!(events.iter().any(|event| event["run_id"] == a.run));
+    assert!(events.iter().any(|event| event["run_id"] == b.run));
+
+    let run = get(h.port, &format!("/events?run={}", b.run), Some(token), None);
+    assert_eq!(run.status, 200, "Person CLI conserva lectura global incluso con filtro de run");
+    assert!(run.cuerpo["data"]["events"].as_array().unwrap().iter().all(|event| event["run_id"] == b.run));
+    h.stop();
+}
+
+#[test]
+fn la_identidad_del_agente_viene_de_la_credencial_y_caller_no_amplia_el_scope() {
     let (_l, _d, _c, core) = core_listo();
     let a = escena(&core, "a");
     let b = escena(&core, "b");
+    let token_a = "agent-events-scope-a-test-secret-32-bytes";
+    let token_b = "agent-events-scope-b-test-secret-32-bytes";
+    registra_agente_http(&core, &a.hija, "install-events-scope-agent-a", token_a);
+    registra_agente_http(&core, &b.hija, "install-events-scope-agent-b", token_b);
     let h = server::start(core.clone()).unwrap();
 
-    let suplantada = get(h.port, "/events?limit=500", Some(&h.token), Some(&b.hija));
-    assert_eq!(suplantada.status, 200, "limitación documentada en EVENTOS.md: sin credencial por tarea, quien tiene el token puede declarar el id de otra");
-    assert!(suplantada.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == b.run));
+    let suplantada = get(h.port, "/events?limit=500", Some(token_a), Some(&b.hija));
+    assert_eq!(suplantada.status, 200, "un caller header no cambia el actor de la credencial");
+    assert!(suplantada.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
+    let propio_b = get(h.port, "/events?limit=500", Some(token_b), Some(&a.hija));
+    assert_eq!(propio_b.status, 200);
+    assert!(propio_b.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == b.run));
     assert_ne!(a.run, b.run);
 
-    let desconocida = get(h.port, "/events", Some(&h.token), Some("t-inventada"));
-    assert_eq!((desconocida.status, desconocida.cuerpo["code"].clone()), (403, json!("forbidden")));
+    let desconocida = get(h.port, "/events", Some(token_a), Some("t-inventada"));
+    assert_eq!(desconocida.status, 200);
+    assert!(desconocida.cuerpo["data"]["events"].as_array().unwrap().iter().all(|e| e["run_id"] == a.run));
     h.stop();
 }
 
@@ -466,10 +528,272 @@ fn humo_servidor_local() {
     let a = escena(&core, "humo-a");
     let b = escena(&core, "humo-b");
     let h = server::start(core.clone()).unwrap();
-    let info = json!({ "port": h.port, "token": h.token, "task_a": a.hija, "run_a": a.run, "task_b": b.hija, "run_b": b.run });
+    let info = json!({ "port": h.port, "task_a": a.hija, "run_a": a.run, "task_b": b.hija, "run_b": b.run });
     std::fs::write(dir.join("info.json"), info.to_string()).unwrap();
     while !dir.join("stop").exists() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     h.stop();
+}
+
+/// E2E contra el Core HTTP y el ejecutable real de `lxo`.
+///
+/// Reproducir en Windows desde `apps/desktop`:
+/// `npm ci; npm run build:lxo; npm run build`
+/// `$env:LXO_BIN = (Resolve-Path .\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe).Path`
+/// `cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture`
+#[test]
+#[ignore = "requiere un binario lxo real indicado por LXO_BIN; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates() {
+    let binary = PathBuf::from(std::env::var_os("LXO_BIN").expect("define LXO_BIN con el binario lxo"));
+    assert!(binary.is_file(), "LXO_BIN no apunta a un archivo: {}", binary.display());
+
+    let (cleanup, _data, _core_dir, core) = core_listo();
+    let scene = escena(&core, "lxo-bin-e2e");
+    let token = "fixture-agent-lxo-events-token-with-32-bytes-minimum";
+    registra_agente_http(&core, &scene.hija, "install-lxo-bin-events-e2e", token);
+    let server = ServerParada(server::start(core.clone()).unwrap());
+
+    // El proceso lxo solo puede ver este home temporal, incluido el cursor local.
+    let home = cleanup.0.join("lxo-home");
+    let lixbon_dir = home.join(".lixbon");
+    std::fs::create_dir_all(&lixbon_dir).unwrap();
+    write_lxo_orch(&lixbon_dir, server.0.port);
+
+    let head_actual = head(&core);
+    assert!(head_actual >= 3, "la escena debe emitir hechos de prueba antes de consultar el cursor");
+
+    // Cursor exclusivo igual al head: el caso vacío actual, con historia previa disponible.
+    let head_text = head_actual.to_string();
+    let empty = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", &head_text, "--limit", "2"]);
+    assert_eq!(seqs(&empty), Vec::<i64>::new());
+    assert_eq!(empty["next_cursor"], head_actual);
+    assert_eq!(empty["head_seq"], head_actual);
+    assert_eq!(empty["has_more"], false);
+
+    // History: el CLI real recupera desde el inicio todos los hechos visibles al Agent.
+    let history = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", "0", "--limit", "500"]);
+    assert_eq!(seqs(&history), (1..=head_actual).collect::<Vec<_>>(),
+        "history debe incluir cada secuencia una vez y en orden");
+    assert!(history["events"].as_array().unwrap().iter().all(|event| event["run_id"] == scene.run));
+
+    // Repetir invocaciones con next_cursor no deja huecos ni duplica secuencias.
+    let mut page = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", "0", "--limit", "2"]);
+    assert_eq!(page["events"].as_array().unwrap().len(), 2);
+    assert_eq!(page["has_more"], true);
+    let mut paginated = seqs(&page);
+    let mut cursor = page["next_cursor"].as_i64().unwrap();
+    let mut page_count = 1;
+    while page["has_more"].as_bool().unwrap() {
+        let cursor_text = cursor.to_string();
+        page = lxo_events_json(&binary, &home, &scene.hija, token,
+            &["events", "--json", "--after", &cursor_text, "--limit", "2"]);
+        let next = page["next_cursor"].as_i64().unwrap();
+        assert!(next > cursor, "una página siguiente debe avanzar el cursor");
+        paginated.extend(seqs(&page));
+        cursor = next;
+        page_count += 1;
+        assert!(page_count <= head_actual as usize, "el paginado debe terminar");
+    }
+    assert!(page_count >= 2, "la escena debe forzar más de una página");
+    assert_eq!(paginated, (1..=head_actual).collect::<Vec<_>>());
+
+    // Follow guarda el cursor en el home temporal. Cortar y relanzar el proceso
+    // equivale a reconectar: los hechos posteriores salen una sola vez.
+    assert!(lxo_cursor_values(&home).is_empty(), "el home recién creado no debe traer cursores previos");
+    let initial_cursor = head_actual.to_string();
+    let initial_args = ["events", "--json", "--follow", "--limit", "2", "--after", &initial_cursor];
+    let mut first_follow = FollowProcess::start(&binary, &home, &scene.hija, token, &initial_args);
+    wait_for_lxo_cursor(&home, head_actual as u64);
+    first_follow.assert_quiet(Duration::from_millis(150));
+    first_follow.stop();
+
+    let before_new_facts = head(&core);
+    core.mutate(|tx| {
+        for n in 0..3 {
+            let task = tx.add_child(&scene.raiz, 2, NewTask {
+                external: false,
+                ..nt(&format!("follow-reconnect-{n}"))
+            })?;
+            tx.mark_running(&task)?;
+        }
+        Ok(())
+    }).unwrap();
+    let head_with_new_facts = head(&core);
+    let expected_follow = (before_new_facts + 1..=head_with_new_facts).collect::<Vec<_>>();
+    assert!(expected_follow.len() >= 4, "la reconexión necesita hechos posteriores al cursor");
+
+    let mut resumed = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2"]);
+    let lines = (0..expected_follow.len())
+        .map(|_| resumed.next_line(Duration::from_secs(10)))
+        .collect::<Vec<_>>();
+    let resumed_seqs = lines.iter().map(|line| {
+        serde_json::from_str::<Value>(line).unwrap()["seq"].as_i64().unwrap()
+    }).collect::<Vec<_>>();
+    assert_eq!(resumed_seqs, expected_follow, "follow debe reanudar desde el cursor confirmado");
+    wait_for_lxo_cursor(&home, head_with_new_facts as u64);
+    resumed.stop();
+
+    let mut after_reconnect = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2"]);
+    after_reconnect.assert_quiet(Duration::from_millis(800));
+    after_reconnect.stop();
+
+    // Una caída recuperable del listener no reinicia Core ni revoca el Agent.
+    // El follow debe releer orch.json y continuar con el mismo token/cursor.
+    let outage_cursor = head_with_new_facts;
+    let outage_cursor_text = outage_cursor.to_string();
+    let mut recovering = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2", "--after", &outage_cursor_text]);
+    wait_for_lxo_cursor(&home, outage_cursor as u64);
+    recovering.assert_quiet(Duration::from_millis(150));
+    server.0.stop();
+    thread::sleep(Duration::from_millis(1200));
+
+    core.mutate(|tx| {
+        for n in 0..2 {
+            let task = tx.add_child(&scene.raiz, 2, NewTask {
+                external: false,
+                ..nt(&format!("follow-http-recovery-{n}"))
+            })?;
+            tx.mark_running(&task)?;
+        }
+        Ok(())
+    }).unwrap();
+    let head_after_outage = head(&core);
+    let expected_after_outage = (outage_cursor + 1..=head_after_outage).collect::<Vec<_>>();
+    assert!(!expected_after_outage.is_empty(), "la interrupción debe cubrir hechos pendientes");
+
+    let restored_server = ServerParada(server::start(core.clone()).unwrap());
+    write_lxo_orch(&lixbon_dir, restored_server.0.port);
+    let recovered_lines = (0..expected_after_outage.len())
+        .map(|_| recovering.next_line(Duration::from_secs(30)))
+        .collect::<Vec<_>>();
+    let recovered_seqs = recovered_lines.iter().map(|line| {
+        serde_json::from_str::<Value>(line).unwrap()["seq"].as_i64().unwrap()
+    }).collect::<Vec<_>>();
+    assert_eq!(recovered_seqs, expected_after_outage,
+        "el follow debe recuperar cada evento una vez tras el outage HTTP");
+    wait_for_lxo_cursor(&home, head_after_outage as u64);
+    recovering.assert_quiet(Duration::from_millis(900));
+    recovering.stop();
+    restored_server.0.stop();
+    server.0.stop();
+}
+
+struct ServerParada(server::Handle);
+
+impl Drop for ServerParada {
+    fn drop(&mut self) { self.0.stop(); }
+}
+
+fn write_lxo_orch(lixbon_dir: &std::path::Path, port: u16) {
+    std::fs::write(
+        lixbon_dir.join("orch.json"),
+        json!({
+            "port": port,
+            "version": env!("CARGO_PKG_VERSION"),
+            "client_id": "client-agent-lxo-events-e2e",
+            "installation_id": "install-lxo-bin-events-e2e"
+        }).to_string(),
+    ).unwrap();
+}
+
+fn lxo_events_json(binary: &std::path::Path, home: &std::path::Path, task_id: &str,
+    token: &str, args: &[&str]) -> Value {
+    let output = Command::new(binary).args(args)
+        .env("USERPROFILE", home).env("HOME", home)
+        .env("LXO_TASK_ID", task_id).env("LXO_CLIENT_TOKEN", token)
+        .output().unwrap_or_else(|error| panic!("no se pudo ejecutar lxo en {}: {error}", binary.display()));
+    assert!(output.status.success(), "lxo {:?} terminó con {:?}; stdout={} stderr={}", args,
+        output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!(
+        "lxo {:?} no devolvió JSON válido ({error}): {}", args, String::from_utf8_lossy(&output.stdout)) )
+}
+
+struct FollowProcess { child: Child, lines: mpsc::Receiver<String>, stderr: Arc<Mutex<String>> }
+
+impl FollowProcess {
+    fn start(binary: &std::path::Path, home: &std::path::Path, task_id: &str,
+        token: &str, args: &[&str]) -> Self {
+        let mut child = Command::new(binary).args(args)
+            .env("USERPROFILE", home).env("HOME", home)
+            .env("LXO_TASK_ID", task_id).env("LXO_CLIENT_TOKEN", token)
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().unwrap_or_else(|error| panic!("no se pudo iniciar lxo events --follow: {error}"));
+        let stdout = child.stdout.take().expect("stdout canalizado");
+        let stderr = child.stderr.take().expect("stderr canalizado");
+        let (sender, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                match line {
+                    Ok(line) => if sender.send(line).is_err() { break; },
+                    Err(_) => break,
+                }
+            }
+        });
+        let error_text = Arc::new(Mutex::new(String::new()));
+        let error_sink = error_text.clone();
+        thread::spawn(move || {
+            let mut text = String::new();
+            let mut reader = BufReader::new(stderr);
+            let _ = reader.read_to_string(&mut text);
+            *error_sink.lock().unwrap() = text;
+        });
+        Self { child, lines, stderr: error_text }
+    }
+
+    fn next_line(&mut self, timeout: Duration) -> String {
+        match self.lines.recv_timeout(timeout) {
+            Ok(line) => line,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!("lxo --follow no emitió el evento a tiempo; stderr={}", self.stderr_text()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = self.child.try_wait().ok().flatten();
+                panic!("lxo --follow terminó antes de emitir; status={status:?}; stderr={}", self.stderr_text());
+            }
+        }
+    }
+
+    fn assert_quiet(&mut self, duration: Duration) {
+        match self.lines.recv_timeout(duration) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {},
+            Ok(line) => panic!("lxo --follow emitió un evento inesperado: {line}"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = self.child.try_wait().ok().flatten();
+                panic!("lxo --follow terminó durante el periodo vacío; status={status:?}; stderr={}", self.stderr_text());
+            }
+        }
+        assert!(self.child.try_wait().unwrap().is_none(), "lxo --follow debe seguir activo mientras espera");
+    }
+
+    fn stop(&mut self) {
+        if self.child.try_wait().unwrap().is_none() { let _ = self.child.kill(); }
+        let _ = self.child.wait();
+    }
+
+    fn stderr_text(&self) -> String { self.stderr.lock().map(|text| text.clone()).unwrap_or_default() }
+}
+
+impl Drop for FollowProcess { fn drop(&mut self) { self.stop(); } }
+
+fn lxo_cursor_values(home: &std::path::Path) -> Vec<u64> {
+    let dir = home.join(".lixbon").join("events");
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries.flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("cursor"))
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok()?.trim().parse().ok())
+        .collect()
+}
+
+fn wait_for_lxo_cursor(home: &std::path::Path, cursor: u64) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if lxo_cursor_values(home).contains(&cursor) { return; }
+        assert!(Instant::now() < deadline, "lxo --follow no confirmó cursor {cursor}; guardados={:?}", lxo_cursor_values(home));
+        thread::sleep(Duration::from_millis(10));
+    }
 }

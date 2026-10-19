@@ -111,7 +111,7 @@ mod tests;
 mod ui_calls;
 mod vocab;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -166,6 +166,10 @@ pub struct Core {
     settings: Mutex<Settings>,
     /// Identidad autenticada del límite Tauri, estable para esta instalación.
     desktop_identity: Mutex<Option<crate::store::AuthenticatedClient>>,
+    /// Credenciales Agent activas por proceso y tarea, revocadas al cerrar su terminal.
+    agent_clients: Mutex<HashMap<String, Vec<String>>>,
+    /// Credenciales cuya revocación no confirmó SQLite; se reintentan antes de autenticar.
+    agent_revocations_pending: Mutex<HashSet<String>>,
     /// Clave AEAD efímera de cursores de Attention; rota al reiniciar el Core, por lo que reconectar empieza en página 1.
     attention_cursor_key: Mutex<Option<[u8; 32]>>,
     server: Mutex<Option<server::Handle>>,
@@ -209,6 +213,8 @@ impl Default for Orch {
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             desktop_identity: Mutex::new(None),
+            agent_clients: Mutex::new(HashMap::new()),
+            agent_revocations_pending: Mutex::new(HashSet::new()),
             attention_cursor_key: Mutex::new(None),
             server: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
