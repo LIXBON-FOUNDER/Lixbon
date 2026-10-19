@@ -189,6 +189,19 @@ fn need(v: Option<String>, what: &str) -> Result<String, String> {
         .ok_or_else(|| format!("Falta {what}. Ejecuta `lxo help`."))
 }
 
+fn run_close_args(
+    agent_task: bool,
+    session_root: Option<String>,
+    force: bool,
+) -> Result<Value, String> {
+    if agent_task {
+        Ok(json!({ "force": force }))
+    } else {
+        let root_task = need(session_root, "la raíz del run actual")?;
+        Ok(json!({ "root_task": root_task, "force": force }))
+    }
+}
+
 fn msg_line(m: &Value) -> String {
     format!(
         "[{} #{}] {} → {}: {}",
@@ -668,7 +681,8 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         "status" => ("status", call("status", json!({}), me)?),
         "run" => {
             if sub(1).as_deref() == Some("close") {
-                let data = call("run_close", json!({ "force": a.b("force") }), me)?;
+                let args = run_close_args(task_env().is_some(), session_task(), a.b("force"))?;
+                let data = call("run_close", args, me)?;
                 if keeps_nothing(&data) {
                     let _ = std::fs::remove_file(session_file());
                 }
@@ -1210,6 +1224,21 @@ mod tests {
         assert_eq!(opts.query["kind_prefix"], "task.");
         assert_eq!(opts.query["class"], "state");
         assert!(opts.follow && opts.json);
+    }
+
+    #[test]
+    fn run_close_person_envia_la_raiz_de_sesion_y_agent_usa_su_credencial() {
+        assert_eq!(
+            run_close_args(false, Some("root-task".into()), false).unwrap(),
+            json!({ "root_task": "root-task", "force": false })
+        );
+        assert_eq!(
+            run_close_args(true, None, true).unwrap(),
+            json!({ "force": true })
+        );
+        assert!(run_close_args(false, None, false)
+            .unwrap_err()
+            .contains("raíz del run actual"));
     }
 
     #[test]

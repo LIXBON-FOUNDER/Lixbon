@@ -1,9 +1,10 @@
-# Almacén seguro (slice J1)
+# Almacén seguro (J1 y autenticación CLI)
 
 Módulo Rust `apps/desktop/src-tauri/src/secure_store/`. Guarda, lee y borra
 secretos (claves de API, tokens, claves de dispositivo) en el almacén del
-sistema operativo. Hoy es infraestructura **sin consumidores**: ni `lib.rs` ni
-`config.json` cambian de comportamiento.
+sistema operativo. LXO-86 ya lo usa Core y el sidecar `lxo` para la credencial
+Person del CLI; los comandos `secret_*` de `lib.rs` y `config.json` conservan su
+comportamiento actual.
 
 ## API
 
@@ -64,6 +65,31 @@ cualquier otro cliente (p. ej. el CLI en Go) debe pasar los mismos casos.
 * **`config.json` solo guardará referencias** (`servicio:cuenta`), nunca el
   valor. `SecretKey::parse` existe para eso.
 
+## Consumidor CLI de LXO-86
+
+Core y el sidecar Rust `apps/desktop/lxo` usan el mismo backend `keyring` v3 y
+la misma clave: servicio `lixbon`, cuenta
+`client/cli/<installation_id>`. La instalación estable vive en
+`~/.lixbon/cli-client.json`; ese archivo contiene únicamente el
+`installation_id`. `orch.json` publica puerto, `client_id`, `installation_id`,
+versión y ruta del sidecar, sin token. El secreto no se escribe en archivos,
+logs ni argumentos de shell.
+
+La credencial Person CLI vence a los 90 días y Core la rota al iniciar el
+orquestador. Credenciales inválidas o revocadas detienen el listener para que
+no haya fallback en texto plano. Para recuperación manual de una credencial
+perdida o revocada: cierra Lixbon, elimina la entrada
+`lixbon:client/cli/<installation_id>` del almacén del SO y respalda/elimina
+`~/.lixbon/cli-client.json`; al volver a abrir, Core crea una instalación y
+credencial nuevas y revoca las credenciales Person CLI anteriores de esa base.
+Core revoca las credenciales Agent cuando termina el proceso y al reiniciar.
+Todavía no existe una pantalla o comando de revocación manual; esa operación de
+usuario es una brecha conocida.
+
+El soporte de producción se limita a los adaptadores que pasan las pruebas de
+la matriz de abajo. Un SO sin backend devuelve `Unavailable`; Core no inicia el
+listener autenticado y no guarda el bearer en otro lugar.
+
 ## Dependencias
 
 * `zeroize = "1"` (directa; ya estaba en el árbol por `keyring`/RustCrypto).
@@ -98,8 +124,8 @@ De macOS y Linux solo se comprobó que la resolución de dependencias de
 que pasar CI en esos SO, con las pruebas `--ignored` donde haya sesión de
 almacén, antes de que J2 dependa de ellos.
 
-## Alcance: J1 sin J2
+## Alcance
 
-Este módulo no tiene consumidores. **No migra credenciales** (J2, bloqueado hasta
-que se roten las claves expuestas), los comandos `secret_*` de `lib.rs` y
-`config.json` siguen como estaban.
+LXO-86 solo consume el almacén para autenticación local del CLI. **No migra
+claves de API** de los comandos `secret_*` (J2, bloqueado hasta que se roten las
+claves expuestas), y `config.json` sigue como estaba.
