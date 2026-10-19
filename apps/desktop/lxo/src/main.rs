@@ -170,7 +170,7 @@ const STALE_SESSION: &str =
 fn call(cmd: &str, mut args: Value, caller: Option<&str>) -> Result<Value, String> {
     let from_session = caller.is_some() && task_env().is_none();
     if from_session {
-        args["session"] = Value::Bool(true);
+        attach_session_context(&mut args, session_task());
     }
     let res = send(cmd, args, caller);
     if from_session && res.as_ref().is_err_and(|e| e == STALE_SESSION_MARK) {
@@ -178,6 +178,13 @@ fn call(cmd: &str, mut args: Value, caller: Option<&str>) -> Result<Value, Strin
         return Err(STALE_SESSION.into());
     }
     res
+}
+
+fn attach_session_context(args: &mut Value, root: Option<String>) {
+    args["session"] = Value::Bool(true);
+    if let Some(root) = root {
+        args["root_task"] = Value::String(root);
+    }
 }
 
 fn send(cmd: &str, args: Value, _caller: Option<&str>) -> Result<Value, String> {
@@ -1239,6 +1246,18 @@ mod tests {
         assert!(run_close_args(false, None, false)
             .unwrap_err()
             .contains("raíz del run actual"));
+    }
+
+    #[test]
+    fn person_cli_envia_la_raiz_de_sesion_sin_convertirla_en_caller() {
+        let mut args = json!({ "pending_id": "sp1" });
+        attach_session_context(&mut args, Some("root-task".into()));
+        assert_eq!(args["root_task"], "root-task");
+        assert_eq!(args["session"], true);
+        assert!(
+            args.get("caller").is_none(),
+            "la raíz es contexto, la identidad viene de la credencial"
+        );
     }
 
     #[test]

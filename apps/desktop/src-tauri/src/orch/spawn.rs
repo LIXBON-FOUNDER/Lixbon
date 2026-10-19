@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 use super::{Caller, Core, MAX_DEPTH, MODEL_TRIES, agents, approval, b, codex_session, delivery, git, lxo_path, pty, random_token, roles, s, spawn_approval, state, task_file, worktree_env};
-use super::events::MutationContext;
+use super::events::{Channel, MutationContext};
 use super::mutation::{Effect, Health, StateAccess, Tx};
 use super::state::NewTask;
 
@@ -41,10 +41,16 @@ pub(super) enum SpawnStep {
     BeforeRequestRevalidation,
     /// Después de persistir e insertar el pending y antes de emitir el aviso de UI.
     AfterRequestPersistBeforeEmit,
+    /// `approve_spawn`: la policy está autorizada y todavía no se tomó `pend_gate`.
+    BeforeApprovalClaim,
     /// Después de pasar `Pending → Launching`, antes de `create_child`.
     AfterApprovalClaim,
     /// Justo antes de que `remove_run` intente tomar `pend_gate`.
     BeforeRunRemovalGate,
+    /// Justo antes de que `close_run` intente tomar `pend_gate`.
+    BeforeRunCloseGate,
+    /// Después de que `close_run` obtiene `pend_gate`.
+    AfterRunCloseGate,
     /// Después de limpiar terminales/worktrees de `remove_run`, antes de tomar la instantánea de pendientes.
     AfterRunRemovalCleanupSnapshot,
     /// Después de confirmar el registro `pty_process` de la tarea hija.
@@ -83,8 +89,8 @@ impl Core {
     }
 
     /// Valida lo que pide el agente (sin crear nada) y arma el pendiente.
-    pub(super) fn plan_spawn(&self, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
-        let parent_id = Self::me(caller)?;
+    pub(super) fn plan_spawn(&self, channel: Channel, caller: &Caller, args: &Value) -> Result<spawn_approval::PendingSpawn, String> {
+        let parent_id = self.coordinator_task(channel, caller, args)?;
         self.check_project_launchable(&parent_id)?;
         let spec = s(args, "task");
         if spec.is_empty() {

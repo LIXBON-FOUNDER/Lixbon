@@ -1,10 +1,13 @@
 //! Pruebas de la API de lectura del Event Log (LXO-83): cursor, páginas, filtros, reinicio, errores,
 //! autorización de solo lectura y el servidor HTTP local real.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::process::{Child, Command, Stdio};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -531,4 +534,222 @@ fn humo_servidor_local() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     h.stop();
+}
+
+/// E2E contra el Core HTTP y el ejecutable real de `lxo`.
+///
+/// Reproducir en Windows desde `apps/desktop`:
+/// `npm ci; npm run build:lxo; npm run build`
+/// `$env:LXO_BIN = (Resolve-Path .\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe).Path`
+/// `cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture`
+#[test]
+#[ignore = "requiere un binario lxo real indicado por LXO_BIN; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates() {
+    let binary = PathBuf::from(std::env::var_os("LXO_BIN").expect("define LXO_BIN con el binario lxo"));
+    assert!(binary.is_file(), "LXO_BIN no apunta a un archivo: {}", binary.display());
+
+    let (cleanup, _data, _core_dir, core) = core_listo();
+    let scene = escena(&core, "lxo-bin-e2e");
+    let token = "fixture-agent-lxo-events-token-with-32-bytes-minimum";
+    registra_agente_http(&core, &scene.hija, "install-lxo-bin-events-e2e", token);
+    let server = ServerParada(server::start(core.clone()).unwrap());
+
+    // El proceso lxo solo puede ver este home temporal, incluido el cursor local.
+    let home = cleanup.0.join("lxo-home");
+    let lixbon_dir = home.join(".lixbon");
+    std::fs::create_dir_all(&lixbon_dir).unwrap();
+    std::fs::write(
+        lixbon_dir.join("orch.json"),
+        json!({
+            "port": server.0.port,
+            "version": env!("CARGO_PKG_VERSION"),
+            "client_id": "client-agent-lxo-events-e2e",
+            "installation_id": "install-lxo-bin-events-e2e"
+        }).to_string(),
+    ).unwrap();
+
+    let head_actual = head(&core);
+    assert!(head_actual >= 3, "la escena debe emitir hechos de prueba antes de consultar el cursor");
+
+    // Cursor exclusivo igual al head: el caso vacío actual, con historia previa disponible.
+    let head_text = head_actual.to_string();
+    let empty = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", &head_text, "--limit", "2"]);
+    assert_eq!(seqs(&empty), Vec::<i64>::new());
+    assert_eq!(empty["next_cursor"], head_actual);
+    assert_eq!(empty["head_seq"], head_actual);
+    assert_eq!(empty["has_more"], false);
+
+    // History: el CLI real recupera desde el inicio todos los hechos visibles al Agent.
+    let history = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", "0", "--limit", "500"]);
+    assert_eq!(seqs(&history), (1..=head_actual).collect::<Vec<_>>(),
+        "history debe incluir cada secuencia una vez y en orden");
+    assert!(history["events"].as_array().unwrap().iter().all(|event| event["run_id"] == scene.run));
+
+    // Repetir invocaciones con next_cursor no deja huecos ni duplica secuencias.
+    let mut page = lxo_events_json(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--after", "0", "--limit", "2"]);
+    assert_eq!(page["events"].as_array().unwrap().len(), 2);
+    assert_eq!(page["has_more"], true);
+    let mut paginated = seqs(&page);
+    let mut cursor = page["next_cursor"].as_i64().unwrap();
+    let mut page_count = 1;
+    while page["has_more"].as_bool().unwrap() {
+        let cursor_text = cursor.to_string();
+        page = lxo_events_json(&binary, &home, &scene.hija, token,
+            &["events", "--json", "--after", &cursor_text, "--limit", "2"]);
+        let next = page["next_cursor"].as_i64().unwrap();
+        assert!(next > cursor, "una página siguiente debe avanzar el cursor");
+        paginated.extend(seqs(&page));
+        cursor = next;
+        page_count += 1;
+        assert!(page_count <= head_actual as usize, "el paginado debe terminar");
+    }
+    assert!(page_count >= 2, "la escena debe forzar más de una página");
+    assert_eq!(paginated, (1..=head_actual).collect::<Vec<_>>());
+
+    // Follow guarda el cursor en el home temporal. Cortar y relanzar el proceso
+    // equivale a reconectar: los hechos posteriores salen una sola vez.
+    assert!(lxo_cursor_values(&home).is_empty(), "el home recién creado no debe traer cursores previos");
+    let initial_cursor = head_actual.to_string();
+    let initial_args = ["events", "--json", "--follow", "--limit", "2", "--after", &initial_cursor];
+    let mut first_follow = FollowProcess::start(&binary, &home, &scene.hija, token, &initial_args);
+    wait_for_lxo_cursor(&home, head_actual as u64);
+    first_follow.assert_quiet(Duration::from_millis(150));
+    first_follow.stop();
+
+    let before_new_facts = head(&core);
+    core.mutate(|tx| {
+        for n in 0..3 {
+            let task = tx.add_child(&scene.raiz, 2, NewTask {
+                external: false,
+                ..nt(&format!("follow-reconnect-{n}"))
+            })?;
+            tx.mark_running(&task)?;
+        }
+        Ok(())
+    }).unwrap();
+    let head_with_new_facts = head(&core);
+    let expected_follow = (before_new_facts + 1..=head_with_new_facts).collect::<Vec<_>>();
+    assert!(expected_follow.len() >= 4, "la reconexión necesita hechos posteriores al cursor");
+
+    let mut resumed = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2"]);
+    let lines = (0..expected_follow.len())
+        .map(|_| resumed.next_line(Duration::from_secs(10)))
+        .collect::<Vec<_>>();
+    let resumed_seqs = lines.iter().map(|line| {
+        serde_json::from_str::<Value>(line).unwrap()["seq"].as_i64().unwrap()
+    }).collect::<Vec<_>>();
+    assert_eq!(resumed_seqs, expected_follow, "follow debe reanudar desde el cursor confirmado");
+    wait_for_lxo_cursor(&home, head_with_new_facts as u64);
+    resumed.stop();
+
+    let mut after_reconnect = FollowProcess::start(&binary, &home, &scene.hija, token,
+        &["events", "--json", "--follow", "--limit", "2"]);
+    after_reconnect.assert_quiet(Duration::from_millis(800));
+    after_reconnect.stop();
+    server.0.stop();
+}
+
+struct ServerParada(server::Handle);
+
+impl Drop for ServerParada {
+    fn drop(&mut self) { self.0.stop(); }
+}
+
+fn lxo_events_json(binary: &std::path::Path, home: &std::path::Path, task_id: &str,
+    token: &str, args: &[&str]) -> Value {
+    let output = Command::new(binary).args(args)
+        .env("USERPROFILE", home).env("HOME", home)
+        .env("LXO_TASK_ID", task_id).env("LXO_CLIENT_TOKEN", token)
+        .output().unwrap_or_else(|error| panic!("no se pudo ejecutar lxo en {}: {error}", binary.display()));
+    assert!(output.status.success(), "lxo {:?} terminó con {:?}; stdout={} stderr={}", args,
+        output.status.code(), String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| panic!(
+        "lxo {:?} no devolvió JSON válido ({error}): {}", args, String::from_utf8_lossy(&output.stdout)) )
+}
+
+struct FollowProcess { child: Child, lines: mpsc::Receiver<String>, stderr: Arc<Mutex<String>> }
+
+impl FollowProcess {
+    fn start(binary: &std::path::Path, home: &std::path::Path, task_id: &str,
+        token: &str, args: &[&str]) -> Self {
+        let mut child = Command::new(binary).args(args)
+            .env("USERPROFILE", home).env("HOME", home)
+            .env("LXO_TASK_ID", task_id).env("LXO_CLIENT_TOKEN", token)
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+            .spawn().unwrap_or_else(|error| panic!("no se pudo iniciar lxo events --follow: {error}"));
+        let stdout = child.stdout.take().expect("stdout canalizado");
+        let stderr = child.stderr.take().expect("stderr canalizado");
+        let (sender, lines) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                match line {
+                    Ok(line) => if sender.send(line).is_err() { break; },
+                    Err(_) => break,
+                }
+            }
+        });
+        let error_text = Arc::new(Mutex::new(String::new()));
+        let error_sink = error_text.clone();
+        thread::spawn(move || {
+            let mut text = String::new();
+            let mut reader = BufReader::new(stderr);
+            let _ = reader.read_to_string(&mut text);
+            *error_sink.lock().unwrap() = text;
+        });
+        Self { child, lines, stderr: error_text }
+    }
+
+    fn next_line(&mut self, timeout: Duration) -> String {
+        match self.lines.recv_timeout(timeout) {
+            Ok(line) => line,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!("lxo --follow no emitió el evento a tiempo; stderr={}", self.stderr_text()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = self.child.try_wait().ok().flatten();
+                panic!("lxo --follow terminó antes de emitir; status={status:?}; stderr={}", self.stderr_text());
+            }
+        }
+    }
+
+    fn assert_quiet(&mut self, duration: Duration) {
+        match self.lines.recv_timeout(duration) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {},
+            Ok(line) => panic!("lxo --follow emitió un evento inesperado: {line}"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let status = self.child.try_wait().ok().flatten();
+                panic!("lxo --follow terminó durante el periodo vacío; status={status:?}; stderr={}", self.stderr_text());
+            }
+        }
+        assert!(self.child.try_wait().unwrap().is_none(), "lxo --follow debe seguir activo mientras espera");
+    }
+
+    fn stop(&mut self) {
+        if self.child.try_wait().unwrap().is_none() { let _ = self.child.kill(); }
+        let _ = self.child.wait();
+    }
+
+    fn stderr_text(&self) -> String { self.stderr.lock().map(|text| text.clone()).unwrap_or_default() }
+}
+
+impl Drop for FollowProcess { fn drop(&mut self) { self.stop(); } }
+
+fn lxo_cursor_values(home: &std::path::Path) -> Vec<u64> {
+    let dir = home.join(".lixbon").join("events");
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries.flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("cursor"))
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok()?.trim().parse().ok())
+        .collect()
+}
+
+fn wait_for_lxo_cursor(home: &std::path::Path, cursor: u64) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if lxo_cursor_values(home).contains(&cursor) { return; }
+        assert!(Instant::now() < deadline, "lxo --follow no confirmó cursor {cursor}; guardados={:?}", lxo_cursor_values(home));
+        thread::sleep(Duration::from_millis(10));
+    }
 }

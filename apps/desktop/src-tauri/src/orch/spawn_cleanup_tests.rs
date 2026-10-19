@@ -22,7 +22,9 @@ use super::spawn::{SpawnAttempt, SpawnStep};
 use super::spawn_approval::{PendState, EV_PENDING, EV_RESOLVED};
 use super::state::{NewTask, State, Status};
 use super::{agents, Caller, Core, Orch};
-use crate::store::{EventQuery, EventRow};
+use crate::store::{
+    ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, EventQuery, EventRow,
+};
 
 // ---------------------------------------------------------------------------------------------
 // Ayudas
@@ -1398,6 +1400,122 @@ fn spawn_request_no_emite_un_pending_despues_de_su_resolucion() {
 }
 
 #[test]
+fn run_close_resuelve_los_pending_del_coordinador_sin_esperar_al_sweep() {
+    let e = setup("close-run-resuelve-pendings");
+    let pending_id = e.spawn(true);
+    let before = head(&e.core);
+
+    e.core.rpc(Caller::User, "", "run_close", &json!({ "root_task": e.root, "force": true })).unwrap();
+
+    let events = desde(&e.core, before);
+    let close_index = events.iter().position(|event| event.kind == "run.closed").expect("run.closed durable");
+    let resolution_index = events.iter().position(|event| event.kind == "spawn.resolved").expect("pending resuelto junto al cierre");
+    assert!(close_index < resolution_index, "primero se cierra el run y luego se resuelve el pending: {:?}", kinds(&events));
+    let resolution = &events[resolution_index];
+    assert_eq!(pl(resolution)["outcome"], "coordinator_closed");
+    assert_eq!(resolution.entity_id, pending_id);
+    assert_eq!((resolution.actor_kind.as_str(), resolution.channel.as_deref()), ("system", Some("core")));
+    assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Expired));
+}
+
+#[test]
+fn cerrar_run_espera_spawn_en_curso_y_resuelve_su_pending() {
+    let e = setup("race-spawn-request-close-run");
+    e.core.settings.lock().unwrap().notify_questions = true;
+    e.host.clear_events();
+    e.host.clear_calls();
+    let before = head(&e.core);
+    let request_paused = Arc::new(TimedBarrier::new());
+    let release_request = Arc::new(TimedBarrier::new());
+    let (paused_hook, release_hook) = (request_paused.clone(), release_request.clone());
+    e.hook(move |_core, _id, step| {
+        if step == SpawnStep::AfterRequestPersistBeforeEmit {
+            paused_hook.wait()?;
+            release_hook.wait()?;
+        }
+        Ok(())
+    });
+
+    let request_core = e.core.clone();
+    let parent = e.root.clone();
+    let request = std::thread::spawn(move || {
+        request_core.rpc(
+            Caller::Agent(Some(parent)),
+            "",
+            "spawn",
+            &json!({ "agent": "claude", "task": "Encargo", "name": "Hija UI", "shared": true }),
+        )
+    });
+    request_paused.wait().expect("solicitud persistida antes de su aviso");
+    let pending_id = e.core.list_pending_spawns().into_iter().next().expect("pending ya persistido").pending_id;
+
+    let (close_gate_attempt_tx, close_gate_attempt_rx) = mpsc::channel();
+    let (close_gate_acquired_tx, close_gate_acquired_rx) = mpsc::channel();
+    e.hook(move |_core, _id, step| {
+        if step == SpawnStep::BeforeRunCloseGate {
+            close_gate_attempt_tx.send(()).unwrap();
+        } else if step == SpawnStep::AfterRunCloseGate {
+            close_gate_acquired_tx.send(()).unwrap();
+        }
+        Ok(())
+    });
+    let (close_done_tx, close_done_rx) = mpsc::channel();
+    let close_core = e.core.clone();
+    let root = e.root.clone();
+    let close = std::thread::spawn(move || {
+        let result = close_core.rpc(Caller::User, "", "run_close", &json!({ "root_task": root, "force": true }));
+        close_done_tx.send(result.clone()).unwrap();
+        result
+    });
+    close_gate_attempt_rx.recv_timeout(Duration::from_secs(5)).expect("run_close llegó a la compuerta");
+    let close_crossed_spawn_gate = close_done_rx.recv_timeout(Duration::from_millis(200)).is_ok();
+
+    release_request.wait().expect("emitir la solicitud antes del cierre");
+    let request_result = request.join().unwrap();
+    close_gate_acquired_rx.recv_timeout(Duration::from_secs(5)).expect("run_close obtuvo la compuerta tras la solicitud");
+    let close_result = close.join().unwrap();
+    assert!(request_result.is_ok(), "solicitud: {request_result:?}");
+    assert!(close_result.is_ok(), "cierre: {close_result:?}");
+    assert!(!close_crossed_spawn_gate, "run_close no debe cruzar la sección crítica del spawn");
+
+    let events = desde(&e.core, before);
+    let close_index = events.iter().position(|event| event.kind == "run.closed").expect("run.closed durable");
+    let resolution_index = events.iter().position(|event| event.kind == "spawn.resolved").expect("pending resuelto al cerrar");
+    assert!(events.iter().position(|event| event.kind == "spawn.requested").is_some_and(|request_index| request_index < close_index));
+    assert!(close_index < resolution_index, "el cierre se registra antes de resolver el pendiente: {:?}", kinds(&events));
+    let resolution = &events[resolution_index];
+    assert_eq!(pl(resolution)["outcome"], "coordinator_closed");
+    assert_eq!(resolution.entity_id, pending_id);
+    assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Expired));
+    let ui_events: Vec<String> = e.host.events().into_iter().map(|(name, _)| name).filter(|name| name == EV_PENDING || name == EV_RESOLVED).collect();
+    assert_eq!(ui_events, vec![EV_PENDING, EV_RESOLVED], "la tarjeta aparece y resuelve en ese orden");
+}
+
+#[test]
+fn approve_spawn_revalida_el_coordinador_despues_de_resolver_la_policy() {
+    let e = setup("approve-revalida-coordinador");
+    let pending_id = e.spawn(true);
+    let argv = e.core.list_pending_spawns().into_iter().find(|pending| pending.pending_id == pending_id).unwrap().policy.argv;
+    let root = e.root.clone();
+    e.hook(move |core, _id, step| {
+        if step == SpawnStep::BeforeApprovalClaim {
+            core.lock_unpersisted().close(&root, Status::Stopped, "detenida antes de aprobar").map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    });
+    let before = head(&e.core);
+
+    let result = e.core.approve_spawn(&pending_id, true, &argv, true).unwrap();
+
+    assert_eq!(result["outcome"], "expired", "el pending se resuelve como coordinador cerrado, no como lanzamiento fallido");
+    assert!(e.hijas().is_empty(), "no se crea una hija para un coordinador final");
+    assert_eq!(e.estado_pendiente(&pending_id), Some(PendState::Expired));
+    let resolution = desde(&e.core, before).into_iter().find(|event| event.kind == "spawn.resolved").expect("resolución durable");
+    assert_eq!(pl(&resolution)["outcome"], "coordinator_closed");
+    assert_eq!((resolution.actor_kind.as_str(), resolution.channel.as_deref()), ("system", Some("core")));
+}
+
+#[test]
 fn remove_run_antes_de_revalidar_rechaza_spawn_request_sin_persistirlo() {
     let e = setup("race-remove-before-spawn-request");
     e.core.settings.lock().unwrap().notify_questions = true;
@@ -1600,6 +1718,40 @@ fn spawn_requested_y_resolved_cumplen_identidad_clase_actor_y_correlacion() {
     assert_eq!((resolution.correlation_id.as_deref(), resolution.idem_key.as_deref(), resolution.run_id.as_deref(), resolution.project_id.as_deref()),
         (Some(pending_id.as_str()), Some(pending_id.as_str()), Some(e.run.as_str()), Some(e.project.as_str())));
     assert_eq!(pl(&resolution), json!({ "outcome": "rejected", "has_reason": true }));
+}
+
+#[test]
+fn person_cli_spawn_registra_evento_con_actor_persona_autenticado() {
+    let e = setup("person-cli-spawn-event");
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new("install-person-cli-spawn-event", None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(
+        ClientPrincipal::Person("person-cli-spawn-event".into()),
+        "person-cli-spawn-event-secret-32-bytes-minimum",
+    )
+    .unwrap();
+    let client = e.core.storage.with_store(|store| {
+        store.register_client(&registration, &credential, super::state::now_ms() as i64).unwrap()
+    }).unwrap();
+    let before = head(&e.core);
+    let response = e.core.rpc_authenticated_via(
+        &client,
+        &Default::default(),
+        Channel::Lxo,
+        &s(&e.repo),
+        "spawn",
+        &json!({ "root_task": e.root, "agent": "claude", "task": "Encargo de la persona", "shared": true }),
+    );
+    let pending_id = response.unwrap()["pending_id"].as_str().unwrap().to_string();
+    let request = desde(&e.core, before).into_iter().find(|event| event.kind == "spawn.requested").unwrap();
+    assert_eq!(request.entity_id, pending_id);
+    assert_eq!(request.actor_kind.as_str(), "person");
+    assert_eq!(request.actor_id.as_deref(), Some("person-cli-spawn-event"));
+    assert_eq!(request.channel.as_deref(), Some("lxo"));
+    assert_eq!(request.client_id.as_deref(), Some(client.identity().client_id()));
 }
 
 #[test]
