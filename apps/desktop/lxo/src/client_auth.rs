@@ -4,7 +4,7 @@
 //! Las personas usan la entrada del Keychain compartida con el escritorio; una
 //! tarea agente recibe su credencial por `LXO_CLIENT_TOKEN`.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 use std::{fmt, io};
@@ -165,6 +165,27 @@ struct HttpResponse {
     body: Value,
 }
 
+#[derive(Debug)]
+pub(crate) enum EventRequestFailure {
+    Network(String),
+    CoreUnavailable(String),
+    Authentication(String),
+    Version(String),
+    Internal(String),
+}
+
+impl EventRequestFailure {
+    pub(crate) fn message(&self) -> &str {
+        match self {
+            Self::Network(message)
+            | Self::CoreUnavailable(message)
+            | Self::Authentication(message)
+            | Self::Version(message)
+            | Self::Internal(message) => message,
+        }
+    }
+}
+
 fn request(
     port: u16,
     method: &str,
@@ -299,11 +320,7 @@ fn send_authenticated(
     args: &Value,
     cwd: &str,
 ) -> Result<Value, String> {
-    let handshake = request(info.port, "GET", "/handshake", &credential.secret, None)?;
-    if handshake.status != 200 {
-        return Err(remote_error(handshake.status, &handshake.body));
-    }
-    validate_handshake(info, &handshake.body, credential.kind)?;
+    authenticate(info, credential).map_err(|e| e.message().to_string())?;
 
     // `caller` se omite intencionalmente: la autoridad proviene de la credencial
     // autenticada; el Core liga las credenciales Agent a su tarea al emitirlas.
@@ -322,6 +339,138 @@ fn send_authenticated(
     }
 }
 
+fn classify_request_error(error: String) -> EventRequestFailure {
+    if error.starts_with("No se pudo conectar")
+        || error.starts_with("El Core de Lixbon no respondió")
+        || error.starts_with("Se perdió la conexión")
+        || error.starts_with("Falló el envío")
+        || error.starts_with("No se pudo configurar el tiempo de espera de red")
+    {
+        EventRequestFailure::Network(error)
+    } else {
+        EventRequestFailure::Version(error)
+    }
+}
+
+fn authenticate(
+    info: &OrchInfo,
+    credential: &ResolvedCredential,
+) -> Result<(), EventRequestFailure> {
+    let handshake = request(info.port, "GET", "/handshake", &credential.secret, None)
+        .map_err(classify_request_error)?;
+    if handshake.status != 200 {
+        return Err(handshake_failure(handshake.status, &handshake.body));
+    }
+    validate_handshake(info, &handshake.body, credential.kind).map_err(|message| {
+        if message.contains("credencial") || message.contains("identidad") {
+            EventRequestFailure::Authentication(message)
+        } else {
+            EventRequestFailure::Version(message)
+        }
+    })
+}
+
+fn handshake_failure(status: u16, body: &Value) -> EventRequestFailure {
+    let message = remote_error(status, body);
+    match status {
+        401 | 403 => EventRequestFailure::Authentication(message),
+        503 => EventRequestFailure::CoreUnavailable(message),
+        _ => EventRequestFailure::Version(message),
+    }
+}
+
+fn events_path(params: &[(String, String)]) -> Result<String, String> {
+    const ALLOWED: &[&str] = &[
+        "cursor",
+        "limit",
+        "project",
+        "run",
+        "entity_kind",
+        "entity_id",
+        "kind",
+        "kind_prefix",
+        "class",
+    ];
+    let mut seen = std::collections::HashSet::new();
+    let mut query = Vec::with_capacity(params.len());
+    for (name, value) in params {
+        if !ALLOWED.contains(&name.as_str()) || !seen.insert(name) {
+            return Err("Parámetros inválidos para GET /events.".into());
+        }
+        query.push(format!(
+            "{}={}",
+            encode_query_component(name),
+            encode_query_component(value)
+        ));
+    }
+    query.sort();
+    Ok(if query.is_empty() {
+        "/events".into()
+    } else {
+        format!("/events?{}", query.join("&"))
+    })
+}
+
+fn encode_query_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+fn client_configuration() -> Result<(OrchInfo, ResolvedCredential), EventRequestFailure> {
+    let path = super::home().join(".lixbon").join("orch.json");
+    let bytes = std::fs::read(path).map_err(|_| {
+        EventRequestFailure::Network(
+            "Lixbon no está abierto o el orquestador está desactivado (Lixbon → Ajustes → Orquestador)".into(),
+        )
+    })?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| EventRequestFailure::Version("orch.json no es válido".into()))?;
+    let info = OrchInfo::parse(&value).map_err(EventRequestFailure::Version)?;
+    let task_id = std::env::var("LXO_TASK_ID").ok();
+    let token = std::env::var("LXO_CLIENT_TOKEN").ok();
+    let credential = resolve_credential(
+        &info,
+        task_id.as_deref(),
+        token.as_deref(),
+        &OsCredentialReader,
+    )
+    .map_err(EventRequestFailure::Authentication)?;
+    Ok((info, credential))
+}
+
+/// GET /events usa el mismo materializador de credenciales y handshake que RPC.
+/// Solo admite parámetros del contrato; el secreto nunca sale de este módulo.
+pub(crate) fn get_events(params: &[(String, String)]) -> Result<(u16, Value), EventRequestFailure> {
+    let path = events_path(params).map_err(EventRequestFailure::Internal)?;
+    let (info, credential) = client_configuration()?;
+    let response = get_events_authenticated(&info, &credential, &path)?;
+    Ok((response.status, response.body))
+}
+
+fn get_events_authenticated(
+    info: &OrchInfo,
+    credential: &ResolvedCredential,
+    path: &str,
+) -> Result<HttpResponse, EventRequestFailure> {
+    if !path.starts_with("/events?") && path != "/events" {
+        return Err(EventRequestFailure::Internal(
+            "La solicitud de eventos debe usar GET /events.".into(),
+        ));
+    }
+    authenticate(info, credential)?;
+    let mut response = request(info.port, "GET", path, &credential.secret, None)
+        .map_err(classify_request_error)?;
+    redact_value(&mut response.body, &credential.secret);
+    Ok(response)
+}
+
 fn redact_secret(message: &str, secret: &str) -> String {
     if secret.is_empty() {
         message.to_string()
@@ -330,26 +479,26 @@ fn redact_secret(message: &str, secret: &str) -> String {
     }
 }
 
+fn redact_value(value: &mut Value, secret: &str) {
+    match value {
+        Value::String(text) => *text = redact_secret(text, secret),
+        Value::Array(items) => items.iter_mut().for_each(|item| redact_value(item, secret)),
+        Value::Object(fields) => fields
+            .values_mut()
+            .for_each(|item| redact_value(item, secret)),
+        _ => {}
+    }
+}
+
 pub(super) fn send(cmd: &str, args: &Value, cwd: &str) -> Result<Value, String> {
-    let path = super::home().join(".lixbon").join("orch.json");
-    let bytes = std::fs::read(path).map_err(|_| "Lixbon no está abierto o el orquestador está desactivado (Lixbon → Ajustes → Orquestador)".to_string())?;
-    let value: Value =
-        serde_json::from_slice(&bytes).map_err(|_| "orch.json no es válido".to_string())?;
-    let info = OrchInfo::parse(&value)?;
-    let task_id = std::env::var("LXO_TASK_ID").ok();
-    let token = std::env::var("LXO_CLIENT_TOKEN").ok();
-    let credential = resolve_credential(
-        &info,
-        task_id.as_deref(),
-        token.as_deref(),
-        &OsCredentialReader,
-    )?;
+    let (info, credential) = client_configuration().map_err(|e| e.message().to_string())?;
     send_authenticated(&info, &credential, cmd, args, cwd)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
     use std::sync::{Arc, Mutex};
 
     const TOKEN: &str = "client-test-secret-never-print-this";
@@ -546,5 +695,87 @@ mod tests {
         assert!(body.contains("\"cmd\":\"status\""));
         assert!(!body.contains("caller"));
         assert!(!body.contains(TOKEN));
+    }
+
+    #[test]
+    fn events_get_reutiliza_handshake_credencial_y_redacta_errores() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let info = OrchInfo { port, ..info() };
+        let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+        let observed_server = observed.clone();
+        let server = std::thread::spawn(move || {
+            for response in [
+                json!({ "ok": true, "data": handshake()["data"] }),
+                json!({ "ok": false, "code": "forbidden", "error": TOKEN, "detail": TOKEN }),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap() == 0 {
+                        break;
+                    }
+                    request.push_str(&line);
+                    if line == "\r\n" {
+                        break;
+                    }
+                }
+                observed_server.lock().unwrap().push(request);
+                let payload = response.to_string();
+                let status = if response["ok"].as_bool() == Some(true) {
+                    200
+                } else {
+                    403
+                };
+                write!(stream, "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}", payload.len()).unwrap();
+            }
+        });
+        let credential = ResolvedCredential {
+            secret: Zeroizing::new(TOKEN.to_string()),
+            kind: CredentialKind::Person,
+        };
+        let response =
+            get_events_authenticated(&info, &credential, "/events?class=state&cursor=0").unwrap();
+        assert_eq!(response.status, 403);
+        assert_eq!(response.body["error"], "[credencial oculta]");
+        assert_eq!(response.body["detail"], "[credencial oculta]");
+        server.join().unwrap();
+        let requests = observed.lock().unwrap();
+        assert!(requests[0].starts_with("GET /handshake HTTP/1.1"));
+        assert!(requests[1].starts_with("GET /events?class=state&cursor=0 HTTP/1.1"));
+        assert!(requests[1].contains(&format!("Authorization: Bearer {TOKEN}")));
+        assert!(!requests[1].contains("X-Lixbon-Caller"));
+    }
+
+    #[test]
+    fn events_path_cierra_nombres_y_codifica_valores() {
+        assert_eq!(
+            events_path(&[
+                ("entity_id".into(), "t/17 a".into()),
+                ("cursor".into(), "42".into())
+            ])
+            .unwrap(),
+            "/events?cursor=42&entity_id=t%2F17%20a"
+        );
+        assert!(events_path(&[("token".into(), TOKEN.into())]).is_err());
+        assert!(
+            events_path(&[("cursor".into(), "1".into()), ("cursor".into(), "2".into())]).is_err()
+        );
+    }
+
+    #[test]
+    fn handshake_core_unavailable_no_se_confunde_con_version_incompatible() {
+        match handshake_failure(503, &json!({ "code": "core_unavailable" })) {
+            EventRequestFailure::CoreUnavailable(message) => {
+                assert!(message.contains("no está disponible"))
+            }
+            _ => panic!("HTTP 503 debe conservar la categoría core_unavailable"),
+        }
+        assert!(matches!(
+            handshake_failure(426, &json!({ "code": "version_mismatch" })),
+            EventRequestFailure::Version(_)
+        ));
     }
 }

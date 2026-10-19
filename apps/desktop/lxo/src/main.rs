@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 mod client_auth;
+mod events;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
 const WORKER: &str = include_str!("../guide/worker.md");
@@ -32,6 +33,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo list | lxo show [<tarea>] | lxo diff <tarea>
   lxo projects [--all]                             proyectos registrados en Lixbon y dónde están (solo lectura;
                                                    registrarlos o archivarlos lo decide una persona en Lixbon)
+  lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
+                                                  Event Log paginado con autenticación de cliente
   lxo stop <tarea> | lxo release <tarea> [--force]
   (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
    lxo merge y lxo pr se rechazan)
@@ -59,36 +62,57 @@ Siempre:
 struct Args {
     pos: Vec<String>,
     flags: Map<String, Value>,
+    duplicates: Vec<String>,
 }
 
 fn parse(raw: Vec<String>) -> Args {
     let mut pos = vec![];
     let mut flags = Map::new();
+    let mut duplicates = vec![];
     let mut it = raw.into_iter().peekable();
     while let Some(a) = it.next() {
         if let Some(name) = a.strip_prefix("--") {
             if let Some((k, v)) = name.split_once('=') {
+                if flags.contains_key(k) {
+                    duplicates.push(k.to_string());
+                }
                 flags.insert(k.into(), Value::String(v.into()));
-            } else if it.peek().is_some_and(|n| !n.starts_with("--")) && !BOOL_FLAGS.contains(&name) {
+            } else if it.peek().is_some_and(|n| !n.starts_with("--")) && !BOOL_FLAGS.contains(&name)
+            {
+                if flags.contains_key(name) {
+                    duplicates.push(name.to_string());
+                }
                 flags.insert(name.into(), Value::String(it.next().unwrap_or_default()));
             } else {
+                if flags.contains_key(name) {
+                    duplicates.push(name.to_string());
+                }
                 flags.insert(name.into(), Value::Bool(true));
             }
         } else {
             pos.push(a);
         }
     }
-    Args { pos, flags }
+    Args {
+        pos,
+        flags,
+        duplicates,
+    }
 }
 
-const BOOL_FLAGS: &[&str] = &["json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all"];
+const BOOL_FLAGS: &[&str] = &[
+    "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
+    "follow", "help",
+];
 
 impl Args {
     fn s(&self, k: &str) -> Option<String> {
         self.flags.get(k).and_then(Value::as_str).map(String::from)
     }
     fn b(&self, k: &str) -> bool {
-        self.flags.get(k).is_some_and(|v| v.as_bool().unwrap_or(true))
+        self.flags
+            .get(k)
+            .is_some_and(|v| v.as_bool().unwrap_or(true))
     }
     fn at(&self, i: usize) -> Option<String> {
         self.pos.get(i).cloned()
@@ -99,11 +123,15 @@ impl Args {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_default()
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 fn cwd() -> String {
-    std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Un coordinador externo no tiene LXO_TASK_ID: su tarea se recuerda por carpeta.
@@ -113,7 +141,11 @@ fn session_file() -> PathBuf {
         h ^= b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
-    home().join(".lixbon").join("orch").join("external").join(format!("{h:016x}"))
+    home()
+        .join(".lixbon")
+        .join("orch")
+        .join("external")
+        .join(format!("{h:016x}"))
 }
 
 fn task_env() -> Option<String> {
@@ -121,7 +153,10 @@ fn task_env() -> Option<String> {
 }
 
 fn session_task() -> Option<String> {
-    std::fs::read_to_string(session_file()).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    std::fs::read_to_string(session_file())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn caller() -> Option<String> {
@@ -129,7 +164,8 @@ fn caller() -> Option<String> {
 }
 
 const STALE_SESSION_MARK: &str = "sesion-obsoleta";
-const STALE_SESSION: &str = "Tu run anterior ya no existe: empieza con `lxo run create --objective \"...\"`";
+const STALE_SESSION: &str =
+    "Tu run anterior ya no existe: empieza con `lxo run create --objective \"...\"`";
 
 fn call(cmd: &str, mut args: Value, caller: Option<&str>) -> Result<Value, String> {
     let from_session = caller.is_some() && task_env().is_none();
@@ -149,7 +185,8 @@ fn send(cmd: &str, args: Value, _caller: Option<&str>) -> Result<Value, String> 
 }
 
 fn need(v: Option<String>, what: &str) -> Result<String, String> {
-    v.filter(|s| !s.trim().is_empty()).ok_or_else(|| format!("Falta {what}. Ejecuta `lxo help`."))
+    v.filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| format!("Falta {what}. Ejecuta `lxo help`."))
 }
 
 fn msg_line(m: &Value) -> String {
@@ -165,16 +202,31 @@ fn msg_line(m: &Value) -> String {
 
 fn task_line(t: &Value) -> String {
     let indent = "  ".repeat(t["depth"].as_u64().unwrap_or(0) as usize);
-    let phase = t["phases"].as_array().and_then(|p| p.last()).map(|p| {
-        format!(" · fase «{}»{}", p["name"].as_str().unwrap_or(""), if p["done"].as_bool() == Some(true) { " ✓" } else { "" })
-    }).unwrap_or_default();
+    let phase = t["phases"]
+        .as_array()
+        .and_then(|p| p.last())
+        .map(|p| {
+            format!(
+                " · fase «{}»{}",
+                p["name"].as_str().unwrap_or(""),
+                if p["done"].as_bool() == Some(true) {
+                    " ✓"
+                } else {
+                    ""
+                }
+            )
+        })
+        .unwrap_or_default();
     format!(
         "{indent}{} [{}] {} ({}){}{}",
         t["id"].as_str().unwrap_or("?"),
         t["status"].as_str().unwrap_or("?"),
         t["title"].as_str().unwrap_or(""),
         t["agent"].as_str().unwrap_or(""),
-        t["branch"].as_str().map(|b| format!(" · {b}")).unwrap_or_default(),
+        t["branch"]
+            .as_str()
+            .map(|b| format!(" · {b}"))
+            .unwrap_or_default(),
         phase
     )
 }
@@ -192,23 +244,41 @@ fn projects_text(data: &Value) -> String {
                 "{} · {}{} · {} tarea(s) · {}",
                 p["id"].as_str().unwrap_or("?"),
                 p["name"].as_str().unwrap_or(""),
-                if p["state"].as_str() == Some("archived") { " (archivado)" } else { "" },
+                if p["state"].as_str() == Some("archived") {
+                    " (archivado)"
+                } else {
+                    ""
+                },
                 p["tasks"].as_u64().unwrap_or(0),
-                p["fingerprint"]["remotes"].as_array().and_then(|r| r.first()).and_then(Value::as_str).unwrap_or("sin remoto")
+                p["fingerprint"]["remotes"]
+                    .as_array()
+                    .and_then(|r| r.first())
+                    .and_then(Value::as_str)
+                    .unwrap_or("sin remoto")
             )];
             for l in p["locations"].as_array().into_iter().flatten() {
                 lines.push(format!(
                     "    {}{}{}",
                     l["path"].as_str().unwrap_or(""),
-                    if l["primary"].as_bool() == Some(true) { " [principal]" } else { "" },
-                    if l["state"].as_str() == Some("missing") { " (no existe: indica dónde está con project_locate)" } else { "" }
+                    if l["primary"].as_bool() == Some(true) {
+                        " [principal]"
+                    } else {
+                        ""
+                    },
+                    if l["state"].as_str() == Some("missing") {
+                        " (no existe: indica dónde está con project_locate)"
+                    } else {
+                        ""
+                    }
                 ));
             }
             lines.join("\n")
         })
         .collect();
     if let Some(n) = data["unassigned_tasks"].as_u64().filter(|n| *n > 0) {
-        out.push(format!("{n} tarea(s) aún sin proyecto (repositorio ambiguo o que ya no existe)."));
+        out.push(format!(
+            "{n} tarea(s) aún sin proyecto (repositorio ambiguo o que ya no existe)."
+        ));
     }
     out.join("\n")
 }
@@ -329,8 +399,10 @@ fn human(cmd: &str, data: &Value) -> String {
 
 fn with_hint(text: String, data: &Value) -> String {
     match data["hint"].as_str() {
-        Some(h) => format!("{text}
-{h}"),
+        Some(h) => format!(
+            "{text}
+{h}"
+        ),
         None => text,
     }
 }
@@ -340,44 +412,94 @@ fn keeps_nothing(data: &Value) -> bool {
 }
 
 fn run_close_human(data: &Value) -> String {
-    let ids = |k: &str| -> Vec<String> { data[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() };
+    let ids = |k: &str| -> Vec<String> {
+        data[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect()
+    };
     let tail = if keeps_nothing(data) {
         "tu tarea queda terminada y la sesión de esta carpeta se borró."
     } else {
         "tu tarea queda terminada. La sesión de esta carpeta se conserva para que la persona integre desde Lixbon y `lxo release` siga funcionando con lo conservado."
     };
-    let mut out = vec![format!("Run {} cerrado: {tail}", data["run"].as_str().unwrap_or(""))];
+    let mut out = vec![format!(
+        "Run {} cerrado: {tail}",
+        data["run"].as_str().unwrap_or("")
+    )];
     let stopped = ids("stopped");
     if !stopped.is_empty() {
-        out.push(format!("Paradas (seguían en marcha): {}.", stopped.join(", ")));
+        out.push(format!(
+            "Paradas (seguían en marcha): {}.",
+            stopped.join(", ")
+        ));
     }
     let terminals = ids("terminals");
-    out.push(if terminals.is_empty() { "Terminales: no había ninguna abierta.".into() } else { format!("Terminales cerradas: {}.", terminals.join(", ")) });
-    let released: Vec<String> = data["released"].as_array().into_iter().flatten().map(|r| format!(
-        "  {} · worktree borrado{}",
-        r["task"].as_str().unwrap_or(""),
-        match (r["branch"].as_str(), r["branch_deleted"].as_bool() == Some(true)) {
-            (Some(b), true) => format!(" y rama {b} borrada"),
-            (Some(b), false) => format!("; rama {b} conservada (puede tener commits sin integrar)"),
-            _ => String::new(),
-        }
-    )).collect();
-    out.push(if released.is_empty() { "Worktrees liberados: ninguno.".into() } else { format!("Worktrees liberados:
-{}", released.join("
-")) });
-    let kept: Vec<String> = data["kept"].as_array().into_iter().flatten().map(|k| format!(
-        "  {} · {}{}",
-        k["task"].as_str().unwrap_or(""),
-        k["branch"].as_str().map(|b| format!("{b} · ")).unwrap_or_default(),
-        k["reason"].as_str().unwrap_or("")
-    )).collect();
+    out.push(if terminals.is_empty() {
+        "Terminales: no había ninguna abierta.".into()
+    } else {
+        format!("Terminales cerradas: {}.", terminals.join(", "))
+    });
+    let released: Vec<String> = data["released"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            format!(
+                "  {} · worktree borrado{}",
+                r["task"].as_str().unwrap_or(""),
+                match (
+                    r["branch"].as_str(),
+                    r["branch_deleted"].as_bool() == Some(true)
+                ) {
+                    (Some(b), true) => format!(" y rama {b} borrada"),
+                    (Some(b), false) =>
+                        format!("; rama {b} conservada (puede tener commits sin integrar)"),
+                    _ => String::new(),
+                }
+            )
+        })
+        .collect();
+    out.push(if released.is_empty() {
+        "Worktrees liberados: ninguno.".into()
+    } else {
+        format!(
+            "Worktrees liberados:
+{}",
+            released.join(
+                "
+"
+            )
+        )
+    });
+    let kept: Vec<String> = data["kept"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|k| {
+            format!(
+                "  {} · {}{}",
+                k["task"].as_str().unwrap_or(""),
+                k["branch"]
+                    .as_str()
+                    .map(|b| format!("{b} · "))
+                    .unwrap_or_default(),
+                k["reason"].as_str().unwrap_or("")
+            )
+        })
+        .collect();
     if !kept.is_empty() {
         out.push(format!("Conservados (fusiónalos y usa `lxo release <tarea>`, o descártalos con `lxo release <tarea> --force`):
 {}", kept.join("
 ")));
     }
-    out.join("
-")
+    out.join(
+        "
+",
+    )
 }
 
 const PRIORIDADES: [&str; 5] = ["sin prioridad", "baja", "media", "alta", "urgente"];
@@ -386,43 +508,87 @@ fn issue_human(data: &Value) -> String {
     let clave = data["clave"].as_str().unwrap_or("");
     match data["accion"].as_str().unwrap_or("") {
         "comentar" => format!("Comentario publicado en {clave}."),
-        "mover" => format!("{clave} está ahora en «{}».", data["estado"].as_str().unwrap_or("")),
-        "vincular" => format!("{} {} vinculado a {clave}.", data["tipo"].as_str().unwrap_or(""), data["ref"].as_str().unwrap_or("")),
+        "mover" => format!(
+            "{clave} está ahora en «{}».",
+            data["estado"].as_str().unwrap_or("")
+        ),
+        "vincular" => format!(
+            "{} {} vinculado a {clave}.",
+            data["tipo"].as_str().unwrap_or(""),
+            data["ref"].as_str().unwrap_or("")
+        ),
         _ => {
             let i = &data["issue"];
-            let mut out = vec![format!("{} · {}", i["clave"].as_str().unwrap_or(""), i["titulo"].as_str().unwrap_or(""))];
-            let prioridad = PRIORIDADES.get(i["prioridad"].as_u64().unwrap_or(0) as usize).copied().unwrap_or("");
+            let mut out = vec![format!(
+                "{} · {}",
+                i["clave"].as_str().unwrap_or(""),
+                i["titulo"].as_str().unwrap_or("")
+            )];
+            let prioridad = PRIORIDADES
+                .get(i["prioridad"].as_u64().unwrap_or(0) as usize)
+                .copied()
+                .unwrap_or("");
             out.push(format!(
                 "Estado: {} · prioridad {}{}{}",
                 i["estado"]["nombre"].as_str().unwrap_or("?"),
                 prioridad,
-                i["fecha_limite"].as_str().map(|f| format!(" · vence {f}")).unwrap_or_default(),
-                i["rama"].as_str().map(|r| format!(" · rama {r}")).unwrap_or_default(),
+                i["fecha_limite"]
+                    .as_str()
+                    .map(|f| format!(" · vence {f}"))
+                    .unwrap_or_default(),
+                i["rama"]
+                    .as_str()
+                    .map(|r| format!(" · rama {r}"))
+                    .unwrap_or_default(),
             ));
             if let Some(d) = i["descripcion"].as_str().filter(|d| !d.trim().is_empty()) {
                 out.push(String::new());
                 out.push(d.trim().to_string());
             }
             let estados = i["estados"].as_array().cloned().unwrap_or_default();
-            let nombre_estado = |id: &Value| estados.iter().find(|e| &e["id"] == id).and_then(|e| e["nombre"].as_str()).unwrap_or("?").to_string();
+            let nombre_estado = |id: &Value| {
+                estados
+                    .iter()
+                    .find(|e| &e["id"] == id)
+                    .and_then(|e| e["nombre"].as_str())
+                    .unwrap_or("?")
+                    .to_string()
+            };
             let subt = i["subtareas_lista"].as_array().cloned().unwrap_or_default();
             if !subt.is_empty() {
                 out.push(String::new());
                 out.push("Subtareas:".into());
                 for x in &subt {
-                    out.push(format!("  {} · {} [{}]", x["clave"].as_str().unwrap_or(""), x["titulo"].as_str().unwrap_or(""), nombre_estado(&x["estado_id"])));
+                    out.push(format!(
+                        "  {} · {} [{}]",
+                        x["clave"].as_str().unwrap_or(""),
+                        x["titulo"].as_str().unwrap_or(""),
+                        nombre_estado(&x["estado_id"])
+                    ));
                 }
             }
-            let coms = i["comentarios_lista"].as_array().cloned().unwrap_or_default();
+            let coms = i["comentarios_lista"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if !coms.is_empty() {
                 out.push(String::new());
                 out.push(format!("Últimos comentarios ({} en total):", coms.len()));
                 for c in coms.iter().rev().take(5).rev() {
-                    let quien = c["de_agente"].as_str().map(|r| format!("agente {r}")).unwrap_or_else(|| "persona".into());
-                    out.push(format!("  [{quien}] {}", c["texto"].as_str().unwrap_or("").replace('\n', "\n  ")));
+                    let quien = c["de_agente"]
+                        .as_str()
+                        .map(|r| format!("agente {r}"))
+                        .unwrap_or_else(|| "persona".into());
+                    out.push(format!(
+                        "  [{quien}] {}",
+                        c["texto"].as_str().unwrap_or("").replace('\n', "\n  ")
+                    ));
                 }
             }
-            let nombres: Vec<&str> = estados.iter().filter_map(|e| e["nombre"].as_str()).collect();
+            let nombres: Vec<&str> = estados
+                .iter()
+                .filter_map(|e| e["nombre"].as_str())
+                .collect();
             out.push(String::new());
             out.push(format!("Estados del equipo: {}", nombres.join(", ")));
             out.join("\n")
@@ -445,7 +611,10 @@ fn await_approval(data: Value, me: Option<&str>) -> Result<Value, String> {
     loop {
         std::thread::sleep(APPROVAL_POLL);
         let st = match call("spawn_status", json!({ "pending_id": id }), me) {
-            Ok(v) => { fails = 0; v }
+            Ok(v) => {
+                fails = 0;
+                v
+            }
             Err(e) => {
                 fails += 1;
                 if fails >= 5 {
@@ -484,10 +653,16 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             let role = match sub(1).as_deref() {
                 Some("coordinator" | "coordinador") => "coordinator".to_string(),
                 Some("worker" | "hija") => "worker".to_string(),
-                _ if std::env::var("LXO_TASK_ID").is_ok_and(|v| !v.is_empty()) => "worker".to_string(),
+                _ if std::env::var("LXO_TASK_ID").is_ok_and(|v| !v.is_empty()) => {
+                    "worker".to_string()
+                }
                 _ => "coordinator".to_string(),
             };
-            let text = if role == "worker" { WORKER } else { COORDINATOR };
+            let text = if role == "worker" {
+                WORKER
+            } else {
+                COORDINATOR
+            };
             return Ok(("guide".into(), Value::String(text.to_string())));
         }
         "status" => ("status", call("status", json!({}), me)?),
@@ -500,9 +675,15 @@ fn run(a: &Args) -> Result<(String, Value), String> {
                 return Ok(("run_close".into(), data));
             }
             if sub(1).as_deref() != Some("create") {
-                return Err("Uso: lxo run create --objective \"...\" | lxo run close [--force]".into());
+                return Err(
+                    "Uso: lxo run create --objective \"...\" | lxo run close [--force]".into(),
+                );
             }
-            let data = call("run_create", json!({ "objective": need(a.s("objective"), "--objective")?, "agent": a.s("agent") }), me)?;
+            let data = call(
+                "run_create",
+                json!({ "objective": need(a.s("objective"), "--objective")?, "agent": a.s("agent") }),
+                me,
+            )?;
             if let Some(task) = data["task"].as_str() {
                 let f = session_file();
                 let _ = std::fs::create_dir_all(f.parent().unwrap_or(&home()));
@@ -510,47 +691,99 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             }
             ("run_create", data)
         }
-        "agents" => ("agents", call("agents", json!({ "refresh": a.b("refresh") }), me)?),
+        "agents" => (
+            "agents",
+            call("agents", json!({ "refresh": a.b("refresh") }), me)?,
+        ),
         "roles" => ("roles", call("roles", json!({}), me)?),
         "spawn" => {
-            let data = call("spawn", json!({
-                "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
-                "role": a.s("role"),
-                "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
-                "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
-            }), me)?;
+            let data = call(
+                "spawn",
+                json!({
+                    "task": need(a.s("task").or_else(|| sub(1)), "--task")?,
+                    "role": a.s("role"),
+                    "agent": if a.s("role").is_some() { a.s("agent") } else { Some(need(a.s("agent"), "--role (mira `lxo roles`) o --agent (mira `lxo agents`)")?) },
+                    "model": a.s("model"), "effort": a.s("effort"), "name": a.s("name"), "base": a.s("base"), "shared": a.b("shared"),
+                }),
+                me,
+            )?;
             ("spawn", await_approval(data, me)?)
         }
         "spawn-status" | "spawn_status" => {
             let id = need(sub(1).or_else(|| a.s("pending-id")), "el pending_id")?;
-            ("spawn", await_approval(json!({ "status": "pending", "pending_id": id }), me)?)
+            (
+                "spawn",
+                await_approval(json!({ "status": "pending", "pending_id": id }), me)?,
+            )
         }
-        "continue" => ("continue", call("continue", json!({
-            "task": need(sub(1), "la tarea")?,
-            "spec": need(a.s("task").or_else(|| sub(2)), "--task con el nuevo encargo")?,
-        }), me)?),
+        "continue" => (
+            "continue",
+            call(
+                "continue",
+                json!({
+                    "task": need(sub(1), "la tarea")?,
+                    "spec": need(a.s("task").or_else(|| sub(2)), "--task con el nuevo encargo")?,
+                }),
+                me,
+            )?,
+        ),
         "phase" => {
             let name = need(sub(1).or_else(|| a.s("name")), "el nombre de la fase")?;
-            ("phase", call("phase", json!({ "name": name, "done": a.b("done"), "note": a.s("note") }), me)?)
+            (
+                "phase",
+                call(
+                    "phase",
+                    json!({ "name": name, "done": a.b("done"), "note": a.s("note") }),
+                    me,
+                )?,
+            )
         }
         "report" => {
-            let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
+            let files: Vec<String> = a
+                .s("files")
+                .map(|f| {
+                    f.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             let summary = need(a.s("summary"), "--summary con una frase")?;
             let report = match a.s("report").as_deref() {
                 Some("-") => {
                     let mut t = String::new();
-                    std::io::stdin().read_to_string(&mut t).map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
+                    std::io::stdin()
+                        .read_to_string(&mut t)
+                        .map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
                     Some(t)
                 }
-                Some(p) if !p.is_empty() => Some(std::fs::read_to_string(p).map_err(|e| format!("No se pudo leer {p}: {e}"))?),
+                Some(p) if !p.is_empty() => Some(
+                    std::fs::read_to_string(p).map_err(|e| format!("No se pudo leer {p}: {e}"))?,
+                ),
                 _ => None,
             };
             let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-            let task = env("LXO_TASK_ID").ok_or("Falta LXO_TASK_ID: lxo report solo funciona dentro de una tarea del orquestador")?;
+            let task = env("LXO_TASK_ID").ok_or(
+                "Falta LXO_TASK_ID: lxo report solo funciona dentro de una tarea del orquestador",
+            )?;
             let nonce = env("LXO_REPORT_NONCE").ok_or("Falta LXO_REPORT_NONCE: esta tarea no tiene activa la entrega por archivo; usa lxo done")?;
-            let attempt: u64 = env("LXO_REPORT_ATTEMPT").and_then(|v| v.parse().ok()).unwrap_or(1);
-            let created = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let body = report_json(&task, attempt, !a.b("failed"), &summary, &files, report.as_deref(), &nonce, created);
+            let attempt: u64 = env("LXO_REPORT_ATTEMPT")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1);
+            let created = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let body = report_json(
+                &task,
+                attempt,
+                !a.b("failed"),
+                &summary,
+                &files,
+                report.as_deref(),
+                &nonce,
+                created,
+            );
             let mut why = String::new();
             if !a.b("stdout") {
                 match env("LXO_REPORT_PATH") {
@@ -567,13 +800,23 @@ fn run(a: &Args) -> Result<(String, Value), String> {
                 marker_block(&body, &nonce)))));
         }
         "done" => {
-            let files: Vec<String> = a.s("files").map(|f| f.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default();
+            let files: Vec<String> = a
+                .s("files")
+                .map(|f| {
+                    f.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             let mut report = a.s("report").unwrap_or_default();
             let summary = a.s("summary").unwrap_or_default();
             // `--report -`: el informe llega por stdin (las hijas de solo lectura no escriben archivos).
             let mut report_text = String::new();
             if report == "-" {
-                std::io::stdin().read_to_string(&mut report_text).map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
+                std::io::stdin()
+                    .read_to_string(&mut report_text)
+                    .map_err(|e| format!("No se pudo leer el informe de stdin: {e}"))?;
                 if report_text.trim().is_empty() {
                     return Err("--report - espera el informe por stdin: lxo done --summary \"...\" --report - <<'EOF' … EOF".into());
                 }
@@ -582,16 +825,31 @@ fn run(a: &Args) -> Result<(String, Value), String> {
             if report.is_empty() && report_text.is_empty() && summary.is_empty() {
                 return Err("Falta --report <informe.md> (y --summary con una frase).".into());
             }
-            ("done", call("done", json!({ "summary": summary, "report": report, "report_text": report_text, "failed": a.b("failed"), "files": files }), me)?)
+            (
+                "done",
+                call(
+                    "done",
+                    json!({ "summary": summary, "report": report, "report_text": report_text, "failed": a.b("failed"), "files": files }),
+                    me,
+                )?,
+            )
         }
         "ask" => {
-            let q = call("ask", json!({ "question": need(sub(1).or_else(|| a.s("question")), "la pregunta")? }), me)?;
+            let q = call(
+                "ask",
+                json!({ "question": need(sub(1).or_else(|| a.s("question")), "la pregunta")? }),
+                me,
+            )?;
             let id = q["question"].clone();
             eprintln!("Pregunta #{id} enviada a tu coordinador. Esperando respuesta…");
             let mut left = a.num("timeout-ms");
             loop {
                 let chunk = left.map(|l| l.min(600_000)).unwrap_or(600_000);
-                let r = call("await_reply", json!({ "question": id, "timeout_ms": chunk }), me)?;
+                let r = call(
+                    "await_reply",
+                    json!({ "question": id, "timeout_ms": chunk }),
+                    me,
+                )?;
                 if r["timeout"].as_bool() != Some(true) {
                     break ("ask", r);
                 }
@@ -603,40 +861,109 @@ fn run(a: &Args) -> Result<(String, Value), String> {
                 }
             }
         }
-        "reply" => ("reply", call("reply", json!({ "question": need(sub(1), "el id de la pregunta")?, "answer": need(sub(2).or_else(|| a.s("answer")), "la respuesta")? }), me)?),
-        "send" => ("send", call("send", json!({ "to": need(sub(1), "la tarea")?, "body": need(sub(2).or_else(|| a.s("body")), "el mensaje")? }), me)?),
-        "wait" => ("wait", call("wait", json!({ "types": a.s("types"), "timeout_ms": a.num("timeout-ms").unwrap_or(600_000) }), me)?),
+        "reply" => (
+            "reply",
+            call(
+                "reply",
+                json!({ "question": need(sub(1), "el id de la pregunta")?, "answer": need(sub(2).or_else(|| a.s("answer")), "la respuesta")? }),
+                me,
+            )?,
+        ),
+        "send" => (
+            "send",
+            call(
+                "send",
+                json!({ "to": need(sub(1), "la tarea")?, "body": need(sub(2).or_else(|| a.s("body")), "el mensaje")? }),
+                me,
+            )?,
+        ),
+        "wait" => (
+            "wait",
+            call(
+                "wait",
+                json!({ "types": a.s("types"), "timeout_ms": a.num("timeout-ms").unwrap_or(600_000) }),
+                me,
+            )?,
+        ),
         "check" => ("check", call("check", json!({}), me)?),
         "inbox" => ("inbox", call("inbox", json!({}), me)?),
         "list" => ("list", call("list", json!({}), me)?),
-        "projects" => ("projects", call("projects", json!({ "all": a.b("all") }), me)?),
+        "projects" => (
+            "projects",
+            call("projects", json!({ "all": a.b("all") }), me)?,
+        ),
         "show" => ("show", call("show", json!({ "task": sub(1) }), me)?),
-        "diff" => ("diff", call("diff", json!({ "task": need(sub(1), "la tarea")? }), me)?),
-        "merge" => ("merge", call("merge", json!({ "task": need(sub(1), "la tarea")?, "squash": a.b("squash"), "force": a.b("force") }), me)?),
-        "pr" => ("pr", call("pr", json!({ "task": need(sub(1), "la tarea")? }), me)?),
-        "stop" => ("stop", call("stop", json!({ "task": need(sub(1), "la tarea")? }), me)?),
-        "release" => ("release", call("release", json!({ "task": need(sub(1), "la tarea")?, "force": a.b("force") }), me)?),
+        "diff" => (
+            "diff",
+            call("diff", json!({ "task": need(sub(1), "la tarea")? }), me)?,
+        ),
+        "merge" => (
+            "merge",
+            call(
+                "merge",
+                json!({ "task": need(sub(1), "la tarea")?, "squash": a.b("squash"), "force": a.b("force") }),
+                me,
+            )?,
+        ),
+        "pr" => (
+            "pr",
+            call("pr", json!({ "task": need(sub(1), "la tarea")? }), me)?,
+        ),
+        "stop" => (
+            "stop",
+            call("stop", json!({ "task": need(sub(1), "la tarea")? }), me)?,
+        ),
+        "release" => (
+            "release",
+            call(
+                "release",
+                json!({ "task": need(sub(1), "la tarea")?, "force": a.b("force") }),
+                me,
+            )?,
+        ),
         "issue" => {
             // `lxo issue LXB-12` es `lxo issue ver LXB-12`.
-            let (accion, clave) = match (sub(1), sub(2)) {
-                (Some(x), Some(c)) if ["ver", "comentar", "mover", "vincular"].contains(&x.as_str()) => (x, c),
-                (Some(c), _) if c.contains('-') => ("ver".to_string(), c),
-                _ => return Err("Uso: lxo issue <ver|comentar|mover|vincular> <CLAVE> …  (mira `lxo help`)".into()),
-            };
+            let (accion, clave) =
+                match (sub(1), sub(2)) {
+                    (Some(x), Some(c))
+                        if ["ver", "comentar", "mover", "vincular"].contains(&x.as_str()) =>
+                    {
+                        (x, c)
+                    }
+                    (Some(c), _) if c.contains('-') => ("ver".to_string(), c),
+                    _ => return Err(
+                        "Uso: lxo issue <ver|comentar|mover|vincular> <CLAVE> …  (mira `lxo help`)"
+                            .into(),
+                    ),
+                };
             let mut texto = a.s("texto").or_else(|| sub(3)).unwrap_or_default();
             if accion == "comentar" && texto == "-" {
                 texto.clear();
-                std::io::stdin().read_to_string(&mut texto).map_err(|e| format!("No se pudo leer el comentario de stdin: {e}"))?;
+                std::io::stdin()
+                    .read_to_string(&mut texto)
+                    .map_err(|e| format!("No se pudo leer el comentario de stdin: {e}"))?;
             }
-            let (tipo, referencia) = if let Some(r) = a.s("rama") { ("rama", r) }
-                else if let Some(r) = a.s("pr") { ("pr", r) }
-                else if let Some(r) = a.s("commit") { ("commit", r) }
-                else { ("", String::new()) };
-            ("issue", call("issue", json!({
-                "accion": accion, "clave": clave, "texto": texto,
-                "estado": a.s("estado").or_else(|| sub(3)),
-                "tipo": tipo, "ref": referencia, "url": a.s("url"),
-            }), me)?)
+            let (tipo, referencia) = if let Some(r) = a.s("rama") {
+                ("rama", r)
+            } else if let Some(r) = a.s("pr") {
+                ("pr", r)
+            } else if let Some(r) = a.s("commit") {
+                ("commit", r)
+            } else {
+                ("", String::new())
+            };
+            (
+                "issue",
+                call(
+                    "issue",
+                    json!({
+                        "accion": accion, "clave": clave, "texto": texto,
+                        "estado": a.s("estado").or_else(|| sub(3)),
+                        "tipo": tipo, "ref": referencia, "url": a.s("url"),
+                    }),
+                    me,
+                )?,
+            )
         }
         other => return Err(format!("Comando desconocido: {other}. Ejecuta `lxo help`.")),
     };
@@ -645,7 +972,16 @@ fn run(a: &Args) -> Result<(String, Value), String> {
 
 /// JSON del contrato de entrega por archivo (schema 1).
 #[allow(clippy::too_many_arguments)]
-fn report_json(task: &str, attempt: u64, ok: bool, summary: &str, files: &[String], report: Option<&str>, nonce: &str, created: u64) -> String {
+fn report_json(
+    task: &str,
+    attempt: u64,
+    ok: bool,
+    summary: &str,
+    files: &[String],
+    report: Option<&str>,
+    nonce: &str,
+    created: u64,
+) -> String {
     let mut v = json!({
         "schema": 1, "task": task, "attempt": attempt, "status": if ok { "done" } else { "failed" },
         "summary": summary, "files": files, "nonce": nonce, "created": created,
@@ -660,10 +996,20 @@ fn report_json(task: &str, attempt: u64, ok: bool, summary: &str, files: &[Strin
 fn marker_block(json: &str, nonce: &str) -> String {
     use base64::Engine;
     use sha2::{Digest, Sha256};
-    let hash: String = Sha256::digest(json.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let hash: String = Sha256::digest(json.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let b64 = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
-    let lines: Vec<&str> = b64.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap_or("")).collect();
-    format!("<<<LXO-REPORT v1 nonce={nonce} sha256={hash}>>>\n{}\n<<<LXO-REPORT-END nonce={nonce}>>>", lines.join("\n"))
+    let lines: Vec<&str> = b64
+        .as_bytes()
+        .chunks(76)
+        .map(|c| std::str::from_utf8(c).unwrap_or(""))
+        .collect();
+    format!(
+        "<<<LXO-REPORT v1 nonce={nonce} sha256={hash}>>>\n{}\n<<<LXO-REPORT-END nonce={nonce}>>>",
+        lines.join("\n")
+    )
 }
 
 /// Escribe `.tmp` y lo renombra; reintenta el rename ~2 s (Windows: archivo abierto).
@@ -683,19 +1029,38 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
+    if a.at(0).as_deref() == Some("events") {
+        return events::run(&a);
+    }
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
     if a.at(0).as_deref() == Some("ask") && a.s("resume").is_some() {
         let id = a.s("resume").unwrap_or_default();
-        return match call("await_reply", json!({ "question": id, "timeout_ms": a.num("timeout-ms").unwrap_or(600_000) }), caller().as_deref()) {
-            Ok(r) if r["timeout"].as_bool() != Some(true) => { println!("Respuesta: {}", r["answer"].as_str().unwrap_or("")); ExitCode::SUCCESS }
-            Ok(_) => { eprintln!("Aún sin respuesta a #{id}."); ExitCode::from(3) }
-            Err(e) => { eprintln!("lxo: {e}"); ExitCode::FAILURE }
+        return match call(
+            "await_reply",
+            json!({ "question": id, "timeout_ms": a.num("timeout-ms").unwrap_or(600_000) }),
+            caller().as_deref(),
+        ) {
+            Ok(r) if r["timeout"].as_bool() != Some(true) => {
+                println!("Respuesta: {}", r["answer"].as_str().unwrap_or(""));
+                ExitCode::SUCCESS
+            }
+            Ok(_) => {
+                eprintln!("Aún sin respuesta a #{id}.");
+                ExitCode::from(3)
+            }
+            Err(e) => {
+                eprintln!("lxo: {e}");
+                ExitCode::FAILURE
+            }
         };
     }
     match run(&a) {
         Ok((cmd, data)) => {
             if a.b("json") && cmd != "help" && cmd != "guide" {
-                println!("{}", serde_json::to_string_pretty(&data).unwrap_or_default());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&data).unwrap_or_default()
+                );
             } else {
                 println!("{}", human(&cmd, &data));
             }
@@ -728,15 +1093,20 @@ mod tests {
             "unassigned_tasks": 2
         });
         let t = super::projects_text(&data);
-        assert!(t.contains("p1 · api · 3 tarea(s) · github.com/o/api"), "{t}");
+        assert!(
+            t.contains("p1 · api · 3 tarea(s) · github.com/o/api"),
+            "{t}"
+        );
         assert!(t.contains("C:/r/api [principal]"), "{t}");
         assert!(t.contains("D:/viejo/api (no existe"), "{t}");
-        assert!(t.contains("p2 · docs (archivado) · 0 tarea(s) · sin remoto"), "{t}");
+        assert!(
+            t.contains("p2 · docs (archivado) · 0 tarea(s) · sin remoto"),
+            "{t}"
+        );
         assert!(t.contains("2 tarea(s) aún sin proyecto"), "{t}");
         // --all es un indicador, no se come el argumento siguiente.
         assert!(super::BOOL_FLAGS.contains(&"all"));
     }
-
 
     /// Ejemplos de la guía (bloques de código y `código` en línea) con `lxo` encadenado.
     fn chained_examples(guide: &str) -> Vec<String> {
@@ -747,7 +1117,11 @@ mod tests {
                 fence = !fence;
                 continue;
             }
-            let snippets: Vec<&str> = if fence { vec![line] } else { line.split('`').skip(1).step_by(2).collect() };
+            let snippets: Vec<&str> = if fence {
+                vec![line]
+            } else {
+                line.split('`').skip(1).step_by(2).collect()
+            };
             for sn in snippets {
                 if !sn.contains("lxo ") {
                     continue;
@@ -756,7 +1130,11 @@ mod tests {
                 let mut out = String::new();
                 let mut q = false;
                 for c in sn.chars() {
-                    if c == '"' { q = !q; } else if !q { out.push(c); }
+                    if c == '"' {
+                        q = !q;
+                    } else if !q {
+                        out.push(c);
+                    }
                 }
                 if out.contains(';') || out.contains("&&") || out.contains('|') {
                     bad.push(sn.to_string());
@@ -773,7 +1151,10 @@ mod tests {
             assert!(g.contains("Un comando `lxo` por llamada"), "{name}");
         }
         // La comprobación detecta los casos que colgaron la prueba de punta a punta.
-        assert_eq!(chained_examples("```\nlxo phase \"X\" --start; lxo check\n```").len(), 1);
+        assert_eq!(
+            chained_examples("```\nlxo phase \"X\" --start; lxo check\n```").len(),
+            1
+        );
         assert_eq!(chained_examples("usa `lxo guide && lxo check`").len(), 1);
         assert_eq!(chained_examples("`lxo list | lxo show`").len(), 1);
         assert!(chained_examples("`lxo ask \"¿A; B | C?\"`").is_empty());
@@ -805,18 +1186,129 @@ mod tests {
     }
 
     #[test]
+    fn events_acepta_filtros_y_conserva_el_cursor_decimal_sin_perdida() {
+        let args = p(&[
+            "events",
+            "--after",
+            "9007199254740993",
+            "--limit",
+            "500",
+            "--task",
+            "t/17",
+            "--kind-prefix",
+            "task.",
+            "--class",
+            "state",
+            "--follow",
+            "--json",
+        ]);
+        let opts = super::events::parse_events_options(&args).unwrap();
+        assert_eq!(opts.after, Some(9_007_199_254_740_993));
+        assert_eq!(opts.query["limit"], "500");
+        assert_eq!(opts.query["entity_kind"], "task");
+        assert_eq!(opts.query["entity_id"], "t/17");
+        assert_eq!(opts.query["kind_prefix"], "task.");
+        assert_eq!(opts.query["class"], "state");
+        assert!(opts.follow && opts.json);
+    }
+
+    #[test]
+    fn events_rechaza_filtros_incompatibles_y_cursor_fuera_de_rango() {
+        for args in [
+            vec!["events", "--task", "t1", "--entity-kind", "run"],
+            vec!["events", "--kind", "task.done", "--kind-prefix", "task."],
+            vec!["events", "--entity-id", "t1"],
+            vec!["events", "--after", "9223372036854775808"],
+            vec!["events", "--after", "+1"],
+        ] {
+            let args = args.iter().copied().collect::<Vec<_>>();
+            assert!(
+                super::events::parse_events_options(&p(&args)).is_err(),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn events_asigna_codigos_de_salida_a_cursor_invalido_y_argumento_ausente() {
+        let invalid_cursor =
+            super::events::parse_events_options(&p(&["events", "--after", "+1"])).unwrap_err();
+        assert_eq!(invalid_cursor.exit_code(), 6);
+        let missing_value =
+            super::events::parse_events_options(&p(&["events", "--after"])).unwrap_err();
+        assert_eq!(missing_value.exit_code(), 2);
+    }
+
+    #[test]
+    fn events_snapshot_json_y_linea_humana_son_estables_y_no_exponen_payload_en_humano() {
+        let response = json!({ "ok": true, "data": {
+            "v": 1,
+            "events": [{
+                "seq": 9007199254740993_i64, "ts": 1792045113470_i64, "v": 1,
+                "id": "event-1", "kind": "task.created", "class": "state",
+                "actor": { "kind": "system", "id": null }, "channel": "core", "client_id": null,
+                "project_id": null, "run_id": "r1", "entity": { "kind": "task", "id": "t2" },
+                "correlation_id": null, "payload": { "secret": "must-not-print" }
+            }],
+            "next_cursor": 9007199254740993_i64, "has_more": false,
+            "head_seq": 9007199254740993_i64, "limit": 100
+        }});
+        let page = super::events::parse_events_page(&response, 0).unwrap();
+        let compact = super::events::events_json(&page.data).unwrap();
+        assert_eq!(compact, "{\"events\":[{\"actor\":{\"id\":null,\"kind\":\"system\"},\"channel\":\"core\",\"class\":\"state\",\"client_id\":null,\"correlation_id\":null,\"entity\":{\"id\":\"t2\",\"kind\":\"task\"},\"id\":\"event-1\",\"kind\":\"task.created\",\"payload\":{\"secret\":\"must-not-print\"},\"project_id\":null,\"run_id\":\"r1\",\"seq\":9007199254740993,\"ts\":1792045113470,\"v\":1}],\"has_more\":false,\"head_seq\":9007199254740993,\"limit\":100,\"next_cursor\":9007199254740993,\"v\":1}");
+        let line = super::events::events_human_line(&page.events[0]).unwrap();
+        assert_eq!(
+            line,
+            "9007199254740993  2026-10-15T06:18:33.470Z  task.created  task:t2  system  run=r1"
+        );
+        assert!(!line.contains("must-not-print"));
+    }
+
+    #[test]
+    fn events_rechaza_repeticion_de_seq_tras_reconectar_desde_el_cursor_confirmado() {
+        let page = json!({ "ok": true, "data": {
+            "v": 1, "events": [{ "seq": 5 }], "next_cursor": 5,
+            "has_more": true, "head_seq": 9, "limit": 2
+        }});
+        assert!(super::events::parse_events_page(&page, 4).is_ok());
+        assert!(super::events::parse_events_page(&page, 5).is_err());
+    }
+
+    #[test]
+    fn ayuda_lista_el_event_log_autenticado() {
+        assert!(super::HELP.contains("lxo events"));
+        assert!(super::events::HELP.contains("--follow"));
+        assert!(super::events::HELP.contains("--after"));
+    }
+
+    #[test]
     fn informe_por_archivo_y_marcadores() {
         use base64::Engine;
         let j = report_json("t3", 1, true, "ok", &["a.rs".into()], Some("# t3"), "n1", 5);
         let v: Value = serde_json::from_str(&j).unwrap();
-        assert_eq!((v["schema"].as_u64(), v["task"].as_str(), v["status"].as_str(), v["nonce"].as_str()), (Some(1), Some("t3"), Some("done"), Some("n1")));
+        assert_eq!(
+            (
+                v["schema"].as_u64(),
+                v["task"].as_str(),
+                v["status"].as_str(),
+                v["nonce"].as_str()
+            ),
+            (Some(1), Some("t3"), Some("done"), Some("n1"))
+        );
         let b = marker_block(&j, "n1");
         let lines: Vec<&str> = b.lines().collect();
-        assert!(lines[0].starts_with("<<<LXO-REPORT v1 nonce=n1 sha256=") && lines[0].ends_with(">>>"));
+        assert!(
+            lines[0].starts_with("<<<LXO-REPORT v1 nonce=n1 sha256=") && lines[0].ends_with(">>>")
+        );
         assert_eq!(*lines.last().unwrap(), "<<<LXO-REPORT-END nonce=n1>>>");
         assert!(lines[1..lines.len() - 1].iter().all(|l| l.len() <= 76));
         let payload: String = lines[1..lines.len() - 1].concat();
-        assert_eq!(base64::engine::general_purpose::STANDARD.decode(payload).unwrap(), j.as_bytes());
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .unwrap(),
+            j.as_bytes()
+        );
         let dir = std::env::temp_dir().join(format!("lxo-report-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("report.json");
@@ -836,18 +1328,29 @@ mod tests {
             "comentarios_lista": [{ "texto": "Listo el runner", "de_agente": "implementador" }],
         }});
         let t = issue_human(&data);
-        assert!(t.starts_with("LXB-12 · Notarizar macOS\nEstado: En curso · prioridad urgente · rama lx/lxb-12-macos"));
+        assert!(t.starts_with(
+            "LXB-12 · Notarizar macOS\nEstado: En curso · prioridad urgente · rama lx/lxb-12-macos"
+        ));
         assert!(t.contains("  LXB-13 · Runner [Hecho]"));
         assert!(t.contains("[agente implementador] Listo el runner"));
         assert!(t.ends_with("Estados del equipo: En curso, Hecho"));
-        assert_eq!(issue_human(&json!({ "accion": "mover", "clave": "LXB-12", "estado": "Hecho" })), "LXB-12 está ahora en «Hecho».");
+        assert_eq!(
+            issue_human(&json!({ "accion": "mover", "clave": "LXB-12", "estado": "Hecho" })),
+            "LXB-12 está ahora en «Hecho»."
+        );
     }
 
     #[test]
     fn recordatorio_de_cierre_en_wait_y_merge() {
-        let wait = human("wait", &json!({ "messages": [], "open_children": [], "hint": "Cierra con `lxo run close`." }));
+        let wait = human(
+            "wait",
+            &json!({ "messages": [], "open_children": [], "hint": "Cierra con `lxo run close`." }),
+        );
         assert!(wait.contains("lxo run close"));
-        let merge = human("merge", &json!({ "merged": "b", "into": "/r", "hint": "Cierra con `lxo run close`." }));
+        let merge = human(
+            "merge",
+            &json!({ "merged": "b", "into": "/r", "hint": "Cierra con `lxo run close`." }),
+        );
         assert!(merge.ends_with("lxo run close`."));
         assert!(!human("merge", &json!({ "merged": "b", "into": "/r" })).contains("run close"));
     }
@@ -868,7 +1371,9 @@ mod tests {
         assert!(t.contains("La sesión de esta carpeta se conserva"));
         assert!(!keeps_nothing(&data));
         assert!(keeps_nothing(&json!({ "kept": [] })));
-        let limpio = run_close_human(&json!({ "run": "r3", "released": [{ "task": "t4", "branch": "b", "branch_deleted": false }] }));
+        let limpio = run_close_human(
+            &json!({ "run": "r3", "released": [{ "task": "t4", "branch": "b", "branch_deleted": false }] }),
+        );
         assert!(limpio.contains("se borró") && limpio.contains("rama b conservada"));
         assert!(run_close_human(&json!({ "run": "r3" })).contains("Worktrees liberados: ninguno."));
     }
@@ -878,19 +1383,44 @@ mod tests {
         assert!(approval_result("sp1", &json!({ "status": "pending" })).is_none());
         let ok = approval_result("sp1", &json!({ "status": "approved", "task": { "task": "t3", "agent": "claude", "status": "running" } })).unwrap().unwrap();
         assert!(human("spawn", &ok).starts_with("Hija t3 lanzada con claude"));
-        let r = approval_result("sp1", &json!({ "status": "rejected", "reason": "no hace falta" })).unwrap().unwrap_err();
+        let r = approval_result(
+            "sp1",
+            &json!({ "status": "rejected", "reason": "no hace falta" }),
+        )
+        .unwrap()
+        .unwrap_err();
         assert!(r.contains("no aprobó") && r.contains("no hace falta"));
-        assert!(approval_result("sp1", &json!({ "status": "launch_failed", "reason": "sin worktree" })).unwrap().unwrap_err().contains("no se pudo lanzar"));
-        assert!(approval_result("sp1", &json!({ "status": "expired" })).unwrap().unwrap_err().contains("venció"));
+        assert!(approval_result(
+            "sp1",
+            &json!({ "status": "launch_failed", "reason": "sin worktree" })
+        )
+        .unwrap()
+        .unwrap_err()
+        .contains("no se pudo lanzar"));
+        assert!(approval_result("sp1", &json!({ "status": "expired" }))
+            .unwrap()
+            .unwrap_err()
+            .contains("venció"));
         // Un host viejo que lanza directamente sigue funcionando.
-        assert_eq!(await_approval(json!({ "task": "t1" }), None).unwrap()["task"], "t1");
+        assert_eq!(
+            await_approval(json!({ "task": "t1" }), None).unwrap()["task"],
+            "t1"
+        );
     }
 
     #[test]
     fn flags_de_issue() {
         let a = p(&["issue", "comentar", "LXB-12", "--texto", "-"]);
         assert_eq!(a.s("texto").as_deref(), Some("-"));
-        let a = p(&["issue", "vincular", "LXB-12", "--pr", "#4", "--url", "https://github.com/x/y/pull/4"]);
+        let a = p(&[
+            "issue",
+            "vincular",
+            "LXB-12",
+            "--pr",
+            "#4",
+            "--url",
+            "https://github.com/x/y/pull/4",
+        ]);
         assert_eq!(a.s("pr").as_deref(), Some("#4"));
     }
 }
