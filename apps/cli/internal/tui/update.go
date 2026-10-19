@@ -244,6 +244,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.printTodo(msg.items, msg.previous)
 		return m, nil
 
+	case imageShownMsg:
+		m.attachImage(msg.img)
+		return m, nil
+
+	case tea.ColorProfileMsg:
+		setColorProfile(msg.Profile)
+		return m, nil
+
 	case approvalMsg:
 		return m, m.openApproval(msg)
 
@@ -514,7 +522,7 @@ func (m *Model) hideMenuWhileBrowsing() {
 func (m *Model) allSpecs() []Spec {
 	specs := slices.DeleteFunc(order(slices.Concat(Specs, GoSpecs)), func(s Spec) bool { return !m.available(s.Name) })
 	for name, c := range m.chat.Custom {
-		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "propios"})
+		specs = append(specs, Spec{Name: name, Desc: c.Description, Group: "custom"})
 	}
 	return specs
 }

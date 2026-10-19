@@ -596,6 +596,24 @@ class TokenUsageDaily(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class TokenUsageServiceDaily(Base):
+    """Tokens por (usuario, día, servicio): cli, ide, mobile, web u other.
+    Alimenta el panal de uso de la web y el móvil. Lo anterior a esta tabla
+    sale como «other» (la diferencia con token_usage_daily)."""
+    __tablename__ = "token_usage_service_daily"
+    __table_args__ = (
+        UniqueConstraint("user_id", "usage_date", "service", name="uq_token_usage_service_daily"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    usage_date: Mapped[str] = mapped_column(Text, nullable=False)
+    service: Mapped[str] = mapped_column(Text, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    request_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 # Contrato: docs/team-protocolo.md del repo del IDE. Los campos van en español
 # y snake_case, como dice la sección 0; la única excepción es el objeto
 # `usuario`, que sale de la tabla `users` con sus nombres de siempre

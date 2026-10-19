@@ -13,7 +13,7 @@ import (
 func (m *Model) footer() string {
 	width := max(1, m.width)
 	sep := sDim2.Render(" " + glyphSep + " ")
-	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Bold(true).Render(m.modeName()), m.footY, m.footMode)
+	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Render(m.modeName()), m.footY, m.footMode)
 
 	var hint string
 	switch {
@@ -51,7 +51,7 @@ func (m *Model) footer() string {
 		notices = append(notices, sOK.Render("v"+m.updateReady+" lista")+sDim.Render(" "+glyphSep+" reinicia"))
 	}
 	if w := m.visionWarning(); w != "" {
-		notices = append(notices, sWarn.Bold(true).Render("!")+" "+sWarn.Render(w)+sDim.Render(" "+glyphSep+" ")+sSoft.Render("/model"))
+		notices = append(notices, sWarn.Render("!")+" "+sWarn.Render(w)+sDim.Render(" "+glyphSep+" ")+sSoft.Render("/model"))
 	}
 	if m.alwaysAllowed {
 		notices = append(notices, sWarn.Render("sin preguntar"))

@@ -70,6 +70,16 @@ module.exports = {
         },
       ],
       [
+        // Solo escribir: «Guardar» en el visor de imágenes del chat remoto.
+        'expo-media-library',
+        {
+          photosPermission: 'Lixbon guarda en tu galería las imágenes del chat que eliges guardar.',
+          savePhotosPermission: 'Lixbon guarda en tu galería las imágenes del chat que eliges guardar.',
+          isAccessMediaLocationEnabled: false,
+          granularPermissions: ['photo'],
+        },
+      ],
+      [
         'expo-splash-screen',
         {
           image: './assets/splash-icon.png',

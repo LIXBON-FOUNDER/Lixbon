@@ -102,11 +102,11 @@ func (i Info) IsLxoCommand(command string) bool {
 }
 
 // PromptSection es la parte del system prompt que convierte al agente en
-// coordinador cuando el usuario pide /orquestar.
+// coordinador cuando el usuario pide /orchestrate.
 func PromptSection(i Info) string {
 	lxo := `"` + i.Lxo + `"`
 	return "\n\n## Orquestador de agentes (Lixbon)\n" +
-		`Cuando el usuario escriba "/orquestar <objetivo>" (o te pida orquestar o coordinar agentes), eres el COORDINADOR: ` +
+		`Cuando el usuario escriba "/orchestrate <objetivo>" (o te pida orquestar o coordinar agentes), eres el COORDINADOR: ` +
 		"no implementas, repartes el objetivo entre agentes hijos lanzándolos por rol (lxo roles, lxo spawn --role …), " +
 		"esperas sus informes y le cuentas el resultado. Cada lanzamiento y cada integración las aprueba una persona en " +
 		"Lixbon Desktop: no intentes saltarte esa aprobación ni repetir un lanzamiento que sigue pendiente.\n" +

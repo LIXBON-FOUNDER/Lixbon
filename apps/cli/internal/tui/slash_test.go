@@ -21,9 +21,9 @@ func TestHelpPickerGroupsAndRunsACommand(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/help")
 	view := h.view()
-	contains(t, view, "Comandos")
-	contains(t, view, "conversación")
-	contains(t, view, "/model [nombre]")
+	contains(t, view, "Commands")
+	contains(t, view, "conversation")
+	contains(t, view, "/model [name]")
 	h.typeText("cost")
 	contains(t, h.view(), "/cost")
 	notContains(t, h.view(), "/model")
@@ -32,8 +32,8 @@ func TestHelpPickerGroupsAndRunsACommand(t *testing.T) {
 	contains(t, h.out(), "Tokens de la sesión")
 
 	h.send("/help plain")
-	contains(t, h.out(), "agente")
-	contains(t, h.out(), "/allow [comando]")
+	contains(t, h.out(), "agent")
+	contains(t, h.out(), "/allow [command]")
 }
 
 func TestHelpWithRequiredArgsExplainsUsage(t *testing.T) {
@@ -41,7 +41,7 @@ func TestHelpWithRequiredArgsExplainsUsage(t *testing.T) {
 	h.send("/help")
 	h.typeText("/run")
 	h.key("enter")
-	contains(t, h.out(), "Uso: /run <comando>")
+	contains(t, h.out(), "Uso: /run <command>")
 }
 
 func TestModelCommand(t *testing.T) {
@@ -244,7 +244,7 @@ func TestToolsAndCostAndStatusReports(t *testing.T) {
 	contains(t, h.out(), "semana ∞")
 	h.send("/usage")
 	h.settle()
-	contains(t, h.out(), "30% usado")
+	contains(t, h.out(), "30 %")
 	contains(t, h.out(), "ilimitado")
 }
 

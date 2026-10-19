@@ -56,11 +56,19 @@ export const initialRemoteState = {
 let nextKey = 1;
 const withKey = (item) => ({ key: `r${nextKey++}`, ...item });
 
+const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+
+// Imagen que el agente enseñó con show_image (CLI 2.13).
+const shownImage = (m) => withKey({
+  kind: 'image', id: m.id || '', name: m.name || 'imagen', w: m.w || 0, h: m.h || 0, caption: m.caption || '',
+});
+
 function mapSnapshotMessages(messages) {
   const items = [];
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || typeof m !== 'object') continue;
-    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '' }));
+    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', imageIds: ids(m.image_ids) }));
+    else if (m.role === 'image' && m.id) items.push(shownImage(m));
     else if (m.role === 'assistant') items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
     else if (m.role === 'tool') {
       items.push(withKey({
@@ -137,9 +145,12 @@ export function remoteReducer(state, ev) {
       return {
         ...s,
         items: [...closeOpenAssistant(s.items), withKey({
-          kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [],
+          kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, imageIds: ids(ev.image_ids),
+          mentions: ev.mentions || [],
         })],
       };
+    case 'image_shown':
+      return ev.id ? { ...s, items: [...closeOpenAssistant(s.items), shownImage(ev)] } : s;
     case 'assistant_delta': {
       const items = [...s.items];
       const idx = lastIdx(items, (it) => it.kind === 'assistant' && it.open);

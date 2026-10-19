@@ -12,7 +12,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { useReenvioVerificacion } from '../components/VerifyBanner';
 import { Logo } from '../components/Logo';
-import { UsageChart } from '../components/UsageChart';
+import { ServiceComb } from '../components/ServiceComb';
 import { SeccionFacturacion } from '../components/pagos/SeccionFacturacion';
 import { planBadge } from '../lib/planColors';
 import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
@@ -633,7 +633,7 @@ function PrivacySection({ user, onUserChange }) {
   );
 }
 
-function UsageSection({ usage, buckets, daily, plan }) {
+function UsageSection({ usage, buckets, services, plan }) {
   const t = useT('account');
   const locale = useLocale();
   const [apiUsage, setApiUsage] = useState(null);
@@ -677,8 +677,8 @@ function UsageSection({ usage, buckets, daily, plan }) {
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">{t('usage.dailyTokensTitle')}</h2>
-        <UsageChart daily={daily} />
+        <h2 className="set-title">{t('usage.combTitle')}</h2>
+        <ServiceComb rows={services} />
       </div>
 
       <div className="set-card">
@@ -934,7 +934,7 @@ export default function AccountPage() {
               {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
               {current.id === 'mascot' && <MascotSection />}
               {current.id === 'mcp' && <McpSection onKeysChanged={loadKeys} />}
-              {current.id === 'usage' && <UsageSection usage={account.usage} buckets={account.buckets} daily={account.daily} plan={plan} />}
+              {current.id === 'usage' && <UsageSection usage={account.usage} buckets={account.buckets} services={account.services} plan={plan} />}
             </div>
           )}
         </main>

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -161,6 +162,77 @@ func TestRemoteAgentQuestionIsAnsweredFromThePhone(t *testing.T) {
 	}
 	if body := fmt.Sprint(h.gw.bodyAt(1)["messages"]); !strings.Contains(body, "Respuesta del usuario: mejor mañana") {
 		t.Fatalf("la respuesta llega al modelo: %s", body)
+	}
+	h.m.remote.link.Stop(true)
+}
+
+// La tanda llega entera al móvil y la app nueva la responde de una vez; las
+// respuestas vuelven con su tanda para que la app las junte en una tarjeta.
+func TestRemoteBatchIsAnsweredAtOnceFromThePhone(t *testing.T) {
+	h, relay := agentRemote(t,
+		toolReply("t1", "ask_user", map[string]any{"questions": []any{
+			map[string]any{"header": "Estilo", "question": "¿Qué estilo?", "options": []any{
+				map[string]any{"label": "Cálido", "description": "tonos tierra"}, "Sobrio"}},
+			map[string]any{"header": "Secciones", "question": "¿Qué secciones?", "options": []any{"Carta", "Ubicación"}, "multiple": true},
+			map[string]any{"header": "Idioma", "question": "¿En qué idioma?"},
+		}}),
+		textReply("Empiezo."))
+	relay.push(prompt("monta la web"))
+	h.waitFor("tanda en el móvil", func() bool { return relay.find("choice_request") != nil })
+	request := relay.find("choice_request")
+	batch, _ := request["batch"].([]any)
+	if request["title"] != "¿Qué estilo?" || len(batch) != 3 {
+		t.Fatalf("choice_request: %v", request)
+	}
+	second := batch[1].(map[string]any)
+	if second["header"] != "Secciones" || second["multiple"] != true || len(second["options"].([]any)) != 2 {
+		t.Fatalf("la tanda: %v", second)
+	}
+	first := batch[0].(map[string]any)["options"].([]any)[0].(map[string]any)
+	if first["label"] != "Cálido" || first["description"] != "tonos tierra" {
+		t.Fatalf("opciones con descripción: %v", first)
+	}
+
+	answer, _ := json.Marshal(map[string]any{"answers": []string{"Cálido", "Carta, Ubicación", ""}})
+	relay.push(fmt.Sprintf(`{"type":"approve","id":%q,"decision":%q}`, request["id"], string(answer)))
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+	h.settle()
+
+	if n := len(relay.all("choice_request")); n != 1 {
+		t.Fatalf("la app nueva responde todo de una vez: %d preguntas abiertas", n)
+	}
+	answered := relay.all("question_answered")
+	if len(answered) != 2 || answered[0]["header"] != "Estilo" || answered[1]["answer"] != "Carta, Ubicación" ||
+		answered[0]["batch"] != answered[1]["batch"] || fmt.Sprint(answered[1]["total"]) != "3" {
+		t.Fatalf("question_answered: %v", answered)
+	}
+	body := fmt.Sprint(h.gw.bodyAt(1)["messages"])
+	if !strings.Contains(body, "Carta, Ubicación") || !strings.Contains(body, "decide tú") {
+		t.Fatalf("las respuestas llegan al modelo: %s", body)
+	}
+	h.m.remote.link.Stop(true)
+}
+
+// Una app antigua responde solo la primera: el resto le llega de una en una.
+func TestRemoteBatchFallsBackToOneByOne(t *testing.T) {
+	h, relay := agentRemote(t,
+		toolReply("t1", "ask_user", map[string]any{"questions": []any{
+			map[string]any{"question": "¿Primera?"}, map[string]any{"question": "¿Segunda?"},
+		}}),
+		textReply("Hecho."))
+	relay.push(prompt("pregunta"))
+	h.waitFor("primera", func() bool { return relay.find("choice_request") != nil })
+	relay.push(fmt.Sprintf(`{"type":"approve","id":%q,"decision":"uno"}`, relay.find("choice_request")["id"]))
+	h.waitFor("segunda", func() bool { return len(relay.all("choice_request")) == 2 })
+	second := relay.last("choice_request")
+	if second["title"] != "¿Segunda?" || second["batch"] != nil {
+		t.Fatalf("la segunda va sola: %v", second)
+	}
+	relay.push(fmt.Sprintf(`{"type":"approve","id":%q,"decision":"dos"}`, second["id"]))
+	h.waitFor("assistant_done", func() bool { return relay.find("assistant_done") != nil })
+	h.settle()
+	if body := fmt.Sprint(h.gw.bodyAt(1)["messages"]); !strings.Contains(body, "uno") || !strings.Contains(body, "dos") {
+		t.Fatalf("las dos respuestas llegan al modelo: %s", body)
 	}
 	h.m.remote.link.Stop(true)
 }

@@ -217,7 +217,7 @@ func TestFormatting(t *testing.T) {
 			t.Errorf("fmtTokens(%d) = %q", n, got)
 		}
 	}
-	for pct, want := range map[float64]string{0: "▱▱▱▱▱▱▱▱", 50: "▰▰▰▰▱▱▱▱", 100: "▰▰▰▰▰▰▰▰", 150: "▰▰▰▰▰▰▰▰", -5: "▱▱▱▱▱▱▱▱"} {
+	for pct, want := range map[float64]string{0: "────────", 50: "━━━━────", 100: "━━━━━━━━", 150: "━━━━━━━━", -5: "────────"} {
 		if got := contextBar(pct); got != want {
 			t.Errorf("contextBar(%v) = %q", pct, got)
 		}

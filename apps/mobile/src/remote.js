@@ -211,11 +211,46 @@ export const initialRemoteState = {
 let nextKey = 1;
 const withKey = (item) => ({ key: `r${nextKey++}`, ...item });
 
+// Las respuestas de una misma tanda de preguntas van juntas en una tarjeta
+// (rows); una pregunta suelta conserva question/answer.
+export function addQa(items, q) {
+  const row = { header: q.header || '', question: q.question || '', answer: q.answer || '' };
+  const last = items[items.length - 1];
+  if (q.batch && (num(q.total) || 0) > 1 && last && last.kind === 'qa' && last.batch === q.batch) {
+    items[items.length - 1] = { ...last, rows: [...last.rows, row] };
+    return items;
+  }
+  items.push(withKey({ kind: 'qa', question: row.question, answer: row.answer, batch: q.batch || '', total: num(q.total) || 1, rows: [row] }));
+  return items;
+}
+
+const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+
+// Imagen que el agente enseñó con show_image (CLI 2.13): va con su turno.
+const shownImage = (ev) =>
+  withKey({ kind: 'image', id: ev.id || '', name: ev.name || 'imagen', w: num(ev.w) || 0, h: num(ev.h) || 0, caption: ev.caption || '', shown: true });
+
+// La tanda entera que manda el host con la primera pregunta (CLI 2.13).
+function batchOf(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  return raw
+    .filter((q) => q && typeof q === 'object')
+    .map((q) => ({
+      header: typeof q.header === 'string' ? q.header : '',
+      question: typeof q.question === 'string' ? q.question : '',
+      multiple: !!q.multiple,
+      options: (Array.isArray(q.options) ? q.options : [])
+        .filter((o) => o && typeof o.label === 'string' && o.label)
+        .map((o) => ({ label: o.label, description: typeof o.description === 'string' ? o.description : '' })),
+    }));
+}
+
 function mapSnapshotMessages(messages) {
   const items = [];
   for (const m of Array.isArray(messages) ? messages : []) {
     if (!m || typeof m !== 'object') continue;
-    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, mentions: m.mentions || [] }));
+    if (m.role === 'user') items.push(withKey({ kind: 'user', text: m.content || '', images: m.images || 0, imageIds: ids(m.image_ids), mentions: m.mentions || [] }));
+    else if (m.role === 'image' && m.id) items.push(shownImage(m));
     else if (m.role === 'assistant') {
       items.push(withKey({ kind: 'assistant', text: m.content || '', open: false }));
       if (m.final) items.push(endItem(m));
@@ -225,7 +260,7 @@ function mapSnapshotMessages(messages) {
         kind: 'tool', id: m.id || '', tool: m.tool || 'tool', summary: m.summary || '', label: m.label || '', readonly: !!m.readonly,
         result: m.content || '', error: m.ok === false, running: !!m.pending, ...changeOf(m), ...resultOf(m),
       }));
-    } else if (m.role === 'qa') items.push(withKey({ kind: 'qa', question: m.question || '', answer: m.content || '' }));
+    } else if (m.role === 'qa') addQa(items, { ...m, answer: m.content });
     else if (m.role === 'compacted') items.push(compactedItem({ ...m, summary: m.content }));
     else if (m.role === 'error') items.push(withKey({ kind: 'error', text: m.content || '' }));
     else if (m.role === 'notice') items.push(withKey({ kind: 'notice', text: m.content || '' }));
@@ -348,17 +383,21 @@ export function remoteReducer(state, ev) {
     case 'local_user':
       // Lo escrito en el móvil se pinta al instante; el user_msg del host lo
       // sustituye cuando el agente lo toma (si estaba ocupado, queda en cola).
-      return { ...s, items: [...s.items, withKey({ kind: 'user', text: ev.text, images: ev.images || 0, mentions: ev.mentions || [], local: ev.local, sent: false })] };
+      return {
+        ...s,
+        items: [...s.items, withKey({ kind: 'user', text: ev.text, images: ev.images || 0, localImages: ev.localImages || [], mentions: ev.mentions || [], local: ev.local, sent: false })],
+      };
     case 'local_user_sent':
       return { ...s, items: s.items.map((it) => (it.local === ev.local ? { ...it, sent: true } : it)) };
     case 'local_user_failed':
       return { ...s, items: s.items.filter((it) => it.local !== ev.local) };
     case 'user_msg': {
-      const real = withKey({ kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, mentions: ev.mentions || [] });
+      const real = withKey({ kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, imageIds: ids(ev.image_ids), mentions: ev.mentions || [] });
       const idx = ev.origin === 'remote' ? s.items.findIndex((it) => it.local && it.text.trim() === (ev.text || '').trim()) : -1;
       if (idx !== -1) {
+        // Las fotos locales se ven al instante mientras las del gateway llegan.
         const rest = s.items.filter((_, i) => i !== idx);
-        return { ...s, items: [...closeOpenAssistant(rest), real] };
+        return { ...s, items: [...closeOpenAssistant(rest), { ...real, localImages: s.items[idx].localImages || [] }] };
       }
       return { ...s, items: [...closeOpenAssistant(s.items), real] };
     }
@@ -432,8 +471,10 @@ export function remoteReducer(state, ev) {
       }
       return { ...s, items };
     }
+    case 'image_shown':
+      return ev.id ? { ...s, items: [...s.items, shownImage(ev)] } : s;
     case 'question_answered':
-      return { ...s, items: [...s.items, withKey({ kind: 'qa', question: ev.question || '', answer: ev.answer || '' })] };
+      return { ...s, items: addQa([...s.items], ev) };
     case 'context':
       return num(ev.pct) === null ? s : { ...s, context: { pct: ev.pct, tokens: num(ev.tokens), window: num(ev.window), files: num(ev.files) || 0, system: num(ev.system) || 0, auto: num(ev.auto) } };
     case 'compact':
@@ -471,7 +512,7 @@ export function remoteReducer(state, ev) {
           ...s.choices,
           {
             id: ev.id, title: ev.title || 'Elige una opción', body: ev.body || '', options: Array.isArray(ev.options) ? ev.options : [],
-            question: ev.kind === 'question', free: !!ev.free,
+            question: ev.kind === 'question', free: !!ev.free, batch: ev.kind === 'question' ? batchOf(ev.batch) : null,
           },
         ],
       };

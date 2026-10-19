@@ -144,7 +144,7 @@ func (m *Model) hasQuery() bool {
 // slashItems son los comandos que casan, agrupados por tema y, dentro, del que
 // mejor casa al que peor.
 func (m *Model) slashItems(query string) []menuItem {
-	groups := append(append([]string{}, Groups...), "propios")
+	groups := append(append([]string{}, Groups...), "custom")
 	var out []menuItem
 	for _, group := range groups {
 		var in []menuItem
@@ -377,21 +377,21 @@ func (m *Model) menuView() []string {
 	end := min(len(m.menu), start+menuVisible)
 	var lines []string
 	if m.menuFiles {
-		lines = append(lines, sDim2.Bold(true).Render(pad+"ARCHIVOS"))
+		lines = append(lines, sDim.Render(pad+"archivos"))
 	}
 	group := ""
 	for i := start; i < end; i++ {
 		it := m.menu[i]
 		if !m.menuFiles && it.group != group {
 			group = it.group
-			lines = append(lines, sDim2.Bold(true).Render(pad+strings.ToUpper(group)))
+			lines = append(lines, sDim.Render(pad+group))
 		}
 		on := i == m.menuCursor
 		labelStyle, descStyle := sBeige, sDim
 		if on {
 			labelStyle, descStyle = sBold, sSoft
 		}
-		label := highlightMatch(it.label, it.pos, labelStyle, sAccent.Bold(on))
+		label := highlightMatch(it.label, it.pos, labelStyle, sAccent)
 		left := label
 		if m.menuFiles {
 			left = label
@@ -421,11 +421,11 @@ func (m *Model) menuView() []string {
 	if len(m.menu) == 0 && m.menuFiles {
 		lines = append(lines, sDim.Render(pad+"sin coincidencias"))
 	}
-	keys := [][2]string{{"↑↓", "mover"}, {"tab", "completar"}}
+	// El menú de comandos va en inglés, como los comandos; el de archivos no.
+	keys := [][2]string{{"↑↓", "mover"}, {"tab", "completar"}, {"esc", "cerrar"}}
 	if !m.menuFiles {
-		keys = append(keys, [2]string{"↵", "ejecutar"})
+		keys = [][2]string{{"↑↓", "move"}, {"↵", "run"}, {"tab", "complete"}, {"esc", "close"}}
 	}
-	keys = append(keys, [2]string{"esc", "cerrar"})
 	lines = append(lines, ansi.Truncate(pad+keyHints(keys...), width, ""))
 	return lines
 }
@@ -448,7 +448,7 @@ func (m *Model) shortcutsView() []string {
 	inner := width - 4
 	var rows []panelRow
 	cell := func(k, label string) string {
-		return sSoft.Bold(true).Render(fmt.Sprintf("%-10s", k)) + sPrimary.Render(label)
+		return sSoft.Render(fmt.Sprintf("%-10s", k)) + sPrimary.Render(label)
 	}
 	if inner >= 70 {
 		for i := 0; i < len(shortcuts); i += 2 {

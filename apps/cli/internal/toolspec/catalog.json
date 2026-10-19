@@ -551,6 +551,29 @@
     {
       "type": "function",
       "function": {
+        "name": "show_image",
+        "description": "Enseña al usuario una imagen: un archivo del proyecto o la captura que guardó browser_screenshot.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Ruta de la imagen"
+            },
+            "caption": {
+              "type": "string",
+              "description": "Línea opcional bajo la imagen"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "browser_navigate",
         "description": "Abre una URL o un archivo del workspace (index.html, web/, logo.svg: HTML, SVG, PDF, imágenes…) en el navegador del agente y devuelve el snapshot con refs [eN] y los errores de JavaScript de la página. Úsalo para ver y probar lo que construyes, páginas con JavaScript, formularios, sesiones iniciadas o el localhost del usuario; para solo leer una web, fetch_url basta.",
         "parameters": {
@@ -925,6 +948,11 @@
       "description": "Preguntar al usuario antes de seguir (hasta 4 a la vez)"
     },
     {
+      "name": "show_image",
+      "args": "path, caption",
+      "description": "Enseñar una imagen al usuario"
+    },
+    {
       "name": "browser_navigate",
       "args": "url, new_tab?",
       "description": "Abrir una página o un archivo del proyecto en el navegador"
@@ -1007,7 +1035,8 @@
     "stop_command",
     "todo",
     "web_search",
-    "browser_viewport"
+    "browser_viewport",
+    "show_image"
   ],
   "mutating": [
     "append_file",
@@ -1140,6 +1169,10 @@
     ],
     "browser_eval": [
       "expression"
+    ],
+    "show_image": [
+      "path",
+      "caption"
     ]
   }
 }

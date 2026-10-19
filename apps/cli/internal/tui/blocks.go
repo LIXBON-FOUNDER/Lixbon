@@ -98,11 +98,11 @@ func (b noticeBlock) render(width int, _ bool) string {
 	case kindErr:
 		head = mark(glyphDot, sErr)
 	case kindWarn:
-		head = mark("!", sWarn.Bold(true))
+		head = mark("!", sWarn)
 	case kindInfo:
 		head = mark(glyphInfo, sDim2)
 	case kindAsk:
-		head, style = mark("?", sWarn.Bold(true)), sBold
+		head, style = mark("?", sWarn), sBold
 	}
 	lines := wrapText(b.text, width-4)
 	for i, l := range lines {
@@ -130,6 +130,8 @@ var imgMarker = regexp.MustCompile(`\s*\[IMG#\d+\]`)
 type imageChip struct {
 	n          int
 	name       string
+	path       string
+	thumb      *thumb
 	w, h       int
 	size       int64
 	visionless bool
@@ -161,7 +163,37 @@ type userBlock struct {
 	chips []imageChip
 }
 
+// userThumbs son las miniaturas de las imágenes del mensaje, bajo la burbuja.
+func (b userBlock) thumbs(width int) [][]string {
+	var out [][]string
+	for _, c := range b.chips {
+		out = append(out, c.thumb.lines(min(28, width-6), 8))
+	}
+	return out
+}
+
+func (b userBlock) imageAt(row, width int) string {
+	row -= strings.Count(b.bubble(width), "\n") + 1
+	for i, lines := range b.thumbs(width) {
+		if row >= 0 && row < len(lines) {
+			return b.chips[i].path
+		}
+		row -= len(lines)
+	}
+	return ""
+}
+
 func (b userBlock) render(width int, _ bool) string {
+	out := []string{b.bubble(width)}
+	for _, lines := range b.thumbs(width) {
+		for _, l := range lines {
+			out = append(out, pad+l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func (b userBlock) bubble(width int) string {
 	text := strings.TrimSpace(imgMarker.ReplaceAllString(b.text, ""))
 	limit := max(8, width-5)
 	var rows []string
@@ -248,7 +280,7 @@ var toolVerbs = map[string][2]string{
 	"search": {"Buscar", "Buscando"}, "list_files": {"Listar", "Listando"}, "find_files": {"Buscar archivos", "Buscando archivos"},
 	"run_command": {"Ejecutar", "Ejecutando"}, "fetch_url": {"Descargar", "Descargando"}, "web_search": {"Buscar en la web", "Buscando en la web"},
 	"read_output": {"Leer salida", "Leyendo la salida"}, "stop_command": {"Detener", "Deteniendo"}, "outline": {"Esquematizar", "Esquematizando"},
-	"todo": {"Planificar", "Planificando"}, "ask_user": {"Preguntar", "Preguntando"},
+	"todo": {"Planificar", "Planificando"}, "ask_user": {"Preguntar", "Preguntando"}, "show_image": {"Mostrar", "Mostrando"},
 	"mcp_tools":        {"Cargar MCP", "Cargando MCP"},
 	"browser_navigate": {"Abrir", "Abriendo"}, "browser_snapshot": {"Ver página", "Mirando la página"},
 	"browser_click": {"Clic en", "Haciendo clic en"}, "browser_type": {"Escribir en", "Escribiendo en"},
@@ -313,6 +345,35 @@ type toolBlock struct {
 	output  []string
 	diff    *diffView
 	answers *askAnswers
+	image   *shownImage
+}
+
+// shownImage es la imagen que el agente enseñó con show_image: su miniatura
+// va bajo la fila «Mostrar» y un clic la abre en el visor.
+type shownImage struct {
+	path, caption string
+	thumb         *thumb
+}
+
+func (s *shownImage) render(width int) []string {
+	if s == nil {
+		return nil
+	}
+	var out []string
+	for _, l := range s.thumb.lines(min(56, width-8), 14) {
+		out = append(out, pad+l)
+	}
+	if s.caption != "" {
+		out = append(out, pad+sSoft.Render(ansi.Truncate(s.caption, max(8, width-len(pad)-1), glyphEllipsis)))
+	}
+	return append(out, pad+sDim2.Render("clic la abre en el visor de imágenes"))
+}
+
+func (b *toolBlock) imageAt(int, int) string {
+	if b.image == nil {
+		return ""
+	}
+	return b.image.path
 }
 
 func newToolBlock(e agent.Event, spin *int) *toolBlock {
@@ -490,6 +551,7 @@ func (b *toolBlock) render(width int, open bool) string {
 		out = append(out, thoughtRows(b.thought, pad, width)...)
 	}
 	out = append(out, b.answers.render(width)...)
+	out = append(out, b.image.render(width)...)
 	if b.diff != nil {
 		out = append(out, b.diff.render(width, open)...)
 	}
@@ -1073,7 +1135,9 @@ type reportBlock struct {
 func (b reportBlock) render(width int, _ bool) string {
 	var out []string
 	if b.title != "" {
-		out = append(out, mark(glyphDot, sDim)+sBold.Render(b.title))
+		// El título en tinta clara con una raya hasta el borde: sin negrita.
+		rule := max(0, min(48, width-ansi.StringWidth(b.title)-len(pad)-2))
+		out = append(out, mark(glyphDot, sDim)+sInk.Render(b.title)+" "+sTrack.Render(strings.Repeat(glyphs.rule, rule)))
 	}
 	labelWidth := 0
 	for _, r := range b.rows {
@@ -1097,8 +1161,8 @@ func (b reportBlock) render(width int, _ bool) string {
 	return strings.Join(out, "\n")
 }
 
-// meter es la barra ▰▱ de cells celdas: acento hasta 60 %, ámbar hasta 85 %
-// y rojo después.
+// meter es la barra de cells celdas, un trazo grueso sobre una pista fina:
+// acento hasta 60 %, ámbar hasta 85 % y rojo después.
 func meter(pct float64, cells int) string {
 	pct = max(0, min(100, pct))
 	filled := int(pct*float64(cells)/100 + 0.5)
@@ -1109,5 +1173,5 @@ func meter(pct float64, cells int) string {
 	case pct >= ctxWarn:
 		style = sWarn
 	}
-	return style.Render(strings.Repeat(glyphMeterOn, filled)) + sDim2.Render(strings.Repeat(glyphMeterOff, cells-filled))
+	return style.Render(strings.Repeat(glyphMeterOn, filled)) + sTrack.Render(strings.Repeat(glyphMeterOff, cells-filled))
 }

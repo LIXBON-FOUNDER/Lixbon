@@ -173,6 +173,11 @@ func (c *Client) open(ctx context.Context, method, url string, payload any, auth
 }
 
 func (c *Client) send(ctx context.Context, method, url string, encoded []byte, token string) (*http.Response, error) {
+	return c.sendBody(ctx, method, url, encoded, "application/json", token)
+}
+
+// sendBody manda body con su Content-Type (JSON, o los bytes de una imagen).
+func (c *Client) sendBody(ctx context.Context, method, url string, encoded []byte, contentType, token string) (*http.Response, error) {
 	var body io.Reader
 	if encoded != nil {
 		body = bytes.NewReader(encoded)
@@ -181,7 +186,7 @@ func (c *Client) send(ctx context.Context, method, url string, encoded []byte, t
 	if err != nil {
 		return nil, &Error{Message: fmt.Sprintf("Error de conexión: %v", err)}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", config.UserAgent)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

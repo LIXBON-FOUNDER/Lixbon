@@ -39,8 +39,9 @@ func TestSlashMenuIsGroupedAndPointsAtTheBestMatch(t *testing.T) {
 		t.Errorf("el cursor va a la mejor coincidencia: %s", h.m.menu[h.m.menuCursor].label)
 	}
 	view := h.view()
-	contains(t, view, "CONVERSACIÓN")
-	contains(t, view, "SISTEMA")
+	contains(t, view, "conversation")
+	contains(t, view, "system")
+	contains(t, view, "↵ run")
 }
 
 func contains2(list []string, s string) bool {
@@ -79,7 +80,7 @@ func TestAtMenuListsFilesAndCompletesThePath(t *testing.T) {
 		}
 	}
 	view := h.view()
-	contains(t, view, "ARCHIVOS")
+	contains(t, view, "archivos")
 	contains(t, view, "src/auth/")
 	for h.m.menu[h.m.menuCursor].insert != "src/auth/session.go" {
 		h.key("down")

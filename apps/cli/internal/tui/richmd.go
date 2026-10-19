@@ -147,7 +147,7 @@ func inline(text string, base lipgloss.Style) string {
 			parts := linkPartsRe.FindStringSubmatch(tok)
 			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(pal.info)).Underline(true).Render(parts[1]))
 		default:
-			b.WriteString(base.Bold(true).Render(tok[2 : len(tok)-2]))
+			b.WriteString(base.Foreground(lipgloss.Color(pal.ink)).Render(tok[2 : len(tok)-2]))
 		}
 		last = loc[1]
 	}
@@ -202,9 +202,10 @@ func trimBlankLines(text string) string {
 }
 
 // renderHeading: H1 con marca y subrayado, H2 con marca, H3 en arena y el
-// resto en negrita suave. Se distinguen del texto sin depender del color solo.
+// resto en tinta suave. Sin negrita: PowerShell y CMD la pintan con otra
+// fuente; la marca y el subrayado los distinguen del texto.
 func renderHeading(seg mdSegment, width int) string {
-	ink := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ink)).Bold(true)
+	ink := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ink))
 	marker := sAccent.Render(glyphEdge) + " "
 	seg.text = stripLeadingEmoji(seg.text)
 	switch seg.level {
@@ -216,9 +217,9 @@ func renderHeading(seg mdSegment, width int) string {
 	case 2:
 		return ansi.Truncate(marker+inline(seg.text, ink), width, glyphEllipsis)
 	case 3:
-		return ansi.Truncate(inline(seg.text, lipgloss.NewStyle().Foreground(lipgloss.Color(pal.sand)).Bold(true)), width, glyphEllipsis)
+		return ansi.Truncate(inline(seg.text, lipgloss.NewStyle().Foreground(lipgloss.Color(pal.sand))), width, glyphEllipsis)
 	}
-	return ansi.Truncate(inline(seg.text, lipgloss.NewStyle().Foreground(lipgloss.Color(pal.soft)).Bold(true)), width, glyphEllipsis)
+	return ansi.Truncate(inline(seg.text, lipgloss.NewStyle().Foreground(lipgloss.Color(pal.soft))), width, glyphEllipsis)
 }
 
 var shellLangs = map[string]bool{"bash": true, "sh": true, "shell": true, "zsh": true, "console": true,
@@ -287,7 +288,7 @@ func renderTable(seg mdSegment, width int) string {
 	if cols == 0 {
 		return ""
 	}
-	head := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ink)).Bold(true)
+	head := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ink))
 	cells := make([][]string, len(seg.rows))
 	widths := make([]int, cols)
 	for i, r := range seg.rows {

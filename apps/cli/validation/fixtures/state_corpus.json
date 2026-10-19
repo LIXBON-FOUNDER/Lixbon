@@ -3,257 +3,257 @@
  "oracle": "cliente Python retirado",
  "catalog": {
   "groups": [
-   "conversación",
-   "agente",
-   "cuenta",
-   "sistema"
+   "conversation",
+   "agent",
+   "account",
+   "system"
   ],
   "specs": [
    [
     "help",
     "",
-    "Ver todos los comandos",
-    "conversación"
+    "Show all commands",
+    "conversation"
    ],
    [
     "model",
-    "[nombre]",
-    "Cambiar de modelo (sin argumento abre el selector)",
-    "conversación"
+    "[name]",
+    "Switch model (no argument opens the picker)",
+    "conversation"
    ],
    [
     "mode",
     "[ask|agent|delegate]",
-    "Cambiar modo de trabajo",
-    "conversación"
+    "Change the working mode",
+    "conversation"
    ],
    [
     "new",
     "",
-    "Empezar una conversación nueva",
-    "conversación"
+    "Start a new conversation",
+    "conversation"
    ],
    [
     "compact",
     "",
-    "Compactar la conversación para liberar contexto",
-    "conversación"
+    "Compact the conversation to free up context",
+    "conversation"
    ],
    [
     "history",
-    "[mensajes]",
-    "Ver y reabrir conversaciones anteriores",
-    "conversación"
+    "[messages]",
+    "Browse and reopen past conversations",
+    "conversation"
    ],
    [
     "image",
-    "<ruta>",
-    "Escribir una imagen en el mensaje (también @ruta)",
-    "conversación"
+    "<path>",
+    "Add an image to the message (also @path)",
+    "conversation"
    ],
    [
     "paste",
     "",
-    "Escribir la imagen del portapapeles en el mensaje (Alt+V)",
-    "conversación"
+    "Paste the clipboard image into the message (Alt+V)",
+    "conversation"
    ],
    [
     "web",
     "[auto|on|off]",
-    "Búsqueda web: el modelo decide, siempre o nunca",
-    "conversación"
+    "Web search: the model decides, always or never",
+    "conversation"
    ],
    [
     "copy",
     "",
-    "Copiar la última respuesta al portapapeles",
-    "conversación"
+    "Copy the last reply to the clipboard",
+    "conversation"
    ],
    [
     "save",
-    "[ruta]",
-    "Guardar la conversación en un archivo Markdown",
-    "conversación"
+    "[path]",
+    "Save the conversation as a Markdown file",
+    "conversation"
    ],
    [
     "clear",
     "",
-    "Vaciar el contexto y empezar de cero",
-    "conversación"
+    "Clear the context and start fresh",
+    "conversation"
    ],
    [
     "approve",
     "[on|off]",
-    "Auto-aprobar herramientas del agente",
-    "agente"
+    "Auto-approve the agent's tools",
+    "agent"
    ],
    [
     "plan",
     "[on|off]",
-    "Modo plan: el agente solo explora y propone, sin tocar nada",
-    "agente"
+    "Plan mode: the agent explores and proposes, touching nothing",
+    "agent"
    ],
    [
     "todo",
     "",
-    "Ver la lista de pasos del agente",
-    "agente"
+    "Show the agent's step list",
+    "agent"
    ],
    [
     "tools",
     "",
-    "Ver las herramientas que puede usar el agente",
-    "agente"
+    "Show the tools the agent can use",
+    "agent"
    ],
    [
     "diff",
-    "[ruta]",
-    "Ver los cambios sin confirmar del workspace",
-    "agente"
+    "[path]",
+    "Show the workspace's uncommitted changes",
+    "agent"
    ],
    [
     "undo",
     "",
-    "Revertir los archivos que tocó el último turno del agente",
-    "agente"
+    "Revert the files the agent's last turn touched",
+    "agent"
    ],
    [
     "ps",
     "",
-    "Comandos en segundo plano del agente (y pararlos)",
-    "agente"
+    "The agent's background commands (and stop them)",
+    "agent"
    ],
    [
     "check",
     "[on|off]",
-    "Verificar con el linter cada archivo que edita el agente",
-    "agente"
+    "Lint every file the agent edits",
+    "agent"
    ],
    [
     "allow",
-    "[comando]",
-    "Comandos que el agente ejecuta sin preguntar (npm test, pytest…)",
-    "agente"
+    "[command]",
+    "Commands the agent runs without asking (npm test, pytest…)",
+    "agent"
    ],
    [
     "commit",
-    "[mensaje]",
-    "Commit de los cambios con mensaje redactado por el modelo",
-    "agente"
+    "[message]",
+    "Commit the changes with a message written by the model",
+    "agent"
    ],
    [
     "mcp",
     "",
-    "Servidores MCP: ver sus herramientas o añadir otro",
-    "agente"
+    "MCP servers: see their tools or add one",
+    "agent"
    ],
    [
     "browser",
     "[on|off|auto|close|open <url>]",
-    "Navegador del agente: estado, activar, cerrar o abrir para iniciar sesión",
-    "agente"
+    "The agent's browser: status, enable, close or open to sign in",
+    "agent"
    ],
    [
     "run",
-    "<comando>",
-    "Ejecutar un comando y darle la salida al modelo",
-    "agente"
+    "<command>",
+    "Run a command and give its output to the model",
+    "agent"
    ],
    [
     "workspace",
-    "[ruta]",
-    "Carpeta de trabajo del modo agent",
-    "agente"
+    "[path]",
+    "Working folder for agent mode",
+    "agent"
    ],
    [
     "init",
     "",
-    "Generar LIXBON.md con el contexto del proyecto",
-    "agente"
+    "Generate LIXBON.md with the project's context",
+    "agent"
    ],
    [
     "visual",
-    "<qué diseñar> | <id> <cambio> | codigo <id> [stack]",
-    "Diseñar en Lixbon Visuals: crear, editar o pasar a código",
-    "agente"
+    "<what to design> | <id> <change> | code <id> [stack]",
+    "Design in Lixbon Visuals: create, edit or turn into code",
+    "agent"
    ],
    [
     "status",
     "",
-    "Ver estado de la sesión",
-    "cuenta"
+    "Show the session status",
+    "account"
    ],
    [
     "cost",
     "",
-    "Tokens y contexto consumidos en esta sesión",
-    "cuenta"
+    "Tokens and context used in this session",
+    "account"
    ],
    [
     "usage",
     "",
-    "Ver uso global de la cuenta",
-    "cuenta"
+    "Show the account's overall usage",
+    "account"
    ],
    [
     "nodes",
     "",
-    "Ver nodos del clúster",
-    "cuenta"
+    "Show the cluster nodes",
+    "account"
    ],
    [
     "login",
     "",
-    "Iniciar sesión de nuevo",
-    "cuenta"
+    "Sign in again",
+    "account"
    ],
    [
     "logout",
     "",
-    "Cerrar la sesión de esta máquina",
-    "cuenta"
+    "Sign out on this machine",
+    "account"
    ],
    [
     "key",
     "<api_key>",
-    "Usar otra API key",
-    "cuenta"
+    "Use another API key",
+    "account"
    ],
    [
     "config",
     "",
-    "Ajustes del CLI en un menú",
-    "sistema"
+    "CLI settings in a menu",
+    "system"
    ],
    [
     "bar",
     "[on|off]",
-    "Barra de estado fija al pie de la terminal",
-    "sistema"
+    "Status bar pinned to the bottom of the terminal",
+    "system"
    ],
    [
     "doctor",
     "",
-    "Diagnóstico de terminal, conexión y sesión",
-    "sistema"
+    "Diagnose the terminal, connection and session",
+    "system"
    ],
    [
     "remote",
     "",
-    "Controlar esta sesión desde la app móvil (link + QR)",
-    "sistema"
+    "Control this session from the mobile app (link + QR)",
+    "system"
    ],
    [
     "update",
     "",
-    "Actualizar el CLI desde el servidor",
-    "sistema"
+    "Update the CLI from the server",
+    "system"
    ],
    [
     "exit",
     "",
-    "Salir",
-    "sistema"
+    "Quit",
+    "system"
    ]
   ],
   "ordered": [

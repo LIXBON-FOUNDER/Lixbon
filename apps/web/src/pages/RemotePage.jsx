@@ -630,14 +630,27 @@ function RemoteSession({ session, t, tc }) {
           if (item.kind === 'user') {
             return (
               <div key={item.key} className="msg msg--user">
-                {(item.images > 0 || item.mentions?.length > 0) && (
+                {item.imageIds?.length > 0 && (
+                  <span className="remote__photos">
+                    {item.imageIds.map((id) => <RemoteImg key={id} sessionId={session.id} id={id} alt={t('imageSent')} />)}
+                  </span>
+                )}
+                {((item.images > 0 && !item.imageIds?.length) || item.mentions?.length > 0) && (
                   <span className="remote__extras">
                     {item.mentions?.map((m) => <span key={m.path || m.name} className="remote__extra">@{m.name || m.rel}</span>)}
-                    {item.images > 0 && <span className="remote__extra"><IconImage size={12} /> {item.images}</span>}
+                    {item.images > 0 && !item.imageIds?.length && <span className="remote__extra"><IconImage size={12} /> {item.images}</span>}
                   </span>
                 )}
                 {item.text}
               </div>
+            );
+          }
+          if (item.kind === 'image') {
+            return (
+              <figure key={item.key} className="remote__shown">
+                <RemoteImg sessionId={session.id} id={item.id} alt={item.caption || item.name} wide />
+                <figcaption>{item.caption ? `${item.caption} · ${item.name}` : item.name}</figcaption>
+              </figure>
             );
           }
           if (item.kind === 'notice') return <div key={item.key} className="remote__notice"><Markdown>{item.text}</Markdown></div>;
@@ -689,5 +702,30 @@ function RemoteSession({ session, t, tc }) {
         {!archived && <RemoteComposer state={state} sendCommand={sendCommand} t={t} tc={tc} />}
       </div>
     </main>
+  );
+}
+
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+/** Imagen del chat remoto servida por el gateway. El host la sube mientras
+    el evento ya viaja con su id: si aún no está, se reintenta un rato. Un clic
+    la abre entera en otra pestaña. */
+function RemoteImg({ sessionId, id, alt, wide = false }) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const url = `${API_BASE}/api/remote/sessions/${sessionId}/images/${id}`;
+  if (failed) return <span className="remote__img is-missing" role="img" aria-label={alt}><IconImage size={16} /></span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className={`remote__img${wide ? ' is-wide' : ''}`}>
+      <img
+        src={attempt ? `${url}?r=${attempt}` : url}
+        alt={alt}
+        loading="lazy"
+        onError={() => {
+          if (attempt >= 6) setFailed(true);
+          else setTimeout(() => setAttempt((a) => a + 1), 1200 * (attempt + 1));
+        }}
+      />
+    </a>
   );
 }

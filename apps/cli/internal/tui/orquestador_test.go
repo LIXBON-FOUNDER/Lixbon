@@ -22,7 +22,7 @@ func systemPromptOf(t *testing.T, h *harness, request int) string {
 func TestOrquestarWithoutObjectiveExplainsUsage(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/orquestar")
-	contains(t, h.out(), "Uso: /orquestar <objetivo>")
+	contains(t, h.out(), "Uso: /orchestrate <objetivo>")
 	if h.gw.count() != 0 {
 		t.Fatal("sin objetivo no se llama al modelo")
 	}
@@ -51,7 +51,7 @@ func TestOrquestarSwitchesToAgentAndGivesTheModelTheCoordinatorInstructions(t *t
 	contains(t, system, `"lxo" guide coordinator`)
 	messages := h.gw.bodyAt(0)["messages"].([]any)
 	last := messages[len(messages)-1].(map[string]any)["content"].(string)
-	if last != "/orquestar migra el módulo de pagos" {
+	if last != "/orchestrate migra el módulo de pagos" {
 		t.Fatalf("el modelo debe recibir el comando tal cual: %q", last)
 	}
 }
@@ -131,9 +131,15 @@ func TestOrchestratorCommandsAreInTheMenuAndReserved(t *testing.T) {
 		menu = append(menu, s.Name)
 	}
 	reserved := reservedNames()
-	for _, name := range []string{"orquestar", "orquestador"} {
+	for _, name := range []string{"orchestrate", "orchestrator"} {
 		if !slices.Contains(menu, name) || !slices.Contains(reserved, name) {
 			t.Errorf("/%s debe estar en el menú y reservado", name)
+		}
+	}
+	// Los nombres en español siguen funcionando y reservados, fuera del menú.
+	for _, name := range []string{"orquestar", "orquestador"} {
+		if slices.Contains(menu, name) || !slices.Contains(reserved, name) {
+			t.Errorf("/%s es un alias reservado que no sale en el menú", name)
 		}
 	}
 }

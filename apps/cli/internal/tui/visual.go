@@ -15,7 +15,7 @@ func (m *Model) cmdVisual(arg string) tea.Cmd {
 		m.add(errLine("Uso: /visual <qué diseñar>"))
 		m.add(note("  /visual una landing para mi API             crea un visual nuevo"))
 		m.add(note("  /visual vis_… haz el título más grande       edita uno existente (id o enlace)"))
-		m.add(note("  /visual codigo vis_… react                   lo implementa en este proyecto"))
+		m.add(note("  /visual code vis_… react                     lo implementa en este proyecto"))
 		return nil
 	}
 	return m.async("preparando Lixbon Visuals", func(ctx context.Context) cmdDoneMsg {

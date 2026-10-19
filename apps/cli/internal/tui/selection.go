@@ -113,6 +113,10 @@ func (m *Model) onMouseUp() tea.Cmd {
 		if e := m.log.foldAt(row); e != nil {
 			e.open = !e.open
 			m.refresh(e)
+		} else if path := m.log.imageAt(row, m.width); path != "" {
+			if err := openImage(path); err != nil {
+				m.notice = "No se pudo abrir la imagen: " + err.Error()
+			}
 		}
 		return nil
 	}
