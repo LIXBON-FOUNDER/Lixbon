@@ -349,7 +349,7 @@ type toolBlock struct {
 }
 
 // shownImage es la imagen que el agente enseñó con show_image: su miniatura
-// va bajo la fila «Mostrar» y un clic la abre en el visor.
+// va bajo la fila «Mostrar» y un clic la abre en el navegador.
 type shownImage struct {
 	path, caption string
 	thumb         *thumb
@@ -360,13 +360,13 @@ func (s *shownImage) render(width int) []string {
 		return nil
 	}
 	var out []string
-	for _, l := range s.thumb.lines(min(56, width-8), 14) {
+	for _, l := range s.thumb.lines(min(72, width-8), 20) {
 		out = append(out, pad+l)
 	}
 	if s.caption != "" {
 		out = append(out, pad+sSoft.Render(ansi.Truncate(s.caption, max(8, width-len(pad)-1), glyphEllipsis)))
 	}
-	return append(out, pad+sDim2.Render("clic la abre en el visor de imágenes"))
+	return append(out, pad+sDim2.Render("clic la abre en el navegador"))
 }
 
 func (b *toolBlock) imageAt(int, int) string {

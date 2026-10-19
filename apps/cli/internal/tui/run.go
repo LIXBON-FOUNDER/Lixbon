@@ -109,6 +109,12 @@ func runProgram(ctx context.Context, m *Model, pickModel, offline bool, in io.Re
 	if in != nil {
 		opts = append(opts, tea.WithInput(in))
 	}
+	if out == nil && term.IsTerminal(os.Stdout.Fd()) {
+		// Las imágenes Sixel se escriben entre fotogramas (sixel.go).
+		g := &gfxOut{File: os.Stdout}
+		m.gfx = &graphics{out: g}
+		out = g
+	}
 	if out != nil {
 		opts = append(opts, tea.WithOutput(out))
 	}

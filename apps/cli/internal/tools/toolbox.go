@@ -140,7 +140,7 @@ func (tb *Toolbox) dispatch(ctx context.Context, name string, args map[string]an
 	case "ask_user":
 		return tb.askUser(ctx, args), nil
 	case "show_image":
-		return tb.showImage(args)
+		return tb.showImage(ctx, args)
 	}
 	return dispatch(ctx, tb.Root, name, args)
 }

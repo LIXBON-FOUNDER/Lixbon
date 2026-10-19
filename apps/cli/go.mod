@@ -10,17 +10,19 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/coder/websocket v1.8.15
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
+	golang.org/x/image v0.47.0
 	golang.org/x/sys v0.49.0
 )
 
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
+	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
@@ -38,6 +40,6 @@ require (
 	github.com/yuin/goldmark v1.7.8 // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )
