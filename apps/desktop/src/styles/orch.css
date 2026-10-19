@@ -4,9 +4,6 @@
 .orch__hint { font-size: 11.5px; line-height: 1.5; color: var(--ink-50); }
 .orch__warn { margin: 8px; padding: 8px 10px; border-radius: var(--radius); font-size: 11.5px; line-height: 1.5; color: var(--warn); background: rgba(var(--warn-rgb), 0.08); }
 
-.modeswitch__tab.has-alert { position: relative; }
-.modeswitch__tab.has-alert:not(:has(.modeswitch__count))::after { content: ''; position: absolute; top: 6px; right: 10px; width: 6px; height: 6px; border-radius: 3px; background: var(--warn); }
-.modeswitch__count { position: absolute; top: 3px; right: 4px; min-width: 14px; height: 14px; padding: 0 4px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; line-height: 1; color: #1A1710; background: var(--warn); }
 
 .orch__side { display: flex; flex-direction: column; }
 .orch__runs { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px 10px; }

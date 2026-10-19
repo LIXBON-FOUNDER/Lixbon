@@ -1,6 +1,7 @@
 // workbenchStore.js — distribución del IDE: modo activo (Agente, Editor,
 // Diseño, Git), qué paneles están abiertos, sus tamaños y cuál tiene el foco.
 import { create } from 'zustand';
+import { isCompact } from '../lib/frameSize';
 
 const read = (key, fallback) => {
   try {
@@ -28,8 +29,15 @@ export const SIZE_LIMITS = {
 const DEFAULT_SIZES = { side: 240, agent: 400, terminal: 190, sessions: 248, changes: 360, inspector: 300 };
 
 // Paneles laterales de los modos que no son el editor (el editor usa
-// sideOpen/agentOpen). Git no tiene panel derecho.
-const DEFAULT_MODE_PANELS = { agent: { left: true, right: true }, design: { left: true, right: true }, git: { left: true }, orch: { left: true } };
+// sideOpen/agentOpen). Todos tienen izquierdo y derecho: el derecho es el
+// agente (en Agente son los cambios), siempre en el mismo sitio.
+const DEFAULT_MODE_PANELS = { agent: { left: true, right: true }, design: { left: true, right: true }, git: { left: true, right: true }, orch: { left: true, right: true } };
+
+// Lo guardado se mezcla modo a modo: quien guardó { left } en Git antes de que
+// existiera el panel derecho no se queda sin él.
+const mergePanels = (saved) => Object.fromEntries(
+  Object.entries(DEFAULT_MODE_PANELS).map(([mode, def]) => [mode, { ...def, ...(saved?.[mode] || {}) }]),
+);
 
 /** { left, right } del modo activo; right = undefined si el modo no lo tiene. */
 export const selectSidePanels = (s) => (s.mode === 'editor'
@@ -42,7 +50,7 @@ export const useWorkbenchStore = create((set, get) => ({
   sideView: read('lx_side_view', 'files'), // 'files' | 'search' | 'extensions'
   agentOpen: read('lx_agent_open', true),
   rightView: read('lx_right_view', 'agent'), // 'agent' | 'team'
-  modePanels: { ...DEFAULT_MODE_PANELS, ...read('lx_mode_panels', {}) },
+  modePanels: mergePanels(read('lx_mode_panels', {})),
   sizes: { ...DEFAULT_SIZES, ...read('lx_sizes', {}) },
   // Panel con foco: se eleva un peldaño. No se persiste.
   focus: 'agent',
@@ -50,8 +58,10 @@ export const useWorkbenchStore = create((set, get) => ({
   searchOpen: false,
   // Texto que el panel de búsqueda recoge al montarse (viene de la barra superior).
   pendingSearch: '',
-  // Página a pantalla completa sobre los modos (hoy solo Ajustes).
+  // Ajustes: ventana centrada sobre el modo activo (page === 'settings').
   page: null,
+  // Panel derecho como cajón cuando la ventana es estrecha (no se persiste).
+  drawer: false,
   settingsSection: 'profile',
 
   dockTab: 'terminal', // 'terminal' | 'problems' | 'output'
@@ -67,15 +77,19 @@ export const useWorkbenchStore = create((set, get) => ({
   closePage: () => set({ page: null }),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
 
+  closeDrawer: () => set({ drawer: false }),
+  toggleDrawer: () => set({ drawer: !get().drawer }),
+
   setMode: (mode) => {
     if (!MODES.includes(mode)) return;
     write('lx_mode', mode);
-    set({ page: null, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
+    set({ page: null, drawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
   },
 
   setFocus: (focus) => { if (get().focus !== focus) set({ focus }); },
 
   toggleModePanel: (side) => {
+    if (side === 'right' && isCompact()) { get().toggleDrawer(); return; }
     const { mode, modePanels } = get();
     const cur = modePanels[mode];
     if (!cur || cur[side] === undefined) return;
@@ -104,6 +118,7 @@ export const useWorkbenchStore = create((set, get) => ({
   },
 
   toggleAgent: () => {
+    if (isCompact()) { get().toggleDrawer(); return; }
     if (get().mode !== 'editor') { get().toggleModePanel('right'); return; }
     const agentOpen = !get().agentOpen;
     write('lx_agent_open', agentOpen);

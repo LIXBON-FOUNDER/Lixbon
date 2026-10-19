@@ -16,13 +16,18 @@ import "./styles/agent.css";
 import "./styles/settings.css";
 import "./styles/orch.css";
 import "./styles/mascota.css";
+import "./styles/ide.css";
 import { initUiScale } from "./lib/uiScale";
+import { initFrameSize } from "./lib/frameSize";
 import { useCodexTermStore } from "./orch/codexterm/codexTermStore";
 
 async function start() {
   // Fuera de Tauri (navegador en `npm run dev`) se simula la API nativa.
   if (import.meta.env.DEV && !window.__TAURI_INTERNALS__) await import("./dev/tauriMock");
+  // Solo la ventana del IDE: Team y el aviso de la mascota no llevan este rediseño.
+  document.documentElement.dataset.ui = "ide";
   initUiScale();
+  initFrameSize();
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.StrictMode>
       <ErrorBoundary>

@@ -54,8 +54,7 @@ export function HistoryList() {
   const codexTabs = useCodexTermStore((s) => s.tabs.length);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const [query, setQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [renamingId, setRenamingId] = useState(null);
+    const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [error, setError] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -197,21 +196,29 @@ export function HistoryList() {
   return (
     <div className="hist">
       <div className="hist__search">
-        {searchOpen ? (
-          <div className="field drop-in">
-            <IconSearch size={12} />
-            <input autoFocus value={query} placeholder="Buscar conversaciones" spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearchOpen(false); } }} />
-          </div>
-        ) : (
-          <button className="lk hist__searchbtn" onClick={() => setSearchOpen(true)}><IconSearch size={12} /> Buscar</button>
-        )}
+        <div className="field">
+          <IconSearch size={15} />
+          <input value={query} placeholder="Buscar conversaciones" aria-label="Buscar conversaciones" spellCheck={false} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }} />
+        </div>
       </div>
       <div className="hist__filters" role="group" aria-label="Filtrar por agente">
-        {FILTERS.map((f) => (
-          <button key={f.id} type="button" className={`hist__chip ${filter === f.id ? 'is-active' : ''}`} aria-pressed={filter === f.id} data-testid={`hist-filter-${f.id}`} onClick={() => chooseFilter(f.id)}>
-            {f.label}{counts[f.id] > 0 && <span className="hist__chipcount">{counts[f.id]}</span>}
-          </button>
-        ))}
+        {FILTERS.map((f) => {
+          const Mark = f.id === 'all' ? null : engineOf(f.id).Mark;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              className={`hist__chip ${filter === f.id ? 'is-active' : ''}`}
+              aria-pressed={filter === f.id}
+              aria-label={f.id === 'all' ? 'Todos los agentes' : engineOf(f.id).label}
+              title={`${f.id === 'all' ? 'Todos' : engineOf(f.id).label}${counts[f.id] > 0 ? ` · ${counts[f.id]}` : ''}`}
+              data-testid={`hist-filter-${f.id}`}
+              onClick={() => chooseFilter(f.id)}
+            >
+              {Mark ? <Mark size={15} /> : f.label}
+            </button>
+          );
+        })}
       </div>
       {error && <span className="hist__error">{error}</span>}
 
@@ -224,7 +231,9 @@ export function HistoryList() {
               <button className="hist__label hist__label--toggle" onClick={() => setShowArchived((v) => !v)}>
                 {showArchived ? <IconChevronDown size={10} /> : <IconChevronRight size={10} />} {g.label} · {g.items.length}
               </button>
-            ) : <span className="hist__label">{g.label}</span>}
+            ) : (
+              <span className="hist__label">{g.label}{!g.label.includes('·') && <span className="hist__labelcount">{g.items.length}</span>}</span>
+            )}
             {(!g.archived || showArchived) && g.items.map((c, i) => (
               <div key={c.key || c.id} className={`hist__item ${(c.key ? open.find((o) => o.key === c.key)?.active : c.id === conversationId) ? 'is-active' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 20}ms` }}>
                 {renamingId === c.id ? (
