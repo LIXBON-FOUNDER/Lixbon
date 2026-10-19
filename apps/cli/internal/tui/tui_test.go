@@ -27,7 +27,7 @@ func TestSendingAMessageShowsItAndTheAnswer(t *testing.T) {
 		t.Fatalf("historial: %d", len(h.chat.History))
 	}
 	contains(t, h.view(), "Qwen")
-	contains(t, h.view(), "ask")
+	contains(t, h.view(), "conversa")
 }
 
 func TestEmptyMessagesAreIgnored(t *testing.T) {
@@ -220,11 +220,17 @@ func TestShiftTabCyclesModes(t *testing.T) {
 		t.Fatal("empieza en ask")
 	}
 	h.key("shift+tab")
-	if h.m.modeName() != "agent" {
+	if h.m.modeName() != "agent" || h.chat.Session.AutoRunCommands {
 		t.Fatalf("modo: %s", h.m.modeName())
 	}
+	// auto edita y ejecuta sin preguntar.
 	h.key("shift+tab")
-	if h.m.modeName() != "plan" || !h.chat.Session.PlanMode {
+	if h.m.modeName() != "auto" || !h.chat.Session.AutoApprove || !h.chat.Session.AutoRunCommands {
+		t.Fatalf("modo: %s", h.m.modeName())
+	}
+	contains(t, h.view(), "edita y ejecuta sin preguntar")
+	h.key("shift+tab")
+	if h.m.modeName() != "plan" || !h.chat.Session.PlanMode || h.chat.Session.AutoRunCommands {
 		t.Fatalf("modo: %s", h.m.modeName())
 	}
 	h.key("shift+tab")
@@ -267,7 +273,7 @@ func TestApprovalPickerAppliesOrRejects(t *testing.T) {
 	h.send("crea a.txt")
 	h.pump(func() bool { return h.m.picker != nil })
 	view := h.view()
-	contains(t, view, "¿Aplicar este cambio?")
+	contains(t, view, "Lixbon quiere cambiar un archivo")
 	contains(t, view, "Sí, y no preguntar más")
 	notContains(t, view, "pregunta lo que quieras") // el selector sustituye a la caja
 	h.key("enter")
@@ -315,15 +321,16 @@ func TestCommandApprovalOffersThePrefix(t *testing.T) {
 		textReply("ok"))
 	h.send("corre echo")
 	h.pump(func() bool { return h.m.picker != nil })
-	contains(t, h.view(), "¿Ejecutar este comando?")
-	contains(t, h.view(), "Sí, y siempre para «echo hola»")
+	contains(t, h.view(), "Lixbon quiere ejecutar una orden")
+	contains(t, h.view(), "Sí, y no vuelvas a preguntar por")
+	contains(t, h.view(), "echo hola")
 	h.key("down")
 	h.key("enter")
 	h.settle()
 	if got := h.chat.Session.AllowedCommands; len(got) != 1 || got[0] != "echo hola" {
 		t.Fatalf("prefijo guardado: %v", got)
 	}
-	contains(t, h.out(), "exit 0")
+	contains(t, h.out(), glyphs.check+" $")
 }
 
 func TestAskUserOptionsAndFreeText(t *testing.T) {
@@ -363,7 +370,7 @@ func TestTodoToolPrintsTheList(t *testing.T) {
 		textReply("hecho"))
 	h.send("planifica")
 	h.settle()
-	contains(t, h.out(), "2 pasos")
+	contains(t, h.out(), "Tareas  1 de 2")
 	contains(t, h.out(), "leer")
 	contains(t, h.out(), "editar")
 	h.send("/todo")

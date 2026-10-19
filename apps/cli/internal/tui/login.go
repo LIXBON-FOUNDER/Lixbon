@@ -104,6 +104,8 @@ type loginView struct {
 	open       func(string) error
 	// entry es el paso con el que se abrió: Esc en él cierra el login.
 	entry loginStep
+	// provider: se eligió entrar con otro proveedor; el chat abre /provider.
+	provider bool
 }
 
 func newLoginView(place loginPlace, client api.Client, version string, spin *int) *loginView {
@@ -263,23 +265,19 @@ func (l *loginView) key(msg tea.KeyPressMsg) (tea.Cmd, loginOutcome) {
 	}
 	switch l.step {
 	case stepMethod:
+		n := len(l.methods())
 		switch k {
 		case "up", "k", "shift+tab":
-			l.cursor = 0
+			l.cursor = (l.cursor + n - 1) % n
 		case "down", "j", "tab":
-			l.cursor = 1
-		case "1":
-			l.cursor = 0
-			return l.startBrowser(), loginPending
-		case "2":
-			l.cursor, l.step = 1, stepAPIKey
-			return l.newInput(true), loginPending
-		case "enter":
-			if l.cursor == 0 {
-				return l.startBrowser(), loginPending
+			l.cursor = (l.cursor + 1) % n
+		case "1", "2", "3":
+			if i := int(k[0] - '1'); i < n {
+				l.cursor = i
+				return l.choose()
 			}
-			l.step = stepAPIKey
-			return l.newInput(true), loginPending
+		case "enter":
+			return l.choose()
 		case "esc":
 			return nil, loginSkipped
 		}
@@ -295,6 +293,11 @@ func (l *loginView) key(msg tea.KeyPressMsg) (tea.Cmd, loginOutcome) {
 			if l.session != nil {
 				l.step = stepPaste
 				return l.newInput(false), loginPending
+			}
+		case "o":
+			if l.session != nil {
+				url := l.session.URL
+				return func() tea.Msg { _ = l.open(url); return nil }, loginPending
 			}
 		case "esc":
 			l.stopWaiting()
@@ -362,6 +365,19 @@ func (l *loginView) key(msg tea.KeyPressMsg) (tea.Cmd, loginOutcome) {
 	return nil, loginPending
 }
 
+// choose sigue por la forma de entrar elegida.
+func (l *loginView) choose() (tea.Cmd, loginOutcome) {
+	switch l.cursor {
+	case 0:
+		return l.startBrowser(), loginPending
+	case 1:
+		l.step = stepAPIKey
+		return l.newInput(true), loginPending
+	}
+	l.provider = true
+	return nil, loginSkipped
+}
+
 // applyLogin guarda en la configuración la sesión recién iniciada.
 func applyLogin(cfg *config.Config, res loginResult) {
 	cfg.APIKey, cfg.KeyModel = res.key, res.keyModel
@@ -391,157 +407,190 @@ func center(s string, width int) string {
 	return strings.Repeat(" ", max(0, (width-ansi.StringWidth(s))/2)) + s
 }
 
-func (l *loginView) card(inner int) (title, boxTitle string, rows []panelRow, border string, hint string) {
-	sep := sDim2.Render(" " + glyphSep + " ")
-	l.input.SetWidth(max(4, inner-14))
-	border = pal.faint
+// loginScreen es lo que enseña un paso: título y subtítulo centrados, el
+// cuerpo en una columna, una nota al pie de la columna y las teclas abajo.
+type loginScreen struct {
+	title, sub string
+	body       []string
+	note       string
+	hints      [][2]string
+}
+
+// methods son las formas de entrar; la del proveedor solo desde el chat.
+func (l *loginView) methods() [][2]string {
+	out := [][2]string{{"Con el navegador", "recomendado"}, {"Con una API key", "lixbon_sk_…"}}
+	if l.place != loginStandalone {
+		out = append(out, [2]string{"Con otro proveedor", "OpenRouter, Ollama…"})
+	}
+	return out
+}
+
+// choice es una opción del login: la elegida en banda con la señal ›.
+func choice(on bool, label, note string, width int) string {
+	if !on {
+		return "    " + fitRight(sSoft.Render(label), sDim.Render(note), max(1, width-4))
+	}
+	return padRow(fitRight(sAccent.Render(glyphPrompt)+" "+sInk.Render(label), sDim.Render(note), max(1, width-3)), pal.surf2, width)
+}
+
+// loginField es la caja de texto del login: una banda con la señal delante.
+func loginField(input, right string, width int) string {
+	return padRow(fitRight(sAccent.Render(glyphPrompt)+" "+input, right, max(1, width-3)), pal.surf2, width)
+}
+
+func (l *loginView) screen(width int) loginScreen {
+	l.input.SetWidth(max(4, width-16))
+	mid := func(s string) string { return center(s, width) }
 	switch l.step {
 	case stepMethod:
-		title = "Inicia sesión para empezar"
-		opt := func(i int, label, desc string) []panelRow {
-			on := l.cursor == i
-			bg, bar, labelStyle := "", " ", sPrimary
-			if on {
-				bg, bar, labelStyle = pal.surf2, sAccent.Render(glyphEdge), sBold
-			}
-			right := ""
-			if on {
-				right = sDim.Render("↵")
-			}
-			return []panelRow{
-				{text: fitRight(bar+" "+labelStyle.Render(label), right, inner+1), bg: bg},
-				{text: "  " + sDim.Render(desc), bg: bg},
-			}
+		s := loginScreen{title: "Entra en lixbon", sub: "para usar tu plan, tus modelos y tus conversaciones",
+			note: "Aquí nunca te pediremos el correo ni la contraseña."}
+		for i, m := range l.methods() {
+			s.body = append(s.body, choice(l.cursor == i, m[0], m[1], width))
 		}
-		rows = append(opt(0, "Continuar con lixbon.com", "Abre lixbon.com con tu sesión o entra allí"), panelRow{})
-		rows = append(rows, opt(1, "Usar una API key", "Pega una clave lixbon_sk_ creada en Cuenta › Claves")...)
 		esc := "salir"
 		switch l.place {
 		case loginStartup:
-			esc = "continuar sin sesión"
+			esc = "entrar sin sesión"
 		case loginCommand:
 			esc = "volver"
 		}
-		hint = keyHints([2]string{"↑↓", "elegir"}, [2]string{"↵", "continuar"}, [2]string{"esc", esc})
+		s.hints = [][2]string{{"↑↓", "elegir"}, {"enter", "seguir"}, {"esc", esc}}
+		return s
 	case stepBrowser:
-		title, boxTitle = "Continúa en tu navegador", "Continuar con lixbon.com"
-		left := sAccent.Render(l.frame()) + " " + sPrimary.Render("Esperando la autorización en lixbon.com…")
-		clock := ""
-		if !l.deadline.IsZero() {
-			rest := max(0, time.Until(l.deadline))
-			clock = sDim.Render(fmt.Sprintf("%d:%02d", int(rest.Minutes()), int(rest.Seconds())%60))
-		}
-		rows = append(rows, panelRow{text: fitRight(left, clock, inner+1)}, panelRow{})
+		s := loginScreen{title: "Termina en el navegador", sub: "abrimos lixbon.com en tu navegador para que autorices este equipo"}
 		if l.openErr != nil {
-			rows = append(rows, panelRow{text: "  " + sWarn.Render("No se pudo abrir el navegador; entra tú en:")})
-		} else {
-			rows = append(rows, panelRow{text: "  " + sDim.Render("Si no se abrió solo, entra en:")})
+			s.sub = "no se pudo abrir el navegador: entra tú en el enlace"
 		}
 		url := "preparando el enlace…"
 		if l.session != nil {
 			url = l.session.URL
 		}
-		rows = append(rows, panelRow{text: "  " + sPlan.Underline(true).Render(ansi.Truncate(url, max(4, inner-2), glyphEllipsis))}, panelRow{})
+		s.body = []string{mid(sDim.Render("enlace")), mid(sSoft.Render(ansi.Truncate(url, max(4, width), glyphEllipsis))), ""}
+		clock := ""
+		if !l.deadline.IsZero() {
+			rest := max(0, time.Until(l.deadline))
+			clock = sDim.Render(fmt.Sprintf("   %d:%02d", int(rest.Minutes()), int(rest.Seconds())%60))
+		}
+		status := sAccent.Render(l.frame()) + " " + sSoft.Render("esperando") + clock
 		if time.Since(l.copied) < 1600*time.Millisecond {
-			rows = append(rows, panelRow{text: "  " + sOK.Render(glyphs.check+" Enlace copiado al portapapeles")})
-		} else {
-			rows = append(rows, panelRow{text: "  " + keyHint("c", "copiar enlace") + sep + keyHint("p", "pegar la dirección final")})
+			status = sOK.Render(glyphs.check) + " " + sSoft.Render("enlace copiado")
 		}
-		hint = keyHints([2]string{"esc", "volver"})
+		s.body = append(s.body, mid(status))
+		s.note = "Si el navegador no puede volver aquí (por SSH, por ejemplo), pulsa p."
+		s.hints = [][2]string{{"c", "copiar el enlace"}, {"o", "abrirlo otra vez"}, {"p", "pegar la dirección"}, {"esc", "volver"}}
+		return s
 	case stepPaste:
-		title, boxTitle = "Pega la dirección a la que volvió el navegador", "Pegar la dirección final"
-		rows = append(rows,
-			panelRow{text: "  " + sDim.Render("Si el navegador no puede volver a esta terminal, por")},
-			panelRow{text: "  " + sDim.Render("ejemplo en SSH, copia aquí la dirección que muestra.")},
-			panelRow{},
-			panelRow{text: sAccent.Render(glyphPrompt) + " " + l.input.View()})
-		hint = keyHints([2]string{"↵", "continuar"}, [2]string{"esc", "volver"})
+		return loginScreen{title: "Pega la dirección final", sub: "la que enseña el navegador tras autorizar",
+			body:  []string{loginField(l.input.View(), "", width)},
+			hints: [][2]string{{"enter", "seguir"}, {"esc", "volver"}}}
 	case stepAPIKey, stepValidating, stepFailed:
-		title, boxTitle = "Usa una clave de API", "Usar una API key"
-		if l.step == stepFailed && l.back != stepAPIKey {
-			title, boxTitle = "No se pudo iniciar sesión", "Continuar con lixbon.com"
+		s := loginScreen{title: "Con una API key", sub: "créala en lixbon.com › Cuenta › Claves",
+			note: "Se guarda en ~/.lixbon/config.json, legible solo por tu usuario."}
+		fromKey := l.back == stepAPIKey || l.step != stepFailed
+		if !fromKey {
+			s = loginScreen{title: "No se pudo iniciar sesión", sub: "vuelve a intentarlo o entra con una API key"}
 		}
-		if l.back == stepAPIKey || l.step != stepFailed {
-			rows = append(rows,
-				panelRow{text: "  " + sDim.Render("Créala en lixbon.com › Cuenta › Claves. Se guarda en")},
-				panelRow{text: "  " + sDim.Render("~/.lixbon/config.json, legible solo por tu usuario.")},
-				panelRow{})
+		if fromKey {
 			count := ""
 			if n := len([]rune(l.input.Value())); n > 0 {
 				count = sDim.Render(fmt.Sprintf("%d car.", n))
 			}
-			rows = append(rows, panelRow{text: fitRight(sAccent.Render(glyphPrompt)+" "+l.input.View(), count, inner+1)})
+			s.body = []string{loginField(l.input.View(), count, width)}
 		}
 		switch l.step {
 		case stepValidating:
-			rows = append(rows, panelRow{}, panelRow{text: sAccent.Render(l.frame()) + " " + sPrimary.Render("Verificando…")})
-			hint = sDim.Render("un momento")
+			s.body = append(s.body, "", mid(sAccent.Render(l.frame())+" "+sSoft.Render("verificando")))
+			s.hints = [][2]string{{"", "un momento"}}
 		case stepFailed:
-			border = pal.err
-			rows = append(rows, panelRow{}, panelRow{text: sErr.Render(glyphDot + " " + l.errMsg)})
-			hint = keyHints([2]string{"↵", "reintentar"}, [2]string{"esc", "volver"})
+			s.body = append(s.body, "", mid(sErr.Render(glyphs.cross)+" "+sSoft.Render(ansi.Truncate(l.errMsg, max(4, width-2), glyphEllipsis))))
+			s.hints = [][2]string{{"enter", "reintentar"}, {"esc", "volver"}}
 		default:
-			hint = keyHints([2]string{"↵", "verificar"}, [2]string{"esc", "volver"})
+			s.hints = [][2]string{{"enter", "verificar"}, {"esc", "volver"}}
 		}
-	case stepDone:
-		title = "Todo listo"
-		detail := "guardada en ~/.lixbon/config.json"
-		if l.result.web {
-			detail = "sesión de este equipo guardada en ~/.lixbon/sessions.json"
-		}
-		if l.result.plan != "" {
-			detail = "plan " + l.result.plan + " " + glyphSep + " " + detail
-		}
-		head := sOK.Render(glyphs.check) + " " + sPrimary.Render("Clave verificada")
-		if l.result.email != "" {
-			head = sOK.Render(glyphs.check) + " " + sPrimary.Render("Sesión iniciada como ") + sBold.Render(l.result.email)
-		}
-		next := "Abrir el chat"
-		if l.place == loginStandalone {
-			next = "Continuar"
-		}
-		rows = append(rows, panelRow{text: head}, panelRow{text: "  " + sDim.Render(detail)}, panelRow{},
-			panelRow{text: fitRight(sAccent.Render(glyphEdge)+" "+sBold.Render(next), sDim.Render("↵"), inner+1), bg: pal.surf2})
-		hint = keyHints([2]string{"↵", strings.ToLower(next)})
+		return s
 	}
-	return title, boxTitle, rows, border, hint
+	// stepDone
+	sub := "clave verificada"
+	if l.result.email != "" {
+		sub = "sesión iniciada como " + l.result.email
+	}
+	detail := "guardada en ~/.lixbon/config.json"
+	if l.result.web {
+		detail = "la sesión de este equipo queda en ~/.lixbon/sessions.json"
+	}
+	if l.result.plan != "" {
+		detail = "Plan " + l.result.plan + "   " + detail
+	}
+	next := "Abrir el chat"
+	if l.place == loginStandalone {
+		next = "Continuar"
+	}
+	return loginScreen{title: sOK.Render(glyphs.check) + " " + sInk.Render("Todo listo"), sub: sub,
+		body:  []string{mid(sDim.Render(detail)), "", choice(true, next, "", width)},
+		hints: [][2]string{{"enter", strings.ToLower(next)}}}
 }
 
+// view es la pantalla del login, propia y centrada: el prisma, el título, el
+// cuerpo y una nota, y las teclas al pie.
 func (l *loginView) view(width, height int) string {
 	width, height = max(width, 1), max(height, 1)
-	boxWidth := min(60, width-2)
-	title, boxTitle, rows, border, hint := l.card(boxWidth - 4)
-	box := panel(rows, boxWidth, border, boxTitle)
+	colW := min(58, width-4)
+	if l.step == stepBrowser {
+		colW = min(72, width-4)
+	}
+	s := l.screen(max(10, colW))
 
-	var lines []string
-	need := len(box) + 6
-	if height >= need+13 {
-		lines = append(lines, "", "")
-		for _, r := range renderLogo(logoSize) {
-			lines = append(lines, center(r, width))
-		}
-		lines = append(lines, "")
+	var block []string
+	title := s.title
+	if !strings.Contains(title, "\x1b[") {
+		title = sInk.Render(title)
 	}
-	if height >= need+5 {
-		for _, r := range renderWordmark() {
-			lines = append(lines, center(r, width))
-		}
-		lines = append(lines, "")
-	}
-	lines = append(lines, center(sSoft.Render(title), width))
+	block = append(block, center(title, width), center(sSoft.Render(s.sub), width))
 	if l.notice != "" {
-		lines = append(lines, center(sWarn.Render(ansi.Truncate(l.notice, max(1, width-2), glyphEllipsis)), width))
+		block = append(block, center(sWarn.Render(glyphWarn+" ")+sSoft.Render(ansi.Truncate(l.notice, max(1, width-4), glyphEllipsis)), width))
 	}
-	lines = append(lines, "")
-	pad := strings.Repeat(" ", max(0, (width-boxWidth)/2))
-	for _, b := range box {
-		lines = append(lines, pad+b)
+	block = append(block, "", "")
+	pad := strings.Repeat(" ", max(0, (width-colW)/2))
+	for _, b := range s.body {
+		block = append(block, pad+b)
 	}
-	lines = append(lines, "", center(hint, width))
-	for len(lines) < height-1 {
+	if s.note != "" {
+		block = append(block, "", "", center(sDim.Render(s.note), width))
+	}
+	var keys []string
+	for _, k := range s.hints {
+		if k[0] == "" {
+			keys = append(keys, sDim.Render(k[1]))
+			continue
+		}
+		keys = append(keys, keyHint(k[0], k[1]))
+	}
+	hints := center(strings.Join(keys, "      "), width)
+
+	// El prisma grande si cabe; si no, el de la tarjeta; si tampoco, nada.
+	room := height - len(block) - 2
+	var logo []string
+	for _, size := range []int{logoSize, cardLogoSize} {
+		if rows := renderLogo(size); len(rows) > 0 && len(rows)+2 <= room-2 {
+			for _, r := range rows {
+				logo = append(logo, center(r, width))
+			}
+			logo = append(logo, "", "")
+			break
+		}
+	}
+	content := append(logo, block...)
+	top := max(0, (height-2-len(content))/2)
+	lines := make([]string, 0, height)
+	for range top {
 		lines = append(lines, "")
 	}
-	lines = append(lines, center(sDim2.Render("lixbon.com"+"  "+glyphSep+"  "+"CLI "+l.version), width))
+	lines = append(lines, content...)
+	for len(lines) < height-2 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, hints, "")
 	if len(lines) > height {
 		lines = lines[len(lines)-height:]
 	}
@@ -583,8 +632,11 @@ func (m *Model) updateLogin(msg tea.Msg) tea.Cmd {
 		m.add(okLine(res.summary()))
 		return tea.Batch(cmd, m.connectAfterLogin())
 	case loginSkipped:
-		place := m.login.place
+		place, provider := m.login.place, m.login.provider
 		m.login = nil
+		if provider {
+			return tea.Batch(cmd, m.dispatch("/provider"))
+		}
 		if place == loginCommand {
 			m.add(note("Inicio de sesión cancelado."))
 		}

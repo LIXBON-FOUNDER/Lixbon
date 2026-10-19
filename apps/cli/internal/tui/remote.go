@@ -951,12 +951,12 @@ func (m *Model) remoteHello() map[string]any {
 		models = append(models, map[string]string{"value": mod.ID, "label": firstNonEmpty(mod.Name, mod.ID)})
 	}
 	efforts := []string{}
-	for _, l := range effortLevels(m.chat.Model) {
+	for _, l := range effortLevels(m.graded(m.chat.Model)) {
 		efforts = append(efforts, firstNonEmpty(l, "auto"))
 	}
 	return map[string]any{
 		"agent": "lixbon", "workspace": filepath.Base(m.chat.Workspace),
-		"mode": m.modeName(), "model": firstNonEmpty(m.chat.Model, "sin modelo"),
+		"mode": m.remoteMode(), "model": firstNonEmpty(m.chat.Model, "sin modelo"),
 		"commands": commands, "capabilities": remoteCapabilities,
 		"models": models, "model_value": m.chat.Model,
 		"efforts": efforts, "effort": firstNonEmpty(m.chat.Effort, "auto"),
@@ -976,7 +976,7 @@ func (m *Model) syncRemote() {
 			h.link.Emit("choice_resolved", map[string]any{"id": id})
 		}
 	}
-	key := strings.Join([]string{m.modeName(), m.chat.Model, m.chat.Effort, m.chat.Workspace, fmt.Sprint(len(m.chat.Custom))}, "|")
+	key := strings.Join([]string{m.remoteMode(), m.chat.Model, m.chat.Effort, m.chat.Workspace, fmt.Sprint(len(m.chat.Custom))}, "|")
 	if key != h.helloKey {
 		h.helloKey = key
 		h.link.Emit("hello", m.remoteHello())
@@ -990,7 +990,7 @@ func (m *Model) enterRemote(link *remote.Link, title, machine, qr string) {
 		choices: map[string]*picker{},
 	}
 	host.base = remoteHistory(m.chat.History)
-	host.helloKey = strings.Join([]string{m.modeName(), m.chat.Model, m.chat.Effort, m.chat.Workspace, fmt.Sprint(len(m.chat.Custom))}, "|")
+	host.helloKey = strings.Join([]string{m.remoteMode(), m.chat.Model, m.chat.Effort, m.chat.Workspace, fmt.Sprint(len(m.chat.Custom))}, "|")
 	m.remote = host
 	link.Snapshot = host.snapshotNow
 

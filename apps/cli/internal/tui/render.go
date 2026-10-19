@@ -48,7 +48,7 @@ func fmtTokens(n int) string {
 	return fmt.Sprint(n)
 }
 
-const contextCells = 8
+const contextCells = 12
 
 func contextBar(pct float64) string {
 	pct = max(0, min(100, pct))

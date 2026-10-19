@@ -1,6 +1,6 @@
 ── 40 ──
- ✓  $  go test ./inter…  exit 0 · 3.4 s
+ ✓ $       go test ./i…  exit 0   3.4 s
 ── 80 ──
- ✓  $  go test ./internal/...                                    exit 0 · 3.4 s
+ ✓ $       go test ./internal/...                                exit 0   3.4 s
 ── 120 ──
- ✓  $  go test ./internal/...                                                                            exit 0 · 3.4 s
+ ✓ $       go test ./internal/...                                                                        exit 0   3.4 s

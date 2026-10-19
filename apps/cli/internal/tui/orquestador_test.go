@@ -80,7 +80,7 @@ func TestAnLxoCallRunsWithoutAskingButChainedCommandsStillAsk(t *testing.T) {
 	if h.gw.count() != 2 {
 		t.Fatalf("la primera llamada a lxo debía ejecutarse sin preguntar; peticiones=%d", h.gw.count())
 	}
-	contains(t, h.view(), "¿Ejecutar este comando?")
+	contains(t, h.view(), "Lixbon quiere ejecutar una orden")
 	h.key("esc")
 	h.settle()
 }

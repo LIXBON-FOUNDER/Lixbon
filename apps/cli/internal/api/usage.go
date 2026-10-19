@@ -24,6 +24,15 @@ type Usage struct {
 		Session Bucket `json:"session"`
 		Week    Bucket `json:"week"`
 	} `json:"buckets"`
+	// Services son los tokens por día y servicio (cli, ide, mobile, web,
+	// other) de los últimos 30 días.
+	Services []ServiceDay `json:"services"`
+}
+
+type ServiceDay struct {
+	Date    string `json:"date"`
+	Service string `json:"service"`
+	Tokens  int    `json:"tokens"`
 }
 
 func (c *Client) Usage(ctx context.Context) (Usage, error) {

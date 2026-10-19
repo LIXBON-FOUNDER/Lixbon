@@ -25,7 +25,7 @@ func TestAskUserBatchWithTabs(t *testing.T) {
 	h.send("monta la web")
 	h.pump(func() bool { return h.m.picker != nil && h.m.picker.ask != nil })
 	view := h.view()
-	for _, s := range []string{"Estilo", "Secciones", "Tipografía", "Enviar", "¿Qué estilo?", "tonos tierra", "Otra respuesta…"} {
+	for _, s := range []string{"Estilo", "Secciones", "Tipografía", "Repaso", "¿Qué estilo?", "tonos tierra", "Otra respuesta…"} {
 		contains(t, view, s)
 	}
 	contains(t, h.view(), "Esperando tus respuestas")

@@ -23,7 +23,7 @@
    ],
    [
     "mode",
-    "[ask|agent|delegate]",
+    "[ask|agent|auto|plan|delegate]",
     "Change the working mode",
     "conversation"
    ],

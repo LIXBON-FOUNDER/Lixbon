@@ -2,134 +2,174 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"lixbon.com/cli/internal/chat"
 )
 
-// footer es la fila de abajo: el modo, el razonamiento, los comandos en
-// segundo plano y los avisos a la izquierda; el contexto de esta conversación
-// a la derecha. Con un selector abierto, la izquierda son sus teclas. En una
-// terminal estrecha se van soltando detalles en vez de partir la fila.
+// footer es la fila de abajo: el modelo, el esfuerzo en tramos, el modo y
+// los procesos en segundo plano a la izquierda (se pulsan y abren su menú);
+// los avisos detrás, y el contexto de esta conversación con su barra a la
+// derecha. En una terminal estrecha se van soltando detalles en vez de partir
+// la fila.
 func (m *Model) footer() string {
 	width := max(1, m.width)
-	sep := sDim2.Render(" " + glyphSep + " ")
-	mode := " " + m.lit(sAccent.Render(glyphPrompt)+" "+modeStyle(m.modeName()).Render(m.modeName()), m.footY, m.footMode)
+	const gap = "     "
 
-	var hint string
-	switch {
-	case m.picker != nil:
-		hint = m.picker.hints()
-	case m.running:
-		hint = sDim2.Render("esc interrumpe")
-	case m.prompt != nil:
-		hint = sDim2.Render("↵ responder " + glyphSep + " esc cancela")
-	default:
-		hint = sDim2.Render("shift+tab")
+	model := sSoft.Render(m.modelLabel(m.chat.Model))
+	if m.chat.Model == "" {
+		model = sDim.Render("sin modelo")
 	}
-	var effort, procs string
-	if m.picker == nil {
-		if l := m.effortLabel(); l != "" {
-			effort = sDim.Render("razonamiento ") + sSoft.Render(l)
-		}
-		if n := m.liveProcs(); n > 0 {
-			procs = sAccent.Render(fmt.Sprintf("[%d]", n)) + " " + sSoft.Render(plural(n, "comando", "comandos"))
+	effort := m.effortMeter()
+	mode := m.modeView()
+	var procs string
+	n := m.liveProcs()
+	if n > 0 {
+		procs = sDim.Render(fmt.Sprintf("%d %s", n, plural(n, "proceso", "procesos")))
+	}
+	if n != m.liveSeen {
+		m.liveSeen = n
+		for _, e := range m.liveTools {
+			m.refresh(e)
 		}
 	}
 	var notices []string
 	switch {
+	case m.compacting != nil:
+		// El avance va encima de la caja.
 	case m.busy != "":
 		notices = append(notices, sAccent.Render(m.spinFrame())+" "+sSoft.Render(m.busy+"…"))
 	case m.toastText != "":
 		notices = append(notices, m.toastText)
 	case m.notice != "":
-		notices = append(notices, sAccent.Render(m.notice))
+		notices = append(notices, sSoft.Render(m.notice))
 	}
 	if n := len(m.queue); n > 0 {
 		notices = append(notices, sSoft.Render(fmt.Sprintf("%d en cola", n)))
 	}
 	if m.updateReady != "" {
-		notices = append(notices, sOK.Render("v"+m.updateReady+" lista")+sDim.Render(" "+glyphSep+" reinicia"))
+		notices = append(notices, sOK.Render(glyphs.check)+" "+sSoft.Render("v"+m.updateReady+" lista")+sDim.Render("  reinicia"))
 	}
 	if w := m.visionWarning(); w != "" {
-		notices = append(notices, sWarn.Render("!")+" "+sWarn.Render(w)+sDim.Render(" "+glyphSep+" ")+sSoft.Render("/model"))
-	}
-	if m.alwaysAllowed {
-		notices = append(notices, sWarn.Render("sin preguntar"))
+		notices = append(notices, sWarn.Render(glyphWarn)+" "+sSoft.Render(w)+sDim.Render("  ")+sInk.Render("/model"))
 	}
 
 	type layout struct {
-		hint          bool
-		effort, procs bool
-		notices       int
+		effort, mode, procs bool
+		notices             int
 	}
 	layouts := []layout{
 		{true, true, true, len(notices)},
-		{false, true, true, len(notices)},
-		{false, true, true, min(1, len(notices))},
-		{false, false, true, min(1, len(notices))},
+		{true, true, true, min(1, len(notices))},
+		{true, true, true, 0},
+		{true, false, true, 0},
 		{false, false, true, 0},
 		{false, false, false, 0},
 	}
-	build := func(l layout) (string, span, span) {
-		left := mode
-		if m.picker != nil {
-			left = " " + hint
-		} else if l.hint {
-			left += "  " + hint
-		}
-		var effortAt, procsAt span
-		if l.effort && effort != "" {
+	type zones struct{ model, effort, mode, procs span }
+	build := func(l layout) (string, zones) {
+		var z zones
+		left := " "
+		add := func(sep, text string, at *span) {
 			left += sep
-			effortAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(effort)}
-			left += m.lit(effort, m.footY, m.footEffort)
+			*at = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(text)}
+			left += m.lit(text, m.footY, *at)
+		}
+		add("", model, &z.model)
+		if l.effort && effort != "" {
+			add("  ", effort, &z.effort)
+		}
+		if l.mode {
+			add(gap, mode, &z.mode)
 		}
 		if l.procs && procs != "" {
-			left += sep
-			procsAt = span{ansi.StringWidth(left), ansi.StringWidth(left) + ansi.StringWidth(procs)}
-			left += m.lit(procs, m.footY, m.footProcs)
+			add(gap, procs, &z.procs)
 		}
 		for _, n := range notices[:l.notices] {
-			left += sep + n
+			left += gap + n
 		}
 		if l.notices == 1 && len(notices) > 0 {
 			left = ansi.Truncate(left, max(1, width-6), glyphEllipsis)
 		}
-		return left, effortAt, procsAt
+		return left, z
 	}
 
-	pct := fmt.Sprintf(" %.0f%%", m.ctxPct)
-	pctStyle := sSoft
-	switch {
-	case m.ctxPct >= ctxFull:
-		pctStyle = sErr
-	case m.ctxPct >= ctxWarn:
-		pctStyle = sWarn
-	}
-	bar := meter(m.ctxPct, contextCells) + pctStyle.Render(pct)
-	tokens := sDim.Render(fmtTokens(m.ctxTokens) + " tok")
+	pct := fmt.Sprintf("%.0f %%", m.ctxPct)
 	compact := ""
 	if m.ctxPct >= ctxFull {
-		compact = sep + sWarn.Render("/compact")
+		compact = "   " + sInk.Render("/compact")
 	}
 	rights := []string{
-		sDim.Render("ctx ") + bar + sep + tokens + compact + "  ",
-		sDim.Render("ctx ") + bar + compact + "  ",
-		bar + " ",
-		pctStyle.Render(fmt.Sprintf("%.0f%%", m.ctxPct)) + " ",
+		sDim.Render("contexto  ") + meter(m.ctxPct, contextCells) + "  " + pctStyle(m.ctxPct).Render(pct) + compact + " ",
+		meter(m.ctxPct, contextCells) + "  " + pctStyle(m.ctxPct).Render(pct) + " ",
+		pctStyle(m.ctxPct).Render(pct) + " ",
 		"",
 	}
 	for _, l := range layouts {
-		left, effortAt, procsAt := build(l)
+		left, z := build(l)
 		for _, r := range rights {
 			if ansi.StringWidth(left)+ansi.StringWidth(r)+2 <= width || r == "" && ansi.StringWidth(left) <= width {
-				m.footMode = span{1, ansi.StringWidth(mode)}
-				m.footEffort, m.footProcs = effortAt, procsAt
+				m.footModel, m.footEffort, m.footMode, m.footProcs = z.model, z.effort, z.mode, z.procs
 				return twoCol(left, r, width)
 			}
 		}
 	}
-	m.footMode, m.footEffort, m.footProcs = span{}, span{}, span{}
-	return ansi.Truncate(mode, width, "")
+	m.footModel, m.footEffort, m.footMode, m.footProcs = span{}, span{}, span{}, span{}
+	return ansi.Truncate(" "+model, width, "")
+}
+
+// effortMeter es el esfuerzo en el pie: solo la palabra, apagada. Los tramos
+// van en los selectores; la señal no decora el pie.
+func (m *Model) effortMeter() string {
+	name := m.effortLabel()
+	if name == "" {
+		return ""
+	}
+	if m.chat.Effort == "" && (m.chat.Mode == chat.ModeAgent || m.chat.Session.PlanMode) {
+		name = effortNames["high"]
+	}
+	return sDim.Render(name)
+}
+
+// effortSteps es cuántos tramos enciende un nivel y de cuántos: tres en un
+// modelo graduado, dos en uno que solo se enciende o apaga.
+func effortSteps(level string, graded bool) (on, of int) {
+	of = 2
+	if graded {
+		of = 3
+	}
+	switch level {
+	case "off":
+		return 0, of
+	case "low":
+		return 1, of
+	case "medium":
+		return 2, of
+	case "high", "on":
+		return of, of
+	}
+	return of / 2, of
+}
+
+// effortBars son los tramos de un nivel: en la señal en la fila elegida y en
+// gris en las demás, sobre la pista.
+func effortBars(on, of int, chosen bool) string {
+	lit := sSoft
+	if chosen {
+		lit = sAccent
+	}
+	var b strings.Builder
+	for i := range of {
+		seg := glyphMeterOn + glyphMeterOn + " "
+		if i < on {
+			b.WriteString(lit.Render(seg))
+		} else {
+			b.WriteString(sTrack.Render(glyphMeterOff + glyphMeterOff + " "))
+		}
+	}
+	return b.String()
 }
 
 // visionWarning avisa si hay imágenes en cola y el modelo dice que no las ve.
