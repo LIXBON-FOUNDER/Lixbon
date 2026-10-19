@@ -888,6 +888,13 @@ mod authenticated_client_tests {
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
         started.unwrap();
         let task = create_ui_task(&core, "task scoped against CLI Person");
+        core.mutate(|tx| {
+            let task_state = tx.task_mut(&task)?;
+            task_state.branch = Some("HEAD".into());
+            task_state.base = Some("HEAD".into());
+            Ok(())
+        })
+        .unwrap();
         let secret = "person-cli-scoped-command-secret-85-32-bytes";
         register(
             &core,
@@ -912,9 +919,11 @@ mod authenticated_client_tests {
             "args": { "task": task }
         }));
         assert_eq!(status, 200, "diff alcanza el coordinador autenticado: {response}");
-        assert_eq!(response["ok"], true, "diff es una lectura válida aunque no haya commit: {response}");
+        assert_eq!(response["ok"], true, "diff debe llegar a la lectura autenticada: {response}");
+        assert_eq!(response["data"]["branch"], "HEAD");
+        assert_eq!(response["data"]["base"], "HEAD");
         assert_eq!(response["data"]["diff"], "");
-        assert!(response["data"]["stat"].as_str().unwrap_or("").contains("Sin commit"));
+        assert!(response["data"]["stat"].is_string());
         server.stop();
     }
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Aísla el test en un bus efímero. D-Bus activa el proveedor GNOME Keyring;
-# --unlock crea y desbloquea un keyring local de CI sin credenciales reales.
+# Aísla el test en un bus efímero. Desbloquea el keyring y después inicializa
+# GNOME Keyring como proveedor Secret Service dentro de ese bus.
 if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   exec dbus-run-session -- bash "$0" "$@"
 fi
@@ -12,6 +12,7 @@ command -v dbus-send >/dev/null
 
 eval "$(printf '%s' 'lixbon-ci-only-keyring-password' \
   | gnome-keyring-daemon --unlock --components=secrets)"
+eval "$(gnome-keyring-daemon --start --components=secrets)"
 
 # Exige que el daemon real posea el nombre Secret Service antes de ejecutar
 # los tests; no se permite pasar por una sesión D-Bus vacía ni un backend mock.

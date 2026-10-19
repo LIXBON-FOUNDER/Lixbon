@@ -528,7 +528,10 @@ fn response_error(status: u16, response: &Value) -> EventsError {
 }
 
 fn cursor_path(query: &BTreeMap<String, String>, task_id: Option<&str>) -> PathBuf {
-    let normalized = serde_json::to_vec(&(task_id.unwrap_or("person"), query)).unwrap_or_default();
+    let mut cursor_query = query.clone();
+    cursor_query.remove("limit");
+    let normalized =
+        serde_json::to_vec(&(task_id.unwrap_or("person"), cursor_query)).unwrap_or_default();
     let hash = Sha256::digest(normalized);
     let filename: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
     crate::home()
@@ -685,6 +688,7 @@ where
         }
         match fetch(*cursor) {
             Ok(page) => {
+                let received_events = !page.events.is_empty();
                 for event in &page.events {
                     emit(event)?;
                 }
@@ -695,8 +699,13 @@ where
                     empty_delay = Duration::from_millis(500);
                     continue;
                 }
+                if received_events {
+                    empty_delay = Duration::from_millis(500);
+                }
                 sleep(empty_delay);
-                empty_delay = (empty_delay * 2).min(Duration::from_secs(2));
+                if !received_events {
+                    empty_delay = (empty_delay * 2).min(Duration::from_secs(2));
+                }
             }
             Err(error) if error.kind == ErrorKind::CursorAhead && !explicit && *cursor > 0 => {
                 eprintln!("El cursor guardado supera el head del Core; se vuelve a leer desde 0.");
@@ -766,6 +775,20 @@ mod tests {
     }
 
     #[test]
+    fn cursor_persistido_se_reutiliza_al_cambiar_el_limite_de_pagina() {
+        let mut query = BTreeMap::from([
+            ("project".to_string(), "project-1".to_string()),
+            ("limit".to_string(), "100".to_string()),
+        ]);
+        let path = cursor_path(&query, None);
+
+        query.insert("limit".to_string(), "500".to_string());
+        let resumed_path = cursor_path(&query, None);
+
+        assert_eq!(resumed_path, path);
+    }
+
+    #[test]
     fn cursor_avanza_hasta_head_con_filtros_sin_eventos() {
         let response = serde_json::json!({ "ok": true, "data": {
             "v": 1, "events": [], "next_cursor": 17, "has_more": false, "head_seq": 17
@@ -826,6 +849,50 @@ mod tests {
         assert_eq!(
             waits,
             vec![Duration::from_secs(1), Duration::from_millis(500)]
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn follow_no_aumenta_el_backoff_mientras_llegan_eventos() {
+        let path = std::env::temp_dir().join(format!(
+            "lxo-events-follow-active-{}.cursor",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut cursor = 0;
+        let attempts = std::cell::Cell::new(0);
+        let mut waits = Vec::new();
+        let mut emitted = Vec::new();
+
+        let result = follow_with(
+            &mut cursor,
+            &path,
+            false,
+            |after| {
+                let attempt = attempts.get();
+                attempts.set(attempt + 1);
+                Ok(EventPage {
+                    data: serde_json::json!({}),
+                    events: vec![serde_json::json!({ "seq": after + 1 })],
+                    next_cursor: after + 1,
+                    has_more: false,
+                    head_seq: after + 1,
+                })
+            },
+            |event| {
+                emitted.push(event["seq"].as_u64().unwrap());
+                Ok(())
+            },
+            |duration| waits.push(duration),
+            || attempts.get() >= 2,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(emitted, vec![1, 2]);
+        assert_eq!(
+            waits,
+            vec![Duration::from_millis(500), Duration::from_millis(500)]
         );
         let _ = std::fs::remove_file(path);
     }

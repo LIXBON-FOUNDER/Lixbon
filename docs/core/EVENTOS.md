@@ -190,7 +190,8 @@ siendo la verdad, el stream solo avisaría). Hasta entonces el contrato de **son
 1. Primera lectura con `cursor=0` (o `cursor=<head_seq>` de una lectura previa para «solo lo nuevo»).
 2. Repetir con `cursor = next_cursor`. Si `has_more` es `true`, repetir **sin esperar**; si es `false`,
    dormir entre 0,5 y 2 s (con retroceso si la respuesta viene vacía repetidamente).
-3. Guardar `next_cursor` de forma durable en el cliente; reanudar con él tras cualquier reinicio.
+3. Guardar `next_cursor` de forma durable en el cliente; reanudar con él al reiniciar el cliente. Si reinicia
+   Core, el cursor sigue siendo válido, pero un cliente Agent debe obtener una credencial nueva antes de continuar.
 4. Ante `cursor_ahead`, descartar el cursor y volver a empezar (la base ya no es la misma).
 
 Una extensión futura **aditiva** (`wait_ms` acotado para long-poll, o SSE) no cambia estas reglas.
