@@ -41,7 +41,7 @@ trash = "5"
 # Almacén SQLite del Core (módulo `store`, slice B). SQLite va incluido (3.46):
 # no depende de la del sistema y `STRICT` exige >= 3.37.
 rusqlite = { version = "0.32", features = ["bundled"] }
-tauri-plugin-http = "~2.6"
+tauri-plugin-http = "~2.7"
 tauri-plugin-single-instance = "2"
 # Catálogo de skills: paquete zip verificado por sha256 (Ajustes › Skills).
 zip = { version = "4", default-features = false, features = ["deflate"] }
