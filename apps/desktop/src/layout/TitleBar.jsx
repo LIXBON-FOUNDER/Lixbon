@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRemoteStore } from '../store/remoteStore';
 import { useShallow } from 'zustand/react/shallow';
-import { useWorkbenchStore, selectSidePanels } from '../store/workbenchStore';
+import { useWorkbenchStore, selectSidePanels, selectRightDrawer } from '../store/workbenchStore';
 import { useFileViewStore } from '../store/fileViewStore';
 import { useChatStore } from '../store/chatStore';
 import { useOrchStore } from '../store/orchStore';
@@ -282,14 +282,16 @@ const RIGHT_TITLE = { agent: 'Cambios', editor: 'Agente', design: 'Agente', git:
 // fuera de él se queda atenuado en lugar de desaparecer y mover a los demás.
 function PanelToggles() {
   const mode = useWorkbenchStore((s) => s.mode);
+  const orchView = useWorkbenchStore((s) => s.orchView);
   const { left, right } = useWorkbenchStore(useShallow(selectSidePanels));
   const { toggleSide, toggleAgent } = useWorkbenchStore();
   const terminalOpen = useAppStore((s) => s.panels.terminal);
   const toggleTerminal = useAppStore((s) => s.toggleTerminal);
   const inEditor = mode === 'editor';
   // Con la ventana estrecha el panel derecho es un cajón: el botón sigue siendo el mismo.
-  const drawer = useWorkbenchStore((st) => st.drawer);
+  const drawer = useWorkbenchStore(selectRightDrawer);
   const rightOn = useIsCompact() ? drawer : right;
+  const rightTitle = mode === 'orch' && orchView === 'ade' ? 'Inspector' : RIGHT_TITLE[mode] || 'Agente';
   return (
     <div className="ptoggles" role="group" aria-label="Paneles">
       <button className={`ic tb__ic ${left ? 'is-on' : ''}`} onClick={toggleSide} title="Panel izquierdo (Ctrl B)" aria-label="Panel izquierdo" aria-pressed={!!left}>
@@ -305,7 +307,7 @@ function PanelToggles() {
       >
         <IconPanelBottom size={18} filled={inEditor && !!terminalOpen} />
       </button>
-      <button className={`ic tb__ic ${rightOn ? 'is-on' : ''}`} onClick={toggleAgent} title={`${RIGHT_TITLE[mode] || 'Agente'} (Ctrl Alt B)`} aria-label="Panel derecho" aria-pressed={!!rightOn}>
+      <button className={`ic tb__ic ${rightOn ? 'is-on' : ''}`} onClick={toggleAgent} title={`${rightTitle} (Ctrl Alt B)`} aria-label={mode === 'orch' && orchView === 'ade' ? 'Inspector' : 'Panel derecho'} aria-pressed={!!rightOn}>
         <IconPanelRight size={18} filled={!!rightOn} />
       </button>
     </div>
