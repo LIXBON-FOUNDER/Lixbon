@@ -7,7 +7,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "prebuild": "expo prebuild --platform android",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/**/*.test.js\""
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

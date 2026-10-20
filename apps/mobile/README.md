@@ -39,6 +39,8 @@ src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), 
 src/components/         primitivas del IDE (ui.js), barra de título, paleta, barra de
                         estado, sidebar, diálogos e iconos
 src/screens/            Auth, Chat y Remoto (secciones), Uso, Cuenta y Personalizar (apiladas)
+src/supervision/        prototipo de supervisión: reglas (model), datos de ejemplo
+                        (fixtures), estado (store) y pruebas (`npm test`)
 assets/                 fuentes embebidas + iconos de la app (desde favicon.svg)
 ```
 
@@ -55,6 +57,47 @@ densidad, enviar con Enter, barra de estado, luz ambiente y animaciones; se
 guarda en AsyncStorage (`uiPrefs`). Cada respuesta tiene Copiar y, la última,
 Regenerar (usa `POST /api/conversations/{id}/rewind` para no duplicar el
 turno guardado).
+
+## Prototipo de supervisión (Sprint D)
+
+Sección **Supervisar** con datos de ejemplo para validar Mobile como superficie
+de supervisión y decisión, sin editor ni terminal. Aparece en desarrollo
+(`__DEV__`) o al activar *Ajustes › Desarrolladores › Prototipo de
+supervisión*; se abre desde el selector del menú lateral o la búsqueda.
+
+- **Inicio**: Atención (lo que te espera, derivado del estado de las tareas,
+  no de los avisos), Trabajo activo, Avisos, Uso y Hosts. El título cambia de
+  host.
+- **Tarea**: host, destino (proyecto · rama), política y agente siempre a la
+  vista; últimos eventos del agente (pausar/reanudar), intentos y «Abrir en
+  Desktop».
+- **Decisiones**: responder una pregunta, aprobar o rechazar, aceptar una
+  revisión o pedir cambios. La política elevada y las revisiones grandes o en
+  zonas delicadas van a Desktop; una revisión generada sobre otro commit no se
+  acepta hasta regenerarla.
+- **Escenario** (⋮ arriba a la derecha): en línea, desactualizado o sin
+  conexión. Desactualizado pide actualizar antes de decidir; sin conexión las
+  respuestas quedan **en cola** (visibles como tales) y aprobar o revisar
+  espera. Nada de eso se pinta como fallo.
+- **Avisos**: leer no resuelve la atención, y la vista previa del push enseña
+  que no viaja el comando, la pregunta ni el diff.
+
+Las reglas viven en `src/supervision/model.js` y están probadas en
+`src/supervision/supervision.test.js` (`npm test`; también en el CI de PRs,
+`.github/workflows/mobile-ci.yml`, junto con el empaquetado de Metro).
+
+### Revisarlo en local (emulador)
+
+La app usa módulos nativos que Expo Go no trae (keyboard-controller,
+reanimated 4), así que se prueba con una build de desarrollo:
+
+1. Android Studio con JDK 17 y un AVD **Pixel 6 · API 34 · Google APIs
+   x86_64** (el mismo perfil que `mobile-e2e.yml`). Para tamaños comunes,
+   un segundo AVD **Small Phone** (360 × 640 dp) y, en el Pixel 6, *Tamaño de
+   fuente* al máximo.
+2. `npm install` y `npx expo run:android` con el emulador abierto (genera
+   `android/`, instala y deja Metro con recarga en caliente).
+3. Iniciar sesión y abrir Supervisar desde el menú lateral.
 
 ## Detalles útiles
 

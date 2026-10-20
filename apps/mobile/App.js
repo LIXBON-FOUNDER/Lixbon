@@ -1,4 +1,5 @@
-// App.js — raíz de la app móvil: la sección activa (Chat o Remoto) a pantalla
+// App.js — raíz de la app móvil: la sección activa (Chat, Remoto o, con el
+// prototipo activado en Ajustes, Supervisar) a pantalla
 // completa con su propia cabecera, el menú lateral (que cambia de sección y
 // guarda el historial), la búsqueda global y las pantallas apiladas (Ajustes,
 // Uso, Personalizar) que entran desde la derecha.
@@ -20,10 +21,12 @@ import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import RemoteScreen from './src/screens/RemoteScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import SupervisionScreen from './src/screens/SupervisionScreen';
 import UsageScreen from './src/screens/UsageScreen';
 import { onRemoteNotificationTap } from './src/push';
 import { shareConversation } from './src/share';
 import { useRemoteSessions } from './src/remoteSessions';
+import { useSupervision } from './src/supervision/useSupervision';
 import { AppState, useApi, useAuth, useChat, usePrefs } from './src/state';
 import { ACCENTS, FONTS, MOTION } from './src/theme';
 
@@ -85,7 +88,7 @@ function Splash() {
   );
 }
 
-function useCommands({ setSection, pushScreen, pickModel, openRemote }) {
+function useCommands({ setSection, pushScreen, pickModel, openRemote, supervise }) {
   const chat = useChat();
   const prefs = usePrefs();
   const auth = useAuth();
@@ -104,6 +107,7 @@ function useCommands({ setSection, pushScreen, pickModel, openRemote }) {
       chat.messages.length > 0 && { id: 'share', title: 'Compartir conversación (Markdown)', category: 'chat', icon: 'share', run: () => shareConversation(chat.title, chat.messages) },
       { id: 'go.chat', title: 'Ir al chat', category: 'ir a', icon: 'chat', run: () => setSection('chat') },
       { id: 'go.remote', title: 'Ir a Remoto', category: 'ir a', icon: 'activity', keywords: 'ide cli sesiones', run: openRemote },
+      supervise && { id: 'go.supervise', title: 'Ir a Supervisar (prototipo)', category: 'ir a', icon: 'eye', keywords: 'atención aprobar revisar hosts', run: () => setSection('supervise') },
       { id: 'go.usage', title: 'Uso y límites', category: 'ir a', icon: 'chart', run: () => pushScreen('usage') },
       { id: 'go.settings', title: 'Ajustes', category: 'ir a', icon: 'gear', keywords: 'cuenta perfil', run: () => pushScreen('settings') },
       { id: 'go.appearance', title: 'Personalizar la interfaz', category: 'apariencia', icon: 'palette', keywords: 'tema color acento', run: () => pushScreen('appearance') },
@@ -131,7 +135,7 @@ function useCommands({ setSection, pushScreen, pickModel, openRemote }) {
       },
     ];
     return list.filter(Boolean);
-  }, [chat, prefs, ui, last, auth, api, toast, confirm, setSection, pushScreen, pickModel, openRemote]);
+  }, [chat, prefs, ui, last, auth, api, toast, confirm, setSection, pushScreen, pickModel, openRemote, supervise]);
 }
 
 function HomeShell() {
@@ -142,10 +146,17 @@ function HomeShell() {
   const { width } = useWindowDimensions();
   const drawerWidth = Math.min(width * 0.84, 322);
 
-  const [section, setSection] = useState('chat'); // chat | remote
+  const prefs = usePrefs();
+  const [section, setSection] = useState('chat'); // chat | remote | supervise
   const [remoteToken, setRemoteToken] = useState(null);
   const [remoteSession, setRemoteSession] = useState(null);
   const remote = useRemoteSessions();
+  // El prototipo de supervisión solo aparece en desarrollo o si se activa en
+  // Ajustes › Desarrolladores: usa datos de ejemplo, no los del usuario.
+  const supervise = __DEV__ || prefs.ui.labs;
+  useEffect(() => {
+    if (!supervise && section === 'supervise') setSection('chat');
+  }, [supervise, section]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [pendingAsk, setPendingAsk] = useState(null);
 
@@ -153,6 +164,8 @@ function HomeShell() {
   // Entra deslizándose 40px mientras aparece, como en el diseño: un recorrido
   // corto y lento se siente más calmado que cruzar toda la pantalla.
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const sup = useSupervision(supervise && (section === 'supervise' || drawerOpen));
+  const { stack: supStack, pop: supPop } = sup;
   const drawer = useRef(new Animated.Value(0)).current;
 
   const animateDrawer = useCallback(
@@ -215,7 +228,7 @@ function HomeShell() {
     if (value) chat.setModel(value);
   }, [sheet, chat]);
 
-  const commands = useCommands({ setSection, pushScreen, pickModel, openRemote });
+  const commands = useCommands({ setSection, pushScreen, pickModel, openRemote, supervise });
 
   // "Preguntar" desde la búsqueda abre una conversación nueva; el envío espera
   // a que el chat quede vacío para no caer en la conversación anterior.
@@ -281,6 +294,10 @@ function HomeShell() {
         popScreen();
         return true;
       }
+      if (section === 'supervise' && supStack.length > 1) {
+        supPop();
+        return true;
+      }
       if (section === 'remote' && remoteSession) {
         setRemoteSession(null);
         return true;
@@ -292,7 +309,7 @@ function HomeShell() {
       return false;
     });
     return () => sub.remove();
-  }, [paletteOpen, drawerOpen, top, section, remoteSession, closeDrawer, popScreen]);
+  }, [paletteOpen, drawerOpen, top, section, remoteSession, closeDrawer, popScreen, supStack.length, supPop]);
 
   const openSearch = useCallback(() => {
     closeDrawer();
@@ -320,6 +337,8 @@ function HomeShell() {
           onUsage={() => pushScreen('usage')}
         />
       )}
+
+      {section === 'supervise' && <SupervisionScreen sup={sup} onMenu={openDrawer} />}
 
       {top != null && (
         <Animated.View
@@ -369,6 +388,7 @@ function HomeShell() {
               onSearch={openSearch}
               remote={remote}
               activeRemoteId={remoteSession?.id}
+              supervision={supervise ? sup : null}
               onOpenSession={(sx) => {
                 setSection('remote');
                 setRemoteSession(sx);
