@@ -127,13 +127,14 @@
   cursor: pointer;
 }
 
-.jpal__option:hover,
-.jpal__option.is-active {
+.jpal__option:hover:not(.is-active) {
   color: var(--ink);
-  background: var(--surface-4);
+  background: var(--surface-3);
 }
 
 .jpal__option.is-active {
+  color: var(--ink);
+  background: var(--surface-4);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
