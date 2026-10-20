@@ -119,9 +119,9 @@ func TestKeyCommandOnlyExistsForAPIKeySessions(t *testing.T) {
 func TestEffortIsSentAndShownInTheFooter(t *testing.T) {
 	h := newHarness(t, nil, textReply("ok"))
 	h.send("/effort high")
-	contains(t, h.view(), "acepta: auto, on, off")
+	contains(t, h.view(), "acepta: auto, off, on")
 	h.send("/effort off")
-	contains(t, h.view(), "razonamiento apagado")
+	contains(t, h.view(), "Qwen  apagado")
 	h.send("hola")
 	h.settle()
 	if think, ok := h.gw.bodyAt(0)["think"]; !ok || think != false {
@@ -135,7 +135,8 @@ func TestEffortIsSentAndShownInTheFooter(t *testing.T) {
 func TestQuotaIsAccountWideInTheTopBar(t *testing.T) {
 	h := newHarness(t, nil)
 	h.update(h.m.fetchQuota()())
-	contains(t, h.view(), "sesión 30%")
+	contains(t, h.view(), "sesión  ")
+	contains(t, h.view(), "30 %")
 }
 
 func TestRemoteShowsInTheTopBar(t *testing.T) {
@@ -178,8 +179,8 @@ func TestBranchPickerSwitchesBranches(t *testing.T) {
 
 func TestFetchShowsURLSizeAndStatus(t *testing.T) {
 	b := newToolBlock(agent.Event{Tool: "fetch_url", Text: "https://lixbon.com/docs"}, nil)
-	contains(t, ansi.Strip(b.render(80, false)), "Fetch  https://lixbon.com/docs")
-	contains(t, ansi.Strip(b.render(80, false)), "Descargando")
+	contains(t, ansi.Strip(b.render(80, false)), "Fetch   https://lixbon.com/docs")
+	contains(t, ansi.Strip(b.render(80, false)), "descargando")
 	b.finish(agent.Event{Summary: "Recibido 196.6 KB (200 OK)"})
 	contains(t, ansi.Strip(b.render(80, false)), "Recibido 196.6 KB (200 OK)")
 }
@@ -187,15 +188,15 @@ func TestFetchShowsURLSizeAndStatus(t *testing.T) {
 func TestComposerHasRoomAboveIt(t *testing.T) {
 	h := newHarness(t, nil)
 	lines := strings.Split(h.view(), "\n")
-	for i, l := range lines {
-		if strings.HasPrefix(strings.TrimSpace(l), "╭") {
-			if strings.TrimSpace(lines[i-1]) != "" {
-				t.Fatalf("falta aire sobre la caja:\n%s", h.view())
-			}
-			return
-		}
+	// Encima de la fila de la caja va la fila vacía de la banda y, sobre
+	// ella, el aire.
+	i := promptRow(lines)
+	if i < 2 {
+		t.Fatal("no se encontró la caja")
 	}
-	t.Fatal("no se encontró la caja")
+	if strings.TrimSpace(lines[i-2]) != "" {
+		t.Fatalf("falta aire sobre la caja:\n%s", h.view())
+	}
 }
 
 func TestAgentFetchShowsItsOwnBlock(t *testing.T) {
@@ -209,7 +210,7 @@ func TestAgentFetchShowsItsOwnBlock(t *testing.T) {
 	h.send("busca la documentación")
 	h.settle()
 	out := ansi.Strip(h.m.log.text())
-	contains(t, out, "Fetch  "+page.URL+"/docs")
+	contains(t, out, "Fetch   "+page.URL+"/docs")
 	contains(t, out, "Recibido 2.0 KB (200 OK)")
 }
 

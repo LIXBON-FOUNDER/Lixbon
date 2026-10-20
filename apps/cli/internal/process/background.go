@@ -48,6 +48,15 @@ func (b *Background) ReadNew() string {
 	return DecodeOutput(fresh)
 }
 
+// Tail es lo que queda en el buffer, leído o no: para enseñar la salida sin
+// quitársela al agente.
+func (b *Background) Tail() string {
+	b.mu.Lock()
+	all := append([]byte(nil), b.buf...)
+	b.mu.Unlock()
+	return DecodeOutput(all)
+}
+
 func (b *Background) Alive() bool {
 	select {
 	case <-b.done:
@@ -91,12 +100,7 @@ func (m *Manager) Start(dir, command string) (*Background, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	m.mu.Lock()
-	m.seq++
-	bg.ID = fmt.Sprintf("p%d", m.seq)
-	m.procs[bg.ID] = bg
-	m.order = append(m.order, bg.ID)
-	m.mu.Unlock()
+	m.adopt(bg)
 
 	go func() {
 		_ = cmd.Wait()
@@ -104,6 +108,16 @@ func (m *Manager) Start(dir, command string) (*Background, error) {
 		close(bg.done)
 	}()
 	return bg, nil
+}
+
+// adopt le da un identificador al proceso y lo apunta entre los activos.
+func (m *Manager) adopt(bg *Background) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq++
+	bg.ID = fmt.Sprintf("p%d", m.seq)
+	m.procs[bg.ID] = bg
+	m.order = append(m.order, bg.ID)
 }
 
 func (m *Manager) Get(id string) (*Background, bool) {

@@ -154,7 +154,6 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 		root = real
 	}
 	toolbox := tools.NewToolbox(root)
-	toolbox.Web = client
 
 	c := &Chat{
 		Cfg:            cfg,
@@ -173,6 +172,9 @@ func New(cfg config.Config, client *api.Client, opts Options) (*Chat, error) {
 		title:          opts.Title,
 		autotitle:      opts.Autotitle,
 		ephemeral:      opts.Ephemeral,
+	}
+	if client != nil {
+		toolbox.Web = webRelay{c}
 	}
 	s := agent.NewSession(root, toolbox)
 	s.AutoApprove = cfg.AutoApproveTools
@@ -815,9 +817,9 @@ func (c *Chat) Compact(ctx context.Context, keepRecent int) error {
 	return c.CompactWithProgress(ctx, keepRecent, nil)
 }
 
-// CompactWithProgress es Compact contando lo que lleva escrito el resumen:
-// progress recibe los caracteres según llegan (desde otra goroutine).
-func (c *Chat) CompactWithProgress(ctx context.Context, keepRecent int, progress func(written int)) error {
+// CompactWithProgress es Compact enseñando el resumen mientras se escribe:
+// progress recibe lo escrito hasta ahora según llega (desde otra goroutine).
+func (c *Chat) CompactWithProgress(ctx context.Context, keepRecent int, progress func(text string)) error {
 	compacted, err := history.CompactMessages(c.History, func(m []history.Message) (string, error) {
 		if progress == nil {
 			return c.AskQuiet(ctx, m)
@@ -834,7 +836,7 @@ func (c *Chat) CompactWithProgress(ctx context.Context, keepRecent int, progress
 
 // summarize pide el resumen en streaming, sin razonamiento ni búsqueda web y
 // fuera de la conversación (sin conversation_id), para poder contar el avance.
-func (c *Chat) summarize(ctx context.Context, messages []history.Message, progress func(int)) (string, error) {
+func (c *Chat) summarize(ctx context.Context, messages []history.Message, progress func(string)) (string, error) {
 	title := "interno"
 	stream, err := c.Client.ChatStream(ctx, api.ChatRequest{
 		Model: c.Model, Messages: toMaps(messages), ClientID: c.ClientID, Title: &title,
@@ -853,7 +855,7 @@ func (c *Chat) summarize(ctx context.Context, messages []history.Message, progre
 		switch ev.Kind {
 		case sse.Content:
 			text.WriteString(ev.Text)
-			progress(text.Len())
+			progress(text.String())
 		case sse.Usage:
 			_ = json.Unmarshal(ev.Value, &spent)
 		}

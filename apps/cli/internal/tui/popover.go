@@ -41,13 +41,17 @@ func (m *Model) openFrom(y int, zone span, command string) tea.Cmd {
 	return m.dispatch(command)
 }
 
+// chrome son las filas del panel que no son opciones: título, teclas y la
+// cuenta cuando no caben todas.
 func (p *picker) chrome() int {
-	n := 3 + len(p.body)
+	n := 5 + len(p.body)
 	if len(p.body) > 0 {
 		n++
 	}
-	if p.search {
-		n++
+	if opts := p.visible(); p.foot != nil && p.cursor < len(opts) {
+		if extra := p.foot(opts[p.cursor], 80); len(extra) > 0 {
+			n += 1 + len(extra)
+		}
 	}
 	return n
 }

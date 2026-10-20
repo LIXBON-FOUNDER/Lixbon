@@ -1,64 +1,148 @@
 package tui
 
 import (
+	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-// Tamaños del prisma en píxeles: 16 para el login y 12 para la tarjeta de
+// Tamaños del prisma en píxeles: 32 para el login y 24 para la tarjeta de
 // bienvenida. Con medios bloques ocupan size columnas por size/2 filas.
 const (
-	logoSize     = 16
-	cardLogoSize = 12
+	logoSize     = 32
+	cardLogoSize = 24
 )
 
-// logoPixel evalúa el isotipo en una rejilla de size×size: un rombo en cuatro
-// facetas con el destello como cruz de cinco píxeles, que se lee también en
-// tamaños pequeños. El punto solo cabe a partir de 16.
-func logoPixel(size, c, r int) string {
-	k := 32 / float64(size)
-	sc, sr := int(math.Floor(19.8/k)), int(math.Floor(19.4/k))
-	if (c == sc && abs(r-sr) <= 1) || (r == sr && abs(c-sc) <= 1) {
-		return pal.spark
+type rgb [3]float64
+
+func hexRGB(h string) rgb {
+	h = strings.TrimPrefix(h, "#")
+	var c rgb
+	for i := range c {
+		v, _ := strconv.ParseUint(h[i*2:i*2+2], 16, 8)
+		c[i] = float64(v)
 	}
-	if size >= 16 && c == int(math.Floor(23.4/k)) && r == int(math.Floor(22.6/k)) {
-		return pal.dot
+	return c
+}
+
+func (c rgb) hex() string {
+	b := func(v float64) int { return int(math.Max(0, math.Min(255, math.Round(v)))) }
+	return fmt.Sprintf("#%02X%02X%02X", b(c[0]), b(c[1]), b(c[2]))
+}
+
+func (c rgb) mix(o rgb, t float64) rgb {
+	return rgb{c[0] + (o[0]-c[0])*t, c[1] + (o[1]-c[1])*t, c[2] + (o[2]-c[2])*t}
+}
+
+// logoSample es el color del prisma en el punto (u, v) del cuadrado unidad,
+// o false fuera de él: cuatro caras con más luz arriba a la izquierda, un
+// filo de luz arriba y sombra abajo, costuras entre caras, el destello de
+// cuatro puntas con su halo y el punto en la señal.
+func logoSample(u, v float64, bg, ink, shade, sig rgb, faces [4]rgb) (rgb, bool) {
+	const r, cx, cy = 0.43, 0.5, 0.5
+	spkX, spkY, sr := cx+0.105, cy+0.095, 0.13
+	satX, satY, satR := cx+0.29, cy+0.27, 0.042
+	ds := math.Hypot(u-satX, v-satY)
+	if ds <= satR {
+		return sig, true
 	}
-	cx, cy := (float64(c)+0.5)*k-16, (float64(r)+0.5)*k-16
-	if math.Abs(cx)+math.Abs(cy) > 12.8 {
-		return ""
+	dx, dy := u-cx, v-cy
+	d := math.Abs(dx) + math.Abs(dy)
+	if d > r {
+		if ds <= satR*2 {
+			return bg.mix(sig, 0.22), true
+		}
+		return rgb{}, false
 	}
+	star := math.Sqrt(math.Abs(u-spkX)/sr) + math.Sqrt(math.Abs(v-spkY)/sr)
+	if star <= 1 {
+		return ink, true
+	}
+	f := 0
 	switch {
-	case cy < 0 && cx < 0:
-		return pal.f1
-	case cy < 0:
-		return pal.f2
-	case cx < 0:
-		return pal.f3
+	case dy < 0 && dx >= 0:
+		f = 1
+	case dy >= 0 && dx < 0:
+		f = 2
+	case dy >= 0:
+		f = 3
 	}
-	return pal.f4
+	if math.Min(math.Abs(dx), math.Abs(dy)) < 0.012 {
+		return faces[f].mix(bg, 0.75), true
+	}
+	col := faces[f]
+	if g := -(dx + dy) / (2 * r); g > 0 {
+		col = col.mix(ink, g*0.35)
+	} else {
+		col = col.mix(shade, -g*0.45)
+	}
+	if r-d < 0.03 {
+		if f < 2 {
+			col = col.mix(ink, 0.35)
+		} else {
+			col = col.mix(shade, 0.4)
+		}
+	}
+	if star < 2.2 {
+		col = col.mix(ink, (2.2-star)/1.2*0.3)
+	}
+	return col, true
 }
 
-func abs(n int) int {
-	if n < 0 {
-		return -n
+// logoGrid supermuestrea el prisma en size×size píxeles (16 muestras por
+// píxel) con los colores del tema; "" es un píxel vacío.
+func logoGrid(size int) [][]string {
+	bg, ink, shade, sig := hexRGB(pal.bg), hexRGB(pal.spark), hexRGB(pal.dot), hexRGB(pal.acc)
+	faces := [4]rgb{hexRGB(pal.f1), hexRGB(pal.f2), hexRGB(pal.f3), hexRGB(pal.f4)}
+	const ss = 4
+	grid := make([][]string, size)
+	for y := range size {
+		grid[y] = make([]string, size)
+		for x := range size {
+			var acc rgb
+			hit := 0
+			for j := range ss {
+				for i := range ss {
+					u := (float64(x) + (float64(i)+0.5)/ss) / float64(size)
+					v := (float64(y) + (float64(j)+0.5)/ss) / float64(size)
+					if c, ok := logoSample(u, v, bg, ink, shade, sig, faces); ok {
+						acc = rgb{acc[0] + c[0], acc[1] + c[1], acc[2] + c[2]}
+						hit++
+					}
+				}
+			}
+			cov := float64(hit) / ss / ss
+			if cov < 0.12 {
+				continue
+			}
+			mean := rgb{acc[0] / float64(hit), acc[1] / float64(hit), acc[2] / float64(hit)}
+			grid[y][x] = bg.mix(mean, cov).hex()
+		}
 	}
-	return n
+	return grid
 }
 
-// renderLogo dibuja el prisma con medios bloques: cada celda lleva dos píxeles.
-// Sin medios bloques (ASCII) no hay logo.
+var logoCache = map[[2]int][]string{}
+
+// renderLogo dibuja el prisma con medios bloques: cada celda lleva dos
+// píxeles. Sin medios bloques (ASCII) no hay logo.
 func renderLogo(size int) []string {
 	if !glyphs.halfBlocks {
 		return nil
 	}
+	key := [2]int{size, themeVersion}
+	if rows, ok := logoCache[key]; ok {
+		return rows
+	}
+	grid := logoGrid(size)
 	var rows []string
 	for r := 0; r < size; r += 2 {
 		var b strings.Builder
 		for c := 0; c < size; c++ {
-			top, bottom := logoPixel(size, c, r), logoPixel(size, c, r+1)
+			top, bottom := grid[r][c], grid[r+1][c]
 			switch {
 			case top == "" && bottom == "":
 				b.WriteString(" ")
@@ -72,48 +156,13 @@ func renderLogo(size int) []string {
 		}
 		rows = append(rows, b.String())
 	}
+	logoCache[key] = rows
 	return rows
 }
 
-// wordmark son las letras LIXBON en mapas de 5×6 píxeles, pintadas con medios
-// bloques en tres filas.
-var wordmarkGlyphs = map[rune][6]string{
-	'L': {"X....", "X....", "X....", "X....", "X....", "XXXXX"},
-	'I': {"X", "X", "X", "X", "X", "X"},
-	'X': {"X...X", ".X.X.", "..X..", "..X..", ".X.X.", "X...X"},
-	'B': {"XXXX.", "X...X", "XXXX.", "X...X", "X...X", "XXXX."},
-	'O': {".XXX.", "X...X", "X...X", "X...X", "X...X", ".XXX."},
-	'N': {"X...X", "XX..X", "X.X.X", "X..XX", "X...X", "X...X"},
-}
-
-func renderWordmark() []string {
-	if !glyphs.halfBlocks {
-		return []string{sBold.Render("L I X B O N")}
+func abs(n int) int {
+	if n < 0 {
+		return -n
 	}
-	ink := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.ivory))
-	var rows []string
-	for r := 0; r < 6; r += 2 {
-		var b strings.Builder
-		for i, ch := range "LIXBON" {
-			if i > 0 {
-				b.WriteString("  ")
-			}
-			g := wordmarkGlyphs[ch]
-			for c := 0; c < len(g[0]); c++ {
-				top, bottom := g[r][c] == 'X', g[r+1][c] == 'X'
-				switch {
-				case top && bottom:
-					b.WriteString(ink.Render("█"))
-				case top:
-					b.WriteString(ink.Render("▀"))
-				case bottom:
-					b.WriteString(ink.Render("▄"))
-				default:
-					b.WriteString(" ")
-				}
-			}
-		}
-		rows = append(rows, b.String())
-	}
-	return rows
+	return n
 }

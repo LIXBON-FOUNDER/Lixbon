@@ -93,24 +93,47 @@ func (r *screenRig) count(text string) int { return strings.Count(r.screen(), te
 
 func (r *screenRig) dump() string { return fmt.Sprintf("\n%s", r.screen()) }
 
+// promptRow es la fila de la caja de entrada: la última que empieza por la
+// señal ›, ya que la caja va abajo; -1 si no hay caja.
+func promptRow(lines []string) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.HasPrefix(lines[i], "  "+glyphPrompt+" ") {
+			return i
+		}
+	}
+	return -1
+}
+
+// prompts cuenta las filas que parecen una caja de entrada: empiezan por la
+// señal y no tienen columnas (la fila elegida de un menú sí las tiene).
+func prompts(lines []string) int {
+	n := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l, "  "+glyphPrompt+" ") && !strings.Contains(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), "? atajos")), "  ") {
+			n++
+		}
+	}
+	return n
+}
+
 func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 	h := newHarness(t, func(c *configT) { c.Model = "" })
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("LIXBON CLI")
+	rig.waitFor("carpeta  ")
 	rig.waitFor("sin modelo")
 
-	status := rig.rowOf("shift+tab")
-	box := rig.rowOf("╭")
+	status := rig.rowOf("contexto  ")
+	box := promptRow(rig.lines())
 	if status != rig.rows-1 || box != rig.rows-4 {
 		t.Fatalf("la barra debe ir en las últimas filas: caja=%d estado=%d%s", box, status, rig.dump())
 	}
 
 	for _, step := range []string{"/", "c", "l", "\x7f", "\x7f", "\x7f", "/", "c", "o", "\x7f", "\x7f", "\x7f"} {
 		rig.type_(step)
-		if got := rig.count("╭"); got != 1 {
+		if got := prompts(rig.lines()); got != 1 {
 			t.Fatalf("tras %q hay %d cajas de entrada%s", step, got, rig.dump())
 		}
-		if rig.rowOf("╭") != box || rig.rowOf("shift+tab") != status {
+		if promptRow(rig.lines()) != box || rig.rowOf("contexto  ") != status {
 			t.Fatalf("tras %q la barra se movió%s", step, rig.dump())
 		}
 	}
@@ -123,8 +146,8 @@ func TestInputBarStaysPinnedAndNeverDuplicates(t *testing.T) {
 func TestLogoAndHeaderAreAtTheTop(t *testing.T) {
 	h := newHarness(t, nil)
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("LIXBON CLI")
-	if row := rig.rowOf("LIXBON CLI"); row < 1 || row > 4 {
+	rig.waitFor("carpeta  ")
+	if row := rig.rowOf("carpeta  "); row < 1 || row > 10 {
 		t.Fatalf("la cabecera va arriba: fila %d%s", row, rig.dump())
 	}
 	if !strings.ContainsAny(rig.screen(), "▀▄") {
@@ -159,7 +182,7 @@ func TestTranscriptScrollsWithPageKeys(t *testing.T) {
 func TestLogoAndHeaderShowTheWorkspaceFolder(t *testing.T) {
 	h := newHarness(t, nil)
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("LIXBON CLI")
+	rig.waitFor("carpeta  ")
 	if !strings.Contains(rig.screen(), shortPath(h.chat.Workspace)) {
 		t.Fatalf("la cabecera muestra la carpeta de trabajo%s", rig.dump())
 	}
@@ -168,10 +191,10 @@ func TestLogoAndHeaderShowTheWorkspaceFolder(t *testing.T) {
 func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	h := newHarness(t, nil, textReply("respuesta vieja"))
 	rig := startScreen(t, h, 100, 30)
-	rig.waitFor("LIXBON CLI")
+	rig.waitFor("carpeta  ")
 	rig.type_("mensaje viejo\r")
 	rig.waitFor("respuesta vieja")
-	rig.waitGone("esc interrumpe")
+	rig.waitGone("esc para")
 
 	rig.type_("/clear\r")
 	rig.waitFor("contexto limpio")
@@ -179,7 +202,7 @@ func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	if strings.Contains(screen, "respuesta vieja") || strings.Contains(screen, "mensaje viejo") {
 		t.Fatalf("/clear debe borrar la conversación de la pantalla%s", rig.dump())
 	}
-	for _, want := range []string{"LIXBON CLI", shortPath(h.chat.Workspace)} {
+	for _, want := range []string{"carpeta  ", shortPath(h.chat.Workspace)} {
 		if !strings.Contains(screen, want) {
 			t.Fatalf("tras /clear debe seguir viéndose %q%s", want, rig.dump())
 		}
@@ -187,7 +210,7 @@ func TestClearKeepsTheHeaderAndDropsTheConversation(t *testing.T) {
 	if !strings.ContainsAny(screen, "▀▄") {
 		t.Fatalf("tras /clear debe seguir el logo%s", rig.dump())
 	}
-	if rig.rowOf("╭") != rig.rows-4 {
+	if promptRow(rig.lines()) != rig.rows-4 {
 		t.Fatalf("la caja debe seguir fija abajo%s", rig.dump())
 	}
 }
@@ -202,7 +225,7 @@ func TestCtrlTShowsTheTranscriptViewer(t *testing.T) {
 
 	rig.type_("\x14")
 	rig.waitFor("Ctrl+T cierran")
-	if rig.count("╭") != 0 {
+	if prompts(rig.lines()) != 0 {
 		t.Fatalf("el visor ocupa toda la pantalla%s", rig.dump())
 	}
 	rig.type_("\x1b[5~")
@@ -215,7 +238,7 @@ func TestCtrlTShowsTheTranscriptViewer(t *testing.T) {
 	rig.waitFor("línea 100")
 	rig.type_("q")
 	rig.waitGone("Ctrl+T cierran")
-	rig.waitFor("╭")
+	rig.until("la caja vuelve", func() bool { return promptRow(rig.lines()) >= 0 })
 }
 
 func TestWheelScrollsWithoutAnyCommand(t *testing.T) {

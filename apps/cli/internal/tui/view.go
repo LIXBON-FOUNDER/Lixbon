@@ -33,7 +33,8 @@ func (m *Model) View() tea.View {
 
 	var bottom []string
 	if m.running {
-		// Una fila de aire entre el último mensaje y lo que hace el agente.
+		// Una fila de aire entre el último mensaje (o el último paso del riel) y
+		// lo que hace el agente.
 		if lines := m.log.lines(); len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) != "" {
 			bottom = append(bottom, "")
 		}
@@ -49,10 +50,15 @@ func (m *Model) View() tea.View {
 	if height >= breathMinHeight {
 		bottom = append(bottom, "")
 	}
-	panelAt := -1
+	panelAt, inputAt := -1, -1
 	anchored := m.picker != nil && m.picker.anchor != nil
 	if m.picker != nil && !anchored {
-		maxRows := height - len(top) - len(bottom) - 1 - m.picker.chrome()
+		// Debajo del panel quedan el pie y, si cabe, su fila de aire.
+		foot := 1
+		if height >= breathMinHeight {
+			foot = 2
+		}
+		maxRows := height - len(top) - len(bottom) - foot - m.picker.chrome()
 		panelAt = len(bottom)
 		bottom = append(bottom, m.picker.view(width, max(1, maxRows))...)
 	} else {
@@ -65,7 +71,13 @@ func (m *Model) View() tea.View {
 		if len(m.queue) > 0 {
 			bottom = append(bottom, m.queueLine())
 		}
-		bottom = append(bottom, m.inputBox()...)
+		box := m.inputBox()
+		inputAt = len(bottom) + m.inputTop
+		bottom = append(bottom, box...)
+	}
+	// Aire entre la caja y el pie: sin él, el pie parecía parte de la caja.
+	if height >= breathMinHeight {
+		bottom = append(bottom, "")
 	}
 	bottom = append(bottom, m.footer())
 	for i, line := range bottom {
@@ -80,6 +92,7 @@ func (m *Model) View() tea.View {
 		cut := len(bottom) - height
 		bottom = bottom[cut:]
 		panelAt -= cut
+		inputAt -= cut
 		liveN = max(0, liveN-cut)
 	}
 	m.barShown = len(top) > 0
@@ -116,6 +129,7 @@ func (m *Model) View() tea.View {
 	if panelAt >= 0 {
 		m.panelY = len(top) + rows + panelAt
 	}
+	m.compactWindow(window)
 	if !m.sel.empty() {
 		for y, line := range window {
 			window[y] = m.highlight(m.winTop+y, line)
@@ -137,6 +151,15 @@ func (m *Model) View() tea.View {
 	}
 	m.placeImages(screen)
 	v := tea.NewView(strings.Join(screen, "\n"))
+	// El cursor es el de la terminal, una barra, y no un bloque pintado: va
+	// sobre la caja cuando se puede escribir en ella.
+	m.inputY = -1
+	if c := m.input.Cursor(); c != nil && inputAt >= 0 && m.picker == nil && !m.shortcutsOpen {
+		m.inputY = len(top) + len(window) + gap + inputAt
+		c.Position.X += 2
+		c.Position.Y += m.inputY
+		v.Cursor = c
+	}
 	v.AltScreen = true
 	// AllMotion y no CellMotion: sin botón pulsado también llega el
 	// movimiento, que es lo que ilumina las zonas clicables al pasar por encima.
@@ -177,8 +200,6 @@ func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
 	// (modelo, razonamiento, modo) vale desde su siguiente paso.
 	case m.barShown && msg.Y == 0 && m.picker == nil:
 		switch {
-		case m.barModel.has(msg.X):
-			return m.openFrom(0, m.barModel, "/model"), true
 		case m.barPlan.has(msg.X) && !m.chat.Client.Generic:
 			return m.openFrom(0, m.barPlan, "/usage"), true
 		case m.barBranch.has(msg.X):
@@ -186,6 +207,8 @@ func (m *Model) clickChrome(msg tea.MouseClickMsg) (tea.Cmd, bool) {
 		}
 	case msg.Y == m.footY && m.picker == nil:
 		switch {
+		case m.footModel.has(msg.X):
+			return m.openFrom(msg.Y, m.footModel, "/model"), true
 		case m.footProcs.has(msg.X):
 			return m.openFrom(msg.Y, m.footProcs, "/ps"), true
 		case m.footMode.has(msg.X):

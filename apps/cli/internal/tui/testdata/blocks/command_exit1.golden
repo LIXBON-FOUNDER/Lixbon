@@ -1,12 +1,12 @@
 ── 40 ──
- ✗  $  npm test          exit 1 · 2.0 s
+ ✗ $       npm test      exit 1   2.0 s
    │ FAIL src/app.test.js
    │ 1 failed
 ── 80 ──
- ✗  $  npm test                                                  exit 1 · 2.0 s
+ ✗ $       npm test                                              exit 1   2.0 s
    │ FAIL src/app.test.js
    │ 1 failed
 ── 120 ──
- ✗  $  npm test                                                                                          exit 1 · 2.0 s
+ ✗ $       npm test                                                                                      exit 1   2.0 s
    │ FAIL src/app.test.js
    │ 1 failed

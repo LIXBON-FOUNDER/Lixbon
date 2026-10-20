@@ -103,12 +103,18 @@ type Model struct {
 	// sesión se puede cambiar mientras el agente trabaja.
 	turnMode string
 	// Zonas clicables del último fotograma.
-	barShown          bool
-	barModel, barPlan span
-	footMode          span
+	barShown           bool
+	barPlan, footModel span
+	footMode           span
 
 	// alwaysAllowed avisa en el pie de que no se pregunta más.
 	alwaysAllowed bool
+	// autoRunDefault es si el agente ejecuta comandos sin preguntar al
+	// arrancar (configuración o --auto-run): el modo agente vuelve a él.
+	autoRunDefault bool
+	// inputTop es la fila de la caja en la que empieza el texto; inputY, la de
+	// la pantalla (-1 si la caja no se ve).
+	inputTop, inputY int
 
 	// liveReal son los tokens reales de los pasos terminados; liveChars y
 	// charsPerToken estiman el paso en curso.
@@ -143,6 +149,10 @@ type Model struct {
 	// imageEntry es la fila «Mostrar» abierta; pendingImage, la imagen que
 	// llegó antes que su fila.
 	imageEntry   *entry
+	// liveTools son los pasos que dejaron un comando en segundo plano: se
+	// repintan cuando cambia cuántos siguen vivos (● pasa a ✓).
+	liveTools []*entry
+	liveSeen  int
 	pendingImage *tools.ShownImage
 	readGroup    *entry
 	browserGroup *entry
@@ -160,6 +170,8 @@ type Model struct {
 
 	remote     *remoteHost
 	compacting *compactState
+	// folding es la conversación plegándose tras compactarla.
+	folding *foldState
 	// answerEntry es la última respuesta del turno; anchorTop, la que el
 	// siguiente fotograma debe dejar arriba de la ventana.
 	answerEntry, anchorTop *entry
@@ -230,7 +242,7 @@ func New(c *chat.Chat, opts Options) *Model {
 	ta.MinHeight = 1
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
-	ta.SetVirtualCursor(true)
+	ta.SetVirtualCursor(false)
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {
 			return glyphPrompt + " "
@@ -258,6 +270,7 @@ func New(c *chat.Chat, opts Options) *Model {
 	}
 	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
+	m.autoRunDefault = c.Session.AutoRunCommands
 	m.refreshContext()
 	return m
 }
@@ -284,8 +297,9 @@ func (m *Model) attachImage(img tools.ShownImage) {
 		return
 	}
 	b.image = &shownImage{path: img.Path, caption: img.Caption, thumb: newThumb(img.Path)}
+	b.meta = "clic la abre"
 	if img.W > 0 {
-		b.meta = fmt.Sprintf("%d×%d", img.W, img.H)
+		b.meta = fmt.Sprintf("%d×%d   clic la abre", img.W, img.H)
 	}
 	m.pendingImage = nil
 	m.refresh(m.imageEntry)
@@ -319,7 +333,6 @@ func (m *Model) add(b block) *entry {
 	rail := railNone
 	if m.railing {
 		rail = railMid
-		m.stepGap(b)
 	}
 	e := m.log.addRail(b, rail)
 	if m.scroll > 0 {
@@ -329,27 +342,6 @@ func (m *Model) add(b block) *entry {
 		m.observe(e.text)
 	}
 	return e
-}
-
-// stepGap deja una fila del riel en blanco antes de cada paso del turno, para
-// que no se lea todo junto. No va justo debajo de la cabecera ni dobla una
-// fila en blanco.
-func (m *Model) stepGap(b block) {
-	if tb, ok := b.(textBlock); ok && tb == "" {
-		return
-	}
-	n := len(m.log.entries)
-	if n == 0 {
-		return
-	}
-	last := m.log.entries[n-1]
-	if last == m.turnHead || last.b == block(textBlock("")) || last.text == "" {
-		return
-	}
-	m.log.addRail(textBlock(""), railMid)
-	if m.scroll > 0 {
-		m.scroll++
-	}
 }
 
 // addOutside añade un bloque fuera del riel aunque el turno lo tenga abierto.
@@ -421,13 +413,11 @@ func (m *Model) toggleDetail() {
 func placeholderFor(c *chat.Chat) string {
 	switch {
 	case c.Session.PlanMode:
-		return "modo plan: el agente explora y propone, sin tocar nada"
-	case c.Mode == chat.ModeAgent:
-		return "describe qué hacer en el workspace, o / para los comandos"
+		return "Pídele un plan a lixbon"
 	case c.Mode == chat.ModeDelegate:
-		return "escribe, o pulsa / para los comandos"
+		return "Escribe, o / para los comandos"
 	}
-	return "pregunta lo que quieras, o / para los comandos"
+	return "Pídele algo a lixbon"
 }
 
 func (m *Model) refreshContext() {
@@ -435,14 +425,6 @@ func (m *Model) refreshContext() {
 	m.sessionTokens = m.chat.SessionTokens
 	m.input.Placeholder = placeholderFor(m.chat)
 	m.syncHeader()
-}
-
-// modeName es el modo que se muestra: plan es un modo del agente.
-func (m *Model) modeName() string {
-	if m.chat.Mode == chat.ModeAgent && m.chat.Session.PlanMode {
-		return "plan"
-	}
-	return m.chat.Mode
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -483,6 +465,8 @@ func inputStyles() textarea.Styles {
 		st.Placeholder = sDim2
 		st.Prompt = sAccent
 	}
+	// El cursor de la terminal, en barra y del color de la señal.
+	styles.Cursor.Shape, styles.Cursor.Color, styles.Cursor.Blink = tea.CursorBar, cAccent, true
 	return styles
 }
 

@@ -83,7 +83,7 @@ func TestSixelMovesWithTheTranscript(t *testing.T) {
 
 	var cleared bool
 	// Más estrecha: la miniatura encoge y el texto de encima se reenvuelve.
-	h.update(tea.WindowSizeMsg{Width: 40, Height: 30})
+	h.update(tea.WindowSizeMsg{Width: 30, Height: 30})
 	h.m.View()
 	deadline := time.After(3 * time.Second)
 	for !cleared {

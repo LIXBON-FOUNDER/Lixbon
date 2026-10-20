@@ -94,15 +94,15 @@ func (b noticeBlock) render(width int, _ bool) string {
 	case kindNote:
 		style = sDim
 	case kindOK:
-		head = mark(glyphDot, sOK)
+		head, style = mark(glyphs.check, sOK), sSoft
 	case kindErr:
-		head = mark(glyphDot, sErr)
+		head, style = mark(glyphs.cross, sErr), sSoft
 	case kindWarn:
-		head = mark("!", sWarn)
+		head, style = mark(glyphWarn, sWarn), sSoft
 	case kindInfo:
-		head = mark(glyphInfo, sDim2)
+		head, style = mark(glyphInfo, sDim), sSoft
 	case kindAsk:
-		head, style = mark("?", sWarn), sBold
+		head, style = mark(glyphWait, sWarn), sInk
 	}
 	lines := wrapText(b.text, width-4)
 	for i, l := range lines {
@@ -194,31 +194,27 @@ func (b userBlock) render(width int, _ bool) string {
 }
 
 func (b userBlock) bubble(width int) string {
+	// Lo que pides va en una banda de punta a punta, con la señal › delante.
 	text := strings.TrimSpace(imgMarker.ReplaceAllString(b.text, ""))
-	limit := max(8, width-5)
+	limit := max(8, width-8)
 	var rows []string
 	if text != "" {
 		rows = wrapText(text, limit)
 	}
-	var chips []string
-	for _, c := range b.chips {
-		chips = append(chips, ansi.Truncate(c.label(), limit, glyphEllipsis))
-	}
-	fill := 0
-	for _, r := range append(append([]string{}, rows...), chips...) {
-		fill = max(fill, ansi.StringWidth(r))
-	}
-	bar := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.sand)).Background(lipgloss.Color(pal.surf))
-	surf := lipgloss.NewStyle().Background(lipgloss.Color(pal.surf))
-	line := func(text string, fg string) string {
-		return " " + bar.Render(glyphEdge) + surf.Foreground(lipgloss.Color(fg)).Render(" "+text+strings.Repeat(" ", fill-ansi.StringWidth(text))+" ")
-	}
 	var out []string
-	for _, r := range rows {
-		out = append(out, line(r, pal.ink))
+	for i, r := range rows {
+		lead := "  "
+		if i == 0 {
+			lead = sAccent.Render(glyphPrompt) + " "
+		}
+		out = append(out, padRow(lead+sInk.Render(r), pal.surf2, width))
 	}
-	for _, c := range chips {
-		out = append(out, line(c, pal.soft))
+	for i, c := range b.chips {
+		lead := "  "
+		if i == 0 && len(rows) == 0 {
+			lead = sAccent.Render(glyphPrompt) + " "
+		}
+		out = append(out, padRow(lead+sSoft.Render(ansi.Truncate(c.label(), limit, glyphEllipsis)), pal.surf2, width))
 	}
 	return strings.Join(out, "\n")
 }
@@ -346,6 +342,9 @@ type toolBlock struct {
 	diff    *diffView
 	answers *askAnswers
 	image   *shownImage
+	// live dice si el comando que dejó en segundo plano sigue vivo: mientras
+	// lo esté, su marca es ● y no ✓.
+	live func() bool
 }
 
 // shownImage es la imagen que el agente enseñó con show_image: su miniatura
@@ -359,14 +358,16 @@ func (s *shownImage) render(width int) []string {
 	if s == nil {
 		return nil
 	}
+	// Una miniatura, no la imagen: 40 columnas por 7 filas como mucho, para
+	// que no empuje el turno. «clic la abre» va a la derecha del paso.
 	var out []string
-	for _, l := range s.thumb.lines(min(72, width-8), 20) {
+	for _, l := range s.thumb.lines(min(40, width-8), 7) {
 		out = append(out, pad+l)
 	}
 	if s.caption != "" {
 		out = append(out, pad+sSoft.Render(ansi.Truncate(s.caption, max(8, width-len(pad)-1), glyphEllipsis)))
 	}
-	return append(out, pad+sDim2.Render("clic la abre en el navegador"))
+	return out
 }
 
 func (b *toolBlock) imageAt(int, int) string {
@@ -419,6 +420,11 @@ func (b *toolBlock) finish(e agent.Event) {
 		b.setOutput(e.Result)
 		return
 	}
+	if e.Tool == "show_image" || b.image != nil {
+		// El resultado de show_image es una nota para el modelo («ya la ve»):
+		// el usuario ya tiene la miniatura.
+		return
+	}
 	b.result = e.Summary
 }
 
@@ -440,6 +446,11 @@ func (b *toolBlock) setOutput(result string) {
 	case strings.HasPrefix(body, "[background "):
 		id, after, _ := strings.Cut(strings.TrimPrefix(body, "[background "), "]")
 		b.code, body = "bg:"+id, strings.TrimSpace(after)
+		// «en marcha» (o que se mandó al fondo) ya lo dicen ● y «en segundo
+		// plano»; la fila es para el modelo. Que terminó sí se enseña.
+		if status, rest, _ := strings.Cut(body, "\n"); !strings.HasPrefix(status, "terminó") {
+			body = rest
+		}
 	}
 	body = strings.ReplaceAll(ansi.Strip(body), "\t", "    ")
 	b.output = nil
@@ -476,7 +487,7 @@ func (b *toolBlock) commandStatus() string {
 	case b.code == "error":
 		return sErr.Render("error")
 	case strings.HasPrefix(b.code, "bg:"):
-		return sDim.Render("en segundo plano " + glyphSep + " " + strings.TrimPrefix(b.code, "bg:"))
+		return sDim.Render("en segundo plano   " + strings.TrimPrefix(b.code, "bg:"))
 	case b.code == "0":
 		return sOK.Render("exit 0")
 	case b.code != "":
@@ -487,7 +498,12 @@ func (b *toolBlock) commandStatus() string {
 
 // dot es el estado delante de la etiqueta: el brillo mientras corre, ✓ hecho,
 // ✗ fallido, ◌ esperando y − interrumpido.
-func (b *toolBlock) dot() string { return stateMark(b.state, b.spin) }
+func (b *toolBlock) dot() string {
+	if b.state == toolDone && b.live != nil && b.live() {
+		return sAccent.Render(glyphDot)
+	}
+	return stateMark(b.state, b.spin)
+}
 
 func stateMark(state toolState, spin *int) string {
 	switch state {
@@ -496,7 +512,10 @@ func stateMark(state toolState, spin *int) string {
 		if spin != nil && !reducedMotion() {
 			frame = glyphs.spin[*spin%len(glyphs.spin)]
 		}
-		return sBeige.Render(frame)
+		if spin == nil {
+			frame = glyphDot
+		}
+		return sAccent.Render(frame)
 	case toolWaiting:
 		return sWarn.Render(glyphWait)
 	case toolFailed:
@@ -522,21 +541,22 @@ func (b *toolBlock) label() string {
 func (b *toolBlock) header(width int) string {
 	left := " " + b.dot() + " " + chip(b.label(), b.tone, b.state == toolRunning)
 	if b.target != "" {
-		target := sBeige.Render(b.target)
-		if b.label() == "$" {
-			target = sInk.Render(b.target)
-		}
-		left += " " + target
+		left += " " + sInk.Render(b.target)
 	}
 	right := ""
 	switch {
 	case b.state == toolWaiting:
-		right = sWarn.Render("esperando")
-	case b.agentCommand() && b.state != toolRunning && b.state != toolStopped:
+		right = sWarn.Render("espera tu permiso")
+		if b.verb == verbs("ask_user")[0] {
+			right = sWarn.Render("esperando tus respuestas")
+		}
+	case b.command && b.state != toolRunning && b.state != toolStopped:
 		right = b.commandStatus()
 		if b.meta != "" {
-			right += sDim.Render(" " + glyphSep + " " + b.meta)
+			right = joinMeta(right, sDim.Render(b.meta))
 		}
+	case b.state == toolFailed:
+		right = sErr.Render(ansi.Truncate(firstNonEmpty(b.result, "falló"), max(10, width/3), glyphEllipsis))
 	case b.counts:
 		right = counts(b.adds, b.dels)
 	case b.meta != "":
@@ -544,6 +564,17 @@ func (b *toolBlock) header(width int) string {
 	}
 	return fitRight(left, joinMeta(thoughtMeta(b.thought), right), width)
 }
+
+// sub es una fila que cuelga de un paso: dos columnas más adentro.
+func sub(text string, width int) string {
+	return ansi.Truncate(pad+text, max(1, width-1), glyphEllipsis)
+}
+
+// outLine es una fila de la salida de un comando: cuelga del paso con un
+// riel fino; outEnd la cierra con └ (cuántas líneas, ctrl+o).
+func outLine(text string, width int) string { return sub(sTrack.Render(glyphRail)+" "+text, width) }
+
+func outEnd(text string, width int) string { return sub(sTrack.Render(glyphCorner)+" "+text, width) }
 
 func (b *toolBlock) render(width int, open bool) string {
 	out := []string{b.header(width)}
@@ -559,8 +590,7 @@ func (b *toolBlock) render(width int, open bool) string {
 		return strings.Join(append(out, b.commandTail(width)...), "\n")
 	}
 	if len(b.output) > 0 {
-		rail := pad + sDim2.Render(glyphRail) + " "
-		line := func(l string) string { return rail + sPrimary.Render(ansi.Truncate(l, max(1, width-6), glyphEllipsis)) }
+		line := func(l string) string { return outLine(sSoft.Render(l), width) }
 		if open || len(b.output) <= outputInline {
 			for _, l := range b.output {
 				out = append(out, line(l))
@@ -570,7 +600,7 @@ func (b *toolBlock) render(width int, open bool) string {
 				out = append(out, line(l))
 			}
 			hidden := len(b.output) - outputHead2 - outputTail
-			out = append(out, rail+sDim.Render(fmt.Sprintf("%s %d líneas", glyphEllipsis, hidden))+sDim2.Render(" "+glyphSep+" ctrl+o"))
+			out = append(out, outLine(sDim.Render(fmt.Sprintf("%s %s más   ctrl+o", glyphEllipsis, noun(hidden, "línea", "líneas"))), width))
 			for _, l := range b.output[len(b.output)-outputTail:] {
 				out = append(out, line(l))
 			}
@@ -585,93 +615,54 @@ func (b *toolBlock) render(width int, open bool) string {
 // commandTail es lo que se ve de un comando plegado: nada si fue bien; si
 // falló, sus últimas líneas y cuántas hay en total.
 func (b *toolBlock) commandTail(width int) []string {
-	rail := pad + sDim2.Render(glyphRail) + " "
-	corner := pad + sDim2.Render(glyphCorner) + " "
 	switch {
 	case b.state == toolStopped:
-		return []string{corner + sWarn.Render("interrumpido")}
+		return []string{sub(sWarn.Render(glyphWarn)+" "+sSoft.Render("interrumpido"), width)}
 	case b.state != toolFailed:
 		return nil
 	}
 	var out []string
 	tail := b.output[max(0, len(b.output)-outputHead2):]
 	for _, l := range tail {
-		out = append(out, rail+sPrimary.Render(ansi.Truncate(l, max(1, width-6), glyphEllipsis)))
+		out = append(out, outLine(sSoft.Render(l), width))
 	}
 	if len(b.output) > len(tail) {
-		out = append(out, corner+sDim.Render(noun(len(b.output), "línea", "líneas"))+sDim2.Render(" "+glyphSep+" ctrl+o"))
+		out = append(out, outEnd(sDim.Render(noun(len(b.output), "línea", "líneas")+"   ctrl+o"), width))
 	}
 	if b.check != "" {
-		out = append(out, corner+sDim2.Render(b.check))
+		out = append(out, outEnd(sDim.Render(b.check), width))
 	}
 	return out
 }
 
+// footer es lo que queda bajo el paso cuando no cabe a la derecha: lo que
+// comprobó después (gofmt…) o que se interrumpió.
 func (b *toolBlock) footer(width int) string {
-	corner := pad + sDim2.Render(glyphCorner) + " "
-	if b.fetch && b.state == toolRunning {
-		return corner + sDim.Render("Descargando"+glyphEllipsis)
-	}
-	if b.state == toolRunning || b.state == toolWaiting {
+	switch {
+	case b.fetch && b.state == toolRunning:
+		return sub(sDim.Render("descargando"+glyphEllipsis), width)
+	case b.state == toolRunning || b.state == toolWaiting:
 		return ""
+	case b.state == toolStopped:
+		return sub(sWarn.Render(glyphWarn)+" "+sSoft.Render("interrumpido"), width)
 	}
-	extra := ""
+	var parts []string
+	if !b.command && b.state != toolFailed && b.diff == nil && b.result != "" && b.result != b.meta {
+		parts = append(parts, b.result)
+	}
 	if b.check != "" {
-		extra = " " + glyphSep + " " + b.check
+		parts = append(parts, b.check)
 	}
-	if b.state == toolStopped {
-		return corner + sWarn.Render("interrumpido")
-	}
-	if b.command {
-		var status string
-		switch {
-		case b.code == "timeout":
-			status = sWarn.Render("tiempo agotado")
-		case b.code == "error":
-			status = sErr.Render("error")
-		case strings.HasPrefix(b.code, "bg:"):
-			status = sDim.Render("en segundo plano " + glyphSep + " " + strings.TrimPrefix(b.code, "bg:"))
-		case b.code == "0":
-			status = sOK.Render("exit 0")
-		case b.code != "":
-			status = sErr.Render("exit " + b.code)
-		default:
-			status = sDim.Render(firstNonEmpty(b.result, "hecho"))
-		}
-		tail := ""
-		if len(b.output) > 0 {
-			tail = " " + glyphSep + " " + noun(len(b.output), "línea", "líneas")
-		}
-		if b.state == toolFailed && b.code != "timeout" {
-			return failRow(corner, ansi.Strip(status)+tail+extra, width)
-		}
-		return corner + status + sDim.Render(tail) + sDim2.Render(extra)
-	}
-	summary := b.result
-	if b.state == toolFailed {
-		return failRow(corner, firstNonEmpty(summary, "falló")+extra, width)
-	}
-	// Bien hecho, el diff ya lo cuenta.
-	if b.diff != nil {
-		summary = ""
-	}
-	if summary == "" && b.check == "" {
+	if len(parts) == 0 {
 		return ""
 	}
-	if summary == "" {
-		return corner + sDim2.Render(b.check)
-	}
-	return corner + sDim.Render(summary) + sDim2.Render(extra)
+	return sub(sDim.Render(strings.Join(parts, "   ")), width)
 }
 
-// failRow pinta un fallo con la fila tintada hasta el margen: es lo único que
-// no puede pasar desapercibido.
-func failRow(corner, text string, width int) string {
-	room := max(4, width-ansi.StringWidth(corner)-1)
-	text = ansi.Truncate(text, room, glyphEllipsis)
-	text += strings.Repeat(" ", max(0, room-ansi.StringWidth(text)))
-	tint := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.delFg)).Background(lipgloss.Color(pal.delBg))
-	return corner + tint.Render(text)
+// failRow pinta un fallo dentro de un grupo: el motivo en coral, sin fondo.
+func failRow(lead, text string, width int) string {
+	room := max(4, width-ansi.StringWidth(lead)-1)
+	return lead + sErr.Render(ansi.Truncate(text, room, glyphEllipsis))
 }
 
 // ── lecturas agrupadas ───────────────────────────────────────────────────
@@ -712,11 +703,14 @@ func (b *readGroupBlock) foldedRow(width int) []string {
 		it := b.items[0]
 		text = glyphs.fold + " " + firstNonEmpty(readPast[it.tool], verbs(it.tool)[0]) + " " + it.target
 	}
-	right := sDim2.Render(seconds(b.elapsed))
+	right := sDim.Render(seconds(b.elapsed))
 	if len(b.items) == 1 {
-		right = sDim2.Render(b.items[0].meta)
+		right = sDim.Render(b.items[0].meta)
 	}
-	out := []string{fitRight(" "+sDim2.Render(ansi.Truncate(text, max(10, width-24), glyphEllipsis)), joinMeta(thoughtMeta(thoughts...), right), width)}
+	if b.folds() {
+		right = joinMeta(right, sDim.Render("ctrl+o"))
+	}
+	out := []string{fitRight(" "+sDim.Render(ansi.Truncate(text, max(10, width-24), glyphEllipsis)), joinMeta(thoughtMeta(thoughts...), right), width)}
 	for _, it := range b.items {
 		if it.failed {
 			out = append(out, failedStep(chip(verbs(it.tool)[0], toneRead, false), it.target, it.summary, width))
@@ -733,28 +727,45 @@ func failedStep(label, target, reason string, width int) string {
 
 // summaryText es «Exploró 2 archivos · 3 búsquedas».
 func (b *readGroupBlock) summaryText() string {
-	files, searches, other := 0, 0, 0
+	files, other := 0, 0
+	var searches []string
 	for _, it := range b.items {
 		switch it.tool {
 		case "read_file", "outline", "read_output":
 			files++
 		case "search", "find_files", "web_search", "list_files":
-			searches++
+			searches = append(searches, it.target)
 		default:
 			other++
 		}
 	}
 	var parts []string
 	if files > 0 {
-		parts = append(parts, noun(files, "archivo", "archivos"))
+		parts = append(parts, "leyó "+noun(files, "archivo", "archivos"))
 	}
-	if searches > 0 {
-		parts = append(parts, noun(searches, "búsqueda", "búsquedas"))
+	switch {
+	case len(searches) == 1 && searches[0] != "":
+		what := ansi.Truncate(searches[0], 40, glyphEllipsis)
+		if !strings.HasPrefix(what, "«") {
+			what = "«" + what + "»"
+		}
+		parts = append(parts, "buscó "+what)
+	case len(searches) > 0:
+		parts = append(parts, "hizo "+noun(len(searches), "búsqueda", "búsquedas"))
 	}
 	if other > 0 {
-		parts = append(parts, noun(other, "consulta", "consultas"))
+		parts = append(parts, "hizo "+noun(other, "consulta", "consultas"))
 	}
-	return "Exploró " + strings.Join(parts, " "+glyphSep+" ")
+	text := "Exploró"
+	switch len(parts) {
+	case 0:
+	case 1:
+		text = parts[0]
+	default:
+		text = strings.Join(parts[:len(parts)-1], ", ") + " y " + parts[len(parts)-1]
+	}
+	r := []rune(text)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
 }
 
 func (b *readGroupBlock) render(width int, open bool) string {
@@ -801,7 +812,7 @@ func (b *readGroupBlock) render(width int, open bool) string {
 	if other > 0 {
 		parts = append(parts, noun(other, "consulta", "consultas"))
 	}
-	summary := sInk.Render(strings.Join(parts, " "+glyphSep+" "))
+	summary := sInk.Render(strings.Join(parts, ", "))
 	state := toolDone
 	if failed > 0 {
 		state = toolFailed
@@ -818,10 +829,17 @@ func (b *readGroupBlock) render(width int, open bool) string {
 		thoughts = append(thoughts, it.thought)
 	}
 	head := " " + stateMark(state, b.spin) + " " + chip(verb, toneRead, b.live) + " " + summary
+	meta := joinMeta(thoughtMeta(thoughts...), sDim.Render(seconds(b.elapsed)))
 	if !b.live {
-		head = " " + sDim.Render(glyphs.unfold+" "+b.summaryText())
+		fold := glyphs.fold
+		if open {
+			fold = glyphs.unfold
+		} else {
+			meta = sDim.Render("ctrl+o")
+		}
+		head = " " + sDim.Render(fold+" "+b.summaryText())
 	}
-	out := []string{fitRight(head, joinMeta(thoughtMeta(thoughts...), sDim.Render(seconds(b.elapsed))), width)}
+	out := []string{fitRight(head, meta, width)}
 	if open {
 		for i, it := range b.items {
 			rail := glyphRail
@@ -1007,19 +1025,19 @@ func (b *todoBlock) render(width int, _ bool) string {
 			done++
 		}
 	}
-	left := mark(glyphDot, sOK) + sBold.Render("Planificar") + "  " + sSoft.Render(noun(len(b.items), "paso", "pasos"))
-	out := []string{fitRight(left, sDim.Render(fmt.Sprintf("%d/%d", done, len(b.items))), width)}
+	left := " " + stateMark(toolDone, nil) + " " + chip("Tareas", toneOther, false) + " " + sInk.Render(fmt.Sprintf("%d de %d", done, len(b.items)))
+	out := []string{left}
 	for _, it := range b.items {
-		var glyph, text string
+		var row string
 		switch it.Status {
 		case "done":
-			glyph, text = sOK.Render(glyphDone), sDim2.Strikethrough(true).Render(it.Text)
+			row = sDim.Render(glyphDone + " " + it.Text)
 		case "doing":
-			glyph, text = sAccent.Render(glyphDoing), sBold.Render(it.Text)
+			row = sAccent.Render(glyphDoing) + " " + sInk.Render(it.Text)
 		default:
-			glyph, text = sDim2.Render(glyphTodo), sSoft.Render(it.Text)
+			row = sSoft.Render(glyphTodo + " " + it.Text)
 		}
-		out = append(out, ansi.Truncate(pad+glyph+" "+text, max(1, width-1), glyphEllipsis))
+		out = append(out, sub(row, width))
 	}
 	return strings.Join(out, "\n")
 }
@@ -1052,9 +1070,13 @@ func (b answerBlock) render(width int, _ bool) string {
 		lines = lines[:len(lines)-1]
 	}
 	for i, l := range lines {
-		if i == 0 && !b.bare {
+		switch {
+		case i == 0 && !b.bare:
 			lines[i] = mark(glyphBrand, sAccent) + l
-		} else {
+		case b.bare:
+			// Tras ┗, la respuesta va fuera del riel, dos columnas adentro.
+			lines[i] = "  " + l
+		default:
 			lines[i] = pad + l
 		}
 	}
@@ -1161,17 +1183,10 @@ func (b reportBlock) render(width int, _ bool) string {
 	return strings.Join(out, "\n")
 }
 
-// meter es la barra de cells celdas, un trazo grueso sobre una pista fina:
-// acento hasta 60 %, ámbar hasta 85 % y rojo después.
+// meter es la barra de cells celdas: lo usado en tinta, grueso, sobre una
+// pista fina. El aviso lo da el color del número, no la barra.
 func meter(pct float64, cells int) string {
 	pct = max(0, min(100, pct))
 	filled := int(pct*float64(cells)/100 + 0.5)
-	style := sAccent
-	switch {
-	case pct >= ctxFull:
-		style = sErr
-	case pct >= ctxWarn:
-		style = sWarn
-	}
-	return style.Render(strings.Repeat(glyphMeterOn, filled)) + sTrack.Render(strings.Repeat(glyphMeterOff, cells-filled))
+	return sInk.Render(strings.Repeat(glyphMeterOn, filled)) + sTrack.Render(strings.Repeat(glyphMeterOff, cells-filled))
 }

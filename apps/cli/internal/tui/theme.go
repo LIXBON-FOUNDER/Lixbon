@@ -12,16 +12,20 @@ import (
 	"lixbon.com/cli/internal/config"
 )
 
-// palette son los tokens de lixbon.com. El acento es solo para estado.
+// palette son dos tintas (el fondo y la tinta, con los grises como tinta con
+// menos fuerza) y una señal: el acento marca dónde estás, nunca decora. El
+// verde, el ámbar y el coral solo pintan el glifo de un estado.
 type palette struct {
 	dark bool
 
-	bg, ink, body, soft, muted, faint, rule, surf, surf2 string
-	acc, accDeep, olive, ivory, sand                     string
-	ok, warn, err, info, code                            string
-	addBg, addFg, delBg, delFg                           string
-	kw, str, fn, ty, num, com                            string
-	f1, f2, f3, f4, spark, dot                           string
+	// surf es el fondo de los paneles y surf2 la banda: tu mensaje, la caja
+	// y la fila elegida. rail es el riel del turno.
+	bg, ink, body, soft, muted, faint, rule, surf, surf2, rail string
+	acc, accDeep, olive, ivory, sand                           string
+	ok, warn, err, info, code                                  string
+	addBg, addFg, delBg, delFg                                 string
+	kw, str, fn, ty, num, com                                  string
+	f1, f2, f3, f4, spark, dot                                 string
 	// shimmer: base, medio y pico del brillo que recorre la etiqueta viva.
 	shBase, shMid, shHigh string
 	// chipLive es el fondo de la etiqueta de una herramienta en marcha.
@@ -30,25 +34,25 @@ type palette struct {
 
 var darkPalette = palette{
 	dark: true,
-	bg:   "#0E0E0E", ink: "#F2F2F0", body: "#D6D6D3", soft: "#B0B0AD", muted: "#7C7C79", faint: "#5E5E5C",
-	rule: "#2A2A2A", surf: "#1C1C1C", surf2: "#262626",
-	acc: "#B4C64E", accDeep: "#8CA038", olive: "#66733A", ivory: "#DCD6BC", sand: "#C7BE9F",
-	ok: "#86D694", warn: "#E8C872", err: "#F08C7C", info: "#8EC5FF", code: "#CBD69B",
-	addBg: "#0D3A17", addFg: "#7EE08F", delBg: "#4A1214", delFg: "#FF9C92",
+	bg:   "#0B0B0A", ink: "#EDECE6", body: "#D3D2CC", soft: "#B9B8B2", muted: "#85847F", faint: "#64635E",
+	rule: "#262624", surf: "#141413", surf2: "#1F1F1D", rail: "#45453F",
+	acc: "#C8E06A", accDeep: "#A9C04A", olive: "#2C2C29", ivory: "#EDECE6", sand: "#E4E3DD",
+	ok: "#7FD38E", warn: "#E7C35A", err: "#F08A78", info: "#8EC5FF", code: "#E4E3DD",
+	addBg: "#132317", addFg: "#7FD38E", delBg: "#2A1614", delFg: "#F08A78",
 	kw: "#E59AD6", str: "#F2C98A", fn: "#8EC5FF", ty: "#C3B4FF", num: "#F5D98A", com: "#6A6A65",
-	f1: "#DCD6BC", f2: "#C7BE9F", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#FCFAEF",
-	shBase: "#9E9681", shMid: "#D8CFAD", shHigh: "#FCFAEF", chipLive: "#2A2F18",
+	f1: "#ECEBE5", f2: "#ABAAA3", f3: "#53534E", f4: "#33332F", spark: "#FAF9F4", dot: "#151514",
+	shBase: "#85847F", shMid: "#B9B8B2", shHigh: "#FAF9F4", chipLive: "#222220",
 }
 
 var lightPalette = palette{
-	bg: "#F5F4EE", ink: "#191917", body: "#2E2E2B", soft: "#5B5B55", muted: "#8A8A82", faint: "#9A9A92",
-	rule: "#DEDCD2", surf: "#ECEAE1", surf2: "#E3E1D7",
-	acc: "#7E9430", accDeep: "#6A7D28", olive: "#A3B068", ivory: "#4B5327", sand: "#6A6346",
-	ok: "#5E8A32", warn: "#A8842A", err: "#B8462F", info: "#2B63A6", code: "#4F6320",
-	addBg: "#CDEFC4", addFg: "#1F6B1A", delBg: "#FAC9C4", delFg: "#9E1F14",
+	bg: "#F4F3EE", ink: "#141413", body: "#2E2E2B", soft: "#45443F", muted: "#75746D", faint: "#9A998F",
+	rule: "#DCDBD2", surf: "#EBEAE4", surf2: "#E1E0D9", rail: "#B9B8AF",
+	acc: "#5E7A10", accDeep: "#4C640C", olive: "#D6D5CC", ivory: "#141413", sand: "#1F1F1D",
+	ok: "#2F8240", warn: "#946C0C", err: "#B3412B", info: "#2B63A6", code: "#1F1F1D",
+	addBg: "#DDEED8", addFg: "#1F6B1A", delBg: "#F5DED8", delFg: "#9E1F14",
 	kw: "#9B3D86", str: "#8A5A12", fn: "#2B63A6", ty: "#6046B0", num: "#7A6210", com: "#A3A39B",
-	f1: "#BDB38E", f2: "#A89D76", f3: "#4B5327", f4: "#333A1C", spark: "#FCFAEF", dot: "#4B5327",
-	shBase: "#8A8574", shMid: "#5E594B", shHigh: "#1B1A17", chipLive: "#DCE5C4",
+	f1: "#1A1A18", f2: "#5A5954", f3: "#AFAEA6", f4: "#CDCCC3", spark: "#0B0B0A", dot: "#E2E1D9",
+	shBase: "#75746D", shMid: "#45443F", shHigh: "#0B0B0A", chipLive: "#E1E0D9",
 }
 
 // pal es el tema en uso. themeVersion cambia con cada applyTheme para que
@@ -84,7 +88,7 @@ func applyTheme(p palette) {
 	sPrimary, sBold, sInk, sSoft = fg(p.body), fg(p.ink), fg(p.ink), fg(p.soft)
 	sOK, sErr, sWarn, sPlan = fg(p.ok), fg(p.err), fg(p.warn), fg(p.info)
 	sAddNum, sDelNum, sCode = fg(p.addFg), fg(p.delFg), fg(p.code)
-	sTrack = fg(p.rule)
+	sTrack = fg(p.rail)
 	sSelected = fg(p.ink).Background(c(p.olive))
 }
 
@@ -96,7 +100,7 @@ type glyphSet struct {
 	brand, wait, thinkRail, gap, prompt, meterOn, meterOff, branch       string
 	chip, info, todo, doing, done, minus, check, cross, rule             string
 	boxTL, boxTR, boxBL, boxBR, boxH, boxV                               string
-	turnRail, turnEnd                                                    string
+	turnRail, turnEnd, warn                                              string
 	fold, unfold                                                         string
 	spin                                                                 []string
 	halfBlocks                                                           bool
@@ -105,9 +109,9 @@ type glyphSet struct {
 var richGlyphs = glyphSet{
 	rail: "│", railHot: "┃", corner: "└", sep: "·", arrow: "→", ellipsis: "…", dot: "●", spark: "✦", think: "✻", edge: "▌",
 	brand: "◆", wait: "◌", thinkRail: "┊", gap: "⋯", prompt: "›", meterOn: "━", meterOff: "─", branch: "⎇",
-	chip: "⧉", info: "◇", todo: "○", doing: "▸", done: "✓", minus: "−", check: "✓", cross: "✗", rule: "─",
+	chip: "⧉", info: "◇", todo: "○", doing: "◔", done: "✓", minus: "−", check: "✓", cross: "✗", rule: "─",
 	boxTL: "╭", boxTR: "╮", boxBL: "╰", boxBR: "╯", boxH: "─", boxV: "│",
-	turnRail: "┃", turnEnd: "┗", fold: "▸", unfold: "▾",
+	turnRail: "┃", turnEnd: "┗", warn: "▲", fold: "▸", unfold: "▾",
 	spin: []string{"·", "⋄", "◇", "◈", "◆", "✦", "◆", "◈", "◇", "⋄"}, halfBlocks: true,
 }
 
@@ -116,7 +120,7 @@ var safeGlyphs = glyphSet{
 	brand: "♦", wait: "○", thinkRail: "│", gap: "…", prompt: "›", meterOn: "━", meterOff: "─", branch: "≡",
 	chip: "□", info: "◊", todo: "○", doing: "►", done: "√", minus: "−", check: "√", cross: "×", rule: "─",
 	boxTL: "┌", boxTR: "┐", boxBL: "└", boxBR: "┘", boxH: "─", boxV: "│",
-	turnRail: "│", turnEnd: "└", fold: "►", unfold: "▼",
+	turnRail: "│", turnEnd: "└", warn: "▲", fold: "►", unfold: "▼",
 	spin: []string{"·", "•", "●", "•"}, halfBlocks: true,
 }
 
@@ -125,7 +129,7 @@ var asciiGlyphs = glyphSet{
 	brand: "*", wait: "o", thinkRail: ":", gap: "...", prompt: ">", meterOn: "=", meterOff: "-", branch: "@",
 	chip: "#", info: "i", todo: "-", doing: ">", done: "x", minus: "-", check: "v", cross: "x", rule: "-",
 	boxTL: "+", boxTR: "+", boxBL: "+", boxBR: "+", boxH: "-", boxV: "|",
-	turnRail: "|", turnEnd: "'", fold: ">", unfold: "v",
+	turnRail: "|", turnEnd: "'", warn: "!", fold: ">", unfold: "v",
 	spin: []string{".", "o", "O", "o"},
 }
 
@@ -135,6 +139,7 @@ var (
 	glyphDot, glyphSpark, glyphThink, glyphEdge, glyphBrand, glyphWait              string
 	glyphThinkRail, glyphGap, glyphPrompt, glyphMeterOn, glyphMeterOff              string
 	glyphBranch, glyphChip, glyphInfo, glyphTodo, glyphDoing, glyphDone, glyphMinus string
+	glyphWarn                                                                       string
 )
 
 func applyGlyphs(g glyphSet) {
@@ -143,6 +148,7 @@ func applyGlyphs(g glyphSet) {
 	glyphDot, glyphSpark, glyphThink, glyphEdge, glyphBrand, glyphWait = g.dot, g.spark, g.think, g.edge, g.brand, g.wait
 	glyphThinkRail, glyphGap, glyphPrompt, glyphMeterOn, glyphMeterOff = g.thinkRail, g.gap, g.prompt, g.meterOn, g.meterOff
 	glyphBranch, glyphChip, glyphInfo, glyphTodo, glyphDoing, glyphDone, glyphMinus = g.branch, g.chip, g.info, g.todo, g.doing, g.done, g.minus
+	glyphWarn = g.warn
 }
 
 func glyphsFor(getenv func(string) string, goos string) glyphSet {

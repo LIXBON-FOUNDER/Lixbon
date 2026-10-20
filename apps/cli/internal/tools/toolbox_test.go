@@ -425,3 +425,32 @@ func TestAskUserInOneBatch(t *testing.T) {
 		t.Fatalf("leído de vuelta: %+v", answers)
 	}
 }
+
+// ctrl+b suelta el run_command en curso: el agente recibe «[background p1]» y
+// el proceso sigue vivo en el gestor.
+func TestDetachCommandSendsTheRunningCommandToTheBackground(t *testing.T) {
+	tb := newBox(t)
+	if tb.DetachCommand() {
+		t.Fatal("sin comando en marcha no hay nada que soltar")
+	}
+	done := make(chan string, 1)
+	go func() { done <- tb.run("run_command", map[string]any{"command": sleepCommand(30)}) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for !tb.DetachCommand() {
+		if time.Now().After(deadline) {
+			t.Fatal("el comando no llegó a correr")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	select {
+	case got := <-done:
+		if !strings.HasPrefix(got, "[background p1] el usuario lo mandó al fondo") {
+			t.Fatalf("got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run_command siguió esperando al comando")
+	}
+	if bg, ok := tb.Procs.Get("p1"); !ok || !bg.Alive() {
+		t.Fatal("el proceso debe seguir vivo en el gestor")
+	}
+}

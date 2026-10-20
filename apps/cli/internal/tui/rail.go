@@ -17,42 +17,62 @@ import (
 
 // withRail pone el riel delante de cada fila de un paso. Las filas de los
 // bloques empiezan con un espacio (la columna del marcador), así que el
-// marcador queda en la columna 3 y el contenido en la 5.
+// marcador queda en la columna 3 y el contenido en la 5. El último paso
+// cierra el riel con ┗ en una fila propia, y la respuesta va debajo.
 func withRail(text string, end bool) string {
-	rail := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.f3))
+	rail := lipgloss.NewStyle().Foreground(lipgloss.Color(pal.rail))
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
-		g := glyphs.turnRail
-		if end && i == len(lines)-1 {
-			g = glyphs.turnEnd
-		}
-		lines[i] = " " + rail.Render(g) + l
+		lines[i] = " " + rail.Render(glyphs.turnRail) + l
+	}
+	if end {
+		lines = append(lines, " "+rail.Render(glyphs.turnEnd))
 	}
 	return strings.Join(lines, "\n")
 }
 
-// turnHeadBlock abre el turno del agente: quién trabaja y cuánto lleva.
+// turnHeadBlock abre el turno del agente: quién trabaja y cuánto lleva. El ◆
+// va siempre en la señal; mientras el turno sigue, «Lixbon» también.
 type turnHeadBlock struct {
-	actions, adds, dels int
-	secs                float64
+	actions, adds, dels, fails int
+	secs                       float64
+	live                       bool
 }
 
 func (b *turnHeadBlock) render(width int, _ bool) string {
-	left := mark(glyphBrand, sBeige) + sBold.Render("Lixbon")
+	name := sInk
+	if b.live {
+		name = sAccent
+	}
+	left := mark(glyphBrand, sAccent) + name.Render("Lixbon")
 	var parts []string
 	if b.actions > 0 {
 		parts = append(parts, sDim.Render(noun(b.actions, "acción", "acciones")))
 	}
+	if b.fails > 0 {
+		parts = append(parts, sErr.Render(noun(b.fails, "fallo", "fallos")))
+	}
 	if b.adds != 0 || b.dels != 0 {
 		parts = append(parts, counts(b.adds, b.dels))
 	}
-	switch {
-	case b.secs >= 10:
-		parts = append(parts, sDim.Render(fmt.Sprintf("%.0f s", b.secs)))
-	case b.secs >= 0.1:
-		parts = append(parts, sDim.Render(fmt.Sprintf("%.1f s", b.secs)))
+	if b.secs >= 0.1 {
+		parts = append(parts, sDim.Render(duration(b.secs)))
 	}
-	return fitRight(left, strings.Join(parts, sDim2.Render(" "+glyphSep+" ")), width)
+	return fitRight(left, strings.Join(parts, "   "), width)
+}
+
+// duration es «12 s», «1 min 12 s» o «1 h 5 min».
+func duration(secs float64) string {
+	s := int(secs + 0.5)
+	switch {
+	case secs < 10:
+		return fmt.Sprintf("%.1f s", secs)
+	case s < 60:
+		return fmt.Sprintf("%d s", s)
+	case s < 3600:
+		return fmt.Sprintf("%d min %d s", s/60, s%60)
+	}
+	return fmt.Sprintf("%d h %d min", s/3600, s%3600/60)
 }
 
 // narrationBlock es lo que el modelo dijo entre acciones: no es la respuesta,
@@ -65,20 +85,35 @@ type narrationBlock struct {
 func (narrationBlock) lazy() bool { return true }
 
 func (b narrationBlock) render(width int, _ bool) string {
-	lines := wrapText(b.text, max(10, width-4))
-	if b.md != nil {
-		lines = strings.Split(ansi.Strip(renderRich(b.text, max(20, width-4), b.md)), "\n")
-	}
-	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-		lines = lines[1:]
-	}
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
+	lines := wrapText(strings.TrimSpace(b.text), max(10, width-4))
+	code := false
 	for i, l := range lines {
-		lines[i] = pad + sPrimary.Render(strings.TrimRight(l, " "))
+		lines[i] = " " + inlineCode(strings.TrimRight(l, " "), &code)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// inlineCode pinta un texto en el cuerpo y lo que va entre comillas
+// invertidas en tinta sobre la hoja; code dice si la fila empieza dentro de
+// un trozo de código (uno partido entre dos filas).
+func inlineCode(line string, code *bool) string {
+	line = strings.ReplaceAll(line, "**", "")
+	codeStyle := sInk.Background(lipgloss.Color(pal.surf))
+	var b strings.Builder
+	for i, part := range strings.Split(line, "`") {
+		if i > 0 {
+			*code = !*code
+		}
+		if part == "" {
+			continue
+		}
+		if *code {
+			b.WriteString(codeStyle.Render(part))
+		} else {
+			b.WriteString(sPrimary.Render(part))
+		}
+	}
+	return b.String()
 }
 
 // systemBlock es un aviso del sistema dentro de un turno (contexto recortado,
@@ -130,14 +165,10 @@ func (t chipTone) color() string {
 	return pal.soft
 }
 
-// chip es el nombre de la herramienta como pieza: texto sobre fondo, con un
-// fondo de oliva mientras está en marcha.
-func chip(label string, tone chipTone, live bool) string {
-	bg := pal.surf2
-	if live {
-		bg = pal.chipLive
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(tone.color())).Background(lipgloss.Color(bg)).Render(" " + label + " ")
+// chip es el verbo de la herramienta en gris y sin fondo, a lo ancho de
+// siete columnas: con el espacio que sigue, los objetivos quedan en fila.
+func chip(label string, _ chipTone, _ bool) string {
+	return sSoft.Render(label + strings.Repeat(" ", max(0, 7-ansi.StringWidth(label))))
 }
 
 var readTools = map[string]bool{
@@ -185,7 +216,7 @@ func joinMeta(parts ...string) string {
 			kept = append(kept, p)
 		}
 	}
-	return strings.Join(kept, sDim2.Render("  "+glyphSep+"  "))
+	return strings.Join(kept, "   ")
 }
 
 // ── el riel del turno ────────────────────────────────────────────────────
@@ -200,9 +231,8 @@ func (m *Model) openRail() {
 	}
 	var from int
 	if m.turnHead == nil {
-		at := min(m.turnStart, len(m.log.entries))
-		m.turnHead = m.insertAt(at, &turnHeadBlock{})
-		from = at + 1
+		m.openTurnHead()
+		from = m.log.index(m.turnHead) + 1
 	} else {
 		from = m.log.index(m.turnHead) + 1
 		if m.railTail != nil {
@@ -221,6 +251,16 @@ func (m *Model) openRail() {
 		m.setRail(e, railMid)
 	}
 	m.railing = true
+}
+
+// openTurnHead pone «◆ Lixbon» delante de lo que el turno ya pintó: todo
+// turno lo lleva, también el que solo responde texto.
+func (m *Model) openTurnHead() {
+	if m.turnHead != nil || m.capturing != nil {
+		return
+	}
+	at := min(m.turnStart, len(m.log.entries))
+	m.turnHead = m.insertAt(at, &turnHeadBlock{live: m.running})
 }
 
 // closeRail cierra el riel en su último paso; las filas en blanco del final

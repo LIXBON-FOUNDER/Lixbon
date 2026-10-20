@@ -139,6 +139,7 @@ func (m *Model) flushLive() {
 	case live.answer != nil:
 		m.drawAnswer(prose)
 	case prose != "":
+		m.openTurnHead()
 		m.printAnswer(prose)
 	}
 	if prose != "" {
@@ -189,6 +190,7 @@ func (m *Model) streamAnswer(tick bool) {
 	case live.answer == nil && utf8.RuneCountInString(prose) < 4:
 	case live.answer == nil:
 		m.flushThinking()
+		m.openTurnHead()
 		m.printAnswer(prose)
 		live.answer = m.answerEntry
 		live.drawn, live.drawAt = prose, time.Now()
@@ -206,12 +208,14 @@ func (m *Model) drawAnswer(prose string) {
 }
 
 // printAnswer escribe prosa del modelo. En un turno con riel lo cierra: la
-// respuesta va fuera; si luego llega otra acción, era narración y openRail la
-// vuelve a colgar del riel.
+// respuesta va fuera, pegada a ┗ o a la cabecera; si luego llega otra acción,
+// era narración y openRail la vuelve a colgar del riel.
 func (m *Model) printAnswer(prose string) {
 	m.closeGroups()
 	m.closeRail()
-	m.gap()
+	if m.turnHead == nil {
+		m.gap()
+	}
 	m.answerEntry = m.add(answerBlock{text: prose, md: m.renderMarkdown, bare: m.turnHead != nil})
 }
 
@@ -246,6 +250,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 				shown = toolparse.CleanProse(answer)
 			}
 			if shown != "" && shown != m.live.lastProse && (!m.live.spoke || m.live.usedTools) {
+				m.openTurnHead()
 				m.printAnswer(shown)
 			}
 		} else if m.turnMode != chat.ModeAgent && !m.live.spoke {
@@ -273,7 +278,7 @@ func (m *Model) finishTurn(msg doneMsg) tea.Cmd {
 	if h, ok := m.turnHeadBlock(); ok {
 		// Las acciones son las del riel (countStep); los cambios, los aplicados.
 		st := m.chat.Session.Stats
-		h.adds, h.dels, h.secs = st.Adds, st.Dels, time.Since(m.started).Seconds()
+		h.adds, h.dels, h.secs, h.live = st.Adds, st.Dels, time.Since(m.started).Seconds(), false
 		m.refresh(m.turnHead)
 	}
 	m.print("")
@@ -321,17 +326,16 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 	var options []option
 	switch req.Kind {
 	case agent.ApproveCommand:
-		title = "¿Ejecutar este comando?"
-		options = append(options, option{Label: "Sí", Value: "yes", Desc: "ejecutar y seguir"})
+		title = "Lixbon quiere ejecutar una orden"
+		options = append(options, option{Label: "Sí, esta vez", Value: "yes"})
 		if req.Prefix != "" {
-			options = append(options, option{Label: "Sí, y siempre para «" + req.Prefix + "»", Value: "prefix",
-				Desc: "se guarda: no volverá a preguntar por ese comando"})
+			options = append(options, option{Label: "Sí, y no vuelvas a preguntar por", Value: "prefix", Extra: sDim.Render(req.Prefix)})
 		}
 		options = append(options,
-			option{Label: "Sí, y no preguntar más", Value: "always", Desc: "auto-ejecutar cualquier comando esta sesión"},
-			option{Label: "No", Value: "no", Desc: "rechazar y decirle al agente que no"})
+			option{Label: "Sí, y no preguntes más en esta sesión", Value: "always"},
+			option{Label: "No; dile qué hacer en su lugar", Value: "no"})
 	case agent.ApproveBrowser:
-		title = "¿Permitir esta acción en el navegador?"
+		title = "Lixbon quiere actuar en el navegador"
 		options = append(options, option{Label: "Sí", Value: "yes", Desc: "solo esta vez"})
 		if !req.Sensitive {
 			if req.Prefix != "" {
@@ -343,14 +347,14 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 		}
 		options = append(options, option{Label: "No", Value: "no", Desc: "rechazar y decirle al agente que no"})
 	case agent.ApproveMCP:
-		title = "¿Ejecutar esta herramienta externa?"
+		title = "Lixbon quiere usar una herramienta externa"
 		options = []option{
 			{Label: "Sí", Value: "yes", Desc: "aplicar y seguir"},
 			{Label: "Sí, y no preguntar más", Value: "always", Desc: "auto-aprobar el resto de la sesión"},
 			{Label: "No", Value: "no", Desc: "rechazar y decirle al agente que no"},
 		}
 	default:
-		title = "¿Aplicar este cambio?"
+		title = "Lixbon quiere cambiar un archivo"
 		options = []option{
 			{Label: "Sí", Value: "yes", Desc: "aplicar y seguir"},
 			{Label: "Sí, y no preguntar más", Value: "always", Desc: "auto-aprobar el resto de la sesión"},
@@ -382,7 +386,7 @@ func (m *Model) openApproval(msg approvalMsg) tea.Cmd {
 	p.token = reply
 	p.tone = pal.warn
 	p.body = m.approvalBody(req)
-	p.keys = [][2]string{{"↑↓", "mover"}, {fmt.Sprintf("1–%d", len(options)), "elegir"}, {"↵", "confirmar"}, {"esc", "= No"}}
+	p.keys = [][2]string{{"↑↓", "mover"}, {fmt.Sprintf("1–%d", len(options)), "elegir"}, {"enter", "aceptar"}, {"esc", "no"}}
 	m.picker = p
 	return nil
 }
@@ -394,25 +398,25 @@ func (m *Model) approvalBody(req agent.Approval) []string {
 	switch req.Kind {
 	case agent.ApproveCommand:
 		return []string{
-			sAccent.Render("$") + " " + sBold.Render(req.Summary),
-			sDim.Render("  en " + shortPath(m.chat.Workspace)),
+			sInk.Render("$ " + req.Summary),
+			sDim.Render("en " + shortPath(m.chat.Workspace)),
 		}
 	case agent.ApproveMCP:
-		return []string{sBeige.Render(req.Detail), sDim.Render("  " + req.Summary)}
+		return []string{sInk.Render(req.Detail), sDim.Render(req.Summary)}
 	case agent.ApproveBrowser:
-		lines := []string{sBeige.Render(browserVerb(req.Tool) + " " + req.Summary), sDim.Render("  en " + req.Detail)}
+		lines := []string{sInk.Render(browserVerb(req.Tool) + " " + req.Summary), sDim.Render("en " + req.Detail)}
 		if req.Sensitive {
-			lines = append(lines, sWarn.Render("  Es un campo sensible (contraseña, tarjeta o código): mejor escríbelo tú en la ventana."))
+			lines = append(lines, sWarn.Render(glyphWarn)+" "+sSoft.Render("Es un campo sensible (contraseña, tarjeta o código): mejor escríbelo tú en la ventana."))
 		}
 		return lines
 	}
-	line := sBeige.Render(firstNonEmpty(req.Detail, req.Summary))
+	line := sInk.Render(firstNonEmpty(req.Detail, req.Summary))
 	if req.Change != nil {
-		line = sBeige.Render(req.Change.Path)
+		line = sInk.Render(req.Change.Path)
 		if b := m.currentTool(); b != nil && b.counts {
-			line += sDim2.Render(" "+glyphSep+" ") + counts(b.adds, b.dels)
+			line += "   " + counts(b.adds, b.dels)
 		}
-		line += sDim.Render(" " + glyphSep + " el diff está justo encima")
+		line += sDim.Render("   el diff está justo encima")
 	}
 	return []string{line}
 }

@@ -61,7 +61,7 @@ func TestPickerNavigationFilterAndCancel(t *testing.T) {
 	}
 	view := ansi.Strip(strings.Join(p.view(60, 12), "\n"))
 	contains(t, view, "Elige")
-	contains(t, view, "▌ Alfa")
+	contains(t, view, "› Alfa")
 	contains(t, view, "primera")
 }
 

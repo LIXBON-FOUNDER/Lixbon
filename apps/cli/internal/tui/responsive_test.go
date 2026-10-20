@@ -43,7 +43,7 @@ func TestHeaderLogoStaysWholeWhenTheWindowChanges(t *testing.T) {
 	h.m.printHeader()
 	logo := renderLogo(cardLogoSize)
 	for _, width := range []int{120, 70, 40, 30, 18, 12, 90} {
-		h.update(tea.WindowSizeMsg{Width: width, Height: 30})
+		h.update(tea.WindowSizeMsg{Width: width, Height: 31})
 		screen := h.view()
 		if width >= cardLogoSize+4 {
 			for i, row := range logo {
@@ -52,7 +52,7 @@ func TestHeaderLogoStaysWholeWhenTheWindowChanges(t *testing.T) {
 				}
 			}
 		}
-		if !strings.Contains(screen, "LIXBON CLI") {
+		if !strings.Contains(screen, "lixbon  ") {
 			t.Fatalf("ancho %d: falta el título\n%s", width, screen)
 		}
 	}

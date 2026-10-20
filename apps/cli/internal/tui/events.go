@@ -75,6 +75,18 @@ func (m *Model) handleEvent(e agent.Event) {
 		switch {
 		case m.openTool != nil:
 			m.currentTool().finish(e)
+			if tb := m.currentTool(); tb != nil && strings.HasPrefix(tb.code, "bg:") {
+				id, procs := strings.TrimPrefix(tb.code, "bg:"), m.chat.Toolbox.Procs
+				tb.live = func() bool {
+					bg, ok := procs.Get(id)
+					return ok && bg.Alive()
+				}
+				m.liveTools = append(m.liveTools, m.openTool)
+			}
+			if h, ok := m.turnHeadBlock(); ok && (e.Failed || m.currentTool().state == toolFailed) {
+				h.fails++
+				m.refresh(m.turnHead)
+			}
 			if g, ok := m.openTool.b.(*browserBlock); ok {
 				g.secs += e.Elapsed.Seconds()
 			}
