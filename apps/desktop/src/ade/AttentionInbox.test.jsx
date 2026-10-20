@@ -96,6 +96,12 @@ function mountCore({ attention = () => page([]), projects = () => overview() } =
   return calls;
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -267,7 +273,26 @@ describe('AttentionInbox', () => {
     expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
   });
 
-  it('reinicia las páginas cargadas cuando se actualiza la cabecera y conserva los destinos durables', async () => {
+  it('detiene la paginación cuando una página posterior vacía informa has_more=false', async () => {
+    mountCore({
+      attention: (args) => args.cursor
+        ? page([])
+        : page([
+          item({ id: 'att_1', target_id: 'task-1', created_at: 1 }),
+          item({ id: 'att_2', target_id: 'task-2', created_at: 2 }),
+        ], { hasMore: true, next: 'cursor-1' }),
+    });
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} />);
+    await screen.findAllByRole('listitem');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
+  });
+
+  it('reinicia las páginas en cada sondeo predeterminado de 15 segundos y conserva los destinos durables', async () => {
     vi.useFakeTimers();
     let refreshed = false;
     const durableTargetId = '0192F0A0-7b1c-7000-8000-0000000000A1';
@@ -302,7 +327,7 @@ describe('AttentionInbox', () => {
     const visibleIds = () => screen.getAllByRole('listitem')
       .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
 
-    render(<AttentionInbox onOpenTarget={onOpenTarget} pollMs={1_000} />);
+    render(<AttentionInbox onOpenTarget={onOpenTarget} />);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(visibleIds()).toEqual(['att_1', 'att_2']);
 
@@ -315,7 +340,11 @@ describe('AttentionInbox', () => {
     expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_4', 'att_5']);
 
     refreshed = true;
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(14_999); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_4', 'att_5']);
+    expect(calls.filter(([query, args]) => query === 'attention_list' && !args.cursor)).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(visibleIds()).toEqual(['att_1', 'att_2']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
@@ -349,10 +378,64 @@ describe('AttentionInbox', () => {
     });
   });
 
+  it('invalida una página en vuelo al cambiar la cabecera y evita que su finally libere la carga nueva', async () => {
+    vi.useFakeTimers();
+    const oldRequest = deferred();
+    const newRequest = deferred();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const stalePageItem = item({ id: 'att_old', target_id: 'task-old', created_at: 3 });
+    const currentPageItem = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return oldRequest.promise;
+        if (args.cursor === 'cursor-new') return newRequest.promise;
+        return page([first, second], { hasMore: true, next: refreshed ? 'cursor-new' : 'cursor-old' });
+      },
+    });
+    const visibleIds = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-old')).toHaveLength(1);
+
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2']);
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-new')).toHaveLength(1);
+
+    const loadingButton = screen.getByRole('button', { name: 'Cargando…' });
+    await act(async () => {
+      oldRequest.resolve(page([stalePageItem]));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    expect(visibleIds()).toEqual(['att_1', 'att_2']);
+
+    // Bypass the disabled presentation to exercise the request lock after the stale finally ran.
+    loadingButton.disabled = false;
+    fireEvent.click(loadingButton);
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-new')).toHaveLength(1);
+
+    await act(async () => {
+      newRequest.resolve(page([currentPageItem]));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3']);
+    expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
+  });
+
   it('reinicia la paginación si el Core rechaza el cursor opaco', async () => {
+    let headReads = 0;
     const calls = mountCore({
       attention: (args) => {
         if (args.cursor === 'cursor-1') throw new Error('attention_invalid_cursor: el cursor no pertenece a esta clave');
+        headReads += 1;
+        if (headReads > 1) return page([item({ id: 'att_3', target_id: 'task-3', created_at: 3 })]);
         return page([
           item({ id: 'att_1', target_id: 'task-1', created_at: 1 }),
           item({ id: 'att_2', target_id: 'task-2', created_at: 2 }),
@@ -364,9 +447,13 @@ describe('AttentionInbox', () => {
     await screen.findAllByRole('listitem');
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
 
-    expect(await screen.findByText(/el cursor caducó: se volvió a la primera página/)).toBeTruthy();
-    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(await screen.findByRole('button', { name: /Media: Pregunta\. Task task-3/ })).toBeTruthy();
+    expect(screen.getByText(/el cursor caducó: se volvió a la primera página/)).toBeTruthy();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(calls.filter(([query]) => query === 'attention_list').length).toBeGreaterThanOrEqual(3);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+    expect(screen.queryByText(/el cursor caducó: se volvió a la primera página/)).toBeNull();
   });
 
   it('reinicia desde la primera página al reconectar y no arrastra duplicados de la sesión anterior', async () => {

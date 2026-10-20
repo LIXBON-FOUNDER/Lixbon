@@ -51,7 +51,7 @@ const TARGET_LABELS = {
   policy: 'Política',
 };
 
-const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, loading: false, error: null, notice: null });
+const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, hasLoadedPage: false, loading: false, error: null });
 
 const emptyPages = (key, headData = null, headUpdatedAt = null) => ({ ...EMPTY_PAGES, key, headData, headUpdatedAt, items: [] });
 
@@ -196,9 +196,10 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const [severity, setSeverity] = useState('');
   const filterKey = `${projectId}\u0000${category}\u0000${severity}`;
   const [pages, setPages] = useState(() => emptyPages(filterKey));
+  const [recoveryNotice, setRecoveryNotice] = useState(null);
   const [focusIndex, setFocusIndex] = useState(0);
   const itemRefs = useRef([]);
-  const loadingMore = useRef(false);
+  const loadingMore = useRef(null);
   const pageGeneration = useRef(0);
   const pageContext = useRef({ key: filterKey, headData: null, updatedAt: null });
 
@@ -212,13 +213,15 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const list = useCoreQuery('attention_list', filters, { enabled: active, pollMs });
   const overview = useCoreQuery('projects_overview', { archived: 'include' }, { enabled: active, pollMs });
 
-  // Tanto los filtros como cada respuesta nueva de la cabecera invalidan las páginas anteriores.
-  // Core no ofrece una instantánea compartida entre consultas; los cursores son keyset, no un change feed.
+  // El sondeo predeterminado de 15 s actualiza solo la cabecera. Cada respuesta nueva inicia una
+  // navegación keyset nueva: se descartan páginas anexadas porque sus filas pueden haberse resuelto.
+  // Core no ofrece una instantánea compartida entre páginas ni un change feed.
   useLayoutEffect(() => {
     if (pageContext.current.key === filterKey && pageContext.current.headData === list.data
       && pageContext.current.updatedAt === list.updatedAt) return;
     pageContext.current = { key: filterKey, headData: list.data, updatedAt: list.updatedAt };
     pageGeneration.current += 1;
+    loadingMore.current = null;
     setPages(emptyPages(filterKey, list.data, list.updatedAt));
     setFocusIndex(0);
   }, [filterKey, list.data, list.updatedAt]);
@@ -229,6 +232,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   useLayoutEffect(() => {
     if (!headFailure) return;
     pageGeneration.current += 1;
+    loadingMore.current = null;
     setPages((current) => emptyPages(current.key));
   }, [headFailure]);
 
@@ -266,12 +270,13 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
     : (projectId ? 'activas en el Project' : 'activas en el Core');
 
   const headCursor = list.data?.has_more ? list.data.next_cursor : null;
-  const moreCursor = headFailure ? null : pageState.items.length > 0 ? pageState.nextCursor : headCursor;
-  const canLoadMore = !headFailure && (pageState.items.length > 0 ? pageState.hasMore : Boolean(headCursor));
+  const moreCursor = headFailure ? null : pageState.hasLoadedPage ? pageState.nextCursor : headCursor;
+  const canLoadMore = !headFailure && (pageState.hasLoadedPage ? pageState.hasMore : Boolean(headCursor));
 
   const loadMore = useCallback(async () => {
     if (loadingMore.current || !moreCursor) return;
-    loadingMore.current = true;
+    const requestToken = {};
+    loadingMore.current = requestToken;
     const requestedKey = filterKey;
     const requestedHead = list.data;
     const requestedHeadUpdatedAt = list.updatedAt;
@@ -281,7 +286,6 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         ...current,
         loading: true,
         error: null,
-        notice: null,
       }));
     try {
       const page = await listAdeAttention({
@@ -298,6 +302,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
           items: [...current.items, ...page.items],
           nextCursor: page.next_cursor,
           hasMore: page.has_more,
+          hasLoadedPage: true,
           loading: false,
           error: null,
         }));
@@ -306,11 +311,11 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
       const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
       if (/attention_invalid_cursor/.test(message)) {
         // El Core rotó su clave (reinicio): se vuelve a la primera página, sin duplicar.
+        setRecoveryNotice('El Core se reinició y el cursor caducó: se volvió a la primera página.');
         setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
           || current.headUpdatedAt !== requestedHeadUpdatedAt
           || pageGeneration.current !== requestedGeneration ? current : {
             ...emptyPages(requestedKey, requestedHead, requestedHeadUpdatedAt),
-            notice: 'El Core se reinició y el cursor caducó: se volvió a la primera página.',
           }));
         list.retry();
       } else {
@@ -319,7 +324,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
           || pageGeneration.current !== requestedGeneration ? current : { ...current, loading: false, error: message }));
       }
     } finally {
-      loadingMore.current = false;
+      if (loadingMore.current === requestToken) loadingMore.current = null;
     }
   }, [moreCursor, projectId, category, severity, filterKey, list.data, list.updatedAt, list.retry]);
 
@@ -460,7 +465,12 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         </div>
       )}
 
-      {pageState.notice && <div className="attention-inbox__state attention-inbox__state--muted" role="status">{pageState.notice}</div>}
+      {recoveryNotice && (
+        <div className="attention-inbox__state attention-inbox__state--muted" role="status">
+          <span>{recoveryNotice}</span>
+          <button type="button" className="lk" onClick={() => setRecoveryNotice(null)}>Cerrar aviso</button>
+        </div>
+      )}
 
       {showEmpty && (
         <div className="attention-inbox__empty" role="status">
