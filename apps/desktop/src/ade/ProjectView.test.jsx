@@ -6,29 +6,30 @@ afterEach(cleanup);
 
 // Todos los datos son SINTÉTICOS: ni IDs, ni hosts, ni rutas, ni textos vienen de Core real.
 const PID = 'synthetic-project-1';
-const LOC_A = { location_id: 'synthetic-loc-a', host_id: 'synthetic-host-a', host_label: 'Host sintético A', path: '/synthetic/a/repo', availability: 'available' };
-const LOC_B = { location_id: 'synthetic-loc-b', host_id: 'synthetic-host-b', host_label: 'Host sintético B', path: '/synthetic/b/repo', availability: 'available' };
-const LOC_DOWN = { location_id: 'synthetic-loc-down', host_id: 'synthetic-host-c', path: '/synthetic/c/repo', availability: 'unavailable' };
+// Forma del DTO de solo lectura de LXO-90: sin location_id ni disponibilidad.
+const LOC_A = { machine: 'synthetic-machine-a', path: '/synthetic/a/repo', primary: true, state: 'ok', last_seen: '2026-01-02T03:04:05Z' };
+const LOC_B = { machine: 'synthetic-machine-b', path: '/synthetic/b/repo', primary: false, state: 'ok', last_seen: '2026-01-01T00:00:00Z' };
+const LOC_MISSING = { machine: 'synthetic-machine-c', path: '/synthetic/c/repo', primary: false, state: 'missing', last_seen: '2025-12-31T23:59:59Z' };
 
 const ready = (items = [], extra = {}) => ({ state: 'ready', items, ...extra });
 const task = (id, status, extra = {}) => ({ task_id: id, title: `Task ${id}`, status, ...extra });
 
-const T_RUNNING = task('t-live', 'running', { location_id: LOC_A.location_id });
+const T_RUNNING = task('t-live', 'running');
 const T_STARTING = task('t-start', 'starting');
 const T_WAIT = task('t-wait', 'awaiting_terminal_approval');
+const T_WAITING = task('t-waiting', 'waiting');
 const T_DONE = task('t-done', 'done');
-const T_FAILED = task('t-fail', 'failed', { location_id: LOC_B.location_id });
+const T_FAILED = task('t-fail', 'failed');
 const T_EXITED = task('t-exit', 'exited');
 const T_STOPPED = task('t-stop', 'stopped');
 const T_UNKNOWN = task('t-weird', 'paused_by_synthetic');
-const ALL_TASKS = [T_RUNNING, T_STARTING, T_WAIT, T_DONE, T_FAILED, T_EXITED, T_STOPPED, T_UNKNOWN];
+const ALL_TASKS = [T_RUNNING, T_STARTING, T_WAIT, T_WAITING, T_DONE, T_FAILED, T_EXITED, T_STOPPED, T_UNKNOWN];
 
 const baseProps = () => ({
   projectId: PID,
   projectName: 'Project sintético',
   locations: ready([LOC_A, LOC_B]),
-  selectedLocationId: LOC_A.location_id,
-  summary: { state: 'ready', counts: { tasks: 8, attempts: 3, attention: 2, resources: 1 } },
+  summary: { state: 'ready', counts: { tasks: 9, attempts: 3, attention: 2, resources: 1 } },
   tasks: ready(ALL_TASKS),
   attention: ready([
     { attention_id: 'attn-review', kind: 'review', text: 'Texto sintético de revisión', task_id: 't-done' },
@@ -37,7 +38,7 @@ const baseProps = () => ({
   activity: ready([
     { activity_id: 'act-1', kind: 'synthetic.kind', text: 'Texto de Activity puesto por Core sintético', occurred_at: '2026-01-01T00:00:00Z', task_id: 't-live' },
   ]),
-  resources: ready([{ resource_id: 'res-1', kind: 'worktree', label: 'Recurso sintético', availability: 'available', location_id: LOC_A.location_id }]),
+  resources: ready([{ resource_id: 'res-1', kind: 'worktree', label: 'Recurso sintético', availability: 'available' }]),
 });
 
 const view = (over = {}, cbs = {}) => render(<ProjectView {...baseProps()} {...over} {...cbs} />);
@@ -91,6 +92,7 @@ describe('ProjectView · Task status, Attention y Activity son ejes distintos', 
     expect(within(screen.getByTestId('task-t-fail')).getByTestId('task-status').textContent).toBe('Falló');
     expect(within(screen.getByTestId('task-t-live')).getByTestId('task-status').textContent).toBe('En curso');
     expect(within(screen.getByTestId('task-t-wait')).getByTestId('task-status').textContent).toBe('Espera aprobación en terminal');
+    expect(within(screen.getByTestId('task-t-waiting')).getByTestId('task-status').textContent).toBe('Esperando respuesta');
   });
 
   it('la Attention no se infiere del estado de la Task: failed sin entrada de Attention no crea ninguna', () => {
@@ -145,8 +147,28 @@ describe('ProjectView · filtros active/final/all', () => {
 
   it('por defecto muestra solo activas y avisa de que hay desconocidas fuera', () => {
     view();
-    expect(visibleTaskIds().sort()).toEqual(['t-live', 't-start', 't-wait']);
+    expect(visibleTaskIds().sort()).toEqual(['t-live', 't-start', 't-wait', 't-waiting']);
     expect(screen.getByTestId('unknown-status-hidden')).toBeTruthy();
+  });
+
+  it('waiting no es final: entra en Activas, no en Finales, y no se marca como desconocido', () => {
+    expect(ACTIVE_TASK_STATUSES).toContain('waiting');
+    expect(FINAL_TASK_STATUSES).not.toContain('waiting');
+    expect(taskMatchesFilter('waiting', 'active')).toBe(true);
+    expect(taskMatchesFilter('waiting', 'final')).toBe(false);
+    view({ tasks: ready([T_WAITING, T_DONE]) });
+    expect(visibleTaskIds()).toEqual(['t-waiting']);
+    expect(screen.queryByTestId('unknown-status-hidden')).toBeNull();
+    expect(screen.getByTestId('task-status').getAttribute('data-status')).toBe('waiting');
+    fireEvent.click(screen.getByTestId('filter-final'));
+    expect(visibleTaskIds()).toEqual(['t-done']);
+  });
+
+  it('un estado no reconocido sigue siendo desconocido y fuera de Activas aunque waiting sea activo', () => {
+    view({ tasks: ready([T_WAITING, T_UNKNOWN]) });
+    expect(visibleTaskIds()).toEqual(['t-waiting']);
+    expect(screen.getByTestId('unknown-status-hidden')).toBeTruthy();
+    for (const st of ['Waiting', 'wait', 'paused']) expect(taskMatchesFilter(st, 'active')).toBe(false);
   });
 
   it('finales: done, failed, exited, stopped', () => {
@@ -200,7 +222,7 @@ describe('ProjectView · contadores solo de Core', () => {
     expect(screen.getByTestId('count-attempts').querySelector('dd').textContent).toBe('7');
     expect(screen.getByTestId('count-attention').querySelector('dd').textContent).toBe('5');
     expect(screen.getByTestId('count-resources').querySelector('dd').textContent).toBe('9');
-    expect(visibleTaskIds()).toHaveLength(3);
+    expect(visibleTaskIds()).toHaveLength(4);
   });
 
   it('sin contadores de Core no sustituye nada contando filas', () => {
@@ -243,67 +265,72 @@ describe('ProjectView · contadores solo de Core', () => {
 });
 
 describe('ProjectView · ubicaciones, hosts e identidad del Project', () => {
-  it('muestra host y ruta de cada ubicación, y marca la actual', () => {
-    view({}, { onSelectLocation: vi.fn() });
-    const a = screen.getByTestId('location-synthetic-loc-a');
-    const b = screen.getByTestId('location-synthetic-loc-b');
-    expect(a.textContent).toContain('Host sintético A');
-    expect(a.textContent).toContain('synthetic-host-a');
-    expect(a.textContent).toContain('/synthetic/a/repo');
-    expect(b.textContent).toContain('Host sintético B');
-    expect(screen.getByTestId('open-location-synthetic-loc-a').getAttribute('aria-current')).toBe('true');
-    expect(screen.getByTestId('open-location-synthetic-loc-b').getAttribute('aria-current')).toBeNull();
-    expect(screen.getByTestId('current-location').textContent).toContain('Host sintético A · /synthetic/a/repo');
+  const rows = () => within(section('Ubicaciones')).getAllByTestId('location');
+
+  it('pinta machine, path, primary, state y last_seen del DTO de LXO-90', () => {
+    view();
+    const [a, b] = rows();
+    expect(within(a).getByTestId('location-machine').textContent).toBe('synthetic-machine-a');
+    expect(within(a).getByTestId('location-path').textContent).toBe('/synthetic/a/repo');
+    expect(within(a).getByTestId('location-primary').textContent).toBe('Principal');
+    expect(within(a).getByTestId('location-state').getAttribute('data-state')).toBe('ok');
+    expect(within(a).getByTestId('location-state').textContent).toBe('Presente');
+    expect(within(a).getByText('2026-01-02T03:04:05Z').getAttribute('datetime')).toBe('2026-01-02T03:04:05Z');
+    expect(within(b).getByTestId('location-machine').textContent).toBe('synthetic-machine-b');
+    expect(within(b).queryByTestId('location-primary')).toBeNull();
   });
 
-  it('cambiar de ubicación conserva el mismo project_id y nombre', () => {
-    const onSelectLocation = vi.fn();
-    const { rerender } = render(<ProjectView {...baseProps()} onSelectLocation={onSelectLocation} />);
+  it('state missing se dice explícitamente; ausente o raro es desconocido; no se inventa disponibilidad', () => {
+    view({ locations: ready([LOC_MISSING, { machine: 'synthetic-machine-x', state: 'rarísimo' }, {}]) });
+    const [missing, weird, empty] = rows();
+    expect(within(missing).getByTestId('location-state').getAttribute('data-state')).toBe('missing');
+    expect(within(missing).getByTestId('location-state').textContent).toBe('Ruta no encontrada');
+    expect(within(weird).getByTestId('location-state').getAttribute('data-state')).toBe('unknown');
+    expect(within(weird).getByTestId('location-path').textContent).toBe('Ruta desconocida');
+    expect(within(weird).getByTestId('location-last-seen').textContent).toContain('desconocido');
+    expect(within(empty).getByTestId('location-machine').textContent).toBe('Máquina desconocida');
+    expect(section('Ubicaciones').textContent).not.toMatch(/Disponible|Disponibilidad/);
+  });
+
+  it('primary solo se marca con true estricto', () => {
+    view({ locations: ready([{ ...LOC_B, primary: 'true' }, { ...LOC_B, primary: 1 }]) });
+    expect(within(section('Ubicaciones')).queryByTestId('location-primary')).toBeNull();
+  });
+
+  it('las ubicaciones no tienen identidad propia: sin location_id, sin acción, sin selección', () => {
+    const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onSelectLocation: vi.fn() };
+    view({}, cb);
+    const loc = section('Ubicaciones');
+    expect(within(loc).queryAllByRole('button')).toHaveLength(0);
+    for (const row of rows()) fireEvent.click(row);
+    fireEvent.click(within(loc).getByText('/synthetic/a/repo'));
+    expect(Object.values(cb).every((f) => f.mock.calls.length === 0)).toBe(true);
+    expect(loc.querySelector('[aria-current], code')).toBeNull();
+    expect(screen.queryByTestId('current-location')).toBeNull();
+  });
+
+  it('la ruta nunca es la identidad del Project: project_id sale solo de la prop y sobrevive a cambiar de ubicaciones', () => {
+    const { rerender } = render(<ProjectView {...baseProps()} />);
     expect(screen.getByTestId('project-id').textContent).toBe(PID);
-    rerender(<ProjectView {...baseProps()} selectedLocationId={LOC_B.location_id} onSelectLocation={onSelectLocation} />);
+    rerender(<ProjectView {...baseProps()} locations={ready([LOC_B])} />);
     expect(screen.getByTestId('project-id').textContent).toBe(PID);
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Project sintético');
-    expect(screen.getByTestId('current-location').textContent).toContain('Host sintético B');
-    expect(screen.getByTestId('open-location-synthetic-loc-b').getAttribute('aria-current')).toBe('true');
+    cleanup();
+    render(<ProjectView {...baseProps()} projectId={undefined} projectName={undefined} />);
+    expect(screen.getByTestId('project-id-missing')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Project sin identificar');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).not.toContain('/synthetic');
+    expect(screen.getByTestId('project-view').textContent).toContain('/synthetic/a/repo');
   });
 
-  it('seleccionar una ubicación llama solo con location_id', () => {
-    const onSelectLocation = vi.fn();
-    view({}, { onSelectLocation });
-    fireEvent.click(screen.getByTestId('open-location-synthetic-loc-b'));
-    expect(onSelectLocation).toHaveBeenCalledTimes(1);
-    expect(onSelectLocation.mock.calls[0]).toEqual(['synthetic-loc-b']);
-  });
-
-  it('ubicación no disponible: se muestra, es explícita y no navegable; host sin etiqueta usa su id', () => {
-    const onSelectLocation = vi.fn();
-    view({ locations: ready([LOC_A, LOC_DOWN]) }, { onSelectLocation });
-    const down = screen.getByTestId('location-synthetic-loc-down');
-    expect(down.textContent).toContain('No disponible');
-    expect(down.textContent).toContain('synthetic-host-c');
-    expect(screen.queryByTestId('open-location-synthetic-loc-down')).toBeNull();
-    expect(onSelectLocation).not.toHaveBeenCalled();
-  });
-
-  it('disponibilidad ausente o rara = desconocida; host ausente = host desconocido; ruta ausente explícita', () => {
-    view({ locations: ready([{ location_id: 'synthetic-loc-x', availability: 'rarísima' }]), selectedLocationId: undefined });
-    const row = screen.getByTestId('location-synthetic-loc-x');
-    expect(row.textContent).toContain('Disponibilidad desconocida');
-    expect(row.textContent).toContain('Host desconocido');
-    expect(row.textContent).toContain('Ruta desconocida');
-    expect(screen.getByTestId('current-location').textContent).toBe('Sin ubicación seleccionada.');
-  });
-
-  it('ubicación seleccionada que Core no conoce: aviso explícito, sin inventar host', () => {
-    view({ selectedLocationId: 'synthetic-loc-ghost' });
-    expect(screen.getByTestId('selected-location-unknown').textContent).toContain('synthetic-loc-ghost');
-    expect(screen.getByTestId('current-location').textContent).toContain('Ubicación desconocida (synthetic-loc-ghost)');
-  });
-
-  it('las filas muestran la ubicación en la que ocurren (host · ruta) y una desconocida se marca', () => {
-    view({ tasks: ready([T_RUNNING, task('t-lost', 'running', { location_id: 'synthetic-loc-lost' })]) });
-    expect(within(screen.getByTestId('task-t-live')).getByTestId('location-chip').textContent).toBe('Host sintético A · /synthetic/a/repo');
-    expect(within(screen.getByTestId('task-t-lost')).getByTestId('location-chip').textContent).toBe('Ubicación desconocida (synthetic-loc-lost)');
+  it('las filas de Task, Activity y Resource no inventan ubicación a partir de location_id', () => {
+    view({
+      tasks: ready([task('t-loc', 'running', { location_id: 'synthetic-loc-x' })]),
+      activity: ready([{ activity_id: 'a-loc', text: 'x', location_id: 'synthetic-loc-x' }]),
+      resources: ready([{ resource_id: 'r-loc', label: 'r', location_id: 'synthetic-loc-x' }]),
+    });
+    expect(screen.getByTestId('project-view').textContent).not.toContain('synthetic-loc-x');
+    expect(screen.queryByTestId('location-chip')).toBeNull();
   });
 
   it('sin project_id duradero lo dice y las filas no se vuelven navegables por otra vía', () => {
@@ -332,7 +359,7 @@ describe('ProjectView · ubicaciones, hosts e identidad del Project', () => {
 });
 
 describe('ProjectView · navegación solo por IDs duraderos', () => {
-  const callbacks = () => ({ onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onSelectLocation: vi.fn() });
+  const callbacks = () => ({ onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn() });
 
   it('cada destino llama a su callback con un único argumento: el ID', () => {
     const cb = callbacks();
@@ -439,7 +466,6 @@ describe('ProjectView · loading, error, partial, degraded y desconocido', () =>
     cleanup();
     view({ locations: { state: 'loading' } });
     expect(screen.queryByText(/no conoce ubicaciones/)).toBeNull();
-    expect(screen.queryByTestId('selected-location-unknown')).toBeNull();
   });
 
   it('items malformados (null, sin campos) no rompen la vista', () => {
@@ -500,7 +526,7 @@ describe('ProjectView · teclado y ARIA', () => {
   });
 
   it('los destinos navegables son <button type="button"> nativos con nombre accesible', () => {
-    view({}, { onOpenTask: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onSelectLocation: vi.fn(), onOpenAttempt: vi.fn() });
+    view({}, { onOpenTask: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onOpenAttempt: vi.fn() });
     for (const b of screen.getAllByRole('button')) {
       expect(b.tagName).toBe('BUTTON');
       expect(b.getAttribute('type')).toBe('button');
@@ -522,15 +548,46 @@ describe('ProjectView · teclado y ARIA', () => {
 });
 
 describe('ProjectView · solo lectura', () => {
-  const MUTATION = /(crear|nueva|nuevo|lanzar|ejecutar|iniciar|reintentar|reanudar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|spawn|run|retry|delete|remove|clean|merge|approve|reject|save|submit)/i;
+  // `\b` real (límite de palabra), no el carácter U+0008: «run» no debe saltar con «Runtime», sí con «Run».
+  const MUTATION = /\b(crear|nueva|nuevo|lanzar|ejecutar|iniciar|reintentar|reanudar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|spawn|run|retry|delete|remove|clean|merge|approve|reject|save|submit)\b/i;
+  const CONTROLS = 'button, [role="button"], a, input, select, textarea, form';
+  const mutationControls = (root) => [...root.querySelectorAll(CONTROLS)]
+    .map((el) => el.getAttribute('aria-label') || el.textContent)
+    .filter((name) => MUTATION.test(name));
+
+  it('el regex no contiene caracteres de control (U+0008) y trae límites de palabra reales', () => {
+    // eslint-disable-next-line no-control-regex
+    expect(MUTATION.source).not.toMatch(/[\u0000-\u001f]/);
+    expect(MUTATION.source.startsWith('\\b(')).toBe(true);
+    expect(MUTATION.source.endsWith(')\\b')).toBe(true);
+  });
+
+  it('el detector caza controles de mutación (control positivo) y respeta los límites de palabra', () => {
+    for (const label of ['Crear Task', 'Reintentar', 'Aprobar', 'Merge', 'Delete', 'Run', 'run now', 'Guardar cambios', 'Limpiar worktree', 'cleanup']) {
+      expect(MUTATION.test(label), label).toBe(true);
+    }
+    for (const label of ['Runtime', 'Abrir Task t-fail', 'Principal', 'Activas', 'Ruta no encontrada', 'Merged']) {
+      expect(MUTATION.test(label), label).toBe(false);
+    }
+    const host = document.createElement('div');
+    host.innerHTML = '<button type="button">Crear Task</button><button type="button" aria-label="Reintentar Attempt">Abrir</button><a href="#">Eliminar</a><button type="button">Abrir Task t-1</button>';
+    expect(mutationControls(host)).toEqual(['Crear Task', 'Reintentar Attempt', 'Eliminar']);
+  });
+
+  it('mutación simulada: un control inyectado en la vista renderizada sí se detecta', () => {
+    const { container } = view({}, { onOpenTask: vi.fn() });
+    expect(mutationControls(container)).toEqual([]);
+    const injected = document.createElement('button');
+    injected.textContent = 'Lanzar Task';
+    container.querySelector('.pv').appendChild(injected);
+    expect(mutationControls(container)).toEqual(['Lanzar Task']);
+  });
 
   it('sin controles de mutación aunque se pasen todos los callbacks', () => {
-    const { container } = view({}, { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onSelectLocation: vi.fn(), onFilterChange: vi.fn() });
+    const { container } = view({}, { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onFilterChange: vi.fn() });
     fireEvent.click(screen.getByTestId('filter-all'));
-    for (const el of container.querySelectorAll('button, [role="button"], a, input, select, textarea, form')) {
-      const name = el.getAttribute('aria-label') || el.textContent;
-      expect(name).not.toMatch(MUTATION);
-    }
+    expect(container.querySelectorAll(CONTROLS).length).toBeGreaterThan(0);
+    expect(mutationControls(container)).toEqual([]);
     expect(container.querySelector('form, input, select, textarea, a[href]')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.queryByRole('combobox')).toBeNull();
@@ -553,7 +610,7 @@ describe('ProjectView · solo lectura', () => {
   });
 
   it('el filtro es estado de vista: no llama a ningún callback de dominio', () => {
-    const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn(), onSelectLocation: vi.fn() };
+    const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn() };
     view({}, cb);
     fireEvent.click(screen.getByTestId('filter-final'));
     fireEvent.click(screen.getByTestId('filter-all'));
