@@ -417,7 +417,7 @@ fn ref_text(value: &serde_json::Map<String, Value>) -> String {
     }
 }
 
-fn clean(value: &str) -> String {
+pub(super) fn clean(value: &str) -> String {
     value
         .chars()
         .map(|ch| if ch.is_control() { '?' } else { ch })

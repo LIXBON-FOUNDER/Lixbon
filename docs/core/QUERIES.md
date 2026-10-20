@@ -118,6 +118,18 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
 | `projects_overview_unavailable` | el Core no tiene almacén abierto |
 | `projects_overview_read_failed` | falló la lectura de SQLite |
 
+### Cliente de terminal: `lxo projects` (LXO-103)
+
+* `lxo projects [--archived exclude|include|only] [--all] [--machine ID] [--json]` pide `projects_overview` con la
+  credencial Person del CLI (almacén seguro). `--all` es `--archived include`. Sustituye al `lxo projects` anterior,
+  que leía `projects` (registro con comprobación de disco).
+* Salida humana por Project: nombre y estado traducido, `id`, contadores de Tasks y Attention (por categoría) y sus
+  ubicaciones como metadato; al final, lo que va a `unassigned`. Cada dato en su línea para terminales estrechas.
+* `--json` imprime el documento del Core sin tocar (`{v, filters, total, projects, unassigned}`): ids, contadores y
+  códigos, sin textos traducidos.
+* Es solo para personas: con credencial Agent responde con código 3. Salidas: 0 correcto, 1 error interno, 2 uso o
+  filtro inválido, 3 autenticación o sin permiso, 4 versión o contrato, 5 Lixbon cerrado o Core no disponible.
+
 ### Pruebas
 
 `orch/projects_overview_tests.rs` (0/1/N Projects, orden, activo+fallido+Attention, estado agregado, Attention
