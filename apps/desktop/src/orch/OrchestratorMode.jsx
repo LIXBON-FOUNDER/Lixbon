@@ -17,6 +17,7 @@ import { isAwaitingTerminalApproval } from './terminalApprovalContract';
 import { IconTrash, IconGitBranch } from '../components/Icons';
 import { useFileViewStore } from '../store/fileViewStore';
 import { usePendingSpawns, PendingSpawnList, PendingSpawnDetail, SpawnNotice } from './spawn/PendingSpawns';
+import { spawnField } from './spawn/spawnContract';
 import { IntegrationDialog } from './integration/IntegrationDialog';
 import { TaskDiffView } from './review/TaskDiffView';
 import { subscribeTaskReviewed } from './review/taskReview';
@@ -423,6 +424,19 @@ export function OrchestratorMode() {
   if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
 
   const adeActive = orchView === 'ade';
+  // Destinos de Attention (`run` / `spawn_request`): solo se abren si el ID durable existe en esta superficie.
+  // Devuelven true si abrieron el destino exacto; nunca caen en otro Run ni en otro pendiente.
+  const openRun = (runId) => {
+    const run = Object.values(snap.runs || {}).find((candidate) => candidate.id === runId);
+    if (!run || !snap.tasks?.[run.root]) return false;
+    pickTask(run.root);
+    return true;
+  };
+  const openSpawnRequest = (pendingId) => {
+    if (!spawns.items.some((item) => spawnField(item, 'pendingId') === pendingId)) return false;
+    pickPendingSpawn(pendingId);
+    return true;
+  };
   const operationNavigation = (
     <section className="ade__nav-section orch__operation-nav" aria-label="Operación">
       <div className="ade__nav-section-head"><span>Operación</span><span className="ade__source">Runs</span></div>
@@ -481,6 +495,8 @@ export function OrchestratorMode() {
         drawerOpen={adeDrawer}
         onCloseDrawer={closeAdeDrawer}
         onActivate={() => setOrchView('ade')}
+        onOpenRun={openRun}
+        onOpenSpawnRequest={openSpawnRequest}
         operationNavigation={operationNavigation}
         operationWorkspace={operationWorkspace}
       />

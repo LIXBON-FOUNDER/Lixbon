@@ -186,7 +186,7 @@ function QueryFailure({ status, error, retry }) {
  * No decide qué es Attention ni sus códigos: traduce los del contrato, conserva su orden y
  * agrega los contadores que publica projects_overview. No resuelve, no pospone y no marca leído.
  */
-export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
+export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = null, onClearTarget }) {
   const titleId = useId();
   const projectFilterId = useId();
   const categoryFilterId = useId();
@@ -194,7 +194,21 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const [projectId, setProjectId] = useState('');
   const [category, setCategory] = useState('');
   const [severity, setSeverity] = useState('');
-  const filterKey = `${projectId}\u0000${category}\u0000${severity}`;
+  // El target (kind + id durable) lo filtra el Core; `seq` identifica cada apertura explícita, de modo que
+  // un stale/reconnect conserva target y filtros y una apertura nueva parte sin filtros heredados.
+  const targetKind = target?.kind || '';
+  const targetId = target?.id || '';
+  const targetKey = target ? `${target.seq ?? ''}\u0000${targetKind}\u0000${targetId}` : '';
+  const [seenTargetKey, setSeenTargetKey] = useState(targetKey);
+  if (seenTargetKey !== targetKey) {
+    setSeenTargetKey(targetKey);
+    if (targetKey) {
+      setProjectId('');
+      setCategory('');
+      setSeverity('');
+    }
+  }
+  const filterKey = `${projectId}\u0000${category}\u0000${severity}\u0000${targetKind}\u0000${targetId}`;
   const [pages, setPages] = useState(() => emptyPages(filterKey));
   const [recoveryNotice, setRecoveryNotice] = useState(null);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -205,10 +219,12 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
 
   const filters = useMemo(() => ({
     project_id: projectId || null,
+    target_kind: targetKind || null,
+    target_id: targetId || null,
     category: category || null,
     severity: severity || null,
     limit: ATTENTION_LIMIT,
-  }), [projectId, category, severity]);
+  }), [projectId, targetKind, targetId, category, severity]);
 
   const list = useCoreQuery('attention_list', filters, { enabled: active, pollMs });
   const overview = useCoreQuery('projects_overview', { archived: 'include' }, { enabled: active, pollMs });
@@ -248,8 +264,9 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
     return [...seen.values()].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }, [list.data, pageState.items]);
 
+  // Los contadores de projects_overview no están acotados a un target: con target activo no se muestran.
   const summed = useMemo(() => {
-    if (!overview.data) return null;
+    if (!overview.data || targetKey) return null;
     if (!projectId) return sumAttentionCounts(overview.data);
     // Con un Project seleccionado se usan SUS contadores del Core, no una suma de la lista visible.
     const attention = overview.data.projects?.find((candidate) => candidate.id === projectId)?.counts?.attention;
@@ -261,11 +278,13 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         Number.isFinite(attention.by_category?.[categoryCode]) ? attention.by_category[categoryCode] : 0,
       ])),
     };
-  }, [overview.data, projectId]);
+  }, [overview.data, projectId, targetKey]);
   const projectOptions = overview.data?.projects ?? [];
   const hasFilters = Boolean(projectId || category || severity);
   const displayedTotal = summed ? (category ? summed.byCategory[category] : summed.total) : null;
-  const totalLabel = category
+  const totalLabel = target
+    ? 'activas en este target'
+    : category
     ? (projectId ? 'en esta categoría del Project' : 'en esta categoría')
     : (projectId ? 'activas en el Project' : 'activas en el Core');
 
@@ -290,6 +309,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
     try {
       const page = await listAdeAttention({
         projectId: projectId || null,
+        targetKind: targetKind || null,
+        targetId: targetId || null,
         category: category || null,
         severity: severity || null,
         cursor: moreCursor,
@@ -326,7 +347,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
     } finally {
       if (loadingMore.current === requestToken) loadingMore.current = null;
     }
-  }, [moreCursor, projectId, category, severity, filterKey, list.data, list.updatedAt, list.retry]);
+  }, [moreCursor, projectId, targetKind, targetId, category, severity, filterKey, list.data, list.updatedAt, list.retry]);
 
   const onItemKeyDown = useCallback((event, index) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
@@ -350,6 +371,10 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const showInitialLoading = list.status === 'loading' && !hasData;
   const showFailure = !hasData && ['disconnected', 'degraded', 'error'].includes(list.status);
   const showEmpty = hasData && items.length === 0 && !showInitialLoading && !showFailure;
+  // Con target, la cifra sale de la página que ya filtró el Core: exacta si no hay más páginas, "N+" si las hay.
+  const targetTotal = hasData ? `${items.length}${canLoadMore ? '+' : ''}` : '—';
+  const totalValue = target ? targetTotal : summed ? displayedTotal : '—';
+  const targetName = target ? `${label(TARGET_LABELS, target.kind)} ${target.id}` : '';
   const interactive = typeof onOpenTarget === 'function';
   const activeIndex = Math.min(focusIndex, Math.max(items.length - 1, 0));
 
@@ -368,12 +393,14 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         </div>
         <div
           className="attention-inbox__total"
-          title={projectId
-            ? 'counts.attention del Project seleccionado (projects_overview)'
-            : 'Suma de counts.attention de projects_overview (Projects y sin Project)'}
+          title={target
+            ? 'Attention activa de este target, según la página que filtró el Core'
+            : projectId
+              ? 'counts.attention del Project seleccionado (projects_overview)'
+              : 'Suma de counts.attention de projects_overview (Projects y sin Project)'}
         >
           <span className="attention-inbox__total-value" data-testid="attention-total">
-            {summed ? displayedTotal : '—'}
+            {totalValue}
           </span>
           <span className="attention-inbox__total-label">{totalLabel}</span>
         </div>
@@ -437,12 +464,26 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         </button>
       </div>
 
-      {overview.status === 'stale' && (
+      {target && (
+        <div className="attention-inbox__target-filter" role="group" aria-label="Filtro por target">
+          <span>
+            Filtrando por <strong>{targetName}</strong>
+            {target.projectId && <> · Project <span className="mono">{target.projectId}</span></>}
+          </span>
+          {typeof onClearTarget === 'function' && (
+            <button type="button" className="lk" onClick={onClearTarget} aria-label={`Quitar el filtro por ${targetName}`}>
+              Quitar filtro
+            </button>
+          )}
+        </div>
+      )}
+
+      {!target && overview.status === 'stale' && (
         <div className="attention-inbox__state attention-inbox__state--stale" role="status">
           Los conteos del Core están desactualizados ({connectionLabel(overview.reason)}). Se conserva la última respuesta.
         </div>
       )}
-      {!overview.data && ['disconnected', 'degraded', 'error'].includes(overview.status) && (
+      {!target && !overview.data && ['disconnected', 'degraded', 'error'].includes(overview.status) && (
         <div className="attention-inbox__state attention-inbox__state--muted" role="status">
           Los conteos y el filtro por Project no están disponibles: {describeAttentionError(overview.error)}
         </div>
@@ -474,7 +515,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
 
       {showEmpty && (
         <div className="attention-inbox__empty" role="status">
-          {hasFilters
+          {hasFilters || target
             ? 'No hay Attention activa con estos filtros. Ajusta o limpia los filtros.'
             : 'El Core no tiene Attention activa: no hay pendientes que requieran tu intervención.'}
         </div>
@@ -526,7 +567,9 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         Esta vista no resuelve, no pospone y no marca como leído.
       </p>
       <span className="attention-inbox__sr" role="status" aria-live="polite">
-        {summed ? `${displayedTotal} Attention${category ? ' en la categoría seleccionada' : ' activas'}${projectId ? ' en el Project' : ' en el Core'}.` : ''}
+        {target
+          ? (hasData ? `${totalValue} Attention activas en ${targetName}.` : '')
+          : summed ? `${displayedTotal} Attention${category ? ' en la categoría seleccionada' : ' activas'}${projectId ? ' en el Project' : ' en el Core'}.` : ''}
       </span>
     </section>
   );

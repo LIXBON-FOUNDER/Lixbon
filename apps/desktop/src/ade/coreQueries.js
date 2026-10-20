@@ -16,6 +16,23 @@ export const ATTENTION_CATEGORIES = Object.freeze([
 /** Escala de severidad del Core, de más a menos urgente (LXO-87/89). */
 export const ATTENTION_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
 
+/** Tipos de target del contrato (`TargetKind` de Core, LXO-87). Se envían tal cual; no se amplían aquí. */
+export const ATTENTION_TARGET_KINDS = Object.freeze([
+  'project',
+  'task',
+  'run',
+  'spawn_request',
+  'attempt',
+  'thread',
+  'worktree',
+  'artifact',
+  'review',
+  'integration',
+  'agent',
+  'decision',
+  'policy',
+]);
+
 /** Página fija de la lista: el cursor opaco queda ligado a este límite (LXO-89). */
 export const ATTENTION_LIMIT = 100;
 
@@ -27,6 +44,7 @@ export const TASK_PAGE_LIMIT = 50;
 
 const ATTENTION_CATEGORY_SET = new Set(ATTENTION_CATEGORIES);
 const ATTENTION_SEVERITY_SET = new Set(ATTENTION_SEVERITIES);
+const ATTENTION_TARGET_KIND_SET = new Set(ATTENTION_TARGET_KINDS);
 const ARCHIVED_FILTERS = new Set(['exclude', 'include', 'only']);
 const TASK_STATUS_SET = new Set(TASK_STATUS_FILTERS);
 
@@ -64,13 +82,23 @@ function taskStatus(value) {
 }
 
 // Solo los filtros del contrato de `attention_list`; `limit` fijo para que el cursor siga siendo válido.
+// El filtro de target lo resuelve el Core: `target_kind` y `target_id` van siempre juntos (un ID sin tipo es ambiguo).
 function attentionRequest(args) {
   const request = { limit: ATTENTION_LIMIT };
   const projectId = optionalDurableId(args?.projectId, 'project_id');
+  const targetKind = optionalCode(args?.targetKind, 'target_kind', ATTENTION_TARGET_KIND_SET);
+  const targetId = optionalDurableId(args?.targetId, 'target_id');
+  if (Boolean(targetKind) !== Boolean(targetId)) {
+    throw new Error('ade_query_invalid_request: target_kind y target_id deben enviarse juntos');
+  }
   const category = optionalCode(args?.category, 'category', ATTENTION_CATEGORY_SET);
   const severity = optionalCode(args?.severity, 'severity', ATTENTION_SEVERITY_SET);
   const cursor = optionalCursor(args?.cursor);
   if (projectId) request.project_id = projectId;
+  if (targetKind) {
+    request.target_kind = targetKind;
+    request.target_id = targetId;
+  }
   if (category) request.category = category;
   if (severity) request.severity = severity;
   if (cursor) request.cursor = cursor;
@@ -160,6 +188,10 @@ function validateResponse(query, args, response) {
     if (response.items.some((item) => !validAttentionItem(item))) {
       throw invalidResponse(query, 'la lista contiene una Attention fuera del contrato');
     }
+    // El filtro lo aplica el Core; aquí solo se verifica que la respuesta corresponde al target pedido.
+    if (args.target_kind && response.items.some((item) => item.target_kind !== args.target_kind || item.target_id !== args.target_id)) {
+      throw invalidResponse(query, 'la lista contiene una Attention de otro target');
+    }
     return response;
   }
   if (query === 'tasks_by_project') {
@@ -204,5 +236,5 @@ export const readAdeTask = (projectId, taskId) => queryAdeCore('task_detail', { 
  * Lista autoritativa de Attention activa (LXO-89). Los filtros son los del contrato del Core y el
  * cursor es el `next_cursor` opaco de la página anterior; no se deriva ni se amplía nada aquí.
  */
-export const listAdeAttention = ({ projectId = null, category = null, severity = null, cursor = null } = {}) =>
-  queryAdeCore('attention_list', { projectId, category, severity, cursor });
+export const listAdeAttention = ({ projectId = null, targetKind = null, targetId = null, category = null, severity = null, cursor = null } = {}) =>
+  queryAdeCore('attention_list', { projectId, targetKind, targetId, category, severity, cursor });

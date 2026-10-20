@@ -249,6 +249,45 @@ describe('OrchestratorMode', () => {
     expect(document.querySelector('.orch__head')).toBe(taskPanel);
   });
 
+  it('abre Run y solicitud pendiente desde Attention solo si el ID durable existe en Operación', async () => {
+    const project = { id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active', counts: { tasks: 0, active: 0, failed: 0, attention: { total: 2, by_category: {} } }, locations: [] };
+    const row = (id, kind, targetId, createdAt) => ({
+      id, category: 'approval', severity: 'medium', status: 'active', target_kind: kind, target_id: targetId,
+      project_id: project.id, run_id: null, occurrence: 1, created_at: createdAt, resolved_at: null, resolution: null,
+    });
+    const rows = [row('att_run', 'run', 'r1', 1), row('att_run_gone', 'run', 'r-gone', 2), row('att_p2', 'spawn_request', 'p2', 3), row('att_p_gone', 'spawn_request', 'p-gone', 4)];
+    mountWith(snapshot([task('t1')]), [pendingSpawn, { ...pendingSpawn, pending_id: 'p2' }], async (query) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
+      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+      if (query === 'attention_list') return { v: 1, items: rows, next_cursor: null, has_more: false, limit: 100 };
+      throw new Error(`Query inesperada: ${query}`);
+    });
+    const attentionRow = (id) => document.querySelector(`[data-attention-id="${id}"]`);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Attention' }));
+    await screen.findByTestId('attention-total');
+    await waitFor(() => expect(attentionRow('att_run')).toBeTruthy());
+
+    // IDs inexistentes: se avisa y la vista no cambia ni cae en otro Run o pendiente.
+    fireEvent.click(attentionRow('att_run_gone'));
+    fireEvent.click(attentionRow('att_p_gone'));
+    expect(useWorkbenchStore.getState().orchView).toBe('ade');
+    expect(useOrchStore.getState().selected).toBeNull();
+    expect(screen.getByText(/La solicitud de lanzamiento p-gone ya no está disponible/)).toBeTruthy();
+
+    fireEvent.click(attentionRow('att_p2'));
+    expect(useWorkbenchStore.getState().orchView).toBe('executions');
+    expect(screen.getByTestId('execution-composition').getAttribute('aria-hidden')).toBe('false');
+    expect(screen.getByTestId('spawn-p2').className).toContain('is-active');
+    expect(screen.getByTestId('spawn-p1').className).not.toContain('is-active');
+
+    act(() => useWorkbenchStore.getState().setOrchView('ade'));
+    fireEvent.click(attentionRow('att_run'));
+    expect(useWorkbenchStore.getState().orchView).toBe('executions');
+    expect(useOrchStore.getState().selected).toBe('coord');
+  });
+
   it('congela el redimensionamiento de AgentTerminal dentro del canvas ADE y lo reactiva al volver', async () => {
     const project = { id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active', counts: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: {} } }, locations: [] };
     mountWith(snapshot([task('t1', { status: 'running' })]), [], async (query) => {

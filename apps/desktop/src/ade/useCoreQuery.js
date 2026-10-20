@@ -7,7 +7,13 @@ const QUERY_TIMEOUT_MS = 10_000;
 function coreArgs(query, args) {
   if (query === 'projects_overview') return { archived: args.archived ?? 'exclude' };
   if (query === 'attention_list') {
-    return { projectId: args.project_id, category: args.category, severity: args.severity };
+    return {
+      projectId: args.project_id,
+      targetKind: args.target_kind,
+      targetId: args.target_id,
+      category: args.category,
+      severity: args.severity,
+    };
   }
   if (query === 'tasks_by_project') {
     return { projectId: args.project_id, status: args.status ?? 'active' };
