@@ -99,3 +99,7 @@ jobs:
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_projects_person_real_store -- --ignored --exact --nocapture
         env:
           LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
+      - name: Ejecutar E2E de lxo tasks y lxo task show como persona (Credential Manager real)
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_tasks_person_real_store -- --ignored --exact --nocapture
+        env:
+          LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
