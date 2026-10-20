@@ -5,6 +5,8 @@ import './TaskWorkspace.css';
 // Task Workspace / Inspector de solo lectura (LXO-98).
 // Presenta exclusivamente lo que devuelve `task_detail` (project_id + task_id). No infiere host/origen ni
 // ningún campo ausente: lo que no llega se muestra como "No informado". La ruta es ubicación, nunca identidad.
+// El DTO actual de `task_detail` no expone host ni origen (docs/core/QUERIES.md), por eso se muestran siempre
+// como "No informado" y no se derivan de cwd, rama ni worktree.
 
 const MISSING = 'No informado';
 
@@ -199,6 +201,41 @@ function statusInfo(status) {
 
 const GROUP_LABELS = { active: 'Activa', final: 'Final', unknown: MISSING };
 
+/**
+ * Accesos contextuales a Activity y Attention de la Task seleccionada. Solo notifican al shell con los IDs
+ * durables exactos (`{ projectId, taskId }`); este componente no navega ni abre ninguna superficie. Sin
+ * callback, la superficie real aún no está conectada y se dice así, sin botón ni vista simulada.
+ */
+function ContextActions({ projectId, taskId, onOpenActivity, onOpenAttention }) {
+  const items = [
+    { key: 'activity', label: 'Activity', handler: onOpenActivity },
+    { key: 'attention', label: 'Attention', handler: onOpenAttention },
+  ];
+  return (
+    <ul className="twk__context" aria-label="Contexto de la Task">
+      {items.map(({ key, label, handler }) => (
+        <li key={key} className="twk__context-item" data-context={key} data-available={typeof handler === 'function'}>
+          {typeof handler === 'function' ? (
+            <button
+              type="button"
+              className="twk__action"
+              aria-label={`Abrir ${label} de la Task ${taskId}`}
+              onClick={() => handler({ projectId, taskId })}
+            >
+              {label} de esta Task
+            </button>
+          ) : (
+            <span className="twk__unavailable">
+              <strong>{label} de esta Task</strong>
+              <span className="twk__hint">No disponible: esta superficie todavía no está conectada.</span>
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Banner({ state, hasData, projectId, taskId }) {
   const { status } = state;
   if (status === 'loading') {
@@ -240,9 +277,12 @@ function Banner({ state, hasData, projectId, taskId }) {
  * - `detail`: estado de `useCoreQuery('task_detail', …)`: `{ status, data, error, reason, updatedAt, retry }`.
  * - `project`: `{ id, name }` opcional; el nombre solo se usa si `project.id === projectId`.
  * - `onNavigate({ projectId, taskId })`: opcional; navegación a padre/raíz/hijas por ID durable. Sin él, son texto.
+ * - `onOpenActivity({ projectId, taskId })` / `onOpenAttention({ projectId, taskId })`: opcionales; contrato para
+ *   que el shell abra la superficie real de Activity/Attention de esta Task. Solo se invocan con la Task verificada
+ *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
  * - `variant`: `'workspace'` (por defecto) o `'inspector'` (solo cambia la clase CSS compacta).
  */
-export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, variant = 'workspace' }) {
+export function TaskWorkspaceView({ projectId, taskId, detail, project = null, onNavigate, onOpenActivity, onOpenAttention, variant = 'workspace' }) {
   const uid = useId();
   const state = detail ?? { status: 'idle', data: null, error: null, reason: null, updatedAt: null };
   const hasTarget = Boolean(text(projectId) && text(taskId));
@@ -349,8 +389,14 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
             <Row label="cwd"><Value value={visible.cwd} mono /></Row>
             <Row label="Rama"><Value value={visible.branch} mono /></Row>
             <Row label="Worktree"><Value value={visible.worktree} mono /></Row>
+            <Row label="Host / origen"><Missing /></Row>
           </Section>
-          <p className="twk__hint">La ruta es una ubicación, no la identidad de la Task: la identidad son los IDs durables.</p>
+          <p className="twk__hint">La ruta es una ubicación, no la identidad de la Task: la identidad son los IDs durables. Core no informa host ni origen en este detalle.</p>
+
+          <section className="twk__section" aria-labelledby={`${uid}-context`}>
+            <h3 id={`${uid}-context`} className="twk__section-title">Contexto</h3>
+            <ContextActions projectId={projectId} taskId={taskId} onOpenActivity={onOpenActivity} onOpenAttention={onOpenAttention} />
+          </section>
 
           <Section id={`${uid}-time`} title="Tiempos">
             <Row label="Creada"><Time value={visible.created_at} /></Row>
