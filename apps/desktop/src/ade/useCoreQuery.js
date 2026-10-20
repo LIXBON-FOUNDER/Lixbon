@@ -5,7 +5,10 @@ const POLL_MS = 15_000;
 const QUERY_TIMEOUT_MS = 10_000;
 
 function coreArgs(query, args) {
-  if (query === 'projects_overview') return {};
+  if (query === 'projects_overview') return { archived: args.archived ?? 'exclude' };
+  if (query === 'attention_list') {
+    return { projectId: args.project_id, category: args.category, severity: args.severity };
+  }
   if (query === 'tasks_by_project') return { projectId: args.project_id };
   return { projectId: args.project_id, taskId: args.task_id };
 }
@@ -19,6 +22,7 @@ export function classifyCoreError(error) {
 
 function isEmptyResult(query, data) {
   return (query === 'projects_overview' && data.projects.length === 0)
+    || (query === 'attention_list' && data.items.length === 0)
     || (query === 'tasks_by_project' && data.tasks.length === 0);
 }
 
