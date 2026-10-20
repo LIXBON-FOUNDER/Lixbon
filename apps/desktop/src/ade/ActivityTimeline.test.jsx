@@ -67,6 +67,58 @@ describe('ActivityTimeline · estados de la vista', () => {
     expect(onRetry).toHaveBeenCalledWith({ scope: { kind: 'global' } });
   });
 
+  it('error sin stale no muestra filas cacheadas', () => {
+    render(
+      <ActivityTimeline
+        status="error"
+        items={[activityItem()]}
+        error={{ message: 'Fallo.' }}
+      />,
+    );
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+    expect(screen.queryByTestId('activity-evt-1')).toBeNull();
+    expect(screen.queryByTestId('activity-stale')).toBeNull();
+    expect(screen.getByTestId('activity-count').textContent).toBe('0');
+  });
+
+  it('stale+error conserva filas, cuenta y anuncia el aviso además del error', () => {
+    const onRetry = vi.fn();
+    const onRefresh = vi.fn();
+    render(
+      <ActivityTimeline
+        status="error"
+        stale
+        items={[activityItem()]}
+        error={{ code: 'internal', message: 'Reconexión fallida.' }}
+        onRetry={onRetry}
+        onRefresh={onRefresh}
+      />,
+    );
+
+    expect(screen.getByTestId('activity-error').textContent).toContain('Reconexión fallida.');
+    expect(screen.getByTestId('activity-stale').textContent).toContain('Vista desactualizada');
+    expect(screen.getByTestId('activity-list')).toBeTruthy();
+    expect(screen.getByTestId('activity-evt-1')).toBeTruthy();
+    expect(screen.getByTestId('activity-count').textContent).toBe('1');
+    expect(screen.getByTestId('activity-count').getAttribute('aria-label')).toBe(
+      '1 evento cargado',
+    );
+    expect(screen.getByTestId('activity-timeline').getAttribute('aria-busy')).toBe('false');
+
+    fireEvent.click(screen.getByTestId('activity-refresh'));
+    expect(onRefresh).toHaveBeenCalledWith({ scope: { kind: 'global' } });
+    fireEvent.click(screen.getByTestId('activity-retry'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('stale+error sin filas conserva el aviso y no inventa una lista', () => {
+    render(<ActivityTimeline status="error" stale error={{ message: 'Fallo.' }} />);
+    expect(screen.getByTestId('activity-stale')).toBeTruthy();
+    expect(screen.getByTestId('activity-error')).toBeTruthy();
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+    expect(screen.getByTestId('activity-count').textContent).toBe('0');
+  });
+
   it('degraded: explica que el Core no tiene Event Log y no finge actividad', () => {
     render(<ActivityTimeline status="degraded" items={[activityItem()]} />);
     const state = screen.getByTestId('activity-degraded');
@@ -186,6 +238,48 @@ describe('ActivityTimeline · alcance y cursor', () => {
       />,
     );
     expect(screen.queryByTestId('activity-load-more')).toBeNull();
+  });
+
+  it.each([
+    ['null', null],
+    ['cero', 0],
+    ['negativo', -2],
+    ['decimal', 1.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['texto', '7'],
+    ['booleano', true],
+  ])('has_more=true con next_cursor %s no habilita load-more', (_name, next) => {
+    const onLoadMore = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[activityItem()]}
+        cursor={{ next, hasMore: true }}
+        onLoadMore={onLoadMore}
+      />,
+    );
+    expect(screen.queryByTestId('activity-load-more')).toBeNull();
+    expect(screen.queryByText('No hay más actividad.')).toBeNull();
+    expect(onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it('sin cursor o con has_more no booleano no ofrece load-more ni fin', () => {
+    const onLoadMore = vi.fn();
+    const { rerender } = render(
+      <ActivityTimeline items={[activityItem()]} cursor={null} onLoadMore={onLoadMore} />,
+    );
+    expect(screen.queryByTestId('activity-load-more')).toBeNull();
+    expect(screen.queryByText('No hay más actividad.')).toBeNull();
+
+    rerender(
+      <ActivityTimeline
+        items={[activityItem()]}
+        cursor={{ next: 7, hasMore: 'true' }}
+        onLoadMore={onLoadMore}
+      />,
+    );
+    expect(screen.queryByTestId('activity-load-more')).toBeNull();
+    expect(screen.queryByText('No hay más actividad.')).toBeNull();
   });
 });
 
@@ -439,7 +533,7 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
     expect(screen.queryByText('CRUDO')).toBeNull();
   });
 
-  it('ignora payload crudo, resúmenes de IA, unread/Attention y metadatos no seguros', () => {
+  it('ignora payload crudo, resúmenes de IA, unread/Attention y metadatos no permitidos', () => {
     const { container } = render(
       <ActivityTimeline
         items={[
@@ -482,42 +576,98 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
     expect(text).not.toMatch(/sin leer/i);
     expect(screen.queryByTestId('activity-unread')).toBeNull();
 
-    // El HTML del metadato se pinta como texto, nunca como nodo.
+    // El HTML de un metadato descartado no se pinta como nodo ni como texto.
     expect(container.querySelector('img')).toBeNull();
-    expect(text).toContain('<img src=x');
+    expect(text).not.toContain('<img src=x');
+
+    // Solo quedan las dos etiquetas técnicas explícitamente seguras.
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(2);
+  });
+
+  it('escapa el HTML de valores de metadatos seguros y del mensaje', () => {
+    const { container } = render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'esc',
+            metadata: [{ label: 'modelo', value: '<img src=x onerror="alert(1)">' }],
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByTestId('activity-esc').textContent).toContain('<img src=x');
+  });
+
+  it('limita a 8 metadatos seguros y recorta valores largos', () => {
+    const metadata = [
+      { label: 'agent', value: 'x'.repeat(400) },
+      { label: 'model', value: 'm' },
+      { label: 'status', value: 'ok' },
+      { label: 'duration_ms', value: 10 },
+      { label: 'retry_count', value: 2 },
+      { label: 'version', value: '1.0' },
+      { label: 'channel', value: 'core' },
+      { label: 'project_id', value: 'p-1' },
+      { label: 'task_id', value: 'CUT_TASK' },
+      { label: 'run_id', value: 'CUT_RUN' },
+    ];
+    render(<ActivityTimeline items={[activityItem({ eventId: 'cap', metadata })]} />);
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(8);
+
+    const text = screen.getByTestId('activity-cap').textContent;
     // 120 caracteres contando el ellipsis de recorte.
     expect(text).not.toContain('x'.repeat(120));
     expect(text).toContain('x'.repeat(119));
-
-    // Límite de 8 metadatos seguros por fila.
-    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(8);
+    expect(text).not.toContain('CUT_TASK');
+    expect(text).not.toContain('CUT_RUN');
   });
 
-  it('filtra familias sensibles en claves anidadas y variantes de formato, y conserva metadatos seguros', () => {
+  it('bloquea familias sensibles en variantes exactas, camel, mayúsculas y anidadas', () => {
+    const blocked = [
+      ['access_key', 'SECRETO_ACCESS_KEY'],
+      ['accessKey', 'SECRETO_ACCESS_CAMEL'],
+      ['ACCESS_KEY_ID', 'SECRETO_ACCESS_ID'],
+      ['secretkey', 'SECRETO_SECRETKEY'],
+      ['secretKey', 'SECRETO_SECRET_CAMEL'],
+      ['jwttoken', 'SECRETO_JWT'],
+      ['jwtToken', 'SECRETO_JWT_CAMEL'],
+      ['bearertoken', 'SECRETO_BEARER'],
+      ['bearerToken', 'SECRETO_BEARER_CAMEL'],
+      ['cookietoken', 'SECRETO_COOKIE'],
+      ['cookieToken', 'SECRETO_COOKIE_CAMEL'],
+      ['passwordhash', 'SECRETO_PASSWORD_HASH'],
+      ['passwordHash', 'SECRETO_PASSWORD_CAMEL'],
+      ['sinleer', 'NO_SINLEER'],
+      ['SINLEER', 'NO_SINLEER_MAYUS'],
+      ['sin_leer', 'NO_SIN_LEER'],
+      ['SinLeer', 'NO_SIN_LEER_CAMEL'],
+      ['unread', 'NO_UNREAD'],
+      ['is_unread', 'NO_IS_UNREAD'],
+      ['unread_count', 'NO_UNREAD_COUNT'],
+      ['IsUnread', 'NO_IS_UNREAD_CAMEL'],
+      ['attention', 'NO_ATTENTION'],
+      ['atención', 'NO_ATENCION'],
+      ['auth.session.secret', 'NO_AUTH_NESTED'],
+      ['context.access_key', 'NO_CONTEXT_ACCESS'],
+      ['context.accessKey', 'NO_CONTEXT_ACCESS_CAMEL'],
+      ['context.sinleer', 'NO_CONTEXT_SINLEER'],
+      ['meta.SINLEER', 'NO_META_SINLEER'],
+      ['meta.passwordhash', 'NO_META_PASSWORD'],
+    ];
+
     render(
       <ActivityTimeline
         items={[
           activityItem({
             eventId: 'familias',
             metadata: [
-              { label: 'access_token', value: 'SECRETO_ACCESS' },
-              { label: 'RefreshToken', value: 'SECRETO_REFRESH' },
-              { label: 'refresh_token', value: 'SECRETO_REFRESH_SNAKE' },
-              { label: 'auth.session.secret', value: 'SECRETO_ANIDADO' },
-              { label: 'unread_count', value: 'NO_UNREAD_COUNT' },
-              { label: 'is_unread', value: 'NO_IS_UNREAD_SNAKE' },
-              { label: 'IsUnread', value: 'NO_IS_UNREAD' },
-              { label: 'ATTENTION.Is_UnRead', value: 'NO_ATTENTION_UNREAD' },
-              { label: 'atención-count', value: 'NO_ATENCION' },
+              ...blocked.map(([label, value]) => ({ label, value })),
               { label: 'agente', value: 'claude' },
               { label: 'modelo', value: 'gpt-6-sol' },
               { label: 'reintentos', value: 'tres' },
               { label: 'readiness', value: 'listo' },
               { label: 'thread', value: 'worker' },
-              {
-                label: 'contexto',
-                value: { refresh_token: 'NO_SECRETO_NESTED', unread_count: 'NO_UNREAD_NESTED' },
-              },
             ],
           }),
         ]}
@@ -526,23 +676,9 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
 
     const row = screen.getByTestId('activity-familias');
     const text = row.textContent;
-    for (const hidden of [
-      'SECRETO_ACCESS',
-      'SECRETO_REFRESH',
-      'SECRETO_REFRESH_SNAKE',
-      'SECRETO_ANIDADO',
-      'NO_UNREAD_COUNT',
-      'NO_IS_UNREAD_SNAKE',
-      'NO_IS_UNREAD',
-      'NO_ATTENTION_UNREAD',
-      'NO_ATENCION',
-      'NO_SECRETO_NESTED',
-      'NO_UNREAD_NESTED',
-      'access_token',
-      'RefreshToken',
-      'IsUnread',
-    ]) {
-      expect(text).not.toContain(hidden);
+    for (const [label, value] of blocked) {
+      expect(text).not.toContain(value);
+      expect(text).not.toContain(label);
     }
     expect(text).toContain('claude');
     expect(text).toContain('gpt-6-sol');
@@ -550,6 +686,125 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
     expect(text).toContain('listo');
     expect(text).toContain('worker');
     expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(5);
+  });
+
+  it('descarta etiquetas desconocidas, valores anidados y metadata que no es una lista plana', () => {
+    const { container } = render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'nested',
+            metadata: [
+              { label: 'unknown_field', value: 'SECRETO_UNKNOWN' },
+              { label: 'custom', value: 'SECRETO_CUSTOM' },
+              { label: 'html', value: 'SECRETO_HTML' },
+              { label: 'body', value: 'SECRETO_BODY' },
+              { label: 'context.agent', value: 'SECRETO_NESTED_SAFE_LEAF' },
+              { label: 'agent', value: { access_key: 'SECRETO_NESTED_OBJ' } },
+              { label: 'model', value: { accessKey: 'SECRETO_NESTED_CAMEL' } },
+              { label: 'status', value: ['SECRETO_NESTED_ARRAY'] },
+              { label: 'channel', value: { sinleer: 'NO_NESTED_SINLEER', SINLEER: 'NO_NESTED_SINLEER_MAYUS' } },
+              { label: 'version', value: 3 },
+              { label: 'run_id', value: null },
+            ],
+          }),
+          activityItem({
+            eventId: 'nonlist',
+            metadata: { access_key: 'SECRETO_OBJECT_METADATA', agent: 'claude' },
+          }),
+        ]}
+      />,
+    );
+
+    const nested = screen.getByTestId('activity-nested');
+    expect(nested.textContent).not.toContain('SECRETO_');
+    expect(nested.textContent).not.toContain('NO_NESTED_');
+    expect(nested.textContent).not.toContain('[object Object]');
+    expect(nested.textContent).toContain('3');
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(1);
+    expect(screen.getByTestId('activity-nonlist').textContent).not.toContain(
+      'SECRETO_OBJECT_METADATA',
+    );
+    expect(container.textContent).not.toContain('SECRETO_');
+    expect(container.textContent).not.toContain('NO_NESTED_');
+  });
+
+  it('no publica valores con forma de credencial o estado de lectura aunque la clave sea segura', () => {
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'values',
+            metadata: [
+              { label: 'agent', value: 'Bearer abcdefghijklmnop' },
+              { label: 'model', value: 'sk-live-1234567890abcdef' },
+              { label: 'status', value: 'SECRETO_EN_VALOR' },
+              { label: 'version', value: 'token=abc123' },
+              { label: 'channel', value: 'sinleer' },
+              { label: 'run_id', value: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' },
+              { label: 'status', value: 'READ_STATE' },
+              { label: 'severity', value: 'SEEN_STATE' },
+              { label: 'state', value: 'LEÍDO' },
+              { label: 'project_id', value: 'proyecto-ok' },
+              { label: 'task_id', value: true },
+            ],
+          }),
+        ]}
+      />,
+    );
+    const text = screen.getByTestId('activity-values').textContent;
+    expect(text).not.toContain('Bearer');
+    expect(text).not.toContain('sk-live');
+    expect(text).not.toContain('SECRETO_EN_VALOR');
+    expect(text).not.toContain('token=');
+    expect(text).not.toContain('sinleer');
+    expect(text).not.toContain('ghp_');
+    expect(text).not.toContain('READ_STATE');
+    expect(text).not.toContain('SEEN_STATE');
+    expect(text).not.toContain('LEÍDO');
+    expect(text).toContain('proyecto-ok');
+    expect(text).toContain('true');
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(2);
+  });
+
+  it('conserva metadatos técnicos explícitamente seguros', () => {
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'safemeta',
+            metadata: [
+              { label: 'agent_id', value: 'a-1' },
+              { label: 'model_name', value: 'gpt-6-sol' },
+              { label: 'durationMs', value: 12 },
+              { label: 'retry_count', value: 3 },
+              { label: 'event_kind', value: 'task.created' },
+              { label: 'project_id', value: 'p-1' },
+              { label: 'run_id', value: 'r-1' },
+              { label: 'status', value: 'ok' },
+            ],
+          }),
+        ]}
+      />,
+    );
+    const text = screen.getByTestId('activity-safemeta').textContent;
+    for (const expected of [
+      'agent_id',
+      'a-1',
+      'model_name',
+      'gpt-6-sol',
+      'durationMs',
+      'retry_count',
+      'event_kind',
+      'project_id',
+      'p-1',
+      'run_id',
+      'r-1',
+      'status',
+      'ok',
+    ]) {
+      expect(text).toContain(expected);
+    }
   });
 
   it('un target de tipo attention es una referencia opaca, sin estado de lectura', () => {
@@ -583,6 +838,47 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
 });
 
 describe('ActivityTimeline · teclado y accesibilidad', () => {
+  it('usa un aria-label plural correcto en el contador', () => {
+    const { rerender } = render(<ActivityTimeline status="ready" items={[]} />);
+    expect(screen.getByTestId('activity-count').getAttribute('aria-label')).toBe(
+      '0 eventos cargados',
+    );
+
+    rerender(<ActivityTimeline items={[activityItem()]} />);
+    expect(screen.getByTestId('activity-count').getAttribute('aria-label')).toBe(
+      '1 evento cargado',
+    );
+
+    rerender(
+      <ActivityTimeline
+        items={[activityItem(), activityItem({ eventId: 'evt-2', seq: 2 })]}
+      />,
+    );
+    expect(screen.getByTestId('activity-count').getAttribute('aria-label')).toBe(
+      '2 eventos cargados',
+    );
+  });
+
+  it('expone eventId y seq en la metadata accesible de la fila', () => {
+    render(<ActivityTimeline items={[activityItem()]} />);
+    const row = screen.getByTestId('activity-evt-1');
+    expect(row.getAttribute('data-event-id')).toBe('evt-1');
+    expect(row.getAttribute('data-seq')).toBe('1');
+    expect(row.getAttribute('aria-label')).toContain('Evento evt-1');
+    expect(row.getAttribute('aria-label')).toContain('secuencia 1');
+
+    const describedBy = row.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const meta = document.getElementById(describedBy);
+    expect(meta).toBeTruthy();
+    expect(meta.textContent).toContain('Evento evt-1');
+    expect(meta.textContent).toContain('Secuencia 1');
+    expect(screen.getByTestId('activity-row-meta-evt-1').textContent).toContain('Evento evt-1');
+    expect(screen.getByTestId('activity-seq-evt-1').getAttribute('aria-label')).toBe(
+      'Secuencia 1',
+    );
+  });
+
   it('la sección está etiquetada, la lista conserva semántica y los controles son botones nativos', () => {
     const onLoadMore = vi.fn();
     const items = [
