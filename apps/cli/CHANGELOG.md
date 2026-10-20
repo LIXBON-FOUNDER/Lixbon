@@ -4,6 +4,17 @@ Cada versión lleva una sección `## <versión>` con viñetas (`- …`) escritas
 
 La etapa sale de la etiqueta: sin sufijo (`cli-v2.4.0`) es estable; con sufijo (`cli-v2.4.0-beta.1`, `cli-v2.3.0-go.2`) es beta.
 
+## 2.14.0
+- Nueva imagen: más lima de Lixbon (el ◆ de la barra superior, los títulos de los paneles y la cabecera de cada turno), un riel continuo junto al trabajo del agente y una línea en vivo con los tokens a la izquierda y las teclas a la derecha.
+- Modos con nombre y color propios: conversa, agente, auto (nuevo: edita y ejecuta sin preguntar), plan y delega. shift+tab pasa por conversa → agente → auto → plan; auto y plan valen solo para la sesión.
+- El esfuerzo se cambia con ←/→ en un deslizador. Los modelos con niveles (gpt-oss, o1/o3/o4, gpt-5 o los que publican `reasoning_effort`) tienen bajo · medio · alto; el resto, auto · apagado · encendido.
+- El menú «/» agrupa los comandos en secciones con color y aire entre ellas, con argumentos y descripciones en columnas.
+- El cursor de la caja es una barra, y hay una fila de aire entre la caja y el pie.
+- ctrl+b manda al fondo el comando que está corriendo; el agente sigue y puede leer su salida después.
+- esc cancela la compactación, y la barra de progreso se llena mientras compacta.
+- La búsqueda web funciona con cualquier proveedor: si no es el gateway de Lixbon, va por tu cuenta de Lixbon guardada.
+- Retoques en el selector de rama, `/usage`, el panel de procesos (● para los que siguen vivos) y las miniaturas de imagen.
+
 ## 2.13.1
 - Las imágenes se ven tal cual son: en terminales con Sixel (Windows Terminal, WezTerm, foot…) la miniatura se cambia por la imagen con sus píxeles cuando la pantalla está quieta. Sin Sixel queda la miniatura, ahora más grande y suavizada.
 - Miniaturas también para WebP.

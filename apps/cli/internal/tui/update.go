@@ -29,7 +29,9 @@ func tickCmd() tea.Cmd {
 }
 
 // ticking: el ticker anima el turno y los comandos asíncronos; se para solo.
-func (m *Model) ticking() bool { return m.running || m.busy != "" || m.login != nil }
+func (m *Model) ticking() bool {
+	return m.running || m.busy != "" || m.login != nil || m.compacting != nil || m.folding != nil
+}
 
 func (m *Model) startTick() tea.Cmd {
 	if m.tickOn {
@@ -165,6 +167,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.spin++
+		m.stepFold()
 		if m.openTool != nil {
 			m.log.refresh(m.openTool)
 		}
@@ -220,7 +223,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactProgressMsg:
 		if c := m.compacting; c != nil {
 			before := compactPct(c.written)
-			c.written = msg.written
+			c.written, c.text = utf8.RuneCountInString(msg.text), msg.text
 			if pct := compactPct(c.written); m.remote != nil && pct/5 != before/5 {
 				m.remote.link.Emit("compact", map[string]any{"phase": "progress", "pct": pct, "step": "summary"})
 			}
@@ -294,6 +297,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cmdDoneMsg:
 		return m, m.finishAsync(msg)
 
+	case compactFoldMsg:
+		m.finishCompact(msg)
+		if len(m.queue) > 0 && !m.running {
+			return m, m.dispatchQueued()
+		}
+		return m, nil
+
 	case updateNoticeMsg:
 		m.onUpdateNotice(msg.Outcome)
 		return m, nil
@@ -323,7 +333,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.picker != nil && m.picker.content != nil && !infoKeys[msg.String()] {
+	// Un panel informativo se cierra con cualquier otra tecla, salvo si
+	// atiende las suyas (el deslizador del esfuerzo).
+	if m.picker != nil && m.picker.content != nil && m.picker.onKey == nil && !infoKeys[msg.String()] {
 		m.picker = nil
 	}
 	if m.picker != nil {
@@ -368,6 +380,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+c":
 		return m, m.onInterrupt()
+	case "ctrl+b":
+		// Con un comando corriendo lo manda al fondo; si no, es la tecla de
+		// la caja (un carácter atrás).
+		if m.detachCommand() {
+			return m, nil
+		}
 	case "esc":
 		switch {
 		case m.prompt != nil:
@@ -378,6 +396,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				p.onCancel()
 			}
 			m.add(note("cancelado"))
+		case m.compacting != nil:
+			m.cancelCompact()
 		case m.running:
 			m.cancelTurn()
 		case len(m.menu) > 0:
@@ -456,19 +476,6 @@ func (m *Model) cancelTurn() {
 		m.cancel()
 	}
 	m.notice = "interrumpiendo…"
-}
-
-func (m *Model) cycleMode() {
-	switch {
-	case m.chat.Mode == "ask":
-		m.setMode("agent")
-	case m.chat.Mode == "agent" && !m.chat.Session.PlanMode:
-		m.chat.Session.PlanMode = true
-	default:
-		m.chat.Session.PlanMode = false
-		m.setMode("ask")
-	}
-	m.refreshContext()
 }
 
 func (m *Model) onEnter() tea.Cmd {

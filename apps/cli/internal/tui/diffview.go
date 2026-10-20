@@ -101,8 +101,14 @@ func (d *diffView) render(width int, open bool) []string {
 	for _, r := range d.rows {
 		number = max(number, max(r.OldNo, r.NewNo))
 	}
-	numWidth := max(3, len(strconv.Itoa(number)))
-	codeWidth := max(4, width-len(pad)-numWidth-1-2-1)
+	numWidth := max(2, len(strconv.Itoa(number)))
+	// Todas las filas del tramo miden lo mismo: lo que ocupa la más larga, con
+	// aire, sin llegar al borde.
+	longest := 0
+	for _, r := range d.rows {
+		longest = max(longest, ansi.StringWidth(strings.ReplaceAll(r.Text, "\t", "    ")))
+	}
+	rowWidth := min(max(10, width-len(pad)-1), max(40, numWidth+3+longest+3))
 	idx := make([]int, 0, len(d.rows))
 	for i := range d.rows {
 		idx = append(idx, i)
@@ -117,48 +123,28 @@ func (d *diffView) render(width int, open bool) []string {
 	for _, i := range idx {
 		r := d.rows[i]
 		if r.Kind == "gap" {
-			out = append(out, pad+sDim2.Render(strings.Repeat(" ", numWidth+1)+glyphGap))
+			out = append(out, pad+sDim.Render(strings.Repeat(" ", numWidth+1)+glyphGap))
 			continue
 		}
-		bg, sign, signColor, base := "", "  ", pal.faint, pal.soft
+		bg, sign, fg := pal.surf, " ", pal.soft
 		switch r.Kind {
 		case "add":
-			bg, sign, signColor, base = pal.addBg, "+ ", pal.ok, pal.ink
+			bg, sign, fg = pal.addBg, "+", pal.ink
 		case "del":
-			bg, sign, signColor, base = pal.delBg, glyphMinus+" ", pal.err, pal.ink
-		}
-		style := func(fg string) lipgloss.Style {
-			s := lipgloss.NewStyle().Foreground(lipgloss.Color(fg))
-			if bg != "" {
-				s = s.Background(lipgloss.Color(bg))
-			}
-			return s
+			bg, sign, fg = pal.delBg, glyphMinus, pal.ink
 		}
 		n := r.NewNo
 		if n == 0 {
 			n = r.OldNo
 		}
-		var code strings.Builder
-		used := 0
-		for _, tok := range d.tokens(i) {
-			text := strings.TrimRight(tok.Value, "\n")
-			if text == "" {
-				continue
-			}
-			if room := codeWidth - used; ansi.StringWidth(text) > room {
-				text = ansi.Truncate(text, max(0, room), "")
-			}
-			used += ansi.StringWidth(text)
-			code.WriteString(style(tokenColor(tok.Type, base)).Render(text))
-			if used >= codeWidth {
-				break
-			}
-		}
-		fill := style(base).Render(strings.Repeat(" ", max(0, codeWidth-used)))
-		out = append(out, pad+style(pal.faint).Render(fmt.Sprintf("%*d ", numWidth, n))+style(signColor).Render(sign)+code.String()+fill)
+		text := fmt.Sprintf(" %*d %s %s", numWidth, n, sign, strings.ReplaceAll(r.Text, "\t", "    "))
+		text = ansi.Truncate(text, rowWidth, glyphEllipsis)
+		text += strings.Repeat(" ", max(0, rowWidth-ansi.StringWidth(text)))
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Background(lipgloss.Color(bg))
+		out = append(out, pad+style.Render(text))
 	}
 	if more > 0 {
-		out = append(out, pad+sDim.Render(fmt.Sprintf("%s %s más", glyphEllipsis, noun(more, "cambio", "cambios")))+sDim2.Render(" "+glyphSep+" ctrl+o"))
+		out = append(out, pad+sDim.Render(fmt.Sprintf("%s %s más   ctrl+o", glyphEllipsis, noun(more, "línea", "líneas"))))
 	}
 	return out
 }

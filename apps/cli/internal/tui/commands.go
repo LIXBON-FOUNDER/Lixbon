@@ -24,7 +24,7 @@ const NameWidth = 10
 var Specs = []Spec{
 	{"help", "", "Show all commands", "conversation"},
 	{"model", "[name]", "Switch model (no argument opens the picker)", "conversation"},
-	{"mode", "[ask|agent|delegate]", "Change the working mode", "conversation"},
+	{"mode", "[ask|agent|auto|plan|delegate]", "Change the working mode", "conversation"},
 	{"new", "", "Start a new conversation", "conversation"},
 	{"compact", "", "Compact the conversation to free up context", "conversation"},
 	{"history", "[messages]", "Browse and reopen past conversations", "conversation"},

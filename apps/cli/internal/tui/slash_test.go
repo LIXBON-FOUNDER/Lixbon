@@ -48,7 +48,7 @@ func TestModelCommand(t *testing.T) {
 	h := newHarness(t, nil)
 	h.send("/model")
 	contains(t, h.view(), "Qwen")
-	contains(t, h.view(), "actual")
+	contains(t, h.view(), "←→ esfuerzo")
 	h.key("down")
 	h.key("enter")
 	if h.chat.Model != "llama" || h.chat.Cfg.Model != "llama" {
@@ -77,7 +77,7 @@ func TestModeCommand(t *testing.T) {
 	}
 	contains(t, h.out(), "Workspace del agente:")
 	h.send("/mode")
-	contains(t, h.view(), "lee tu proyecto sin modificarlo")
+	contains(t, h.view(), "lee y responde, sin editar")
 	h.key("esc")
 	if h.chat.Mode != "agent" {
 		t.Fatal("Esc no cambia el modo")
@@ -167,12 +167,55 @@ func TestCompactCommand(t *testing.T) {
 	}
 }
 
+// esc corta la compactación: el resumen no llega y la conversación sigue igual.
+func TestEscCancelsTheCompaction(t *testing.T) {
+	hang := func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
+	h := newHarness(t, nil, hang)
+	for i := 0; i < 4; i++ {
+		h.chat.History = append(h.chat.History, history.User("pregunta"), history.Assistant("respuesta"))
+	}
+	h.send("/compact")
+	contains(t, h.view(), "esc cancela")
+	h.key("esc")
+	h.settle()
+	contains(t, h.out(), "Compactación cancelada")
+	if len(h.chat.History) != 8 {
+		t.Fatalf("historial: %d", len(h.chat.History))
+	}
+}
+
 func TestCompactProgressShowsBothPhases(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.compacting = &compactState{started: time.Now(), messages: 12, tokens: 9000}
-	contains(t, h.view(), "1/2 el modelo lee 12 mensajes")
-	h.update(compactProgressMsg{written: 1400})
-	contains(t, h.view(), "2/2 escribe el resumen 50%")
+	contains(t, h.view(), "1/2  lee 12 mensajes")
+	h.update(compactProgressMsg{text: "Paginación con cursor. " + strings.Repeat("x", 1377)})
+	contains(t, h.view(), "2/2  escribe el resumen  50 %")
+	contains(t, h.view(), "xxxxxxxx")
+}
+
+// Al terminar, lo hablado sale del transcript y se pliega en una fila
+// mientras el contexto baja; al acabar el pliegue solo queda esa fila.
+func TestCompactFoldsTheConversation(t *testing.T) {
+	h := newHarness(t, nil)
+	h.m.printHeader()
+	h.m.add(userBlock{text: "pregunta vieja"})
+	h.m.add(note("respuesta vieja"))
+	h.m.foldConversation(compactBlock{summary: "resumen", before: 9000, after: 900, secs: 3}, 92, 9)
+	if reducedMotion() {
+		t.Skip("sin animaciones no hay pliegue")
+	}
+	if h.m.folding == nil || h.m.ctxPct != 92 {
+		t.Fatalf("el pliegue empieza con el contexto de antes: %v", h.m.ctxPct)
+	}
+	contains(t, h.view(), "Conversación compactada")
+	contains(t, h.view(), "pregunta vieja")
+	h.m.folding.started = time.Now().Add(-2 * foldTime)
+	h.m.stepFold()
+	if h.m.folding != nil {
+		t.Fatal("el pliegue termina")
+	}
+	notContains(t, h.view(), "pregunta vieja")
+	contains(t, h.view(), "Conversación compactada")
 }
 
 func TestSettingsCommands(t *testing.T) {
@@ -244,8 +287,8 @@ func TestToolsAndCostAndStatusReports(t *testing.T) {
 	contains(t, h.out(), "semana ∞")
 	h.send("/usage")
 	h.settle()
-	contains(t, h.out(), "30 %")
-	contains(t, h.out(), "ilimitado")
+	contains(t, h.view(), "30 %")
+	contains(t, h.view(), "ilimitado")
 }
 
 func TestWorkspaceCommandReloadsProjectContext(t *testing.T) {
@@ -294,7 +337,7 @@ func TestRunCommandExecutesAndFeedsTheModel(t *testing.T) {
 	h.key("enter")
 	h.settle()
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), "exit 0")
+	contains(t, h.out(), glyphs.check+" $")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)
@@ -339,12 +382,12 @@ func TestPsListsAndStopsBackgroundCommands(t *testing.T) {
 	}
 	h.chat.Toolbox.Execute(t.Context(), "run_command", map[string]any{"command": sleep, "background": true})
 	h.send("/ps")
-	contains(t, h.view(), "Comandos en segundo plano (1)")
-	contains(t, h.view(), "en marcha")
+	contains(t, h.view(), "Procesos")
+	contains(t, h.view(), "1 en marcha")
 	h.key("esc")
-	contains(t, h.view(), "[1] comando")
+	contains(t, h.view(), "1 proceso")
 	h.send("/ps")
-	h.key("enter")
+	h.typeText("k")
 	if len(h.chat.Toolbox.Procs.IDs()) != 0 {
 		t.Fatal("el proceso debía detenerse")
 	}
@@ -363,7 +406,7 @@ func TestKeyCommandValidatesTheKey(t *testing.T) {
 	if h.m.login == nil || h.m.login.step != stepAPIKey {
 		t.Fatal("/key sin argumento abre el login en la API key")
 	}
-	contains(t, h.view(), "Usar una API key")
+	contains(t, h.view(), "Con una API key")
 	h.key("esc")
 	if h.m.login != nil {
 		t.Fatal("Esc vuelve al chat")
@@ -463,9 +506,9 @@ func TestBangRunsTheCommandWithoutAskingAndFeedsTheModel(t *testing.T) {
 	h.send("!echo hola")
 	h.settle()
 	notContains(t, h.view(), "Ejecutar «")
-	contains(t, h.out(), "$  echo hola")
+	contains(t, h.out(), "$       echo hola")
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), "exit 0")
+	contains(t, h.out(), glyphs.check+" $")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)

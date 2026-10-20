@@ -11,12 +11,14 @@ import (
 // option es una fila de un selector. Meta va pegado a la derecha (ya pintado)
 // y Extra detrás de la descripción (p. ej. las capacidades de un modelo).
 type option struct {
-	Label    string
-	Value    string
-	Desc     string
-	Badge    string
-	Meta     string
-	Extra    string
+	Label string
+	Value string
+	Desc  string
+	Badge string
+	Meta  string
+	Extra string
+	// Lead va entre la etiqueta y la descripción: los tramos del esfuerzo.
+	Lead     string
 	Disabled bool
 }
 
@@ -54,6 +56,19 @@ type picker struct {
 	token any
 	// anchor: el panel lo abrió un botón y se pinta pegado a él.
 	anchor *anchor
+	// noNumbers: sin números delante aunque haya pocas opciones.
+	noNumbers bool
+	// right va a la derecha del título cuando no hay búsqueda.
+	right string
+	// searchHint sustituye a «escribe para buscar» mientras no hay filtro.
+	searchHint string
+	// before pinta delante de la etiqueta (el ● de un proceso).
+	before func(o option, on bool) string
+	// lead pinta lo que va entre la etiqueta y la descripción según la fila
+	// esté elegida o no (los tramos del esfuerzo); sin él, option.Lead.
+	lead func(o option, on bool) string
+	// foot son filas bajo la lista sobre la opción elegida (su detalle).
+	foot func(o option, inner int) []string
 
 	// Lo que pintó el último view, para traducir clics a filas.
 	start, optionTop, shown int
@@ -102,7 +117,7 @@ func (p *picker) move(step int) {
 
 // numbered: sin filtro y con pocas opciones, las teclas 1–9 eligen.
 func (p *picker) numbered() bool {
-	if p.search {
+	if p.search || p.noNumbers {
 		return false
 	}
 	n := 0
@@ -219,7 +234,7 @@ func (p *picker) hints() string {
 	if p.search {
 		pairs = append(pairs, [2]string{"escribe", "filtra"})
 	}
-	pairs = append(pairs, [2]string{"↵", "elegir"}, [2]string{"esc", "cancelar"})
+	pairs = append(pairs, [2]string{"enter", "elegir"}, [2]string{"esc", "cerrar"})
 	return keyHints(pairs...)
 }
 
@@ -240,10 +255,10 @@ func (p *picker) view(width, maxRows int) []string {
 		return p.infoView(width, inner, maxRows)
 	}
 	if p.form != nil {
-		return panel(p.form.view(inner), width, pal.acc, p.title)
+		return sheet(p.form.view(inner), width, "", p.title, "", p.hints())
 	}
 	if p.ask != nil {
-		return panel(p.ask.view(inner), width, p.tone, p.title)
+		return sheet(p.ask.view(inner), width, p.tone, p.title, "", p.hints())
 	}
 	var rows []panelRow
 	for _, b := range p.body {
@@ -253,13 +268,12 @@ func (p *picker) view(width, maxRows int) []string {
 	if len(p.body) > 0 && len(opts) > 0 {
 		rows = append(rows, panelRow{})
 	}
+	right := p.right
 	if p.search {
-		query := sInk.Render(p.filter) + sAccent.Render(glyphEdge)
-		if p.filter == "" {
-			query = sAccent.Render(glyphEdge) + sDim2.Render("escribe para filtrar")
+		right = sDim.Render(firstNonEmpty(p.searchHint, "escribe para buscar"))
+		if p.filter != "" {
+			right = sDim.Render(fmt.Sprintf("%d de %d   ", len(opts), len(p.options))) + sInk.Render(p.filter) + sAccent.Render(glyphEdge)
 		}
-		count := sDim.Render(fmt.Sprintf("%d de %d", len(opts), len(p.options)))
-		rows = append(rows, panelRow{text: fitRight(sDim2.Render("/ ")+query, count, inner+1)})
 	}
 	limit := max(1, min(p.maxShown, maxRows))
 	start := 0
@@ -275,7 +289,11 @@ func (p *picker) view(width, maxRows int) []string {
 	}
 	labelWidth = min(labelWidth, max(8, inner/2))
 	numbers := p.numbered()
-	p.start, p.optionTop, p.shown = start, 1+len(rows), end-start
+	head := 0
+	if p.title != "" || right != "" {
+		head = 2
+	}
+	p.start, p.optionTop, p.shown = start, head+len(rows), end-start
 	number := 0
 	for i := 0; i < start; i++ {
 		if !opts[i].Disabled {
@@ -290,20 +308,24 @@ func (p *picker) view(width, maxRows int) []string {
 		}
 		number++
 		on := i == p.cursor
-		bar, labelStyle, descStyle := " ", sPrimary, sDim
+		bar, labelStyle, descStyle := " ", sSoft, sDim
 		if on {
-			bar, labelStyle, descStyle = sAccent.Render(glyphEdge), sBold, sSoft
+			bar, labelStyle, descStyle = sAccent.Render(glyphPrompt), sInk, sSoft
 		}
 		left := bar + " "
 		if numbers {
-			numStyle := sDim2
-			if on {
-				numStyle = sAccent
-			}
-			left += numStyle.Render(fmt.Sprintf("%d", number)) + "  "
+			left += sDim.Render(fmt.Sprintf("%d", number)) + "  "
+		}
+		if p.before != nil {
+			left += p.before(o, on) + " "
 		}
 		label := ansi.Truncate(o.Label, labelWidth, glyphEllipsis)
 		left += labelStyle.Render(label + strings.Repeat(" ", labelWidth-ansi.StringWidth(label)))
+		if p.lead != nil {
+			left += "  " + p.lead(o, on)
+		} else if o.Lead != "" {
+			left += "  " + o.Lead
+		}
 		if o.Desc != "" {
 			left += "  " + descStyle.Render(o.Desc)
 		}
@@ -315,7 +337,7 @@ func (p *picker) view(width, maxRows int) []string {
 			if right != "" {
 				right += "  "
 			}
-			right += sAccent.Render(o.Badge)
+			right += sAccent.Render(glyphDot) + " " + sDim.Render(o.Badge)
 		}
 		row := panelRow{text: fitRight(left, right, inner+1)}
 		if on {
@@ -326,14 +348,21 @@ func (p *picker) view(width, maxRows int) []string {
 	if len(opts) == 0 {
 		rows = append(rows, panelRow{text: sDim.Render("  sin coincidencias")})
 	}
-	if len(opts) > limit {
-		rows = append(rows, panelRow{text: sDim2.Render(fmt.Sprintf("  %d de %d", p.cursor+1, len(opts)))})
+	switch {
+	case end < len(opts):
+		rows = append(rows, panelRow{text: sDim.Render(fmt.Sprintf("  ↓ %d más", len(opts)-end))})
+	case start > 0:
+		rows = append(rows, panelRow{text: sDim.Render(fmt.Sprintf("  ↑ %d más", start))})
 	}
-	tone := p.tone
-	if tone == "" {
-		tone = pal.faint
+	if p.foot != nil && p.cursor < len(opts) {
+		if extra := p.foot(opts[p.cursor], inner); len(extra) > 0 {
+			rows = append(rows, panelRow{})
+			for _, l := range extra {
+				rows = append(rows, panelRow{text: l})
+			}
+		}
 	}
-	return panel(rows, width, tone, p.title)
+	return sheet(rows, width, p.tone, p.title, right, p.hints())
 }
 
 func newInfoPanel(title string, content func(width int) []string) *picker {
@@ -380,5 +409,5 @@ func (p *picker) infoView(width, inner, maxRows int) []string {
 	if len(lines) > limit {
 		rows = append(rows, panelRow{text: sDim2.Render(fmt.Sprintf("  %d–%d de %d", p.scroll+1, min(len(lines), p.scroll+limit), len(lines)))})
 	}
-	return panel(rows, width, pal.faint, p.title)
+	return sheet(rows, width, "", p.title, p.right, p.hints())
 }

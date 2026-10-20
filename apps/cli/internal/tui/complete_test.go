@@ -39,9 +39,9 @@ func TestSlashMenuIsGroupedAndPointsAtTheBestMatch(t *testing.T) {
 		t.Errorf("el cursor va a la mejor coincidencia: %s", h.m.menu[h.m.menuCursor].label)
 	}
 	view := h.view()
-	contains(t, view, "conversation")
-	contains(t, view, "system")
-	contains(t, view, "↵ run")
+	contains(t, view, "Conversation")
+	contains(t, view, "System")
+	contains(t, view, "enter run")
 }
 
 func contains2(list []string, s string) bool {

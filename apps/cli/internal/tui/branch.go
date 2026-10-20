@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,18 +16,34 @@ type branchRef struct {
 	remote     bool
 }
 
+// branchWhen es cuándo se tocó una rama por última vez, en español: «hace 2
+// horas», «ayer», «lun 12» o «3 oct». git lo da en el idioma del sistema.
+func branchWhen(now time.Time, unix string) string {
+	secs, err := strconv.ParseInt(strings.TrimSpace(unix), 10, 64)
+	if err != nil {
+		return ""
+	}
+	ts := time.Unix(secs, 0)
+	if dayGroup(now, ts) == "ayer" {
+		return "ayer"
+	}
+	return whenLabel(now, ts)
+}
+
 // branches son las ramas locales (la más reciente primero) y las remotas que
 // aún no tienen copia local.
 func (m *Model) branches(ctx context.Context) ([]branchRef, string, bool) {
 	code, out := m.git(ctx, 10*time.Second, "for-each-ref", "--sort=-committerdate",
-		"--format=%(refname)%09%(committerdate:relative)", "refs/heads", "refs/remotes")
+		"--format=%(refname)%09%(committerdate:unix)", "refs/heads", "refs/remotes")
 	if code != 0 {
 		return nil, strings.TrimSpace(out), false
 	}
+	now := time.Now()
 	var local, remote []branchRef
 	have := map[string]bool{}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		ref, when, _ := strings.Cut(line, "\t")
+		ref, unix, _ := strings.Cut(line, "\t")
+		when := branchWhen(now, unix)
 		switch {
 		case strings.HasPrefix(ref, "refs/heads/"):
 			name := strings.TrimPrefix(ref, "refs/heads/")
@@ -58,11 +75,20 @@ func (m *Model) cmdBranch(arg string) tea.Cmd {
 		if !ok {
 			return cmdDoneMsg{lines: []block{errLine("git no pudo listar las ramas: " + problem)}}
 		}
-		return cmdDoneMsg{apply: func(m *Model) { m.branchPicker(refs) }}
+		dirty := 0
+		if code, out := m.git(ctx, 10*time.Second, "status", "--porcelain"); code == 0 {
+			if out = strings.TrimSpace(out); out != "" {
+				dirty = strings.Count(out, "\n") + 1
+			}
+		}
+		return cmdDoneMsg{apply: func(m *Model) { m.branchPicker(refs, dirty) }}
 	})
 }
 
-func (m *Model) branchPicker(refs []branchRef) {
+// branchPicker es el menú de la rama: las recientes primero, la actual
+// marcada y, debajo, si hay cambios sin confirmar (git los lleva consigo al
+// cambiar, o se niega y lo explica).
+func (m *Model) branchPicker(refs []branchRef, dirty int) {
 	options := make([]option, 0, len(refs)+1)
 	cursor := 0
 	for _, r := range refs {
@@ -76,7 +102,7 @@ func (m *Model) branchPicker(refs []branchRef) {
 		options = append(options, o)
 	}
 	options = append(options, option{Label: "+ rama nueva", Value: newBranchValue, Desc: "crearla desde " + firstNonEmpty(m.branch, "HEAD")})
-	p := newPicker("Ramas "+glyphSep+" "+shortPath(m.repoRoot), options, func(value string, cancelled bool) tea.Cmd {
+	p := newPicker("Rama", options, func(value string, cancelled bool) tea.Cmd {
 		switch {
 		case cancelled:
 			return nil
@@ -89,8 +115,13 @@ func (m *Model) branchPicker(refs []branchRef) {
 		}
 		return m.switchBranch(value, false)
 	})
-	p.search, p.maxShown, p.cursor = true, 14, cursor
-	p.keys = [][2]string{{"escribe", "filtra"}, {"↑↓", "mover"}, {"↵", "cambiar"}, {"esc", "salir"}}
+	p.search, p.maxShown, p.cursor = true, 8, cursor
+	p.searchHint = "escribe para buscar"
+	if dirty > 0 {
+		notice := sDim.Render("  " + noun(dirty, "cambio sin confirmar: se queda al cambiar", "cambios sin confirmar: se quedan al cambiar"))
+		p.foot = func(option, int) []string { return []string{notice} }
+	}
+	p.keys = [][2]string{{"↑↓", "mover"}, {"enter", "cambiar"}, {"esc", "cerrar"}}
 	m.picker = p
 }
 

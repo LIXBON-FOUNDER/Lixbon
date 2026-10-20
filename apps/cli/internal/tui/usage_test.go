@@ -93,14 +93,16 @@ func TestNoBoldAndUsageShowsTheContext(t *testing.T) {
 	h.settle()
 	h.send("/usage")
 	h.settle()
+	panel := h.view()
+	h.key("esc")
 	h.send("/help")
-	for _, frame := range []string{h.view(), h.out()} {
+	for _, frame := range []string{panel, h.view(), h.out()} {
 		if bold.MatchString(frame) {
 			t.Fatalf("hay negrita en la pantalla:\n%q", frame)
 		}
 	}
-	out := ansi.Strip(h.out())
-	contains(t, out, "Contexto")
+	out := ansi.Strip(panel)
+	contains(t, out, "contexto")
 	contains(t, out, glyphMeterOn)
 	contains(t, out, glyphMeterOff)
 }

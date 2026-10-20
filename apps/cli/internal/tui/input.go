@@ -15,11 +15,16 @@ type panelRow struct {
 	bg   string
 }
 
-// panel dibuja una caja redondeada de ancho width con el borde del color dado
-// y un título opcional en la línea de arriba.
-func panel(rows []panelRow, width int, border, title string) []string {
-	b := lipgloss.NewStyle().Foreground(lipgloss.Color(border))
-	if width < 4 {
+// panel es una hoja sin marco: un fondo un punto más claro que la terminal,
+// el título arriba y las filas con dos columnas de margen. Un tono ámbar
+// (aprobaciones, preguntas) pone ▲ delante del título.
+func panel(rows []panelRow, width int, tone, title string) []string {
+	return sheet(rows, width, tone, title, "", "")
+}
+
+// sheet es panel con un dato a la derecha del título y las teclas al pie.
+func sheet(rows []panelRow, width int, tone, title, right, hints string) []string {
+	if width < 6 {
 		out := make([]string, len(rows))
 		for i, r := range rows {
 			out[i] = ansi.Truncate(r.text, max(1, width), "")
@@ -27,26 +32,33 @@ func panel(rows []panelRow, width int, border, title string) []string {
 		return out
 	}
 	inner := width - 4
-	top := b.Render(glyphs.boxTL + strings.Repeat(glyphs.boxH, width-2) + glyphs.boxTR)
-	if title != "" && width > 8 {
-		t := ansi.Truncate(" "+title+" ", width-5, glyphEllipsis)
-		top = b.Render(glyphs.boxTL+glyphs.boxH) + sBold.Render(t) +
-			b.Render(strings.Repeat(glyphs.boxH, max(0, width-3-ansi.StringWidth(t)))+glyphs.boxTR)
+	line := func(text, bg string) string { return padRow(text, bg, width) }
+	var out []string
+	if title != "" || right != "" {
+		// El título del panel va en la señal: dice dónde estás.
+		head := sAccent.Render(title)
+		if tone == pal.warn {
+			head = sWarn.Render(glyphWarn+" ") + head
+		}
+		out = append(out, line(fitRight(head, right, inner+1), pal.surf), line("", pal.surf))
 	}
-	out := []string{top}
 	for _, r := range rows {
-		// Un \r (salida de un programa de Windows) devolvería el cursor al
-		// borde y pisaría la fila.
-		text := ansi.Truncate(strings.ReplaceAll(r.text, "\r", ""), inner, "")
-		fill := strings.Repeat(" ", max(0, inner-ansi.StringWidth(text)))
-		if r.bg != "" {
-			bg := lipgloss.NewStyle().Background(lipgloss.Color(r.bg))
-			out = append(out, b.Render(glyphs.boxV)+bg.Render(" ")+withBackground(text, r.bg)+bg.Render(fill+" ")+b.Render(glyphs.boxV))
+		bg := r.bg
+		if bg == "" {
+			bg = pal.surf
+		}
+		if noColor && bg == pal.surf2 {
+			// Sin color la banda no se ve: la fila elegida va en vídeo inverso.
+			text := ansi.Truncate(ansi.Strip(r.text), inner, "")
+			out = append(out, "  "+lipgloss.NewStyle().Reverse(true).Render(text+strings.Repeat(" ", max(0, inner-ansi.StringWidth(text))))+"  ")
 			continue
 		}
-		out = append(out, b.Render(glyphs.boxV)+" "+text+fill+" "+b.Render(glyphs.boxV))
+		out = append(out, line(r.text, bg))
 	}
-	return append(out, b.Render(glyphs.boxBL+strings.Repeat(glyphs.boxH, width-2)+glyphs.boxBR))
+	if hints != "" {
+		out = append(out, line("", pal.surf), line(hints, pal.surf))
+	}
+	return out
 }
 
 // withBackground repinta el fondo de un texto ya estilado: cada reset de
@@ -61,41 +73,55 @@ func withBackground(text, bg string) string {
 	return open + strings.ReplaceAll(text, "\x1b[m", "\x1b[m"+open) + "\x1b[m"
 }
 
-// key pinta una pista de teclado: la tecla destacada y lo que hace atenuado.
-func keyHint(k, label string) string { return sSoft.Render(k) + sDim.Render(" "+label) }
+// key pinta una pista de teclado sin marco: la tecla en tinta y lo que hace
+// apagado.
+func keyHint(k, label string) string {
+	if k == "↵" {
+		k = "enter"
+	}
+	return sInk.Render(k) + sDim.Render(" "+label)
+}
 
 func keyHints(pairs ...[2]string) string {
 	parts := make([]string, len(pairs))
 	for i, p := range pairs {
 		parts[i] = keyHint(p[0], p[1])
 	}
-	return strings.Join(parts, sDim2.Render(" "+glyphSep+" "))
+	return strings.Join(parts, "     ")
 }
 
-// inputBox es la caja de entrada: borde del color del modo (ámbar cuando
-// responde a una pregunta), chips de imagen arriba y una pista a la derecha.
+// inputBox es la caja de entrada: una banda sin borde con la señal › al
+// principio. Encima, en la misma banda, lo que la condiciona (remote, la
+// pregunta que responde) y las imágenes en cola; a la derecha, una pista.
 func (m *Model) inputBox() []string {
 	width := max(4, m.width)
 	inner := max(1, width-4)
-	border, title := modeBorder(m.modeName()), ""
-	if m.remote != nil {
-		border, title = pal.acc, "Remote activo "+glyphSep+" ctrl+c con la caja vacía lo termina"
-	}
-	if m.prompt != nil {
-		border, title = pal.warn, m.prompt.label
-	}
 	var rows []panelRow
+	switch {
+	case m.prompt != nil:
+		rows = append(rows, panelRow{text: sWarn.Render(glyphWarn+" ") + sInk.Render(m.prompt.label)})
+	case m.remote != nil:
+		rows = append(rows, panelRow{text: sAccent.Render(glyphDot) + " " + sSoft.Render("remote") + sDim.Render("   ctrl+c con la caja vacía lo termina")})
+	}
 	if len(m.chips) > 0 {
 		rows = append(rows, panelRow{text: m.chipsRow(inner)})
+	}
+	m.input.Placeholder = placeholderFor(m.chat)
+	switch {
+	case m.compacting != nil:
+		// Lo que se escriba queda en cola hasta que termine.
+		m.input.Placeholder = "espera a que termine de compactar"
+	case m.running:
+		m.input.Placeholder = "Guía a lixbon mientras trabaja"
 	}
 	lines := strings.Split(m.input.View(), "\n")
 	hint := ""
 	switch {
 	case m.prompt != nil:
 	case strings.TrimSpace(m.input.Value()) == "":
-		hint = sDim2.Render("? atajos")
+		hint = sDim.Render("? atajos")
 	case m.input.LineCount() > 1:
-		hint = sDim2.Render("alt+↵ nueva línea")
+		hint = sDim.Render("alt+↵ nueva línea")
 	}
 	if hint != "" {
 		last := len(lines) - 1
@@ -109,10 +135,41 @@ func (m *Model) inputBox() []string {
 			lines[last] += "  " + hint
 		}
 	}
+	// La fila de la caja donde empieza el texto (tras la fila vacía de la
+	// banda): ahí va el cursor de la terminal.
+	m.inputTop = 1 + len(rows)
 	for _, l := range lines {
 		rows = append(rows, panelRow{text: l})
 	}
-	return panel(rows, width, border, title)
+	return band(rows, width)
+}
+
+// band pinta filas sobre el fondo de la banda, con una fila vacía arriba y
+// otra abajo: la caja de entrada.
+func band(rows []panelRow, width int) []string {
+	if width < 6 {
+		out := make([]string, len(rows))
+		for i, r := range rows {
+			out[i] = ansi.Truncate(r.text, max(1, width), "")
+		}
+		return out
+	}
+	out := []string{padRow("", pal.surf2, width)}
+	for _, r := range rows {
+		out = append(out, padRow(r.text, pal.surf2, width))
+	}
+	return append(out, padRow("", pal.surf2, width))
+}
+
+// padRow es una fila de ancho width con dos columnas de margen a cada lado
+// y el fondo bg de punta a punta.
+func padRow(text, bg string, width int) string {
+	inner := max(1, width-4)
+	// Un \r (salida de un programa de Windows) devolvería el cursor al
+	// borde y pisaría la fila.
+	text = ansi.Truncate(strings.ReplaceAll(text, "\r", ""), inner, "")
+	fill := strings.Repeat(" ", max(0, inner-ansi.StringWidth(text)))
+	return withBackground("  "+text+fill+"  ", bg)
 }
 
 // chipsRow son las imágenes en cola, como fichas, con cómo pegar otra.

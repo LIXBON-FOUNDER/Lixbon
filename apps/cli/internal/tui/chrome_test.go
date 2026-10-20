@@ -23,9 +23,9 @@ func TestTopBarDegradesByWidth(t *testing.T) {
 		width     int
 		want, not []string
 	}{
-		{120, []string{"LIXBON", "plan Pro", "web", "LIXBON.md", "feature/login-web", "Qwen"}, nil},
-		{80, []string{"LIXBON", "Pro", "Qwen"}, []string{"LIXBON.md", "plan Pro"}},
-		{50, []string{"Qwen", filepath.Base(h.chat.Workspace)}, []string{"LIXBON ", "Pro"}},
+		{120, []string{"lixbon", "api", "Pro", "web", "LIXBON.md", "feature/login-web"}, []string{"Qwen"}},
+		{50, []string{"lixbon", "api", "Pro", "feature/login"}, []string{"LIXBON.md", "web"}},
+		{24, []string{"lixbon", "api"}, []string{"Pro", "feature"}},
 	}
 	for _, c := range cases {
 		bar := h.m.topBar(c.width)
@@ -60,19 +60,16 @@ func TestTopBarShowsTheSessionState(t *testing.T) {
 func TestClickingTheModelOpensThePicker(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.View()
-	if h.m.barModel.x1 == 0 {
-		t.Fatal("la barra superior debe apuntar dónde está el modelo")
+	if h.m.footModel.x1 == 0 {
+		t.Fatal("el pie debe apuntar dónde está el modelo")
 	}
-	h.update(tea.MouseClickMsg{X: h.m.barModel.x0, Y: 0, Button: tea.MouseLeft})
-	if h.m.picker == nil || h.m.picker.title != "Modelo" {
-		t.Fatal("un clic en el modelo abre el selector")
+	h.update(tea.MouseClickMsg{X: h.m.footModel.x0, Y: h.m.footY, Button: tea.MouseLeft})
+	if h.m.picker == nil || h.m.picker.title != "Modelo" || h.m.picker.anchor == nil {
+		t.Fatal("un clic en el modelo del pie abre su selector, anclado")
 	}
-	screen := ansi.Strip(h.m.View().Content)
-	if h.m.panelY != 1 || h.m.panelX+h.m.panelW < h.m.barModel.x0 || h.m.panelX > h.m.barModel.x1 {
-		t.Fatalf("el selector se despliega bajo el botón: panel x=%d y=%d w=%d, botón %+v", h.m.panelX, h.m.panelY, h.m.panelW, h.m.barModel)
-	}
-	if rows := strings.Split(screen, "\n"); !strings.Contains(rows[1], "Modelo") {
-		t.Fatalf("el borde del selector va justo bajo la barra: %q", rows[1])
+	h.m.View()
+	if h.m.panelY+h.m.panelH != h.m.footY || h.m.panelX > h.m.footModel.x1 {
+		t.Fatalf("el selector se despliega sobre el botón: panel x=%d y=%d h=%d, botón %+v", h.m.panelX, h.m.panelY, h.m.panelH, h.m.footModel)
 	}
 	h.update(tea.MouseClickMsg{X: h.m.panelX + 4, Y: h.m.panelY + h.m.picker.optionTop + 1, Button: tea.MouseLeft})
 	if h.m.picker != nil || h.chat.Model != "llama" {
@@ -89,7 +86,7 @@ func TestChromeButtonsWorkWhileTheAgentRuns(t *testing.T) {
 	h := newHarness(t, nil)
 	h.m.running = true
 	h.m.View()
-	h.update(tea.MouseClickMsg{X: h.m.barModel.x0, Y: 0, Button: tea.MouseLeft})
+	h.update(tea.MouseClickMsg{X: h.m.footModel.x0, Y: h.m.footY, Button: tea.MouseLeft})
 	if h.m.picker == nil || h.m.picker.anchor == nil {
 		t.Fatal("con el agente trabajando el botón del modelo abre su selector, anclado")
 	}

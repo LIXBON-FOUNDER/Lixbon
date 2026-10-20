@@ -60,6 +60,24 @@ type Toolbox struct {
 
 	previewOnce sync.Once
 	previewSrv  *preview
+
+	// detach suelta el run_command en curso; nil si no corre ninguno.
+	detachMu sync.Mutex
+	detach   chan struct{}
+}
+
+// DetachCommand manda al fondo el run_command que está corriendo: sigue vivo
+// como proceso en segundo plano y el agente recibe lo que llevaba. Es seguro
+// llamarlo desde otra goroutine; false si no corría ninguno.
+func (tb *Toolbox) DetachCommand() bool {
+	tb.detachMu.Lock()
+	defer tb.detachMu.Unlock()
+	if tb.detach == nil {
+		return false
+	}
+	close(tb.detach)
+	tb.detach = nil
+	return true
 }
 
 func NewToolbox(root string) *Toolbox {
@@ -158,7 +176,23 @@ func (tb *Toolbox) runCommand(ctx context.Context, command string, timeoutArg in
 	if tb.OnOutput != nil {
 		live = outputFunc(tb.OnOutput)
 	}
-	res, err := process.RunLive(ctx, realPath(tb.Root), command, time.Duration(timeout)*time.Second, live)
+	detach := make(chan struct{})
+	tb.detachMu.Lock()
+	tb.detach = detach
+	tb.detachMu.Unlock()
+	res, bg, err := tb.Procs.RunDetachable(ctx, realPath(tb.Root), command, time.Duration(timeout)*time.Second, live, detach)
+	tb.detachMu.Lock()
+	if tb.detach == detach {
+		tb.detach = nil
+	}
+	tb.detachMu.Unlock()
+	if bg != nil {
+		out := fmt.Sprintf("[background %s] el usuario lo mandó al fondo y sigue en marcha; lee su salida con read_output", bg.ID)
+		if res.Output != "" {
+			out += "\n" + res.Output
+		}
+		return out, nil
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()

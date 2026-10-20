@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"lixbon.com/cli/internal/tools"
@@ -292,22 +293,20 @@ func (f *askForm) paste(msg tea.PasteMsg) tea.Cmd {
 func (f *askForm) hints() string {
 	switch {
 	case f.editing:
-		return keyHints([2]string{"↵", "guardar"}, [2]string{"esc", "volver a las opciones"})
+		return keyHints([2]string{"enter", "guardar"}, [2]string{"esc", "volver a las opciones"})
 	case f.onSend():
-		return keyHints([2]string{"↑↓", "mover"}, [2]string{"←→", "pregunta"}, [2]string{"↵", "elegir"}, [2]string{"esc", "cerrar"})
+		return keyHints([2]string{"←→", "pregunta"}, [2]string{"↑↓", "mover"}, [2]string{"enter", "elegir"}, [2]string{"esc", "que decida lixbon"})
 	}
-	pairs := [][2]string{{"↑↓", "mover"}}
+	var pairs [][2]string
+	if f.tabs() {
+		pairs = append(pairs, [2]string{"←→", "pregunta"})
+	}
+	pairs = append(pairs, [2]string{"↑↓", "mover"})
 	if f.qs[f.tab].Multiple {
 		pairs = append(pairs, [2]string{"espacio", "marcar"})
-	} else {
-		pairs = append(pairs, [2]string{fmt.Sprintf("1–%d", f.rowsFor(f.tab)), "elegir"})
 	}
-	if f.tabs() {
-		pairs = append(pairs, [2]string{"←→", "pregunta"}, [2]string{"↵", "siguiente"})
-	} else {
-		pairs = append(pairs, [2]string{"↵", "elegir"})
-	}
-	return keyHints(append(pairs, [2]string{"esc", "cerrar"})...)
+	pairs = append(pairs, [2]string{"enter", "elegir"})
+	return keyHints(append(pairs, [2]string{"esc", "que decida lixbon"})...)
 }
 
 func (f *askForm) tabLabel(i int) string {
@@ -317,44 +316,66 @@ func (f *askForm) tabLabel(i int) string {
 	return fmt.Sprintf("Pregunta %d", i+1)
 }
 
-func (f *askForm) tabBar(inner int) string {
-	var parts []string
+// tabRows son las pestañas como texto, la de ahora en tinta y subrayada con
+// la señal; las respondidas llevan ✓ y van apagadas.
+func (f *askForm) tabRows(inner int) []panelRow {
+	const gap = "      "
+	var top, line strings.Builder
+	add := func(label string, style lipgloss.Style, current bool) {
+		if top.Len() > 0 {
+			top.WriteString(gap)
+			line.WriteString(gap)
+		}
+		top.WriteString(style.Render(label))
+		mark := " "
+		if current {
+			mark = glyphMeterOn
+		}
+		line.WriteString(sAccent.Render(strings.Repeat(mark, ansi.StringWidth(label))))
+	}
 	for i := range f.qs {
-		mark, style := glyphs.todo, sDim
-		if f.answer(i) != "" {
-			mark, style = glyphs.check, sOK
+		label, style := f.tabLabel(i), sSoft
+		switch {
+		case i == f.tab && !f.onSend():
+			style = sInk
+		case f.answer(i) != "":
+			label, style = glyphs.check+" "+label, sDim
 		}
-		label := mark + " " + f.tabLabel(i)
-		if i == f.tab {
-			parts = append(parts, sSelected.Render(" "+label+" "))
-		} else {
-			parts = append(parts, style.Render(label))
-		}
+		add(label, style, i == f.tab && !f.onSend())
 	}
-	send := glyphs.check + " Enviar"
+	style := sSoft
 	if f.onSend() {
-		parts = append(parts, sSelected.Render(" "+send+" "))
-	} else {
-		parts = append(parts, sSoft.Render(send))
+		style = sInk
 	}
-	return ansi.Truncate(strings.Join(parts, "  "), inner, glyphEllipsis)
+	add("Repaso", style, f.onSend())
+	return []panelRow{
+		{text: ansi.Truncate(top.String(), inner, glyphEllipsis)},
+		{text: ansi.Truncate(line.String(), inner, "")},
+	}
 }
 
 func (f *askForm) view(inner int) []panelRow {
 	var rows []panelRow
 	if f.tabs() {
-		rows = append(rows, panelRow{text: f.tabBar(inner)}, panelRow{})
+		rows = append(rows, f.tabRows(inner)...)
+		rows = append(rows, panelRow{})
 	}
 	if f.onSend() {
 		return append(rows, f.sendView(inner)...)
 	}
 	q := f.qs[f.tab]
 	if f.tabs() {
-		for _, l := range wrapText(q.Text, max(10, inner-2)) {
-			rows = append(rows, panelRow{text: sBold.Render(l)})
-		}
-		if q.Multiple {
-			rows[len(rows)-1].text += sDim.Render("  varias")
+		lines := wrapText(q.Text, max(10, inner-10))
+		for i, l := range lines {
+			text := sInk.Render(l)
+			if i == 0 {
+				count := fmt.Sprintf("%d de %d", f.tab+1, len(f.qs))
+				if q.Multiple {
+					count = "varias   " + count
+				}
+				text = fitRight(text, sDim.Render(count), inner+1)
+			}
+			rows = append(rows, panelRow{text: text})
 		}
 		rows = append(rows, panelRow{})
 	} else if q.Multiple {
@@ -363,54 +384,39 @@ func (f *askForm) view(inner int) []panelRow {
 	cursor := f.cursor[f.tab]
 	for j, o := range q.Options {
 		on := j == cursor
-		bar, labelStyle := " ", sPrimary
+		bar, labelStyle, bg := " ", sSoft, ""
 		if on {
-			bar, labelStyle = sAccent.Render(glyphEdge), sBold
+			bar, labelStyle, bg = sAccent.Render(glyphPrompt), sInk, pal.surf2
 		}
-		left := bar + " " + sDim2.Render(fmt.Sprintf("%d", j+1)) + "  "
-		if q.Multiple {
-			box := "[ ] "
-			if f.picked[f.tab][j] {
-				box = "[x] "
-			}
-			left += labelStyle.Render(box)
+		mark := sDim.Render(glyphTodo)
+		if f.picked[f.tab][j] {
+			mark = sAccent.Render(glyphDot)
 		}
-		left += labelStyle.Render(ansi.Truncate(o.Label, max(8, inner-12), glyphEllipsis))
-		if !q.Multiple && f.picked[f.tab][j] {
-			left += " " + sOK.Render(glyphs.check)
-		}
-		row := panelRow{text: left}
-		if on {
-			row.bg = pal.surf2
-		}
-		rows = append(rows, row)
+		left := bar + " " + mark + " " + labelStyle.Render(ansi.Truncate(o.Label, max(8, inner-8), glyphEllipsis))
+		rows = append(rows, panelRow{text: left, bg: bg})
 		if o.Description != "" {
-			rows = append(rows, panelRow{text: "      " + sDim.Render(ansi.Truncate(o.Description, max(8, inner-8), glyphEllipsis))})
+			rows = append(rows, panelRow{text: "    " + sDim.Render(ansi.Truncate(o.Description, max(8, inner-6), glyphEllipsis)), bg: bg})
 		}
 	}
 	j := len(q.Options)
 	on := cursor == j
-	bar := " "
+	bar, bg := " ", ""
 	if on {
-		bar = sAccent.Render(glyphEdge)
+		bar, bg = sAccent.Render(glyphPrompt), pal.surf2
 	}
-	left := bar + " " + sDim2.Render(fmt.Sprintf("%d", j+1)) + "  "
+	left := bar + " " + sDim.Render(glyphTodo) + " "
 	switch {
 	case f.editing:
 		f.input.SetWidth(max(10, inner-8))
 		left += f.input.View()
 	case f.other[f.tab] != "":
-		left += sBeige.Render("«" + ansi.Truncate(f.other[f.tab], max(8, inner-12), glyphEllipsis) + "»")
+		left += sInk.Render("«" + ansi.Truncate(f.other[f.tab], max(8, inner-12), glyphEllipsis) + "»")
 	case on:
-		left += sBold.Render("Otra respuesta…")
+		left += sInk.Render("Otra respuesta…")
 	default:
-		left += sSoft.Render("Otra respuesta…")
+		left += sDim.Render("Otra respuesta…")
 	}
-	row := panelRow{text: left}
-	if on {
-		row.bg = pal.surf2
-	}
-	return append(rows, row)
+	return append(rows, panelRow{text: left, bg: bg})
 }
 
 func (f *askForm) sendView(inner int) []panelRow {
@@ -422,7 +428,7 @@ func (f *askForm) sendView(inner int) []panelRow {
 	for i := range f.qs {
 		label := f.tabLabel(i)
 		left := sDim.Render(label+strings.Repeat(" ", width-ansi.StringWidth(label))) + "  "
-		answer := sWarn.Render("sin responder")
+		answer := sDim.Render("lo decide lixbon")
 		if a := f.answer(i); a != "" {
 			answer = sInk.Render(ansi.Truncate(a, max(8, inner-width-4), glyphEllipsis))
 		}
@@ -438,7 +444,7 @@ func (f *askForm) sendView(inner int) []panelRow {
 		on := n == f.sendCursor
 		row := panelRow{text: "  " + sSoft.Render(label)}
 		if on {
-			row = panelRow{text: sAccent.Render(glyphEdge) + " " + sBold.Render(label), bg: pal.surf2}
+			row = panelRow{text: sAccent.Render(glyphPrompt) + " " + sInk.Render(label), bg: pal.surf2}
 		}
 		rows = append(rows, row)
 	}

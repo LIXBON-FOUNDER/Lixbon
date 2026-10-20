@@ -1,18 +1,18 @@
 ── 40 ──
- ✓  Editar  session.go            +2 −1
+ ✓ Editar  session.go             +2 −1
      2 −     return &S{}               
-     2 +     s := &S{created: time.Now(
+     2 +     s := &S{created: time.Now…
      3 +     return s                  
-   └ gofmt: sin errores
+   gofmt: sin errores
 ── 80 ──
- ✓  Editar  session.go                                                    +2 −1
-     2 −     return &S{}                                                       
-     2 +     s := &S{created: time.Now()}                                      
-     3 +     return s                                                          
-   └ gofmt: sin errores
+ ✓ Editar  session.go                                                     +2 −1
+     2 −     return &S{}                   
+     2 +     s := &S{created: time.Now()}  
+     3 +     return s                      
+   gofmt: sin errores
 ── 120 ──
- ✓  Editar  session.go                                                                                            +2 −1
-     2 −     return &S{}                                                                                               
-     2 +     s := &S{created: time.Now()}                                                                              
-     3 +     return s                                                                                                  
-   └ gofmt: sin errores
+ ✓ Editar  session.go                                                                                             +2 −1
+     2 −     return &S{}                   
+     2 +     s := &S{created: time.Now()}  
+     3 +     return s                      
+   gofmt: sin errores
