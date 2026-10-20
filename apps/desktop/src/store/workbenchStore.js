@@ -35,7 +35,7 @@ const DEFAULT_MODE_PANELS = {
   agent: { left: true, right: true },
   design: { left: true, right: true },
   git: { left: true, right: true },
-  orch: { left: true, right: true, adeLeft: true, adeRight: true },
+  orch: { left: true, right: true, adeRight: true },
 };
 
 // Lo guardado se mezcla modo a modo: quien guardó { left } en Git antes de que
@@ -44,12 +44,12 @@ const mergePanels = (saved) => Object.fromEntries(
   Object.entries(DEFAULT_MODE_PANELS).map(([mode, def]) => [mode, { ...def, ...(saved?.[mode] || {}) }]),
 );
 
-/** { left, right } del modo/vista activa; right = undefined si no tiene panel derecho. */
+/** { left, right } del modo activo; el Orquestador comparte su navegador entre contextos. */
 export const selectSidePanels = (s) => {
   if (s.mode === 'editor') return { left: s.sideOpen, right: s.agentOpen };
   const panels = s.modePanels[s.mode];
   if (s.mode === 'orch' && s.orchView === 'ade') {
-    return { left: panels?.adeLeft ?? true, right: panels?.adeRight ?? true };
+    return { left: panels?.left ?? true, right: panels?.adeRight ?? true };
   }
   return panels;
 };
@@ -63,6 +63,8 @@ export const useWorkbenchStore = create((set, get) => ({
   mode: read('lx_mode', 'editor'),
   // Preferencia de presentación interna; nunca cambia las selecciones operativas.
   orchView: readOrchView(),
+  // La selección observacional usa IDs Core y sobrevive al desmontaje de Orquestador.
+  adeSelection: { projectId: null, taskId: null },
   adeDrawer: false,
   sideOpen: read('lx_side_open', true),
   sideView: read('lx_side_view', 'files'), // 'files' | 'search' | 'extensions'
@@ -106,10 +108,17 @@ export const useWorkbenchStore = create((set, get) => ({
     set({ orchView });
   },
 
+  setAdeSelection: (selection) => set({
+    adeSelection: {
+      projectId: selection?.projectId ?? null,
+      taskId: selection?.taskId ?? null,
+    },
+  }),
+
   setMode: (mode) => {
     if (!MODES.includes(mode)) return;
     write('lx_mode', mode);
-    set({ page: null, drawer: false, adeDrawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
+    set({ page: null, drawer: false, adeDrawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? (get().orchView === 'ade' ? 'ade-workspace' : 'orchmain') : get().focus });
   },
 
   setFocus: (focus) => { if (get().focus !== focus) set({ focus }); },
@@ -122,7 +131,7 @@ export const useWorkbenchStore = create((set, get) => ({
       return;
     }
     const cur = modePanels[mode];
-    const key = mode === 'orch' && orchView === 'ade' ? `ade${side[0].toUpperCase()}${side.slice(1)}` : side;
+    const key = mode === 'orch' && orchView === 'ade' && side === 'right' ? 'adeRight' : side;
     if (!cur || cur[key] === undefined) return;
     const next = { ...modePanels, [mode]: { ...cur, [key]: !cur[key] } };
     write('lx_mode_panels', next);

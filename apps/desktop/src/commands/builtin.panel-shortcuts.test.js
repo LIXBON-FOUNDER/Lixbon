@@ -2,13 +2,13 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registerBuiltinCommands } from './builtin';
 import { DEFAULT_KEYMAP } from '../lib/keymap';
 import { runCommand } from '../lib/commands';
-import { useWorkbenchStore } from '../store/workbenchStore';
+import { selectSidePanels, useWorkbenchStore } from '../store/workbenchStore';
 
 const initialPanels = {
   agent: { left: true, right: true },
   design: { left: true, right: true },
   git: { left: true, right: true },
-  orch: { left: true, right: true, adeLeft: true, adeRight: true },
+  orch: { left: true, right: true, adeRight: true },
 };
 
 beforeAll(() => registerBuiltinCommands());
@@ -34,16 +34,18 @@ describe('atajos de panel en el Orquestador', () => {
   });
 
   it.each([
-    ['Ejecuciones', 'executions', 'left'],
-    ['ADE', 'ade', 'adeLeft'],
-  ])('Ctrl+B alterna la navegación de %s sin salir del Orquestador', async (_label, view, panel) => {
+    ['Ejecuciones', 'executions'],
+    ['ADE', 'ade'],
+  ])('Ctrl+B alterna la navegación unificada desde el contexto %s', async (_label, view) => {
     useWorkbenchStore.setState({ mode: 'orch', orchView: view });
 
     await runCommand(DEFAULT_KEYMAP['ctrl+b']);
 
     const state = useWorkbenchStore.getState();
     expect(state.mode).toBe('orch');
-    expect(state.modePanels.orch[panel]).toBe(false);
+    expect(state.modePanels.orch.left).toBe(false);
+    useWorkbenchStore.getState().setOrchView(view === 'ade' ? 'executions' : 'ade');
+    expect(selectSidePanels(useWorkbenchStore.getState()).left).toBe(false);
     expect(state.sideOpen).toBe(true);
   });
 

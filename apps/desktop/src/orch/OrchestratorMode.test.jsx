@@ -8,7 +8,7 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
-vi.mock('./AgentTerminal', () => ({ AgentTerminal: () => <div data-testid="agent-terminal" /> }));
+vi.mock('./AgentTerminal', () => ({ AgentTerminal: ({ visible }) => <div data-testid="agent-terminal" data-visible={String(visible)} /> }));
 vi.mock('./review/TaskDiffView', () => ({ TaskDiffView: ({ taskId }) => <div data-testid={`review-${taskId}`} /> }));
 
 const task = (id, over = {}) => ({
@@ -23,7 +23,9 @@ const snapshot = (tasks, extra = {}) => ({
 });
 const pendingSpawn = { pending_id: 'p1', parent_task: 'coord', agent: 'claude', provider: 'claude', profile: 'explorar', role: 'explorador', expires_at: Date.now() + 300000, policy: { argv: ['claude'], status: 'ok', warnings: [] } };
 
-function mountWith(snap, pending = [], query = async () => ({}), selected = null) {
+function mountWith(snap, pending = [], query = async (name) => (name === 'projects_overview'
+  ? { v: 1, filters: { archived: 'exclude', machine: null }, total: 0, projects: [], unassigned: {} }
+  : { v: 1, tasks: [], has_more: false, next_cursor: null }), selected = null) {
   invoke.mockImplementation(async (cmd, args) => {
     if (cmd === 'orch_pending_spawns' || cmd === 'orch_list_pending_spawns') return pending;
     if (cmd === 'orch_query') return query(args.query, args.args);
@@ -31,8 +33,9 @@ function mountWith(snap, pending = [], query = async () => ({}), selected = null
   });
   useAppStore.setState({ workspaceRoot: 'C:/repo' });
   useWorkbenchStore.setState((state) => ({
-    orchView: 'executions', focus: 'orchtree', drawer: false, adeDrawer: false,
-    modePanels: { ...state.modePanels, orch: { left: true, right: true, adeLeft: true, adeRight: true } },
+    orchView: 'executions', focus: 'ade-nav', drawer: false, adeDrawer: false,
+    adeSelection: { projectId: null, taskId: null },
+    modePanels: { ...state.modePanels, orch: { left: true, right: true, adeRight: true } },
   }));
   useOrchStore.setState({ snap, selected, init: () => {}, refresh: async () => {} });
   return render(<OrchestratorMode />);
@@ -42,18 +45,18 @@ beforeEach(() => invoke.mockReset());
 afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.removeItem('lx_orch_view'); });
 
 describe('OrchestratorMode', () => {
-  it('mantiene el selector Ejecuciones/ADE dentro del Orquestador', () => {
-    mountWith(snapshot([task('t1')]), [], async () => ({}), 'execution-task');
+  it('presenta Projects y Operación en un navegador y un canvas contextual', async () => {
+    mountWith(snapshot([task('t1')]), [], undefined, 'execution-task');
 
-    expect(screen.getByRole('button', { name: 'Ejecuciones' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'ADE' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Ejecuciones' }).getAttribute('aria-pressed')).toBe('true');
-    expect(invoke.mock.calls.filter(([command]) => command === 'orch_query')).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
-    expect(localStorage.getItem('lx_orch_view')).toBe('"ade"');
+    expect(screen.queryByRole('button', { name: 'Ejecuciones' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'ADE' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Projects y Tasks' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Operación' })).toBeTruthy();
+    expect(screen.getByTestId('execution-composition').getAttribute('aria-hidden')).toBe('false');
+    expect(screen.getByTestId('ade-composition')).toBeTruthy();
+    expect(invoke.mock.calls.filter(([command]) => command === 'orch_query').map(([, args]) => args.query)).toEqual(['projects_overview']);
     expect(useOrchStore.getState().selected).toBe('execution-task');
-    expect(useWorkbenchStore.getState().focus).toBe('orchtree');
+    expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
   });
 
   it('carga Project, Tasks y detalle desde las queries read-only del Core', async () => {
@@ -74,7 +77,6 @@ describe('OrchestratorMode', () => {
       throw new Error(`Query no permitida en fixture: ${query}`);
     }, 'execution-task');
 
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Task Real' }));
 
@@ -86,6 +88,35 @@ describe('OrchestratorMode', () => {
       ['task_detail', { project_id: 'project-uuid-1', task_id: 'task-uuid-1' }],
     ]);
     expect(invoke.mock.calls.filter(([command]) => command === 'orch_call')).toEqual([]);
+    expect(useWorkbenchStore.getState().orchView).toBe('ade');
+  });
+
+  it('conserva la selección ADE por ID durable al desmontar y volver a Orquestador', async () => {
+    const project = {
+      id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
+      counts: { tasks: 1, active: 1, failed: 0, attention: { total: 0, by_category: {} } }, locations: [],
+    };
+    const item = {
+      id: 'task-uuid-1', run_id: 'run-1', parent_id: null, root_id: 'task-uuid-1', status: 'running',
+      title: 'Task Real', provider: 'claude', model: null, created_at: 1, updated_at: 2,
+    };
+    const view = mountWith(snapshot([task('execution-task')]), [], async (query) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
+      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [item], has_more: false, next_cursor: null };
+      if (query === 'task_detail') return { v: 1, task: { ...item, project_id: project.id, child_ids: [], phase: null, messages: [], cwd: '', branch: null, worktree: null, merged: false, review: null, integration: null } };
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Task Real' }));
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
+
+    view.unmount();
+    render(<OrchestratorMode />);
+
+    expect((await screen.findByRole('button', { name: 'Repo Real' })).getAttribute('aria-pressed')).toBe('true');
+    expect((await screen.findByRole('button', { name: 'Task Real' })).getAttribute('aria-pressed')).toBe('true');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
   });
 
   it('representa Core degradado y se recupera al reconectar sin cambiar la vista', async () => {
@@ -98,7 +129,6 @@ describe('OrchestratorMode', () => {
       return { v: 1, filters: { archived: 'exclude', machine: null }, total: 0, projects: [], unassigned: {} };
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(screen.getByRole('alert').textContent).toContain('Core degradado');
     expect(screen.getByRole('alert').textContent).toContain('projects_overview_unavailable');
@@ -106,7 +136,7 @@ describe('OrchestratorMode', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(screen.getByText('No hay Projects registrados.')).toBeTruthy();
     expect(attempts).toBe(2);
-    expect(useWorkbenchStore.getState().orchView).toBe('ade');
+    expect(useWorkbenchStore.getState().orchView).toBe('executions');
   });
 
   it('conserva IDs y foco cuando una actualización de Core deja de listar el Project', async () => {
@@ -122,7 +152,6 @@ describe('OrchestratorMode', () => {
       throw new Error(`Query inesperada: ${query}`);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
     const projectButton = await screen.findByRole('button', { name: 'Repo Real' });
     fireEvent.pointerDown(projectButton);
     fireEvent.click(projectButton);
@@ -135,7 +164,7 @@ describe('OrchestratorMode', () => {
     expect(overviewCalls).toBe(2);
   });
 
-  it('mantiene separadas las selecciones y conserva AgentPanel montado al cambiar de vista', async () => {
+  it('mantiene selecciones separadas y conserva AgentPanel, conversación y scroll al cambiar el canvas', async () => {
     const project = {
       id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
       counts: { tasks: 1, active: 1, failed: 0, attention: { total: 0, by_category: {} } }, locations: [],
@@ -153,7 +182,6 @@ describe('OrchestratorMode', () => {
 
     const feed = document.querySelector('.chatpanel__feed');
     feed.scrollTop = 47;
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
     const projectButton = await screen.findByRole('button', { name: 'Repo Real' });
     fireEvent.pointerDown(projectButton);
     fireEvent.click(projectButton);
@@ -162,6 +190,9 @@ describe('OrchestratorMode', () => {
     fireEvent.click(taskButton);
 
     expect(useOrchStore.getState().selected).toBe('execution-task');
+    const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
+      .find((button) => button.querySelector('.orch__task-title')?.textContent === 'execution-task');
+    expect(operationTask.classList.contains('is-active')).toBe(false);
     expect(document.querySelector('.chatpanel__feed')).toBe(feed);
     expect(feed.scrollTop).toBe(47);
     expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
@@ -174,11 +205,17 @@ describe('OrchestratorMode', () => {
     fireEvent.click(projectButton);
     expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ejecuciones' }));
+    expect(operationTask).toBeTruthy();
+    fireEvent.pointerDown(operationTask);
+    fireEvent.click(operationTask);
     expect(useOrchStore.getState().selected).toBe('execution-task');
-    expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
+    expect(useWorkbenchStore.getState().orchView).toBe('executions');
+    expect(operationTask.classList.contains('is-active')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('false');
     expect(document.querySelector('.chatpanel__feed')).toBe(feed);
-    fireEvent.click(screen.getByRole('button', { name: 'ADE' }));
+    expect(feed.scrollTop).toBe(47);
+    fireEvent.click(projectButton);
+    expect(useWorkbenchStore.getState().orchView).toBe('ade');
     expect(screen.getByRole('button', { name: 'Repo Real' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('true');
   });
@@ -190,6 +227,43 @@ describe('OrchestratorMode', () => {
     expect(screen.getByTestId('attention-t2').textContent).toContain('Lista para integrar');
     fireEvent.click(screen.getByTestId('attention-t1'));
     await waitFor(() => expect(screen.getByTestId('review-t1')).toBeTruthy());
+  });
+
+  it('al volver al mismo Run conserva la revisión iniciada desde Attention', async () => {
+    const project = { id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active', counts: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: {} } }, locations: [] };
+    mountWith(snapshot([task('t1', { branch: 'lxo/t1' })]), [], async (query) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
+      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+      throw new Error(`Query inesperada: ${query}`);
+    }, 't1');
+
+    fireEvent.click(screen.getByTestId('attention-t1'));
+    expect(screen.getByTestId('review-t1')).toBeTruthy();
+    const taskPanel = document.querySelector('.orch__head');
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
+      .find((button) => button.querySelector('.orch__task-title')?.textContent === 't1');
+    fireEvent.click(operationTask);
+
+    expect(screen.getByTestId('review-t1')).toBeTruthy();
+    expect(document.querySelector('.orch__head')).toBe(taskPanel);
+  });
+
+  it('congela el redimensionamiento de AgentTerminal dentro del canvas ADE y lo reactiva al volver', async () => {
+    const project = { id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active', counts: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: {} } }, locations: [] };
+    mountWith(snapshot([task('t1', { status: 'running' })]), [], async (query) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
+      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+      throw new Error(`Query inesperada: ${query}`);
+    }, 't1');
+
+    expect(screen.getByTestId('agent-terminal').getAttribute('data-visible')).toBe('true');
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    expect(screen.getByTestId('agent-terminal').getAttribute('data-visible')).toBe('false');
+    const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
+      .find((button) => button.querySelector('.orch__task-title')?.textContent === 't1');
+    fireEvent.click(operationTask);
+    expect(screen.getByTestId('agent-terminal').getAttribute('data-visible')).toBe('true');
   });
 
   it('sin nada pendiente de decidir no muestra la sección', () => {

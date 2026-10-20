@@ -5,8 +5,6 @@ import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { useOrchStore, taskTree, isFinal, STATUS_LABELS } from '../store/orchStore';
 import { Panel } from '../layout/Panel';
-import { Gutter } from '../layout/Gutter';
-import { Collapse } from '../layout/Collapse';
 import { RightDock } from '../layout/RightDock';
 import { AgentPanel } from '../chat/AgentPanel';
 import { AdeShell } from '../ade/AdeShell';
@@ -276,7 +274,7 @@ function DiffTab({ task }) {
   );
 }
 
-function TaskView({ task, snap, intent }) {
+function TaskView({ task, snap, intent, terminalVisible = true }) {
   const call = useOrchStore((s) => s.call);
   const [tab, setTab] = useState(task.parent && intent !== ATTENTION.review && intent !== ATTENTION.integrate ? 'term' : 'activity');
   const live = snap.live.includes(task.id);
@@ -347,7 +345,7 @@ function TaskView({ task, snap, intent }) {
         </div>
       )}
       <div className="orch__body">
-        {tab === 'term' && task.parent && <AgentTerminal key={task.id} task={task.id} live={live} />}
+        {tab === 'term' && task.parent && <AgentTerminal key={task.id} task={task.id} live={live} visible={terminalVisible} />}
         {tab === 'activity' && <Activity task={task} messages={snap.messages} tasks={snap.tasks} />}
         {tab === 'diff' && <DiffTab task={task} />}
       </div>
@@ -371,10 +369,8 @@ function Disabled() {
 }
 
 export function OrchestratorMode() {
-  const sizes = useWorkbenchStore((s) => s.sizes);
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const rightOpen = useWorkbenchStore((s) => s.modePanels.orch?.right ?? true);
-  const adeLeftOpen = useWorkbenchStore((s) => s.modePanels.orch?.adeLeft ?? true);
   const adeRightOpen = useWorkbenchStore((s) => s.modePanels.orch?.adeRight ?? true);
   const adeDrawer = useWorkbenchStore((s) => s.adeDrawer);
   const closeAdeDrawer = useWorkbenchStore((s) => s.closeAdeDrawer);
@@ -388,7 +384,15 @@ export function OrchestratorMode() {
   const spawns = usePendingSpawns();
   const [pendingSel, setPendingSel] = useState(null);
   const [intent, setIntent] = useState(null);
-  const pickTask = (id, why = null) => { setPendingSel(null); setIntent(why); select(id); };
+  const pickTask = (id, why = null) => {
+    setPendingSel(null);
+    // Volver al mismo Run desde el navegador unificado no debe cerrar una
+    // revisión/integración iniciada desde Attention ni remontar su terminal.
+    if (id !== selected || why) setIntent(why);
+    select(id);
+    setOrchView('executions');
+  };
+  const pickPendingSpawn = (id) => { setPendingSel(id); setOrchView('executions'); };
 
   useEffect(() => { init(); }, [init]);
 
@@ -419,73 +423,67 @@ export function OrchestratorMode() {
   if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
 
   const adeActive = orchView === 'ade';
-
-  return (
-    <div className="orch__shell">
-      <div className="orch__viewbar">
-        <div className="orch__viewtabs" role="group" aria-label="Vistas del Orquestador">
-          <button type="button" aria-pressed={!adeActive} className={!adeActive ? 'is-active' : ''} onClick={() => setOrchView('executions')}>Ejecuciones</button>
-          <button type="button" aria-pressed={adeActive} className={adeActive ? 'is-active' : ''} onClick={() => setOrchView('ade')}>ADE</button>
-        </div>
+  const operationNavigation = (
+    <section className="ade__nav-section orch__operation-nav" aria-label="Operación">
+      <div className="ade__nav-section-head"><span>Operación</span><span className="ade__source">Runs</span></div>
+      <SpawnNotice notice={spawns.notice} onClose={spawns.clearNotice} />
+      <PendingSpawnList items={spawns.items} selected={!adeActive ? pendingItem?.pending_id ?? null : null} onSelect={pickPendingSpawn} tasks={snap.tasks} />
+      <AttentionList items={attention} selected={!adeActive && !pendingItem ? selected : null} onSelect={pickTask} />
+      <div className="orch__runs scroll">
+        {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
+        {runs.map((r) => {
+          const folded = r.closed && !expanded.has(r.id);
+          const toggle = () => setExpanded((s) => { const n = new Set(s); if (!n.delete(r.id)) n.add(r.id); return n; });
+          return (
+          <section key={r.id} className={`orch__run${r.closed ? ' orch__run--closed' : ''}`}>
+            <div className="orch__run-head">
+              {r.closed
+                ? <button className="orch__run-title orch__run-fold" title={r.objective} aria-expanded={!folded} onClick={toggle}>{r.objective}</button>
+                : <span className="orch__run-title" title={r.objective}>{r.objective}</span>}
+              {r.closed && <span className="orch__run-tag">cerrado</span>}
+              {!r.closed && <RunProgress tasks={taskTree(snap.tasks, r.id)} />}
+              <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
+            </div>
+            {!folded && taskTree(snap.tasks, r.id).map((t) => (
+              <TaskRow key={t.id} task={t} now={now} selected={!adeActive && t.id === selected} asking={asking.has(t.id)} onSelect={(id) => pickTask(id)} />
+            ))}
+          </section>
+          );
+        })}
       </div>
-      <div className="orch__views">
-      <div className={`wb wb--orch orch__execution${adeActive ? ' is-hidden' : ''}`} aria-hidden={adeActive} inert={adeActive} data-testid="execution-composition">
-      <Collapse open={open} size={Math.max(sizes.side, 300) + 8}>
-        <Panel id="orchtree" className="sidepanel orch__side">
-          <div className="panelhead">
-            <span className="panelhead__title">{allRepos ? 'Runs · todos los repos' : `Runs · ${root ? root.split(/[\\/]/).pop() : 'sin carpeta'}`}</span>
-          </div>
-          <SpawnNotice notice={spawns.notice} onClose={spawns.clearNotice} />
-          <PendingSpawnList items={spawns.items} selected={pendingItem?.pending_id ?? null} onSelect={setPendingSel} tasks={snap.tasks} />
-          <AttentionList items={attention} selected={pendingItem ? null : selected} onSelect={pickTask} />
-          <div className="orch__runs scroll">
-            {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
-            {runs.map((r) => {
-              const folded = r.closed && !expanded.has(r.id);
-              const toggle = () => setExpanded((s) => { const n = new Set(s); if (!n.delete(r.id)) n.add(r.id); return n; });
-              return (
-              <section key={r.id} className={`orch__run${r.closed ? ' orch__run--closed' : ''}`}>
-                <div className="orch__run-head">
-                  {r.closed
-                    ? <button className="orch__run-title orch__run-fold" title={r.objective} aria-expanded={!folded} onClick={toggle}>{r.objective}</button>
-                    : <span className="orch__run-title" title={r.objective}>{r.objective}</span>}
-                  {r.closed && <span className="orch__run-tag">cerrado</span>}
-                  {!r.closed && <RunProgress tasks={taskTree(snap.tasks, r.id)} />}
-                  <button className="ic" title="Quitar este run de la lista (libera los worktrees fusionados y borra sus ramas)" onClick={() => call('remove_run', { run: r.id }, removedText)}><IconTrash size={12} /></button>
-                </div>
-                {!folded && taskTree(snap.tasks, r.id).map((t) => (
-                  <TaskRow key={t.id} task={t} now={now} selected={t.id === selected} asking={asking.has(t.id)} onSelect={(id) => pickTask(id)} />
-                ))}
-              </section>
-              );
-            })}
-          </div>
-          {(hidden > 0 || allRepos) && (
-            <button className="lk orch__repos" onClick={() => setAllRepos((v) => !v)}>
-              {allRepos ? 'Ver solo este repositorio' : `Ver también ${hidden} run${hidden === 1 ? '' : 's'} de otros repos`}
-            </button>
-          )}
-          {!snap.lxo_exists && <div className="orch__warn">No se encontró <span className="mono">lxo</span> junto a Lixbon: los agentes no podrán hablar con el orquestador.</div>}
-        </Panel>
-        <Gutter sizeKey="side" />
-      </Collapse>
+      {(hidden > 0 || allRepos) && (
+        <button className="lk orch__repos" onClick={() => setAllRepos((v) => !v)}>
+          {allRepos ? 'Ver solo este repositorio' : `Ver también ${hidden} run${hidden === 1 ? '' : 's'} de otros repos`}
+        </button>
+      )}
+      {!snap.lxo_exists && <div className="orch__warn">No se encontró <span className="mono">lxo</span> junto a Lixbon: los agentes no podrán hablar con el orquestador.</div>}
+    </section>
+  );
+  const operationWorkspace = (
+    <>
       <Panel id="orchmain" className="wb__grow orch__main">
         {pendingItem
           ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
-          : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} /> : <HowTo />}
+          : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} terminalVisible={!adeActive} /> : <HowTo />}
       </Panel>
       <RightDock open={rightOpen} visible={!adeActive} keepMountedWhenHidden={adeActive}>
         <AgentPanel onClose={toggleAgent} />
       </RightDock>
-      </div>
+    </>
+  );
+
+  return (
+    <div className="orch__shell">
       <AdeShell
         active={adeActive}
-        leftOpen={adeLeftOpen}
+        leftOpen={open}
         rightOpen={adeRightOpen}
         drawerOpen={adeDrawer}
         onCloseDrawer={closeAdeDrawer}
+        onActivate={() => setOrchView('ade')}
+        operationNavigation={operationNavigation}
+        operationWorkspace={operationWorkspace}
       />
-      </div>
     </div>
   );
 }

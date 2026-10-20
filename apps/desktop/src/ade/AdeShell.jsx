@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
@@ -84,20 +84,24 @@ function CoreTaskButton({ task, selected, onSelect }) {
   );
 }
 
-export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer }) {
+export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace }) {
   const sizes = useWorkbenchStore((s) => s.sizes);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const projects = useCoreQuery('projects_overview', { archived: 'exclude' }, { enabled: active });
+  const adeSelection = useWorkbenchStore((s) => s.adeSelection);
+  const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
+  const selectedProjectId = adeSelection.projectId;
+  const selectedTaskId = adeSelection.taskId;
+  // Projects/Tasks viven en la navegación unificada, también mientras el canvas
+  // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
+  const projects = useCoreQuery('projects_overview', { archived: 'exclude' });
   const tasks = useCoreQuery('tasks_by_project', {
     project_id: selectedProjectId,
     status: 'active',
     limit: 50,
-  }, { enabled: active && Boolean(selectedProjectId) });
+  }, { enabled: Boolean(selectedProjectId) });
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
     task_id: selectedTaskId,
-  }, { enabled: active && Boolean(selectedProjectId) && Boolean(selectedTaskId) });
+  }, { enabled: Boolean(selectedProjectId) && Boolean(selectedTaskId) });
   const task = detail.data?.task;
   const selectedProjectInOverview = projects.data?.projects.some((project) => project.id === selectedProjectId);
   const selectedProjectMissing = selectedProjectId && ['ready', 'empty'].includes(projects.status) && !selectedProjectInOverview;
@@ -105,89 +109,100 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     && !tasks.data.tasks.some((item) => item.id === selectedTaskId);
 
   const selectProject = (projectId) => {
-    if (projectId === selectedProjectId) return;
-    setSelectedProjectId(projectId);
-    setSelectedTaskId(null);
+    if (projectId !== selectedProjectId) {
+      setAdeSelection({ projectId, taskId: null });
+    }
+    onActivate?.();
   };
+  const selectTask = (taskId) => { setAdeSelection({ projectId: selectedProjectId, taskId }); onActivate?.(); };
 
   return (
     <div
-      className={`wb wb--orch ade__layout${active ? '' : ' is-hidden'}`}
-      aria-hidden={!active}
-      inert={!active}
+      className="wb wb--orch ade__layout"
       data-testid="ade-composition"
     >
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Projects</span><span className="ade__source">Core</span></div>
+          <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
           <div className="ade__nav-content scroll">
-            <QueryFeedback state={projects} subject="Projects" />
-          {selectedProjectMissing && <div className="ade__notice" role="status">El Project seleccionado ya no aparece en el overview activo. Se conserva la selección; elige otro Project para cambiar de contexto.</div>}
-            {projects.status === 'empty' && <div className="changes__empty">No hay Projects registrados.</div>}
-            {projects.data?.projects.map((project) => (
-              <CoreProjectButton key={project.id} project={project} selected={project.id === selectedProjectId} onSelect={selectProject} />
-            ))}
+            <section className="ade__nav-section" aria-label="Projects y Tasks">
+              <div className="ade__nav-section-head"><span>Projects</span><span className="ade__source">Core</span></div>
+              <QueryFeedback state={projects} subject="Projects" />
+              {selectedProjectMissing && <div className="ade__notice" role="status">El Project seleccionado ya no aparece en el overview activo. Se conserva la selección; elige otro Project para cambiar de contexto.</div>}
+              {projects.status === 'empty' && <div className="changes__empty">No hay Projects registrados.</div>}
+              {projects.data?.projects.map((project) => (
+                <CoreProjectButton key={project.id} project={project} selected={active && project.id === selectedProjectId} onSelect={selectProject} />
+              ))}
 
-            {selectedProjectId && (
-              <section className="ade__task-list" aria-label={`Tasks del Project ${selectedProjectId}`}>
-                <div className="ade__section-head">
-                  <span>Tasks activas</span>
-                  <span className="ade__durable-id mono" title="Project ID">{selectedProjectId}</span>
-                </div>
-                <QueryFeedback state={tasks} subject="Tasks" />
-                {tasks.status === 'empty' && <div className="changes__empty">Este Project no tiene Tasks activas.</div>}
-                {tasks.data?.tasks.map((item) => (
-                  <CoreTaskButton key={item.id} task={item} selected={item.id === selectedTaskId} onSelect={setSelectedTaskId} />
-                ))}
-                {tasks.data?.has_more && <div className="ade__partial" role="status">Vista parcial: hay más Tasks después de esta página.</div>}
-              </section>
-            )}
+              {selectedProjectId && (
+                <section className="ade__task-list" aria-label={`Tasks del Project ${selectedProjectId}`}>
+                  <div className="ade__section-head">
+                    <span>Tasks activas</span>
+                    <span className="ade__durable-id mono" title="Project ID">{selectedProjectId}</span>
+                  </div>
+                  <QueryFeedback state={tasks} subject="Tasks" />
+                  {tasks.status === 'empty' && <div className="changes__empty">Este Project no tiene Tasks activas.</div>}
+                  {tasks.data?.tasks.map((item) => (
+                    <CoreTaskButton key={item.id} task={item} selected={active && item.id === selectedTaskId} onSelect={selectTask} />
+                  ))}
+                  {tasks.data?.has_more && <div className="ade__partial" role="status">Vista parcial: hay más Tasks después de esta página.</div>}
+                </section>
+              )}
+            </section>
+            {operationNavigation}
           </div>
         </Panel>
         <Gutter sizeKey="side" />
       </Collapse>
 
-      <Panel id="ade-workspace" className="wb__grow orch__main ade__workspace">
-        <div className="panelhead ade__workspace-head">
-          <div className="panelhead__title">Workspace</div>
-          {selectedTaskId && <span className="ade__durable-id mono">Task · {selectedTaskId}</span>}
+      <div className="ade__canvas-stack">
+        <div className={`ade__context-canvas ade__execution-canvas${active ? ' is-hidden' : ''}`} aria-hidden={active} inert={active} data-testid="execution-composition">
+          {operationWorkspace}
         </div>
-        {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
-        {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
-        {selectedTaskId && (
-          <div className="ade__task-overview scroll">
-            <QueryFeedback state={detail} subject="el detalle de Task" />
-            {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
-            {task && (
-              <>
-                <h1>{task.title || task.id}</h1>
-                <div className="ade__status-row"><span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status}</span><span className="ade__durable-id mono">{task.id}</span></div>
-                <p className="orch__hint">Resumen mínimo de la Task. El detalle ampliado se presentará en este workspace.</p>
-              </>
+        <div className={`ade__context-canvas ade__workspace-canvas${active ? '' : ' is-hidden'}`} aria-hidden={!active} inert={!active}>
+          <Panel id="ade-workspace" className="wb__grow orch__main ade__workspace">
+            <div className="panelhead ade__workspace-head">
+              <div className="panelhead__title">Workspace</div>
+              {selectedTaskId && <span className="ade__durable-id mono">Task · {selectedTaskId}</span>}
+            </div>
+            {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
+            {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
+            {selectedTaskId && (
+              <div className="ade__task-overview scroll">
+                <QueryFeedback state={detail} subject="el detalle de Task" />
+                {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
+                {task && (
+                  <>
+                    <h1>{task.title || task.id}</h1>
+                    <div className="ade__status-row"><span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status}</span><span className="ade__durable-id mono">{task.id}</span></div>
+                    <p className="orch__hint">Resumen mínimo de la Task. El detalle ampliado se presentará en este workspace.</p>
+                  </>
+                )}
+              </div>
             )}
-          </div>
-        )}
-      </Panel>
+          </Panel>
 
-      <RightDock
-        id="ade-inspector"
-        sizeKey="inspector"
-        className="ade__inspector"
-        open={rightOpen}
-        visible={active}
-        keepMountedWhenHidden
-        drawerOpen={drawerOpen}
-        onCloseDrawer={onCloseDrawer}
-      >
-        <div className="panelhead"><span className="panelhead__title">Inspector</span></div>
-        <div className="ade__inspector-content">
-          <section className="ade__inspector-section">
-            <div className="ssec__label">Selección ADE</div>
-            <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
-            <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
-          </section>
+          <RightDock
+            id="ade-inspector"
+            sizeKey="inspector"
+            className="ade__inspector"
+            open={rightOpen}
+            visible={active}
+            keepMountedWhenHidden
+            drawerOpen={drawerOpen}
+            onCloseDrawer={onCloseDrawer}
+          >
+            <div className="panelhead"><span className="panelhead__title">Inspector</span></div>
+            <div className="ade__inspector-content">
+              <section className="ade__inspector-section">
+                <div className="ssec__label">Selección ADE</div>
+                <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
+                <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
+              </section>
+            </div>
+          </RightDock>
         </div>
-      </RightDock>
+      </div>
     </div>
   );
 }
