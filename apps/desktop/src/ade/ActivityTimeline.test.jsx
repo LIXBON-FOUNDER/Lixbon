@@ -1,0 +1,563 @@
+// ActivityTimeline.test.jsx — pruebas de la rodaja LXO-99 (presentacional, solo fixtures).
+//
+// SOLO SINTÉTICO: estas fixtures imitan la forma normalizada provisional que deberá
+// entregar la proyección de LXO-92. No son salida del Core, no se leen del Event Log
+// y no demuestran la aceptación de LXO-99 ni una vista Activity conectada.
+
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { ActivityTimeline } from './ActivityTimeline';
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+const T0 = 1792045113470;
+
+function activityItem(overrides = {}) {
+  return {
+    eventId: 'evt-1',
+    seq: 1,
+    timestamp: T0,
+    class: 'state',
+    kind: 'task.created',
+    target: { kind: 'task', id: 't-1' },
+    project: { id: 'p-1', name: 'lixbon' },
+    actor: { kind: 'agent', id: 't-1' },
+    client: { channel: 'core', clientId: null },
+    message: { key: 'activity.task.created', text: 'Tarea creada' },
+    known: true,
+    severity: null,
+    metadata: [],
+    ...overrides,
+  };
+}
+
+describe('ActivityTimeline · estados de la vista', () => {
+  it('loading: anuncia la carga y no pinta elementos previos', () => {
+    render(<ActivityTimeline status="loading" items={[activityItem()]} />);
+    expect(screen.getByTestId('activity-timeline').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByTestId('activity-loading').textContent).toContain('Cargando actividad');
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+    expect(screen.queryByTestId('activity-evt-1')).toBeNull();
+  });
+
+  it('empty: sin actividad no inventa filas ni textos de eventos', () => {
+    render(<ActivityTimeline status="ready" items={[]} />);
+    expect(screen.getByTestId('activity-empty').textContent).toContain('Sin actividad todavía');
+    expect(screen.getByTestId('activity-count').textContent).toBe('0');
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+  });
+
+  it('error: muestra el mensaje y el código, y reintenta con el alcance', () => {
+    const onRetry = vi.fn();
+    render(
+      <ActivityTimeline
+        status="error"
+        error={{ code: 'internal', message: 'Fallo de lectura.' }}
+        onRetry={onRetry}
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('No se pudo cargar la actividad');
+    expect(alert.textContent).toContain('Fallo de lectura.');
+    expect(alert.textContent).toContain('internal');
+    fireEvent.click(screen.getByTestId('activity-retry'));
+    expect(onRetry).toHaveBeenCalledWith({ scope: { kind: 'global' } });
+  });
+
+  it('degraded: explica que el Core no tiene Event Log y no finge actividad', () => {
+    render(<ActivityTimeline status="degraded" items={[activityItem()]} />);
+    const state = screen.getByTestId('activity-degraded');
+    expect(state.textContent).toMatch(/modo degradado/i);
+    expect(state.textContent).toContain('Event Log');
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+    expect(screen.queryByTestId('activity-empty')).toBeNull();
+  });
+
+  it('stale: avisa y deja actualizar sin ocultar lo ya cargado', () => {
+    const onRefresh = vi.fn();
+    render(<ActivityTimeline items={[activityItem()]} stale onRefresh={onRefresh} />);
+    expect(screen.getByTestId('activity-stale').textContent).toContain('Vista desactualizada');
+    expect(screen.getByTestId('activity-evt-1')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('activity-refresh'));
+    expect(onRefresh).toHaveBeenCalledWith({ scope: { kind: 'global' } });
+  });
+
+  it('stale sin filas no se confunde con un vacío limpio', () => {
+    render(<ActivityTimeline items={[]} stale onRefresh={vi.fn()} />);
+    expect(screen.getByTestId('activity-stale')).toBeTruthy();
+    expect(screen.getByTestId('activity-empty')).toBeTruthy();
+  });
+
+  it('loadingMore: deshabilita el cursor y mantiene la lista visible', () => {
+    const onLoadMore = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[activityItem()]}
+        cursor={{ next: 2, hasMore: true }}
+        loadingMore
+        onLoadMore={onLoadMore}
+      />,
+    );
+    const more = screen.getByTestId('activity-load-more');
+    expect(more.disabled).toBe(true);
+    expect(more.textContent).toBe('Cargando…');
+    expect(screen.getByTestId('activity-timeline').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByTestId('activity-evt-1')).toBeTruthy();
+    fireEvent.click(more);
+    expect(onLoadMore).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActivityTimeline · alcance y cursor', () => {
+  it('acepta alcance global, Project y Task; el id durable queda visible', () => {
+    const item = activityItem();
+    const { rerender } = render(<ActivityTimeline items={[item]} scope={{ kind: 'global' }} />);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Actividad global');
+    expect(screen.queryByTestId('activity-scope-id')).toBeNull();
+
+    rerender(<ActivityTimeline items={[item]} scope={{ kind: 'project', id: 'p-1', name: 'lixbon' }} />);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Proyecto · lixbon');
+    expect(screen.getByTestId('activity-scope-id').textContent).toBe('p-1');
+
+    rerender(<ActivityTimeline items={[item]} scope={{ kind: 'task', id: 't-1', title: 'Arreglar login' }} />);
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Tarea · Arreglar login');
+    expect(screen.getByTestId('activity-scope-id').textContent).toBe('t-1');
+  });
+
+  it('load-more entrega el next_cursor y el alcance, no un offset', () => {
+    const onLoadMore = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[activityItem()]}
+        scope={{ kind: 'project', id: 'p-1', name: 'lixbon' }}
+        cursor={{ next: 7, hasMore: true, headSeq: 9 }}
+        onLoadMore={onLoadMore}
+      />,
+    );
+    const more = screen.getByTestId('activity-load-more');
+    expect(more.textContent).toBe('Cargar más actividad');
+    more.focus();
+    expect(document.activeElement).toBe(more);
+    fireEvent.click(more);
+    expect(onLoadMore).toHaveBeenCalledWith({
+      cursor: 7,
+      scope: { kind: 'project', id: 'p-1', name: 'lixbon' },
+    });
+  });
+
+  it('hasMore=false muestra el fin y no ofrece un cursor inválido', () => {
+    const { rerender } = render(
+      <ActivityTimeline
+        items={[activityItem()]}
+        cursor={{ next: 1, hasMore: false }}
+        onLoadMore={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('activity-load-more')).toBeNull();
+    expect(screen.getByText('No hay más actividad.')).toBeTruthy();
+
+    rerender(
+      <ActivityTimeline
+        items={[activityItem()]}
+        cursor={{ next: -1, hasMore: true }}
+        onLoadMore={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('activity-load-more')).toBeNull();
+  });
+});
+
+describe('ActivityTimeline · clases y procedencia', () => {
+  it('pinta state, decision, effect, project y spawn como filas separadas con destino durable', () => {
+    const items = [
+      activityItem({
+        eventId: 'state',
+        seq: 1,
+        class: 'state',
+        kind: 'task.created',
+        target: { kind: 'task', id: 't-1' },
+        actor: { kind: 'agent', id: 't-1' },
+        client: { channel: 'core', clientId: null },
+        message: { key: 'k.state', text: 'Tarea creada' },
+      }),
+      activityItem({
+        eventId: 'decision',
+        seq: 2,
+        class: 'decision',
+        kind: 'spawn.approved',
+        target: { kind: 'spawn_request', id: 'sp-1' },
+        actor: { kind: 'person', id: 'ana' },
+        client: { channel: 'ui', clientId: 'c-9' },
+        message: { key: 'k.decision', text: 'Lanzamiento aprobado' },
+        severity: 'warning',
+      }),
+      activityItem({
+        eventId: 'effect',
+        seq: 3,
+        class: 'effect',
+        kind: 'run.created',
+        target: { kind: 'run', id: 'r-1' },
+        message: { key: 'k.effect', text: 'Run creado' },
+      }),
+      activityItem({
+        eventId: 'project',
+        seq: 4,
+        class: 'state',
+        kind: 'project.registered',
+        target: { kind: 'project', id: 'p-1' },
+        project: { id: 'p-1', name: 'lixbon' },
+        message: { key: 'k.project', text: 'Proyecto registrado' },
+      }),
+      activityItem({
+        eventId: 'spawn',
+        seq: 5,
+        class: 'state',
+        kind: 'spawn.requested',
+        target: { kind: 'spawn_request', id: 'sp-2' },
+        message: { key: 'k.spawn', text: 'Lanzamiento pendiente' },
+      }),
+    ];
+    render(<ActivityTimeline items={items} />);
+
+    const state = screen.getByTestId('activity-state');
+    expect(state.textContent).toContain('Estado');
+    expect(state.textContent).toContain('Tarea t-1');
+    expect(state.textContent).toContain('Proyecto p-1 · lixbon');
+    expect(state.textContent).toContain('Agente · t-1');
+
+    const decision = screen.getByTestId('activity-decision');
+    expect(decision.textContent).toContain('Decisión');
+    expect(decision.textContent).toContain('Lanzamiento sp-1');
+    expect(decision.textContent).toContain('Persona · ana');
+    expect(decision.textContent).toContain('UI · c-9');
+    expect(decision.textContent).toContain('Aviso');
+
+    const effect = screen.getByTestId('activity-effect');
+    expect(effect.textContent).toContain('Efecto');
+    expect(effect.textContent).toContain('Run r-1');
+    expect(effect.textContent).toContain('Core');
+
+    expect(screen.getByTestId('activity-project').textContent).toContain('Proyecto p-1');
+    expect(screen.getByTestId('activity-spawn').textContent).toContain('Lanzamiento sp-2');
+    expect(screen.getByTestId('activity-count').textContent).toBe('5');
+  });
+
+  it('expone eventId, seq y timestamp sin dejar que la hora ordene', () => {
+    const { container } = render(<ActivityTimeline items={[activityItem({ timestamp: T0 })]} />);
+    const row = screen.getByTestId('activity-evt-1');
+    expect(row.getAttribute('data-event-id')).toBe('evt-1');
+    expect(row.getAttribute('data-seq')).toBe('1');
+    expect(row.textContent).toContain('#1');
+
+    const time = container.querySelector('time');
+    expect(time.getAttribute('datetime')).toBe(new Date(T0).toISOString());
+    expect(time.getAttribute('title')).toContain('no ordena');
+  });
+
+  it('una decisión y su efecto con la misma correlación no se fusionan', () => {
+    const decision = activityItem({
+      eventId: 'd',
+      seq: 1,
+      class: 'decision',
+      correlationId: 'corr-1',
+      target: { kind: 'spawn_request', id: 'sp-1' },
+      message: { key: 'k.d', text: 'Decisión: aprobar' },
+    });
+    const effect = activityItem({
+      eventId: 'e',
+      seq: 2,
+      class: 'effect',
+      correlationId: 'corr-1',
+      target: { kind: 'run', id: 'r-1' },
+      message: { key: 'k.e', text: 'Efecto: lanzar' },
+    });
+    render(<ActivityTimeline items={[decision, effect]} />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    const d = screen.getByTestId('activity-d');
+    const e = screen.getByTestId('activity-e');
+    expect(d.textContent).toContain('Decisión: aprobar');
+    expect(d.textContent).not.toContain('Efecto: lanzar');
+    expect(e.textContent).toContain('Efecto: lanzar');
+    expect(e.textContent).not.toContain('Decisión: aprobar');
+    expect(d.textContent).toContain('correlación corr-1');
+    expect(e.textContent).toContain('correlación corr-1');
+  });
+});
+
+describe('ActivityTimeline · fallbacks sin inventar texto', () => {
+  it('evento desconocido: fallback estable con kind y sin traducir el kind', () => {
+    const translate = vi.fn(() => 'NO DEBE USARSE');
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'u',
+            seq: 8,
+            class: 'system',
+            kind: 'worktree.rotated',
+            known: false,
+            message: { key: 'activity.future', text: 'Texto que no debe salir' },
+            target: { kind: 'run', id: 'r-1' },
+          }),
+        ]}
+        translateMessage={translate}
+      />,
+    );
+    const row = screen.getByTestId('activity-u');
+    expect(row.textContent).toContain('Evento desconocido');
+    expect(row.textContent).toContain('worktree.rotated');
+    expect(row.textContent).not.toContain('Texto que no debe salir');
+    expect(row.textContent).not.toMatch(/rotad|rotación/i);
+    expect(translate).not.toHaveBeenCalled();
+  });
+
+  it('evento conocido sin texto: no deriva una frase del kind y conserva la clave', () => {
+    render(
+      <ActivityTimeline
+        items={[activityItem({ eventId: 'm', message: { key: 'activity.task.created' } })]}
+      />,
+    );
+    const row = screen.getByTestId('activity-m');
+    expect(row.textContent).toContain('Actividad sin descripción');
+    expect(row.textContent).not.toMatch(/creada|creado/i);
+    expect(screen.getByTestId('activity-message-m').getAttribute('data-message-key')).toBe(
+      'activity.task.created',
+    );
+  });
+
+  it('resuelve la clave con el catálogo inyectado y tolera un catálogo roto', () => {
+    const translate = vi.fn((key, params) => `Traducido ${key} ${params.n}`);
+    const { rerender } = render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'tr',
+            message: { key: 'activity.task.created', params: { n: 3 } },
+          }),
+        ]}
+        translateMessage={translate}
+      />,
+    );
+    expect(screen.getByTestId('activity-tr').textContent).toContain('Traducido activity.task.created 3');
+    expect(translate).toHaveBeenCalledWith('activity.task.created', { n: 3 });
+
+    rerender(
+      <ActivityTimeline
+        items={[activityItem({ eventId: 'tr', message: { key: 'activity.task.created' } })]}
+        translateMessage={() => {
+          throw new Error('catálogo roto');
+        }}
+      />,
+    );
+    expect(screen.getByTestId('activity-tr').textContent).toContain('Actividad sin descripción');
+  });
+});
+
+describe('ActivityTimeline · orden estable y reconexión', () => {
+  it('respeta el orden entregado por Core; no ordena por timestamp ni por seq', () => {
+    const items = [
+      activityItem({ eventId: 's5', seq: 5, timestamp: 300, message: { key: 'k', text: 'Cinco' } }),
+      activityItem({ eventId: 's2', seq: 2, timestamp: 100, message: { key: 'k', text: 'Dos' } }),
+      activityItem({ eventId: 's9', seq: 9, timestamp: 200, message: { key: 'k', text: 'Nueve' } }),
+    ];
+    render(<ActivityTimeline items={items} />);
+    expect(
+      screen.getAllByRole('listitem').map((li) => li.getAttribute('data-event-id')),
+    ).toEqual(['s5', 's2', 's9']);
+  });
+
+  it('un reemplazo por reconexión reutiliza la fila por eventId y deduplica repeticiones', () => {
+    const a = activityItem({ eventId: 'a', seq: 1, message: { key: 'k', text: 'A' } });
+    const b = activityItem({ eventId: 'b', seq: 2, message: { key: 'k', text: 'B' } });
+    const { rerender } = render(<ActivityTimeline items={[a, b]} />);
+    const rowA = screen.getByTestId('activity-a');
+    const rowB = screen.getByTestId('activity-b');
+
+    rerender(
+      <ActivityTimeline
+        items={[
+          { ...a },
+          { ...b },
+          activityItem({ eventId: 'c', seq: 3, message: { key: 'k', text: 'C' } }),
+          { ...a },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('activity-a')).toBe(rowA);
+    expect(screen.getByTestId('activity-b')).toBe(rowB);
+    expect(screen.getAllByTestId('activity-a')).toHaveLength(1);
+    expect(
+      screen.getAllByRole('listitem').map((li) => li.getAttribute('data-event-id')),
+    ).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('ActivityTimeline · seguridad del límite de presentación', () => {
+  it('no acepta un evento crudo del Event Log como fuente de presentación', () => {
+    const raw = {
+      id: '01a13e36-607e-71eb-8e8d-43d75c9836d3',
+      seq: 1,
+      ts: T0,
+      v: 1,
+      kind: 'task.created',
+      class: 'state',
+      actor: { kind: 'system', id: null },
+      channel: 'core',
+      client_id: null,
+      project_id: null,
+      run_id: 'r1',
+      entity: { kind: 'task', id: 't2' },
+      correlation_id: null,
+      payload: { title: 'CRUDO' },
+    };
+    render(<ActivityTimeline items={[raw]} />);
+    expect(screen.getByTestId('activity-empty')).toBeTruthy();
+    expect(screen.queryByTestId('activity-list')).toBeNull();
+    expect(screen.queryByText('CRUDO')).toBeNull();
+  });
+
+  it('ignora payload crudo, resúmenes de IA, unread/Attention y metadatos no seguros', () => {
+    const { container } = render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'safe',
+            seq: 1,
+            payload: { token: 'RAW_SECRET', body: 'CUERPO_CRUDO' },
+            summary: 'RESUMEN_IA',
+            aiSummary: 'RESUMEN_IA_2',
+            unread: true,
+            attention: { total: 3, category: 'failed' },
+            metadata: [
+              { label: 'agente', value: 'claude' },
+              { label: 'modelo', value: 'gpt-6-sol' },
+              { label: 'payload', value: 'NO_PAYLOAD' },
+              { label: 'unread', value: 'NO_UNREAD' },
+              { label: 'atención', value: 'NO_ATTENTION' },
+              { label: 'anidado', value: { secreto: 'SECRETO_ANIDADO' } },
+              { label: 'html', value: '<img src=x onerror="alert(1)">' },
+              { label: 'largo', value: 'x'.repeat(400) },
+              ...Array.from({ length: 6 }, (_, i) => ({ label: `extra_${i}`, value: `v${i}` })),
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    const text = screen.getByTestId('activity-safe').textContent;
+    expect(text).toContain('claude');
+    expect(text).toContain('gpt-6-sol');
+    expect(text).not.toContain('RAW_SECRET');
+    expect(text).not.toContain('CUERPO_CRUDO');
+    expect(text).not.toContain('RESUMEN_IA');
+    expect(text).not.toContain('RESUMEN_IA_2');
+    expect(text).not.toContain('NO_PAYLOAD');
+    expect(text).not.toContain('NO_UNREAD');
+    expect(text).not.toContain('NO_ATTENTION');
+    expect(text).not.toContain('SECRETO_ANIDADO');
+    expect(text.toLowerCase()).not.toContain('attention');
+    expect(text).not.toMatch(/sin leer/i);
+    expect(screen.queryByTestId('activity-unread')).toBeNull();
+
+    // El HTML del metadato se pinta como texto, nunca como nodo.
+    expect(container.querySelector('img')).toBeNull();
+    expect(text).toContain('<img src=x');
+    // 120 caracteres contando el ellipsis de recorte.
+    expect(text).not.toContain('x'.repeat(120));
+    expect(text).toContain('x'.repeat(119));
+
+    // Límite de 8 metadatos seguros por fila.
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(8);
+  });
+
+  it('un target de tipo attention es una referencia opaca, sin estado de lectura', () => {
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'at',
+            target: { kind: 'attention', id: 'at-1' },
+            unread: true,
+            attention: { total: 1 },
+          }),
+        ]}
+      />,
+    );
+    const row = screen.getByTestId('activity-at');
+    expect(row.textContent).toContain('Destino at-1');
+    expect(row.textContent).not.toContain('Atención');
+    expect(row.textContent).not.toMatch(/sin leer|unread|attention/i);
+  });
+
+  it('escapa el texto humano provisto por Core', () => {
+    const { container } = render(
+      <ActivityTimeline
+        items={[activityItem({ message: { key: 'k', text: '<b>hola</b>' } })]}
+      />,
+    );
+    expect(container.querySelector('b')).toBeNull();
+    expect(screen.getByTestId('activity-message-evt-1').textContent).toBe('<b>hola</b>');
+  });
+});
+
+describe('ActivityTimeline · teclado y accesibilidad', () => {
+  it('la sección está etiquetada, la lista conserva semántica y los controles son botones nativos', () => {
+    const onLoadMore = vi.fn();
+    const items = [
+      activityItem({ eventId: 'a', seq: 1 }),
+      activityItem({ eventId: 'b', seq: 2 }),
+    ];
+    render(
+      <ActivityTimeline items={items} cursor={{ next: 2, hasMore: true }} onLoadMore={onLoadMore} />,
+    );
+
+    const section = screen.getByTestId('activity-timeline');
+    expect(section.tagName).toBe('SECTION');
+    const labelledBy = section.getAttribute('aria-labelledby');
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy).textContent).toBe('Actividad global');
+    expect(section.getAttribute('aria-busy')).toBe('false');
+
+    expect(screen.getByRole('list').tagName).toBe('OL');
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+
+    const more = screen.getByTestId('activity-load-more');
+    expect(more.tagName).toBe('BUTTON');
+    expect(more.getAttribute('type')).toBe('button');
+    expect(more.getAttribute('tabindex')).toBeNull();
+    more.focus();
+    expect(document.activeElement).toBe(more);
+    fireEvent.click(more);
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it('el reintento de error es enfocable y tiene nombre accesible', () => {
+    const onRetry = vi.fn();
+    render(
+      <ActivityTimeline
+        status="error"
+        error={{ code: 'internal', message: 'Fallo.' }}
+        onRetry={onRetry}
+      />,
+    );
+    expect(screen.getByRole('alert')).toBeTruthy();
+    const retry = screen.getByRole('button', { name: 'Reintentar' });
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+    fireEvent.click(retry);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('loading anuncia con role=status y aria-busy; stale usa role=status', () => {
+    const { rerender } = render(<ActivityTimeline status="loading" />);
+    expect(screen.getByRole('status').textContent).toContain('Cargando actividad');
+    expect(screen.getByTestId('activity-timeline').getAttribute('aria-busy')).toBe('true');
+
+    rerender(<ActivityTimeline items={[activityItem()]} stale />);
+    expect(screen.getByTestId('activity-stale').getAttribute('role')).toBe('status');
+  });
+});
