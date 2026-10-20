@@ -526,9 +526,8 @@ export function ActivityTimeline({
 
       {showCachedRows && safeItems.length > 0 ? (
         <ol className="activity__list" data-testid="activity-list">
-          {safeItems.map((item, index) => {
+          {safeItems.map((item) => {
             const eventId = eventIdOf(item);
-            const rowMetaId = `${headingId}-row-${index}`;
             const unknown = item.known === false;
             const text = resolveMessage(item, translateMessage);
             const messageKey = messageKeyOf(item);
@@ -572,18 +571,8 @@ export function ActivityTimeline({
                 data-class={classKey}
                 data-severity={severity || undefined}
                 aria-label={rowLabel}
-                aria-describedby={rowMetaId}
                 title={`evento ${eventId} · seq ${item.seq}`}
               >
-                {/* Descripción accesible: la identidad durable de la fila sin duplicar el texto visible. */}
-                <span
-                  className="activity__sr"
-                  id={rowMetaId}
-                  data-testid={`activity-row-meta-${eventId}`}
-                  aria-hidden="true"
-                >
-                  Evento {eventId}. Secuencia {item.seq}.
-                </span>
                 <span className="activity__spine" aria-hidden="true" />
                 <div className="activity__body">
                   <div className="activity__top">
