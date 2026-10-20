@@ -9,7 +9,9 @@ function coreArgs(query, args) {
   if (query === 'attention_list') {
     return { projectId: args.project_id, category: args.category, severity: args.severity };
   }
-  if (query === 'tasks_by_project') return { projectId: args.project_id };
+  if (query === 'tasks_by_project') {
+    return { projectId: args.project_id, status: args.status ?? 'active' };
+  }
   return { projectId: args.project_id, taskId: args.task_id };
 }
 
