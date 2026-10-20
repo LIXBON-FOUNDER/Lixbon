@@ -1,0 +1,31 @@
+.resinv { display: flex; flex-direction: column; gap: 10px; padding: 12px; color: var(--ink-body, #dcdcd6); font-size: 12px; }
+.resinv__bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.resinv__title { margin: 0; font-size: 13px; color: var(--ink, #f2f2ee); }
+.resinv__badge { padding: 1px 8px; border-radius: 999px; background: var(--surface-4, #222); color: var(--ink-soft, #9a9a94); }
+.resinv__badge--warning { background: var(--warn-soft, rgba(232, 200, 114, 0.14)); color: var(--warn, #e8c872); }
+.resinv__note, .resinv__count, .resinv__empty { margin: 0; color: var(--ink-soft, #9a9a94); }
+
+.resinv__filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.resinv__filter { display: flex; flex-direction: column; gap: 3px; }
+.resinv__filter select { background: var(--surface-3, #1c1c1c); color: inherit; border: 1px solid var(--ink-faint, #44443f); border-radius: 6px; padding: 3px 6px; }
+
+.resinv__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.resinv__row { background: var(--surface-2, #161616); border-radius: 8px; padding: 8px 10px; border-left: 3px solid var(--ink-faint, #44443f); }
+.resinv__row--known { border-left-color: var(--good, #86d694); }
+.resinv__row--external_candidate { border-left-color: var(--info, #8ec5ff); }
+.resinv__row--missing { border-left-color: var(--ink-50, #85857f); }
+.resinv__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.resinv__id { font-family: var(--font-mono, monospace); color: var(--ink, #f2f2ee); overflow-wrap: anywhere; }
+.resinv__tag { padding: 0 7px; border-radius: 4px; background: var(--surface-4, #222); color: var(--ink-70, #b5b5af); }
+.resinv__tag--known { color: var(--good, #86d694); }
+.resinv__tag--external_candidate { color: var(--info, #8ec5ff); }
+.resinv__tag--missing { color: var(--ink-soft, #9a9a94); }
+.resinv__tag--unavailable { color: var(--ink-70, #b5b5af); font-style: italic; }
+/* Aviso, no error de integridad: tono de advertencia, no el de peligro. */
+.resinv__tag--warning { background: var(--warn-soft, rgba(232, 200, 114, 0.14)); color: var(--warn, #e8c872); }
+
+.resinv__meta { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+.resinv__meta dt { color: var(--ink-50, #85857f); }
+.resinv__meta dd { margin: 0; overflow-wrap: anywhere; }
+.resinv__loc { display: flex; flex-direction: column; }
+.resinv__path { font-family: var(--font-mono, monospace); color: var(--ink-soft, #9a9a94); }
