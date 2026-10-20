@@ -55,6 +55,7 @@ export const UI_DEFAULTS = {
   statusBar: false,
   ambient: false,
   motion: true,
+  labs: false, // prototipo de supervisión con datos de ejemplo (Ajustes › Desarrolladores)
 };
 
 const UI_OPTIONS = {
@@ -67,7 +68,7 @@ function cleanUi(raw) {
   if (!raw || typeof raw !== 'object') return out;
   if (typeof raw.accent === 'string') out.accent = raw.accent;
   for (const [k, vals] of Object.entries(UI_OPTIONS)) if (vals.includes(raw[k])) out[k] = raw[k];
-  for (const k of ['sendOnEnter', 'statusBar', 'ambient', 'motion']) {
+  for (const k of ['sendOnEnter', 'statusBar', 'ambient', 'motion', 'labs']) {
     if (typeof raw[k] === 'boolean') out[k] = raw[k];
   }
   return out;
@@ -145,10 +146,14 @@ export function AppState({ children }) {
     });
   }, []);
 
+  // Restablecer la apariencia no apaga el prototipo de Desarrolladores.
   const resetUi = useCallback(() => {
-    setUiState(UI_DEFAULTS);
+    setUiState((cur) => {
+      const next = { ...UI_DEFAULTS, labs: cur.labs };
+      AsyncStorage.multiSet([[UI_KEY, JSON.stringify(next)], ['themeMode', 'dark']]).catch(() => {});
+      return next;
+    });
     setThemeModeState('dark');
-    AsyncStorage.multiSet([[UI_KEY, JSON.stringify(UI_DEFAULTS)], ['themeMode', 'dark']]).catch(() => {});
   }, []);
 
   const setApiBase = useCallback(

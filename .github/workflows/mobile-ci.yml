@@ -1,0 +1,44 @@
+name: Mobile CI
+
+# Comprobación rápida de cada PR que toca la app móvil: pruebas de lógica
+# (node --test) y que Metro empaquete la app para Android. Sin SDK ni
+# emulador; el APK y el e2e siguen en mobile.yml y mobile-e2e.yml.
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EXPO_NO_TELEMETRY: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tests
+        run: npm test
+
+      - name: Bundle (Metro, Android)
+        run: npx expo export --platform android --output-dir "$RUNNER_TEMP/mobile-export"

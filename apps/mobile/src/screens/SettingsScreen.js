@@ -197,6 +197,12 @@ export default function SettingsScreen({ onBack, onNavigate }) {
         <Section title="Desarrolladores" delay={150}>
           <Row title="API keys" icon="key" external onPress={() => Linking.openURL(`${api.base}/account/profile`)} />
           <Row title="Documentación" icon="book" external onPress={() => Linking.openURL(`${api.base}/docs`)} />
+          <Row
+            title="Prototipo de supervisión"
+            detail="Supervisar con datos de ejemplo, para validar el diseño"
+            icon="eye"
+            right={<Toggle label="Prototipo de supervisión" value={prefs.ui.labs} onChange={(labs) => prefs.setUi({ labs })} />}
+          />
         </Section>
 
         <Section title="Sesión y datos" delay={180}>
