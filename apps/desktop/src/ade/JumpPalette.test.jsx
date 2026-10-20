@@ -134,19 +134,32 @@ describe('JumpPalette', () => {
     const third = screen.getByText('Task 3').closest('[role="option"]');
     const commitsBeforePointer = commits;
 
+    expect(screen.getAllByRole('option')).toHaveLength(125);
     fireEvent.mouseEnter(second);
     fireEvent.mouseMove(third);
     expect(activeOption(input)).toBe(first);
+    expect(first.getAttribute('aria-selected')).toBe('true');
+    expect(second.getAttribute('aria-selected')).toBe('false');
+    expect(third.getAttribute('aria-selected')).toBe('false');
+    expect(screen.getAllByRole('option')).toHaveLength(125);
     expect(commits - commitsBeforePointer).toBe(0);
+
+    fireEvent.keyDown(input, { key: 'End' });
+    expect(activeOption(input).textContent).toContain('Task 125');
+    expect(commits - commitsBeforePointer).toBe(1);
+
+    fireEvent.keyDown(input, { key: 'Home' });
+    expect(activeOption(input)).toBe(first);
+    expect(commits - commitsBeforePointer).toBe(2);
 
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     expect(activeOption(input)).toBe(second);
-    expect(commits - commitsBeforePointer).toBe(1);
+    expect(commits - commitsBeforePointer).toBe(3);
 
     fireEvent.mouseEnter(third);
     fireEvent.mouseMove(third);
     expect(activeOption(input)).toBe(second);
-    expect(commits - commitsBeforePointer).toBe(1);
+    expect(commits - commitsBeforePointer).toBe(3);
 
     fireEvent.click(third);
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-3' });
