@@ -794,6 +794,107 @@ describe('ProjectsSidebar', () => {
     expect(screen.getByRole('treeitem', { name: /Beta/ }).getAttribute('aria-selected')).toBe('true');
   });
 
+  it('sigue la selección externa, expande el Project y conserva filtro, expansión y foco', async () => {
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha'), project('project-b', 'Beta')]),
+      tasks: (args) => page(args.project_id, args.status, [
+        task(`${args.project_id}-task`, { status: 'done' }),
+      ]),
+    });
+    const { rerender } = render(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-a', taskId: null }}
+      />,
+    );
+
+    const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
+    const beta = screen.getByRole('treeitem', { name: /Beta/ });
+    await waitFor(() => expect(alpha.getAttribute('aria-expanded')).toBe('true'));
+    expect(alpha.getAttribute('aria-selected')).toBe('true');
+    expect(alpha.classList.contains('is-selected')).toBe(true);
+    expect(beta.getAttribute('aria-expanded')).toBe('false');
+
+    const finalFilter = screen.getByRole('radio', { name: 'Finalizadas' });
+    fireEvent.click(finalFilter);
+    finalFilter.focus();
+    expect(document.activeElement).toBe(finalFilter);
+
+    rerender(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-b', taskId: null }}
+      />,
+    );
+    await waitFor(() => expect(beta.getAttribute('aria-selected')).toBe('true'));
+    await waitFor(() => expect(beta.getAttribute('aria-expanded')).toBe('true'));
+    expect(alpha.getAttribute('aria-selected')).toBe('false');
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+    expect(beta.getAttribute('aria-expanded')).toBe('true');
+    expect(finalFilter.checked).toBe(true);
+    expect(document.activeElement).toBe(finalFilter);
+
+    const taskRow = await screen.findByRole('treeitem', { name: /Task project-b-task/ });
+
+    rerender(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-b', taskId: 'project-b-task' }}
+      />,
+    );
+
+    await waitFor(() => expect(taskRow.getAttribute('aria-selected')).toBe('true'));
+    expect(taskRow.classList.contains('is-selected')).toBe(true);
+    expect(alpha.getAttribute('aria-selected')).toBe('false');
+    expect(beta.getAttribute('aria-selected')).toBe('false');
+    expect(beta.classList.contains('is-context')).toBe(true);
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+    expect(beta.getAttribute('aria-expanded')).toBe('true');
+    expect(finalFilter.checked).toBe(true);
+    expect(document.activeElement).toBe(finalFilter);
+  });
+
+  it('en modo controlado notifica la selección del usuario sin cambiar los IDs suministrados', async () => {
+    const onSelectProject = vi.fn();
+    const onSelectTask = vi.fn();
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha'), project('project-b', 'Beta')]),
+      tasks: (args) => page(args.project_id, args.status, [task(`${args.project_id}-task`)]),
+    });
+    const { rerender } = render(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-a', taskId: null }}
+        onSelectProject={onSelectProject}
+        onSelectTask={onSelectTask}
+      />,
+    );
+
+    const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
+    const beta = screen.getByRole('treeitem', { name: /Beta/ });
+    clickProject(beta);
+    expect(onSelectProject).toHaveBeenCalledTimes(1);
+    expect(onSelectProject).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: 'project-b', name: 'Beta' }));
+    expect(onSelectTask).not.toHaveBeenCalled();
+    expect(alpha.getAttribute('aria-selected')).toBe('true');
+    expect(beta.getAttribute('aria-selected')).toBe('false');
+
+    const taskRow = await screen.findByRole('treeitem', { name: /Task project-b-task/ });
+    fireEvent.click(taskRow);
+
+    expect(onSelectProject).toHaveBeenCalledTimes(2);
+    expect(onSelectProject).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: 'project-b', name: 'Beta' }));
+    expect(onSelectTask).toHaveBeenLastCalledWith(expect.objectContaining({ taskId: 'project-b-task', projectId: 'project-b' }));
+    expect(alpha.getAttribute('aria-selected')).toBe('true');
+    expect(taskRow.getAttribute('aria-selected')).toBe('false');
+
+    rerender(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-b', taskId: 'project-b-task' }}
+        onSelectProject={onSelectProject}
+        onSelectTask={onSelectTask}
+      />,
+    );
+    await waitFor(() => expect(taskRow.getAttribute('aria-selected')).toBe('true'));
+    expect(alpha.getAttribute('aria-selected')).toBe('false');
+  });
+
   it('navega con el teclado y no depende de índices ni etiquetas', async () => {
     mountCore({
       overviews: () => overview([project('project-a', 'Alpha'), project('project-b', 'Beta')]),

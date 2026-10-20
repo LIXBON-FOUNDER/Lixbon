@@ -810,14 +810,17 @@ function ProjectTasks({
  * API pública (LXO-97). Componente aislado, solo lectura y sin dependencias del shell; el host lo
  * monta y conecta la selección con estos callbacks. No crea, reintenta ni muta nada.
  *
- * La expansión y la selección son estado interno no controlado. `initialExpandedProjectIds` solo se
- * lee al montar; para persistir, el host guarda los IDs que recibe por `onExpandedChange`.
+ * La expansión es estado interno no controlado. `initialExpandedProjectIds` solo se lee al montar;
+ * para persistir, el host guarda los IDs que recibe por `onExpandedChange`. La selección también es
+ * interna salvo que `selection` suministre los IDs durables actuales.
  *
  * @param {object} [props]
  * @param {boolean} [props.active=true] Si es `false`, la sección queda oculta e `inert` y no consulta el Core.
  * @param {'exclude'|'include'|'only'} [props.archived='exclude'] Filtro de archivo de `projects_overview`.
  * @param {number} [props.pollMs] Intervalo de refresco; por defecto el de `useCoreQuery` (15 s).
  * @param {string[]} [props.initialExpandedProjectIds=[]] Expansión inicial por ID durable; solo al montar.
+ * @param {{projectId: string | null, taskId: string | null} | null} [props.selection]
+ *   Selección durable controlada; si se omite, la selección es interna.
  * @param {(projectIds: string[]) => void} [props.onExpandedChange] Lista completa de IDs expandidos tras un cambio.
  * @param {(summary: ProjectSummary) => void} [props.onSelectProject] Se invoca al activar una fila de Project.
  * @param {(summary: TaskSummary | null, context?: {projectId: string, taskId: string | null}) => void} [props.onSelectTask]
@@ -829,6 +832,7 @@ export function ProjectsSidebar({
   archived = 'exclude',
   pollMs,
   initialExpandedProjectIds,
+  selection,
   onExpandedChange,
   onSelectProject,
   onSelectTask,
@@ -837,11 +841,31 @@ export function ProjectsSidebar({
   const statusFilterName = useId();
   const [statusView, setStatusView] = useState(TASK_STATUS_VIEWS[0]);
   const [expanded, setExpanded] = useState(() => new Set(initialExpandedProjectIds ?? []));
-  const [selected, setSelected] = useState({ projectId: null, taskId: null, taskProjectId: null });
+  const selectionControlled = selection !== undefined;
+  const [uncontrolledSelection, setUncontrolledSelection] = useState({ projectId: null, taskId: null, taskProjectId: null });
+  const selectedProjectId = typeof selection?.projectId === 'string' ? selection.projectId : null;
+  const selectedTaskId = selectedProjectId && typeof selection?.taskId === 'string' ? selection.taskId : null;
+  const selected = selectionControlled
+    ? {
+      projectId: selectedProjectId,
+      taskId: selectedTaskId,
+      taskProjectId: selectedTaskId ? selectedProjectId : null,
+    }
+    : uncontrolledSelection;
   const [taskIdsByProject, setTaskIdsByProject] = useState({});
   const [activeKey, setActiveKey] = useState(null);
   const itemRefs = useRef(new Map());
   const firstFilterInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!selectionControlled || !selected.projectId) return;
+    setExpanded((current) => {
+      if (current.has(selected.projectId)) return current;
+      const next = new Set(current);
+      next.add(selected.projectId);
+      return next;
+    });
+  }, [selectionControlled, selected.projectId, selected.taskId]);
 
   const overview = useCoreQuery('projects_overview', { archived }, { enabled: active, pollMs });
   const projects = overview.data?.projects ?? [];
@@ -899,7 +923,9 @@ export function ProjectsSidebar({
       taskId: keepsTask ? selected.taskId : null,
       taskProjectId: keepsTask ? selected.taskProjectId : null,
     };
-    setSelected((current) => (current.projectId === next.projectId && current.taskId === next.taskId ? current : next));
+    if (!selectionControlled) {
+      setUncontrolledSelection((current) => (current.projectId === next.projectId && current.taskId === next.taskId ? current : next));
+    }
     onSelectProject?.(toProjectSummary(project));
   };
 
@@ -911,7 +937,7 @@ export function ProjectsSidebar({
 
   const activateTask = (project, task) => {
     setActiveKey(taskKey(project.id, task.id));
-    setSelected({ projectId: project.id, taskId: task.id, taskProjectId: project.id });
+    if (!selectionControlled) setUncontrolledSelection({ projectId: project.id, taskId: task.id, taskProjectId: project.id });
     if (selected.projectId !== project.id) onSelectProject?.(toProjectSummary(project));
     onSelectTask?.(toTaskSummary(task, project.id));
   };
