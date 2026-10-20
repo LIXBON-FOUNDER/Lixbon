@@ -505,6 +505,20 @@ pregunta, aprobación, revisión e integración siguen sujetos a sus permisos y 
 * Las preguntas, approvals y reviews se resuelven con sus Commands de dominio existentes; esta API no generaliza sus
   decisiones ni expone una acción de resolución para esas categorías.
 
+### Cliente de terminal: `lxo attention` (LXO-105)
+* `lxo attention [--project ID] [--category C] [--severity S] [--task ID | --target-kind K --target-id ID] [--json]` pide
+  `attention_list` con la credencial del CLI (Person por el almacén seguro; Agent por `LXO_CLIENT_TOKEN`) y recorre
+  todas las páginas con `next_cursor`. Con `--limit N` lee una sola página y sugiere `--cursor` en stderr.
+* `lxo attention show <attention_id>` pide `attention_detail`: también muestra una fila resuelta (historia) y, si está
+  activa, con qué Command de su dominio se resuelve.
+* `--json` imprime `{v, items, next_cursor, has_more, limit}` (o el item de `show`) con el DTO del Core sin tocar:
+  conserva `id` y el target durable. La salida humana traduce los códigos y añade la edad; un código que lxo no
+  conoce se muestra tal cual.
+* lxo no calcula categoría, severidad ni orden: usa los del Core. No hay `--unread` (Attention no es «no leído») ni
+  `resolve`/`snooze`: ambos subcomandos están reservados y responden que el Core no los ofrece.
+* Salidas: 0 correcto, 1 Core o conexión, 2 uso o filtro inválido (también los que rechaza el Core), 3 inexistente o
+  fuera de scope.
+
 ## Esquema (`006_attention.sql`)
 
 | Columna | Para qué |

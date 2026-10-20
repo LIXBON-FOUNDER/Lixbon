@@ -91,6 +91,10 @@ jobs:
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture
         env:
           LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
+      - name: Ejecutar E2E de lxo attention contra el servidor HTTP del Core
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_attention_question_appears_and_reply_resolves_it -- --ignored --exact --nocapture
+        env:
+          LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
       - name: Ejecutar E2E de lxo projects como persona (Credential Manager real)
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_projects_person_real_store -- --ignored --exact --nocapture
         env:
