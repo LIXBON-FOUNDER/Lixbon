@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { ATTENTION_LIMIT, queryAdeCore } from './coreQueries';
+import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeTasks, queryAdeCore } from './coreQueries';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -146,6 +146,26 @@ describe('queryAdeCore', () => {
     await expect(queryAdeCore('attention_list')).resolves.toEqual(valid);
   });
 
+  it('listAdeTasks exige un Project durable y usa active por defecto', async () => {
+    invoke.mockResolvedValue({
+      v: 1,
+      project_id: 'project-1',
+      filters: { status: 'active' },
+      limit: TASK_PAGE_LIMIT,
+      tasks: [],
+      has_more: false,
+      next_cursor: null,
+    });
+
+    await listAdeTasks('project-1');
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'tasks_by_project',
+      args: { project_id: 'project-1', status: 'active', limit: TASK_PAGE_LIMIT },
+    });
+
+    await expect(listAdeTasks('')).rejects.toThrow('ade_query_invalid_request');
+  });
+
   it('rechaza páginas incompatibles con la versión y el contrato del Core', async () => {
     invoke.mockResolvedValue({
       v: 2,
@@ -159,5 +179,90 @@ describe('queryAdeCore', () => {
 
     await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1' }))
       .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('transporta tasks_by_project con los tres status del contrato, limit fijo y cursor opaco', async () => {
+    const task = {
+      id: 'task-1', run_id: 'run-1', parent_id: null, root_id: 'task-1', status: 'running',
+      title: 'Implementar X', provider: 'claude', model: null, created_at: 1_000, updated_at: 2_000,
+    };
+    const page = (status) => ({
+      v: 1,
+      project_id: 'project-1',
+      filters: { status },
+      limit: TASK_PAGE_LIMIT,
+      tasks: [task],
+      has_more: false,
+      next_cursor: null,
+    });
+
+    invoke.mockResolvedValue(page('active'));
+    // `limit` no se acepta desde el llamador: la página fija es la del contrato y el cursor depende de ella.
+    await queryAdeCore('tasks_by_project', { projectId: 'project-1', limit: 100 });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'tasks_by_project',
+      args: { project_id: 'project-1', status: 'active', limit: TASK_PAGE_LIMIT },
+    });
+
+    invoke.mockResolvedValue(page('final'));
+    await queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'tasks_by_project',
+      args: { project_id: 'project-1', status: 'final', limit: TASK_PAGE_LIMIT },
+    });
+
+    invoke.mockResolvedValue(page('all'));
+    await queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'all', cursor: 'cursor-1' });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'tasks_by_project',
+      args: { project_id: 'project-1', status: 'all', limit: TASK_PAGE_LIMIT, cursor: 'cursor-1' },
+    });
+
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'done' }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'todo' }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('tasks_by_project', { projectId: '  ' }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', cursor: 7 }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', cursor: '   ' }))
+      .rejects.toThrow('ade_query_invalid_request');
+  });
+
+  it('exige el eco exacto de project_id, status y limit, y rechaza Tasks incompletas', async () => {
+    const task = {
+      id: 'task-1', run_id: 'run-1', parent_id: null, root_id: 'task-1', status: 'failed',
+      title: 'Implementar X', provider: null, model: null, created_at: 1_000, updated_at: 2_000,
+    };
+    const valid = {
+      v: 1,
+      project_id: 'project-1',
+      filters: { status: 'final' },
+      limit: TASK_PAGE_LIMIT,
+      tasks: [task],
+      has_more: true,
+      next_cursor: 'cursor-1',
+    };
+
+    invoke.mockResolvedValue({ ...valid, project_id: 'project-2' });
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...valid, filters: { status: 'active' } });
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...valid, limit: 100 });
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...valid, tasks: [{ ...task, created_at: 'ayer' }] });
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(valid);
+    await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
+      .resolves.toEqual(valid);
   });
 });

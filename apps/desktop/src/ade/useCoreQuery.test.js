@@ -42,6 +42,14 @@ describe('useCoreQuery', () => {
     expect(result.current.error).toContain('ade_query_timeout');
   });
 
+  it('transporta el status del contrato en tasks_by_project', async () => {
+    queryAdeCore.mockResolvedValue({ tasks: [] });
+    renderHook(() => useCoreQuery('tasks_by_project', { project_id: 'project-1', status: 'final', limit: 50 }));
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(queryAdeCore).toHaveBeenCalledWith('tasks_by_project', { projectId: 'project-1', status: 'final' });
+  });
+
   it('pausa el polling mientras la ventana está oculta y actualiza al volver', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     queryAdeCore.mockResolvedValue({ projects: [] });

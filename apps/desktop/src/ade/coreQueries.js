@@ -19,9 +19,16 @@ export const ATTENTION_SEVERITIES = Object.freeze(['critical', 'high', 'medium',
 /** Página fija de la lista: el cursor opaco queda ligado a este límite (LXO-89). */
 export const ATTENTION_LIMIT = 100;
 
+/** Grupos de estado del contrato de `tasks_by_project` (LXO-91). No se amplían desde el cliente. */
+export const TASK_STATUS_FILTERS = Object.freeze(['active', 'final', 'all']);
+
+/** Página fija de la lista de Tasks: el cursor opaco queda ligado a este límite (LXO-91). */
+export const TASK_PAGE_LIMIT = 50;
+
 const ATTENTION_CATEGORY_SET = new Set(ATTENTION_CATEGORIES);
 const ATTENTION_SEVERITY_SET = new Set(ATTENTION_SEVERITIES);
 const ARCHIVED_FILTERS = new Set(['exclude', 'include', 'only']);
+const TASK_STATUS_SET = new Set(TASK_STATUS_FILTERS);
 
 function durableId(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`ade_query_invalid_request: ${name} debe ser un ID durable`);
@@ -47,6 +54,15 @@ function optionalCursor(value) {
   return value;
 }
 
+/** `status` de `tasks_by_project`: solo los tres grupos del contrato; ausente equivale a `active`. */
+function taskStatus(value) {
+  if (value === undefined || value === null || value === '') return 'active';
+  if (typeof value !== 'string' || !value.trim()) throw new Error('ade_query_invalid_request: status debe ser active, final o all');
+  const status = value.trim();
+  if (!TASK_STATUS_SET.has(status)) throw new Error('ade_query_invalid_request: status debe ser active, final o all');
+  return status;
+}
+
 // Solo los filtros del contrato de `attention_list`; `limit` fijo para que el cursor siga siendo válido.
 function attentionRequest(args) {
   const request = { limit: ATTENTION_LIMIT };
@@ -70,7 +86,14 @@ function requestFor(query, args) {
   }
   if (query === 'attention_list') return attentionRequest(args);
   if (query === 'tasks_by_project') {
-    return { project_id: durableId(args?.projectId, 'project_id'), status: 'active', limit: 50 };
+    const request = {
+      project_id: durableId(args?.projectId, 'project_id'),
+      status: taskStatus(args?.status),
+      limit: TASK_PAGE_LIMIT,
+    };
+    const cursor = optionalCursor(args?.cursor);
+    if (cursor) request.cursor = cursor;
+    return request;
   }
   return {
     project_id: durableId(args?.projectId, 'project_id'),
@@ -80,6 +103,21 @@ function requestFor(query, args) {
 
 function invalidResponse(query, detail) {
   return new Error(`ade_query_invalid_response: ${query}: ${detail}`);
+}
+
+const optionalText = (value) => value === null || value === undefined || typeof value === 'string';
+
+/** Task de la lista (LXO-91): identidad durable, estado real y metadato opcional, sin inferir nada. */
+function validTask(task) {
+  return Boolean(task)
+    && typeof task.id === 'string' && Boolean(task.id.trim())
+    && typeof task.title === 'string'
+    && typeof task.status === 'string' && Boolean(task.status.trim())
+    && Number.isSafeInteger(task.created_at) && task.created_at >= 0
+    && Number.isSafeInteger(task.updated_at) && task.updated_at >= 0
+    && optionalText(task.run_id) && optionalText(task.parent_id) && optionalText(task.root_id)
+    && optionalText(task.provider) && optionalText(task.model)
+    && optionalText(task.branch) && optionalText(task.worktree);
 }
 
 function validAttentionItem(item) {
@@ -128,11 +166,11 @@ function validateResponse(query, args, response) {
     const cursorIsValid = response.has_more
       ? typeof response.next_cursor === 'string' && response.next_cursor.length > 0
       : response.next_cursor === null;
-    if (response.project_id !== args.project_id || response.filters?.status !== 'active' || response.limit !== 50
+    if (response.project_id !== args.project_id || response.filters?.status !== args.status || response.limit !== TASK_PAGE_LIMIT
       || !Array.isArray(response.tasks) || typeof response.has_more !== 'boolean' || !cursorIsValid) {
-      throw invalidResponse(query, 'la página no corresponde al Project solicitado');
+      throw invalidResponse(query, 'la página no corresponde al Project, al filtro de estado y al límite solicitados');
     }
-    if (response.tasks.some((task) => !task || typeof task.id !== 'string' || !task.id.trim() || typeof task.title !== 'string' || typeof task.status !== 'string')) {
+    if (response.tasks.some((task) => !validTask(task))) {
       throw invalidResponse(query, 'la lista contiene una Task incompleta');
     }
     return response;
@@ -152,7 +190,14 @@ export async function queryAdeCore(query, input = {}) {
 }
 
 export const listAdeProjects = ({ archived = 'exclude' } = {}) => queryAdeCore('projects_overview', { archived });
-export const listAdeTasks = (projectId) => queryAdeCore('tasks_by_project', { projectId });
+
+/**
+ * Lista paginada de Tasks de un Project (LXO-91). `status` es uno de los tres grupos del contrato
+ * (`active` · `final` · `all`, por defecto `active`) y `cursor` es el `next_cursor` opaco de la página
+ * anterior; nada se deriva ni se amplía aquí.
+ */
+export const listAdeTasks = (projectId, { status = 'active', cursor = null } = {}) =>
+  queryAdeCore('tasks_by_project', { projectId, status, cursor });
 export const readAdeTask = (projectId, taskId) => queryAdeCore('task_detail', { projectId, taskId });
 
 /**

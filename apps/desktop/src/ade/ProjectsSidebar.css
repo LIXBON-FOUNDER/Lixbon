@@ -1,0 +1,258 @@
+/* ProjectsSidebar · sidebar F2 de Projects → Tasks (LXO-97). Prefijo propio `ps__`: no comparte
+   clases con el sidebar del orquestador ni con AttentionInbox. */
+
+.ps {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+  padding: 12px 14px;
+  overflow: hidden;
+  color: var(--ink-70);
+}
+
+.ps.is-hidden { display: none; }
+
+.ps__head { min-width: 0; }
+
+.ps__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.ps__subtitle {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-50);
+}
+
+.ps__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ps__filter-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-35);
+}
+
+.ps__radios {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+}
+
+.ps__radio {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: calc(var(--radius) - 2px);
+  font-size: 11.5px;
+  color: var(--ink-50);
+  cursor: pointer;
+}
+
+.ps__radio.is-active { color: var(--ink); background: var(--surface-4); }
+
+.ps__radio input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.ps__radio:focus-within { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+
+.ps__hint,
+.ps__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-50);
+  overflow-wrap: anywhere;
+}
+
+.ps__note { color: var(--ink-35); }
+
+.ps__state {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-70);
+  overflow-wrap: anywhere;
+}
+
+.ps__state code {
+  font-size: 10.5px;
+  color: var(--ink-50);
+  overflow-wrap: anywhere;
+}
+
+.ps__state--error { color: var(--danger); background: var(--danger-soft); }
+.ps__state--stale { color: var(--warn); background: var(--warn-soft); }
+.ps__state--muted { color: var(--ink-50); }
+
+.ps__empty {
+  padding: 14px 12px;
+  border: 1px dashed rgba(var(--ink-rgb), 0.12);
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-50);
+}
+
+.ps__tree {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.ps__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(var(--ink-rgb), 0.06);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.ps__item:hover { background: var(--surface-3); }
+.ps__item:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+.ps__item.is-selected { background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.35); }
+.ps__item--project.is-context {
+  background: var(--surface-3);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.ps__item--task {
+  margin-left: 14px;
+  background: var(--surface-1);
+}
+
+.ps__item--task.is-selected { background: var(--accent-soft); }
+
+.ps__tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ps__line {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ps__chevron {
+  flex: none;
+  width: 10px;
+  font-size: 10px;
+  color: var(--ink-35);
+}
+
+.ps__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.ps__item--task .ps__name { font-weight: 500; color: var(--ink-body); }
+
+.ps__id {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-35);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+
+.ps__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--ink-50);
+  overflow-wrap: anywhere;
+}
+
+.ps__badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  background: var(--surface-4);
+  color: var(--ink-70);
+}
+
+.ps__badge--attention {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* El estado agregado del Project y la Attention son señales distintas: cada una tiene su color. */
+.ps__badge--status-failed { background: var(--danger-soft); color: var(--danger); }
+.ps__badge--status-attention { background: var(--warn-soft); color: var(--warn); }
+.ps__badge--status-active { background: var(--accent-soft); color: var(--accent); }
+.ps__badge--status-idle { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-50); }
+
+.ps__badge--task { background: var(--surface-4); color: var(--ink-70); }
+.ps__badge--task.ps__badge--final {
+  background: rgba(var(--ink-rgb), 0.06);
+  color: var(--ink-35);
+}
+
+/* Tonos de los ocho estados: activo, en espera, fallido y final no se confunden entre sí. */
+.ps__badge--task.ps__badge--active { background: var(--accent-soft); color: var(--accent); }
+.ps__badge--task.ps__badge--waiting { background: var(--warn-soft); color: var(--warn); }
+.ps__badge--task.ps__badge--failed { background: var(--danger-soft); color: var(--danger); }
+.ps__badge--task.ps__badge--done { background: var(--good-soft); color: var(--good); }
+.ps__badge--task.ps__badge--stopped,
+.ps__badge--task.ps__badge--exited { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-35); }
+
+.ps__more { align-self: flex-start; margin: 2px 0 2px 14px; }
+
+@media (max-width: 640px) {
+  .ps { padding: 10px 12px; }
+  .ps__id { max-width: 35%; }
+}
