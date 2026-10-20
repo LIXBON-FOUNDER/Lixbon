@@ -166,6 +166,40 @@ describe('queryAdeCore', () => {
     await expect(listAdeTasks('')).rejects.toThrow('ade_query_invalid_request');
   });
 
+  it('transporta target_kind y target_id juntos, valida el tipo y exige que la página corresponda al target', async () => {
+    const row = {
+      id: 'att_1', category: 'question', severity: 'high', status: 'active', target_kind: 'task',
+      target_id: 'task-1', project_id: 'project-1', run_id: null, occurrence: 1, created_at: 1,
+      resolved_at: null, resolution: null,
+    };
+    const response = { v: 1, items: [row], next_cursor: 'cursor-1', has_more: true, limit: ATTENTION_LIMIT };
+    invoke.mockResolvedValue(response);
+
+    await queryAdeCore('attention_list', { targetKind: 'task', targetId: 'task-1' });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'attention_list',
+      args: { limit: ATTENTION_LIMIT, target_kind: 'task', target_id: 'task-1' },
+    });
+
+    await queryAdeCore('attention_list', { targetKind: 'task', targetId: 'task-1', category: 'question', cursor: 'cursor-1' });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'attention_list',
+      args: { limit: ATTENTION_LIMIT, target_kind: 'task', target_id: 'task-1', category: 'question', cursor: 'cursor-1' },
+    });
+
+    invoke.mockClear();
+    await expect(queryAdeCore('attention_list', { targetKind: 'task' })).rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('attention_list', { targetId: 'task-1' })).rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('attention_list', { targetKind: 'attention', targetId: 'x' })).rejects.toThrow('ade_query_invalid_request');
+    expect(invoke).not.toHaveBeenCalled();
+
+    // No se recorta una página ajena en cliente: se rechaza entera.
+    invoke.mockResolvedValue({ ...response, items: [row, { ...row, id: 'att_2', target_id: 'task-2' }] });
+    await expect(queryAdeCore('attention_list', { targetKind: 'task', targetId: 'task-1' })).rejects.toThrow('ade_query_invalid_response');
+    invoke.mockResolvedValue({ ...response, items: [{ ...row, target_kind: 'run' }] });
+    await expect(queryAdeCore('attention_list', { targetKind: 'task', targetId: 'task-1' })).rejects.toThrow('ade_query_invalid_response');
+  });
+
   it('rechaza páginas incompatibles con la versión y el contrato del Core', async () => {
     invoke.mockResolvedValue({
       v: 2,

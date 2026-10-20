@@ -211,6 +211,50 @@ describe('AttentionInbox', () => {
     });
   });
 
+  it('con target pide target_kind/target_id al Core, lo conserva al paginar y se puede quitar', async () => {
+    const own = item({ id: 'att_1', target_id: 'task-9', created_at: 1 });
+    const more = item({ id: 'att_2', target_id: 'task-9', created_at: 2 });
+    const calls = mountCore({
+      attention: (args) => (args.cursor ? page([more]) : page([own], { hasMore: true, next: 'cursor-1' })),
+      projects: () => overview({ projects: [project('project-a', 'Alpha', counts({ question: 5 }))] }),
+    });
+    const onClearTarget = vi.fn();
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} target={{ kind: 'task', id: 'task-9', projectId: 'project-a', seq: 1 }} onClearTarget={onClearTarget} />);
+    await screen.findByRole('button', { name: /Media: Pregunta/ });
+
+    expect(calls).toContainEqual(['attention_list', { target_kind: 'task', target_id: 'task-9', limit: ATTENTION_LIMIT }]);
+    // Los contadores de projects_overview no son del target: no se presentan como si lo fueran.
+    expect(screen.getByTestId('attention-total').textContent).toBe('1+');
+    expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-9');
+    expect(screen.getByLabelText('Categoría').textContent).not.toMatch(/\(\d+\)/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Media: Pregunta/ })).toHaveLength(2));
+    expect(calls).toContainEqual(['attention_list', { target_kind: 'task', target_id: 'task-9', cursor: 'cursor-1', limit: ATTENTION_LIMIT }]);
+    expect(screen.getByTestId('attention-total').textContent).toBe('2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar el filtro por Task task-9' }));
+    expect(onClearTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it('una apertura nueva del target parte sin filtros heredados', async () => {
+    const calls = mountCore({ attention: () => page([item()]) });
+    const { rerender } = render(<AttentionInbox onOpenTarget={vi.fn()} />);
+    await screen.findByRole('button', { name: /Media: Pregunta/ });
+    fireEvent.change(screen.getByLabelText('Severidad'), { target: { value: 'high' } });
+    await waitFor(() => expect(calls).toContainEqual(['attention_list', { severity: 'high', limit: ATTENTION_LIMIT }]));
+
+    rerender(<AttentionInbox onOpenTarget={vi.fn()} target={{ kind: 'task', id: 'task-1', projectId: null, seq: 1 }} />);
+    await waitFor(() => expect(calls.at(-1)).toEqual(['attention_list', { target_kind: 'task', target_id: 'task-1', limit: ATTENTION_LIMIT }]));
+    expect(screen.getByLabelText('Severidad').value).toBe('');
+
+    // Un cambio de filtro posterior se respeta mientras el mismo target siga abierto.
+    fireEvent.change(screen.getByLabelText('Severidad'), { target: { value: 'low' } });
+    rerender(<AttentionInbox onOpenTarget={vi.fn()} target={{ kind: 'task', id: 'task-1', projectId: null, seq: 1 }} />);
+    expect(screen.getByLabelText('Severidad').value).toBe('low');
+  });
+
   it('navega con teclado y expone nombres y descripciones ARIA', async () => {
     const rows = [1, 2, 3].map((n) => item({
       id: `att_${n}`,

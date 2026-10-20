@@ -1,9 +1,10 @@
-import { useId } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
 import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { AttentionInbox } from './AttentionInbox';
 import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
 import './TaskWorkspace.css';
@@ -86,9 +87,62 @@ function CoreTaskButton({ task, selected, onSelect }) {
   );
 }
 
-// `onOpenTaskActivity` / `onOpenTaskAttention` reciben `{ projectId, taskId }` de la Task seleccionada y verificada.
-// Mientras no estén conectados a una superficie real, el workspace declara Activity/Attention como no disponibles.
-export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenTaskAttention }) {
+const WORKSPACE_VIEWS = [
+  { key: 'workspace', label: 'Workspace' },
+  { key: 'attention', label: 'Attention' },
+];
+
+/** Switch Workspace/Attention con semántica de tabs (flechas, Inicio/Fin); solo cambia la subvista del ADE. */
+function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
+  const tabRefs = useRef({});
+  const onKeyDown = (event) => {
+    const index = WORKSPACE_VIEWS.findIndex((item) => item.key === view);
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % WORKSPACE_VIEWS.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + WORKSPACE_VIEWS.length) % WORKSPACE_VIEWS.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = WORKSPACE_VIEWS.length - 1;
+    else return;
+    event.preventDefault();
+    const key = WORKSPACE_VIEWS[next].key;
+    onChange(key);
+    tabRefs.current[key]?.focus();
+  };
+  return (
+    <div className="ade-view-switch" role="tablist" aria-label="Vista del ADE" onKeyDown={onKeyDown}>
+      {WORKSPACE_VIEWS.map((item) => {
+        const selected = item.key === view;
+        return (
+          <button
+            key={item.key}
+            ref={(node) => { tabRefs.current[item.key] = node; }}
+            type="button"
+            role="tab"
+            id={`${idPrefix}-tab-${item.key}`}
+            aria-selected={selected}
+            aria-controls={`${idPrefix}-panel-${item.key}`}
+            tabIndex={selected ? 0 : -1}
+            className={`ade-view-switch__tab${selected ? ' is-active' : ''}`}
+            onClick={() => onChange(item.key)}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// `onOpenTaskActivity` recibe `{ projectId, taskId }` de la Task seleccionada y verificada; mientras no esté
+// conectado, el workspace declara Activity como no disponible. Attention la sirve este shell (AttentionInbox).
+// `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
+// ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
+export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
+  const viewIds = useId();
+  const [workspaceView, setWorkspaceView] = useState('workspace');
+  const [attentionTarget, setAttentionTarget] = useState(null);
+  const [attentionNotice, setAttentionNotice] = useState(null);
+  const targetSeq = useRef(0);
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
@@ -119,6 +173,43 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     onActivate?.();
   };
   const selectTask = (taskId) => { setAdeSelection({ projectId: selectedProjectId, taskId }); onActivate?.(); };
+  const changeWorkspaceView = (view) => { setWorkspaceView(view); if (view !== 'attention') setAttentionNotice(null); };
+
+  // Attention de una Task: filtro por target (task + ID durable) resuelto por el Core, no por la página global.
+  const openTaskAttention = ({ projectId, taskId }) => {
+    if (typeof taskId !== 'string' || !taskId.trim()) return;
+    targetSeq.current += 1;
+    setAttentionTarget({ kind: 'task', id: taskId, projectId: typeof projectId === 'string' ? projectId : null, seq: targetSeq.current });
+    setAttentionNotice(null);
+    setWorkspaceView('attention');
+    onActivate?.();
+  };
+  const clearAttentionTarget = useCallback(() => setAttentionTarget(null), []);
+
+  // Cada fila enruta solo por su par (target_kind, target_id) durable; nunca por títulos ni por rutas.
+  const openAttentionTarget = ({ kind, id, projectId }) => {
+    const unavailable = (what) => setAttentionNotice(`${what} ya no está disponible en esta superficie.`);
+    setAttentionNotice(null);
+    if (kind === 'project') {
+      setAdeSelection({ projectId: id, taskId: null });
+      setWorkspaceView('workspace');
+      onActivate?.();
+    } else if (kind === 'task') {
+      if (!projectId) {
+        setAttentionNotice(`La Attention de la Task ${id} no trae Project: no se puede abrir en el Workspace.`);
+        return;
+      }
+      setAdeSelection({ projectId, taskId: id });
+      setWorkspaceView('workspace');
+      onActivate?.();
+    } else if (kind === 'run') {
+      if (typeof onOpenRun !== 'function' || onOpenRun(id) !== true) unavailable(`El Run ${id}`);
+    } else if (kind === 'spawn_request') {
+      if (typeof onOpenSpawnRequest !== 'function' || onOpenSpawnRequest(id) !== true) unavailable(`La solicitud de lanzamiento ${id}`);
+    } else {
+      setAttentionNotice(`Esta vista aún no abre destinos de tipo ${kind} (${id}).`);
+    }
+  };
   // Un solo estado `task_detail` alimenta canvas e Inspector: no hay segunda consulta.
   const workspaceProps = {
     projectId: selectedProjectId,
@@ -127,7 +218,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     project: selectedProject,
     onNavigate: ({ projectId, taskId }) => { if (projectId === selectedProjectId) selectTask(taskId); },
     onOpenActivity: onOpenTaskActivity,
-    onOpenAttention: onOpenTaskAttention,
+    onOpenAttention: openTaskAttention,
   };
 
   return (
@@ -176,17 +267,41 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
         <div className={`ade__context-canvas ade__workspace-canvas${active ? '' : ' is-hidden'}`} aria-hidden={!active} inert={!active}>
           <Panel id="ade-workspace" className="wb__grow orch__main ade__workspace">
             <div className="panelhead ade__workspace-head">
-              <div className="panelhead__title">Workspace</div>
+              <WorkspaceViewSwitch view={workspaceView} onChange={changeWorkspaceView} idPrefix={viewIds} />
               {selectedTaskId && <span className="ade__durable-id mono">Task · {selectedTaskId}</span>}
             </div>
-            {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
-            {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
-            {selectedTaskId && (
-              <div className="ade__task-overview scroll">
-                {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
-                <TaskWorkspace {...workspaceProps} variant="workspace" />
-              </div>
-            )}
+            <div
+              className="ade-view-panel"
+              role="tabpanel"
+              id={`${viewIds}-panel-workspace`}
+              aria-labelledby={`${viewIds}-tab-workspace`}
+              hidden={workspaceView !== 'workspace'}
+            >
+              {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
+              {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
+              {selectedTaskId && (
+                <div className="ade__task-overview scroll">
+                  {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
+                  <TaskWorkspace {...workspaceProps} variant="workspace" />
+                </div>
+              )}
+            </div>
+            {/* Siempre montado: conserva filtros y target; sin vista activa no consulta ni sondea. */}
+            <div
+              className="ade-view-panel"
+              role="tabpanel"
+              id={`${viewIds}-panel-attention`}
+              aria-labelledby={`${viewIds}-tab-attention`}
+              hidden={workspaceView !== 'attention'}
+            >
+              {attentionNotice && <div className="ade__notice" role="status">{attentionNotice}</div>}
+              <AttentionInbox
+                active={active && workspaceView === 'attention'}
+                target={attentionTarget}
+                onClearTarget={clearAttentionTarget}
+                onOpenTarget={openAttentionTarget}
+              />
+            </div>
           </Panel>
 
           <RightDock
