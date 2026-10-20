@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
+mod attention;
 mod client_auth;
 mod events;
 
@@ -35,6 +36,8 @@ Coordinador (el agente con el que habla el usuario):
                                                    registrarlos o archivarlos lo decide una persona en Lixbon)
   lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
                                                   Event Log paginado con autenticación de cliente
+  lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
+  lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo stop <tarea> | lxo release <tarea> [--force]
   (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
    lxo merge y lxo pr se rechazan)
@@ -1052,6 +1055,9 @@ fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
     if a.at(0).as_deref() == Some("events") {
         return events::run(&a);
+    }
+    if a.at(0).as_deref() == Some("attention") {
+        return attention::run(&a);
     }
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
     if a.at(0).as_deref() == Some("ask") && a.s("resume").is_some() {

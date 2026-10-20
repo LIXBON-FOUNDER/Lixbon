@@ -685,6 +685,66 @@ fn lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates()
     server.0.stop();
 }
 
+/// LXO-105 · `lxo attention` real contra el HTTP del Core: la pregunta de una hija aparece en su inbox,
+/// una respuesta desde fuera (la persona en Lixbon) la resuelve y `show` conserva la historia.
+#[test]
+#[ignore = "requiere un binario lxo real indicado por LXO_BIN; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_attention_question_appears_and_reply_resolves_it() {
+    let binary = PathBuf::from(std::env::var_os("LXO_BIN").expect("define LXO_BIN con el binario lxo"));
+    assert!(binary.is_file(), "LXO_BIN no apunta a un archivo: {}", binary.display());
+
+    let (cleanup, _data, _core_dir, core) = core_listo();
+    let scene = escena(&core, "lxo-attention-e2e");
+    let token = "fixture-agent-lxo-attention-token-with-32-bytes-min";
+    registra_agente_http(&core, &scene.hija, "install-lxo-bin-events-e2e", token);
+    let server = ServerParada(server::start(core.clone()).unwrap());
+    let home = cleanup.0.join("lxo-home");
+    let lixbon_dir = home.join(".lixbon");
+    std::fs::create_dir_all(&lixbon_dir).unwrap();
+    write_lxo_orch(&lixbon_dir, server.0.port);
+    let attention = |args: &[&str]| lxo_events_json(&binary, &home, &scene.hija, token, args);
+    let raw = |args: &[&str]| Command::new(&binary).args(args)
+        .env("USERPROFILE", &home).env("HOME", &home)
+        .env("LXO_TASK_ID", &scene.hija).env("LXO_CLIENT_TOKEN", token)
+        .output().unwrap();
+
+    let empty = attention(&["attention", "--json"]);
+    assert_eq!(empty["items"], json!([]), "sin preguntas no hay nada pendiente: {empty}");
+    assert_eq!(empty["has_more"], false);
+    let text = String::from_utf8_lossy(&raw(&["attention"]).stdout).into_owned();
+    assert!(text.contains("Nada necesita atención ahora."), "estado vacío: {text}");
+
+    let question = core
+        .rpc(Caller::Agent(Some(scene.hija.clone())), "", "ask", &json!({ "question": "¿qué rama uso?" }))
+        .unwrap()["question"]
+        .as_u64()
+        .unwrap();
+    let inbox = attention(&["attention", "--json", "--category", "question"]);
+    let items = inbox["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "la pregunta aparece: {inbox}");
+    let item = &items[0];
+    assert_eq!((item["category"].as_str(), item["status"].as_str()), (Some("question"), Some("active")));
+    assert_eq!((item["target_kind"].as_str(), item["target_id"].as_str()), (Some("task"), Some(scene.hija.as_str())));
+    let id = item["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("att_"), "el JSON conserva attention_id: {id}");
+
+    let human = raw(&["attention"]);
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(human.status.success() && text.contains(&id) && text.contains("pregunta"), "salida humana: {text}");
+    assert!(!text.contains("¿qué rama uso?"), "Attention no expone el texto libre de la pregunta: {text}");
+
+    core.rpc(Caller::User, "", "reply", &json!({ "question": question, "answer": "main" })).unwrap();
+    let after = attention(&["attention", "--json"]);
+    assert_eq!(after["items"], json!([]), "la respuesta externa la saca de las activas: {after}");
+    let detail = attention(&["attention", "show", &id, "--json"]);
+    assert_eq!((detail["status"].as_str(), detail["resolution"].as_str()), (Some("resolved"), Some("acted")), "{detail}");
+    assert!(detail["resolved_at"].is_i64());
+
+    let missing = raw(&["attention", "show", "att_no_existe"]);
+    assert_eq!(missing.status.code(), Some(3), "stderr={}", String::from_utf8_lossy(&missing.stderr));
+    server.0.stop();
+}
+
 struct ServerParada(server::Handle);
 
 impl Drop for ServerParada {
