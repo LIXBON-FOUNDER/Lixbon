@@ -57,7 +57,9 @@ export const STATE_FILTERS = [
 
 const isUnavailable = (r) => r.availability === 'unavailable';
 const isUnset = (v) => v === null || v === undefined;
-const isMissing = (r) => r.classification === 'missing' || (r.classification === 'known' && r.exists === false);
+// Falta: Core lo clasifica así, o un recurso conocido con exists === false. Si Core no pudo leer los
+// valores (availability 'unavailable') el exists no es fiable: es «No disponible», no «Falta».
+const isMissing = (r) => r.classification === 'missing' || (r.classification === 'known' && !isUnavailable(r) && r.exists === false);
 
 /** ¿Cumple la entrada el filtro de estado? Predicados, no un estado único: dirty y unmerged pueden coincidir. */
 export function matchesState(r, filter) {
@@ -113,7 +115,8 @@ function Row({ r }) {
   const external = r.classification === 'external_candidate';
   const unmerged = !isUnavailable(r) && r.merged === false;
   const missing = isMissing(r);
-  const cls = CLASS_LABEL[r.classification] ?? 'Desconocido';
+  // La etiqueta visible sigue a isMissing (igual que el estilo y el filtro «Falta»).
+  const cls = missing ? CLASS_LABEL.missing : (CLASS_LABEL[r.classification] ?? 'Desconocido');
   return (
     <li className={`resinv__row resinv__row--${r.classification}`} data-testid="resinv-row" data-resource-id={r.id}>
       <div className="resinv__head">
