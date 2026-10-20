@@ -867,13 +867,8 @@ describe('ActivityTimeline · teclado y accesibilidad', () => {
     expect(row.getAttribute('aria-label')).toContain('Evento evt-1');
     expect(row.getAttribute('aria-label')).toContain('secuencia 1');
 
-    const describedBy = row.getAttribute('aria-describedby');
-    expect(describedBy).toBeTruthy();
-    const meta = document.getElementById(describedBy);
-    expect(meta).toBeTruthy();
-    expect(meta.textContent).toContain('Evento evt-1');
-    expect(meta.textContent).toContain('Secuencia 1');
-    expect(screen.getByTestId('activity-row-meta-evt-1').textContent).toContain('Evento evt-1');
+    expect(row.getAttribute('aria-describedby')).toBeNull();
+    expect(screen.queryByTestId('activity-row-meta-evt-1')).toBeNull();
     expect(screen.getByTestId('activity-seq-evt-1').getAttribute('aria-label')).toBe(
       'Secuencia 1',
     );

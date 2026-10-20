@@ -138,19 +138,6 @@
   border-radius: var(--radius);
 }
 
-/* Identidad durable de la fila solo para lectores de pantalla. */
-.activity__sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 .activity__list {
   display: flex;
   flex-direction: column;
