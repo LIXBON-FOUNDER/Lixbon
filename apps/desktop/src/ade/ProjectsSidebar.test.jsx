@@ -88,6 +88,7 @@ function mountCore({ overviews = () => overview([]), tasks = (args) => page(args
 
 const taskCalls = (calls) => calls.filter((call) => call.query === 'tasks_by_project');
 const onlyReadQueries = (calls) => calls.every((call) => ['projects_overview', 'tasks_by_project'].includes(call.query));
+const clickProject = (row) => fireEvent.click(row.querySelector('.ps__name'));
 const flush = async () => {
   await act(async () => {
     for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
@@ -124,7 +125,7 @@ describe('ProjectsSidebar', () => {
     expect(onlyReadQueries(calls)).toBe(true);
 
     for (const id of ['project-000', 'project-001', 'project-099']) {
-      fireEvent.click(container.querySelector(`li[data-project-id="${id}"]`));
+      clickProject(container.querySelector(`li[data-project-id="${id}"]`));
     }
     await waitFor(() => expect(taskCalls(calls)).toHaveLength(3));
     expect(taskCalls(calls).map((call) => call.args.project_id).sort())
@@ -142,7 +143,7 @@ describe('ProjectsSidebar', () => {
     await flush();
     expect(calls).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
     await flush();
     expect(taskCalls(calls)).toHaveLength(1);
     expect(taskCalls(calls)[0].args).toEqual({ project_id: 'project-a', status: 'active', limit: TASK_PAGE_LIMIT });
@@ -163,15 +164,47 @@ describe('ProjectsSidebar', () => {
     });
     const { container } = render(<ProjectsSidebar />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task t1');
-    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
     await screen.findByText('Task t3');
 
     expect(screen.getAllByText('Task t2')).toHaveLength(1);
     expect([...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id')))
       .toEqual(['t3', 't2', 't1']);
     expect(taskCalls(calls).map((call) => call.args.cursor)).toEqual([undefined, 'cursor-1']);
+  });
+
+  it.each([1, 10, 100])('carga el dataset de %i Tasks y pagina 100 en dos respuestas', async (count) => {
+    const dataset = Array.from({ length: count }, (_, index) => task(
+      `task-${String(index + 1).padStart(3, '0')}`,
+      { created_at: (count - index) * 1_000 },
+    ));
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          return page(args.project_id, args.status, dataset.slice(0, TASK_PAGE_LIMIT), {
+            hasMore: count > TASK_PAGE_LIMIT,
+            cursor: 'cursor-dataset',
+          });
+        }
+        return page(args.project_id, args.status, [dataset[TASK_PAGE_LIMIT - 1], ...dataset.slice(TASK_PAGE_LIMIT)]);
+      },
+    });
+    const { container } = render(<ProjectsSidebar />);
+
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await waitFor(() => expect(container.querySelectorAll('li[data-task-id]')).toHaveLength(Math.min(count, TASK_PAGE_LIMIT)));
+    if (count > TASK_PAGE_LIMIT) {
+      fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+      await waitFor(() => expect(container.querySelectorAll('li[data-task-id]')).toHaveLength(count));
+    }
+
+    expect([...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id')))
+      .toEqual(dataset.map((item) => item.id));
+    expect(taskCalls(calls).map((call) => call.args.cursor))
+      .toEqual(count > TASK_PAGE_LIMIT ? [undefined, 'cursor-dataset'] : [undefined]);
   });
 
   it('si el Core reinició la clave del cursor vuelve a la primera página sin duplicar', async () => {
@@ -187,9 +220,9 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task t1');
-    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
 
     await screen.findByText(/El Core se reinició y el cursor caducó/);
     expect(screen.getAllByText('Task t1')).toHaveLength(1);
@@ -212,18 +245,18 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar pollMs={1_000} />);
     await flush();
-    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
     await flush();
     expect(screen.getByText('Task t1')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
     await flush();
-    expect(screen.getByRole('button', { name: 'Cargando…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cargando Tasks de Alpha' })).toBeTruthy();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     await flush();
     expect(screen.getByText(/Datos desactualizados/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Cargar más Tasks' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
 
     await act(async () => {
       resolveMore(page('project-a', 'active', [task('t2')]));
@@ -232,6 +265,146 @@ describe('ProjectsSidebar', () => {
     expect(screen.queryByText('Task t2')).toBeNull();
     expect(screen.getByText('Task t1')).toBeTruthy();
     expect(taskCalls(calls).some((call) => call.args.cursor === 'cursor-1')).toBe(true);
+  });
+
+  it('reconcilia título y estado de páginas cargadas tras refrescar la cabecera', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    let resolveFreshPage;
+    const freshPage = new Promise((resolve) => { resolveFreshPage = resolve; });
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor === 'cursor-old') {
+          return page(args.project_id, args.status, [task('t2', { title: 'Task antigua', status: 'running', created_at: 900 })]);
+        }
+        if (args.cursor === 'cursor-new') return freshPage;
+        headReads += 1;
+        return page(args.project_id, args.status, [task('t1', { created_at: 2_000 })], {
+          hasMore: true,
+          cursor: headReads === 1 ? 'cursor-old' : 'cursor-new',
+        });
+      },
+    });
+    const { container } = render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+
+    const oldRow = screen.getByRole('treeitem', { name: /Task antigua/ });
+    fireEvent.click(oldRow);
+    oldRow.focus();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+
+    expect(screen.getByTestId('stale-task-pages-project-a')).toBeTruthy();
+    expect(oldRow.getAttribute('aria-label')).toMatch(/^Datos desactualizados/);
+    expect(oldRow.querySelector('.ps__badge--stale')).toBeTruthy();
+    expect(taskCalls(calls).map((call) => call.args.cursor)).toEqual([undefined, 'cursor-old', undefined, 'cursor-new']);
+
+    await act(async () => { resolveFreshPage(page('project-a', 'active', [task('t2', {
+      title: 'Task actualizada', status: 'waiting', created_at: 900,
+    })])); });
+    await flush();
+
+    const freshRow = screen.getByRole('treeitem', { name: /Task actualizada/ });
+    expect(freshRow).toBe(oldRow);
+    expect(freshRow.getAttribute('data-status')).toBe('waiting');
+    expect(freshRow.getAttribute('aria-selected')).toBe('true');
+    expect(freshRow.querySelector('.ps__badge--stale')).toBeNull();
+    expect(document.activeElement).toBe(freshRow);
+    expect(container.querySelectorAll('li[data-task-id="t2"]')).toHaveLength(1);
+    expect(screen.queryByText('Task antigua')).toBeNull();
+  });
+
+  it('libera el lock al recuperar una cabecera stale y un finally viejo no bloquea la página nueva', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    let moreReads = 0;
+    let resolveObsoletePage;
+    let resolveCurrentPage;
+    const obsoletePage = new Promise((resolve) => { resolveObsoletePage = resolve; });
+    const currentPage = new Promise((resolve) => { resolveCurrentPage = resolve; });
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) {
+          moreReads += 1;
+          return moreReads === 1 ? obsoletePage : currentPage;
+        }
+        headReads += 1;
+        if (headReads === 2) throw new Error('tasks_by_project_read_failed');
+        return page(args.project_id, args.status, [task('t1')], {
+          hasMore: true,
+          cursor: headReads === 1 ? 'cursor-old' : 'cursor-current',
+        });
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByText(/Datos desactualizados/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByRole('button', { name: 'Cargando Tasks de Alpha' }).disabled).toBe(true);
+
+    await act(async () => { resolveObsoletePage(page('project-a', 'active', [task('t-obsolete')])); });
+    await flush();
+    expect(screen.getByRole('button', { name: 'Cargando Tasks de Alpha' }).disabled).toBe(true);
+
+    await act(async () => { resolveCurrentPage(page('project-a', 'active', [task('t-current')])); });
+    await flush();
+    expect(screen.getByText('Task t-current')).toBeTruthy();
+    expect(screen.queryByText('Task t-obsolete')).toBeNull();
+    expect(taskCalls(calls).some((call) => call.args.cursor === 'cursor-current')).toBe(true);
+  });
+
+  it('cambio de filtro invalida la petición anterior sin dejar que su finally libere la nueva', async () => {
+    let resolveActivePage;
+    let resolveFinalPage;
+    const activePage = new Promise((resolve) => { resolveActivePage = resolve; });
+    const finalPage = new Promise((resolve) => { resolveFinalPage = resolve; });
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) return args.status === 'active' ? activePage : finalPage;
+        return args.status === 'active'
+          ? page(args.project_id, args.status, [task('t-active')], { hasMore: true, cursor: 'cursor-active' })
+          : page(args.project_id, args.status, [task('t-final')], { hasMore: true, cursor: 'cursor-final' });
+      },
+    });
+    render(<ProjectsSidebar />);
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task t-active');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Finalizadas' }));
+    await screen.findByText('Task t-final');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(taskCalls(calls).map((call) => call.args.cursor)).toEqual([undefined, 'cursor-active', undefined, 'cursor-final']);
+
+    await act(async () => { resolveActivePage(page('project-a', 'active', [task('t-active-obsolete')])); });
+    await flush();
+    expect(screen.getByRole('button', { name: 'Cargando Tasks de Alpha' }).disabled).toBe(true);
+
+    await act(async () => { resolveFinalPage(page('project-a', 'final', [task('t-final-next')])); });
+    await flush();
+    expect(screen.getByText('Task t-final-next')).toBeTruthy();
+    expect(screen.queryByText('Task t-active-obsolete')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Finalizadas' }).checked).toBe(true);
   });
 
   it('expone el filtro explícito active/final/all y las finalizadas son descubribles', async () => {
@@ -246,7 +419,7 @@ describe('ProjectsSidebar', () => {
     render(<ProjectsSidebar />);
 
     expect(screen.getByTestId('active-view-hint').textContent).toMatch(/finalizadas quedan ocultas/i);
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task activa');
 
     fireEvent.click(screen.getByRole('radio', { name: 'Finalizadas' }));
@@ -287,7 +460,7 @@ describe('ProjectsSidebar', () => {
     expect(screen.getByTestId('project-status-project-a').textContent).toBe('Con Attention');
     expect(screen.queryByTestId('project-attention-project-b')).toBeNull();
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task t1');
     expect(screen.getAllByRole('treeitem', { name: /^Task t/ })).toHaveLength(5);
     expect(screen.getByTestId('project-attention-project-a').textContent).toBe('Attention 3');
@@ -301,7 +474,7 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task t1');
     expect(screen.queryByText(/unread/i)).toBeNull();
     expect(screen.queryByText(/sin leer/i)).toBeNull();
@@ -309,7 +482,7 @@ describe('ProjectsSidebar', () => {
     expect(onlyReadQueries(calls)).toBe(true);
   });
 
-  it('trata host, origen, rama y worktree como metadato y usa «No informado» cuando faltan', async () => {
+  it('trata host, origen, rama y worktree como metadato y reserva los ausentes para el detalle', async () => {
     mountCore({
       overviews: () => overview([
         project('project-a', 'Alpha', {
@@ -328,12 +501,12 @@ describe('ProjectsSidebar', () => {
     expect(beta.textContent).toContain(`Host ${NOT_REPORTED}`);
     expect(beta.textContent).toContain(`Origen ${NOT_REPORTED}`);
 
-    fireEvent.click(beta);
+    clickProject(beta);
     const taskRow = await screen.findByRole('treeitem', { name: /Task t1/ });
     expect(taskRow.textContent).toContain('Proveedor claude');
     expect(taskRow.textContent).toContain(`Modelo ${NOT_REPORTED}`);
-    expect(taskRow.textContent).toContain(`Rama ${NOT_REPORTED}`);
-    expect(taskRow.textContent).toContain(`Worktree ${NOT_REPORTED}`);
+    expect(taskRow.textContent).toContain('Rama Solo en detalle');
+    expect(taskRow.textContent).toContain('Worktree Solo en detalle');
     expect(taskRow.getAttribute('data-task-id')).toBe('t1');
   });
 
@@ -346,7 +519,7 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     const taskRow = await screen.findByRole('treeitem', { name: /Task t1/ });
     expect(taskRow.textContent).toContain('Rama feat/x');
     expect(taskRow.textContent).toContain('Worktree /wt/x');
@@ -365,7 +538,7 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar onSelectProject={onSelectProject} onSelectTask={onSelectTask} />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     expect(onSelectProject).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: 'project-a', name: 'Alpha' }));
 
     const taskRow = await screen.findByRole('treeitem', { name: /Task project-a-task/ });
@@ -379,7 +552,7 @@ describe('ProjectsSidebar', () => {
     expect(alpha.getAttribute('tabindex')).toBe('-1');
     expect(alpha.classList.contains('is-context')).toBe(true);
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /Beta/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Beta/ }));
     expect(onSelectTask).toHaveBeenLastCalledWith(null, { projectId: 'project-b', taskId: null });
     expect(screen.getByRole('treeitem', { name: /Task project-a-task/ }).getAttribute('aria-selected')).toBe('false');
     expect(screen.getByRole('treeitem', { name: /Beta/ }).getAttribute('aria-selected')).toBe('true');
@@ -448,8 +621,8 @@ describe('ProjectsSidebar', () => {
     render(<ProjectsSidebar />);
 
     const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
-    fireEvent.click(alpha);
-    const more = await screen.findByRole('button', { name: 'Cargar más Tasks' });
+    clickProject(alpha);
+    const more = await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' });
     more.focus();
 
     fireEvent.keyDown(more, { key: 'Enter' });
@@ -459,6 +632,67 @@ describe('ProjectsSidebar', () => {
     fireEvent.keyDown(more, { key: ' ' });
     expect(alpha.getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(more);
+  });
+
+  it('el espacio vacío de una fila no pliega el Project', async () => {
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => page(args.project_id, args.status, []),
+    });
+    render(<ProjectsSidebar />);
+
+    const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
+    clickProject(alpha);
+    await screen.findByText(/Este Project no tiene Tasks activas/);
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(alpha);
+    fireEvent.click(alpha.querySelector('.ps__line'));
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+
+    clickProject(alpha);
+    expect(alpha.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('mantiene el foco en una fila utilizable cuando desaparece el botón de paginación', async () => {
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => (args.cursor
+        ? page(args.project_id, args.status, [task('t2', { created_at: 2_000 })])
+        : page(args.project_id, args.status, [task('t1', { created_at: 1_000 })], { hasMore: true, cursor: 'cursor-1' })),
+    });
+    render(<ProjectsSidebar />);
+
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    const more = await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    more.focus();
+    fireEvent.click(more);
+    await screen.findByText('Task t2');
+    await waitFor(() => expect(document.activeElement.getAttribute('role')).toBe('treeitem'));
+    expect(document.activeElement.getAttribute('tabindex')).toBe('0');
+    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+  });
+
+  it('identifica el Project en el reintento de una página fallida', async () => {
+    let moreAttempts = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) return page(args.project_id, args.status, [task('t1')], { hasMore: true, cursor: 'cursor-1' });
+        moreAttempts += 1;
+        if (moreAttempts === 1) throw new Error('tasks_read_failed: falló la lectura de página');
+        return page(args.project_id, args.status, [task('t2')]);
+      },
+    });
+    render(<ProjectsSidebar />);
+
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    const alert = await screen.findByRole('alert');
+    const retry = within(alert).getByRole('button', { name: 'Reintentar carga de Tasks de Alpha' });
+    fireEvent.click(retry);
+    await screen.findByText('Task t2');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('distingue visualmente estados activos, en espera, fallidos y finales', async () => {
@@ -477,7 +711,7 @@ describe('ProjectsSidebar', () => {
 
     const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
     expect(alpha.querySelector('.ps__badge--status-active')).toBeTruthy();
-    fireEvent.click(alpha);
+    clickProject(alpha);
     await screen.findByText('Running');
     fireEvent.click(screen.getByRole('radio', { name: 'Todas' }));
 
@@ -510,7 +744,7 @@ describe('ProjectsSidebar', () => {
     render(<ProjectsSidebar pollMs={1_000} />);
     await flush();
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
     await flush();
     const taskRow = screen.getByRole('treeitem', { name: /Task t1/ });
     fireEvent.click(taskRow);
@@ -567,7 +801,7 @@ describe('ProjectsSidebar', () => {
     await flush();
 
     const alpha = screen.getByRole('treeitem', { name: /Alpha/ });
-    fireEvent.click(alpha);
+    clickProject(alpha);
     expect(alpha.getAttribute('aria-selected')).toBe('true');
     expect(alpha.getAttribute('aria-expanded')).toBe('true');
 
@@ -591,11 +825,11 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar onExpandedChange={(ids) => changes.push(ids)} />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
-    fireEvent.click(screen.getByRole('treeitem', { name: /Beta/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Beta/ }));
     expect(changes).toEqual([['project-a'], ['project-a', 'project-b']]);
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }));
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
     expect(changes).toEqual([['project-a'], ['project-a', 'project-b'], ['project-b']]);
     await waitFor(() => expect(screen.getByRole('treeitem', { name: /Alpha/ }).getAttribute('aria-expanded')).toBe('false'));
     expect(screen.getByRole('treeitem', { name: /Beta/ }).getAttribute('aria-expanded')).toBe('true');
@@ -616,7 +850,7 @@ describe('ProjectsSidebar', () => {
     expect(alert.textContent).toContain('Core degradado');
     expect(alert.textContent).toContain('projects_overview_unavailable');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar lectura' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar lectura de Projects' }));
     expect(await screen.findByRole('treeitem', { name: /Alpha/ })).toBeTruthy();
     expect(calls.every((call) => call.query === 'projects_overview')).toBe(true);
     expect(invoke.mock.calls.every(([command]) => command === 'orch_query')).toBe(true);
@@ -634,12 +868,12 @@ describe('ProjectsSidebar', () => {
     });
     render(<ProjectsSidebar />);
 
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Core no pudo leer este dato.');
     expect(alert.textContent).toContain('tasks_read_failed');
 
-    fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar lectura' }));
+    fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar lectura de las Tasks de Alpha' }));
     expect(await screen.findByText('Task t1')).toBeTruthy();
     expect(onlyReadQueries(calls)).toBe(true);
   });
@@ -684,7 +918,7 @@ describe('ProjectsSidebar', () => {
       tasks: (args) => page(args.project_id, args.status, [task('t1')]),
     });
     render(<ProjectsSidebar />);
-    fireEvent.click(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await screen.findByText('Task t1');
 
     expect(screen.queryByRole('button', { name: /crear Task|nueva Task|reintentar Task|Attempt|mission/i })).toBeNull();
