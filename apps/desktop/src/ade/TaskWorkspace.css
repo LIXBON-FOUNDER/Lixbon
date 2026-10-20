@@ -1,0 +1,41 @@
+/* Task Workspace / Inspector de solo lectura (LXO-98). Prefijo `twk` exclusivo de este componente. */
+
+.twk { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 20px; color: var(--ink-70); font-size: 12px; line-height: 1.5; }
+.twk--inspector { gap: 8px; padding: 14px; font-size: 11px; }
+.twk__head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.twk__title { flex: 1 1 auto; min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 20px; font-weight: 600; color: var(--ink); }
+.twk--inspector .twk__title { font-size: 14px; }
+.twk__empty { margin: 0; padding: 12px 0; color: var(--ink-50); }
+
+.twk__status { display: inline-flex; align-items: center; min-height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; color: var(--ink-70); background: var(--surface-3); }
+.twk__status--active { color: var(--info); }
+.twk__status--final { color: var(--good); }
+.twk__status[data-status='failed'] { color: var(--danger); background: var(--danger-soft); }
+.twk__status--unknown { color: var(--warn); background: var(--warn-soft); }
+
+.twk__banner { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border-radius: var(--radius); font-size: 11px; line-height: 1.45; color: var(--ink-70); background: var(--surface-3); overflow-wrap: anywhere; }
+.twk__banner--error { color: var(--danger); background: var(--danger-soft); }
+.twk__banner--stale, .twk__banner--partial { color: var(--warn); background: var(--warn-soft); }
+
+.twk__body { display: flex; flex-direction: column; gap: 14px; }
+.twk__section { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid rgba(var(--ink-rgb), 0.08); }
+.twk__section-title { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-50); }
+.twk__list { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.twk__row { display: grid; grid-template-columns: minmax(96px, 30%) minmax(0, 1fr); gap: 8px; }
+.twk--inspector .twk__row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.twk__row dt { color: var(--ink-50); }
+.twk__row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+
+.twk__mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; overflow-wrap: anywhere; word-break: break-all; color: inherit; }
+.twk__missing { color: var(--ink-50); font-style: italic; }
+.twk__hint { margin: 0; font-size: 10.5px; color: var(--ink-50); }
+.twk__verified { padding-top: 6px; }
+
+.twk__questions { display: flex; flex-direction: column; gap: 4px; }
+.twk__question-list, .twk__children { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.twk__quote { display: block; margin-top: 2px; padding-left: 8px; border-left: 2px solid rgba(var(--ink-rgb), 0.15); color: var(--ink-70); quotes: none; }
+
+.twk__action, .twk__link { align-self: flex-start; padding: 3px 8px; border: 1px solid rgba(var(--ink-rgb), 0.16); border-radius: var(--radius); font: inherit; font-size: 11px; color: var(--ink); background: transparent; cursor: pointer; }
+.twk__link { padding: 2px 6px; text-align: left; }
+.twk__action:hover, .twk__link:hover { background: var(--surface-3); }
+.twk__action:focus-visible, .twk__link:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
