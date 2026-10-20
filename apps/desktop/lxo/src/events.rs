@@ -417,14 +417,14 @@ fn ref_text(value: &serde_json::Map<String, Value>) -> String {
     }
 }
 
-fn clean(value: &str) -> String {
+pub(super) fn clean(value: &str) -> String {
     value
         .chars()
         .map(|ch| if ch.is_control() { '?' } else { ch })
         .collect()
 }
 
-fn timestamp_utc(milliseconds: i64) -> String {
+pub(super) fn timestamp_utc(milliseconds: i64) -> String {
     let seconds = milliseconds.div_euclid(1000);
     let millis = milliseconds.rem_euclid(1000);
     let days = seconds.div_euclid(86_400);
