@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Profiler, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { JumpPalette } from './JumpPalette';
@@ -17,6 +17,7 @@ function Harness({ initialOpen = true, onNavigate = vi.fn(), onClose = vi.fn(), 
         open={open}
         query={query}
         onQueryChange={setQuery}
+        loading={results.loading}
         projects={results.projects}
         tasks={results.tasks}
         attention={results.attention}
@@ -48,9 +49,19 @@ describe('JumpPalette', () => {
 
     const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
     expect(document.activeElement).toBe(input);
+    const listbox = screen.getByRole('listbox', { name: 'Resultados de navegación' });
     expect(within(screen.getByRole('group', { name: 'Projects' })).getAllByRole('option')).toHaveLength(1);
     expect(within(screen.getByRole('group', { name: 'Tasks' })).getAllByRole('option')).toHaveLength(1);
     expect(within(screen.getByRole('group', { name: 'Attention' })).getAllByRole('option')).toHaveLength(1);
+    expect(Array.from(listbox.children).every((child) => child.getAttribute('role') === 'group')).toBe(true);
+    for (const group of listbox.children) {
+      expect(group.getAttribute('aria-label')).toBeTruthy();
+      expect(Array.from(group.children)
+        .filter((child) => child.getAttribute('aria-hidden') !== 'true')
+        .every((child) => child.getAttribute('role') === 'option')).toBe(true);
+    }
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(listbox.contains(screen.getByRole('status'))).toBe(false);
 
     expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
     expect(activeOption(input).getAttribute('aria-selected')).toBe('true');
@@ -63,6 +74,9 @@ describe('JumpPalette', () => {
     expect(screen.queryByRole('group', { name: 'Projects' })).toBeNull();
     fireEvent.change(input, { target: { value: 'shp auth' } });
     expect(screen.queryByRole('option')).toBeNull();
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByRole('status').textContent).toContain('Sin resultados');
+    expect(listbox.contains(screen.getByRole('status'))).toBe(false);
 
     fireEvent.change(input, { target: { value: 'project-a' } });
     const project = screen.getByRole('option', { name: /Workspace Alpha/ });
@@ -99,7 +113,31 @@ describe('JumpPalette', () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-2' });
   });
 
-  it('rejects a stale active result when updated props replace it', () => {
+  it('activates on row entry and ignores repeated movement within one of 125 results', () => {
+    let commits = 0;
+    const tasks = Array.from({ length: 125 }, (_, index) => ({
+      id: `task-${index + 1}`,
+      projectId: 'project-1',
+      title: `Task ${index + 1}`,
+    }));
+    render(
+      <Profiler id="jump-palette" onRender={() => { commits += 1; }}>
+        <Harness tasks={tasks} />
+      </Profiler>,
+    );
+
+    const option = screen.getByText('Task 2').closest('[role="option"]');
+    expect(option).not.toBeNull();
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    const commitsBeforePointer = commits;
+    fireEvent.mouseEnter(option);
+    expect(activeOption(input)).toBe(option);
+    expect(commits - commitsBeforePointer).toBe(1);
+    for (let index = 0; index < 50; index += 1) fireEvent.mouseMove(option);
+    expect(commits - commitsBeforePointer).toBe(1);
+  });
+
+  it('rebases the active key to async replacements without navigating a stale result', () => {
     const onNavigate = vi.fn();
     const task = { id: 'task-stale', projectId: 'project-1', title: 'Stale Task' };
     const { rerender } = render(<Harness tasks={[task]} onNavigate={onNavigate} />);
@@ -107,15 +145,57 @@ describe('JumpPalette', () => {
     expect(activeOption(input).textContent).toContain('Stale Task');
 
     rerender(<Harness tasks={[{ id: 'task-current', projectId: 'project-1', title: 'Replacement Task' }]} onNavigate={onNavigate} />);
-    expect(screen.getByRole('option', { name: /Replacement Task/ })).toBeTruthy();
-    expect(input.getAttribute('aria-activedescendant')).toBeNull();
+    const replacement = screen.getByRole('option', { name: /Replacement Task/ });
+    expect(activeOption(input)).toBe(replacement);
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(onNavigate).not.toHaveBeenCalled();
-    fireEvent.keyDown(input, { key: 'ArrowDown' });
-    expect(activeOption(input).textContent).toContain('Replacement Task');
-    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledTimes(1);
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-current' });
+    expect(onNavigate).not.toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-stale' });
+  });
+
+  it('announces loading once outside the listbox without exposing stale options', () => {
+    const onNavigate = vi.fn();
+    render(
+      <Harness
+        loading
+        onNavigate={onNavigate}
+        tasks={[{ id: 'task-stale', projectId: 'project-1', title: 'Stale Task' }]}
+      />,
+    );
+
+    const listbox = screen.getByRole('listbox', { name: 'Resultados de navegación' });
+    const status = screen.getByRole('status');
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    expect(listbox.getAttribute('aria-busy')).toBe('true');
+    expect(listbox.children).toHaveLength(0);
+    expect(screen.queryByRole('option')).toBeNull();
+    expect(status.textContent).toContain('Cargando resultados');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(listbox.contains(status)).toBe(false);
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps Escape and Tab handling after pointer clicks on non-interactive header and status text', () => {
+    render(<Harness tasks={[{ id: 'task-1', projectId: 'project-1', title: 'Task One' }]} />);
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    const closeButton = screen.getByRole('button', { name: 'Cerrar Jump Palette' });
+
+    fireEvent.mouseDown(screen.getByRole('heading', { name: 'Jump Palette' }));
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(document.activeElement).toBe(closeButton);
+
+    fireEvent.mouseDown(screen.getByRole('status'));
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.mouseDown(screen.getByRole('heading', { name: 'Jump Palette' }));
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('navigates Attention by durable IDs and restores focus when Escape closes the palette', () => {

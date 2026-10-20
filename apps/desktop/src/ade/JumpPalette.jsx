@@ -86,6 +86,7 @@ function buildGroups({ projects, tasks, attention, query }) {
  *
  * API:
  * - `open`, `query`, and `onQueryChange` control visibility and search text.
+ * - `loading` identifies an in-progress result refresh.
  * - `projects`: normalized `{ id, name, branch? }` results.
  * - `tasks`: normalized `{ id, projectId, title, branch? }` results.
  * - `attention`: normalized `{ projectId, taskId, title, branch? }` results.
@@ -99,6 +100,7 @@ function buildGroups({ projects, tasks, attention, query }) {
 export function JumpPalette({
   open,
   query = '',
+  loading = false,
   onQueryChange,
   projects = [],
   tasks = [],
@@ -113,17 +115,24 @@ export function JumpPalette({
   const returnFocusRef = useRef(null);
   const lastQueryRef = useRef(query);
   const initializedRef = useRef(false);
-  const lastResultKeysRef = useRef([]);
   const [activeKey, setActiveKey] = useState(null);
   const safeQuery = typeof query === 'string' ? query.trim() : '';
   const groups = useMemo(
     () => buildGroups({ projects, tasks, attention, query: safeQuery }),
     [projects, tasks, attention, safeQuery],
   );
-  const visibleGroups = useMemo(() => groups.filter((group) => group.items.length > 0), [groups]);
+  const visibleGroups = useMemo(
+    () => (loading ? [] : groups.filter((group) => group.items.length > 0)),
+    [groups, loading],
+  );
   const results = useMemo(() => visibleGroups.flatMap((group) => group.items), [visibleGroups]);
   const activeIndex = results.findIndex((item) => item.key === activeKey);
   const activeResult = activeIndex >= 0 ? results[activeIndex] : null;
+  const statusMessage = loading
+    ? 'Cargando resultados…'
+    : results.length === 0
+      ? 'Sin resultados para esta búsqueda.'
+      : `${results.length} ${results.length === 1 ? 'resultado' : 'resultados'} · ↑↓ mover · Home/End ir al inicio/final · Enter abrir · Esc cerrar`;
   const listId = `${uid}-results`;
   const headingId = `${uid}-heading`;
   const inputId = `${uid}-search`;
@@ -143,21 +152,20 @@ export function JumpPalette({
 
   useEffect(() => {
     const queryChanged = lastQueryRef.current !== query;
-    const hadNoResults = lastResultKeysRef.current.length === 0;
     lastQueryRef.current = query;
-    lastResultKeysRef.current = results.map((item) => item.key);
     if (!open) {
       initializedRef.current = false;
-      lastResultKeysRef.current = [];
       setActiveKey(null);
       return;
     }
-    if (queryChanged || !initializedRef.current || (hadNoResults && results.length > 0)) {
+    if (queryChanged || !initializedRef.current) {
       initializedRef.current = true;
       setActiveKey(results[0]?.key ?? null);
       return;
     }
-    if (activeKey && !results.some((item) => item.key === activeKey)) setActiveKey(null);
+    if (!activeKey || !results.some((item) => item.key === activeKey)) {
+      setActiveKey(results[0]?.key ?? null);
+    }
   }, [open, query, results, activeKey]);
 
   useEffect(() => {
@@ -229,6 +237,12 @@ export function JumpPalette({
         aria-modal="true"
         aria-labelledby={headingId}
         onKeyDown={handleKeyDown}
+        onMouseDown={(event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (target?.closest('button, input, [role="option"]')) return;
+          event.preventDefault();
+          inputRef.current?.focus();
+        }}
       >
         <header className="jpal__header">
           <div>
@@ -259,12 +273,11 @@ export function JumpPalette({
           spellCheck={false}
         />
 
-        <div className="jpal__results" id={listId} role="listbox" aria-label="Resultados de navegación">
-          {visibleGroups.map((group) => {
-            const groupId = `${listId}-${group.kind}`;
-            return (
-              <div key={group.kind} className="jpal__group" role="group" aria-labelledby={groupId}>
-                <h3 className="jpal__group-title" id={groupId}>
+        <div className="jpal__results">
+          <div id={listId} role="listbox" aria-label="Resultados de navegación" aria-busy={loading}>
+            {visibleGroups.map((group) => (
+              <div key={group.kind} className="jpal__group" role="group" aria-label={group.label}>
+                <h3 className="jpal__group-title" aria-hidden="true">
                   <span>{group.label}</span><span className="jpal__count" aria-hidden="true">{group.items.length}</span>
                 </h3>
                 {group.items.map((item) => {
@@ -278,7 +291,7 @@ export function JumpPalette({
                       role="option"
                       aria-selected={selected}
                       onMouseDown={(event) => event.preventDefault()}
-                      onMouseMove={() => setActiveKey(item.key)}
+                      onMouseEnter={() => setActiveKey(item.key)}
                       onClick={() => selectCurrent(item.key)}
                     >
                       <span className="jpal__option-label">{item.label}</span>
@@ -287,12 +300,11 @@ export function JumpPalette({
                   );
                 })}
               </div>
-            );
-          })}
-          {results.length === 0 && <p className="jpal__empty" role="status">Sin resultados para esta búsqueda.</p>}
+            ))}
+          </div>
         </div>
         <p className="jpal__status" role="status" aria-live="polite">
-          {results.length} {results.length === 1 ? 'resultado' : 'resultados'} · ↑↓ mover · Home/End ir al inicio/final · Enter abrir · Esc cerrar
+          {statusMessage}
         </p>
       </section>
     </div>
