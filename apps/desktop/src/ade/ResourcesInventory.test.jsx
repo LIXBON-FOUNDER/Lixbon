@@ -86,6 +86,40 @@ describe('ResourcesInventory', () => {
     expect(unavailable.getByTestId('resinv-path').textContent).toBe('—');
   });
 
+  it('conocido con exists=false: la etiqueta visible dice «Falta», coherente con Existe y el filtro', () => {
+    const gone = { ...FIX.clean, id: 'res-gone', exists: false };
+    render(<ResourcesInventory inventory={{ resources: [gone, FIX.unknown, FIX.external] }} />);
+    const row = within(rowOf('res-gone'));
+    expect(row.getByTestId('resinv-class').textContent).toBe('Falta');
+    expect(row.getByTestId('resinv-class').className).toContain('resinv__tag--missing');
+    expect(row.getByTestId('resinv-exists').textContent).toBe('No');
+    pick('Estado', 'missing');
+    expect(shownIds()).toEqual(['res-gone']);
+    // Desconocido y candidato externo siguen sin ser «Falta».
+    pick('Estado', 'all');
+    expect(within(rowOf('res-unknown')).getByTestId('resinv-class').textContent).toBe('Conocido');
+    expect(within(rowOf('res-external')).getByTestId('resinv-class').textContent).toBe('Candidato externo');
+  });
+
+  it('no disponible con exists=false no es «Falta»: el valor no es fiable', () => {
+    const lejana = { ...FIX.unavailable, id: 'res-lejana', exists: false };
+    render(<ResourcesInventory inventory={{ resources: [lejana] }} />);
+    const row = within(rowOf('res-lejana'));
+    expect(row.getByTestId('resinv-class').textContent).toBe('Conocido');
+    expect(row.getByTestId('resinv-exists').textContent).toBe('No disponible');
+    expect(row.queryByText('Falta')).toBeNull();
+    expect(matchesState(lejana, 'missing')).toBe(false);
+    expect(matchesState(lejana, 'unknown')).toBe(true);
+  });
+
+  it('candidato externo con exists=false mantiene «Candidato externo» y sin propietario', () => {
+    const ext = { ...FIX.external, id: 'res-ext-gone', exists: false };
+    render(<ResourcesInventory inventory={{ resources: [ext] }} />);
+    const row = within(rowOf('res-ext-gone'));
+    expect(row.getByTestId('resinv-class').textContent).toBe('Candidato externo');
+    expect(row.getByTestId('resinv-owner').textContent).toBe('Sin propietario');
+  });
+
   it('candidato externo: sin propietario aunque el dato lo traiga', () => {
     render(<ResourcesInventory inventory={inv()} />);
     const ext = within(rowOf('res-external'));
