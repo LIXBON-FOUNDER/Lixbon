@@ -6,6 +6,7 @@
   --ps-text-danger: var(--danger);
   --ps-text-good: var(--good);
   --ps-text-warning: var(--warn);
+  --ps-stale-ink: #F1D682;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -21,6 +22,7 @@
   --ps-text-danger: #9B2B1B;
   --ps-text-good: #17622E;
   --ps-text-warning: #704B00;
+  --ps-stale-ink: #654600;
 }
 
 .ps.is-hidden { display: none; }
@@ -116,7 +118,11 @@
 }
 
 .ps__state--error { color: var(--ps-text-danger); background: var(--danger-soft); }
-.ps__state--stale { color: var(--ps-text-warning); background: var(--warn-soft); }
+.ps__state--stale {
+  color: var(--ps-stale-ink);
+  background: var(--warn-soft);
+  border: 1px solid rgba(var(--warn-rgb), 0.42);
+}
 .ps__state--muted { color: var(--ink-soft); }
 
 .ps__empty {
@@ -154,6 +160,7 @@
 
 .ps__item:hover { background: var(--surface-3); }
 .ps__item:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: -2px; }
+.ps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius); }
 .ps__item.is-selected { background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.35); }
 .ps__item--project.is-context {
   background: var(--surface-3);
@@ -242,8 +249,9 @@
 }
 
 .ps__badge--stale {
-  background: var(--surface-4);
-  color: var(--ink-soft);
+  background: var(--warn-soft);
+  color: var(--ps-stale-ink);
+  font-weight: 600;
 }
 
 /* El estado agregado del Project y la Attention son señales distintas: cada una tiene su color. */

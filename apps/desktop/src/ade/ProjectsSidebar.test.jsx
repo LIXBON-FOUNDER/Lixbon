@@ -94,9 +94,15 @@ const flush = async () => {
     for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
   });
 };
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+};
 
 afterEach(() => {
   cleanup();
+  document.body.removeAttribute('tabindex');
   vi.useRealTimers();
   vi.restoreAllMocks();
   invoke.mockReset();
@@ -173,6 +179,167 @@ describe('ProjectsSidebar', () => {
     expect([...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id')))
       .toEqual(['t3', 't2', 't1']);
     expect(taskCalls(calls).map((call) => call.args.cursor)).toEqual([undefined, 'cursor-1']);
+  });
+
+  it('no reconcilia tres páginas cargadas cuando el polling devuelve la misma cabecera', async () => {
+    vi.useFakeTimers();
+    const cursors = [];
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) return page(args.project_id, args.status, [task('head')], { hasMore: true, cursor: 'cursor-1' });
+        cursors.push(args.cursor);
+        const index = Number(args.cursor.slice('cursor-'.length));
+        return page(args.project_id, args.status, [task(`page-${index}`, { created_at: 1_000 - index })], {
+          hasMore: true,
+          cursor: `cursor-${index + 1}`,
+        });
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+      await flush();
+    }
+    expect(cursors).toEqual(['cursor-1', 'cursor-2', 'cursor-3']);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+
+    expect(cursors).toEqual(['cursor-1', 'cursor-2', 'cursor-3']);
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeTruthy();
+    expect(onlyReadQueries(calls)).toBe(true);
+  });
+
+  it('reconcilia todas las páginas cargadas desde el cursor nuevo cuando cambia la cabecera', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    const cursors = [];
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          headReads += 1;
+          return headReads === 1
+            ? page(args.project_id, args.status, [task('head-old')], { hasMore: true, cursor: 'old-1' })
+            : page(args.project_id, args.status, [task('head-new', { created_at: 5_000 })], { hasMore: true, cursor: 'new-1' });
+        }
+        cursors.push(args.cursor);
+        if (args.cursor === 'old-1') return page(args.project_id, args.status, [task('old-page-1')], { hasMore: true, cursor: 'old-2' });
+        if (args.cursor === 'old-2') return page(args.project_id, args.status, [task('old-page-2')], { hasMore: true, cursor: 'old-3' });
+        if (args.cursor === 'new-1') return page(args.project_id, args.status, [task('new-page-1')], { hasMore: true, cursor: 'new-2' });
+        if (args.cursor === 'new-2') return page(args.project_id, args.status, [task('new-page-2')], { hasMore: true, cursor: 'new-3' });
+        return page(args.project_id, args.status, [task('new-page-3')]);
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task old-page-1')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task old-page-2')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+
+    expect(cursors).toEqual(['old-1', 'old-2', 'new-1', 'new-2']);
+    expect(screen.getByText('Task new-page-1')).toBeTruthy();
+    expect(screen.getByText('Task new-page-2')).toBeTruthy();
+    expect(screen.queryByText('Task old-page-1')).toBeNull();
+    expect(screen.queryByText('Task old-page-2')).toBeNull();
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task new-page-3')).toBeTruthy();
+    expect(cursors.at(-1)).toBe('new-3');
+  });
+
+  it('no cancela una carga de página en curso durante un polling idéntico', async () => {
+    vi.useFakeTimers();
+    const pendingPage = deferred();
+    const cursors = [];
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) return page(args.project_id, args.status, [task('head')], { hasMore: true, cursor: 'cursor-1' });
+        cursors.push(args.cursor);
+        return pendingPage.promise;
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(cursors).toEqual(['cursor-1']);
+
+    const loadedPage = page('project-a', 'active', [task('loaded-during-poll')], { hasMore: true, cursor: 'cursor-2' });
+    await act(async () => {
+      pendingPage.resolve(loadedPage);
+      await pendingPage.promise;
+    });
+    await flush();
+    expect(screen.getByText('Task loaded-during-poll')).toBeTruthy();
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
+  });
+
+  it('conserva las páginas como stale ante error de reconciliación y reintenta el cursor', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    let reconcileAttempts = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          headReads += 1;
+          return page(args.project_id, args.status, [task(headReads === 1 ? 'head-old' : 'head-new')], {
+            hasMore: true,
+            cursor: headReads === 1 ? 'old-1' : 'new-1',
+          });
+        }
+        if (args.cursor === 'old-1') return page(args.project_id, args.status, [task('old-page')], { hasMore: true, cursor: 'old-2' });
+        if (args.cursor === 'new-1') {
+          reconcileAttempts += 1;
+          if (reconcileAttempts === 1) throw new Error('tasks_read_failed: lectura de reconciliación');
+          return page(args.project_id, args.status, [task('new-page')], { hasMore: true, cursor: 'new-2' });
+        }
+        return page(args.project_id, args.status, [task('next-page')]);
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task old-page')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    const stale = screen.getByTestId('stale-task-pages-project-a');
+    expect(stale.textContent).toContain('tasks_read_failed');
+    expect(screen.getByText('Task old-page')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar actualización de páginas de Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task new-page')).toBeTruthy();
+    expect(reconcileAttempts).toBe(2);
+    expect(screen.queryByText('Task old-page')).toBeNull();
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
   });
 
   it.each([1, 10, 100])('carga el dataset de %i Tasks y pagina 100 en dos respuestas', async (count) => {
@@ -666,11 +833,85 @@ describe('ProjectsSidebar', () => {
     clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     const more = await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' });
     more.focus();
+    fireEvent.keyDown(more, { key: 'Enter' });
     fireEvent.click(more);
     await screen.findByText('Task t2');
     await waitFor(() => expect(document.activeElement.getAttribute('role')).toBe('treeitem'));
     expect(document.activeElement.getAttribute('tabindex')).toBe('0');
     expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+    expect(screen.getByRole('treeitem', { name: /Alpha/ }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('devuelve el foco al botón habilitado tras una carga iniciada con teclado', async () => {
+    const pendingPage = deferred();
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor === 'cursor-1') return pendingPage.promise;
+        if (args.cursor === 'cursor-2') return page(args.project_id, args.status, [task('t2')]);
+        return page(args.project_id, args.status, [task('t1')], { hasMore: true, cursor: 'cursor-1' });
+      },
+    });
+    render(<ProjectsSidebar />);
+    const alpha = await screen.findByRole('treeitem', { name: /Alpha/ });
+    clickProject(alpha);
+    const more = await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    more.focus();
+    fireEvent.keyDown(more, { key: 'Enter' });
+    fireEvent.click(more);
+    await waitFor(() => expect(more.disabled).toBe(true));
+    more.blur();
+    document.body.setAttribute('tabindex', '-1');
+    document.body.focus();
+    expect(document.activeElement).toBe(document.body);
+
+    const firstPage = page('project-a', 'active', [task('t1-loaded')], { hasMore: true, cursor: 'cursor-2' });
+    await act(async () => {
+      pendingPage.resolve(firstPage);
+      await pendingPage.promise;
+    });
+    document.body.removeAttribute('tabindex');
+
+    const returnedButton = await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    await waitFor(() => expect(document.activeElement).toBe(returnedButton));
+    fireEvent.keyDown(returnedButton, { key: 'Enter' });
+    fireEvent.click(returnedButton);
+    await screen.findByText('Task t2');
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('no recupera el foco tras un blur deliberado antes de que desaparezca el botón', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          headReads += 1;
+          return headReads === 1
+            ? page(args.project_id, args.status, [task('head-old')], { hasMore: true, cursor: 'old-1' })
+            : page(args.project_id, args.status, [task('head-new', { created_at: 5_000 })], { hasMore: true, cursor: 'new-1' });
+        }
+        if (args.cursor === 'old-1') return page(args.project_id, args.status, [task('old-page')], { hasMore: true, cursor: 'old-2' });
+        return page(args.project_id, args.status, []);
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task old-page')).toBeTruthy();
+    const more = screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    more.focus();
+    more.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.queryByRole('button', { name: /páginas de Tasks de Alpha/ })).toBeNull();
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('identifica el Project en el reintento de una página fallida', async () => {

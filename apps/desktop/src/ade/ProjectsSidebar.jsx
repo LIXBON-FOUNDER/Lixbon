@@ -414,12 +414,21 @@ function ProjectTasks({
   const pageRequestRef = useRef(null);
   const pageRequestSequence = useRef(0);
   const pagingFocusRef = useRef(false);
+  const pagingRequestActiveRef = useRef(false);
   const loadMoreButtonRef = useRef(null);
   const headFailed = failureStatuses.has(head.status);
   const headFailedRef = useRef(headFailed);
   headFailedRef.current = headFailed;
   const latestHeadUpdatedAtRef = useRef(head.updatedAt);
   latestHeadUpdatedAtRef.current = head.updatedAt;
+
+  useEffect(() => {
+    const clearPagingFocusOnOtherTarget = (event) => {
+      if (event.target !== loadMoreButtonRef.current && event.target !== document.body) pagingFocusRef.current = false;
+    };
+    document.addEventListener('focusin', clearPagingFocusOnOtherTarget);
+    return () => document.removeEventListener('focusin', clearPagingFocusOnOtherTarget);
+  }, []);
 
   // Un filtro de estado nuevo empieza en la primera página: los cursores son de una sola consulta.
   useEffect(() => {
@@ -474,6 +483,7 @@ function ProjectTasks({
       kind: 'reconcile',
     };
     pageRequestRef.current = request;
+    pagingRequestActiveRef.current = true;
     setPages((current) => (current.key !== requestedKey ? current : {
       ...current,
       loading: true,
@@ -568,6 +578,7 @@ function ProjectTasks({
       kind: 'more',
     };
     pageRequestRef.current = request;
+    pagingRequestActiveRef.current = true;
     setPages((current) => ({ ...current, loading: true, error: null, notice: null }));
     const isCurrentRequest = () => pageRequestRef.current === request
       && !headFailedRef.current
@@ -609,9 +620,29 @@ function ProjectTasks({
   }, [currentPages.stale, head.retry, head.updatedAt, moreCursor, pageKey, projectId, statusView.code]);
 
   useEffect(() => {
-    if (currentPages.loading || !pagingFocusRef.current || loadMoreButtonRef.current?.isConnected) return;
-    if (document.activeElement !== document.body) return;
+    if (currentPages.loading) return;
+    if (!pagingFocusRef.current) {
+      pagingRequestActiveRef.current = false;
+      return;
+    }
+
+    const button = loadMoreButtonRef.current;
+    const activeElement = document.activeElement;
+    const focusIsVacant = activeElement === document.body || !activeElement?.isConnected;
+    if (button?.isConnected && !button.disabled) {
+      if (focusIsVacant) button.focus();
+      else if (activeElement !== button) pagingFocusRef.current = false;
+      pagingRequestActiveRef.current = false;
+      return;
+    }
+    if (!focusIsVacant) {
+      pagingFocusRef.current = false;
+      pagingRequestActiveRef.current = false;
+      return;
+    }
+
     pagingFocusRef.current = false;
+    pagingRequestActiveRef.current = false;
     const lastTask = tasks.at(-1);
     const fallbackKey = lastTask ? taskKey(projectId, lastTask.id) : projectKey(projectId);
     onFocusKey(fallbackKey);
@@ -681,6 +712,14 @@ function ProjectTasks({
           type="button"
           className="lk ps__more"
           onFocus={() => { pagingFocusRef.current = true; }}
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget && nextTarget !== document.body && nextTarget !== loadMoreButtonRef.current) {
+              pagingFocusRef.current = false;
+            } else if (!pagingRequestActiveRef.current) {
+              pagingFocusRef.current = false;
+            }
+          }}
           onClick={currentPages.stale
             ? () => reconcileLoadedPages(currentPages.pageCount, head.updatedAt)
             : loadMore}
