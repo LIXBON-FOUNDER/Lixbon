@@ -291,7 +291,6 @@ export function JumpPalette({
                       role="option"
                       aria-selected={selected}
                       onMouseDown={(event) => event.preventDefault()}
-                      onMouseEnter={() => setActiveKey(item.key)}
                       onClick={() => selectCurrent(item.key)}
                     >
                       <span className="jpal__option-label">{item.label}</span>

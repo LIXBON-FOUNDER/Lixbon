@@ -113,8 +113,10 @@ describe('JumpPalette', () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-2' });
   });
 
-  it('activates on row entry and ignores repeated movement within one of 125 results', () => {
+  it('keeps keyboard selection independent of pointer hover across 125 results while clicks navigate', () => {
     let commits = 0;
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
     const tasks = Array.from({ length: 125 }, (_, index) => ({
       id: `task-${index + 1}`,
       projectId: 'project-1',
@@ -122,19 +124,34 @@ describe('JumpPalette', () => {
     }));
     render(
       <Profiler id="jump-palette" onRender={() => { commits += 1; }}>
-        <Harness tasks={tasks} />
+        <Harness tasks={tasks} onNavigate={onNavigate} onClose={onClose} />
       </Profiler>,
     );
 
-    const option = screen.getByText('Task 2').closest('[role="option"]');
-    expect(option).not.toBeNull();
     const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    const first = screen.getByText('Task 1').closest('[role="option"]');
+    const second = screen.getByText('Task 2').closest('[role="option"]');
+    const third = screen.getByText('Task 3').closest('[role="option"]');
     const commitsBeforePointer = commits;
-    fireEvent.mouseEnter(option);
-    expect(activeOption(input)).toBe(option);
+
+    fireEvent.mouseEnter(second);
+    fireEvent.mouseMove(third);
+    expect(activeOption(input)).toBe(first);
+    expect(commits - commitsBeforePointer).toBe(0);
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(activeOption(input)).toBe(second);
     expect(commits - commitsBeforePointer).toBe(1);
-    for (let index = 0; index < 50; index += 1) fireEvent.mouseMove(option);
+
+    fireEvent.mouseEnter(third);
+    fireEvent.mouseMove(third);
+    expect(activeOption(input)).toBe(second);
     expect(commits - commitsBeforePointer).toBe(1);
+
+    fireEvent.click(third);
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-3' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('rebases the active key to async replacements without navigating a stale result', () => {
