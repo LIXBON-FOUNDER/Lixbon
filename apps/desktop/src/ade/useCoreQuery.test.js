@@ -32,6 +32,30 @@ describe('useCoreQuery', () => {
     expect(result.current.data).toBe(data);
   });
 
+  it('mantiene la versión semántica al recibir un payload idéntico y la avanza cuando cambia', async () => {
+    let tick = 0;
+    queryAdeCore.mockImplementation(async () => {
+      tick += 1;
+      return { projects: [{ id: tick < 3 ? 'project-1' : 'project-2', name: 'Repo' }] };
+    });
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCoreQuery('projects_overview', {}, { pollMs: 1_000 }));
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const initialData = result.current.data;
+    const initialVersion = result.current.updatedAt;
+    expect(initialData.projects[0].id).toBe('project-1');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result.current.updatedAt).toBe(initialVersion);
+    expect(result.current.data).toBe(initialData);
+    expect(result.current.status).toBe('ready');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result.current.data.projects[0].id).toBe('project-2');
+    expect(result.current.updatedAt).toBeGreaterThan(initialVersion);
+  });
+
   it('marca disconnected si la query no responde dentro del plazo', async () => {
     queryAdeCore.mockImplementation(() => new Promise(() => {}));
     vi.useFakeTimers();

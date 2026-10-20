@@ -28,6 +28,23 @@ function isEmptyResult(query, data) {
     || (query === 'tasks_by_project' && data.tasks.length === 0);
 }
 
+/** Core query results are JSON DTOs; object key order does not change their meaning. */
+function sameData(left, right) {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameData(value, right[index]));
+  }
+
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key) => Object.hasOwn(right, key) && sameData(left[key], right[key]));
+}
+
 export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } = {}) {
   const argsJson = JSON.stringify(args);
   const requestKey = `${query}:${argsJson}`;
@@ -56,9 +73,14 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
           queryTimeout,
         ]);
         if (!alive) return;
-        const updatedAt = Date.now();
-        cache.current = { key: requestKey, data, updatedAt };
-        setSnapshot({ key: requestKey, status: isEmptyResult(query, data) ? 'empty' : 'ready', data, error: null, reason: null, updatedAt });
+        // Consumers use updatedAt as a semantic data version, so an identical poll reuses it.
+        const unchanged = previous.data !== null && sameData(previous.data, data);
+        const snapshotData = unchanged ? previous.data : data;
+        const updatedAt = unchanged
+          ? previous.updatedAt
+          : Math.max(Date.now(), (previous.updatedAt ?? 0) + 1);
+        cache.current = { key: requestKey, data: snapshotData, updatedAt };
+        setSnapshot({ key: requestKey, status: isEmptyResult(query, snapshotData) ? 'empty' : 'ready', data: snapshotData, error: null, reason: null, updatedAt });
       } catch (error) {
         if (!alive) return;
         const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
