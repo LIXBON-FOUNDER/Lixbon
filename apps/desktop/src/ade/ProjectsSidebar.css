@@ -85,7 +85,7 @@
   margin: 0;
 }
 
-.ps__radio:focus-within { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 0; }
+.ps__radio:focus-within { outline: 2px solid var(--accent-deep); outline-offset: 0; }
 
 .ps__hint,
 .ps__note {
@@ -159,8 +159,8 @@
 }
 
 .ps__item:hover { background: var(--surface-3); }
-.ps__item:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: -2px; }
-.ps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius); }
+.ps__item:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: -2px; }
+.ps button:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; border-radius: var(--radius); }
 .ps__item.is-selected { background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.35); }
 .ps__item--project.is-context {
   background: var(--surface-3);
