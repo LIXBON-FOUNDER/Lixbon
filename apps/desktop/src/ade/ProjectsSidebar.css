@@ -2,6 +2,10 @@
    clases con el sidebar del orquestador ni con AttentionInbox. */
 
 .ps {
+  --ps-text-accent: var(--accent-deep);
+  --ps-text-danger: var(--danger);
+  --ps-text-good: var(--good);
+  --ps-text-warning: var(--warn);
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -11,6 +15,12 @@
   padding: 12px 14px;
   overflow: hidden;
   color: var(--ink-70);
+}
+
+[data-theme='light'] .ps {
+  --ps-text-danger: #9B2B1B;
+  --ps-text-good: #17622E;
+  --ps-text-warning: #704B00;
 }
 
 .ps.is-hidden { display: none; }
@@ -29,7 +39,7 @@
   margin: 2px 0 0;
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--ink-50);
+  color: var(--ink-soft);
 }
 
 .ps__filters {
@@ -42,7 +52,7 @@
   font-size: 10.5px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-35);
+  color: var(--ink-soft);
 }
 
 .ps__radios {
@@ -62,7 +72,7 @@
   padding: 4px 8px;
   border-radius: calc(var(--radius) - 2px);
   font-size: 11.5px;
-  color: var(--ink-50);
+  color: var(--ink-soft);
   cursor: pointer;
 }
 
@@ -73,18 +83,18 @@
   margin: 0;
 }
 
-.ps__radio:focus-within { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+.ps__radio:focus-within { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 0; }
 
 .ps__hint,
 .ps__note {
   margin: 0;
   font-size: 11px;
   line-height: 1.45;
-  color: var(--ink-50);
+  color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
 
-.ps__note { color: var(--ink-35); }
+.ps__note { color: var(--ink-soft); }
 
 .ps__state {
   display: flex;
@@ -101,13 +111,13 @@
 
 .ps__state code {
   font-size: 10.5px;
-  color: var(--ink-50);
+  color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
 
-.ps__state--error { color: var(--danger); background: var(--danger-soft); }
-.ps__state--stale { color: var(--warn); background: var(--warn-soft); }
-.ps__state--muted { color: var(--ink-50); }
+.ps__state--error { color: var(--ps-text-danger); background: var(--danger-soft); }
+.ps__state--stale { color: var(--ps-text-warning); background: var(--warn-soft); }
+.ps__state--muted { color: var(--ink-soft); }
 
 .ps__empty {
   padding: 14px 12px;
@@ -115,7 +125,7 @@
   border-radius: var(--radius);
   font-size: 11.5px;
   line-height: 1.5;
-  color: var(--ink-50);
+  color: var(--ink-soft);
 }
 
 .ps__tree {
@@ -143,7 +153,7 @@
 }
 
 .ps__item:hover { background: var(--surface-3); }
-.ps__item:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+.ps__item:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: -2px; }
 .ps__item.is-selected { background: var(--accent-soft); border-color: rgba(var(--accent-rgb), 0.35); }
 .ps__item--project.is-context {
   background: var(--surface-3);
@@ -156,6 +166,7 @@
 }
 
 .ps__item--task.is-selected { background: var(--accent-soft); }
+.ps__item--task.is-stale { border-style: dashed; }
 
 .ps__tasks {
   display: flex;
@@ -177,7 +188,7 @@
   flex: none;
   width: 10px;
   font-size: 10px;
-  color: var(--ink-35);
+  color: var(--ink-soft);
 }
 
 .ps__name {
@@ -197,7 +208,7 @@
   flex: none;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--ink-35);
+  color: var(--ink-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -211,7 +222,7 @@
   gap: 4px 8px;
   font-size: 10.5px;
   line-height: 1.45;
-  color: var(--ink-50);
+  color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
 
@@ -227,28 +238,33 @@
 
 .ps__badge--attention {
   background: var(--warn-soft);
-  color: var(--warn);
+  color: var(--ps-text-warning);
+}
+
+.ps__badge--stale {
+  background: var(--surface-4);
+  color: var(--ink-soft);
 }
 
 /* El estado agregado del Project y la Attention son señales distintas: cada una tiene su color. */
-.ps__badge--status-failed { background: var(--danger-soft); color: var(--danger); }
-.ps__badge--status-attention { background: var(--warn-soft); color: var(--warn); }
-.ps__badge--status-active { background: var(--accent-soft); color: var(--accent); }
-.ps__badge--status-idle { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-50); }
+.ps__badge--status-failed { background: var(--danger-soft); color: var(--ps-text-danger); }
+.ps__badge--status-attention { background: var(--warn-soft); color: var(--ps-text-warning); }
+.ps__badge--status-active { background: var(--accent-soft); color: var(--ps-text-accent); }
+.ps__badge--status-idle { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-soft); }
 
 .ps__badge--task { background: var(--surface-4); color: var(--ink-70); }
 .ps__badge--task.ps__badge--final {
   background: rgba(var(--ink-rgb), 0.06);
-  color: var(--ink-35);
+  color: var(--ink-soft);
 }
 
 /* Tonos de los ocho estados: activo, en espera, fallido y final no se confunden entre sí. */
-.ps__badge--task.ps__badge--active { background: var(--accent-soft); color: var(--accent); }
-.ps__badge--task.ps__badge--waiting { background: var(--warn-soft); color: var(--warn); }
-.ps__badge--task.ps__badge--failed { background: var(--danger-soft); color: var(--danger); }
-.ps__badge--task.ps__badge--done { background: var(--good-soft); color: var(--good); }
+.ps__badge--task.ps__badge--active { background: var(--accent-soft); color: var(--ps-text-accent); }
+.ps__badge--task.ps__badge--waiting { background: var(--warn-soft); color: var(--ps-text-warning); }
+.ps__badge--task.ps__badge--failed { background: var(--danger-soft); color: var(--ps-text-danger); }
+.ps__badge--task.ps__badge--done { background: var(--good-soft); color: var(--ps-text-good); }
 .ps__badge--task.ps__badge--stopped,
-.ps__badge--task.ps__badge--exited { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-35); }
+.ps__badge--task.ps__badge--exited { background: rgba(var(--ink-rgb), 0.06); color: var(--ink-soft); }
 
 .ps__more { align-self: flex-start; margin: 2px 0 2px 14px; }
 
