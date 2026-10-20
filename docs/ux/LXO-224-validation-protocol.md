@@ -15,7 +15,7 @@ La sesión no modifica Tasks, Projects, Attempts, Core, worktrees ni Linear. Los
 | Tema | F2 productivo | Fixture North Star |
 |---|---|---|
 | Navegación | Projects y Tasks del Core; registrar los IDs realmente mostrados y la consulta disponible en el build. El shell LXO-95 usa `project_id`/`task_id` durables y consultas read-only. | Puede mostrar los 3 Projects y 11 Tasks de esta guía con IDs `fx-*`. Es una maqueta conceptual. |
-| Attempts | **No existen como entidad/navegación productiva de F2.** No pedir que se abran ni inferirlas de Runs o estados operativos. | Probar exclusivamente el patrón futuro de 0/1/N Attempts; etiquetar cada pantalla `NORTH STAR / FIXTURE`. Su destino conceptual es F3. |
+| Attempts | **F2 no tiene Attempts como entidad ni navegación. Nunca se deben mostrar ni abrir Attempts en escenarios F2, sin importar las fuentes o contratos que exponga el build; en F2 son N/A.** | Probar exclusivamente el patrón conceptual futuro de 0/1/N Attempts en North Star/F3; etiquetar cada pantalla `NORTH STAR / FIXTURE · F3`. |
 | Status | Registrar el valor del Core y el texto renderizado. No inferirlo desde Attention, unread ni Attempts. El build puede exponer solo un subconjunto de filtros/estados. | Usar los estímulos `working`, `waiting`, `review`, `failed` y `final` de la tabla. No presentarlos como datos de Core. |
 | Attention | LXO-95 no presenta Attention simulada ni un Inbox global. Solo validar una señal si el build la lee de una fuente autoritativa y el origen se puede registrar. La ausencia en el shell actual no se rellena con mocks. | Los ejemplos de Attention son estímulos visuales ficticios, nunca prueba del Core. |
 | Unread | La documentación del Core separa Attention de unread/Activity y no define columnas de lectura por persona/dispositivo. No mostrar ni inventar un badge o contador. Si antes de la sesión se identifica una fuente autoritativa distinta, registrar contrato, query y propietario; si no, unread es **N/A** como señal visible. | No mostrar unread en el fixture base. Preguntar qué puede saberse sin una señal de lectura y registrar cualquier confusión con status o Attention. |
@@ -60,7 +60,7 @@ Completar antes de cada participante. Si un control crítico falla, no improvisa
 - [ ] Confirmar que el perfil Core es aislado y ya está provisionado por la persona dueña del entorno. El moderador no crea ni modifica datos en Core durante la validación. Si no existe un fixture aislado y poblado, las tareas runtime F2 quedan bloqueadas.
 - [ ] Confirmar que las consultas y vistas F2 a probar son read-only. No usar botones de Operation/Run como sustituto de Project/Task.
 - [ ] Preparar una copia reiniciable del fixture por participante; el estado inicial y los mismos IDs deben coincidir en ambas sesiones.
-- [ ] Preparar, si hay entorno North Star, las escenas 0/1/N Attempts y los estados de conexión con una marca visible `NORTH STAR / FIXTURE`.
+- [ ] Preparar, si hay entorno North Star, las escenas conceptuales 0/1/N Attempts de F3 y los estados de conexión con una marca visible `NORTH STAR / FIXTURE · F3`.
 - [ ] Preparar cualquier captura o estado stale/degraded/reconnect por un método reversible y aislado. Si la única opción es modificar internals, detener el Core integrado, corromper almacenamiento o forzar una falla en producción, no ejecutar: marcar runtime **BLOCKED**.
 - [ ] Verificar que no aparezcan nombres reales, secretos, actividad de otras personas ni notificaciones privadas. Cerrar ventanas ajenas al escenario.
 - [ ] Confirmar teclado funcional y que se conocen los atajos publicados por ese build. No introducir un atajo que no esté documentado o visible.
@@ -70,9 +70,9 @@ Completar antes de cada participante. Si un control crítico falla, no improvisa
 
 ## 5. Fixture aislado
 
-Los nombres, estados, IDs, Attempts y ubicaciones siguientes son inventados para la sesión. `fx-*` identifica entidades dentro del fixture, no entidades reales del Core. Las columnas Attention y Attempts se usan únicamente en North Star; en F2 no se muestran salvo que el build consultado las provea desde su contrato autoritativo.
+Los nombres, estados, IDs, Attempts y ubicaciones siguientes son inventados para la sesión. `fx-*` identifica entidades dentro del fixture, no entidades reales del Core. Los valores de Attention y Attempts son estímulos ficticios de North Star/F3. Ningún escenario F2 muestra ni navega Attempts, sin importar la fuente o contrato que exponga el build.
 
-| Project ID | Project | Task ID | Task | Status de estímulo | Attention de estímulo (North Star) | Attempts (North Star únicamente) |
+| Project ID | Project | Task ID | Task | Status de estímulo | Attention de estímulo (North Star) | Attempts (North Star/F3 únicamente) |
 |---|---|---|---|---|---|---:|
 | `fx-p-001` | Atlas Console | `fx-t-001` | Navegación por teclado | working | none | 0 |
 | `fx-p-001` | Atlas Console | `fx-t-002` | Restaurar foco tras diálogo | waiting | active: question | 1 |
@@ -115,7 +115,7 @@ No explicar el árbol, las etiquetas ni los estados antes de que la persona los 
 | 4 | Target durable y metadata · North Star o F2 si el build la entrega | “En Orion Sync encuentra ‘Reconectar datos stale’. Describe el host, origin y worktree que ves. Ahora cambia la location del escenario y vuelve a cargar. ¿Sigue siendo el mismo trabajo?” | El fixture mantiene `fx-t-005`; solo cambia la location. Registrar selección antes/después, ID, foco/scroll y si la persona trata host/branch/path como identidad. Preguntar: “¿Qué dato usarías para volver a este target?” |
 | 5 | Teclado y foco · ambas pistas por separado | “Sin usar el mouse, ve a Harbor Billing y selecciona ‘Buscar de nuevo tras refresh’. Abre la búsqueda o Jump Palette solo si el build la ofrece, ciérrala y continúa con el mismo target.” | Registrar teclas y orden, foco visible, entrada/salida de overlay, retorno de foco, lectura de selección por teclado, trampas y atajos que chocan con campos de texto. Mientras conserva el foco en la fila, presentar una actualización de fondo preparada y preguntar: “¿Dónde quedó tu selección?” |
 | 6 | Loading, stale, degraded y reconnect · runtime aislado o captura conceptual | Presentar por separado: (a) loading inicial; (b) datos stale con marca de última actualización; (c) degraded/read-only; (d) desconectado y reconnect exitoso. Decir: “Cuéntame qué está disponible, qué no puedes asumir y qué harías ahora.” | Registrar comprensión de estado actual vs viejo, mensaje/acción esperada, target/foco/scroll antes y después, y si distingue error de lista vacía. Para captura o North Star, el veredicto será conceptual. Si falta un seam aislado, runtime queda **BLOCKED**, aunque la captura se entienda. No provocar fallos en el Core integrado. |
-| 7 | 0/1/N Attempts · North Star únicamente, al final | Mostrar `fx-t-001` (0), `fx-t-002` (1) y `fx-t-003` (3) con el encabezado visible `NORTH STAR / FIXTURE`. Decir: “Explícame cómo entiendes esta agrupación y qué cambia entre estos tres casos.” | Preguntar si la Task sigue siendo el target al expandir N. Registrar orientación, densidad y vocabulario; no preguntar ni sugerir que esto exista en F2. Este escenario nunca puntúa como comportamiento productivo F2. |
+| 7 | 0/1/N Attempts · North Star/F3 conceptual únicamente, al final | Mostrar `fx-t-001` (0), `fx-t-002` (1) y `fx-t-003` (3) con el encabezado visible `NORTH STAR / FIXTURE · F3`. Decir: “Explícame cómo entiendes esta agrupación y qué cambia entre estos tres casos.” | Preguntar si la Task sigue siendo el target al expandir N. Registrar orientación, densidad y vocabulario; no preguntar ni sugerir que esto exista en F2. Este escenario nunca puntúa como comportamiento productivo F2. |
 
 ### Preguntas neutrales de seguimiento
 
@@ -204,7 +204,7 @@ Query / fuente autoritativa: [pendiente / no disponible]
 Status bruto → label visible: [pendiente]
 Attention source + item/target: [pendiente / no visible]
 Unread source/schema/query: [pendiente / N/A: no existe fuente confirmada]
-Attempts: [N/A en F2 / 0, 1 o N en North Star]
+Attempts: [N/A en F2 / 0, 1 o N en North Star/F3]
 Host / origin / worktree: [sanitizados / unknown]
 Secuencia de acciones/teclas: [pendiente]
 Primera selección / retrocesos / ayuda neutral: [pendiente]
