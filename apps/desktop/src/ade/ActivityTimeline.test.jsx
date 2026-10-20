@@ -91,6 +91,25 @@ describe('ActivityTimeline · estados de la vista', () => {
     expect(screen.getByTestId('activity-empty')).toBeTruthy();
   });
 
+  it('stale durante la reconexión conserva las filas y el aviso mientras carga', () => {
+    render(
+      <ActivityTimeline
+        status="loading"
+        items={[activityItem()]}
+        stale
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('activity-timeline').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByTestId('activity-loading').textContent).toContain('Cargando actividad');
+    expect(screen.getByTestId('activity-stale').textContent).toContain('Vista desactualizada');
+    expect(screen.getByTestId('activity-refresh')).toBeTruthy();
+    expect(screen.getByTestId('activity-list')).toBeTruthy();
+    expect(screen.getByTestId('activity-evt-1')).toBeTruthy();
+    expect(screen.getByTestId('activity-count').textContent).toBe('1');
+  });
+
   it('loadingMore: deshabilita el cursor y mantiene la lista visible', () => {
     const onLoadMore = vi.fn();
     render(
@@ -472,6 +491,65 @@ describe('ActivityTimeline · seguridad del límite de presentación', () => {
 
     // Límite de 8 metadatos seguros por fila.
     expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(8);
+  });
+
+  it('filtra familias sensibles en claves anidadas y variantes de formato, y conserva metadatos seguros', () => {
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'familias',
+            metadata: [
+              { label: 'access_token', value: 'SECRETO_ACCESS' },
+              { label: 'RefreshToken', value: 'SECRETO_REFRESH' },
+              { label: 'refresh_token', value: 'SECRETO_REFRESH_SNAKE' },
+              { label: 'auth.session.secret', value: 'SECRETO_ANIDADO' },
+              { label: 'unread_count', value: 'NO_UNREAD_COUNT' },
+              { label: 'is_unread', value: 'NO_IS_UNREAD_SNAKE' },
+              { label: 'IsUnread', value: 'NO_IS_UNREAD' },
+              { label: 'ATTENTION.Is_UnRead', value: 'NO_ATTENTION_UNREAD' },
+              { label: 'atención-count', value: 'NO_ATENCION' },
+              { label: 'agente', value: 'claude' },
+              { label: 'modelo', value: 'gpt-6-sol' },
+              { label: 'reintentos', value: 'tres' },
+              { label: 'readiness', value: 'listo' },
+              { label: 'thread', value: 'worker' },
+              {
+                label: 'contexto',
+                value: { refresh_token: 'NO_SECRETO_NESTED', unread_count: 'NO_UNREAD_NESTED' },
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    const row = screen.getByTestId('activity-familias');
+    const text = row.textContent;
+    for (const hidden of [
+      'SECRETO_ACCESS',
+      'SECRETO_REFRESH',
+      'SECRETO_REFRESH_SNAKE',
+      'SECRETO_ANIDADO',
+      'NO_UNREAD_COUNT',
+      'NO_IS_UNREAD_SNAKE',
+      'NO_IS_UNREAD',
+      'NO_ATTENTION_UNREAD',
+      'NO_ATENCION',
+      'NO_SECRETO_NESTED',
+      'NO_UNREAD_NESTED',
+      'access_token',
+      'RefreshToken',
+      'IsUnread',
+    ]) {
+      expect(text).not.toContain(hidden);
+    }
+    expect(text).toContain('claude');
+    expect(text).toContain('gpt-6-sol');
+    expect(text).toContain('tres');
+    expect(text).toContain('listo');
+    expect(text).toContain('worker');
+    expect(screen.getAllByTestId(/^activity-meta-/)).toHaveLength(5);
   });
 
   it('un target de tipo attention es una referencia opaca, sin estado de lectura', () => {

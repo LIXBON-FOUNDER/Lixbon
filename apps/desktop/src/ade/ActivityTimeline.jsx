@@ -87,9 +87,53 @@ const MAX_METADATA = 8;
 const MAX_METADATA_LABEL = 40;
 const MAX_METADATA_VALUE = 120;
 
-// Claves que nunca son metadato presentable: pertenecen al payload, a la identidad o a Attention.
-const BLOCKED_METADATA_KEY =
-  /^(unread|sin[_\s-]?leer|attention|atenci[oó]n|read|seen|payload|raw|argv|env|token|secret|password|passwd|authorization|cookie|api[_-]?key|__proto__|prototype|constructor)$/i;
+// Filtra familias de campos que pueden contener credenciales, payload crudo o estado de Attention.
+// Se conserva una política por familias (en vez de una allowlist) para no ocultar metadatos inocuos.
+const BLOCKED_METADATA_WORDS = new Set([
+  'unread',
+  'attention',
+  'atencion',
+  'read',
+  'seen',
+  'payload',
+  'raw',
+  'argv',
+  'env',
+  'token',
+  'secret',
+  'password',
+  'passwd',
+  'passphrase',
+  'authorization',
+  'auth',
+  'authentication',
+  'cookie',
+  'credential',
+  'credentials',
+  'bearer',
+  'jwt',
+  'session',
+  'proto',
+  'prototype',
+  'constructor',
+]);
+
+const BLOCKED_METADATA_KEY_PREFIXES = new Set([
+  'api',
+  'private',
+  'client',
+  'session',
+  'signing',
+  'encryption',
+  'ssh',
+]);
+
+const BLOCKED_METADATA_COMPACT_PATTERNS = [
+  /^(?:(?:access|refresh|id|auth|api|client|session|private|signing|encryption|ssh)?(?:token|secret|password|passwd|passphrase|credential|authorization|cookie|bearer|jwt))$/,
+  /^(?:api|private|client|session|signing|encryption|ssh)key$/,
+  /^(?:(?:is|has|was|last|mark|marked)?read(?:at|by|count|status|time|timestamp)?)$/,
+  /unread|attention|atencion/,
+];
 
 const TIME_FORMAT = new Intl.DateTimeFormat('es-ES', {
   day: '2-digit',
@@ -128,6 +172,27 @@ function eventIdOf(item) {
   return typeof item?.eventId === 'string' ? item.eventId.trim() : '';
 }
 
+function blockedMetadataKey(label) {
+  const normalized = label
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase();
+  const words = normalized.split(/[^a-z0-9]+/).filter(Boolean);
+  const compact = words.join('');
+
+  if (words.some((word) => BLOCKED_METADATA_WORDS.has(word))) return true;
+  if (words.includes('sin') && words.includes('leer')) return true;
+  if (
+    words.includes('key') &&
+    words.some((word) => BLOCKED_METADATA_KEY_PREFIXES.has(word))
+  ) {
+    return true;
+  }
+  return BLOCKED_METADATA_COMPACT_PATTERNS.some((pattern) => pattern.test(compact));
+}
+
 // Conserva el orden que entrega Core. Solo valida procedencia y elimina repeticiones por eventId:
 // una reconexión puede reenviar la misma página y React debe reutilizar la fila, no duplicarla.
 function normalizeItems(items) {
@@ -152,7 +217,7 @@ function sanitizeMetadata(metadata) {
     if (out.length >= MAX_METADATA) break;
     if (!entry || typeof entry !== 'object') continue;
     const label = typeof entry.label === 'string' ? entry.label.trim() : '';
-    if (!label || label.length > MAX_METADATA_LABEL || BLOCKED_METADATA_KEY.test(label)) continue;
+    if (!label || label.length > MAX_METADATA_LABEL || blockedMetadataKey(label)) continue;
     const raw = entry.value;
     const type = typeof raw;
     if (type !== 'string' && type !== 'number' && type !== 'boolean') continue;
@@ -274,7 +339,9 @@ export function ActivityTimeline({
   const safeItems = useMemo(() => normalizeItems(items), [items]);
   const viewStatus = STATUSES.has(status) ? status : 'error';
   const busy = viewStatus === 'loading' || (viewStatus === 'ready' && loadingMore === true);
-  const showStale = viewStatus === 'ready' && stale === true;
+  const showCachedRows =
+    viewStatus === 'ready' || (viewStatus === 'loading' && stale === true);
+  const showStale = (viewStatus === 'ready' || viewStatus === 'loading') && stale === true;
   const nextCursor =
     cursor && typeof cursor === 'object' && Number.isSafeInteger(cursor.next) && cursor.next >= 0
       ? cursor.next
@@ -289,7 +356,7 @@ export function ActivityTimeline({
     viewStatus === 'ready' && cursor && typeof cursor === 'object' && cursor.hasMore === false,
   );
   const showFooter = viewStatus === 'ready' && safeItems.length > 0 && (canLoadMore || showEnd);
-  const displayCount = viewStatus === 'ready' ? safeItems.length : 0;
+  const displayCount = showCachedRows ? safeItems.length : 0;
   const scopeName = scopeTitle(safeScope);
   const normalizedError = errorOf(error);
   const emptyHint =
@@ -402,7 +469,7 @@ export function ActivityTimeline({
         </div>
       ) : null}
 
-      {viewStatus === 'ready' && safeItems.length > 0 ? (
+      {showCachedRows && safeItems.length > 0 ? (
         <ol className="activity__list" data-testid="activity-list">
           {safeItems.map((item) => {
             const eventId = eventIdOf(item);
