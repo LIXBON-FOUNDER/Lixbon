@@ -157,13 +157,6 @@
   white-space: nowrap;
 }
 
-.jpal__empty {
-  margin: 0;
-  padding: 16px 10px;
-  color: var(--ink-50);
-  font-size: 12px;
-}
-
 .jpal__status {
   margin: 0;
   padding: 9px 20px 11px;
