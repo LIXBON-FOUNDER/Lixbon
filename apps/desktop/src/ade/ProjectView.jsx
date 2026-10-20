@@ -15,16 +15,17 @@ import './ProjectView.css';
  *  projectName       string · etiqueta legible suministrada por Core.
  *
  *  locations         Slice de ubicaciones conocidas: { state, items, message }.
- *                    item: { location_id, host_id?, host_label?, path?, availability? }
- *                    availability: 'available' | 'unavailable' | 'unknown'.
- *  selectedLocationId string · ubicación que se está mirando (controlada desde fuera).
+ *                    item: { machine, path, primary, state, last_seen } (DTO de solo lectura
+ *                    de LXO-90). state: 'ok' | 'missing'. El DTO no trae location_id ni
+ *                    disponibilidad: no se inventan, y la ruta NO es identidad del Project.
+ *                    Las ubicaciones se muestran y no son navegables (no hay ID duradero).
  *
  *  summary           { state, counts, message }. counts: { tasks, attempts, attention,
  *                    resources } con enteros ≥ 0 o null. SOLO se muestran los números que
  *                    Core suministra; la vista jamás cuenta filas ni suma nada.
  *
  *  tasks             Slice de filas Task legacy: { state, items, message }.
- *                    item: { task_id, title?, status, location_id?, project_id? }
+ *                    item: { task_id, title?, status, project_id? }
  *  filter            'active' | 'final' | 'all' (controlada) · defaultFilter (no controlada)
  *  onFilterChange    (filter) => void
  *
@@ -32,10 +33,9 @@ import './ProjectView.css';
  *                    item: { attention_id, kind, text?, task_id?, attempt_id?, project_id? }
  *  activity          Slice: { state, items, message }.
  *                    item: { activity_id, kind?, text?, occurred_at?, task_id?, attempt_id?,
- *                            location_id?, project_id? }  (el texto humano lo pone Core)
+ *                            project_id? }  (el texto humano lo pone Core)
  *  resources         Slice: { state, items, message }.
- *                    item: { resource_id, kind?, label?, availability?, location_id?,
- *                            project_id? }
+ *                    item: { resource_id, kind?, label?, availability?, project_id? }
  *
  *  Estados de slice: 'ready' | 'loading' | 'error' | 'partial' | 'degraded' | 'unavailable'.
  *  Cualquier otro valor (o slice ausente) se pinta como estado desconocido / no disponible.
@@ -43,7 +43,7 @@ import './ProjectView.css';
  *  con 'loading', 'partial' y 'degraded' sí, junto al aviso.
  *
  * Callbacks de navegación: reciben SOLO el ID duradero del destino, nada más.
- *  onSelectLocation(locationId)  onOpenTask(taskId)  onOpenAttempt(attemptId)
+ *  onOpenTask(taskId)  onOpenAttempt(attemptId)
  *  onOpenAttention(attentionId)  onOpenResource(resourceId)
  *  Sin callback, o sin ID duradero en el item, el elemento se pinta sin acción.
  *
@@ -57,13 +57,18 @@ export const TASK_FILTERS = Object.freeze([
   { id: 'all', label: 'Todas' },
 ]);
 
-/** Estados legacy de Task. Lo que no esté aquí es «desconocido»: solo entra en «Todas». */
-export const ACTIVE_TASK_STATUSES = Object.freeze(['starting', 'running', 'awaiting_terminal_approval']);
+/**
+ * Estados legacy de Task (docs/VOCABULARIO.md §2). «Activas» = no finales, incluidos los que
+ * esperan a una persona (`waiting`, `awaiting_terminal_approval`). Lo que no esté en ninguna
+ * lista es «desconocido»: solo entra en «Todas».
+ */
+export const ACTIVE_TASK_STATUSES = Object.freeze(['starting', 'running', 'waiting', 'awaiting_terminal_approval']);
 export const FINAL_TASK_STATUSES = Object.freeze(['done', 'failed', 'exited', 'stopped']);
 
 const STATUS_LABEL = {
   starting: 'Arrancando',
   running: 'En curso',
+  waiting: 'Esperando respuesta',
   awaiting_terminal_approval: 'Espera aprobación en terminal',
   done: 'Hecha',
   failed: 'Falló',
@@ -75,6 +80,11 @@ const AVAILABILITY_LABEL = {
   available: 'Disponible',
   unavailable: 'No disponible',
   unknown: 'Disponibilidad desconocida',
+};
+
+const LOCATION_STATE_LABEL = {
+  ok: 'Presente',
+  missing: 'Ruta no encontrada',
 };
 
 const COUNT_KEYS = [
@@ -146,37 +156,21 @@ function Section({ title, headingId, note, children }) {
 }
 
 /** Botón de navegación por ID duradero, o texto plano si no hay callback o ID. */
-function Target({ id, onOpen, className = '', label, children, testId, current }) {
-  const ariaCurrent = current ? 'true' : undefined;
+function Target({ id, onOpen, className = '', label, children, testId }) {
   if (!isId(id) || typeof onOpen !== 'function') {
-    return <span className={`pv__plain ${className}`} aria-current={ariaCurrent}>{children}</span>;
+    return <span className={`pv__plain ${className}`}>{children}</span>;
   }
   return (
-    <button type="button" className={`pv__link ${className}`} aria-label={label} aria-current={ariaCurrent} data-testid={testId} onClick={() => onOpen(id)}>
+    <button type="button" className={`pv__link ${className}`} aria-label={label} data-testid={testId} onClick={() => onOpen(id)}>
       {children}
     </button>
   );
 }
 
-function locationText(locationId, locationsById) {
-  if (!isId(locationId)) return null;
-  const loc = locationsById.get(locationId);
-  if (!loc) return `Ubicación desconocida (${locationId})`;
-  const host = loc.host_label || loc.host_id || 'Host desconocido';
-  return loc.path ? `${host} · ${loc.path}` : host;
-}
-
-function LocationChip({ locationId, locationsById }) {
-  const text = locationText(locationId, locationsById);
-  if (!text) return null;
-  return <span className="pv__chip" data-testid="location-chip">{text}</span>;
-}
-
-function Locations({ slice, selectedLocationId, onSelectLocation, headingId }) {
+function Locations({ slice, headingId }) {
   const kept = slice.items;
-  const selectedKnown = kept.some((l) => l?.location_id === selectedLocationId);
   return (
-    <Section title="Ubicaciones" headingId={headingId} note="El Project es el mismo en todas sus ubicaciones; cambiar de ubicación no cambia su identidad.">
+    <Section title="Ubicaciones" headingId={headingId} note="El Project es el mismo en todas sus ubicaciones; la ruta no es su identidad.">
       <SliceNotice slice={slice} />
       {SHOW_ITEMS.has(slice.state) && (
         <>
@@ -184,30 +178,23 @@ function Locations({ slice, selectedLocationId, onSelectLocation, headingId }) {
           {kept.length > 0 && (
             <ul className="pv__list" aria-labelledby={headingId}>
               {kept.map((loc, i) => {
-                const id = loc?.location_id;
-                const current = isId(id) && id === selectedLocationId;
-                const avail = AVAILABILITY_LABEL[loc?.availability] ? loc.availability : 'unknown';
-                const usable = avail !== 'unavailable';
-                const body = (
-                  <>
-                    <span className="pv__loc-host" data-testid="location-host">{loc?.host_label || loc?.host_id || 'Host desconocido'}</span>
-                    {loc?.host_label && loc?.host_id && <code className="pv__id">{loc.host_id}</code>}
-                    {loc?.path ? <span className="pv__loc-path">{loc.path}</span> : <span className="pv__loc-path pv__muted">Ruta desconocida</span>}
-                    <span className={`pv__avail pv__avail--${avail}`}>{AVAILABILITY_LABEL[avail]}</span>
-                    {current && <span className="pv__current">Vista actual</span>}
-                  </>
-                );
+                const known = Boolean(LOCATION_STATE_LABEL[loc?.state]);
+                const lastSeen = isId(loc?.last_seen) ? loc.last_seen : null;
                 return (
-                  <li key={id || `loc-${i}`} className="pv__row pv__row--loc" data-testid={isId(id) ? `location-${id}` : undefined}>
-                    <Target id={usable ? id : null} onOpen={onSelectLocation} current={current} className="pv__rowlink" testId={isId(id) ? `open-location-${id}` : undefined}>{body}</Target>
-                    {isId(id) && <code className="pv__id" data-testid="location-id">{id}</code>}
+                  <li key={`loc-${i}`} className="pv__row pv__row--loc" data-testid="location">
+                    <span className="pv__loc-host" data-testid="location-machine">{isId(loc?.machine) ? loc.machine : 'Máquina desconocida'}</span>
+                    <span className={`pv__loc-path ${loc?.path ? '' : 'pv__muted'}`} data-testid="location-path">{loc?.path || 'Ruta desconocida'}</span>
+                    {loc?.primary === true && <span className="pv__current" data-testid="location-primary">Principal</span>}
+                    <span className={`pv__avail ${known ? `pv__avail--loc-${loc.state}` : 'pv__avail--unknown'}`} data-testid="location-state" data-state={known ? loc.state : 'unknown'}>
+                      {known ? LOCATION_STATE_LABEL[loc.state] : 'Estado desconocido'}
+                    </span>
+                    {lastSeen
+                      ? <span className="pv__time" data-testid="location-last-seen">Visto por última vez: <time dateTime={lastSeen}>{lastSeen}</time></span>
+                      : <span className="pv__time pv__muted" data-testid="location-last-seen">Última vez visto: desconocido</span>}
                   </li>
                 );
               })}
             </ul>
-          )}
-          {isId(selectedLocationId) && !selectedKnown && slice.state !== 'loading' && (
-            <p className="pv__notice pv__notice--partial" role="status" data-testid="selected-location-unknown">Ubicación seleccionada desconocida para Core ({selectedLocationId}).</p>
           )}
         </>
       )}
@@ -275,7 +262,7 @@ function FilterGroup({ value, onChange, labelId, hintId }) {
   );
 }
 
-function Tasks({ slice, projectId, filter, onFilter, locationsById, onOpenTask, headingId }) {
+function Tasks({ slice, projectId, filter, onFilter, onOpenTask, headingId }) {
   const labelId = `${headingId}-filter`;
   const hintId = `${headingId}-hint`;
   const { kept, foreign } = scopeToProject(slice.items, projectId);
@@ -312,7 +299,6 @@ function Tasks({ slice, projectId, filter, onFilter, locationsById, onOpenTask, 
                     <span className={`pv__status ${known ? `pv__status--${t.status}` : 'pv__status--unknown'}`} data-testid="task-status" data-status={known ? t.status : 'unknown'}>
                       {known ? STATUS_LABEL[t.status] : `Estado desconocido${isId(t?.status) ? ` («${t.status}»)` : ''}`}
                     </span>
-                    <LocationChip locationId={t?.location_id} locationsById={locationsById} />
                   </li>
                 );
               })}
@@ -361,7 +347,7 @@ function Attention({ slice, projectId, onOpenAttention, onOpenTask, onOpenAttemp
   );
 }
 
-function Activity({ slice, projectId, locationsById, onOpenTask, onOpenAttempt, headingId }) {
+function Activity({ slice, projectId, onOpenTask, onOpenAttempt, headingId }) {
   const { kept, foreign } = scopeToProject(slice.items, projectId);
   return (
     <Section title={<>Activity <span className="pv__tag">lo ocurrido</span></>} headingId={headingId}>
@@ -380,7 +366,6 @@ function Activity({ slice, projectId, locationsById, onOpenTask, onOpenAttempt, 
                     : <span className="pv__title pv__muted" data-testid="activity-no-text">
                       Core no suministró texto para esta Activity.{isId(ev?.kind) && <> Tipo sin interpretar: <code className="pv__kind">{ev.kind}</code></>}
                     </span>}
-                  <LocationChip locationId={ev?.location_id} locationsById={locationsById} />
                   <RelatedTargets scope="activity" item={ev} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} />
                 </li>
               ))}
@@ -392,7 +377,7 @@ function Activity({ slice, projectId, locationsById, onOpenTask, onOpenAttempt, 
   );
 }
 
-function Resources({ slice, projectId, locationsById, onOpenResource, headingId }) {
+function Resources({ slice, projectId, onOpenResource, headingId }) {
   const { kept, foreign } = scopeToProject(slice.items, projectId);
   return (
     <Section title="Resources" headingId={headingId}>
@@ -412,7 +397,6 @@ function Resources({ slice, projectId, locationsById, onOpenResource, headingId 
                       <span className="pv__title">{r?.label || r?.resource_id || 'Recurso sin ID duradero'}</span>
                     </Target>
                     <span className={`pv__avail pv__avail--${avail}`}>{AVAILABILITY_LABEL[avail]}</span>
-                    <LocationChip locationId={r?.location_id} locationsById={locationsById} />
                   </li>
                 );
               })}
@@ -426,11 +410,11 @@ function Resources({ slice, projectId, locationsById, onOpenResource, headingId 
 
 export function ProjectView({
   projectId, projectName,
-  locations, selectedLocationId,
+  locations,
   summary,
   tasks, filter, defaultFilter = 'active', onFilterChange,
   attention, activity, resources,
-  onSelectLocation, onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
+  onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
 }) {
   const uid = useId();
   const [innerFilter, setInnerFilter] = useState(defaultFilter);
@@ -442,9 +426,7 @@ export function ProjectView({
   };
 
   const locSlice = normalizeSlice(locations);
-  const locationsById = new Map(locSlice.items.filter((l) => isId(l?.location_id)).map((l) => [l.location_id, l]));
   const titleId = `${uid}-title`;
-  const selectedText = isId(selectedLocationId) ? locationText(selectedLocationId, locationsById) : null;
 
   return (
     <article className="pv" aria-labelledby={titleId} data-testid="project-view">
@@ -453,19 +435,14 @@ export function ProjectView({
         {isId(projectId)
           ? <code className="pv__id pv__id--project" data-testid="project-id">{projectId}</code>
           : <span className="pv__notice pv__notice--unknown" role="status" data-testid="project-id-missing">Sin project_id duradero: no se puede navegar desde esta vista.</span>}
-        <p className="pv__where" data-testid="current-location">
-          {isId(selectedLocationId)
-            ? <>Mirando: <strong>{selectedText}</strong></>
-            : 'Sin ubicación seleccionada.'}
-        </p>
       </header>
 
       <Summary summary={summary} headingId={`${uid}-summary`} />
-      <Locations slice={locSlice} selectedLocationId={selectedLocationId} onSelectLocation={onSelectLocation} headingId={`${uid}-locations`} />
+      <Locations slice={locSlice} headingId={`${uid}-locations`} />
       <Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} />
-      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} locationsById={locationsById} onOpenTask={onOpenTask} headingId={`${uid}-tasks`} />
-      <Activity slice={normalizeSlice(activity)} projectId={projectId} locationsById={locationsById} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
-      <Resources slice={normalizeSlice(resources)} projectId={projectId} locationsById={locationsById} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
+      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} headingId={`${uid}-tasks`} />
+      <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
+      <Resources slice={normalizeSlice(resources)} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
     </article>
   );
 }
