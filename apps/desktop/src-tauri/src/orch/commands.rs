@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, State as TauriState};
 use super::events::Channel;
 use super::{Caller, CodexTerms, Orch, Settings, agents, codex_session, codex_term, data_dir, lxo_path, providers, roles, skill, spawn_approval, write_json};
 
-const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail"];
+const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail", "attention_list"];
 
 fn is_ade_read_query(query: &str) -> bool {
     ADE_READ_QUERIES.contains(&query)
@@ -230,10 +230,14 @@ mod ade_query_tests {
 
     #[test]
     fn ade_solo_expone_queries_observacionales_de_f2() {
-        for query in ["projects_overview", "tasks_by_project", "task_detail"] {
+        for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
         for operation in ["project_archive", "run_create", "spawn", "remove_run", "unknown"] {
+            assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
+        }
+        // Escribir o resolver Attention no entra por la superficie F2: solo su lectura activa.
+        for operation in ["attention_detail", "attention_resolve", "attention_act_risk", "attention_snooze"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
     }
