@@ -32,8 +32,10 @@
 // @property {boolean} [known]   false = la proyección no reconoce el kind; se usa el fallback.
 // @property {ActivitySeverity|null} [severity]  Opcional; solo presentación.
 // @property {Array<{label: string, value: string|number|boolean}>} [metadata]
-//                               Pares planos EXPLÍCITAMENTE seguros (máx. 8). Objetos, arrays y claves
-//                               sensibles se descartan; no es el payload crudo del evento.
+//                               Pares planos EXPLÍCITAMENTE seguros (máx. 8). La etiqueta debe
+//                               pertenecer a una allowlist de familias técnicas y el valor debe ser
+//                               primitivo y no parecer una credencial; claves desconocidas, anidadas
+//                               o sensibles se descartan. No es el payload crudo del evento.
 // @property {string} [correlationId]  Une hechos (p. ej. decisión y efecto); se muestra, no se fusiona.
 //
 // Prohibido por contrato: `payload` crudo, `summary`/resúmenes de IA, `unread`/Attention y fusionar
@@ -87,52 +89,72 @@ const MAX_METADATA = 8;
 const MAX_METADATA_LABEL = 40;
 const MAX_METADATA_VALUE = 120;
 
-// Filtra familias de campos que pueden contener credenciales, payload crudo o estado de Attention.
-// Se conserva una política por familias (en vez de una allowlist) para no ocultar metadatos inocuos.
-const BLOCKED_METADATA_WORDS = new Set([
-  'unread',
-  'attention',
-  'atencion',
-  'read',
-  'seen',
-  'payload',
-  'raw',
-  'argv',
-  'env',
-  'token',
-  'secret',
-  'password',
-  'passwd',
-  'passphrase',
-  'authorization',
-  'auth',
-  'authentication',
-  'cookie',
-  'credential',
-  'credentials',
-  'bearer',
-  'jwt',
-  'session',
-  'proto',
-  'prototype',
-  'constructor',
+// Allowlist de palabras que pueden componer una etiqueta de metadata. Una etiqueta solo
+// se acepta si TODAS sus palabras normalizadas están aquí: una clave desconocida
+// (`custom`, `html`, `body`), anidada (`auth.session.secret`, `context.access_key`) o de
+// una familia sensible (`access_key`, `secretkey`, `jwttoken`, `passwordhash`, `sinleer`)
+// se descarta sin depender de coincidencias exactas o de fragmentos frágiles.
+const SAFE_METADATA_WORDS = new Set([
+  // Procedencia y clasificación
+  'actor', 'agent', 'agente', 'person', 'persona', 'system', 'sistema',
+  'model', 'modelo', 'provider', 'proveedor', 'client', 'cliente', 'core',
+  'channel', 'canal', 'transport', 'transporte',
+  'event', 'evento', 'kind', 'tipo', 'type', 'class', 'clase',
+  'status', 'estado', 'state', 'severity', 'severidad', 'level',
+  'source', 'origen', 'origin', 'schema', 'esquema', 'contract', 'contrato', 'version',
+  // Referencias durables
+  'target', 'destino', 'destination', 'entity', 'entidad', 'correlation',
+  'project', 'proyecto', 'task', 'tarea', 'run', 'spawn',
+  // Métricas y conteos
+  'count', 'cuenta', 'total', 'number', 'numero', 'num',
+  'retry', 'retries', 'reintento', 'reintentos',
+  'attempt', 'attempts', 'intento', 'intentos',
+  'duration', 'duracion', 'latency', 'latencia',
+  'ms', 'millisecond', 'milliseconds', 'milisegundo', 'milisegundos',
+  'second', 'seconds', 'segundo', 'segundos', 'elapsed',
+  'size', 'tamano', 'byte', 'bytes', 'kb', 'mb', 'gb',
+  'rows', 'filas', 'items', 'elementos', 'depth', 'profundidad',
+  'priority', 'prioridad', 'step', 'paso', 'phase', 'fase',
+  'queue', 'cola', 'port', 'puerto', 'method', 'metodo',
+  'mode', 'modo', 'result', 'resultado', 'outcome', 'desenlace',
+  'code', 'codigo', 'exit', 'salida', 'signal', 'senal',
+  'start', 'end', 'started', 'finished', 'line', 'column',
+  'sha', 'commit', 'branch', 'tag',
+  // Identidad y tiempo
+  'id', 'ids', 'name', 'nombre', 'label', 'etiqueta', 'ref', 'referencia',
+  'seq', 'sequence', 'secuencia', 'index', 'indice',
+  'timestamp', 'ts', 'time', 'hora', 'fecha',
+  // Plataforma
+  'http', 'https', 'rpc', 'grpc', 'sse', 'api',
+  'host', 'hostname', 'node', 'nodo', 'worker', 'thread', 'hilo',
+  'readiness', 'ready', 'health', 'salud',
+  'protocol', 'protocolo', 'encoding', 'codificacion',
 ]);
 
-const BLOCKED_METADATA_KEY_PREFIXES = new Set([
-  'api',
-  'private',
-  'client',
-  'session',
-  'signing',
-  'encryption',
-  'ssh',
-]);
+// Una etiqueta con separadores estructurales representa una ruta anidada, no un par plano.
+const NESTED_METADATA_LABEL = /[./\\:\[\]{}?#&=]/;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 
-const BLOCKED_METADATA_COMPACT_PATTERNS = [
-  /^(?:(?:access|refresh|id|auth|api|client|session|private|signing|encryption|ssh)?(?:token|secret|password|passwd|passphrase|credential|authorization|cookie|bearer|jwt))$/,
-  /^(?:api|private|client|session|signing|encryption|ssh)key$/,
-  /^(?:(?:is|has|was|last|mark|marked)?read(?:at|by|count|status|time|timestamp)?)$/,
-  /unread|attention|atencion/,
+// Defensa en profundidad: aunque una etiqueta sea inocua, un valor con forma de
+// credencial o de estado de lectura no se publica.
+const SECRET_VALUE_SUBSTRINGS =
+  /(?:token|secret|secreto|password|passwd|pwd|passphrase|contrasena|credencial|credenciales|autorizacion|sesion|clave|bearer|jwt|cookie|credential|authorization|unread|attention|atencion|sin[ _-]?leer|access[ _-]?key|api[ _-]?key|private[ _-]?key|client[ _-]?secret)/i;
+
+// `read`/`seen` como palabra completa, no como fragmento: `readiness` o `thread` siguen siendo seguros.
+const READ_STATE_VALUE =
+  /(?:^|[^a-z0-9])(?:read|seen|visto|vista|vistos|vistas|leido|leida|leidos|leidas)(?:$|[^a-z0-9])/i;
+
+const SECRET_VALUE_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/i,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{20,}|npm_[A-Za-z0-9]{36})\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/,
+  /\b(?:sk|rk)[-_](?:live|test)[-_][A-Za-z0-9_-]{16,}\b/,
+  /\bsk-[A-Za-z0-9_-]{16,}\b/,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
+  /\bBasic\s+[A-Za-z0-9+/=]{8,}/i,
+  /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i,
 ];
 
 const TIME_FORMAT = new Intl.DateTimeFormat('es-ES', {
@@ -172,25 +194,49 @@ function eventIdOf(item) {
   return typeof item?.eventId === 'string' ? item.eventId.trim() : '';
 }
 
-function blockedMetadataKey(label) {
-  const normalized = label
+function metadataWords(label) {
+  return label
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u200b-\u200d\ufeff]/g, '')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .toLowerCase();
-  const words = normalized.split(/[^a-z0-9]+/).filter(Boolean);
-  const compact = words.join('');
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
-  if (words.some((word) => BLOCKED_METADATA_WORDS.has(word))) return true;
-  if (words.includes('sin') && words.includes('leer')) return true;
-  if (
-    words.includes('key') &&
-    words.some((word) => BLOCKED_METADATA_KEY_PREFIXES.has(word))
-  ) {
-    return true;
-  }
-  return BLOCKED_METADATA_COMPACT_PATTERNS.some((pattern) => pattern.test(compact));
+function isSafeMetadataLabel(label) {
+  if (typeof label !== 'string') return false;
+  const trimmed = label.trim();
+  if (!trimmed || trimmed.length > MAX_METADATA_LABEL) return false;
+  if (CONTROL_CHARS.test(trimmed) || NESTED_METADATA_LABEL.test(trimmed)) return false;
+  const words = metadataWords(trimmed);
+  if (words.length === 0) return false;
+  if (!words.some((word) => SAFE_METADATA_WORDS.has(word))) return false;
+  return words.every(
+    (word) => SAFE_METADATA_WORDS.has(word) || /^[0-9]+$/.test(word),
+  );
+}
+
+function isSafeMetadataValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const probe = trimmed
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u200b-\u200d\ufeff]/g, '');
+  if (SECRET_VALUE_SUBSTRINGS.test(probe) || READ_STATE_VALUE.test(probe)) return false;
+  return !SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(probe));
+}
+
+function activityCountLabel(count) {
+  return count === 1 ? '1 evento cargado' : `${count} eventos cargados`;
 }
 
 // Conserva el orden que entrega Core. Solo valida procedencia y elimina repeticiones por eventId:
@@ -216,18 +262,19 @@ function sanitizeMetadata(metadata) {
   for (const entry of metadata) {
     if (out.length >= MAX_METADATA) break;
     if (!entry || typeof entry !== 'object') continue;
-    const label = typeof entry.label === 'string' ? entry.label.trim() : '';
-    if (!label || label.length > MAX_METADATA_LABEL || blockedMetadataKey(label)) continue;
-    const raw = entry.value;
-    const type = typeof raw;
-    if (type !== 'string' && type !== 'number' && type !== 'boolean') continue;
-    if (type === 'number' && !Number.isFinite(raw)) continue;
-    let value = type === 'string' ? raw.trim() : raw;
-    if (type === 'string' && !value) continue;
-    if (type === 'string' && value.length > MAX_METADATA_VALUE) {
-      value = `${value.slice(0, MAX_METADATA_VALUE - 1)}…`;
+    try {
+      const label = typeof entry.label === 'string' ? entry.label.trim() : '';
+      if (!isSafeMetadataLabel(label)) continue;
+      const raw = entry.value;
+      if (!isSafeMetadataValue(raw)) continue;
+      let value = typeof raw === 'string' ? raw.trim() : raw;
+      if (typeof value === 'string' && value.length > MAX_METADATA_VALUE) {
+        value = `${value.slice(0, MAX_METADATA_VALUE - 1)}…`;
+      }
+      out.push({ label, value });
+    } catch {
+      // Un objeto hostil no puede romper la vista ni colarse como metadata.
     }
-    out.push({ label, value });
   }
   return out;
 }
@@ -339,11 +386,19 @@ export function ActivityTimeline({
   const safeItems = useMemo(() => normalizeItems(items), [items]);
   const viewStatus = STATUSES.has(status) ? status : 'error';
   const busy = viewStatus === 'loading' || (viewStatus === 'ready' && loadingMore === true);
+  const staleView = stale === true;
+  // Una reconexión (loading) o un fallo de actualización (error) no pueden borrar lo ya
+  // cargado si la vista está marcada como stale: las filas, la cuenta y el aviso siguen.
   const showCachedRows =
-    viewStatus === 'ready' || (viewStatus === 'loading' && stale === true);
-  const showStale = (viewStatus === 'ready' || viewStatus === 'loading') && stale === true;
+    viewStatus === 'ready' ||
+    (staleView && (viewStatus === 'loading' || viewStatus === 'error'));
+  const showStale =
+    staleView &&
+    (viewStatus === 'ready' || viewStatus === 'loading' || viewStatus === 'error');
+  // next_cursor es el seq del último evento devuelto: con has_more=true debe ser un
+  // entero positivo. null, 0, negativos, decimales o strings no habilitan load-more.
   const nextCursor =
-    cursor && typeof cursor === 'object' && Number.isSafeInteger(cursor.next) && cursor.next >= 0
+    cursor && typeof cursor === 'object' && Number.isSafeInteger(cursor.next) && cursor.next > 0
       ? cursor.next
       : null;
   const hasMore = Boolean(cursor && typeof cursor === 'object' && cursor.hasMore === true);
@@ -390,7 +445,7 @@ export function ActivityTimeline({
           <span
             className="activity__count mono"
             data-testid="activity-count"
-            aria-label={`${displayCount} eventos cargados`}
+            aria-label={activityCountLabel(displayCount)}
           >
             {displayCount}
           </span>
@@ -471,8 +526,9 @@ export function ActivityTimeline({
 
       {showCachedRows && safeItems.length > 0 ? (
         <ol className="activity__list" data-testid="activity-list">
-          {safeItems.map((item) => {
+          {safeItems.map((item, index) => {
             const eventId = eventIdOf(item);
+            const rowMetaId = `${headingId}-row-${index}`;
             const unknown = item.known === false;
             const text = resolveMessage(item, translateMessage);
             const messageKey = messageKeyOf(item);
@@ -488,6 +544,16 @@ export function ActivityTimeline({
             const time = timeInfo(item.timestamp);
             const showProject =
               project && !(target && target.kind === 'project' && target.id === project.id);
+            const rowLabel = [
+              `Evento ${eventId}`,
+              `secuencia ${item.seq}`,
+              CLASS_LABELS[classKey] || 'Sin clase',
+              severity ? SEVERITY_LABELS[severity] : '',
+              text || (unknown ? 'Evento desconocido' : 'Actividad sin descripción'),
+              target ? `${TARGET_LABELS[target.kind] || 'Destino'} ${target.id}` : 'Sin destino',
+            ]
+              .filter(Boolean)
+              .join('. ');
 
             return (
               <li
@@ -505,8 +571,19 @@ export function ActivityTimeline({
                 data-kind={kind || undefined}
                 data-class={classKey}
                 data-severity={severity || undefined}
+                aria-label={rowLabel}
+                aria-describedby={rowMetaId}
                 title={`evento ${eventId} · seq ${item.seq}`}
               >
+                {/* Descripción accesible: la identidad durable de la fila sin duplicar el texto visible. */}
+                <span
+                  className="activity__sr"
+                  id={rowMetaId}
+                  data-testid={`activity-row-meta-${eventId}`}
+                  aria-hidden="true"
+                >
+                  Evento {eventId}. Secuencia {item.seq}.
+                </span>
                 <span className="activity__spine" aria-hidden="true" />
                 <div className="activity__body">
                   <div className="activity__top">
@@ -535,6 +612,8 @@ export function ActivityTimeline({
                   <div className="activity__meta">
                     <span
                       className="activity__seq mono"
+                      data-testid={`activity-seq-${eventId}`}
+                      aria-label={`Secuencia ${item.seq}`}
                       title={`evento ${eventId} · seq ${item.seq}`}
                     >
                       #{item.seq}
