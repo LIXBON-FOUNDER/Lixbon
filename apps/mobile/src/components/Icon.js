@@ -79,6 +79,11 @@ const ICONS = {
   'chevron-down': { paths: ['m6 9 6 6 6-6'] },
   'chevron-up': { paths: ['m6 15 6-6 6 6'] },
   stop: { rects: [{ x: 6, y: 6, width: 12, height: 12, rx: 2 }] },
+  pause: { paths: ['M9 6v12M15 6v12'] },
+  play: { paths: ['M7 5v14l12-7L7 5Z'] },
+  monitor: { paths: ['M8 21h8M12 17v4'], rects: [{ x: 3, y: 4, width: 18, height: 13, rx: 2 }] },
+  bell: { paths: ['M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9', 'M10.3 21a1.9 1.9 0 0 0 3.4 0'] },
+  'cloud-off': { paths: ['M3 3l18 18', 'M8.5 6.3A6 6 0 0 1 17.7 10H18a4 4 0 0 1 2.4 7.2M16 18H7a5 5 0 0 1-1.6-9.7'] },
   // Menú de opciones de la cabecera: tres puntos verticales. Los "puntos" son
   // segmentos de longitud cero con extremo redondo (mismo truco que la web),
   // así heredan el grosor de trazo del resto del set en vez de ser círculos.
