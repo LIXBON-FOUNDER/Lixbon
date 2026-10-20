@@ -97,7 +97,13 @@ describe('TaskWorkspace · identidad y metadatos (fixtures)', () => {
     expect(field('Ubicación', 'cwd').textContent).toBe('C:/repo-compartido');
     expect(field('Ubicación', 'Rama').textContent).toBe('No informado');
     expect(field('Ubicación', 'Worktree').textContent).toBe('No informado');
-    expect(screen.queryByText(/host|origen/i)).toBeNull();
+  });
+
+  it('host/origen se muestra como "No informado" aunque cwd y worktree existan: el DTO no los expone', () => {
+    renderView(taskFixture());
+    expect(field('Ubicación', 'Host / origen').textContent).toBe('No informado');
+    expect(field('Ubicación', 'cwd').textContent).toBe('C:/work/wt-root');
+    expect(screen.getByText(/Core no informa host ni origen/)).toBeTruthy();
   });
 
   it('Task final integrada: revisión, integración y marca merged son señales separadas', () => {
@@ -184,6 +190,56 @@ describe('TaskWorkspace · navegación por IDs durables', () => {
   });
 });
 
+describe('TaskWorkspace · contrato de Activity y Attention contextuales', () => {
+  const contextList = () => screen.getByRole('list', { name: 'Contexto de la Task' });
+
+  it('sin callbacks declara ambas superficies como no disponibles, sin botones ni vistas simuladas', () => {
+    renderView(taskFixture(), { state: { retry: undefined } });
+    const items = within(contextList()).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      expect(item.getAttribute('data-available')).toBe('false');
+      expect(item.textContent).toContain('No disponible: esta superficie todavía no está conectada');
+      expect(within(item).queryByRole('button')).toBeNull();
+    }
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('con callbacks entrega exactamente { projectId, taskId } de la Task verificada, sin rutas ni otros campos', () => {
+    const onOpenActivity = vi.fn();
+    const onOpenAttention = vi.fn();
+    renderView(childFixture(), { onOpenActivity, onOpenAttention });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir Activity de la Task task-child-a' }));
+    expect(onOpenActivity).toHaveBeenCalledTimes(1);
+    expect(onOpenActivity).toHaveBeenCalledWith({ projectId: PROJECT_ID, taskId: 'task-child-a' });
+    expect(onOpenAttention).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir Attention de la Task task-child-a' }));
+    expect(onOpenAttention).toHaveBeenCalledTimes(1);
+    expect(onOpenAttention.mock.calls[0]).toEqual([{ projectId: PROJECT_ID, taskId: 'task-child-a' }]);
+    expect(Object.keys(onOpenAttention.mock.calls[0][0]).sort()).toEqual(['projectId', 'taskId']);
+    expect(JSON.stringify([onOpenActivity.mock.calls, onOpenAttention.mock.calls])).not.toContain('wt-root');
+  });
+
+  it('un solo callback habilita solo esa superficie; la otra sigue honestamente no disponible', () => {
+    renderView(taskFixture(), { onOpenAttention: vi.fn() });
+    const [activity, attention] = within(contextList()).getAllByRole('listitem');
+    expect(activity.getAttribute('data-available')).toBe('false');
+    expect(attention.getAttribute('data-available')).toBe('true');
+  });
+
+  it('con respuesta no verificada no hay accesos contextuales ni se invocan los callbacks', () => {
+    const onOpenActivity = vi.fn();
+    const onOpenAttention = vi.fn();
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-nueva" detail={stateFixture(taskFixture())} onOpenActivity={onOpenActivity} onOpenAttention={onOpenAttention} />);
+    expect(screen.queryByRole('list', { name: 'Contexto de la Task' })).toBeNull();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(onOpenActivity).not.toHaveBeenCalled();
+    expect(onOpenAttention).not.toHaveBeenCalled();
+  });
+});
+
 describe('TaskWorkspace · refresh y target ausente', () => {
   it('Actualizar solo aparece con datos listos y ejecuta retry', () => {
     const state = stateFixture(taskFixture());
@@ -247,6 +303,40 @@ describe('TaskWorkspace · refresh y target ausente', () => {
     render(<TaskWorkspaceView projectId="otro-project" taskId="task-root" detail={stateFixture(taskFixture())} />);
     expect(screen.getByRole('alert').textContent).toContain('Respuesta no verificada');
     expect(screen.queryByRole('region', { name: 'Identidad' })).toBeNull();
+  });
+
+  it.each([
+    ['otro task.id', { id: 'task-vieja' }],
+    ['otro project_id', { project_id: 'project-vieja' }],
+    ['ambos distintos', { id: 'task-vieja', project_id: 'project-vieja' }],
+  ])('regresión: respuesta obsoleta con %s no renderiza ningún detalle ni acción', (_name, over) => {
+    const onNavigate = vi.fn();
+    const onOpenActivity = vi.fn();
+    render(
+      <TaskWorkspaceView
+        projectId={PROJECT_ID}
+        taskId="task-actual"
+        detail={stateFixture(taskFixture({ title: 'Título obsoleto', cwd: 'C:/work/obsoleta', branch: 'lxo/obsoleta', ...over }), { status: 'refreshing' })}
+        project={{ id: PROJECT_ID, name: 'Lixbon' }}
+        onNavigate={onNavigate}
+        onOpenActivity={onOpenActivity}
+        onOpenAttention={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('alert').textContent).toContain('Respuesta no verificada');
+    expect(screen.getByRole('alert').textContent).toContain('task-actual');
+    expect(document.body.textContent).not.toContain('Título obsoleto');
+    expect(document.body.textContent).not.toContain('C:/work/obsoleta');
+    expect(document.body.textContent).not.toContain('lxo/obsoleta');
+    expect(document.body.textContent).not.toContain('task-child-a');
+    expect(document.body.textContent).not.toContain('Target verificado');
+    expect(document.querySelector('[data-target-verified]').getAttribute('data-target-verified')).toBe('false');
+    expect(document.querySelector('.twk__status')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Identidad' })).toBeNull();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(onOpenActivity).not.toHaveBeenCalled();
   });
 
   it('sin selección no hay lectura: estado vacío anunciado', () => {

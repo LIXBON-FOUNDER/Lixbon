@@ -4,7 +4,9 @@ import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
 import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
+import './TaskWorkspace.css';
 
 const STATUS_LABELS = {
   starting: 'Iniciando',
@@ -84,7 +86,9 @@ function CoreTaskButton({ task, selected, onSelect }) {
   );
 }
 
-export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace }) {
+// `onOpenTaskActivity` / `onOpenTaskAttention` reciben `{ projectId, taskId }` de la Task seleccionada y verificada.
+// Mientras no estén conectados a una superficie real, el workspace declara Activity/Attention como no disponibles.
+export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenTaskAttention }) {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
@@ -102,7 +106,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     project_id: selectedProjectId,
     task_id: selectedTaskId,
   }, { enabled: Boolean(selectedProjectId) && Boolean(selectedTaskId) });
-  const task = detail.data?.task;
+  const selectedProject = projects.data?.projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedProjectInOverview = projects.data?.projects.some((project) => project.id === selectedProjectId);
   const selectedProjectMissing = selectedProjectId && ['ready', 'empty'].includes(projects.status) && !selectedProjectInOverview;
   const selectedTaskMissingFromCompletePage = selectedTaskId && tasks.data && !tasks.data.has_more
@@ -115,6 +119,16 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     onActivate?.();
   };
   const selectTask = (taskId) => { setAdeSelection({ projectId: selectedProjectId, taskId }); onActivate?.(); };
+  // Un solo estado `task_detail` alimenta canvas e Inspector: no hay segunda consulta.
+  const workspaceProps = {
+    projectId: selectedProjectId,
+    taskId: selectedTaskId,
+    detail,
+    project: selectedProject,
+    onNavigate: ({ projectId, taskId }) => { if (projectId === selectedProjectId) selectTask(taskId); },
+    onOpenActivity: onOpenTaskActivity,
+    onOpenAttention: onOpenTaskAttention,
+  };
 
   return (
     <div
@@ -169,15 +183,8 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
             {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
             {selectedTaskId && (
               <div className="ade__task-overview scroll">
-                <QueryFeedback state={detail} subject="el detalle de Task" />
                 {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
-                {task && (
-                  <>
-                    <h1>{task.title || task.id}</h1>
-                    <div className="ade__status-row"><span className={`orch__state orch__state--${task.status}`}>{STATUS_LABELS[task.status] || task.status}</span><span className="ade__durable-id mono">{task.id}</span></div>
-                    <p className="orch__hint">Resumen mínimo de la Task. El detalle ampliado se presentará en este workspace.</p>
-                  </>
-                )}
+                <TaskWorkspace {...workspaceProps} variant="workspace" />
               </div>
             )}
           </Panel>
@@ -199,6 +206,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
                 <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
               </section>
+              {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
             </div>
           </RightDock>
         </div>

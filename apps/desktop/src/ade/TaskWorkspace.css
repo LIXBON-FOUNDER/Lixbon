@@ -39,3 +39,7 @@
 .twk__link { padding: 2px 6px; text-align: left; }
 .twk__action:hover, .twk__link:hover { background: var(--surface-3); }
 .twk__action:focus-visible, .twk__link:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+
+.twk__context { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.twk__unavailable { display: flex; flex-direction: column; gap: 2px; color: var(--ink-50); }
+.twk__unavailable strong { font-weight: 500; }
