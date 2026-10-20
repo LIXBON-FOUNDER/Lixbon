@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ATTENTION_CATEGORIES,
   ATTENTION_LIMIT,
@@ -53,7 +53,7 @@ const TARGET_LABELS = {
 
 const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, loading: false, error: null, notice: null });
 
-const emptyPages = (key) => ({ ...EMPTY_PAGES, key, items: [] });
+const emptyPages = (key, headData = null, headUpdatedAt = null) => ({ ...EMPTY_PAGES, key, headData, headUpdatedAt, items: [] });
 
 const label = (labels, code) => labels[code] || code;
 
@@ -199,6 +199,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const [focusIndex, setFocusIndex] = useState(0);
   const itemRefs = useRef([]);
   const loadingMore = useRef(false);
+  const pageGeneration = useRef(0);
+  const pageContext = useRef({ key: filterKey, headData: null, updatedAt: null });
 
   const filters = useMemo(() => ({
     project_id: projectId || null,
@@ -210,27 +212,37 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
   const list = useCoreQuery('attention_list', filters, { enabled: active, pollMs });
   const overview = useCoreQuery('projects_overview', { archived: 'include' }, { enabled: active, pollMs });
 
-  // Un conjunto de filtros nuevo empieza en la primera página: los cursores son de una sola consulta.
-  useEffect(() => {
-    setPages(emptyPages(filterKey));
+  // Tanto los filtros como cada respuesta nueva de la cabecera invalidan las páginas anteriores.
+  // Core no ofrece una instantánea compartida entre consultas; los cursores son keyset, no un change feed.
+  useLayoutEffect(() => {
+    if (pageContext.current.key === filterKey && pageContext.current.headData === list.data
+      && pageContext.current.updatedAt === list.updatedAt) return;
+    pageContext.current = { key: filterKey, headData: list.data, updatedAt: list.updatedAt };
+    pageGeneration.current += 1;
+    setPages(emptyPages(filterKey, list.data, list.updatedAt));
     setFocusIndex(0);
-  }, [filterKey]);
+  }, [filterKey, list.data, list.updatedAt]);
 
   // Si el Core deja de responder, los cursores del proceso anterior dejan de ser válidos. Al volver,
   // se reinicia desde la primera página (contrato LXO-89) en vez de mezclar páginas de dos sesiones.
   const headFailure = ['stale', 'disconnected', 'degraded', 'error'].includes(list.status);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!headFailure) return;
-    setPages((current) => (current.items.length === 0 ? current : emptyPages(current.key)));
+    pageGeneration.current += 1;
+    setPages((current) => emptyPages(current.key));
   }, [headFailure]);
 
+  // A head response is visible immediately; never render pages whose cursor came from an older head.
+  const pageState = pages.key === filterKey && pages.headData === list.data && pages.headUpdatedAt === list.updatedAt
+    ? pages
+    : EMPTY_PAGES;
   const items = useMemo(() => {
     const seen = new Map();
-    for (const item of [...(list.data?.items ?? []), ...pages.items]) {
+    for (const item of [...(list.data?.items ?? []), ...pageState.items]) {
       if (!seen.has(item.id)) seen.set(item.id, item);
     }
     return [...seen.values()].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  }, [list.data, pages.items]);
+  }, [list.data, pageState.items]);
 
   const summed = useMemo(() => {
     if (!overview.data) return null;
@@ -254,14 +266,23 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
     : (projectId ? 'activas en el Project' : 'activas en el Core');
 
   const headCursor = list.data?.has_more ? list.data.next_cursor : null;
-  const moreCursor = pages.items.length > 0 ? pages.nextCursor : headCursor;
-  const canLoadMore = pages.items.length > 0 ? pages.hasMore : Boolean(headCursor);
+  const moreCursor = headFailure ? null : pageState.items.length > 0 ? pageState.nextCursor : headCursor;
+  const canLoadMore = !headFailure && (pageState.items.length > 0 ? pageState.hasMore : Boolean(headCursor));
 
   const loadMore = useCallback(async () => {
     if (loadingMore.current || !moreCursor) return;
     loadingMore.current = true;
     const requestedKey = filterKey;
-    setPages((current) => ({ ...current, loading: true, error: null, notice: null }));
+    const requestedHead = list.data;
+    const requestedHeadUpdatedAt = list.updatedAt;
+    const requestedGeneration = pageGeneration.current;
+    setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
+      || current.headUpdatedAt !== requestedHeadUpdatedAt ? current : {
+        ...current,
+        loading: true,
+        error: null,
+        notice: null,
+      }));
     try {
       const page = await listAdeAttention({
         projectId: projectId || null,
@@ -269,30 +290,38 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         severity: severity || null,
         cursor: moreCursor,
       });
-      setPages((current) => (current.key !== requestedKey ? current : {
-        ...current,
-        items: [...current.items, ...page.items],
-        nextCursor: page.next_cursor,
-        hasMore: page.has_more,
-        loading: false,
-        error: null,
-      }));
+      if (pageGeneration.current !== requestedGeneration) return;
+      setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
+        || current.headUpdatedAt !== requestedHeadUpdatedAt
+        || pageGeneration.current !== requestedGeneration ? current : {
+          ...current,
+          items: [...current.items, ...page.items],
+          nextCursor: page.next_cursor,
+          hasMore: page.has_more,
+          loading: false,
+          error: null,
+        }));
     } catch (error) {
+      if (pageGeneration.current !== requestedGeneration) return;
       const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
       if (/attention_invalid_cursor/.test(message)) {
         // El Core rotó su clave (reinicio): se vuelve a la primera página, sin duplicar.
-        setPages((current) => (current.key !== requestedKey ? current : {
-          ...emptyPages(requestedKey),
-          notice: 'El Core se reinició y el cursor caducó: se volvió a la primera página.',
-        }));
+        setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
+          || current.headUpdatedAt !== requestedHeadUpdatedAt
+          || pageGeneration.current !== requestedGeneration ? current : {
+            ...emptyPages(requestedKey, requestedHead, requestedHeadUpdatedAt),
+            notice: 'El Core se reinició y el cursor caducó: se volvió a la primera página.',
+          }));
         list.retry();
       } else {
-        setPages((current) => (current.key !== requestedKey ? current : { ...current, loading: false, error: message }));
+        setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
+          || current.headUpdatedAt !== requestedHeadUpdatedAt
+          || pageGeneration.current !== requestedGeneration ? current : { ...current, loading: false, error: message }));
       }
     } finally {
       loadingMore.current = false;
     }
-  }, [moreCursor, projectId, category, severity, filterKey, list.retry]);
+  }, [moreCursor, projectId, category, severity, filterKey, list.data, list.updatedAt, list.retry]);
 
   const onItemKeyDown = useCallback((event, index) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
@@ -431,7 +460,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         </div>
       )}
 
-      {pages.notice && <div className="attention-inbox__state attention-inbox__state--muted" role="status">{pages.notice}</div>}
+      {pageState.notice && <div className="attention-inbox__state attention-inbox__state--muted" role="status">{pageState.notice}</div>}
 
       {showEmpty && (
         <div className="attention-inbox__empty" role="status">
@@ -445,7 +474,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
         <ul
           className="attention-inbox__list"
           aria-label="Attention activa"
-          aria-busy={pages.loading || list.status === 'refreshing'}
+          aria-busy={pageState.loading || list.status === 'refreshing'}
         >
           {items.map((item, index) => (
             <AttentionItem
@@ -467,17 +496,17 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget }) {
           type="button"
           className="lk attention-inbox__more"
           onClick={loadMore}
-          disabled={pages.loading}
-          aria-busy={pages.loading}
+          disabled={pageState.loading}
+          aria-busy={pageState.loading}
         >
-          {pages.loading ? 'Cargando…' : 'Cargar más'}
+          {pageState.loading ? 'Cargando…' : 'Cargar más'}
         </button>
       )}
 
-      {pages.error && (
+      {pageState.error && (
         <div className="attention-inbox__state attention-inbox__state--error" role="alert">
-          <span>No se pudo cargar la siguiente página de Attention. {describeAttentionError(pages.error)}</span>
-          <code>{pages.error}</code>
+          <span>No se pudo cargar la siguiente página de Attention. {describeAttentionError(pageState.error)}</span>
+          <code>{pageState.error}</code>
           <button type="button" className="lk" onClick={loadMore}>Reintentar</button>
         </div>
       )}

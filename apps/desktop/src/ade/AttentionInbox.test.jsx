@@ -267,6 +267,88 @@ describe('AttentionInbox', () => {
     expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
   });
 
+  it('reinicia las páginas cargadas cuando se actualiza la cabecera y conserva los destinos durables', async () => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const durableTargetId = '0192F0A0-7b1c-7000-8000-0000000000A1';
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const third = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const resolvedAfterRefresh = item({ id: 'att_4', target_id: 'task-4', created_at: 4 });
+    const fifth = item({
+      id: 'att_5',
+      category: 'risk',
+      severity: 'critical',
+      target_kind: 'spawn_request',
+      target_id: durableTargetId,
+      occurrence: 2,
+      created_at: 5,
+    });
+    const calls = mountCore({
+      attention: (args) => {
+        if (!args.cursor) {
+          return refreshed
+            ? page([first, second], { hasMore: true, next: 'cursor-new-1' })
+            : page([first, second], { hasMore: true, next: 'cursor-old-1' });
+        }
+        if (args.cursor === 'cursor-old-1') return page([third, resolvedAfterRefresh], { hasMore: true, next: 'cursor-old-2' });
+        if (args.cursor === 'cursor-old-2') return page([fifth]);
+        if (args.cursor === 'cursor-new-1') return page([second, third], { hasMore: true, next: 'cursor-new-2' });
+        if (args.cursor === 'cursor-new-2') return page([fifth]);
+        throw new Error(`cursor inesperado: ${args.cursor}`);
+      },
+    });
+    const onOpenTarget = vi.fn();
+    const visibleIds = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+
+    render(<AttentionInbox onOpenTarget={onOpenTarget} pollMs={1_000} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_4']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_4', 'att_5']);
+
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const ids = visibleIds();
+    expect(ids).toEqual(['att_1', 'att_2', 'att_3', 'att_5']);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-old-1' }]);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-old-2' }]);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-new-1' }]);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-new-2' }]);
+    expect(screen.queryByRole('button', { name: /Task task-4/ })).toBeNull();
+
+    const targetButton = screen.getByRole('button', { name: /Crítica: Riesgo\. Solicitud de lanzamiento/ });
+    expect(targetButton.dataset.targetId).toBe(durableTargetId);
+    fireEvent.click(targetButton);
+    expect(onOpenTarget).toHaveBeenCalledWith({
+      attentionId: 'att_5',
+      kind: 'spawn_request',
+      id: durableTargetId,
+      projectId: 'project-a',
+      runId: 'run-1',
+      category: 'risk',
+      severity: 'critical',
+      occurrence: 2,
+      createdAt: 5,
+    });
+  });
+
   it('reinicia la paginación si el Core rechaza el cursor opaco', async () => {
     const calls = mountCore({
       attention: (args) => {
