@@ -1,7 +1,8 @@
 // Sidebar.js — menú lateral: marca, botón de nueva conversación, selector
 // Chat · Remoto y debajo lo de cada uno: buscar y el historial por fechas,
 // plegable y por páginas (mantener pulsado para fijar, renombrar, compartir o
-// eliminar con "Deshacer"), o las sesiones remotas. Abajo, la tarjeta de
+// eliminar con "Deshacer"), las sesiones remotas o, con el prototipo activo,
+// el resumen de Supervisar. Abajo, la tarjeta de
 // cuenta (foto, nombre y uso de la sesión), que entera lleva a Ajustes.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
@@ -9,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiException } from '../api';
 import { groupByDate, togglePin, usePins } from '../pins';
+import { attention, hostState } from '../supervision/model.js';
 import { shareConversationById } from '../share';
 import { CHAT_SOURCE } from '../sse';
 import { useApi, useAuth, useChat } from '../state';
@@ -20,7 +22,7 @@ import { Avatar, avatarUri, Eyebrow, FadeUp, LixLogo, LogoMark, Meter, Segmented
 
 const PAGE = 30; // conversaciones por página del historial
 
-export default function Sidebar({ open, onClose, onNavigate, section, onSection, onSearch, remote, activeRemoteId, onOpenSession }) {
+export default function Sidebar({ open, onClose, onNavigate, section, onSection, onSearch, remote, activeRemoteId, onOpenSession, supervision }) {
   const c = useColors();
   const api = useApi();
   const auth = useAuth();
@@ -225,11 +227,22 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
           options={[
             { value: 'chat', label: 'Chat' },
             { value: 'remote', label: 'Remoto', dot: remote.live && tab !== 'remote', a11y: remote.live ? 'Remoto, sesión en curso' : 'Remoto' },
+            ...(supervision ? [{ value: 'supervise', label: 'Supervisar' }] : []),
           ]}
         />
       </View>
 
-      {tab === 'remote' ? (
+      {tab === 'supervise' && supervision ? (
+        <SupervisionTab
+          sup={supervision}
+          onOpen={(route) => {
+            supervision.home();
+            if (route) supervision.push(route);
+            onSection('supervise');
+            onClose();
+          }}
+        />
+      ) : tab === 'remote' ? (
         <RemoteTab remote={remote} activeId={section === 'remote' ? activeRemoteId : null} onOpen={onOpenSession} />
       ) : (
         <>
@@ -338,6 +351,51 @@ export default function Sidebar({ open, onClose, onNavigate, section, onSection,
         )}
       </Pressable>
     </View>
+  );
+}
+
+// Resumen de Supervisar: cuántas cosas te esperan y los hosts, cada fila
+// abre su pantalla.
+function SupervisionTab({ sup, onOpen }) {
+  const c = useColors();
+  const { state, now } = sup;
+  const waiting = attention(state.tasks).length;
+  const active = state.tasks.filter((t) => t.status === 'running' || t.status === 'paused').length;
+  const row = (label, value, route) => (
+    <Pressable
+      key={label}
+      onPress={() => onOpen(route)}
+      style={({ pressed }) => ({ height: 42, paddingHorizontal: 12, borderRadius: RADIUS, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: pressed ? c.pressed : 'transparent' })}
+    >
+      <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{value}</Text>
+    </Pressable>
+  );
+  return (
+    <ScrollView style={{ flex: 1, marginTop: 18 }} showsVerticalScrollIndicator={false}>
+      <Eyebrow style={{ paddingHorizontal: 12, paddingBottom: 4 }}>Prototipo · datos de ejemplo</Eyebrow>
+      {row('Atención', String(waiting), null)}
+      {row('Trabajo activo', String(active), null)}
+      {row('Avisos', String(state.notifications.filter((n) => !n.read).length), { name: 'notifications' })}
+      {row('Uso', '', { name: 'usage' })}
+      <Eyebrow style={{ paddingHorizontal: 12, paddingTop: 18, paddingBottom: 4 }}>Hosts</Eyebrow>
+      {state.hosts.map((h) => {
+        const hs = hostState(h, now);
+        return (
+          <Pressable
+            key={h.id}
+            onPress={() => {
+              sup.dispatch({ type: 'hostFilter', value: h.id });
+              onOpen(null);
+            }}
+            style={({ pressed }) => ({ height: 42, paddingHorizontal: 12, borderRadius: RADIUS, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: pressed ? c.pressed : 'transparent' })}
+          >
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: hs === 'online' ? c.good : hs === 'stale' ? c.warn : c.inkFaint }} />
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>{h.name}</Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
   );
 }
 
