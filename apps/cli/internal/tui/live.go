@@ -230,13 +230,14 @@ func (m *Model) liveView() []string {
 // al fondo con ctrl+b.
 func (m *Model) commandRunning() bool {
 	b := m.currentTool()
-	return b != nil && b.state == toolRunning && b.command
+	return b != nil && b.state == toolRunning && b.command &&
+		m.chat.Toolbox != nil && m.chat.Toolbox.CanDetach()
 }
 
 // detachCommand manda al fondo el comando en curso: sigue en /ps y el agente
 // continúa con lo que llevaba escrito.
 func (m *Model) detachCommand() bool {
-	if !m.commandRunning() || m.chat.Toolbox == nil {
+	if !m.commandRunning() {
 		return false
 	}
 	return m.chat.Toolbox.DetachCommand()

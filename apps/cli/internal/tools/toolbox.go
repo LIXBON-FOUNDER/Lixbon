@@ -80,6 +80,15 @@ func (tb *Toolbox) DetachCommand() bool {
 	return true
 }
 
+// CanDetach dice si hay un run_command que DetachCommand puede soltar ya. La
+// vista marca el paso como en curso un instante antes de que el comando
+// arranque, y ctrl+b en ese hueco no hacía nada.
+func (tb *Toolbox) CanDetach() bool {
+	tb.detachMu.Lock()
+	defer tb.detachMu.Unlock()
+	return tb.detach != nil
+}
+
 func NewToolbox(root string) *Toolbox {
 	return &Toolbox{Root: root, Procs: process.NewManager()}
 }
