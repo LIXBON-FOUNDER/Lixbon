@@ -184,7 +184,10 @@ export function registerBuiltinCommands() {
     {
       id: 'workbench.toggleExplorer', title: 'Mostrar u ocultar la barra lateral',
       category: 'Ver', keywords: 'archivos explorer sidebar barra lateral',
-      run: () => { if (wb().mode !== 'editor') { inEditor(); wb().showSide('files'); } else wb().toggleSide(); },
+      run: () => {
+        if (wb().mode === 'orch') { wb().toggleSide(); return; }
+        if (wb().mode !== 'editor') { inEditor(); wb().showSide('files'); } else wb().toggleSide();
+      },
     },
     {
       id: 'workbench.showFiles', title: 'Archivos',
@@ -204,7 +207,7 @@ export function registerBuiltinCommands() {
     {
       id: 'workbench.toggleAgent', title: 'Mostrar u ocultar el panel del agente',
       category: 'Ver', keywords: 'agente panel derecho chat',
-      run: () => { inEditor(); wb().toggleAgent(); },
+      run: () => { if (wb().mode !== 'orch') inEditor(); wb().toggleAgent(); },
     },
     {
       id: 'workbench.toggleTerminal', title: 'Alternar terminal',

@@ -9,6 +9,7 @@ import { Gutter } from '../layout/Gutter';
 import { Collapse } from '../layout/Collapse';
 import { RightDock } from '../layout/RightDock';
 import { AgentPanel } from '../chat/AgentPanel';
+import { AdeShell } from '../ade/AdeShell';
 import { Segmented } from '../components/Segmented';
 import { DiffView } from '../sections/SourceControl/DiffView';
 import { AgentTerminal } from './AgentTerminal';
@@ -373,6 +374,12 @@ export function OrchestratorMode() {
   const sizes = useWorkbenchStore((s) => s.sizes);
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const rightOpen = useWorkbenchStore((s) => s.modePanels.orch?.right ?? true);
+  const adeLeftOpen = useWorkbenchStore((s) => s.modePanels.orch?.adeLeft ?? true);
+  const adeRightOpen = useWorkbenchStore((s) => s.modePanels.orch?.adeRight ?? true);
+  const adeDrawer = useWorkbenchStore((s) => s.adeDrawer);
+  const closeAdeDrawer = useWorkbenchStore((s) => s.closeAdeDrawer);
+  const orchView = useWorkbenchStore((s) => s.orchView);
+  const setOrchView = useWorkbenchStore((s) => s.setOrchView);
   const toggleAgent = useWorkbenchStore((s) => s.toggleAgent);
   const { snap, selected, select, init, call } = useOrchStore();
   const [allRepos, setAllRepos] = useState(false);
@@ -411,8 +418,18 @@ export function OrchestratorMode() {
   if (!snap) return <div className="wb"><div className="changes__empty">Cargando el orquestador…</div></div>;
   if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
 
+  const adeActive = orchView === 'ade';
+
   return (
-    <div className="wb wb--orch">
+    <div className="orch__shell">
+      <div className="orch__viewbar">
+        <div className="orch__viewtabs" role="group" aria-label="Vistas del Orquestador">
+          <button type="button" aria-pressed={!adeActive} className={!adeActive ? 'is-active' : ''} onClick={() => setOrchView('executions')}>Ejecuciones</button>
+          <button type="button" aria-pressed={adeActive} className={adeActive ? 'is-active' : ''} onClick={() => setOrchView('ade')}>ADE</button>
+        </div>
+      </div>
+      <div className="orch__views">
+      <div className={`wb wb--orch orch__execution${adeActive ? ' is-hidden' : ''}`} aria-hidden={adeActive} inert={adeActive} data-testid="execution-composition">
       <Collapse open={open} size={Math.max(sizes.side, 300) + 8}>
         <Panel id="orchtree" className="sidepanel orch__side">
           <div className="panelhead">
@@ -457,9 +474,18 @@ export function OrchestratorMode() {
           ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
           : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} /> : <HowTo />}
       </Panel>
-      <RightDock open={rightOpen}>
+      <RightDock open={rightOpen} visible={!adeActive} keepMountedWhenHidden={adeActive}>
         <AgentPanel onClose={toggleAgent} />
       </RightDock>
+      </div>
+      <AdeShell
+        active={adeActive}
+        leftOpen={adeLeftOpen}
+        rightOpen={adeRightOpen}
+        drawerOpen={adeDrawer}
+        onCloseDrawer={closeAdeDrawer}
+      />
+      </div>
     </div>
   );
 }

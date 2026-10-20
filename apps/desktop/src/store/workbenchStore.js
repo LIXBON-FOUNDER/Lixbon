@@ -31,7 +31,12 @@ const DEFAULT_SIZES = { side: 240, agent: 400, terminal: 190, sessions: 248, cha
 // Paneles laterales de los modos que no son el editor (el editor usa
 // sideOpen/agentOpen). Todos tienen izquierdo y derecho: el derecho es el
 // agente (en Agente son los cambios), siempre en el mismo sitio.
-const DEFAULT_MODE_PANELS = { agent: { left: true, right: true }, design: { left: true, right: true }, git: { left: true, right: true }, orch: { left: true, right: true } };
+const DEFAULT_MODE_PANELS = {
+  agent: { left: true, right: true },
+  design: { left: true, right: true },
+  git: { left: true, right: true },
+  orch: { left: true, right: true, adeLeft: true, adeRight: true },
+};
 
 // Lo guardado se mezcla modo a modo: quien guardó { left } en Git antes de que
 // existiera el panel derecho no se queda sin él.
@@ -39,13 +44,26 @@ const mergePanels = (saved) => Object.fromEntries(
   Object.entries(DEFAULT_MODE_PANELS).map(([mode, def]) => [mode, { ...def, ...(saved?.[mode] || {}) }]),
 );
 
-/** { left, right } del modo activo; right = undefined si el modo no lo tiene. */
-export const selectSidePanels = (s) => (s.mode === 'editor'
-  ? { left: s.sideOpen, right: s.agentOpen }
-  : s.modePanels[s.mode]);
+/** { left, right } del modo/vista activa; right = undefined si no tiene panel derecho. */
+export const selectSidePanels = (s) => {
+  if (s.mode === 'editor') return { left: s.sideOpen, right: s.agentOpen };
+  const panels = s.modePanels[s.mode];
+  if (s.mode === 'orch' && s.orchView === 'ade') {
+    return { left: panels?.adeLeft ?? true, right: panels?.adeRight ?? true };
+  }
+  return panels;
+};
+
+/** El cajón del botón derecho es independiente entre Ejecuciones y ADE. */
+export const selectRightDrawer = (s) => (s.mode === 'orch' && s.orchView === 'ade' ? s.adeDrawer : s.drawer);
+
+const readOrchView = () => (read('lx_orch_view', 'executions') === 'ade' ? 'ade' : 'executions');
 
 export const useWorkbenchStore = create((set, get) => ({
   mode: read('lx_mode', 'editor'),
+  // Preferencia de presentación interna; nunca cambia las selecciones operativas.
+  orchView: readOrchView(),
+  adeDrawer: false,
   sideOpen: read('lx_side_open', true),
   sideView: read('lx_side_view', 'files'), // 'files' | 'search' | 'extensions'
   agentOpen: read('lx_agent_open', true),
@@ -79,21 +97,34 @@ export const useWorkbenchStore = create((set, get) => ({
 
   closeDrawer: () => set({ drawer: false }),
   toggleDrawer: () => set({ drawer: !get().drawer }),
+  closeAdeDrawer: () => set({ adeDrawer: false }),
+  toggleAdeDrawer: () => set({ adeDrawer: !get().adeDrawer }),
+
+  setOrchView: (orchView) => {
+    if (orchView !== 'executions' && orchView !== 'ade') return;
+    write('lx_orch_view', orchView);
+    set({ orchView });
+  },
 
   setMode: (mode) => {
     if (!MODES.includes(mode)) return;
     write('lx_mode', mode);
-    set({ page: null, drawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
+    set({ page: null, drawer: false, adeDrawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? 'orchmain' : get().focus });
   },
 
   setFocus: (focus) => { if (get().focus !== focus) set({ focus }); },
 
   toggleModePanel: (side) => {
-    if (side === 'right' && isCompact()) { get().toggleDrawer(); return; }
-    const { mode, modePanels } = get();
+    const { mode, modePanels, orchView } = get();
+    if (side === 'right' && isCompact()) {
+      if (mode === 'orch' && orchView === 'ade') get().toggleAdeDrawer();
+      else get().toggleDrawer();
+      return;
+    }
     const cur = modePanels[mode];
-    if (!cur || cur[side] === undefined) return;
-    const next = { ...modePanels, [mode]: { ...cur, [side]: !cur[side] } };
+    const key = mode === 'orch' && orchView === 'ade' ? `ade${side[0].toUpperCase()}${side.slice(1)}` : side;
+    if (!cur || cur[key] === undefined) return;
+    const next = { ...modePanels, [mode]: { ...cur, [key]: !cur[key] } };
     write('lx_mode_panels', next);
     set({ modePanels: next });
   },
@@ -118,7 +149,11 @@ export const useWorkbenchStore = create((set, get) => ({
   },
 
   toggleAgent: () => {
-    if (isCompact()) { get().toggleDrawer(); return; }
+    if (isCompact()) {
+      if (get().mode === 'orch' && get().orchView === 'ade') get().toggleAdeDrawer();
+      else get().toggleDrawer();
+      return;
+    }
     if (get().mode !== 'editor') { get().toggleModePanel('right'); return; }
     const agentOpen = !get().agentOpen;
     write('lx_agent_open', agentOpen);

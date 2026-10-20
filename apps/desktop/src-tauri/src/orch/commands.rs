@@ -6,6 +6,12 @@ use tauri::{AppHandle, Emitter, State as TauriState};
 use super::events::Channel;
 use super::{Caller, CodexTerms, Orch, Settings, agents, codex_session, codex_term, data_dir, lxo_path, providers, roles, skill, spawn_approval, write_json};
 
+const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail"];
+
+fn is_ade_read_query(query: &str) -> bool {
+    ADE_READ_QUERIES.contains(&query)
+}
+
 #[tauri::command]
 pub fn orch_snapshot(orch: TauriState<'_, Orch>) -> Value {
     orch.0.snapshot()
@@ -34,6 +40,15 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
 #[tauri::command(async)]
 pub fn orch_call(orch: TauriState<'_, Orch>, cmd: String, args: Value) -> Result<Value, String> {
     orch.0.rpc_via(Channel::Ui, Caller::User, "", &cmd, &args)
+}
+
+/// RPC dedicado del ADE. La allowlist evita exponer operaciones de escritura a esta superficie F2.
+#[tauri::command(async)]
+pub fn orch_query(orch: TauriState<'_, Orch>, query: String, args: Value) -> Result<Value, String> {
+    if !is_ade_read_query(&query) {
+        return Err(format!("orch_query_forbidden: `{query}` no es una query read-only del ADE"));
+    }
+    orch.0.rpc_via(Channel::Ui, Caller::User, "", &query, &args)
 }
 
 /// Proyectos registrados (slice D), con sus ubicaciones. `include_archived`: también los archivados.
@@ -207,4 +222,19 @@ pub fn orch_skill_install(ids: Vec<String>) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
     skill::uninstall(&ids)
+}
+
+#[cfg(test)]
+mod ade_query_tests {
+    use super::is_ade_read_query;
+
+    #[test]
+    fn ade_solo_expone_queries_observacionales_de_f2() {
+        for query in ["projects_overview", "tasks_by_project", "task_detail"] {
+            assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
+        }
+        for operation in ["project_archive", "run_create", "spawn", "remove_run", "unknown"] {
+            assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
+        }
+    }
 }
