@@ -126,7 +126,12 @@ describe('ProjectsSidebar', () => {
     const { container } = render(<ProjectsSidebar />);
 
     await screen.findByText('Alpha 0');
-    expect(container.querySelectorAll('li[data-project-id]')).toHaveLength(100);
+    const projectRows = container.querySelectorAll('li[data-project-id]');
+    expect(projectRows).toHaveLength(100);
+    expect(projectRows[0].getAttribute('aria-posinset')).toBe('1');
+    expect(projectRows[0].getAttribute('aria-setsize')).toBe('100');
+    expect(projectRows[99].getAttribute('aria-posinset')).toBe('100');
+    expect(projectRows[99].getAttribute('aria-setsize')).toBe('100');
     expect(calls).toEqual([{ query: 'projects_overview', args: { archived: 'exclude' } }]);
     expect(onlyReadQueries(calls)).toBe(true);
 
@@ -363,6 +368,9 @@ describe('ProjectsSidebar', () => {
 
     clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
     await waitFor(() => expect(container.querySelectorAll('li[data-task-id]')).toHaveLength(Math.min(count, TASK_PAGE_LIMIT)));
+    const firstPageRows = container.querySelectorAll('li[data-task-id]');
+    expect(firstPageRows[0].getAttribute('aria-posinset')).toBe('1');
+    expect(firstPageRows[0].getAttribute('aria-setsize')).toBe(count > TASK_PAGE_LIMIT ? '-1' : String(count));
     if (count > TASK_PAGE_LIMIT) {
       fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
       await waitFor(() => expect(container.querySelectorAll('li[data-task-id]')).toHaveLength(count));
@@ -370,6 +378,9 @@ describe('ProjectsSidebar', () => {
 
     expect([...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id')))
       .toEqual(dataset.map((item) => item.id));
+    const taskRows = container.querySelectorAll('li[data-task-id]');
+    expect(taskRows[taskRows.length - 1].getAttribute('aria-posinset')).toBe(String(count));
+    expect(taskRows[taskRows.length - 1].getAttribute('aria-setsize')).toBe(String(count));
     expect(taskCalls(calls).map((call) => call.args.cursor))
       .toEqual(count > TASK_PAGE_LIMIT ? [undefined, 'cursor-dataset'] : [undefined]);
   });
@@ -432,6 +443,64 @@ describe('ProjectsSidebar', () => {
     expect(screen.queryByText('Task t2')).toBeNull();
     expect(screen.getByText('Task t1')).toBeTruthy();
     expect(taskCalls(calls).some((call) => call.args.cursor === 'cursor-1')).toBe(true);
+  });
+
+  it('retiene las páginas cargadas y restaura el foco tras recuperar una cabecera desconectada', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    let pageReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) {
+          pageReads += 1;
+          return pageReads === 1
+            ? page(args.project_id, args.status, [task('t2', { created_at: 900 })], { hasMore: true, cursor: 'cursor-2' })
+            : page(args.project_id, args.status, [task('t2', { created_at: 900 })]);
+        }
+        headReads += 1;
+        if (headReads === 2) throw new Error('disconnected: Core IPC closed');
+        return page(args.project_id, args.status, [task('t1', { created_at: 2_000 })], {
+          hasMore: true,
+          cursor: 'cursor-1',
+        });
+      },
+    });
+    const { container } = render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    const alpha = screen.getByRole('treeitem', { name: /Alpha/ });
+    clickProject(alpha);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await flush();
+    expect(screen.getByText('Task t2')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByText(/Core desconectado/)).toBeTruthy();
+    expect(screen.getByText('Task t1')).toBeTruthy();
+    expect(screen.getByText('Task t2')).toBeTruthy();
+    expect(screen.getByTestId('stale-task-pages-project-a').textContent).toContain('Se conservan las páginas adicionales');
+    const stalePageRow = container.querySelector('li[data-task-id="t2"]');
+    expect(stalePageRow.querySelector('.ps__badge--stale')).toBeTruthy();
+    expect(stalePageRow.getAttribute('aria-setsize')).toBe('-1');
+    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+
+    const retryHead = screen.getByRole('button', { name: 'Reintentar lectura de las Tasks de Alpha' });
+    retryHead.focus();
+    fireEvent.click(retryHead);
+    await flush();
+    expect(document.activeElement).toBe(alpha);
+    expect(screen.getByText('Task t2')).toBeTruthy();
+
+    const retryPages = screen.getByRole('button', { name: 'Reintentar actualización de páginas de Tasks de Alpha' });
+    retryPages.focus();
+    fireEvent.click(retryPages);
+    await flush();
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
+    expect(document.activeElement.getAttribute('role')).toBe('treeitem');
+    expect(document.activeElement.getAttribute('data-task-id')).toBe('t2');
+    expect(screen.getByText('Task t2')).toBeTruthy();
   });
 
   it('reconcilia título y estado de páginas cargadas tras refrescar la cabecera', async () => {
@@ -936,6 +1005,30 @@ describe('ProjectsSidebar', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('restaura el foco al árbol tras reintentar una página fallida', async () => {
+    let attempts = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) return page(args.project_id, args.status, [task('t1')], { hasMore: true, cursor: 'cursor-1' });
+        attempts += 1;
+        if (attempts === 1) throw new Error('tasks_read_failed: lectura de página fallida');
+        return page(args.project_id, args.status, [task('t2')]);
+      },
+    });
+    render(<ProjectsSidebar />);
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+
+    const retry = await screen.findByRole('button', { name: 'Reintentar carga de Tasks de Alpha' });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByText('Task t2');
+    await waitFor(() => expect(document.activeElement.getAttribute('role')).toBe('treeitem'));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('distingue visualmente estados activos, en espera, fallidos y finales', async () => {
     mountCore({
       overviews: () => overview([project('project-a', 'Alpha', { status: 'active' })]),
@@ -1091,8 +1184,11 @@ describe('ProjectsSidebar', () => {
     expect(alert.textContent).toContain('Core degradado');
     expect(alert.textContent).toContain('projects_overview_unavailable');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar lectura de Projects' }));
+    const retry = screen.getByRole('button', { name: 'Reintentar lectura de Projects' });
+    retry.focus();
+    fireEvent.click(retry);
     expect(await screen.findByRole('treeitem', { name: /Alpha/ })).toBeTruthy();
+    expect(document.activeElement.getAttribute('type')).toBe('radio');
     expect(calls.every((call) => call.query === 'projects_overview')).toBe(true);
     expect(invoke.mock.calls.every(([command]) => command === 'orch_query')).toBe(true);
   });

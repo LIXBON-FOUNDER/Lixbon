@@ -208,7 +208,11 @@ export function toTaskSummary(task, projectId) {
   };
 }
 
-function Feedback({ state, subject }) {
+function Feedback({ state, subject, onRetry }) {
+  const retry = (event) => {
+    onRetry?.(event);
+    state.retry();
+  };
   if (state.status === 'idle' || state.status === 'ready' || state.status === 'refreshing') return null;
   if (state.status === 'loading') return <div className="ps__state" role="status">Conectando con Core para cargar {subject}…</div>;
   if (state.status === 'empty') return null;
@@ -220,7 +224,7 @@ function Feedback({ state, subject }) {
         <button
           type="button"
           className="lk"
-          onClick={state.retry}
+          onClick={retry}
           aria-label={`Reintentar lectura de ${subject}`}
         >Reintentar lectura</button>
       </div>
@@ -234,14 +238,14 @@ function Feedback({ state, subject }) {
       <button
         type="button"
         className="lk"
-        onClick={state.retry}
+        onClick={retry}
         aria-label={`Reintentar lectura de ${subject}`}
       >Reintentar lectura</button>
     </div>
   );
 }
 
-function TaskRow({ project, task, selected, stale, isActiveKey, registerRef, onKeyDown, onFocus, onActivate }) {
+function TaskRow({ project, task, selected, stale, position, setSize, isActiveKey, registerRef, onKeyDown, onFocus, onActivate }) {
   const metaId = useId();
   const key = taskKey(project.id, task.id);
   const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
@@ -251,6 +255,8 @@ function TaskRow({ project, task, selected, stale, isActiveKey, registerRef, onK
     <li
       role="treeitem"
       aria-level={2}
+      aria-posinset={position}
+      aria-setsize={setSize}
       aria-selected={selected}
       aria-label={`${stale ? 'Datos desactualizados. ' : ''}${task.title || task.id}. ${statusLabel}`}
       aria-describedby={metaId}
@@ -301,7 +307,7 @@ function TaskRow({ project, task, selected, stale, isActiveKey, registerRef, onK
   );
 }
 
-function ProjectRow({ project, expanded, selected, context, isActiveKey, registerRef, onKeyDown, onFocus, onActivate, children }) {
+function ProjectRow({ project, expanded, selected, context, position, setSize, isActiveKey, registerRef, onKeyDown, onFocus, onActivate, children }) {
   const metaId = useId();
   const key = projectKey(project.id);
   const statusLabel = PROJECT_STATUS_LABELS[project.status] || project.status || 'Sin estado agregado';
@@ -318,6 +324,8 @@ function ProjectRow({ project, expanded, selected, context, isActiveKey, registe
     <li
       role="treeitem"
       aria-level={1}
+      aria-posinset={position}
+      aria-setsize={setSize}
       aria-expanded={expanded}
       aria-selected={selected}
       aria-label={accessibleName}
@@ -416,6 +424,7 @@ function ProjectTasks({
   const pagingFocusRef = useRef(false);
   const pagingRequestActiveRef = useRef(false);
   const loadMoreButtonRef = useRef(null);
+  const pageRetryButtonRef = useRef(null);
   const headFailed = failureStatuses.has(head.status);
   const headFailedRef = useRef(headFailed);
   headFailedRef.current = headFailed;
@@ -424,7 +433,11 @@ function ProjectTasks({
 
   useEffect(() => {
     const clearPagingFocusOnOtherTarget = (event) => {
-      if (event.target !== loadMoreButtonRef.current && event.target !== document.body) pagingFocusRef.current = false;
+      if (
+        event.target !== loadMoreButtonRef.current
+        && event.target !== pageRetryButtonRef.current
+        && event.target !== document.body
+      ) pagingFocusRef.current = false;
     };
     document.addEventListener('focusin', clearPagingFocusOnOtherTarget);
     return () => document.removeEventListener('focusin', clearPagingFocusOnOtherTarget);
@@ -439,29 +452,31 @@ function ProjectTasks({
     };
   }, [pageKey]);
 
-  // Si el Core deja de responder, los cursores del proceso anterior dejan de ser válidos (LXO-91).
+  // Si la cabecera falla, no se encadenan sus cursores; conserva las páginas ya cargadas como stale.
   useEffect(() => {
     if (!headFailed) return;
     pageRequestRef.current = null;
     setPages((current) => {
       if (current.key !== pageKey) return current;
-      if (current.items.length === 0) return current.loading ? { ...current, loading: false } : current;
-      return emptyPageState(current.key);
+      if (current.items.length === 0 && current.pageCount === 0) {
+        return current.loading ? { ...current, loading: false } : current;
+      }
+      return { ...current, loading: false, stale: true };
     });
   }, [headFailed, pageKey]);
 
-  // Nunca se leen páginas de otro filtro ni de una cabecera que dejó de ser válida.
-  const currentPages = !headFailed && pages.key === pageKey ? pages : EMPTY_PAGE;
+  // Nunca se leen páginas de otro filtro; las de la última cabecera siguen visibles como stale.
+  const currentPages = pages.key === pageKey ? pages : EMPTY_PAGE;
   const headTasks = head.data?.tasks ?? [];
   const headTaskIds = useMemo(() => new Set(headTasks.map((task) => task.id)), [headTasks]);
   const tasks = useMemo(() => {
     return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder);
   }, [headTasks, currentPages.items]);
   const staleTaskIds = useMemo(() => new Set(
-    currentPages.stale
+    (currentPages.stale || headFailed)
       ? currentPages.items.filter((task) => !headTaskIds.has(task.id)).map((task) => task.id)
       : [],
-  ), [currentPages.items, currentPages.stale, headTaskIds]);
+  ), [currentPages.items, currentPages.stale, headFailed, headTaskIds]);
 
   const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
   useEffect(() => {
@@ -568,6 +583,11 @@ function ProjectTasks({
     && !currentPages.stale
     && (currentPages.pageCount > 0 ? currentPages.hasMore : Boolean(headCursor));
 
+  const hasMoreTasks = currentPages.pageCount > 0
+    ? currentPages.hasMore
+    : Boolean(head.data?.has_more);
+  const taskSetSize = (headFailed || currentPages.stale || hasMoreTasks) ? -1 : tasks.length;
+
   const loadMore = useCallback(async () => {
     if (pageRequestRef.current || !moreCursor || currentPages.stale) return;
     const requestedKey = pageKey;
@@ -654,13 +674,20 @@ function ProjectTasks({
 
   return (
     <>
-      <Feedback state={head} subject={`las Tasks de ${projectName}`} />
+      <Feedback
+        state={head}
+        subject={`las Tasks de ${projectName}`}
+        onRetry={(event) => {
+          if (event.currentTarget === document.activeElement) focusItem(projectKey(projectId));
+        }}
+      />
 
       {currentPages.stale && (
         <div className="ps__state ps__state--stale" role="status" data-testid={`stale-task-pages-${projectId}`}>
           <span>
-            La primera página de {projectName} se actualizó. Las páginas adicionales provienen de lecturas
-            independientes anteriores y pueden tener estados o títulos desactualizados.
+            {headFailed
+              ? `Core no confirmó la cabecera de Tasks de ${projectName}. Se conservan las páginas adicionales de la última lectura correcta y pueden estar desactualizadas.`
+              : `La primera página de ${projectName} se actualizó. Las páginas adicionales provienen de lecturas independientes anteriores y pueden tener estados o títulos desactualizados.`}
           </span>
           {currentPages.loading && <span>Actualizando las páginas cargadas de {projectName}…</span>}
           {currentPages.error && (
@@ -679,7 +706,7 @@ function ProjectTasks({
           aria-label={`Tasks de ${project.name || projectId} · ${statusView.label}`}
           aria-busy={currentPages.loading || head.status === 'refreshing'}
         >
-          {tasks.map((task) => {
+          {tasks.map((task, index) => {
             const key = taskKey(projectId, task.id);
             return (
               <TaskRow
@@ -688,6 +715,8 @@ function ProjectTasks({
                 task={task}
                 selected={task.id === selectedTaskId && selectedTaskProjectId === projectId}
                 stale={staleTaskIds.has(task.id)}
+                position={index + 1}
+                setSize={taskSetSize}
                 isActiveKey={isActiveKey(key)}
                 registerRef={registerRef}
                 onKeyDown={onKeyDown}
@@ -706,7 +735,7 @@ function ProjectTasks({
         </div>
       )}
 
-      {(canLoadMore || currentPages.stale) && (
+      {(canLoadMore || (currentPages.stale && !headFailed)) && (
         <button
           ref={loadMoreButtonRef}
           type="button"
@@ -714,7 +743,12 @@ function ProjectTasks({
           onFocus={() => { pagingFocusRef.current = true; }}
           onBlur={(event) => {
             const nextTarget = event.relatedTarget;
-            if (nextTarget && nextTarget !== document.body && nextTarget !== loadMoreButtonRef.current) {
+            if (
+              nextTarget
+              && nextTarget !== document.body
+              && nextTarget !== loadMoreButtonRef.current
+              && nextTarget !== pageRetryButtonRef.current
+            ) {
               pagingFocusRef.current = false;
             } else if (!pagingRequestActiveRef.current) {
               pagingFocusRef.current = false;
@@ -746,8 +780,23 @@ function ProjectTasks({
           <span>No se pudo cargar la siguiente página de Tasks. {describeCoreError(currentPages.error)}</span>
           <code>{currentPages.error}</code>
           <button
+            ref={pageRetryButtonRef}
             type="button"
             className="lk"
+            onFocus={() => { pagingFocusRef.current = true; }}
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (
+                nextTarget
+                && nextTarget !== document.body
+                && nextTarget !== loadMoreButtonRef.current
+                && nextTarget !== pageRetryButtonRef.current
+              ) {
+                pagingFocusRef.current = false;
+              } else if (!pagingRequestActiveRef.current) {
+                pagingFocusRef.current = false;
+              }
+            }}
             onClick={loadMore}
             aria-label={`Reintentar carga de Tasks de ${projectName}`}
           >Reintentar lectura</button>
@@ -792,6 +841,7 @@ export function ProjectsSidebar({
   const [taskIdsByProject, setTaskIdsByProject] = useState({});
   const [activeKey, setActiveKey] = useState(null);
   const itemRefs = useRef(new Map());
+  const firstFilterInputRef = useRef(null);
 
   const overview = useCoreQuery('projects_overview', { archived }, { enabled: active, pollMs });
   const projects = overview.data?.projects ?? [];
@@ -943,6 +993,7 @@ export function ProjectsSidebar({
           {TASK_STATUS_VIEWS.map((view) => (
             <label key={view.code} className={`ps__radio${statusView.code === view.code ? ' is-active' : ''}`}>
               <input
+                ref={view.code === 'active' ? firstFilterInputRef : undefined}
                 type="radio"
                 name={statusFilterName}
                 value={view.code}
@@ -961,7 +1012,15 @@ export function ProjectsSidebar({
         </p>
       )}
 
-      <Feedback state={overview} subject="Projects" />
+      <Feedback
+        state={overview}
+        subject="Projects"
+        onRetry={(event) => {
+          if (event.currentTarget !== document.activeElement) return;
+          if (visibleKeys[0]) focusItem(visibleKeys[0]);
+          else firstFilterInputRef.current?.focus();
+        }}
+      />
 
       {selectedProjectMissing && (
         <div className="ps__state ps__state--muted" role="status">
@@ -978,7 +1037,7 @@ export function ProjectsSidebar({
           aria-label="Projects y Tasks del Core"
           aria-busy={overview.status === 'refreshing'}
         >
-          {projects.map((project) => {
+          {projects.map((project, index) => {
             const isExpanded = expanded.has(project.id);
             return (
               <ProjectRow
@@ -987,6 +1046,8 @@ export function ProjectsSidebar({
                 expanded={isExpanded}
                 selected={project.id === selected.projectId && !selected.taskId}
                 context={project.id === selected.projectId && Boolean(selected.taskId)}
+                position={index + 1}
+                setSize={projects.length}
                 isActiveKey={projectKey(project.id) === effectiveActiveKey}
                 registerRef={registerItem}
                 onKeyDown={onTreeKeyDown}
