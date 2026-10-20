@@ -40,32 +40,35 @@ const CONTRACT: u64 = 1;
 const FLAGS: [&str; 5] = ["archived", "all", "machine", "json", "help"];
 
 #[derive(Debug, PartialEq, Eq)]
-enum Failure {
+pub(super) enum Failure {
     Internal(String),
     Usage(String),
     Auth(String),
     Version(String),
     Unavailable(String),
+    NotFound(String),
 }
 
 impl Failure {
-    fn code(&self) -> (&'static str, u8) {
+    pub(super) fn code(&self) -> (&'static str, u8) {
         match self {
             Failure::Internal(_) => ("internal", 1),
             Failure::Usage(_) => ("usage", 2),
             Failure::Auth(_) => ("authentication", 3),
             Failure::Version(_) => ("version", 4),
             Failure::Unavailable(_) => ("core_unavailable", 5),
+            Failure::NotFound(_) => ("not_found", 6),
         }
     }
 
-    fn message(&self) -> &str {
+    pub(super) fn message(&self) -> &str {
         match self {
             Failure::Internal(m)
             | Failure::Usage(m)
             | Failure::Auth(m)
             | Failure::Version(m)
-            | Failure::Unavailable(m) => m,
+            | Failure::Unavailable(m)
+            | Failure::NotFound(m) => m,
         }
     }
 }
@@ -75,7 +78,7 @@ enum Request {
     Overview(Map<String, Value>),
 }
 
-fn usage(message: impl Into<String>) -> Failure {
+pub(super) fn usage(message: impl Into<String>) -> Failure {
     Failure::Usage(message.into())
 }
 
@@ -125,7 +128,7 @@ fn parse(a: &Args) -> Result<Request, Failure> {
 }
 
 /// Traduce los fallos del transporte y del Core a mensaje y código de salida.
-fn failure(error: RpcFailure) -> Failure {
+pub(super) fn failure(error: RpcFailure) -> Failure {
     match error {
         RpcFailure::Transport(EventRequestFailure::Network(m))
         | RpcFailure::Transport(EventRequestFailure::CoreUnavailable(m)) => Failure::Unavailable(m),
@@ -291,7 +294,12 @@ fn execute(request: Request, json: bool) -> Result<(), Failure> {
 
 pub(super) fn run(a: &Args) -> ExitCode {
     let json = a.b("json");
-    match parse(a).and_then(|request| execute(request, json)) {
+    finish(parse(a).and_then(|request| execute(request, json)), json)
+}
+
+/// Código de salida y error (en JSON por stderr con `--json`) de un comando de lectura.
+pub(super) fn finish(result: Result<(), Failure>, json: bool) -> ExitCode {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(failure) => {
             let (code, exit) = failure.code();
