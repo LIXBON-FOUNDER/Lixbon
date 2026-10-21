@@ -2052,6 +2052,89 @@ describe('ProjectsSidebar', () => {
     expect(screen.getByTestId('projects-sidebar').getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('publica idle explícito, sin loading perpetuo, mientras la vista está inactiva', async () => {
+    const onProjectSnapshot = vi.fn();
+    const calls = mountCore({ overviews: () => overview([project('project-a', 'Alpha')]) });
+    render(
+      <ProjectsSidebar
+        active={false}
+        selection={{ projectId: 'project-a', taskId: null }}
+        onProjectSnapshot={onProjectSnapshot}
+      />,
+    );
+    await flush();
+
+    expect(calls).toEqual([]);
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith({
+      projectId: 'project-a', queryState: 'idle', project: null, error: null, reason: null,
+    });
+    expect(onProjectSnapshot.mock.calls.map(([snapshot]) => snapshot.queryState)).not.toContain('loading');
+  });
+
+  it('al reactivarse no publica la lectura previa como vigente y conserva foco y selección', async () => {
+    const onProjectSnapshot = vi.fn();
+    const onSelectProject = vi.fn();
+    const onSelectTask = vi.fn();
+    const refresh = deferred();
+    let reads = 0;
+    const calls = mountCore({
+      overviews: () => {
+        reads += 1;
+        return reads === 1 ? overview([project('project-a', 'Alpha')]) : refresh.promise;
+      },
+    });
+    const selection = { projectId: 'project-a', taskId: null };
+    const props = { selection, onProjectSnapshot, onSelectProject, onSelectTask };
+    const { rerender } = render(
+      <>
+        <input aria-label="Foco externo" />
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
+    await screen.findByRole('treeitem', { name: /Alpha/ });
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ queryState: 'ready' })));
+    const external = screen.getByLabelText('Foco externo');
+    external.focus();
+
+    rerender(
+      <>
+        <input aria-label="Foco externo" />
+        <ProjectsSidebar active={false} {...props} />
+      </>,
+    );
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith({
+      projectId: 'project-a', queryState: 'idle', project: null, error: null, reason: null,
+    });
+    expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(1);
+
+    onProjectSnapshot.mockClear();
+    rerender(
+      <>
+        <input aria-label="Foco externo" />
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
+    await flush();
+
+    // Reactivar dispara una lectura nueva; mientras llega, solo se publica `refreshing`, nunca `ready` previo.
+    expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(2);
+    expect(onProjectSnapshot.mock.calls.map(([snapshot]) => snapshot.queryState)).toEqual(['refreshing']);
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', project: expect.objectContaining({ projectId: 'project-a', name: 'Alpha' }),
+    }));
+
+    refresh.resolve(overview([project('project-a', 'Alpha renombrado')]));
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      queryState: 'ready',
+      project: expect.objectContaining({ projectId: 'project-a', name: 'Alpha renombrado' }),
+    })));
+    expect(document.activeElement).toBe(external);
+    expect(onSelectProject).not.toHaveBeenCalled();
+    expect(onSelectTask).not.toHaveBeenCalled();
+  });
+
   it('transporta el filtro archived al overview', async () => {
     const calls = mountCore({ overviews: (args) => overview([], { archived: args.archived }) });
     render(<ProjectsSidebar archived="only" />);
