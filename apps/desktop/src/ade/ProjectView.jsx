@@ -43,6 +43,8 @@ import './ProjectView.css';
  *                    «inventario no disponible» (LXO-93 está en Backlog); no se inventan filas.
  *
  *  Estados de slice: 'ready' | 'loading' | 'error' | 'partial' | 'degraded' | 'unavailable'.
+ *  Un slice 'loading' con `refreshing: true` es una relectura sana de datos ya cargados: el aviso dice
+ *  «Actualizando desde Core.» en lugar de «Cargando…» y no se presenta como dato desactualizado.
  *  Cualquier otro valor (o slice ausente) se pinta como estado desconocido / no disponible.
  *  Con 'error', 'unavailable' o estado desconocido NO se pintan los items (no son fiables);
  *  con 'loading', 'partial' y 'degraded' sí, junto al aviso.
@@ -124,6 +126,7 @@ function normalizeSlice(slice) {
     state: typeof slice.state === 'string' ? slice.state : 'unknown',
     items: Array.isArray(slice.items) ? slice.items : [],
     message: typeof slice.message === 'string' && slice.message ? slice.message : null,
+    refreshing: slice.refreshing === true,
     supplied: true,
   };
 }
@@ -138,7 +141,9 @@ function scopeToProject(items, projectId) {
 function SliceNotice({ slice }) {
   const known = SLICE_NOTICE[slice.state];
   if (slice.state === 'ready') return null;
-  const notice = known || { role: 'status', text: `Estado desconocido («${slice.state}»): no se puede fiar de esta sección.` };
+  const notice = slice.state === 'loading' && slice.refreshing
+    ? { role: 'status', text: 'Actualizando desde Core.' }
+    : known || { role: 'status', text: `Estado desconocido («${slice.state}»): no se puede fiar de esta sección.` };
   return (
     <p className={`pv__notice pv__notice--${known ? slice.state : 'unknown'}`} role={notice.role} aria-busy={slice.state === 'loading' ? 'true' : undefined} data-testid="slice-notice">
       {notice.text}{slice.message ? ` ${slice.message}` : ''}
@@ -209,8 +214,8 @@ function Locations({ slice, headingId }) {
 
 function Summary({ summary, headingId }) {
   const slice = summary && typeof summary === 'object'
-    ? { state: typeof summary.state === 'string' ? summary.state : 'unknown', message: typeof summary.message === 'string' && summary.message ? summary.message : null }
-    : { state: 'unavailable', message: null };
+    ? { state: typeof summary.state === 'string' ? summary.state : 'unknown', message: typeof summary.message === 'string' && summary.message ? summary.message : null, refreshing: summary.refreshing === true }
+    : { state: 'unavailable', message: null, refreshing: false };
   const counts = summary?.counts && typeof summary.counts === 'object' ? summary.counts : {};
   return (
     <Section title="Resumen de Core" headingId={headingId} note="Contadores autoritativos suministrados por Core. Esta vista no los calcula.">

@@ -7,38 +7,40 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
 import { JumpPaletteHost } from './JumpPaletteHost';
+import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
 import './TaskWorkspace.css';
 
-const STATUS_LABELS = {
-  starting: 'Iniciando',
-  running: 'En ejecución',
-  waiting: 'Esperando',
-  awaiting_terminal_approval: 'Esperando aprobación de terminal',
-  done: 'Terminada',
-  failed: 'Fallida',
-  stopped: 'Detenida',
-  exited: 'Cerrada',
-};
-
-function describeCoreError(error) {
-  if (/(_unavailable|degraded|almac[eé]n.*no disponible)/i.test(error)) return 'Core no tiene un almacén autoritativo disponible.';
-  if (/(_auth_required|authentication|unauthorized)/i.test(error)) return 'Core no pudo autenticar esta lectura.';
-  if (/(_not_found)/i.test(error)) return 'El Project o la Task ya no está disponible con ese ID.';
-  if (/(_read_failed|_internal)/i.test(error)) return 'Core no pudo leer este dato.';
-  if (/(disconnected|connection|transport|timeout|ipc.*closed)/i.test(error)) return 'No se pudo completar la conexión con Core.';
-  return 'Core devolvió un error al leer este dato.';
-}
-
 function projectViewQueryState(query) {
   if (query.status === 'ready' || query.status === 'empty') return 'ready';
-  if (query.status === 'loading' || query.status === 'refreshing') return 'loading';
+  if (query.status === 'idle' || query.status === 'loading' || query.status === 'refreshing') return 'loading';
   if (query.status === 'stale' || query.status === 'degraded') return 'degraded';
   if (query.status === 'error' || query.status === 'disconnected') return 'error';
+  if (query.status === 'missing') return 'unavailable';
   return 'unavailable';
+}
+
+function projectQueryMessage(query) {
+  if (query.status === 'stale') {
+    const cause = {
+      disconnected: 'Core desconectado',
+      degraded: 'Core degradado',
+      error: 'Core con error',
+    }[query.reason];
+    return `Datos desactualizados${cause ? ` (${cause})` : ''}; se conserva la última respuesta. ${query.error || ''}`.trim();
+  }
+  // `refreshing` no lleva mensaje: ProjectView lo pinta como «Actualizando desde Core.» mediante el flag.
+  if (query.status === 'refreshing') return null;
+  const sourceLabel = {
+    disconnected: 'Core desconectado',
+    degraded: 'Core degradado',
+    error: 'Core con error',
+  }[query.status];
+  if (sourceLabel) return `${sourceLabel}. ${query.error || ''}`.trim();
+  return query.error || null;
 }
 
 function projectViewSlice(query, items, { hasMore = false } = {}) {
@@ -46,24 +48,23 @@ function projectViewSlice(query, items, { hasMore = false } = {}) {
   const state = queryState === 'ready' && hasMore ? 'partial' : queryState;
   const canShowItems = ['ready', 'partial', 'loading', 'degraded'].includes(state);
   const messages = [];
-  if (query.status === 'stale') {
-    messages.push(`Datos desactualizados; se conserva la última respuesta. ${query.error || ''}`.trim());
-  } else if (query.status === 'refreshing') {
-    messages.push('Actualizando desde Core.');
-  } else if (query.error) {
-    messages.push(query.error);
-  }
+  const queryMessage = projectQueryMessage(query);
+  if (queryMessage) messages.push(queryMessage);
   if (hasMore) messages.push('Core indica que hay más elementos después de esta página.');
   return {
     state,
+    ...(query.status === 'refreshing' ? { refreshing: true } : {}),
     items: canShowItems && Array.isArray(items) ? items : [],
     ...(messages.length ? { message: messages.join(' ') } : {}),
   };
 }
 
 function overviewUnavailableSlice(projects, subject) {
-  if (['ready', 'empty'].includes(projects.status)) {
+  if (['ready', 'empty', 'missing'].includes(projects.status)) {
     return { state: 'unavailable', items: [], message: `El Project seleccionado no aparece en el overview activo de Core; no hay ${subject} autoritativos para mostrar.` };
+  }
+  if (projects.status === 'unknown' || projects.status === 'unavailable') {
+    return { state: 'unavailable', items: [], message: `Core no confirmó metadata autoritativa para este Project; no hay ${subject} autoritativos para mostrar.` };
   }
   return projectViewSlice(projects, []);
 }
@@ -72,64 +73,6 @@ function locationLastSeen(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
-
-function QueryFeedback({ state, subject }) {
-  if (state.status === 'idle' || state.status === 'ready' || state.status === 'empty') return null;
-  if (state.status === 'loading') return <div className="ade__query-state" role="status">Conectando con Core para cargar {subject}…</div>;
-  if (state.status === 'refreshing') return null;
-  if (state.status === 'stale') {
-    return (
-      <div className="ade__query-state ade__query-state--stale" role="status">
-        <span>Datos desactualizados · Core {state.reason === 'disconnected' ? 'desconectado' : state.reason === 'degraded' ? 'degradado' : 'con error'}. Se conserva la última respuesta. {describeCoreError(state.error)}</span>
-        <code>{state.error}</code>
-        <button type="button" className="lk" onClick={state.retry}>Reintentar</button>
-      </div>
-    );
-  }
-  const title = state.status === 'disconnected' ? 'Core desconectado' : state.status === 'degraded' ? 'Core degradado' : 'Error de Core';
-  return (
-    <div className="ade__query-state ade__query-state--error" role="alert">
-      <strong>{title}</strong>
-      <span>{describeCoreError(state.error)}</span>
-      <code>{state.error}</code>
-      <button type="button" className="lk" onClick={state.retry}>Reintentar</button>
-    </div>
-  );
-}
-
-function CoreProjectButton({ project, selected, onSelect }) {
-  const idDescription = useId();
-  return (
-    <button
-      type="button"
-      className={`ade__project${selected ? ' is-active' : ''}`}
-      aria-label={project.name}
-      aria-describedby={idDescription}
-      aria-pressed={selected}
-      onClick={() => onSelect(project.id)}
-    >
-      <span className="ade__project-name">{project.name}</span>
-      <span id={idDescription} className="ade__durable-id mono">{project.id}</span>
-    </button>
-  );
-}
-
-function CoreTaskButton({ task, selected, onSelect }) {
-  const idDescription = useId();
-  return (
-    <button
-      type="button"
-      className={`ade__task${selected ? ' is-active' : ''}`}
-      aria-label={task.title}
-      aria-describedby={idDescription}
-      aria-pressed={selected}
-      onClick={() => onSelect(task.id)}
-    >
-      <span className="ade__task-name">{task.title}</span>
-      <span className="ade__task-meta"><span>{STATUS_LABELS[task.status] || task.status}</span><span id={idDescription} className="ade__durable-id mono">{task.id}</span></span>
-    </button>
-  );
 }
 
 const WORKSPACE_VIEWS = [
@@ -193,7 +136,7 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
 }
 
 // Activity y Attention las sirve este shell (ActivityPanel / AttentionInbox). El enlace Activity de la Task abre la
-// subvista Activity con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
+// subvista con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
 // `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
 // ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
 export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
@@ -204,6 +147,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [activityScopePref, setActivityScopePref] = useState(null);
   const [activityNotice, setActivityNotice] = useState(null);
   const [activityFocusSeq, setActivityFocusSeq] = useState(0);
+  const [projectSnapshot, setProjectSnapshot] = useState(null);
   const targetSeq = useRef(0);
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
@@ -214,13 +158,15 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const selectedTaskId = adeSelection.taskId;
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
-  const projects = useCoreQuery('projects_overview', { archived: 'exclude' });
-  const tasks = useCoreQuery('tasks_by_project', {
-    project_id: selectedProjectId,
-    status: 'active',
-    limit: 50,
-  }, { enabled: Boolean(selectedProjectId) });
   const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
+  const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
+  const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
+  const projectOverview = {
+    status: currentProjectSnapshot?.queryState ?? (selectedProjectId ? 'loading' : 'unknown'),
+    data: currentProjectSnapshot?.project ? { projects: [currentProjectSnapshot.project] } : null,
+    error: currentProjectSnapshot?.error ?? null,
+    reason: currentProjectSnapshot?.reason ?? null,
+  };
   const projectTasks = useCoreQuery('tasks_by_project', {
     project_id: selectedProjectId,
     status: 'all',
@@ -233,18 +179,17 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     project_id: selectedProjectId,
     task_id: selectedTaskId,
   }, { enabled: Boolean(selectedProjectId) && Boolean(selectedTaskId) });
-  const selectedProject = projects.data?.projects.find((project) => project.id === selectedProjectId) ?? null;
-  const selectedProjectInOverview = projects.data?.projects.some((project) => project.id === selectedProjectId);
-  const selectedProjectMissing = selectedProjectId && ['ready', 'empty'].includes(projects.status) && !selectedProjectInOverview;
-  const selectedTaskMissingFromCompletePage = selectedTaskId && tasks.data && !tasks.data.has_more
-    && !tasks.data.tasks.some((item) => item.id === selectedTaskId);
+  const selectedProject = currentProjectSnapshot?.projectId === selectedProjectId
+    ? currentProjectSnapshot.project
+    : null;
 
-  // El alcance de Activity sale solo de los IDs durables seleccionados; nombre/título son rótulo, no identidad.
+  // Activity toma su alcance solo de IDs durables. Título y nombre son rótulos y se aceptan únicamente
+  // cuando la respuesta corresponde a la selección actual.
   const activityScopeKind = resolveActivityScope(activityScopePref, selectedProjectId, selectedTaskId);
   const detailTask = detail.data?.task;
-  const selectedTaskTitle = (detailTask?.id === selectedTaskId && detailTask?.project_id === selectedProjectId
+  const selectedTaskTitle = detailTask?.id === selectedTaskId && detailTask?.project_id === selectedProjectId
     ? detailTask.title
-    : tasks.data?.tasks.find((item) => item.id === selectedTaskId)?.title) ?? null;
+    : null;
   const selectedProjectName = selectedProject?.name ?? null;
   const activityScope = useMemo(() => {
     if (activityScopeKind === 'task') {
@@ -256,7 +201,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     return { kind: 'global' };
   }, [activityScopeKind, selectedProjectId, selectedTaskId, selectedProjectName, selectedTaskTitle]);
 
-  const overviewState = projectViewQueryState(projects);
+  const overviewState = projectViewQueryState(projectOverview);
   const projectLocations = Array.isArray(selectedProject?.locations)
     ? selectedProject.locations.map((location) => ({
       machine: location.machine,
@@ -267,10 +212,10 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     }))
     : null;
   const projectLocationSlice = projectLocations
-    ? projectViewSlice(projects, projectLocations)
+    ? projectViewSlice(projectOverview, projectLocations)
     : selectedProject
-      ? { state: overviewState === 'ready' ? 'unknown' : overviewState, items: [], message: 'Core no incluyó ubicaciones en el overview de este Project.' }
-      : overviewUnavailableSlice(projects, 'ubicaciones');
+      ? { state: overviewState === 'ready' ? 'unknown' : overviewState, ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}), items: [], message: 'Core no incluyó ubicaciones en el overview de este Project.' }
+      : overviewUnavailableSlice(projectOverview, 'ubicaciones');
   const projectCounts = selectedProject?.counts && typeof selectedProject.counts === 'object'
     ? selectedProject.counts
     : null;
@@ -278,6 +223,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     state: selectedProject
       ? projectCounts ? overviewState : overviewState === 'ready' ? 'unknown' : overviewState
       : overviewState === 'ready' ? 'unavailable' : overviewState,
+    ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}),
     counts: {
       tasks: projectCounts?.tasks ?? null,
       attempts: null,
@@ -285,7 +231,11 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       resources: null,
     },
     ...(!selectedProject
-      ? { message: 'El Project seleccionado no aparece en el overview activo de Core.' }
+      ? { message: ['unknown', 'unavailable'].includes(projectOverview.status)
+        ? 'Core no confirmó metadata autoritativa para este Project.'
+        : ['ready', 'empty', 'missing'].includes(projectOverview.status)
+          ? 'El Project seleccionado no aparece en el overview activo de Core.'
+          : projectQueryMessage(projectOverview) || 'No hay metadata autoritativa para este Project.' }
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
   const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
@@ -303,15 +253,22 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     : [];
   const projectAttentionSlice = projectViewSlice(projectAttention, projectAttentionItems, { hasMore: projectAttention.data?.has_more === true });
 
-  const selectProject = (projectId) => {
+  const selectProject = (project) => {
+    const projectId = typeof project === 'string' ? project : project?.projectId;
+    if (typeof projectId !== 'string' || !projectId.trim()) return;
     if (projectId !== selectedProjectId || selectedTaskId !== null) {
       setAdeSelection({ projectId, taskId: null });
     }
     setWorkspaceView('workspace');
     onActivate?.();
   };
-  const selectTask = (taskId) => {
-    setAdeSelection({ projectId: selectedProjectId, taskId });
+  const selectTask = (task, context) => {
+    const projectId = typeof task === 'string'
+      ? selectedProjectId
+      : task?.projectId ?? context?.projectId ?? selectedProjectId;
+    const taskId = typeof task === 'string' ? task : task?.taskId ?? context?.taskId ?? null;
+    if (typeof projectId !== 'string' || !projectId.trim()) return;
+    setAdeSelection({ projectId, taskId: typeof taskId === 'string' && taskId.trim() ? taskId : null });
     setWorkspaceView('workspace');
     onActivate?.();
   };
@@ -320,6 +277,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     if (view !== 'attention') setAttentionNotice(null);
     if (view !== 'activity') setActivityNotice(null);
   };
+
   const openTaskActivity = (target) => {
     if (target?.projectId === selectedProjectId && target?.taskId === selectedTaskId) {
       setActivityScopePref('task');
@@ -329,22 +287,20 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     }
     onOpenTaskActivity?.(target);
   };
+
   // Foco solo tras la acción explícita de la Task: el TaskWorkspace queda oculto y el foco pasa a la pestaña Activity.
   useEffect(() => {
     if (activityFocusSeq > 0) document.getElementById(`${viewIds}-tab-activity`)?.focus();
   }, [activityFocusSeq, viewIds]);
-  // Destinos de Activity: solo por (kind, ID durable). Una Task se abre únicamente si está seleccionada o aparece
-  // en las Tasks del Project seleccionado, porque el evento no trae el Project y no se infiere ni se adivina.
+
+  // La navegación de Activity usa el ID exacto. Para una Task no seleccionada se conserva la comprobación
+  // de pertenencia a la página autoritativa ya cargada; el ID por sí solo no permite adivinar su Project.
   const openActivityTarget = ({ kind, id }) => {
     setActivityNotice(null);
     if (kind === 'project') {
-      if (!projects.data?.projects.some((project) => project.id === id)) {
-        setActivityNotice(`El Project ${id} no aparece en el overview activo de Core.`);
-        return;
-      }
       selectProject(id);
     } else if (kind === 'task') {
-      if (id === selectedTaskId || tasks.data?.tasks.some((item) => item.id === id)) {
+      if (id === selectedTaskId || projectTasks.data?.tasks.some((item) => item.id === id)) {
         selectTask(id);
       } else {
         setActivityNotice(`La Task ${id} no se puede abrir desde Activity: el evento no identifica su Project.`);
@@ -454,28 +410,12 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
-              <div className="ade__nav-section-head"><span>Projects</span><span className="ade__source">Core</span></div>
-              <QueryFeedback state={projects} subject="Projects" />
-              {selectedProjectMissing && <div className="ade__notice" role="status">El Project seleccionado ya no aparece en el overview activo. Se conserva la selección; elige otro Project para cambiar de contexto.</div>}
-              {projects.status === 'empty' && <div className="changes__empty">No hay Projects registrados.</div>}
-              {projects.data?.projects.map((project) => (
-                <CoreProjectButton key={project.id} project={project} selected={active && project.id === selectedProjectId} onSelect={selectProject} />
-              ))}
-
-              {selectedProjectId && (
-                <section className="ade__task-list" aria-label={`Tasks del Project ${selectedProjectId}`}>
-                  <div className="ade__section-head">
-                    <span>Tasks activas</span>
-                    <span className="ade__durable-id mono" title="Project ID">{selectedProjectId}</span>
-                  </div>
-                  <QueryFeedback state={tasks} subject="Tasks" />
-                  {tasks.status === 'empty' && <div className="changes__empty">Este Project no tiene Tasks activas.</div>}
-                  {tasks.data?.tasks.map((item) => (
-                    <CoreTaskButton key={item.id} task={item} selected={active && item.id === selectedTaskId} onSelect={selectTask} />
-                  ))}
-                  {tasks.data?.has_more && <div className="ade__partial" role="status">Vista parcial: hay más Tasks después de esta página.</div>}
-                </section>
-              )}
+              <ProjectsSidebar
+                selection={{ projectId: selectedProjectId, taskId: selectedTaskId }}
+                onSelectProject={selectProject}
+                onSelectTask={selectTask}
+                onProjectSnapshot={onProjectSnapshot}
+              />
             </section>
             {operationNavigation && (
               <div className="ade__nav-scroll-region ade__nav-operation-scroll" role="region" aria-label="Navegación de Operación" tabIndex={0}>
@@ -523,7 +463,6 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
               )}
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
-                  {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
                   <TaskWorkspace {...workspaceProps} variant="workspace" />
                 </div>
               )}

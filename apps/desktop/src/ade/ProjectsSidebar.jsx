@@ -173,6 +173,31 @@ export function toProjectSummary(project) {
   };
 }
 
+function toProjectViewSummary(project) {
+  if (!project) return null;
+  const summary = { id: project.id, projectId: project.id };
+  for (const field of ['name', 'state', 'status', 'counts', 'locations']) {
+    if (Object.hasOwn(project, field)) summary[field] = project[field];
+  }
+  return summary;
+}
+
+function selectedProjectQueryState(overview, project, projectId) {
+  // `idle` es una consulta sin habilitar (sección inactiva), no una carga pendiente: no se disfraza de `loading`.
+  if (overview.status === 'idle') return 'idle';
+  if (overview.status === 'loading') return 'loading';
+  if (overview.status === 'refreshing') return 'refreshing';
+  if (overview.status === 'stale') return 'stale';
+  if (['error', 'disconnected', 'degraded'].includes(overview.status)) return overview.status;
+  if (overview.status === 'empty') return projectId ? 'missing' : 'empty';
+  if (overview.status === 'ready') {
+    return project && project.id === projectId ? 'ready' : projectId ? 'missing' : 'unknown';
+  }
+  return 'unknown';
+}
+
+/** @typedef {{id: string, projectId: string, name?: string, state?: string, status?: string, counts?: object, locations?: object[]}} ProjectViewSummary */
+
 /**
  * @typedef {object} TaskSummary
  * @property {string} taskId ID durable de la Task; es la identidad.
@@ -352,8 +377,9 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
       onClick={(event) => {
         // Los controles anidados (Cargar más, Reintentar lectura) no activan la fila del Project.
         if (event.target.closest?.('button, input, select, textarea, a')) return;
-        // El espacio vacío de la fila es inerte; solo activan el nombre/ID/chevron visibles.
-        if (!event.target.closest?.('.ps__line > *')) return;
+        // La tarjeta del Project (nombre, metadatos y su espacio libre) es un único target.
+        // El contenido de Tasks, estados y avisos anidados conserva su propia interacción.
+        if (event.target.closest?.('.ps__tasks, .ps__state, .ps__empty, .ps__item--task')) return;
         onActivate(project);
       }}
     >
@@ -622,6 +648,9 @@ function ProjectTasks({
   const loadMore = useCallback(async ({ automatic = false } = {}) => {
     if (pageRequestRef.current || !moreCursor || currentPages.stale) return;
     if (automatic && !pendingTaskId) return;
+    if (!automatic && (document.activeElement === loadMoreButtonRef.current || document.activeElement === pageRetryButtonRef.current)) {
+      pagingFocusRef.current = true;
+    }
     const requestedKey = pageKey;
     const request = {
       id: ++pageRequestSequence.current,
@@ -702,7 +731,7 @@ function ProjectTasks({
     onTaskLookupComplete(projectId, pendingTaskId);
   }, [allStatusReadComplete, onTaskLookupComplete, pendingTaskId, projectId, tasks]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (currentPages.loading) return;
     if (!pagingFocusRef.current) {
       pagingRequestActiveRef.current = false;
@@ -893,6 +922,8 @@ function ProjectTasks({
  * @param {(summary: ProjectSummary) => void} [props.onSelectProject] Se invoca al activar una fila de Project.
  * @param {(summary: TaskSummary | null, context?: {projectId: string, taskId: string | null}) => void} [props.onSelectTask]
  *   Se invoca al activar una Task; al cambiar a otro Project sin conservarla, con `null` y el contexto nuevo.
+ * @param {(snapshot: {projectId: string|null, queryState: 'idle'|'loading'|'refreshing'|'ready'|'stale'|'error'|'disconnected'|'degraded'|'missing'|'empty'|'unknown', project: ProjectViewSummary|null, error: string|null}) => void} [props.onProjectSnapshot]
+ *   Publica la metadata del Project que coincide con la selección controlada y el estado de su overview.
  * @returns {import('react').ReactElement}
  */
 export function ProjectsSidebar({
@@ -904,6 +935,7 @@ export function ProjectsSidebar({
   onExpandedChange,
   onSelectProject,
   onSelectTask,
+  onProjectSnapshot,
 }) {
   const headingId = useId();
   const statusFilterName = useId();
@@ -1179,6 +1211,36 @@ export function ProjectsSidebar({
   };
 
   const selectedProject = projects.find((project) => project.id === selected.projectId);
+  const projectViewSummary = useMemo(() => toProjectViewSummary(selectedProject), [selectedProject]);
+  const projectQueryState = selectedProjectQueryState(overview, selectedProject, selected.projectId);
+  // Al reactivarse, espera a que `useCoreQuery` inicie una lectura antes de volver a publicar una
+  // respuesta cacheada como vigente. Si la pestaña está oculta, el hook omite el refresco y el host
+  // conserva la metadata con estado stale hasta que una lectura empiece o termine.
+  const [queryResumed, setQueryResumed] = useState(active);
+  useEffect(() => {
+    if (!active) {
+      setQueryResumed(false);
+      return;
+    }
+    if (!['ready', 'empty'].includes(overview.status)) setQueryResumed(true);
+  }, [active, overview.status]);
+  const waitingForFreshQuery = active && !queryResumed;
+  const hiddenCachedResume = waitingForFreshQuery
+    && document.visibilityState === 'hidden'
+    && overview.data !== null;
+  const snapshotCurrent = !active || queryResumed || hiddenCachedResume;
+  const snapshotQueryState = hiddenCachedResume ? 'stale' : projectQueryState;
+  useEffect(() => {
+    if (!snapshotCurrent) return;
+    onProjectSnapshot?.({
+      projectId: selected.projectId,
+      queryState: snapshotQueryState,
+      project: projectViewSummary,
+      error: overview.error ?? null,
+      reason: overview.reason ?? null,
+    });
+  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId, snapshotCurrent, snapshotQueryState]);
+
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
   const isEmpty = overview.status === 'empty';
