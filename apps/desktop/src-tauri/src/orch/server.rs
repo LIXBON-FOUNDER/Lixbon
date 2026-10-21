@@ -718,6 +718,55 @@ mod authenticated_client_tests {
     }
 
     #[test]
+    fn http_rpc_activity_list_es_solo_para_person_autenticada() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let task = create_ui_task(&core, "activity HTTP task");
+        let person_secret = "person-activity-http-secret-at-least-32-bytes";
+        let agent_secret = "agent-activity-http-secret-at-least-32-bytes";
+        register(&core, ClientSurface::Cli, ClientPrincipal::Person("person-activity-http".into()), "install-person-activity-http", person_secret);
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent(task.clone()), "install-agent-activity-http", agent_secret);
+        let server = start(core).unwrap();
+
+        let (status, person) = post(server.port, person_secret, &json!({ "cmd": "activity_list", "args": { "limit": 50 } }));
+        assert_eq!(status, 200);
+        assert_eq!(person["ok"], true, "Person CLI lee Activity del Core local");
+        let data = &person["data"];
+        assert_eq!((data["v"].as_u64(), data["projection"].as_u64(), data["order"].as_str()), (Some(1), Some(1), Some("asc")));
+        let items = data["items"].as_array().unwrap();
+        assert!(!items.is_empty(), "crear el run dejó eventos");
+        let fields: std::collections::BTreeSet<_> = items[0].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            fields,
+            ["actor", "args", "class", "correlation_id", "event_id", "fallback", "kind", "message_key", "project_id", "provenance", "run_id", "seq", "target", "ts", "v", "visual"]
+                .into_iter()
+                .collect()
+        );
+        assert!(items.iter().any(|i| i["message_key"] == "activity.run.created"));
+        assert!(items.iter().all(|i| i["fallback"] == false), "los eventos reales no caen al respaldo");
+
+        let cursor = data["next_cursor"].as_i64().unwrap();
+        let (_, next) = post(server.port, person_secret, &json!({ "cmd": "activity_list", "args": { "cursor": cursor } }));
+        assert_eq!(next["ok"], true);
+        assert!(next["data"]["items"].as_array().unwrap().is_empty(), "retomar desde next_cursor no repite nada");
+        let (_, invalid) = post(server.port, person_secret, &json!({ "cmd": "activity_list", "args": { "kind": "task.created" } }));
+        assert_eq!(invalid["ok"], false);
+        assert!(invalid["error"].as_str().unwrap().contains("activity_invalid_request"));
+
+        let (status, agent) = post(server.port, agent_secret, &json!({ "cmd": "activity_list", "args": {} }));
+        assert_eq!(status, 200);
+        assert_eq!(agent["ok"], false, "un Agent no lee Activity");
+        assert!(agent["error"].as_str().unwrap().contains("activity_auth_required"));
+
+        let (status, legacy) = post(server.port, "legacy-shared-server-token-test-only-32-bytes", &json!({ "cmd": "activity_list", "caller": task, "args": {} }));
+        assert_eq!(status, 401, "el token legacy ya no autentica RPC");
+        assert_eq!(legacy["code"], "invalid_credential");
+        server.stop();
+    }
+
+    #[test]
     fn http_rpc_projects_overview_es_solo_para_person_autenticada() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
