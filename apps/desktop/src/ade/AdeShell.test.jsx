@@ -1053,6 +1053,9 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       args: { name: 'Repo Real', origin: 'auto' },
     });
     const taskDetailCalls = (taskId) => queryAdeCore.mock.calls.filter(([query, args]) => query === 'task_detail' && args.taskId === taskId);
+    const taskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls.filter(([query, args]) => (
+      query === 'task_detail' && args.projectId === projectId && args.taskId === taskId
+    ));
     // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
     const settle = async () => { for (let i = 0; i < 6; i += 1) await flush(); };
     // Toda lectura de `task_detail` del destino queda pendiente hasta que la prueba la resuelva.
@@ -1280,6 +1283,131 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       pending.resolve(detailOf({ id: targetTaskId, title: 'Task única' }));
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+    });
+
+    it('comparte la lectura en vuelo de A al navegar A/B/A por el mismo ID en Projects distintos', async () => {
+      const targetTaskId = 'task-activity-pair-dedup';
+      const secondProject = { ...PROJECT, id: 'project-uuid-2', name: 'Otro Repo' };
+      coreWithActivity([
+        activityItem(18, { target: { kind: 'task', id: targetTaskId }, project_id: PROJECT.id }),
+        activityItem(19, { target: { kind: 'task', id: targetTaskId }, project_id: secondProject.id }),
+      ]);
+      const pendingA = deferred();
+      const pendingB = deferred();
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation((query, args) => {
+        if (query === 'projects_overview') return {
+          v: 1, filters: { archived: args.archived, machine: null }, total: 2, projects: [PROJECT, secondProject], unassigned: {},
+        };
+        if (query === 'task_detail' && args.taskId === targetTaskId) {
+          if (args.projectId === PROJECT.id) return pendingA.promise;
+          if (args.projectId === secondProject.id) return pendingB.promise;
+        }
+        return base(query, args);
+      });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-19'));
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      await settle();
+
+      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(taskDetailCallsFor(secondProject.id, targetTaskId)).toHaveLength(1);
+      expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+
+      // La respuesta de B ya no es dueña de la navegación; A reutilizada sí lo es.
+      pendingB.resolve(detailOf({ ...ITEM, id: targetTaskId, project_id: secondProject.id, title: 'Task B' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+      expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+      pendingA.resolve(detailOf({ ...ITEM, id: targetTaskId, project_id: PROJECT.id, title: 'Task A' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+    });
+
+    it('reintenta tras timeout reutilizando task_detail pendiente y acepta la respuesta del intento vigente', async () => {
+      vi.useFakeTimers();
+      const targetTaskId = 'task-activity-timeout-retry';
+      coreWithActivity([activityItem(20, { target: { kind: 'task', id: targetTaskId } })]);
+      const pending = deferred();
+      withPendingTarget(targetTaskId, pending);
+      useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      await settle();
+      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      await settle();
+      expect(screen.getByText(`Core no respondió a tiempo al verificar la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      await settle();
+      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+
+      pending.resolve(detailOf({ ...ITEM, id: targetTaskId, title: 'Task tras reintento' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+      expect(screen.queryByText(/Core no respondió a tiempo al verificar la Task/)).toBeNull();
+    });
+
+    it('conserva la selección y avisa si task_detail devuelve otro task.id', async () => {
+      const targetTaskId = 'task-activity-id-mismatch';
+      coreWithActivity([activityItem(21, { target: { kind: 'task', id: targetTaskId } })]);
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation(async (query, args) => {
+        if (query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId) {
+          return detailOf({ ...ITEM, id: 'task-activity-different-id' });
+        }
+        return base(query, args);
+      });
+      const selection = { projectId: PROJECT.id, taskId: null };
+      useWorkbenchStore.setState({ adeSelection: selection });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-21'));
+
+      expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
+      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(useWorkbenchStore.getState().adeSelection).toEqual(selection);
+    });
+
+    it('conserva la selección y avisa si task_detail devuelve el task.id esperado con otro project_id', async () => {
+      const targetTaskId = 'task-activity-project-mismatch';
+      coreWithActivity([activityItem(22, { target: { kind: 'task', id: targetTaskId } })]);
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation(async (query, args) => {
+        if (query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId) {
+          return detailOf({ ...ITEM, id: targetTaskId, project_id: 'project-activity-different' });
+        }
+        return base(query, args);
+      });
+      const selection = { projectId: PROJECT.id, taskId: null };
+      useWorkbenchStore.setState({ adeSelection: selection });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-22'));
+
+      expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
+      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(useWorkbenchStore.getState().adeSelection).toEqual(selection);
     });
   });
 });
