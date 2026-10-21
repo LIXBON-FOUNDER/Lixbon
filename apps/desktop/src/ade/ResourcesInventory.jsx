@@ -490,32 +490,52 @@ function Row({ row }) {
  */
 const INVENTORY_STATUS_TEXT = {
   loading: { role: 'status', text: 'Cargando el inventario desde Core.' },
-  refreshing: { role: 'status', text: 'Actualizando el inventario desde Core; se muestra la última foto.' },
+  // `refreshing` es solo visual: un sondeo cada 15 s no debe anunciarse al lector de pantalla.
+  refreshing: { role: null, text: 'Actualizando el inventario desde Core; se muestra la última foto.' },
   stale: { role: 'status', text: 'Foto desactualizada: la última lectura de Core no terminó; se muestra la anterior.' },
   error: { role: 'alert', text: 'No se pudo leer el inventario de Core.' },
   disconnected: { role: 'alert', text: 'Core desconectado: no se puede leer el inventario.' },
   degraded: { role: 'status', text: 'Core responde degradado: el inventario puede no estar disponible.' },
 };
 const RETRYABLE_STATUS = new Set(['stale', 'error', 'disconnected', 'degraded']);
+/** Plazo agotado sin foto previa: el Core puede seguir escaneando; no es un fallo de lectura. */
+const WAITING_NOTICE = { role: 'status', text: 'El Core está tardando; seguimos esperando.' };
+const WAITING_RETRY_TEXT = 'Esperando la lectura anterior del Core';
+
+const isTimeoutMessage = (message) => typeof message === 'string' && /^ade_query_timeout\b/.test(message);
 
 function InventoryStatus({ status, onRetry }) {
   const state = typeof status?.state === 'string' ? status.state : null;
-  const notice = state ? INVENTORY_STATUS_TEXT[state] : null;
-  if (!notice) return null;
+  const known = state ? INVENTORY_STATUS_TEXT[state] : null;
+  if (!known) return null;
   const message = typeof status.message === 'string' && status.message ? status.message : null;
+  // Hay una petición viva para esta clave: reintentar se engancharía a ella y no haría nada.
+  const inFlight = status.inFlight === true;
+  const waiting = state === 'error' && inFlight && isTimeoutMessage(message);
+  const notice = waiting ? WAITING_NOTICE : known;
+  const shownState = waiting ? 'waiting' : state;
   return (
-    <p
-      className={`resinv__note resinv__status resinv__status--${state}`}
-      role={notice.role}
-      aria-busy={state === 'loading' || state === 'refreshing' ? 'true' : undefined}
-      data-testid="resinv-status"
-      data-state={state}
-    >
-      {notice.text}{message ? ` ${message}` : ''}
-      {RETRYABLE_STATUS.has(state) && typeof onRetry === 'function' && (
-        <> <button type="button" className="resinv__retry" onClick={onRetry} data-testid="resinv-retry">Reintentar</button></>
+    <div className={`resinv__note resinv__status resinv__status--${shownState}`} data-testid="resinv-status" data-state={shownState}>
+      <p
+        className="resinv__status-text"
+        role={notice.role ?? undefined}
+        aria-busy={state === 'loading' || state === 'refreshing' ? 'true' : undefined}
+        data-testid="resinv-status-text"
+      >
+        {notice.text}
+      </p>
+      {message && (
+        <details className="resinv__status-detail" data-testid="resinv-status-detail">
+          <summary>Detalle técnico</summary>
+          <code>{message}</code>
+        </details>
       )}
-    </p>
+      {RETRYABLE_STATUS.has(state) && typeof onRetry === 'function' && (
+        inFlight
+          ? <button type="button" className="resinv__retry" disabled data-testid="resinv-retry">{WAITING_RETRY_TEXT}</button>
+          : <button type="button" className="resinv__retry" onClick={onRetry} data-testid="resinv-retry">Reintentar</button>
+      )}
+    </div>
   );
 }
 

@@ -20,8 +20,10 @@ describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
     render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', message: 'ade_query_timeout: el Core no respondió' }} onRetry={() => { retried += 1; }} />);
     const status = screen.getByTestId('resinv-status');
     expect(status.dataset.state).toBe('stale');
-    expect(status.textContent).toContain('Foto desactualizada');
-    expect(status.textContent).toContain('ade_query_timeout');
+    expect(screen.getByTestId('resinv-status-text').textContent).toContain('Foto desactualizada');
+    // P3-3: el error crudo del Core va en el detalle, no en la frase principal.
+    expect(screen.getByTestId('resinv-status-text').textContent).not.toContain('ade_query_timeout');
+    expect(screen.getByTestId('resinv-status-detail').textContent).toContain('ade_query_timeout');
     expect(screen.getAllByTestId('resinv-row').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByTestId('resinv-retry'));
     expect(retried).toBe(1);
@@ -29,7 +31,7 @@ describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
 
   it('loading y refreshing se anuncian sin borrar filas ni ofrecer reintento', () => {
     const { rerender } = render(<ResourcesInventory inventory={null} status={{ state: 'loading' }} onRetry={() => {}} />);
-    expect(screen.getByTestId('resinv-status').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByTestId('resinv-status-text').getAttribute('aria-busy')).toBe('true');
     expect(screen.queryByTestId('resinv-retry')).toBeNull();
     expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
     rerender(<ResourcesInventory inventory={scoped()} status={{ state: 'refreshing' }} onRetry={() => {}} />);
@@ -42,12 +44,51 @@ describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
       render(<ResourcesInventory inventory={null} status={{ state, message: `motivo-${state}` }} onRetry={() => {}} />);
       const status = screen.getByTestId('resinv-status');
       expect(status.dataset.state).toBe(state);
-      expect(status.getAttribute('role')).toBe(role);
-      expect(status.textContent).toContain(`motivo-${state}`);
+      expect(screen.getByTestId('resinv-status-text').getAttribute('role')).toBe(role);
+      expect(screen.getByTestId('resinv-status-detail').textContent).toContain(`motivo-${state}`);
       expect(screen.getByTestId('resinv-retry')).toBeTruthy();
       expect(screen.queryAllByTestId('resinv-row')).toHaveLength(0);
       cleanup();
     }
+  });
+
+  it('P2-1: con una petición viva el reintento queda desactivado y lo explica', () => {
+    let retried = 0;
+    render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', inFlight: true, message: 'ade_query_timeout: x' }} onRetry={() => { retried += 1; }} />);
+    const button = screen.getByTestId('resinv-retry');
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('Esperando la lectura anterior del Core');
+    fireEvent.click(button);
+    expect(retried).toBe(0);
+    cleanup();
+    render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', inFlight: false }} onRetry={() => { retried += 1; }} />);
+    expect(screen.getByTestId('resinv-retry').disabled).toBe(false);
+    expect(screen.getByTestId('resinv-retry').textContent).toBe('Reintentar');
+  });
+
+  it('P2-2: refreshing es solo visual; loading y stale/error/degraded sí se anuncian', () => {
+    const { rerender } = render(<ResourcesInventory inventory={scoped()} status={{ state: 'refreshing' }} />);
+    expect(screen.getByTestId('resinv-status-text').hasAttribute('role')).toBe(false);
+    expect(screen.queryByRole('status', { name: /Actualizando/ })).toBeNull();
+    for (const [state, role] of [['loading', 'status'], ['stale', 'status'], ['error', 'alert'], ['degraded', 'status']]) {
+      rerender(<ResourcesInventory inventory={scoped()} status={{ state }} />);
+      expect(screen.getByTestId('resinv-status-text').getAttribute('role')).toBe(role);
+    }
+  });
+
+  it('P3-4: un plazo agotado sin foto previa dice que el Core tarda, no que falló', () => {
+    render(<ResourcesInventory inventory={null} status={{ state: 'error', inFlight: true, message: 'ade_query_timeout: el Core no respondió dentro del umbral del cliente' }} onRetry={() => {}} />);
+    const status = screen.getByTestId('resinv-status');
+    expect(status.dataset.state).toBe('waiting');
+    const text = screen.getByTestId('resinv-status-text');
+    expect(text.textContent).toBe('El Core está tardando; seguimos esperando.');
+    expect(text.getAttribute('role')).toBe('status');
+    expect(status.textContent).not.toContain('No se pudo leer el inventario');
+    expect(screen.getByTestId('resinv-retry').disabled).toBe(true);
+    cleanup();
+    // Un error real (no plazo) sigue siendo error.
+    render(<ResourcesInventory inventory={null} status={{ state: 'error', inFlight: false, message: 'resource_inventory_read_failed' }} onRetry={() => {}} />);
+    expect(screen.getByTestId('resinv-status-text').textContent).toBe('No se pudo leer el inventario de Core.');
   });
 
   it('ready, empty o sin estado no pintan aviso', () => {

@@ -88,8 +88,12 @@ function sameData(left, right) {
  * política (peticiones outstanding, umbral, aplazamiento y recuperación) vive en
  * `coreQueryPolicy.js`; aquí solo se traduce a estado de pantalla:
  *
- *  · La petición NO se abandona al pasarse el umbral. Si el Core contesta más tarde, esa
- *    respuesta se aplica (recuperación) y el escaneo no se duplica.
+ *  · La petición NO se abandona al pasarse el umbral visual: si el Core contesta antes del tope
+ *    de abandono, esa respuesta se aplica (recuperación) y el escaneo no se duplica. Pasado el
+ *    tope de `abandonAfter(query)` (120 s para `resource_inventory`) `coreQueryPolicy.js` sí la
+ *    abandona: libera el hueco y la respuesta posterior se descarta.
+ *  · `inFlight` dice si hay una petición viva para esta clave: mientras la hay, reintentar se
+ *    engancharía a ella y no abriría otra lectura.
  *  · Mientras una petición sigue viva no se abre otra para la misma clave, y para
  *    `resource_inventory` no se abre ninguna en todo el cliente: cada una es un escaneo
  *    secuencial del disco y del git del Core. Lo que no cabe se APLAZA hasta que se libere hueco.
@@ -99,7 +103,7 @@ function sameData(left, right) {
 export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } = {}) {
   const argsJson = JSON.stringify(args);
   const requestKey = `${query}:${argsJson}`;
-  const [snapshot, setSnapshot] = useState({ key: null, status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0 });
+  const [snapshot, setSnapshot] = useState({ key: null, status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: false });
   const [retryToken, setRetryToken] = useState(0);
   const cache = useRef({ key: requestKey, data: null, updatedAt: null, readEpoch: 0 });
   if (cache.current.key !== requestKey) cache.current = { key: requestKey, data: null, updatedAt: null, readEpoch: 0 };
@@ -123,6 +127,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
         data: previous.data,
         error: TIMEOUT_MESSAGE,
         reason: previous.data ? 'timeout' : null,
+        inFlight: true,
         updatedAt: previous.updatedAt,
         readEpoch: previous.readEpoch,
       });
@@ -142,7 +147,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
         // posteriores) se obtuvieron antes de esa lectura. No cambia la semántica de data/updatedAt.
         const readEpoch = previous.readEpoch + 1;
         cache.current = { key: requestKey, data: snapshotData, updatedAt, readEpoch };
-        setSnapshot({ key: requestKey, status: isEmptyResult(query, snapshotData) ? 'empty' : 'ready', data: snapshotData, error: null, reason: null, updatedAt, readEpoch });
+        setSnapshot({ key: requestKey, status: isEmptyResult(query, snapshotData) ? 'empty' : 'ready', data: snapshotData, error: null, reason: null, updatedAt, readEpoch, inFlight: false });
         return;
       }
       const message = outcome.error instanceof Error ? outcome.error.message : String(outcome.error ?? 'Error desconocido del Core');
@@ -153,6 +158,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
         data: previous.data,
         error: message,
         reason: previous.data ? reason : null,
+        inFlight: false,
         updatedAt: previous.updatedAt,
         readEpoch: previous.readEpoch,
       });
@@ -173,7 +179,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
           showThreshold();
           return;
         }
-        setSnapshot({ key: requestKey, status: previous.data ? 'refreshing' : 'loading', data: previous.data, error: null, reason: null, updatedAt: previous.updatedAt, readEpoch: previous.readEpoch });
+        setSnapshot({ key: requestKey, status: previous.data ? 'refreshing' : 'loading', data: previous.data, error: null, reason: null, updatedAt: previous.updatedAt, readEpoch: previous.readEpoch, inFlight: true });
       },
       onThreshold: () => showThreshold(),
       onOutcome: (outcome) => applyOutcome(outcome),
@@ -192,7 +198,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
   }, [query, argsJson, requestKey, enabled, pollMs, retryToken]);
 
   const retry = useCallback(() => setRetryToken((token) => token + 1), []);
-  if (!enabled) return { status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, retry };
-  if (snapshot.key !== requestKey) return { status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, retry };
+  if (!enabled) return { status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: false, retry };
+  if (snapshot.key !== requestKey) return { status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true, retry };
   return { ...snapshot, retry };
 }
