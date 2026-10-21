@@ -15,6 +15,17 @@ function coreArgs(query, args) {
       severity: args.severity,
     };
   }
+  if (query === 'activity_list') {
+    return {
+      cursor: args.cursor ?? 0,
+      limit: args.limit ?? 100,
+      order: args.order ?? 'asc',
+      projectId: args.project_id,
+      runId: args.run_id,
+      targetKind: args.target_kind,
+      targetId: args.target_id,
+    };
+  }
   if (query === 'tasks_by_project') {
     return { projectId: args.project_id, status: args.status ?? 'active' };
   }
@@ -31,6 +42,7 @@ export function classifyCoreError(error) {
 function isEmptyResult(query, data) {
   return (query === 'projects_overview' && data.projects.length === 0)
     || (query === 'attention_list' && data.items.length === 0)
+    || (query === 'activity_list' && data.items.length === 0)
     || (query === 'tasks_by_project' && data.tasks.length === 0);
 }
 

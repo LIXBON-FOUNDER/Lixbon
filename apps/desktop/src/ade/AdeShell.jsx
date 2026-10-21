@@ -1,10 +1,12 @@
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
 import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
+import { readAdeTask } from './coreQueries';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
@@ -77,9 +79,35 @@ function locationLastSeen(value) {
 const WORKSPACE_VIEWS = [
   { key: 'workspace', label: 'Workspace' },
   { key: 'attention', label: 'Attention' },
+  { key: 'activity', label: 'Activity' },
 ];
 
-/** Switch Workspace/Attention con semántica de tabs (flechas, Inicio/Fin); solo cambia la subvista del ADE. */
+// Misma política que useCoreQuery: ninguna lectura de Core queda abierta indefinidamente.
+const ACTIVITY_VERIFY_TIMEOUT_MS = 10_000;
+
+/** Espera la lectura con el límite de 10 s; vencer el plazo solo rechaza al llamante, no libera la lectura en vuelo. */
+function withinVerifyPolicy(read) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error('ade_query_timeout: Core no respondió a tiempo')), ACTIVITY_VERIFY_TIMEOUT_MS);
+  });
+  return Promise.race([read, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
+const ACTIVITY_SCOPES = [
+  { kind: 'global', label: 'Global' },
+  { kind: 'project', label: 'Project' },
+  { kind: 'task', label: 'Task' },
+];
+
+/** Alcance de Activity: preferencia explícita si sigue disponible; si no, el más específico que haya seleccionado. */
+function resolveActivityScope(preferred, projectId, taskId) {
+  const available = { global: true, project: Boolean(projectId), task: Boolean(projectId && taskId) };
+  if (preferred && available[preferred]) return preferred;
+  return available.task ? 'task' : available.project ? 'project' : 'global';
+}
+
+/** Switch Workspace/Attention/Activity con semántica de tabs (flechas, Inicio/Fin); solo cambia la subvista del ADE. */
 function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
   const tabRefs = useRef({});
   const onKeyDown = (event) => {
@@ -120,8 +148,8 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
   );
 }
 
-// `onOpenTaskActivity` recibe `{ projectId, taskId }` de la Task seleccionada y verificada; mientras no esté
-// conectado, el workspace declara Activity como no disponible. Attention la sirve este shell (AttentionInbox).
+// Activity y Attention las sirve este shell (ActivityPanel / AttentionInbox). El enlace Activity de la Task abre la
+// subvista con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
 // `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
 // ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
 export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
@@ -129,8 +157,15 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
+  const [activityScopePref, setActivityScopePref] = useState(null);
+  const [activityNotice, setActivityNotice] = useState(null);
+  const [activityFocusSeq, setActivityFocusSeq] = useState(0);
+  const [workspaceFocusSeq, setWorkspaceFocusSeq] = useState(0);
   const [projectSnapshot, setProjectSnapshot] = useState(null);
+  const [projectsSnapshot, setProjectsSnapshot] = useState(null);
   const targetSeq = useRef(0);
+  const activityTargetRequest = useRef(0);
+  const taskVerifications = useRef(new Map());
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
@@ -142,6 +177,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
   const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
+  const onProjectsSnapshot = useCallback((snapshot) => setProjectsSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
   const projectOverview = {
     status: currentProjectSnapshot?.queryState ?? (selectedProjectId ? 'loading' : 'unknown'),
@@ -164,6 +200,24 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const selectedProject = currentProjectSnapshot?.projectId === selectedProjectId
     ? currentProjectSnapshot.project
     : null;
+
+  // Activity toma su alcance solo de IDs durables. Título y nombre son rótulos y se aceptan únicamente
+  // cuando la respuesta corresponde a la selección actual.
+  const activityScopeKind = resolveActivityScope(activityScopePref, selectedProjectId, selectedTaskId);
+  const detailTask = detail.data?.task;
+  const selectedTaskTitle = detailTask?.id === selectedTaskId && detailTask?.project_id === selectedProjectId
+    ? detailTask.title
+    : null;
+  const selectedProjectName = selectedProject?.name ?? null;
+  const activityScope = useMemo(() => {
+    if (activityScopeKind === 'task') {
+      return { kind: 'task', id: selectedTaskId, ...(selectedTaskTitle ? { title: selectedTaskTitle } : {}) };
+    }
+    if (activityScopeKind === 'project') {
+      return { kind: 'project', id: selectedProjectId, ...(selectedProjectName ? { name: selectedProjectName } : {}) };
+    }
+    return { kind: 'global' };
+  }, [activityScopeKind, selectedProjectId, selectedTaskId, selectedProjectName, selectedTaskTitle]);
 
   const overviewState = projectViewQueryState(projectOverview);
   const projectLocations = Array.isArray(selectedProject?.locations)
@@ -217,9 +271,17 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     : [];
   const projectAttentionSlice = projectViewSlice(projectAttention, projectAttentionItems, { hasMore: projectAttention.data?.has_more === true });
 
+  // Invalida la verificación de Activity en curso y retira solo su aviso «Verificando…»; otros avisos no son suyos.
+  const invalidateActivityRequest = () => {
+    const invalidated = activityTargetRequest.current;
+    activityTargetRequest.current += 1;
+    setActivityNotice((notice) => (notice?.pendingFor === invalidated ? null : notice));
+  };
+
   const selectProject = (project) => {
     const projectId = typeof project === 'string' ? project : project?.projectId;
     if (typeof projectId !== 'string' || !projectId.trim()) return;
+    invalidateActivityRequest();
     if (projectId !== selectedProjectId || selectedTaskId !== null) {
       setAdeSelection({ projectId, taskId: null });
     }
@@ -232,17 +294,146 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       : task?.projectId ?? context?.projectId ?? selectedProjectId;
     const taskId = typeof task === 'string' ? task : task?.taskId ?? context?.taskId ?? null;
     if (typeof projectId !== 'string' || !projectId.trim()) return;
+    invalidateActivityRequest();
     setAdeSelection({ projectId, taskId: typeof taskId === 'string' && taskId.trim() ? taskId : null });
     setWorkspaceView('workspace');
     onActivate?.();
   };
-  const changeWorkspaceView = (view) => { setWorkspaceView(view); if (view !== 'attention') setAttentionNotice(null); };
+  const changeWorkspaceView = (view) => {
+    if (view !== 'activity') {
+      invalidateActivityRequest();
+      setActivityNotice(null);
+    }
+    setWorkspaceView(view);
+    if (view !== 'attention') setAttentionNotice(null);
+  };
+
+  const openTaskActivity = (target) => {
+    if (target?.projectId === selectedProjectId && target?.taskId === selectedTaskId) {
+      setActivityScopePref('task');
+      changeWorkspaceView('activity');
+      setActivityFocusSeq((seq) => seq + 1);
+      onActivate?.();
+    }
+    onOpenTaskActivity?.(target);
+  };
+
+  // Foco solo tras la acción explícita de la Task: el TaskWorkspace queda oculto y el foco pasa a la pestaña Activity.
+  useEffect(() => {
+    if (activityFocusSeq > 0) document.getElementById(`${viewIds}-tab-activity`)?.focus();
+  }, [activityFocusSeq, viewIds]);
+
+  // La navegación desde Activity oculta su panel: si el foco estaba dentro (o ya se perdió), pasa a la pestaña Workspace.
+  useEffect(() => {
+    if (workspaceFocusSeq > 0) document.getElementById(`${viewIds}-tab-workspace`)?.focus();
+  }, [workspaceFocusSeq, viewIds]);
+  const activityFocusNeedsRestore = () => {
+    const current = document.activeElement;
+    return !current || current === document.body
+      || Boolean(document.getElementById(`${viewIds}-panel-activity`)?.contains(current));
+  };
+
+  // Una sola lectura `task_detail` por par durable en vuelo (A/B/A y reintentos tras timeout la reutilizan).
+  // La ranura se libera cuando la consulta subyacente se asienta, nunca por el timeout de la UI.
+  const verifyTask = (projectId, taskId) => {
+    const key = JSON.stringify([projectId, taskId]);
+    const inFlight = taskVerifications.current;
+    let read = inFlight.get(key);
+    if (!read) {
+      read = new Promise((resolve) => resolve(readAdeTask(projectId, taskId)));
+      inFlight.set(key, read);
+      const release = () => {
+        if (inFlight.get(key) === read) inFlight.delete(key);
+      };
+      read.then(release, release);
+    }
+    return withinVerifyPolicy(read);
+  };
+
+  // Activity entrega IDs durables. Se confirma el Project en la lista actual y la Task por su par exacto
+  // antes de cambiar la selección, incluso cuando la página de Tasks no está activa.
+  const openActivityTarget = async ({ kind, id, projectId } = {}) => {
+    const requestId = ++activityTargetRequest.current;
+    const notify = (text, { pending = false } = {}) => setActivityNotice({ text, pendingFor: pending ? requestId : null });
+    setActivityNotice(null);
+    if (typeof id !== 'string' || !id.trim()) return;
+    // `refreshing` conserva la última lectura sana del overview (no es stale/error), así que sigue validando.
+    const projectSnapshotReady = ['ready', 'empty', 'refreshing'].includes(projectsSnapshot?.queryState);
+    const projectExists = (candidate) => projectSnapshotReady
+      && Array.isArray(projectsSnapshot.projectIds)
+      && projectsSnapshot.projectIds.includes(candidate);
+    if (kind === 'project') {
+      if (!projectSnapshotReady) {
+        notify(`No se pudo verificar el Project ${id} en el overview de Core; no se cambió la selección.`);
+        return;
+      }
+      if (!projectExists(id)) {
+        notify(`El Project ${id} no aparece en el overview activo de Core.`);
+        return;
+      }
+      const restoreFocus = activityFocusNeedsRestore();
+      selectProject(id);
+      if (restoreFocus) setWorkspaceFocusSeq((seq) => seq + 1);
+    } else if (kind === 'task') {
+      if (typeof projectId !== 'string' || !projectId.trim()) {
+        notify(`La Task ${id} no se puede abrir desde Activity: el evento no identifica su Project.`);
+        return;
+      }
+      if (!projectSnapshotReady) {
+        notify(`No se pudo verificar el Project ${projectId} en el overview de Core; no se cambió la selección.`);
+        return;
+      }
+      if (!projectExists(projectId)) {
+        notify(`El Project ${projectId} no aparece en el overview activo de Core.`);
+        return;
+      }
+
+      const openVerifiedTask = () => {
+        const restoreFocus = activityFocusNeedsRestore();
+        selectTask({ projectId, taskId: id });
+        if (restoreFocus) setWorkspaceFocusSeq((seq) => seq + 1);
+      };
+      // La Task ya seleccionada tiene su `task_detail` sano en el shell: se reutiliza sin repetir la lectura.
+      const loaded = detail.data?.task;
+      if (projectId === selectedProjectId && id === selectedTaskId
+        && ['ready', 'refreshing'].includes(detail.status)
+        && loaded?.id === id && loaded.project_id === projectId) {
+        openVerifiedTask();
+        return;
+      }
+
+      notify(`Verificando la Task ${id} en el Project ${projectId}…`, { pending: true });
+      try {
+        const response = await verifyTask(projectId, id);
+        if (requestId !== activityTargetRequest.current) return;
+        if (response?.task?.id !== id || response.task.project_id !== projectId) {
+          notify(`Core no confirmó la Task ${id} del Project ${projectId}; no se cambió la selección.`);
+          return;
+        }
+        setActivityNotice(null);
+        openVerifiedTask();
+      } catch (error) {
+        if (requestId !== activityTargetRequest.current) return;
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        if (/project_not_found/i.test(message)) {
+          notify(`El Project ${projectId} ya no está disponible en Core.`);
+        } else if (/task_not_found|_not_found/i.test(message)) {
+          notify(`La Task ${id} ya no está disponible en el Project ${projectId}.`);
+        } else if (/ade_query_timeout/i.test(message)) {
+          notify(`Core no respondió a tiempo al verificar la Task ${id} del Project ${projectId}; no se cambió la selección.`);
+        } else {
+          notify(`Core no pudo verificar la Task ${id} del Project ${projectId}; no se cambió la selección.`);
+        }
+      }
+    }
+  };
 
   // Attention de un target: filtro por (kind + ID durable) resuelto por el Core, no por la página global.
   const openAttentionFilter = ({ kind, id, projectId }) => {
     targetSeq.current += 1;
     setAttentionTarget({ kind, id, projectId: typeof projectId === 'string' && projectId ? projectId : null, seq: targetSeq.current });
     setAttentionNotice(null);
+    invalidateActivityRequest();
     setWorkspaceView('attention');
     onActivate?.();
   };
@@ -262,6 +453,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     const unavailable = (what) => setAttentionNotice(`${what} ya no está disponible en esta superficie.`);
     setAttentionNotice(null);
     if (kind === 'project') {
+      invalidateActivityRequest();
       setAdeSelection({ projectId: id, taskId: null });
       setWorkspaceView('workspace');
       onActivate?.();
@@ -270,6 +462,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
         setAttentionNotice(`La Attention de la Task ${id} no trae Project: no se puede abrir en el Workspace.`);
         return;
       }
+      invalidateActivityRequest();
       setAdeSelection({ projectId, taskId: id });
       setWorkspaceView('workspace');
       onActivate?.();
@@ -325,7 +518,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       selectTask(taskId);
       return true;
     },
-    onOpenActivity: onOpenTaskActivity,
+    onOpenActivity: openTaskActivity,
     onOpenAttention: openTaskAttention,
   };
 
@@ -345,6 +538,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 onSelectProject={selectProject}
                 onSelectTask={selectTask}
                 onProjectSnapshot={onProjectSnapshot}
+                onProjectsSnapshot={onProjectsSnapshot}
               />
             </section>
             {operationNavigation && (
@@ -411,6 +605,40 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 target={attentionTarget}
                 onClearTarget={clearAttentionTarget}
                 onOpenTarget={openAttentionTarget}
+              />
+            </div>
+            {/* Siempre montado: conserva el historial paginado; sin vista activa no consulta ni sondea. */}
+            <div
+              className="ade-view-panel"
+              role="tabpanel"
+              id={`${viewIds}-panel-activity`}
+              aria-labelledby={`${viewIds}-tab-activity`}
+              hidden={workspaceView !== 'activity'}
+            >
+              <div className="ade__section-head" role="group" aria-label="Alcance de Activity">
+                <div className="ade-view-switch">
+                  {ACTIVITY_SCOPES.map(({ kind, label }) => {
+                    const enabled = kind === 'global' || (kind === 'project' ? Boolean(selectedProjectId) : Boolean(selectedProjectId && selectedTaskId));
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        className={`ade-view-switch__tab${kind === activityScopeKind ? ' is-active' : ''}`}
+                        aria-pressed={kind === activityScopeKind}
+                        disabled={!enabled}
+                        onClick={() => { setActivityScopePref(kind); setActivityNotice((notice) => (notice?.pendingFor == null ? null : notice)); }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {activityNotice && <div className="ade__notice" role="status">{activityNotice.text}</div>}
+              <ActivityPanel
+                scope={activityScope}
+                active={active && workspaceView === 'activity'}
+                onOpenTarget={openActivityTarget}
               />
             </div>
           </Panel>

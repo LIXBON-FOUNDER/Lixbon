@@ -214,7 +214,7 @@ describe('ActivityTimeline · alcance y cursor', () => {
     expect(document.activeElement).toBe(more);
     fireEvent.click(more);
     expect(onLoadMore).toHaveBeenCalledWith({
-      cursor: 7,
+      cursor: '7',
       scope: { kind: 'project', id: 'p-1', name: 'lixbon' },
     });
   });
@@ -247,7 +247,8 @@ describe('ActivityTimeline · alcance y cursor', () => {
     ['decimal', 1.5],
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
-    ['texto', '7'],
+    ['decimal no canónico', '07'],
+    ['fuera de i64', '9223372036854775808'],
     ['booleano', true],
   ])('has_more=true con next_cursor %s no habilita load-more', (_name, next) => {
     const onLoadMore = vi.fn();
@@ -261,6 +262,24 @@ describe('ActivityTimeline · alcance y cursor', () => {
     expect(screen.queryByTestId('activity-load-more')).toBeNull();
     expect(screen.queryByText('No hay más actividad.')).toBeNull();
     expect(onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it('renderiza secuencias i64 grandes y reenvía el cursor decimal exacto', () => {
+    const seq = '9223372036854775806';
+    const nextCursor = '9223372036854775807';
+    const onLoadMore = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[activityItem({ eventId: 'large-seq', seq })]}
+        cursor={{ next: nextCursor, hasMore: true }}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    expect(screen.getByTestId('activity-large-seq').getAttribute('data-seq')).toBe(seq);
+    expect(screen.getByTestId('activity-seq-large-seq').textContent).toBe(`#${seq}`);
+    fireEvent.click(screen.getByTestId('activity-load-more'));
+    expect(onLoadMore).toHaveBeenCalledWith({ cursor: nextCursor, scope: { kind: 'global' } });
   });
 
   it('sin cursor o con has_more no booleano no ofrece load-more ni fin', () => {
@@ -940,7 +959,7 @@ function deepFreeze(value) {
 }
 
 describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)', () => {
-  it('entrega kind e id exactos del destino durable al activar el botón', () => {
+  it('entrega el target durable y el Project del evento al activar el botón', () => {
     const onOpenTarget = vi.fn();
     render(
       <ActivityTimeline
@@ -953,12 +972,12 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
 
     fireEvent.click(screen.getByTestId('activity-target-a'));
-    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'task', id: 't-Ab_9' });
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'task', id: 't-Ab_9', projectId: 'p-1' });
     fireEvent.click(screen.getByTestId('activity-target-b'));
-    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'project', id: 'p-77' });
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'project', id: 'p-77', projectId: 'p-77' });
     expect(onOpenTarget).toHaveBeenCalledTimes(2);
-    // Solo kind e id: nada de scope, cursor, eventId ni texto derivado.
-    expect(Object.keys(onOpenTarget.mock.calls[0][0]).sort()).toEqual(['id', 'kind']);
+    // Project ID del hecho más el target exacto; nada de scope, cursor, eventId ni texto derivado.
+    expect(Object.keys(onOpenTarget.mock.calls[0][0]).sort()).toEqual(['id', 'kind', 'projectId']);
   });
 
   it('es un botón nativo, enfocable por teclado y con nombre accesible', () => {
@@ -980,7 +999,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     // verifica la semántica nativa y se emite el click que el navegador generaría.
     fireEvent.click(button);
     expect(onOpenTarget).toHaveBeenCalledTimes(1);
-    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'task', id: 't-1' });
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'task', id: 't-1', projectId: 'p-1' });
   });
 
   it('sin callback el destino es solo informativo (sin botón ni rol interactivo)', () => {
@@ -1064,7 +1083,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
     expect(screen.getByTestId('activity-message-unk').textContent).toBe('Evento desconocido');
     fireEvent.click(screen.getByTestId('activity-target-unk'));
-    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'project', id: 'p-1' });
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'project', id: 'p-1', projectId: 'p-1' });
   });
 
   it('no muta items, scope ni cursor, ni dispara refresh/retry/load-more al navegar', () => {
@@ -1096,7 +1115,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     fireEvent.click(screen.getByTestId('activity-target-evt-1'));
 
     expect(onOpenTarget).toHaveBeenCalledTimes(2);
-    expect(onOpenTarget.mock.calls[1][0]).toEqual({ kind: 'task', id: 'mutado' });
+    expect(onOpenTarget.mock.calls[1][0]).toEqual({ kind: 'task', id: 'mutado', projectId: 'p-1' });
     expect(onOpenTarget.mock.calls[0][0]).not.toBe(onOpenTarget.mock.calls[1][0]);
     expect(JSON.stringify({ items, scope, cursor })).toBe(snapshot);
     expect(items[0].target).toEqual({ kind: 'task', id: 't-1' });
@@ -1125,7 +1144,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
     fireEvent.click(screen.getByTestId('activity-load-more'));
     expect(onLoadMore).toHaveBeenCalledWith({
-      cursor: 1,
+      cursor: '1',
       scope: { kind: 'task', id: 't-1', title: 'Hacer' },
     });
     fireEvent.click(screen.getByTestId('activity-refresh'));

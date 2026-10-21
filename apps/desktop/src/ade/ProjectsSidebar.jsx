@@ -97,6 +97,7 @@ const byCoreTaskOrder = (a, b) => (b.created_at - a.created_at)
 const EMPTY_PAGE = Object.freeze({
   items: [], nextCursor: null, hasMore: false, pageCount: 0, loading: false, stale: false, error: null, notice: null,
 });
+const EMPTY_PROJECT_IDS = Object.freeze([]);
 const emptyPageState = (key) => ({ ...EMPTY_PAGE, key });
 const uniqueTasksById = (tasks) => {
   const seen = new Map();
@@ -452,6 +453,7 @@ function ProjectTasks({
   const pageRequestRef = useRef(null);
   const pageRequestSequence = useRef(0);
   const pagingFocusRef = useRef(false);
+  const pageRetryFocusRef = useRef(false);
   const pagingRequestActiveRef = useRef(false);
   const loadMoreButtonRef = useRef(null);
   const pageRetryButtonRef = useRef(null);
@@ -470,7 +472,10 @@ function ProjectTasks({
         event.target !== loadMoreButtonRef.current
         && event.target !== pageRetryButtonRef.current
         && event.target !== document.body
-      ) pagingFocusRef.current = false;
+      ) {
+        pagingFocusRef.current = false;
+        pageRetryFocusRef.current = false;
+      }
     };
     document.addEventListener('focusin', clearPagingFocusOnOtherTarget);
     return () => document.removeEventListener('focusin', clearPagingFocusOnOtherTarget);
@@ -645,15 +650,21 @@ function ProjectTasks({
     && !currentPages.error
     && !hasMoreTasks;
 
-  const loadMore = useCallback(async ({ automatic = false } = {}) => {
+  const loadMore = useCallback(async ({ automatic = false, retry = false } = {}) => {
     if (pageRequestRef.current || !moreCursor || currentPages.stale) return;
     if (automatic && !pendingTaskId) return;
+    if (retry && document.activeElement === pageRetryButtonRef.current) {
+      pageRetryFocusRef.current = true;
+      pagingFocusRef.current = true;
+    } else if (!automatic && (document.activeElement === loadMoreButtonRef.current || document.activeElement === pageRetryButtonRef.current)) {
+      pagingFocusRef.current = true;
+    }
     const requestedKey = pageKey;
     const request = {
       id: ++pageRequestSequence.current,
       key: requestedKey,
       headUpdatedAt: head.updatedAt,
-      kind: automatic ? 'auto' : 'more',
+      kind: automatic ? 'auto' : retry ? 'retry' : 'more',
       pendingTaskId: automatic ? pendingTaskId : null,
     };
     pageRequestRef.current = request;
@@ -728,10 +739,25 @@ function ProjectTasks({
     onTaskLookupComplete(projectId, pendingTaskId);
   }, [allStatusReadComplete, onTaskLookupComplete, pendingTaskId, projectId, tasks]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (currentPages.loading) return;
     if (!pagingFocusRef.current) {
       pagingRequestActiveRef.current = false;
+      return;
+    }
+
+    if (pageRetryFocusRef.current) {
+      pageRetryFocusRef.current = false;
+      pagingRequestActiveRef.current = false;
+      if (currentPages.error && pageRetryButtonRef.current?.isConnected) {
+        pageRetryButtonRef.current.focus();
+        return;
+      }
+      pagingFocusRef.current = false;
+      const lastTask = tasks.at(-1);
+      const fallbackKey = lastTask ? taskKey(projectId, lastTask.id) : projectKey(projectId);
+      onFocusKey(fallbackKey);
+      focusItem(fallbackKey);
       return;
     }
 
@@ -891,7 +917,7 @@ function ProjectTasks({
                 pagingFocusRef.current = false;
               }
             }}
-            onClick={loadMore}
+            onClick={() => loadMore({ retry: true })}
             aria-label={`Reintentar carga de Tasks de ${projectName}`}
           >Reintentar lectura</button>
         </div>
@@ -921,6 +947,8 @@ function ProjectTasks({
  *   Se invoca al activar una Task; al cambiar a otro Project sin conservarla, con `null` y el contexto nuevo.
  * @param {(snapshot: {projectId: string|null, queryState: 'idle'|'loading'|'refreshing'|'ready'|'stale'|'error'|'disconnected'|'degraded'|'missing'|'empty'|'unknown', project: ProjectViewSummary|null, error: string|null}) => void} [props.onProjectSnapshot]
  *   Publica la metadata del Project que coincide con la selección controlada y el estado de su overview.
+ * @param {(snapshot: {queryState: string, projectIds: string[], error: string|null}) => void} [props.onProjectsSnapshot]
+ *   Publica los IDs de la lista de Projects junto con el estado de la lectura autoritativa del overview.
  * @returns {import('react').ReactElement}
  */
 export function ProjectsSidebar({
@@ -933,6 +961,7 @@ export function ProjectsSidebar({
   onSelectProject,
   onSelectTask,
   onProjectSnapshot,
+  onProjectsSnapshot,
 }) {
   const headingId = useId();
   const statusFilterName = useId();
@@ -975,6 +1004,7 @@ export function ProjectsSidebar({
 
   const overview = useCoreQuery('projects_overview', { archived }, { enabled: active, pollMs });
   const projects = overview.data?.projects ?? [];
+  const projectIds = useMemo(() => overview.data?.projects.map((project) => project.id) ?? EMPTY_PROJECT_IDS, [overview.data]);
 
   const registerItem = useCallback((key) => (node) => {
     if (node) itemRefs.current.set(key, node);
@@ -1237,6 +1267,15 @@ export function ProjectsSidebar({
       reason: overview.reason ?? null,
     });
   }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId, snapshotCurrent, snapshotQueryState]);
+  const projectsSnapshotQueryState = hiddenCachedResume ? 'stale' : overview.status;
+  useEffect(() => {
+    if (!snapshotCurrent) return;
+    onProjectsSnapshot?.({
+      queryState: projectsSnapshotQueryState,
+      projectIds,
+      error: overview.error ?? null,
+    });
+  }, [onProjectsSnapshot, overview.error, projectIds, projectsSnapshotQueryState, snapshotCurrent]);
 
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
