@@ -289,6 +289,34 @@ describe('ResourcesInventory · el contador de avisos es el de Core', () => {
     render(<ResourcesInventory inventory={{ ...DTO, warnings: undefined }} />);
     expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
   });
+
+  it('probe=false con branches_to_review null: estado sin contador, sin número ni «0 por revisar»', () => {
+    const dto = {
+      ...DTO,
+      filters: { project_id: null, probe: false },
+      warnings: { ...DTO.warnings, branches_to_review: null },
+    };
+    render(<ResourcesInventory inventory={dto} />);
+    expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    const note = screen.getByTestId('resinv-count-unavailable');
+    expect(note.textContent).toContain('filters.probe=false');
+    expect(note.textContent).toContain('no hay contador');
+    expect(note.textContent).not.toMatch(/\d/);
+    expect(screen.queryByText(/Ramas por revisar \(Core/)).toBeNull();
+  });
+
+  it('branches_to_review null con probe=true no culpa a probe: dice que Core no informó un contador válido', () => {
+    render(<ResourcesInventory inventory={withWarnings({ branches_to_review: null })} />);
+    const note = screen.getByTestId('resinv-count-unavailable');
+    expect(note.textContent).toContain('no informó un contador válido');
+    expect(note.textContent).not.toContain('probe=false');
+  });
+
+  it('con contador numérico de Core no aparece el aviso de «sin contador» (el número sigue siendo autoritativo)', () => {
+    render(<ResourcesInventory inventory={withWarnings({ branches_to_review: 2 })} />);
+    expect(screen.queryByTestId('resinv-count-unavailable')).toBeNull();
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 2');
+  });
 });
 
 describe('ResourcesInventory · se acota por Project ID', () => {
@@ -608,6 +636,26 @@ describe('ResourcesInventory · versión del DTO', () => {
     expect(screen.getByTestId('resinv-incompatible-version').textContent).toContain('sin versión');
   });
 
+  it.each([[2], [0], ['1'], [null]])(
+    'v=%j sin ninguna lista es versión incompatible, no «Core no ha entregado el inventario»',
+    (v) => {
+      render(<ResourcesInventory inventory={{ v, machine: 'm-1' }} />);
+      const notice = screen.getByTestId('resinv-incompatible-version');
+      expect(notice.textContent).toContain('no compatible');
+      expect(screen.queryByTestId('resinv-unavailable-inventory')).toBeNull();
+      expect(screen.queryByText(/no ha entregado/i)).toBeNull();
+      expect(screen.queryAllByTestId('resinv-row')).toHaveLength(0);
+      expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+      expect(screen.queryByTestId('resinv-count-unavailable')).toBeNull();
+    },
+  );
+
+  it('v: 1 sin listas sigue siendo «Core no ha entregado el inventario»', () => {
+    render(<ResourcesInventory inventory={{ v: 1, machine: 'm-1' }} />);
+    expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('no ha entregado');
+    expect(screen.queryByTestId('resinv-incompatible-version')).toBeNull();
+  });
+
   it('readInventory marca la versión no compatible y no entrega filas ni contador', () => {
     const parsed = readInventory({ ...DTO, v: 3 });
     expect(parsed.incompatible).toBe(true);
@@ -705,12 +753,20 @@ describe('ResourcesInventory · vocabulario desconocido de Core', () => {
     expect(screen.queryByTestId('resinv-review-unrecognized')).toBeNull();
   });
 
-  it('un motivo de repo desconocido se muestra crudo, sin traducirlo a otro', () => {
+  it('un motivo de repo desconocido se marca como Desconocido con el valor crudo, sin inventar su significado', () => {
     render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: 'disk_on_fire' })} />);
-    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('disk_on_fire');
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('Desconocido («disk_on_fire» no reconocido)');
     cleanup();
     render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: 'constructor' })} />);
-    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('constructor');
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('Desconocido («constructor» no reconocido)');
+  });
+
+  it('un motivo conocido sigue traducido y la ausencia de motivo es «—», no «Desconocido»', () => {
+    render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: 'git_failed' })} />);
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('git falló');
+    cleanup();
+    render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: undefined })} />);
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('—');
   });
 });
 
