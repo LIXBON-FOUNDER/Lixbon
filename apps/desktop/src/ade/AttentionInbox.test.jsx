@@ -115,26 +115,39 @@ describe('AttentionInbox', () => {
       attention: () => page(sevenFixtures()),
       projects: () => overview({
         projects: [
-          project('project-a', 'Alpha', counts({ question: 1, approval: 1, review_ready: 1, conflict: 1 })),
-          project('project-b', 'Beta', counts({ failed: 1 })),
+          project('project-a', 'Alpha', counts({ question: 1, approval: 2, review_ready: 3, conflict: 4 })),
+          project('project-b', 'Beta', counts({ failed: 5 })),
         ],
-        unassigned: counts({ environment_blocked: 1, risk: 1 }),
+        unassigned: counts({ environment_blocked: 6, risk: 7 }),
       }),
     });
 
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
 
-    expect((await screen.findByTestId('attention-total')).textContent).toBe('7');
-    expect(screen.getAllByRole('listitem')).toHaveLength(7);
+    await waitFor(() => expect(screen.getByTestId('attention-total').textContent).toBe('28'));
+    expect(screen.getByText('activas en el overview')).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(7));
     for (const visible of ['Pregunta', 'Aprobación', 'Revisión lista', 'Conflicto', 'Fallida', 'Entorno bloqueado', 'Riesgo']) {
       expect(screen.getAllByText(visible).length).toBeGreaterThan(0);
     }
 
     const categoryFilter = screen.getByLabelText('Categoría');
-    expect(within(categoryFilter).getByRole('option', { name: 'Riesgo (1)' })).toBeTruthy();
-    expect(within(categoryFilter).getByRole('option', { name: 'Pregunta (1)' })).toBeTruthy();
+    expect(within(categoryFilter).getAllByRole('option')).toHaveLength(8);
+    for (const [name, count] of [
+      ['Pregunta', 1],
+      ['Aprobación', 2],
+      ['Revisión lista', 3],
+      ['Conflicto', 4],
+      ['Fallida', 5],
+      ['Entorno bloqueado', 6],
+      ['Riesgo', 7],
+    ]) {
+      expect(within(categoryFilter).getByRole('option', { name: `${name} (${count})` })).toBeTruthy();
+    }
     expect(within(screen.getByLabelText('Severidad')).getAllByRole('option')).toHaveLength(5);
-    expect(within(screen.getByLabelText('Project')).getByRole('option', { name: 'Alpha · 4' })).toBeTruthy();
+    const projectFilter = screen.getByLabelText('Project');
+    expect(within(projectFilter).getByRole('option', { name: 'Alpha · 10' })).toBeTruthy();
+    expect(within(projectFilter).getByRole('option', { name: 'Beta · 5' })).toBeTruthy();
   });
 
   it('filtra con project_id, category y severity del contrato, y limpia los filtros', async () => {
@@ -155,6 +168,9 @@ describe('AttentionInbox', () => {
       { project_id: 'project-b', limit: ATTENTION_LIMIT },
     ]));
     expect(screen.getByTestId('attention-total').textContent).toBe('1');
+    const categoryFilter = screen.getByLabelText('Categoría');
+    expect(within(categoryFilter).getByRole('option', { name: 'Revisión lista (1)' })).toBeTruthy();
+    expect(within(categoryFilter).getByRole('option', { name: 'Pregunta (0)' })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'review_ready' } });
     await waitFor(() => expect(calls).toContainEqual([
@@ -173,6 +189,36 @@ describe('AttentionInbox', () => {
     await waitFor(() => expect(calls.filter(([query]) => query === 'attention_list').at(-1))
       .toEqual(['attention_list', { limit: ATTENTION_LIMIT }]));
     expect(screen.getByTestId('attention-total').textContent).toBe('2');
+  });
+
+  it('con severidad no presenta el total global como si fuera el de la consulta: usa la página y marca «+»', async () => {
+    const critical = item({ id: 'att_critical', category: 'risk', severity: 'critical', created_at: 1 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.severity !== 'critical') return page([]);
+        if (args.cursor === 'cursor-1') return page([]);
+        return page([critical], { hasMore: true, next: 'cursor-1' });
+      },
+      projects: () => overview({ projects: [project('project-a', 'Alpha', counts({ question: 3, risk: 2 }))] }),
+    });
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('attention-total').textContent).toBe('5'));
+    expect(screen.getByText('activas en el overview')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Severidad'), { target: { value: 'critical' } });
+    await waitFor(() => expect(calls).toContainEqual([
+      'attention_list',
+      { severity: 'critical', limit: ATTENTION_LIMIT },
+    ]));
+    await waitFor(() => expect(screen.getByTestId('attention-total').textContent).toBe('1+'));
+    expect(screen.getByText('activas con esta severidad')).toBeTruthy();
+    // Los conteos por categoría del overview no están cruzados con la severidad: no se insinúa que lo estén.
+    expect(screen.getByLabelText('Categoría').textContent).not.toMatch(/\(\d+\)/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await waitFor(() => expect(screen.getByTestId('attention-total').textContent).toBe('1'));
+    expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
   });
 
   it('abre el destino con los IDs durables exactos, sin transformarlos', async () => {
@@ -262,7 +308,10 @@ describe('AttentionInbox', () => {
       created_at: n,
       severity: ['critical', 'high', 'low'][n - 1],
     }));
-    mountCore({ attention: () => page(rows) });
+    mountCore({
+      attention: () => page(rows),
+      projects: () => overview({ projects: [project('project-a', 'Alpha', counts({ question: 3 }))] }),
+    });
 
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
     const buttons = await screen.findAllByRole('button', { name: /^(Crítica|Alta|Baja): / });
@@ -286,6 +335,43 @@ describe('AttentionInbox', () => {
     const describedBy = buttons[0].getAttribute('aria-describedby');
     expect(document.getElementById(describedBy).textContent).toContain('att_1');
     expect(buttons[0].getAttribute('aria-label')).toBe('Crítica: Pregunta. Task task-1');
+
+    expect(screen.getByTestId('attention-inbox').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByRole('list', { name: 'Attention activa' }).getAttribute('aria-busy')).toBe('false');
+    const live = document.querySelector('.attention-inbox__sr');
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(live.textContent).toBe('3 Attention activas en el overview.');
+  });
+
+  it('es de solo lectura: ninguna interacción emite mutaciones ni otras queries', async () => {
+    mountCore({
+      attention: () => page([item()]),
+      projects: () => overview({ projects: [project('project-a', 'Alpha', counts({ question: 1 }))] }),
+    });
+    const onOpenTarget = vi.fn();
+    render(<AttentionInbox onOpenTarget={onOpenTarget} />);
+    await screen.findByRole('button', { name: /Media: Pregunta/ });
+
+    fireEvent.change(screen.getByLabelText('Project'), { target: { value: 'project-a' } });
+    await waitFor(() => expect(invoke.mock.calls.some(([, payload]) => payload.query === 'attention_list'
+      && payload.args.project_id === 'project-a')).toBe(true));
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'question' } });
+    await waitFor(() => expect(invoke.mock.calls.some(([, payload]) => payload.query === 'attention_list'
+      && payload.args.category === 'question')).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: /Media: Pregunta/ }));
+    expect(onOpenTarget).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
+    await waitFor(() => expect(invoke.mock.calls.some(([, payload]) => payload.query === 'attention_list'
+      && !payload.args.project_id && !payload.args.category)).toBe(true));
+
+    expect(invoke).toHaveBeenCalled();
+    for (const [command, payload] of invoke.mock.calls) {
+      expect(command).toBe('orch_query');
+      expect(['attention_list', 'projects_overview']).toContain(payload.query);
+    }
+    const trace = invoke.mock.calls.map(([command, payload]) => `${command}:${payload.query}`).join(' ');
+    expect(trace).not.toMatch(/act_risk|resolve|snooze|push|unread|mark|approve|review|reply|orch_call/i);
   });
 
   it('pagina con el cursor opaco y no duplica filas que se solapan', async () => {
@@ -544,36 +630,108 @@ describe('AttentionInbox', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('muestra carga, vacío, error y degradado sin inventar datos', async () => {
+  it('al reconectar conserva el target, deduplica el solape y vuelve a paginar con la misma cabecera', async () => {
+    vi.useFakeTimers();
+    let failing = false;
+    const first = item({ id: 'att_1', target_id: 'task-9', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-9', created_at: 2 });
+    const third = item({ id: 'att_3', target_id: 'task-9', created_at: 3 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (failing) throw new Error('ade_query_timeout: Core no respondió a tiempo');
+        if (args.cursor === 'cursor-1') return page([second, third]);
+        return page([first, second], { hasMore: true, next: 'cursor-1' });
+      },
+      projects: () => overview({ projects: [project('project-a', 'Alpha', counts({ question: 3 }))] }),
+    });
+    const ids = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+    const attentionCalls = () => calls.filter(([query]) => query === 'attention_list');
+
+    render(
+      <AttentionInbox
+        onOpenTarget={vi.fn()}
+        target={{ kind: 'task', id: 'task-9', projectId: 'project-a', seq: 1 }}
+        onClearTarget={vi.fn()}
+        pollMs={1_000}
+      />,
+    );
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(ids()).toEqual(['att_1', 'att_2']);
+    expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-9');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(ids()).toEqual(['att_1', 'att_2', 'att_3']);
+    expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
+
+    failing = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    expect(ids()).toEqual(['att_1', 'att_2']);
+    expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-9');
+
+    failing = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.queryByText(/Attention desactualizada/)).toBeNull();
+    expect(ids()).toEqual(['att_1', 'att_2']);
+    expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-9');
+
+    // La cabecera reconectada es idéntica (updatedAt no cambia) y aun así la paginación sigue ligada a ella.
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(ids()).toEqual(['att_1', 'att_2', 'att_3']);
+    expect(new Set(ids()).size).toBe(3);
+
+    // El target se conserva en todas las consultas, también en las de paginación posteriores.
+    for (const [, args] of attentionCalls()) {
+      expect(args).toMatchObject({ target_kind: 'task', target_id: 'task-9' });
+    }
+  });
+
+  it('muestra carga, vacío, vacío filtrado, error y degradado con roles accesibles', async () => {
     const pending = new Promise(() => {});
     mountCore({ attention: () => pending });
     const first = render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    expect(screen.getByText('Cargando Attention activa desde el Core…')).toBeTruthy();
+    const loading = screen.getByTestId('attention-loading');
+    expect(loading.getAttribute('role')).toBe('status');
+    expect(loading.textContent).toBe('Cargando Attention activa desde el Core…');
+    expect(screen.getByTestId('attention-inbox').getAttribute('aria-busy')).toBe('true');
     first.unmount();
 
     cleanup();
     mountCore({ attention: () => page([]) });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    expect(await screen.findByText(/El Core no tiene Attention activa/)).toBeTruthy();
+    const empty = await screen.findByTestId('attention-empty');
+    expect(empty.getAttribute('role')).toBe('status');
+    expect(empty.textContent).toMatch(/El Core no tiene Attention activa/);
     expect(screen.getByTestId('attention-total').textContent).toBe('0');
+    expect(screen.getByTestId('attention-inbox').getAttribute('aria-busy')).toBe('false');
+
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'risk' } });
+    await waitFor(() => expect(screen.getByTestId('attention-empty').textContent).toMatch(/con estos filtros/));
     cleanup();
 
     mountCore({ attention: () => { throw new Error('attention_unavailable: el Core no tiene un almacén autoritativo disponible'); } });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    const degraded = await screen.findByRole('alert');
+    const degraded = await screen.findByTestId('attention-error');
+    expect(degraded.getAttribute('role')).toBe('alert');
     expect(degraded.textContent).toContain('Core degradado');
     expect(degraded.textContent).toContain('almacén autoritativo');
+    expect(within(degraded).getByRole('button', { name: 'Reintentar' })).toBeTruthy();
     cleanup();
 
     mountCore({ attention: () => { throw new Error('ade_query_timeout: Core no respondió a tiempo'); } });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    const disconnected = await screen.findByRole('alert');
+    const disconnected = await screen.findByTestId('attention-error');
+    expect(disconnected.getAttribute('role')).toBe('alert');
     expect(disconnected.textContent).toContain('Core desconectado');
     cleanup();
 
     mountCore({ attention: () => { throw new Error('attention_read_failed: no se pudo leer la tabla'); } });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    const failed = await screen.findByRole('alert');
+    const failed = await screen.findByTestId('attention-error');
+    expect(failed.getAttribute('role')).toBe('alert');
     expect(failed.textContent).toContain('Error de Core');
     expect(failed.textContent).toContain('Core no pudo leer la Attention');
   });
