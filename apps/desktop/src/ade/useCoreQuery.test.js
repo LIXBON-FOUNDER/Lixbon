@@ -104,6 +104,31 @@ describe('useCoreQuery', () => {
     expect(queryAdeCore).toHaveBeenCalledWith('tasks_by_project', { projectId: 'project-1', status: 'final' });
   });
 
+  it('transporta los filtros numéricos de activity_list y marca empty sin items', async () => {
+    queryAdeCore.mockResolvedValue({ items: [] });
+    const { result } = renderHook(() => useCoreQuery('activity_list', {
+      cursor: 25,
+      limit: 50,
+      order: 'desc',
+      project_id: 'project-1',
+      run_id: 'run-1',
+      target_kind: 'task',
+      target_id: 'task-1',
+    }));
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(queryAdeCore).toHaveBeenCalledWith('activity_list', {
+      cursor: 25,
+      limit: 50,
+      order: 'desc',
+      projectId: 'project-1',
+      runId: 'run-1',
+      targetKind: 'task',
+      targetId: 'task-1',
+    });
+    expect(result.current.status).toBe('empty');
+  });
+
   it('pausa el polling mientras la ventana está oculta y actualiza al volver', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     queryAdeCore.mockResolvedValue({ projects: [] });
