@@ -699,6 +699,34 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
   });
 
+  it('mueve el foco a la pestaña Activity tras la acción de la Task y no lo roba en la selección ordinaria', async () => {
+    coreWithActivity();
+    render(shell());
+    await pickTask();
+    await screen.findAllByRole('region', { name: 'Identidad' });
+    const activityTab = screen.getByRole('tab', { name: 'Activity' });
+    expect(document.activeElement).not.toBe(activityTab);
+
+    const action = screen.getAllByRole('button', { name: `Abrir Activity de la Task ${ITEM.id}` })[0];
+    action.focus();
+    expect(document.activeElement).toBe(action);
+    fireEvent.click(action);
+    await flush();
+
+    expect(activityTab.getAttribute('aria-selected')).toBe('true');
+    expect(activityTab.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(activityTab);
+
+    // Actualizaciones de fondo y cambios de alcance no vuelven a mover el foco.
+    const globalScope = scopeButton('Global');
+    globalScope.focus();
+    await flush();
+    expect(document.activeElement).toBe(globalScope);
+    fireEvent.click(globalScope);
+    await flush();
+    expect(document.activeElement).toBe(globalScope);
+  });
+
   it('no sondea Activity al salir de la subvista ni con el ADE inactivo y conserva el canvas operativo', async () => {
     vi.useFakeTimers();
     coreWithActivity();

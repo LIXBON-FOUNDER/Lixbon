@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
@@ -203,6 +203,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [attentionNotice, setAttentionNotice] = useState(null);
   const [activityScopePref, setActivityScopePref] = useState(null);
   const [activityNotice, setActivityNotice] = useState(null);
+  const [activityFocusSeq, setActivityFocusSeq] = useState(0);
   const targetSeq = useRef(0);
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
@@ -323,10 +324,15 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     if (target?.projectId === selectedProjectId && target?.taskId === selectedTaskId) {
       setActivityScopePref('task');
       changeWorkspaceView('activity');
+      setActivityFocusSeq((seq) => seq + 1);
       onActivate?.();
     }
     onOpenTaskActivity?.(target);
   };
+  // Foco solo tras la acción explícita de la Task: el TaskWorkspace queda oculto y el foco pasa a la pestaña Activity.
+  useEffect(() => {
+    if (activityFocusSeq > 0) document.getElementById(`${viewIds}-tab-activity`)?.focus();
+  }, [activityFocusSeq, viewIds]);
   // Destinos de Activity: solo por (kind, ID durable). Una Task se abre únicamente si está seleccionada o aparece
   // en las Tasks del Project seleccionado, porque el evento no trae el Project y no se infiere ni se adivina.
   const openActivityTarget = ({ kind, id }) => {
