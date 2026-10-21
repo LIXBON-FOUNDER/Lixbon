@@ -18,6 +18,8 @@ import {
   outstandingCount,
   outstandingLimit,
   resetOutstandingQueries,
+  RESOURCE_INVENTORY_ABANDON_MS,
+  slotFor,
   statusForFailure,
   subscribeFreeSlots,
   timeoutFor,
@@ -432,6 +434,80 @@ await checkAsync('un fallo tardío libera el hueco y la foto conocida no se inve
     if (reader) reader.stop();
     clock.restore();
   }
+});
+
+await checkAsync('el hueco de resource_inventory es por Project: un escaneo lento no aplaza a otro Project', async () => {
+  const clock = fakeClock();
+  const readers = [];
+  try {
+    resetOutstandingQueries();
+    const slow = deferred();
+    const launched = [];
+    const make = (projectId, launch) => {
+      const reader = createQueryReader({
+        query: 'resource_inventory',
+        requestKey: `resource_inventory:{"project_id":"${projectId}","probe":true}`,
+        slot: slotFor('resource_inventory', projectId),
+        launch: () => { launched.push(projectId); return launch(); },
+        pollMs: 1_000,
+        timers: clock.api,
+      });
+      readers.push(reader);
+      reader.start();
+      return reader;
+    };
+    make('project-1', () => slow.promise);
+    make('project-2', () => Promise.resolve({}));
+    await clock.advance(10);
+    assert.deepEqual(launched.slice(0, 2), ['project-1', 'project-2'], 'project-2 sale sin esperar a project-1');
+    assert.equal(outstandingCount(slotFor('resource_inventory', 'project-1')), 1);
+    assert.equal(slotFor('resource_inventory', null), 'resource_inventory', 'sin Project el hueco es el global');
+    slow.resolve({});
+    await flush();
+  } finally {
+    for (const reader of readers) reader.stop();
+    clock.restore();
+  }
+});
+
+await checkAsync('una petición colgada se abandona, libera el hueco y el sondeo vuelve a preguntar', async () => {
+  const clock = fakeClock();
+  let reader = null;
+  try {
+    resetOutstandingQueries();
+    let launches = 0;
+    const outcomes = [];
+    reader = createQueryReader({
+      query: 'resource_inventory',
+      requestKey: 'resource_inventory:{"project_id":"project-1","probe":true}',
+      slot: slotFor('resource_inventory', 'project-1'),
+      launch: () => { launches += 1; return new Promise(() => {}); },
+      pollMs: 1_000,
+      timers: clock.api,
+      onOutcome: (outcome) => outcomes.push(outcome),
+    });
+    reader.start();
+    await clock.advance(RESOURCE_INVENTORY_ABANDON_MS - 1);
+    assert.equal(launches, 1, 'antes del abandono no se abre otro escaneo');
+    assert.equal(outcomes.length, 0);
+    await clock.advance(1);
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0].ok, false);
+    assert.equal(classifyCoreError(outcomes[0].error), 'timeout', 'el abandono es un plazo, no una desconexión');
+    // El hueco quedó libre: el sondeo del mismo instante ya pudo volver a preguntar (una sola petición viva).
+    assert.ok(outstandingCount(slotFor('resource_inventory', 'project-1')) <= 1, 'nunca dos escaneos vivos del mismo Project');
+    await clock.advance(1_000);
+    assert.equal(launches, 2, 'el sondeo vuelve a preguntar tras el abandono');
+  } finally {
+    if (reader) reader.stop();
+    clock.restore();
+  }
+});
+
+check('el eco de filtros sin project_id se rechaza', () => {
+  const dto = inventario();
+  const { project_id: _omitido, ...sinProject } = dto.filters;
+  assert.throws(() => validateResourceInventory({ ...dto, filters: sinProject }, { project_id: null, probe: true }), /ade_query_invalid_response/);
 });
 
 // ------------------------------------------------------- contrato de resource_inventory (P2)

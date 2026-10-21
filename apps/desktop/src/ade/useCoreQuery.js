@@ -3,6 +3,7 @@ import { queryAdeCore } from './coreQueries';
 import {
   classifyCoreError,
   createQueryReader,
+  slotFor,
   statusForFailure,
 } from './coreQueryPolicy';
 
@@ -41,7 +42,11 @@ function coreArgs(query, args) {
   }
   if (query === 'resource_inventory') {
     // El sondeo viaja siempre: el Core decide si calcula `dirty`/`merged` y el eco se verifica.
-    return { projectId: args.project_id ?? null, probe: args.probe ?? true };
+    // El ADE exige `project_id`: el inventario se lee siempre acotado a un Project durable.
+    if (typeof args.project_id !== 'string' || !args.project_id.trim()) {
+      throw new Error('ade_query_invalid_request: resource_inventory exige project_id');
+    }
+    return { projectId: args.project_id, probe: args.probe ?? true };
   }
   return { projectId: args.project_id, taskId: args.task_id };
 }
@@ -156,6 +161,8 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
     const reader = createQueryReader({
       query,
       requestKey,
+      // Hueco por Project para `resource_inventory`: un escaneo lento no aplaza a otro Project.
+      slot: slotFor(query, JSON.parse(argsJson)?.project_id ?? null),
       launch: () => queryAdeCore(query, coreArgs(query, JSON.parse(argsJson))),
       pollMs,
       isHidden: () => document.visibilityState === 'hidden',

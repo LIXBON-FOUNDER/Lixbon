@@ -14,7 +14,10 @@
  *    siguiente poll, un reintento o un cambio de argumentosaban una segunda petición al Core
  *    mientras la primera seguía viva.
  *  · Hay un registro de peticiones outstanding: como mucho UNA por clave de petición y, para
- *    `resource_inventory`, UNA en todo el cliente (cada una es un escaneo del Core).
+ *    `resource_inventory`, UNA por Project (cada una es un escaneo del Core); un Project lento
+ *    no aplaza a otro.
+ *  · Una petición sin respuesta se ABANDONA tras `abandonAfter(query)`: libera su hueco y el
+ *    sondeo/reintento puede volver a preguntar. No hay esperas indefinidas.
  *  · Si no hay hueco, la lectura NO se lanza: se aplaza hasta que se libere otro.
  *  · Un plazo agotado NO es evidencia de desconexión: se clasifica aparte ('timeout') y el
  *    estado que se muestra es stale/degraded/error según la evidencia que haya, nunca
@@ -33,6 +36,29 @@ export const QUERY_TIMEOUT_MS = 10_000;
  * en ellos: el escaneo puede seguir vivo en el Core mucho después.
  */
 export const RESOURCE_INVENTORY_TIMEOUT_MS = 30_000;
+
+/**
+ * Plazo de ABANDONO: pasado este tiempo sin respuesta, la petición deja de ocupar su hueco y quien
+ * esperaba recibe un fallo `ade_query_timeout` (se conserva la última foto como `stale`). Sin este
+ * tope, un escaneo colgado del Core bloqueaba para siempre el sondeo y los reintentos de esa clave
+ * (revisión de 0d4dc641). Una respuesta que llegue después del abandono se descarta.
+ */
+export const RESOURCE_INVENTORY_ABANDON_MS = 120_000;
+const ABANDON_FACTOR = 4;
+
+export function abandonAfter(query) {
+  return query === 'resource_inventory' ? RESOURCE_INVENTORY_ABANDON_MS : timeoutFor(query) * ABANDON_FACTOR;
+}
+
+/**
+ * Hueco de concurrencia de una lectura. Por defecto es la query; `resource_inventory` lo acota
+ * por Project (`resource_inventory#<project_id>`): un escaneo lento de un Project no puede aplazar
+ * la lectura de otro Project.
+ */
+export function slotFor(query, projectId = null) {
+  if (query === 'resource_inventory' && typeof projectId === 'string' && projectId) return `${query}#${projectId}`;
+  return query;
+}
 
 /** Plazo de espera (umbral visual) por query. */
 const QUERY_TIMEOUT_MS_BY_QUERY = { resource_inventory: RESOURCE_INVENTORY_TIMEOUT_MS };
@@ -90,8 +116,12 @@ const counts = new Map();
 /** Avisados cuando se libera un hueco (para lanzar lo que estaba aplazado). */
 const slotListeners = new Set();
 
-export function outstandingCount(query) {
-  return counts.get(query) ?? 0;
+export function outstandingCount(slot) {
+  return counts.get(slot) ?? 0;
+}
+
+function limitForSlot(slot) {
+  return outstandingLimit(slot.split('#')[0]);
 }
 
 /**
@@ -103,12 +133,12 @@ export function outstandingCount(query) {
  * La entrada lleva `deadline` (el umbral visual de ESA petición, contado desde que se lanzó):
  * quien se enganche después lo hereda, porque el plazo es de la petición y no de quien espera.
  */
-export function ensureRequest(query, requestKey, launch) {
+export function ensureRequest(query, requestKey, launch, { slot = query, timers = DEFAULT_TIMERS } = {}) {
   const existing = entries.get(requestKey);
   if (existing) return existing;
-  if (outstandingCount(query) >= outstandingLimit(query)) return null;
-  const startedAt = Date.now();
-  const entry = { query, requestKey, startedAt, deadline: startedAt + timeoutFor(query) };
+  if (outstandingCount(slot) >= limitForSlot(slot)) return null;
+  const startedAt = timers.now();
+  const entry = { query, slot, requestKey, startedAt, deadline: startedAt + timeoutFor(query), abandoned: false };
   // `settled` nunca rechaza: el error viaja como resultado, para que el enganche siempre pueda
   // distinguir «respondió» de «falló».
   entry.settled = new Promise((resolve) => {
@@ -119,22 +149,35 @@ export function ensureRequest(query, requestKey, launch) {
       resolve({ ok: false, error });
       return;
     }
+    let abandonTimer = null;
+    const finish = (outcome) => {
+      if (abandonTimer !== null) timers.clearTimeout(abandonTimer);
+      abandonTimer = null;
+      resolve(outcome);
+    };
+    abandonTimer = timers.setTimeout(() => {
+      abandonTimer = null;
+      entry.abandoned = true;
+      resolve({ ok: false, error: new Error(`ade_query_timeout: ${query} abandonada tras ${abandonAfter(query)} ms sin respuesta del Core`) });
+    }, abandonAfter(query));
+    // En Node (scripts de contrato) el tope de abandono no debe mantener vivo el proceso.
+    if (abandonTimer && typeof abandonTimer.unref === 'function') abandonTimer.unref();
     Promise.resolve(launched).then(
-      (data) => resolve({ ok: true, data }),
-      (error) => resolve({ ok: false, error }),
+      (data) => { if (!entry.abandoned) finish({ ok: true, data }); },
+      (error) => { if (!entry.abandoned) finish({ ok: false, error }); },
     );
   });
   entries.set(requestKey, entry);
-  counts.set(query, outstandingCount(query) + 1);
+  counts.set(slot, outstandingCount(slot) + 1);
   const release = () => {
     // Solo la petición registrada libera su hueco: una entrada que ya se liberó (o un registro
     // reiniciado por una prueba) no puede decrementar el hueco de otra.
     if (entries.get(requestKey) !== entry) return;
     entries.delete(requestKey);
-    counts.set(query, Math.max(0, outstandingCount(query) - 1));
+    counts.set(slot, Math.max(0, outstandingCount(slot) - 1));
     for (const listener of [...slotListeners]) {
       try {
-        listener(query);
+        listener(slot);
       } catch {
         // Un oyente que falla no puede dejar el hueco ocupado para los demás.
       }
@@ -191,6 +234,7 @@ export function createQueryReader({
   query,
   requestKey,
   launch,
+  slot = query,
   pollMs = 15_000,
   isHidden = () => false,
   timers = DEFAULT_TIMERS,
@@ -204,8 +248,8 @@ export function createQueryReader({
   let thresholdTimer = null;
   let interval = null;
 
-  const unsubscribe = subscribeFreeSlots((freedQuery) => {
-    if (!alive || freedQuery !== query || !pending) return;
+  const unsubscribe = subscribeFreeSlots((freedSlot) => {
+    if (!alive || freedSlot !== slot || !pending) return;
     refresh();
   });
 
@@ -213,7 +257,7 @@ export function createQueryReader({
     if (!alive || active || isHidden()) return;
     // Una petición viva para esta clave se reutiliza; si no hay hueco, la lectura se APLAZA:
     // preguntar al Core con otro escaneo en marcha sería un escaneo solapado.
-    const entry = ensureRequest(query, requestKey, launch);
+    const entry = ensureRequest(query, requestKey, launch, { slot, timers });
     if (!entry) {
       pending = true;
       return;

@@ -119,7 +119,7 @@ describe('useCoreQuery', () => {
 
   it('un Core degradado se declara degradado, no desconectado', async () => {
     queryAdeCore.mockRejectedValue(new Error('resource_inventory_unavailable: almacén no disponible'));
-    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }));
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }));
 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(result.current.status).toBe('degraded');
@@ -187,7 +187,7 @@ describe('useCoreQuery', () => {
   it('da a resource_inventory un umbral propio: el sondeo de git del Core puede pasar de los 10 s', async () => {
     queryAdeCore.mockImplementation(() => new Promise(() => {}));
     vi.useFakeTimers();
-    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }));
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }));
 
     // El umbral genérico de 10 s descartaría una respuesta legítima del Core: aquí no se agota.
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
@@ -207,7 +207,7 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     const late = deferred();
     queryAdeCore.mockImplementation(() => late.promise);
     vi.useFakeTimers();
-    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }, { pollMs: 1_000 }));
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }, { pollMs: 1_000 }));
 
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(queryAdeCore).toHaveBeenCalledTimes(1);
@@ -234,7 +234,7 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     vi.useFakeTimers();
     const { result, rerender } = renderHook(
       ({ projectId }) => useCoreQuery('resource_inventory', { project_id: projectId, probe: true }, { pollMs: 1_000 }),
-      { initialProps: { projectId: null } },
+      { initialProps: { projectId: 'project-1' } },
     );
 
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
@@ -248,17 +248,40 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     await act(async () => { result.current.retry(); await vi.advanceTimersByTimeAsync(1_000); });
     expect(queryAdeCore).toHaveBeenCalledTimes(1);
 
-    // Un cambio de argumentos tampoco: la lectura nueva se APLAZA hasta que se libere el hueco.
-    await act(async () => { rerender({ projectId: 'project-2' }); await vi.advanceTimersByTimeAsync(5_000); });
-    expect(queryAdeCore).toHaveBeenCalledTimes(1);
-
-    // Cuando la primera se resuelve, la lectura aplazada sale: secuencial, nunca solapada.
-    await act(async () => {
-      late.resolve({ repos: [], worktrees: [], preserved_branches: [] });
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    // Otro Project NO espera al escaneo lento del primero: el hueco es por Project.
+    await act(async () => { rerender({ projectId: 'project-2' }); await vi.advanceTimersByTimeAsync(1_000); });
     expect(queryAdeCore).toHaveBeenCalledTimes(2);
     expect(queryAdeCore).toHaveBeenLastCalledWith('resource_inventory', { projectId: 'project-2', probe: true });
+
+    // Volver al primer Project se engancha a su petición viva: no se solapan escaneos del mismo Project.
+    await act(async () => { rerender({ projectId: 'project-1' }); await vi.advanceTimersByTimeAsync(1_000); });
+    expect(queryAdeCore).toHaveBeenCalledTimes(2);
+    late.resolve({ repos: [], worktrees: [], preserved_branches: [] });
+  });
+
+  it('exige project_id para resource_inventory y no pregunta al Core sin él', async () => {
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(queryAdeCore).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toContain('ade_query_invalid_request');
+  });
+
+  it('una lectura colgada se abandona y deja reintentar: no bloquea indefinidamente', async () => {
+    queryAdeCore.mockImplementation(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }, { pollMs: 1_000 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(queryAdeCore).toHaveBeenCalledTimes(1);
+    await act(async () => { result.current.retry(); await vi.advanceTimersByTimeAsync(1_000); });
+    expect(queryAdeCore).toHaveBeenCalledTimes(1);
+
+    // Pasado el tope de abandono (120 s) el hueco se libera y el sondeo vuelve a preguntar al Core.
+    await act(async () => { await vi.advanceTimersByTimeAsync(57_000); });
+    expect(queryAdeCore).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(queryAdeCore).toHaveBeenCalledTimes(2);
+    expect(result.current.status).not.toBe('disconnected');
   });
 
   it('al agotarse el umbral se conserva la última foto y la respuesta tardía la actualiza', async () => {
@@ -266,7 +289,7 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     const first = { repos: [], worktrees: [], preserved_branches: [], machine: 'machine-1' };
     queryAdeCore.mockResolvedValueOnce(first).mockImplementation(() => late.promise);
     vi.useFakeTimers();
-    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }, { pollMs: 1_000 }));
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }, { pollMs: 1_000 }));
 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(result.current.status).toBe('ready');
@@ -294,7 +317,7 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     const first = { repos: [], worktrees: [], preserved_branches: [] };
     queryAdeCore.mockResolvedValueOnce(first).mockImplementation(() => late.promise);
     vi.useFakeTimers();
-    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }, { pollMs: 1_000 }));
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }, { pollMs: 1_000 }));
 
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
