@@ -80,7 +80,16 @@ const INVENTORY = {
   },
 };
 
-function core(detail, { attention = () => attentionPage([]), inventory = () => INVENTORY } = {}) {
+const projectActivityPage = (items, args = {}) => ({
+  v: 1, projection: 'activity.v1', order: 'desc', items, next_cursor: '0', has_more: false, head_seq: '0', limit: args.limit ?? 20,
+});
+const ACTIVITY_EVENT = {
+  seq: '7', event_id: 'evt-project-1', ts: Date.UTC(2026, 9, 21, 15, 0, 0), kind: 'task.created', v: 1, class: 'task',
+  message_key: 'no.such.key', args: {}, visual: 'neutral', fallback: false,
+  target: { kind: 'task', id: 'task-durable-1' }, project_id: 'project-durable-1',
+};
+
+function core(detail, { attention = () => attentionPage([]), inventory = () => INVENTORY, activity = (args) => projectActivityPage([], args) } = {}) {
   queryAdeCore.mockImplementation(async (query, args) => {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
     if (query === 'tasks_by_project') return {
@@ -91,6 +100,7 @@ function core(detail, { attention = () => attentionPage([]), inventory = () => I
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
     if (query === 'resource_inventory') return inventory(args);
+    if (query === 'activity_list') return activity(args);
     throw new Error(`Query no permitida en fixture: ${query}`);
   });
 }
@@ -354,12 +364,16 @@ describe('AdeShell · Project View (LXO-204)', () => {
   });
 
   it('abre por el ID durable y muestra metadata real del overview, Tasks all y slices pendientes', async () => {
-    core(detailOf(), { attention: () => attentionPage([att({ id: 'att-project-1' })]) });
+    core(detailOf(), {
+      attention: () => attentionPage([att({ id: 'att-project-1' })]),
+      activity: (args) => projectActivityPage([{ ...ACTIVITY_EVENT, project_id: PROJECT.id, target: { kind: 'task', id: ITEM.id } }], args),
+    });
     render(shell());
 
     fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
     const projectView = await screen.findByTestId('project-view');
     await within(projectView).findByTestId('location-machine');
+    await within(projectView).findByTestId('activity-evt-project-1');
     await within(projectView).findByTestId('attention-att-project-1');
 
     expect(within(projectView).getByRole('heading', { level: 2, name: 'Repo Real' })).toBeTruthy();
@@ -378,8 +392,14 @@ describe('AdeShell · Project View (LXO-204)', () => {
     }
     expect(within(projectView).getByTestId('attention-kind').textContent).toBe('question');
     expect(within(projectView).getByText('Core no suministró texto para esta Attention.')).toBeTruthy();
-    expect(within(projectView).getByRole('region', { name: /Activity/ }).querySelector('[data-testid="slice-notice"]').textContent)
-      .toContain('Backlog (LXO-92)');
+    // Activity del Project (LXO-204): la proyección real de Events acotada al Project durable.
+    const activityRegion = within(projectView).getByRole('region', { name: /Activity/ });
+    expect(activityRegion.querySelector('[data-testid="slice-notice"]')).toBeNull();
+    expect(within(activityRegion).getByTestId('activity-no-text').textContent).toContain('task.created');
+    expect(within(activityRegion).getByTestId('activity-evt-project-1').querySelector('time').dateTime)
+      .toBe(new Date(ACTIVITY_EVENT.ts).toISOString());
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'activity_list'))
+      .toContainEqual(['activity_list', { cursor: '0', limit: 20, order: 'desc', projectId: PROJECT.id, runId: null, targetKind: null, targetId: null }]);
     // El slice legacy de Resources no lo da ninguna query de Core: se declara no disponible (no vacío)
     // y su foto real es el inventario de solo lectura, que ya está montado debajo.
     expect(within(projectView).getByRole('region', { name: 'Resources' }).querySelector('[data-testid="slice-notice"]').textContent)
@@ -415,6 +435,32 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(inventory).getAllByTestId('resinv-target').map((el) => el.textContent))
       .toEqual(['C:/repos/repo-real', 'C:/repos/repo-real.lixbon-wt/wt-1']);
     expect(within(inventory).getByTestId('resinv-readonly').textContent).toBe('Solo lectura');
+  });
+
+  it('conserva y muestra el estado del inventario: error con reintento y foto real después', async () => {
+    let fail = true;
+    core(detailOf(), {
+      inventory: () => {
+        if (fail) throw new Error('resource_inventory_read_failed: git no respondió');
+        return INVENTORY;
+      },
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+    const status = await within(projectView).findByTestId('resinv-status');
+    expect(status.dataset.state).toBe('error');
+    expect(status.getAttribute('role')).toBe('alert');
+    expect(status.textContent).toContain('resource_inventory_read_failed');
+    expect(within(projectView).getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+
+    // El reintento vuelve a preguntar al Core y la foto real sustituye al error.
+    fail = false;
+    fireEvent.click(within(projectView).getByTestId('resinv-retry'));
+    await within(projectView).findAllByTestId('resinv-row');
+    expect(within(projectView).queryByTestId('resinv-status')).toBeNull();
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'resource_inventory').length).toBeGreaterThanOrEqual(2);
   });
 
   it('no consulta el inventario mientras no hay un Project durable seleccionado', async () => {

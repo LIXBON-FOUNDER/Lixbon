@@ -6,6 +6,7 @@ import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
+import { translateActivityMessage } from './activityMessages';
 import { readAdeTask } from './coreQueries';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
@@ -45,6 +46,37 @@ function projectQueryMessage(query) {
   }[query.status];
   if (sourceLabel) return `${sourceLabel}. ${query.error || ''}`.trim();
   return query.error || null;
+}
+
+/** Eventos recientes que Project View resume; la línea de tiempo completa vive en la pestaña Activity. */
+export const PROJECT_ACTIVITY_LIMIT = 20;
+
+/**
+ * Proyecta un item de `activity_list` (LXO-92) a la fila de Project View. Solo se usan campos del
+ * contrato: el texto sale de `message_key`/`args` traducidos; un fallback o una clave desconocida
+ * dejan el texto vacío y Project View dice que Core no dio texto, sin inventarlo.
+ */
+export function projectActivityItem(item) {
+  const target = item?.target && typeof item.target === 'object' ? item.target : null;
+  const text = item?.fallback === true ? null : translateActivityMessage(item?.message_key, item?.args);
+  return {
+    activity_id: typeof item?.event_id === 'string' ? item.event_id : undefined,
+    kind: typeof item?.kind === 'string' ? item.kind : undefined,
+    ...(typeof text === 'string' && text ? { text } : {}),
+    ...(Number.isSafeInteger(item?.ts) && item.ts >= 0 ? { occurred_at: new Date(item.ts).toISOString() } : {}),
+    ...(target?.kind === 'task' && typeof target.id === 'string' ? { task_id: target.id } : {}),
+    ...(target?.kind === 'attempt' && typeof target.id === 'string' ? { attempt_id: target.id } : {}),
+    ...(typeof item?.project_id === 'string' && item.project_id ? { project_id: item.project_id } : {}),
+  };
+}
+
+/** Estado del inventario de recursos tal como lo da `useCoreQuery`: stale/loading/error/degraded se conservan. */
+export function resourceInventoryStatus(query) {
+  return {
+    state: query.status,
+    message: typeof query.error === 'string' && query.error ? query.error : null,
+    reason: query.reason ?? null,
+  };
 }
 
 function projectViewSlice(query, items, { hasMore = false } = {}) {
@@ -204,6 +236,17 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     project_id: selectedProjectId,
     probe: true,
   }, { enabled: projectViewActive });
+  // Activity del Project (LXO-204): la misma proyección de Events que la pestaña Activity, acotada
+  // al Project durable y en orden descendente. Solo lectura.
+  const projectActivity = useCoreQuery('activity_list', {
+    cursor: '0',
+    limit: PROJECT_ACTIVITY_LIMIT,
+    order: 'desc',
+    project_id: selectedProjectId,
+    run_id: null,
+    target_kind: null,
+    target_id: null,
+  }, { enabled: projectViewActive });
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
     task_id: selectedTaskId,
@@ -281,6 +324,10 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     }))
     : [];
   const projectAttentionSlice = projectViewSlice(projectAttention, projectAttentionItems, { hasMore: projectAttention.data?.has_more === true });
+  const projectActivityItems = Array.isArray(projectActivity.data?.items)
+    ? projectActivity.data.items.map(projectActivityItem)
+    : [];
+  const projectActivitySlice = projectViewSlice(projectActivity, projectActivityItems, { hasMore: projectActivity.data?.has_more === true });
 
   // Invalida la verificación de Activity en curso y retira solo su aviso «Verificando…»; otros avisos no son suyos.
   const invalidateActivityRequest = () => {
@@ -589,12 +636,14 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                     summary={projectSummary}
                     tasks={projectTaskSlice}
                     attention={projectAttentionSlice}
-                    activity={{ state: 'unavailable', items: [], message: 'Activity permanece en Backlog (LXO-92).' }}
+                    activity={projectActivitySlice}
                     // El slice legacy de Resources (resource_id/kind/label/availability) no lo da ninguna
                     // query de Core: se declara no disponible, nunca vacío. La foto real de repos,
                     // worktrees y ramas conservadas es el inventario de solo lectura de abajo.
                     resources={{ state: 'unavailable', items: [], message: 'Core no da un listado de Resources; su foto de solo lectura es el inventario de esta sección.' }}
                     resourceInventory={projectInventory.data ?? null}
+                    resourceInventoryStatus={resourceInventoryStatus(projectInventory)}
+                    onRetryResourceInventory={projectInventory.retry}
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
                   />

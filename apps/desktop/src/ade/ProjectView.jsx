@@ -391,7 +391,7 @@ function Activity({ slice, projectId, onOpenTask, onOpenAttempt, headingId }) {
   );
 }
 
-function Resources({ slice, inventory, projectId, onOpenResource, headingId }) {
+function Resources({ slice, inventory, inventoryStatus, onRetryInventory, projectId, onOpenResource, headingId }) {
   const { kept, foreign } = scopeToProject(slice.items, projectId);
   return (
     <Section title="Resources" headingId={headingId}>
@@ -420,7 +420,7 @@ function Resources({ slice, inventory, projectId, onOpenResource, headingId }) {
       )}
       {/* Inventario de SOLO LECTURA (LXO-101): el DTO de `resource_inventory` de Core, acotado
           por Project ID. Sin DTO pinta «no disponible», jamás filas inventadas. */}
-      <ResourcesInventory inventory={inventory} projectId={projectId} />
+      <ResourcesInventory inventory={inventory} status={inventoryStatus} onRetry={onRetryInventory} projectId={projectId} />
     </Section>
   );
 }
@@ -430,7 +430,7 @@ export function ProjectView({
   locations,
   summary,
   tasks, filter, defaultFilter = 'active', onFilterChange,
-  attention, activity, resources, resourceInventory,
+  attention, activity, resources, resourceInventory, resourceInventoryStatus, onRetryResourceInventory,
   onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
 }) {
   const uid = useId();
@@ -459,7 +459,7 @@ export function ProjectView({
       <Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} />
       <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} headingId={`${uid}-tasks`} />
       <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
-      <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
+      <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} inventoryStatus={resourceInventoryStatus} onRetryInventory={onRetryResourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
     </article>
   );
 }
