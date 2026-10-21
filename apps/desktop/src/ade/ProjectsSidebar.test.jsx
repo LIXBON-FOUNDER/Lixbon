@@ -2135,6 +2135,63 @@ describe('ProjectsSidebar', () => {
     expect(onSelectTask).not.toHaveBeenCalled();
   });
 
+  it('mantiene stale al reactivarse oculta hasta iniciar y completar una lectura nueva', async () => {
+    const visibilityState = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const onProjectSnapshot = vi.fn();
+    const refresh = deferred();
+    let reads = 0;
+    const calls = mountCore({
+      overviews: () => {
+        reads += 1;
+        return reads === 1 ? overview([project('project-a', 'Alpha')]) : refresh.promise;
+      },
+    });
+    const props = {
+      pollMs: 60_000,
+      selection: { projectId: 'project-a', taskId: null },
+      onProjectSnapshot,
+    };
+    const { rerender } = render(<ProjectsSidebar active {...props} />);
+
+    await screen.findByRole('treeitem', { name: /Alpha/ });
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ queryState: 'ready' })));
+
+    rerender(<ProjectsSidebar active={false} {...props} />);
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith({
+      projectId: 'project-a', queryState: 'idle', project: null, error: null, reason: null,
+    });
+
+    onProjectSnapshot.mockClear();
+    visibilityState.mockReturnValue('hidden');
+    rerender(<ProjectsSidebar active {...props} />);
+    await flush();
+
+    expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(1);
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      queryState: 'stale',
+      project: expect.objectContaining({ projectId: 'project-a', name: 'Alpha' }),
+      error: null,
+      reason: null,
+    }));
+    expect(onProjectSnapshot.mock.calls.map(([snapshot]) => snapshot.queryState)).not.toContain('ready');
+
+    visibilityState.mockReturnValue('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', queryState: 'refreshing', project: expect.objectContaining({ name: 'Alpha' }),
+    })));
+    expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(2);
+
+    refresh.resolve(overview([project('project-a', 'Alpha renombrado')]));
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      queryState: 'ready',
+      project: expect.objectContaining({ projectId: 'project-a', name: 'Alpha renombrado' }),
+    })));
+  });
+
   it('transporta el filtro archived al overview', async () => {
     const calls = mountCore({ overviews: (args) => overview([], { archived: args.archived }) });
     render(<ProjectsSidebar archived="only" />);
