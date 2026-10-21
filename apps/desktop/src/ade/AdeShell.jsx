@@ -85,13 +85,13 @@ const WORKSPACE_VIEWS = [
 // Misma política que useCoreQuery: ninguna lectura de Core queda abierta indefinidamente.
 const ACTIVITY_VERIFY_TIMEOUT_MS = 10_000;
 
-/** Lee `task_detail` por el par durable con el límite de 10 s; la lectura tardía se descarta, no se aplica. */
-function readTaskWithinPolicy(projectId, taskId) {
+/** Espera la lectura con el límite de 10 s; vencer el plazo solo rechaza al llamante, no libera la lectura en vuelo. */
+function withinVerifyPolicy(read) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = window.setTimeout(() => reject(new Error('ade_query_timeout: Core no respondió a tiempo')), ACTIVITY_VERIFY_TIMEOUT_MS);
   });
-  return Promise.race([readAdeTask(projectId, taskId), timeout]).finally(() => window.clearTimeout(timeoutId));
+  return Promise.race([read, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
 const ACTIVITY_SCOPES = [
@@ -165,7 +165,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [projectsSnapshot, setProjectsSnapshot] = useState(null);
   const targetSeq = useRef(0);
   const activityTargetRequest = useRef(0);
-  const taskVerification = useRef(null);
+  const taskVerifications = useRef(new Map());
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
@@ -333,15 +333,21 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       || Boolean(document.getElementById(`${viewIds}-panel-activity`)?.contains(current));
   };
 
-  // Una sola lectura `task_detail` por par durable en vuelo: un segundo clic sobre el mismo destino la reutiliza.
+  // Una sola lectura `task_detail` por par durable en vuelo (A/B/A y reintentos tras timeout la reutilizan).
+  // La ranura se libera cuando la consulta subyacente se asienta, nunca por el timeout de la UI.
   const verifyTask = (projectId, taskId) => {
     const key = JSON.stringify([projectId, taskId]);
-    if (taskVerification.current?.key === key) return taskVerification.current.promise;
-    const promise = readTaskWithinPolicy(projectId, taskId).finally(() => {
-      if (taskVerification.current?.promise === promise) taskVerification.current = null;
-    });
-    taskVerification.current = { key, promise };
-    return promise;
+    const inFlight = taskVerifications.current;
+    let read = inFlight.get(key);
+    if (!read) {
+      read = new Promise((resolve) => resolve(readAdeTask(projectId, taskId)));
+      inFlight.set(key, read);
+      const release = () => {
+        if (inFlight.get(key) === read) inFlight.delete(key);
+      };
+      read.then(release, release);
+    }
+    return withinVerifyPolicy(read);
   };
 
   // Activity entrega IDs durables. Se confirma el Project en la lista actual y la Task por su par exacto
