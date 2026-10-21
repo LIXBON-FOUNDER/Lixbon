@@ -38,6 +38,10 @@
 //                               o sensibles se descartan. No es el payload crudo del evento.
 // @property {string} [correlationId]  Une hechos (p. ej. decisión y efecto); se muestra, no se fusiona.
 //
+// Navegación: `onOpenTarget({kind, id})` recibe la referencia durable exacta de un target
+// `project` o `task` bien formado. Sin callback, o con otro kind / id mal formado, el destino
+// se pinta como texto informativo. La vista solo avisa al host; no navega ni escribe.
+//
 // Prohibido por contrato: `payload` crudo, `summary`/resúmenes de IA, `unread`/Attention y fusionar
 // decision/effect en una sola fila. La vista es de solo lectura y no escribe en el Core.
 
@@ -328,6 +332,25 @@ function targetOf(item) {
   };
 }
 
+// Solo se navega a entidades que la vista ya conoce como alcance (Project / Task). `run`,
+// `spawn_request`, `agent`, `core` y `attention` siguen siendo referencias informativas: abrirlas
+// pertenece a otras rodajas (Attempt/F3, Attention) y aquí no se inventa esa navegación.
+const NAVIGABLE_TARGET_KINDS = new Set(['project', 'task']);
+const MAX_TARGET_ID = 200;
+
+// Devuelve la referencia durable EXACTA (kind + id sin tocar) o null. Un kind o id con espacios
+// sobrantes, vacío, con caracteres de control o demasiado largo se considera mal formado: no se
+// «arregla» con trim porque el host recibiría un id distinto del que Core emitió.
+function navigableTargetOf(item) {
+  const target = item.target;
+  if (!target || typeof target !== 'object') return null;
+  const { kind, id } = target;
+  if (typeof kind !== 'string' || !NAVIGABLE_TARGET_KINDS.has(kind)) return null;
+  if (typeof id !== 'string' || !id || id !== id.trim() || id.length > MAX_TARGET_ID) return null;
+  if (CONTROL_CHARS.test(id)) return null;
+  return { kind, id };
+}
+
 function projectOf(item) {
   const project = item.project;
   if (!project || typeof project !== 'object') return null;
@@ -378,6 +401,7 @@ export function ActivityTimeline({
   onLoadMore,
   onRefresh,
   onRetry,
+  onOpenTarget,
   translateMessage,
   className = '',
 }) {
@@ -535,6 +559,7 @@ export function ActivityTimeline({
             const classKey = CLASS_KEYS.has(item.class) ? item.class : 'unknown';
             const severity = SEVERITY_KEYS.has(item.severity) ? item.severity : null;
             const target = targetOf(item);
+            const openable = typeof onOpenTarget === 'function' ? navigableTargetOf(item) : null;
             const project = projectOf(item);
             const actor = actorOf(item);
             const client = clientOf(item);
@@ -610,7 +635,20 @@ export function ActivityTimeline({
                     <time className="activity__time mono" dateTime={time.iso} title={time.title}>
                       {time.label}
                     </time>
-                    {target ? (
+                    {target && openable ? (
+                      <button
+                        type="button"
+                        className="activity__target activity__target--link"
+                        data-testid={`activity-target-${eventId}`}
+                        aria-label={`Abrir ${TARGET_LABELS[openable.kind]} ${openable.id}`}
+                        onClick={() => onOpenTarget({ kind: openable.kind, id: openable.id })}
+                      >
+                        {TARGET_LABELS[target.kind] || 'Destino'}{' '}
+                        <span className="mono" title={target.id}>
+                          {target.id}
+                        </span>
+                      </button>
+                    ) : target ? (
                       <span className="activity__target" data-testid={`activity-target-${eventId}`}>
                         {TARGET_LABELS[target.kind] || 'Destino'}{' '}
                         <span className="mono" title={target.id}>

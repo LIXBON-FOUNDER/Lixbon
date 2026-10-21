@@ -325,6 +325,28 @@
   color: var(--ink-70);
 }
 
+.activity__target--link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.activity__target--link:hover {
+  color: var(--ink);
+}
+
+.activity__target--link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .activity__target--missing {
   color: var(--warn);
 }
