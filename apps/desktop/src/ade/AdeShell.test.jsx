@@ -122,12 +122,16 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
     expect(operationRegion.tabIndex).toBe(0);
 
     const navigationContentStyle = getComputedStyle(projectsRegion.parentElement);
+    expect(navigationContentStyle.display).toBe('flex');
+    expect(navigationContentStyle.flexDirection).toBe('column');
     expect(navigationContentStyle.flexGrow).toBe('1');
     expect(navigationContentStyle.minHeight).toBe('0px');
     expect(navigationContentStyle.maxHeight).toBe('100%');
+    expect(navigationContentStyle.overflowX).toBe('hidden');
     expect(navigationContentStyle.overflowY).toBe('hidden');
     for (const region of [projectsRegion, operationRegion]) {
       const style = getComputedStyle(region);
+      expect(style.overflowX).toBe('hidden');
       expect(style.overflowY).toBe('auto');
       expect(style.minHeight).toBe('0px');
       expect(style.maxHeight).toBe('100%');
