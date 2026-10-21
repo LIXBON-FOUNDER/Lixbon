@@ -260,18 +260,18 @@ describe('ResourcesInventory · needs_review gobierna el aviso y el filtro', () 
 describe('ResourcesInventory · el contador de avisos es el de Core', () => {
   it('muestra warnings.branches_to_review tal cual, aunque no coincida con las filas', () => {
     render(<ResourcesInventory inventory={withWarnings({ branches_to_review: 7 })} />);
-    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core): 7');
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 7');
   });
 
   it('no cambia con los filtros', () => {
     render(<ResourcesInventory inventory={withWarnings({ branches_to_review: 3 })} />);
     pick('Estado', 'external');
-    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core): 3');
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 3');
   });
 
   it('0 de Core se muestra como 0', () => {
     render(<ResourcesInventory inventory={withWarnings({ branches_to_review: 0 })} />);
-    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core): 0');
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 0');
   });
 
   it.each([[null], [undefined], ['4'], [-1], [2.5], [NaN]])(
@@ -514,5 +514,308 @@ describe('ResourcesInventory · helpers del contrato', () => {
     expect(isMissing(missing)).toBe(true);
     expect(isMissing(unknown)).toBe(false);
     expect(isMissing(repo)).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Remediación de la revisión de LXO-101.
+const wt = (over = {}) => ({
+  target: target({ path: '/home/ana/app.lixbon-wt/wt-x' }),
+  state: 'tracked', origin: 'task', physical: 'present',
+  git: { registered: true, branch: 'lx/r/x', detached: false, locked: false, prunable: false },
+  owner: { task_id: 't-1', run_id: 'r-1', status: 'done' },
+  dirty: 'clean', merged: 'merged', into: 'main', needs_review: false,
+  ...over,
+});
+const only = (over) => ({ ...DTO, repos: [], preserved_branches: [], worktrees: [wt(over)] });
+const onlyRepo = (over) => ({ ...DTO, worktrees: [], preserved_branches: [], repos: [{ project_id: 'p-1', machine: 'm-1', path: '/home/ana/raro', scan: 'ok', ...over }] });
+const WT_X = '/home/ana/app.lixbon-wt/wt-x';
+
+describe('ResourcesInventory · alcance del contador de Core (docs/core/RESOURCES.md §Aviso)', () => {
+  it('la etiqueta dice el alcance de la petición: todos los Projects si filters.project_id es null', () => {
+    render(<ResourcesInventory inventory={DTO} />);
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 2');
+    expect(screen.queryByTestId('resinv-count-scope-note')).toBeNull();
+  });
+
+  it('con un Project seleccionado, un contador de todos los Projects no se presenta como el de ese Project', () => {
+    render(<ResourcesInventory inventory={DTO} projectId="p-1" />);
+    expect(screen.getByTestId('resinv-warning-count').textContent).toContain('todos los Projects');
+    expect(screen.getByTestId('resinv-count-scope-note').textContent).toContain('no es el de este Project');
+  });
+
+  it('el contador no se recalcula con las filas omitidas ni con los filtros locales', () => {
+    const dto = withWarnings({ branches_to_review: 9 });
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 9');
+    pick('Proyecto', 'p-1');
+    pick('Revisión', 'needs_review');
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 9');
+  });
+
+  it('si la petición fue acotada al mismo Project, la etiqueta lo dice y no hay aviso de alcance', () => {
+    const dto = { ...DTO, filters: { project_id: 'p-1', probe: true } };
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, Project p-1): 2');
+    expect(screen.queryByTestId('resinv-count-scope-note')).toBeNull();
+  });
+
+  it('si la petición fue acotada a otro Project, el contador no se atribuye a este', () => {
+    const dto = { ...DTO, filters: { project_id: 'p-2', probe: true } };
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    expect(screen.getByTestId('resinv-count-foreign').textContent).toContain('otro Project (Project p-2)');
+  });
+
+  it.each([[undefined], [null], ['x'], [{ probe: true }], [{ project_id: '', probe: true }], [{ project_id: 3 }]])(
+    'sin filters.project_id legible el alcance es «no informado», no se supone: %j',
+    (filters) => {
+      render(<ResourcesInventory inventory={{ ...DTO, filters }} />);
+      expect(screen.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, alcance no informado): 2');
+    },
+  );
+});
+
+describe('ResourcesInventory · versión del DTO', () => {
+  it('v: 1 es la única versión compatible y se pinta con normalidad', () => {
+    render(<ResourcesInventory inventory={DTO} />);
+    expect(screen.queryByTestId('resinv-incompatible-version')).toBeNull();
+    expect(screen.getAllByTestId('resinv-row')).toHaveLength(10);
+  });
+
+  it.each([[2], [0], ['1'], [1.5], [null], [undefined], [true]])(
+    'v=%j no es compatible: estado desconocido, sin filas, sin filtros y sin contador',
+    (v) => {
+      render(<ResourcesInventory inventory={{ ...DTO, v }} />);
+      const notice = screen.getByTestId('resinv-incompatible-version');
+      expect(notice.textContent).toContain('no compatible');
+      expect(notice.textContent).toContain('v=1');
+      expect(notice.textContent).toMatch(/desconocido/i);
+      expect(screen.queryAllByTestId('resinv-row')).toHaveLength(0);
+      expect(screen.queryByTestId('resinv-shown')).toBeNull();
+      expect(screen.queryByRole('combobox')).toBeNull();
+      expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+      expect(screen.queryByTestId('resinv-unavailable-inventory')).toBeNull();
+    },
+  );
+
+  it('dice la versión recibida, o que no hay versión', () => {
+    const { unmount } = render(<ResourcesInventory inventory={{ ...DTO, v: 2 }} />);
+    expect(screen.getByTestId('resinv-incompatible-version').textContent).toContain('(v=2)');
+    unmount();
+    const { v: _omitida, ...sinVersion } = DTO;
+    render(<ResourcesInventory inventory={sinVersion} />);
+    expect(screen.getByTestId('resinv-incompatible-version').textContent).toContain('sin versión');
+  });
+
+  it('readInventory marca la versión no compatible y no entrega filas ni contador', () => {
+    const parsed = readInventory({ ...DTO, v: 3 });
+    expect(parsed.incompatible).toBe(true);
+    expect(parsed.version).toBe(3);
+    expect(parsed.rows).toEqual([]);
+    expect(parsed.branchesToReview).toBeNull();
+    expect(readInventory(DTO).incompatible).toBe(false);
+  });
+});
+
+describe('ResourcesInventory · vocabulario desconocido de Core', () => {
+  it('state desconocido va a «Desconocidos», con el valor crudo, y nunca es falta', () => {
+    render(<ResourcesInventory inventory={only({ state: 'quarantined' })} />);
+    expect(targetsIn('unknown')).toEqual([WT_X]);
+    expect(screen.queryByTestId('resinv-section-missing_on_disk')).toBeNull();
+    const row = within(rowOf(WT_X));
+    expect(row.getByTestId('resinv-state').textContent).toBe('Desconocido («quarantined» no reconocido)');
+    expect(row.getByTestId('resinv-core-state').textContent).toBe('quarantined');
+    expect(row.queryByText('Falta en disco')).toBeNull();
+  });
+
+  it.each([[undefined], [null], [7], ['constructor'], ['']])('state %j (ausente o fuera de contrato) es desconocido', (state) => {
+    render(<ResourcesInventory inventory={only({ state })} />);
+    expect(targetsIn('unknown')).toEqual([WT_X]);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-state').textContent).toMatch(/^Desconocido/);
+  });
+
+  it('scan desconocido NO se colapsa en «No disponible»: va a Desconocidos', () => {
+    render(<ResourcesInventory inventory={onlyRepo({ scan: 'degraded' })} />);
+    expect(targetsIn('unknown')).toEqual(['/home/ana/raro']);
+    expect(screen.queryByTestId('resinv-section-scan_unavailable')).toBeNull();
+    expect(screen.queryByTestId('resinv-section-scan_ok')).toBeNull();
+    const row = within(rowOf('/home/ana/raro'));
+    expect(row.getByTestId('resinv-state').textContent).toBe('Desconocido («degraded» no reconocido)');
+    expect(row.getByTestId('resinv-scan').textContent).toBe('degraded');
+    expect(row.queryByText('No disponible')).toBeNull();
+  });
+
+  it.each([[undefined], [null], [''], ['constructor']])('scan %j fuera de contrato es desconocido, no «No disponible»', (scan) => {
+    render(<ResourcesInventory inventory={onlyRepo({ scan })} />);
+    expect(targetsIn('unknown')).toEqual(['/home/ana/raro']);
+    expect(screen.queryByTestId('resinv-section-scan_unavailable')).toBeNull();
+  });
+
+  it('el filtro «Desconocido» incluye al repo con scan desconocido y no a los de scan unavailable', () => {
+    const dto = { ...DTO, repos: [...DTO.repos, { project_id: 'p-1', machine: 'm-1', path: '/home/ana/raro', scan: 'degraded' }] };
+    render(<ResourcesInventory inventory={dto} />);
+    pick('Estado', 'unknown');
+    expect(shownTargets().sort()).toEqual(['/home/ana/app.lixbon-wt/wt-desconocido', '/home/ana/raro']);
+    pick('Estado', 'scan_unavailable');
+    expect(shownTargets()).toEqual(['/home/ana/roto']);
+  });
+
+  it('origin desconocido es «Desconocido» con su valor, no una de las tres procedencias', () => {
+    render(<ResourcesInventory inventory={only({ origin: 'cloud' })} />);
+    const text = within(rowOf(WT_X)).getByTestId('resinv-origin').textContent;
+    expect(text).toBe('Desconocido («cloud» no reconocido)');
+    expect(text).not.toMatch(/Externo|Carpeta de Lixbon|Task de Lixbon/);
+  });
+
+  it('dirty desconocido es «Desconocido», distinto de «No evaluado» y de «Limpio»', () => {
+    render(<ResourcesInventory inventory={only({ dirty: 'partial' })} />);
+    const text = within(rowOf(WT_X)).getByTestId('resinv-dirty').textContent;
+    expect(text).toBe('Desconocido («partial» no reconocido)');
+    expect(text).not.toMatch(/No evaluado|Limpio|Con cambios/);
+  });
+
+  it.each([['origin'], ['dirty'], ['merged'], ['physical']])('%s ausente es «Desconocido»', (campo) => {
+    render(<ResourcesInventory inventory={only({ [campo]: undefined })} />);
+    expect(within(rowOf(WT_X)).getByTestId(`resinv-${campo}`).textContent).toBe('Desconocido');
+  });
+
+  it('physical y merged fuera de contrato son desconocidos, no «Falta»', () => {
+    render(<ResourcesInventory inventory={only({ physical: 'gone', merged: 'maybe' })} />);
+    const row = within(rowOf(WT_X));
+    expect(row.getByTestId('resinv-physical').textContent).toBe('Desconocido («gone» no reconocido)');
+    expect(row.getByTestId('resinv-merged').textContent).toBe('Desconocido («maybe» no reconocido)');
+    expect(row.queryByText('Falta')).toBeNull();
+  });
+
+  it('git.registered y branch_exists fuera de true/false/null son desconocidos, no «No se pudo comprobar»', () => {
+    const dto = { ...only({ git: { registered: 'tal vez', branch: 'b' } }), preserved_branches: [{ ...DTO.preserved_branches[0], branch_exists: 'quiza' }] };
+    render(<ResourcesInventory inventory={dto} />);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-registered').textContent).toBe('Desconocido');
+    expect(within(rowOf('lx/r/g')).getByTestId('resinv-branch-exists').textContent).toBe('Desconocido');
+  });
+
+  it('needs_review fuera de true/false/null es «Revisión desconocida», no «sin revisión»', () => {
+    render(<ResourcesInventory inventory={only({ needs_review: 'quizá' })} />);
+    const row = within(rowOf(WT_X));
+    expect(row.getByTestId('resinv-review-unrecognized').textContent).toBe('Revisión desconocida');
+    expect(row.queryByTestId('resinv-needs-review')).toBeNull();
+    cleanup();
+    render(<ResourcesInventory inventory={only({ needs_review: false })} />);
+    expect(screen.queryByTestId('resinv-review-unrecognized')).toBeNull();
+  });
+
+  it('un motivo de repo desconocido se muestra crudo, sin traducirlo a otro', () => {
+    render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: 'disk_on_fire' })} />);
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('disk_on_fire');
+    cleanup();
+    render(<ResourcesInventory inventory={onlyRepo({ scan: 'unavailable', reason: 'constructor' })} />);
+    expect(within(rowOf('/home/ana/raro')).getByTestId('resinv-reason').textContent).toBe('constructor');
+  });
+});
+
+describe('ResourcesInventory · propietario', () => {
+  it('owner sin task_id NO se presenta como «sin propietario»', () => {
+    render(<ResourcesInventory inventory={only({ owner: { run_id: 'r-7', status: 'running' } })} />);
+    const row = within(rowOf(WT_X));
+    expect(row.getByTestId('resinv-owner').textContent).toBe('Propietario sin task_id');
+    expect(row.getByTestId('resinv-owner').textContent).not.toMatch(/Sin propietario/i);
+    expect(row.getByTestId('resinv-run').textContent).toBe('r-7');
+    expect(row.getByTestId('resinv-owner-status').textContent).toBe('running');
+  });
+
+  it.each([[{}], [{ task_id: '' }], [{ task_id: null }], [{ task_id: 5 }]])('owner %j existe pero sin task_id utilizable', (owner) => {
+    render(<ResourcesInventory inventory={only({ owner })} />);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-owner').textContent).toBe('Propietario sin task_id');
+  });
+
+  it.each([['t-1'], [3], [[]], [true]])('owner malformado %j no es «sin propietario»', (owner) => {
+    render(<ResourcesInventory inventory={only({ owner })} />);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-owner').textContent).toBe('Propietario no reconocido');
+  });
+
+  it('owner ausente es «no informado», no «sin propietario»', () => {
+    render(<ResourcesInventory inventory={only({ owner: undefined })} />);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-owner').textContent).toBe('Propietario no informado por Core');
+  });
+
+  it('owner null sigue siendo «Sin propietario» y owner con task_id muestra el task_id', () => {
+    const dto = { ...DTO, repos: [], preserved_branches: [], worktrees: [wt({ owner: null }), wt({ target: target({ path: '/otro/wt-2' }) })] };
+    render(<ResourcesInventory inventory={dto} />);
+    expect(within(rowOf(WT_X)).getByTestId('resinv-owner').textContent).toBe('Sin propietario');
+    expect(within(rowOf('/otro/wt-2')).getByTestId('resinv-owner').textContent).toBe('t-1');
+  });
+
+  it('una rama conservada con owner sin task_id tampoco afirma que no tiene propietario', () => {
+    const dto = { ...DTO, preserved_branches: [{ ...DTO.preserved_branches[0], owner: { run_id: 'r-1', status: 'stopped' } }] };
+    render(<ResourcesInventory inventory={dto} />);
+    expect(within(rowOf('lx/r/g')).getByTestId('resinv-owner').textContent).toBe('Propietario sin task_id');
+  });
+});
+
+describe('ResourcesInventory · cambio de Project externo', () => {
+  const MULTI = {
+    ...DTO,
+    worktrees: [
+      ...DTO.worktrees,
+      wt({ target: { machine: 'm-1', project_id: 'p-2', repo: '/home/ana/otro', path: '/home/ana/otro.lixbon-wt/wt-2' }, needs_review: true }),
+    ],
+  };
+
+  it('al cambiar el projectId se restablecen los tres filtros locales', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    pick('Estado', 'tracked');
+    pick('Revisión', 'needs_review');
+    expect(screen.getByLabelText('Estado').value).toBe('tracked');
+    expect(screen.getByLabelText('Revisión').value).toBe('needs_review');
+    rerender(<ResourcesInventory inventory={MULTI} projectId="p-2" />);
+    expect(screen.getByLabelText('Proyecto').value).toBe('all');
+    expect(screen.getByLabelText('Estado').value).toBe('all');
+    expect(screen.getByLabelText('Revisión').value).toBe('all');
+    // Todo lo de p-2 se ve, no solo lo que casaba con los filtros del Project anterior.
+    expect(shownTargets()).toEqual(['/home/ana/roto', '/home/ana/otro.lixbon-wt/wt-2']);
+  });
+
+  it('el filtro de Project local también se restablece', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} />);
+    pick('Proyecto', 'p-2');
+    expect(screen.getByLabelText('Proyecto').value).toBe('p-2');
+    rerender(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    expect(screen.getByLabelText('Proyecto').value).toBe('all');
+  });
+
+  it('un filtro que dejaba la lista vacía no se arrastra al Project nuevo', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    pick('Estado', 'external');
+    pick('Revisión', 'needs_review');
+    expect(screen.getByTestId('resinv-no-match')).toBeTruthy();
+    rerender(<ResourcesInventory inventory={MULTI} projectId="p-2" />);
+    expect(screen.queryByTestId('resinv-no-match')).toBeNull();
+    expect(shownTargets().length).toBeGreaterThan(0);
+  });
+
+  it('si el projectId no cambia, los filtros se conservan al recibir otro DTO', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    pick('Estado', 'tracked');
+    rerender(<ResourcesInventory inventory={{ ...MULTI }} projectId="p-1" />);
+    expect(screen.getByLabelText('Estado').value).toBe('tracked');
+  });
+
+  it('pasar de un Project a «sin Project» y viceversa también restablece', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    pick('Estado', 'tracked');
+    rerender(<ResourcesInventory inventory={MULTI} projectId={null} />);
+    expect(screen.getByLabelText('Estado').value).toBe('all');
+    pick('Estado', 'external');
+    rerender(<ResourcesInventory inventory={MULTI} projectId="p-2" />);
+    expect(screen.getByLabelText('Estado').value).toBe('all');
+  });
+
+  it('null, undefined y cadena vacía son la misma identidad «sin Project»: no se restablecen entre sí', () => {
+    const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId={null} />);
+    pick('Estado', 'tracked');
+    rerender(<ResourcesInventory inventory={MULTI} projectId="" />);
+    rerender(<ResourcesInventory inventory={MULTI} projectId={undefined} />);
+    expect(screen.getByLabelText('Estado').value).toBe('tracked');
   });
 });

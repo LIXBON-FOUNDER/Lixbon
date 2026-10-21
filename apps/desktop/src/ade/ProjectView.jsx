@@ -41,7 +41,10 @@ import './ProjectView.css';
  *                    lectura: { v, machine, filters, repos, worktrees, preserved_branches,
  *                    warnings }. Se monta dentro de Resources y se acota por Project ID
  *                    (`project_id`), nunca por ProjectLocation. Ausente = «inventario no
- *                    disponible»; no se inventan filas.
+ *                    disponible»; no se inventan filas. Solo se entiende `v: 1`; otra versión es
+ *                    estado desconocido. El contador `warnings.branches_to_review` es el de Core
+ *                    con el alcance de `filters.project_id`; esta vista no lo recalcula. Los filtros
+ *                    locales del inventario se restablecen al cambiar `projectId`.
  *
  *  Estados de slice: 'ready' | 'loading' | 'error' | 'partial' | 'degraded' | 'unavailable'.
  *  Un slice 'loading' con `refreshing: true` es una relectura sana de datos ya cargados: el aviso dice
