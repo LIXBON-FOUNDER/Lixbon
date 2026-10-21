@@ -18,9 +18,20 @@ const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 // Se espía aparte de `queryAdeCore` porque son dos canales distintos: la verificación de Activity
 // (`readAdeTask`) y las lecturas del shell (`useCoreQuery` → `queryAdeCore`). Contarlos juntos mezclaría
 // una lectura del shell con una verificación de un destino.
+// Como ambos canales pasan por el mismo mock de transporte, cada llamada emitida por la verificación se
+// marca con su índice dentro de `queryAdeCore.mock.calls`. Así el canal del shell se mide sin contar las
+// verificaciones: sin esa marca, cualquier lectura del shell sería indistinguible de una verificación.
+const transport = vi.hoisted(() => ({ verificationCallIndexes: new Set() }));
+
 vi.mock('./coreQueries', async (importOriginal) => {
   const queryAdeCore = vi.fn();
-  const readAdeTask = vi.fn((projectId, taskId) => queryAdeCore('task_detail', { projectId, taskId }));
+  const readAdeTask = vi.fn((projectId, taskId) => {
+    // La llamada se registra de forma síncrona en `mock.calls`, así que su índice es el de esta verificación.
+    const index = queryAdeCore.mock.calls.length;
+    const result = queryAdeCore('task_detail', { projectId, taskId });
+    transport.verificationCallIndexes.add(index);
+    return result;
+  });
   return {
     ...(await importOriginal()),
     queryAdeCore,
@@ -98,6 +109,8 @@ afterEach(() => {
   vi.useRealTimers();
   queryAdeCore.mockReset();
   readAdeTask.mockClear();
+  // Los índices marcan llamadas de `queryAdeCore.mock.calls`, que `mockReset` deja vacío: se descartan con él.
+  transport.verificationCallIndexes.clear();
 });
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
@@ -1063,9 +1076,16 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     const verificationCallsFor = (projectId, taskId) => verificationCalls()
       .filter((call) => call.projectId === projectId && call.taskId === taskId);
     const verificationCallsForTask = (taskId) => verificationCalls().filter((call) => call.taskId === taskId);
-    const shellTaskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls.filter(([query, args]) => (
-      query === 'task_detail' && args.projectId === projectId && args.taskId === taskId
-    ));
+    // Lecturas del shell: `task_detail` emitidas por `useCoreQuery` → `queryAdeCore`, SIN contar las que
+    // emite la verificación de Activity (`readAdeTask`), que comparte el mismo mock de transporte. Sin esta
+    // separación, una lectura del shell y una verificación serían la misma llamada y el conteo del shell
+    // sería tautológico (siempre ≥ 1 si hubo una verificación).
+    const shellTaskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls
+      .map((call, index) => ({ call, index }))
+      .filter(({ call: [query, args] }) => query === 'task_detail'
+        && args.projectId === projectId && args.taskId === taskId)
+      .filter(({ index }) => !transport.verificationCallIndexes.has(index))
+      .map(({ call }) => call);
     // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
     const settle = async () => { for (let i = 0; i < 6; i += 1) await flush(); };
     // Toda lectura de `task_detail` del destino queda pendiente hasta que la prueba la resuelva.
@@ -1483,6 +1503,8 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: taskB });
       expect(screen.queryByText(/Verificando la Task/)).toBeNull();
       // La lectura del shell es otro canal: no cuenta como verificación del destino.
+      // El conteo del shell excluye las llamadas de verificación, así que `> 0` prueba que el shell leyó
+      // el detalle por su cuenta (no que la verificación ya lo dejó hecho).
       expect(verificationCallsFor(PROJECT.id, taskB)).toHaveLength(1);
       expect(shellTaskDetailCallsFor(PROJECT.id, taskB).length).toBeGreaterThan(0);
     });
