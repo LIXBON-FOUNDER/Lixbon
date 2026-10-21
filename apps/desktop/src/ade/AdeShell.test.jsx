@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AdeShell } from './AdeShell';
-import { queryAdeCore } from './coreQueries';
+import { queryAdeCore, readAdeTask } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 // Vitest omite CSS por defecto; cargar las fuentes mantiene sus reglas reales en esta prueba.
@@ -15,12 +15,16 @@ const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 
 // Solo se sustituye el transporte; los códigos y constantes del contrato son los reales.
 // `readAdeTask` delega en el mismo transporte simulado: lee `task_detail` por el par durable, igual que el real.
+// Se espía aparte de `queryAdeCore` porque son dos canales distintos: la verificación de Activity
+// (`readAdeTask`) y las lecturas del shell (`useCoreQuery` → `queryAdeCore`). Contarlos juntos mezclaría
+// una lectura del shell con una verificación de un destino.
 vi.mock('./coreQueries', async (importOriginal) => {
   const queryAdeCore = vi.fn();
+  const readAdeTask = vi.fn((projectId, taskId) => queryAdeCore('task_detail', { projectId, taskId }));
   return {
     ...(await importOriginal()),
     queryAdeCore,
-    readAdeTask: (projectId, taskId) => queryAdeCore('task_detail', { projectId, taskId }),
+    readAdeTask,
   };
 });
 
@@ -93,6 +97,7 @@ afterEach(() => {
   adeShellStyleElement.remove();
   vi.useRealTimers();
   queryAdeCore.mockReset();
+  readAdeTask.mockClear();
 });
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
@@ -1052,8 +1057,13 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       message_key: 'activity.project.registered',
       args: { name: 'Repo Real', origin: 'auto' },
     });
-    const taskDetailCalls = (taskId) => queryAdeCore.mock.calls.filter(([query, args]) => query === 'task_detail' && args.taskId === taskId);
-    const taskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls.filter(([query, args]) => (
+    // Dos canales distintos de `task_detail`: la verificación de Activity (`readAdeTask`) y la lectura del
+    // shell (`useCoreQuery` → `queryAdeCore`). Una lectura del shell NO es una verificación: no se cuentan juntas.
+    const verificationCalls = () => readAdeTask.mock.calls.map(([projectId, taskId]) => ({ projectId, taskId }));
+    const verificationCallsFor = (projectId, taskId) => verificationCalls()
+      .filter((call) => call.projectId === projectId && call.taskId === taskId);
+    const verificationCallsForTask = (taskId) => verificationCalls().filter((call) => call.taskId === taskId);
+    const shellTaskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls.filter(([query, args]) => (
       query === 'task_detail' && args.projectId === projectId && args.taskId === taskId
     ));
     // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
@@ -1240,14 +1250,18 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
 
       fireEvent.click(screen.getByTestId('activity-target-event-15'));
       await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
       expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+      expect(screen.queryByText(/Core no respondió a tiempo/)).toBeNull();
 
       await act(async () => { await vi.advanceTimersByTimeAsync(1); });
       await settle();
       expect(screen.queryByText(/Verificando la Task/)).toBeNull();
       expect(screen.getByText(`Core no respondió a tiempo al verificar la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+      // Vencido el plazo, la lectura subyacente sigue viva: el timeout no genera otra lectura ni suelta la ranura.
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
     });
 
     it('no repite task_detail para la Task ya seleccionada y sana, y reutiliza la lectura en vuelo del mismo destino', async () => {
@@ -1264,11 +1278,12 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      // Task ya seleccionada con su detalle sano en el shell: se abre sin otra lectura.
-      const selectedReads = taskDetailCalls(ITEM.id).length;
+      // Task ya seleccionada con su detalle sano en el shell: se abre sin otra lectura (ni del shell ni de verificación).
+      const shellReadsBefore = shellTaskDetailCallsFor(PROJECT.id, ITEM.id).length;
       fireEvent.click(await screen.findByTestId('activity-target-event-16'));
       await settle();
-      expect(taskDetailCalls(ITEM.id)).toHaveLength(selectedReads);
+      expect(verificationCallsForTask(ITEM.id)).toHaveLength(0);
+      expect(shellTaskDetailCallsFor(PROJECT.id, ITEM.id)).toHaveLength(shellReadsBefore);
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
 
       // Dos clics sobre el mismo destino comparten una única verificación.
@@ -1278,7 +1293,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       fireEvent.click(screen.getByTestId('activity-target-event-17'));
       await settle();
-      expect(taskDetailCalls(targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
       pending.resolve(detailOf({ id: targetTaskId, title: 'Task única' }));
       await settle();
@@ -1317,8 +1332,8 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       fireEvent.click(screen.getByTestId('activity-target-event-18'));
       await settle();
 
-      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
-      expect(taskDetailCallsFor(secondProject.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(secondProject.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
 
       // La respuesta de B ya no es dueña de la navegación; A reutilizada sí lo es.
@@ -1345,21 +1360,33 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
 
       fireEvent.click(screen.getByTestId('activity-target-event-20'));
       await settle();
-      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       await settle();
       expect(screen.getByText(`Core no respondió a tiempo al verificar la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+      // El timeout de la UI no libera la ranura de deduplicación: la lectura subyacente sigue en vuelo.
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
       fireEvent.click(screen.getByTestId('activity-target-event-20'));
       await settle();
-      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
 
       pending.resolve(detailOf({ ...ITEM, id: targetTaskId, title: 'Task tras reintento' }));
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
       expect(screen.queryByText(/Core no respondió a tiempo al verificar la Task/)).toBeNull();
+
+      // La ranura se liberó al asentarse la consulta subyacente (no al vencer el timeout): sin Task seleccionada
+      // en el shell, el mismo destino vuelve a verificarse con una lectura nueva.
+      useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
+      await settle();
+      openActivityTab();
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
 
     it('conserva la selección y avisa si task_detail devuelve otro task.id', async () => {
@@ -1382,7 +1409,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       fireEvent.click(screen.getByTestId('activity-target-event-21'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
-      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(useWorkbenchStore.getState().adeSelection).toEqual(selection);
     });
 
@@ -1406,8 +1433,114 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       fireEvent.click(screen.getByTestId('activity-target-event-22'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
-      expect(taskDetailCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(useWorkbenchStore.getState().adeSelection).toEqual(selection);
+    });
+
+    it('no deduplica dos Tasks distintas del mismo Project: la clave incluye el taskId', async () => {
+      const taskA = 'task-activity-mismo-project-a';
+      const taskB = 'task-activity-mismo-project-b';
+      coreWithActivity([
+        activityItem(23, { target: { kind: 'task', id: taskA }, project_id: PROJECT.id }),
+        activityItem(24, { target: { kind: 'task', id: taskB }, project_id: PROJECT.id }),
+      ]);
+      const pendingA = deferred();
+      const pendingB = deferred();
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation((query, args) => {
+        if (query === 'task_detail' && args.projectId === PROJECT.id) {
+          if (args.taskId === taskA) return pendingA.promise;
+          if (args.taskId === taskB) return pendingB.promise;
+        }
+        return base(query, args);
+      });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-23'));
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-24'));
+      await settle();
+
+      // Mismo Project, Tasks distintas: dos lecturas en vuelo independientes (la ranura es el par completo).
+      expect(verificationCallsFor(PROJECT.id, taskA)).toHaveLength(1);
+      expect(verificationCallsFor(PROJECT.id, taskB)).toHaveLength(1);
+      expect(verificationCalls()).toHaveLength(2);
+      expect(screen.getByText(`Verificando la Task ${taskB} en el Project ${PROJECT.id}…`)).toBeTruthy();
+
+      // La respuesta de A no satisface la petición vigente de B: no hay cruce entre destinos del mismo Project.
+      pendingA.resolve(detailOf({ ...ITEM, id: taskA, project_id: PROJECT.id, title: 'Task A' }));
+      await settle();
+      expect(screen.getByText(`Verificando la Task ${taskB} en el Project ${PROJECT.id}…`)).toBeTruthy();
+      expect(screen.queryByText(/Core no confirmó la Task/)).toBeNull();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+
+      // B sí es la petición vigente: su propia respuesta abre su Task.
+      pendingB.resolve(detailOf({ ...ITEM, id: taskB, project_id: PROJECT.id, title: 'Task B' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: taskB });
+      expect(screen.queryByText(/Verificando la Task/)).toBeNull();
+      // La lectura del shell es otro canal: no cuenta como verificación del destino.
+      expect(verificationCallsFor(PROJECT.id, taskB)).toHaveLength(1);
+      expect(shellTaskDetailCallsFor(PROJECT.id, taskB).length).toBeGreaterThan(0);
+    });
+
+    it('libera la ranura de deduplicación cuando la consulta subyacente se asienta', async () => {
+      const targetTaskId = 'task-activity-slot-release';
+      coreWithActivity([activityItem(25, { target: { kind: 'task', id: targetTaskId } })]);
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation(async (query, args) => {
+        // La lectura se asienta, pero con otro task.id: la verificación no prospera y la selección no cambia.
+        if (query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId) {
+          return detailOf({ ...ITEM, id: 'task-activity-otra-id' });
+        }
+        return base(query, args);
+      });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+      expect(screen.getByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+
+      // La consulta ya se asentó: la ranura quedó libre y el mismo destino se verifica con una lectura nueva.
+      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
+    });
+
+    it('libera la ranura tras una verificación correcta cuando el shell ya no tiene la Task seleccionada', async () => {
+      const targetTaskId = 'task-activity-slot-release-ok';
+      coreWithActivity([activityItem(26, { target: { kind: 'task', id: targetTaskId } })]);
+      const pending = deferred();
+      withPendingTarget(targetTaskId, pending);
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-26'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
+
+      pending.resolve(detailOf({ ...ITEM, id: targetTaskId, title: 'Task verificada' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+
+      // Sin la Task seleccionada, el shell no tiene un detalle sano que reutilizar: se verifica de nuevo.
+      useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
+      await settle();
+      openActivityTab();
+      await settle();
+      fireEvent.click(await screen.findByTestId('activity-target-event-26'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
   });
 });
