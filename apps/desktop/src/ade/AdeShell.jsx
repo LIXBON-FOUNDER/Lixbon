@@ -311,7 +311,10 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
   const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
-    ? projectTasks.data.tasks.map((task) => ({ task_id: task.id, title: task.title, status: task.status }))
+    ? projectTasks.data.tasks
+      // El cursor de tasks_by_project no es snapshot: una Task puede repetirse; se deduplica por task_id.
+      .filter((task, index, all) => all.findIndex((other) => other?.id === task?.id) === index)
+      .map((task) => ({ task_id: task.id, title: task.title, status: task.status }))
     : [];
   const projectTaskSlice = projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTasks.data?.has_more === true });
   const projectAttentionItems = Array.isArray(projectAttention.data?.items)
