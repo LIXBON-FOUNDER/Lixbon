@@ -24,7 +24,15 @@ function orderMatches(items, query) {
   return [...primary, ...metadata];
 }
 
-function buildGroups({ projects, tasks, attention, query }) {
+// Clave de resultado de un destino recordado (misma identidad durable que usan los resultados).
+function recentResultKey(recent) {
+  if (recent?.kind === 'project') return resultKey('project', asText(recent.projectId), asText(recent.projectId));
+  if (recent?.kind === 'task') return resultKey('task', asText(recent.projectId), asText(recent.taskId));
+  if (recent?.kind === 'attention') return resultKey('attention', asText(recent.attentionId), asText(recent.attentionId));
+  return null;
+}
+
+function buildGroups({ projects, tasks, attention, recents, query }) {
   const projectItems = (Array.isArray(projects) ? projects : []).flatMap((project) => {
     const id = asText(project?.id);
     const name = asText(project?.name);
@@ -79,10 +87,27 @@ function buildGroups({ projects, tasks, attention, query }) {
     }];
   });
 
-  return [
+  const groups = [
     { kind: 'project', label: 'Projects', items: orderMatches(projectItems, query) },
     { kind: 'task', label: 'Tasks', items: orderMatches(taskItems, query) },
     { kind: 'attention', label: 'Attention', items: orderMatches(attentionItems, query) },
+  ];
+  if (query) return groups;
+
+  // Sin búsqueda, los destinos recientes que siguen en los resultados actuales van primero y no se repiten abajo;
+  // los que ya no existen simplemente no aparecen.
+  const byKey = new Map(groups.flatMap((group) => group.items).map((item) => [item.key, item]));
+  const recentItems = [];
+  for (const recent of Array.isArray(recents) ? recents : []) {
+    const key = recentResultKey(recent);
+    const item = key && byKey.get(key);
+    if (item && !recentItems.includes(item)) recentItems.push(item);
+  }
+  if (recentItems.length === 0) return groups;
+  const recentKeys = new Set(recentItems.map((item) => item.key));
+  return [
+    { kind: 'recent', label: 'Recientes', items: recentItems },
+    ...groups.map((group) => ({ ...group, items: group.items.filter((item) => !recentKeys.has(item.key)) })),
   ];
 }
 
@@ -116,6 +141,9 @@ const PaletteOption = memo(function PaletteOption({ item, id, selected, onSelect
  * - `projects`: `{ id, name, branch?, facts? }`; `tasks`: `{ id, projectId, title, branch?, facts? }`.
  * - `attention`: `{ id, targetKind, targetId, projectId?, title?, facts? }` (one per active Attention).
  *   `facts` are display-only strings (status, host/origin); only titles/names, durable IDs and branch are searched.
+ * - `recents`: destinos recordados `{ kind: 'project', projectId }`, `{ kind: 'task', projectId, taskId }` o
+ *   `{ kind: 'attention', attentionId }`, del más reciente al más antiguo. Sin búsqueda se muestran primero, solo los
+ *   que siguen entre los resultados recibidos; el almacenamiento y la poda los gestiona el anfitrión.
  * - `onNavigate(target)` receives `{ kind: 'project', projectId }`, `{ kind: 'task', projectId, taskId }` or
  *   `{ kind: 'attention', attentionId, targetKind, targetId, projectId }`. Returning `false` rejects the target:
  *   the palette stays open so the caller can show a `notice`.
@@ -133,6 +161,7 @@ export function JumpPalette({
   projects = [],
   tasks = [],
   attention = [],
+  recents = [],
   onNavigate,
   onClose,
 }) {
@@ -148,8 +177,8 @@ export function JumpPalette({
   const [activeKey, setActiveKey] = useState(null);
   const safeQuery = typeof query === 'string' ? query.trim() : '';
   const groups = useMemo(
-    () => buildGroups({ projects, tasks, attention, query: safeQuery }),
-    [projects, tasks, attention, safeQuery],
+    () => buildGroups({ projects, tasks, attention, recents, query: safeQuery }),
+    [projects, tasks, attention, recents, safeQuery],
   );
   const visibleGroups = useMemo(
     () => (loading ? [] : groups.filter((group) => group.items.length > 0)),

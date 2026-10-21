@@ -59,14 +59,24 @@ export function getKeymap() {
   return activeKeymap;
 }
 
-/** Asigna `chord` al comando `commandId` (desvinculando su chord anterior). */
+/** Comando que ya tiene `chord` y que quedaría desasignado si se lo diéramos a `commandId`; `null` si está libre. */
+export function bindingConflict(commandId, chord) {
+  const owner = activeKeymap[chord];
+  return owner && owner !== commandId ? owner : null;
+}
+
+/** Asigna `chord` al comando `commandId` (desvinculando su chord anterior). No desaloja a otro comando: si el
+    chord ya es de otro, no cambia nada y devuelve `{ ok: false, conflict }` con el comando que lo tiene. */
 export function setBinding(commandId, chord) {
+  const conflict = bindingConflict(commandId, chord);
+  if (conflict) return { ok: false, conflict };
   const ov = readOverrides();
   const oldChord = chordForCommand(commandId);
   if (oldChord && oldChord !== chord) ov[oldChord] = null; // libera el anterior
   ov[chord] = commandId;
   localStorage.setItem(OVERRIDE_KEY, JSON.stringify(ov));
   loadKeymap(ov);
+  return { ok: true, conflict: null };
 }
 
 /** Restaura todos los atajos por defecto. */
