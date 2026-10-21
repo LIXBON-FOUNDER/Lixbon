@@ -9,6 +9,7 @@ import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
+import './AdeShell.css';
 import './TaskWorkspace.css';
 
 const STATUS_LABELS = {
@@ -381,8 +382,8 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
-          <div className="ade__nav-content scroll">
-            <section className="ade__nav-section" aria-label="Projects y Tasks">
+          <div className="ade__nav-content">
+            <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <div className="ade__nav-section-head"><span>Projects</span><span className="ade__source">Core</span></div>
               <QueryFeedback state={projects} subject="Projects" />
               {selectedProjectMissing && <div className="ade__notice" role="status">El Project seleccionado ya no aparece en el overview activo. Se conserva la selección; elige otro Project para cambiar de contexto.</div>}
@@ -406,7 +407,11 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 </section>
               )}
             </section>
-            {operationNavigation}
+            {operationNavigation && (
+              <div className="ade__nav-scroll-region ade__nav-operation-scroll" role="region" aria-label="Navegación de Operación" tabIndex={0}>
+                {operationNavigation}
+              </div>
+            )}
           </div>
         </Panel>
         <Gutter sizeKey="side" />
