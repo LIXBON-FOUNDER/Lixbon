@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{activity_read, attention_read, projects_overview, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{activity_read, attention_read, projects_overview, resource_inventory, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
@@ -147,6 +147,7 @@ impl Core {
             "projects" => self.projects_list(b(args, "all")),
             "projects_overview" => projects_overview::overview(self, &caller, authenticated_context.as_ref(), args),
             "activity_list" => activity_read::list(self, &caller, authenticated_context.as_ref(), args),
+            "resource_inventory" => resource_inventory::inventory(self, &caller, authenticated_context.as_ref(), args),
             "events" => self.events_read(&caller, args).map_err(String::from),
             "attention_list" => attention_read::list(self, &caller, authenticated_context.as_ref(), args),
             "attention_detail" => attention_read::detail(self, &caller, authenticated_context.as_ref(), args),
@@ -451,7 +452,7 @@ impl Core {
 /// política por principal/superficie está centralizada en `AuthenticatedClient::authorize`.
 fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
-        "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail" | "activity_list"
+        "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail" | "activity_list" | "resource_inventory"
         | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
@@ -486,7 +487,7 @@ mod tests {
 
     fn expected_cli_action(cmd: &str) -> ClientAction {
         match cmd {
-            "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail" | "activity_list"
+            "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail" | "activity_list" | "resource_inventory"
             | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
             "events" => ClientAction::EventLogRead,
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
