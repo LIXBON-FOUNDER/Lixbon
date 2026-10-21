@@ -38,18 +38,36 @@
 //  · `needs_review` es el veredicto de Core: gobierna el aviso y el filtro «Por revisar»; no se
 //    deduce de `merged === 'unmerged'`.
 //  · `dirty`/`merged` con valor `skipped` («no evaluado») se muestran distintos de `unknown`.
-//  · `owner: null` significa «sin propietario», no «desconocido».
-//  · El contador de avisos es `warnings.branches_to_review` tal cual; nunca se deriva de las filas.
-//  · El acotado es por Project ID (`project_id`), nunca por ProjectLocation.
+//  · `owner: null` significa «sin propietario», no «desconocido». Un `owner` objeto sin `task_id`,
+//    ausente o malformado NO es «sin propietario»: se dice lo que Core no informó.
+//  · Vocabulario fuera del contrato (`state`, `scan`, `origin`, `dirty`, `merged`, `physical`,
+//    `needs_review`…) es «Desconocido» con el valor crudo; nunca se colapsa en «No disponible» ni «Falta».
+//  · El contador de avisos es `warnings.branches_to_review` tal cual y nunca se deriva de las filas. Su
+//    alcance es el de la petición (`filters.project_id`, docs/core/RESOURCES.md §Aviso): el filtro local por
+//    Project no lo recalcula, y la etiqueta dice a qué abarca.
+//  · Solo se entiende `v: 1`. Otra versión (o ninguna) es estado desconocido: ni filas ni contador.
+//  · El acotado es por Project ID (`project_id`), nunca por ProjectLocation. Al cambiar el Project
+//    externo se restablecen los filtros locales.
 import { useMemo, useState } from 'react';
 import './ResourcesInventory.css';
 
 const NONE = '__none__';
+/** Única versión del DTO de `resource_inventory` que esta vista entiende. */
+export const SUPPORTED_VERSION = 1;
 
 const isObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 const isId = (v) => typeof v === 'string' && v.length > 0;
 /** Texto del DTO tal cual; `null` si Core no lo da. */
 const text = (v) => (isId(v) ? v : null);
+const hasKey = (map, v) => typeof v === 'string' && Object.prototype.hasOwnProperty.call(map, v);
+/**
+ * Etiqueta de un vocabulario cerrado de Core. Un valor fuera del contrato es «Desconocido» (con el valor
+ * crudo para trazarlo), nunca otro estado: no se convierte en «No disponible», «Falta» ni «Sin…».
+ */
+function vocab(map, v) {
+  if (hasKey(map, v)) return map[v];
+  return isId(v) ? `Desconocido («${v}» no reconocido)` : 'Desconocido';
+}
 
 /** Estados de `worktrees[].state` (vocabulario cerrado de Core). */
 const WORKTREE_STATES = new Set([
@@ -159,11 +177,14 @@ function preservedRow(entry, index) {
   };
 }
 
+const REPO_SECTION = { ok: 'scan_ok', unavailable: 'scan_unavailable', other_machine: 'scan_other_machine' };
+
 function repoRow(entry, index) {
   const scan = typeof entry.scan === 'string' ? entry.scan : '';
   return {
     kind: 'repo',
-    section: scan === 'ok' ? 'scan_ok' : scan === 'other_machine' ? 'scan_other_machine' : 'scan_unavailable',
+    // Un escaneo fuera del contrato es «desconocido»: no se afirma que git no esté disponible.
+    section: hasKey(REPO_SECTION, scan) ? REPO_SECTION[scan] : 'unknown',
     coreState: scan || null,
     projectId: text(entry.project_id),
     machine: text(entry.machine),
@@ -183,6 +204,11 @@ export function readInventory(inventory) {
   const preserved = Array.isArray(inventory.preserved_branches) ? inventory.preserved_branches : null;
   if (!repos && !worktrees && !preserved) return null;
 
+  // Solo `v: 1`. Otra versión (o ninguna) no es un inventario fiable: estado desconocido, sin filas ni contador.
+  if (inventory.v !== SUPPORTED_VERSION) {
+    return { incompatible: true, version: inventory.v ?? null, rows: [], branchesToReview: null, scope: { kind: 'unknown', projectId: null } };
+  }
+
   const rows = [];
   (repos ?? []).forEach((entry, i) => { if (isObject(entry)) rows.push(repoRow(entry, i)); });
   (worktrees ?? []).forEach((entry, i) => { if (isObject(entry)) rows.push(worktreeRow(entry, i)); });
@@ -196,7 +222,18 @@ export function readInventory(inventory) {
     ? warnings.branches_to_review
     : null;
 
-  return { rows, branchesToReview };
+  return { incompatible: false, version: SUPPORTED_VERSION, rows, branchesToReview, scope: countScope(inventory.filters) };
+}
+
+/**
+ * Alcance del contador de Core: el de la petición (`filters.project_id`), no el de las filas que la vista
+ * decida mostrar. `null` = todos los Projects; un ID = ese Project; sin `filters` = no informado.
+ */
+function countScope(filters) {
+  if (!isObject(filters)) return { kind: 'unknown', projectId: null };
+  if (filters.project_id === null) return { kind: 'all', projectId: null };
+  if (isId(filters.project_id)) return { kind: 'project', projectId: filters.project_id };
+  return { kind: 'unknown', projectId: null };
 }
 
 /**
@@ -248,8 +285,10 @@ function idOptions(rows, noneLabel) {
   return opts;
 }
 
-const registeredText = (v) => (v === true ? 'Sí' : v === false ? 'No' : 'No se pudo comprobar');
-const branchExistsText = (v) => (v === true ? 'Sí' : v === false ? 'No' : 'No se pudo comprobar');
+// `null` es «git no pudo responder» (contrato); cualquier otro valor fuera de true/false/null es desconocido.
+const triState = (v) => (v === true ? 'Sí' : v === false ? 'No' : v === null ? 'No se pudo comprobar' : 'Desconocido');
+const registeredText = triState;
+const branchExistsText = triState;
 
 function FilterSelect({ id, label, value, onChange, options }) {
   return (
@@ -267,7 +306,7 @@ function StateTag({ row }) {
   if (row.kind === 'repo') {
     return (
       <span className={`resinv__tag resinv__tag--${row.section}`} data-testid="resinv-state">
-        {SCAN_LABEL[row.section === 'scan_ok' ? 'ok' : row.section === 'scan_other_machine' ? 'other_machine' : 'unavailable']}
+        {vocab(SCAN_LABEL, row.coreState)}
       </span>
     );
   }
@@ -280,7 +319,7 @@ function StateTag({ row }) {
   }
   return (
     <span className={`resinv__tag resinv__tag--${row.section}`} data-testid="resinv-state">
-      {STATE_LABEL[row.section]}
+      {vocab(STATE_LABEL, row.coreState)}
     </span>
   );
 }
@@ -302,7 +341,24 @@ function ReviewTag({ entry }) {
       </span>
     );
   }
-  return null;
+  if (entry.needs_review === false) return null;
+  // Ni true, ni false, ni null (o ausente): fuera del contrato = desconocido, no «sin revisión».
+  return (
+    <span className="resinv__tag resinv__tag--unknown" data-testid="resinv-review-unrecognized">
+      Revisión desconocida
+    </span>
+  );
+}
+
+/**
+ * `owner: null` es la única forma de «sin propietario» (contrato). Un propietario que existe pero no trae
+ * `task_id`, un campo ausente o uno malformado NO se presentan como «sin propietario».
+ */
+function ownerText(owner) {
+  if (owner === null) return 'Sin propietario';
+  if (owner === undefined) return 'Propietario no informado por Core';
+  if (!isObject(owner)) return 'Propietario no reconocido';
+  return text(owner.task_id) ?? 'Propietario sin task_id';
 }
 
 function OwnerFields({ owner }) {
@@ -310,7 +366,7 @@ function OwnerFields({ owner }) {
   return (
     <>
       <dt>Propietario</dt>
-      <dd data-testid="resinv-owner">{hasOwner ? (text(owner.task_id) ?? 'Sin propietario') : 'Sin propietario'}</dd>
+      <dd data-testid="resinv-owner">{ownerText(owner)}</dd>
       <dt>Ejecución</dt>
       <dd data-testid="resinv-run">{hasOwner ? (text(owner.run_id) ?? '—') : '—'}</dd>
       <dt>Estado de la tarea</dt>
@@ -341,12 +397,12 @@ function WorktreeRow({ row }) {
         <dt>Proyecto</dt><dd data-testid="resinv-project">{row.projectId ?? 'Sin proyecto'}</dd>
         <dt>Máquina</dt><dd data-testid="resinv-machine">{row.machine ?? '—'}</dd>
         <dt>Repo</dt><dd className="resinv__path" data-testid="resinv-repo">{text(target.repo) ?? '—'}</dd>
-        <dt>Origen</dt><dd data-testid="resinv-origin">{ORIGIN_LABEL[entry.origin] ?? 'Desconocido'}</dd>
-        <dt>En disco</dt><dd data-testid="resinv-physical">{PHYSICAL_LABEL[entry.physical] ?? 'Desconocido'}</dd>
+        <dt>Origen</dt><dd data-testid="resinv-origin">{vocab(ORIGIN_LABEL, entry.origin)}</dd>
+        <dt>En disco</dt><dd data-testid="resinv-physical">{vocab(PHYSICAL_LABEL, entry.physical)}</dd>
         <dt>Registrado en git</dt><dd data-testid="resinv-registered">{registeredText(git.registered)}</dd>
         <dt>Rama</dt><dd data-testid="resinv-branch">{text(git.branch) ?? '—'}</dd>
-        <dt>Cambios</dt><dd data-testid="resinv-dirty">{DIRTY_LABEL[entry.dirty] ?? 'Desconocido'}</dd>
-        <dt>Fusión</dt><dd data-testid="resinv-merged">{MERGED_LABEL[entry.merged] ?? 'Desconocido'}</dd>
+        <dt>Cambios</dt><dd data-testid="resinv-dirty">{vocab(DIRTY_LABEL, entry.dirty)}</dd>
+        <dt>Fusión</dt><dd data-testid="resinv-merged">{vocab(MERGED_LABEL, entry.merged)}</dd>
         <dt>Destino</dt><dd data-testid="resinv-into">{text(entry.into) ?? '—'}</dd>
         <OwnerFields owner={entry.owner} />
       </dl>
@@ -370,7 +426,7 @@ function PreservedRow({ row }) {
         <dt>Repo</dt><dd className="resinv__path" data-testid="resinv-repo">{text(target.repo) ?? '—'}</dd>
         <dt>Rama</dt><dd data-testid="resinv-branch">{text(target.branch) ?? '—'}</dd>
         <dt>La rama existe</dt><dd data-testid="resinv-branch-exists">{branchExistsText(entry.branch_exists)}</dd>
-        <dt>Fusión</dt><dd data-testid="resinv-merged">{MERGED_LABEL[entry.merged] ?? 'Desconocido'}</dd>
+        <dt>Fusión</dt><dd data-testid="resinv-merged">{vocab(MERGED_LABEL, entry.merged)}</dd>
         <dt>Destino</dt><dd data-testid="resinv-into">{text(entry.into) ?? '—'}</dd>
         <OwnerFields owner={entry.owner} />
       </dl>
@@ -392,7 +448,7 @@ function RepoRow({ row }) {
         <dt>Máquina</dt><dd data-testid="resinv-machine">{row.machine ?? '—'}</dd>
         <dt>Ruta</dt><dd className="resinv__path" data-testid="resinv-repo">{text(entry.path) ?? '—'}</dd>
         <dt>Escaneo (Core)</dt><dd data-testid="resinv-scan">{row.coreState ?? '—'}</dd>
-        <dt>Motivo</dt><dd data-testid="resinv-reason">{reason ? (REASON_LABEL[reason] ?? reason) : '—'}</dd>
+        <dt>Motivo</dt><dd data-testid="resinv-reason">{reason ? (hasKey(REASON_LABEL, reason) ? REASON_LABEL[reason] : reason) : '—'}</dd>
       </dl>
     </li>
   );
@@ -415,6 +471,17 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
   const [stateFilter, setStateFilter] = useState('all');
   const [reviewFilter, setReviewFilter] = useState('all');
 
+  // Al cambiar el Project externo seleccionado se restablecen los filtros locales: no deben arrastrarse
+  // al Project nuevo. Ajuste durante el render (React lo reaplica antes de pintar).
+  const scopeId = isId(projectId) ? projectId : null;
+  const [lastScopeId, setLastScopeId] = useState(scopeId);
+  if (lastScopeId !== scopeId) {
+    setLastScopeId(scopeId);
+    setProjectFilter('all');
+    setStateFilter('all');
+    setReviewFilter('all');
+  }
+
   const parsed = useMemo(() => readInventory(inventory), [inventory]);
   const scoped = useMemo(() => scopeByProject(parsed?.rows ?? [], projectId), [parsed, projectId]);
   const visible = useMemo(
@@ -422,8 +489,15 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
     [scoped, projectFilter, stateFilter, reviewFilter],
   );
   const projectOptions = useMemo(() => idOptions(scoped.rows, 'Sin proyecto'), [scoped.rows]);
-  // Solo el número que Core suministra; nunca se calcula a partir de las filas.
-  const warningCount = parsed ? parsed.branchesToReview : null;
+  // Solo el número que Core suministra; nunca se calcula a partir de las filas. Su alcance es el de la
+  // petición: si es de otro Project que el seleccionado, no se atribuye a este.
+  const countScopeInfo = parsed?.scope ?? { kind: 'unknown', projectId: null };
+  const foreignCount = countScopeInfo.kind === 'project' && scopeId !== null && countScopeInfo.projectId !== scopeId;
+  const warningCount = parsed && !foreignCount ? parsed.branchesToReview : null;
+  const scopeLabel = countScopeInfo.kind === 'all'
+    ? 'todos los Projects'
+    : countScopeInfo.kind === 'project' ? `Project ${countScopeInfo.projectId}` : 'alcance no informado';
+  const countIsThisProject = countScopeInfo.kind === 'project' && countScopeInfo.projectId === scopeId;
 
   return (
     <section className="resinv" aria-label="Inventario de recursos" data-testid="resinv">
@@ -432,17 +506,32 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
         <span className="resinv__badge" data-testid="resinv-readonly">Solo lectura</span>
         {warningCount !== null && (
           <span className="resinv__badge resinv__badge--warning" data-testid="resinv-warning-count">
-            Ramas por revisar (Core): {warningCount}
+            Ramas por revisar (Core, {scopeLabel}): {warningCount}
           </span>
         )}
       </header>
       <p className="resinv__note">
         «Desconocido» y «No disponible» no significan que falte el recurso.
       </p>
+      {warningCount !== null && scopeId !== null && !countIsThisProject && (
+        <p className="resinv__note" role="status" data-testid="resinv-count-scope-note">
+          El contador de Core no es el de este Project ({scopeLabel}); los filtros de esta vista no lo recalculan.
+        </p>
+      )}
+      {foreignCount && (
+        <p className="resinv__note" role="status" data-testid="resinv-count-foreign">
+          El contador de Core corresponde a otro Project ({scopeLabel}) y no se atribuye a este.
+        </p>
+      )}
 
       {!parsed ? (
         <p className="resinv__empty" data-testid="resinv-unavailable-inventory">
           Inventario de recursos no disponible: Core no ha entregado el inventario. No se muestra ningún recurso.
+        </p>
+      ) : parsed.incompatible ? (
+        <p className="resinv__empty" role="status" data-testid="resinv-incompatible-version">
+          Versión de inventario no compatible ({parsed.version === null ? 'sin versión' : `v=${String(parsed.version)}`}): esta vista solo entiende v={SUPPORTED_VERSION}.
+          Estado desconocido: no se muestra ningún recurso ni contador como fiables.
         </p>
       ) : (
         <>

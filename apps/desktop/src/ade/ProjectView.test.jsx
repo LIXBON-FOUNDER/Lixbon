@@ -733,7 +733,7 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
     view({ resourceInventory: INV });
     const inside = within(resourcesSection());
     expect(within(inside.getByTestId('resinv-section-external')).getByTestId('resinv-owner').textContent).toBe('Sin propietario');
-    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core): 2');
+    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 2');
     // El filtro de aviso lo gobierna `needs_review`, no `merged === 'unmerged'`.
     fireEvent.change(inside.getByLabelText('Revisión'), { target: { value: 'needs_review' } });
     expect(invTargets()).toEqual(['/synthetic/app.lixbon-wt/wt-c', 'lx/r/g']);
@@ -795,5 +795,63 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
   it('un inventario malformado se trata como no disponible, sin romper la vista', () => {
     expect(() => view({ resourceInventory: { worktrees: 'no-es-lista' } })).not.toThrow();
     expect(within(resourcesSection()).getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+  });
+
+  it('una versión de inventario no compatible es estado desconocido en Resources: sin filas ni contador', () => {
+    view({ resourceInventory: { ...INV, v: 2 } });
+    const inside = within(resourcesSection());
+    expect(inside.getByTestId('resinv-incompatible-version').textContent).toContain('no compatible');
+    expect(inside.queryAllByTestId('resinv-row')).toHaveLength(0);
+    expect(inside.queryByTestId('resinv-warning-count')).toBeNull();
+    expect(inside.queryByRole('combobox')).toBeNull();
+  });
+
+  it('el contador de Core dice su alcance y no se presenta como el de este Project', () => {
+    view({ resourceInventory: INV });
+    const inside = within(resourcesSection());
+    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core, todos los Projects): 2');
+    expect(inside.getByTestId('resinv-count-scope-note').textContent).toContain('no es el de este Project');
+  });
+
+  it('un owner sin task_id no se pinta como «Sin propietario»', () => {
+    const inv = { ...INV, worktrees: [{ ...INV.worktrees[1], owner: { run_id: 'r-5', status: 'running' } }] };
+    view({ resourceInventory: inv });
+    const ext = within(within(resourcesSection()).getByTestId('resinv-section-external'));
+    expect(ext.getByTestId('resinv-owner').textContent).toBe('Propietario sin task_id');
+  });
+
+  it('un scan desconocido no se pinta como «No disponible» dentro de Resources', () => {
+    const inv = { ...INV, repos: [{ project_id: PID, machine: 'synthetic-machine-1', path: '/synthetic/raro', scan: 'degraded' }] };
+    view({ resourceInventory: inv });
+    const inside = within(resourcesSection());
+    expect(inside.queryByTestId('resinv-section-scan_unavailable')).toBeNull();
+    expect(within(inside.getByTestId('resinv-section-unknown')).getByTestId('resinv-state').textContent).toContain('Desconocido');
+  });
+
+  it('al cambiar de Project se restablecen los filtros locales del inventario', () => {
+    const other = 'synthetic-project-2';
+    const inv = {
+      ...INV,
+      worktrees: [
+        ...INV.worktrees,
+        {
+          target: { machine: 'synthetic-machine-1', project_id: other, repo: '/synthetic/otro', path: '/synthetic/otro.lixbon-wt/wt-2' },
+          state: 'tracked', origin: 'task', physical: 'present',
+          git: { registered: true, branch: 'lx/r/y', detached: false, locked: false, prunable: false },
+          owner: { task_id: 't-77', run_id: 'r-7', status: 'done' },
+          dirty: 'clean', merged: 'merged', into: 'main', needs_review: false,
+        },
+      ],
+    };
+    const { rerender } = view({ resourceInventory: inv });
+    const inside = () => within(resourcesSection());
+    fireEvent.change(inside().getByLabelText('Estado'), { target: { value: 'external' } });
+    fireEvent.change(inside().getByLabelText('Revisión'), { target: { value: 'needs_review' } });
+    expect(inside().getByLabelText('Estado').value).toBe('external');
+    rerender(<ProjectView {...baseProps()} projectId={other} resourceInventory={inv} />);
+    expect(inside().getByLabelText('Proyecto').value).toBe('all');
+    expect(inside().getByLabelText('Estado').value).toBe('all');
+    expect(inside().getByLabelText('Revisión').value).toBe('all');
+    expect(invTargets()).toContain('/synthetic/otro.lixbon-wt/wt-2');
   });
 });
