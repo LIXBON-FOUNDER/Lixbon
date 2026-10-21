@@ -66,6 +66,8 @@ export const useWorkbenchStore = create((set, get) => ({
   // La selección observacional usa IDs Core y sobrevive al desmontaje de Orquestador.
   adeSelection: { projectId: null, taskId: null },
   adeDrawer: false,
+  // Jump Palette del ADE (LXO-102): abierta solo mientras AdeShell está montado; no se persiste.
+  jumpPaletteOpen: false,
   sideOpen: read('lx_side_open', true),
   sideView: read('lx_side_view', 'files'), // 'files' | 'search' | 'extensions'
   agentOpen: read('lx_agent_open', true),
@@ -115,10 +117,12 @@ export const useWorkbenchStore = create((set, get) => ({
     },
   }),
 
+  setJumpPaletteOpen: (open) => set({ jumpPaletteOpen: Boolean(open) }),
+
   setMode: (mode) => {
     if (!MODES.includes(mode)) return;
     write('lx_mode', mode);
-    set({ page: null, drawer: false, adeDrawer: false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? (get().orchView === 'ade' ? 'ade-workspace' : 'orchmain') : get().focus });
+    set({ page: null, drawer: false, adeDrawer: false, jumpPaletteOpen: mode === 'orch' ? get().jumpPaletteOpen : false, mode, focus: mode === 'agent' ? 'chat' : mode === 'design' ? 'canvas' : mode === 'git' ? 'diff' : mode === 'orch' ? (get().orchView === 'ade' ? 'ade-workspace' : 'orchmain') : get().focus });
   },
 
   setFocus: (focus) => { if (get().focus !== focus) set({ focus }); },
