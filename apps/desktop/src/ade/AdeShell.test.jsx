@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { AdeShell } from './AdeShell';
 import adeShellStyles from './AdeShell.css?inline';
+import orchStyles from '../styles/orch.css?inline';
 import { queryAdeCore } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
@@ -76,6 +77,7 @@ afterEach(() => {
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
   it('mantiene Operación en una región propia y alcanzable con muchos Projects y Tasks', async () => {
+    adeShellStyleElement.textContent = `${orchStyles}\n${adeShellStyles}`;
     const projects = Array.from({ length: 32 }, (_, index) => ({
       ...PROJECT,
       id: `project-${index}`,
@@ -127,8 +129,7 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
     expect(navigationContentStyle.flexGrow).toBe('1');
     expect(navigationContentStyle.minHeight).toBe('0px');
     expect(navigationContentStyle.maxHeight).toBe('100%');
-    expect(navigationContentStyle.overflowX).toBe('hidden');
-    expect(navigationContentStyle.overflowY).toBe('hidden');
+    expect(navigationContentStyle.overflow).toBe('hidden');
     for (const region of [projectsRegion, operationRegion]) {
       const style = getComputedStyle(region);
       expect(style.overflowX).toBe('hidden');
