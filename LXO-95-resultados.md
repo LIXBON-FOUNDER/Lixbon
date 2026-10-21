@@ -11,6 +11,12 @@ Orca task `task_28b52961e92e` revisó de solo lectura `3df864289ab2464f7e6785af0
 - El revisor detectó evidencia de consultas con marcas de tiempo/resultados contradictorios y señaló dos riesgos en el código revisado: `orchestrator.enabled` podía ocultar Projects/Tasks y las aprobaciones operativas quedaban dentro del scroll de navegación. Deben comprobarse y resolverse contra la rama consolidada antes de aceptar LXO-95.
 - La revisión encontró que `feat/lxo-28` ya contiene el shell equivalente junto con cambios F2 posteriores, y que aplicar directamente `3df86428` produce conflictos; por eso no se integró ese commit.
 
+## Reconciliación en feat/lxo-28 - 2026-10-21
+
+- SHA revisado (ACCEPT, P3 de trazabilidad): `3df864289ab2464f7e6785af00ad0b53bd8fd23a`.
+- `feat/lxo-28` contiene el mismo parche como `0327e522`: `git cherry` lo marca equivalente y `git range-diff 3df86428~1..3df86428 0327e522~1..0327e522` devuelve `1: 3df86428 = 1: 0327e522`. No hace falta volver a aplicarlo.
+- La evidencia de pruebas de esta sección corresponde a `feat/lxo-28` en `c0f445c1` (tras integrar LXO-99 `07d2ade5`), no a `a96cb2d`: `npm test -- src/ade/AdeShell.test.jsx src/commands/builtin.panel-shortcuts.test.js src/orch/AgentTerminal.test.jsx src/orch/OrchestratorMode.test.jsx src/layout/RightDock.test.jsx` → 5 archivos, 81/81 tests pasados.
+- Los resultados 24/24 y el build citados más abajo siguen siendo históricos y no se atribuyen a `3df86428`.
 La PTY real de AgentTask, continuidad de AgentPanel/conversación/aprobaciones y estados desconectado/stale/reconexión permanecen sin validar. El dogfood conectado en WebView2/Core sigue siendo un gate de aceptación.
 
 ## 1. Orquestador unificado
