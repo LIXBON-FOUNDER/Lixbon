@@ -125,7 +125,7 @@ describe('OrchestratorMode', () => {
     }, 'execution-task');
 
     const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
-    fireEvent.click(within(projectTaskSidebar).getByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await within(projectTaskSidebar).findByRole('button', { name: 'Repo Real' }));
     fireEvent.click(await within(projectTaskSidebar).findByRole('button', { name: 'Task Real' }));
 
     expect((await screen.findAllByText('task-uuid-1')).length).toBeGreaterThan(0);
