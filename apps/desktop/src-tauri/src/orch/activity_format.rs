@@ -21,14 +21,17 @@ use crate::store::EventRow;
 /// Versión del formateador. Sube si cambia el significado de una clave o de un argumento ya publicado.
 pub(super) const PROJECTION_VERSION: u8 = 1;
 
-/// Versión del contrato de evento (`events.v`) que este formateador sabe leer.
-const SUPPORTED_EVENT_VERSION: i64 = 1;
+/// ¿Sabe leer esta versión del contrato (`events.v`) de este `kind`? Todos la 1; `task.created` además la 2
+/// (Task como intención, LXO-113), que tiene su propia clave de mensaje.
+fn supports(kind: &str, v: i64) -> bool {
+    v == 1 || (kind == "task.created" && v == 2)
+}
 
 /// Clave del item de respaldo.
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 24] = [
+pub(super) const KINDS: [&str; 27] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -39,6 +42,9 @@ pub(super) const KINDS: [&str; 24] = [
     "task.reply",
     "task.removed",
     "task.review_requested",
+    "task.updated",
+    "task.discarded",
+    "task.restored",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -65,6 +71,8 @@ const TASK_STATUSES: [&str; 8] = [
     "stopped",
     "exited",
 ];
+/// Campos de la intención que puede nombrar `task.updated`.
+const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
 const ENV_CODES: [&str; 3] = [
     "cli_missing",
     "cli_flags_unsupported",
@@ -277,6 +285,20 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             vec![("tasks", number(p, "tasks"))],
         ),
 
+        "task.created" if e.v == 2 => rendered(
+            "activity.task.intent_created",
+            Visual::Info,
+            vec![
+                ("title", text(p, "title", 120)),
+                (
+                    "parent?",
+                    p.get("parent")
+                        .filter(|v| !v.is_null())
+                        .and_then(|_| id(p, "parent")),
+                ),
+                ("depth", number(p, "depth")),
+            ],
+        ),
         "task.created" => rendered(
             "activity.task.created",
             Visual::Info,
@@ -349,8 +371,26 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         "task.removed" => rendered(
             "activity.task.removed",
             Visual::Warning,
-            vec![("cause", closed(p, "cause", &["launch_failed"]))],
+            vec![("cause", closed(p, "cause", &["launch_failed", "unused"]))],
         ),
+        "task.updated" => {
+            let changed = p
+                .get("changed")?
+                .as_array()?
+                .iter()
+                .map(|v| v.as_str().filter(|s| INTENT_FIELDS.contains(s)).map(|s| json!(s)))
+                .collect::<Option<Vec<Value>>>()?;
+            if changed.is_empty() {
+                return None;
+            }
+            rendered(
+                "activity.task.updated",
+                Visual::Info,
+                vec![("changed", Some(json!(changed))), ("title?", opt_text(p, "title", 120))],
+            )
+        }
+        "task.discarded" => rendered("activity.task.discarded", Visual::Warning, vec![]),
+        "task.restored" => rendered("activity.task.restored", Visual::Info, vec![]),
         "task.review_requested" => rendered(
             "activity.task.review_requested",
             Visual::Info,
@@ -637,7 +677,7 @@ pub(super) fn item(e: &EventRow) -> Value {
     let known = KINDS.contains(&e.kind.as_str());
     let outcome = if !known {
         Err(FallbackReason::UnknownKind)
-    } else if e.v != SUPPORTED_EVENT_VERSION {
+    } else if !supports(&e.kind, e.v) {
         Err(FallbackReason::UnsupportedVersion)
     } else {
         serde_json::from_str::<Value>(&e.payload)

@@ -214,6 +214,25 @@ fn casos() -> Vec<Caso> {
             "activity.task.review_requested",
             "info",
         ),
+        // state/decision · Task como intención (LXO-113)
+        (
+            "task.updated",
+            State,
+            t,
+            json!({ "changed": ["title", "spec"], "title": "API de sesiones" }),
+            "activity.task.updated",
+            "info",
+        ),
+        (
+            "task.removed",
+            State,
+            t,
+            json!({ "cause": "unused" }),
+            "activity.task.removed",
+            "warning",
+        ),
+        ("task.discarded", Decision, t, json!({}), "activity.task.discarded", "warning"),
+        ("task.restored", Decision, t, json!({}), "activity.task.restored", "info"),
         // decision
         (
             "decision.recorded",
@@ -513,7 +532,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 54] = [
+const CLAVES: [&str; 58] = [
     "activity.attention.created",
     "activity.attention.resolved",
     "activity.attention.risk_acted",
@@ -555,18 +574,22 @@ const CLAVES: [&str; 54] = [
     "activity.spawn.timeout",
     "activity.task.awaiting_terminal_approval",
     "activity.task.created",
+    "activity.task.discarded",
     "activity.task.done",
     "activity.task.exited",
     "activity.task.failed",
+    "activity.task.intent_created",
     "activity.task.phase_done",
     "activity.task.phase_started",
     "activity.task.question",
     "activity.task.removed",
     "activity.task.reply",
+    "activity.task.restored",
     "activity.task.review_requested",
     "activity.task.running",
     "activity.task.starting",
     "activity.task.stopped",
+    "activity.task.updated",
     "activity.task.waiting",
 ];
 
@@ -585,6 +608,12 @@ fn la_tabla_event_kind_a_clave_cubre_todos_los_casos_y_fija_las_claves() {
         vistas.insert(clave.to_string());
         kinds.insert(kind);
     }
+    // `task.created` v2 (Task como intención, LXO-113): el mismo kind con otra versión tiene su propia clave.
+    let mut v2 = fila(999, "task.created", EventClass::State, ("task", "t-8"), json!({ "parent": "t-7", "depth": 1, "title": "API" }));
+    v2.v = 2;
+    let v2 = item(&v2);
+    assert_eq!((v2["fallback"].as_bool(), v2["message_key"].as_str()), (Some(false), Some("activity.task.intent_created")));
+    vistas.insert("activity.task.intent_created".to_string());
     assert_eq!(
         vistas,
         CLAVES

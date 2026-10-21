@@ -1585,9 +1585,10 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // El catálogo solo lo importa tx_ops; nadie más nombra sus constructores ni la cola de la transacción.
     let prohibido: [(&str, &[&str]); 16] = [
-        // Los mutadores, Projects y el comando dedicado Person/Desktop de Attention importan contratos del catálogo.
-        ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs", "attention_action.rs"]),
-        ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs", "tx_ops.rs"]),
+        // Los mutadores, Projects, la Task como intención (LXO-113) y el comando dedicado Person/Desktop de Attention
+        // importan contratos del catálogo.
+        ("event_kinds", &["tx_ops.rs", "mod.rs", "project_ops.rs", "task_ops.rs", "attention_action.rs"]),
+        ("EventDraft", &["events.rs", "event_kinds.rs", "mutation.rs", "tx_ops.rs", "task_ops.rs"]),
         ("try_push_event", &["mutation.rs", "tx_ops.rs"]),
         ("task_status_changed(", &["event_kinds.rs", "tx_ops.rs"]),
         ("run_created(", &["event_kinds.rs", "tx_ops.rs"]),
@@ -1600,9 +1601,10 @@ fn ninguna_capa_superior_construye_ni_empuja_eventos_de_estado() {
         ("EffectObserved", &["event_kinds.rs", "tx_ops.rs"]),
         (".observe_effect(", &["mutation.rs"]),
         ("EFFECT_KINDS_WITHOUT_EVENT", &["event_kinds.rs"]),
-        // `task.removed` lo construye SOLO `Tx::remove_failed_launch`; el cleanup no vuelve a borrar tareas a mano ni a depender de `Task.worktree`.
-        ("task_removed(", &["event_kinds.rs", "tx_ops.rs"]),
-        ("RemovalCause", &["event_kinds.rs", "tx_ops.rs"]),
+        // `task.removed` lo construye SOLO `Tx::remove_failed_launch` (legacy) y, para la Task como intención (LXO-113), el
+        // borrado explícito de `task_ops`; el cleanup no vuelve a borrar tareas a mano ni a depender de `Task.worktree`.
+        ("task_removed(", &["event_kinds.rs", "tx_ops.rs", "task_ops.rs"]),
+        ("RemovalCause", &["event_kinds.rs", "tx_ops.rs", "task_ops.rs"]),
         ("discard_worktree", &[]),
         ("tasks.remove(", &["state.rs"]),
     ];
