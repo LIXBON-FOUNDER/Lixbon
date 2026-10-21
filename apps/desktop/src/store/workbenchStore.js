@@ -107,7 +107,7 @@ export const useWorkbenchStore = create((set, get) => ({
   setOrchView: (orchView) => {
     if (orchView !== 'executions' && orchView !== 'ade') return;
     write('lx_orch_view', orchView);
-    set({ orchView });
+    set({ orchView, ...(orchView === 'ade' ? {} : { jumpPaletteOpen: false }) });
   },
 
   setAdeSelection: (selection) => set({

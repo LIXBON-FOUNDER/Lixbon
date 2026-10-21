@@ -7,30 +7,46 @@ import { queryAdeCore } from './coreQueries';
 
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
 
-// FIXTURES con la forma del contrato de docs/core/QUERIES.md; no son una lectura de Core real ni dogfood.
+// Fixtures que respetan los DTO documentados de projects_overview y tasks_by_project.
+const attentionCounts = { total: 0, by_category: { question: 0, approval: 0, review_ready: 0, conflict: 0, failed: 0, environment_blocked: 0, risk: 0 } };
+const projectDto = (id, name, status, locations = []) => ({
+  id,
+  name,
+  state: 'active',
+  status,
+  counts: { tasks: 1, active: 1, failed: 0, attention: attentionCounts },
+  locations,
+});
 
 const PROJECTS = [
-  { id: 'prj-1', name: 'Alpha', status: 'active', locations: [{ machine: 'host-a', path: 'C:/alpha' }] },
-  { id: 'prj-2', name: 'Beta', status: 'idle', locations: [] },
-  ...Array.from({ length: 4 }, (_, index) => ({ id: `prj-${index + 3}`, name: `Gamma ${index + 3}`, status: 'idle', locations: [] })),
+  projectDto('prj-1', 'Alpha', 'active', [{ machine: 'host-a', path: 'C:/alpha', primary: true, state: 'ok', last_seen: 1 }]),
+  projectDto('prj-2', 'Beta', 'idle'),
+  projectDto('prj-3', 'Gamma 3', 'idle', [{ machine: 'maquina-7', path: 'C:/gamma-3', primary: true, state: 'ok', last_seen: 1 }]),
+  ...Array.from({ length: 3 }, (_, index) => projectDto(`prj-${index + 4}`, `Gamma ${index + 4}`, 'idle')),
 ];
 
 const makeTasks = (projectId, count, over = {}) => Array.from({ length: count }, (_, index) => ({
   id: `${projectId}-task-${index + 1}`,
+  run_id: `${projectId}-run-${index + 1}`,
+  parent_id: null,
+  root_id: `${projectId}-task-${index + 1}`,
   title: `${projectId} tarea ${index + 1}`,
   status: 'running',
+  provider: null,
+  model: null,
   branch: `rama/${projectId}/${index + 1}`,
+  worktree: null,
   created_at: 1,
   updated_at: 2,
   ...over,
 }));
 
 /** Reparte `tasks` en páginas de 50 con cursores opacos `cur:<proyecto>:<n>` (el cliente no los interpreta). */
-function paged(projectId, tasks, cursor) {
+function paged(projectId, tasks, cursor, status) {
   const start = cursor ? Number(cursor.split(':')[2]) : 0;
   const slice = tasks.slice(start, start + 50);
   const end = start + 50;
-  return { v: 1, project_id: projectId, tasks: slice, has_more: end < tasks.length, next_cursor: end < tasks.length ? `cur:${projectId}:${end}` : null };
+  return { v: 1, project_id: projectId, filters: { status }, limit: 50, tasks: slice, has_more: end < tasks.length, next_cursor: end < tasks.length ? `cur:${projectId}:${end}` : null };
 }
 
 const att = (over = {}) => ({
@@ -51,7 +67,13 @@ function core({ fail = {} } = {}) {
   maxInFlight = 0;
   queryAdeCore.mockImplementation(async (query, args) => {
     if (fail[query] && (fail[query] === true || fail[query](args))) throw new Error(`${query}_read_failed: fixture`);
-    if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived }, total: PROJECTS.length, projects: PROJECTS };
+    if (query === 'projects_overview') return {
+      v: 1,
+      filters: { archived: args.archived, machine: null },
+      total: PROJECTS.length,
+      projects: PROJECTS,
+      unassigned: { tasks: 0, active: 0, failed: 0, attention: attentionCounts },
+    };
     if (query === 'attention_list') {
       const second = args.cursor === 'att-cursor-1';
       const items = second ? attentionItems.slice(1) : attentionItems.slice(0, 1);
@@ -62,7 +84,7 @@ function core({ fail = {} } = {}) {
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 5));
       inFlight -= 1;
-      return paged(args.projectId, taskData[args.projectId] ?? [], args.cursor);
+      return paged(args.projectId, taskData[args.projectId] ?? [], args.cursor, args.status);
     }
     throw new Error(`Query no permitida en fixture: ${query}`);
   });
@@ -148,8 +170,7 @@ describe('JumpPaletteHost · lecturas', () => {
     expect(screen.getAllByRole('option')).toHaveLength(1);
   });
 
-  it('muestra Estado y Host/origen solo si Core los devuelve; lo desconocido queda explícito', async () => {
-    taskData['prj-3'][0] = { ...taskData['prj-3'][0], host: 'maquina-7', origin: 'cli' };
+  it('muestra Estado y ubicación del Project desde metadata autoritativa', async () => {
     render(<Harness onNavigate={vi.fn()} />);
     await screen.findByRole('option', { name: /Alpha/ });
     await loaded();
@@ -157,12 +178,14 @@ describe('JumpPaletteHost · lecturas', () => {
     const alpha = screen.getByRole('option', { name: /Alpha/ });
     expect(alpha.textContent).toContain('Estado active');
     expect(alpha.textContent).toContain('Host host-a');
-    expect(screen.getByRole('option', { name: /Beta/ }).textContent).toContain('Host/origen no informado');
+    expect(screen.getByRole('option', { name: /Beta/ }).textContent).toContain('Ubicación/host del Project no informado');
     fireEvent.change(input(), { target: { value: 'prj-3-task-1' } });
-    expect(screen.getByRole('option').textContent).toContain('Host/origen maquina-7 / cli');
+    expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
     fireEvent.change(input(), { target: { value: 'prj-3-task-2' } });
     expect(screen.getByRole('option').textContent).toContain('Estado running');
-    expect(screen.getByRole('option').textContent).toContain('Host/origen no informado');
+    expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
+    fireEvent.change(input(), { target: { value: 'prj-2-task-1' } });
+    expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project no informado');
   });
 
   it('etiqueta Attention con el título de su Task por ID exacto y la busca por IDs durables', async () => {

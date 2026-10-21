@@ -86,7 +86,7 @@ describe('JumpPalette', () => {
     expect(project.textContent).toContain('project-a');
   });
 
-  it('keeps 125 Tasks available and supports arrow, Home, End, and Enter navigation', () => {
+  it('keeps 125 Tasks available and supports arrows, Ctrl+Home/Ctrl+End, and Enter navigation', () => {
     const onNavigate = vi.fn();
     const tasks = Array.from({ length: 125 }, (_, index) => ({
       id: `task-${index + 1}`,
@@ -99,11 +99,11 @@ describe('JumpPalette', () => {
     const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
     expect(screen.getAllByRole('option')).toHaveLength(125);
 
-    fireEvent.keyDown(input, { key: 'End' });
+    fireEvent.keyDown(input, { key: 'End', ctrlKey: true });
     expect(activeOption(input).textContent).toContain('Task 125');
     fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(activeOption(input).textContent).toContain('Task 124');
-    fireEvent.keyDown(input, { key: 'Home' });
+    fireEvent.keyDown(input, { key: 'Home', ctrlKey: true });
     expect(activeOption(input).textContent).toContain('Task 1');
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     expect(activeOption(input).textContent).toContain('Task 2');
@@ -144,11 +144,11 @@ describe('JumpPalette', () => {
     expect(screen.getAllByRole('option')).toHaveLength(125);
     expect(commits - commitsBeforePointer).toBe(0);
 
-    fireEvent.keyDown(input, { key: 'End' });
+    fireEvent.keyDown(input, { key: 'End', ctrlKey: true });
     expect(activeOption(input).textContent).toContain('Task 125');
     expect(commits - commitsBeforePointer).toBe(1);
 
-    fireEvent.keyDown(input, { key: 'Home' });
+    fireEvent.keyDown(input, { key: 'Home', ctrlKey: true });
     expect(activeOption(input)).toBe(first);
     expect(commits - commitsBeforePointer).toBe(2);
 
@@ -166,6 +166,83 @@ describe('JumpPalette', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+
+  it('leaves Home and End available to move the text cursor in the search input', () => {
+    render(<Harness tasks={Array.from({ length: 3 }, (_, index) => ({
+      id: `task-${index + 1}`, projectId: 'project-1', title: `Task ${index + 1}`,
+    }))} />);
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    fireEvent.change(input, { target: { value: 'Task' } });
+    input.setSelectionRange(2, 2);
+    const selected = activeOption(input);
+
+    const home = new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true });
+    fireEvent(input, home);
+    const end = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true });
+    fireEvent(input, end);
+
+    expect(home.defaultPrevented).toBe(false);
+    expect(end.defaultPrevented).toBe(false);
+    expect(activeOption(input)).toBe(selected);
+  });
+
+  it.each(['Quick Open (Ctrl+P)', 'Command Palette (Ctrl+Shift+P)'])(
+    'does not steal focus from %s when the palette closes externally',
+    (surfaceName) => {
+      const onClose = vi.fn();
+      const view = (open) => (
+        <>
+          <button type="button">Previous surface</button>
+          <input type="text" aria-label={surfaceName} />
+          <JumpPalette open={open} query="" onQueryChange={vi.fn()} onClose={onClose} />
+        </>
+      );
+      const { rerender } = render(view(false));
+      const previous = screen.getByRole('button', { name: 'Previous surface' });
+      previous.focus();
+      rerender(view(true));
+      expect(document.activeElement).toBe(screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' }));
+
+      const competingSurface = screen.getByRole('textbox', { name: surfaceName });
+      competingSurface.focus();
+      rerender(view(false));
+
+      expect(document.activeElement).toBe(competingSurface);
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['inert', 'hidden', 'aria-hidden', 'unmounted'])(
+    'does not restore focus to a previous surface that became %s',
+    (surfaceState) => {
+      const onClose = vi.fn();
+      const view = (open, blocked = false) => (
+        <>
+          {surfaceState === 'unmounted' && blocked ? null : (
+            <div
+              inert={surfaceState === 'inert' && blocked ? true : undefined}
+              hidden={surfaceState === 'hidden' && blocked}
+              aria-hidden={surfaceState === 'aria-hidden' && blocked ? 'true' : undefined}
+            >
+              <button type="button">Previous surface</button>
+            </div>
+          )}
+          <JumpPalette open={open} query="" onQueryChange={vi.fn()} onClose={onClose} />
+        </>
+      );
+      const { rerender } = render(view(false));
+      const previous = screen.getByRole('button', { name: 'Previous surface' });
+      previous.focus();
+      rerender(view(true));
+      const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+      fireEvent.keyDown(input, { key: 'Escape' });
+      rerender(view(false, true));
+
+      expect(document.activeElement).not.toBe(previous);
+      if (surfaceState === 'unmounted') expect(previous.isConnected).toBe(false);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('rebases the active key to async replacements without navigating a stale result', () => {
     const onNavigate = vi.fn();

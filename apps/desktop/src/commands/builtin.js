@@ -175,12 +175,20 @@ export function registerBuiltinCommands() {
       id: 'ade.jumpPalette', title: 'Ir a Project, Task o Attention…',
       category: 'Ver', keywords: 'jump palette saltar ir project proyecto task attention orquestador ade navegar',
       run: () => {
-        if (wb().mode === 'orch' && wb().jumpPaletteOpen) { wb().setJumpPaletteOpen(false); return; }
+        const state = wb();
         const a = app();
         a.setCommandPalette(false);
         a.setQuickOpen(false);
-        if (wb().mode !== 'orch') wb().setMode('orch');
-        wb().setJumpPaletteOpen(true);
+        if (state.mode === 'orch' && state.orchView !== 'ade') {
+          state.setJumpPaletteOpen(false);
+          return;
+        }
+        if (state.mode === 'orch' && state.jumpPaletteOpen) { state.setJumpPaletteOpen(false); return; }
+        if (state.mode !== 'orch') {
+          state.setMode('orch');
+          state.setOrchView('ade');
+        }
+        state.setJumpPaletteOpen(true);
       },
     },
     {
