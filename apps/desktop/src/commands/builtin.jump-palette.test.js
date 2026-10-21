@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { registerBuiltinCommands } from './builtin';
-import { DEFAULT_KEYMAP, chordForCommand, dispatchKeydown, getKeymap, resetBindings, setBinding } from '../lib/keymap';
+import { DEFAULT_KEYMAP, bindingConflict, chordForCommand, dispatchKeydown, getKeymap, resetBindings, setBinding } from '../lib/keymap';
 import { allCommands, getCommand } from '../lib/commands';
 import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
@@ -87,5 +87,44 @@ describe('Jump Palette · atajo configurable', () => {
     expect(press({ key: 'K', ctrlKey: true, shiftKey: true, altKey: true }).consumed).toBe(true);
     await flush();
     expect(jumpOpen()).toBe(true);
+  });
+});
+
+describe('Jump Palette · colisiones de atajos', () => {
+  const keyToggleAgent = 'workbench.toggleAgent';
+
+  it('rechaza reasignar Quick Open o la propia Jump Palette sin desalojar a su dueño', async () => {
+    // Otro comando intenta quedarse Ctrl+P: se rechaza y Quick Open sigue abriéndose.
+    expect(bindingConflict(keyToggleAgent, 'ctrl+p')).toBe('workbench.quickOpen');
+    expect(setBinding(keyToggleAgent, 'ctrl+p')).toEqual({ ok: false, conflict: 'workbench.quickOpen' });
+    expect(chordForCommand('workbench.quickOpen')).toBe('ctrl+p');
+    expect(chordForCommand(keyToggleAgent)).toBe('ctrl+alt+b');
+    expect(localStorage.getItem('lixbon_keymap_overrides')).toBeNull();
+    press({ key: 'p', ctrlKey: true });
+    await flush();
+    expect(useAppStore.getState().quickOpen).toBe(true);
+
+    // Otro comando intenta quedarse Ctrl+Alt+J: la Jump Palette lo conserva.
+    expect(setBinding(keyToggleAgent, 'ctrl+alt+j')).toEqual({ ok: false, conflict: JUMP });
+    expect(chordForCommand(JUMP)).toBe('ctrl+alt+j');
+    expect(press({ key: 'j', ctrlKey: true, altKey: true }).consumed).toBe(true);
+    await flush();
+    expect(jumpOpen()).toBe(true);
+  });
+
+  it('la Jump Palette tampoco puede quitarle Ctrl+P ni Ctrl+K a sus comandos', () => {
+    expect(setBinding(JUMP, 'ctrl+p')).toEqual({ ok: false, conflict: 'workbench.quickOpen' });
+    expect(setBinding(JUMP, 'ctrl+k')).toEqual({ ok: false, conflict: 'workbench.focusSearch' });
+    expect(chordForCommand(JUMP)).toBe('ctrl+alt+j');
+    expect(chordForCommand('workbench.quickOpen')).toBe('ctrl+p');
+  });
+
+  it('permite volver a asignar el mismo chord a su comando y mover a uno libre', () => {
+    expect(setBinding(JUMP, 'ctrl+alt+j')).toEqual({ ok: true, conflict: null });
+    expect(bindingConflict(JUMP, 'ctrl+alt+j')).toBeNull();
+    expect(setBinding(JUMP, 'ctrl+shift+alt+9').ok).toBe(true);
+    // El chord que dejó libre ya puede usarse.
+    expect(bindingConflict(keyToggleAgent, 'ctrl+alt+j')).toBeNull();
+    expect(setBinding(keyToggleAgent, 'ctrl+alt+j').ok).toBe(true);
   });
 });

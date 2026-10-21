@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { JumpPalette } from './JumpPalette';
-import { useJumpPaletteData } from './jumpPaletteData';
+import { useJumpPaletteData, useJumpPaletteRecents } from './jumpPaletteData';
 
 /** Etiqueta cada Attention con datos del Core por ID exacto (Task/Project del mismo conjunto); nunca por ruta ni rama. */
 export function buildAttentionResults(attention, tasks, projects) {
@@ -35,12 +35,14 @@ function staleMessage(target) {
 /**
  * Anfitrión del Jump Palette dentro del ADE: lee Core solo mientras está abierta, rechaza destinos que ya no están
  * en el último conjunto autoritativo y delega la navegación en `onNavigate(target)`, que devuelve
- * `{ ok: true }` o `{ ok: false, message }` (la paleta queda abierta con el aviso).
+ * `{ ok: true }` o `{ ok: false, message }` (la paleta queda abierta con el aviso). Los destinos abiertos con éxito se
+ * recuerdan solo en el cliente (IDs durables en localStorage); nunca se escriben en Core.
  */
 export function JumpPaletteHost({ open, onClose, onNavigate }) {
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState(null);
   const { data, refresh, hasTarget } = useJumpPaletteData(open);
+  const { recents, remember } = useJumpPaletteRecents(open, data);
   const ideOverlayOpen = useAppStore((s) => s.quickOpen || s.commandPalette);
 
   useEffect(() => {
@@ -78,8 +80,9 @@ export function JumpPaletteHost({ open, onClose, onNavigate }) {
       setNotice({ message: outcome.message });
       return false;
     }
+    remember(target);
     return true;
-  }, [hasTarget, onNavigate, refresh]);
+  }, [hasTarget, onNavigate, refresh, remember]);
 
   const hasResults = data.projects.length > 0 || data.tasks.length > 0 || data.attention.length > 0;
   const loading = data.phase === 'loading' && !hasResults;
@@ -107,6 +110,7 @@ export function JumpPaletteHost({ open, onClose, onNavigate }) {
       projects={data.projects}
       tasks={data.tasks}
       attention={attention}
+      recents={recents}
       onNavigate={navigate}
       onClose={onClose}
     />

@@ -331,3 +331,43 @@ describe('JumpPalette', () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'attention', attentionId: 'att-9', targetKind: 'spawn_request', targetId: 'pend-1', projectId: null });
   });
 });
+
+describe('JumpPalette · recientes', () => {
+  const projects = [{ id: 'p-1', name: 'Alpha' }, { id: 'p-2', name: 'Beta' }];
+  const tasks = [{ id: 't-1', projectId: 'p-1', title: 'Primera' }, { id: 't-2', projectId: 'p-1', title: 'Segunda' }];
+  const recents = [
+    { kind: 'task', projectId: 'p-1', taskId: 't-2' },
+    { kind: 'task', projectId: 'p-9', taskId: 't-2' }, // obsoleto: no está en los resultados
+    { kind: 'project', projectId: 'p-2' },
+    { kind: 'task', projectId: 'p-1', taskId: 't-2' }, // repetido
+  ];
+  const renderPalette = (query = '', onNavigate = vi.fn()) => render(
+    <JumpPalette open query={query} onQueryChange={vi.fn()} projects={projects} tasks={tasks} recents={recents} onNavigate={onNavigate} onClose={vi.fn()} />,
+  );
+
+  it('sin búsqueda muestra primero los que siguen existiendo, en orden y sin repetirlos en sus grupos', () => {
+    const onNavigate = vi.fn();
+    renderPalette('', onNavigate);
+
+    const groupNames = screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'));
+    expect(groupNames).toEqual(['Recientes', 'Projects', 'Tasks']);
+    const recent = within(screen.getByRole('group', { name: 'Recientes' })).getAllByRole('option');
+    expect(recent.map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Segunda'),
+      expect.stringContaining('Beta'),
+    ]);
+    expect(within(screen.getByRole('group', { name: 'Projects' })).getAllByRole('option')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'Tasks' })).getAllByRole('option')).toHaveLength(1);
+
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    expect(activeOption(input)).toBe(recent[0]);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'p-1', taskId: 't-2' });
+  });
+
+  it('con una búsqueda vuelve a los grupos normales', () => {
+    renderPalette('Segunda');
+    expect(screen.queryByRole('group', { name: 'Recientes' })).toBeNull();
+    expect(within(screen.getByRole('group', { name: 'Tasks' })).getAllByRole('option')).toHaveLength(1);
+  });
+});

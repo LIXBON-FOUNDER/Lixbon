@@ -88,6 +88,7 @@ const loaded = () => waitFor(() => {
 const calls = (query) => queryAdeCore.mock.calls.filter(([name]) => name === query);
 
 beforeEach(() => {
+  localStorage.clear(); // los recientes viven en localStorage: ninguna prueba hereda los de otra
   taskData = { 'prj-1': makeTasks('prj-1', 120), 'prj-2': makeTasks('prj-2', 5), 'prj-3': makeTasks('prj-3', 3), 'prj-4': [], 'prj-5': makeTasks('prj-5', 1), 'prj-6': makeTasks('prj-6', 2) };
   attentionItems = [att(), att({ id: 'att-2', target_kind: 'run', target_id: 'run-9', project_id: null })];
   core();
@@ -119,9 +120,9 @@ describe('JumpPaletteHost · lecturas', () => {
 
     const project1 = calls('tasks_by_project').filter(([, args]) => args.projectId === 'prj-1').map(([, args]) => args);
     expect(project1).toEqual([
-      { projectId: 'prj-1', status: 'active', cursor: null },
-      { projectId: 'prj-1', status: 'active', cursor: 'cur:prj-1:50' },
-      { projectId: 'prj-1', status: 'active', cursor: 'cur:prj-1:100' },
+      { projectId: 'prj-1', status: 'all', cursor: null },
+      { projectId: 'prj-1', status: 'all', cursor: 'cur:prj-1:50' },
+      { projectId: 'prj-1', status: 'all', cursor: 'cur:prj-1:100' },
     ]);
     expect(calls('attention_list').map(([, args]) => args)).toEqual([{ cursor: null }, { cursor: 'att-cursor-1' }]);
     expect(maxInFlight).toBeGreaterThan(1);

@@ -68,6 +68,7 @@ async function pick(query, group) {
 }
 
 beforeEach(() => {
+  localStorage.clear(); // los recientes de la paleta viven en localStorage: ninguna prueba hereda los de otra
   useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null }, jumpPaletteOpen: false, mode: 'orch', orchView: 'ade' });
   core();
 });

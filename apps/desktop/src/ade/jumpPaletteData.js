@@ -4,12 +4,15 @@ import { queryAdeCore } from './coreQueries';
 // Lecturas del Jump Palette (LXO-102): solo las queries read-only del ADE, solo mientras la paleta está abierta.
 // Los cursores son los `next_cursor` opacos del Core; nunca se calculan offsets.
 
-export const PALETTE_TASK_STATUS = 'active';
+// `all` incluye las Tasks finalizadas (done, failed, stopped, exited); su estado real se muestra como metadato.
+export const PALETTE_TASK_STATUS = 'all';
 export const PALETTE_CONCURRENCY = 4;
 export const PALETTE_REFRESH_MS = 15_000;
 export const PALETTE_QUERY_TIMEOUT_MS = 10_000;
 export const MAX_TASK_PAGES_PER_PROJECT = 20;
 export const MAX_ATTENTION_PAGES = 10;
+export const RECENTS_STORAGE_KEY = 'lixbon_jump_palette_recents';
+export const MAX_RECENTS = 8;
 
 export const EMPTY_RESULTS = Object.freeze({
   phase: 'idle',
@@ -20,6 +23,7 @@ export const EMPTY_RESULTS = Object.freeze({
   issues: Object.freeze([]),
   error: null,
   progress: Object.freeze({ done: 0, total: 0 }),
+  sources: Object.freeze({ projects: false, attention: false, attentionComplete: false }),
   updatedAt: null,
 });
 
@@ -84,18 +88,22 @@ const dedupe = (items, keyOf) => {
   });
 };
 
+// `status` es el estado agregado del Project (failed · attention · active · idle); `state` solo dice si está
+// activo o archivado y nunca se usa como estado agregado.
 function normalizeProject(project) {
   const id = text(project.id);
   const machines = (Array.isArray(project.locations) ? project.locations : [])
     .map((location) => text(location?.machine))
     .filter(Boolean);
   const hosts = [...new Set(machines)];
-  const status = text(project.status) || text(project.state);
+  const status = text(project.status);
   return {
     id,
     name: text(project.name),
+    archived: text(project.state) === 'archived',
     facts: [
-      status ? `Estado ${status}` : `Estado ${NOT_REPORTED}`,
+      `Estado ${status || NOT_REPORTED}`,
+      ...(text(project.state) === 'archived' ? ['Archivado'] : []),
       hosts.length ? `Host ${hosts.join(', ')}` : `Host/origen ${NOT_REPORTED}`,
     ],
   };
@@ -137,6 +145,7 @@ export async function loadJumpPaletteResults({ previous = EMPTY_RESULTS, initial
   const draft = {
     projects: null,
     attention: null,
+    attentionComplete: false,
     taskGroups: {},
     issues: [],
     errors: [],
@@ -159,6 +168,11 @@ export async function loadJumpPaletteResults({ previous = EMPTY_RESULTS, initial
       issues: [...draft.issues],
       error: phase === 'done' && !loadedSomething ? draft.errors[0] ?? 'Error desconocido del Core' : null,
       progress: { ...draft.progress },
+      sources: {
+        projects: Boolean(draft.projects) || Boolean(hasPrevious && previous.sources?.projects),
+        attention: Boolean(draft.attention) || Boolean(hasPrevious && previous.sources?.attention),
+        attentionComplete: draft.attention ? draft.attentionComplete : Boolean(hasPrevious && previous.sources?.attentionComplete),
+      },
       updatedAt: Date.now(),
     };
   };
@@ -178,6 +192,7 @@ export async function loadJumpPaletteResults({ previous = EMPTY_RESULTS, initial
       return;
     }
     draft.attention = dedupe(result.items, (item) => item.id);
+    draft.attentionComplete = result.complete;
     if (!result.complete) draft.issues.push('Vista parcial de Attention: quedan páginas sin cargar.');
     progressive();
   };
@@ -288,4 +303,117 @@ export function useJumpPaletteData(open, { refreshMs = PALETTE_REFRESH_MS } = {}
   }, []);
 
   return { data, refresh, hasTarget };
+}
+
+// --- Recientes (solo cliente) -------------------------------------------------------------------------------
+// Solo IDs durables en localStorage: nada se escribe en Core y los títulos se releen de Core al abrir.
+
+const MAX_ID_LENGTH = 256;
+const validId = (value) => typeof value === 'string' && value.trim() !== '' && value.length <= MAX_ID_LENGTH;
+
+/** Reduce un destino de navegación a su identidad durable mínima, o `null` si no es reconocible. */
+export function recentFromTarget(target) {
+  if (target?.kind === 'project' && validId(target.projectId)) return { kind: 'project', projectId: target.projectId };
+  if (target?.kind === 'task' && validId(target.projectId) && validId(target.taskId)) {
+    return { kind: 'task', projectId: target.projectId, taskId: target.taskId };
+  }
+  if (target?.kind === 'attention' && validId(target.attentionId)) return { kind: 'attention', attentionId: target.attentionId };
+  return null;
+}
+
+const recentKey = (recent) => JSON.stringify(
+  recent.kind === 'project' ? [recent.kind, recent.projectId]
+    : recent.kind === 'task' ? [recent.kind, recent.projectId, recent.taskId]
+      : [recent.kind, recent.attentionId],
+);
+
+/** Valida lo leído del almacenamiento: descarta lo ilegible, duplicado o sobrante. */
+export function sanitizeRecents(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const recents = [];
+  for (const entry of value) {
+    const recent = recentFromTarget(entry);
+    if (!recent) continue;
+    const key = recentKey(recent);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    recents.push(recent);
+    if (recents.length >= MAX_RECENTS) break;
+  }
+  return recents;
+}
+
+export function loadRecents() {
+  try {
+    return sanitizeRecents(JSON.parse(localStorage.getItem(RECENTS_STORAGE_KEY) || '[]'));
+  } catch {
+    return [];
+  }
+}
+
+function saveRecents(recents) {
+  try {
+    if (recents.length) localStorage.setItem(RECENTS_STORAGE_KEY, JSON.stringify(recents));
+    else localStorage.removeItem(RECENTS_STORAGE_KEY);
+  } catch { /* sin almacenamiento disponible: los recientes solo viven en memoria */ }
+}
+
+/** Añade el destino al frente (sin duplicados, con tope). */
+export function addRecent(recents, target) {
+  const recent = recentFromTarget(target);
+  if (!recent) return recents;
+  const key = recentKey(recent);
+  return [recent, ...recents.filter((item) => recentKey(item) !== key)].slice(0, MAX_RECENTS);
+}
+
+/**
+ * Quita los recientes que el último conjunto autoritativo y completo de Core ya no contiene. Si la fuente no se
+ * pudo leer o quedó parcial, el reciente se conserva: no se descarta lo que simplemente no se pudo comprobar.
+ */
+export function pruneRecents(recents, data) {
+  if (data.phase !== 'ready') return recents;
+  const { sources } = data;
+  const projectIds = new Set(data.projects.map((project) => project.id));
+  const attentionIds = new Set(data.attention.map((item) => item.id));
+  return recents.filter((recent) => {
+    if (recent.kind === 'project') return !sources.projects || projectIds.has(recent.projectId);
+    if (recent.kind === 'task') {
+      if (!sources.projects) return true;
+      if (!projectIds.has(recent.projectId)) return false;
+      const group = data.taskGroups[recent.projectId];
+      if (!group?.complete) return true;
+      return group.tasks.some((task) => task.id === recent.taskId);
+    }
+    return !(sources.attention && sources.attentionComplete) || attentionIds.has(recent.attentionId);
+  });
+}
+
+/** Recientes locales del Jump Palette: se releen al abrir, se podan contra Core y nunca se escriben en Core. */
+export function useJumpPaletteRecents(open, data) {
+  const [recents, setRecents] = useState(loadRecents);
+
+  useEffect(() => {
+    if (open) setRecents(loadRecents());
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setRecents((current) => {
+      const pruned = pruneRecents(current, data);
+      if (pruned.length === current.length) return current;
+      saveRecents(pruned);
+      return pruned;
+    });
+  }, [open, data]);
+
+  const remember = useCallback((target) => {
+    setRecents((current) => {
+      const next = addRecent(current, target);
+      saveRecents(next);
+      return next;
+    });
+  }, []);
+
+  return { recents, remember };
 }

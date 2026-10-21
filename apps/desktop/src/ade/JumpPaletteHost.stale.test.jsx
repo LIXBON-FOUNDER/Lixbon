@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { queryAdeCore } from './coreQueries';
@@ -39,6 +39,8 @@ const core = () => queryAdeCore.mockImplementation(async (query, args) => {
 });
 const att = { id: 'att-1', category: 'question', severity: 'high', target_kind: 'task', target_id: 'task-1', project_id: 'prj-1' };
 const counts = () => screen.getByTestId('counts').textContent;
+
+beforeEach(() => localStorage.clear());
 
 afterEach(() => {
   cleanup();
