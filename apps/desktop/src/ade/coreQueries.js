@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const QUERY_NAMES = new Set(['projects_overview', 'tasks_by_project', 'task_detail', 'attention_list']);
+const QUERY_NAMES = new Set(['projects_overview', 'tasks_by_project', 'task_detail', 'attention_list', 'activity_list']);
 
 /** Categorías del conjunto cerrado de Attention (LXO-87/89). No se amplían desde el cliente. */
 export const ATTENTION_CATEGORIES = Object.freeze([
@@ -42,11 +42,114 @@ export const TASK_STATUS_FILTERS = Object.freeze(['active', 'final', 'all']);
 /** Página fija de la lista de Tasks: el cursor opaco queda ligado a este límite (LXO-91). */
 export const TASK_PAGE_LIMIT = 50;
 
+/** Límites del contrato de páginas de Activity (LXO-92). */
+export const ACTIVITY_DEFAULT_LIMIT = 100;
+export const ACTIVITY_MAX_LIMIT = 500;
+
 const ATTENTION_CATEGORY_SET = new Set(ATTENTION_CATEGORIES);
 const ATTENTION_SEVERITY_SET = new Set(ATTENTION_SEVERITIES);
 const ATTENTION_TARGET_KIND_SET = new Set(ATTENTION_TARGET_KINDS);
 const ARCHIVED_FILTERS = new Set(['exclude', 'include', 'only']);
 const TASK_STATUS_SET = new Set(TASK_STATUS_FILTERS);
+const ACTIVITY_ORDER_SET = new Set(['asc', 'desc']);
+const ACTIVITY_CLASS_SET = new Set(['state', 'effect', 'decision', 'system']);
+const ACTIVITY_VISUAL_SET = new Set(['info', 'success', 'warning', 'error']);
+const ACTIVITY_ACTOR_KIND_SET = new Set(['person', 'agent', 'system']);
+const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
+
+const ACTIVITY_ARG_SCHEMAS = new Map([
+  ['activity.run.created', { required: { root_task: 'string' } }],
+  ['activity.run.closed', { required: { forced: 'boolean', stopped_total: 'integer' } }],
+  ['activity.run.removed', { required: { tasks: 'integer' } }],
+  ['activity.task.created', {
+    required: { title: 'text', agent: 'string', depth: 'integer', external: 'boolean' },
+    optional: { role: 'string', model: 'string', parent: 'string' },
+  }],
+  ['activity.task.phase_started', { required: {} }],
+  ['activity.task.phase_done', { required: {} }],
+  ['activity.task.question', { required: { message_id: 'integer', to: 'string' } }],
+  ['activity.task.reply', { required: { question_id: 'integer', message_id: 'integer' } }],
+  ['activity.task.removed', { required: { cause: 'string' } }],
+  ['activity.task.review_requested', { required: { branch: 'text' } }],
+  ['activity.decision.review.accepted', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
+  ['activity.decision.review.rejected', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
+  ['activity.decision.merge.merged', {
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.conflict', {
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.error', {
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.target_moved', {
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.pr.created', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.already_exists', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.error', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_merge.merged', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_merge.conflict', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_merge.error', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_push_pr.created', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.already_exists', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.error', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_worktree.created', {
+    required: { effect_id: 'string', branch: 'text' },
+    optional: { base: 'text' },
+  }],
+  ['activity.effect.git_worktree.removed', {
+    required: { effect_id: 'string', worktree_removed: 'boolean', branch_deleted: 'boolean' },
+    optional: { branch: 'text' },
+  }],
+  ['activity.effect.process.launched', { required: { effect_id: 'string' } }],
+  ['activity.effect.process.not_launched', { required: { effect_id: 'string' } }],
+  ['activity.project.registered', { required: { name: 'text', origin: 'string', has_remote: 'boolean' } }],
+  ['activity.project.location_added', { required: { primary: 'boolean', fingerprint_adopted: 'boolean' } }],
+  ['activity.project.archived', { required: {} }],
+  ['activity.project.restored', { required: {} }],
+  ['activity.project.relocated', { required: { fingerprint_adopted: 'boolean', confirmed_mismatch: 'boolean' } }],
+  ['activity.spawn.requested', {
+    required: {
+      parent_task: 'string', title: 'text', provider: 'string', profile: 'string',
+      shared: 'boolean', policy_status: 'string',
+    },
+    optional: { role: 'string', model: 'string', effort: 'string' },
+  }],
+  ['activity.environment.blocked', { required: { provider: 'string', profile: 'string', code: 'string' } }],
+  ['activity.environment.cleared', { required: { provider: 'string', profile: 'string', code: 'string' } }],
+  ['activity.attention.risk_acted', { required: { resolution: 'string' } }],
+  ['activity.attention.created', {
+    required: {
+      category: 'string', severity: 'string', occurrence: 'integer', target_kind: 'string', target_id: 'string',
+    },
+  }],
+  ['activity.attention.resolved', { required: { resolution: 'string' } }],
+  ['activity.unknown', { required: { reason: 'string', kind: 'string', event_version: 'integer' } }],
+]);
+
+for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']) {
+  ACTIVITY_ARG_SCHEMAS.set(`activity.task.${state}`, {
+    required: { from: 'string', to: 'string' },
+    optional: { cause: 'string' },
+  });
+}
+for (const outcome of ['approved', 'rejected', 'launch_failed', 'timeout', 'coordinator_closed', 'cancelled_run_removed']) {
+  ACTIVITY_ARG_SCHEMAS.set(`activity.spawn.${outcome}`, {
+    required: { has_reason: 'boolean' },
+    optional: { task: 'string' },
+  });
+}
+
+const ACTIVITY_RESPONSE_KEYS = ['v', 'projection', 'order', 'items', 'next_cursor', 'has_more', 'head_seq', 'limit'];
+const ACTIVITY_ITEM_KEYS = [
+  'seq', 'event_id', 'ts', 'kind', 'v', 'class', 'message_key', 'args', 'visual', 'fallback',
+  'target', 'project_id', 'run_id', 'actor', 'provenance', 'correlation_id',
+];
 
 function durableId(value, name) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`ade_query_invalid_request: ${name} debe ser un ID durable`);
@@ -81,6 +184,76 @@ function taskStatus(value) {
   return status;
 }
 
+function activityFilter(value, name) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new Error(`ade_query_invalid_request: ${name} debe ser texto`);
+  const filter = value.trim();
+  if (!filter || [...filter].length > 200) {
+    throw new Error(`ade_query_invalid_request: ${name} debe contener de 1 a 200 caracteres`);
+  }
+  return filter;
+}
+
+// Tauri transports Activity i64 fields as decimal strings; keep large values exact and
+// normalize only values that JavaScript can represent safely back to Number.
+function activityI64(value) {
+  if (typeof value === 'bigint') {
+    return value >= 0n && value <= ACTIVITY_I64_MAX ? value : null;
+  }
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  }
+  if (typeof value !== 'string' || value.length > 19 || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const parsed = BigInt(value);
+  return parsed <= ACTIVITY_I64_MAX ? parsed : null;
+}
+
+function activityRequestCursor(value) {
+  const cursor = activityI64(value);
+  if (cursor === null) {
+    throw new Error('ade_query_invalid_request: cursor debe ser un entero i64 no negativo y exacto');
+  }
+  return cursor.toString();
+}
+
+function publicActivityI64(value) {
+  return value.toString();
+}
+
+function activityRequest(args) {
+  const allowed = new Set(['cursor', 'limit', 'order', 'projectId', 'runId', 'targetKind', 'targetId']);
+  if (args !== undefined && args !== null && (typeof args !== 'object' || Array.isArray(args))) {
+    throw new Error('ade_query_invalid_request: los parámetros de activity_list deben ser un objeto');
+  }
+  const input = args ?? {};
+  if (Object.keys(input).some((key) => !allowed.has(key))) {
+    throw new Error('ade_query_invalid_request: activity_list solo acepta cursor, limit, order, projectId, runId, targetKind y targetId');
+  }
+  const cursor = activityRequestCursor(input.cursor ?? 0);
+  const limit = input.limit ?? ACTIVITY_DEFAULT_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > ACTIVITY_MAX_LIMIT) {
+    throw new Error(`ade_query_invalid_request: limit debe ser un entero entre 1 y ${ACTIVITY_MAX_LIMIT}`);
+  }
+  const order = input.order ?? 'asc';
+  if (!ACTIVITY_ORDER_SET.has(order)) {
+    throw new Error('ade_query_invalid_request: order debe ser asc o desc');
+  }
+
+  const request = { cursor, limit, order };
+  const projectId = activityFilter(input.projectId, 'project_id');
+  const runId = activityFilter(input.runId, 'run_id');
+  const targetKind = activityFilter(input.targetKind, 'target_kind');
+  const targetId = activityFilter(input.targetId, 'target_id');
+  if (targetId && !targetKind) {
+    throw new Error('ade_query_invalid_request: target_id exige target_kind');
+  }
+  if (projectId !== null) request.project_id = projectId;
+  if (runId !== null) request.run_id = runId;
+  if (targetKind !== null) request.target_kind = targetKind;
+  if (targetId !== null) request.target_id = targetId;
+  return request;
+}
+
 // Solo los filtros del contrato de `attention_list`; `limit` fijo para que el cursor siga siendo válido.
 // El filtro de target lo resuelve el Core: `target_kind` y `target_id` van siempre juntos (un ID sin tipo es ambiguo).
 function attentionRequest(args) {
@@ -113,6 +286,7 @@ function requestFor(query, args) {
     return { archived };
   }
   if (query === 'attention_list') return attentionRequest(args);
+  if (query === 'activity_list') return activityRequest(args);
   if (query === 'tasks_by_project') {
     const request = {
       project_id: durableId(args?.projectId, 'project_id'),
@@ -134,6 +308,121 @@ function invalidResponse(query, detail) {
 }
 
 const optionalText = (value) => value === null || value === undefined || typeof value === 'string';
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const nonEmptyText = (value) => typeof value === 'string' && Boolean(value.trim());
+const freeText = (value) => typeof value === 'string' && (value === '' || Boolean(value.trim()));
+const nonNegativeSafeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
+
+function hasExactKeys(value, keys) {
+  return isRecord(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function validActivityArgs(messageKey, args) {
+  const schema = ACTIVITY_ARG_SCHEMAS.get(messageKey);
+  if (!schema || !isRecord(args)) return false;
+  const required = schema.required ?? {};
+  const optional = schema.optional ?? {};
+  const fields = { ...required, ...optional };
+  const validators = {
+    string: nonEmptyText,
+    text: freeText,
+    boolean: (value) => typeof value === 'boolean',
+    integer: nonNegativeSafeInteger,
+  };
+  return Object.keys(required).every((key) => Object.hasOwn(args, key))
+    && Object.keys(args).every((key) => Object.hasOwn(fields, key)
+      && validators[fields[key]]?.(args[key]) === true);
+}
+
+function validActivityItem(item) {
+  const seq = activityI64(item?.seq);
+  return hasExactKeys(item, ACTIVITY_ITEM_KEYS)
+    && seq !== null && seq > 0n
+    && nonEmptyText(item.event_id)
+    && nonNegativeSafeInteger(item.ts)
+    && nonEmptyText(item.kind)
+    && Number.isSafeInteger(item.v) && item.v >= 1
+    && ACTIVITY_CLASS_SET.has(item.class)
+    && typeof item.message_key === 'string' && /^activity\.[a-z0-9_.]+$/.test(item.message_key)
+    && validActivityArgs(item.message_key, item.args)
+    && ACTIVITY_VISUAL_SET.has(item.visual)
+    && typeof item.fallback === 'boolean'
+    && hasExactKeys(item.target, ['kind', 'id'])
+    && nonEmptyText(item.target.kind) && nonEmptyText(item.target.id)
+    && (item.project_id === null || typeof item.project_id === 'string')
+    && (item.run_id === null || typeof item.run_id === 'string')
+    && hasExactKeys(item.actor, ['kind', 'id'])
+    && ACTIVITY_ACTOR_KIND_SET.has(item.actor.kind)
+    && (item.actor.id === null || typeof item.actor.id === 'string')
+    && hasExactKeys(item.provenance, ['channel', 'client_id'])
+    && (item.provenance.channel === null || typeof item.provenance.channel === 'string')
+    && (item.provenance.client_id === null || typeof item.provenance.client_id === 'string')
+    && (item.correlation_id === null || typeof item.correlation_id === 'string');
+}
+
+function validateActivityResponse(args, response) {
+  const cursor = activityI64(args.cursor);
+  const nextCursor = activityI64(response?.next_cursor);
+  const headSeq = activityI64(response?.head_seq);
+  if (!hasExactKeys(response, ACTIVITY_RESPONSE_KEYS)
+    || response.v !== 1 || response.projection !== 1 || response.order !== args.order
+    || response.limit !== args.limit || typeof response.has_more !== 'boolean'
+    || cursor === null || nextCursor === null || headSeq === null
+    || nextCursor > headSeq || !Array.isArray(response.items)
+    || response.items.length > args.limit) {
+    throw invalidResponse('activity_list', 'la página no corresponde al contrato de Activity');
+  }
+  if (cursor > headSeq) {
+    throw invalidResponse('activity_list', 'head_seq es menor que el cursor solicitado');
+  }
+  if (response.items.some((item) => !validActivityItem(item))) {
+    throw invalidResponse('activity_list', 'la lista contiene un ActivityItem fuera del DTO contractual');
+  }
+
+  let previousSeq = null;
+  for (const item of response.items) {
+    const seq = activityI64(item.seq);
+    if (seq > headSeq
+      || (args.project_id !== undefined && item.project_id !== args.project_id)
+      || (args.run_id !== undefined && item.run_id !== args.run_id)
+      || (args.target_kind !== undefined && item.target.kind !== args.target_kind)
+      || (args.target_id !== undefined && item.target.id !== args.target_id)) {
+      throw invalidResponse('activity_list', 'la lista contiene un item fuera de los filtros o head_seq');
+    }
+    if (args.order === 'asc') {
+      if (seq <= cursor || (previousSeq !== null && seq <= previousSeq)) {
+        throw invalidResponse('activity_list', 'los items no respetan el cursor exclusivo y el orden ascendente');
+      }
+    } else if ((cursor > 0n && seq >= cursor) || (previousSeq !== null && seq >= previousSeq)) {
+      throw invalidResponse('activity_list', 'los items no respetan el cursor exclusivo y el orden descendente');
+    }
+    previousSeq = seq;
+  }
+
+  if (response.has_more) {
+    if (response.items.length !== args.limit || response.items.length === 0
+      || nextCursor !== activityI64(response.items[response.items.length - 1].seq)) {
+      throw invalidResponse('activity_list', 'el cursor de continuación no corresponde a la página');
+    }
+  } else if (args.order === 'asc') {
+    if (nextCursor !== headSeq) {
+      throw invalidResponse('activity_list', 'next_cursor debe coincidir con head_seq al terminar en asc');
+    }
+  } else {
+    const lastSeq = response.items.length === 0 ? cursor : activityI64(response.items[response.items.length - 1].seq);
+    if (nextCursor !== lastSeq) {
+      throw invalidResponse('activity_list', 'next_cursor debe coincidir con el seq más bajo en desc');
+    }
+  }
+  return {
+    ...response,
+    next_cursor: publicActivityI64(nextCursor),
+    head_seq: publicActivityI64(headSeq),
+    items: response.items.map((item) => ({ ...item, seq: publicActivityI64(activityI64(item.seq)) })),
+  };
+}
 
 /** Task de la lista (LXO-91): identidad durable, estado real y metadato opcional, sin inferir nada. */
 function validTask(task) {
@@ -169,6 +458,7 @@ function validateResponse(query, args, response) {
     throw invalidResponse(query, 'respuesta no es un objeto');
   }
   if (response.v !== 1) throw invalidResponse(query, 'versión de respuesta no compatible');
+  if (query === 'activity_list') return validateActivityResponse(args, response);
   if (query === 'projects_overview') {
     if (response.filters?.archived !== args.archived || response.filters?.machine !== null
       || !Array.isArray(response.projects) || response.total !== response.projects.length
@@ -238,3 +528,7 @@ export const readAdeTask = (projectId, taskId) => queryAdeCore('task_detail', { 
  */
 export const listAdeAttention = ({ projectId = null, targetKind = null, targetId = null, category = null, severity = null, cursor = null } = {}) =>
   queryAdeCore('attention_list', { projectId, targetKind, targetId, category, severity, cursor });
+
+/** Activity es una proyección de solo lectura; su cursor decimal canónico es el `seq` exclusivo del Core. */
+export const listAdeActivity = ({ cursor = 0, limit = ACTIVITY_DEFAULT_LIMIT, order = 'asc', projectId = null, runId = null, targetKind = null, targetId = null } = {}) =>
+  queryAdeCore('activity_list', { cursor, limit, order, projectId, runId, targetKind, targetId });

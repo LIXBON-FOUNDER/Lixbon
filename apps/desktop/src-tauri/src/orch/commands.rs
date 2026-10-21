@@ -6,10 +6,73 @@ use tauri::{AppHandle, Emitter, State as TauriState};
 use super::events::Channel;
 use super::{Caller, CodexTerms, Orch, Settings, agents, codex_session, codex_term, data_dir, lxo_path, providers, roles, skill, spawn_approval, write_json};
 
-const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail", "attention_list"];
+const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list"];
+const MAX_SAFE_ACTIVITY_CURSOR: i64 = 9_007_199_254_740_991;
 
 fn is_ade_read_query(query: &str) -> bool {
     ADE_READ_QUERIES.contains(&query)
+}
+
+/// El Core recibe `cursor` como i64, pero la WebView solo puede transportar
+/// enteros JS exactos como Number hasta `MAX_SAFE_ACTIVITY_CURSOR`. Los cursores
+/// mayores cruzan IPC como decimal y se restauran a i64 antes de llamar al Core.
+fn activity_args_for_core(mut args: Value) -> Result<Value, String> {
+    let Some(cursor) = args.get("cursor") else { return Ok(args) };
+    let parsed = match cursor {
+        Value::String(text) => {
+            if text.is_empty()
+                || text.len() > 19
+                || !text.bytes().all(|byte| byte.is_ascii_digit())
+                || (text.len() > 1 && text.starts_with('0'))
+            {
+                return Err("ade_query_invalid_request: cursor Activity debe ser un decimal i64 canónico".into());
+            }
+            text.parse::<i64>()
+                .map_err(|_| "ade_query_invalid_request: cursor Activity está fuera de i64".to_string())?
+        }
+        Value::Number(number) => {
+            let number = number.as_i64()
+                .ok_or_else(|| "ade_query_invalid_request: cursor Activity debe ser un entero i64".to_string())?;
+            if number > MAX_SAFE_ACTIVITY_CURSOR {
+                return Err("ade_query_invalid_request: cursor Activity mayor que MAX_SAFE_INTEGER debe enviarse como decimal".into());
+            }
+            number
+        }
+        _ => return Err("ade_query_invalid_request: cursor Activity debe ser un entero i64".into()),
+    };
+    if parsed < 0 {
+        return Err("ade_query_invalid_request: cursor Activity debe ser no negativo".into());
+    }
+    if let Some(object) = args.as_object_mut() {
+        object.insert("cursor".into(), Value::Number(parsed.into()));
+    }
+    Ok(args)
+}
+
+/// Serializa los tres i64 del contrato Activity como decimal en IPC para que
+/// JSON/JavaScript no los redondee antes de que `coreQueries` los valide.
+fn activity_response_for_webview(mut response: Value) -> Value {
+    if let Some(object) = response.as_object_mut() {
+        for key in ["next_cursor", "head_seq"] {
+            if let Some(value) = object.get_mut(key) {
+                stringify_activity_i64(value);
+            }
+        }
+        if let Some(Value::Array(items)) = object.get_mut("items") {
+            for item in items {
+                if let Some(seq) = item.get_mut("seq") {
+                    stringify_activity_i64(seq);
+                }
+            }
+        }
+    }
+    response
+}
+
+fn stringify_activity_i64(value: &mut Value) {
+    if let Some(number) = value.as_i64() {
+        *value = Value::String(number.to_string());
+    }
 }
 
 #[tauri::command]
@@ -48,7 +111,9 @@ pub fn orch_query(orch: TauriState<'_, Orch>, query: String, args: Value) -> Res
     if !is_ade_read_query(&query) {
         return Err(format!("orch_query_forbidden: `{query}` no es una query read-only del ADE"));
     }
-    orch.0.rpc_via(Channel::Ui, Caller::User, "", &query, &args)
+    let args = if query == "activity_list" { activity_args_for_core(args)? } else { args };
+    let response = orch.0.rpc_via(Channel::Ui, Caller::User, "", &query, &args)?;
+    Ok(if query == "activity_list" { activity_response_for_webview(response) } else { response })
 }
 
 /// Proyectos registrados (slice D), con sus ubicaciones. `include_archived`: también los archivados.
@@ -226,19 +291,57 @@ pub fn orch_skill_uninstall(ids: Vec<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod ade_query_tests {
-    use super::is_ade_read_query;
+    use super::{activity_args_for_core, activity_response_for_webview, is_ade_read_query, MAX_SAFE_ACTIVITY_CURSOR};
+    use serde_json::{json, Value};
 
     #[test]
     fn ade_solo_expone_queries_observacionales_de_f2() {
-        for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list"] {
+        for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
-        for operation in ["project_archive", "run_create", "spawn", "remove_run", "unknown"] {
+        for operation in ["project_archive", "run_create", "spawn", "remove_run", "events", "unknown"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
         // Escribir o resolver Attention no entra por la superficie F2: solo su lectura activa.
         for operation in ["attention_detail", "attention_resolve", "attention_act_risk", "attention_snooze"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
+    }
+
+    #[test]
+    fn activity_cursor_decimal_se_convierte_a_i64_sin_perdida() {
+        let cursor = "9223372036854775807";
+        let args = activity_args_for_core(json!({ "cursor": cursor, "limit": 1 })).unwrap();
+        assert_eq!(args["cursor"].as_i64(), Some(i64::MAX));
+        assert_eq!(args["limit"], json!(1));
+
+        let safe = activity_args_for_core(json!({ "cursor": 9_007_199_254_740_991_i64 })).unwrap();
+        assert_eq!(safe["cursor"].as_i64(), Some(MAX_SAFE_ACTIVITY_CURSOR));
+    }
+
+    #[test]
+    fn activity_cursor_rechaza_numeros_inseguros_y_decimales_no_canonicos() {
+        for args in [
+            json!({ "cursor": 9_007_199_254_740_992_i64 }),
+            json!({ "cursor": -1 }),
+            json!({ "cursor": "09223372036854775807" }),
+            json!({ "cursor": "9223372036854775808" }),
+            json!({ "cursor": 1.5 }),
+        ] {
+            assert!(activity_args_for_core(args).is_err());
+        }
+    }
+
+    #[test]
+    fn activity_i64_salen_como_decimales_exactos_por_ipc() {
+        let response = activity_response_for_webview(json!({
+            "next_cursor": i64::MAX,
+            "head_seq": i64::MAX,
+            "items": [{ "seq": i64::MAX, "args": { "depth": 1 } }],
+        }));
+        assert_eq!(response["next_cursor"], Value::String(i64::MAX.to_string()));
+        assert_eq!(response["head_seq"], Value::String(i64::MAX.to_string()));
+        assert_eq!(response["items"][0]["seq"], Value::String(i64::MAX.to_string()));
+        assert_eq!(response["items"][0]["args"]["depth"], json!(1));
     }
 }
