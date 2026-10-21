@@ -1,0 +1,36 @@
+.ade__nav .ade__nav-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.ade__nav .ade__nav-scroll-region {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  scrollbar-gutter: stable;
+}
+
+.ade__nav .ade__nav-projects-scroll {
+  flex: 1 1 58%;
+}
+
+.ade__nav .ade__nav-operation-scroll {
+  flex: 1 1 42%;
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
+}
+
+.ade__nav .ade__nav-scroll-region:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: -2px;
+}
+
+.ade__nav .ade__nav-operation-scroll > .orch__operation-nav {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}

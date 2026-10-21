@@ -68,6 +68,55 @@ afterEach(() => {
   queryAdeCore.mockReset();
 });
 
+describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
+  it('mantiene Operación en una región propia y alcanzable con muchos Projects y Tasks', async () => {
+    const projects = Array.from({ length: 32 }, (_, index) => ({
+      ...PROJECT,
+      id: `project-${index}`,
+      name: `Repo ${index}`,
+    }));
+    const tasks = Array.from({ length: 50 }, (_, index) => ({
+      ...ITEM,
+      id: `task-${index}`,
+      title: `Task ${index}`,
+    }));
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return {
+        v: 1, filters: { archived: args.archived, machine: null }, total: projects.length, projects, unassigned: {},
+      };
+      if (query === 'tasks_by_project') return {
+        v: 1, project_id: args.project_id, filters: { status: args.status }, limit: 50, tasks, has_more: false, next_cursor: null,
+      };
+      if (query === 'task_detail') return detailOf();
+      if (query === 'attention_list') return attentionPage([]);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+
+    render(shell({
+      operationNavigation: (
+        <section aria-label="Operación">
+          <button type="button">Aprobar spawn pendiente</button>
+          <button type="button">Run anterior</button>
+        </section>
+      ),
+    }));
+
+    const projectsRegion = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    expect(within(projectsRegion).getAllByRole('button', { name: /^Repo / })).toHaveLength(32);
+    fireEvent.click(within(projectsRegion).getByRole('button', { name: 'Repo 0' }));
+    const tasksRegion = await screen.findByRole('region', { name: 'Tasks del Project project-0' });
+    await within(tasksRegion).findByRole('button', { name: 'Task 49' });
+    expect(within(tasksRegion).getAllByRole('button', { name: /^Task / })).toHaveLength(50);
+
+    const operationRegion = screen.getByRole('region', { name: 'Navegación de Operación' });
+    expect(within(operationRegion).getByRole('button', { name: 'Aprobar spawn pendiente' })).toBeTruthy();
+    expect(within(operationRegion).getByRole('button', { name: 'Run anterior' })).toBeTruthy();
+    expect(projectsRegion.parentElement).toBe(operationRegion.parentElement);
+    expect(projectsRegion.tabIndex).toBe(0);
+    expect(operationRegion.tabIndex).toBe(0);
+  });
+});
+
 describe('AdeShell · Project View (LXO-204)', () => {
   it('abre por el ID durable y muestra metadata real del overview, Tasks all y slices pendientes', async () => {
     core(detailOf(), { attention: () => attentionPage([att({ id: 'att-project-1' })]) });
