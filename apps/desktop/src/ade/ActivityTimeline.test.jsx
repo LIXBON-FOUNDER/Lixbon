@@ -930,3 +930,208 @@ describe('ActivityTimeline · teclado y accesibilidad', () => {
     expect(screen.getByTestId('activity-stale').getAttribute('role')).toBe('status');
   });
 });
+
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    Object.values(value).forEach(deepFreeze);
+  }
+  return value;
+}
+
+describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)', () => {
+  it('entrega kind e id exactos del destino durable al activar el botón', () => {
+    const onOpenTarget = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({ eventId: 'a', seq: 1, target: { kind: 'task', id: 't-Ab_9' } }),
+          activityItem({ eventId: 'b', seq: 2, target: { kind: 'project', id: 'p-77' } }),
+        ]}
+        onOpenTarget={onOpenTarget}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('activity-target-a'));
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'task', id: 't-Ab_9' });
+    fireEvent.click(screen.getByTestId('activity-target-b'));
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'project', id: 'p-77' });
+    expect(onOpenTarget).toHaveBeenCalledTimes(2);
+    // Solo kind e id: nada de scope, cursor, eventId ni texto derivado.
+    expect(Object.keys(onOpenTarget.mock.calls[0][0]).sort()).toEqual(['id', 'kind']);
+  });
+
+  it('es un botón nativo, enfocable por teclado y con nombre accesible', () => {
+    const onOpenTarget = vi.fn();
+    render(<ActivityTimeline items={[activityItem()]} onOpenTarget={onOpenTarget} />);
+
+    const button = screen.getByRole('button', { name: 'Abrir Tarea t-1' });
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('tabindex')).toBeNull();
+    expect(button.getAttribute('disabled')).toBeNull();
+    // El texto visible del destino se conserva.
+    expect(button.textContent).toContain('Tarea');
+    expect(button.textContent).toContain('t-1');
+
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    // Enter/Espacio sobre un <button> nativo disparan click; jsdom no los sintetiza, por eso se
+    // verifica la semántica nativa y se emite el click que el navegador generaría.
+    fireEvent.click(button);
+    expect(onOpenTarget).toHaveBeenCalledTimes(1);
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'task', id: 't-1' });
+  });
+
+  it('sin callback el destino es solo informativo (sin botón ni rol interactivo)', () => {
+    render(<ActivityTimeline items={[activityItem()]} />);
+    const target = screen.getByTestId('activity-target-evt-1');
+    expect(target.tagName).toBe('SPAN');
+    expect(target.textContent).toContain('Tarea');
+    expect(target.textContent).toContain('t-1');
+    expect(screen.queryByRole('button', { name: /Abrir/ })).toBeNull();
+    expect(target.getAttribute('tabindex')).toBeNull();
+  });
+
+  it('un callback que no es función se trata como ausente', () => {
+    render(<ActivityTimeline items={[activityItem()]} onOpenTarget="no-soy-funcion" />);
+    expect(screen.getByTestId('activity-target-evt-1').tagName).toBe('SPAN');
+    expect(screen.queryByRole('button', { name: /Abrir/ })).toBeNull();
+  });
+
+  it('destinos ausentes o mal formados no ofrecen navegación', () => {
+    const onOpenTarget = vi.fn();
+    const items = [
+      activityItem({ eventId: 'none', seq: 1, target: undefined }),
+      activityItem({ eventId: 'null', seq: 2, target: null }),
+      activityItem({ eventId: 'str', seq: 3, target: 'task:t-1' }),
+      activityItem({ eventId: 'noid', seq: 4, target: { kind: 'task' } }),
+      activityItem({ eventId: 'blank', seq: 5, target: { kind: 'task', id: '   ' } }),
+      activityItem({ eventId: 'empty', seq: 6, target: { kind: 'task', id: '' } }),
+      activityItem({ eventId: 'num', seq: 7, target: { kind: 'task', id: 42 } }),
+      activityItem({ eventId: 'obj', seq: 8, target: { kind: 'task', id: { x: 1 } } }),
+      activityItem({ eventId: 'pad', seq: 9, target: { kind: 'task', id: ' t-1 ' } }),
+      activityItem({ eventId: 'ctrl', seq: 10, target: { kind: 'task', id: 't-1\n' } }),
+      activityItem({ eventId: 'long', seq: 11, target: { kind: 'task', id: 'x'.repeat(201) } }),
+      activityItem({ eventId: 'kpad', seq: 12, target: { kind: ' task', id: 't-1' } }),
+      activityItem({ eventId: 'kupper', seq: 13, target: { kind: 'Task', id: 't-1' } }),
+      activityItem({ eventId: 'nokind', seq: 14, target: { id: 't-1' } }),
+      activityItem({ eventId: 'knum', seq: 15, target: { kind: 7, id: 't-1' } }),
+    ];
+    render(<ActivityTimeline items={items} onOpenTarget={onOpenTarget} />);
+
+    expect(screen.getByTestId('activity-list')).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /Abrir/ })).toHaveLength(0);
+    for (const item of items) {
+      const el = screen.queryByTestId(`activity-target-${item.eventId}`);
+      if (el) expect(el.tagName).toBe('SPAN');
+    }
+    expect(onOpenTarget).not.toHaveBeenCalled();
+  });
+
+  it('kinds desconocidos o fuera de alcance quedan como texto informativo', () => {
+    const onOpenTarget = vi.fn();
+    const kinds = ['run', 'spawn_request', 'agent', 'core', 'attention', 'attempt', 'zzz'];
+    const items = kinds.map((kind, i) =>
+      activityItem({ eventId: `k-${kind}`, seq: i + 1, target: { kind, id: `${kind}-1` } }),
+    );
+    render(<ActivityTimeline items={items} onOpenTarget={onOpenTarget} />);
+
+    expect(screen.queryAllByRole('button', { name: /Abrir/ })).toHaveLength(0);
+    for (const kind of kinds) {
+      expect(screen.getByTestId(`activity-target-k-${kind}`).tagName).toBe('SPAN');
+    }
+    // Un kind desconocido conserva su rótulo genérico y no se traduce.
+    expect(screen.getByTestId('activity-target-k-zzz').textContent).toContain('Destino zzz-1');
+    expect(onOpenTarget).not.toHaveBeenCalled();
+  });
+
+  it('un evento con known=false sigue mostrando su fallback; el destino válido es navegable', () => {
+    const onOpenTarget = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[
+          activityItem({
+            eventId: 'unk',
+            known: false,
+            kind: 'algo.nuevo',
+            message: null,
+            target: { kind: 'project', id: 'p-1' },
+          }),
+        ]}
+        onOpenTarget={onOpenTarget}
+      />,
+    );
+    expect(screen.getByTestId('activity-message-unk').textContent).toBe('Evento desconocido');
+    fireEvent.click(screen.getByTestId('activity-target-unk'));
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'project', id: 'p-1' });
+  });
+
+  it('no muta items, scope ni cursor, ni dispara refresh/retry/load-more al navegar', () => {
+    const items = deepFreeze([activityItem()]);
+    const scope = deepFreeze({ kind: 'project', id: 'p-1', name: 'lixbon' });
+    const cursor = deepFreeze({ next: 1, hasMore: true });
+    const snapshot = JSON.stringify({ items, scope, cursor });
+    const onOpenTarget = vi.fn((target) => {
+      // El host puede alterar lo que recibe sin tocar el estado de la vista.
+      target.id = 'mutado';
+    });
+    const onLoadMore = vi.fn();
+    const onRefresh = vi.fn();
+    const onRetry = vi.fn();
+    render(
+      <ActivityTimeline
+        items={items}
+        scope={scope}
+        cursor={cursor}
+        stale
+        onOpenTarget={onOpenTarget}
+        onLoadMore={onLoadMore}
+        onRefresh={onRefresh}
+        onRetry={onRetry}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('activity-target-evt-1'));
+    fireEvent.click(screen.getByTestId('activity-target-evt-1'));
+
+    expect(onOpenTarget).toHaveBeenCalledTimes(2);
+    expect(onOpenTarget.mock.calls[1][0]).toEqual({ kind: 'task', id: 'mutado' });
+    expect(onOpenTarget.mock.calls[0][0]).not.toBe(onOpenTarget.mock.calls[1][0]);
+    expect(JSON.stringify({ items, scope, cursor })).toBe(snapshot);
+    expect(items[0].target).toEqual({ kind: 'task', id: 't-1' });
+    expect(onLoadMore).not.toHaveBeenCalled();
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(onRetry).not.toHaveBeenCalled();
+    // La fila y el destino siguen igual tras activar.
+    expect(screen.getByTestId('activity-target-evt-1').textContent).toContain('t-1');
+    expect(screen.getByTestId('activity-count').textContent).toBe('1');
+  });
+
+  it('conserva los callbacks de alcance y cursor con navegación activa', () => {
+    const onOpenTarget = vi.fn();
+    const onLoadMore = vi.fn();
+    const onRefresh = vi.fn();
+    render(
+      <ActivityTimeline
+        scope={{ kind: 'task', id: 't-1', title: 'Hacer' }}
+        items={[activityItem()]}
+        cursor={{ next: 1, hasMore: true }}
+        stale
+        onOpenTarget={onOpenTarget}
+        onLoadMore={onLoadMore}
+        onRefresh={onRefresh}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('activity-load-more'));
+    expect(onLoadMore).toHaveBeenCalledWith({
+      cursor: 1,
+      scope: { kind: 'task', id: 't-1', title: 'Hacer' },
+    });
+    fireEvent.click(screen.getByTestId('activity-refresh'));
+    expect(onRefresh).toHaveBeenCalledWith({
+      scope: { kind: 'task', id: 't-1', title: 'Hacer' },
+    });
+    expect(onOpenTarget).not.toHaveBeenCalled();
+  });
+});
