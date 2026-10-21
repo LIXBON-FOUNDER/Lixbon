@@ -143,6 +143,8 @@ describe('OrchestratorMode', () => {
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'active', limit: 50 }],
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'all', limit: 50 }],
       ['attention_list', { limit: 100, project_id: 'project-uuid-1' }],
+      ['resource_inventory', { project_id: 'project-uuid-1', probe: true }],
+      ['activity_list', { cursor: '0', limit: 20, order: 'desc', project_id: 'project-uuid-1' }],
       ['task_detail', { project_id: 'project-uuid-1', task_id: 'task-uuid-1' }],
     ]);
     expect(invoke.mock.calls.filter(([command]) => command === 'orch_call')).toEqual([]);
