@@ -49,7 +49,7 @@ export const STATE_FILTERS = [
   { value: 'external_candidate', label: 'Candidato externo' },
   { value: 'missing', label: 'Falta' },
   { value: 'unknown', label: 'Desconocido / no disponible' },
-  { value: 'dirty', label: 'Con cambios sin guardar' },
+  { value: 'dirty', label: 'Con cambios' },
   { value: 'clean', label: 'Limpio' },
   { value: 'merged', label: 'Fusionado' },
   { value: 'unmerged', label: 'Sin fusionar (aviso)' },
@@ -57,18 +57,32 @@ export const STATE_FILTERS = [
 
 const isUnavailable = (r) => r.availability === 'unavailable';
 const isUnset = (v) => v === null || v === undefined;
-// Falta: Core lo clasifica así, o un recurso conocido con exists === false. Si Core no pudo leer los
-// valores (availability 'unavailable') el exists no es fiable: es «No disponible», no «Falta».
+// Falta: Core lo clasifica así (su veredicto manda, incluso si otros valores no se pudieron leer), o un
+// recurso conocido con exists === false. Si Core no pudo leer los valores (availability 'unavailable')
+// el exists de un recurso conocido no es fiable: es «No disponible», no «Falta».
 const isMissing = (r) => r.classification === 'missing' || (r.classification === 'known' && !isUnavailable(r) && r.exists === false);
+
+/** Sección en la que se pinta la fila; sigue a isMissing para que etiqueta, sección y filtro coincidan. */
+export function sectionOf(r) {
+  if (isMissing(r)) return 'missing';
+  if (r.classification === 'external_candidate') return 'external_candidate';
+  if (r.classification === 'known') return 'known';
+  return 'unclassified';
+}
+
+// «Desconocido»: alguno de los campos de estado que la fila MUESTRA es desconocido o no disponible.
+// «Existe» de una fila clasificada como Falta se muestra como «No» (veredicto de Core), no como desconocido.
+const hasUnknownShown = (r) =>
+  isUnavailable(r) || (r.classification !== 'missing' && isUnset(r.exists)) || isUnset(r.dirty) || isUnset(r.merged);
 
 /** ¿Cumple la entrada el filtro de estado? Predicados, no un estado único: dirty y unmerged pueden coincidir. */
 export function matchesState(r, filter) {
   switch (filter) {
     case 'all': return true;
-    case 'known': return r.classification === 'known';
-    case 'external_candidate': return r.classification === 'external_candidate';
+    case 'known': return sectionOf(r) === 'known';
+    case 'external_candidate': return sectionOf(r) === 'external_candidate';
     case 'missing': return isMissing(r);
-    case 'unknown': return isUnavailable(r) || (r.classification === 'known' && !isMissing(r) && (isUnset(r.exists) || isUnset(r.dirty) || isUnset(r.merged)));
+    case 'unknown': return hasUnknownShown(r);
     case 'dirty': return !isUnavailable(r) && r.dirty === true;
     case 'clean': return !isUnavailable(r) && r.dirty === false;
     case 'merged': return !isUnavailable(r) && r.merged === true;
@@ -78,6 +92,14 @@ export function matchesState(r, filter) {
 }
 
 const CLASS_LABEL = { known: 'Conocido', external_candidate: 'Candidato externo', missing: 'Falta' };
+
+// Secciones distintas: nunca se mezclan conocidos, candidatos externos y recursos que faltan.
+const SECTIONS = [
+  { key: 'known', title: 'Conocidos' },
+  { key: 'external_candidate', title: 'Candidatos externos (sin propietario)' },
+  { key: 'missing', title: 'Faltan' },
+  { key: 'unclassified', title: 'Sin clasificar por Core' },
+];
 
 /** Texto de un valor booleano de Core: Sí/No, o «Desconocido»/«No disponible», nunca «Falta». */
 function boolText(entry, value, yes, no) {
@@ -114,14 +136,14 @@ const matchesId = (r, field, filter) =>
 function Row({ r }) {
   const external = r.classification === 'external_candidate';
   const unmerged = !isUnavailable(r) && r.merged === false;
-  const missing = isMissing(r);
-  // La etiqueta visible sigue a isMissing (igual que el estilo y el filtro «Falta»).
-  const cls = missing ? CLASS_LABEL.missing : (CLASS_LABEL[r.classification] ?? 'Desconocido');
+  const section = sectionOf(r);
+  // La etiqueta visible sigue a isMissing (igual que el estilo, la sección y el filtro «Falta»).
+  const cls = CLASS_LABEL[section] ?? 'Sin clasificar';
   return (
-    <li className={`resinv__row resinv__row--${r.classification}`} data-testid="resinv-row" data-resource-id={r.id}>
+    <li className={`resinv__row resinv__row--${section}`} data-testid="resinv-row" data-resource-id={r.id}>
       <div className="resinv__head">
         <span className="resinv__id">{r.id}</span>
-        <span className={`resinv__tag resinv__tag--${missing ? 'missing' : r.classification}`} data-testid="resinv-class">{cls}</span>
+        <span className={`resinv__tag resinv__tag--${section}`} data-testid="resinv-class">{cls}</span>
         {unmerged && (
           <span className="resinv__tag resinv__tag--warning" data-testid="resinv-unmerged-warning">
             Rama conservada sin fusionar
@@ -158,7 +180,9 @@ export function ResourcesInventory({ inventory = null }) {
   const [host, setHost] = useState('all');
   const [state, setState] = useState('all');
 
-  const entries = useMemo(() => (Array.isArray(inventory?.resources) ? inventory.resources : []), [inventory]);
+  // Sin lista `resources` no hay inventario: es «no disponible», nunca una lista vacía ni filas inventadas.
+  const available = Array.isArray(inventory?.resources);
+  const entries = useMemo(() => (available ? inventory.resources.filter((r) => r && typeof r === 'object') : []), [available, inventory]);
   const projectOptions = useMemo(() => idOptions(entries, 'projectId', 'Sin proyecto'), [entries]);
   const hostOptions = useMemo(() => idOptions(entries, 'hostId', 'Sin host'), [entries]);
   const visible = useMemo(
@@ -167,12 +191,12 @@ export function ResourcesInventory({ inventory = null }) {
   );
 
   // Solo el número que Core suministra; nunca se calcula a partir de las filas.
-  const warningCount = Number.isInteger(inventory?.warningCount) && inventory.warningCount >= 0 ? inventory.warningCount : null;
+  const warningCount = available && Number.isInteger(inventory.warningCount) && inventory.warningCount >= 0 ? inventory.warningCount : null;
 
   return (
     <section className="resinv" aria-label="Inventario de recursos" data-testid="resinv">
       <header className="resinv__bar">
-        <h2 className="resinv__title">Recursos</h2>
+        <h4 className="resinv__title">Inventario de recursos</h4>
         <span className="resinv__badge" data-testid="resinv-readonly">Solo lectura</span>
         {warningCount !== null && (
           <span className="resinv__badge resinv__badge--warning" data-testid="resinv-warning-count">
@@ -184,8 +208,10 @@ export function ResourcesInventory({ inventory = null }) {
         Vista provisional con datos de Core; sin contrato LXO-93 todavía. «Desconocido» y «No disponible» no significan que falte el recurso.
       </p>
 
-      {!inventory ? (
-        <p className="resinv__empty" data-testid="resinv-unavailable-inventory">Inventario no disponible: Core no ha entregado datos.</p>
+      {!available ? (
+        <p className="resinv__empty" data-testid="resinv-unavailable-inventory">
+          Inventario no disponible: Core (LXO-93) todavía no entrega datos de recursos. No se muestra ningún recurso.
+        </p>
       ) : (
         <>
           <div className="resinv__filters">
@@ -201,9 +227,19 @@ export function ResourcesInventory({ inventory = null }) {
           ) : visible.length === 0 ? (
             <p className="resinv__empty" data-testid="resinv-no-match">Ningún recurso coincide con los filtros.</p>
           ) : (
-            <ul className="resinv__list">
-              {visible.map((r) => <Row key={r.id} r={r} />)}
-            </ul>
+            SECTIONS.map(({ key, title }) => {
+              const rows = visible.filter((r) => sectionOf(r) === key);
+              if (rows.length === 0) return null;
+              const headingId = `resinv-section-${key}`;
+              return (
+                <section key={key} className="resinv__section" aria-labelledby={headingId} data-testid={`resinv-section-${key}`}>
+                  <h5 className="resinv__section-title" id={headingId}>{title} ({rows.length})</h5>
+                  <ul className="resinv__list" aria-labelledby={headingId}>
+                    {rows.map((r, i) => <Row key={r.id ?? `row-${i}`} r={r} />)}
+                  </ul>
+                </section>
+              );
+            })
           )}
         </>
       )}

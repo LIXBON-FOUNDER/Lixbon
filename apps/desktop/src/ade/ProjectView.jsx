@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react';
+import { ResourcesInventory } from './ResourcesInventory';
 import './ProjectView.css';
 
 /**
@@ -36,6 +37,10 @@ import './ProjectView.css';
  *                            project_id? }  (el texto humano lo pone Core)
  *  resources         Slice: { state, items, message }.
  *                    item: { resource_id, kind?, label?, availability?, project_id? }
+ *  resourceInventory Inventario de recursos de LXO-93 (PROVISIONAL, solo lectura): ver el
+ *                    typedef ResourceInventory en ResourcesInventory.jsx. Se monta dentro de
+ *                    Resources y no se acota por Project: debe llegar ya acotado. Ausente =
+ *                    «inventario no disponible» (LXO-93 está en Backlog); no se inventan filas.
  *
  *  Estados de slice: 'ready' | 'loading' | 'error' | 'partial' | 'degraded' | 'unavailable'.
  *  Cualquier otro valor (o slice ausente) se pinta como estado desconocido / no disponible.
@@ -377,7 +382,7 @@ function Activity({ slice, projectId, onOpenTask, onOpenAttempt, headingId }) {
   );
 }
 
-function Resources({ slice, projectId, onOpenResource, headingId }) {
+function Resources({ slice, inventory, projectId, onOpenResource, headingId }) {
   const { kept, foreign } = scopeToProject(slice.items, projectId);
   return (
     <Section title="Resources" headingId={headingId}>
@@ -404,6 +409,8 @@ function Resources({ slice, projectId, onOpenResource, headingId }) {
           )}
         </>
       )}
+      {/* Inventario de SOLO LECTURA (LXO-101). Sin datos LXO-93 pinta «no disponible», jamás filas inventadas. */}
+      <ResourcesInventory inventory={inventory} />
     </Section>
   );
 }
@@ -413,7 +420,7 @@ export function ProjectView({
   locations,
   summary,
   tasks, filter, defaultFilter = 'active', onFilterChange,
-  attention, activity, resources,
+  attention, activity, resources, resourceInventory,
   onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
 }) {
   const uid = useId();
@@ -442,7 +449,7 @@ export function ProjectView({
       <Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} />
       <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} headingId={`${uid}-tasks`} />
       <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
-      <Resources slice={normalizeSlice(resources)} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
+      <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
     </article>
   );
 }

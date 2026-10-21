@@ -617,3 +617,84 @@ describe('ProjectView · solo lectura', () => {
     expect(Object.values(cb).every((f) => f.mock.calls.length === 0)).toBe(true);
   });
 });
+
+describe('ProjectView · inventario de recursos (LXO-101, fixtures sintéticas)', () => {
+  // Fixtures SINTÉTICAS con la forma provisional de LXO-93 (Backlog): no vienen de Core ni del disco.
+  const INV = {
+    warningCount: 4,
+    resources: [
+      { id: 'inv-known', classification: 'known', projectId: PID, hostId: 'synthetic-host-1', branch: 'synthetic/branch', path: '/synthetic/wt', owner: 'synthetic-owner', exists: true, dirty: false, merged: true },
+      { id: 'inv-external', classification: 'external_candidate', projectId: PID, hostId: 'synthetic-host-1', owner: 'no-debe-verse', exists: true, dirty: false, merged: null },
+      { id: 'inv-missing', classification: 'missing', projectId: PID, hostId: 'synthetic-host-1', exists: false, dirty: null, merged: null },
+    ],
+  };
+  const resourcesSection = () => section('Resources');
+
+  it('sin datos LXO-93 el inventario está montado en Resources con estado explícito «no disponible» y sin filas', () => {
+    view();
+    const inside = within(resourcesSection());
+    expect(inside.getByTestId('resinv')).toBeTruthy();
+    expect(inside.getByTestId('resinv-unavailable-inventory').textContent).toContain('LXO-93');
+    expect(inside.queryAllByTestId('resinv-row')).toHaveLength(0);
+    expect(inside.queryByRole('combobox')).toBeNull();
+    expect(inside.queryByTestId('resinv-warning-count')).toBeNull();
+    // Solo está en Resources.
+    expect(screen.getAllByTestId('resinv')).toHaveLength(1);
+  });
+
+  it('los items del slice legacy de Resources no se convierten en filas del inventario', () => {
+    view({ resources: ready([{ resource_id: 'res-legacy', kind: 'worktree', label: 'Legacy sintético' }]) });
+    const inside = within(resourcesSection());
+    expect(inside.getByTestId('resource-res-legacy')).toBeTruthy();
+    expect(inside.queryAllByTestId('resinv-row')).toHaveLength(0);
+    expect(inside.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+  });
+
+  it('el inventario suministrado se pinta en Resources con secciones distintas y filtros', () => {
+    view({ resourceInventory: INV });
+    const inside = within(resourcesSection());
+    expect(inside.queryByTestId('resinv-unavailable-inventory')).toBeNull();
+    expect(inside.getByTestId('resinv-section-known')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-external_candidate')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-missing')).toBeTruthy();
+    expect(inside.getAllByTestId('resinv-row').map((el) => el.getAttribute('data-resource-id'))).toEqual(['inv-known', 'inv-external', 'inv-missing']);
+    // El candidato externo no muestra propietario aunque venga; el conocido sí.
+    expect(within(inside.getByTestId('resinv-section-external_candidate')).getByTestId('resinv-owner').textContent).toBe('Sin propietario');
+    expect(resourcesSection().textContent).not.toContain('no-debe-verse');
+    // El contador es el que suministra Core, no uno derivado de las filas (hay 0 filas sin fusionar).
+    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Avisos (Core): 4');
+    // El filtro «Desconocido» incluye el externo y el que falta, con campos nulos.
+    fireEvent.change(inside.getByLabelText('Estado'), { target: { value: 'unknown' } });
+    expect(inside.getAllByTestId('resinv-row').map((el) => el.getAttribute('data-resource-id'))).toEqual(['inv-external', 'inv-missing']);
+  });
+
+  it('sin warningCount de Core no se muestra contador', () => {
+    view({ resourceInventory: { resources: INV.resources } });
+    expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+  });
+
+  it('el inventario sigue visible aunque el slice legacy de Resources falle, sin mezclar sus avisos', () => {
+    view({ resources: { state: 'error' }, resourceInventory: INV });
+    const inside = within(resourcesSection());
+    expect(inside.getByTestId('slice-notice').textContent).toContain('No se pudo cargar');
+    expect(inside.getAllByTestId('resinv-row')).toHaveLength(3);
+  });
+
+  it('solo lectura: sin controles de mutación, enlaces ni botones nuevos, y sin llamar a callbacks de dominio', () => {
+    const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn() };
+    const { container } = view({ resourceInventory: INV }, cb);
+    const inv = container.querySelector('[data-testid="resinv"]');
+    expect(inv.querySelectorAll('button, a, input, textarea, form, [role="button"]')).toHaveLength(0);
+    expect(inv.querySelectorAll('select')).toHaveLength(3);
+    const MUTATION = /(crear|lanzar|ejecutar|reintentar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|run|retry|delete|remove|clean|merge|approve|reject|save|submit)/i;
+    const names = [...inv.querySelectorAll('select, option')].map((el) => el.textContent);
+    expect(names.filter((n) => MUTATION.test(n))).toEqual([]);
+    for (const select of inv.querySelectorAll('select')) fireEvent.change(select, { target: { value: select.options[1].value } });
+    expect(Object.values(cb).every((f) => f.mock.calls.length === 0)).toBe(true);
+  });
+
+  it('un inventario malformado se trata como no disponible, sin romper la vista', () => {
+    expect(() => view({ resourceInventory: { resources: 'no-es-lista' } })).not.toThrow();
+    expect(within(resourcesSection()).getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+  });
+});
