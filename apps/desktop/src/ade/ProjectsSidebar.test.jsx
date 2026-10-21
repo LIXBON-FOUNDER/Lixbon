@@ -1272,6 +1272,23 @@ describe('ProjectsSidebar', () => {
     expect(taskCalls(calls).some(({ args }) => args.status === 'all' && args.cursor === 'all-cursor-1')).toBe(true);
   });
 
+  it('no cambia el filtro ni avisa si la primera lectura falla sin datos con selección controlada', async () => {
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: () => { throw new Error('tasks_read_failed: falló la lectura de SQLite'); },
+    });
+    render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'durable-target' }} />);
+
+    const alert = await screen.findByRole('alert');
+    await flush();
+    expect(alert.textContent).toContain('tasks_read_failed');
+    expect(screen.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
+    expect(screen.getByRole('radio', { name: 'Todas' }).checked).toBe(false);
+    expect(screen.getByTestId('selection-filter-notice').textContent).toBe('');
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+    expect(taskCalls(calls).map(({ args }) => args.status)).toEqual(['active']);
+  });
+
   it('conserva scroll y foco al refrescar y reconectar con los mismos IDs controlados', async () => {
     vi.useFakeTimers();
     let tick = 0;
