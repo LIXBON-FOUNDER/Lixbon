@@ -9,8 +9,13 @@ vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()
 
 // FIXTURES con la forma del contrato de docs/core/QUERIES.md; no son una lectura de Core real ni dogfood.
 
-const PROJECT = { id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active', counts: { tasks: 1, active: 1, failed: 0, attention: { total: 0, by_category: {} } }, locations: [] };
+const PROJECT = {
+  id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
+  counts: { tasks: 2, active: 1, failed: 0, attention: { total: 1, by_category: { question: 1 } } },
+  locations: [{ machine: 'machine-real', path: 'C:/repos/repo-real', primary: true, state: 'ok', last_seen: 1760000000000 }],
+};
 const ITEM = { id: 'task-uuid-1', run_id: 'run-1', parent_id: null, root_id: 'task-uuid-1', status: 'running', title: 'Task Real', provider: 'claude', model: null, created_at: 1, updated_at: 2 };
+const FINAL_ITEM = { ...ITEM, id: 'task-uuid-final', status: 'done', title: 'Task Final' };
 const detailOf = (over = {}) => ({
   v: 1,
   task: { ...ITEM, project_id: PROJECT.id, child_ids: [], phase: null, messages: [], cwd: 'C:/wt', branch: 'lxo/x', worktree: 'C:/wt', merged: false, review: null, integration: null, ...over },
@@ -25,7 +30,10 @@ const attentionPage = (items, hasMore = false) => ({ v: 1, items, next_cursor: h
 function core(detail, { attention = () => attentionPage([]) } = {}) {
   queryAdeCore.mockImplementation(async (query, args) => {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
-    if (query === 'tasks_by_project') return { v: 1, project_id: PROJECT.id, filters: { status: 'active' }, limit: 50, tasks: [ITEM], has_more: false, next_cursor: null };
+    if (query === 'tasks_by_project') return {
+      v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+      tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+    };
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
     throw new Error(`Query no permitida en fixture: ${query}`);
@@ -44,7 +52,8 @@ const shell = (props = {}) => (
 
 const pickTask = async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Task Real' }));
+  const taskNav = await screen.findByRole('region', { name: `Tasks del Project ${PROJECT.id}` });
+  fireEvent.click(await within(taskNav).findByRole('button', { name: 'Task Real' }));
 };
 
 beforeEach(() => {
@@ -54,6 +63,110 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   queryAdeCore.mockReset();
+});
+
+describe('AdeShell · Project View (LXO-204)', () => {
+  it('abre por el ID durable y muestra metadata real del overview, Tasks all y slices pendientes', async () => {
+    core(detailOf(), { attention: () => attentionPage([att({ id: 'att-project-1' })]) });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const projectView = await screen.findByTestId('project-view');
+    await within(projectView).findByTestId('location-machine');
+    await within(projectView).findByTestId('attention-att-project-1');
+
+    expect(within(projectView).getByRole('heading', { level: 2, name: 'Repo Real' })).toBeTruthy();
+    expect(within(projectView).getByTestId('project-id').textContent).toBe(PROJECT.id);
+    expect(within(projectView).getByTestId('location-machine').textContent).toBe('machine-real');
+    expect(within(projectView).getByTestId('location-path').textContent).toBe('C:/repos/repo-real');
+    expect(within(projectView).getByTestId('location-state').dataset.state).toBe('ok');
+    expect(within(projectView).getByTestId('location-last-seen').querySelector('time').dateTime)
+      .toBe(new Date(PROJECT.locations[0].last_seen).toISOString());
+    expect(within(projectView).getByTestId('count-tasks').querySelector('dd').textContent).toBe('2');
+    expect(within(projectView).getByTestId('count-attention').querySelector('dd').textContent).toBe('1');
+    for (const name of ['attempts', 'resources']) {
+      const count = within(projectView).getByTestId(`count-${name}`).querySelector('dd');
+      expect(count.textContent).toBe('—');
+      expect(count.getAttribute('aria-label')).toBe('No informado por Core');
+    }
+    expect(within(projectView).getByTestId('attention-kind').textContent).toBe('question');
+    expect(within(projectView).getByText('Core no suministró texto para esta Attention.')).toBeTruthy();
+    expect(within(projectView).getByRole('region', { name: /Activity/ }).querySelector('[data-testid="slice-notice"]').textContent)
+      .toContain('Backlog (LXO-92)');
+    expect(within(projectView).getByRole('region', { name: 'Resources' }).querySelector('[data-testid="slice-notice"]').textContent)
+      .toContain('Backlog (LXO-93)');
+
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project'))
+      .toContainEqual(['tasks_by_project', { projectId: PROJECT.id, status: 'all' }]);
+    expect(attentionCalls().some(([, args]) => args.projectId === PROJECT.id)).toBe(true);
+
+    fireEvent.click(within(projectView).getByTestId('filter-all'));
+    expect(within(projectView).getByTestId(`task-${FINAL_ITEM.id}`)).toBeTruthy();
+    fireEvent.click(within(projectView).getByTestId(`open-task-${FINAL_ITEM.id}`));
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: FINAL_ITEM.id });
+  });
+
+  it('consulta Tasks all solo mientras está abierto el Project View y conserva la query activa del navegador', async () => {
+    vi.useFakeTimers();
+    core(detailOf());
+    render(shell());
+    await flush();
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
+    await flush();
+    const taskCalls = () => queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project');
+    const allReads = () => taskCalls().filter(([, args]) => args.status === 'all');
+    const activeReads = () => taskCalls().filter(([, args]) => args.status === 'active');
+    expect(allReads()).toHaveLength(1);
+    expect(activeReads()).toHaveLength(1);
+
+    fireEvent.click(within(screen.getByRole('region', { name: `Tasks del Project ${PROJECT.id}` })).getByRole('button', { name: 'Task Real' }));
+    await flush();
+    const allReadsAfterTaskSelection = allReads().length;
+    const activeReadsAfterTaskSelection = activeReads().length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+    expect(allReads()).toHaveLength(allReadsAfterTaskSelection);
+    expect(activeReads().length).toBeGreaterThan(activeReadsAfterTaskSelection);
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+  });
+
+  it('abre Attention desde su DTO con el par exacto (kind, target_id)', async () => {
+    const row = att({ id: 'att-project-route', target_kind: 'task', target_id: ITEM.id });
+    core(detailOf(), { attention: () => attentionPage([row]) });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await screen.findByTestId('open-attention-att-project-route'));
+    await flush();
+
+    expect(screen.getByRole('tab', { name: 'Attention' }).getAttribute('aria-selected')).toBe('true');
+    expect(attentionCalls().at(-1)[1]).toEqual({
+      projectId: null, targetKind: 'task', targetId: ITEM.id, category: null, severity: null,
+    });
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+    expect(screen.queryByRole('button', { name: /Abrir Attempt/ })).toBeNull();
+  });
+
+  it('no convierte un error de tasks_by_project en una lista vacía exitosa', async () => {
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
+      if (query === 'tasks_by_project' && args.status === 'all') throw new Error('tasks_by_project_read_failed');
+      if (query === 'tasks_by_project') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [ITEM], has_more: false, next_cursor: null };
+      if (query === 'attention_list') return attentionPage([]);
+      if (query === 'task_detail') return detailOf();
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const projectView = await screen.findByTestId('project-view');
+    const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
+    expect((await within(tasksRegion).findByRole('alert')).textContent).toContain('tasks_by_project_read_failed');
+    expect(within(tasksRegion).queryByTestId('tasks-empty')).toBeNull();
+    expect(within(tasksRegion).queryByTestId('tasks-filtered-empty')).toBeNull();
+  });
 });
 
 describe('AdeShell · Task Workspace como canvas e Inspector', () => {
@@ -101,7 +214,7 @@ describe('AdeShell · Task Workspace como canvas e Inspector', () => {
     const CHILD = { ...ITEM, id: 'task-uuid-child', parent_id: ITEM.id, title: 'Hija Real' };
     queryAdeCore.mockImplementation(async (query, args) => {
       if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
-      if (query === 'tasks_by_project') return { v: 1, project_id: PROJECT.id, filters: { status: 'active' }, limit: 50, tasks: [ITEM], has_more: false, next_cursor: null };
+      if (query === 'tasks_by_project') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null };
       if (query === 'task_detail') {
         return args.taskId === CHILD.id
           ? detailOf({ ...CHILD, root_id: ITEM.id, child_ids: [] })
@@ -120,6 +233,23 @@ describe('AdeShell · Task Workspace como canvas e Inspector', () => {
     const headings = await screen.findAllByRole('heading', { level: 2, name: 'Hija Real' });
     expect(headings).toHaveLength(2);
     expect(headings).toContain(document.activeElement);
+  });
+
+  it('rechaza la navegación a la misma Task seleccionada y conserva el foco en el enlace', async () => {
+    core(detailOf({ child_ids: [ITEM.id] }));
+    const onActivate = vi.fn();
+    render(shell({ onActivate }));
+    await pickTask();
+    await screen.findAllByRole('region', { name: 'Identidad' });
+
+    const sameTask = screen.getAllByRole('button', { name: `Abrir Task hija ${ITEM.id}` })[0];
+    onActivate.mockClear();
+    sameTask.focus();
+    fireEvent.click(sameTask);
+
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(sameTask);
   });
 
   it('entrega a Activity exactamente los IDs seleccionados', async () => {
