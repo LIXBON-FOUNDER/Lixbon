@@ -55,6 +55,11 @@ const attentionCalls = () => queryAdeCore.mock.calls.filter(([query]) => query =
 const projectAttentionCalls = () => attentionCalls().filter(([, args]) => args.projectId === PROJECT.id);
 const inboxAttentionCalls = () => attentionCalls().filter(([, args]) => args.projectId === null);
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+};
 const attentionRows = () => within(screen.getByRole('list', { name: 'Attention activa' })).getAllByRole('listitem');
 const openAttentionTab = () => fireEvent.click(screen.getByRole('tab', { name: 'Attention' }));
 
@@ -160,10 +165,16 @@ describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
     const tree = await screen.findByRole('tree', { name: 'Projects y Tasks del Core' });
     const projectRow = await within(tree).findByRole('treeitem', { name: /Repo Real/ });
     expect(projectRow.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(projectRow);
+    fireEvent.click(projectRow.querySelector('.ps__meta'));
+    expect(projectRow.getAttribute('aria-expanded')).toBe('true');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
 
     expect(screen.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
-    expect(await within(tree).findByRole('treeitem', { name: /Task Real/ })).toBeTruthy();
+    const taskRow = await within(tree).findByRole('treeitem', { name: /Task Real/ });
+    expect(taskRow).toBeTruthy();
+    fireEvent.click(taskRow);
+    expect(taskRow.getAttribute('aria-selected')).toBe('true');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
     expect(within(tree).queryByRole('treeitem', { name: /Task Final/ })).toBeNull();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Finalizadas' }));
@@ -207,6 +218,78 @@ describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
 });
 
 describe('AdeShell · Project View (LXO-204)', () => {
+  it('muestra loading mientras espera y distingue un overview completo que omite el Project', async () => {
+    const pendingOverview = deferred();
+    useWorkbenchStore.setState({ adeSelection: { projectId: 'missing-project', taskId: null } });
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return pendingOverview.promise;
+      if (query === 'tasks_by_project') return {
+        v: 1, project_id: args.projectId, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null,
+      };
+      if (query === 'attention_list') return attentionPage([]);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+
+    const projectView = await screen.findByTestId('project-view');
+    const summary = within(projectView).getByRole('region', { name: 'Resumen de Core' });
+    expect(summary.querySelector('[data-testid="slice-notice"]').className).toContain('pv__notice--loading');
+    expect(summary.querySelector('[data-testid="slice-notice"]').textContent).toContain('Cargando…');
+
+    pendingOverview.resolve({
+      v: 1,
+      filters: { archived: 'exclude', machine: null },
+      total: 1,
+      projects: [PROJECT],
+      unassigned: {},
+    });
+    await screen.findByText(/El Project seleccionado no aparece en el overview activo de Core/);
+    const settledNotice = summary.querySelector('[data-testid="slice-notice"]');
+    expect(settledNotice.className).toContain('pv__notice--unavailable');
+    expect(settledNotice.textContent).toContain('El Project seleccionado no aparece');
+    expect(settledNotice.textContent).not.toContain('Core no confirmó metadata autoritativa');
+  });
+
+  it('muestra refreshing durante un polling sano sin marcar el Project como stale', async () => {
+    vi.useFakeTimers();
+    const pendingRefresh = deferred();
+    let reads = 0;
+    useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') {
+        reads += 1;
+        return reads === 1
+          ? { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} }
+          : pendingRefresh.promise;
+      }
+      if (query === 'tasks_by_project') return {
+        v: 1, project_id: args.projectId, filters: { status: args.status }, limit: 50,
+        tasks: [], has_more: false, next_cursor: null,
+      };
+      if (query === 'attention_list') return attentionPage([]);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+    await flush();
+
+    const projectView = screen.getByTestId('project-view');
+    const summary = within(projectView).getByRole('region', { name: 'Resumen de Core' });
+    expect(summary.querySelector('[data-testid="slice-notice"]')).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    const refreshingNotice = summary.querySelector('[data-testid="slice-notice"]');
+    expect(refreshingNotice.className).toContain('pv__notice--loading');
+    expect(refreshingNotice.textContent).toContain('Actualizando desde Core.');
+    expect(refreshingNotice.textContent).not.toContain('Datos desactualizados');
+
+    pendingRefresh.resolve({
+      v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [PROJECT], unassigned: {},
+    });
+    await flush();
+    expect(summary.querySelector('[data-testid="slice-notice"]')).toBeNull();
+  });
+
   it('abre por el ID durable y muestra metadata real del overview, Tasks all y slices pendientes', async () => {
     core(detailOf(), { attention: () => attentionPage([att({ id: 'att-project-1' })]) });
     render(shell());
