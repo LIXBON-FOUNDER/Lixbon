@@ -70,8 +70,11 @@ no son del tipo esperado, el item cae al respaldo.
 | `task.phase` | `activity.task.phase_started` / `activity.task.phase_done` | — (el nombre de la fase no se expone) | info |
 | `task.question` | `activity.task.question` | `message_id`, `to` | warning |
 | `task.reply` | `activity.task.reply` | `question_id`, `message_id` | info |
-| `task.removed` | `activity.task.removed` | `cause` | warning |
+| `task.removed` | `activity.task.removed` | `cause` ∈ `launch_failed` `unused` | warning |
 | `task.review_requested` | `activity.task.review_requested` | `branch` | info |
+| `task.created` **v2** (Task como intención, LXO-113) | `activity.task.intent_created` | `title`, `parent?`, `depth` | info |
+| `task.updated` | `activity.task.updated` | `changed` (lista ⊆ `title` `spec`), `title?` | info |
+| `task.discarded` · `task.restored` | `activity.task.discarded` / `.restored` | — | warning / info |
 | `decision.recorded` · `review` | `activity.decision.review.accepted` / `.rejected` | `decision_id`, `has_comment` | success / warning |
 | `decision.recorded` · `merge` | `activity.decision.merge.merged` / `.conflict` / `.error` / `.target_moved` | `decision_id`, `branch`, `squash`, `conflict_count?` | success / error / error / warning |
 | `decision.recorded` · `pr` | `activity.decision.pr.created` / `.already_exists` / `.error` | `decision_id`, `branch`, `has_pr_url` | success / info / error |
@@ -103,7 +106,7 @@ conserva `seq`, `event_id`, `target`, `actor` y `provenance`, y `args.reason` di
 | `reason` | Cuándo |
 |---|---|
 | `unknown_kind` | el `kind` no está en la tabla (un evento de una versión futura del Core) |
-| `unsupported_version` | el `kind` es conocido pero su `v` es mayor que la que sabe leer este formateador |
+| `unsupported_version` | el `kind` es conocido pero este formateador no sabe leer su `v` (todas la 1; `task.created` también la 2) |
 | `invalid_payload` | el payload no es JSON, falta un campo obligatorio o un código cerrado no es de su conjunto |
 
 El respaldo **no copia el payload**: solo el `kind` (recortado), la versión y el motivo. Una prueba exige que todo

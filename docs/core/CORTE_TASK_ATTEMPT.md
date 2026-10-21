@@ -39,8 +39,10 @@ Consecuencias que el corte corrige:
 
 1. Se normaliza `legacy_state` en tablas: **Task, Attempt, ProviderSession, Thread, Worktree, Artifact**, más
    `runs`, `decisions`, `reviews`, `env_blocks` y `legacy_residue`.
-2. El corte es **una sola migración** (`007_task_attempt`), en **una transacción**, que crea el esquema, copia el
-   documento con SQL determinista (JSON1), verifica conteos y **congela** `legacy_state`.
+2. El corte de **datos** es **una sola migración** (`NNN_task_attempt_cut`), en **una transacción**, que copia el
+   documento con SQL determinista (JSON1), verifica conteos y **congela** `legacy_state`. El esquema de cada entidad
+   llega antes, en su propia migración (`007_tasks` en LXO-113, Attempt y el resto después), **inerte** hasta el corte
+   (D15, revisada en LXO-113).
 3. Antes del corte se hace una **copia previa obligatoria** y verificada. Si no se puede hacer, no hay corte.
 4. **Rollback = restaurar esa copia** con un binario F2. Nunca una migración hacia atrás ni un deshacer parcial.
 5. Los clientes F2 siguen funcionando sin cambios: el Core sirve una **vista legacy** (`legacy_task_v1`)
@@ -51,11 +53,11 @@ Consecuencias que el corte corrige:
 
 | # | Invariante | Mecanismo | Prueba conceptual |
 |---|---|---|---|
-| 1 | Task = intención durable; Attempt = ejecución concreta | `tasks` no tiene `status` ni campos de ejecución; el estado de la Task se **deriva** de sus Attempts | S2, S3 |
+| 1 | Task = intención durable; Attempt = ejecución concreta | `tasks` solo guarda la intención (`open`/`discarded`, decisión de la persona), sin estado ni campos de ejecución; el resto del estado de la Task se **deriva** de sus Attempts ([TASKS.md](TASKS.md)) | S2, S3 |
 | 2 | Retry crea un Attempt nuevo | `attempts UNIQUE (task_id, n)`, `id = task_id-a<n>`; ninguna ruta actualiza un Attempt final para «reabrirlo» | S3 (`1 Attempt n=1 por Task`) |
 | 3 | Project pertenece a Task | `tasks.project_id` (FK real a `projects`); Attempt no tiene `project_id`. `CHECK (project_id IS NOT NULL OR origin = 'legacy')` | S2 (t14) |
 | 4 | No se infiere ProviderSession por cwd+tiempo | `provider_sessions.binding IN ('stream_json','session_id')`; `cwd_time` va a `legacy_residue` | S3 (t4) |
-| 5 | Copia previa obligatoria antes del corte | el arranque no aplica la 007 sin copia `pre-f3-cut` verificada y su sidecar | S1 |
+| 5 | Copia previa obligatoria antes del corte | el arranque no aplica la migración del corte sin copia `pre-f3-cut` verificada y su sidecar | S1 |
 | 6 | No hay rollback parcial del esquema | no existe migración inversa; rollback = restaurar la copia; `legacy_state` congelado con triggers | S4, S5 |
 
 ## 4. Diagrama antes / después
@@ -165,7 +167,8 @@ destino **no se descarta**: va a `legacy_residue` con un motivo.
 | `model`, `effort`, `role`, `profile` | `attempts.*` | se eligen al lanzar: son del intento |
 | `external` | `attempts.external` | un coordinador fuera de Lixbon es una propiedad de la ejecución |
 | `cwd` | `attempts.cwd` | |
-| `status` | `attempts.status` | mismo id (VOCABULARIO §3). La Task no guarda estado |
+| `status` | `attempts.status` | mismo id (VOCABULARIO §3). La Task no guarda estado de ejecución |
+| — | `tasks.intent` | `open`: el legado no tiene descarte |
 | `phases[]` | `attempt_phases (attempt_id, ord, …)` | `ord` = posición en la lista |
 | `summary`, `files` | `attempts.summary`, `attempts.files` | resultado del intento |
 | `report` | `artifacts (kind = report)` | |
@@ -246,20 +249,24 @@ destino **no se descarta**: va a `legacy_residue` con un motivo.
 
 ## 9. Orden de migraciones y del arranque
 
-La numeración sigue [`MIGRACIONES.md`](MIGRACIONES.md): la 007 es el siguiente número libre **hoy**; si otra
-migración se fusiona antes, el corte toma el siguiente. Toda migración de F2 pendiente se fusiona **antes** del
-corte, y ninguna migración entre la última de F2 y el corte puede tocar `legacy_state`.
+La numeración sigue [`MIGRACIONES.md`](MIGRACIONES.md). El esquema de las entidades llega **antes** del corte, una
+migración por slice (`007_tasks` en LXO-113; Attempt y el resto, las siguientes), con sus tablas **vacías e inertes**:
+triggers que abortan cualquier escritura mientras no exista `meta.agentic_model` ([TASKS.md](TASKS.md)). La migración
+del corte (`NNN_task_attempt_cut`, el siguiente número libre cuando se escriba) solo copia datos y congela, y es la que
+escribe `meta.agentic_model`, **antes** de copiar. Ninguna migración anterior al corte puede tocar `legacy_state`.
+
+En esta sección y en §12, «binario F2» es cualquier binario **anterior al corte**, aunque ya traiga el esquema inerte.
 
 | Paso | Qué | Dónde | Si falla |
 |---|---|---|---|
 | 1 | Abrir hasta la valla, `decide_boot`, marcador | existente (AUTORIDAD.md) | bloquea (como hoy) |
-| 2 | Migraciones F2 pendientes (003…006) | existente, con `pre-migracion-vN` | bloquea (como hoy) |
+| 2 | Migraciones pendientes anteriores al corte (003… incluido el esquema inerte, 007…) | existente, con `pre-migracion-vN` | bloquea (como hoy) |
 | 3 | **Preflight F3** (solo lectura): base exactamente en la última de F2; fila `legacy_state` con `doc_schema = 0`; el documento se deserializa como `State`; Core no degradado; `core.lock` tomado | Rust, nuevo | bloquea sin tocar nada |
 | 4 | **Copia previa `pre-f3-cut`** (§10) | Rust, `backup_to` + sidecar | bloquea sin tocar nada (D13) |
-| 5 | **`007_task_attempt`** en UNA transacción: DDL → copia → residuo → asserts de conteo → congelar `legacy_state` → `meta` | SQL ([borrador](fixtures/corte-task-attempt/corte.borrador.sql)) | ROLLBACK: la base sigue en la versión de F2 (S4) |
+| 5 | **`NNN_task_attempt_cut`** en UNA transacción: `meta.agentic_model` → DDL que aún falte → copia → residuo → asserts de conteo → congelar `legacy_state` → `meta` | SQL ([borrador](fixtures/corte-task-attempt/corte.borrador.sql)) | ROLLBACK: la base sigue en la versión anterior al corte (S4) |
 | 5b | **Dentro de la misma transacción**, antes del COMMIT: comprobación semántica (la vista legacy reconstruida == documento, salvo D3) y evento `system` `core.agentic_cut` (`idem_key = task_attempt_v1`, conteos y nombre de la copia) | Rust: el marco necesita un *check* por migración (nuevo) | ROLLBACK, igual que 5 |
 | 6 | Runtime: los Attempts no externos y no finales pasan a `exited` (lo que hoy hace `orphan_all`) | Rust | — |
-| — | Migraciones de F3 posteriores (índices, columnas nuevas de Attempt…) | 008+ | solo después de la 007 |
+| — | Migraciones de F3 posteriores al corte (índices, columnas nuevas…) | las siguientes | solo después del corte |
 | — | **`NNN_legacy_drop`**: retira `legacy_state` y lo que §11 permita | **otra release**, nunca la del corte | — |
 
 Notas:
@@ -268,7 +275,7 @@ Notas:
   migración. Los triggers `legacy_state_frozen_*` hacen que cualquier ruta de código vieja que intente escribir el
   documento falle en lugar de crear una segunda autoridad.
 * Un binario F2 sobre una base cortada recibe `DatabaseNewer` (bloqueante) y no la toca.
-* La 007 no lleva `BEGIN/COMMIT` ni `PRAGMA foreign_keys`; usa FKs `DEFERRABLE INITIALLY DEFERRED` para las
+* Ninguna de estas migraciones lleva `BEGIN/COMMIT` ni `PRAGMA foreign_keys`; usa FKs `DEFERRABLE INITIALLY DEFERRED` para las
   referencias circulares (run ↔ raíz, padre ↔ hija, Attempt ↔ Worktree).
 
 ## 10. Copia previa obligatoria
@@ -362,9 +369,9 @@ y la fixture en la misma PR.
 | D12 | **Lanzamiento pendiente:** tras el corte es un Attempt `pending_approval` (id ya reservado en VOCABULARIO §3); un rechazo lo deja `stopped` | mantenerlo en memoria, fuera del modelo |
 | D13 | Sin copia previa, el arranque se bloquea | degradar a legacy: obligaría a mantener dos runtimes |
 | D14 | La copia `pre-f3-cut` no entra en ninguna retención automática | — |
-| D15 | El corte es UNA migración (DDL + datos + congelado) | DDL primero y datos después: estado intermedio con tablas vacías y dos posibles autoridades |
+| D15 | El corte de datos es UNA migración (activar + copiar + congelar). **Revisada en LXO-113:** el esquema de cada entidad llega antes, en su migración, **inerte** (triggers que impiden escribir sin `meta.agentic_model`), así que no hay dos autoridades aunque las tablas existan vacías | esquema + datos en la misma migración: obliga a publicar todo el modelo de golpe y hace imposible probar cada entidad por separado; esquema escribible antes del corte: dos posibles autoridades |
 | D16 | `Run` se conserva (tabla `runs`) | retirarlo en F3: amplía el corte sin necesidad |
-| D17 | El estado de la Task se deriva, no se guarda | columna `tasks.status`: se desincroniza de sus Attempts |
+| D17 | El estado de ejecución de la Task se deriva, no se guarda. Solo se guarda la **intención** (`open` · `discarded`), que es una decisión de la persona y no se puede derivar (LXO-113) | columna `tasks.status`: se desincroniza de sus Attempts |
 | D18 | **Rutas:** `tasks.repo` y `attempts.cwd` se conservan; `tasks.repo` se retira cuando `project_locations` resuelva la ubicación de toda Task (§14) | retirarlas ya: el runtime todavía las necesita para git |
 
 ## 14. Criterios para eliminar campos legacy (C3)
@@ -394,7 +401,7 @@ ProviderSession o Artifact (`status`, `phases`, `report`, `pr_url`, `merged`, `w
 | `legacy_state.before.json` | un `State` real (se deserializa con `orch::state::State`) con los casos límite |
 | `corte.borrador.sql` | el mapeo ejecutable. **No es una migración** |
 | `normalizado.after.json` | las filas esperadas tras el corte |
-| `verificar.py` | aplica 001…006 reales, la copia, el corte, un corte roto y el rollback |
+| `verificar.py` | aplica las migraciones publicadas anteriores al corte (hoy 001…007), la copia, el corte, un corte roto y el rollback |
 
 Casos de la fixture: raíz con rama de checkout (`t2`); hija Codex integrada, con revisión aceptada, sesión por
 `session_id`, fases, política y artefactos (`t3`); hija Codex fallida con sesión `cwd_time` y pregunta respondida
@@ -404,7 +411,7 @@ anterior al registro de proyectos (`t14`); coordinador externo en marcha (`t17`)
 
 | Escenario | Comprueba |
 |---|---|
-| S0 | base F2 con las migraciones publicadas 001…006 y `legacy_state` = fixture |
+| S0 | base anterior al corte con las migraciones publicadas (hoy 001…007, con `runs`/`tasks` vacías e inertes) y `legacy_state` = fixture |
 | S1 | copia previa: `integrity_check`, versión 6, SHA-256 del documento en el sidecar |
 | S2 | corte en una transacción; tablas == `normalizado.after.json` |
 | S3 | FKs íntegras; `t4` sin ProviderSession y con residuo; 1 Attempt por Task; ids conservados; revisiones sobre Attempt; `legacy_state` congelado (UPDATE/DELETE/INSERT abortan); determinismo; vista legacy == documento salvo D3, comparando **los 48 campos** de cada Task (un campo sin destino aparecería como diferencia) |

@@ -845,6 +845,27 @@ la misma transacción. El mismo `attention_id` deduplica reintentos. Esta decisi
 * Actualizar `severity`/`facts` de la activa **no** emite nada (no hay `attention.updated`).
 * `source_event_id` es el `events.id` (no el `seq`) del Event que levantó o resolvió.
 
+## Task como intención (LXO-113)
+Los hechos de la Task del modelo Task/Attempt ([`TASKS.md`](TASKS.md)). **Inertes hasta el corte**: hasta que exista
+`meta.agentic_model` ningún mutador escribe, así que estos eventos no aparecen en una instalación sin cortar. Los
+construye solo `orch/task_ops.rs` (prueba de arquitectura) y viajan en la transacción de sus filas (`store::tasks`,
+`state_rev = NULL`), con la proyección de Attention dentro.
+
+| kind | v | class | entidad | Payload | Quién |
+|---|---|---|---|---|---|
+| `run.created` | 1 | state | `run` | `root_task` (misma forma que el legacy) | persona · agente · sistema |
+| `task.created` | **2** | state | `task` | `parent`, `depth`, `title` (recortado a 120) | persona · agente bajo su Task · sistema |
+| `task.updated` | 1 | state | `task` | `changed` ⊆ {`title`, `spec`}, `title?` (solo si cambió) | persona · agente que la coordina |
+| `task.discarded` · `task.restored` | 1 | decision | `task` | — | persona |
+| `task.removed` | 1 | state | `task` | `cause = unused` (nueva causa, junto a `launch_failed`) | persona |
+
+* `run_id` y `project_id` salen de la fila confirmada (nunca de `project_from_task`): no hay `State` que leer.
+* **`task.created` v2** no lleva `agent`, `role`, `model` ni `external`: son de la ejecución y, tras el corte, del
+  Attempt. La v1 la sigue emitiendo el runtime legacy; un lector distingue por `v`.
+* El encargo (`spec`) **nunca** viaja: `task.updated` solo dice que cambió.
+* Un `Unchanged` (nada cambió de verdad) no emite nada. Un evento que no se refiere a la Task (otra entidad, otro
+  Run, otro Project) o un duplicado por `(kind, idem_key)` deshace el cambio entero.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.

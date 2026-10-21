@@ -1,13 +1,14 @@
 """Prueba conceptual del corte Task/Attempt y de su rollback por copia (LXO-112).
 
 NO es código productivo: ejercita la ADR (docs/core/CORTE_TASK_ATTEMPT.md) sobre la fixture con SQLite
-real y las migraciones publicadas 001..006, sin tocar ningún binario ni ~/.lixbon.
+real y TODAS las migraciones publicadas anteriores al corte (001..007, con el esquema inerte de Task), sin
+tocar ningún binario ni ~/.lixbon.
 
     python -I docs/core/fixtures/corte-task-attempt/verificar.py            # comprueba
     python -I docs/core/fixtures/corte-task-attempt/verificar.py --escribir # regenera normalizado.after.json
 
 Escenarios:
-  S0  base F2 (001..006) con legacy_state = fixture.
+  S0  base anterior al corte (001..007) con legacy_state = fixture y las tablas de Task vacías e inertes.
   S1  copia previa obligatoria (VACUUM INTO + integrity_check + sidecar con SHA-256).
   S2  corte (borrador SQL en UNA transacción) → tablas normalizadas == normalizado.after.json.
   S3  invariantes: sin ProviderSession por cwd+tiempo, 1 Attempt por Task, legacy congelado,
@@ -30,8 +31,9 @@ MIGRACIONES = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "migra
 BEFORE = AQUI / "legacy_state.before.json"
 AFTER = AQUI / "normalizado.after.json"
 CORTE = AQUI / "corte.borrador.sql"
-VERSION_F2 = 6
-VERSION_CORTE = 7
+# «F2» = cualquier binario anterior al corte, aunque ya traiga el esquema inerte (la 007).
+VERSION_F2 = 7
+VERSION_CORTE = 8
 LEGACY_REV = 42
 
 TABLAS = ["runs", "tasks", "attempts", "attempt_phases", "worktrees", "provider_sessions", "threads",
@@ -84,7 +86,7 @@ def partir(sql):
 
 
 def base_f2(path, doc):
-    """S0: una base con 001..006 aplicadas, un Project registrado y legacy_state = doc."""
+    """S0: una base con 001..VERSION_F2 aplicadas, un Project registrado y legacy_state = doc."""
     c = conectar(path)
     c.execute("PRAGMA journal_mode = WAL")
     for f in sorted(MIGRACIONES.glob("*.sql")):
@@ -221,20 +223,25 @@ def main():
         core.mkdir()
         db = core / "lixbon.db"
 
-        print("S0  base F2 (migraciones 001..006 publicadas) con legacy_state = fixture")
+        print(f"S0  base anterior al corte (migraciones 001..{VERSION_F2:03} publicadas) con legacy_state = fixture")
         c = base_f2(str(db), doc)
         esquema_f2 = esquema(c)
-        ok(c.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, "user_version = 6")
+        ok(c.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, f"user_version = {VERSION_F2}")
+        try:
+            c.execute("INSERT INTO runs (id, objective, root_task_id, created_at, last_activity) VALUES ('r0', 'o', 't0', 0, 0)")
+            ok(False, "antes del corte las tablas de Task son inertes")
+        except sqlite3.DatabaseError as e:
+            ok("inerte" in str(e), "antes del corte las tablas de Task son inertes (la 007 aborta la escritura)")
 
         print("S1  copia previa obligatoria")
         copia, sidecar = copia_previa(c, core / "backups")
         ok(sidecar["integrity_check"] == "ok", "la copia pasa integrity_check")
-        ok(sidecar["user_version"] == VERSION_F2 and sidecar["legacy_rev"] == LEGACY_REV, "la copia es la base F2 (v6, rev 42)")
+        ok(sidecar["user_version"] == VERSION_F2 and sidecar["legacy_rev"] == LEGACY_REV, f"la copia es la base anterior al corte (v{VERSION_F2}, rev 42)")
         ok(sidecar["legacy_doc_sha256"] == sha(doc), "el SHA-256 del documento coincide con la fixture")
 
         print("S2  corte en una transacción")
         cortar(c)
-        ok(c.execute("PRAGMA user_version").fetchone()[0] == VERSION_CORTE, "user_version = 7")
+        ok(c.execute("PRAGMA user_version").fetchone()[0] == VERSION_CORTE, f"user_version = {VERSION_CORTE}")
         dump = volcar(c)
         if escribir:
             AFTER.write_text(json.dumps(dump, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -287,13 +294,13 @@ def main():
             ok(False, "el corte con un estado desconocido aborta")
         except sqlite3.DatabaseError:
             ok(True, "el corte con un estado desconocido aborta")
-        ok(c3.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, "la base sigue en v6")
+        ok(c3.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, f"la base sigue en v{VERSION_F2}")
         ok((esquema(c3), c3.execute("SELECT rev, doc FROM legacy_state").fetchone()) == antes,
            "mismo esquema y mismo legacy_state que antes del intento")
         c3.close()
 
         print("S5  rollback = restaurar la copia previa (nunca downgrade del esquema)")
-        ok(VERSION_CORTE > VERSION_F2, "un binario F2 (máx. 6) abre la base cortada con DatabaseNewer: no la toca")
+        ok(VERSION_CORTE > VERSION_F2, f"un binario anterior al corte (máx. {VERSION_F2}) abre la base cortada con DatabaseNewer: no la toca")
         apartado = core / "rollback-1792200000000"
         apartado.mkdir()
         for f in core.glob("lixbon.db*"):
@@ -302,12 +309,12 @@ def main():
         shutil.copyfile(copia, db)
         r = conectar(str(db))
         ok(r.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "la base restaurada pasa integrity_check")
-        ok(r.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, "la base restaurada está en v6")
-        ok(esquema(r) == esquema_f2, "el esquema restaurado es exactamente el de F2 (sin tablas ni triggers del corte)")
+        ok(r.execute("PRAGMA user_version").fetchone()[0] == VERSION_F2, f"la base restaurada está en v{VERSION_F2}")
+        ok(esquema(r) == esquema_f2, "el esquema restaurado es exactamente el anterior al corte (sin tablas ni triggers del corte)")
         rev, doc_r = r.execute("SELECT rev, doc FROM legacy_state").fetchone()
         ok(rev == LEGACY_REV and sha(doc_r) == sidecar["legacy_doc_sha256"], "legacy_state restaurado: rev 42 y mismo SHA-256")
         r.execute("UPDATE legacy_state SET rev = rev + 1")
-        ok(True, "un binario F2 vuelve a poder escribir legacy_state")
+        ok(True, "un binario anterior al corte vuelve a poder escribir legacy_state")
         ok((apartado / "lixbon.db").exists(), "la base cortada queda apartada, no borrada")
         r.close()
 

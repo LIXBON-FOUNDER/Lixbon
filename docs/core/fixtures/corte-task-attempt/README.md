@@ -10,8 +10,8 @@ python -I docs/core/fixtures/corte-task-attempt/verificar.py --escribir  # regen
 ```
 
 Solo usa la biblioteca estándar de Python (`sqlite3` con JSON1) y trabaja en un directorio temporal: no toca
-`~/.lixbon`. Aplica las migraciones **publicadas** 001…006 del repositorio, así que si una de ellas cambia, la
-prueba lo nota.
+`~/.lixbon`. Aplica todas las migraciones **publicadas** anteriores al corte (hoy 001…007, con
+el esquema inerte de Task), así que si una de ellas cambia, la prueba lo nota.
 
 Si cambias el mapeo, cambia a la vez `corte.borrador.sql`, la ADR y, tras revisarlo a mano,
 `normalizado.after.json` con `--escribir`.
