@@ -1,6 +1,17 @@
 # LXO-95: navegación unificada, dogfood y diagnósticos
 
-**Estado de cierre:** abierta en Linear (**In Progress**). La composición fue ajustada; faltan gates de dogfood operativo y la representación vigente de una Task activa, así que no se marca Done. LXO-97/LXO-98 no se iniciaron. Rama `feat/lxo-95-runtime-validation`, HEAD `a96cb2d2321f696cfc27c2526e39cd8b57539007`; no hay commits nuevos.
+**Snapshot histórico (2026-10-20):** en ese corte LXO-95 estaba en Linear (**In Progress**), la rama `feat/lxo-95-runtime-validation` estaba en HEAD `a96cb2d2321f696cfc27c2526e39cd8b57539007` y LXO-97/LXO-98 aún no iniciaban. Este informe conserva esa evidencia histórica; no describe el estado actual de `feat/lxo-28`.
+
+## Revisión independiente posterior — 2026-10-20
+
+Orca task `task_28b52961e92e` revisó de solo lectura `3df864289ab2464f7e6785af00ad0b53bd8fd23a` contra `a96cb2d2321f696cfc27c2526e39cd8b57539007`. Veredicto: **CHANGES REQUIRED para este informe**; no encontró hallazgos P0/P1 de código en ese commit y no ejecutó pruebas porque su worktree no tenía dependencias instaladas.
+
+- El encabezado y las secciones V1/V3 conservaban estado anterior a `3df86428` y presentaban el HEAD `a96cb2d` como vigente. Este informe marca ahora explícitamente que es un snapshot histórico.
+- Los resultados 24/24 de Vitest y build Vite registrados más abajo son afirmaciones de la campaña anterior; el revisor no encontró salidas persistidas que permitan corroborarlas contra el SHA exacto `3df86428`.
+- El revisor detectó evidencia de consultas con marcas de tiempo/resultados contradictorios y señaló dos riesgos en el código revisado: `orchestrator.enabled` podía ocultar Projects/Tasks y las aprobaciones operativas quedaban dentro del scroll de navegación. Deben comprobarse y resolverse contra la rama consolidada antes de aceptar LXO-95.
+- La revisión encontró que `feat/lxo-28` ya contiene el shell equivalente junto con cambios F2 posteriores, y que aplicar directamente `3df86428` produce conflictos; por eso no se integró ese commit.
+
+La PTY real de AgentTask, continuidad de AgentPanel/conversación/aprobaciones y estados desconectado/stale/reconexión permanecen sin validar. El dogfood conectado en WebView2/Core sigue siendo un gate de aceptación.
 
 ## 1. Orquestador unificado
 
