@@ -199,13 +199,15 @@ Lista paginada de las Tasks de un Project. Implementación: `orch/tasks_read.rs`
 
 ### Orden y paginación
 
-* **Orden determinista:** `updated_at` descendente (lo más reciente primero) y, a igualdad, `id` ascendente.
+* **Orden determinista:** `created_at` descendente (lo creado más reciente primero) y, a igualdad, `id` ascendente.
+  Se ordena por `created_at` y no por `updated_at` porque es inmutable y el cursor se apoya en él.
 * El cursor es **opaco** para el cliente: solo vale el `next_cursor` de la página anterior, con el mismo
   `project_id`, `status` y `limit`. Un cursor con otro formato es `tasks_invalid_request`.
 * `has_more` es `true` si quedan Tasks después de la página; entonces `next_cursor` es texto. Si no quedan,
   `next_cursor` es `null`.
-* El cursor es una posición dentro de la lista ordenada en el momento de cada lectura, no una instantánea:
-  si cambian las Tasks entre páginas, una Task puede repetirse o saltarse.
+* El cursor es por clave (`created_at` e `id` de la última Task entregada), no por posición: una Task creada
+  entre páginas no repite ni salta las que ya existían; aparece al volver a pedir la primera página. Una Task
+  que cambia de `status` entre páginas puede entrar o salir del filtro, porque no es una instantánea.
 
 ### Errores
 
@@ -293,5 +295,7 @@ Las dos queries toman el guard del estado y, **con él tomado**, comprueban el P
 
 `orch/tasks_read_tests.rs` cubre la clasificación como `Read`, el filtrado por Project y por `status`, la
 paginación con cursor y el cursor inválido, la falta de `project_id` y los parámetros desconocidos, Project
-inexistente, Task inexistente o de otro Project, el DTO del detalle y el rechazo de un Agent. No hay todavía una
-prueba E2E por `POST /rpc` para estas dos queries.
+inexistente, Task inexistente o de otro Project, el DTO del detalle y el rechazo de un Agent.
+`orch/server.rs::tasks_http_tests::consultas_de_tasks_por_post_rpc` lo repite de punta a punta por `POST /rpc` con
+credencial de Person registrada: `limit` en 0, 1, 100 y 101, paginación con una Task creada entre páginas, cursor
+inválido, `status`, Project inexistente, `task_detail` propio, inexistente y de otro Project, y rechazo de un Agent.

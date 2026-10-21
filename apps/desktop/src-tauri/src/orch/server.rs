@@ -295,7 +295,7 @@ mod authenticated_client_tests {
     };
     use crate::orch::state::NewTask;
 
-    fn register(core: &Core, surface: ClientSurface, principal: ClientPrincipal, installation: &str, secret: &str) -> String {
+    pub(super) fn register(core: &Core, surface: ClientSurface, principal: ClientPrincipal, installation: &str, secret: &str) -> String {
         let registration = ClientRegistration::new(surface, DeviceIdentity::new(installation, None).unwrap()).unwrap();
         let credential = ClientCredential::new(principal, secret).unwrap();
         core.storage.with_store(|store| {
@@ -303,7 +303,7 @@ mod authenticated_client_tests {
         }).expect("almacén abierto")
     }
 
-    fn post(port: u16, token: &str, body: &Value) -> (u16, Value) {
+    pub(super) fn post(port: u16, token: &str, body: &Value) -> (u16, Value) {
         let body = body.to_string();
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(stream, "POST /rpc HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
@@ -1219,6 +1219,100 @@ mod authenticated_client_tests {
         assert_eq!(requested.actor_kind.as_str(), "agent");
         assert_eq!(requested.actor_id.as_deref(), Some(task.as_str()));
         assert_eq!(requested.channel.as_deref(), Some("lxo"));
+        server.stop();
+    }
+}
+
+/// LXO-98 · `tasks_by_project` y `task_detail` de punta a punta por `POST /rpc`.
+#[cfg(test)]
+mod tasks_http_tests {
+    use super::*;
+    use super::authenticated_client_tests::{post, register};
+    use crate::orch::boot_tests;
+    use crate::orch::tasks_read_tests::{proyecto, tarea};
+    use crate::store::{ClientPrincipal, ClientSurface};
+
+    const PERSON: &str = "tasks-http-person-secret-lxo98-test-only-32b";
+    const AGENT: &str = "tasks-http-agent-secret-lxo98-test-only-32by";
+
+    fn call(port: u16, token: &str, cmd: &str, args: Value) -> (u16, Value) {
+        post(port, token, &json!({ "cmd": cmd, "args": args, "cwd": std::env::current_dir().unwrap().to_string_lossy() }))
+    }
+
+    fn error_code(r: &Value) -> String {
+        r["error"].as_str().unwrap_or("").split(':').next().unwrap_or("").trim().to_string()
+    }
+
+    #[test]
+    fn consultas_de_tasks_por_post_rpc() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        register(&core, ClientSurface::Cli, ClientPrincipal::Person("person-tasks-http".into()), "install-tasks-http-person", PERSON);
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent("task-tasks-http".into()), "install-tasks-http-agent", AGENT);
+        let a = proyecto(&core, "alfa-http");
+        let b = proyecto(&core, "beta-http");
+        let mut ids: Vec<String> = (0..3).map(|i| tarea(&core, &format!("A{i}"), Some(&a))).collect();
+        let tb = tarea(&core, "B0", Some(&b));
+        let server = start(core.clone()).unwrap();
+        let port = server.port;
+
+        // Límites de `limit`: 0 y 101 se rechazan, 1 y 100 se aceptan.
+        for bad in [0, 101] {
+            let (st, r) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "all", "limit": bad }));
+            assert_eq!((st, r["ok"].clone()), (200, json!(false)), "limit {bad}: {r}");
+            assert_eq!(error_code(&r), "tasks_invalid_request", "limit {bad}: {r}");
+        }
+        for good in [1, 100] {
+            let (st, r) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "all", "limit": good }));
+            assert_eq!((st, r["ok"].clone()), (200, json!(true)), "limit {good}: {r}");
+            assert_eq!(r["data"]["limit"], good);
+            assert_eq!(r["data"]["tasks"].as_array().unwrap().len(), (good as usize).min(3));
+        }
+
+        // Paginación con una Task creada entre páginas: sin repetidas ni saltadas de las existentes.
+        let (_, p1) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "all", "limit": 2 }));
+        assert_eq!(p1["data"]["has_more"], true, "{p1}");
+        let cursor = p1["data"]["next_cursor"].as_str().unwrap().to_string();
+        let nueva = tarea(&core, "A-nueva", Some(&a));
+        let (_, p2) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "all", "limit": 2, "cursor": cursor }));
+        assert_eq!(p2["ok"], true, "{p2}");
+        let mut vistos: Vec<String> = p1["data"]["tasks"].as_array().unwrap().iter()
+            .chain(p2["data"]["tasks"].as_array().unwrap())
+            .map(|t| t["id"].as_str().unwrap().to_string()).collect();
+        let total = vistos.len();
+        vistos.sort();
+        vistos.dedup();
+        assert_eq!(vistos.len(), total, "Task repetida entre páginas: {p1} {p2}");
+        ids.sort();
+        assert_eq!(vistos, ids, "las Tasks previas aparecen una vez cada una");
+        assert!(!vistos.contains(&nueva), "la Task nueva no se cuela en la página siguiente");
+        let (_, fresh) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "all", "limit": 1 }));
+        assert_eq!(fresh["data"]["tasks"][0]["id"], json!(nueva), "una lectura nueva la muestra primero");
+
+        // Cursor inválido y filtro `status`.
+        let (_, r) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "cursor": "nope" }));
+        assert_eq!(error_code(&r), "tasks_invalid_request", "{r}");
+        let (_, r) = call(port, PERSON, "tasks_by_project", json!({ "project_id": a, "status": "final" }));
+        assert_eq!(r["data"]["tasks"].as_array().unwrap().len(), 0, "{r}");
+        let (_, r) = call(port, PERSON, "tasks_by_project", json!({ "project_id": "no-existe" }));
+        assert_eq!(error_code(&r), "tasks_project_not_found", "{r}");
+
+        // task_detail: propia, inexistente y de otro Project.
+        let (_, r) = call(port, PERSON, "task_detail", json!({ "project_id": a, "task_id": ids[0] }));
+        assert_eq!(r["data"]["task"]["id"], json!(ids[0]), "{r}");
+        let (_, r) = call(port, PERSON, "task_detail", json!({ "project_id": a, "task_id": "no-existe" }));
+        assert_eq!(error_code(&r), "tasks_not_found", "{r}");
+        let (_, r) = call(port, PERSON, "task_detail", json!({ "project_id": a, "task_id": tb }));
+        assert_eq!(error_code(&r), "tasks_not_found", "Task de otro Project no se filtra: {r}");
+
+        // Un agente no lee.
+        for (cmd, args) in [("tasks_by_project", json!({ "project_id": a })), ("task_detail", json!({ "project_id": a, "task_id": ids[0] }))] {
+            let (st, r) = call(port, AGENT, cmd, args);
+            assert_eq!(r["ok"], false, "{cmd} con agente: {st} {r}");
+            assert!(st == 403 || error_code(&r) == "tasks_auth_required", "{cmd} con agente: {st} {r}");
+        }
         server.stop();
     }
 }
