@@ -118,7 +118,8 @@ describe('OrchestratorMode', () => {
     mountWith(snapshot([task('execution-task')]), [], async (query, args) => {
       calls.push([query, args]);
       if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
-      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [item], has_more: true, next_cursor: 'next-page' };
+      if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: args.status }, limit: 50, tasks: [item], has_more: true, next_cursor: 'next-page' };
+      if (query === 'attention_list') return { v: 1, items: [], next_cursor: null, has_more: false, limit: 100 };
       if (query === 'task_detail') return { v: 1, task: { ...item, project_id: project.id, child_ids: [], phase: null, messages: [], cwd: '', branch: null, worktree: null, merged: false, review: null, integration: null } };
       throw new Error(`Query no permitida en fixture: ${query}`);
     }, 'execution-task');
@@ -131,6 +132,8 @@ describe('OrchestratorMode', () => {
     expect(calls).toEqual([
       ['projects_overview', { archived: 'exclude' }],
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'active', limit: 50 }],
+      ['tasks_by_project', { project_id: 'project-uuid-1', status: 'all', limit: 50 }],
+      ['attention_list', { limit: 100, project_id: 'project-uuid-1' }],
       ['task_detail', { project_id: 'project-uuid-1', task_id: 'task-uuid-1' }],
     ]);
     expect(invoke.mock.calls.filter(([command]) => command === 'orch_call')).toEqual([]);
