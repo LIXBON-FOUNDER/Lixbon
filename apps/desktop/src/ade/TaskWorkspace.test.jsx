@@ -484,3 +484,323 @@ describe('TaskWorkspace conectado · queries read-only (mock de queryAdeCore, no
     expect(field('Identidad', 'Task ID').textContent).toBe('task-root');
   });
 });
+
+describe('TaskWorkspace · cabecera, estados y salud (LXO-98)', () => {
+  it('la cabecera muestra Task y Project con el ID durable; sin Project coincidente no inventa el nombre', () => {
+    const { unmount } = renderView(taskFixture());
+    expect(document.querySelector('.twk__subtitle').textContent).toBe(`Project: Lixbon · ${PROJECT_ID}`);
+    unmount();
+
+    renderView(taskFixture(), { project: { id: 'otro-project', name: 'Ajeno' } });
+    expect(document.querySelector('.twk__subtitle').textContent).toBe(`Project: No informado · ${PROJECT_ID}`);
+    expect(document.body.textContent).not.toContain('Ajeno');
+  });
+
+  it.each([
+    ['starting', 'Iniciando', 'Activa'],
+    ['running', 'En ejecución', 'Activa'],
+    ['waiting', 'Esperando', 'Activa'],
+    ['awaiting_terminal_approval', 'Esperando aprobación de terminal', 'Activa'],
+    ['done', 'Terminada', 'Final'],
+    ['failed', 'Fallida', 'Final'],
+    ['stopped', 'Detenida', 'Final'],
+    ['exited', 'Cerrada', 'Final'],
+  ])('estado %s se presenta como «%s» y grupo %s', (status, label, group) => {
+    renderView(taskFixture({ status }));
+    expect(document.querySelector('.twk__status').textContent).toBe(label);
+    expect(document.querySelector('.twk__status').getAttribute('data-status')).toBe(status);
+    expect(field('Estado', 'Grupo').textContent).toBe(group);
+  });
+
+  it('Task compartida: dos Tasks con el mismo cwd/worktree se distinguen solo por su ID durable', () => {
+    const shared = { cwd: 'C:/work/compartido', worktree: 'C:/work/compartido', branch: 'lxo/compartida' };
+    const onOpenActivity = vi.fn();
+    const first = renderView(taskFixture({ ...shared }), { onOpenActivity });
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-root');
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir Activity de la Task task-root' }));
+    first.unmount();
+
+    renderView(childFixture({ ...shared }), { onOpenActivity });
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-child-a');
+    expect(field('Ubicación', 'Worktree').textContent).toBe('C:/work/compartido');
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir Activity de la Task task-child-a' }));
+
+    expect(onOpenActivity.mock.calls).toEqual([
+      [{ projectId: PROJECT_ID, taskId: 'task-root' }],
+      [{ projectId: PROJECT_ID, taskId: 'task-child-a' }],
+    ]);
+  });
+
+  it('salud de la lectura: al día, actualizando y desactualizada se distinguen de la Task', () => {
+    const ready = renderView(taskFixture());
+    expect(field('Estado', 'Lectura de Core').textContent).toBe('Al día');
+    ready.unmount();
+
+    const refreshing = renderView(taskFixture(), { state: { status: 'refreshing' } });
+    expect(field('Estado', 'Lectura de Core').textContent).toBe('Actualizando');
+    refreshing.unmount();
+
+    const stale = renderView(taskFixture(), { state: { status: 'stale', reason: 'degraded', error: 'tasks_unavailable' } });
+    expect(field('Estado', 'Lectura de Core').textContent).toBe('Desactualizada · Core degradado');
+    stale.unmount();
+
+    renderView(taskFixture(), { state: { status: 'stale', reason: 'error', error: 'tasks_not_found' } });
+    expect(field('Estado', 'Lectura de Core').textContent).toBe('Desactualizada · el target ya no está disponible');
+  });
+
+  it('Task desaparecida con datos previos no culpa a Core: el aviso dice que el target ya no está', () => {
+    renderView(taskFixture(), { state: { status: 'stale', reason: 'error', error: 'tasks_not_found' } });
+    const banner = screen.getByRole('status');
+    expect(banner.textContent).toContain('Datos desactualizados · target no disponible');
+    expect(banner.textContent).not.toContain('Core con error');
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-root');
+  });
+});
+
+describe('TaskWorkspace · target sin detalle y errores inesperados (LXO-98)', () => {
+  it('ready sin task en la respuesta: alerta con los IDs, sin datos inventados', () => {
+    const retry = vi.fn();
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'ready', data: { v: 1 }, error: null, retry }} />);
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Core no devolvió el detalle de la Task');
+    expect(alert.textContent).toContain('task-root');
+    expect(alert.textContent).toContain(PROJECT_ID);
+    expect(screen.queryByRole('region', { name: 'Identidad' })).toBeNull();
+    expect(screen.queryByText(/Target verificado/)).toBeNull();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }));
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('task: null y lectura inactiva (idle) con target tampoco quedan en blanco', () => {
+    const { unmount } = render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'ready', data: { v: 1, task: null } }} />);
+    expect(screen.getByRole('alert').textContent).toContain('Core no devolvió el detalle de la Task');
+    unmount();
+
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" />);
+    expect(screen.getByRole('alert').textContent).toContain('Core no devolvió el detalle de la Task');
+  });
+
+  it('un error que no es string no rompe el render ni se muestra como código inventado', () => {
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'error', data: null, error: { code: 'x' } }} />);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Error de Core');
+    expect(alert.textContent).not.toContain('[object Object]');
+    expect(alert.querySelectorAll('code')).toHaveLength(2); // solo los IDs del target
+  });
+
+  it('un Error de JS como causa conserva su mensaje', () => {
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'error', data: null, error: new Error('tasks_not_found') }} />);
+    expect(screen.getByRole('alert').textContent).toContain('Target no encontrado');
+  });
+});
+
+describe('TaskWorkspace · relaciones y navegación por ID (LXO-98)', () => {
+  it('hijas duplicadas o vacías no duplican filas ni claves; el orden de Core se conserva', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderView(taskFixture({ child_ids: ['task-b', '', 'task-a', 'task-b', null, '  '] }), { onNavigate: vi.fn() });
+
+    const names = within(screen.getByRole('list', { name: 'Tasks hijas' })).getAllByRole('button').map((button) => button.getAttribute('aria-label'));
+    expect(names).toEqual(['Abrir Task hija task-b', 'Abrir Task hija task-a']);
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('raíz y padre ausentes en una respuesta parcial no ofrecen enlaces ni se infieren', () => {
+    const task = childFixture();
+    delete task.root_id;
+    delete task.parent_id;
+    renderView(task, { onNavigate: vi.fn() });
+
+    expect(field('Identidad', 'Tipo').textContent).toBe('No informado');
+    expect(field('Ejecución y jerarquía', 'Raíz').textContent).toBe('No informado');
+    expect(field('Ejecución y jerarquía', 'Padre').textContent).toBe('No informado');
+    expect(screen.queryByRole('button', { name: /Abrir Task (padre|raíz)/ })).toBeNull();
+  });
+
+  it('navegación directa por ID: al cambiar el target no se muestran datos de la Task anterior', () => {
+    const view = (taskId, detail) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={taskId} detail={detail} project={{ id: PROJECT_ID, name: 'Lixbon' }} />;
+    const { rerender } = render(view('task-root', stateFixture(taskFixture())));
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-root');
+
+    // El shell cambia el target; mientras Core no responde, la respuesta anterior no se presenta.
+    rerender(view('task-child-a', stateFixture(taskFixture(), { status: 'refreshing' })));
+    expect(screen.getByRole('alert').textContent).toContain('Respuesta no verificada');
+    expect(document.body.textContent).not.toContain('Implementar inspector');
+
+    rerender(view('task-child-a', stateFixture(childFixture())));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-child-a');
+    expect(field('Identidad', 'Tipo').textContent).toBe('Hija');
+  });
+
+  it('tras navegar por un enlace el foco pasa al encabezado de la nueva Task', () => {
+    const onNavigate = vi.fn();
+    const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={onNavigate} />;
+    const { rerender } = render(view(taskFixture()));
+
+    const link = screen.getByRole('button', { name: 'Abrir Task hija task-child-a' });
+    link.focus();
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith({ projectId: PROJECT_ID, taskId: 'task-child-a' });
+
+    rerender(view(childFixture()));
+    const heading = screen.getByRole('heading', { level: 2, name: 'Hija A' });
+    expect(heading.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(heading);
+  });
+
+  it('si el shell ignora la navegación o el cambio viene de fuera, el foco no se mueve', () => {
+    const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={vi.fn()} />;
+    const { rerender } = render(view(taskFixture()));
+    const link = screen.getByRole('button', { name: 'Abrir Task hija task-child-a' });
+    link.focus();
+    fireEvent.click(link); // el shell lo ignora: el target no cambia
+
+    rerender(view(taskFixture({ title: 'Refresco' })));
+    expect(document.activeElement).toBe(link);
+  });
+});
+
+describe('TaskWorkspace · metadatos desconocidos (LXO-98)', () => {
+  it('campos extra de Core no se renderizan ni se interpretan', () => {
+    renderView(taskFixture({ secreto_interno: 'valor-no-contractual', host: 'host-no-contractual', origin: 'origen-no-contractual' }));
+
+    expect(document.body.textContent).not.toContain('valor-no-contractual');
+    expect(document.body.textContent).not.toContain('host-no-contractual');
+    expect(document.body.textContent).not.toContain('origen-no-contractual');
+    expect(field('Ubicación', 'Host / origen').textContent).toBe('No informado');
+    expect(screen.queryByText('Respuesta parcial de Core')).toBeNull();
+  });
+
+  it('tipos inesperados (números, objetos, nulos) degradan a «No informado» sin romper', () => {
+    renderView(taskFixture({
+      provider: 42, branch: { name: 'x' }, worktree: [], run_id: 7, merged: 'sí',
+      phase: { name: 'probar', done: 'tal vez', at: 'ayer' },
+      messages: [null, 3, { id: null, kind: 'question', body: 'sin id' }],
+      review: { decision: 'accepted', head_commit: 99, at: 'ayer' }, integration: { outcome: 'merged', decision_id: null },
+    }));
+
+    for (const [section, label] of [['Ejecución y jerarquía', 'Proveedor'], ['Ejecución y jerarquía', 'Run'], ['Ubicación', 'Rama'], ['Ubicación', 'Worktree'], ['Estado', 'Marca merged']]) {
+      expect(field(section, label).textContent, label).toBe('No informado');
+    }
+    expect(field('Estado', 'Fase').textContent).toBe('probar');
+    expect(field('Estado', 'Revisión').textContent).toBe('Aceptada');
+    expect(field('Estado', 'Integración').textContent).toBe('Integrada');
+    expect(field('Estado', 'Preguntas').textContent).toContain('1 registrada · 1 sin respuesta');
+  });
+
+  it('más preguntas abiertas que el límite avisa de las restantes sin listarlas', () => {
+    const messages = Array.from({ length: 7 }, (_, index) => ({ id: index + 1, kind: 'question', from: 'a', to: 'b', body: `q${index + 1}`, reply_to: null, at: T0 }));
+    renderView(taskFixture({ messages }));
+    const value = field('Estado', 'Preguntas');
+    expect(within(value).getAllByRole('listitem')).toHaveLength(5);
+    expect(value.textContent).toContain('y 2 más sin respuesta');
+  });
+});
+
+describe('TaskWorkspace · teclado y ARIA (LXO-98)', () => {
+  it('orden de tabulación natural: sin tabindex positivo y solo controles nativos', () => {
+    renderView(taskFixture(), { onNavigate: vi.fn(), onOpenActivity: vi.fn(), onOpenAttention: vi.fn() });
+
+    for (const element of document.querySelectorAll('button, a[href], [tabindex]')) {
+      if (element.tagName === 'H2') continue; // foco programático (-1), fuera del orden de tabulación
+      expect(element.tagName).toBe('BUTTON');
+      expect(element.tabIndex).toBe(0);
+    }
+    expect(screen.getByRole('heading', { level: 2 }).tabIndex).toBe(-1);
+  });
+
+  it('los accesos contextuales son botones nativos enfocables y entregan los IDs exactos', () => {
+    const onOpenActivity = vi.fn();
+    renderView(taskFixture(), { onOpenActivity });
+    const button = screen.getByRole('button', { name: 'Abrir Activity de la Task task-root' });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    expect(button.tagName).toBe('BUTTON');
+    fireEvent.click(button); // Enter/Espacio sobre un <button> nativo producen este click
+    expect(onOpenActivity).toHaveBeenCalledWith({ projectId: PROJECT_ID, taskId: 'task-root' });
+  });
+
+  it('cada región apunta a un encabezado existente y los ids no se repiten', () => {
+    renderView(taskFixture(), { onNavigate: vi.fn(), onOpenActivity: vi.fn(), onOpenAttention: vi.fn() });
+
+    const regions = screen.getAllByRole('region'); // Task + Identidad, Estado, Ejecución y jerarquía, Ubicación, Contexto, Tiempos
+    expect(regions).toHaveLength(7);
+    for (const region of regions) {
+      const heading = document.getElementById(region.getAttribute('aria-labelledby'));
+      expect(heading, region.getAttribute('aria-labelledby')).toBeTruthy();
+      expect(heading.textContent.length).toBeGreaterThan(0);
+    }
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(6);
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('dos instancias (canvas + inspector) no comparten ids de encabezado', () => {
+    const task = taskFixture();
+    render(
+      <>
+        <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} variant="workspace" />
+        <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} variant="inspector" />
+      </>,
+    );
+    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(screen.getAllByRole('heading', { level: 2, name: 'Implementar inspector' })).toHaveLength(2);
+  });
+
+  it('aria-busy solo está activo durante loading/refreshing', () => {
+    const ready = renderView(taskFixture());
+    expect(document.querySelector('.twk').getAttribute('aria-busy')).toBe('false');
+    ready.unmount();
+    renderView(taskFixture(), { state: { status: 'refreshing' } });
+    expect(document.querySelector('.twk').getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('con todos los callbacks activos sigue sin haber controles operativos', () => {
+    renderView(taskFixture(), { onNavigate: vi.fn(), onOpenActivity: vi.fn(), onOpenAttention: vi.fn() });
+    const names = screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent).sort();
+    expect(names).toEqual([
+      'Abrir Activity de la Task task-root',
+      'Abrir Attention de la Task task-root',
+      'Abrir Task hija task-child-a',
+      'Abrir Task hija task-child-b',
+      'Actualizar',
+    ]);
+    expect(document.querySelector('input, textarea, select, form, [contenteditable], [role=textbox], [role=menuitem]')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Attempt|intento|reanudar|resume|fork|retry|chat|editor/i);
+  });
+});
+
+describe('TaskWorkspace conectado · ID durable directo (LXO-98)', () => {
+  it('abre por Project ID + Task ID sin lista previa y re-consulta con el nuevo ID al navegar', async () => {
+    queryAdeCore.mockImplementation(async (_query, { taskId }) => ({ v: 1, task: taskId === 'task-child-a' ? childFixture() : taskFixture() }));
+    const view = (taskId) => <TaskWorkspace projectId={PROJECT_ID} taskId={taskId} project={{ id: PROJECT_ID, name: 'Lixbon' }} pollMs={60_000} />;
+    const { rerender } = render(view('task-child-a'));
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Hija A' })).toBeTruthy();
+    expect(queryAdeCore).toHaveBeenCalledTimes(1);
+    expect(queryAdeCore).toHaveBeenLastCalledWith('task_detail', { projectId: PROJECT_ID, taskId: 'task-child-a' });
+
+    rerender(view('task-root'));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Implementar inspector' })).toBeTruthy();
+    expect(queryAdeCore).toHaveBeenLastCalledWith('task_detail', { projectId: PROJECT_ID, taskId: 'task-root' });
+    expect(document.body.textContent).not.toContain('Hija A');
+  });
+
+  it('una Task que desaparece entre lecturas conserva lo último verificado y avisa; el reintento la recupera', async () => {
+    queryAdeCore.mockResolvedValueOnce({ v: 1, task: taskFixture() });
+    render(<TaskWorkspace projectId={PROJECT_ID} taskId="task-root" pollMs={60_000} />);
+    expect(await screen.findByRole('region', { name: 'Identidad' })).toBeTruthy();
+
+    queryAdeCore.mockRejectedValueOnce(new Error('tasks_not_found'));
+    fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    expect((await screen.findByText(/Datos desactualizados · target no disponible/)).closest('[role=status]')).toBeTruthy();
+    expect(field('Identidad', 'Task ID').textContent).toBe('task-root');
+
+    queryAdeCore.mockResolvedValueOnce({ v: 1, task: taskFixture({ title: 'De vuelta' }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'De vuelta' })).toBeTruthy();
+    expect(screen.queryByText(/Datos desactualizados/)).toBeNull();
+  });
+});

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { useCoreQuery } from './useCoreQuery';
 import './TaskWorkspace.css';
 
@@ -48,8 +48,11 @@ function formatTime(ms) {
   return { iso, label: `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC` };
 }
 
+// El error llega como string desde `useCoreQuery`; si no lo fuera, no se rompe el render ni se inventa un código.
+const errorCode = (error) => text(typeof error === 'string' ? error : error instanceof Error ? error.message : null);
+
 function describeError(error, { hasData }) {
-  const message = String(error ?? '');
+  const message = errorCode(error) ?? '';
   const kept = hasData ? ' Se conserva la última respuesta.' : '';
   if (/tasks_project_not_found/i.test(message)) return `El Project ya no existe en el registro de Core con ese ID.${kept}`;
   if (/tasks_not_found|_not_found/i.test(message)) return `La Task ya no está disponible en este Project con ese ID.${kept}`;
@@ -60,8 +63,22 @@ function describeError(error, { hasData }) {
   return `Core devolvió un error al leer este dato.${kept}`;
 }
 
+const isNotFound = (error) => /_not_found/i.test(errorCode(error) ?? '');
+
+// Estado de la lectura de Core (no de la Task): lo que el hook informa, sin deducir nada más.
+function readHealth(state) {
+  if (state.status === 'ready') return 'Al día';
+  if (state.status === 'refreshing') return 'Actualizando';
+  if (state.status === 'stale') {
+    if (isNotFound(state.error)) return 'Desactualizada · el target ya no está disponible';
+    const kind = state.reason === 'disconnected' ? 'desconectado' : state.reason === 'degraded' ? 'degradado' : 'con error';
+    return `Desactualizada · Core ${kind}`;
+  }
+  return null;
+}
+
 function titleFor(state, hasData) {
-  if (/_not_found/i.test(String(state.error ?? ''))) return hasData ? 'Target no disponible' : 'Target no encontrado';
+  if (isNotFound(state.error)) return hasData ? 'Target no disponible' : 'Target no encontrado';
   if (state.status === 'disconnected' || state.reason === 'disconnected') return 'Core desconectado';
   if (state.status === 'degraded' || state.reason === 'degraded') return 'Core degradado';
   return 'Error de Core';
@@ -150,8 +167,8 @@ function QuestionsValue({ messages }) {
       <span>{summary.total} registrada{summary.total === 1 ? '' : 's'} · {summary.open.length} sin respuesta</span>
       {shown.length > 0 && (
         <ul className="twk__question-list" aria-label="Preguntas sin respuesta">
-          {shown.map((question) => (
-            <li key={String(question.id)}>
+          {shown.map((question, index) => (
+            <li key={`${index}-${String(question.id)}`}>
               <code className="twk__mono">#{String(question.id)}</code>{' '}
               <span>{text(question.from) ?? MISSING} → {text(question.to) ?? MISSING}</span>
               {text(question.body) && <q className="twk__quote">{question.body}</q>}
@@ -246,22 +263,24 @@ function Banner({ state, hasData, projectId, taskId }) {
   }
   if (status === 'stale') {
     const kind = state.reason === 'disconnected' ? 'desconectado' : state.reason === 'degraded' ? 'degradado' : 'con error';
+    const code = errorCode(state.error);
     return (
       <div className="twk__banner twk__banner--stale" role="status">
-        <strong>Datos desactualizados · Core {kind}</strong>
+        <strong>{isNotFound(state.error) ? 'Datos desactualizados · target no disponible' : `Datos desactualizados · Core ${kind}`}</strong>
         <span>{describeError(state.error, { hasData: true })}</span>
-        <code className="twk__mono">{state.error}</code>
+        {code && <code className="twk__mono">{code}</code>}
         {state.retry && <button type="button" className="twk__action" onClick={state.retry}>Reintentar</button>}
       </div>
     );
   }
   if (['degraded', 'disconnected', 'error'].includes(status)) {
+    const code = errorCode(state.error);
     return (
       <div className="twk__banner twk__banner--error" role="alert">
         <strong>{titleFor(state, hasData)}</strong>
         <span>{describeError(state.error, { hasData })}</span>
         <span className="twk__hint">Target: Project <code className="twk__mono">{projectId}</code> · Task <code className="twk__mono">{taskId}</code></span>
-        <code className="twk__mono">{state.error}</code>
+        {code && <code className="twk__mono">{code}</code>}
         {state.retry && <button type="button" className="twk__action" onClick={state.retry}>Reintentar</button>}
       </div>
     );
@@ -296,7 +315,22 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
   const info = statusInfo(visible?.status);
   const projectName = project && project.id === projectId ? text(project.name) : null;
   const missingFields = visible ? DETAIL_FIELDS.filter((field) => !(field in visible)) : [];
-  const childIds = Array.isArray(visible?.child_ids) ? visible.child_ids.filter((id) => text(id)) : null;
+  const childIds = Array.isArray(visible?.child_ids) ? [...new Set(visible.child_ids.filter((id) => text(id)))] : null;
+  const noDetail = hasTarget && !task && !['loading', 'refreshing', 'stale', 'degraded', 'disconnected', 'error'].includes(state.status);
+  const health = visible ? readHealth(state) : null;
+
+  // Al navegar por un ID durable desde el propio detalle, el foco pasa al encabezado de la nueva Task en vez de
+  // perderse en el `body` cuando el botón pulsado desaparece. Solo se mueve si el shell aceptó ese target exacto.
+  const headingRef = useRef(null);
+  const pendingFocus = useRef(null);
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    pendingFocus.current = null;
+    if (pending && pending.projectId === projectId && pending.taskId === taskId) headingRef.current?.focus();
+  }, [projectId, taskId]);
+  const navigate = typeof onNavigate === 'function'
+    ? (target) => { pendingFocus.current = target; onNavigate(target); }
+    : undefined;
   const refreshable = verified && state.status === 'ready' && state.retry;
 
   if (!hasTarget) {
@@ -311,14 +345,29 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
   return (
     <section className={className} aria-labelledby={headingId} aria-busy={busy} data-state={state.status} data-target-verified={verified}>
       <header className="twk__head">
-        <h2 id={headingId} className="twk__title">{visible ? (text(visible.title) ?? 'Task sin título') : 'Task'}</h2>
+        <h2 id={headingId} ref={headingRef} tabIndex={-1} className="twk__title">{visible ? (text(visible.title) ?? 'Task sin título') : 'Task'}</h2>
         {visible && (
           <span className={`twk__status twk__status--${info.group}`} data-status={info.raw ?? ''}>{info.label}</span>
         )}
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
       </header>
 
+      {visible && (
+        <p className="twk__subtitle">
+          Project: {projectName ?? <Missing />} · <code className="twk__mono">{visible.project_id}</code>
+        </p>
+      )}
+
       <Banner state={state} hasData={Boolean(visible)} projectId={projectId} taskId={taskId} />
+
+      {noDetail && (
+        <div className="twk__banner twk__banner--error" role="alert">
+          <strong>Core no devolvió el detalle de la Task</strong>
+          <span>No hay datos que mostrar para el target seleccionado; no se completan desde la lista ni desde la ruta.</span>
+          <span className="twk__hint">Target: Project <code className="twk__mono">{projectId}</code> · Task <code className="twk__mono">{taskId}</code></span>
+          {state.retry && <button type="button" className="twk__action" onClick={state.retry}>Reintentar</button>}
+        </div>
+      )}
 
       {mismatched && (
         <div className="twk__banner twk__banner--error" role="alert">
@@ -353,6 +402,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
               {info.raw && <> <code className="twk__mono">{info.raw}</code></>}
             </Row>
             <Row label="Grupo"><span>{GROUP_LABELS[info.group]}</span></Row>
+            <Row label="Lectura de Core">{health ?? <Missing />}</Row>
             <Row label="Fase"><PhaseValue phase={visible.phase} /></Row>
             <Row label="Preguntas"><QuestionsValue messages={visible.messages} /></Row>
             <Row label="Revisión"><ReviewValue review={visible.review} /></Row>
@@ -367,10 +417,10 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
             <Row label="Modelo solicitado"><Value value={visible.model} /></Row>
             <Row label="Run"><Value value={visible.run_id} mono /></Row>
             <Row label="Raíz">
-              {visible.root_id === visible.id ? <span>Esta Task</span> : <TaskLink projectId={visible.project_id} taskId={visible.root_id} relation="Task raíz" onNavigate={onNavigate} />}
+              {visible.root_id === visible.id ? <span>Esta Task</span> : <TaskLink projectId={visible.project_id} taskId={visible.root_id} relation="Task raíz" onNavigate={navigate} />}
             </Row>
             <Row label="Padre">
-              {visible.parent_id === null ? <Missing>Sin padre (raíz)</Missing> : <TaskLink projectId={visible.project_id} taskId={visible.parent_id} relation="Task padre" onNavigate={onNavigate} />}
+              {visible.parent_id === null ? <Missing>Sin padre (raíz)</Missing> : <TaskLink projectId={visible.project_id} taskId={visible.parent_id} relation="Task padre" onNavigate={navigate} />}
             </Row>
             <Row label="Hijas">
               {childIds === null && <Missing />}
@@ -378,7 +428,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
               {childIds?.length > 0 && (
                 <ul className="twk__children" aria-label="Tasks hijas">
                   {childIds.map((id) => (
-                    <li key={id}><TaskLink projectId={visible.project_id} taskId={id} relation="Task hija" onNavigate={onNavigate} /></li>
+                    <li key={id}><TaskLink projectId={visible.project_id} taskId={id} relation="Task hija" onNavigate={navigate} /></li>
                   ))}
                 </ul>
               )}
