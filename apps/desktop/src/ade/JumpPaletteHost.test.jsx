@@ -54,25 +54,16 @@ const att = (over = {}) => ({
   project_id: 'prj-1', run_id: null, occurrence: 1, created_at: 1, resolved_at: null, resolution: null, ...over,
 });
 
-// Estas pruebas son de integración: montan la paleta con las 139 opciones del fixture (131 Tasks) y
-// esperan a un Core simulado cuya carga es asíncrona. El coste está en el filtro `name` de las consultas
-// por rol: RTL recalcula el nombre accesible de TODAS las opciones en cada sondeo de `waitFor`/`findBy*`
-// (~55 ms por sondeo en solitario, medido en la investigación de LXO-102), así que la espera necesita
-// varios sondeos.
-// Medido en la investigación de LXO-102 (corrida con los 15 archivos de src/ade en paralelo): «no lee Core
-// mientras está cerrada…» tardó 0,3 s en solitario y 6,6 s en paralelo, y «busca por título/nombre y ID
-// durable…» llegó a 7,8 s: por encima del presupuesto por defecto de la prueba (5 s). Una de ellas agotó
-// además los 5 s de presupuesto de espera. Al repetir esa misma corrida con menos carga en la máquina
-// bajaron a 1,1-2,1 s: el factor depende de la carga, así que no se escribe un multiplicador fijo; lo que
-// se fija son los presupuestos.
-// Los archivos hermanos JumpPaletteHost.recents (7 opciones) y JumpPaletteHost.stale (paleta simulada, sin
-// consultas por rol) no pagan ese coste: en la misma corrida se midieron por debajo de 1,5 s y de 0,8 s, así
-// que no llevan presupuesto propio.
-// El presupuesto de espera de RTL (10 s) queda POR DEBAJO del presupuesto de la prueba (15 s): si fueran el
-// mismo, un `wait` que no se cumple se reportaría como "Test timed out in 5000ms" —sin causa— en vez de
-// decir qué elemento no apareció. Los 10 s cubren el caso medido en que una espera agotó los 5 s de espera
-// anteriores, y los 15 s cubren la duración más larga medida (7,8 s) con las varias esperas seguidas que
-// encadenan estas pruebas.
+// Estas pruebas de integración montan la paleta con 139 opciones del fixture: 6 Projects, 131 Tasks y
+// 2 Attention; Core está simulado y su carga es asíncrona. Las consultas por rol de `option` con filtro
+// `name` calculan nombres accesibles para filtrar las opciones dentro de su ámbito, y `findByRole` repite
+// esa consulta mientras espera. Los conteos por rol sin filtro `name` no hacen ese filtrado de nombres.
+// El agotamiento de RTL observado corresponde a «sigue los cursores opacos exactos, con concurrencia
+// acotada, y muestra 100+ Tasks», que espera por `findByRole` la opción `prj-1 tarea 120`.
+// `JumpPaletteHost.stale.test.jsx` sí hace consultas por rol, pero sustituye `JumpPalette` por un doble;
+// esas consultas no recorren la lista de 139 opciones que monta este fixture.
+// El límite de RTL (10 s) es menor que el límite explícito de estas pruebas (15 s): si una espera agota
+// su plazo mientras la prueba aún tiene margen, RTL puede señalar qué consulta no se resolvió.
 const PALETTE_WAIT_TIMEOUT = 10_000;
 const PALETTE_TEST_TIMEOUT = 15_000;
 configure({ asyncUtilTimeout: PALETTE_WAIT_TIMEOUT });
