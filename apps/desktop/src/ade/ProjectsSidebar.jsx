@@ -499,7 +499,8 @@ function ProjectTasks({
   ), [currentPages.items, currentPages.stale, headFailed, headTaskIds]);
 
   const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
-  const tasksSettled = Boolean(head.data) || failureStatuses.has(head.status);
+  // Una lectura fallida sin datos no demuestra la ausencia de la Task: no cuenta como asentada.
+  const tasksSettled = Boolean(head.data);
   useEffect(() => {
     onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : [], tasksSettled, statusView.code);
     return () => onVisibleTasks(projectId, [], false, statusView.code);
