@@ -67,6 +67,7 @@ export const TASK_STATUS_VIEWS = Object.freeze([
   { code: 'final', label: 'Finalizadas', empty: 'Este Project no tiene Tasks finalizadas.' },
   { code: 'all', label: 'Todas', empty: 'Este Project no tiene Tasks registradas.' },
 ]);
+const ALL_TASKS_VIEW = TASK_STATUS_VIEWS.find((view) => view.code === 'all');
 
 /** Etiquetas de las siete categorías de Attention del contrato (LXO-87/89). */
 export const ATTENTION_CATEGORY_LABELS = Object.freeze({
@@ -405,6 +406,9 @@ function ProjectTasks({
   effectiveActiveKey,
   selectedTaskId,
   selectedTaskProjectId,
+  pendingTaskId,
+  confirmedMissingTaskId,
+  onTaskLookupComplete,
   onKeyDown,
   onFocusKey,
   focusItem,
@@ -425,6 +429,9 @@ function ProjectTasks({
   const pagingRequestActiveRef = useRef(false);
   const loadMoreButtonRef = useRef(null);
   const pageRetryButtonRef = useRef(null);
+  const pendingTaskIdRef = useRef(pendingTaskId);
+  const previousPendingTaskIdRef = useRef(pendingTaskId);
+  pendingTaskIdRef.current = pendingTaskId;
   const headFailed = failureStatuses.has(head.status);
   const headFailedRef = useRef(headFailed);
   headFailedRef.current = headFailed;
@@ -451,6 +458,19 @@ function ProjectTasks({
       if (pageRequestRef.current?.key === pageKey) pageRequestRef.current = null;
     };
   }, [pageKey]);
+
+  // Selection-driven paging belongs to the selected durable ID. A new target or a manual filter
+  // change must stop the old lookup even if its Core read is already in flight.
+  useEffect(() => {
+    if (previousPendingTaskIdRef.current === pendingTaskId) return;
+    previousPendingTaskIdRef.current = pendingTaskId;
+    const request = pageRequestRef.current;
+    if (request?.kind !== 'auto') return;
+    pageRequestRef.current = null;
+    setPages((current) => (current.key !== request.key || !current.loading
+      ? current
+      : { ...current, loading: false }));
+  }, [pendingTaskId]);
 
   // Si la cabecera falla, no se encadenan sus cursores; conserva las páginas ya cargadas como stale.
   useEffect(() => {
@@ -479,10 +499,11 @@ function ProjectTasks({
   ), [currentPages.items, currentPages.stale, headFailed, headTaskIds]);
 
   const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
+  const tasksSettled = Boolean(head.data) || failureStatuses.has(head.status);
   useEffect(() => {
-    onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : []);
-    return () => onVisibleTasks(projectId, []);
-  }, [projectId, taskIdSignature, onVisibleTasks]);
+    onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : [], tasksSettled, statusView.code);
+    return () => onVisibleTasks(projectId, [], false, statusView.code);
+  }, [projectId, taskIdSignature, tasksSettled, onVisibleTasks, statusView.code]);
 
   const headCursor = head.data?.has_more ? head.data.next_cursor : null;
   const moreCursor = currentPages.pageCount > 0 ? currentPages.nextCursor : headCursor;
@@ -583,26 +604,38 @@ function ProjectTasks({
     && !currentPages.stale
     && (currentPages.pageCount > 0 ? currentPages.hasMore : Boolean(headCursor));
 
+  const hasData = Boolean(head.data);
   const hasMoreTasks = currentPages.pageCount > 0
     ? currentPages.hasMore
     : Boolean(head.data?.has_more);
   const taskSetSize = (headFailed || currentPages.stale || hasMoreTasks) ? -1 : tasks.length;
+  const allStatusReadComplete = statusView.code === 'all'
+    && hasData
+    && !headFailed
+    && head.status !== 'refreshing'
+    && !currentPages.stale
+    && !currentPages.loading
+    && !currentPages.error
+    && !hasMoreTasks;
 
-  const loadMore = useCallback(async () => {
+  const loadMore = useCallback(async ({ automatic = false } = {}) => {
     if (pageRequestRef.current || !moreCursor || currentPages.stale) return;
+    if (automatic && !pendingTaskId) return;
     const requestedKey = pageKey;
     const request = {
       id: ++pageRequestSequence.current,
       key: requestedKey,
       headUpdatedAt: head.updatedAt,
-      kind: 'more',
+      kind: automatic ? 'auto' : 'more',
+      pendingTaskId: automatic ? pendingTaskId : null,
     };
     pageRequestRef.current = request;
     pagingRequestActiveRef.current = true;
     setPages((current) => ({ ...current, loading: true, error: null, notice: null }));
     const isCurrentRequest = () => pageRequestRef.current === request
       && !headFailedRef.current
-      && latestHeadUpdatedAtRef.current === request.headUpdatedAt;
+      && latestHeadUpdatedAtRef.current === request.headUpdatedAt
+      && (!automatic || pendingTaskIdRef.current === request.pendingTaskId);
     try {
       const page = await listAdeTasks(projectId, { status: statusView.code, cursor: moreCursor });
       if (!isCurrentRequest()) return;
@@ -637,7 +670,36 @@ function ProjectTasks({
           : { ...current, loading: false }));
       }
     }
-  }, [currentPages.stale, head.retry, head.updatedAt, moreCursor, pageKey, projectId, statusView.code]);
+  }, [currentPages.stale, head.retry, head.updatedAt, moreCursor, pageKey, pendingTaskId, projectId, statusView.code]);
+
+  useEffect(() => {
+    if (
+      !pendingTaskId
+      || statusView.code !== 'all'
+      || tasks.some((task) => task.id === pendingTaskId)
+      || !canLoadMore
+      || currentPages.loading
+      || currentPages.stale
+      || currentPages.error
+      || head.status === 'refreshing'
+    ) return;
+    void loadMore({ automatic: true });
+  }, [
+    canLoadMore,
+    currentPages.error,
+    currentPages.loading,
+    currentPages.stale,
+    head.status,
+    loadMore,
+    pendingTaskId,
+    statusView.code,
+    tasks,
+  ]);
+
+  useEffect(() => {
+    if (!pendingTaskId || tasks.some((task) => task.id === pendingTaskId) || !allStatusReadComplete) return;
+    onTaskLookupComplete(projectId, pendingTaskId);
+  }, [allStatusReadComplete, onTaskLookupComplete, pendingTaskId, projectId, tasks]);
 
   useEffect(() => {
     if (currentPages.loading) return;
@@ -669,7 +731,6 @@ function ProjectTasks({
     focusItem(fallbackKey);
   }, [canLoadMore, currentPages.loading, focusItem, onFocusKey, projectId, taskIdSignature]);
 
-  const hasData = Boolean(head.data);
   const isActiveKey = (key) => key === effectiveActiveKey;
 
   return (
@@ -735,6 +796,12 @@ function ProjectTasks({
         </div>
       )}
 
+      {confirmedMissingTaskId && (
+        <div className="ps__state ps__state--muted" role="status" data-testid="selected-task-missing">
+          La Task seleccionada ({confirmedMissingTaskId}) no aparece en ninguna página de este Project según la lectura completa de Tasks del Core.
+        </div>
+      )}
+
       {(canLoadMore || (currentPages.stale && !headFailed)) && (
         <button
           ref={loadMoreButtonRef}
@@ -756,7 +823,7 @@ function ProjectTasks({
           }}
           onClick={currentPages.stale
             ? () => reconcileLoadedPages(currentPages.pageCount, head.updatedAt)
-            : loadMore}
+            : () => loadMore()}
           disabled={currentPages.loading}
           aria-busy={currentPages.loading}
           aria-label={currentPages.stale
@@ -853,8 +920,17 @@ export function ProjectsSidebar({
     }
     : uncontrolledSelection;
   const [taskIdsByProject, setTaskIdsByProject] = useState({});
+  const [settledTaskStatusByProject, setSettledTaskStatusByProject] = useState({});
+  const [pendingSelectionScroll, setPendingSelectionScroll] = useState(null);
+  const [missingTaskSelection, setMissingTaskSelection] = useState(null);
+  const [automaticFilterNotice, setAutomaticFilterNotice] = useState(null);
+  const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
   const [activeKey, setActiveKey] = useState(null);
   const itemRefs = useRef(new Map());
+  const previousSelectionRef = useRef(null);
+  const pendingSelectionAnnouncementRef = useRef(null);
+  const pendingSelectionFilterCheckRef = useRef(null);
+  const pendingSelectionScrollRef = useRef(null);
   const firstFilterInputRef = useRef(null);
 
   useEffect(() => {
@@ -877,13 +953,25 @@ export function ProjectsSidebar({
 
   const onFocusKey = useCallback((key) => setActiveKey(key), []);
 
-  const onVisibleTasks = useCallback((projectId, taskIds) => {
+  const onVisibleTasks = useCallback((projectId, taskIds, settled, taskStatus) => {
     setTaskIdsByProject((current) => {
       const previous = current[projectId];
       if (previous && previous.length === taskIds.length && previous.every((id, index) => id === taskIds[index])) return current;
-      if (!previous && taskIds.length === 0) return current;
       return { ...current, [projectId]: taskIds };
     });
+    setSettledTaskStatusByProject((current) => {
+      const next = settled ? taskStatus : null;
+      if (current[projectId] === next) return current;
+      return { ...current, [projectId]: next };
+    });
+  }, []);
+
+  const onTaskLookupComplete = useCallback((projectId, taskId) => {
+    const pending = pendingSelectionScrollRef.current;
+    if (pending?.projectId !== projectId || pending.taskId !== taskId) return;
+    pendingSelectionScrollRef.current = null;
+    setPendingSelectionScroll(null);
+    setMissingTaskSelection({ projectId, taskId });
   }, []);
 
   const visibleKeys = useMemo(() => {
@@ -896,6 +984,100 @@ export function ProjectsSidebar({
     }
     return keys;
   }, [projects, expanded, taskIdsByProject]);
+
+  // Solo una modificación de IDs controlados inicia scroll. La solicitud de Task sigue pendiente
+  // hasta que aparece la fila o una lectura completa de todas las Tasks confirma su ausencia.
+  useLayoutEffect(() => {
+    const current = {
+      controlled: selectionControlled,
+      projectId: selected.projectId,
+      taskId: selected.taskId,
+    };
+    const previous = previousSelectionRef.current;
+    const changed = !previous
+      || previous.controlled !== current.controlled
+      || previous.projectId !== current.projectId
+      || previous.taskId !== current.taskId;
+
+    if (changed) {
+      previousSelectionRef.current = current;
+      pendingSelectionAnnouncementRef.current = current.controlled && current.projectId && current.taskId
+        ? { projectId: current.projectId, taskId: current.taskId }
+        : null;
+      pendingSelectionFilterCheckRef.current = current.controlled && current.projectId && current.taskId && statusView.code !== 'all'
+        ? { projectId: current.projectId, taskId: current.taskId, status: statusView.code }
+        : null;
+      setSelectionAnnouncement('');
+      const nextPending = current.controlled && current.projectId
+        ? {
+          key: current.taskId ? taskKey(current.projectId, current.taskId) : projectKey(current.projectId),
+          projectId: current.projectId,
+          taskId: current.taskId,
+        }
+        : null;
+      pendingSelectionScrollRef.current = nextPending;
+      setPendingSelectionScroll(nextPending);
+      setMissingTaskSelection(null);
+      setAutomaticFilterNotice(null);
+    }
+
+    // Controlled selection can arrive before its lazy Task rows mount; wait for the page to settle
+    // before deciding whether the current filter needs an automatic transition.
+    const pendingFilterCheck = pendingSelectionFilterCheckRef.current;
+    if (
+      pendingFilterCheck?.projectId === current.projectId
+      && pendingFilterCheck.taskId === current.taskId
+      && pendingFilterCheck.status === statusView.code
+      && current.controlled
+      && settledTaskStatusByProject[current.projectId] === statusView.code
+    ) {
+      pendingSelectionFilterCheckRef.current = null;
+      if (!itemRefs.current.has(taskKey(current.projectId, current.taskId))) {
+        setStatusView(ALL_TASKS_VIEW);
+        setAutomaticFilterNotice({ projectId: current.projectId, taskId: current.taskId });
+      }
+    }
+
+    // Update the persistent status region only after the selected row exists in the tree.
+    const pendingAnnouncement = pendingSelectionAnnouncementRef.current;
+    if (
+      pendingAnnouncement?.projectId === current.projectId
+      && pendingAnnouncement.taskId === current.taskId
+      && current.controlled
+    ) {
+      const taskNode = itemRefs.current.get(taskKey(current.projectId, current.taskId));
+      if (taskNode) {
+        const taskLabel = taskNode.getAttribute('aria-label') || current.taskId;
+        pendingSelectionAnnouncementRef.current = null;
+        setSelectionAnnouncement(`Task seleccionada: ${taskLabel}.`);
+      }
+    }
+
+    let pending = pendingSelectionScrollRef.current;
+    if (pending && overview.data && !projects.some((project) => project.id === pending.projectId)) {
+      pendingSelectionScrollRef.current = null;
+      setPendingSelectionScroll(null);
+      pending = null;
+    }
+    const node = pending && itemRefs.current.get(pending.key);
+    if (active && node) {
+      node.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      pendingSelectionScrollRef.current = null;
+      setPendingSelectionScroll(null);
+    }
+  }, [active, overview.data, projects, selectionControlled, selected.projectId, selected.taskId, settledTaskStatusByProject, statusView.code, visibleKeys]);
+
+  const confirmedMissingTaskId = missingTaskSelection?.projectId === selected.projectId
+    && missingTaskSelection.taskId === selected.taskId
+    ? missingTaskSelection.taskId
+    : null;
+
+  useEffect(() => {
+    if (
+      confirmedMissingTaskId
+      && (taskIdsByProject[selected.projectId] ?? []).includes(confirmedMissingTaskId)
+    ) setMissingTaskSelection(null);
+  }, [confirmedMissingTaskId, selected.projectId, taskIdsByProject]);
 
   // Clave con foco de teclado (roving tabindex). Si su fila desaparece, se degrada a la fila más
   // cercana sin llamar a `focus()`: una actualización en segundo plano nunca mueve el foco.
@@ -999,6 +1181,13 @@ export function ProjectsSidebar({
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
   const isEmpty = overview.status === 'empty';
+  const automaticFilterAnnouncement = automaticFilterNotice?.projectId === selected.projectId
+    && automaticFilterNotice.taskId === selected.taskId
+    && overview.data
+    && projects.some((project) => project.id === selected.projectId)
+    && statusView.code === 'all'
+    ? `Filtro cambiado automáticamente a Todas para buscar la Task seleccionada (${automaticFilterNotice.taskId}).`
+    : '';
 
   return (
     <section
@@ -1024,12 +1213,29 @@ export function ProjectsSidebar({
                 name={statusFilterName}
                 value={view.code}
                 checked={statusView.code === view.code}
-                onChange={() => setStatusView(view)}
+                onChange={() => {
+                  pendingSelectionScrollRef.current = null;
+                  pendingSelectionFilterCheckRef.current = null;
+                  setPendingSelectionScroll(null);
+                  setAutomaticFilterNotice(null);
+                  setStatusView(view);
+                }}
               />
               <span>{view.label}</span>
             </label>
           ))}
         </div>
+      </div>
+
+      <div
+        className={automaticFilterAnnouncement ? 'ps__state ps__state--muted' : 'ps__live-region--sr-only'}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="selection-filter-notice"
+      >
+        {automaticFilterAnnouncement}
+        {selectionAnnouncement && <span className="ps__sr-only">{selectionAnnouncement}</span>}
       </div>
 
       {statusView.code === 'active' && (
@@ -1091,6 +1297,11 @@ export function ProjectsSidebar({
                     effectiveActiveKey={effectiveActiveKey}
                     selectedTaskId={selected.taskId}
                     selectedTaskProjectId={selected.taskProjectId}
+                    pendingTaskId={pendingSelectionScroll?.projectId === project.id ? pendingSelectionScroll.taskId : null}
+                    confirmedMissingTaskId={confirmedMissingTaskId && missingTaskSelection.projectId === project.id
+                      ? confirmedMissingTaskId
+                      : null}
+                    onTaskLookupComplete={onTaskLookupComplete}
                     onKeyDown={onTreeKeyDown}
                     onFocusKey={onFocusKey}
                     focusItem={focusItem}

@@ -99,9 +99,30 @@ const deferred = () => {
   const promise = new Promise((done) => { resolve = done; });
   return { promise, resolve };
 };
+const mockScrollIntoView = (node) => {
+  const scrollIntoView = vi.fn();
+  Object.defineProperty(node, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+  return scrollIntoView;
+};
+
+const scrollPrototypeRestorers = [];
+const trackScrollIntoView = () => {
+  const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  const calls = [];
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value(options) { calls.push({ element: this, options }); },
+  });
+  scrollPrototypeRestorers.push(() => {
+    if (previous) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previous);
+    else delete HTMLElement.prototype.scrollIntoView;
+  });
+  return calls;
+};
 
 afterEach(() => {
   cleanup();
+  for (const restore of scrollPrototypeRestorers.splice(0)) restore();
   document.body.removeAttribute('tabindex');
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -849,6 +870,440 @@ describe('ProjectsSidebar', () => {
     expect(beta.getAttribute('aria-expanded')).toBe('true');
     expect(finalFilter.checked).toBe(true);
     expect(document.activeElement).toBe(finalFilter);
+  });
+
+  it('revela por scroll los cambios controlados de Project y Task sin mover el foco', async () => {
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha'), project('project-b', 'Beta')]),
+      tasks: (args) => page(args.project_id, args.status, [task(`${args.project_id}-task`)]),
+    });
+    const { rerender } = render(
+      <ProjectsSidebar selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+
+    await screen.findByRole('treeitem', { name: /Alpha/ });
+    const beta = screen.getByRole('treeitem', { name: /Beta/ });
+    const scrollBeta = mockScrollIntoView(beta);
+    const filter = screen.getByRole('radio', { name: 'Activas' });
+    filter.focus();
+
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-b', taskId: null }} />);
+    await waitFor(() => expect(scrollBeta).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' }));
+    expect(document.activeElement).toBe(filter);
+
+    const taskRow = await screen.findByRole('treeitem', { name: /Task project-b-task/ });
+    const scrollTask = mockScrollIntoView(taskRow);
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-b', taskId: 'project-b-task' }} />);
+
+    await waitFor(() => expect(scrollTask).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' }));
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it('sigue la selección controlada de una Task hasta una página posterior y solo hace scroll', async () => {
+    const scrollCalls = trackScrollIntoView();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.status !== 'all') return page(args.project_id, args.status, [task('active-first')]);
+        if (!args.cursor) return page(args.project_id, args.status, [task('all-first')], { hasMore: true, cursor: 'all-cursor-1' });
+        return page(args.project_id, args.status, [task('target', { status: 'done' })]);
+      },
+    });
+    const { rerender } = render(
+      <ProjectsSidebar selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+    await screen.findByText('Task active-first');
+
+    const activeFilter = screen.getByRole('radio', { name: 'Activas' });
+    activeFilter.focus();
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'target' }} />);
+
+    const target = await screen.findByRole('treeitem', { name: /Task target/ });
+    await waitFor(() => expect(scrollCalls.some(({ element }) => element === target)).toBe(true));
+    expect(screen.getByRole('radio', { name: 'Todas' }).checked).toBe(true);
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(activeFilter);
+    expect(taskCalls(calls).map(({ args }) => [args.status, args.cursor])).toEqual([
+      ['active', undefined],
+      ['all', undefined],
+      ['all', 'all-cursor-1'],
+    ]);
+  });
+
+  it('mantiene montada la región status al anunciar el cambio automático a Todas', async () => {
+    const scrollCalls = trackScrollIntoView();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => args.status === 'all'
+        ? page(args.project_id, args.status, [task('final-target', { status: 'failed' })])
+        : page(args.project_id, args.status, [task('active-first')]),
+    });
+    const { rerender } = render(
+      <ProjectsSidebar selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+    await screen.findByText('Task active-first');
+    const notice = screen.getByTestId('selection-filter-notice');
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.getAttribute('aria-live')).toBe('polite');
+    expect(notice.getAttribute('aria-atomic')).toBe('true');
+    expect(notice.textContent).toBe('');
+    const activeFilter = screen.getByRole('radio', { name: 'Activas' });
+    activeFilter.focus();
+
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'final-target' }} />);
+
+    const target = await screen.findByRole('treeitem', { name: /Task final-target/ });
+    await waitFor(() => expect(scrollCalls.some(({ element }) => element === target)).toBe(true));
+    expect(screen.getByRole('radio', { name: 'Todas' }).checked).toBe(true);
+    expect(screen.getByTestId('selection-filter-notice')).toBe(notice);
+    expect(notice.textContent).toContain('Filtro cambiado automáticamente a Todas');
+    expect(taskCalls(calls).map(({ args }) => args.status)).toEqual(['active', 'all']);
+    expect(document.activeElement).toBe(activeFilter);
+  });
+
+  it('anuncia después del montaje una Task controlada que ya aparece en la primera página', async () => {
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => page(args.project_id, args.status, [task('present-task', { status: 'running', title: 'Present target' })]),
+    });
+    render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'present-task' }} />);
+
+    const notice = screen.getByTestId('selection-filter-notice');
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(notice.className).toBe('ps__live-region--sr-only');
+    expect(notice.textContent).toBe('');
+    const activeFilter = screen.getByRole('radio', { name: 'Activas' });
+    activeFilter.focus();
+
+    const target = await screen.findByRole('treeitem', { name: /Present target/ });
+    await waitFor(() => expect(notice.textContent).toContain('Task seleccionada: Present target.'));
+
+    expect(screen.getByTestId('selection-filter-notice')).toBe(notice);
+    expect(notice.className).toBe('ps__live-region--sr-only');
+    expect(screen.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(taskCalls(calls).map(({ args }) => args.status)).toEqual(['active']);
+    expect(document.activeElement).toBe(activeFilter);
+  });
+
+  it('limpia el anuncio al cambiar de Project y conserva el foco', async () => {
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha'), project('project-b', 'Beta')]),
+      tasks: (args) => page(
+        args.project_id,
+        args.status,
+        [task(args.project_id === 'project-a' ? 'alpha-task' : 'beta-task', {
+          title: args.project_id === 'project-a' ? 'Alpha selected' : 'Beta task',
+        })],
+      ),
+    });
+    const { rerender } = render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'alpha-task' }} />);
+    const notice = screen.getByTestId('selection-filter-notice');
+    await waitFor(() => expect(notice.textContent).toContain('Task seleccionada: Alpha selected.'));
+    const activeFilter = screen.getByRole('radio', { name: 'Activas' });
+    activeFilter.focus();
+
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-b', taskId: null }} />);
+    await waitFor(() => expect(notice.textContent).toBe(''));
+
+    expect(screen.getByTestId('selection-filter-notice')).toBe(notice);
+    expect(screen.getByRole('treeitem', { name: /Beta\. Project project-b/ }).getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(activeFilter);
+  });
+
+  it('al montar con selección durable busca una Task fuera de la primera página sin mover el foco', async () => {
+    const scrollCalls = trackScrollIntoView();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => (args.cursor
+        ? page(args.project_id, args.status, [task('initial-target', { status: 'done' })])
+        : page(args.project_id, args.status, [task('initial-first')], { hasMore: true, cursor: 'initial-cursor' })),
+    });
+    render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'initial-target' }} />);
+
+    const target = await screen.findByRole('treeitem', { name: /Task initial-target/ });
+    await waitFor(() => expect(scrollCalls.some(({ element }) => element === target)).toBe(true));
+    expect(screen.getByRole('radio', { name: 'Todas' }).checked).toBe(true);
+    expect(screen.getByTestId('selection-filter-notice').textContent).toContain('initial-target');
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).not.toBe(target);
+    expect(taskCalls(calls).map(({ args }) => [args.status, args.cursor])).toEqual([
+      ['active', undefined],
+      ['all', undefined],
+      ['all', 'initial-cursor'],
+    ]);
+  });
+
+  it('cancela la página automática anterior cuando cambia la selección durable', async () => {
+    const oldPage = deferred();
+    const newPage = deferred();
+    const scrollCalls = trackScrollIntoView();
+    let cursorReads = 0;
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) return page(args.project_id, args.status, [task('change-first')], { hasMore: true, cursor: 'change-cursor' });
+        cursorReads += 1;
+        return cursorReads === 1
+          ? oldPage.promise
+          : newPage.promise;
+      },
+    });
+    const { rerender } = render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'old-target' }} />);
+    await waitFor(() => expect(taskCalls(calls).filter(({ args }) => args.cursor).length).toBe(1));
+    const notice = screen.getByTestId('selection-filter-notice');
+    expect(notice.textContent).toContain('old-target');
+    const allFilter = screen.getByRole('radio', { name: 'Todas' });
+    allFilter.focus();
+
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'new-target' }} />);
+    await waitFor(() => expect(taskCalls(calls).filter(({ args }) => args.cursor).length).toBe(2));
+    expect(screen.getByTestId('selection-filter-notice')).toBe(notice);
+    expect(notice.textContent).toBe('');
+    expect(document.activeElement).toBe(allFilter);
+
+    await act(async () => {
+      newPage.resolve(page('project-a', 'all', [task('new-target')]));
+      await newPage.promise;
+    });
+    const target = await screen.findByRole('treeitem', { name: /Task new-target/ });
+    await waitFor(() => expect(scrollCalls.some(({ element }) => element === target)).toBe(true));
+    await waitFor(() => expect(notice.textContent).toContain('Task seleccionada: Task new-target.'));
+    expect(document.activeElement).toBe(allFilter);
+
+    await act(async () => {
+      oldPage.resolve(page('project-a', 'all', [task('old-target')]));
+      await oldPage.promise;
+    });
+    await flush();
+
+    expect(screen.queryByRole('treeitem', { name: /Task old-target/ })).toBeNull();
+    expect(screen.getByRole('treeitem', { name: /Task new-target/ }).getAttribute('aria-selected')).toBe('true');
+    expect(scrollCalls.some(({ element }) => element.getAttribute('data-task-id') === 'old-target')).toBe(false);
+  });
+
+  it('cancela la búsqueda automática y su scroll cuando el usuario cambia el filtro', async () => {
+    const pendingPage = deferred();
+    const scrollCalls = trackScrollIntoView();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.status === 'final') return page(args.project_id, args.status, []);
+        if (!args.cursor) return page(args.project_id, args.status, [task('manual-first')], { hasMore: true, cursor: 'manual-cursor' });
+        return pendingPage.promise;
+      },
+    });
+    render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'manual-target' }} />);
+    await waitFor(() => expect(taskCalls(calls).some(({ args }) => args.cursor === 'manual-cursor')).toBe(true));
+    const notice = screen.getByTestId('selection-filter-notice');
+    expect(notice.textContent).toContain('manual-target');
+
+    const finalFilter = screen.getByRole('radio', { name: 'Finalizadas' });
+    finalFilter.focus();
+    fireEvent.click(finalFilter);
+    await waitFor(() => expect(taskCalls(calls).some(({ args }) => args.status === 'final')).toBe(true));
+    expect(finalFilter.checked).toBe(true);
+    expect(screen.getByTestId('selection-filter-notice')).toBe(notice);
+    expect(notice.textContent).toBe('');
+
+    await act(async () => {
+      pendingPage.resolve(page('project-a', 'all', [task('manual-target')]));
+      await pendingPage.promise;
+    });
+    await flush();
+
+    expect(finalFilter.checked).toBe(true);
+    expect(document.activeElement).toBe(finalFilter);
+    expect(screen.queryByRole('treeitem', { name: /Task manual-target/ })).toBeNull();
+    expect(scrollCalls).toHaveLength(0);
+  });
+
+  it('confirma la ausencia solo después de completar todas las páginas con status all', async () => {
+    const secondPage = deferred();
+    const finalPage = deferred();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.status !== 'all') return page(args.project_id, args.status, []);
+        if (!args.cursor) return page(args.project_id, args.status, [task('all-first')], { hasMore: true, cursor: 'all-cursor-1' });
+        if (args.cursor === 'all-cursor-1') return secondPage.promise;
+        return finalPage.promise;
+      },
+    });
+    const { rerender } = render(
+      <ProjectsSidebar selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+    await screen.findByRole('treeitem', { name: /Alpha/ });
+    rerender(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'absent-target' }} />);
+
+    await waitFor(() => expect(taskCalls(calls).some(({ args }) => args.cursor === 'all-cursor-1')).toBe(true));
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+    await act(async () => {
+      secondPage.resolve(page('project-a', 'all', [task('all-second')], { hasMore: true, cursor: 'all-cursor-2' }));
+      await secondPage.promise;
+    });
+    await waitFor(() => expect(taskCalls(calls).some(({ args }) => args.cursor === 'all-cursor-2')).toBe(true));
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+
+    await act(async () => {
+      finalPage.resolve(page('project-a', 'all', []));
+      await finalPage.promise;
+    });
+    expect(await screen.findByTestId('selected-task-missing')).toBeTruthy();
+    expect(taskCalls(calls).map(({ args }) => [args.status, args.cursor])).toEqual([
+      ['active', undefined],
+      ['all', undefined],
+      ['all', 'all-cursor-1'],
+      ['all', 'all-cursor-2'],
+    ]);
+  });
+
+  it('reanuda la búsqueda de una selección durable después de un cursor inválido', async () => {
+    let headReads = 0;
+    let cursorReads = 0;
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          if (args.status !== 'all') return page(args.project_id, args.status, [task('active-first')]);
+          headReads += 1;
+          return headReads === 1
+            ? page(args.project_id, args.status, [task('invalid-first')], { hasMore: true, cursor: 'invalid-cursor' })
+            : page(args.project_id, args.status, [task('invalid-target', { status: 'done' })]);
+        }
+        cursorReads += 1;
+        throw new Error('tasks_invalid_cursor: cursor inválido para esta consulta');
+      },
+    });
+    render(<ProjectsSidebar selection={{ projectId: 'project-a', taskId: 'invalid-target' }} />);
+
+    const target = await screen.findByRole('treeitem', { name: /Task invalid-target/ });
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(headReads).toBe(2);
+    expect(cursorReads).toBe(1);
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Todas' }).checked).toBe(true);
+  });
+
+  it('limpia la ausencia si una reconciliación posterior carga la Task seleccionada', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    const cursors = [];
+    const scrollCalls = trackScrollIntoView();
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (!args.cursor) {
+          if (args.status !== 'all') return page(args.project_id, args.status, [task('active-first')]);
+          headReads += 1;
+          return headReads === 1
+            ? page(args.project_id, args.status, [task('reconcile-head-old')], { hasMore: true, cursor: 'old-head-cursor' })
+            : page(args.project_id, args.status, [task('reconcile-head-new')], { hasMore: true, cursor: 'new-head-cursor' });
+        }
+        cursors.push(args.cursor);
+        return args.cursor === 'old-head-cursor'
+          ? page(args.project_id, args.status, [task('reconcile-old-page')])
+          : page(args.project_id, args.status, [task('reconcile-target', { status: 'done' })]);
+      },
+    });
+    render(<ProjectsSidebar pollMs={1_000} selection={{ projectId: 'project-a', taskId: 'reconcile-target' }} />);
+    await flush();
+    expect(screen.getByTestId('selected-task-missing')).toBeTruthy();
+    expect(cursors).toEqual(['old-head-cursor']);
+
+    const allFilter = screen.getByRole('radio', { name: 'Todas' });
+    allFilter.focus();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+
+    const target = screen.getByRole('treeitem', { name: /Task reconcile-target/ });
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+    expect(cursors).toEqual(['old-head-cursor', 'new-head-cursor']);
+    expect(document.activeElement).toBe(allFilter);
+    expect(scrollCalls).toHaveLength(0);
+    expect(taskCalls(calls).some(({ args }) => args.cursor === 'new-head-cursor')).toBe(true);
+  });
+
+  it('preserva la navegación durante error de página y desconexión del Core', async () => {
+    vi.useFakeTimers();
+    const scrollCalls = trackScrollIntoView();
+    let headReads = 0;
+    let pageReads = 0;
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.status !== 'all') return page(args.project_id, args.status, []);
+        if (!args.cursor) {
+          headReads += 1;
+          if (headReads === 2) throw new Error('disconnected: Core IPC closed');
+          return page(args.project_id, args.status, [task('all-first')], { hasMore: true, cursor: 'all-cursor-1' });
+        }
+        pageReads += 1;
+        if (pageReads === 1) throw new Error('tasks_read_failed: lectura de página fallida');
+        return page(args.project_id, args.status, [task('target')]);
+      },
+    });
+    const { rerender } = render(
+      <ProjectsSidebar pollMs={1_000} selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+    await flush();
+    const activeFilter = screen.getByRole('radio', { name: 'Activas' });
+    activeFilter.focus();
+    rerender(<ProjectsSidebar pollMs={1_000} selection={{ projectId: 'project-a', taskId: 'target' }} />);
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('tasks_read_failed');
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByText(/Core desconectado/)).toBeTruthy();
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByRole('button', { name: 'Reintentar carga de Tasks de Alpha' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar carga de Tasks de Alpha' }));
+    await flush();
+    const target = screen.getByRole('treeitem', { name: /Task target/ });
+    expect(scrollCalls.some(({ element }) => element === target)).toBe(true);
+    expect(document.activeElement).toBe(activeFilter);
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+    expect(taskCalls(calls).some(({ args }) => args.status === 'all' && args.cursor === 'all-cursor-1')).toBe(true);
+  });
+
+  it('conserva scroll y foco al refrescar y reconectar con los mismos IDs controlados', async () => {
+    vi.useFakeTimers();
+    let tick = 0;
+    mountCore({
+      overviews: () => {
+        tick += 1;
+        if (tick === 2) throw new Error('projects_overview_disconnected: Core desconectado');
+        return overview([project('project-a', 'Alpha')]);
+      },
+    });
+    const { container } = render(
+      <ProjectsSidebar pollMs={1_000} selection={{ projectId: 'project-a', taskId: null }} />,
+    );
+    await flush();
+
+    const row = screen.getByRole('treeitem', { name: /Alpha/ });
+    const scrollRow = mockScrollIntoView(row);
+    const tree = container.querySelector('.ps__tree');
+    tree.scrollTop = 173;
+    const filter = screen.getByRole('radio', { name: 'Activas' });
+    filter.focus();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByText(/Datos desactualizados/)).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(screen.getByRole('treeitem', { name: /Alpha/ })).toBe(row);
+    expect(tree.scrollTop).toBe(173);
+    expect(document.activeElement).toBe(filter);
+    expect(scrollRow).not.toHaveBeenCalled();
   });
 
   it('en modo controlado notifica la selección del usuario sin cambiar los IDs suministrados', async () => {
