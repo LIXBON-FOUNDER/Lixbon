@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { invoke } from '@tauri-apps/api/core';
 import { AttentionInbox, sumAttentionCounts } from './AttentionInbox';
 import { ATTENTION_LIMIT } from './coreQueries';
+import { resetOutstandingQueries } from './coreQueryPolicy';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -155,6 +156,9 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   invoke.mockReset();
+  // El registro de peticiones vivas es de módulo (LXO-101): una petición a medio camino de un
+  // caso envenenaría el siguiente.
+  resetOutstandingQueries();
 });
 
 describe('AttentionInbox', () => {
@@ -979,7 +983,7 @@ describe('AttentionInbox', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     await flushAsync();
     // Las páginas anexadas se descartan con la cabecera retenida; el foco no pasa a una fila ajena.
-    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    expect(screen.getByText(/Attention desactualizada: Core sin respuesta a tiempo/)).toBeTruthy();
     expect(visibleAttentionIds()).toEqual(['att_1', 'att_2']);
     // Precondición de la regresión: el nodo enfocado se retiró con focusout emulado (WebView2/Chromium).
     // Sin esta comprobación el caso pasaría en verde aunque la retirada del nodo dejara de probarse.
@@ -1245,7 +1249,7 @@ describe('AttentionInbox', () => {
 
     failing = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    expect(screen.getByText(/Attention desactualizada: Core sin respuesta a tiempo/)).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
 
     failing = false;
@@ -1297,7 +1301,7 @@ describe('AttentionInbox', () => {
 
     failing = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    expect(screen.getByText(/Attention desactualizada: Core sin respuesta a tiempo/)).toBeTruthy();
     expect(ids()).toEqual(['att_1', 'att_2']);
     expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-9');
 
@@ -1328,6 +1332,9 @@ describe('AttentionInbox', () => {
     expect(loading.textContent).toBe('Cargando Attention activa desde el Core…');
     expect(screen.getByTestId('attention-inbox').getAttribute('aria-busy')).toBe('true');
     first.unmount();
+    // La petición de carga nunca llega: se libera su hueco para que el caso siguiente pueda leer
+    // de verdad (la política no abandona la petición, pero entre casos de prueba no se hereda).
+    resetOutstandingQueries();
 
     cleanup();
     mountCore({ attention: () => page([]) });
@@ -1353,9 +1360,12 @@ describe('AttentionInbox', () => {
 
     mountCore({ attention: () => { throw new Error('ade_query_timeout: Core no respondió a tiempo'); } });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
-    const disconnected = await screen.findByTestId('attention-error');
-    expect(disconnected.getAttribute('role')).toBe('alert');
-    expect(disconnected.textContent).toContain('Core desconectado');
+    const timedOut = await screen.findByTestId('attention-error');
+    expect(timedOut.getAttribute('role')).toBe('alert');
+    // Un plazo agotado no es una desconexión: no hay evidencia de transporte roto (LXO-101).
+    expect(timedOut.textContent).not.toContain('Core desconectado');
+    expect(timedOut.textContent).toContain('Error de Core');
+    expect(timedOut.textContent).toContain('no respondió dentro del umbral');
     cleanup();
 
     mountCore({ attention: () => { throw new Error('attention_read_failed: no se pudo leer la tabla'); } });

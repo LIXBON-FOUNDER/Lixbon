@@ -59,7 +59,28 @@ const att = (over = {}) => ({
 });
 const attentionPage = (items, hasMore = false) => ({ v: 1, items, next_cursor: hasMore ? 'cursor-1' : null, has_more: hasMore, limit: 100 });
 
-function core(detail, { attention = () => attentionPage([]) } = {}) {
+// DTO de `resource_inventory` con la FORMA del contrato (docs/core/RESOURCES.md): lo que da el Core,
+// tal cual. No es una lectura real de Core ni dogfood.
+const INVENTORY = {
+  v: 1,
+  machine: 'machine-real',
+  filters: { project_id: PROJECT.id, probe: true },
+  repos: [{ project_id: PROJECT.id, machine: 'machine-real', path: 'C:/repos/repo-real', scan: 'ok' }],
+  worktrees: [{
+    target: { machine: 'machine-real', project_id: PROJECT.id, repo: 'C:/repos/repo-real', path: 'C:/repos/repo-real.lixbon-wt/wt-1' },
+    state: 'tracked', origin: 'task', physical: 'present',
+    git: { registered: true, branch: 'lxo/x', detached: false, locked: false, prunable: false },
+    owner: { task_id: ITEM.id, run_id: 'run-1', status: 'running' },
+    dirty: 'clean', merged: 'unknown', into: 'main', needs_review: false,
+  }],
+  preserved_branches: [],
+  warnings: {
+    branches_to_review: 0,
+    worktrees_by_state: { tracked: 1, missing_on_disk: 0, not_registered: 0, orphan_candidate: 0, external: 0, unknown: 0 },
+  },
+};
+
+function core(detail, { attention = () => attentionPage([]), inventory = () => INVENTORY } = {}) {
   queryAdeCore.mockImplementation(async (query, args) => {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
     if (query === 'tasks_by_project') return {
@@ -69,6 +90,7 @@ function core(detail, { attention = () => attentionPage([]) } = {}) {
     };
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
+    if (query === 'resource_inventory') return inventory(args);
     throw new Error(`Query no permitida en fixture: ${query}`);
   });
 }
@@ -358,8 +380,11 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByText('Core no suministró texto para esta Attention.')).toBeTruthy();
     expect(within(projectView).getByRole('region', { name: /Activity/ }).querySelector('[data-testid="slice-notice"]').textContent)
       .toContain('Backlog (LXO-92)');
+    // El slice legacy de Resources no lo da ninguna query de Core: se declara no disponible (no vacío)
+    // y su foto real es el inventario de solo lectura, que ya está montado debajo.
     expect(within(projectView).getByRole('region', { name: 'Resources' }).querySelector('[data-testid="slice-notice"]').textContent)
-      .toContain('Backlog (LXO-93)');
+      .toContain('Core no da un listado de Resources');
+    expect(within(projectView).getByRole('region', { name: 'Resources' }).textContent).not.toMatch(/Backlog \(LXO-93\)/);
 
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project'))
       .toContainEqual(['tasks_by_project', { projectId: PROJECT.id, status: 'all' }]);
@@ -369,6 +394,34 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId(`task-${FINAL_ITEM.id}`)).toBeTruthy();
     fireEvent.click(within(projectView).getByTestId(`open-task-${FINAL_ITEM.id}`));
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: FINAL_ITEM.id });
+  });
+
+  it('consulta el inventario del Project durable y monta la foto del Core en Resources tal cual', async () => {
+    core(detailOf());
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+
+    // El DTO llega tal cual: repo y worktree, sin inventar filas ni contadores.
+    const inventory = await within(projectView).findByTestId('resinv');
+
+    // La petición lleva solo los dos parámetros del contrato: el ID duradero del Project y el sondeo.
+    const inventoryCalls = queryAdeCore.mock.calls.filter(([query]) => query === 'resource_inventory');
+    expect(inventoryCalls).toHaveLength(1);
+    expect(inventoryCalls[0][1]).toEqual({ projectId: PROJECT.id, probe: true });
+
+    expect(within(inventory).getAllByTestId('resinv-row')).toHaveLength(2);
+    expect(within(inventory).getAllByTestId('resinv-target').map((el) => el.textContent))
+      .toEqual(['C:/repos/repo-real', 'C:/repos/repo-real.lixbon-wt/wt-1']);
+    expect(within(inventory).getByTestId('resinv-readonly').textContent).toBe('Solo lectura');
+  });
+
+  it('no consulta el inventario mientras no hay un Project durable seleccionado', async () => {
+    core(detailOf());
+    render(shell());
+    await flush();
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'resource_inventory')).toHaveLength(0);
   });
 
   it('consulta Tasks all solo mientras está abierto el Project View y conserva la query activa del navegador', async () => {
@@ -723,7 +776,8 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
 
     failing = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    // Un plazo agotado no es una desconexión: el Core puede estar escaneando (LXO-101).
+    expect(screen.getByText(/Attention desactualizada: Core sin respuesta a tiempo/)).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain(ITEM.id);
     expect(screen.getByLabelText('Categoría').value).toBe('approval');
     expect(attentionRows()).toHaveLength(1);

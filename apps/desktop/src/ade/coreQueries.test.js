@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeActivity, listAdeTasks, queryAdeCore } from './coreQueries';
+import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeActivity, listAdeTasks, queryAdeCore, readAdeResources } from './coreQueries';
 import { ACTIVITY_V1_MESSAGE_KEYS } from './activityMessages.js';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -695,5 +695,996 @@ describe('queryAdeCore', () => {
     invoke.mockResolvedValue(valid);
     await expect(queryAdeCore('tasks_by_project', { projectId: 'project-1', status: 'final' }))
       .resolves.toEqual(valid);
+  });
+});
+
+/** Un DTO de `resource_inventory` tal como lo da el Core (docs/core/RESOURCES.md). */
+function inventario({ probe = true, projectId = null } = {}) {
+  const dto = {
+    v: 1,
+    machine: 'machine-1',
+    filters: { project_id: projectId, probe },
+    repos: [
+      { project_id: 'project-1', machine: 'machine-1', path: '/home/ana/app', scan: 'ok' },
+      { project_id: 'project-2', machine: 'machine-1', path: '/home/ana/roto', scan: 'unavailable', reason: 'not_a_repository' },
+      { project_id: 'project-3', machine: 'otro-equipo', path: '/srv/remoto', scan: 'other_machine', reason: 'other_machine' },
+    ],
+    worktrees: [
+      {
+        target: { machine: 'machine-1', project_id: 'project-1', repo: '/home/ana/app', path: '/home/ana/app.lixbon-wt/wt-c' },
+        state: 'tracked',
+        origin: 'task',
+        physical: 'present',
+        git: { registered: true, branch: 'lx/r/c', detached: false, locked: false, prunable: false },
+        owner: { task_id: 't-9', run_id: 'r-1', status: 'done' },
+        dirty: 'clean',
+        merged: 'unmerged',
+        into: 'main',
+        needs_review: true,
+      },
+      {
+        target: { machine: 'machine-1', project_id: 'project-1', repo: '/home/ana/app', path: '/srv/otro' },
+        state: 'external',
+        origin: 'external',
+        physical: 'present',
+        git: { registered: true, branch: 'ext/x', detached: false, locked: false, prunable: false },
+        owner: null,
+        dirty: 'dirty',
+        merged: 'unknown',
+        into: 'main',
+        needs_review: false,
+      },
+    ],
+    preserved_branches: [
+      {
+        target: { machine: 'machine-1', project_id: 'project-1', repo: '/home/ana/app', branch: 'lx/r/g' },
+        branch_exists: true,
+        owner: { task_id: 't-4', run_id: 'r-1', status: 'stopped' },
+        merged: 'unmerged',
+        into: 'main',
+        needs_review: true,
+      },
+    ],
+    warnings: {
+      branches_to_review: 2,
+      worktrees_by_state: {
+        tracked: 1,
+        missing_on_disk: 0,
+        not_registered: 0,
+        orphan_candidate: 0,
+        external: 1,
+        unknown: 0,
+      },
+    },
+  };
+
+  if (projectId !== null) {
+    dto.repos = dto.repos.filter((repo) => repo.project_id === projectId);
+    dto.worktrees = dto.worktrees.filter((worktree) => worktree.target.project_id === projectId);
+    dto.preserved_branches = dto.preserved_branches.filter((branch) => branch.target.project_id === projectId);
+  }
+  return recontarInventario(dto);
+}
+
+function recontarInventario(dto) {
+  const states = ['tracked', 'missing_on_disk', 'not_registered', 'orphan_candidate', 'external', 'unknown'];
+  const allReviewable = [...dto.worktrees, ...dto.preserved_branches];
+  return {
+    ...dto,
+    warnings: {
+      ...dto.warnings,
+      branches_to_review: dto.filters.probe ? allReviewable.filter((entry) => entry.needs_review === true).length : null,
+      worktrees_by_state: Object.fromEntries(states.map((state) => [
+        state,
+        dto.worktrees.filter((worktree) => worktree.state === state).length,
+      ])),
+    },
+  };
+}
+
+function conWorktrees(dto, worktrees) {
+  return recontarInventario({ ...dto, worktrees });
+}
+
+function conRamasConservadas(dto, preserved_branches) {
+  return recontarInventario({ ...dto, preserved_branches });
+}
+
+/** El mismo DTO sin sondeo: `dirty`/`merged` quedan «no evaluado» y no hay contador de avisos. */
+function inventarioSinSondeo(projectId = null) {
+  const out = inventario({ probe: false, projectId });
+  out.worktrees = out.worktrees.map((worktree) => ({
+    ...worktree,
+    dirty: 'skipped',
+    merged: 'skipped',
+    needs_review: null,
+  }));
+  out.preserved_branches = out.preserved_branches.map((branch) => ({
+    ...branch,
+    merged: 'skipped',
+    needs_review: null,
+  }));
+  out.warnings = { ...out.warnings, branches_to_review: null };
+  return out;
+}
+
+describe('resource_inventory (adaptador de lectura)', () => {
+  /** El Core hace eco de los filtros que se le piden: el mock responde a lo que se le pidió. */
+  const mockInventario = (mutar) => invoke.mockImplementation((_cmd, payload) => {
+    const projectId = payload.args.project_id ?? null;
+    const probe = payload.args.probe ?? true;
+    const dto = probe ? inventario({ projectId }) : inventarioSinSondeo(projectId);
+    return mutar ? mutar(dto) : dto;
+  });
+
+  it('transporta solo los dos parámetros del contrato y el sondeo por defecto', async () => {
+    mockInventario();
+
+    await queryAdeCore('resource_inventory');
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'resource_inventory',
+      args: { probe: true },
+    });
+
+    await queryAdeCore('resource_inventory', { projectId: 'project-1', probe: false });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'resource_inventory',
+      args: { project_id: 'project-1', probe: false },
+    });
+  });
+
+  it('rechaza parámetros inválidos antes de preguntar al Core', async () => {
+    invoke.mockClear();
+
+    await expect(queryAdeCore('resource_inventory', { probe: 'si' }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('resource_inventory', { projectId: '  ' }))
+      .rejects.toThrow('ade_query_invalid_request');
+    await expect(queryAdeCore('resource_inventory', { projectId: 3 }))
+      .rejects.toThrow('ade_query_invalid_request');
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('exige que la respuesta sea la lectura que se pidió', async () => {
+    invoke.mockResolvedValue(inventario({ projectId: 'project-9' }));
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...inventario(), filters: { project_id: null, probe: false } });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...inventario(), v: 2 });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(inventario());
+    await expect(queryAdeCore('resource_inventory')).resolves.toEqual(inventario());
+  });
+
+  it('limita repos, worktrees y ramas conservadas al Project pedido', async () => {
+    const scoped = inventario({ projectId: 'project-1' });
+    invoke.mockResolvedValue(scoped);
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' })).resolves.toEqual(scoped);
+
+    const otherRepo = inventario().repos[1];
+    invoke.mockResolvedValue({ ...scoped, repos: [...scoped.repos, otherRepo] });
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    const otherWorktree = {
+      ...scoped.worktrees[0],
+      target: { ...scoped.worktrees[0].target, project_id: 'project-2' },
+    };
+    invoke.mockResolvedValue(conWorktrees(scoped, [otherWorktree, ...scoped.worktrees.slice(1)]));
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    const otherBranch = {
+      ...scoped.preserved_branches[0],
+      target: { ...scoped.preserved_branches[0].target, project_id: 'project-2' },
+    };
+    invoke.mockResolvedValue(conRamasConservadas(scoped, [otherBranch]));
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    const nullRepo = { project_id: null, machine: 'machine-1', path: '/tmp/unassigned', scan: 'ok' };
+    invoke.mockResolvedValue({ ...scoped, repos: [...scoped.repos, nullRepo] });
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    const nullProjectWorktree = {
+      ...scoped.worktrees[1],
+      target: { ...scoped.worktrees[1].target, project_id: null },
+    };
+    invoke.mockResolvedValue(conWorktrees(scoped, [scoped.worktrees[0], nullProjectWorktree]));
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    const nullProjectBranch = {
+      ...scoped.preserved_branches[0],
+      target: { ...scoped.preserved_branches[0].target, project_id: null },
+    };
+    invoke.mockResolvedValue(conRamasConservadas(scoped, [nullProjectBranch]));
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('exige que cada target corresponda a un repo por ruta, máquina y Project', async () => {
+    const base = inventario();
+    const repoUnavailable = base.repos[1];
+
+    const worktreeRepoMismatch = {
+      ...base.worktrees[0],
+      target: { ...base.worktrees[0].target, repo: repoUnavailable.path },
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [worktreeRepoMismatch, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const worktreeProjectMismatch = {
+      ...base.worktrees[0],
+      target: { ...base.worktrees[0].target, project_id: 'project-2' },
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [worktreeProjectMismatch, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const worktreeMachineMismatch = {
+      ...base.worktrees[0],
+      target: { ...base.worktrees[0].target, machine: null },
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [worktreeMachineMismatch, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const branchRepoMismatch = {
+      ...base.preserved_branches[0],
+      target: { ...base.preserved_branches[0].target, repo: repoUnavailable.path },
+    };
+    invoke.mockResolvedValue(conRamasConservadas(base, [branchRepoMismatch]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const branchProjectMismatch = {
+      ...base.preserved_branches[0],
+      target: { ...base.preserved_branches[0].target, project_id: 'project-2' },
+    };
+    invoke.mockResolvedValue(conRamasConservadas(base, [branchProjectMismatch]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const branchMachineMismatch = {
+      ...base.preserved_branches[0],
+      target: { ...base.preserved_branches[0].target, machine: null },
+    };
+    invoke.mockResolvedValue(conRamasConservadas(base, [branchMachineMismatch]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('permite candidatos externos sin Project solo cuando no se pidió un filtro', async () => {
+    const base = inventario();
+    const nullRepo = { project_id: null, machine: 'machine-1', path: '/tmp/unassigned', scan: 'ok' };
+    const nullProjectWorktree = {
+      ...base.worktrees[1],
+      target: { ...base.worktrees[1].target, project_id: null, repo: '/tmp/unassigned', path: '/tmp/unassigned/wt' },
+    };
+    const unfiltered = recontarInventario({
+      ...base,
+      repos: [...base.repos, nullRepo],
+      worktrees: [...base.worktrees, nullProjectWorktree],
+    });
+
+    invoke.mockResolvedValue(unfiltered);
+    await expect(queryAdeCore('resource_inventory')).resolves.toEqual(unfiltered);
+
+    const filteredBase = inventario({ projectId: 'project-1' });
+    const filtered = recontarInventario({
+      ...filteredBase,
+      repos: [...filteredBase.repos, nullRepo],
+      worktrees: [...filteredBase.worktrees, nullProjectWorktree],
+    });
+    invoke.mockResolvedValue(filtered);
+    await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))
+      .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza un inventario con vocabulario fuera del contrato', async () => {
+    const base = inventario();
+
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], state: 'perdido' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], dirty: 'limpio' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], merged: 'fusionado' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], physical: 'perdido' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], origin: 'sistema' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      repos: [{ ...base.repos[0], scan: 'tal_vez' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('no confunde «no evaluado» con «limpio» ni con «fusionado»', async () => {
+    const sinSondeo = inventarioSinSondeo();
+    invoke.mockResolvedValue(sinSondeo);
+
+    const respuesta = await queryAdeCore('resource_inventory', { probe: false });
+    expect(respuesta.worktrees[0].dirty).toBe('skipped');
+    expect(respuesta.worktrees[0].merged).toBe('skipped');
+    expect(respuesta.preserved_branches[0].merged).toBe('skipped');
+    expect(respuesta.worktrees[0].needs_review).toBeNull();
+    expect(respuesta.warnings.branches_to_review).toBeNull();
+
+    // Sin sondeo el Core no evaluó nada: un «limpio» aquí es un dato inventado.
+    invoke.mockResolvedValue({
+      ...sinSondeo,
+      worktrees: [{ ...sinSondeo.worktrees[0], dirty: 'clean' }],
+    });
+    await expect(queryAdeCore('resource_inventory', { probe: false }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...sinSondeo,
+      worktrees: [{ ...sinSondeo.worktrees[0], needs_review: false }],
+    });
+    await expect(queryAdeCore('resource_inventory', { probe: false }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    // Con sondeo, «no evaluado» solo es coherente si no hay carpeta que mirar: con la carpeta
+    // presente y registrada en git, el Core sí evaluó `dirty` y un `skipped` ahí es incoherente.
+    const conSondeo = inventario();
+    invoke.mockResolvedValue({
+      ...conSondeo,
+      worktrees: [{ ...conSondeo.worktrees[0], dirty: 'skipped' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Sin carpeta que mirar, «no evaluado» es lo coherente y se conserva tal cual: no se
+    // reescribe como «limpio» ni como «fusionado».
+    const sinCarpeta = conWorktrees(conSondeo, [{
+      ...conSondeo.worktrees[0],
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    }]);
+    invoke.mockResolvedValue(sinCarpeta);
+    const respuestaSinCarpeta = await queryAdeCore('resource_inventory');
+    expect(respuestaSinCarpeta.worktrees[0].dirty).toBe('skipped');
+    expect(respuestaSinCarpeta.worktrees[0].merged).toBe('unknown');
+  });
+
+  it('exige que los avisos coincidan con el propio inventario', async () => {
+    const base = inventario();
+
+    invoke.mockResolvedValue({ ...base, warnings: { ...base.warnings, branches_to_review: 5 } });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      warnings: { ...base.warnings, worktrees_by_state: { ...base.warnings.worktrees_by_state, tracked: 7 } },
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Sin sondeo no hay contador de avisos.
+    const sinSondeo = inventarioSinSondeo();
+    invoke.mockResolvedValue({ ...sinSondeo, warnings: { ...sinSondeo.warnings, branches_to_review: 2 } });
+    await expect(queryAdeCore('resource_inventory', { probe: false }))
+      .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('exige que branches_to_review sea un número con sondeo y null sin sondeo', async () => {
+    const base = inventario();
+
+    // Con sondeo el aviso es un veredicto numérico: que falte no es «cero ramas por revisar».
+    invoke.mockResolvedValue({ ...base, warnings: { ...base.warnings, branches_to_review: null } });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...base, warnings: { ...base.warnings, branches_to_review: '2' } });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Sin sondeo el Core no evaluó nada: el contador es null, nunca un número.
+    const sinSondeo = inventarioSinSondeo();
+    invoke.mockResolvedValue({ ...sinSondeo, warnings: { ...sinSondeo.warnings, branches_to_review: 0 } });
+    await expect(queryAdeCore('resource_inventory', { probe: false }))
+      .rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(base);
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    invoke.mockResolvedValue(sinSondeo);
+    await expect(queryAdeCore('resource_inventory', { probe: false })).resolves.toBeTruthy();
+  });
+
+  it('rechaza un estado que no cuadra con el disco ni con lo que dijo git', async () => {
+    const base = inventario();
+    const tracked = base.worktrees[0];
+
+    // `tracked` con un git que no lo registra.
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...tracked, git: { ...tracked.git, registered: false } }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // El estado dice `tracked`, pero el disco dice `missing`: ambos campos deben concordar.
+    invoke.mockResolvedValue(conWorktrees(base, [{ ...tracked, physical: 'missing' }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // A la inversa, `missing_on_disk` con el disco presente también contradice la matriz.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'missing_on_disk',
+      git: { ...tracked.git, prunable: true },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // La existencia física determina missing_on_disk; prunable solo refleja el tag que Git emitió.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'missing_on_disk',
+      physical: 'missing',
+      dirty: 'skipped',
+      git: { ...tracked.git, locked: true, prunable: false },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    // La etiqueta sí puede venir presente cuando Git marca la entrada como podable.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'missing_on_disk',
+      physical: 'missing',
+      dirty: 'skipped',
+      git: { ...tracked.git, prunable: true },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    const missingUnowned = {
+      ...base.worktrees[1],
+      state: 'missing_on_disk',
+      physical: 'missing',
+      dirty: 'skipped',
+      git: { ...base.worktrees[1].git, locked: true, prunable: false },
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [missingUnowned]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    // `unknown` + `present` + git registrado + origen Task no es una combinación del productor.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'unknown',
+      git: { ...tracked.git, registered: true },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('solo acepta dirty cuando la carpeta está presente y git confirma el registro', async () => {
+    const base = inventario();
+    const tracked = base.worktrees[0];
+
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'dirty',
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'not_registered',
+      git: { registered: false, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'clean',
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [{ ...tracked, dirty: 'skipped' }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('acepta unknown con disco no comprobable para Tasks y candidatos sin dueño', async () => {
+    const base = inventario();
+    const taskUnknown = {
+      ...base.worktrees[0],
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+    };
+    const externalUnknown = {
+      ...base.worktrees[1],
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+    };
+    const orphanUnknown = {
+      ...base.worktrees[1],
+      target: { ...base.worktrees[1].target, path: '/home/ana/app.lixbon-wt/orphan' },
+      state: 'unknown',
+      origin: 'lixbon_dir',
+      physical: 'unknown',
+      dirty: 'skipped',
+    };
+    const unknownDisk = conWorktrees(base, [taskUnknown, externalUnknown, orphanUnknown]);
+    invoke.mockResolvedValue(unknownDisk);
+    await expect(queryAdeCore('resource_inventory')).resolves.toEqual(unknownDisk);
+
+    // Si existe el directorio pero git no respondió, solo una Task puede conocer el worktree.
+    const gitUnavailable = conWorktrees({
+      ...base,
+      repos: [{ ...base.repos[0], scan: 'unavailable', reason: 'git_failed' }],
+      preserved_branches: [],
+    }, [{
+      ...base.worktrees[0],
+      state: 'unknown',
+      git: { registered: null, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    }]);
+    invoke.mockResolvedValue(gitUnavailable);
+    await expect(queryAdeCore('resource_inventory')).resolves.toEqual(gitUnavailable);
+  });
+
+  it('relaciona scan del repo con registro Git y existencia de ramas', async () => {
+    const base = inventario();
+
+    const unavailableWithGitFacts = conWorktrees({
+      ...base,
+      repos: [{ ...base.repos[0], scan: 'unavailable', reason: 'git_failed' }],
+      preserved_branches: [],
+    }, base.worktrees);
+    invoke.mockResolvedValue(unavailableWithGitFacts);
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const scannedWithoutRegistration = conWorktrees(base, [{
+      ...base.worktrees[0],
+      state: 'unknown',
+      git: { registered: null, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    }]);
+    invoke.mockResolvedValue(scannedWithoutRegistration);
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const registeredWithoutGitFacts = conWorktrees(base, [{
+      ...base.worktrees[0],
+      git: { ...base.worktrees[0].git, detached: null, locked: null, prunable: null },
+    }]);
+    invoke.mockResolvedValue(registeredWithoutGitFacts);
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const unavailableBranch = conWorktrees({
+      ...base,
+      repos: [{ ...base.repos[0], scan: 'unavailable', reason: 'git_failed' }],
+      preserved_branches: [{ ...base.preserved_branches[0], branch_exists: true }],
+    }, []);
+    invoke.mockResolvedValue(unavailableBranch);
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('limita los merges de worktrees cuando el escaneo Git no está disponible', async () => {
+    const base = inventario();
+    const unavailable = (overrides) => conWorktrees({
+      ...base,
+      repos: [{ ...base.repos[0], scan: 'unavailable', reason: 'git_failed' }],
+      preserved_branches: [],
+    }, [{
+      ...base.worktrees[0],
+      state: 'unknown',
+      git: { registered: null, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+      ...overrides,
+    }]);
+
+    invoke.mockResolvedValue(unavailable({ merged: 'unknown' }));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    // Task.merged puede suministrar el valor sin un escaneo local.
+    invoke.mockResolvedValue(unavailable({ merged: 'merged' }));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    invoke.mockResolvedValue(unavailable({ merged: 'unmerged' }));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(unavailable({ merged: 'unmerged', needs_review: true }));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza estados y orígenes incompatibles del worktree', async () => {
+    const base = inventario();
+    const tracked = base.worktrees[0];
+    const external = base.worktrees[1];
+
+    // Un unknown con disco no comprobable sigue siendo una Task conocida y no puede perder su dueño.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...tracked,
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+      owner: null,
+      needs_review: false,
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // `orphan_candidate` es el worktree bajo <repo>.lixbon-wt/ que nadie declara, no otro origen.
+    invoke.mockResolvedValue(conWorktrees(base, [{ ...external, state: 'orphan_candidate', origin: 'external' }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // `tracked` sin Task que lo declare no es `tracked`.
+    invoke.mockResolvedValue(conWorktrees(base, [{ ...tracked, origin: 'lixbon_dir', needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Un candidato unknown sin dueño todavía debe venir de una worktree que git sí listó.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...external,
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+      git: { ...external.git, registered: null },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Un candidato unknown tampoco puede ser un worktree que git consultó y no registró.
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...external,
+      state: 'unknown',
+      physical: 'unknown',
+      dirty: 'skipped',
+      git: { ...external.git, registered: false },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza un repo o un worktree de otra máquina que no sale como other_machine', async () => {
+    const base = inventario();
+
+    // Otra máquina: el motivo es su propio motivo.
+    invoke.mockResolvedValue({
+      ...base,
+      repos: [{ ...base.repos[2], reason: 'git_failed' }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Una ubicación de otra máquina sale como `other_machine`, no escaneada.
+    invoke.mockResolvedValue({ ...base, repos: [{ ...base.repos[0], machine: 'otro-equipo' }] });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...base, repos: [{ ...base.repos[2], machine: null }] });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({ ...base, repos: [{ ...base.repos[2], project_id: null }] });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // El Core no ejecuta git en otro host: no puede haber worktrees de otra máquina.
+    invoke.mockResolvedValue({
+      ...base,
+      worktrees: [{ ...base.worktrees[0], target: { ...base.worktrees[0].target, machine: 'otro-equipo' } }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('no permite targets de repos other_machine y exige la máquina del Core cuando existe', async () => {
+    const base = inventario();
+    const targetOtherMachine = {
+      ...base.worktrees[0].target,
+      machine: 'otro-equipo',
+      project_id: 'project-3',
+      repo: '/srv/remoto',
+    };
+    invoke.mockResolvedValue({
+      ...base,
+      machine: null,
+      worktrees: [{ ...base.worktrees[0], target: targetOtherMachine }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      machine: null,
+      preserved_branches: [{ ...base.preserved_branches[0], target: { ...targetOtherMachine, branch: 'lx/r/g' } }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue({
+      ...base,
+      repos: [{ ...base.repos[0], machine: null }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('requiere machine null en repos y targets locales cuando Core no informa machine', async () => {
+    const base = inventario();
+    const withoutMachine = {
+      ...base,
+      machine: null,
+      repos: base.repos.map((repo) => repo.scan === 'other_machine' ? repo : { ...repo, machine: null }),
+      worktrees: base.worktrees.map((worktree) => ({
+        ...worktree,
+        target: { ...worktree.target, machine: null },
+      })),
+      preserved_branches: base.preserved_branches.map((branch) => ({
+        ...branch,
+        target: { ...branch.target, machine: null },
+      })),
+    };
+
+    invoke.mockResolvedValue(withoutMachine);
+    await expect(queryAdeCore('resource_inventory')).resolves.toEqual(withoutMachine);
+
+    // Repo y target coinciden entre sí, pero no con machine=null del Core.
+    const nonNullLocalMachine = {
+      ...withoutMachine,
+      repos: withoutMachine.repos.map((repo) => repo.scan === 'other_machine' ? repo : { ...repo, machine: 'machine-1' }),
+      worktrees: withoutMachine.worktrees.map((worktree) => ({
+        ...worktree,
+        target: { ...worktree.target, machine: 'machine-1' },
+      })),
+      preserved_branches: withoutMachine.preserved_branches.map((branch) => ({
+        ...branch,
+        target: { ...branch.target, machine: 'machine-1' },
+      })),
+    };
+    invoke.mockResolvedValue(nonNullLocalMachine);
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza una rama conservada que git da por inexistente y que a la vez pide revisar', async () => {
+    const base = inventario();
+    // El contador de avisos sigue cuadrando: lo único que falla es la contradicción de la rama.
+    invoke.mockResolvedValue({
+      ...base,
+      preserved_branches: [{ ...base.preserved_branches[0], branch_exists: false }],
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza merged=unmerged en una rama conservada cuando el repo no se pudo escanear', async () => {
+    const base = inventario();
+    const repos = [
+      { ...base.repos[0], scan: 'unavailable', reason: 'git_failed' },
+      ...base.repos.slice(1),
+    ];
+    const preserved = {
+      ...base.preserved_branches[0],
+      branch_exists: null,
+      merged: 'unmerged',
+      needs_review: false,
+    };
+    invoke.mockResolvedValue(conRamasConservadas({ ...base, repos, worktrees: [] }, [preserved]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conRamasConservadas({ ...base, repos, worktrees: [] }, [{
+      ...preserved,
+      merged: 'unknown',
+    }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+  });
+
+  it('rechaza un veredicto needs_review incoherente con una sola variación', async () => {
+    const base = inventario();
+    invoke.mockResolvedValue(conWorktrees(base, [
+      base.worktrees[0],
+      { ...base.worktrees[1], needs_review: true },
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conRamasConservadas(base, [{
+      ...base.preserved_branches[0],
+      needs_review: false,
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza mismatches aislados de machine en repos y targets', async () => {
+    const base = inventario();
+    invoke.mockResolvedValue({
+      ...base,
+      repos: base.repos.map((repo, index) => index === 1 ? { ...repo, machine: null } : repo),
+    });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [
+      { ...base.worktrees[0], target: { ...base.worktrees[0].target, machine: null } },
+      base.worktrees[1],
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conRamasConservadas(base, [{
+      ...base.preserved_branches[0],
+      target: { ...base.preserved_branches[0].target, machine: null },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza state y physical contradictorios en las dos direcciones', async () => {
+    const base = inventario();
+    const task = base.worktrees[0];
+    invoke.mockResolvedValue(conWorktrees(base, [
+      { ...task, physical: 'missing', dirty: 'skipped' },
+      base.worktrees[1],
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [
+      { ...task, state: 'missing_on_disk' },
+      base.worktrees[1],
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza registered=false/null incompatibles y conserva missing_on_disk conocido por Task', async () => {
+    const base = inventario();
+    const task = base.worktrees[0];
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...task,
+      git: { registered: false, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    }, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [{
+      ...task,
+      state: 'unknown',
+      git: { registered: null, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    }, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const missingUnregistered = {
+      ...task,
+      state: 'missing_on_disk',
+      physical: 'missing',
+      git: { registered: false, branch: null, detached: null, locked: null, prunable: null },
+      dirty: 'skipped',
+      merged: 'unknown',
+      needs_review: false,
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [missingUnregistered, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    const unavailableRepos = [
+      { ...base.repos[0], scan: 'unavailable', reason: 'git_failed' },
+      ...base.repos.slice(1),
+    ];
+    invoke.mockResolvedValue(conWorktrees({ ...base, repos: unavailableRepos, preserved_branches: [] }, [{
+      ...missingUnregistered,
+      git: { registered: null, branch: null, detached: null, locked: null, prunable: null },
+    }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+  });
+
+  it('rechaza incoherencias aisladas entre origin y owner', async () => {
+    const base = inventario();
+    const task = base.worktrees[0];
+    const external = base.worktrees[1];
+
+    invoke.mockResolvedValue(conWorktrees(base, [
+      { ...task, owner: null, needs_review: false },
+      external,
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockResolvedValue(conWorktrees(base, [
+      task,
+      { ...external, owner: { task_id: 't-9', run_id: 'r-1', status: 'done' } },
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // `lixbon_dir` también identifica un candidato sin dueño; el resto del DTO mantiene coherencia.
+    invoke.mockResolvedValue(conWorktrees(base, [
+      task,
+      {
+        ...external,
+        state: 'orphan_candidate',
+        origin: 'lixbon_dir',
+        owner: { task_id: 't-9', run_id: 'r-1', status: 'done' },
+      },
+    ]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('valida needs_review con los campos visibles sin inferir existencia de ramas de worktrees', async () => {
+    const base = inventario();
+    const task = base.worktrees[0];
+    const preserved = base.preserved_branches[0];
+
+    // El DTO de worktrees no expone branch_exists; git.branch no permite inferir ese resultado.
+    const unknownBranch = {
+      ...task,
+      git: { ...task.git, branch: null },
+      needs_review: false,
+    };
+    invoke.mockResolvedValue(conWorktrees(base, [unknownBranch, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    // Una Task aún activa no cuenta aunque su rama esté sin fusionar.
+    const activeTask = { ...task, owner: { ...task.owner, status: 'running' }, needs_review: false };
+    invoke.mockResolvedValue(conWorktrees(base, [activeTask, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    for (const invalidTask of [
+      { ...task, merged: 'unknown' },
+      { ...task, merged: 'merged' },
+      { ...task, owner: { ...task.owner, status: 'running' } },
+    ]) {
+      invoke.mockResolvedValue(conWorktrees(base, [invalidTask, base.worktrees[1]]));
+      await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+    }
+
+    const externalClaimedForReview = { ...base.worktrees[1], needs_review: true };
+    invoke.mockResolvedValue(conWorktrees(base, [task, externalClaimedForReview]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Para ramas conservadas `branch_exists` sí es explícito: true + unmerged exige needs_review=true.
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Con existencia desconocida, merged=unmerged puede venir de merge-base, pero no se confirma revisión.
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, branch_exists: null, needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, branch_exists: null }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // Sin existencia no puede haber estado unmerged; con rama inexistente y merged desconocido, false sí cuadra.
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, branch_exists: false, merged: 'unmerged', needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, branch_exists: false, merged: 'unknown', needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).resolves.toBeTruthy();
+
+    // Las ramas conservadas proceden de una Task y no pueden perder su dueño.
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, owner: null }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    // El productor nunca devuelve skipped con probe=true; sin probe sí se conserva.
+    invoke.mockResolvedValue(conWorktrees(base, [{ ...task, merged: 'skipped' }, base.worktrees[1]]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+    invoke.mockResolvedValue(conRamasConservadas(base, [{ ...preserved, merged: 'skipped', needs_review: false }]));
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    const withoutProbe = inventarioSinSondeo();
+    invoke.mockResolvedValue(withoutProbe);
+    await expect(queryAdeCore('resource_inventory', { probe: false })).resolves.toEqual(withoutProbe);
+  });
+
+  it('readAdeResources devuelve el DTO del Core tal cual, sin traducirlo', async () => {
+    const base = inventario({ projectId: 'project-1' });
+    invoke.mockResolvedValue(base);
+
+    const respuesta = await readAdeResources({ projectId: 'project-1' });
+
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'resource_inventory',
+      args: { project_id: 'project-1', probe: true },
+    });
+    expect(respuesta).toEqual(base);
+    // Lo que no dice el Core no se inventa: sin dueño y sin evaluación siguen tal cual.
+    expect(respuesta.worktrees[1].owner).toBeNull();
+    expect(respuesta.worktrees[1].merged).toBe('unknown');
   });
 });
