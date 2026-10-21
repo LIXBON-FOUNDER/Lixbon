@@ -43,6 +43,7 @@ Hoy el intento es la propia `Task` (un solo intento por tarea; el anterior se pi
 - Son los ids de la tarea más **uno nuevo**, `pending_approval`. Hoy ese estado no existe en la tarea: vive fuera, como lanzamiento pendiente (`PendState::Pending`, id `pending`, ver §4). Reutilizar los ids hace que el corte Task/Attempt no obligue a reescribir `state.json`.
 - Correspondencia con el modelo (en español, solo para la interfaz): pendiente de aprobación = `pending_approval`; iniciando = `starting`; trabajando = `running`; esperando (pregunta / aprobación en la terminal) = `waiting` / `awaiting_terminal_approval`; entregado = `done`; fallido = `failed`; detenido = `stopped`.
 - Estado **derivado** de la Task tras el corte (reservado): `open`, `in_progress`, `in_review`, `integrated`, `discarded`.
+- **Intención** de la Task (`tasks.intent`, LXO-113, inerte hasta el corte; [`core/TASKS.md`](core/TASKS.md)): `open` · `discarded`. Es lo único de su estado que se guarda, porque es una decisión de la persona; el resto del estado derivado sale de sus Attempts.
 - Antes del corte **no** se consolidan como API: retry, resume, race, comparar ni historial de intentos.
 
 Campos de Task que son «del intento» (para el corte, no para H): `agent`, `model`, `effort`, `role`, `profile`, `status`, `phases`, `policy`, `report*`, `delivery_channel`, `model_*`, `approval_deadline`, `failure_reason`, `attempt_started`… (lista completa en `LIXBON-modelo-runtime.md` §2.2).

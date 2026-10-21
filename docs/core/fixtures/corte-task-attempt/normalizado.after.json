@@ -35,9 +35,11 @@
       "title": "Coordinar script",
       "spec": "",
       "repo": "/home/ana/viejo",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1791000000000,
-      "updated_at": 1791000500000
+      "updated_at": 1791000500000,
+      "discarded_at": null
     },
     {
       "id": "t17",
@@ -48,9 +50,11 @@
       "title": "Coordinar refactor",
       "spec": "",
       "repo": "/home/ana/app",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1792001000000,
-      "updated_at": 1792001200000
+      "updated_at": 1792001200000,
+      "discarded_at": null
     },
     {
       "id": "t2",
@@ -61,9 +65,11 @@
       "title": "Coordinar login",
       "spec": "",
       "repo": "/home/ana/app",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1792000000000,
-      "updated_at": 1792000900000
+      "updated_at": 1792000900000,
+      "discarded_at": null
     },
     {
       "id": "t3",
@@ -74,9 +80,11 @@
       "title": "API de sesiones",
       "spec": "Implementa /api/session.",
       "repo": "/home/ana/app",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1792000040000,
-      "updated_at": 1792000300000
+      "updated_at": 1792000300000,
+      "discarded_at": null
     },
     {
       "id": "t4",
@@ -87,9 +95,11 @@
       "title": "Formulario de login",
       "spec": "Pantalla de login.",
       "repo": "/home/ana/app",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1792000045000,
-      "updated_at": 1792000500000
+      "updated_at": 1792000500000,
+      "discarded_at": null
     },
     {
       "id": "t5",
@@ -100,9 +110,11 @@
       "title": "Tests de login",
       "spec": "Escribe tests del login.\n\n---\nSeguimiento:\nCubre también el logout.",
       "repo": "/home/ana/app",
+      "intent": "open",
       "origin": "legacy",
       "created_at": 1792000046000,
-      "updated_at": 1792000800000
+      "updated_at": 1792000800000,
+      "discarded_at": null
     }
   ],
   "attempts": [

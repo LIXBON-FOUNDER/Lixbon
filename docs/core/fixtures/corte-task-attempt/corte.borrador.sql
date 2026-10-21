@@ -1,46 +1,29 @@
 -- BORRADOR DE DISEÑO (LXO-112). NO es una migración: no vive en store/migrations/, build.rs no lo
 -- embebe y ningún binario lo ejecuta. Fija, de forma ejecutable, el mapeo legacy_state → tablas que
--- la ADR (docs/core/CORTE_TASK_ATTEMPT.md) describe. `verificar.py` lo aplica a la fixture sobre las
--- migraciones reales 001..006 y compara el resultado con `normalizado.after.json`.
+-- la ADR (docs/core/CORTE_TASK_ATTEMPT.md) describe. `verificar.py` lo aplica a la fixture sobre TODAS las
+-- migraciones publicadas anteriores al corte (001..007) y compara el resultado con `normalizado.after.json`.
 --
--- Cuando se implemente (LXO-113 en adelante) se copiará como `NNN_task_attempt.sql` con el siguiente
--- número libre y, desde ese momento, ese texto no se edita (checksum). Mismas reglas que toda
--- migración: una transacción (sin BEGIN/COMMIT), STRICT, ms epoch, identificadores TEXT.
+-- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113).
+-- Este borrador crea solo lo que todavía no está publicado; según se publique cada entidad, su CREATE sale de
+-- aquí. El corte real será `NNN_task_attempt_cut` (el siguiente número libre) y, desde ese momento, su texto
+-- no se edita (checksum). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms
+-- epoch, identificadores TEXT.
 --
 -- Orden dentro de la transacción:
---   1. DDL de las entidades nuevas.
+--   0. Activar el modelo (`meta.agentic_model`): los triggers de la 007 impiden escribir sin esa clave.
+--   1. DDL de las entidades que aún no tienen migración propia.
 --   2. Copia determinista desde legacy_state (solo SQL + JSON1: mismo documento ⇒ mismas filas).
 --   3. Residuo: lo que NO se mapea va a legacy_residue con un motivo, nunca se descarta en silencio.
 --   4. Asserts de conteo (una fila con CHECK (ok = 1)): si algo no cuadra, aborta TODA la migración.
 --   5. Congelar legacy_state (triggers) y registrar el corte en meta.
 
+-- ───────────────────────────── 0. Activar ─────────────────────────────
+-- Primero: sin esta clave, los triggers `*_inert_*` de la 007 abortan cualquier INSERT en runs y tasks.
+
+INSERT INTO meta (key, value) VALUES ('agentic_model', 'task_attempt_v1');
+
 -- ───────────────────────────── 1. DDL ─────────────────────────────
-
-CREATE TABLE runs (
-  id            TEXT    PRIMARY KEY,
-  objective     TEXT    NOT NULL,
-  root_task_id  TEXT    NOT NULL REFERENCES tasks (id) DEFERRABLE INITIALLY DEFERRED,
-  created_at    INTEGER NOT NULL,
-  closed        INTEGER NOT NULL CHECK (closed IN (0, 1)),
-  last_activity INTEGER NOT NULL
-) STRICT;
-
--- Task = intención durable. No tiene estado de ejecución propio: su estado se deriva de sus Attempts.
-CREATE TABLE tasks (
-  id             TEXT    PRIMARY KEY,
-  run_id         TEXT    NOT NULL REFERENCES runs (id) DEFERRABLE INITIALLY DEFERRED,
-  parent_task_id TEXT    REFERENCES tasks (id) DEFERRABLE INITIALLY DEFERRED,
-  depth          INTEGER NOT NULL CHECK (depth >= 0),
-  project_id     TEXT    REFERENCES projects (id),
-  title          TEXT    NOT NULL,
-  spec           TEXT    NOT NULL,
-  repo           TEXT    NOT NULL,            -- legacy: ruta local al crear (ver criterios de retirada)
-  origin         TEXT    NOT NULL CHECK (origin IN ('legacy', 'core')),
-  created_at     INTEGER NOT NULL,
-  updated_at     INTEGER NOT NULL,
-  -- Project pertenece a Task: solo una Task importada puede llegar sin Project (decisión D1).
-  CHECK (project_id IS NOT NULL OR origin = 'legacy')
-) STRICT;
+-- `runs` y `tasks` ya existen (007_tasks, LXO-113): tasks guarda la intención (`intent` = 'open' por defecto).
 
 -- Attempt = ejecución concreta. Un retry o un seguimiento crea otra fila (n + 1); nunca se pisa.
 CREATE TABLE attempts (
@@ -192,8 +175,6 @@ CREATE TABLE legacy_residue (
   PRIMARY KEY (entity_kind, legacy_id, field)
 ) STRICT;
 
-CREATE INDEX tasks_by_project ON tasks (project_id);
-CREATE INDEX tasks_by_run ON tasks (run_id);
 CREATE INDEX attempts_by_status ON attempts (status);
 CREATE INDEX thread_messages_by_thread ON thread_messages (thread_id, id);
 CREATE INDEX decisions_by_attempt ON decisions (attempt_id, kind, id);
@@ -435,7 +416,6 @@ DROP TABLE f3_msg;
 
 INSERT INTO meta (key, value) SELECT 'id_seq', CAST(coalesce(json_extract(doc, '$.seq'), 0) AS TEXT) FROM legacy_state;
 INSERT INTO meta (key, value) SELECT 'f3_cut_legacy_rev', CAST(rev AS TEXT) FROM legacy_state;
-INSERT INTO meta (key, value) VALUES ('agentic_model', 'task_attempt_v1');
 
 CREATE TRIGGER legacy_state_frozen_insert BEFORE INSERT ON legacy_state
 BEGIN SELECT RAISE(ABORT, 'legacy_state está congelado desde el corte Task/Attempt'); END;
