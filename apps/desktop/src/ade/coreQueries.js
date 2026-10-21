@@ -62,7 +62,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.run.closed', { required: { forced: 'boolean', stopped_total: 'integer' } }],
   ['activity.run.removed', { required: { tasks: 'integer' } }],
   ['activity.task.created', {
-    required: { title: 'string', agent: 'string', depth: 'integer', external: 'boolean' },
+    required: { title: 'text', agent: 'string', depth: 'integer', external: 'boolean' },
     optional: { role: 'string', model: 'string', parent: 'string' },
   }],
   ['activity.task.phase_started', { required: {} }],
@@ -70,52 +70,52 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.task.question', { required: { message_id: 'integer', to: 'string' } }],
   ['activity.task.reply', { required: { question_id: 'integer', message_id: 'integer' } }],
   ['activity.task.removed', { required: { cause: 'string' } }],
-  ['activity.task.review_requested', { required: { branch: 'string' } }],
+  ['activity.task.review_requested', { required: { branch: 'text' } }],
   ['activity.decision.review.accepted', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
   ['activity.decision.review.rejected', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
   ['activity.decision.merge.merged', {
-    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
     optional: { conflict_count: 'integer' },
   }],
   ['activity.decision.merge.conflict', {
-    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
     optional: { conflict_count: 'integer' },
   }],
   ['activity.decision.merge.error', {
-    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
     optional: { conflict_count: 'integer' },
   }],
   ['activity.decision.merge.target_moved', {
-    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    required: { decision_id: 'integer', branch: 'text', squash: 'boolean' },
     optional: { conflict_count: 'integer' },
   }],
-  ['activity.decision.pr.created', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
-  ['activity.decision.pr.already_exists', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
-  ['activity.decision.pr.error', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
-  ['activity.effect.git_merge.merged', { required: { effect_id: 'string', branch: 'string' } }],
-  ['activity.effect.git_merge.conflict', { required: { effect_id: 'string', branch: 'string' } }],
-  ['activity.effect.git_merge.error', { required: { effect_id: 'string', branch: 'string' } }],
-  ['activity.effect.git_push_pr.created', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
-  ['activity.effect.git_push_pr.already_exists', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
-  ['activity.effect.git_push_pr.error', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.created', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.already_exists', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.error', { required: { decision_id: 'integer', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_merge.merged', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_merge.conflict', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_merge.error', { required: { effect_id: 'string', branch: 'text' } }],
+  ['activity.effect.git_push_pr.created', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.already_exists', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.error', { required: { effect_id: 'string', branch: 'text', has_pr_url: 'boolean' } }],
   ['activity.effect.git_worktree.created', {
-    required: { effect_id: 'string', branch: 'string' },
-    optional: { base: 'string' },
+    required: { effect_id: 'string', branch: 'text' },
+    optional: { base: 'text' },
   }],
   ['activity.effect.git_worktree.removed', {
     required: { effect_id: 'string', worktree_removed: 'boolean', branch_deleted: 'boolean' },
-    optional: { branch: 'string' },
+    optional: { branch: 'text' },
   }],
   ['activity.effect.process.launched', { required: { effect_id: 'string' } }],
   ['activity.effect.process.not_launched', { required: { effect_id: 'string' } }],
-  ['activity.project.registered', { required: { name: 'string', origin: 'string', has_remote: 'boolean' } }],
+  ['activity.project.registered', { required: { name: 'text', origin: 'string', has_remote: 'boolean' } }],
   ['activity.project.location_added', { required: { primary: 'boolean', fingerprint_adopted: 'boolean' } }],
   ['activity.project.archived', { required: {} }],
   ['activity.project.restored', { required: {} }],
   ['activity.project.relocated', { required: { fingerprint_adopted: 'boolean', confirmed_mismatch: 'boolean' } }],
   ['activity.spawn.requested', {
     required: {
-      parent_task: 'string', title: 'string', provider: 'string', profile: 'string',
+      parent_task: 'string', title: 'text', provider: 'string', profile: 'string',
       shared: 'boolean', policy_status: 'string',
     },
     optional: { role: 'string', model: 'string', effort: 'string' },
@@ -310,6 +310,7 @@ function invalidResponse(query, detail) {
 const optionalText = (value) => value === null || value === undefined || typeof value === 'string';
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const nonEmptyText = (value) => typeof value === 'string' && Boolean(value.trim());
+const freeText = (value) => typeof value === 'string' && (value === '' || Boolean(value.trim()));
 const nonNegativeSafeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 
 function hasExactKeys(value, keys) {
@@ -326,6 +327,7 @@ function validActivityArgs(messageKey, args) {
   const fields = { ...required, ...optional };
   const validators = {
     string: nonEmptyText,
+    text: freeText,
     boolean: (value) => typeof value === 'boolean',
     integer: nonNegativeSafeInteger,
   };

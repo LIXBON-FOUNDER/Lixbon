@@ -171,6 +171,25 @@ describe('ActivityPanel', () => {
     expect(document.body.textContent).not.toContain('NO_INFERIR');
   });
 
+  it('muestra un fallback humano para texto libre vacío y conserva los demás eventos', async () => {
+    const technicalToken = 'TOKEN_TECNICO_NO_RENDERIZAR';
+    snapshot = readySnapshot([
+      activity(7, {
+        args: { title: '', agent: technicalToken, depth: 1, external: false },
+      }),
+      activity(6, {
+        event_id: 'event-6',
+        args: { title: 'Otra tarea', agent: 'codex', depth: 0, external: false },
+      }),
+    ], 1, { hasMore: false });
+    render(<ActivityPanel />);
+
+    expect(await screen.findAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByTestId('activity-message-event-7').textContent).toBe('Actividad sin descripción');
+    expect(screen.getByTestId('activity-message-event-6').textContent).toContain('Otra tarea');
+    expect(document.body.textContent).not.toContain(technicalToken);
+  });
+
   it('traduce activity.unknown con fallback=true usando solo los args permitidos', async () => {
     snapshot = readySnapshot([activity(7, {
       kind: 'task.teleported',
