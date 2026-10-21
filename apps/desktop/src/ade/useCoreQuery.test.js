@@ -56,6 +56,36 @@ describe('useCoreQuery', () => {
     expect(result.current.updatedAt).toBeGreaterThan(initialVersion);
   });
 
+  it('avanza readEpoch en cada lectura correcta aunque el payload sea idéntico y lo conserva al fallar', async () => {
+    let fail = false;
+    queryAdeCore.mockImplementation(async () => {
+      if (fail) throw new Error('ade_query_timeout: Core no respondió a tiempo');
+      return { projects: [{ id: 'project-1', name: 'Repo' }] };
+    });
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCoreQuery('projects_overview', {}, { pollMs: 1_000 }));
+
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const { data, updatedAt, readEpoch } = result.current;
+    expect(readEpoch).toBeGreaterThan(0);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result.current.data).toBe(data);
+    expect(result.current.updatedAt).toBe(updatedAt);
+    expect(result.current.readEpoch).toBe(readEpoch + 1);
+
+    fail = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result.current.status).toBe('stale');
+    expect(result.current.readEpoch).toBe(readEpoch + 1);
+
+    fail = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(result.current.status).toBe('ready');
+    expect(result.current.updatedAt).toBe(updatedAt);
+    expect(result.current.readEpoch).toBe(readEpoch + 2);
+  });
+
   it('marca disconnected si la query no responde dentro del plazo', async () => {
     queryAdeCore.mockImplementation(() => new Promise(() => {}));
     vi.useFakeTimers();

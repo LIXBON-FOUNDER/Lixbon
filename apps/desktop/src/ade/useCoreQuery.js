@@ -54,10 +54,10 @@ function sameData(left, right) {
 export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } = {}) {
   const argsJson = JSON.stringify(args);
   const requestKey = `${query}:${argsJson}`;
-  const [snapshot, setSnapshot] = useState({ key: null, status: 'idle', data: null, error: null, reason: null, updatedAt: null });
+  const [snapshot, setSnapshot] = useState({ key: null, status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0 });
   const [retryToken, setRetryToken] = useState(0);
-  const cache = useRef({ key: requestKey, data: null, updatedAt: null });
-  if (cache.current.key !== requestKey) cache.current = { key: requestKey, data: null, updatedAt: null };
+  const cache = useRef({ key: requestKey, data: null, updatedAt: null, readEpoch: 0 });
+  if (cache.current.key !== requestKey) cache.current = { key: requestKey, data: null, updatedAt: null, readEpoch: 0 };
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -67,8 +67,8 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
     const refresh = async () => {
       if (inFlight || document.visibilityState === 'hidden') return;
       inFlight = true;
-      const previous = cache.current.key === requestKey ? cache.current : { data: null, updatedAt: null };
-      setSnapshot({ key: requestKey, status: previous.data ? 'refreshing' : 'loading', data: previous.data, error: null, reason: null, updatedAt: previous.updatedAt });
+      const previous = cache.current.key === requestKey ? cache.current : { data: null, updatedAt: null, readEpoch: 0 };
+      setSnapshot({ key: requestKey, status: previous.data ? 'refreshing' : 'loading', data: previous.data, error: null, reason: null, updatedAt: previous.updatedAt, readEpoch: previous.readEpoch });
       let timeoutId;
       try {
         const queryTimeout = new Promise((_, reject) => {
@@ -85,8 +85,11 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
         const updatedAt = unchanged
           ? previous.updatedAt
           : Math.max(Date.now(), (previous.updatedAt ?? 0) + 1);
-        cache.current = { key: requestKey, data: snapshotData, updatedAt };
-        setSnapshot({ key: requestKey, status: isEmptyResult(query, snapshotData) ? 'empty' : 'ready', data: snapshotData, error: null, reason: null, updatedAt });
+        // readEpoch avanza en cada lectura correcta, incluso idéntica: acota qué datos derivados (p. ej. páginas
+        // posteriores) se obtuvieron antes de esa lectura. No cambia la semántica de data/updatedAt.
+        const readEpoch = previous.readEpoch + 1;
+        cache.current = { key: requestKey, data: snapshotData, updatedAt, readEpoch };
+        setSnapshot({ key: requestKey, status: isEmptyResult(query, snapshotData) ? 'empty' : 'ready', data: snapshotData, error: null, reason: null, updatedAt, readEpoch });
       } catch (error) {
         if (!alive) return;
         const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
@@ -98,6 +101,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
           error: message,
           reason: previous.data ? reason : null,
           updatedAt: previous.updatedAt,
+          readEpoch: previous.readEpoch,
         });
       } finally {
         if (timeoutId !== undefined) window.clearTimeout(timeoutId);
@@ -121,7 +125,7 @@ export function useCoreQuery(query, args, { enabled = true, pollMs = POLL_MS } =
   }, [query, argsJson, requestKey, enabled, pollMs, retryToken]);
 
   const retry = useCallback(() => setRetryToken((token) => token + 1), []);
-  if (!enabled) return { status: 'idle', data: null, error: null, reason: null, updatedAt: null, retry };
-  if (snapshot.key !== requestKey) return { status: 'loading', data: null, error: null, reason: null, updatedAt: null, retry };
+  if (!enabled) return { status: 'idle', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, retry };
+  if (snapshot.key !== requestKey) return { status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, retry };
   return { ...snapshot, retry };
 }

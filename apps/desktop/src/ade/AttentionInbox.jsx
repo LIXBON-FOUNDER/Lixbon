@@ -53,7 +53,7 @@ const TARGET_LABELS = {
 
 const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, hasLoadedPage: false, loading: false, error: null });
 
-const emptyPages = (key, headData = null, headUpdatedAt = null) => ({ ...EMPTY_PAGES, key, headData, headUpdatedAt, items: [] });
+const emptyPages = (key, headData = null, headReadEpoch = 0) => ({ ...EMPTY_PAGES, key, headData, headReadEpoch, items: [] });
 
 const label = (labels, code) => labels[code] || code;
 
@@ -215,7 +215,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const itemRefs = useRef([]);
   const loadingMore = useRef(null);
   const pageGeneration = useRef(0);
-  const pageContext = useRef({ key: filterKey, headData: null, updatedAt: null });
+  const pageContext = useRef({ key: filterKey, headData: null, readEpoch: 0 });
 
   const filters = useMemo(() => ({
     project_id: projectId || null,
@@ -229,31 +229,31 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const list = useCoreQuery('attention_list', filters, { enabled: active, pollMs });
   const overview = useCoreQuery('projects_overview', { archived: 'include' }, { enabled: active, pollMs });
 
-  // El sondeo predeterminado de 15 s actualiza solo la cabecera. Cada respuesta nueva inicia una
-  // navegación keyset nueva: se descartan páginas anexadas porque sus filas pueden haberse resuelto.
+  // El sondeo predeterminado de 15 s actualiza solo la cabecera. Cada lectura correcta inicia una
+  // navegación keyset nueva, aunque la cabecera sea idéntica (misma data/updatedAt): una página posterior
+  // pudo cambiar sin alterar la cabecera, así que sus filas anexadas y su total ya no son exactos.
   // Core no ofrece una instantánea compartida entre páginas ni un change feed.
   useLayoutEffect(() => {
     if (pageContext.current.key === filterKey && pageContext.current.headData === list.data
-      && pageContext.current.updatedAt === list.updatedAt) return;
-    pageContext.current = { key: filterKey, headData: list.data, updatedAt: list.updatedAt };
+      && pageContext.current.readEpoch === list.readEpoch) return;
+    pageContext.current = { key: filterKey, headData: list.data, readEpoch: list.readEpoch };
     pageGeneration.current += 1;
     loadingMore.current = null;
-    setPages(emptyPages(filterKey, list.data, list.updatedAt));
+    setPages(emptyPages(filterKey, list.data, list.readEpoch));
     setFocusIndex(0);
-  }, [filterKey, list.data, list.updatedAt]);
+  }, [filterKey, list.data, list.readEpoch]);
 
   // Si el Core deja de responder, los cursores del proceso anterior dejan de ser válidos. Al volver,
   // se reinicia desde la primera página (contrato LXO-89) en vez de mezclar páginas de dos sesiones.
-  // La cabecera retenida se conserva como contexto de esa primera página: si la reconexión devuelve
-  // los mismos datos, `updatedAt` no cambia y el efecto de cabecera no reinicia `pages`; sin este
-  // contexto, «Cargar más» seguiría pidiendo páginas que luego descartaría.
+  // La cabecera retenida se conserva como contexto de esa primera página mientras dura el fallo; la
+  // primera lectura correcta posterior avanza `readEpoch` y vuelve a reiniciar `pages` con la cabecera nueva.
   const headFailure = ['stale', 'disconnected', 'degraded', 'error'].includes(list.status);
   useLayoutEffect(() => {
     if (!headFailure) return;
     pageGeneration.current += 1;
     loadingMore.current = null;
-    setPages((current) => emptyPages(current.key, list.data, list.updatedAt));
-  }, [headFailure, list.data, list.updatedAt]);
+    setPages((current) => emptyPages(current.key, list.data, list.readEpoch));
+  }, [headFailure, list.data, list.readEpoch]);
 
   // Un aviso de cursor caducado pertenece a la consulta anterior: no se arrastra a otro filtro ni target.
   useLayoutEffect(() => {
@@ -261,7 +261,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   }, [filterKey]);
 
   // A head response is visible immediately; never render pages whose cursor came from an older head.
-  const pageState = pages.key === filterKey && pages.headData === list.data && pages.headUpdatedAt === list.updatedAt
+  const pageState = pages.key === filterKey && pages.headData === list.data && pages.headReadEpoch === list.readEpoch
     ? pages
     : EMPTY_PAGES;
   const items = useMemo(() => {
@@ -319,10 +319,10 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
     loadingMore.current = requestToken;
     const requestedKey = filterKey;
     const requestedHead = list.data;
-    const requestedHeadUpdatedAt = list.updatedAt;
+    const requestedHeadReadEpoch = list.readEpoch;
     const requestedGeneration = pageGeneration.current;
     setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
-      || current.headUpdatedAt !== requestedHeadUpdatedAt ? current : {
+      || current.headReadEpoch !== requestedHeadReadEpoch ? current : {
         ...current,
         loading: true,
         error: null,
@@ -338,7 +338,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
       });
       if (pageGeneration.current !== requestedGeneration) return;
       setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
-        || current.headUpdatedAt !== requestedHeadUpdatedAt
+        || current.headReadEpoch !== requestedHeadReadEpoch
         || pageGeneration.current !== requestedGeneration ? current : {
           ...current,
           items: [...current.items, ...page.items],
@@ -355,20 +355,20 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
         // El Core rotó su clave (reinicio): se vuelve a la primera página, sin duplicar.
         setRecoveryNotice('El Core se reinició y el cursor caducó: se volvió a la primera página.');
         setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
-          || current.headUpdatedAt !== requestedHeadUpdatedAt
+          || current.headReadEpoch !== requestedHeadReadEpoch
           || pageGeneration.current !== requestedGeneration ? current : {
-            ...emptyPages(requestedKey, requestedHead, requestedHeadUpdatedAt),
+            ...emptyPages(requestedKey, requestedHead, requestedHeadReadEpoch),
           }));
         list.retry();
       } else {
         setPages((current) => (current.key !== requestedKey || current.headData !== requestedHead
-          || current.headUpdatedAt !== requestedHeadUpdatedAt
+          || current.headReadEpoch !== requestedHeadReadEpoch
           || pageGeneration.current !== requestedGeneration ? current : { ...current, loading: false, error: message }));
       }
     } finally {
       if (loadingMore.current === requestToken) loadingMore.current = null;
     }
-  }, [moreCursor, projectId, targetKind, targetId, category, severity, filterKey, list.data, list.updatedAt, list.retry]);
+  }, [moreCursor, projectId, targetKind, targetId, category, severity, filterKey, list.data, list.readEpoch, list.retry]);
 
   const onItemKeyDown = useCallback((event, index) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
