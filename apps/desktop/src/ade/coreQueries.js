@@ -55,6 +55,59 @@ const ACTIVITY_ORDER_SET = new Set(['asc', 'desc']);
 const ACTIVITY_CLASS_SET = new Set(['state', 'effect', 'decision', 'system']);
 const ACTIVITY_VISUAL_SET = new Set(['info', 'success', 'warning', 'error']);
 const ACTIVITY_ACTOR_KIND_SET = new Set(['person', 'agent', 'system']);
+const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
+const ACTIVITY_SAFE_INTEGER_MAX = BigInt(Number.MAX_SAFE_INTEGER);
+
+const ACTIVITY_ARGS_KEYS = new Map([
+  ['activity.run.created', new Set(['root_task'])],
+  ['activity.run.closed', new Set(['forced', 'stopped_total'])],
+  ['activity.run.removed', new Set(['tasks'])],
+  ['activity.task.created', new Set(['title', 'agent', 'role', 'model', 'parent', 'depth', 'external'])],
+  ['activity.task.phase_started', new Set()],
+  ['activity.task.phase_done', new Set()],
+  ['activity.task.question', new Set(['message_id', 'to'])],
+  ['activity.task.reply', new Set(['question_id', 'message_id'])],
+  ['activity.task.removed', new Set(['cause'])],
+  ['activity.task.review_requested', new Set(['branch'])],
+  ['activity.decision.review.accepted', new Set(['decision_id', 'has_comment'])],
+  ['activity.decision.review.rejected', new Set(['decision_id', 'has_comment'])],
+  ['activity.decision.merge.merged', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
+  ['activity.decision.merge.conflict', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
+  ['activity.decision.merge.error', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
+  ['activity.decision.merge.target_moved', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
+  ['activity.decision.pr.created', new Set(['decision_id', 'branch', 'has_pr_url'])],
+  ['activity.decision.pr.already_exists', new Set(['decision_id', 'branch', 'has_pr_url'])],
+  ['activity.decision.pr.error', new Set(['decision_id', 'branch', 'has_pr_url'])],
+  ['activity.effect.git_merge.merged', new Set(['effect_id', 'branch'])],
+  ['activity.effect.git_merge.conflict', new Set(['effect_id', 'branch'])],
+  ['activity.effect.git_merge.error', new Set(['effect_id', 'branch'])],
+  ['activity.effect.git_push_pr.created', new Set(['effect_id', 'branch', 'has_pr_url'])],
+  ['activity.effect.git_push_pr.already_exists', new Set(['effect_id', 'branch', 'has_pr_url'])],
+  ['activity.effect.git_push_pr.error', new Set(['effect_id', 'branch', 'has_pr_url'])],
+  ['activity.effect.git_worktree.created', new Set(['effect_id', 'branch', 'base'])],
+  ['activity.effect.git_worktree.removed', new Set(['effect_id', 'worktree_removed', 'branch', 'branch_deleted'])],
+  ['activity.effect.process.launched', new Set(['effect_id'])],
+  ['activity.effect.process.not_launched', new Set(['effect_id'])],
+  ['activity.project.registered', new Set(['name', 'origin', 'has_remote'])],
+  ['activity.project.location_added', new Set(['primary', 'fingerprint_adopted'])],
+  ['activity.project.archived', new Set()],
+  ['activity.project.restored', new Set()],
+  ['activity.project.relocated', new Set(['fingerprint_adopted', 'confirmed_mismatch'])],
+  ['activity.spawn.requested', new Set(['parent_task', 'title', 'provider', 'profile', 'role', 'model', 'effort', 'shared', 'policy_status'])],
+  ['activity.environment.blocked', new Set(['provider', 'profile', 'code'])],
+  ['activity.environment.cleared', new Set(['provider', 'profile', 'code'])],
+  ['activity.attention.risk_acted', new Set(['resolution'])],
+  ['activity.attention.created', new Set(['category', 'severity', 'occurrence', 'target_kind', 'target_id'])],
+  ['activity.attention.resolved', new Set(['resolution'])],
+  ['activity.unknown', new Set(['reason', 'kind', 'event_version'])],
+]);
+
+for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']) {
+  ACTIVITY_ARGS_KEYS.set(`activity.task.${state}`, new Set(['from', 'to', 'cause']));
+}
+for (const outcome of ['approved', 'rejected', 'launch_failed', 'timeout', 'coordinator_closed', 'cancelled_run_removed']) {
+  ACTIVITY_ARGS_KEYS.set(`activity.spawn.${outcome}`, new Set(['task', 'has_reason']));
+}
 
 const ACTIVITY_RESPONSE_KEYS = ['v', 'projection', 'order', 'items', 'next_cursor', 'has_more', 'head_seq', 'limit'];
 const ACTIVITY_ITEM_KEYS = [
@@ -105,6 +158,32 @@ function activityFilter(value, name) {
   return filter;
 }
 
+// Tauri transports Activity i64 fields as decimal strings; keep large values exact and
+// normalize only values that JavaScript can represent safely back to Number.
+function activityI64(value) {
+  if (typeof value === 'bigint') {
+    return value >= 0n && value <= ACTIVITY_I64_MAX ? value : null;
+  }
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
+  }
+  if (typeof value !== 'string' || value.length > 19 || !/^(0|[1-9]\d*)$/.test(value)) return null;
+  const parsed = BigInt(value);
+  return parsed <= ACTIVITY_I64_MAX ? parsed : null;
+}
+
+function activityRequestCursor(value) {
+  const cursor = activityI64(value);
+  if (cursor === null) {
+    throw new Error('ade_query_invalid_request: cursor debe ser un entero i64 no negativo y exacto');
+  }
+  return cursor <= ACTIVITY_SAFE_INTEGER_MAX ? Number(cursor) : cursor.toString();
+}
+
+function publicActivityI64(value) {
+  return value <= ACTIVITY_SAFE_INTEGER_MAX ? Number(value) : value.toString();
+}
+
 function activityRequest(args) {
   const allowed = new Set(['cursor', 'limit', 'order', 'projectId', 'runId', 'targetKind', 'targetId']);
   if (args !== undefined && args !== null && (typeof args !== 'object' || Array.isArray(args))) {
@@ -114,10 +193,7 @@ function activityRequest(args) {
   if (Object.keys(input).some((key) => !allowed.has(key))) {
     throw new Error('ade_query_invalid_request: activity_list solo acepta cursor, limit, order, projectId, runId, targetKind y targetId');
   }
-  const cursor = input.cursor ?? 0;
-  if (!Number.isSafeInteger(cursor) || cursor < 0) {
-    throw new Error('ade_query_invalid_request: cursor debe ser un entero seguro no negativo');
-  }
+  const cursor = activityRequestCursor(input.cursor ?? 0);
   const limit = input.limit ?? ACTIVITY_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > ACTIVITY_MAX_LIMIT) {
     throw new Error(`ade_query_invalid_request: limit debe ser un entero entre 1 y ${ACTIVITY_MAX_LIMIT}`);
@@ -207,8 +283,10 @@ function hasExactKeys(value, keys) {
 }
 
 function validActivityItem(item) {
+  const seq = activityI64(item?.seq);
+  const allowedArgs = ACTIVITY_ARGS_KEYS.get(item?.message_key);
   return hasExactKeys(item, ACTIVITY_ITEM_KEYS)
-    && Number.isSafeInteger(item.seq) && item.seq > 0
+    && seq !== null && seq > 0n
     && nonEmptyText(item.event_id)
     && nonNegativeSafeInteger(item.ts)
     && nonEmptyText(item.kind)
@@ -216,6 +294,7 @@ function validActivityItem(item) {
     && ACTIVITY_CLASS_SET.has(item.class)
     && typeof item.message_key === 'string' && /^activity\.[a-z0-9_.]+$/.test(item.message_key)
     && isRecord(item.args)
+    && allowedArgs !== undefined && Object.keys(item.args).every((key) => allowedArgs.has(key))
     && Object.values(item.args).every((value) => value === null || typeof value === 'string'
       || typeof value === 'boolean' || (Number.isSafeInteger(value) && value >= 0))
     && ACTIVITY_VISUAL_SET.has(item.visual)
@@ -234,15 +313,18 @@ function validActivityItem(item) {
 }
 
 function validateActivityResponse(args, response) {
+  const cursor = activityI64(args.cursor);
+  const nextCursor = activityI64(response?.next_cursor);
+  const headSeq = activityI64(response?.head_seq);
   if (!hasExactKeys(response, ACTIVITY_RESPONSE_KEYS)
     || response.v !== 1 || response.projection !== 1 || response.order !== args.order
     || response.limit !== args.limit || typeof response.has_more !== 'boolean'
-    || !nonNegativeSafeInteger(response.next_cursor) || !nonNegativeSafeInteger(response.head_seq)
-    || response.next_cursor > response.head_seq || !Array.isArray(response.items)
+    || cursor === null || nextCursor === null || headSeq === null
+    || nextCursor > headSeq || !Array.isArray(response.items)
     || response.items.length > args.limit) {
     throw invalidResponse('activity_list', 'la página no corresponde al contrato de Activity');
   }
-  if (args.cursor > response.head_seq) {
+  if (cursor > headSeq) {
     throw invalidResponse('activity_list', 'head_seq es menor que el cursor solicitado');
   }
   if (response.items.some((item) => !validActivityItem(item))) {
@@ -251,7 +333,8 @@ function validateActivityResponse(args, response) {
 
   let previousSeq = null;
   for (const item of response.items) {
-    if (item.seq > response.head_seq
+    const seq = activityI64(item.seq);
+    if (seq > headSeq
       || (args.project_id !== undefined && item.project_id !== args.project_id)
       || (args.run_id !== undefined && item.run_id !== args.run_id)
       || (args.target_kind !== undefined && item.target.kind !== args.target_kind)
@@ -259,31 +342,36 @@ function validateActivityResponse(args, response) {
       throw invalidResponse('activity_list', 'la lista contiene un item fuera de los filtros o head_seq');
     }
     if (args.order === 'asc') {
-      if (item.seq <= args.cursor || (previousSeq !== null && item.seq <= previousSeq)) {
+      if (seq <= cursor || (previousSeq !== null && seq <= previousSeq)) {
         throw invalidResponse('activity_list', 'los items no respetan el cursor exclusivo y el orden ascendente');
       }
-    } else if ((args.cursor > 0 && item.seq >= args.cursor) || (previousSeq !== null && item.seq >= previousSeq)) {
+    } else if ((cursor > 0n && seq >= cursor) || (previousSeq !== null && seq >= previousSeq)) {
       throw invalidResponse('activity_list', 'los items no respetan el cursor exclusivo y el orden descendente');
     }
-    previousSeq = item.seq;
+    previousSeq = seq;
   }
 
   if (response.has_more) {
     if (response.items.length !== args.limit || response.items.length === 0
-      || response.next_cursor !== response.items[response.items.length - 1].seq) {
+      || nextCursor !== activityI64(response.items[response.items.length - 1].seq)) {
       throw invalidResponse('activity_list', 'el cursor de continuación no corresponde a la página');
     }
   } else if (args.order === 'asc') {
-    if (response.next_cursor !== response.head_seq) {
+    if (nextCursor !== headSeq) {
       throw invalidResponse('activity_list', 'next_cursor debe coincidir con head_seq al terminar en asc');
     }
   } else {
-    const lastSeq = response.items.length === 0 ? args.cursor : response.items[response.items.length - 1].seq;
-    if (response.next_cursor !== lastSeq) {
+    const lastSeq = response.items.length === 0 ? cursor : activityI64(response.items[response.items.length - 1].seq);
+    if (nextCursor !== lastSeq) {
       throw invalidResponse('activity_list', 'next_cursor debe coincidir con el seq más bajo en desc');
     }
   }
-  return response;
+  return {
+    ...response,
+    next_cursor: publicActivityI64(nextCursor),
+    head_seq: publicActivityI64(headSeq),
+    items: response.items.map((item) => ({ ...item, seq: publicActivityI64(activityI64(item.seq)) })),
+  };
 }
 
 /** Task de la lista (LXO-91): identidad durable, estado real y metadato opcional, sin inferir nada. */
