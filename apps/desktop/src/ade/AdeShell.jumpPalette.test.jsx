@@ -6,7 +6,15 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
 
-configure({ asyncUtilTimeout: 5000 });
+// Estas pruebas son de integración: montan el shell completo del ADE y la paleta, y esperan a un Core
+// simulado cuya carga es asíncrona. Con varios archivos del ADE en paralelo el reloj de jsdom va 6-8x
+// más lento que en aislamiento (medido en esta máquina con 12 núcleos: 8,4 s y 6,6 s con 15 archivos en
+// paralelo, frente a 0,4 s y 0,3 s en solitario), más que el límite por defecto de la prueba (5 s).
+// El presupuesto de espera de RTL queda POR DEBAJO del presupuesto de la prueba: si fueran el mismo, un
+// `wait` que no se cumple se reportaría como "Test timed out in 5000ms" —sin causa— en vez de decir qué
+// elemento no apareció, y una prueba con varias esperas seguidas nunca cabría en el presupuesto.
+const PALETTE_TEST_TIMEOUT = 30_000;
+configure({ asyncUtilTimeout: 10_000 });
 
 // FIXTURES con la forma del contrato de docs/core/QUERIES.md; no son una lectura de Core real ni dogfood.
 
@@ -83,7 +91,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     // Solo la paleta lee con la clave `cursor`; el shell no lo hace.
     expect(queryAdeCore.mock.calls.some(([, args]) => 'cursor' in args)).toBe(false);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('selecciona el Project exacto, cierra y devuelve el foco', async () => {
     await openPalette();
@@ -94,7 +102,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(useWorkbenchStore.getState().jumpPaletteOpen).toBe(false);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Foco previo' }));
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('selecciona el par exacto Project/Task aunque el Project no esté seleccionado, y vuelve a Workspace', async () => {
     const onActivate = vi.fn();
@@ -105,7 +113,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(selection()).toEqual({ projectId: 'prj-2', taskId: 'task-2' });
     expect(screen.getByRole('tab', { name: 'Workspace' }).getAttribute('aria-selected')).toBe('true');
     expect(onActivate).toHaveBeenCalled();
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('abre una Attention de Task por la subvista Attention con el filtro exacto (task + ID)', async () => {
     await openPalette();
@@ -115,7 +123,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     await waitFor(() => expect(attentionCalls()).toContainEqual(['attention_list', expect.objectContaining({ targetKind: 'task', targetId: 'task-2' })]));
     expect(screen.getByRole('group', { name: 'Filtro por target' }).textContent).toContain('Task task-2');
     expect(selection()).toEqual({ projectId: null, taskId: null }); // no inventa una selección
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it.each([
     ['run', 'att-run', 'run-7', 'onOpenRun'],
@@ -128,7 +136,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(open.mock.calls).toEqual([[targetId]]);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(attentionCalls()).toHaveLength(0);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('si la ruta de Run ya no existe, mantiene la paleta con un aviso y no cae a otro destino', async () => {
     const onOpenRun = vi.fn(() => false);
@@ -139,7 +147,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('El Run run-7 ya no está disponible');
     expect(selection()).toEqual({ projectId: null, taskId: null });
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('anuncia un tipo de destino no soportado sin navegar a ningún otro sitio', async () => {
     const onOpenRun = vi.fn(() => true);
@@ -153,7 +161,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(onOpenSpawnRequest).not.toHaveBeenCalled();
     expect(screen.getByRole('tab', { name: 'Workspace' }).getAttribute('aria-selected')).toBe('true');
     expect(attentionCalls()).toHaveLength(0);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('cede a Quick Open / la paleta de comandos del IDE en vez de apilarse', async () => {
     const { useAppStore } = await import('../store/appStore');
@@ -162,7 +170,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(useWorkbenchStore.getState().jumpPaletteOpen).toBe(false);
     act(() => useAppStore.getState().setQuickOpen(false));
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('cierra con Esc sin navegar y restaura el foco', async () => {
     await openPalette();
@@ -171,5 +179,5 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(selection()).toEqual({ projectId: null, taskId: null });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Foco previo' }));
-  });
+  }, PALETTE_TEST_TIMEOUT);
 });

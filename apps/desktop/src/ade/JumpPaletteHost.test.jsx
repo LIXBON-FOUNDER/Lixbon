@@ -54,8 +54,17 @@ const att = (over = {}) => ({
   project_id: 'prj-1', run_id: null, occurrence: 1, created_at: 1, resolved_at: null, resolution: null, ...over,
 });
 
-// La carga real es asíncrona; bajo la suite completa el reloj de jsdom va más lento que el límite por defecto de 1 s.
-configure({ asyncUtilTimeout: 5000 });
+// Estas pruebas son de integración: montan la paleta con las 139 opciones del fixture (131 Tasks) y
+// esperan a un Core simulado cuya carga es asíncrona. Con varios archivos del ADE en paralelo el reloj de
+// jsdom va 6-8x más lento que en aislamiento (medido en esta máquina con 12 núcleos: 6,6 s y 7,8 s con 15
+// archivos en paralelo, frente a 0,3 s y 0,4 s en solitario), más que el límite por defecto de la prueba
+// (5 s). Cada sondeo de `waitFor` vuelve a pagar el nombre accesible de las 139 opciones (~55 ms solo,
+// ~1,2 s en paralelo), así que la espera necesita varios sondeos.
+// El presupuesto de espera de RTL queda POR DEBAJO del presupuesto de la prueba: si fueran el mismo, un
+// `wait` que no se cumple se reportaría como "Test timed out in 5000ms" —sin causa— en vez de decir qué
+// elemento no apareció, y una prueba con varias esperas seguidas nunca cabría en el presupuesto.
+const PALETTE_TEST_TIMEOUT = 30_000;
+configure({ asyncUtilTimeout: 10_000 });
 
 let taskData;
 let attentionItems;
@@ -133,7 +142,7 @@ describe('JumpPaletteHost · lecturas', () => {
 
     expect(new Set(queryAdeCore.mock.calls.map(([name]) => name))).toEqual(new Set(['projects_overview', 'tasks_by_project', 'attention_list']));
     expect(calls('projects_overview')).toEqual([['projects_overview', { archived: 'exclude' }]]);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('sigue los cursores opacos exactos, con concurrencia acotada, y muestra 100+ Tasks', async () => {
     render(<Harness onNavigate={vi.fn()} />);
@@ -149,7 +158,7 @@ describe('JumpPaletteHost · lecturas', () => {
     expect(calls('attention_list').map(([, args]) => args)).toEqual([{ cursor: null }, { cursor: 'att-cursor-1' }]);
     expect(maxInFlight).toBeGreaterThan(1);
     expect(maxInFlight).toBeLessThanOrEqual(PALETTE_CONCURRENCY);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('busca por título/nombre y ID durable, y deja la rama como metadato secundario', async () => {
     taskData['prj-2'][0] = { ...taskData['prj-2'][0], title: 'Migración', branch: 'feat/login' };
@@ -168,7 +177,7 @@ describe('JumpPaletteHost · lecturas', () => {
     expect(options[1].textContent).toContain('Migración');
     fireEvent.change(input(), { target: { value: 'rama/prj-3/2' } });
     expect(screen.getAllByRole('option')).toHaveLength(1);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('muestra Estado y ubicación del Project desde metadata autoritativa', async () => {
     render(<Harness onNavigate={vi.fn()} />);
@@ -186,7 +195,7 @@ describe('JumpPaletteHost · lecturas', () => {
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
     fireEvent.change(input(), { target: { value: 'prj-2-task-1' } });
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project no informado');
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('etiqueta Attention con el título de su Task por ID exacto y la busca por IDs durables', async () => {
     render(<Harness onNavigate={vi.fn()} />);
@@ -201,7 +210,7 @@ describe('JumpPaletteHost · lecturas', () => {
     expect(screen.getByRole('option').textContent).toContain('Sin Project');
     fireEvent.change(input(), { target: { value: 'att-1' } });
     expect(screen.getAllByRole('option')).toHaveLength(1);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('declara parcial una lectura fallida sin ocultar el resto', async () => {
     core({ fail: { tasks_by_project: (args) => args.projectId === 'prj-2' } });
@@ -210,7 +219,7 @@ describe('JumpPaletteHost · lecturas', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('No se pudieron leer las Tasks de 1 Project.'));
     expect(screen.queryByText('prj-2 tarea 1')).toBeNull();
     expect(screen.getByText('prj-3 tarea 1')).toBeTruthy();
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('muestra un error recuperable cuando Core no responde y reintenta', async () => {
     core({ fail: { projects_overview: true, attention_list: true } });
@@ -222,7 +231,7 @@ describe('JumpPaletteHost · lecturas', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }));
     await screen.findByRole('option', { name: /Alpha/ });
     expect(screen.queryByRole('alert')).toBeNull();
-  });
+  }, PALETTE_TEST_TIMEOUT);
 });
 
 describe('JumpPaletteHost · navegación y foco', () => {
@@ -255,7 +264,7 @@ describe('JumpPaletteHost · navegación y foco', () => {
     fireEvent.keyDown(input(), { key: 'Enter' });
     expect(onNavigate).toHaveBeenLastCalledWith({ kind: 'attention', attentionId: 'att-2', targetKind: 'run', targetId: 'run-9', projectId: null });
     expect(onNavigate).toHaveBeenCalledTimes(3);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('mantiene abierta la paleta y anuncia el aviso cuando la navegación declara un destino no soportado', async () => {
     const onNavigate = vi.fn(() => ({ ok: false, message: 'Esta vista aún no abre destinos de tipo thread (t-1).' }));
@@ -270,7 +279,7 @@ describe('JumpPaletteHost · navegación y foco', () => {
     expect(screen.getByRole('alert').textContent).toContain('aún no abre destinos de tipo thread');
     fireEvent.change(input(), { target: { value: 'prj' } });
     expect(screen.queryByRole('alert')).toBeNull(); // el aviso caduca al cambiar la búsqueda
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('un refresco en segundo plano ni roba el foco ni cambia la opción activa', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
@@ -290,7 +299,7 @@ describe('JumpPaletteHost · navegación y foco', () => {
     expect(calls('projects_overview').length).toBe(before + 1);
     expect(document.activeElement).toBe(input());
     expect(activeOption().textContent).toBe(label);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 
   it('deja de leer Core al cerrar', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
@@ -301,5 +310,5 @@ describe('JumpPaletteHost · navegación y foco', () => {
     const count = queryAdeCore.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(queryAdeCore.mock.calls.length).toBe(count);
-  });
+  }, PALETTE_TEST_TIMEOUT);
 });
