@@ -371,7 +371,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
       {paused && (
         <div className="twk__banner" role="status">
           <strong>Lectura pausada</strong>
-          <span>La consulta del detalle está inactiva; todavía no se ha pedido ni recibido nada de Core para este target.</span>
+          <span>La consulta está pausada; no hay datos de Core disponibles para mostrar ahora.</span>
           <span className="twk__hint">Target: Project <code className="twk__mono">{projectId}</code> · Task <code className="twk__mono">{taskId}</code></span>
         </div>
       )}
