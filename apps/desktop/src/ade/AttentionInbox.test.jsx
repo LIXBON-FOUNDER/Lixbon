@@ -102,7 +102,43 @@ function deferred() {
   return { promise, resolve };
 }
 
+// jsdom no implementa scrollIntoView: se instala un mock observable y se retira al terminar.
+function mockScrollIntoView() {
+  const scrollIntoView = vi.fn();
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
+  return scrollIntoView;
+}
+
+// Geometría observable: la lista mide 0–100 px y las filas indicadas quedan fuera de ella (150–190 px).
+function mockRowGeometry(hiddenAttentionIds) {
+  return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+    if (this.classList.contains('attention-inbox__list')) return { top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100 };
+    const hidden = hiddenAttentionIds.includes(this.dataset?.attentionId);
+    return hidden
+      ? { top: 150, bottom: 190, left: 0, right: 100, width: 100, height: 40 }
+      : { top: 10, bottom: 50, left: 0, right: 100, width: 100, height: 40 };
+  });
+}
+
+// Emula a Chrome: al quitar del DOM el nodo enfocado dispara focusout (relatedTarget null) antes de retirarlo.
+function emulateBlurOnRemoval() {
+  const original = Node.prototype.removeChild;
+  vi.spyOn(Node.prototype, 'removeChild').mockImplementation(function removeChild(child) {
+    const active = document.activeElement;
+    if (active && active !== document.body && child.contains(active)) {
+      active.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    }
+    return original.call(this, child);
+  });
+}
+
+const flushAsync = () => act(async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); });
+const visibleAttentionIds = () => screen.getAllByRole('listitem')
+  .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+const attentionCalls = (calls, cursor) => calls.filter(([query, args]) => query === 'attention_list' && args.cursor === cursor);
+
 afterEach(() => {
+  delete HTMLElement.prototype.scrollIntoView;
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -537,8 +573,7 @@ describe('AttentionInbox', () => {
 
     const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
     focusedButton.focus();
-    const list = screen.getByRole('list', { name: 'Attention activa' });
-    list.scrollTop = 144;
+    const scrollIntoView = mockScrollIntoView();
 
     refreshed = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
@@ -548,7 +583,8 @@ describe('AttentionInbox', () => {
     expect(document.activeElement).toBe(refreshedFocusedButton);
     expect(refreshedFocusedButton.tabIndex).toBe(0);
     expect(screen.getByRole('button', { name: /Task task-0/ }).tabIndex).toBe(-1);
-    expect(list.scrollTop).toBe(144);
+    // La fila sigue visible: el foco vuelve sin ningún scroll adicional.
+    expect(scrollIntoView).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /Task task-old/ })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
@@ -602,6 +638,266 @@ describe('AttentionInbox', () => {
     expect(visibleIds()).toEqual(['att_0', 'att_2', 'att_5']);
     expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-new' }]);
     expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-old')).toHaveLength(1);
+  });
+
+  describe.each([
+    ['un relatedTarget externo', (row, outside) => outside.focus()],
+    ['relatedTarget null', (row) => row.blur()],
+  ])('si el foco sale de la lista hacia %s', (_name, leave) => {
+    it('el sondeo siguiente no roba el foco ni deja que Enter active una fila, en varios sondeos', async () => {
+      vi.useFakeTimers();
+      let reads = 0;
+      const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+      const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+      mountCore({
+        attention: () => {
+          reads += 1;
+          return page([item({ id: `att_new${reads}`, target_id: `task-new${reads}`, created_at: 0 }), first, second]);
+        },
+      });
+      const onOpenTarget = vi.fn();
+      render(<><button type="button">fuera</button><AttentionInbox onOpenTarget={onOpenTarget} pollMs={1_000} /></>);
+      await flushAsync();
+      const outside = screen.getByRole('button', { name: 'fuera' });
+      const row = screen.getByRole('button', { name: /Task task-1/ });
+      row.focus();
+      expect(document.activeElement).toBe(row);
+
+      act(() => leave(row, outside));
+      const expectedActive = document.activeElement;
+      expect(expectedActive.closest('[data-attention-id]')).toBeNull();
+
+      for (let poll = 1; poll <= 3; poll += 1) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        expect(visibleAttentionIds()).toContain(`att_new${reads}`);
+        expect(document.activeElement).toBe(expectedActive);
+        // Enter sobre el elemento activo (fuera de la lista) no abre ninguna fila.
+        fireEvent.keyDown(document.activeElement, { key: 'Enter' });
+        expect(onOpenTarget).not.toHaveBeenCalled();
+      }
+      // Roving tabindex intacto: una única fila es tab stop.
+      const tabStops = screen.getAllByRole('button', { name: /^Media: / }).filter((button) => button.tabIndex === 0);
+      expect(tabStops).toHaveLength(1);
+    });
+  });
+
+  it('un blur que provoca la sustitución del nodo por el refresh no cuenta como perder el foco', async () => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const newFirst = item({ id: 'att_0', target_id: 'task-0', created_at: 0 });
+    mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused]);
+        if (args.cursor === 'cursor-new') return page([focused]);
+        return refreshed
+          ? page([newFirst, second], { hasMore: true, next: 'cursor-new' })
+          : page([first, second], { hasMore: true, next: 'cursor-old' });
+      },
+    });
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+
+    emulateBlurOnRemoval();
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2', 'att_3']);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-3/ }));
+  });
+
+  it('una fila de página anexada enfocada sobrevive a varios sondeos si la consulta fresca la encuentra', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const oldOnly = item({ id: 'att_old', target_id: 'task-old', created_at: 4 });
+    const later = item({ id: 'att_9', target_id: 'task-9', created_at: 9 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused, oldOnly]);
+        if (args.cursor) return page([focused, later]);
+        reads += 1;
+        if (reads === 1) return page([first, second], { hasMore: true, next: 'cursor-old' });
+        return page([item({ id: `att_new${reads}`, target_id: `task-new${reads}`, created_at: 0 }), second],
+          { hasMore: true, next: `cursor-fresh-${reads}` });
+      },
+    });
+    const onOpenTarget = vi.fn();
+    render(<AttentionInbox onOpenTarget={onOpenTarget} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+
+    for (const freshCursor of ['cursor-fresh-2', 'cursor-fresh-3']) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      await flushAsync();
+      const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+      expect(document.activeElement).toBe(focusedButton);
+      expect(focusedButton.tabIndex).toBe(0);
+      expect(visibleAttentionIds()).toEqual([expect.stringMatching(/^att_new/), 'att_2', 'att_3', 'att_9']);
+      expect(attentionCalls(calls, freshCursor)).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: /Task task-old/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
+    }
+    // Los cursores de la sesión anterior no se reutilizan nunca.
+    expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
+    expect(onOpenTarget).not.toHaveBeenCalled();
+  });
+
+  it('mientras rehidrata la página anexada bloquea «Cargar más» y no roba el foco si el usuario ya se fue', async () => {
+    vi.useFakeTimers();
+    const search = deferred();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused]);
+        if (args.cursor === 'cursor-new') return search.promise;
+        return refreshed
+          ? page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), second], { hasMore: true, next: 'cursor-new' })
+          : page([first, second], { hasMore: true, next: 'cursor-old' });
+      },
+    });
+    render(<><button type="button">fuera</button><AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} /></>);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+
+    emulateBlurOnRemoval();
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2']);
+    expect(screen.getByRole('list', { name: 'Attention activa' }).getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Cargando…' }).disabled).toBe(true);
+
+    // El usuario pasa a otro control antes de que acabe la búsqueda.
+    const outside = screen.getByRole('button', { name: 'fuera' });
+    outside.focus();
+    await act(async () => {
+      search.resolve(page([focused]));
+      for (let i = 0; i < 12; i += 1) await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(outside);
+    expect(screen.getByRole('list', { name: 'Attention activa' }).getAttribute('aria-busy')).toBe('false');
+  });
+
+  it('si la consulta fresca no puede probar presencia ni ausencia conserva el ID y no mueve el foco a otra fila', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused]);
+        if (args.cursor === 'cursor-broken') throw new Error('ade_query_timeout: Core no respondió a tiempo');
+        if (args.cursor === 'cursor-ok') return page([focused]);
+        reads += 1;
+        if (reads === 1) return page([first, second], { hasMore: true, next: 'cursor-old' });
+        return page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), second],
+          { hasMore: true, next: reads === 2 ? 'cursor-broken' : 'cursor-ok' });
+      },
+    });
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2']);
+    // Ninguna fila ajena recibe el foco.
+    expect(document.activeElement).toBe(document.body);
+
+    // En el sondeo siguiente la fila ya se puede probar presente: el ID se había conservado.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2', 'att_3']);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-3/ }));
+  });
+
+  it('un target realmente ausente cae a la primera fila nueva tras agotar la búsqueda fresca, también en varios sondeos', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const newFirst = item({ id: 'att_0', target_id: 'task-0', created_at: 0 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused]);
+        if (args.cursor) return page([item({ id: 'att_7', target_id: 'task-7', created_at: 7 })]);
+        reads += 1;
+        return reads === 1
+          ? page([first, second], { hasMore: true, next: 'cursor-old' })
+          : page([newFirst, second], { hasMore: true, next: `cursor-gone-${reads}` });
+      },
+    });
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    const fallback = screen.getByRole('button', { name: /Task task-0/ });
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2']);
+    expect(document.activeElement).toBe(fallback);
+    expect(fallback.tabIndex).toBe(0);
+    expect(attentionCalls(calls, 'cursor-gone-2')).toHaveLength(1);
+
+    // El nuevo foco es la primera fila; el sondeo siguiente la conserva sin buscar de nuevo.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-0/ }));
+    expect(attentionCalls(calls, 'cursor-gone-3')).toHaveLength(0);
+    expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
+  });
+
+  it('al devolver el foco hace el scroll mínimo solo si la fila quedó fuera del viewport', async () => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    mountCore({
+      attention: () => (refreshed
+        ? page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), focused])
+        : page([first, focused])),
+    });
+    const scrollIntoView = mockScrollIntoView();
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    screen.getByRole('list', { name: 'Attention activa' }).style.overflowY = 'auto';
+
+    // Visible: el foco vuelve y el scroll se conserva.
+    const geometry = mockRowGeometry([]);
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-3/ }));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // Fuera del área visible: se pide el scroll mínimo (block nearest) sobre esa fila.
+    geometry.mockRestore();
+    mockRowGeometry(['att_3']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole('button', { name: /Task task-3/ }));
   });
 
   it('con cabecera idéntica pero una página posterior cambiada, el sondeo descarta las páginas y el total deja de ser exacto', async () => {

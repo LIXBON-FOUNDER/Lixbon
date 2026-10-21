@@ -1,4 +1,4 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ATTENTION_CATEGORIES,
   ATTENTION_LIMIT,
@@ -54,13 +54,35 @@ const TARGET_LABELS = {
 const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, hasLoadedPage: false, loading: false, error: null });
 
 const emptyPages = (key, headData = null, headReadEpoch = 0) => ({ ...EMPTY_PAGES, key, headData, headReadEpoch, items: [] });
+// Orden keyset del Core (created_at ASC, id ASC): también acota hasta dónde hay que buscar una fila.
+const compareAttention = (a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const uniqueSortedItems = (items) => {
   const seen = new Map();
   for (const item of items) {
     if (!seen.has(item.id)) seen.set(item.id, item);
   }
-  return [...seen.values()].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return [...seen.values()].sort(compareAttention);
 };
+
+// Tope de seguridad de la búsqueda fresca de la fila enfocada; al agotarlo no se puede probar presencia ni ausencia.
+const REHYDRATE_MAX_PAGES = 20;
+
+function scrollContainerOf(node) {
+  for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+    if (/(auto|scroll|overlay)/.test(window.getComputedStyle(parent).overflowY)) return parent;
+  }
+  return null;
+}
+
+// Devuelve el foco sin saltar la vista; solo si la fila quedó fuera del área visible hace el scroll mínimo.
+function focusAndReveal(node) {
+  node.focus({ preventScroll: true });
+  if (typeof node.scrollIntoView !== 'function') return;
+  const container = scrollContainerOf(node);
+  const bounds = container ? container.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const rect = node.getBoundingClientRect();
+  if (rect.top < bounds.top || rect.bottom > bounds.bottom) node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
 
 const label = (labels, code) => labels[code] || code;
 
@@ -220,7 +242,13 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const [pages, setPages] = useState(() => emptyPages(filterKey));
   const [recoveryNotice, setRecoveryNotice] = useState(null);
   const [focusIndex, setFocusIndex] = useState(0);
-  const focusedItem = useRef({ id: null, hasDOMFocus: false });
+  const sectionRef = useRef(null);
+  // hasDOMFocus: el foco del DOM está (o estaba, hasta que un refresh sustituyó el nodo) en una fila de la lista.
+  const focusedItem = useRef({ id: null, createdAt: null, hasDOMFocus: false });
+  // ID al que hay que devolver el foco en cuanto exista su fila; null tras cualquier navegación explícita.
+  const pendingFocus = useRef(null);
+  // Verdadero entre el render de una cabecera/lectura nueva y su commit: un blur ahí lo causa la sustitución del nodo.
+  const replacingRows = useRef(false);
   const itemRefs = useRef([]);
   const loadingMore = useRef(null);
   const pageGeneration = useRef(0);
@@ -242,28 +270,101 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   // navegación keyset nueva, aunque la cabecera sea idéntica (misma data/updatedAt): una página posterior
   // pudo cambiar sin alterar la cabecera, así que sus filas anexadas y su total ya no son exactos.
   // Core no ofrece una instantánea compartida entre páginas ni un change feed.
+  // El foco del DOM solo se devuelve si seguía en la lista. Si la fila enfocada estaba en una página anexada
+  // y la cabecera nueva no la trae, se rehidrata con cursores nuevos (nunca con los viejos) antes de declararla ausente.
   useLayoutEffect(() => {
     if (pageContext.current.key === filterKey && pageContext.current.headData === list.data
       && pageContext.current.readEpoch === list.readEpoch) return;
     const sameFilter = pageContext.current.key === filterKey;
-    const restoreDOMFocus = sameFilter && focusedItem.current.hasDOMFocus;
-    const previousAttentionId = sameFilter ? focusedItem.current.id : null;
-    const refreshedItems = uniqueSortedItems(list.data?.items ?? []);
-    const previousFocusIndex = previousAttentionId
-      ? refreshedItems.findIndex((item) => item.id === previousAttentionId)
+    const previous = sameFilter ? focusedItem.current : { id: null, createdAt: null, hasDOMFocus: false };
+    const activeElement = document.activeElement;
+    const focusIsFree = !activeElement || activeElement === document.body || activeElement === document.documentElement
+      || Boolean(sectionRef.current?.contains(activeElement) && activeElement.hasAttribute('data-attention-id'));
+    const restoreDOMFocus = previous.hasDOMFocus && focusIsFree;
+    const head = list.data;
+    const headReadEpoch = list.readEpoch;
+    const refreshedItems = uniqueSortedItems(head?.items ?? []);
+    const previousFocusIndex = previous.id
+      ? refreshedItems.findIndex((item) => item.id === previous.id)
       : -1;
-    const nextFocusIndex = previousFocusIndex >= 0 ? previousFocusIndex : 0;
-    const nextFocusedItem = refreshedItems[nextFocusIndex];
-    pageContext.current = { key: filterKey, headData: list.data, readEpoch: list.readEpoch };
+    const lastHeadItem = refreshedItems[refreshedItems.length - 1];
+    const previousKey = previous.createdAt == null ? null : { id: previous.id, created_at: previous.createdAt };
+    // Sin la fila en la cabecera, su ausencia solo está probada si la cabecera ya pasó de su posición keyset o no hay más.
+    const needsFreshSearch = restoreDOMFocus && previousFocusIndex < 0 && Boolean(previous.id)
+      && Boolean(head?.has_more && head.next_cursor) && Boolean(lastHeadItem)
+      && (!previousKey || compareAttention(lastHeadItem, previousKey) < 0);
+    pageContext.current = { key: filterKey, headData: head, readEpoch: headReadEpoch };
     pageGeneration.current += 1;
+    const generation = pageGeneration.current;
     loadingMore.current = null;
-    setPages(emptyPages(filterKey, list.data, list.readEpoch));
-    setFocusIndex(nextFocusIndex);
-    focusedItem.current = {
-      id: nextFocusedItem?.id ?? null,
-      hasDOMFocus: restoreDOMFocus && Boolean(nextFocusedItem),
+    pendingFocus.current = null;
+
+    const settleOnHead = (index) => {
+      const next = refreshedItems[index];
+      setFocusIndex(index);
+      focusedItem.current = { id: next?.id ?? null, createdAt: next?.created_at ?? null, hasDOMFocus: restoreDOMFocus && Boolean(next) };
+      if (restoreDOMFocus && next) pendingFocus.current = next.id;
     };
-    if (restoreDOMFocus && nextFocusedItem) itemRefs.current[nextFocusIndex]?.focus({ preventScroll: true });
+
+    if (!needsFreshSearch) {
+      setPages(emptyPages(filterKey, head, headReadEpoch));
+      settleOnHead(previousFocusIndex >= 0 ? previousFocusIndex : 0);
+      return;
+    }
+
+    // Se conserva el ID mientras se busca: sin pruebas de presencia/ausencia no se mueve el foco a una fila ajena.
+    const token = {};
+    loadingMore.current = token;
+    pendingFocus.current = previous.id;
+    focusedItem.current = { id: previous.id, createdAt: previous.createdAt, hasDOMFocus: true };
+    setFocusIndex(0);
+    setPages({ ...emptyPages(filterKey, head, headReadEpoch), loading: true });
+    const baseArgs = {
+      projectId: projectId || null,
+      targetKind: targetKind || null,
+      targetId: targetId || null,
+      category: category || null,
+      severity: severity || null,
+    };
+    const search = async () => {
+      const collected = [];
+      let cursor = head.next_cursor;
+      for (let count = 0; count < REHYDRATE_MAX_PAGES; count += 1) {
+        const found = await listAdeAttention({ ...baseArgs, cursor });
+        if (pageGeneration.current !== generation) return { status: 'stale' };
+        collected.push(...found.items);
+        if (found.items.some((item) => item.id === previous.id)) return { status: 'found', collected, last: found };
+        const passed = previousKey && found.items.some((item) => compareAttention(item, previousKey) > 0);
+        if (!found.has_more || !found.next_cursor || passed) return { status: 'absent' };
+        cursor = found.next_cursor;
+      }
+      return { status: 'unproven' };
+    };
+    search().catch(() => ({ status: 'unproven' })).then((outcome) => {
+      if (pageGeneration.current !== generation) return;
+      if (loadingMore.current === token) loadingMore.current = null;
+      const applyPages = (patch) => setPages((current) => (current.key !== filterKey || current.headData !== head
+        || current.headReadEpoch !== headReadEpoch ? current : { ...emptyPages(filterKey, head, headReadEpoch), ...patch }));
+      // El usuario navegó (foco a otra fila o fuera de la lista) mientras se buscaba: no se roba el foco.
+      if (pendingFocus.current !== previous.id) {
+        applyPages({});
+      } else if (outcome.status === 'found') {
+        applyPages({
+          items: outcome.collected,
+          nextCursor: outcome.last.next_cursor,
+          hasMore: outcome.last.has_more,
+          hasLoadedPage: true,
+        });
+      } else if (outcome.status === 'absent') {
+        // Ausente probado con cursores frescos: respaldo determinista en la primera fila de la cabecera nueva.
+        applyPages({});
+        settleOnHead(0);
+      } else {
+        // No se pudo probar presencia ni ausencia: se conserva el ID y el foco no se mueve.
+        pendingFocus.current = null;
+        applyPages({});
+      }
+    });
   }, [filterKey, list.data, list.readEpoch]);
 
   // Si el Core deja de responder, los cursores del proceso anterior dejan de ser válidos. Al volver,
@@ -284,6 +385,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   }, [filterKey]);
 
   // A head response is visible immediately; never render pages whose cursor came from an older head.
+  replacingRows.current = pageContext.current.key !== filterKey || pageContext.current.headData !== list.data
+    || pageContext.current.readEpoch !== list.readEpoch || (headFailure && pages.items.length > 0);
   const pageState = pages.key === filterKey && pages.headData === list.data && pages.headReadEpoch === list.readEpoch
     ? pages
     : EMPTY_PAGES;
@@ -292,8 +395,35 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   }, [list.data, pageState.items]);
 
   useLayoutEffect(() => {
-    if (!focusedItem.current.id) focusedItem.current.id = items[focusIndex]?.id ?? null;
+    if (focusedItem.current.id) return;
+    const current = items[focusIndex];
+    focusedItem.current = { ...focusedItem.current, id: current?.id ?? null, createdAt: current?.created_at ?? null };
   }, [items, focusIndex]);
+
+  // Devuelve el foco a la fila pendiente en cuanto está en el DOM (de inmediato o tras rehidratar la página).
+  // Solo si el foco sigue libre (body): si el usuario pasó a otro control no se le roba.
+  useLayoutEffect(() => {
+    const pendingId = pendingFocus.current;
+    if (!pendingId || !active) return;
+    const index = items.findIndex((candidate) => candidate.id === pendingId);
+    const node = index >= 0 ? itemRefs.current[index] : null;
+    if (!node) return;
+    pendingFocus.current = null;
+    const activeElement = document.activeElement;
+    if (activeElement && activeElement !== document.body && activeElement !== document.documentElement && activeElement !== node) {
+      focusedItem.current = { ...focusedItem.current, hasDOMFocus: false };
+      return;
+    }
+    setFocusIndex(index);
+    focusedItem.current = { id: pendingId, createdAt: items[index].created_at, hasDOMFocus: true };
+    focusAndReveal(node);
+  });
+
+  useLayoutEffect(() => {
+    replacingRows.current = false;
+  });
+
+  useEffect(() => () => { pageGeneration.current += 1; }, []);
 
   // Los contadores de projects_overview no están acotados a un target: con target activo no se muestran.
   const summed = useMemo(() => {
@@ -420,6 +550,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
 
   return (
     <section
+      ref={sectionRef}
       className={`attention-inbox${active ? '' : ' is-hidden'}`}
       aria-labelledby={titleId}
       aria-hidden={!active}
@@ -580,14 +711,17 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
               tabIndex={index === activeIndex ? 0 : -1}
               itemRef={(node) => { itemRefs.current[index] = node; }}
               onFocus={() => {
-                focusedItem.current = { id: item.id, hasDOMFocus: true };
+                pendingFocus.current = null;
+                focusedItem.current = { id: item.id, createdAt: item.created_at, hasDOMFocus: true };
                 setFocusIndex(index);
               }}
               onBlur={(event) => {
                 const listElement = event.currentTarget.parentElement?.parentElement;
-                if (event.relatedTarget && !listElement?.contains(event.relatedTarget)) {
-                  focusedItem.current = { ...focusedItem.current, hasDOMFocus: false };
-                }
+                // Entre filas manda onFocus; el blur que provoca un refresh al sustituir el nodo no es perder el foco.
+                if (event.relatedTarget && listElement?.contains(event.relatedTarget)) return;
+                if (replacingRows.current) return;
+                pendingFocus.current = null;
+                focusedItem.current = { ...focusedItem.current, hasDOMFocus: false };
               }}
               onKeyDown={(event) => onItemKeyDown(event, index)}
               onOpenTarget={onOpenTarget}
