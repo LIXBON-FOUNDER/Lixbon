@@ -125,6 +125,20 @@
 }
 .ps__state--muted { color: var(--ink-soft); }
 
+.ps__live-region--sr-only,
+.ps__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .ps__empty {
   padding: 14px 12px;
   border: 1px dashed rgba(var(--ink-rgb), 0.12);
@@ -156,6 +170,7 @@
   border-radius: var(--radius);
   background: var(--surface-2);
   cursor: pointer;
+  scroll-margin-block: 8px;
 }
 
 .ps__item:hover { background: var(--surface-3); }
