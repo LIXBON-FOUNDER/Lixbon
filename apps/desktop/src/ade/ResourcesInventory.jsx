@@ -205,7 +205,7 @@ export function ResourcesInventory({ inventory = null }) {
         )}
       </header>
       <p className="resinv__note">
-        El inventario real aún no está disponible: el contrato de Core (LXO-93) sigue pendiente. «Desconocido» y «No disponible» no significan que falte el recurso.
+        «Desconocido» y «No disponible» no significan que falte el recurso.
       </p>
 
       {!available ? (

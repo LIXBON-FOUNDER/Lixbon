@@ -353,6 +353,28 @@ describe('ResourcesInventory', () => {
       expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
     });
 
+    it('solo explica que el inventario no está disponible cuando no hay filas de Core', () => {
+      const { rerender } = render(<ResourcesInventory />);
+      expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+
+      rerender(<ResourcesInventory inventory={{ resources: [FIX.unknown, FIX.missing] }} />);
+      expect(screen.queryByTestId('resinv-unavailable-inventory')).toBeNull();
+      expect(screen.queryByText(/El inventario real aún no está disponible/)).toBeNull();
+      expect(screen.getByText('«Desconocido» y «No disponible» no significan que falte el recurso.')).toBeTruthy();
+
+      const unknown = within(rowOf('res-unknown'));
+      expect(unknown.getByTestId('resinv-class').textContent).toBe('Conocido');
+      expect(unknown.getByTestId('resinv-exists').textContent).toBe('Desconocido');
+      expect(unknown.queryByText('Falta')).toBeNull();
+      const missing = within(rowOf('res-missing'));
+      expect(missing.getByTestId('resinv-class').textContent).toBe('Falta');
+      expect(missing.getByTestId('resinv-exists').textContent).toBe('No');
+
+      expect(screen.queryAllByRole('button')).toHaveLength(0);
+      expect(screen.queryAllByRole('link')).toHaveLength(0);
+      expect(screen.getAllByRole('combobox')).toHaveLength(3);
+    });
+
     it('un warningCount sin lista de recursos no se muestra: no hay inventario al que pertenezca', () => {
       render(<ResourcesInventory inventory={{ warningCount: 5 }} />);
       expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
