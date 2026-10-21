@@ -60,6 +60,9 @@ mod spawn_blocked_tests;
 mod hardening_tests;
 mod projects;
 mod project_ops;
+mod task_ops;
+#[cfg(test)]
+mod task_ops_tests;
 #[cfg(test)]
 mod projects_tests;
 #[cfg(test)]

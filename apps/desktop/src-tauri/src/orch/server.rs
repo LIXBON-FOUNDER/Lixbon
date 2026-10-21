@@ -360,7 +360,7 @@ mod authenticated_client_tests {
         assert_eq!(response["ok"], true);
         assert_eq!(response["data"]["core_version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(response["data"]["protocol_version"], 1);
-        assert_eq!(response["data"]["schema_version"], 6);
+        assert_eq!(response["data"]["schema_version"], 7);
         assert_eq!(response["data"]["capabilities"], json!(["rpc", "events.read"]));
         assert_eq!(response["data"]["client_id"], client_id);
         assert!(!response.to_string().contains(secret), "el handshake no debe devolver la credencial");
