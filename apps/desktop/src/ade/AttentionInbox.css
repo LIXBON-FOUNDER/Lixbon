@@ -17,6 +17,7 @@
 
 .attention-inbox__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -45,6 +46,7 @@
   align-items: flex-end;
   gap: 1px;
   flex: none;
+  min-width: 0;
 }
 
 .attention-inbox__total-value {
@@ -56,8 +58,11 @@
 }
 
 .attention-inbox__total-label {
+  max-width: 34ch;
   font-size: 10px;
   letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-align: right;
   text-transform: uppercase;
   color: var(--ink-35);
 }
