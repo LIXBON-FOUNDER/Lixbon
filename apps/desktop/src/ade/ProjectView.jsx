@@ -3,11 +3,11 @@ import { ResourcesInventory } from './ResourcesInventory';
 import './ProjectView.css';
 
 /**
- * Vista de Project (LXO-204) · SLICE PARCIAL, solo presentacional y de solo lectura.
+ * Vista de Project (LXO-204) · solo presentacional y de solo lectura.
  *
- * Los contratos de Core (LXO-90/91/92/93) aún no existen en master: todas las props de
- * abajo son PROVISIONALES y pueden cambiar de forma cuando Core las fije. Este componente
- * no consulta nada, no crea nada y no muta nada: pinta lo que recibe y avisa por callbacks.
+ * Esta vista no consulta nada, no crea nada y no muta nada: pinta lo que recibe y avisa por
+ * callbacks. Los contratos de Core que ya existen se entregan tal cual; los que aún no, se
+ * muestran como «no disponible», nunca como vacío.
  *
  * Props (todas opcionales; lo que falte se muestra como «no disponible», nunca como vacío):
  *
@@ -37,10 +37,11 @@ import './ProjectView.css';
  *                            project_id? }  (el texto humano lo pone Core)
  *  resources         Slice: { state, items, message }.
  *                    item: { resource_id, kind?, label?, availability?, project_id? }
- *  resourceInventory Inventario de recursos de LXO-93 (PROVISIONAL, solo lectura): ver el
- *                    typedef ResourceInventory en ResourcesInventory.jsx. Se monta dentro de
- *                    Resources y no se acota por Project: debe llegar ya acotado. Ausente =
- *                    «inventario no disponible» (LXO-93 está en Backlog); no se inventan filas.
+ *  resourceInventory DTO de `resource_inventory` (Core, docs/core/RESOURCES.md), de solo
+ *                    lectura: { v, machine, filters, repos, worktrees, preserved_branches,
+ *                    warnings }. Se monta dentro de Resources y se acota por Project ID
+ *                    (`project_id`), nunca por ProjectLocation. Ausente = «inventario no
+ *                    disponible»; no se inventan filas.
  *
  *  Estados de slice: 'ready' | 'loading' | 'error' | 'partial' | 'degraded' | 'unavailable'.
  *  Un slice 'loading' con `refreshing: true` es una relectura sana de datos ya cargados: el aviso dice
@@ -414,8 +415,9 @@ function Resources({ slice, inventory, projectId, onOpenResource, headingId }) {
           )}
         </>
       )}
-      {/* Inventario de SOLO LECTURA (LXO-101). Sin datos LXO-93 pinta «no disponible», jamás filas inventadas. */}
-      <ResourcesInventory inventory={inventory} />
+      {/* Inventario de SOLO LECTURA (LXO-101): el DTO de `resource_inventory` de Core, acotado
+          por Project ID. Sin DTO pinta «no disponible», jamás filas inventadas. */}
+      <ResourcesInventory inventory={inventory} projectId={projectId} />
     </Section>
   );
 }
