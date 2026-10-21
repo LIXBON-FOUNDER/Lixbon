@@ -14,7 +14,15 @@ const adeShellStyles = readFileSync(resolve(sourceRoot, 'ade/AdeShell.css'), 'ut
 const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 
 // Solo se sustituye el transporte; los códigos y constantes del contrato son los reales.
-vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
+// `readAdeTask` delega en el mismo transporte simulado: lee `task_detail` por el par durable, igual que el real.
+vi.mock('./coreQueries', async (importOriginal) => {
+  const queryAdeCore = vi.fn();
+  return {
+    ...(await importOriginal()),
+    queryAdeCore,
+    readAdeTask: (projectId, taskId) => queryAdeCore('task_detail', { projectId, taskId }),
+  };
+});
 
 // FIXTURES con la forma del contrato de docs/core/QUERIES.md; no son una lectura de Core real ni dogfood.
 
@@ -1035,5 +1043,243 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
 
     expect((await screen.findByTestId('activity-message-event-9')).textContent)
       .toBe('No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind).');
+  });
+
+  describe('navegación por destinos (remediación de revisión)', () => {
+    const projectTargetItem = () => activityItem(11, {
+      target: { kind: 'project', id: PROJECT.id },
+      kind: 'project.registered',
+      message_key: 'activity.project.registered',
+      args: { name: 'Repo Real', origin: 'auto' },
+    });
+    const taskDetailCalls = (taskId) => queryAdeCore.mock.calls.filter(([query, args]) => query === 'task_detail' && args.taskId === taskId);
+    // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await flush(); };
+    // Toda lectura de `task_detail` del destino queda pendiente hasta que la prueba la resuelva.
+    function withPendingTarget(targetTaskId, pending) {
+      const base = queryAdeCore.getMockImplementation();
+      queryAdeCore.mockImplementation((query, args) => (
+        query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId
+          ? pending.promise
+          : base(query, args)
+      ));
+    }
+
+    it('un overview en refreshing (última lectura sana) valida el Project; uno stale no', async () => {
+      vi.useFakeTimers();
+      coreWithActivity([projectTargetItem()]);
+      const base = queryAdeCore.getMockImplementation();
+      const refresh = deferred();
+      let overviewReads = 0;
+      let overviewMode = 'hold';
+      queryAdeCore.mockImplementation((query, args) => {
+        if (query === 'projects_overview') {
+          overviewReads += 1;
+          if (overviewReads > 1 && overviewMode === 'hold') return refresh.promise;
+          if (overviewReads > 1 && overviewMode === 'fail') return Promise.reject(new Error('ade_query_timeout: Core no respondió a tiempo'));
+        }
+        return base(query, args);
+      });
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      // El segundo overview queda en vuelo: el sidebar conserva los IDs sanos y publica `refreshing`.
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      await settle();
+      expect(overviewReads).toBeGreaterThan(1);
+      fireEvent.click(screen.getByTestId('activity-target-event-11'));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+      expect(screen.queryByText(/No se pudo verificar el Project/)).toBeNull();
+
+      // Con una lectura posterior fallida el snapshot pasa a stale: ya no valida.
+      useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
+      overviewMode = 'fail';
+      refresh.resolve({ v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [PROJECT], unassigned: {} });
+      await settle();
+      openActivityTab();
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-11'));
+      await settle();
+      expect(screen.getByText(`No se pudo verificar el Project ${PROJECT.id} en el overview de Core; no se cambió la selección.`)).toBeTruthy();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+    });
+
+    it('conserva el foco del teclado al pasar del destino de Activity al Workspace', async () => {
+      coreWithActivity([projectTargetItem()]);
+      render(shell());
+      await flush();
+      openActivityTab();
+      await flush();
+
+      const target = await screen.findByTestId('activity-target-event-11');
+      target.focus();
+      expect(document.activeElement).toBe(target);
+      fireEvent.click(target);
+      await settle();
+
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+      expect(document.getElementById(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-controls')).hidden).toBe(true);
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Workspace' }));
+    });
+
+    it('también mueve el foco tras verificar una Task, pero no lo roba si el usuario ya lo movió', async () => {
+      const targetTaskId = 'task-activity-focus';
+      coreWithActivity([activityItem(12, { target: { kind: 'task', id: targetTaskId } })]);
+      const pending = deferred();
+      withPendingTarget(targetTaskId, pending);
+      render(shell());
+      fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+      await screen.findByRole('treeitem', { name: /Task Real/ });
+      openActivityTab();
+      await settle();
+
+      const target = await screen.findByTestId('activity-target-event-12');
+      target.focus();
+      fireEvent.click(target);
+      await settle();
+      pending.resolve(detailOf({ id: targetTaskId, title: 'Task con foco' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+      expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Workspace' }));
+
+      // Segundo intento: el foco sale del panel Activity mientras se verifica; la navegación no lo roba.
+      useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+      const second = deferred();
+      withPendingTarget(targetTaskId, second);
+      openActivityTab();
+      await settle();
+      fireEvent.click(await screen.findByTestId('activity-target-event-12'));
+      await settle();
+      const elsewhere = screen.getByRole('treeitem', { name: /Task Real/ });
+      elsewhere.focus();
+      expect(document.activeElement).toBe(elsewhere);
+      second.resolve(detailOf({ id: targetTaskId, title: 'Task con foco' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+      expect(document.activeElement).toBe(elsewhere);
+    });
+
+    it('retira solo el «Verificando…» de la petición invalidada por un cambio de selección', async () => {
+      const targetTaskId = 'task-activity-slow';
+      coreWithActivity([
+        activityItem(13, { target: { kind: 'task', id: targetTaskId } }),
+        activityItem(14, { target: { kind: 'task', id: 'task-of-deleted-project' }, project_id: 'deleted-project' }),
+      ]);
+      const pending = deferred();
+      withPendingTarget(targetTaskId, pending);
+      render(shell());
+      fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+      await screen.findByRole('treeitem', { name: /Task Real/ });
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(await screen.findByTestId('activity-target-event-13'));
+      await settle();
+      expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+
+      // El usuario elige otra Task desde el navegador: la petición queda invalidada y su aviso desaparece.
+      fireEvent.click(screen.getByRole('treeitem', { name: /Task Real/ }));
+      openActivityTab();
+      await settle();
+      expect(screen.queryByText(/Verificando la Task/)).toBeNull();
+      pending.resolve(detailOf({ id: targetTaskId, title: 'Task lenta' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+
+      // Un aviso que no es de una verificación no se retira por cambiar la selección.
+      fireEvent.click(await screen.findByTestId('activity-target-event-14'));
+      await settle();
+      const notice = 'El Project deleted-project no aparece en el overview activo de Core.';
+      expect(screen.getByText(notice)).toBeTruthy();
+      fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+      openActivityTab();
+      await settle();
+      expect(screen.getByText(notice)).toBeTruthy();
+    });
+
+    it('una verificación que sigue en vuelo no pisa el aviso de la petición siguiente', async () => {
+      const slowTaskId = 'task-activity-slow';
+      coreWithActivity([
+        activityItem(13, { target: { kind: 'task', id: slowTaskId } }),
+        activityItem(14, { target: { kind: 'task', id: 'task-of-deleted-project' }, project_id: 'deleted-project' }),
+      ]);
+      const pending = deferred();
+      withPendingTarget(slowTaskId, pending);
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(await screen.findByTestId('activity-target-event-13'));
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-14'));
+      await settle();
+      pending.resolve(detailOf({ id: slowTaskId }));
+      await settle();
+
+      expect(screen.getByText('El Project deleted-project no aparece en el overview activo de Core.')).toBeTruthy();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+    });
+
+    it('acota la verificación de task_detail a 10 s y conserva la selección', async () => {
+      vi.useFakeTimers();
+      const targetTaskId = 'task-activity-hung';
+      coreWithActivity([activityItem(15, { target: { kind: 'task', id: targetTaskId } })]);
+      withPendingTarget(targetTaskId, deferred());
+      render(shell());
+      await settle();
+      openActivityTab();
+      await settle();
+
+      fireEvent.click(screen.getByTestId('activity-target-event-15'));
+      await settle();
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
+      expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      await settle();
+      expect(screen.queryByText(/Verificando la Task/)).toBeNull();
+      expect(screen.getByText(`Core no respondió a tiempo al verificar la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+    });
+
+    it('no repite task_detail para la Task ya seleccionada y sana, y reutiliza la lectura en vuelo del mismo destino', async () => {
+      const targetTaskId = 'task-activity-twice';
+      coreWithActivity([
+        activityItem(16),
+        activityItem(17, { target: { kind: 'task', id: targetTaskId } }),
+      ]);
+      const pending = deferred();
+      withPendingTarget(targetTaskId, pending);
+      render(shell());
+      await pickTask();
+      await screen.findAllByRole('region', { name: 'Identidad' });
+      openActivityTab();
+      await settle();
+
+      // Task ya seleccionada con su detalle sano en el shell: se abre sin otra lectura.
+      const selectedReads = taskDetailCalls(ITEM.id).length;
+      fireEvent.click(await screen.findByTestId('activity-target-event-16'));
+      await settle();
+      expect(taskDetailCalls(ITEM.id)).toHaveLength(selectedReads);
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+
+      // Dos clics sobre el mismo destino comparten una única verificación.
+      openActivityTab();
+      await settle();
+      fireEvent.click(await screen.findByTestId('activity-target-event-17'));
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-17'));
+      await settle();
+      expect(taskDetailCalls(targetTaskId)).toHaveLength(1);
+
+      pending.resolve(detailOf({ id: targetTaskId, title: 'Task única' }));
+      await settle();
+      expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+    });
   });
 });
