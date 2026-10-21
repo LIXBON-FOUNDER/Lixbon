@@ -120,16 +120,28 @@ function mockRowGeometry(hiddenAttentionIds) {
   });
 }
 
-// Emula a Chrome: al quitar del DOM el nodo enfocado dispara focusout (relatedTarget null) antes de retirarlo.
+// Emula a Chrome/WebView2: al quitar del DOM el nodo enfocado dispara focusout (relatedTarget null) antes de retirarlo.
+// jsdom no emite ese focusout al retirar el nodo, así que el harness lo suelta a mano.
+// El registro cuenta los focusout que LLEGAN al nodo enfocado, no los intentos: si la emulación deja de
+// despacharlos, el contador se queda en cero y la regresión falla en vez de quedar en verde sin probar la retirada.
 function emulateBlurOnRemoval() {
   const original = Node.prototype.removeChild;
+  const emulated = { focusouts: 0, targets: [] };
   vi.spyOn(Node.prototype, 'removeChild').mockImplementation(function removeChild(child) {
     const active = document.activeElement;
     if (active && active !== document.body && child.contains(active)) {
+      const onFocusout = (event) => {
+        if (event.target !== active) return;
+        emulated.focusouts += 1;
+        emulated.targets.push(active);
+        active.removeEventListener('focusout', onFocusout);
+      };
+      active.addEventListener('focusout', onFocusout);
       active.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
     }
     return original.call(this, child);
   });
+  return emulated;
 }
 
 const flushAsync = () => act(async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); });
@@ -959,8 +971,9 @@ describe('AttentionInbox', () => {
     await flushAsync();
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
     await flushAsync();
-    screen.getByRole('button', { name: /Task task-3/ }).focus();
-    emulateBlurOnRemoval();
+    const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    focusedButton.focus();
+    const emulated = emulateBlurOnRemoval();
 
     failing = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
@@ -968,6 +981,10 @@ describe('AttentionInbox', () => {
     // Las páginas anexadas se descartan con la cabecera retenida; el foco no pasa a una fila ajena.
     expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
     expect(visibleAttentionIds()).toEqual(['att_1', 'att_2']);
+    // Precondición de la regresión: el nodo enfocado se retiró con focusout emulado (WebView2/Chromium).
+    // Sin esta comprobación el caso pasaría en verde aunque la retirada del nodo dejara de probarse.
+    expect(emulated.focusouts).toBeGreaterThan(0);
+    expect(emulated.targets).toContain(focusedButton);
     expect(document.activeElement).toBe(document.body);
     // Un sondeo más con el Core caído: el target sigue conservado.
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
@@ -1009,12 +1026,16 @@ describe('AttentionInbox', () => {
     await flushAsync();
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
     await flushAsync();
-    screen.getByRole('button', { name: /Task task-3/ }).focus();
-    emulateBlurOnRemoval();
+    const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    focusedButton.focus();
+    const emulated = emulateBlurOnRemoval();
 
     failing = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     await flushAsync();
+    // Precondición de la regresión: el nodo enfocado se retiró con focusout emulado (WebView2/Chromium).
+    expect(emulated.focusouts).toBeGreaterThan(0);
+    expect(emulated.targets).toContain(focusedButton);
     expect(document.activeElement).toBe(document.body);
 
     failing = false;
@@ -1050,13 +1071,17 @@ describe('AttentionInbox', () => {
     await flushAsync();
     expect(visibleAttentionIds()).toEqual(['att_1', 'att_2', 'att_3']);
     // El foco queda en la fila anexada (el clic no lo mueve, como en Safari/Firefox).
-    screen.getByRole('button', { name: /Task task-3/ }).focus();
-    emulateBlurOnRemoval();
+    const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    focusedButton.focus();
+    const emulated = emulateBlurOnRemoval();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
     await flushAsync();
 
     expect(screen.getByText(/el cursor caducó: se volvió a la primera página/)).toBeTruthy();
+    // Precondición de la regresión: el nodo enfocado se retiró con focusout emulado (WebView2/Chromium).
+    expect(emulated.focusouts).toBeGreaterThan(0);
+    expect(emulated.targets).toContain(focusedButton);
     const restored = screen.getByRole('button', { name: /Task task-3/ });
     expect(visibleAttentionIds()).toEqual(['att_0', 'att_2', 'att_3']);
     expect(document.activeElement).toBe(restored);
