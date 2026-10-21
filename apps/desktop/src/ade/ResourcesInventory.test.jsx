@@ -343,8 +343,9 @@ describe('ResourcesInventory', () => {
   describe('sin inventario', () => {
     it('ausente = no disponible (LXO-93), no vacío ni «falta»', () => {
       render(<ResourcesInventory />);
-      expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('no disponible');
-      expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('LXO-93');
+      expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toBe(
+        'El inventario real aún no está disponible: el contrato de Core (LXO-93) sigue pendiente. No se muestra ningún recurso.',
+      );
       expect(screen.queryByTestId('resinv-shown')).toBeNull();
       expect(document.querySelectorAll('.resinv__section')).toHaveLength(0);
       expect(screen.queryByTestId('resinv-row')).toBeNull();
