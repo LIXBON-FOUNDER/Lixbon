@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
 import { AdeShell } from './AdeShell';
-import adeShellStyles from './AdeShell.css?inline';
-import orchStyles from '../styles/orch.css?inline';
 import { queryAdeCore } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
+
+// Vitest omite CSS por defecto; cargar las fuentes mantiene sus reglas reales en esta prueba.
+const adeShellStyles = readFileSync(new URL('./AdeShell.css', import.meta.url), 'utf8');
+const orchStyles = readFileSync(new URL('../styles/orch.css', import.meta.url), 'utf8');
 
 // Solo se sustituye el transporte; los códigos y constantes del contrato son los reales.
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
