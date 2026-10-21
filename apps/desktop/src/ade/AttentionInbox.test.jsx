@@ -508,6 +508,102 @@ describe('AttentionInbox', () => {
     });
   });
 
+  it('conserva el foco por ID durable cuando una página anexada vuelve en la nueva cabecera', async () => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const oldOnly = item({ id: 'att_old', target_id: 'task-old', created_at: 4 });
+    const newFirst = item({ id: 'att_0', target_id: 'task-0', created_at: 0 });
+    const newPage = item({ id: 'att_5', target_id: 'task-5', created_at: 5 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused, oldOnly]);
+        if (args.cursor === 'cursor-new') return page([newPage]);
+        return refreshed
+          ? page([newFirst, focused], { hasMore: true, next: 'cursor-new' })
+          : page([first, second], { hasMore: true, next: 'cursor-old' });
+      },
+    });
+    const visibleIds = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_old']);
+
+    const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    focusedButton.focus();
+    const list = screen.getByRole('list', { name: 'Attention activa' });
+    list.scrollTop = 144;
+
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+    const refreshedFocusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    expect(visibleIds()).toEqual(['att_0', 'att_3']);
+    expect(document.activeElement).toBe(refreshedFocusedButton);
+    expect(refreshedFocusedButton.tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: /Task task-0/ }).tabIndex).toBe(-1);
+    expect(list.scrollTop).toBe(144);
+    expect(screen.queryByRole('button', { name: /Task task-old/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_0', 'att_3', 'att_5']);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-new' }]);
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-old')).toHaveLength(1);
+  });
+
+  it('mueve el foco a la primera fila nueva cuando desaparece el destino enfocado al sondear', async () => {
+    vi.useFakeTimers();
+    let refreshed = false;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const oldOnly = item({ id: 'att_old', target_id: 'task-old', created_at: 4 });
+    const newFirst = item({ id: 'att_0', target_id: 'task-0', created_at: 0 });
+    const newSecond = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const newPage = item({ id: 'att_5', target_id: 'task-5', created_at: 5 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused, oldOnly]);
+        if (args.cursor === 'cursor-new') return page([newPage]);
+        return refreshed
+          ? page([newFirst, newSecond], { hasMore: true, next: 'cursor-new' })
+          : page([first, second], { hasMore: true, next: 'cursor-old' });
+      },
+    });
+    const visibleIds = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_old']);
+
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+    const fallbackButton = screen.getByRole('button', { name: /Task task-0/ });
+    expect(visibleIds()).toEqual(['att_0', 'att_2']);
+    expect(document.activeElement).toBe(fallbackButton);
+    expect(fallbackButton.tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: /Task task-2/ }).tabIndex).toBe(-1);
+    expect(screen.queryByRole('button', { name: /Task task-3|Task task-old/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_0', 'att_2', 'att_5']);
+    expect(calls).toContainEqual(['attention_list', { limit: ATTENTION_LIMIT, cursor: 'cursor-new' }]);
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-old')).toHaveLength(1);
+  });
+
   it('con cabecera idéntica pero una página posterior cambiada, el sondeo descarta las páginas y el total deja de ser exacto', async () => {
     vi.useFakeTimers();
     let laterChanged = false;
