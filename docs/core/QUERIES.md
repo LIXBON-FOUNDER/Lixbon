@@ -1,7 +1,7 @@
 # Queries de lectura del Core para clientes observacionales (F2)
 
-Estado: **`projects_overview` implementado (LXO-90)**. Las queries de Tasks por Project (LXO-91), Activity
-(LXO-92), inventario de worktrees (LXO-93) y snapshot compacto (LXO-94) se documentan aquí cuando se
+Estado: **`projects_overview` implementado (LXO-90)**; **`tasks_by_project` y `task_detail` implementados
+(LXO-98, lectura de Tasks por Project prevista en LXO-91)**. Activity (LXO-92), inventario de worktrees (LXO-93) y snapshot compacto (LXO-94) se documentan aquí cuando se
 implementen.
 
 F2 es observacional: Desktop, CLI y Mobile muestran lo que el Core dice, sin agrupar por rutas ni reconstruir
@@ -124,3 +124,178 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
 vs `failed`, relocalización, archivados, filtro `machine`, `unassigned`, coherencia con `attention_list` y con
 el snapshot, solo Person, parámetros inválidos, solo lectura) y
 `orch/server.rs::http_rpc_projects_overview_es_solo_para_person_autenticada` (E2E por `POST /rpc`).
+
+## `tasks_by_project`
+
+Lista paginada de las Tasks de un Project. Implementación: `orch/tasks_read.rs` (`list`).
+
+* **Clave:** `project_id`, obligatorio. Solo salen Tasks cuyo `project_id` es exactamente ese; las Tasks sin
+  Project no aparecen. La ruta o la rama nunca identifican una Task.
+* **Solo Person autenticada.** Sin cliente autenticado, o con un Agent, la query se rechaza
+  (`tasks_auth_required` cuando llega a la query).
+* **Transporte:** el mismo comando por el RPC de Tauri (`orch_query`, allowlist `ADE_READ_QUERIES`) y por
+  `POST /rpc`, clasificado como `ClientAction::Read`.
+* **No escribe.** Lee las Tasks del `State` y comprueba el Project en el registro de SQLite.
+
+### Petición
+
+```json
+{"cmd":"tasks_by_project","args":{"project_id":"<project_id>","status":"active","limit":50,"cursor":"<next_cursor>"}}
+```
+
+| Parámetro | Valores | Por defecto |
+|---|---|---|
+| `project_id` | texto, 1–200 caracteres tras recortar espacios | **obligatorio** |
+| `status` | `active` · `final` · `all` | `active` |
+| `limit` | entero JSON de 1 a 100 | 50 |
+| `cursor` | el `next_cursor` de la página anterior | primera página |
+
+* Un parámetro con valor `null` cuenta como ausente.
+* Los parámetros desconocidos, un `project_id` ausente, vacío, demasiado largo o que no sea texto, un `status`
+  fuera de los tres valores y un `limit` que no sea un entero en rango se rechazan con `tasks_invalid_request`.
+  El `limit` no se recorta: fuera de rango es un error.
+* `active` son las Tasks que **no** están en un estado final; `final`, las que están en `done`, `failed`,
+  `stopped` o `exited`; `all`, todas.
+* Si el `project_id` no está en el registro de proyectos, la respuesta es `tasks_project_not_found`.
+
+### Respuesta
+
+```json
+{
+  "v": 1,
+  "project_id": "<project_id>",
+  "filters": {"status": "active"},
+  "limit": 50,
+  "tasks": [{
+    "id": "<task_id>",
+    "run_id": "<run_id>",
+    "parent_id": null,
+    "root_id": "<task_id>",
+    "status": "running",
+    "title": "…",
+    "provider": "claude",
+    "model": null,
+    "branch": null,
+    "worktree": null,
+    "created_at": 1760000000000,
+    "updated_at": 1760000000000
+  }],
+  "has_more": false,
+  "next_cursor": null
+}
+```
+
+| Campo | Origen en la Task |
+|---|---|
+| `run_id` | `run` |
+| `parent_id` | `parent` (`null` en la raíz) |
+| `root_id` | `root` del Run de la Task; `null` si el Run no está en el estado |
+| `status` | `starting` · `running` · `waiting` · `awaiting_terminal_approval` · `done` · `failed` · `stopped` · `exited` |
+| `provider` | `agent` |
+| `model` | `model` tal como se pidió (no el modelo efectivo) |
+| `created_at` / `updated_at` | `created` / `updated` (ms epoch) |
+
+`project_id`, `filters.status` y `limit` repiten los valores ya validados de la petición.
+
+### Orden y paginación
+
+* **Orden determinista:** `created_at` descendente (lo creado más reciente primero) y, a igualdad, `id` ascendente.
+  Se ordena por `created_at` y no por `updated_at` porque es inmutable y el cursor se apoya en él.
+* El cursor es **opaco** para el cliente: solo vale el `next_cursor` de la página anterior, con el mismo
+  `project_id`, `status` y `limit`. Un cursor con otro formato es `tasks_invalid_request`.
+* `has_more` es `true` si quedan Tasks después de la página; entonces `next_cursor` es texto. Si no quedan,
+  `next_cursor` es `null`.
+* El cursor es por clave (`created_at` e `id` de la última Task entregada), no por posición: una Task creada
+  entre páginas no repite ni salta las que ya existían; aparece al volver a pedir la primera página. Una Task
+  que cambia de `status` entre páginas puede entrar o salir del filtro, porque no es una instantánea.
+
+### Errores
+
+| Código | Cuándo |
+|---|---|
+| `tasks_auth_required` | sin cliente autenticado, o la identidad no es una Person |
+| `tasks_invalid_request` | parámetro desconocido, falta `project_id` o un valor inválido (incluido el cursor) |
+| `tasks_project_not_found` | el `project_id` no está en el registro |
+| `tasks_unavailable` | el Core no tiene almacén abierto |
+| `tasks_read_failed` | falló la lectura del registro en SQLite |
+
+## `task_detail`
+
+Detalle de una Task dentro de su Project, para el Task Workspace y el Inspector. Implementación:
+`orch/tasks_read.rs` (`detail`). Misma autenticación, transporte y clasificación (`ClientAction::Read`) que
+`tasks_by_project`, y tampoco escribe.
+
+### Petición
+
+```json
+{"cmd":"task_detail","args":{"project_id":"<project_id>","task_id":"<task_id>"}}
+```
+
+| Parámetro | Valores | Por defecto |
+|---|---|---|
+| `project_id` | texto, 1–200 caracteres tras recortar espacios | **obligatorio** |
+| `task_id` | texto, 1–200 caracteres tras recortar espacios | **obligatorio** |
+
+* Los parámetros desconocidos y un `project_id` o `task_id` ausente o inválido se rechazan con
+  `tasks_invalid_request`.
+* Primero se comprueba el Project (`tasks_project_not_found` si no está en el registro). Después, la Task tiene
+  que existir **y** pertenecer a ese Project; si no existe o es de otro Project, la respuesta es
+  `tasks_not_found`. Una Task nunca se devuelve bajo un Project que no es el suyo.
+
+### Respuesta
+
+```json
+{
+  "v": 1,
+  "task": {
+    "id": "<task_id>", "run_id": "<run_id>", "parent_id": null, "root_id": "<task_id>",
+    "status": "running", "title": "…", "provider": "claude", "model": null,
+    "branch": null, "worktree": null, "created_at": 1760000000000, "updated_at": 1760000000000,
+    "project_id": "<project_id>",
+    "child_ids": [],
+    "phase": {"name": "…", "done": false, "note": "", "at": 1760000000000},
+    "messages": [{"id": 1, "kind": "question", "from": "<task_id>", "to": "<task_id>", "body": "…", "reply_to": null, "at": 1760000000000}],
+    "cwd": "…",
+    "merged": false,
+    "review": {"decision": "accepted", "head_commit": "<sha>", "at": 1760000000000},
+    "integration": {"outcome": "merged", "decision_id": 2, "at": 1760000000000}
+  }
+}
+```
+
+Lleva los mismos campos que un elemento de `tasks_by_project`, más:
+
+| Campo | Definición |
+|---|---|
+| `project_id` | el Project pedido, que es el de la Task |
+| `child_ids` | ids de las Tasks cuyo `parent` es esta, ordenados |
+| `phase` | la **última** fase registrada; `null` si no hay ninguna |
+| `messages` | mensajes del buzón cuyo `from` o `to` es esta Task, en el orden del estado |
+| `cwd` / `merged` | los de la Task |
+| `review` | la última decisión `review` de la Task (`decision` y `head_commit` salen de su detalle, `null` si faltan); `null` si no hay |
+| `integration` | la última decisión `merge` de la Task (`outcome` de su detalle, `decision_id` es el id de la decisión); `null` si no hay |
+
+"Última" decisión es la de `id` más alto. El Core no añade host ni origen: el DTO no los incluye.
+
+### Errores
+
+| Código | Cuándo |
+|---|---|
+| `tasks_auth_required` | sin cliente autenticado, o la identidad no es una Person |
+| `tasks_invalid_request` | parámetro desconocido, falta `project_id` o `task_id`, o un valor inválido |
+| `tasks_project_not_found` | el `project_id` no está en el registro |
+| `tasks_not_found` | la Task no existe o no pertenece a ese Project |
+| `tasks_unavailable` | el Core no tiene almacén abierto |
+| `tasks_read_failed` | falló la lectura del registro en SQLite |
+
+### Consistencia y pruebas (`tasks_by_project` y `task_detail`)
+
+Las dos queries toman el guard del estado y, **con él tomado**, comprueban el Project en SQLite: el mismo orden
+`estado -> almacén` que `projects_overview` y que `mutate`.
+
+`orch/tasks_read_tests.rs` cubre la clasificación como `Read`, el filtrado por Project y por `status`, la
+paginación con cursor y el cursor inválido, la falta de `project_id` y los parámetros desconocidos, Project
+inexistente, Task inexistente o de otro Project, el DTO del detalle y el rechazo de un Agent.
+`orch/server.rs::tasks_http_tests::consultas_de_tasks_por_post_rpc` lo repite de punta a punta por `POST /rpc` con
+credencial de Person registrada: `limit` en 0, 1, 100 y 101, paginación con una Task creada entre páginas, cursor
+inválido, `status`, Project inexistente, `task_detail` propio, inexistente y de otro Project, y rechazo de un Agent.

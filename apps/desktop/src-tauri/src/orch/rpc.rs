@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{activity_read, attention_read, projects_overview, resource_inventory, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{activity_read, attention_read, projects_overview, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
@@ -151,6 +151,8 @@ impl Core {
             "events" => self.events_read(&caller, args).map_err(String::from),
             "attention_list" => attention_read::list(self, &caller, authenticated_context.as_ref(), args),
             "attention_detail" => attention_read::detail(self, &caller, authenticated_context.as_ref(), args),
+            "tasks_by_project" => tasks_read::list(self, &caller, authenticated_context.as_ref(), args),
+            "task_detail" => tasks_read::detail(self, &caller, authenticated_context.as_ref(), args),
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
@@ -453,7 +455,7 @@ impl Core {
 fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "attention_list" | "attention_detail" | "activity_list" | "resource_inventory"
-        | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
+        | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
@@ -637,4 +639,9 @@ mod tests {
         assert!(result.unwrap_err().contains("Acción no permitida"), "la identidad Agent se rechaza en la frontera autenticada");
         assert_eq!(core.storage.with_store(|store| store.events_head().unwrap()).unwrap(), head_before);
     }
+}
+
+#[cfg(test)]
+pub(super) fn rpc_action_for_tests(cmd: &str) -> ClientAction {
+    rpc_action(cmd)
 }
