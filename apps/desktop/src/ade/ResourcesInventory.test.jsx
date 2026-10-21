@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
-import { ResourcesInventory, matchesState } from './ResourcesInventory';
+import { ResourcesInventory, matchesState, sectionOf } from './ResourcesInventory';
 
 afterEach(cleanup);
 
@@ -17,6 +17,8 @@ const FIX = {
   unavailable: { id: 'res-unavailable', classification: 'known', projectId: 'proj-c', hostId: 'host-3', branch: 'feat/lejana', path: null, owner: 'agente-d', availability: 'unavailable' },
 };
 const ALL = Object.values(FIX);
+// Orden de pintado: secciones Conocidos → Candidatos externos → Faltan; dentro de cada una, el orden de entrada.
+const BY_SECTION = ['res-clean', 'res-dirty', 'res-merged', 'res-unmerged', 'res-unknown', 'res-unavailable', 'res-external', 'res-missing'];
 const inv = (extra = {}) => ({ resources: ALL, ...extra });
 
 const rowOf = (id) => document.querySelector(`[data-resource-id="${id}"]`);
@@ -26,7 +28,7 @@ const pick = (label, value) => fireEvent.change(screen.getByLabelText(label), { 
 describe('ResourcesInventory', () => {
   it('muestra todas las filas con ID duradero, IDs de proyecto/host/tarea/ejecución y ubicación como metadato', () => {
     render(<ResourcesInventory inventory={inv()} />);
-    expect(shownIds()).toEqual(ALL.map((r) => r.id));
+    expect(shownIds()).toEqual(BY_SECTION);
     const row = within(rowOf('res-clean'));
     expect(row.getByText('proj-a')).toBeTruthy();
     expect(row.getByText('host-1')).toBeTruthy();
@@ -160,8 +162,9 @@ describe('ResourcesInventory', () => {
       pick('Estado', 'known');
       expect(shownIds()).toEqual(['res-clean', 'res-dirty', 'res-merged', 'res-unmerged', 'res-unknown', 'res-unavailable']);
       pick('Estado', 'unknown');
-      // Desconocido y no disponible juntos, y nunca el recurso que falta ni el candidato externo.
-      expect(shownIds()).toEqual(['res-unknown', 'res-unavailable']);
+      // Todas las filas cuyos campos de estado mostrados son desconocidos / no disponibles, sea cual sea su
+      // clasificación: el candidato externo (merged null) y la fila que falta (dirty/merged null) también.
+      expect(shownIds()).toEqual(['res-unknown', 'res-unavailable', 'res-external', 'res-missing']);
     });
 
     it('Estado: limpio / con cambios / fusionado / sin fusionar', () => {
@@ -210,6 +213,106 @@ describe('ResourcesInventory', () => {
     });
   });
 
+  describe('secciones', () => {
+    const titles = () => [...document.querySelectorAll('.resinv__section-title')].map((h) => h.textContent);
+    const idsIn = (key) => within(screen.getByTestId('resinv-section-' + key)).queryAllByTestId('resinv-row').map((el) => el.getAttribute('data-resource-id'));
+
+    it('conocidos, candidatos externos y faltan van en secciones distintas', () => {
+      render(<ResourcesInventory inventory={inv()} />);
+      expect(titles()).toEqual(['Conocidos (6)', 'Candidatos externos (sin propietario) (1)', 'Faltan (1)']);
+      expect(idsIn('known')).toEqual(['res-clean', 'res-dirty', 'res-merged', 'res-unmerged', 'res-unknown', 'res-unavailable']);
+      expect(idsIn('external_candidate')).toEqual(['res-external']);
+      expect(idsIn('missing')).toEqual(['res-missing']);
+      // Cada sección es una región con nombre y su lista etiquetada.
+      expect(screen.getByRole('region', { name: 'Faltan (1)' })).toBeTruthy();
+      expect(screen.getByRole('list', { name: 'Candidatos externos (sin propietario) (1)' })).toBeTruthy();
+    });
+
+    it('un conocido con exists=false se pinta en Faltan, no en Conocidos; el candidato externo con exists=false sigue en el suyo', () => {
+      const gone = { ...FIX.clean, id: 'res-gone', exists: false };
+      const extGone = { ...FIX.external, id: 'res-ext-gone', exists: false };
+      render(<ResourcesInventory inventory={{ resources: [gone, extGone, FIX.clean] }} />);
+      expect(idsIn('missing')).toEqual(['res-gone']);
+      expect(idsIn('external_candidate')).toEqual(['res-ext-gone']);
+      expect(idsIn('known')).toEqual(['res-clean']);
+      expect(sectionOf(gone)).toBe('missing');
+      expect(sectionOf(extGone)).toBe('external_candidate');
+    });
+
+    it('las secciones vacías no se pintan y el filtro deja solo la que corresponde', () => {
+      render(<ResourcesInventory inventory={inv()} />);
+      pick('Estado', 'external_candidate');
+      expect(titles()).toEqual(['Candidatos externos (sin propietario) (1)']);
+      expect(screen.queryByTestId('resinv-section-known')).toBeNull();
+      expect(screen.queryByTestId('resinv-section-missing')).toBeNull();
+    });
+
+    it('una clasificación que Core no reconoce no se descarta: va a «Sin clasificar», nunca a Falta', () => {
+      const odd = { id: 'res-odd', classification: 'zombie', exists: null, dirty: null, merged: null };
+      render(<ResourcesInventory inventory={{ resources: [odd, FIX.clean] }} />);
+      expect(idsIn('unclassified')).toEqual(['res-odd']);
+      expect(within(rowOf('res-odd')).getByTestId('resinv-class').textContent).toBe('Sin clasificar');
+      expect(within(rowOf('res-odd')).queryByText('Falta')).toBeNull();
+      expect(screen.getByTestId('resinv-shown').textContent).toBe('Mostrando 2 de 2');
+    });
+  });
+
+  describe('filtro «Desconocido / no disponible»', () => {
+    it('incluye externos y faltantes con campos nulos, y excluye filas con todos los campos mostrados conocidos', () => {
+      const extNull = { ...FIX.external, id: 'e-null', merged: null };
+      const extKnown = { ...FIX.external, id: 'e-known', merged: false };
+      const missNull = { ...FIX.missing, id: 'm-null' }; // dirty/merged null
+      const missKnown = { ...FIX.missing, id: 'm-known', dirty: false, merged: true }; // exists false se muestra como «No»
+      const goneKnown = { ...FIX.clean, id: 'g-known', exists: false };
+      render(<ResourcesInventory inventory={{ resources: [extNull, extKnown, missNull, missKnown, goneKnown] }} />);
+      pick('Estado', 'unknown');
+      expect(shownIds()).toEqual(['e-null', 'm-null']);
+      // Lo que el filtro afirma desconocido es lo que la fila muestra como «Desconocido».
+      expect(within(rowOf('e-null')).getByTestId('resinv-merged').textContent).toBe('Desconocido');
+      expect(within(rowOf('m-null')).getByTestId('resinv-dirty').textContent).toBe('Desconocido');
+      expect(within(rowOf('m-null')).getByTestId('resinv-exists').textContent).toBe('No');
+    });
+
+    it('matchesState coincide con lo mostrado para cada fixture', () => {
+      const expected = { clean: false, dirty: false, merged: false, unmerged: false, missing: true, external: true, unknown: true, unavailable: true };
+      for (const [k, want] of Object.entries(expected)) expect(matchesState(FIX[k], 'unknown'), k).toBe(want);
+    });
+  });
+
+  describe('Falta frente a No disponible', () => {
+    it('Core clasifica «Falta» pero no pudo leer el resto: Falta (veredicto de Core) + No disponible, sin contradicción en Existe', () => {
+      const both = { ...FIX.missing, id: 'res-both', availability: 'unavailable' };
+      render(<ResourcesInventory inventory={{ resources: [both] }} />);
+      const row = within(rowOf('res-both'));
+      expect(row.getByTestId('resinv-class').textContent).toBe('Falta');
+      expect(row.getByTestId('resinv-unavailable').textContent).toBe('No disponible');
+      expect(row.getByTestId('resinv-exists').textContent).toBe('No');
+      expect(row.getByTestId('resinv-dirty').textContent).toBe('No disponible');
+      expect(row.getByTestId('resinv-merged').textContent).toBe('No disponible');
+      expect(matchesState(both, 'missing')).toBe(true);
+      expect(matchesState(both, 'unknown')).toBe(true);
+    });
+
+    it('un conocido no disponible NO es Falta ni aparece en la sección Faltan, tenga o no exists=false', () => {
+      const lejana = { ...FIX.unavailable, id: 'res-lejana', exists: false };
+      render(<ResourcesInventory inventory={{ resources: [lejana, FIX.unavailable] }} />);
+      expect(screen.queryByTestId('resinv-section-missing')).toBeNull();
+      expect(screen.getByTestId('resinv-section-known')).toBeTruthy();
+      pick('Estado', 'missing');
+      expect(shownIds()).toEqual([]);
+    });
+
+    it('Falta, Desconocido y No disponible tienen textos distintos', () => {
+      render(<ResourcesInventory inventory={inv()} />);
+      const texts = [
+        within(rowOf('res-missing')).getByTestId('resinv-class').textContent,
+        within(rowOf('res-unknown')).getByTestId('resinv-exists').textContent,
+        within(rowOf('res-unavailable')).getByTestId('resinv-exists').textContent,
+      ];
+      expect(new Set(texts).size).toBe(3);
+    });
+  });
+
   describe('contador de avisos', () => {
     it('lo muestra tal cual lo suministra Core, aunque no coincida con las filas', () => {
       // Hay exactamente 2 filas sin fusionar (dirty + unmerged); Core dice 7.
@@ -238,12 +341,34 @@ describe('ResourcesInventory', () => {
   });
 
   describe('sin inventario', () => {
-    it('ausente = no disponible, no vacío ni «falta»', () => {
+    it('ausente = no disponible (LXO-93), no vacío ni «falta»', () => {
       render(<ResourcesInventory />);
       expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('no disponible');
+      expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('LXO-93');
+      expect(screen.queryByTestId('resinv-shown')).toBeNull();
+      expect(document.querySelectorAll('.resinv__section')).toHaveLength(0);
       expect(screen.queryByTestId('resinv-row')).toBeNull();
       expect(screen.queryByLabelText('Proyecto')).toBeNull();
       expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    });
+
+    it('un warningCount sin lista de recursos no se muestra: no hay inventario al que pertenezca', () => {
+      render(<ResourcesInventory inventory={{ warningCount: 5 }} />);
+      expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+      expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    });
+
+    it.each([[{}], [{ resources: null }], [{ resources: 'x' }], [{ resources: { a: 1 } }]])('inventario sin lista de recursos (%j) = no disponible, sin filas inventadas', (bad) => {
+      render(<ResourcesInventory inventory={bad} />);
+      expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+      expect(screen.queryByText('Core no informa recursos.')).toBeNull();
+      expect(screen.queryByTestId('resinv-row')).toBeNull();
+    });
+
+    it('entradas nulas o no objeto se ignoran sin romper', () => {
+      render(<ResourcesInventory inventory={{ resources: [null, 3, FIX.clean] }} />);
+      expect(shownIds()).toEqual(['res-clean']);
+      expect(screen.getByTestId('resinv-shown').textContent).toBe('Mostrando 1 de 1');
     });
 
     it('lista vacía = Core no informa recursos', () => {

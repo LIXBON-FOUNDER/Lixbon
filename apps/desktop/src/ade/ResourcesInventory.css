@@ -29,3 +29,8 @@
 .resinv__meta dd { margin: 0; overflow-wrap: anywhere; }
 .resinv__loc { display: flex; flex-direction: column; }
 .resinv__path { font-family: var(--font-mono, monospace); color: var(--ink-soft, #9a9a94); }
+
+.resinv__section { display: flex; flex-direction: column; gap: 6px; }
+.resinv__section-title { margin: 0; font-size: 12px; color: var(--ink-70, #b5b5af); }
+.resinv__row--unclassified { border-left-color: var(--ink-faint, #44443f); }
+.resinv__tag--unclassified { color: var(--ink-soft, #9a9a94); }
