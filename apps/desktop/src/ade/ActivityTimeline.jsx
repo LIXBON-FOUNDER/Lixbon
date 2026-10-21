@@ -38,9 +38,9 @@
 //                               o sensibles se descartan. No es el payload crudo del evento.
 // @property {string} [correlationId]  Une hechos (p. ej. decisión y efecto); se muestra, no se fusiona.
 //
-// Navegación: `onOpenTarget({kind, id})` recibe la referencia durable exacta de un target
-// `project` o `task` bien formado. Sin callback, o con otro kind / id mal formado, el destino
-// se pinta como texto informativo. La vista solo avisa al host; no navega ni escribe.
+// Navegación: `onOpenTarget({kind, id, projectId})` recibe el target durable exacto y el Project
+// durable del hecho (para `project`, es el mismo ID del target). Sin callback, o con otro kind / id
+// mal formado, el destino se pinta como texto informativo. La vista solo avisa al host; no navega ni escribe.
 //
 // Prohibido por contrato: `payload` crudo, `summary`/resúmenes de IA, `unread`/Attention y fusionar
 // decision/effect en una sola fila. La vista es de solo lectura y no escribe en el Core.
@@ -368,6 +368,13 @@ function navigableTargetOf(item) {
   return { kind, id };
 }
 
+function navigableProjectIdOf(item, target) {
+  if (target.kind === 'project') return target.id;
+  const id = item.project?.id;
+  if (typeof id !== 'string' || !id || id !== id.trim() || id.length > MAX_TARGET_ID || CONTROL_CHARS.test(id)) return null;
+  return id;
+}
+
 function projectOf(item) {
   const project = item.project;
   if (!project || typeof project !== 'object') return null;
@@ -657,7 +664,11 @@ export function ActivityTimeline({
                         className="activity__target activity__target--link"
                         data-testid={`activity-target-${eventId}`}
                         aria-label={`Abrir ${TARGET_LABELS[openable.kind]} ${openable.id}`}
-                        onClick={() => onOpenTarget({ kind: openable.kind, id: openable.id })}
+                        onClick={() => onOpenTarget({
+                          kind: openable.kind,
+                          id: openable.id,
+                          projectId: navigableProjectIdOf(item, openable),
+                        })}
                       >
                         {TARGET_LABELS[target.kind] || 'Destino'}{' '}
                         <span className="mono" title={target.id}>

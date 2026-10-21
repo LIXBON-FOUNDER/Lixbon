@@ -1823,7 +1823,7 @@ describe('ProjectsSidebar', () => {
         if (!args.cursor) return page(args.project_id, args.status, [task('t1')], { hasMore: true, cursor: 'cursor-1' });
         attempts += 1;
         if (attempts === 1) throw new Error('tasks_read_failed: lectura de página fallida');
-        return page(args.project_id, args.status, [task('t2')]);
+        return page(args.project_id, args.status, [task('t2')], { hasMore: true, cursor: 'cursor-2' });
       },
     });
     render(<ProjectsSidebar />);
@@ -1832,10 +1832,12 @@ describe('ProjectsSidebar', () => {
 
     const retry = await screen.findByRole('button', { name: 'Reintentar carga de Tasks de Alpha' });
     retry.focus();
+    expect(document.activeElement).toBe(retry);
     fireEvent.click(retry);
     await screen.findByText('Task t2');
+    expect(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeTruthy();
     await waitFor(() => expect(document.activeElement.getAttribute('role')).toBe('treeitem'));
-    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement.closest('[role="tree"]')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
   });
 

@@ -918,18 +918,107 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
   });
 
-  it('no adivina el Project de una Task ajena: avisa y conserva la selección', async () => {
-    coreWithActivity([activityItem(5, { target: { kind: 'task', id: 'task-otra' } })]);
+  it('abre una Task de Activity por el par durable aunque no aparezca en la página de Tasks seleccionada', async () => {
+    const targetTaskId = 'task-activity-target';
+    coreWithActivity([activityItem(6, { target: { kind: 'task', id: targetTaskId } })]);
+    const base = queryAdeCore.getMockImplementation();
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId) {
+        return detailOf({ ...ITEM, id: targetTaskId, title: 'Task abierta desde Activity', project_id: PROJECT.id });
+      }
+      return base(query, args);
+    });
+    render(shell());
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    await screen.findByRole('treeitem', { name: /Task Real/ });
+    expect(screen.queryByText('Task abierta desde Activity')).toBeNull();
+    expect(document.querySelector(`[data-task-id="${targetTaskId}"]`)).toBeNull();
+
+    await flush();
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-6'));
+    const identityRegions = await screen.findAllByRole('region', { name: 'Identidad' });
+
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
+    expect(identityRegions.some((region) => region.textContent.includes(targetTaskId)
+      && region.textContent.includes('Task abierta desde Activity'))).toBe(true);
+    expect(queryAdeCore).toHaveBeenCalledWith('task_detail', { projectId: PROJECT.id, taskId: targetTaskId });
+    expect(screen.queryByText(/no se pudo verificar|no aparece en el overview/i)).toBeNull();
+  });
+
+  it('no selecciona un destino de Activity cuyo Project ya no aparece en el overview', async () => {
+    coreWithActivity([activityItem(7, {
+      target: { kind: 'task', id: 'task-of-deleted-project' },
+      project_id: 'deleted-project',
+    })]);
     render(shell());
     await flush();
     openActivityTab();
     await flush();
 
-    fireEvent.click(await screen.findByTestId('activity-target-event-5'));
+    fireEvent.click(await screen.findByTestId('activity-target-event-7'));
 
-    expect(screen.getByText('La Task task-otra no se puede abrir desde Activity: el evento no identifica su Project.')).toBeTruthy();
+    expect(await screen.findByText('El Project deleted-project no aparece en el overview activo de Core.')).toBeTruthy();
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
-    expect(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-selected')).toBe('true');
+    expect(queryAdeCore.mock.calls.some(([query, args]) => query === 'task_detail' && args.taskId === 'task-of-deleted-project')).toBe(false);
+  });
+
+  it('no selecciona un Project de Activity ausente del overview', async () => {
+    coreWithActivity([activityItem(8, {
+      target: { kind: 'project', id: 'deleted-project' },
+      project_id: 'deleted-project',
+      kind: 'project.registered',
+      message_key: 'activity.project.registered',
+    })]);
+    render(shell());
+    await flush();
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-8'));
+
+    expect(await screen.findByText('El Project deleted-project no aparece en el overview activo de Core.')).toBeTruthy();
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+  });
+
+  it('mantiene la selección cuando Core confirma que la Task de Activity ya no existe', async () => {
+    const targetTaskId = 'deleted-task';
+    coreWithActivity([activityItem(9, { target: { kind: 'task', id: targetTaskId } })]);
+    const base = queryAdeCore.getMockImplementation();
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'task_detail' && args.projectId === PROJECT.id && args.taskId === targetTaskId) {
+        throw new Error('task_not_found: Task no encontrada');
+      }
+      return base(query, args);
+    });
+    render(shell());
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    await screen.findByRole('treeitem', { name: /Task Real/ });
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-9'));
+
+    expect(await screen.findByText(`La Task ${targetTaskId} ya no está disponible en el Project ${PROJECT.id}.`)).toBeTruthy();
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+  });
+
+  it('no abre una Task sin Project durable en el evento y conserva la selección', async () => {
+    coreWithActivity([activityItem(10, {
+      target: { kind: 'task', id: 'task-without-project' },
+      project_id: null,
+    })]);
+    render(shell());
+    await flush();
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-10'));
+
+    expect(await screen.findByText('La Task task-without-project no se puede abrir desde Activity: el evento no identifica su Project.')).toBeTruthy();
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
   });
 
   it('muestra el texto seguro de un evento desconocido que Core marca fallback=true', async () => {
