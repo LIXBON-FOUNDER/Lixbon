@@ -637,23 +637,65 @@ describe('ProjectView · solo lectura', () => {
   });
 });
 
-describe('ProjectView · inventario de recursos (LXO-101, fixtures sintéticas)', () => {
-  // Fixtures SINTÉTICAS con la forma provisional de LXO-93 (Backlog): no vienen de Core ni del disco.
+describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
+  // DTO de `resource_inventory` (docs/core/RESOURCES.md) con la FORMA del contrato: repos,
+  // worktrees, ramas conservadas y avisos. Los datos son sintéticos; los campos y los
+  // vocabularios son los que devuelve el Core.
   const INV = {
-    warningCount: 4,
-    resources: [
-      { id: 'inv-known', classification: 'known', projectId: PID, hostId: 'synthetic-host-1', branch: 'synthetic/branch', path: '/synthetic/wt', owner: 'synthetic-owner', exists: true, dirty: false, merged: true },
-      { id: 'inv-external', classification: 'external_candidate', projectId: PID, hostId: 'synthetic-host-1', owner: 'no-debe-verse', exists: true, dirty: false, merged: null },
-      { id: 'inv-missing', classification: 'missing', projectId: PID, hostId: 'synthetic-host-1', exists: false, dirty: null, merged: null },
+    v: 1,
+    machine: 'synthetic-machine-1',
+    filters: { project_id: null, probe: true },
+    repos: [
+      { project_id: PID, machine: 'synthetic-machine-1', path: '/synthetic/app', scan: 'ok' },
+      { project_id: 'synthetic-project-2', machine: 'otro-equipo', path: '/srv/remoto', scan: 'other_machine', reason: 'other_machine' },
     ],
+    worktrees: [
+      {
+        target: { machine: 'synthetic-machine-1', project_id: PID, repo: '/synthetic/app', path: '/synthetic/app.lixbon-wt/wt-c' },
+        state: 'tracked', origin: 'task', physical: 'present',
+        git: { registered: true, branch: 'lx/r/c', detached: false, locked: false, prunable: false },
+        owner: { task_id: 't-9', run_id: 'r-1', status: 'done' },
+        dirty: 'clean', merged: 'unmerged', into: 'main', needs_review: true,
+      },
+      {
+        target: { machine: 'synthetic-machine-1', project_id: PID, repo: '/synthetic/app', path: '/synthetic/app.lixbon-wt/wt-ext' },
+        state: 'external', origin: 'external', physical: 'present',
+        git: { registered: true, branch: 'otra/rama', detached: false, locked: false, prunable: false },
+        owner: null, dirty: 'clean', merged: 'unknown', into: 'main', needs_review: false,
+      },
+      {
+        target: { machine: 'synthetic-machine-1', project_id: PID, repo: '/synthetic/app', path: '/synthetic/app.lixbon-wt/wt-falta' },
+        state: 'missing_on_disk', origin: 'task', physical: 'missing',
+        git: { registered: null, branch: 'lx/r/f', detached: false, locked: false, prunable: true },
+        owner: { task_id: 't-10', run_id: 'r-2', status: 'done' },
+        dirty: 'skipped', merged: 'skipped', into: 'main', needs_review: false,
+      },
+    ],
+    preserved_branches: [
+      {
+        target: { machine: 'synthetic-machine-1', project_id: PID, repo: '/synthetic/app', branch: 'lx/r/g' },
+        branch_exists: true, owner: { task_id: 't-4', run_id: 'r-1', status: 'stopped' },
+        merged: 'unmerged', into: 'main', needs_review: true,
+      },
+    ],
+    warnings: {
+      branches_to_review: 2,
+      worktrees_by_state: { tracked: 1, missing_on_disk: 1, not_registered: 0, orphan_candidate: 0, external: 1, unknown: 0 },
+    },
   };
   const resourcesSection = () => section('Resources');
+  const invRows = () => within(resourcesSection()).getAllByTestId('resinv-row');
+  const invTargets = () => invRows().map((el) => within(el).getByTestId('resinv-target').textContent);
 
-  it('sin datos LXO-93 el inventario está montado en Resources con estado explícito «no disponible» y sin filas', () => {
+  it('sin DTO el inventario está montado en Resources con estado explícito «no disponible» y sin filas', () => {
     view();
     const inside = within(resourcesSection());
     expect(inside.getByTestId('resinv')).toBeTruthy();
-    expect(inside.getByTestId('resinv-unavailable-inventory').textContent).toContain('LXO-93');
+    const notice = inside.getByTestId('resinv-unavailable-inventory');
+    expect(notice.textContent).toContain('no disponible');
+    // No dice que el contrato de Core esté pendiente ni en Backlog.
+    expect(notice.textContent).not.toMatch(/LXO-93|Backlog|pendiente/i);
+    expect(resourcesSection().textContent).not.toMatch(/LXO-93|Backlog/i);
     expect(inside.queryAllByTestId('resinv-row')).toHaveLength(0);
     expect(inside.queryByRole('combobox')).toBeNull();
     expect(inside.queryByTestId('resinv-warning-count')).toBeNull();
@@ -669,26 +711,64 @@ describe('ProjectView · inventario de recursos (LXO-101, fixtures sintéticas)'
     expect(inside.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
   });
 
-  it('el inventario suministrado se pinta en Resources con secciones distintas y filtros', () => {
+  it('el DTO de Core se pinta en Resources con una sección por categoría', () => {
     view({ resourceInventory: INV });
     const inside = within(resourcesSection());
     expect(inside.queryByTestId('resinv-unavailable-inventory')).toBeNull();
-    expect(inside.getByTestId('resinv-section-known')).toBeTruthy();
-    expect(inside.getByTestId('resinv-section-external_candidate')).toBeTruthy();
-    expect(inside.getByTestId('resinv-section-missing')).toBeTruthy();
-    expect(inside.getAllByTestId('resinv-row').map((el) => el.getAttribute('data-resource-id'))).toEqual(['inv-known', 'inv-external', 'inv-missing']);
-    // El candidato externo no muestra propietario aunque venga; el conocido sí.
-    expect(within(inside.getByTestId('resinv-section-external_candidate')).getByTestId('resinv-owner').textContent).toBe('Sin propietario');
-    expect(resourcesSection().textContent).not.toContain('no-debe-verse');
-    // El contador es el que suministra Core, no uno derivado de las filas (hay 0 filas sin fusionar).
-    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Avisos (Core): 4');
-    // El filtro «Desconocido» incluye el externo y el que falta, con campos nulos.
-    fireEvent.change(inside.getByLabelText('Estado'), { target: { value: 'unknown' } });
-    expect(inside.getAllByTestId('resinv-row').map((el) => el.getAttribute('data-resource-id'))).toEqual(['inv-external', 'inv-missing']);
+    expect(inside.getByTestId('resinv-section-scan_ok')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-tracked')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-missing_on_disk')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-external')).toBeTruthy();
+    expect(inside.getByTestId('resinv-section-preserved')).toBeTruthy();
+    expect(invTargets()).toEqual([
+      '/synthetic/app',
+      '/synthetic/app.lixbon-wt/wt-c',
+      '/synthetic/app.lixbon-wt/wt-falta',
+      '/synthetic/app.lixbon-wt/wt-ext',
+      'lx/r/g',
+    ]);
   });
 
-  it('sin warningCount de Core no se muestra contador', () => {
-    view({ resourceInventory: { resources: INV.resources } });
+  it('el externo no muestra propietario y el contador es el de Core, no uno derivado de las filas', () => {
+    view({ resourceInventory: INV });
+    const inside = within(resourcesSection());
+    expect(within(inside.getByTestId('resinv-section-external')).getByTestId('resinv-owner').textContent).toBe('Sin propietario');
+    expect(inside.getByTestId('resinv-warning-count').textContent).toBe('Ramas por revisar (Core): 2');
+    // El filtro de aviso lo gobierna `needs_review`, no `merged === 'unmerged'`.
+    fireEvent.change(inside.getByLabelText('Revisión'), { target: { value: 'needs_review' } });
+    expect(invTargets()).toEqual(['/synthetic/app.lixbon-wt/wt-c', 'lx/r/g']);
+  });
+
+  it('el inventario se acota por Project ID: las filas de otro Project no se pintan', () => {
+    const foreign = {
+      ...INV,
+      worktrees: [
+        ...INV.worktrees,
+        {
+          target: { machine: 'synthetic-machine-1', project_id: 'synthetic-project-2', repo: '/synthetic/otro', path: '/synthetic/otro.lixbon-wt/wt' },
+          state: 'tracked', origin: 'task', physical: 'present',
+          git: { registered: true, branch: 'lx/r/x', detached: false, locked: false, prunable: false },
+          owner: { task_id: 't-99', run_id: 'r-9', status: 'done' },
+          dirty: 'clean', merged: 'merged', into: 'main', needs_review: false,
+        },
+      ],
+    };
+    view({ resourceInventory: foreign });
+    expect(invTargets()).not.toContain('/synthetic/otro.lixbon-wt/wt');
+    // El repo de otro Project tampoco sale.
+    expect(invTargets()).not.toContain('/srv/remoto');
+    expect(within(resourcesSection()).getByTestId('resinv-foreign-omitted')).toBeTruthy();
+  });
+
+  it('el inventario NO se filtra por ProjectLocation: una ruta fuera de las ubicaciones se ve igual', () => {
+    // Las ubicaciones del ProjectView apuntan a /synthetic/a/repo y /synthetic/b/repo; la fila del
+    // inventario está en /synthetic/app.lixbon-wt/wt-c. El acotado es por Project ID, no por ruta.
+    view({ resourceInventory: INV });
+    expect(invTargets()).toContain('/synthetic/app.lixbon-wt/wt-c');
+  });
+
+  it('sin branches_to_review de Core no se muestra contador', () => {
+    view({ resourceInventory: { ...INV, warnings: { branches_to_review: null } } });
     expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
   });
 
@@ -696,7 +776,7 @@ describe('ProjectView · inventario de recursos (LXO-101, fixtures sintéticas)'
     view({ resources: { state: 'error' }, resourceInventory: INV });
     const inside = within(resourcesSection());
     expect(inside.getByTestId('slice-notice').textContent).toContain('No se pudo cargar');
-    expect(inside.getAllByTestId('resinv-row')).toHaveLength(3);
+    expect(inside.getAllByTestId('resinv-row')).toHaveLength(5);
   });
 
   it('solo lectura: sin controles de mutación, enlaces ni botones nuevos, y sin llamar a callbacks de dominio', () => {
@@ -713,7 +793,7 @@ describe('ProjectView · inventario de recursos (LXO-101, fixtures sintéticas)'
   });
 
   it('un inventario malformado se trata como no disponible, sin romper la vista', () => {
-    expect(() => view({ resourceInventory: { resources: 'no-es-lista' } })).not.toThrow();
+    expect(() => view({ resourceInventory: { worktrees: 'no-es-lista' } })).not.toThrow();
     expect(within(resourcesSection()).getByTestId('resinv-unavailable-inventory')).toBeTruthy();
   });
 });
