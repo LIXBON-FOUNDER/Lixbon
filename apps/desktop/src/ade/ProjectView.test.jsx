@@ -419,6 +419,25 @@ describe('ProjectView · loading, error, partial, degraded y desconocido', () =>
     expect(screen.queryByTestId('resources-empty')).toBeNull();
   });
 
+  it('loading con refreshing: dice «Actualizando desde Core.» sin «Cargando…», conserva items y aria-busy', () => {
+    view({
+      tasks: { state: 'loading', refreshing: true, items: [T_RUNNING] },
+      summary: { state: 'loading', refreshing: true, counts: { tasks: 1 } },
+    });
+    const taskNotice = within(section(/^Tasks/)).getByTestId('slice-notice');
+    expect(taskNotice.textContent).toBe('Actualizando desde Core.');
+    expect(taskNotice.getAttribute('aria-busy')).toBe('true');
+    expect(taskNotice.className).toContain('pv__notice--loading');
+    expect(visibleTaskIds()).toContain(T_RUNNING.task_id);
+    const summaryNotice = within(section('Resumen de Core')).getByTestId('slice-notice');
+    expect(summaryNotice.textContent).toBe('Actualizando desde Core.');
+    expect(summaryNotice.textContent).not.toContain('Datos desactualizados');
+    // Sin el flag, loading sigue siendo una primera carga.
+    cleanup();
+    view({ tasks: { state: 'loading', items: [] } });
+    expect(within(section(/^Tasks/)).getByTestId('slice-notice').textContent).toBe('Cargando…');
+  });
+
   it('error: role=alert con mensaje de Core, sin items (no son fiables) ni vacío', () => {
     view({ tasks: { state: 'error', items: [T_RUNNING], message: 'Error sintético de Core' }, activity: { state: 'error', items: [{ activity_id: 'x', text: 'stale' }] } });
     const alert = within(section(/^Tasks/)).getByRole('alert');
