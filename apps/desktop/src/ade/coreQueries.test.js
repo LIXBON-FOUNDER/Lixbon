@@ -145,7 +145,8 @@ describe('queryAdeCore', () => {
 
   it('rechaza parámetros de Activity fuera de sus tipos y rangos', async () => {
     const invalidRequests = [
-      { cursor: '12' },
+      { cursor: '12x' },
+      { cursor: '012' },
       { cursor: -1 },
       { cursor: 1.5 },
       { cursor: Number.MAX_SAFE_INTEGER + 1 },
@@ -161,6 +162,93 @@ describe('queryAdeCore', () => {
       await expect(queryAdeCore('activity_list', request)).rejects.toThrow('ade_query_invalid_request');
     }
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('conserva los i64 de Activity y pagina en asc y desc sin redondearlos', async () => {
+    const maxI64 = '9223372036854775807';
+    invoke.mockResolvedValueOnce(activityPage({
+      items: [
+        activityItem({ seq: '9007199254740992' }),
+        activityItem({ seq: '9007199254740993' }),
+      ],
+      next_cursor: '9007199254740993',
+      head_seq: maxI64,
+      has_more: true,
+      limit: 2,
+    }));
+
+    const first = await queryAdeCore('activity_list', { cursor: Number.MAX_SAFE_INTEGER, limit: 2 });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: { cursor: Number.MAX_SAFE_INTEGER, limit: 2, order: 'asc' },
+    });
+    expect(first.items.map((item) => item.seq)).toEqual(['9007199254740992', '9007199254740993']);
+    expect(first.next_cursor).toBe('9007199254740993');
+    expect(first.head_seq).toBe(maxI64);
+
+    invoke.mockResolvedValueOnce(activityPage({
+      items: [activityItem({ seq: maxI64 })],
+      next_cursor: maxI64,
+      head_seq: maxI64,
+      limit: 1,
+    }));
+    const second = await queryAdeCore('activity_list', { cursor: first.next_cursor, limit: 1 });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: { cursor: '9007199254740993', limit: 1, order: 'asc' },
+    });
+    expect(second.items[0].seq).toBe(maxI64);
+    expect(second.next_cursor).toBe(maxI64);
+    expect(second.head_seq).toBe(maxI64);
+
+    invoke.mockResolvedValueOnce(activityPage({
+      order: 'desc',
+      items: [activityItem({ seq: '9223372036854775806' })],
+      next_cursor: '9223372036854775806',
+      head_seq: maxI64,
+      limit: 1,
+    }));
+    const descending = await queryAdeCore('activity_list', {
+      cursor: maxI64,
+      limit: 1,
+      order: 'desc',
+    });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: { cursor: maxI64, limit: 1, order: 'desc' },
+    });
+    expect(descending.items[0].seq).toBe('9223372036854775806');
+    expect(descending.next_cursor).toBe('9223372036854775806');
+    expect(descending.head_seq).toBe(maxI64);
+  });
+
+  it('rechaza cursores de continuación que difieren solo por uno sobre MAX_SAFE_INTEGER', async () => {
+    invoke.mockResolvedValueOnce(activityPage({
+      items: [activityItem({ seq: '9007199254740993' })],
+      next_cursor: '9007199254740992',
+      head_seq: '9007199254740994',
+      has_more: true,
+      limit: 1,
+    }));
+    await expect(queryAdeCore('activity_list', { cursor: Number.MAX_SAFE_INTEGER, limit: 1 }))
+      .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('rechaza args de Activity que no pertenecen a la message_key documentada', async () => {
+    const valid = activityPage();
+    for (const extra of ['body', 'private_content']) {
+      invoke.mockResolvedValueOnce({
+        ...valid,
+        items: [activityItem({ args: { ...valid.items[0].args, [extra]: 'dato privado' } })],
+      });
+      await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+    }
+
+    invoke.mockResolvedValueOnce({
+      ...valid,
+      items: [activityItem({ message_key: 'activity.unlisted', args: { body: 'dato privado' } })],
+    });
+    await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
   });
 
   it('valida versión, cursor exclusivo, filtros exactos y DTO de Activity', async () => {
@@ -183,7 +271,7 @@ describe('queryAdeCore', () => {
       { ...valid, v: 2 },
       { ...valid, projection: 2 },
       { ...valid, order: 'desc' },
-      { ...valid, next_cursor: '131' },
+      { ...valid, next_cursor: '0131' },
       { ...valid, head_seq: 130 },
       { ...valid, items: [activityItem({ project_id: 'project-2' })] },
       { ...valid, items: [activityItem({ run_id: 'run-2' })] },
