@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeActivity, listAdeTasks, queryAdeCore } from './coreQueries';
+import { ACTIVITY_V1_MESSAGE_KEYS } from './activityMessages.js';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -8,7 +9,7 @@ afterEach(() => invoke.mockReset());
 
 function activityItem(overrides = {}) {
   return {
-    seq: 131,
+    seq: '131',
     event_id: '0192f0a0-7b1c-7000-8000-0000000000a1',
     ts: 1_760_000_130_000,
     kind: 'task.created',
@@ -34,12 +35,73 @@ function activityPage(overrides = {}) {
     projection: 1,
     order: 'asc',
     items: [activityItem()],
-    next_cursor: 131,
+    next_cursor: '131',
     has_more: false,
-    head_seq: 131,
+    head_seq: '131',
     limit: 100,
     ...overrides,
   };
+}
+
+const ACTIVITY_ARGS_CONTRACTS = [
+  ['activity.run.created', { root_task: 'task-1' }],
+  ['activity.run.closed', { forced: false, stopped_total: 2 }],
+  ['activity.run.removed', { tasks: 2 }],
+  ['activity.task.created', { title: 'Implementar', agent: 'codex', depth: 1, external: false }, { role: 'worker', model: 'gpt', parent: 'task-0' }],
+  ['activity.task.phase_started', {}],
+  ['activity.task.phase_done', {}],
+  ['activity.task.question', { message_id: 7, to: 'task-1' }],
+  ['activity.task.reply', { question_id: 6, message_id: 7 }],
+  ['activity.task.removed', { cause: 'launch_failed' }],
+  ['activity.task.review_requested', { branch: 'feature/activity' }],
+  ['activity.decision.review.accepted', { decision_id: 1, has_comment: true }],
+  ['activity.decision.review.rejected', { decision_id: 1, has_comment: false }],
+  ['activity.decision.merge.merged', { decision_id: 2, branch: 'feature/activity', squash: true }, { conflict_count: 0 }],
+  ['activity.decision.merge.conflict', { decision_id: 2, branch: 'feature/activity', squash: false }, { conflict_count: 1 }],
+  ['activity.decision.merge.error', { decision_id: 2, branch: 'feature/activity', squash: false }, { conflict_count: 1 }],
+  ['activity.decision.merge.target_moved', { decision_id: 2, branch: 'feature/activity', squash: false }, { conflict_count: 0 }],
+  ['activity.decision.pr.created', { decision_id: 3, branch: 'feature/activity', has_pr_url: true }],
+  ['activity.decision.pr.already_exists', { decision_id: 3, branch: 'feature/activity', has_pr_url: false }],
+  ['activity.decision.pr.error', { decision_id: 3, branch: 'feature/activity', has_pr_url: false }],
+  ['activity.effect.git_merge.merged', { effect_id: 'effect-1', branch: 'feature/activity' }],
+  ['activity.effect.git_merge.conflict', { effect_id: 'effect-1', branch: 'feature/activity' }],
+  ['activity.effect.git_merge.error', { effect_id: 'effect-1', branch: 'feature/activity' }],
+  ['activity.effect.git_push_pr.created', { effect_id: 'effect-1', branch: 'feature/activity', has_pr_url: true }],
+  ['activity.effect.git_push_pr.already_exists', { effect_id: 'effect-1', branch: 'feature/activity', has_pr_url: false }],
+  ['activity.effect.git_push_pr.error', { effect_id: 'effect-1', branch: 'feature/activity', has_pr_url: false }],
+  ['activity.effect.git_worktree.created', { effect_id: 'effect-1', branch: 'feature/activity' }, { base: 'main' }],
+  ['activity.effect.git_worktree.removed', { effect_id: 'effect-1', worktree_removed: true, branch_deleted: false }, { branch: 'feature/activity' }],
+  ['activity.effect.process.launched', { effect_id: 'effect-1' }],
+  ['activity.effect.process.not_launched', { effect_id: 'effect-1' }],
+  ['activity.project.registered', { name: 'Lixbon', origin: 'manual', has_remote: true }],
+  ['activity.project.location_added', { primary: true, fingerprint_adopted: false }],
+  ['activity.project.archived', {}],
+  ['activity.project.restored', {}],
+  ['activity.project.relocated', { fingerprint_adopted: true, confirmed_mismatch: false }],
+  ['activity.spawn.requested', {
+    parent_task: 'task-1', title: 'Implementar', provider: 'codex', profile: 'default',
+    shared: false, policy_status: 'ok',
+  }, { role: 'worker', model: 'gpt', effort: 'high' }],
+  ['activity.spawn.approved', { has_reason: true }, { task: 'task-2' }],
+  ['activity.spawn.rejected', { has_reason: false }, { task: 'task-2' }],
+  ['activity.spawn.launch_failed', { has_reason: true }, { task: 'task-2' }],
+  ['activity.spawn.timeout', { has_reason: false }, { task: 'task-2' }],
+  ['activity.spawn.coordinator_closed', { has_reason: false }, { task: 'task-2' }],
+  ['activity.spawn.cancelled_run_removed', { has_reason: false }, { task: 'task-2' }],
+  ['activity.environment.blocked', { provider: 'codex', profile: 'default', code: 'cli_missing' }],
+  ['activity.environment.cleared', { provider: 'codex', profile: 'default', code: 'cli_missing' }],
+  ['activity.attention.risk_acted', { resolution: 'acted' }],
+  ['activity.attention.created', { category: 'question', severity: 'high', occurrence: 1, target_kind: 'task', target_id: 'task-1' }],
+  ['activity.attention.resolved', { resolution: 'condition_cleared' }],
+  ['activity.unknown', { reason: 'unknown_kind', kind: 'task.future', event_version: 2 }],
+  ...['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']
+    .map((to) => [`activity.task.${to}`, { from: 'running', to }, { cause: 'agent_idle_timeout' }]),
+];
+
+function invalidActivityArgValue(value) {
+  if (typeof value === 'string') return 1;
+  if (typeof value === 'boolean') return 'true';
+  return '1';
 }
 
 describe('queryAdeCore', () => {
@@ -94,23 +156,23 @@ describe('queryAdeCore', () => {
       .rejects.toThrow('ade_query_invalid_response');
   });
 
-  it('lista Activity con cursor de seq numérico y solo los filtros exactos del Core', async () => {
+  it('lista Activity con cursor decimal canónico y solo los filtros exactos del Core', async () => {
     invoke.mockResolvedValueOnce(activityPage());
     await listAdeActivity();
     expect(invoke).toHaveBeenLastCalledWith('orch_query', {
       query: 'activity_list',
-      args: { cursor: 0, limit: 100, order: 'asc' },
+      args: { cursor: '0', limit: 100, order: 'asc' },
     });
 
     invoke.mockResolvedValueOnce(activityPage({
       order: 'desc',
-      items: [activityItem({ seq: 49 })],
-      next_cursor: 49,
-      head_seq: 51,
+      items: [activityItem({ seq: '49' })],
+      next_cursor: '49',
+      head_seq: '51',
       limit: 25,
     }));
     await listAdeActivity({
-      cursor: 50,
+      cursor: '50',
       limit: 25,
       order: 'desc',
       projectId: ' project-1 ',
@@ -121,7 +183,7 @@ describe('queryAdeCore', () => {
     expect(invoke).toHaveBeenLastCalledWith('orch_query', {
       query: 'activity_list',
       args: {
-        cursor: 50,
+        cursor: '50',
         limit: 25,
         order: 'desc',
         project_id: 'project-1',
@@ -133,13 +195,13 @@ describe('queryAdeCore', () => {
 
     invoke.mockResolvedValueOnce(activityPage({
       items: [activityItem()],
-      next_cursor: 131,
-      head_seq: 131,
+      next_cursor: '131',
+      head_seq: '131',
     }));
     await queryAdeCore('activity_list', { targetKind: 'task' });
     expect(invoke).toHaveBeenLastCalledWith('orch_query', {
       query: 'activity_list',
-      args: { cursor: 0, limit: 100, order: 'asc', target_kind: 'task' },
+      args: { cursor: '0', limit: 100, order: 'asc', target_kind: 'task' },
     });
   });
 
@@ -164,7 +226,7 @@ describe('queryAdeCore', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it('conserva los i64 de Activity y pagina en asc y desc sin redondearlos', async () => {
+  it('normaliza siempre seq y cursores i64 como decimales canónicos y pagina sin redondearlos', async () => {
     const maxI64 = '9223372036854775807';
     invoke.mockResolvedValueOnce(activityPage({
       items: [
@@ -180,7 +242,7 @@ describe('queryAdeCore', () => {
     const first = await queryAdeCore('activity_list', { cursor: Number.MAX_SAFE_INTEGER, limit: 2 });
     expect(invoke).toHaveBeenLastCalledWith('orch_query', {
       query: 'activity_list',
-      args: { cursor: Number.MAX_SAFE_INTEGER, limit: 2, order: 'asc' },
+      args: { cursor: '9007199254740991', limit: 2, order: 'asc' },
     });
     expect(first.items.map((item) => item.seq)).toEqual(['9007199254740992', '9007199254740993']);
     expect(first.next_cursor).toBe('9007199254740993');
@@ -251,6 +313,43 @@ describe('queryAdeCore', () => {
     await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
   });
 
+  it('exige los argumentos requeridos, opcionales y tipos exactos por cada message_key', async () => {
+    expect(ACTIVITY_ARGS_CONTRACTS.map(([messageKey]) => messageKey).sort())
+      .toEqual([...ACTIVITY_V1_MESSAGE_KEYS].sort());
+
+    for (const [messageKey, required, optional = {}] of ACTIVITY_ARGS_CONTRACTS) {
+      const allArgs = { ...required, ...optional };
+      const makeResponse = (args) => activityPage({
+        items: [activityItem({ message_key: messageKey, args })],
+      });
+
+      invoke.mockResolvedValueOnce(makeResponse(allArgs));
+      await expect(queryAdeCore('activity_list')).resolves.toMatchObject({
+        items: [expect.objectContaining({ message_key: messageKey, args: allArgs })],
+      });
+
+      invoke.mockResolvedValueOnce(makeResponse(required));
+      await expect(queryAdeCore('activity_list')).resolves.toMatchObject({
+        items: [expect.objectContaining({ message_key: messageKey, args: required })],
+      });
+
+      for (const key of Object.keys(required)) {
+        const missing = { ...allArgs };
+        delete missing[key];
+        invoke.mockResolvedValueOnce(makeResponse(missing));
+        await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+      }
+
+      invoke.mockResolvedValueOnce(makeResponse({ ...allArgs, unlisted: 'extra' }));
+      await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+
+      for (const [key, value] of Object.entries(allArgs)) {
+        invoke.mockResolvedValueOnce(makeResponse({ ...allArgs, [key]: invalidActivityArgValue(value) }));
+        await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+      }
+    }
+  });
+
   it('valida versión, cursor exclusivo, filtros exactos y DTO de Activity', async () => {
     const request = {
       cursor: 130,
@@ -263,8 +362,8 @@ describe('queryAdeCore', () => {
     };
     const valid = activityPage({
       items: [activityItem()],
-      next_cursor: 131,
-      head_seq: 131,
+      next_cursor: '131',
+      head_seq: '131',
       limit: 1,
     });
     const invalidResponses = [

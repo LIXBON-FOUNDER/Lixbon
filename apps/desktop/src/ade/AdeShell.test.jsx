@@ -626,13 +626,13 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
 
 // Activity (LXO-99): la subvista monta ActivityPanel con alcance derivado de los IDs durables seleccionados.
 const activityItem = (seq, over = {}) => ({
-  seq, event_id: `event-${seq}`, ts: 1_800_000_000_000 + seq, kind: 'task.created', v: 1, class: 'state',
+  seq: String(seq), event_id: `event-${seq}`, ts: 1_800_000_000_000, kind: 'task.created', v: 1, class: 'state',
   message_key: 'activity.task.created', args: { title: `Tarea ${seq}`, agent: 'codex', depth: 0, external: false },
   visual: 'info', fallback: false, target: { kind: 'task', id: ITEM.id }, project_id: PROJECT.id, run_id: 'run-1',
   actor: { kind: 'system', id: null }, provenance: { channel: 'core', client_id: 'core-system' }, correlation_id: null, ...over,
 });
 const activityPage = (items) => ({
-  v: 1, projection: 1, order: 'desc', items, next_cursor: items.at(-1)?.seq ?? 0, has_more: false, head_seq: items[0]?.seq ?? 0, limit: 100,
+  v: 1, projection: 1, order: 'desc', items, next_cursor: items.at(-1)?.seq ?? '0', has_more: false, head_seq: items[0]?.seq ?? '0', limit: 100,
 });
 function coreWithActivity(items = [activityItem(3)]) {
   core(detailOf());
@@ -645,7 +645,7 @@ const scopeButton = (name) => within(screen.getByRole('group', { name: 'Alcance 
 
 describe('AdeShell · subvista Activity (LXO-99)', () => {
   it('monta ActivityPanel solo al abrir la subvista y consulta el alcance global sin selección', async () => {
-    coreWithActivity();
+    coreWithActivity([activityItem('9007199254740993')]);
     render(shell());
     await flush();
     expect(activityCalls()).toEqual([]);
@@ -654,7 +654,8 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     await flush();
 
     expect(await screen.findByTestId('activity-list')).toBeTruthy();
-    expect(activityCalls()).toEqual([{ cursor: 0, limit: 100, order: 'desc', projectId: null, runId: null, targetKind: null, targetId: null }]);
+    expect(activityCalls()).toEqual([{ cursor: '0', limit: 100, order: 'desc', projectId: null, runId: null, targetKind: null, targetId: null }]);
+    expect(screen.getByTestId('activity-event-9007199254740993').getAttribute('data-seq')).toBe('9007199254740993');
     expect(scopeButton('Global').getAttribute('aria-pressed')).toBe('true');
     expect(scopeButton('Project').disabled).toBe(true);
     expect(scopeButton('Task').disabled).toBe(true);

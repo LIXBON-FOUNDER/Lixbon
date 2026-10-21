@@ -56,57 +56,93 @@ const ACTIVITY_CLASS_SET = new Set(['state', 'effect', 'decision', 'system']);
 const ACTIVITY_VISUAL_SET = new Set(['info', 'success', 'warning', 'error']);
 const ACTIVITY_ACTOR_KIND_SET = new Set(['person', 'agent', 'system']);
 const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
-const ACTIVITY_SAFE_INTEGER_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 
-const ACTIVITY_ARGS_KEYS = new Map([
-  ['activity.run.created', new Set(['root_task'])],
-  ['activity.run.closed', new Set(['forced', 'stopped_total'])],
-  ['activity.run.removed', new Set(['tasks'])],
-  ['activity.task.created', new Set(['title', 'agent', 'role', 'model', 'parent', 'depth', 'external'])],
-  ['activity.task.phase_started', new Set()],
-  ['activity.task.phase_done', new Set()],
-  ['activity.task.question', new Set(['message_id', 'to'])],
-  ['activity.task.reply', new Set(['question_id', 'message_id'])],
-  ['activity.task.removed', new Set(['cause'])],
-  ['activity.task.review_requested', new Set(['branch'])],
-  ['activity.decision.review.accepted', new Set(['decision_id', 'has_comment'])],
-  ['activity.decision.review.rejected', new Set(['decision_id', 'has_comment'])],
-  ['activity.decision.merge.merged', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
-  ['activity.decision.merge.conflict', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
-  ['activity.decision.merge.error', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
-  ['activity.decision.merge.target_moved', new Set(['decision_id', 'branch', 'squash', 'conflict_count'])],
-  ['activity.decision.pr.created', new Set(['decision_id', 'branch', 'has_pr_url'])],
-  ['activity.decision.pr.already_exists', new Set(['decision_id', 'branch', 'has_pr_url'])],
-  ['activity.decision.pr.error', new Set(['decision_id', 'branch', 'has_pr_url'])],
-  ['activity.effect.git_merge.merged', new Set(['effect_id', 'branch'])],
-  ['activity.effect.git_merge.conflict', new Set(['effect_id', 'branch'])],
-  ['activity.effect.git_merge.error', new Set(['effect_id', 'branch'])],
-  ['activity.effect.git_push_pr.created', new Set(['effect_id', 'branch', 'has_pr_url'])],
-  ['activity.effect.git_push_pr.already_exists', new Set(['effect_id', 'branch', 'has_pr_url'])],
-  ['activity.effect.git_push_pr.error', new Set(['effect_id', 'branch', 'has_pr_url'])],
-  ['activity.effect.git_worktree.created', new Set(['effect_id', 'branch', 'base'])],
-  ['activity.effect.git_worktree.removed', new Set(['effect_id', 'worktree_removed', 'branch', 'branch_deleted'])],
-  ['activity.effect.process.launched', new Set(['effect_id'])],
-  ['activity.effect.process.not_launched', new Set(['effect_id'])],
-  ['activity.project.registered', new Set(['name', 'origin', 'has_remote'])],
-  ['activity.project.location_added', new Set(['primary', 'fingerprint_adopted'])],
-  ['activity.project.archived', new Set()],
-  ['activity.project.restored', new Set()],
-  ['activity.project.relocated', new Set(['fingerprint_adopted', 'confirmed_mismatch'])],
-  ['activity.spawn.requested', new Set(['parent_task', 'title', 'provider', 'profile', 'role', 'model', 'effort', 'shared', 'policy_status'])],
-  ['activity.environment.blocked', new Set(['provider', 'profile', 'code'])],
-  ['activity.environment.cleared', new Set(['provider', 'profile', 'code'])],
-  ['activity.attention.risk_acted', new Set(['resolution'])],
-  ['activity.attention.created', new Set(['category', 'severity', 'occurrence', 'target_kind', 'target_id'])],
-  ['activity.attention.resolved', new Set(['resolution'])],
-  ['activity.unknown', new Set(['reason', 'kind', 'event_version'])],
+const ACTIVITY_ARG_SCHEMAS = new Map([
+  ['activity.run.created', { required: { root_task: 'string' } }],
+  ['activity.run.closed', { required: { forced: 'boolean', stopped_total: 'integer' } }],
+  ['activity.run.removed', { required: { tasks: 'integer' } }],
+  ['activity.task.created', {
+    required: { title: 'string', agent: 'string', depth: 'integer', external: 'boolean' },
+    optional: { role: 'string', model: 'string', parent: 'string' },
+  }],
+  ['activity.task.phase_started', { required: {} }],
+  ['activity.task.phase_done', { required: {} }],
+  ['activity.task.question', { required: { message_id: 'integer', to: 'string' } }],
+  ['activity.task.reply', { required: { question_id: 'integer', message_id: 'integer' } }],
+  ['activity.task.removed', { required: { cause: 'string' } }],
+  ['activity.task.review_requested', { required: { branch: 'string' } }],
+  ['activity.decision.review.accepted', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
+  ['activity.decision.review.rejected', { required: { decision_id: 'integer', has_comment: 'boolean' } }],
+  ['activity.decision.merge.merged', {
+    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.conflict', {
+    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.error', {
+    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.merge.target_moved', {
+    required: { decision_id: 'integer', branch: 'string', squash: 'boolean' },
+    optional: { conflict_count: 'integer' },
+  }],
+  ['activity.decision.pr.created', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.already_exists', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.decision.pr.error', { required: { decision_id: 'integer', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_merge.merged', { required: { effect_id: 'string', branch: 'string' } }],
+  ['activity.effect.git_merge.conflict', { required: { effect_id: 'string', branch: 'string' } }],
+  ['activity.effect.git_merge.error', { required: { effect_id: 'string', branch: 'string' } }],
+  ['activity.effect.git_push_pr.created', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.already_exists', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_push_pr.error', { required: { effect_id: 'string', branch: 'string', has_pr_url: 'boolean' } }],
+  ['activity.effect.git_worktree.created', {
+    required: { effect_id: 'string', branch: 'string' },
+    optional: { base: 'string' },
+  }],
+  ['activity.effect.git_worktree.removed', {
+    required: { effect_id: 'string', worktree_removed: 'boolean', branch_deleted: 'boolean' },
+    optional: { branch: 'string' },
+  }],
+  ['activity.effect.process.launched', { required: { effect_id: 'string' } }],
+  ['activity.effect.process.not_launched', { required: { effect_id: 'string' } }],
+  ['activity.project.registered', { required: { name: 'string', origin: 'string', has_remote: 'boolean' } }],
+  ['activity.project.location_added', { required: { primary: 'boolean', fingerprint_adopted: 'boolean' } }],
+  ['activity.project.archived', { required: {} }],
+  ['activity.project.restored', { required: {} }],
+  ['activity.project.relocated', { required: { fingerprint_adopted: 'boolean', confirmed_mismatch: 'boolean' } }],
+  ['activity.spawn.requested', {
+    required: {
+      parent_task: 'string', title: 'string', provider: 'string', profile: 'string',
+      shared: 'boolean', policy_status: 'string',
+    },
+    optional: { role: 'string', model: 'string', effort: 'string' },
+  }],
+  ['activity.environment.blocked', { required: { provider: 'string', profile: 'string', code: 'string' } }],
+  ['activity.environment.cleared', { required: { provider: 'string', profile: 'string', code: 'string' } }],
+  ['activity.attention.risk_acted', { required: { resolution: 'string' } }],
+  ['activity.attention.created', {
+    required: {
+      category: 'string', severity: 'string', occurrence: 'integer', target_kind: 'string', target_id: 'string',
+    },
+  }],
+  ['activity.attention.resolved', { required: { resolution: 'string' } }],
+  ['activity.unknown', { required: { reason: 'string', kind: 'string', event_version: 'integer' } }],
 ]);
 
 for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']) {
-  ACTIVITY_ARGS_KEYS.set(`activity.task.${state}`, new Set(['from', 'to', 'cause']));
+  ACTIVITY_ARG_SCHEMAS.set(`activity.task.${state}`, {
+    required: { from: 'string', to: 'string' },
+    optional: { cause: 'string' },
+  });
 }
 for (const outcome of ['approved', 'rejected', 'launch_failed', 'timeout', 'coordinator_closed', 'cancelled_run_removed']) {
-  ACTIVITY_ARGS_KEYS.set(`activity.spawn.${outcome}`, new Set(['task', 'has_reason']));
+  ACTIVITY_ARG_SCHEMAS.set(`activity.spawn.${outcome}`, {
+    required: { has_reason: 'boolean' },
+    optional: { task: 'string' },
+  });
 }
 
 const ACTIVITY_RESPONSE_KEYS = ['v', 'projection', 'order', 'items', 'next_cursor', 'has_more', 'head_seq', 'limit'];
@@ -177,11 +213,11 @@ function activityRequestCursor(value) {
   if (cursor === null) {
     throw new Error('ade_query_invalid_request: cursor debe ser un entero i64 no negativo y exacto');
   }
-  return cursor <= ACTIVITY_SAFE_INTEGER_MAX ? Number(cursor) : cursor.toString();
+  return cursor.toString();
 }
 
 function publicActivityI64(value) {
-  return value <= ACTIVITY_SAFE_INTEGER_MAX ? Number(value) : value.toString();
+  return value.toString();
 }
 
 function activityRequest(args) {
@@ -282,9 +318,24 @@ function hasExactKeys(value, keys) {
     && keys.every((key) => Object.hasOwn(value, key));
 }
 
+function validActivityArgs(messageKey, args) {
+  const schema = ACTIVITY_ARG_SCHEMAS.get(messageKey);
+  if (!schema || !isRecord(args)) return false;
+  const required = schema.required ?? {};
+  const optional = schema.optional ?? {};
+  const fields = { ...required, ...optional };
+  const validators = {
+    string: nonEmptyText,
+    boolean: (value) => typeof value === 'boolean',
+    integer: nonNegativeSafeInteger,
+  };
+  return Object.keys(required).every((key) => Object.hasOwn(args, key))
+    && Object.keys(args).every((key) => Object.hasOwn(fields, key)
+      && validators[fields[key]]?.(args[key]) === true);
+}
+
 function validActivityItem(item) {
   const seq = activityI64(item?.seq);
-  const allowedArgs = ACTIVITY_ARGS_KEYS.get(item?.message_key);
   return hasExactKeys(item, ACTIVITY_ITEM_KEYS)
     && seq !== null && seq > 0n
     && nonEmptyText(item.event_id)
@@ -293,10 +344,7 @@ function validActivityItem(item) {
     && Number.isSafeInteger(item.v) && item.v >= 1
     && ACTIVITY_CLASS_SET.has(item.class)
     && typeof item.message_key === 'string' && /^activity\.[a-z0-9_.]+$/.test(item.message_key)
-    && isRecord(item.args)
-    && allowedArgs !== undefined && Object.keys(item.args).every((key) => allowedArgs.has(key))
-    && Object.values(item.args).every((value) => value === null || typeof value === 'string'
-      || typeof value === 'boolean' || (Number.isSafeInteger(value) && value >= 0))
+    && validActivityArgs(item.message_key, item.args)
     && ACTIVITY_VISUAL_SET.has(item.visual)
     && typeof item.fallback === 'boolean'
     && hasExactKeys(item.target, ['kind', 'id'])
@@ -479,6 +527,6 @@ export const readAdeTask = (projectId, taskId) => queryAdeCore('task_detail', { 
 export const listAdeAttention = ({ projectId = null, targetKind = null, targetId = null, category = null, severity = null, cursor = null } = {}) =>
   queryAdeCore('attention_list', { projectId, targetKind, targetId, category, severity, cursor });
 
-/** Activity es una proyección de solo lectura; su cursor numérico es el `seq` exclusivo del Core. */
+/** Activity es una proyección de solo lectura; su cursor decimal canónico es el `seq` exclusivo del Core. */
 export const listAdeActivity = ({ cursor = 0, limit = ACTIVITY_DEFAULT_LIMIT, order = 'asc', projectId = null, runId = null, targetKind = null, targetId = null } = {}) =>
   queryAdeCore('activity_list', { cursor, limit, order, projectId, runId, targetKind, targetId });

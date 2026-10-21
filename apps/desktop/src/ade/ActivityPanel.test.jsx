@@ -19,17 +19,17 @@ const emptyPage = {
   projection: 1,
   order: 'desc',
   items: [],
-  next_cursor: 0,
+  next_cursor: '0',
   has_more: false,
-  head_seq: 0,
+  head_seq: '0',
   limit: 100,
 };
 
 function activity(seq, overrides = {}) {
   return {
-    seq,
+    seq: String(seq),
     event_id: `event-${seq}`,
-    ts: 1_800_000_000_000 + seq,
+    ts: 1_800_000_000_000,
     kind: 'task.created',
     v: 1,
     class: 'state',
@@ -52,20 +52,20 @@ function activity(seq, overrides = {}) {
   };
 }
 
-function activityPage(items, { nextCursor = 0, hasMore = false } = {}) {
+function activityPage(items, { nextCursor = '0', hasMore = false } = {}) {
   return {
     ...emptyPage,
     items,
     next_cursor: nextCursor,
     has_more: hasMore,
-    head_seq: items[0]?.seq ?? 0,
+    head_seq: items[0]?.seq ?? '0',
   };
 }
 
 function readySnapshot(items, readEpoch = 1, extra = {}) {
   return {
     status: items.length ? 'ready' : 'empty',
-    data: activityPage(items, { nextCursor: items.at(-1)?.seq ?? 0, hasMore: Boolean(extra.hasMore) }),
+    data: activityPage(items, { nextCursor: items.at(-1)?.seq ?? '0', hasMore: Boolean(extra.hasMore) }),
     error: null,
     reason: null,
     updatedAt: readEpoch,
@@ -116,7 +116,7 @@ describe('ActivityPanel', () => {
     expect(queryCalls[0]).toEqual([
       'activity_list',
       {
-        cursor: 0,
+        cursor: '0',
         limit: 100,
         order: 'desc',
         project_id: filters.project_id,
@@ -200,18 +200,18 @@ describe('ActivityPanel', () => {
     expect(document.body.textContent).not.toContain('NO_INFERIR');
   });
 
-  it('pagina con el cursor numérico exclusivo y elimina duplicados sin reordenar', async () => {
+  it('pagina con el cursor decimal exclusivo y elimina duplicados sin reordenar', async () => {
     snapshot = readySnapshot([activity(9), activity(8)], 1, { hasMore: true });
     mocks.listAdeActivity.mockResolvedValue(activityPage(
       [activity(8), activity(7)],
-      { nextCursor: 7, hasMore: true },
+      { nextCursor: '7', hasMore: true },
     ));
     render(<ActivityPanel scope={{ kind: 'project', id: 'project-a' }} />);
 
     fireEvent.click(await screen.findByTestId('activity-load-more'));
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
     expect(mocks.listAdeActivity).toHaveBeenCalledWith({
-      cursor: 8,
+      cursor: '8',
       limit: 100,
       order: 'desc',
       projectId: 'project-a',
@@ -227,7 +227,7 @@ describe('ActivityPanel', () => {
     snapshot = readySnapshot([activity(9), activity(8)], 1, { hasMore: true });
     mocks.listAdeActivity.mockResolvedValue(activityPage(
       [activity(7)],
-      { nextCursor: 7, hasMore: true },
+      { nextCursor: '7', hasMore: true },
     ));
     const view = render(<ActivityPanel />);
     fireEvent.click(await screen.findByTestId('activity-load-more'));
@@ -249,17 +249,32 @@ describe('ActivityPanel', () => {
     snapshot = readySnapshot([activity(10), activity(9)], 2, { hasMore: true });
     view.rerender(<ActivityPanel />);
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2));
-    await act(async () => pendingPage.resolve(activityPage([activity(7)], { nextCursor: 7, hasMore: true })));
+    await act(async () => pendingPage.resolve(activityPage([activity(7)], { nextCursor: '7', hasMore: true })));
 
     expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-seq'))).toEqual(['10', '9']);
   });
 
   it('conserva filas base al desconectarse y deduplica la lectura tras reconectar', async () => {
-    snapshot = readySnapshot([activity(9), activity(8)], 1, { hasMore: true });
-    mocks.listAdeActivity.mockResolvedValue(activityPage([activity(7)], { nextCursor: 7, hasMore: true }));
+    snapshot = readySnapshot([activity('9007199254740994'), activity('9007199254740993')], 1, { hasMore: true });
+    mocks.listAdeActivity.mockResolvedValue(activityPage(
+      [activity('9007199254740992')],
+      { nextCursor: '9007199254740992', hasMore: true },
+    ));
     const view = render(<ActivityPanel />);
     fireEvent.click(await screen.findByTestId('activity-load-more'));
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
+    expect(mocks.listAdeActivity).toHaveBeenLastCalledWith({
+      cursor: '9007199254740993',
+      limit: 100,
+      order: 'desc',
+      projectId: null,
+      runId: null,
+      targetKind: null,
+      targetId: null,
+    });
+    expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-seq'))).toEqual([
+      '9007199254740994', '9007199254740993', '9007199254740992',
+    ]);
 
     snapshot = {
       ...snapshot,
@@ -269,19 +284,39 @@ describe('ActivityPanel', () => {
     };
     view.rerender(<ActivityPanel />);
     expect(await screen.findByTestId('activity-stale')).toBeTruthy();
-    expect(screen.getByTestId('activity-event-9')).toBeTruthy();
-    expect(screen.queryByTestId('activity-event-7')).toBeNull();
+    expect(screen.getByTestId('activity-event-9007199254740994')).toBeTruthy();
+    expect(screen.queryByTestId('activity-event-9007199254740992')).toBeNull();
     expect(screen.getByTestId('activity-timeline').getAttribute('data-status')).toBe('error');
     expect(screen.getByRole('alert').textContent).toMatch(/desconectad/i);
 
     snapshot = readySnapshot([
-      activity(10),
-      activity(9),
-      activity(8, { event_id: 'event-9' }),
-    ], 2, { hasMore: false });
+      activity('9007199254740996'),
+      activity('9007199254740995'),
+    ], 2, { hasMore: true });
     view.rerender(<ActivityPanel />);
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(2));
-    expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-seq'))).toEqual(['10', '9']);
+    expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-seq'))).toEqual([
+      '9007199254740996', '9007199254740995',
+    ]);
+
+    mocks.listAdeActivity.mockResolvedValue(activityPage(
+      [activity('9007199254740994')],
+      { nextCursor: '9007199254740994', hasMore: false },
+    ));
+    fireEvent.click(await screen.findByTestId('activity-load-more'));
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(3));
+    expect(mocks.listAdeActivity).toHaveBeenLastCalledWith({
+      cursor: '9007199254740995',
+      limit: 100,
+      order: 'desc',
+      projectId: null,
+      runId: null,
+      targetKind: null,
+      targetId: null,
+    });
+    expect(screen.getAllByRole('listitem').map((row) => row.getAttribute('data-seq'))).toEqual([
+      '9007199254740996', '9007199254740995', '9007199254740994',
+    ]);
   });
 
   it.each([
