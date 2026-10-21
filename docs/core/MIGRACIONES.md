@@ -14,7 +14,8 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 004 | `events` | E (Event Log; E1a) | en revisión (PR de E1a). Ver `EVENTOS.md` |
 | 005 | `clients` | F1 (LXO-85) | publicada. Ver `CLIENT_IDENTITY.md` |
 | 006 | `attention` | G (LXO-87) | en revisión (PR de LXO-87). Ver `ATTENTION.md` |
-| 007 | `task_attempt` | F3 · corte Task/Attempt | **reserva orientativa**, sin escribir. Diseño y borrador en `CORTE_TASK_ATTEMPT.md` (LXO-112) |
+| 007 | `tasks` | F3 · Task como intención (LXO-113) | en revisión (PR de LXO-113). Esquema **inerte** hasta el corte. Ver `TASKS.md` |
+| — | `task_attempt_cut` | F3 · corte de datos | sin número: toma el siguiente libre cuando se escriba, después del esquema de Attempt y el resto. Ver `CORTE_TASK_ATTEMPT.md` |
 
 La numeración inicial (002 proyectos · 003 eventos · 004 clientes · 005 attention) quedó obsoleta
 cuando C2b ocupó la 002 con la valla: D, E, F1 y G pasaron a 003..006. Los números aún no escritos son una **reserva

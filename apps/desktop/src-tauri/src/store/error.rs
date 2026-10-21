@@ -55,6 +55,13 @@ pub enum StoreError {
     /// Una Attention no cumple el contrato (destino que parece una ruta, `facts` que no es un objeto JSON
     /// acotado, resolución anterior a la creación…). Se rechaza ANTES de tocar la base.
     InvalidAttention(String),
+    /// Las tablas del modelo Task/Attempt existen pero siguen inertes: el corte (`meta.agentic_model`) aún no
+    /// se ha hecho y la autoridad de las tareas es `legacy_state`. No se escribió nada.
+    AgenticModelInactive,
+    /// Una Task no admite la operación (padre descartado o inexistente, Run cerrado, hijas abiertas, raíz…).
+    TaskConflict(String),
+    /// Una Task no cumple el contrato (título vacío, cambio vacío…). Se rechaza ANTES de tocar la base.
+    InvalidTask(String),
 }
 
 impl StoreError {
@@ -155,6 +162,11 @@ impl fmt::Display for StoreError {
             StoreError::ProjectConflict(m) => write!(f, "registro de proyectos: {m}"),
             StoreError::InvalidEvent(m) => write!(f, "evento inválido: {m}"),
             StoreError::InvalidAttention(m) => write!(f, "attention inválida: {m}"),
+            StoreError::AgenticModelInactive => f.write_str(
+                "el modelo Task/Attempt todavía no está activo (falta el corte): las tareas siguen en el estado legacy y no se escribió nada",
+            ),
+            StoreError::TaskConflict(m) => write!(f, "tasks: {m}"),
+            StoreError::InvalidTask(m) => write!(f, "task inválida: {m}"),
         }
     }
 }

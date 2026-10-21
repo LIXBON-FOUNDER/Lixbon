@@ -40,6 +40,11 @@ fn hasta_la_005() -> Vec<Migration> {
     embedded().into_iter().filter(|m| m.version <= 5).collect()
 }
 
+/// Lo que conoce un binario de G: hasta la 006 (las posteriores se prueban en su propio slice).
+fn hasta_la_006() -> Vec<Migration> {
+    embedded().into_iter().filter(|m| m.version <= 6).collect()
+}
+
 fn destino(kind: TargetKind, id: &str) -> AttentionTarget {
     AttentionTarget::new(kind, id).unwrap()
 }
@@ -744,7 +749,7 @@ fn la_migracion_006_se_aplica_sobre_una_base_en_la_005_y_no_toca_lo_anterior() {
         s.meta_set("marca", "intacta").unwrap();
         assert_eq!(s.schema_version().unwrap(), 5);
     }
-    let s = abre(tmp.path());
+    let s = Store::open_with(tmp.path(), &hasta_la_006(), "t").unwrap();
     assert_eq!(s.schema_version().unwrap(), 6);
     assert_eq!((s.migration_report().from_version, s.migration_report().applied.clone()), (5, vec![6]));
     assert_eq!(s.meta("marca").unwrap().as_deref(), Some("intacta"));
@@ -754,10 +759,10 @@ fn la_migracion_006_se_aplica_sobre_una_base_en_la_005_y_no_toca_lo_anterior() {
 #[test]
 fn una_base_con_la_006_no_la_abre_un_binario_que_no_la_conoce() {
     let tmp = Tmp::new();
-    drop(abre(tmp.path()));
+    drop(Store::open_with(tmp.path(), &hasta_la_006(), "t").unwrap());
     let r = Store::open_with(tmp.path(), &hasta_la_005(), "t");
     assert!(matches!(r, Err(StoreError::DatabaseNewer { .. }) | Err(StoreError::UnknownMigration { .. })), "{r:?}");
-    assert_eq!(abre(tmp.path()).schema_version().unwrap(), 6, "y no se modificó nada");
+    assert_eq!(Store::open_with(tmp.path(), &hasta_la_006(), "t").unwrap().schema_version().unwrap(), 6, "y no se modificó nada");
 }
 
 /// La 006 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).

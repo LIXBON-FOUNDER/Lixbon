@@ -549,7 +549,7 @@ fn solo_project_ops_construye_los_eventos_de_projects_y_solo_el_almacen_inserta_
         ("ProjectOrigin::", &["event_kinds.rs", "project_ops.rs", "projects.rs"]),
         (".project_register(", &["project_ops.rs"]),
         ("register_project(", &["project_ops.rs", "projects.rs"]),
-        ("finalize_all", &["events.rs", "mutation.rs", "project_ops.rs"]),
+        ("finalize_all", &["events.rs", "mutation.rs", "project_ops.rs", "task_ops.rs"]),
         ("INSERT INTO", &[]),
         ("rusqlite", &[]),
         ("project_create(", &[]),
