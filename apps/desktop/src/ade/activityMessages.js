@@ -333,7 +333,7 @@ const FORMATTERS = {
     const effect = requiredText(args, 'effect_id');
     const branch = requiredText(args, 'branch');
     const base = optionalText(args, 'base');
-    if (!requiredArguments(effect, branch) || (args.base != null && base === null)) return null;
+    if (!requiredArguments(effect, branch) || (args.base != null && typeof args.base !== 'string')) return null;
     return `Se creó un worktree para «${branch}»${base ? ` desde «${base}»` : ''} (efecto ${effect}).`;
   },
   'activity.effect.git_worktree.removed': (args) => {
@@ -341,7 +341,7 @@ const FORMATTERS = {
     const worktreeRemoved = requiredBoolean(args, 'worktree_removed');
     const branchDeleted = requiredBoolean(args, 'branch_deleted');
     const branch = optionalText(args, 'branch');
-    if (!requiredArguments(effect, worktreeRemoved, branchDeleted) || (args.branch != null && branch === null)) return null;
+    if (!requiredArguments(effect, worktreeRemoved, branchDeleted) || (args.branch != null && typeof args.branch !== 'string')) return null;
     const details = [
       branch ? `rama «${branch}»` : null,
       branchDeleted ? 'rama eliminada' : null,

@@ -163,10 +163,34 @@ describe('translateActivityMessage', () => {
     ['activity.task.review_requested', { branch: '' }],
     ['activity.decision.merge.merged', { branch: '' }],
     ['activity.effect.git_worktree.created', { branch: '' }],
-    ['activity.effect.git_worktree.created', { base: '' }],
-    ['activity.effect.git_worktree.removed', { branch: '' }],
   ])('deja el texto libre vacío de %s al fallback seguro', (key, emptyText) => {
     expect(translate(key, { ...COMPLETE_ARGS, ...emptyText })).toBeNull();
+  });
+
+  it.each([
+    [
+      'activity.effect.git_worktree.created',
+      'base',
+      'Se creó un worktree para «feat/activity-panel» (efecto effect-1).',
+    ],
+    [
+      'activity.effect.git_worktree.removed',
+      'branch',
+      'Se retiró el worktree (efecto effect-1).',
+    ],
+  ])('conserva el mensaje de %s si el campo opcional está vacío o ausente', (key, field, expected) => {
+    expect(translate(key, { ...COMPLETE_ARGS, [field]: '' })).toBe(expected);
+
+    const argsWithoutOptionalField = { ...COMPLETE_ARGS };
+    delete argsWithoutOptionalField[field];
+    expect(translate(key, argsWithoutOptionalField)).toBe(expected);
+  });
+
+  it.each([
+    ['activity.effect.git_worktree.created', { base: '' }],
+    ['activity.effect.git_worktree.removed', { branch: '' }],
+  ])('sigue rechazando un effect_id vacío en %s', (key, optionalText) => {
+    expect(translate(key, { ...COMPLETE_ARGS, ...optionalText, effect_id: '' })).toBeNull();
   });
 
   it('formatea estados y argumentos booleanos desde la clave y argumentos contractuales', () => {
