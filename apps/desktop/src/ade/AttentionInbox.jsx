@@ -105,13 +105,16 @@ function describeAttentionError(code) {
   if (/(_invalid_cursor)/i.test(code)) return 'El cursor de paginación ya no es válido para este Core.';
   if (/(_invalid_request)/i.test(code)) return 'Core rechazó los filtros de esta consulta.';
   if (/(_read_failed|_internal)/i.test(code)) return 'Core no pudo leer la Attention.';
-  if (/(disconnected|connection|transport|timeout|ipc.*closed)/i.test(code)) return 'No se pudo completar la conexión con Core.';
+  if (/(disconnected|connection|transport|ipc.*closed)/i.test(code)) return 'No se pudo completar la conexión con Core.';
+  // Un plazo agotado no es evidencia de transporte roto: el Core puede estar escaneando (LXO-101).
+  if (/(ade_query_timeout|timeout|timed out)/i.test(code)) return 'El Core no respondió dentro del umbral del cliente.';
   return 'Core devolvió un error al leer la Attention.';
 }
 
 function connectionLabel(reason) {
   if (reason === 'disconnected') return 'desconectado';
   if (reason === 'degraded') return 'degradado';
+  if (reason === 'timeout') return 'sin respuesta a tiempo';
   return 'con error';
 }
 

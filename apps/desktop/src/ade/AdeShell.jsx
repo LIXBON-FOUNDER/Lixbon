@@ -29,6 +29,8 @@ function projectQueryMessage(query) {
     const cause = {
       disconnected: 'Core desconectado',
       degraded: 'Core degradado',
+      // Un plazo agotado no es una desconexión: el Core puede estar escaneando (LXO-101).
+      timeout: 'Core no respondió a tiempo',
       error: 'Core con error',
     }[query.reason];
     return `Datos desactualizados${cause ? ` (${cause})` : ''}; se conserva la última respuesta. ${query.error || ''}`.trim();
@@ -38,6 +40,7 @@ function projectQueryMessage(query) {
   const sourceLabel = {
     disconnected: 'Core desconectado',
     degraded: 'Core degradado',
+    timeout: 'Core no respondió a tiempo',
     error: 'Core con error',
   }[query.status];
   if (sourceLabel) return `${sourceLabel}. ${query.error || ''}`.trim();
@@ -192,6 +195,14 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   }, { enabled: projectViewActive });
   const projectAttention = useCoreQuery('attention_list', {
     project_id: selectedProjectId,
+  }, { enabled: projectViewActive });
+  // Inventario de recursos de SOLO LECTURA (LXO-101): la foto que da el Core para el Project
+  // durable seleccionado. `project_id` acota el alcance y `probe` viaja explícito para poder
+  // comprobar el eco del Core. No escribe nada: ni git, ni disco, ni Tasks. El escaneo del Core
+  // puede tardar más que el umbral del cliente; mientras tanto se conserva la última foto.
+  const projectInventory = useCoreQuery('resource_inventory', {
+    project_id: selectedProjectId,
+    probe: true,
   }, { enabled: projectViewActive });
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
@@ -579,7 +590,11 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                     tasks={projectTaskSlice}
                     attention={projectAttentionSlice}
                     activity={{ state: 'unavailable', items: [], message: 'Activity permanece en Backlog (LXO-92).' }}
-                    resources={{ state: 'unavailable', items: [], message: 'Resources permanece en Backlog (LXO-93).' }}
+                    // El slice legacy de Resources (resource_id/kind/label/availability) no lo da ninguna
+                    // query de Core: se declara no disponible, nunca vacío. La foto real de repos,
+                    // worktrees y ramas conservadas es el inventario de solo lectura de abajo.
+                    resources={{ state: 'unavailable', items: [], message: 'Core no da un listado de Resources; su foto de solo lectura es el inventario de esta sección.' }}
+                    resourceInventory={projectInventory.data ?? null}
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
                   />
