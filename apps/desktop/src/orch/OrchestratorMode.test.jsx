@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, act, within } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { OrchestratorMode } from './OrchestratorMode';
 import { useOrchStore } from '../store/orchStore';
@@ -124,8 +124,9 @@ describe('OrchestratorMode', () => {
       throw new Error(`Query no permitida en fixture: ${query}`);
     }, 'execution-task');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Task Real' }));
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    fireEvent.click(within(projectTaskSidebar).getByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await within(projectTaskSidebar).findByRole('button', { name: 'Task Real' }));
 
     expect((await screen.findAllByText('task-uuid-1')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Vista parcial: hay más Tasks/)).toBeTruthy();
