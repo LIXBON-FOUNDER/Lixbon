@@ -312,6 +312,37 @@ describe('ResourcesInventory · el contador de avisos es el de Core', () => {
     expect(note.textContent).not.toContain('probe=false');
   });
 
+  it('contador null de una petición acotada a otro Project: solo «sin contador», sin afirmar que hay un contador de otro Project', () => {
+    const dto = { ...DTO, filters: { project_id: 'p-2', probe: true }, warnings: { ...DTO.warnings, branches_to_review: null } };
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    expect(screen.getByTestId('resinv-count-unavailable').textContent).toContain('no informó un contador válido');
+    // No hay número de Core que atribuir a otro Project: el aviso de «otro Project» sería contradictorio.
+    expect(screen.queryByTestId('resinv-count-foreign')).toBeNull();
+    expect(screen.queryByTestId('resinv-count-scope-note')).toBeNull();
+    expect(screen.queryByText(/corresponde a otro Project/)).toBeNull();
+    // Y con probe=false pasa lo mismo: solo se dice que Core no evaluó.
+    cleanup();
+    render(<ResourcesInventory inventory={{ ...dto, filters: { project_id: 'p-2', probe: false } }} projectId="p-1" />);
+    expect(screen.getByTestId('resinv-count-unavailable').textContent).toContain('filters.probe=false');
+    expect(screen.queryByTestId('resinv-count-foreign')).toBeNull();
+  });
+
+  it('contador null con un recurso que falta en disco: el aviso no contradice las filas', () => {
+    const dto = { ...DTO, filters: { project_id: 'p-2', probe: true }, warnings: { branches_to_review: null } };
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(targetsIn('missing_on_disk')).toEqual(['/home/ana/app.lixbon-wt/wt-falta']);
+    expect(screen.getByTestId('resinv-count-unavailable')).toBeTruthy();
+    expect(screen.queryByTestId('resinv-count-foreign')).toBeNull();
+  });
+
+  it('con un número de Core de otro Project sigue valiendo el aviso de «otro Project» y no el de «sin contador»', () => {
+    const dto = { ...DTO, filters: { project_id: 'p-2', probe: true } };
+    render(<ResourcesInventory inventory={dto} projectId="p-1" />);
+    expect(screen.getByTestId('resinv-count-foreign')).toBeTruthy();
+    expect(screen.queryByTestId('resinv-count-unavailable')).toBeNull();
+  });
+
   it('con contador numérico de Core no aparece el aviso de «sin contador» (el número sigue siendo autoritativo)', () => {
     render(<ResourcesInventory inventory={withWarnings({ branches_to_review: 2 })} />);
     expect(screen.queryByTestId('resinv-count-unavailable')).toBeNull();
@@ -636,8 +667,8 @@ describe('ResourcesInventory · versión del DTO', () => {
     expect(screen.getByTestId('resinv-incompatible-version').textContent).toContain('sin versión');
   });
 
-  it.each([[2], [0], ['1'], [null]])(
-    'v=%j sin ninguna lista es versión incompatible, no «Core no ha entregado el inventario»',
+  it.each([[2], [0], ['1']])(
+    'v=%j declarada sin ninguna lista es versión incompatible, no «Core no ha entregado el inventario»',
     (v) => {
       render(<ResourcesInventory inventory={{ v, machine: 'm-1' }} />);
       const notice = screen.getByTestId('resinv-incompatible-version');
@@ -649,6 +680,25 @@ describe('ResourcesInventory · versión del DTO', () => {
       expect(screen.queryByTestId('resinv-count-unavailable')).toBeNull();
     },
   );
+
+  it.each([[null], [undefined]])('v=%j (ausente) sin ninguna lista es «Core no ha entregado», no una versión incompatible declarada', (v) => {
+    render(<ResourcesInventory inventory={{ v, machine: 'm-1' }} />);
+    expect(screen.getByTestId('resinv-unavailable-inventory').textContent).toContain('no ha entregado');
+    expect(screen.queryByTestId('resinv-incompatible-version')).toBeNull();
+    expect(screen.queryAllByTestId('resinv-row')).toHaveLength(0);
+    expect(readInventory({ v, machine: 'm-1' })).toBeNull();
+  });
+
+  it('v null con listas se trata como v ausente: incompatible «sin versión», igual que sin la clave', () => {
+    const { unmount } = render(<ResourcesInventory inventory={{ ...DTO, v: null }} />);
+    const conNull = screen.getByTestId('resinv-incompatible-version').textContent;
+    expect(conNull).toContain('sin versión');
+    expect(conNull).not.toContain('v=null');
+    unmount();
+    const { v: _omitida, ...sinVersion } = DTO;
+    render(<ResourcesInventory inventory={sinVersion} />);
+    expect(screen.getByTestId('resinv-incompatible-version').textContent).toBe(conNull);
+  });
 
   it('v: 1 sin listas sigue siendo «Core no ha entregado el inventario»', () => {
     render(<ResourcesInventory inventory={{ v: 1, machine: 'm-1' }} />);

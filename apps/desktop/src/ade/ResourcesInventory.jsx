@@ -46,10 +46,13 @@
 //    alcance es el de la petición (`filters.project_id`, docs/core/RESOURCES.md §Aviso): el filtro local por
 //    Project no lo recalcula, y la etiqueta dice a qué abarca.
 //  · Solo se entiende `v: 1`. Otra versión (o ninguna) es estado desconocido: ni filas ni contador.
-//    Una versión declarada distinta de 1 es incompatibilidad aunque no traiga listas; solo un DTO sin versión
-//    ni listas es «Core no entregó el inventario».
+//    `v: null` cuenta como versión ausente (no como una versión declarada). Sin listas contractuales:
+//    · sin versión (ausente o null) o `v: 1` → «Core no entregó el inventario»;
+//    · una versión declarada distinta de 1 → incompatibilidad, aunque no traiga listas.
+//    Con listas pero sin versión (ausente o null) o con otra versión → incompatibilidad («sin versión» / `v=N`).
 //  · Sin contador de Core (`branches_to_review: null`, p. ej. `filters.probe=false`) se dice que no hay contador;
-//    no se inventa un número.
+//    no se inventa un número. Sin contador no hay nada que atribuir a otro Project: el aviso de «contador de otro
+//    Project» solo sale si Core entregó un número, y nunca junto al de «sin contador».
 //  · El acotado es por Project ID (`project_id`), nunca por ProjectLocation. Al cambiar el Project
 //    externo se restablecen los filtros locales.
 import { useMemo, useState } from 'react';
@@ -208,7 +211,8 @@ function incompatibleInventory(version) {
 export function readInventory(inventory) {
   if (!isObject(inventory)) return null;
   // Una versión declarada que no es la soportada es incompatibilidad, aunque no traiga listas: no es «Core no entregó».
-  if (inventory.v !== undefined && inventory.v !== SUPPORTED_VERSION) return incompatibleInventory(inventory.v);
+  // `null` es versión ausente, no una versión declarada.
+  if (inventory.v != null && inventory.v !== SUPPORTED_VERSION) return incompatibleInventory(inventory.v);
   const repos = Array.isArray(inventory.repos) ? inventory.repos : null;
   const worktrees = Array.isArray(inventory.worktrees) ? inventory.worktrees : null;
   const preserved = Array.isArray(inventory.preserved_branches) ? inventory.preserved_branches : null;
@@ -505,7 +509,9 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
   // Solo el número que Core suministra; nunca se calcula a partir de las filas. Su alcance es el de la
   // petición: si es de otro Project que el seleccionado, no se atribuye a este.
   const countScopeInfo = parsed?.scope ?? { kind: 'unknown', projectId: null };
-  const foreignCount = countScopeInfo.kind === 'project' && scopeId !== null && countScopeInfo.projectId !== scopeId;
+  // Solo hay «contador de otro Project» si Core entregó un número: sin contador no hay nada que atribuir.
+  const foreignCount = parsed !== null && !parsed.incompatible && parsed.branchesToReview !== null
+    && countScopeInfo.kind === 'project' && scopeId !== null && countScopeInfo.projectId !== scopeId;
   const warningCount = parsed && !foreignCount ? parsed.branchesToReview : null;
   const scopeLabel = countScopeInfo.kind === 'all'
     ? 'todos los Projects'
