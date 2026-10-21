@@ -573,10 +573,8 @@ describe('TaskWorkspace · target sin detalle y errores inesperados (LXO-98)', (
   });
 
   it('task: null con target tampoco queda en blanco', () => {
-    const { unmount } = render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'ready', data: { v: 1, task: null } }} />);
+    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'ready', data: { v: 1, task: null } }} />);
     expect(screen.getByRole('alert').textContent).toContain('Core no devolvió el detalle de la Task');
-    unmount();
-
   });
 
   it('lectura inactiva (idle) con target: estado pausado, sin afirmar que Core no devolvió detalle ni ofrecer reintento', () => {
@@ -586,7 +584,9 @@ describe('TaskWorkspace · target sin detalle y errores inesperados (LXO-98)', (
       if (detail) { unmount(); render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={detail} />); }
       expect(screen.queryByRole('alert')).toBeNull();
       expect(screen.getByRole('status').textContent).toContain('Lectura pausada');
+      expect(screen.getByRole('status').textContent).toContain('no hay datos de Core disponibles');
       expect(document.body.textContent).not.toContain('Core no devolvió');
+      expect(document.body.textContent).not.toContain('todavía no se ha pedido ni recibido');
       expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
       expect(screen.queryByRole('region', { name: 'Identidad' })).toBeNull();
       expect(document.querySelector('.twk').getAttribute('data-state')).toBe('idle');
