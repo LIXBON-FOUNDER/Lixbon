@@ -23,6 +23,8 @@ export const DEFAULT_KEYMAP = {
   'ctrl+shift+x': 'workbench.showExtensions',
   'ctrl+shift+g': 'git.open',
   'ctrl+alt+b': 'workbench.toggleAgent',
+  // Jump Palette del ADE (LXO-102): distinto de Quick Open (ctrl+p), Ctrl+K y la paleta de comandos.
+  'ctrl+alt+j': 'ade.jumpPalette',
   'ctrl+1': 'mode.agent',
   'ctrl+2': 'mode.editor',
   'ctrl+3': 'mode.design',

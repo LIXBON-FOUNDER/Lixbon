@@ -138,6 +138,21 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+.jpal__option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.jpal__option-facts {
+  overflow: hidden;
+  color: var(--ink-50);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .jpal__option-label {
   min-width: 0;
   overflow: hidden;
@@ -156,6 +171,36 @@
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.jpal__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius, 8px);
+  color: var(--warn);
+  background: var(--warn-soft);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.jpal__notice-action {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius, 8px);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.jpal__notice-action:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.72);
+  outline-offset: 2px;
 }
 
 .jpal__status {
