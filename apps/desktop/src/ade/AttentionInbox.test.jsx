@@ -868,36 +868,201 @@ describe('AttentionInbox', () => {
     expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
   });
 
-  it('al devolver el foco hace el scroll mínimo solo si la fila quedó fuera del viewport', async () => {
+  it('un nodo que conserva el foco DOM no se desplaza al sondear, aunque el usuario lo sacara de vista', async () => {
     vi.useFakeTimers();
-    let refreshed = false;
+    let reads = 0;
     const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
     const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
     mountCore({
-      attention: () => (refreshed
-        ? page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), focused])
-        : page([first, focused])),
+      attention: () => {
+        reads += 1;
+        return page([item({ id: `att_new${reads}`, target_id: `task-new${reads}`, created_at: 0 }), first, focused]);
+      },
     });
     const scrollIntoView = mockScrollIntoView();
     render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
     await flushAsync();
     screen.getByRole('list', { name: 'Attention activa' }).style.overflowY = 'auto';
 
-    // Visible: el foco vuelve y el scroll se conserva.
-    const geometry = mockRowGeometry([]);
-    screen.getByRole('button', { name: /Task task-3/ }).focus();
-    refreshed = true;
-    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-3/ }));
-    expect(scrollIntoView).not.toHaveBeenCalled();
-
-    // Fuera del área visible: se pide el scroll mínimo (block nearest) sobre esa fila.
-    geometry.mockRestore();
+    const focusedButton = screen.getByRole('button', { name: /Task task-3/ });
+    focusedButton.focus();
+    // El usuario desplazó la lista: la fila enfocada queda fuera de vista, pero su nodo sigue siendo el activo.
     mockRowGeometry(['att_3']);
+    for (let poll = 1; poll <= 3; poll += 1) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      await flushAsync();
+      expect(visibleAttentionIds()).toContain(`att_new${reads}`);
+      expect(screen.getByRole('button', { name: /Task task-3/ })).toBe(focusedButton);
+      expect(document.activeElement).toBe(focusedButton);
+      expect(focusedButton.tabIndex).toBe(0);
+    }
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('al restaurar el foco en un nodo nuevo fuera de vista hace el scroll mínimo (nearest) solo esa vez', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    mountCore({
+      attention: (args) => {
+        if (args.cursor) return page([focused]);
+        reads += 1;
+        if (reads === 1) return page([first, second], { hasMore: true, next: 'cursor-old' });
+        return page([item({ id: `att_new${reads}`, target_id: `task-new${reads}`, created_at: 0 }), second],
+          { hasMore: true, next: `cursor-fresh-${reads}` });
+      },
+    });
+    const scrollIntoView = mockScrollIntoView();
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('list', { name: 'Attention activa' }).style.overflowY = 'auto';
+    mockRowGeometry(['att_3']);
+    const oldNode = screen.getByRole('button', { name: /Task task-3/ });
+    oldNode.focus();
+
+    emulateBlurOnRemoval();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+
+    // La fila vive en una página anexada: el refresh retiró su nodo y la rehidratación crea uno nuevo.
+    const newNode = screen.getByRole('button', { name: /Task task-3/ });
+    expect(newNode).not.toBe(oldNode);
+    expect(document.activeElement).toBe(newNode);
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
-    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole('button', { name: /Task task-3/ }));
+    expect(scrollIntoView.mock.contexts[0]).toBe(newNode);
+  });
+
+  it('si el Core falla con el foco en una página anexada, al reconectar rehidrata con cursores frescos y restaura el foco', async () => {
+    vi.useFakeTimers();
+    let failing = false;
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (failing) throw new Error('ade_query_timeout: Core no respondió a tiempo');
+        if (args.cursor) return page([focused]);
+        reads += 1;
+        return reads === 1
+          ? page([first, second], { hasMore: true, next: 'cursor-old' })
+          : page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), second], { hasMore: true, next: 'cursor-fresh' });
+      },
+    });
+    const onOpenTarget = vi.fn();
+    render(<AttentionInbox onOpenTarget={onOpenTarget} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+    emulateBlurOnRemoval();
+
+    failing = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    // Las páginas anexadas se descartan con la cabecera retenida; el foco no pasa a una fila ajena.
+    expect(screen.getByText(/Attention desactualizada: Core desconectado/)).toBeTruthy();
+    expect(visibleAttentionIds()).toEqual(['att_1', 'att_2']);
+    expect(document.activeElement).toBe(document.body);
+    // Un sondeo más con el Core caído: el target sigue conservado.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    expect(document.activeElement).toBe(document.body);
+
+    failing = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    const restored = screen.getByRole('button', { name: /Task task-3/ });
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2', 'att_3']);
+    expect(document.activeElement).toBe(restored);
+    expect(restored.tabIndex).toBe(0);
+    // Solo se usó el cursor de la cabecera fresca; el de la sesión anterior no se reutiliza.
+    expect(attentionCalls(calls, 'cursor-fresh')).toHaveLength(1);
+    expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
+    expect(onOpenTarget).not.toHaveBeenCalled();
+  });
+
+  it('si al reconectar la fila ya no existe, no salta a una fila ajena hasta probar su ausencia con cursores frescos', async () => {
+    vi.useFakeTimers();
+    let failing = false;
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (failing) throw new Error('ade_query_timeout: Core no respondió a tiempo');
+        if (args.cursor === 'cursor-old') return page([focused]);
+        if (args.cursor) return page([item({ id: 'att_7', target_id: 'task-7', created_at: 7 })]);
+        reads += 1;
+        return reads === 1
+          ? page([first, second], { hasMore: true, next: 'cursor-old' })
+          : page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), second], { hasMore: true, next: 'cursor-gone' });
+      },
+    });
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+    emulateBlurOnRemoval();
+
+    failing = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    expect(document.activeElement).toBe(document.body);
+
+    failing = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flushAsync();
+    // Con cursores frescos la ausencia queda probada: respaldo determinista en la primera fila de la cabecera.
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2']);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Task task-0/ }));
+    expect(attentionCalls(calls, 'cursor-gone')).toHaveLength(1);
+    expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
+  });
+
+  it('si un cursor caducado descarta las páginas con el foco en una fila anexada, rehidrata con la cabecera nueva y restaura el foco', async () => {
+    vi.useFakeTimers();
+    let reads = 0;
+    const first = item({ id: 'att_1', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', target_id: 'task-2', created_at: 2 });
+    const focused = item({ id: 'att_3', target_id: 'task-3', created_at: 3 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-old') return page([focused], { hasMore: true, next: 'cursor-expired' });
+        if (args.cursor === 'cursor-expired') throw new Error('attention_invalid_cursor: el cursor no pertenece a esta clave');
+        if (args.cursor) return page([focused]);
+        reads += 1;
+        return reads === 1
+          ? page([first, second], { hasMore: true, next: 'cursor-old' })
+          : page([item({ id: 'att_0', target_id: 'task-0', created_at: 0 }), second], { hasMore: true, next: 'cursor-fresh' });
+      },
+    });
+    render(<AttentionInbox onOpenTarget={vi.fn()} />);
+    await flushAsync();
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+    expect(visibleAttentionIds()).toEqual(['att_1', 'att_2', 'att_3']);
+    // El foco queda en la fila anexada (el clic no lo mueve, como en Safari/Firefox).
+    screen.getByRole('button', { name: /Task task-3/ }).focus();
+    emulateBlurOnRemoval();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await flushAsync();
+
+    expect(screen.getByText(/el cursor caducó: se volvió a la primera página/)).toBeTruthy();
+    const restored = screen.getByRole('button', { name: /Task task-3/ });
+    expect(visibleAttentionIds()).toEqual(['att_0', 'att_2', 'att_3']);
+    expect(document.activeElement).toBe(restored);
+    expect(attentionCalls(calls, 'cursor-fresh')).toHaveLength(1);
+    expect(attentionCalls(calls, 'cursor-old')).toHaveLength(1);
+    expect(attentionCalls(calls, 'cursor-expired')).toHaveLength(1);
   });
 
   it('con cabecera idéntica pero una página posterior cambiada, el sondeo descarta las páginas y el total deja de ser exacto', async () => {

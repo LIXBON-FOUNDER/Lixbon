@@ -394,6 +394,11 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
     return uniqueSortedItems([...(list.data?.items ?? []), ...pageState.items]);
   }, [list.data, pageState.items]);
 
+  // Si la fila con foco DOM deja de pintarse (p. ej. al descartar las páginas anexadas por un fallo o un cursor
+  // caducado), el blur lo causa la retirada del nodo y no el usuario: el target se conserva para rehidratarlo.
+  const focusedRowId = focusedItem.current.hasDOMFocus ? focusedItem.current.id : null;
+  if (focusedRowId && !items.some((candidate) => candidate.id === focusedRowId)) replacingRows.current = true;
+
   useLayoutEffect(() => {
     if (focusedItem.current.id) return;
     const current = items[focusIndex];
@@ -416,7 +421,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
     }
     setFocusIndex(index);
     focusedItem.current = { id: pendingId, createdAt: items[index].created_at, hasDOMFocus: true };
-    focusAndReveal(node);
+    // Un nodo que conserva el foco DOM no se toca: el usuario pudo desplazar la lista y no hay que devolverlo a la vista.
+    if (activeElement !== node) focusAndReveal(node);
   });
 
   useLayoutEffect(() => {
