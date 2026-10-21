@@ -1,6 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
+import {
+  RESOURCE_DIRTY_VALUES,
+  RESOURCE_MERGED_VALUES,
+  RESOURCE_PHYSICAL_VALUES,
+  RESOURCE_SCAN_REASONS,
+  RESOURCE_SCAN_VALUES,
+  RESOURCE_WORKTREE_ORIGINS,
+  RESOURCE_WORKTREE_STATES,
+  validateResourceInventory,
+} from './coreInventoryContract';
 
-const QUERY_NAMES = new Set(['projects_overview', 'tasks_by_project', 'task_detail', 'attention_list']);
+const QUERY_NAMES = new Set(['projects_overview', 'tasks_by_project', 'task_detail', 'attention_list', 'resource_inventory']);
 
 /** Categorías del conjunto cerrado de Attention (LXO-87/89). No se amplían desde el cliente. */
 export const ATTENTION_CATEGORIES = Object.freeze([
@@ -42,6 +52,22 @@ export const TASK_STATUS_FILTERS = Object.freeze(['active', 'final', 'all']);
 /** Página fija de la lista de Tasks: el cursor opaco queda ligado a este límite (LXO-91). */
 export const TASK_PAGE_LIMIT = 50;
 
+/**
+ * Vocabularios cerrados de `resource_inventory` (docs/core/RESOURCES.md). No se amplían desde el
+ * cliente: un valor fuera del contrato es una respuesta inválida, no un dato que se reinterpreté.
+ * Viven en `coreInventoryContract.js` (sin dependencias) y se reexportan aquí para no cambiar la
+ * superficie pública de este módulo.
+ */
+export {
+  RESOURCE_DIRTY_VALUES,
+  RESOURCE_MERGED_VALUES,
+  RESOURCE_PHYSICAL_VALUES,
+  RESOURCE_SCAN_REASONS,
+  RESOURCE_SCAN_VALUES,
+  RESOURCE_WORKTREE_ORIGINS,
+  RESOURCE_WORKTREE_STATES,
+};
+
 const ATTENTION_CATEGORY_SET = new Set(ATTENTION_CATEGORIES);
 const ATTENTION_SEVERITY_SET = new Set(ATTENTION_SEVERITIES);
 const ATTENTION_TARGET_KIND_SET = new Set(ATTENTION_TARGET_KINDS);
@@ -70,6 +96,29 @@ function optionalCursor(value) {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string' || !value.trim()) throw new Error('ade_query_invalid_request: cursor debe ser el next_cursor opaco del Core');
   return value;
+}
+
+/**
+ * `probe` decide si el Core calcula `dirty` y `merged` (docs/core/RESOURCES.md). El valor por defecto
+ * es el del contrato (`true`); el cliente solo puede pedir `true` o `false`, nunca otra cosa.
+ */
+function optionalProbe(value) {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'boolean') throw new Error('ade_query_invalid_request: probe debe ser verdadero o falso');
+  return value;
+}
+
+/**
+ * Petición de `resource_inventory`: solo los dos parámetros del contrato. `project_id` acota a un
+ * Project por su ID duradero (ausente = todos) y `probe` viaja siempre explícito para poder verificar
+ * el eco del Core.
+ */
+function resourceInventoryRequest(args) {
+  const request = {};
+  const projectId = optionalDurableId(args?.projectId, 'project_id');
+  if (projectId) request.project_id = projectId;
+  request.probe = optionalProbe(args?.probe);
+  return request;
 }
 
 /** `status` de `tasks_by_project`: solo los tres grupos del contrato; ausente equivale a `active`. */
@@ -113,6 +162,7 @@ function requestFor(query, args) {
     return { archived };
   }
   if (query === 'attention_list') return attentionRequest(args);
+  if (query === 'resource_inventory') return resourceInventoryRequest(args);
   if (query === 'tasks_by_project') {
     const request = {
       project_id: durableId(args?.projectId, 'project_id'),
@@ -207,6 +257,11 @@ function validateResponse(query, args, response) {
     }
     return response;
   }
+  if (query === 'resource_inventory') {
+    // El contrato del inventario (vocabulario cerrado, eco de filtros y coherencia de las
+    // entradas entre sí) vive en `coreInventoryContract.js`.
+    return validateResourceInventory(response, args);
+  }
   const task = response.task;
   if (!task || task.id !== args.task_id || task.project_id !== args.project_id || typeof task.status !== 'string') {
     throw invalidResponse(query, 'el detalle no corresponde al Project y Task solicitados');
@@ -238,3 +293,16 @@ export const readAdeTask = (projectId, taskId) => queryAdeCore('task_detail', { 
  */
 export const listAdeAttention = ({ projectId = null, targetKind = null, targetId = null, category = null, severity = null, cursor = null } = {}) =>
   queryAdeCore('attention_list', { projectId, targetKind, targetId, category, severity, cursor });
+
+/**
+ * Inventario de recursos del Core (LXO-93): repos, worktrees y ramas conservadas, TAL CUAL los da
+ * el Core (docs/core/RESOURCES.md). `projectId` acota a un Project por su ID duradero (ausente =
+ * todos) y `probe` decide si el Core calcula `dirty` y `merged` (por defecto `true`, como en el
+ * contrato).
+ *
+ * El DTO no se traduce aquí: `dirty`/`merged` en `skipped` («no evaluado») siguen siendo `skipped`,
+ * nunca «limpio» ni «fusionado»; `owner: null` sigue siendo «sin propietario»; y `unknown` nunca se
+ * presenta como «falta». Detectar no es adoptar ni borrar: esta lectura no escribe nada.
+ */
+export const readAdeResources = ({ projectId = null, probe = true } = {}) =>
+  queryAdeCore('resource_inventory', { projectId, probe });

@@ -6,7 +6,16 @@ use tauri::{AppHandle, Emitter, State as TauriState};
 use super::events::Channel;
 use super::{Caller, CodexTerms, Orch, Settings, agents, codex_session, codex_term, data_dir, lxo_path, providers, roles, skill, spawn_approval, write_json};
 
-const ADE_READ_QUERIES: &[&str] = &["projects_overview", "tasks_by_project", "task_detail", "attention_list"];
+/// Superficie F2 del ADE: solo lectura. `resource_inventory` entra porque el inventario de recursos
+/// (LXO-93) es una foto de solo lectura: repos, worktrees y ramas conservadas. Ninguna acción de
+/// git, de limpieza o de adopción existe en esta superficie.
+const ADE_READ_QUERIES: &[&str] = &[
+    "projects_overview",
+    "tasks_by_project",
+    "task_detail",
+    "attention_list",
+    "resource_inventory",
+];
 
 fn is_ade_read_query(query: &str) -> bool {
     ADE_READ_QUERIES.contains(&query)
@@ -230,7 +239,7 @@ mod ade_query_tests {
 
     #[test]
     fn ade_solo_expone_queries_observacionales_de_f2() {
-        for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list"] {
+        for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "resource_inventory"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
         for operation in ["project_archive", "run_create", "spawn", "remove_run", "unknown"] {
@@ -238,6 +247,24 @@ mod ade_query_tests {
         }
         // Escribir o resolver Attention no entra por la superficie F2: solo su lectura activa.
         for operation in ["attention_detail", "attention_resolve", "attention_act_risk", "attention_snooze"] {
+            assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
+        }
+    }
+
+    /// El inventario de recursos se LEE desde el ADE, pero por esta superficie no se toca nada: ni
+    /// git, ni el disco, ni la lista de Tasks. Detectar no es adoptar ni borrar (LXO-93).
+    #[test]
+    fn el_inventario_de_recursos_es_de_solo_lectura() {
+        assert!(is_ade_read_query("resource_inventory"));
+        for operation in [
+            "worktree_prune",
+            "worktree_remove",
+            "resource_adopt",
+            "resource_archive",
+            "resource_clean",
+            "resource_delete",
+            "branch_delete",
+        ] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
     }
