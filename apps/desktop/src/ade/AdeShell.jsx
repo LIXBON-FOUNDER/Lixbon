@@ -1,9 +1,10 @@
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { Collapse } from '../layout/Collapse';
 import { Gutter } from '../layout/Gutter';
 import { Panel } from '../layout/Panel';
 import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectView } from './ProjectView';
@@ -134,9 +135,23 @@ function CoreTaskButton({ task, selected, onSelect }) {
 const WORKSPACE_VIEWS = [
   { key: 'workspace', label: 'Workspace' },
   { key: 'attention', label: 'Attention' },
+  { key: 'activity', label: 'Activity' },
 ];
 
-/** Switch Workspace/Attention con semántica de tabs (flechas, Inicio/Fin); solo cambia la subvista del ADE. */
+const ACTIVITY_SCOPES = [
+  { kind: 'global', label: 'Global' },
+  { kind: 'project', label: 'Project' },
+  { kind: 'task', label: 'Task' },
+];
+
+/** Alcance de Activity: preferencia explícita si sigue disponible; si no, el más específico que haya seleccionado. */
+function resolveActivityScope(preferred, projectId, taskId) {
+  const available = { global: true, project: Boolean(projectId), task: Boolean(projectId && taskId) };
+  if (preferred && available[preferred]) return preferred;
+  return available.task ? 'task' : available.project ? 'project' : 'global';
+}
+
+/** Switch Workspace/Attention/Activity con semántica de tabs (flechas, Inicio/Fin); solo cambia la subvista del ADE. */
 function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
   const tabRefs = useRef({});
   const onKeyDown = (event) => {
@@ -177,8 +192,8 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
   );
 }
 
-// `onOpenTaskActivity` recibe `{ projectId, taskId }` de la Task seleccionada y verificada; mientras no esté
-// conectado, el workspace declara Activity como no disponible. Attention la sirve este shell (AttentionInbox).
+// Activity y Attention las sirve este shell (ActivityPanel / AttentionInbox). El enlace Activity de la Task abre la
+// subvista Activity con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
 // `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
 // ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
 export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
@@ -186,6 +201,8 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [attentionTarget, setAttentionTarget] = useState(null);
   const [attentionNotice, setAttentionNotice] = useState(null);
+  const [activityScopePref, setActivityScopePref] = useState(null);
+  const [activityNotice, setActivityNotice] = useState(null);
   const targetSeq = useRef(0);
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
@@ -220,6 +237,23 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const selectedProjectMissing = selectedProjectId && ['ready', 'empty'].includes(projects.status) && !selectedProjectInOverview;
   const selectedTaskMissingFromCompletePage = selectedTaskId && tasks.data && !tasks.data.has_more
     && !tasks.data.tasks.some((item) => item.id === selectedTaskId);
+
+  // El alcance de Activity sale solo de los IDs durables seleccionados; nombre/título son rótulo, no identidad.
+  const activityScopeKind = resolveActivityScope(activityScopePref, selectedProjectId, selectedTaskId);
+  const detailTask = detail.data?.task;
+  const selectedTaskTitle = (detailTask?.id === selectedTaskId && detailTask?.project_id === selectedProjectId
+    ? detailTask.title
+    : tasks.data?.tasks.find((item) => item.id === selectedTaskId)?.title) ?? null;
+  const selectedProjectName = selectedProject?.name ?? null;
+  const activityScope = useMemo(() => {
+    if (activityScopeKind === 'task') {
+      return { kind: 'task', id: selectedTaskId, ...(selectedTaskTitle ? { title: selectedTaskTitle } : {}) };
+    }
+    if (activityScopeKind === 'project') {
+      return { kind: 'project', id: selectedProjectId, ...(selectedProjectName ? { name: selectedProjectName } : {}) };
+    }
+    return { kind: 'global' };
+  }, [activityScopeKind, selectedProjectId, selectedTaskId, selectedProjectName, selectedTaskTitle]);
 
   const overviewState = projectViewQueryState(projects);
   const projectLocations = Array.isArray(selectedProject?.locations)
@@ -280,7 +314,37 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     setWorkspaceView('workspace');
     onActivate?.();
   };
-  const changeWorkspaceView = (view) => { setWorkspaceView(view); if (view !== 'attention') setAttentionNotice(null); };
+  const changeWorkspaceView = (view) => {
+    setWorkspaceView(view);
+    if (view !== 'attention') setAttentionNotice(null);
+    if (view !== 'activity') setActivityNotice(null);
+  };
+  const openTaskActivity = (target) => {
+    if (target?.projectId === selectedProjectId && target?.taskId === selectedTaskId) {
+      setActivityScopePref('task');
+      changeWorkspaceView('activity');
+      onActivate?.();
+    }
+    onOpenTaskActivity?.(target);
+  };
+  // Destinos de Activity: solo por (kind, ID durable). Una Task se abre únicamente si está seleccionada o aparece
+  // en las Tasks del Project seleccionado, porque el evento no trae el Project y no se infiere ni se adivina.
+  const openActivityTarget = ({ kind, id }) => {
+    setActivityNotice(null);
+    if (kind === 'project') {
+      if (!projects.data?.projects.some((project) => project.id === id)) {
+        setActivityNotice(`El Project ${id} no aparece en el overview activo de Core.`);
+        return;
+      }
+      selectProject(id);
+    } else if (kind === 'task') {
+      if (id === selectedTaskId || tasks.data?.tasks.some((item) => item.id === id)) {
+        selectTask(id);
+      } else {
+        setActivityNotice(`La Task ${id} no se puede abrir desde Activity: el evento no identifica su Project.`);
+      }
+    }
+  };
 
   // Attention de un target: filtro por (kind + ID durable) resuelto por el Core, no por la página global.
   const openAttentionFilter = ({ kind, id, projectId }) => {
@@ -369,7 +433,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       selectTask(taskId);
       return true;
     },
-    onOpenActivity: onOpenTaskActivity,
+    onOpenActivity: openTaskActivity,
     onOpenAttention: openTaskAttention,
   };
 
@@ -472,6 +536,40 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 target={attentionTarget}
                 onClearTarget={clearAttentionTarget}
                 onOpenTarget={openAttentionTarget}
+              />
+            </div>
+            {/* Siempre montado: conserva el historial paginado; sin vista activa no consulta ni sondea. */}
+            <div
+              className="ade-view-panel"
+              role="tabpanel"
+              id={`${viewIds}-panel-activity`}
+              aria-labelledby={`${viewIds}-tab-activity`}
+              hidden={workspaceView !== 'activity'}
+            >
+              <div className="ade__section-head" role="group" aria-label="Alcance de Activity">
+                <div className="ade-view-switch">
+                  {ACTIVITY_SCOPES.map(({ kind, label }) => {
+                    const enabled = kind === 'global' || (kind === 'project' ? Boolean(selectedProjectId) : Boolean(selectedProjectId && selectedTaskId));
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        className={`ade-view-switch__tab${kind === activityScopeKind ? ' is-active' : ''}`}
+                        aria-pressed={kind === activityScopeKind}
+                        disabled={!enabled}
+                        onClick={() => { setActivityScopePref(kind); setActivityNotice(null); }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {activityNotice && <div className="ade__notice" role="status">{activityNotice}</div>}
+              <ActivityPanel
+                scope={activityScope}
+                active={active && workspaceView === 'activity'}
+                onOpenTarget={openActivityTarget}
               />
             </div>
           </Panel>

@@ -5,6 +5,8 @@ import { ActivityTimeline } from './ActivityTimeline';
 import { ACTIVITY_V1_MESSAGE_KEYS, translateActivityMessage } from './activityMessages';
 
 const MESSAGE_KEYS = new Set(ACTIVITY_V1_MESSAGE_KEYS);
+// Único key que el Core emite con `fallback: true`: su texto sale de `args` permitidos (reason, kind, event_version).
+const UNKNOWN_EVENT_KEY = 'activity.unknown';
 const VISUAL_TO_SEVERITY = Object.freeze({
   info: 'info',
   success: 'success',
@@ -97,7 +99,11 @@ function presentationalClient(provenance) {
 function toTimelineItem(item) {
   const eventId = typeof item.event_id === 'string' ? item.event_id.trim() : '';
   const messageKey = typeof item.message_key === 'string' ? item.message_key.trim() : '';
-  const known = item.fallback !== true && MESSAGE_KEYS.has(messageKey);
+  const fallback = item.fallback === true;
+  // Un fallback del Core solo se traduce como `activity.unknown` y con args válidos; cualquier otra clave marcada
+  // fallback, o args fuera del contrato, deja al timeline en su texto genérico «Evento desconocido».
+  const known = MESSAGE_KEYS.has(messageKey)
+    && (!fallback || (messageKey === UNKNOWN_EVENT_KEY && translateActivityMessage(messageKey, item.args) !== null));
   const project = typeof item.project_id === 'string' && item.project_id.trim()
     ? { id: item.project_id }
     : null;
