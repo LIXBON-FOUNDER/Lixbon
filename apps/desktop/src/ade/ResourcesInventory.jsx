@@ -205,12 +205,12 @@ export function ResourcesInventory({ inventory = null }) {
         )}
       </header>
       <p className="resinv__note">
-        Vista provisional con datos de Core; sin contrato LXO-93 todavía. «Desconocido» y «No disponible» no significan que falte el recurso.
+        El inventario real aún no está disponible: el contrato de Core (LXO-93) sigue pendiente. «Desconocido» y «No disponible» no significan que falte el recurso.
       </p>
 
       {!available ? (
         <p className="resinv__empty" data-testid="resinv-unavailable-inventory">
-          Inventario no disponible: Core (LXO-93) todavía no entrega datos de recursos. No se muestra ningún recurso.
+          El inventario real aún no está disponible: el contrato de Core (LXO-93) sigue pendiente. No se muestra ningún recurso.
         </p>
       ) : (
         <>
