@@ -350,6 +350,72 @@ describe('queryAdeCore', () => {
     }
   });
 
+  it('conserva páginas con texto libre vacío ya normalizado por Core y rechaza IDs o tokens vacíos', async () => {
+    const emptyTextCases = [
+      ['activity.task.created', 'title'],
+      ['activity.spawn.requested', 'title'],
+      ['activity.project.registered', 'name'],
+      ['activity.task.review_requested', 'branch'],
+      ...[
+        'activity.decision.merge.merged',
+        'activity.decision.merge.conflict',
+        'activity.decision.merge.error',
+        'activity.decision.merge.target_moved',
+        'activity.decision.pr.created',
+        'activity.decision.pr.already_exists',
+        'activity.decision.pr.error',
+        'activity.effect.git_merge.merged',
+        'activity.effect.git_merge.conflict',
+        'activity.effect.git_merge.error',
+        'activity.effect.git_push_pr.created',
+        'activity.effect.git_push_pr.already_exists',
+        'activity.effect.git_push_pr.error',
+        'activity.effect.git_worktree.created',
+      ].map((messageKey) => [messageKey, 'branch']),
+      ['activity.effect.git_worktree.created', 'base'],
+      ['activity.effect.git_worktree.removed', 'branch'],
+    ];
+    const argsByKey = new Map(ACTIVITY_ARGS_CONTRACTS.map(([messageKey, required, optional = {}]) => [
+      messageKey,
+      { ...required, ...optional },
+    ]));
+    const whitespaceNormalizedByCore = ' \t\n '.trim();
+
+    for (const [messageKey, field] of emptyTextCases) {
+      const args = { ...argsByKey.get(messageKey), [field]: whitespaceNormalizedByCore };
+      const first = activityItem({ message_key: messageKey, args });
+      const second = activityItem({
+        seq: '132',
+        event_id: '0192f0a0-7b1c-7000-8000-0000000000a2',
+      });
+      invoke.mockResolvedValueOnce(activityPage({
+        items: [first, second],
+        next_cursor: '132',
+        head_seq: '132',
+      }));
+
+      await expect(queryAdeCore('activity_list')).resolves.toMatchObject({
+        items: [
+          expect.objectContaining({ message_key: messageKey, args }),
+          expect.objectContaining({ event_id: second.event_id }),
+        ],
+      });
+    }
+
+    const controls = [
+      ['activity.run.created', 'root_task'],
+      ['activity.task.created', 'agent'],
+      ['activity.effect.process.launched', 'effect_id'],
+    ];
+    for (const [messageKey, field] of controls) {
+      const args = { ...argsByKey.get(messageKey), [field]: '' };
+      invoke.mockResolvedValueOnce(activityPage({
+        items: [activityItem({ message_key: messageKey, args })],
+      }));
+      await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+    }
+  });
+
   it('valida versión, cursor exclusivo, filtros exactos y DTO de Activity', async () => {
     const request = {
       cursor: 130,

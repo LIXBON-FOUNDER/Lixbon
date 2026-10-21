@@ -156,6 +156,19 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.task.review_requested', { branch: ['rama'] })).toBeNull();
   });
 
+  it.each([
+    ['activity.task.created', { title: '' }],
+    ['activity.spawn.requested', { title: '' }],
+    ['activity.project.registered', { name: '' }],
+    ['activity.task.review_requested', { branch: '' }],
+    ['activity.decision.merge.merged', { branch: '' }],
+    ['activity.effect.git_worktree.created', { branch: '' }],
+    ['activity.effect.git_worktree.created', { base: '' }],
+    ['activity.effect.git_worktree.removed', { branch: '' }],
+  ])('deja el texto libre vacío de %s al fallback seguro', (key, emptyText) => {
+    expect(translate(key, { ...COMPLETE_ARGS, ...emptyText })).toBeNull();
+  });
+
   it('formatea estados y argumentos booleanos desde la clave y argumentos contractuales', () => {
     expect(translate('activity.task.failed', { ...COMPLETE_ARGS, to: 'failed' })).toMatch(/falló/i);
     expect(translate('activity.run.closed', { ...COMPLETE_ARGS, forced: false })).toContain('cerró');
