@@ -1,10 +1,46 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeTasks, queryAdeCore } from './coreQueries';
+import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeActivity, listAdeTasks, queryAdeCore } from './coreQueries';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 afterEach(() => invoke.mockReset());
+
+function activityItem(overrides = {}) {
+  return {
+    seq: 131,
+    event_id: '0192f0a0-7b1c-7000-8000-0000000000a1',
+    ts: 1_760_000_130_000,
+    kind: 'task.created',
+    v: 1,
+    class: 'state',
+    message_key: 'activity.task.created',
+    args: { title: 'Implementar X', agent: 'claude', depth: 0, external: false },
+    visual: 'info',
+    fallback: false,
+    target: { kind: 'task', id: 'task-1' },
+    project_id: 'project-1',
+    run_id: 'run-1',
+    actor: { kind: 'person', id: null },
+    provenance: { channel: 'ui', client_id: null },
+    correlation_id: null,
+    ...overrides,
+  };
+}
+
+function activityPage(overrides = {}) {
+  return {
+    v: 1,
+    projection: 1,
+    order: 'asc',
+    items: [activityItem()],
+    next_cursor: 131,
+    has_more: false,
+    head_seq: 131,
+    limit: 100,
+    ...overrides,
+  };
+}
 
 describe('queryAdeCore', () => {
   it('solo transporta las queries observacionales permitidas', async () => {
@@ -24,6 +60,7 @@ describe('queryAdeCore', () => {
     });
     await expect(queryAdeCore('project_archive')).rejects.toThrow('ade_query_forbidden');
     await expect(queryAdeCore('attention_detail', { attentionId: 'att_1' })).rejects.toThrow('ade_query_forbidden');
+    await expect(queryAdeCore('events')).rejects.toThrow('ade_query_forbidden');
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
@@ -55,6 +92,113 @@ describe('queryAdeCore', () => {
     });
     await expect(queryAdeCore('projects_overview', { archived: 'include' }))
       .rejects.toThrow('ade_query_invalid_response');
+  });
+
+  it('lista Activity con cursor de seq numérico y solo los filtros exactos del Core', async () => {
+    invoke.mockResolvedValueOnce(activityPage());
+    await listAdeActivity();
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: { cursor: 0, limit: 100, order: 'asc' },
+    });
+
+    invoke.mockResolvedValueOnce(activityPage({
+      order: 'desc',
+      items: [activityItem({ seq: 49 })],
+      next_cursor: 49,
+      head_seq: 51,
+      limit: 25,
+    }));
+    await listAdeActivity({
+      cursor: 50,
+      limit: 25,
+      order: 'desc',
+      projectId: ' project-1 ',
+      runId: 'run-1',
+      targetKind: ' task ',
+      targetId: 'task-1',
+    });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: {
+        cursor: 50,
+        limit: 25,
+        order: 'desc',
+        project_id: 'project-1',
+        run_id: 'run-1',
+        target_kind: 'task',
+        target_id: 'task-1',
+      },
+    });
+
+    invoke.mockResolvedValueOnce(activityPage({
+      items: [activityItem()],
+      next_cursor: 131,
+      head_seq: 131,
+    }));
+    await queryAdeCore('activity_list', { targetKind: 'task' });
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', {
+      query: 'activity_list',
+      args: { cursor: 0, limit: 100, order: 'asc', target_kind: 'task' },
+    });
+  });
+
+  it('rechaza parámetros de Activity fuera de sus tipos y rangos', async () => {
+    const invalidRequests = [
+      { cursor: '12' },
+      { cursor: -1 },
+      { cursor: 1.5 },
+      { cursor: Number.MAX_SAFE_INTEGER + 1 },
+      { limit: 0 },
+      { limit: 501 },
+      { limit: 1.5 },
+      { order: 'DESC' },
+      { projectId: '  ' },
+      { targetId: 'task-1' },
+      { eventKind: 'task.created' },
+    ];
+    for (const request of invalidRequests) {
+      await expect(queryAdeCore('activity_list', request)).rejects.toThrow('ade_query_invalid_request');
+    }
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('valida versión, cursor exclusivo, filtros exactos y DTO de Activity', async () => {
+    const request = {
+      cursor: 130,
+      limit: 1,
+      order: 'asc',
+      projectId: 'project-1',
+      runId: 'run-1',
+      targetKind: 'task',
+      targetId: 'task-1',
+    };
+    const valid = activityPage({
+      items: [activityItem()],
+      next_cursor: 131,
+      head_seq: 131,
+      limit: 1,
+    });
+    const invalidResponses = [
+      { ...valid, v: 2 },
+      { ...valid, projection: 2 },
+      { ...valid, order: 'desc' },
+      { ...valid, next_cursor: '131' },
+      { ...valid, head_seq: 130 },
+      { ...valid, items: [activityItem({ project_id: 'project-2' })] },
+      { ...valid, items: [activityItem({ run_id: 'run-2' })] },
+      { ...valid, items: [activityItem({ target: { kind: 'run', id: 'task-1' } })] },
+      { ...valid, items: [activityItem({ seq: 130 })] },
+      { ...valid, items: [activityItem({ payload: { secret: 'raw event' } })] },
+      { ...valid, items: [activityItem({ args: ['raw event'] })] },
+    ];
+    for (const response of invalidResponses) {
+      invoke.mockResolvedValueOnce(response);
+      await expect(queryAdeCore('activity_list', request)).rejects.toThrow('ade_query_invalid_response');
+    }
+
+    invoke.mockResolvedValueOnce(valid);
+    await expect(queryAdeCore('activity_list', request)).resolves.toEqual(valid);
   });
 
   it('transporta attention_list con limit fijo, filtros del contrato y cursor opaco', async () => {
