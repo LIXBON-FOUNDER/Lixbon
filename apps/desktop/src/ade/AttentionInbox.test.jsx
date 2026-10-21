@@ -508,6 +508,54 @@ describe('AttentionInbox', () => {
     });
   });
 
+  it('con cabecera idéntica pero una página posterior cambiada, el sondeo descarta las páginas y el total deja de ser exacto', async () => {
+    vi.useFakeTimers();
+    let laterChanged = false;
+    const first = item({ id: 'att_1', severity: 'critical', target_id: 'task-1', created_at: 1 });
+    const second = item({ id: 'att_2', severity: 'critical', target_id: 'task-2', created_at: 2 });
+    const third = item({ id: 'att_3', severity: 'critical', target_id: 'task-3', created_at: 3 });
+    const fourth = item({ id: 'att_4', severity: 'critical', target_id: 'task-4', created_at: 4 });
+    const calls = mountCore({
+      attention: (args) => {
+        if (args.cursor === 'cursor-1') {
+          return laterChanged
+            ? page([third, fourth], { hasMore: true, next: 'cursor-2' })
+            : page([third]);
+        }
+        // La cabecera es byte a byte la misma antes y después del sondeo.
+        return page([first, second], { hasMore: true, next: 'cursor-1' });
+      },
+    });
+    const visibleIds = () => screen.getAllByRole('listitem')
+      .map((row) => row.querySelector('[data-attention-id]').dataset.attentionId);
+    const total = () => screen.getByTestId('attention-total').textContent;
+
+    render(<AttentionInbox onOpenTarget={vi.fn()} pollMs={1_000} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    fireEvent.change(screen.getByLabelText('Severidad'), { target: { value: 'critical' } });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(total()).toBe('2+');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3']);
+    expect(total()).toBe('3');
+    expect(screen.queryByRole('button', { name: 'Cargar más' })).toBeNull();
+
+    laterChanged = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    // La página 2 anexada ya no se revalidó: no se presenta su total como exacto ni se conservan sus filas.
+    expect(visibleIds()).toEqual(['att_1', 'att_2']);
+    expect(total()).toBe('2+');
+    expect(screen.getByRole('button', { name: 'Cargar más' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más' }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(visibleIds()).toEqual(['att_1', 'att_2', 'att_3', 'att_4']);
+    expect(total()).toBe('4+');
+    expect(calls.filter(([query, args]) => query === 'attention_list' && args.cursor === 'cursor-1')).toHaveLength(2);
+  });
+
   it('invalida una página en vuelo al cambiar la cabecera y evita que su finally libere la carga nueva', async () => {
     vi.useFakeTimers();
     const oldRequest = deferred();
