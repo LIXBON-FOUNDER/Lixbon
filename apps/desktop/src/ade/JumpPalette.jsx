@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import './JumpPalette.css';
 
 const asText = (value) => (typeof value === 'string' ? value.trim() : '');
 const resultKey = (kind, projectId, itemId) => JSON.stringify([kind, projectId, itemId]);
+const asFacts = (value) => (Array.isArray(value) ? value.map(asText).filter(Boolean) : []);
 
 function matches(query, label, metadata) {
   if (!query) return true;
@@ -36,6 +37,7 @@ function buildGroups({ projects, tasks, attention, query }) {
       kind: 'project',
       label,
       metadata,
+      facts: asFacts(project?.facts),
       target: { kind: 'project', projectId: id },
     }];
   });
@@ -53,24 +55,27 @@ function buildGroups({ projects, tasks, attention, query }) {
       kind: 'task',
       label,
       metadata,
+      facts: asFacts(task?.facts),
       target: { kind: 'task', projectId, taskId: id },
     }];
   });
 
   const attentionItems = (Array.isArray(attention) ? attention : []).flatMap((item) => {
+    const id = asText(item?.id);
+    const targetKind = asText(item?.targetKind);
+    const targetId = asText(item?.targetId);
+    if (!id || !targetKind || !targetId) return [];
     const projectId = asText(item?.projectId);
-    const taskId = asText(item?.taskId);
-    if (!projectId || !taskId) return [];
-    const title = asText(item?.title);
-    const label = title || taskId;
-    const metadata = [projectId, taskId, asText(item?.branch)].filter(Boolean);
+    const label = asText(item?.title) || targetId;
+    const metadata = [id, targetId, projectId, asText(item?.branch)].filter(Boolean);
     if (!matches(query, label, metadata)) return [];
     return [{
-      key: resultKey('attention', projectId, taskId),
+      key: resultKey('attention', id, id),
       kind: 'attention',
       label,
       metadata,
-      target: { kind: 'attention', projectId, taskId },
+      facts: asFacts(item?.facts),
+      target: { kind: 'attention', attentionId: id, targetKind, targetId, projectId: projectId || null },
     }];
   });
 
@@ -81,26 +86,49 @@ function buildGroups({ projects, tasks, attention, query }) {
   ];
 }
 
+const PaletteOption = memo(function PaletteOption({ item, id, selected, onSelect }) {
+  return (
+    <div
+      id={id}
+      className={`jpal__option${selected ? ' is-active' : ''}`}
+      role="option"
+      aria-selected={selected}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onSelect(item.key)}
+    >
+      <span className="jpal__option-main">
+        <span className="jpal__option-label">{item.label}</span>
+        {item.facts.length > 0 && <span className="jpal__option-facts">{item.facts.join(' · ')}</span>}
+      </span>
+      <span className="jpal__option-meta">{item.metadata.join(' · ')}</span>
+    </div>
+  );
+});
+
 /**
- * Presentational, controlled navigation palette for a future shell owner.
+ * Controlled navigation palette; the shell host (`JumpPaletteHost`) owns reads and result freshness.
  *
  * API:
  * - `open`, `query`, and `onQueryChange` control visibility and search text.
- * - `loading` identifies an in-progress result refresh.
- * - `projects`: normalized `{ id, name, branch? }` results.
- * - `tasks`: normalized `{ id, projectId, title, branch? }` results.
- * - `attention`: normalized `{ projectId, taskId, title, branch? }` results.
- * - `onNavigate(target)` receives only `{ kind, projectId }` for a Project or
- *   `{ kind, projectId, taskId }` for a Task or Attention item.
+ * - `loading` identifies an in-progress result refresh with nothing to show yet.
+ * - `statusNote` is optional extra text for the status line (partial results, progress).
+ * - `notice` is `{ message, actionLabel?, onAction? }`, announced as an alert and reachable with Tab.
+ * - `projects`: `{ id, name, branch?, facts? }`; `tasks`: `{ id, projectId, title, branch?, facts? }`.
+ * - `attention`: `{ id, targetKind, targetId, projectId?, title?, facts? }` (one per active Attention).
+ *   `facts` are display-only strings (status, host/origin); only titles/names, durable IDs and branch are searched.
+ * - `onNavigate(target)` receives `{ kind: 'project', projectId }`, `{ kind: 'task', projectId, taskId }` or
+ *   `{ kind: 'attention', attentionId, targetKind, targetId, projectId }`. Returning `false` rejects the target:
+ *   the palette stays open so the caller can show a `notice`.
  * - `onClose()` asks the shell to close the palette.
  *
- * The caller owns all reads and result freshness. This component has no query,
- * store, shortcut, command, file-search, or Attention-resolution integration.
+ * No query, store, shortcut, command, file-search, or Attention-resolution integration lives here.
  */
 export function JumpPalette({
   open,
   query = '',
   loading = false,
+  statusNote = '',
+  notice = null,
   onQueryChange,
   projects = [],
   tasks = [],
@@ -112,6 +140,8 @@ export function JumpPalette({
   const dialogRef = useRef(null);
   const inputRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const noticeActionRef = useRef(null);
+  const handlersRef = useRef({});
   const returnFocusRef = useRef(null);
   const lastQueryRef = useRef(query);
   const initializedRef = useRef(false);
@@ -128,11 +158,13 @@ export function JumpPalette({
   const results = useMemo(() => visibleGroups.flatMap((group) => group.items), [visibleGroups]);
   const activeIndex = results.findIndex((item) => item.key === activeKey);
   const activeResult = activeIndex >= 0 ? results[activeIndex] : null;
-  const statusMessage = loading
+  const note = asText(statusNote);
+  const baseMessage = loading
     ? 'Cargando resultados…'
     : results.length === 0
       ? 'Sin resultados para esta búsqueda.'
       : `${results.length} ${results.length === 1 ? 'resultado' : 'resultados'} · ↑↓ mover · Home/End ir al inicio/final · Enter abrir · Esc cerrar`;
+  const statusMessage = note ? `${baseMessage} ${note}` : baseMessage;
   const listId = `${uid}-results`;
   const headingId = `${uid}-heading`;
   const inputId = `${uid}-search`;
@@ -174,6 +206,16 @@ export function JumpPalette({
     option?.scrollIntoView?.({ block: 'nearest' });
   }, [activeIndex, activeResult, listId]);
 
+  // Stable across active-key changes so memoized rows do not re-render on every arrow key.
+  handlersRef.current = { results, onNavigate, onClose };
+  const activate = useCallback((key) => {
+    const { results: current, onNavigate: navigate, onClose: dismiss } = handlersRef.current;
+    const entry = current.find((item) => item.key === key);
+    if (!entry || typeof navigate !== 'function') return;
+    if (navigate(entry.target) === false) return;
+    dismiss?.();
+  }, []);
+
   if (!open) return null;
 
   const close = () => onClose?.();
@@ -185,11 +227,10 @@ export function JumpPalette({
     }
     if (event.key === 'Tab') {
       event.preventDefault();
-      if (event.target === inputRef.current) {
-        closeButtonRef.current?.focus();
-      } else {
-        inputRef.current?.focus();
-      }
+      const stops = [inputRef.current, noticeActionRef.current, closeButtonRef.current].filter(Boolean);
+      const at = stops.indexOf(document.activeElement);
+      const step = event.shiftKey ? -1 : 1;
+      stops[(at + step + stops.length) % stops.length]?.focus();
       return;
     }
     if (event.target !== inputRef.current) return;
@@ -207,18 +248,8 @@ export function JumpPalette({
       setActiveKey(results.at(-1)?.key ?? null);
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const current = results.find((item) => item.key === activeKey);
-      if (!current || typeof onNavigate !== 'function') return;
-      onNavigate(current.target);
-      close();
+      activate(activeKey);
     }
-  };
-
-  const selectCurrent = (key) => {
-    const current = results.find((item) => item.key === key);
-    if (!current || typeof onNavigate !== 'function') return;
-    onNavigate(current.target);
-    close();
   };
 
   const optionIndex = new Map(results.map((item, index) => [item.key, index]));
@@ -282,26 +313,38 @@ export function JumpPalette({
                 </h3>
                 {group.items.map((item) => {
                   const index = optionIndex.get(item.key);
-                  const selected = item.key === activeKey;
                   return (
-                    <div
+                    <PaletteOption
                       key={item.key}
+                      item={item}
                       id={`${listId}-option-${index}`}
-                      className={`jpal__option${selected ? ' is-active' : ''}`}
-                      role="option"
-                      aria-selected={selected}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => selectCurrent(item.key)}
-                    >
-                      <span className="jpal__option-label">{item.label}</span>
-                      <span className="jpal__option-meta">{item.metadata.join(' · ')}</span>
-                    </div>
+                      selected={item.key === activeKey}
+                      onSelect={activate}
+                    />
                   );
                 })}
               </div>
             ))}
           </div>
         </div>
+        {notice && (
+          <div className="jpal__notice" role="alert">
+            <span>{notice.message}</span>
+            {notice.actionLabel && (
+              <button
+                ref={noticeActionRef}
+                type="button"
+                className="jpal__notice-action"
+                onClick={() => {
+                  notice.onAction?.();
+                  inputRef.current?.focus();
+                }}
+              >
+                {notice.actionLabel}
+              </button>
+            )}
+          </div>
+        )}
         <p className="jpal__status" role="status" aria-live="polite">
           {statusMessage}
         </p>

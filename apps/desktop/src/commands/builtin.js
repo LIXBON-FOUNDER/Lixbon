@@ -172,6 +172,18 @@ export function registerBuiltinCommands() {
       run: () => { const a = app(); a.setCommandPalette(false); a.setQuickOpen(true); },
     },
     {
+      id: 'ade.jumpPalette', title: 'Ir a Project, Task o Attention…',
+      category: 'Ver', keywords: 'jump palette saltar ir project proyecto task attention orquestador ade navegar',
+      run: () => {
+        if (wb().mode === 'orch' && wb().jumpPaletteOpen) { wb().setJumpPaletteOpen(false); return; }
+        const a = app();
+        a.setCommandPalette(false);
+        a.setQuickOpen(false);
+        if (wb().mode !== 'orch') wb().setMode('orch');
+        wb().setJumpPaletteOpen(true);
+      },
+    },
+    {
       id: 'chat.newConversation', title: 'Nueva conversación',
       category: 'Chat', keywords: 'nuevo chat conversacion agente',
       run: () => useChatStore.getState().newConversation(),

@@ -5,6 +5,7 @@ import { Panel } from '../layout/Panel';
 import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { AttentionInbox } from './AttentionInbox';
+import { JumpPaletteHost } from './JumpPaletteHost';
 import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
 import './TaskWorkspace.css';
@@ -146,6 +147,8 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
+  const jumpPaletteOpen = useWorkbenchStore((s) => s.jumpPaletteOpen);
+  const setJumpPaletteOpen = useWorkbenchStore((s) => s.setJumpPaletteOpen);
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
@@ -175,14 +178,17 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const selectTask = (taskId) => { setAdeSelection({ projectId: selectedProjectId, taskId }); onActivate?.(); };
   const changeWorkspaceView = (view) => { setWorkspaceView(view); if (view !== 'attention') setAttentionNotice(null); };
 
-  // Attention de una Task: filtro por target (task + ID durable) resuelto por el Core, no por la página global.
-  const openTaskAttention = ({ projectId, taskId }) => {
-    if (typeof taskId !== 'string' || !taskId.trim()) return;
+  // Attention de un target: filtro por (kind + ID durable) resuelto por el Core, no por la página global.
+  const openAttentionFilter = ({ kind, id, projectId }) => {
     targetSeq.current += 1;
-    setAttentionTarget({ kind: 'task', id: taskId, projectId: typeof projectId === 'string' ? projectId : null, seq: targetSeq.current });
+    setAttentionTarget({ kind, id, projectId: typeof projectId === 'string' && projectId ? projectId : null, seq: targetSeq.current });
     setAttentionNotice(null);
     setWorkspaceView('attention');
     onActivate?.();
+  };
+  const openTaskAttention = ({ projectId, taskId }) => {
+    if (typeof taskId !== 'string' || !taskId.trim()) return;
+    openAttentionFilter({ kind: 'task', id: taskId, projectId });
   };
   const clearAttentionTarget = useCallback(() => setAttentionTarget(null), []);
 
@@ -210,6 +216,38 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       setAttentionNotice(`Esta vista aún no abre destinos de tipo ${kind} (${id}).`);
     }
   };
+  // Jump Palette (LXO-102): selecciona IDs exactos o abre el destino exacto de una Attention; sin fallback entre tipos.
+  const closeJumpPalette = useCallback(() => setJumpPaletteOpen(false), [setJumpPaletteOpen]);
+  const jumpTo = (target) => {
+    if (target.kind === 'project') {
+      setAdeSelection({ projectId: target.projectId, taskId: null });
+      changeWorkspaceView('workspace');
+      onActivate?.();
+      return { ok: true };
+    }
+    if (target.kind === 'task') {
+      setAdeSelection({ projectId: target.projectId, taskId: target.taskId });
+      changeWorkspaceView('workspace');
+      onActivate?.();
+      return { ok: true };
+    }
+    const { targetKind, targetId, projectId } = target;
+    if (targetKind === 'project' || targetKind === 'task') {
+      openAttentionFilter({ kind: targetKind, id: targetId, projectId });
+      return { ok: true };
+    }
+    if (targetKind === 'run') {
+      return typeof onOpenRun === 'function' && onOpenRun(targetId) === true
+        ? { ok: true }
+        : { ok: false, message: `El Run ${targetId} ya no está disponible en esta superficie.` };
+    }
+    if (targetKind === 'spawn_request') {
+      return typeof onOpenSpawnRequest === 'function' && onOpenSpawnRequest(targetId) === true
+        ? { ok: true }
+        : { ok: false, message: `La solicitud de lanzamiento ${targetId} ya no está disponible en esta superficie.` };
+    }
+    return { ok: false, message: `Esta vista aún no abre destinos de tipo ${targetKind} (${targetId}).` };
+  };
   // Un solo estado `task_detail` alimenta canvas e Inspector: no hay segunda consulta.
   const workspaceProps = {
     projectId: selectedProjectId,
@@ -226,6 +264,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       className="wb wb--orch ade__layout"
       data-testid="ade-composition"
     >
+      <JumpPaletteHost open={jumpPaletteOpen} onClose={closeJumpPalette} onNavigate={jumpTo} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
