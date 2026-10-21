@@ -16,8 +16,8 @@
 // @typedef {Object} ActivityItem
 // @property {string} eventId    events.id (UUID v7): identidad estable. Es la clave de render y lo que
 //                               sobrevive a un reemplazo por reconexión; nunca se usa el índice de la lista.
-// @property {number} seq        events.seq: orden autoritativo y único cursor. Entero positivo. Se muestra
-//                               como procedencia; la vista NO reordena por él.
+// @property {string|number} seq events.seq: i64 decimal canónico (o entero JS seguro en fixtures).
+//                               Se muestra sin convertir a Number; la vista NO reordena por él.
 // @property {number} timestamp  events.ts en ms epoch. Informativo: se muestra, NUNCA ordena.
 // @property {ActivityClass} class  Clase del hecho. decision y effect se pintan como filas distintas.
 // @property {string} [kind]     kind del evento (1..64). Solo trazabilidad y fallback de desconocidos;
@@ -92,6 +92,22 @@ const SEVERITY_KEYS = new Set(Object.keys(SEVERITY_LABELS));
 const MAX_METADATA = 8;
 const MAX_METADATA_LABEL = 40;
 const MAX_METADATA_VALUE = 120;
+const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
+
+function canonicalActivityI64(value, positive = false) {
+  let parsed;
+  if (typeof value === 'bigint') {
+    parsed = value;
+  } else if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    parsed = BigInt(value);
+  } else if (typeof value === 'string' && value.length <= 19 && /^(0|[1-9]\d*)$/.test(value)) {
+    parsed = BigInt(value);
+  } else {
+    return null;
+  }
+  if (parsed < (positive ? 1n : 0n) || parsed > ACTIVITY_I64_MAX) return null;
+  return parsed.toString();
+}
 
 // Allowlist de palabras que pueden componer una etiqueta de metadata. Una etiqueta solo
 // se acepta si TODAS sus palabras normalizadas están aquí: una clave desconocida
@@ -253,9 +269,10 @@ function normalizeItems(items) {
     if (!item || typeof item !== 'object') continue;
     const eventId = eventIdOf(item);
     if (!eventId || eventId.length > 200 || seen.has(eventId)) continue;
-    if (!Number.isSafeInteger(item.seq) || item.seq < 1) continue;
+    const seq = canonicalActivityI64(item.seq, true);
+    if (seq === null) continue;
     seen.add(eventId);
-    out.push(item);
+    out.push(item.seq === seq ? item : { ...item, seq });
   }
   return out;
 }
@@ -420,11 +437,10 @@ export function ActivityTimeline({
     staleView &&
     (viewStatus === 'ready' || viewStatus === 'loading' || viewStatus === 'error');
   // next_cursor es el seq del último evento devuelto: con has_more=true debe ser un
-  // entero positivo. null, 0, negativos, decimales o strings no habilitan load-more.
-  const nextCursor =
-    cursor && typeof cursor === 'object' && Number.isSafeInteger(cursor.next) && cursor.next > 0
-      ? cursor.next
-      : null;
+  // i64 decimal canónico positivo. Los valores inseguros nunca pasan por Number.
+  const nextCursor = cursor && typeof cursor === 'object'
+    ? canonicalActivityI64(cursor.next, true)
+    : null;
   const hasMore = Boolean(cursor && typeof cursor === 'object' && cursor.hasMore === true);
   const canLoadMore =
     viewStatus === 'ready' &&

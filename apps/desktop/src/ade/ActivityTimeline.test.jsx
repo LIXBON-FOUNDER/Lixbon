@@ -214,7 +214,7 @@ describe('ActivityTimeline · alcance y cursor', () => {
     expect(document.activeElement).toBe(more);
     fireEvent.click(more);
     expect(onLoadMore).toHaveBeenCalledWith({
-      cursor: 7,
+      cursor: '7',
       scope: { kind: 'project', id: 'p-1', name: 'lixbon' },
     });
   });
@@ -247,7 +247,8 @@ describe('ActivityTimeline · alcance y cursor', () => {
     ['decimal', 1.5],
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
-    ['texto', '7'],
+    ['decimal no canónico', '07'],
+    ['fuera de i64', '9223372036854775808'],
     ['booleano', true],
   ])('has_more=true con next_cursor %s no habilita load-more', (_name, next) => {
     const onLoadMore = vi.fn();
@@ -261,6 +262,24 @@ describe('ActivityTimeline · alcance y cursor', () => {
     expect(screen.queryByTestId('activity-load-more')).toBeNull();
     expect(screen.queryByText('No hay más actividad.')).toBeNull();
     expect(onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it('renderiza secuencias i64 grandes y reenvía el cursor decimal exacto', () => {
+    const seq = '9223372036854775806';
+    const nextCursor = '9223372036854775807';
+    const onLoadMore = vi.fn();
+    render(
+      <ActivityTimeline
+        items={[activityItem({ eventId: 'large-seq', seq })]}
+        cursor={{ next: nextCursor, hasMore: true }}
+        onLoadMore={onLoadMore}
+      />,
+    );
+
+    expect(screen.getByTestId('activity-large-seq').getAttribute('data-seq')).toBe(seq);
+    expect(screen.getByTestId('activity-seq-large-seq').textContent).toBe(`#${seq}`);
+    fireEvent.click(screen.getByTestId('activity-load-more'));
+    expect(onLoadMore).toHaveBeenCalledWith({ cursor: nextCursor, scope: { kind: 'global' } });
   });
 
   it('sin cursor o con has_more no booleano no ofrece load-more ni fin', () => {
@@ -1125,7 +1144,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
     fireEvent.click(screen.getByTestId('activity-load-more'));
     expect(onLoadMore).toHaveBeenCalledWith({
-      cursor: 1,
+      cursor: '1',
       scope: { kind: 'task', id: 't-1', title: 'Hacer' },
     });
     fireEvent.click(screen.getByTestId('activity-refresh'));

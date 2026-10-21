@@ -14,6 +14,22 @@ const VISUAL_TO_SEVERITY = Object.freeze({
   error: 'danger',
 });
 const HEAD_FAILURES = new Set(['stale', 'disconnected', 'degraded', 'error']);
+const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
+
+function canonicalActivityI64(value, positive = false) {
+  let parsed;
+  if (typeof value === 'bigint') {
+    parsed = value;
+  } else if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    parsed = BigInt(value);
+  } else if (typeof value === 'string' && value.length <= 19 && /^(0|[1-9]\d*)$/.test(value)) {
+    parsed = BigInt(value);
+  } else {
+    return null;
+  }
+  if (parsed < (positive ? 1n : 0n) || parsed > ACTIVITY_I64_MAX) return null;
+  return parsed.toString();
+}
 
 const emptyPages = (key, headData = null, readEpoch = 0) => ({
   key,
@@ -49,7 +65,7 @@ function scopeKey(scope) {
 
 function queryFilters(scope) {
   return {
-    cursor: 0,
+    cursor: '0',
     limit: ACTIVITY_DEFAULT_LIMIT,
     order: 'desc',
     project_id: scope.kind === 'project' ? scope.id : null,
@@ -67,9 +83,10 @@ function uniqueContractItems(items) {
     if (!item || typeof item !== 'object') continue;
     const eventId = typeof item.event_id === 'string' ? item.event_id.trim() : '';
     if (!eventId || eventId.length > 200 || seen.has(eventId)) continue;
-    if (!Number.isSafeInteger(item.seq) || item.seq < 1) continue;
+    const seq = canonicalActivityI64(item.seq, true);
+    if (seq === null) continue;
     seen.add(eventId);
-    unique.push(item);
+    unique.push(item.seq === seq ? item : { ...item, seq });
   }
   return unique;
 }
@@ -152,7 +169,7 @@ function coreStatus(status, hasData, pageError) {
   return 'ready';
 }
 
-/** Read-only Activity projection over the Core's descending, numeric-sequence cursor. */
+/** Read-only Activity projection over the Core's descending, decimal i64 sequence cursor. */
 export function ActivityPanel({
   scope: inputScope = { kind: 'global' },
   active = true,
@@ -203,14 +220,14 @@ export function ActivityPanel({
 
   const pageCursor = pageState.hasLoadedPage ? pageState.nextCursor : list.data?.next_cursor;
   const hasMore = pageState.hasLoadedPage ? pageState.hasMore : list.data?.has_more === true;
-  const usableCursor = Number.isSafeInteger(pageCursor) && pageCursor > 0 ? pageCursor : null;
+  const usableCursor = canonicalActivityI64(pageCursor, true);
   const canLoadMore = usableCursor !== null
     && hasMore
     && !headFailure
     && list.status !== 'refreshing'
     && !pageState.error;
   const cursor = list.data
-    ? { next: usableCursor ?? pageCursor ?? null, hasMore: hasMore === true }
+    ? { next: usableCursor ?? canonicalActivityI64(pageCursor) ?? null, hasMore: hasMore === true }
     : null;
 
   const loadMore = useCallback(async () => {
@@ -245,7 +262,7 @@ export function ActivityPanel({
         : {
           ...current,
           items: [...current.items, ...(Array.isArray(page?.items) ? page.items : [])],
-          nextCursor: page?.next_cursor ?? null,
+          nextCursor: canonicalActivityI64(page?.next_cursor),
           hasMore: page?.has_more === true,
           hasLoadedPage: true,
           loading: false,
