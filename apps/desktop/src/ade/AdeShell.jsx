@@ -254,7 +254,12 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     taskId: selectedTaskId,
     detail,
     project: selectedProject,
-    onNavigate: ({ projectId, taskId }) => { if (projectId === selectedProjectId) selectTask(taskId); },
+    // Devuelve `true` solo si aceptó el target exacto (mismo Project); el workspace usa esa confirmación para el foco.
+    onNavigate: ({ projectId, taskId }) => {
+      if (projectId !== selectedProjectId || typeof taskId !== 'string' || !taskId.trim()) return false;
+      selectTask(taskId);
+      return true;
+    },
     onOpenActivity: onOpenTaskActivity,
     onOpenAttention: openTaskAttention,
   };
