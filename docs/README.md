@@ -26,6 +26,7 @@
 | [`core/MIGRACIONES.md`](core/MIGRACIONES.md) | Migraciones de la base local |
 | [`core/PROYECTOS.md`](core/PROYECTOS.md) | Registro de proyectos |
 | [`core/QUERIES.md`](core/QUERIES.md) | Queries de solo lectura para clientes (overview multiproyecto) |
+| [`core/ACTIVITY.md`](core/ACTIVITY.md) | Activity humana: proyección del Event Log para clientes (claves de mensaje) |
 | [`secure-store/README.md`](secure-store/README.md) | Almacén seguro de credenciales |
 
 ## Operación
