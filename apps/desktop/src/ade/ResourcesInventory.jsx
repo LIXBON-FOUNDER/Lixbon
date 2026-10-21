@@ -46,6 +46,10 @@
 //    alcance es el de la petición (`filters.project_id`, docs/core/RESOURCES.md §Aviso): el filtro local por
 //    Project no lo recalcula, y la etiqueta dice a qué abarca.
 //  · Solo se entiende `v: 1`. Otra versión (o ninguna) es estado desconocido: ni filas ni contador.
+//    Una versión declarada distinta de 1 es incompatibilidad aunque no traiga listas; solo un DTO sin versión
+//    ni listas es «Core no entregó el inventario».
+//  · Sin contador de Core (`branches_to_review: null`, p. ej. `filters.probe=false`) se dice que no hay contador;
+//    no se inventa un número.
 //  · El acotado es por Project ID (`project_id`), nunca por ProjectLocation. Al cambiar el Project
 //    externo se restablecen los filtros locales.
 import { useMemo, useState } from 'react';
@@ -193,21 +197,25 @@ function repoRow(entry, index) {
   };
 }
 
+function incompatibleInventory(version) {
+  return { incompatible: true, version: version ?? null, rows: [], branchesToReview: null, probe: null, scope: { kind: 'unknown', projectId: null } };
+}
+
 /**
  * Lee el DTO de Core. Devuelve `null` cuando no hay inventario utilizable (eso es «no
  * disponible», nunca una lista vacía ni filas inventadas).
  */
 export function readInventory(inventory) {
   if (!isObject(inventory)) return null;
+  // Una versión declarada que no es la soportada es incompatibilidad, aunque no traiga listas: no es «Core no entregó».
+  if (inventory.v !== undefined && inventory.v !== SUPPORTED_VERSION) return incompatibleInventory(inventory.v);
   const repos = Array.isArray(inventory.repos) ? inventory.repos : null;
   const worktrees = Array.isArray(inventory.worktrees) ? inventory.worktrees : null;
   const preserved = Array.isArray(inventory.preserved_branches) ? inventory.preserved_branches : null;
   if (!repos && !worktrees && !preserved) return null;
 
   // Solo `v: 1`. Otra versión (o ninguna) no es un inventario fiable: estado desconocido, sin filas ni contador.
-  if (inventory.v !== SUPPORTED_VERSION) {
-    return { incompatible: true, version: inventory.v ?? null, rows: [], branchesToReview: null, scope: { kind: 'unknown', projectId: null } };
-  }
+  if (inventory.v !== SUPPORTED_VERSION) return incompatibleInventory(inventory.v);
 
   const rows = [];
   (repos ?? []).forEach((entry, i) => { if (isObject(entry)) rows.push(repoRow(entry, i)); });
@@ -222,7 +230,12 @@ export function readInventory(inventory) {
     ? warnings.branches_to_review
     : null;
 
-  return { incompatible: false, version: SUPPORTED_VERSION, rows, branchesToReview, scope: countScope(inventory.filters) };
+  return { incompatible: false, version: SUPPORTED_VERSION, rows, branchesToReview, probe: probeOf(inventory.filters), scope: countScope(inventory.filters) };
+}
+
+/** `filters.probe` tal cual: `false` = Core no evaluó dirty/merged/needs_review; cualquier otra cosa no se supone. */
+function probeOf(filters) {
+  return isObject(filters) && typeof filters.probe === 'boolean' ? filters.probe : null;
 }
 
 /**
@@ -448,7 +461,7 @@ function RepoRow({ row }) {
         <dt>Máquina</dt><dd data-testid="resinv-machine">{row.machine ?? '—'}</dd>
         <dt>Ruta</dt><dd className="resinv__path" data-testid="resinv-repo">{text(entry.path) ?? '—'}</dd>
         <dt>Escaneo (Core)</dt><dd data-testid="resinv-scan">{row.coreState ?? '—'}</dd>
-        <dt>Motivo</dt><dd data-testid="resinv-reason">{reason ? (hasKey(REASON_LABEL, reason) ? REASON_LABEL[reason] : reason) : '—'}</dd>
+        <dt>Motivo</dt><dd data-testid="resinv-reason">{reason ? vocab(REASON_LABEL, reason) : '—'}</dd>
       </dl>
     </li>
   );
@@ -497,6 +510,8 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
   const scopeLabel = countScopeInfo.kind === 'all'
     ? 'todos los Projects'
     : countScopeInfo.kind === 'project' ? `Project ${countScopeInfo.projectId}` : 'alcance no informado';
+  // Sin contador de Core (p. ej. `filters.probe=false`): se dice, y no se sustituye por ningún número.
+  const noCountFromCore = Boolean(parsed) && !parsed.incompatible && parsed.branchesToReview === null;
   const countIsThisProject = countScopeInfo.kind === 'project' && countScopeInfo.projectId === scopeId;
 
   return (
@@ -516,6 +531,14 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
       {warningCount !== null && scopeId !== null && !countIsThisProject && (
         <p className="resinv__note" role="status" data-testid="resinv-count-scope-note">
           El contador de Core no es el de este Project ({scopeLabel}); los filtros de esta vista no lo recalculan.
+        </p>
+      )}
+      {noCountFromCore && (
+        <p className="resinv__note" role="status" data-testid="resinv-count-unavailable">
+          {parsed.probe === false
+            ? 'Core no evaluó la revisión (filters.probe=false): no hay contador de ramas por revisar.'
+            : 'Core no informó un contador válido de ramas por revisar (warnings.branches_to_review).'}
+          {' '}No se calcula a partir de las filas.
         </p>
       )}
       {foreignCount && (

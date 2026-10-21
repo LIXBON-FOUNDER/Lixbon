@@ -768,8 +768,9 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
   });
 
   it('sin branches_to_review de Core no se muestra contador', () => {
-    view({ resourceInventory: { ...INV, warnings: { branches_to_review: null } } });
+    view({ resourceInventory: { ...INV, filters: { project_id: null, probe: false }, warnings: { branches_to_review: null } } });
     expect(screen.queryByTestId('resinv-warning-count')).toBeNull();
+    expect(within(resourcesSection()).getByTestId('resinv-count-unavailable').textContent).toContain('filters.probe=false');
   });
 
   it('el inventario sigue visible aunque el slice legacy de Resources falle, sin mezclar sus avisos', () => {
