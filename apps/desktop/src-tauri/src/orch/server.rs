@@ -718,6 +718,45 @@ mod authenticated_client_tests {
     }
 
     #[test]
+    fn http_rpc_resource_inventory_es_solo_para_person_autenticada() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let task = create_ui_task(&core, "resource HTTP task");
+        let person_secret = "person-resource-http-secret-at-least-32-bytes";
+        let agent_secret = "agent-resource-http-secret-at-least-32-bytes";
+        register(&core, ClientSurface::Cli, ClientPrincipal::Person("person-resource-http".into()), "install-person-resource-http", person_secret);
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent(task.clone()), "install-agent-resource-http", agent_secret);
+        let server = start(core).unwrap();
+
+        // `probe: false`: solo registro de git y disco; no ejecuta `git status` sobre el repo de quien corre la prueba.
+        let (status, person) = post(server.port, person_secret, &json!({ "cmd": "resource_inventory", "args": { "probe": false } }));
+        assert_eq!(status, 200);
+        assert_eq!(person["ok"], true, "Person CLI lee el inventario del Core local");
+        let data = &person["data"];
+        let fields: std::collections::BTreeSet<_> = data.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(fields, ["filters", "machine", "preserved_branches", "repos", "v", "warnings", "worktrees"].into_iter().collect());
+        assert_eq!(data["v"], 1);
+        assert_eq!(data["warnings"]["branches_to_review"], serde_json::Value::Null, "sin sondeo no hay cuenta");
+        assert!(data["repos"].as_array().unwrap().iter().any(|r| r["scan"] == "ok"), "el repo de la Task se escaneó");
+
+        let (_, invalid) = post(server.port, person_secret, &json!({ "cmd": "resource_inventory", "args": { "path": "/tmp" } }));
+        assert_eq!(invalid["ok"], false);
+        assert!(invalid["error"].as_str().unwrap().contains("resource_inventory_invalid_request"));
+
+        let (status, agent) = post(server.port, agent_secret, &json!({ "cmd": "resource_inventory", "args": {} }));
+        assert_eq!(status, 200);
+        assert_eq!(agent["ok"], false, "un Agent no lee el inventario");
+        assert!(agent["error"].as_str().unwrap().contains("resource_inventory_auth_required"));
+
+        let (status, legacy) = post(server.port, "legacy-shared-server-token-test-only-32-bytes", &json!({ "cmd": "resource_inventory", "caller": task, "args": {} }));
+        assert_eq!(status, 401, "el token legacy ya no autentica RPC");
+        assert_eq!(legacy["code"], "invalid_credential");
+        server.stop();
+    }
+
+    #[test]
     fn http_rpc_activity_list_es_solo_para_person_autenticada() {
         let (_cleanup, data, core_dir) = boot_tests::dirs();
         let (core, _host, started) = boot_tests::arranca(&data, &core_dir);

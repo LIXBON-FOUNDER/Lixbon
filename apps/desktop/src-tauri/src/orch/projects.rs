@@ -182,7 +182,7 @@ fn lookup(store: &Store, machine: &str, ident: &Identity) -> StoreResult<Lookup>
 /// Identificador estable de esta máquina para `project_locations.machine`, SOLO LECTURA: `None` si aún no
 /// se creó (entonces esta máquina no tiene ubicaciones registradas). Las lecturas usan esta; así una
 /// consulta con el Core degradado no puede crear una fila de `meta`.
-fn machine_id_read(store: &Store) -> StoreResult<Option<String>> {
+pub(super) fn machine_id_read(store: &Store) -> StoreResult<Option<String>> {
     store.meta(META_MACHINE)
 }
 
