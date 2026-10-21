@@ -54,6 +54,13 @@ const TARGET_LABELS = {
 const EMPTY_PAGES = Object.freeze({ items: [], nextCursor: null, hasMore: false, hasLoadedPage: false, loading: false, error: null });
 
 const emptyPages = (key, headData = null, headReadEpoch = 0) => ({ ...EMPTY_PAGES, key, headData, headReadEpoch, items: [] });
+const uniqueSortedItems = (items) => {
+  const seen = new Map();
+  for (const item of items) {
+    if (!seen.has(item.id)) seen.set(item.id, item);
+  }
+  return [...seen.values()].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+};
 
 const label = (labels, code) => labels[code] || code;
 
@@ -106,7 +113,7 @@ export function sumAttentionCounts(overview) {
   return { total, byCategory };
 }
 
-function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onKeyDown, onOpenTarget }) {
+function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, onKeyDown, onOpenTarget }) {
   const metaId = useId();
   const summary = toSummary(item);
   const category = label(CATEGORY_LABELS, item.category);
@@ -160,6 +167,7 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onKeyDow
         aria-label={accessibleName}
         aria-describedby={metaId}
         onFocus={onFocus}
+        onBlur={onBlur}
         onKeyDown={onKeyDown}
         onClick={() => onOpenTarget(summary)}
       >
@@ -212,6 +220,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   const [pages, setPages] = useState(() => emptyPages(filterKey));
   const [recoveryNotice, setRecoveryNotice] = useState(null);
   const [focusIndex, setFocusIndex] = useState(0);
+  const focusedItem = useRef({ id: null, hasDOMFocus: false });
   const itemRefs = useRef([]);
   const loadingMore = useRef(null);
   const pageGeneration = useRef(0);
@@ -236,11 +245,25 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
   useLayoutEffect(() => {
     if (pageContext.current.key === filterKey && pageContext.current.headData === list.data
       && pageContext.current.readEpoch === list.readEpoch) return;
+    const sameFilter = pageContext.current.key === filterKey;
+    const restoreDOMFocus = sameFilter && focusedItem.current.hasDOMFocus;
+    const previousAttentionId = sameFilter ? focusedItem.current.id : null;
+    const refreshedItems = uniqueSortedItems(list.data?.items ?? []);
+    const previousFocusIndex = previousAttentionId
+      ? refreshedItems.findIndex((item) => item.id === previousAttentionId)
+      : -1;
+    const nextFocusIndex = previousFocusIndex >= 0 ? previousFocusIndex : 0;
+    const nextFocusedItem = refreshedItems[nextFocusIndex];
     pageContext.current = { key: filterKey, headData: list.data, readEpoch: list.readEpoch };
     pageGeneration.current += 1;
     loadingMore.current = null;
     setPages(emptyPages(filterKey, list.data, list.readEpoch));
-    setFocusIndex(0);
+    setFocusIndex(nextFocusIndex);
+    focusedItem.current = {
+      id: nextFocusedItem?.id ?? null,
+      hasDOMFocus: restoreDOMFocus && Boolean(nextFocusedItem),
+    };
+    if (restoreDOMFocus && nextFocusedItem) itemRefs.current[nextFocusIndex]?.focus({ preventScroll: true });
   }, [filterKey, list.data, list.readEpoch]);
 
   // Si el Core deja de responder, los cursores del proceso anterior dejan de ser válidos. Al volver,
@@ -265,12 +288,12 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
     ? pages
     : EMPTY_PAGES;
   const items = useMemo(() => {
-    const seen = new Map();
-    for (const item of [...(list.data?.items ?? []), ...pageState.items]) {
-      if (!seen.has(item.id)) seen.set(item.id, item);
-    }
-    return [...seen.values()].sort((a, b) => (a.created_at - b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return uniqueSortedItems([...(list.data?.items ?? []), ...pageState.items]);
   }, [list.data, pageState.items]);
+
+  useLayoutEffect(() => {
+    if (!focusedItem.current.id) focusedItem.current.id = items[focusIndex]?.id ?? null;
+  }, [items, focusIndex]);
 
   // Los contadores de projects_overview no están acotados a un target: con target activo no se muestran.
   const summed = useMemo(() => {
@@ -556,7 +579,16 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
               interactive={interactive}
               tabIndex={index === activeIndex ? 0 : -1}
               itemRef={(node) => { itemRefs.current[index] = node; }}
-              onFocus={() => setFocusIndex(index)}
+              onFocus={() => {
+                focusedItem.current = { id: item.id, hasDOMFocus: true };
+                setFocusIndex(index);
+              }}
+              onBlur={(event) => {
+                const listElement = event.currentTarget.parentElement?.parentElement;
+                if (event.relatedTarget && !listElement?.contains(event.relatedTarget)) {
+                  focusedItem.current = { ...focusedItem.current, hasDOMFocus: false };
+                }
+              }}
               onKeyDown={(event) => onItemKeyDown(event, index)}
               onOpenTarget={onOpenTarget}
             />
