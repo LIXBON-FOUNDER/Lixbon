@@ -14,7 +14,7 @@ fn person(core: &Core) -> crate::store::AuthenticatedClient {
     persona(core, "person-tasks", "install-person-tasks", "person-tasks-secret-0123456789abcdef")
 }
 
-fn proyecto(core: &Core, name: &str) -> String {
+pub(super) fn proyecto(core: &Core, name: &str) -> String {
     core.storage
         .with_store(|store| {
             store
@@ -29,7 +29,7 @@ fn proyecto(core: &Core, name: &str) -> String {
         .unwrap()
 }
 
-fn tarea(core: &Core, title: &str, project: Option<&str>) -> String {
+pub(super) fn tarea(core: &Core, title: &str, project: Option<&str>) -> String {
     core.mutate(|tx| {
         let (_run, root) = tx.create_run(
             title,
