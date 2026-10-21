@@ -7,6 +7,7 @@ import {
   TASK_STATUS_LABELS,
   toProjectSummary,
   toTaskSummary,
+  byCoreTaskOrder,
 } from './ProjectsSidebar';
 import { TASK_PAGE_LIMIT } from './coreQueries';
 
@@ -418,6 +419,17 @@ describe('ProjectsSidebar', () => {
     expect(taskCalls(calls).every((call) => call.args.project_id === 'project-a')).toBe(true);
   });
 
+  it('ordena como el Core: created_at descendente y, a igualdad, id ascendente', () => {
+    const tasks = [
+      { id: 'b', created_at: 1_000 },
+      { id: 'c', created_at: 2_000 },
+      { id: 'a', created_at: 1_000 },
+      { id: 'd', created_at: 1_000, updated_at: 9_999 },
+    ];
+    // updated_at no interviene en el orden: es mutable y el cursor del Core no se apoya en él.
+    expect([...tasks].sort(byCoreTaskOrder).map((task) => task.id)).toEqual(['c', 'a', 'b', 'd']);
+  });
+
   it('pagina con el cursor opaco del Core y deduplica por ID durable en orden keyset', async () => {
     const calls = mountCore({
       overviews: () => overview([project('project-a', 'Alpha')]),
@@ -434,7 +446,8 @@ describe('ProjectsSidebar', () => {
 
     expect(screen.getAllByText('Task t2')).toHaveLength(1);
     expect([...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id')))
-      .toEqual(['t3', 't2', 't1']);
+      // Mismo created_at: el Core desempata por id ascendente (docs/core/QUERIES.md).
+      .toEqual(['t1', 't2', 't3']);
     expect(taskCalls(calls).map((call) => call.args.cursor)).toEqual([undefined, 'cursor-1']);
   });
 

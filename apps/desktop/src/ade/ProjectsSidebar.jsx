@@ -90,9 +90,13 @@ const projectKey = (projectId) => `p:${projectId}`;
 const taskKey = (projectId, taskId) => `t:${projectId}\u0000${taskId}`;
 const projectIdOfTaskKey = (key) => key.slice(2).split('\u0000')[0];
 
-/** Orden del contrato LXO-91: `created_at` descendente y, a igualdad, `id` descendente. */
-const byCoreTaskOrder = (a, b) => (b.created_at - a.created_at)
-  || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+/**
+ * Orden del Core para `tasks_by_project` (docs/core/QUERIES.md): `created_at` descendente y, a
+ * igualdad, `id` ascendente. Es el mismo orden del cursor por clave, así que las páginas acumuladas
+ * quedan en el orden en que el Core las entrega.
+ */
+export const byCoreTaskOrder = (a, b) => (b.created_at - a.created_at)
+  || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 const EMPTY_PAGE = Object.freeze({
   items: [], nextCursor: null, hasMore: false, pageCount: 0, loading: false, stale: false, error: null, notice: null,
