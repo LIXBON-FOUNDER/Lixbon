@@ -1,0 +1,708 @@
+{
+  "runs": [
+    {
+      "id": "r1",
+      "objective": "Login con GitHub",
+      "root_task_id": "t2",
+      "created_at": 1792000000000,
+      "closed": 1,
+      "last_activity": 1792000900000
+    },
+    {
+      "id": "r13",
+      "objective": "Script viejo anterior al registro de proyectos",
+      "root_task_id": "t14",
+      "created_at": 1791000000000,
+      "closed": 1,
+      "last_activity": 1791000500000
+    },
+    {
+      "id": "r16",
+      "objective": "Coordinador externo",
+      "root_task_id": "t17",
+      "created_at": 1792001000000,
+      "closed": 0,
+      "last_activity": 1792001200000
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t14",
+      "run_id": "r13",
+      "parent_task_id": null,
+      "depth": 0,
+      "project_id": null,
+      "title": "Coordinar script",
+      "spec": "",
+      "repo": "/home/ana/viejo",
+      "origin": "legacy",
+      "created_at": 1791000000000,
+      "updated_at": 1791000500000
+    },
+    {
+      "id": "t17",
+      "run_id": "r16",
+      "parent_task_id": null,
+      "depth": 0,
+      "project_id": "p-1",
+      "title": "Coordinar refactor",
+      "spec": "",
+      "repo": "/home/ana/app",
+      "origin": "legacy",
+      "created_at": 1792001000000,
+      "updated_at": 1792001200000
+    },
+    {
+      "id": "t2",
+      "run_id": "r1",
+      "parent_task_id": null,
+      "depth": 0,
+      "project_id": "p-1",
+      "title": "Coordinar login",
+      "spec": "",
+      "repo": "/home/ana/app",
+      "origin": "legacy",
+      "created_at": 1792000000000,
+      "updated_at": 1792000900000
+    },
+    {
+      "id": "t3",
+      "run_id": "r1",
+      "parent_task_id": "t2",
+      "depth": 1,
+      "project_id": "p-1",
+      "title": "API de sesiones",
+      "spec": "Implementa /api/session.",
+      "repo": "/home/ana/app",
+      "origin": "legacy",
+      "created_at": 1792000040000,
+      "updated_at": 1792000300000
+    },
+    {
+      "id": "t4",
+      "run_id": "r1",
+      "parent_task_id": "t2",
+      "depth": 1,
+      "project_id": "p-1",
+      "title": "Formulario de login",
+      "spec": "Pantalla de login.",
+      "repo": "/home/ana/app",
+      "origin": "legacy",
+      "created_at": 1792000045000,
+      "updated_at": 1792000500000
+    },
+    {
+      "id": "t5",
+      "run_id": "r1",
+      "parent_task_id": "t2",
+      "depth": 1,
+      "project_id": "p-1",
+      "title": "Tests de login",
+      "spec": "Escribe tests del login.\n\n---\nSeguimiento:\nCubre también el logout.",
+      "repo": "/home/ana/app",
+      "origin": "legacy",
+      "created_at": 1792000046000,
+      "updated_at": 1792000800000
+    }
+  ],
+  "attempts": [
+    {
+      "id": "t14-a1",
+      "task_id": "t14",
+      "n": 1,
+      "status": "done",
+      "external": 0,
+      "provider": "claude",
+      "role": null,
+      "profile": null,
+      "model": null,
+      "effort": null,
+      "instruction": null,
+      "cwd": "/home/ana/viejo",
+      "checkout_branch": "master",
+      "worktree_id": null,
+      "provider_session_id": null,
+      "policy": null,
+      "ack_unverified": 0,
+      "requested_argv": null,
+      "plan_mode": 0,
+      "stream_json": 0,
+      "report_nonce": null,
+      "delivered": [],
+      "delivery_channel": null,
+      "model_requested": null,
+      "model_effective": null,
+      "model_source": null,
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": null,
+      "summary": "",
+      "files": [],
+      "integrated": 0,
+      "started_at": null,
+      "ended_at": null,
+      "created_at": 1791000000000,
+      "updated_at": 1791000500000,
+      "origin": "legacy"
+    },
+    {
+      "id": "t17-a1",
+      "task_id": "t17",
+      "n": 1,
+      "status": "running",
+      "external": 1,
+      "provider": "claude",
+      "role": null,
+      "profile": null,
+      "model": null,
+      "effort": null,
+      "instruction": null,
+      "cwd": "/home/ana/app",
+      "checkout_branch": "main",
+      "worktree_id": null,
+      "provider_session_id": null,
+      "policy": null,
+      "ack_unverified": 0,
+      "requested_argv": null,
+      "plan_mode": 0,
+      "stream_json": 0,
+      "report_nonce": null,
+      "delivered": [],
+      "delivery_channel": null,
+      "model_requested": null,
+      "model_effective": null,
+      "model_source": null,
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": null,
+      "summary": "",
+      "files": [],
+      "integrated": 0,
+      "started_at": null,
+      "ended_at": null,
+      "created_at": 1792001000000,
+      "updated_at": 1792001200000,
+      "origin": "legacy"
+    },
+    {
+      "id": "t2-a1",
+      "task_id": "t2",
+      "n": 1,
+      "status": "done",
+      "external": 0,
+      "provider": "claude",
+      "role": null,
+      "profile": null,
+      "model": null,
+      "effort": null,
+      "instruction": null,
+      "cwd": "/home/ana/app",
+      "checkout_branch": "main",
+      "worktree_id": null,
+      "provider_session_id": null,
+      "policy": null,
+      "ack_unverified": 0,
+      "requested_argv": null,
+      "plan_mode": 0,
+      "stream_json": 0,
+      "report_nonce": null,
+      "delivered": [],
+      "delivery_channel": null,
+      "model_requested": null,
+      "model_effective": null,
+      "model_source": null,
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": null,
+      "summary": "",
+      "files": [],
+      "integrated": 0,
+      "started_at": null,
+      "ended_at": null,
+      "created_at": 1792000000000,
+      "updated_at": 1792000900000,
+      "origin": "legacy"
+    },
+    {
+      "id": "t3-a1",
+      "task_id": "t3",
+      "n": 1,
+      "status": "done",
+      "external": 0,
+      "provider": "codex",
+      "role": "implementador",
+      "profile": "implementar",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "instruction": null,
+      "cwd": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "checkout_branch": null,
+      "worktree_id": "wt-t3-a1",
+      "provider_session_id": "ps-t3-a1",
+      "policy": {
+        "profile": "implementar",
+        "cli_version": "0.80.0",
+        "policy_status": "ok",
+        "ack_unverified": false
+      },
+      "ack_unverified": 0,
+      "requested_argv": [
+        "codex",
+        "exec",
+        "--full-auto"
+      ],
+      "plan_mode": 0,
+      "stream_json": 0,
+      "report_nonce": "n-3",
+      "delivered": [
+        "0d9f3c"
+      ],
+      "delivery_channel": "exec_o",
+      "model_requested": "gpt-6.1-sol",
+      "model_effective": "gpt-6.1-sol",
+      "model_source": "session_declared",
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": null,
+      "summary": "API lista",
+      "files": [
+        "src/api/session.rs"
+      ],
+      "integrated": 1,
+      "started_at": 1792000050000,
+      "ended_at": null,
+      "created_at": 1792000040000,
+      "updated_at": 1792000300000,
+      "origin": "legacy"
+    },
+    {
+      "id": "t4-a1",
+      "task_id": "t4",
+      "n": 1,
+      "status": "failed",
+      "external": 0,
+      "provider": "codex",
+      "role": null,
+      "profile": "implementar",
+      "model": null,
+      "effort": null,
+      "instruction": null,
+      "cwd": "/home/ana/app.lixbon-wt/t4-formulario-de-login",
+      "checkout_branch": null,
+      "worktree_id": "wt-t4-a1",
+      "provider_session_id": null,
+      "policy": null,
+      "ack_unverified": 0,
+      "requested_argv": null,
+      "plan_mode": 0,
+      "stream_json": 0,
+      "report_nonce": null,
+      "delivered": [],
+      "delivery_channel": null,
+      "model_requested": null,
+      "model_effective": "gpt-5.6-luna",
+      "model_source": "unknown",
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": "agent_idle_timeout",
+      "summary": "",
+      "files": [],
+      "integrated": 0,
+      "started_at": 1792000060000,
+      "ended_at": null,
+      "created_at": 1792000045000,
+      "updated_at": 1792000500000,
+      "origin": "legacy"
+    },
+    {
+      "id": "t5-a1",
+      "task_id": "t5",
+      "n": 1,
+      "status": "done",
+      "external": 0,
+      "provider": "claude",
+      "role": null,
+      "profile": null,
+      "model": "sonnet",
+      "effort": null,
+      "instruction": null,
+      "cwd": "/home/ana/app.lixbon-wt/t5-tests-de-login",
+      "checkout_branch": null,
+      "worktree_id": "wt-t5-a1",
+      "provider_session_id": "ps-t5-a1",
+      "policy": null,
+      "ack_unverified": 0,
+      "requested_argv": null,
+      "plan_mode": 0,
+      "stream_json": 1,
+      "report_nonce": null,
+      "delivered": [],
+      "delivery_channel": "stream_json",
+      "model_requested": "sonnet",
+      "model_effective": "claude-sonnet-5-5",
+      "model_source": "stream_json",
+      "model_mismatch": 0,
+      "model_mismatch_reason": null,
+      "approval_deadline": null,
+      "failure_reason": null,
+      "summary": "Tests de login y logout",
+      "files": [],
+      "integrated": 0,
+      "started_at": 1792000070000,
+      "ended_at": null,
+      "created_at": 1792000046000,
+      "updated_at": 1792000800000,
+      "origin": "legacy"
+    }
+  ],
+  "attempt_phases": [
+    {
+      "attempt_id": "t3-a1",
+      "ord": 0,
+      "name": "tests",
+      "done": 0,
+      "note": "",
+      "at": 1792000100000
+    },
+    {
+      "attempt_id": "t3-a1",
+      "ord": 1,
+      "name": "tests",
+      "done": 1,
+      "note": "12 ok",
+      "at": 1792000200000
+    }
+  ],
+  "worktrees": [
+    {
+      "id": "wt-t3-a1",
+      "task_id": "t3",
+      "created_by_attempt_id": "t3-a1",
+      "repo": "/home/ana/app",
+      "path": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "branch": "lx/r1/t3-api-de-sesiones",
+      "base_branch": "main",
+      "base_commit": "b0b0b0",
+      "env_plan": {
+        "shared": [
+          "node_modules"
+        ],
+        "copy": [
+          ".env"
+        ],
+        "skipped": []
+      },
+      "state": "active",
+      "origin": "legacy"
+    },
+    {
+      "id": "wt-t4-a1",
+      "task_id": "t4",
+      "created_by_attempt_id": "t4-a1",
+      "repo": "/home/ana/app",
+      "path": "/home/ana/app.lixbon-wt/t4-formulario-de-login",
+      "branch": "lx/r1/t4-formulario-de-login",
+      "base_branch": "main",
+      "base_commit": null,
+      "env_plan": null,
+      "state": "active",
+      "origin": "legacy"
+    },
+    {
+      "id": "wt-t5-a1",
+      "task_id": "t5",
+      "created_by_attempt_id": "t5-a1",
+      "repo": "/home/ana/app",
+      "path": null,
+      "branch": "lx/r1/t5-tests-de-login",
+      "base_branch": "main",
+      "base_commit": "b0b0b0",
+      "env_plan": null,
+      "state": "released",
+      "origin": "legacy"
+    }
+  ],
+  "provider_sessions": [
+    {
+      "id": "ps-t3-a1",
+      "task_id": "t3",
+      "opened_by_attempt_id": "t3-a1",
+      "provider": "codex",
+      "external_ref": "/home/ana/.codex/sessions/2026/10/rollout-t3.jsonl",
+      "binding": "session_id",
+      "origin": "legacy"
+    },
+    {
+      "id": "ps-t5-a1",
+      "task_id": "t5",
+      "opened_by_attempt_id": "t5-a1",
+      "provider": "claude",
+      "external_ref": "6f1c2a9e-0b7d-4d1e-9a51-3c2f8e7d9b10",
+      "binding": "stream_json",
+      "origin": "legacy"
+    }
+  ],
+  "threads": [
+    {
+      "id": "th-t2",
+      "task_id": "t2",
+      "run_id": "r1"
+    },
+    {
+      "id": "th-t3",
+      "task_id": "t3",
+      "run_id": "r1"
+    },
+    {
+      "id": "th-t4",
+      "task_id": "t4",
+      "run_id": "r1"
+    },
+    {
+      "id": "th-t5",
+      "task_id": "t5",
+      "run_id": "r1"
+    }
+  ],
+  "thread_messages": [
+    {
+      "id": 6,
+      "thread_id": "th-t4",
+      "from_task_id": "t4",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "question",
+      "body": "¿Uso la tabla users o accounts?",
+      "reply_to": null,
+      "read": 1,
+      "at": 1792000150000
+    },
+    {
+      "id": 7,
+      "thread_id": "th-t4",
+      "from_task_id": "t2",
+      "to_task_id": "t4",
+      "from_attempt_id": null,
+      "kind": "reply",
+      "body": "accounts",
+      "reply_to": 6,
+      "read": 1,
+      "at": 1792000160000
+    },
+    {
+      "id": 8,
+      "thread_id": "th-t3",
+      "from_task_id": "t3",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "phase",
+      "body": "API de sesiones: fase «tests» terminada. 12 ok",
+      "reply_to": null,
+      "read": 1,
+      "at": 1792000200000
+    },
+    {
+      "id": 9,
+      "thread_id": "th-t3",
+      "from_task_id": "t3",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "done",
+      "body": "API de sesiones: terminada. API lista",
+      "reply_to": null,
+      "read": 1,
+      "at": 1792000300000
+    },
+    {
+      "id": 10,
+      "thread_id": "th-t2",
+      "from_task_id": "t2",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "note",
+      "body": "Prioriza el login con GitHub",
+      "reply_to": null,
+      "read": 0,
+      "at": 1792000310000
+    },
+    {
+      "id": 11,
+      "thread_id": "th-t5",
+      "from_task_id": "t5",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "done",
+      "body": "Tests de login: terminada. Tests de login y logout",
+      "reply_to": null,
+      "read": 0,
+      "at": 1792000800000
+    },
+    {
+      "id": 12,
+      "thread_id": "th-t4",
+      "from_task_id": "t4",
+      "to_task_id": "t2",
+      "from_attempt_id": null,
+      "kind": "exited",
+      "body": "Formulario de login: sin actividad",
+      "reply_to": null,
+      "read": 0,
+      "at": 1792000500000
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "t3-a1-last_message",
+      "attempt_id": "t3-a1",
+      "kind": "last_message",
+      "uri": "/home/ana/app.lixbon-wt/t3-api-de-sesiones/.lixbon/out/t3/last.txt",
+      "created_at": null,
+      "origin": "legacy"
+    },
+    {
+      "id": "t3-a1-report",
+      "attempt_id": "t3-a1",
+      "kind": "report",
+      "uri": "/home/ana/app/.lixbon/informes/r1/t3.md",
+      "created_at": null,
+      "origin": "legacy"
+    },
+    {
+      "id": "t5-a1-pull_request",
+      "attempt_id": "t5-a1",
+      "kind": "pull_request",
+      "uri": "https://github.com/ana/app/pull/42",
+      "created_at": null,
+      "origin": "legacy"
+    }
+  ],
+  "decisions": [
+    {
+      "id": 1,
+      "task_id": "t3",
+      "attempt_id": "t3-a1",
+      "kind": "review",
+      "actor": "human",
+      "detail_json": {
+        "decision": "accepted",
+        "base_commit": "b0b0b0",
+        "base_source": "base_commit",
+        "head_commit": "c3c3c3",
+        "comment": null
+      },
+      "at": 1792000400000
+    },
+    {
+      "id": 2,
+      "task_id": "t3",
+      "attempt_id": "t3-a1",
+      "kind": "merge",
+      "actor": "human",
+      "detail_json": {
+        "outcome": "merged",
+        "branch": "lx/r1/t3-api-de-sesiones",
+        "into": "main",
+        "squash": false
+      },
+      "at": 1792000410000
+    },
+    {
+      "id": 3,
+      "task_id": "t5",
+      "attempt_id": "t5-a1",
+      "kind": "review",
+      "actor": "human",
+      "detail_json": {
+        "decision": "rejected",
+        "base_commit": "b0b0b0",
+        "base_source": "base_commit",
+        "head_commit": "c5c5c5",
+        "comment": "falta el logout"
+      },
+      "at": 1792000700000
+    },
+    {
+      "id": 4,
+      "task_id": "t5",
+      "attempt_id": "t5-a1",
+      "kind": "pr",
+      "actor": "human",
+      "detail_json": {
+        "outcome": "created",
+        "branch": "lx/r1/t5-tests-de-login",
+        "remote": "origin",
+        "pr_url": "https://github.com/ana/app/pull/42"
+      },
+      "at": 1792000850000
+    }
+  ],
+  "reviews": [
+    {
+      "decision_id": 1,
+      "attempt_id": "t3-a1",
+      "head_commit": "c3c3c3",
+      "verdict": "accepted",
+      "at": 1792000400000
+    },
+    {
+      "decision_id": 3,
+      "attempt_id": "t5-a1",
+      "head_commit": "c5c5c5",
+      "verdict": "rejected",
+      "at": 1792000700000
+    }
+  ],
+  "env_blocks": [
+    {
+      "scope": "claude/implementar",
+      "cause": "cli_flags_unsupported"
+    },
+    {
+      "scope": "claude/implementar",
+      "cause": "cli_missing"
+    },
+    {
+      "scope": "codex/explorar",
+      "cause": "windows_sandbox_elevated"
+    }
+  ],
+  "legacy_residue": [
+    {
+      "entity_kind": "message",
+      "legacy_id": "15",
+      "field": "message",
+      "value": {
+        "id": 15,
+        "run": "r1",
+        "from": "t99",
+        "to": "t2",
+        "kind": "note",
+        "body": "mensaje de una tarea que ya no existe",
+        "read": false,
+        "at": 1792000600000
+      },
+      "reason": "dangling_participant"
+    },
+    {
+      "entity_kind": "task",
+      "legacy_id": "t4",
+      "field": "session",
+      "value": {
+        "session_ref": "/home/ana/.codex/sessions/2026/10/rollout-quiza-t4.jsonl",
+        "session_match": "cwd_time",
+        "model_source": "session_declared"
+      },
+      "reason": "session_not_verified"
+    }
+  ],
+  "meta": {
+    "agentic_model": "task_attempt_v1",
+    "f3_cut_legacy_rev": "42",
+    "id_seq": "17"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "runs": {
+    "r1": {"id": "r1", "objective": "Login con GitHub", "root": "t2", "created": 1792000000000, "closed": true, "last_activity": 1792000900000},
+    "r13": {"id": "r13", "objective": "Script viejo anterior al registro de proyectos", "root": "t14", "created": 1791000000000, "closed": true, "last_activity": 1791000500000},
+    "r16": {"id": "r16", "objective": "Coordinador externo", "root": "t17", "created": 1792001000000, "last_activity": 1792001200000}
+  },
+  "tasks": {
+    "t2": {
+      "id": "t2", "run": "r1", "parent": null, "depth": 0, "agent": "claude", "title": "Coordinar login", "spec": "",
+      "repo": "/home/ana/app", "project_id": "p-1", "cwd": "/home/ana/app", "branch": "main", "base": null, "worktree": null,
+      "status": "done", "created": 1792000000000, "updated": 1792000900000
+    },
+    "t3": {
+      "id": "t3", "run": "r1", "parent": "t2", "depth": 1, "agent": "codex", "model": "gpt-6.1-sol", "effort": "high",
+      "role": "implementador", "title": "API de sesiones", "spec": "Implementa /api/session.",
+      "repo": "/home/ana/app", "project_id": "p-1", "cwd": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "branch": "lx/r1/t3-api-de-sesiones", "base": "main", "worktree": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "status": "done",
+      "phases": [
+        {"name": "tests", "done": false, "note": "", "at": 1792000100000},
+        {"name": "tests", "done": true, "note": "12 ok", "at": 1792000200000}
+      ],
+      "summary": "API lista", "files": ["src/api/session.rs"], "report": "/home/ana/app/.lixbon/informes/r1/t3.md",
+      "merged": true, "env": {"shared": ["node_modules"], "copy": [".env"], "skipped": []}, "base_commit": "b0b0b0",
+      "profile": "implementar", "requested_argv": ["codex", "exec", "--full-auto"],
+      "policy": {"profile": "implementar", "cli_version": "0.80.0", "policy_status": "ok", "ack_unverified": false},
+      "report_nonce": "n-3", "delivered": ["0d9f3c"], "delivery_channel": "exec_o",
+      "model_effective": "gpt-6.1-sol", "model_requested": "gpt-6.1-sol", "model_source": "session_declared",
+      "session_ref": "/home/ana/.codex/sessions/2026/10/rollout-t3.jsonl", "session_match": "session_id",
+      "attempt_started": 1792000050000, "last_message_path": "/home/ana/app.lixbon-wt/t3-api-de-sesiones/.lixbon/out/t3/last.txt",
+      "created": 1792000040000, "updated": 1792000300000
+    },
+    "t4": {
+      "id": "t4", "run": "r1", "parent": "t2", "depth": 1, "agent": "codex", "title": "Formulario de login", "spec": "Pantalla de login.",
+      "repo": "/home/ana/app", "project_id": "p-1", "cwd": "/home/ana/app.lixbon-wt/t4-formulario-de-login",
+      "branch": "lx/r1/t4-formulario-de-login", "base": "main", "worktree": "/home/ana/app.lixbon-wt/t4-formulario-de-login",
+      "status": "failed", "profile": "implementar",
+      "failure_reason": "agent_idle_timeout",
+      "model_effective": "gpt-5.6-luna", "model_source": "session_declared",
+      "session_ref": "/home/ana/.codex/sessions/2026/10/rollout-quiza-t4.jsonl", "session_match": "cwd_time",
+      "attempt_started": 1792000060000,
+      "created": 1792000045000, "updated": 1792000500000
+    },
+    "t5": {
+      "id": "t5", "run": "r1", "parent": "t2", "depth": 1, "agent": "claude", "model": "sonnet", "title": "Tests de login",
+      "spec": "Escribe tests del login.\n\n---\nSeguimiento:\nCubre también el logout.",
+      "repo": "/home/ana/app", "project_id": "p-1", "cwd": "/home/ana/app.lixbon-wt/t5-tests-de-login",
+      "branch": "lx/r1/t5-tests-de-login", "base": "main", "worktree": null,
+      "status": "done", "summary": "Tests de login y logout", "pr_url": "https://github.com/ana/app/pull/42",
+      "base_commit": "b0b0b0", "delivery_channel": "stream_json",
+      "model_effective": "claude-sonnet-5-5", "model_requested": "sonnet", "model_source": "stream_json",
+      "session_ref": "6f1c2a9e-0b7d-4d1e-9a51-3c2f8e7d9b10", "attempt_started": 1792000070000, "stream_json": true,
+      "created": 1792000046000, "updated": 1792000800000
+    },
+    "t14": {
+      "id": "t14", "run": "r13", "parent": null, "depth": 0, "agent": "claude", "title": "Coordinar script", "spec": "",
+      "repo": "/home/ana/viejo", "cwd": "/home/ana/viejo", "branch": "master", "base": null, "worktree": null,
+      "status": "done", "created": 1791000000000, "updated": 1791000500000
+    },
+    "t17": {
+      "id": "t17", "run": "r16", "parent": null, "depth": 0, "agent": "claude", "title": "Coordinar refactor", "spec": "",
+      "repo": "/home/ana/app", "project_id": "p-1", "cwd": "/home/ana/app", "branch": "main", "base": null, "worktree": null,
+      "status": "running", "external": true, "created": 1792001000000, "updated": 1792001200000
+    }
+  },
+  "messages": [
+    {"id": 6, "run": "r1", "from": "t4", "to": "t2", "kind": "question", "body": "¿Uso la tabla users o accounts?", "read": true, "at": 1792000150000},
+    {"id": 7, "run": "r1", "from": "t2", "to": "t4", "kind": "reply", "body": "accounts", "reply_to": 6, "read": true, "at": 1792000160000},
+    {"id": 8, "run": "r1", "from": "t3", "to": "t2", "kind": "phase", "body": "API de sesiones: fase «tests» terminada. 12 ok", "read": true, "at": 1792000200000},
+    {"id": 9, "run": "r1", "from": "t3", "to": "t2", "kind": "done", "body": "API de sesiones: terminada. API lista", "read": true, "at": 1792000300000},
+    {"id": 10, "run": "r1", "from": "t2", "to": "t2", "kind": "note", "body": "Prioriza el login con GitHub", "read": false, "at": 1792000310000},
+    {"id": 11, "run": "r1", "from": "t5", "to": "t2", "kind": "done", "body": "Tests de login: terminada. Tests de login y logout", "read": false, "at": 1792000800000},
+    {"id": 12, "run": "r1", "from": "t4", "to": "t2", "kind": "exited", "body": "Formulario de login: sin actividad", "read": false, "at": 1792000500000},
+    {"id": 15, "run": "r1", "from": "t99", "to": "t2", "kind": "note", "body": "mensaje de una tarea que ya no existe", "read": false, "at": 1792000600000}
+  ],
+  "seq": 17,
+  "decisions": [
+    {"id": 1, "task": "t3", "kind": "review", "actor": "human", "detail_json": "{\"decision\":\"accepted\",\"base_commit\":\"b0b0b0\",\"base_source\":\"base_commit\",\"head_commit\":\"c3c3c3\",\"comment\":null}", "at": 1792000400000},
+    {"id": 2, "task": "t3", "kind": "merge", "actor": "human", "detail_json": "{\"outcome\":\"merged\",\"branch\":\"lx/r1/t3-api-de-sesiones\",\"into\":\"main\",\"squash\":false}", "at": 1792000410000},
+    {"id": 3, "task": "t5", "kind": "review", "actor": "human", "detail_json": "{\"decision\":\"rejected\",\"base_commit\":\"b0b0b0\",\"base_source\":\"base_commit\",\"head_commit\":\"c5c5c5\",\"comment\":\"falta el logout\"}", "at": 1792000700000},
+    {"id": 4, "task": "t5", "kind": "pr", "actor": "human", "detail_json": "{\"outcome\":\"created\",\"branch\":\"lx/r1/t5-tests-de-login\",\"remote\":\"origin\",\"pr_url\":\"https://github.com/ana/app/pull/42\"}", "at": 1792000850000}
+  ],
+  "env_blocks": {
+    "codex/explorar": "windows_sandbox_elevated",
+    "claude/implementar": ["cli_flags_unsupported", "cli_missing"]
+  }
+}
