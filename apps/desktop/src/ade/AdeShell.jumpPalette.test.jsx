@@ -7,14 +7,25 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
 
 // Estas pruebas son de integración: montan el shell completo del ADE y la paleta, y esperan a un Core
-// simulado cuya carga es asíncrona. Con varios archivos del ADE en paralelo el reloj de jsdom va 6-8x
-// más lento que en aislamiento (medido en esta máquina con 12 núcleos: 8,4 s y 6,6 s con 15 archivos en
-// paralelo, frente a 0,4 s y 0,3 s en solitario), más que el límite por defecto de la prueba (5 s).
-// El presupuesto de espera de RTL queda POR DEBAJO del presupuesto de la prueba: si fueran el mismo, un
-// `wait` que no se cumple se reportaría como "Test timed out in 5000ms" —sin causa— en vez de decir qué
-// elemento no apareció, y una prueba con varias esperas seguidas nunca cabría en el presupuesto.
-const PALETTE_TEST_TIMEOUT = 30_000;
-configure({ asyncUtilTimeout: 10_000 });
+// simulado cuya carga es asíncrona. El coste de la espera está en el filtro `name` de las consultas por
+// rol: RTL recalcula el nombre accesible de TODAS las opciones en cada sondeo de `waitFor`/`findBy*`,
+// así que una espera necesita varios sondeos.
+// Medido en la investigación de LXO-102 (corrida con los 15 archivos de src/ade en paralelo): «selecciona
+// el Project exacto, cierra y devuelve el foco» tardó 0,4 s en solitario y 8,4 s en paralelo, y «selecciona
+// el par exacto Project/Task…» llegó a 5,1 s: por encima del presupuesto por defecto de la prueba (5 s).
+// Al repetir esa misma corrida con menos carga en la máquina bajaron a 1,1-1,5 s: el factor depende de
+// la carga, así que no se escribe un multiplicador fijo; lo que se fija son los presupuestos.
+// El presupuesto de espera de RTL (10 s) queda POR DEBAJO del presupuesto de la prueba (15 s): si
+// fueran el mismo, un `wait` que no se cumple se reportaría como "Test timed out in 5000ms" —sin causa—
+// en vez de decir qué elemento no apareció. Los 10 s cubren el caso medido en que una espera agotó los
+// 5 s de espera anteriores, y los 15 s cubren la duración más larga medida (8,4 s) con las varias
+// esperas seguidas que encadenan estas pruebas.
+// El presupuesto propio es solo de las pruebas async que esperan (comparten la misma espera: abrir la
+// paleta y filtrar por nombre); la primera prueba es síncrona, no espera nada y va con el presupuesto
+// por defecto de la suite.
+const PALETTE_WAIT_TIMEOUT = 10_000;
+const PALETTE_TEST_TIMEOUT = 15_000;
+configure({ asyncUtilTimeout: PALETTE_WAIT_TIMEOUT });
 
 // FIXTURES con la forma del contrato de docs/core/QUERIES.md; no son una lectura de Core real ni dogfood.
 
@@ -91,7 +102,7 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     // Solo la paleta lee con la clave `cursor`; el shell no lo hace.
     expect(queryAdeCore.mock.calls.some(([, args]) => 'cursor' in args)).toBe(false);
-  }, PALETTE_TEST_TIMEOUT);
+  });
 
   it('selecciona el Project exacto, cierra y devuelve el foco', async () => {
     await openPalette();
