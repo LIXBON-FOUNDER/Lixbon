@@ -56,13 +56,19 @@ describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
     let retried = 0;
     render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', inFlight: true, message: 'ade_query_timeout: x' }} onRetry={() => { retried += 1; }} />);
     const button = screen.getByTestId('resinv-retry');
-    expect(button.disabled).toBe(true);
+    // aria-disabled y no disabled: sigue siendo enfocable.
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    button.focus();
+    expect(document.activeElement).toBe(button);
     expect(button.textContent).toBe('Esperando la lectura anterior del Core');
     fireEvent.click(button);
     expect(retried).toBe(0);
     cleanup();
     render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', inFlight: false }} onRetry={() => { retried += 1; }} />);
-    expect(screen.getByTestId('resinv-retry').disabled).toBe(false);
+    expect(screen.getByTestId('resinv-retry').hasAttribute('aria-disabled')).toBe(false);
+    fireEvent.click(screen.getByTestId('resinv-retry'));
+    expect(retried).toBe(1);
     expect(screen.getByTestId('resinv-retry').textContent).toBe('Reintentar');
   });
 
@@ -84,7 +90,10 @@ describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
     expect(text.textContent).toBe('El Core está tardando; seguimos esperando.');
     expect(text.getAttribute('role')).toBe('status');
     expect(status.textContent).not.toContain('No se pudo leer el inventario');
-    expect(screen.getByTestId('resinv-retry').disabled).toBe(true);
+    // En espera no se muestra el detalle con el código de plazo.
+    expect(screen.queryByTestId('resinv-status-detail')).toBeNull();
+    expect(status.textContent).not.toContain('ade_query_timeout');
+    expect(screen.getByTestId('resinv-retry').getAttribute('aria-disabled')).toBe('true');
     cleanup();
     // Un error real (no plazo) sigue siendo error.
     render(<ResourcesInventory inventory={null} status={{ state: 'error', inFlight: false, message: 'resource_inventory_read_failed' }} onRetry={() => {}} />);
