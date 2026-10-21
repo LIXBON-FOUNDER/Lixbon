@@ -1210,22 +1210,33 @@ export function ProjectsSidebar({
   const selectedProject = projects.find((project) => project.id === selected.projectId);
   const projectViewSummary = useMemo(() => toProjectViewSummary(selectedProject), [selectedProject]);
   const projectQueryState = selectedProjectQueryState(overview, selectedProject, selected.projectId);
-  // Al reactivarse, el primer render aún devuelve la última lectura de `useCoreQuery` como si fuera
-  // vigente (su refresco arranca en el efecto de ese mismo commit). Ese render no se publica: el host
-  // recibe después `refreshing` con la última lectura, o el estado real de la consulta ya reanudada.
+  // Al reactivarse, espera a que `useCoreQuery` inicie una lectura antes de volver a publicar una
+  // respuesta cacheada como vigente. Si la pestaña está oculta, el hook omite el refresco y el host
+  // conserva la metadata con estado stale hasta que una lectura empiece o termine.
   const [queryResumed, setQueryResumed] = useState(active);
-  useEffect(() => { setQueryResumed(active); }, [active]);
-  const snapshotCurrent = !active || queryResumed;
+  useEffect(() => {
+    if (!active) {
+      setQueryResumed(false);
+      return;
+    }
+    if (!['ready', 'empty'].includes(overview.status)) setQueryResumed(true);
+  }, [active, overview.status]);
+  const waitingForFreshQuery = active && !queryResumed;
+  const hiddenCachedResume = waitingForFreshQuery
+    && document.visibilityState === 'hidden'
+    && overview.data !== null;
+  const snapshotCurrent = !active || queryResumed || hiddenCachedResume;
+  const snapshotQueryState = hiddenCachedResume ? 'stale' : projectQueryState;
   useEffect(() => {
     if (!snapshotCurrent) return;
     onProjectSnapshot?.({
       projectId: selected.projectId,
-      queryState: projectQueryState,
+      queryState: snapshotQueryState,
       project: projectViewSummary,
       error: overview.error ?? null,
       reason: overview.reason ?? null,
     });
-  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId, snapshotCurrent]);
+  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId, snapshotCurrent, snapshotQueryState]);
 
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
