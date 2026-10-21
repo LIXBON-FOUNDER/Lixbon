@@ -22,6 +22,11 @@ const snapshot = (tasks, extra = {}) => ({
   ...extra,
 });
 const pendingSpawn = { pending_id: 'p1', parent_task: 'coord', agent: 'claude', provider: 'claude', profile: 'explorar', role: 'explorador', expires_at: Date.now() + 300000, policy: { argv: ['claude'], status: 'ok', warnings: [] } };
+const findTreeitemById = async (region, attribute, id, accessibleName) => {
+  const row = await within(region).findByRole('treeitem', { name: accessibleName });
+  expect(row.getAttribute(attribute)).toBe(id);
+  return row;
+};
 
 function mountWith(snap, pending = [], query = async (name) => (name === 'projects_overview'
   ? { v: 1, filters: { archived: 'exclude', machine: null }, total: 0, projects: [], unassigned: {} }
@@ -125,11 +130,14 @@ describe('OrchestratorMode', () => {
     }, 'execution-task');
 
     const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
-    fireEvent.click(await within(projectTaskSidebar).findByRole('button', { name: 'Repo Real' }));
-    fireEvent.click(await within(projectTaskSidebar).findByRole('button', { name: 'Task Real' }));
+    const projectRow = await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`));
+    fireEvent.click(projectRow);
+    const taskRow = await findTreeitemById(projectTaskSidebar, 'data-task-id', item.id, new RegExp(`^${item.title}\\.`));
+    fireEvent.click(taskRow);
 
     expect((await screen.findAllByText('task-uuid-1')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Vista parcial: hay más Tasks/)).toBeTruthy();
+    expect(taskRow.getAttribute('data-task-id')).toBe(item.id);
+    expect(within(projectTaskSidebar).getByRole('button', { name: 'Cargar más Tasks de Repo Real' })).toBeTruthy();
     expect(calls).toEqual([
       ['projects_overview', { archived: 'exclude' }],
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'active', limit: 50 }],
@@ -157,15 +165,20 @@ describe('OrchestratorMode', () => {
       throw new Error(`Query no permitida en fixture: ${query}`);
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Task Real' }));
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`)));
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-task-id', item.id, new RegExp(`^${item.title}\\.`)));
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
 
     view.unmount();
     render(<OrchestratorMode />);
 
-    expect((await screen.findByRole('button', { name: 'Repo Real' })).getAttribute('aria-pressed')).toBe('true');
-    expect((await screen.findByRole('button', { name: 'Task Real' })).getAttribute('aria-pressed')).toBe('true');
+    const remountedSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    const projectRow = await findTreeitemById(remountedSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`));
+    const taskRow = await findTreeitemById(remountedSidebar, 'data-task-id', item.id, new RegExp(`^${item.title}\\.`));
+    expect(projectRow.getAttribute('aria-selected')).toBe('false');
+    expect(projectRow.classList.contains('is-context')).toBe(true);
+    expect(taskRow.getAttribute('aria-selected')).toBe('true');
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
   });
 
@@ -184,7 +197,7 @@ describe('OrchestratorMode', () => {
     expect(screen.getByRole('alert').textContent).toContain('projects_overview_unavailable');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(screen.getByText('No hay Projects registrados.')).toBeTruthy();
+    expect(screen.getByText('No hay Projects registrados con este filtro del Core.')).toBeTruthy();
     expect(attempts).toBe(2);
     expect(useWorkbenchStore.getState().orchView).toBe('executions');
   });
@@ -202,13 +215,14 @@ describe('OrchestratorMode', () => {
       throw new Error(`Query inesperada: ${query}`);
     });
 
-    const projectButton = await screen.findByRole('button', { name: 'Repo Real' });
-    fireEvent.pointerDown(projectButton);
-    fireEvent.click(projectButton);
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    const projectRow = await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`));
+    fireEvent.pointerDown(projectRow);
+    fireEvent.click(projectRow);
     expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
 
     document.dispatchEvent(new Event('visibilitychange'));
-    expect(await screen.findByText(/El Project seleccionado ya no aparece/)).toBeTruthy();
+    expect(await within(projectTaskSidebar).findByText(/El Project seleccionado \(project-uuid-1\) ya no aparece/)).toBeTruthy();
     expect((await screen.findAllByText('project-uuid-1')).length).toBeGreaterThan(0);
     expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
     expect(overviewCalls).toBe(2);
@@ -232,12 +246,13 @@ describe('OrchestratorMode', () => {
 
     const feed = document.querySelector('.chatpanel__feed');
     feed.scrollTop = 47;
-    const projectButton = await screen.findByRole('button', { name: 'Repo Real' });
-    fireEvent.pointerDown(projectButton);
-    fireEvent.click(projectButton);
-    const taskButton = await screen.findByRole('button', { name: 'Task Real' });
-    fireEvent.pointerDown(taskButton);
-    fireEvent.click(taskButton);
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    const projectRow = await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`));
+    fireEvent.pointerDown(projectRow);
+    fireEvent.click(projectRow);
+    const taskRow = await findTreeitemById(projectTaskSidebar, 'data-task-id', item.id, new RegExp(`^${item.title}\\.`));
+    fireEvent.pointerDown(taskRow);
+    fireEvent.click(taskRow);
 
     expect(useOrchStore.getState().selected).toBe('execution-task');
     const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
@@ -246,14 +261,21 @@ describe('OrchestratorMode', () => {
     expect(document.querySelector('.chatpanel__feed')).toBe(feed);
     expect(feed.scrollTop).toBe(47);
     expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
-    const projectIdDescription = projectButton.getAttribute('aria-describedby');
-    const taskIdDescription = taskButton.getAttribute('aria-describedby');
-    expect(document.getElementById(projectIdDescription).textContent).toBe('project-uuid-1');
-    expect(document.getElementById(taskIdDescription).textContent).toBe('task-uuid-1');
-
-    fireEvent.pointerDown(projectButton);
-    fireEvent.click(projectButton);
-    expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('true');
+    const projectMeta = document.getElementById(projectRow.getAttribute('aria-describedby'));
+    const taskMeta = document.getElementById(taskRow.getAttribute('aria-describedby'));
+    expect(projectMeta).toBe(projectRow.querySelector('.ps__meta'));
+    expect(projectMeta.classList.contains('ps__meta')).toBe(true);
+    expect(projectMeta.textContent).toContain('Tasks 1');
+    expect(taskMeta).toBe(taskRow.querySelector('.ps__meta'));
+    expect(taskMeta.classList.contains('ps__meta')).toBe(true);
+    expect(taskMeta.textContent).toContain('Proveedor claude');
+    expect(taskMeta.textContent).toContain('Rama Solo en detalle');
+    expect(projectRow.getAttribute('data-project-id')).toBe(project.id);
+    expect(projectRow.querySelector('.ps__id').textContent).toBe(project.id);
+    expect(taskRow.getAttribute('data-task-id')).toBe(item.id);
+    expect(taskRow.querySelector('.ps__id').textContent).toBe(item.id);
+    expect(projectRow.getAttribute('aria-selected')).toBe('false');
+    expect(projectRow.classList.contains('is-context')).toBe(true);
 
     expect(operationTask).toBeTruthy();
     fireEvent.pointerDown(operationTask);
@@ -261,13 +283,19 @@ describe('OrchestratorMode', () => {
     expect(useOrchStore.getState().selected).toBe('execution-task');
     expect(useWorkbenchStore.getState().orchView).toBe('executions');
     expect(operationTask.classList.contains('is-active')).toBe(true);
-    expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('false');
+    expect(taskRow.getAttribute('aria-selected')).toBe('true');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
     expect(document.querySelector('.chatpanel__feed')).toBe(feed);
     expect(feed.scrollTop).toBe(47);
-    fireEvent.click(projectButton);
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`)));
     expect(useWorkbenchStore.getState().orchView).toBe('ade');
-    expect(screen.getByRole('button', { name: 'Repo Real' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Task Real' }).getAttribute('aria-pressed')).toBe('true');
+    const returnedSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    const returnedProjectRow = await findTreeitemById(returnedSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`));
+    expect(returnedProjectRow.getAttribute('aria-selected')).toBe('true');
+    expect(returnedProjectRow.getAttribute('aria-expanded')).toBe('true');
+    const returnedTaskRow = await findTreeitemById(returnedSidebar, 'data-task-id', item.id, new RegExp(`^${item.title}\\.`));
+    expect(returnedTaskRow.getAttribute('aria-selected')).toBe('false');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: null });
   });
 
   it('lista lo que espera una decisión y abre la revisión al elegirlo', async () => {
@@ -290,7 +318,8 @@ describe('OrchestratorMode', () => {
     fireEvent.click(screen.getByTestId('attention-t1'));
     expect(screen.getByTestId('review-t1')).toBeTruthy();
     const taskPanel = document.querySelector('.orch__head');
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`)));
     const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
       .find((button) => button.querySelector('.orch__task-title')?.textContent === 't1');
     fireEvent.click(operationTask);
@@ -314,7 +343,8 @@ describe('OrchestratorMode', () => {
     });
     const attentionRow = (id) => document.querySelector(`[data-attention-id="${id}"]`);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`)));
     fireEvent.click(screen.getByRole('tab', { name: 'Attention' }));
     await screen.findByTestId('attention-total');
     await waitFor(() => expect(attentionRow('att_run')).toBeTruthy());
@@ -347,7 +377,8 @@ describe('OrchestratorMode', () => {
     }, 't1');
 
     expect(screen.getByTestId('agent-terminal').getAttribute('data-visible')).toBe('true');
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    const projectTaskSidebar = await screen.findByRole('region', { name: 'Projects y Tasks' });
+    fireEvent.click(await findTreeitemById(projectTaskSidebar, 'data-project-id', project.id, new RegExp(`Project ${project.id}`)));
     expect(screen.getByTestId('agent-terminal').getAttribute('data-visible')).toBe('false');
     const operationTask = [...document.querySelectorAll('.orch__runs .orch__task')]
       .find((button) => button.querySelector('.orch__task-title')?.textContent === 't1');
