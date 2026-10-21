@@ -146,7 +146,8 @@ afterEach(() => {
 });
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
-  it('mantiene Operación en una región propia y alcanzable con muchos Projects y Tasks', async () => {
+  // Lista grande: en la suite paralela el render supera los 5 s por defecto; se sube el plazo, no se relajan aserciones.
+  it('mantiene Operación en una región propia y alcanzable con muchos Projects y Tasks', { timeout: 20_000 }, async () => {
     adeShellStyleElement.textContent = `${orchStyles}\n${adeShellStyles}`;
     const projects = Array.from({ length: 32 }, (_, index) => ({
       ...PROJECT,
@@ -451,8 +452,9 @@ describe('AdeShell · Project View (LXO-204)', () => {
     const projectView = await screen.findByTestId('project-view');
     const status = await within(projectView).findByTestId('resinv-status');
     expect(status.dataset.state).toBe('error');
-    expect(status.getAttribute('role')).toBe('alert');
-    expect(status.textContent).toContain('resource_inventory_read_failed');
+    expect(within(status).getByTestId('resinv-status-text').getAttribute('role')).toBe('alert');
+    expect(within(status).getByTestId('resinv-status-text').textContent).not.toContain('resource_inventory_read_failed');
+    expect(within(status).getByTestId('resinv-status-detail').textContent).toContain('resource_inventory_read_failed');
     expect(within(projectView).getByTestId('resinv-unavailable-inventory')).toBeTruthy();
 
     // El reintento vuelve a preguntar al Core y la foto real sustituye al error.

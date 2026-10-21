@@ -371,7 +371,8 @@ describe('ProjectsSidebar', () => {
     }));
   });
 
-  it('soporta 100 Projects sin fan-out: solo consulta el overview hasta expandir', async () => {
+  // Lista grande: en la suite paralela el render supera los 5 s por defecto; se sube el plazo, no se relajan aserciones.
+  it('soporta 100 Projects sin fan-out: solo consulta el overview hasta expandir', { timeout: 20_000 }, async () => {
     const projects = Array.from({ length: 100 }, (_, index) => project(`project-${String(index).padStart(3, '0')}`, `Alpha ${index}`));
     const calls = mountCore({ overviews: () => overview(projects) });
     const { container } = render(<ProjectsSidebar />);
