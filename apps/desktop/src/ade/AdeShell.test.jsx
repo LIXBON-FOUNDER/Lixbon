@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { AdeShell } from './AdeShell';
@@ -169,7 +169,12 @@ describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
     expect(projectRow.getAttribute('aria-expanded')).toBe('true');
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
 
-    expect(screen.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
+    // ProjectView tiene su propio filtro «Activas» (role=radio); el del sidebar se acota a su región.
+    const sidebar = within(screen.getByTestId('projects-sidebar'));
+    expect(sidebar.getByRole('radiogroup', { name: 'Estado de las Tasks' })).toBeTruthy();
+    expect(sidebar.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
+    // Ambos grupos de radio conservan su rol y nombre accesible.
+    expect(within(screen.getByTestId('project-view')).getByRole('radio', { name: 'Activas' })).toBeTruthy();
     const taskRow = await within(tree).findByRole('treeitem', { name: /Task Real/ });
     expect(taskRow).toBeTruthy();
     fireEvent.click(taskRow);
@@ -177,11 +182,11 @@ describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
     expect(within(tree).queryByRole('treeitem', { name: /Task Final/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Finalizadas' }));
+    fireEvent.click(sidebar.getByRole('radio', { name: 'Finalizadas' }));
     expect(await within(tree).findByRole('treeitem', { name: /Task Final/ })).toBeTruthy();
     expect(within(tree).queryByRole('treeitem', { name: /Task Real/ })).toBeNull();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Todas' }));
+    fireEvent.click(sidebar.getByRole('radio', { name: 'Todas' }));
     expect(await within(tree).findByRole('treeitem', { name: /Task Real/ })).toBeTruthy();
     expect(within(tree).getByRole('treeitem', { name: /Task Final/ })).toBeTruthy();
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project').map(([, args]) => args.status))
@@ -243,11 +248,19 @@ describe('AdeShell · Project View (LXO-204)', () => {
       projects: [PROJECT],
       unassigned: {},
     });
-    await screen.findByText(/El Project seleccionado no aparece en el overview activo de Core/);
+    // El mismo aviso autoritativo aparece en Resumen y en Ubicaciones: se acota al Resumen.
+    await waitFor(() => {
+      expect(summary.querySelector('[data-testid="slice-notice"]').className).toContain('pv__notice--unavailable');
+    });
     const settledNotice = summary.querySelector('[data-testid="slice-notice"]');
-    expect(settledNotice.className).toContain('pv__notice--unavailable');
-    expect(settledNotice.textContent).toContain('El Project seleccionado no aparece');
+    expect(settledNotice.textContent).toContain('El Project seleccionado no aparece en el overview activo de Core');
     expect(settledNotice.textContent).not.toContain('Core no confirmó metadata autoritativa');
+    expect(settledNotice.textContent).not.toContain('Cargando…');
+    expect(settledNotice.getAttribute('aria-busy')).toBeNull();
+    // Sin metadata fabricada: ni nombre, ni contadores, ni ubicaciones del Project omitido.
+    expect(within(projectView).queryByText(PROJECT.name)).toBeNull();
+    expect(within(projectView).queryByTestId('location-machine')).toBeNull();
+    expect(within(projectView).queryByTestId('count-tasks')).toBeNull();
   });
 
   it('muestra refreshing durante un polling sano sin marcar el Project como stale', async () => {
@@ -280,8 +293,10 @@ describe('AdeShell · Project View (LXO-204)', () => {
     await flush();
     const refreshingNotice = summary.querySelector('[data-testid="slice-notice"]');
     expect(refreshingNotice.className).toContain('pv__notice--loading');
-    expect(refreshingNotice.textContent).toContain('Actualizando desde Core.');
+    expect(refreshingNotice.textContent).toBe('Actualizando desde Core.');
+    expect(refreshingNotice.textContent).not.toContain('Cargando…');
     expect(refreshingNotice.textContent).not.toContain('Datos desactualizados');
+    expect(refreshingNotice.getAttribute('aria-busy')).toBe('true');
 
     pendingRefresh.resolve({
       v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [PROJECT], unassigned: {},

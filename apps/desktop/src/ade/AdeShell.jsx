@@ -31,7 +31,8 @@ function projectQueryMessage(query) {
     }[query.reason];
     return `Datos desactualizados${cause ? ` (${cause})` : ''}; se conserva la última respuesta. ${query.error || ''}`.trim();
   }
-  if (query.status === 'refreshing') return 'Actualizando desde Core.';
+  // `refreshing` no lleva mensaje: ProjectView lo pinta como «Actualizando desde Core.» mediante el flag.
+  if (query.status === 'refreshing') return null;
   const sourceLabel = {
     disconnected: 'Core desconectado',
     degraded: 'Core degradado',
@@ -51,6 +52,7 @@ function projectViewSlice(query, items, { hasMore = false } = {}) {
   if (hasMore) messages.push('Core indica que hay más elementos después de esta página.');
   return {
     state,
+    ...(query.status === 'refreshing' ? { refreshing: true } : {}),
     items: canShowItems && Array.isArray(items) ? items : [],
     ...(messages.length ? { message: messages.join(' ') } : {}),
   };
@@ -176,7 +178,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const projectLocationSlice = projectLocations
     ? projectViewSlice(projectOverview, projectLocations)
     : selectedProject
-      ? { state: overviewState === 'ready' ? 'unknown' : overviewState, items: [], message: 'Core no incluyó ubicaciones en el overview de este Project.' }
+      ? { state: overviewState === 'ready' ? 'unknown' : overviewState, ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}), items: [], message: 'Core no incluyó ubicaciones en el overview de este Project.' }
       : overviewUnavailableSlice(projectOverview, 'ubicaciones');
   const projectCounts = selectedProject?.counts && typeof selectedProject.counts === 'object'
     ? selectedProject.counts
@@ -185,6 +187,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     state: selectedProject
       ? projectCounts ? overviewState : overviewState === 'ready' ? 'unknown' : overviewState
       : overviewState === 'ready' ? 'unavailable' : overviewState,
+    ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}),
     counts: {
       tasks: projectCounts?.tasks ?? null,
       attempts: null,
