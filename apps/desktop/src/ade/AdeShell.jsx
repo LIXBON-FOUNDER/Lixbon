@@ -6,6 +6,7 @@ import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
+import { queryAdeCore } from './coreQueries';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
@@ -148,7 +149,9 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const [activityNotice, setActivityNotice] = useState(null);
   const [activityFocusSeq, setActivityFocusSeq] = useState(0);
   const [projectSnapshot, setProjectSnapshot] = useState(null);
+  const [projectsSnapshot, setProjectsSnapshot] = useState(null);
   const targetSeq = useRef(0);
+  const activityTargetRequest = useRef(0);
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
@@ -160,6 +163,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
   const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
+  const onProjectsSnapshot = useCallback((snapshot) => setProjectsSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
   const projectOverview = {
     status: currentProjectSnapshot?.queryState ?? (selectedProjectId ? 'loading' : 'unknown'),
@@ -254,6 +258,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const projectAttentionSlice = projectViewSlice(projectAttention, projectAttentionItems, { hasMore: projectAttention.data?.has_more === true });
 
   const selectProject = (project) => {
+    activityTargetRequest.current += 1;
     const projectId = typeof project === 'string' ? project : project?.projectId;
     if (typeof projectId !== 'string' || !projectId.trim()) return;
     if (projectId !== selectedProjectId || selectedTaskId !== null) {
@@ -263,6 +268,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     onActivate?.();
   };
   const selectTask = (task, context) => {
+    activityTargetRequest.current += 1;
     const projectId = typeof task === 'string'
       ? selectedProjectId
       : task?.projectId ?? context?.projectId ?? selectedProjectId;
@@ -273,6 +279,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     onActivate?.();
   };
   const changeWorkspaceView = (view) => {
+    if (view !== 'activity') activityTargetRequest.current += 1;
     setWorkspaceView(view);
     if (view !== 'attention') setAttentionNotice(null);
     if (view !== 'activity') setActivityNotice(null);
@@ -293,17 +300,60 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     if (activityFocusSeq > 0) document.getElementById(`${viewIds}-tab-activity`)?.focus();
   }, [activityFocusSeq, viewIds]);
 
-  // La navegación de Activity usa el ID exacto. Para una Task no seleccionada se conserva la comprobación
-  // de pertenencia a la página autoritativa ya cargada; el ID por sí solo no permite adivinar su Project.
-  const openActivityTarget = ({ kind, id }) => {
+  // Activity entrega IDs durables. Se confirma el Project en la lista actual y la Task por su par exacto
+  // antes de cambiar la selección, incluso cuando la página de Tasks no está activa.
+  const openActivityTarget = async ({ kind, id, projectId } = {}) => {
+    const requestId = ++activityTargetRequest.current;
     setActivityNotice(null);
+    if (typeof id !== 'string' || !id.trim()) return;
+    const projectSnapshotReady = ['ready', 'empty'].includes(projectsSnapshot?.queryState);
+    const projectExists = (candidate) => projectSnapshotReady
+      && Array.isArray(projectsSnapshot.projectIds)
+      && projectsSnapshot.projectIds.includes(candidate);
     if (kind === 'project') {
+      if (!projectSnapshotReady) {
+        setActivityNotice(`No se pudo verificar el Project ${id} en el overview de Core; no se cambió la selección.`);
+        return;
+      }
+      if (!projectExists(id)) {
+        setActivityNotice(`El Project ${id} no aparece en el overview activo de Core.`);
+        return;
+      }
       selectProject(id);
     } else if (kind === 'task') {
-      if (id === selectedTaskId || projectTasks.data?.tasks.some((item) => item.id === id)) {
-        selectTask(id);
-      } else {
+      if (typeof projectId !== 'string' || !projectId.trim()) {
         setActivityNotice(`La Task ${id} no se puede abrir desde Activity: el evento no identifica su Project.`);
+        return;
+      }
+      if (!projectSnapshotReady) {
+        setActivityNotice(`No se pudo verificar el Project ${projectId} en el overview de Core; no se cambió la selección.`);
+        return;
+      }
+      if (!projectExists(projectId)) {
+        setActivityNotice(`El Project ${projectId} no aparece en el overview activo de Core.`);
+        return;
+      }
+
+      setActivityNotice(`Verificando la Task ${id} en el Project ${projectId}…`);
+      try {
+        const response = await queryAdeCore('task_detail', { projectId, taskId: id });
+        if (requestId !== activityTargetRequest.current) return;
+        if (response?.task?.id !== id || response.task.project_id !== projectId) {
+          setActivityNotice(`Core no confirmó la Task ${id} del Project ${projectId}; no se cambió la selección.`);
+          return;
+        }
+        setActivityNotice(null);
+        selectTask({ projectId, taskId: id });
+      } catch (error) {
+        if (requestId !== activityTargetRequest.current) return;
+        const message = error instanceof Error ? error.message : String(error ?? '');
+        if (/project_not_found/i.test(message)) {
+          setActivityNotice(`El Project ${projectId} ya no está disponible en Core.`);
+        } else if (/task_not_found|_not_found/i.test(message)) {
+          setActivityNotice(`La Task ${id} ya no está disponible en el Project ${projectId}.`);
+        } else {
+          setActivityNotice(`Core no pudo verificar la Task ${id} del Project ${projectId}; no se cambió la selección.`);
+        }
       }
     }
   };
@@ -415,6 +465,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 onSelectProject={selectProject}
                 onSelectTask={selectTask}
                 onProjectSnapshot={onProjectSnapshot}
+                onProjectsSnapshot={onProjectsSnapshot}
               />
             </section>
             {operationNavigation && (

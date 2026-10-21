@@ -959,7 +959,7 @@ function deepFreeze(value) {
 }
 
 describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)', () => {
-  it('entrega kind e id exactos del destino durable al activar el botón', () => {
+  it('entrega el target durable y el Project del evento al activar el botón', () => {
     const onOpenTarget = vi.fn();
     render(
       <ActivityTimeline
@@ -972,12 +972,12 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
 
     fireEvent.click(screen.getByTestId('activity-target-a'));
-    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'task', id: 't-Ab_9' });
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'task', id: 't-Ab_9', projectId: 'p-1' });
     fireEvent.click(screen.getByTestId('activity-target-b'));
-    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'project', id: 'p-77' });
+    expect(onOpenTarget).toHaveBeenLastCalledWith({ kind: 'project', id: 'p-77', projectId: 'p-77' });
     expect(onOpenTarget).toHaveBeenCalledTimes(2);
-    // Solo kind e id: nada de scope, cursor, eventId ni texto derivado.
-    expect(Object.keys(onOpenTarget.mock.calls[0][0]).sort()).toEqual(['id', 'kind']);
+    // Project ID del hecho más el target exacto; nada de scope, cursor, eventId ni texto derivado.
+    expect(Object.keys(onOpenTarget.mock.calls[0][0]).sort()).toEqual(['id', 'kind', 'projectId']);
   });
 
   it('es un botón nativo, enfocable por teclado y con nombre accesible', () => {
@@ -999,7 +999,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     // verifica la semántica nativa y se emite el click que el navegador generaría.
     fireEvent.click(button);
     expect(onOpenTarget).toHaveBeenCalledTimes(1);
-    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'task', id: 't-1' });
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'task', id: 't-1', projectId: 'p-1' });
   });
 
   it('sin callback el destino es solo informativo (sin botón ni rol interactivo)', () => {
@@ -1083,7 +1083,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     );
     expect(screen.getByTestId('activity-message-unk').textContent).toBe('Evento desconocido');
     fireEvent.click(screen.getByTestId('activity-target-unk'));
-    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'project', id: 'p-1' });
+    expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'project', id: 'p-1', projectId: 'p-1' });
   });
 
   it('no muta items, scope ni cursor, ni dispara refresh/retry/load-more al navegar', () => {
@@ -1115,7 +1115,7 @@ describe('ActivityTimeline · navegación por destino (solo fixtures, sin Core)'
     fireEvent.click(screen.getByTestId('activity-target-evt-1'));
 
     expect(onOpenTarget).toHaveBeenCalledTimes(2);
-    expect(onOpenTarget.mock.calls[1][0]).toEqual({ kind: 'task', id: 'mutado' });
+    expect(onOpenTarget.mock.calls[1][0]).toEqual({ kind: 'task', id: 'mutado', projectId: 'p-1' });
     expect(onOpenTarget.mock.calls[0][0]).not.toBe(onOpenTarget.mock.calls[1][0]);
     expect(JSON.stringify({ items, scope, cursor })).toBe(snapshot);
     expect(items[0].target).toEqual({ kind: 'task', id: 't-1' });
