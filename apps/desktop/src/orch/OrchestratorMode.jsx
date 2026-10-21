@@ -369,6 +369,21 @@ function Disabled() {
   );
 }
 
+function SnapshotFailure({ error, refreshing, onRetry, stale = false }) {
+  return (
+    <div className="orch__warn" role="alert" data-testid={stale ? 'orch-snapshot-stale' : 'orch-snapshot-error'}>
+      <strong>{stale ? 'Core degradado' : 'Core desconectado'}</strong>
+      <span> {stale
+        ? 'Se conserva la última snapshot; los datos pueden estar desactualizados.'
+        : 'No se pudo cargar el orquestador.'}</span>
+      {error && <span className="mono"> {error}</span>}
+      <button className="btn" type="button" onClick={onRetry} disabled={refreshing}>
+        {refreshing ? 'Reintentando…' : 'Reintentar'}
+      </button>
+    </div>
+  );
+}
+
 export function OrchestratorMode() {
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const rightOpen = useWorkbenchStore((s) => s.modePanels.orch?.right ?? true);
@@ -378,7 +393,7 @@ export function OrchestratorMode() {
   const orchView = useWorkbenchStore((s) => s.orchView);
   const setOrchView = useWorkbenchStore((s) => s.setOrchView);
   const toggleAgent = useWorkbenchStore((s) => s.toggleAgent);
-  const { snap, selected, select, init, call } = useOrchStore();
+  const { snap, snapshotError, snapshotRefreshing, refresh, selected, select, init, call } = useOrchStore();
   const [allRepos, setAllRepos] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const root = useAppStore((s) => s.workspaceRoot);
@@ -420,8 +435,23 @@ export function OrchestratorMode() {
   const anyAwaiting = useMemo(() => Object.values(snap?.tasks || {}).some(isAwaitingTerminalApproval), [snap]);
   const now = useNow(anyLive, anyAwaiting ? 1000 : 5000);
 
-  if (!snap) return <div className="wb"><div className="changes__empty">Cargando el orquestador…</div></div>;
-  if (!snap.settings?.enabled) return <div className="wb wb--orch"><Disabled /></div>;
+  if (!snap) {
+    return (
+      <div className="wb wb--orch">
+        {snapshotError
+          ? <div className="changes__empty"><SnapshotFailure error={snapshotError} refreshing={snapshotRefreshing} onRetry={refresh} /></div>
+          : <div className="changes__empty">Cargando el orquestador…</div>}
+      </div>
+    );
+  }
+  if (!snap.settings?.enabled) {
+    return (
+      <div className="wb wb--orch">
+        {snapshotError && <SnapshotFailure error={snapshotError} refreshing={snapshotRefreshing} onRetry={refresh} stale />}
+        <Disabled />
+      </div>
+    );
+  }
 
   const adeActive = orchView === 'ade';
   // Destinos de Attention (`run` / `spawn_request`): solo se abren si el ID durable existe en esta superficie.
@@ -488,6 +518,7 @@ export function OrchestratorMode() {
 
   return (
     <div className="orch__shell">
+      {snapshotError && <SnapshotFailure error={snapshotError} refreshing={snapshotRefreshing} onRetry={refresh} stale />}
       <AdeShell
         active={adeActive}
         leftOpen={open}

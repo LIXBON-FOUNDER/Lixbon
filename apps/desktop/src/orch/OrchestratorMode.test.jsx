@@ -25,19 +25,20 @@ const pendingSpawn = { pending_id: 'p1', parent_task: 'coord', agent: 'claude', 
 
 function mountWith(snap, pending = [], query = async (name) => (name === 'projects_overview'
   ? { v: 1, filters: { archived: 'exclude', machine: null }, total: 0, projects: [], unassigned: {} }
-  : { v: 1, tasks: [], has_more: false, next_cursor: null }), selected = null) {
+  : { v: 1, tasks: [], has_more: false, next_cursor: null }), selected = null, snapshotReader = async () => snap) {
   invoke.mockImplementation(async (cmd, args) => {
     if (cmd === 'orch_pending_spawns' || cmd === 'orch_list_pending_spawns') return pending;
+    if (cmd === 'orch_snapshot') return snapshotReader();
     if (cmd === 'orch_query') return query(args.query, args.args);
     return snap;
   });
   useAppStore.setState({ workspaceRoot: 'C:/repo' });
   useWorkbenchStore.setState((state) => ({
-    orchView: 'executions', focus: 'ade-nav', drawer: false, adeDrawer: false,
+    page: 'editor', settingsSection: null, orchView: 'executions', focus: 'ade-nav', drawer: false, adeDrawer: false,
     adeSelection: { projectId: null, taskId: null },
     modePanels: { ...state.modePanels, orch: { left: true, right: true, adeRight: true } },
   }));
-  useOrchStore.setState({ snap, selected, init: () => {}, refresh: async () => {} });
+  useOrchStore.setState({ snap, snapshotError: null, snapshotRefreshing: false, selected, init: () => {} });
   return render(<OrchestratorMode />);
 }
 
@@ -45,6 +46,51 @@ beforeEach(() => invoke.mockReset());
 afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.removeItem('lx_orch_view'); });
 
 describe('OrchestratorMode', () => {
+  it('muestra desconexión inicial y recupera la vista con un reintento read-only', async () => {
+    const recovered = snapshot([]);
+    let attempts = 0;
+    mountWith(null, [], undefined, null, async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('Core offline');
+      return recovered;
+    });
+
+    expect(screen.getByText('Cargando el orquestador…')).toBeTruthy();
+    await act(async () => { await useOrchStore.getState().refresh(); });
+    expect(screen.getByTestId('orch-snapshot-error').textContent).toContain('Core desconectado');
+    expect(screen.getByTestId('orch-snapshot-error').textContent).toContain('Core offline');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByRole('region', { name: 'Projects y Tasks' })).toBeTruthy();
+    expect(useOrchStore.getState().snap).toBe(recovered);
+    expect(useOrchStore.getState().snapshotError).toBeNull();
+    expect(attempts).toBe(2);
+    expect(invoke.mock.calls.filter(([command]) => command === 'orch_snapshot')).toHaveLength(2);
+    expect(invoke.mock.calls.filter(([command]) => ['orch_call', 'orch_settings_set'].includes(command))).toEqual([]);
+  });
+
+  it('conserva y marca como degradada la última snapshot cuando falla su refresco', async () => {
+    const lastSnapshot = snapshot([task('cached-task')]);
+    mountWith(lastSnapshot, [], undefined, null, async () => { throw new Error('Core no disponible'); });
+
+    await act(async () => { await useOrchStore.getState().refresh(); });
+
+    expect(useOrchStore.getState().snap).toBe(lastSnapshot);
+    expect(screen.getByTestId('orch-snapshot-stale').textContent).toContain('Core degradado');
+    expect(screen.getByTestId('orch-snapshot-stale').textContent).toContain('Core no disponible');
+    expect(screen.getByText('cached-task', { selector: '.orch__task-title' })).toBeTruthy();
+  });
+
+  it('mantiene desactivado el flujo hasta el opt-in experimental en Ajustes', () => {
+    mountWith(snapshot([], { settings: { enabled: false } }));
+
+    expect(screen.getByText('Experimental')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Projects y Tasks' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Activar en Ajustes' }));
+    expect(useWorkbenchStore.getState().page).toBe('settings');
+    expect(useWorkbenchStore.getState().settingsSection).toBe('orch');
+  });
+
   it('presenta Projects y Operación en un navegador y un canvas contextual', async () => {
     mountWith(snapshot([task('t1')]), [], undefined, 'execution-task');
 
