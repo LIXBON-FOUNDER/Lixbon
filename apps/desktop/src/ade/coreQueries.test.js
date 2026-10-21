@@ -845,6 +845,21 @@ describe('resource_inventory (adaptador de lectura)', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  it('exige filters.project_id en el eco del Core y project_id en readAdeResources', async () => {
+    const { project_id: _omitido, ...sinProject } = inventario().filters;
+    invoke.mockResolvedValue({ ...inventario(), filters: sinProject });
+    await expect(queryAdeCore('resource_inventory')).rejects.toThrow('ade_query_invalid_response');
+
+    invoke.mockClear();
+    await expect(readAdeResources()).rejects.toThrow('ade_query_invalid_request');
+    await expect(readAdeResources({ projectId: '   ' })).rejects.toThrow('ade_query_invalid_request');
+    expect(invoke).not.toHaveBeenCalled();
+
+    invoke.mockResolvedValue(inventario({ projectId: 'project-1' }));
+    await expect(readAdeResources({ projectId: 'project-1' })).resolves.toEqual(inventario({ projectId: 'project-1' }));
+    expect(invoke).toHaveBeenLastCalledWith('orch_query', { query: 'resource_inventory', args: { project_id: 'project-1', probe: true } });
+  });
+
   it('exige que la respuesta sea la lectura que se pidió', async () => {
     invoke.mockResolvedValue(inventario({ projectId: 'project-9' }));
     await expect(queryAdeCore('resource_inventory', { projectId: 'project-1' }))

@@ -598,5 +598,11 @@ export const listAdeActivity = ({ cursor = 0, limit = ACTIVITY_DEFAULT_LIMIT, or
  * nunca «limpio» ni «fusionado»; `owner: null` sigue siendo «sin propietario»; y `unknown` nunca se
  * presenta como «falta». Detectar no es adoptar ni borrar: esta lectura no escribe nada.
  */
-export const readAdeResources = ({ projectId = null, probe = true } = {}) =>
-  queryAdeCore('resource_inventory', { projectId, probe });
+export const readAdeResources = ({ projectId = null, probe = true } = {}) => {
+  // El ADE solo lee el inventario de un Project durable: sin `project_id` no hay alcance y se
+  // rechaza antes de preguntar al Core (un inventario global es un escaneo de todos los repos).
+  if (typeof projectId !== 'string' || !projectId.trim()) {
+    return Promise.reject(new Error('ade_query_invalid_request: resource_inventory exige project_id'));
+  }
+  return queryAdeCore('resource_inventory', { projectId, probe });
+};

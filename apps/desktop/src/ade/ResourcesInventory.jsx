@@ -483,7 +483,43 @@ function Row({ row }) {
  * listas contractuales = «no disponible», nunca una lista vacía ni filas inventadas.
  * `projectId` acota el inventario por Project ID; sin él se ve todo lo que llegó.
  */
-export function ResourcesInventory({ inventory = null, projectId = null }) {
+/**
+ * Aviso del estado de la lectura (`useCoreQuery`). Una foto anterior se sigue mostrando con
+ * `stale`; `loading`/`refreshing` no borran filas; `error`/`disconnected`/`degraded` se dicen tal
+ * cual. El aviso nunca sustituye al DTO ni inventa filas.
+ */
+const INVENTORY_STATUS_TEXT = {
+  loading: { role: 'status', text: 'Cargando el inventario desde Core.' },
+  refreshing: { role: 'status', text: 'Actualizando el inventario desde Core; se muestra la última foto.' },
+  stale: { role: 'status', text: 'Foto desactualizada: la última lectura de Core no terminó; se muestra la anterior.' },
+  error: { role: 'alert', text: 'No se pudo leer el inventario de Core.' },
+  disconnected: { role: 'alert', text: 'Core desconectado: no se puede leer el inventario.' },
+  degraded: { role: 'status', text: 'Core responde degradado: el inventario puede no estar disponible.' },
+};
+const RETRYABLE_STATUS = new Set(['stale', 'error', 'disconnected', 'degraded']);
+
+function InventoryStatus({ status, onRetry }) {
+  const state = typeof status?.state === 'string' ? status.state : null;
+  const notice = state ? INVENTORY_STATUS_TEXT[state] : null;
+  if (!notice) return null;
+  const message = typeof status.message === 'string' && status.message ? status.message : null;
+  return (
+    <p
+      className={`resinv__note resinv__status resinv__status--${state}`}
+      role={notice.role}
+      aria-busy={state === 'loading' || state === 'refreshing' ? 'true' : undefined}
+      data-testid="resinv-status"
+      data-state={state}
+    >
+      {notice.text}{message ? ` ${message}` : ''}
+      {RETRYABLE_STATUS.has(state) && typeof onRetry === 'function' && (
+        <> <button type="button" className="resinv__retry" onClick={onRetry} data-testid="resinv-retry">Reintentar</button></>
+      )}
+    </p>
+  );
+}
+
+export function ResourcesInventory({ inventory = null, projectId = null, status = null, onRetry = null }) {
   const [projectFilter, setProjectFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -531,6 +567,7 @@ export function ResourcesInventory({ inventory = null, projectId = null }) {
           </span>
         )}
       </header>
+      <InventoryStatus status={status} onRetry={onRetry} />
       <p className="resinv__note">
         «Desconocido» y «No disponible» no significan que falte el recurso.
       </p>

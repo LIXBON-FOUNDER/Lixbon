@@ -12,6 +12,53 @@ import {
 
 afterEach(cleanup);
 
+describe('ResourcesInventory · estado de la lectura (LXO-101)', () => {
+  const scoped = () => ({ ...DTO, filters: { project_id: null, probe: true } });
+
+  it('stale conserva la última foto y avisa, con reintento', () => {
+    let retried = 0;
+    render(<ResourcesInventory inventory={scoped()} status={{ state: 'stale', message: 'ade_query_timeout: el Core no respondió' }} onRetry={() => { retried += 1; }} />);
+    const status = screen.getByTestId('resinv-status');
+    expect(status.dataset.state).toBe('stale');
+    expect(status.textContent).toContain('Foto desactualizada');
+    expect(status.textContent).toContain('ade_query_timeout');
+    expect(screen.getAllByTestId('resinv-row').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('resinv-retry'));
+    expect(retried).toBe(1);
+  });
+
+  it('loading y refreshing se anuncian sin borrar filas ni ofrecer reintento', () => {
+    const { rerender } = render(<ResourcesInventory inventory={null} status={{ state: 'loading' }} onRetry={() => {}} />);
+    expect(screen.getByTestId('resinv-status').getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByTestId('resinv-retry')).toBeNull();
+    expect(screen.getByTestId('resinv-unavailable-inventory')).toBeTruthy();
+    rerender(<ResourcesInventory inventory={scoped()} status={{ state: 'refreshing' }} onRetry={() => {}} />);
+    expect(screen.getByTestId('resinv-status').dataset.state).toBe('refreshing');
+    expect(screen.getAllByTestId('resinv-row').length).toBeGreaterThan(0);
+  });
+
+  it('error, disconnected y degraded se dicen tal cual y no inventan filas', () => {
+    for (const [state, role] of [['error', 'alert'], ['disconnected', 'alert'], ['degraded', 'status']]) {
+      render(<ResourcesInventory inventory={null} status={{ state, message: `motivo-${state}` }} onRetry={() => {}} />);
+      const status = screen.getByTestId('resinv-status');
+      expect(status.dataset.state).toBe(state);
+      expect(status.getAttribute('role')).toBe(role);
+      expect(status.textContent).toContain(`motivo-${state}`);
+      expect(screen.getByTestId('resinv-retry')).toBeTruthy();
+      expect(screen.queryAllByTestId('resinv-row')).toHaveLength(0);
+      cleanup();
+    }
+  });
+
+  it('ready, empty o sin estado no pintan aviso', () => {
+    for (const status of [null, { state: 'ready' }, { state: 'empty' }, { state: 'idle' }]) {
+      render(<ResourcesInventory inventory={scoped()} status={status} />);
+      expect(screen.queryByTestId('resinv-status')).toBeNull();
+      cleanup();
+    }
+  });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures: el DTO de Core de `resource_inventory` (docs/core/RESOURCES.md) tal cual.
 // No hay un modelo alterno: los mismos campos, los mismos valores y los mismos vocabularios

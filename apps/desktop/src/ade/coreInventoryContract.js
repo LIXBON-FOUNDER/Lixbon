@@ -328,9 +328,14 @@ export function validateResourceInventory(response, args) {
 
   // El Core dice a qué Project y con qué sondeo respondió: la respuesta tiene que ser la que se
   // pidió.
-  const echoedProject = response.filters?.project_id ?? null;
+  // `filters.project_id` es obligatorio en el eco (aunque sea null): un eco sin la clave no dice
+  // a qué alcance respondió el Core y se rechaza.
+  if (!isPlainObject(response.filters) || !Object.hasOwn(response.filters, 'project_id')) {
+    throw invalid('el eco de filtros no incluye project_id');
+  }
+  const echoedProject = response.filters.project_id ?? null;
   const askedProject = args.project_id ?? null;
-  if (!isPlainObject(response.filters) || response.filters.probe !== probe
+  if (response.filters.probe !== probe
     || echoedProject !== askedProject || !nullableText(response.machine)) {
     throw invalid('el inventario no corresponde al Project y al sondeo solicitados');
   }
