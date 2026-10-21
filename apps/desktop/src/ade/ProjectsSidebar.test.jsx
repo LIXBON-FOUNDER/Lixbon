@@ -170,6 +170,7 @@ describe('ProjectsSidebar', () => {
         locations: selectedProject.locations,
       },
       error: null,
+      reason: null,
     }));
     expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(1);
 
@@ -187,11 +188,12 @@ describe('ProjectsSidebar', () => {
         counts: betaProject.counts, locations: betaProject.locations,
       },
       error: null,
+      reason: null,
     }));
     expect(calls.filter((call) => call.query === 'projects_overview')).toHaveLength(1);
   });
 
-  it('emite unknown si el ID controlado no se resuelve en un overview completo', async () => {
+  it('emite missing si un overview completo no contiene el ID controlado', async () => {
     const onProjectSnapshot = vi.fn();
     mountCore({ overviews: () => overview([project('project-b', 'Beta')]) });
     render(
@@ -203,11 +205,11 @@ describe('ProjectsSidebar', () => {
 
     await screen.findByRole('treeitem', { name: /Beta/ });
     await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith({
-      projectId: 'missing-project', queryState: 'unknown', project: null, error: null,
+      projectId: 'missing-project', queryState: 'missing', project: null, error: null, reason: null,
     }));
   });
 
-  it('emite empty cuando el overview confirma que no hay Projects', async () => {
+  it('emite missing cuando un overview vacío confirma que el Project seleccionado no existe', async () => {
     const onProjectSnapshot = vi.fn();
     mountCore({ overviews: () => overview([]) });
     render(
@@ -219,8 +221,31 @@ describe('ProjectsSidebar', () => {
 
     await screen.findByText('No hay Projects registrados con este filtro del Core.');
     await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith({
-      projectId: 'project-a', queryState: 'empty', project: null, error: null,
+      projectId: 'project-a', queryState: 'missing', project: null, error: null, reason: null,
     }));
+  });
+
+  it('emite loading mientras espera el primer overview de la selección', async () => {
+    const pendingOverview = deferred();
+    const onProjectSnapshot = vi.fn();
+    mountCore({ overviews: () => pendingOverview.promise });
+    render(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-a', taskId: null }}
+        onProjectSnapshot={onProjectSnapshot}
+      />,
+    );
+
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', queryState: 'loading', project: null, error: null, reason: null,
+    }));
+
+    pendingOverview.resolve(overview([project('project-a', 'Alpha')]));
+    await screen.findByRole('treeitem', { name: /Alpha/ });
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', queryState: 'ready', reason: null,
+    })));
   });
 
   it('no completa campos ausentes del Project con valores inferidos', async () => {
@@ -240,6 +265,7 @@ describe('ProjectsSidebar', () => {
       queryState: 'ready',
       project: { id: 'project-sparse', projectId: 'project-sparse', name: 'Sparse', state: 'active' },
       error: null,
+      reason: null,
     }));
   });
 
@@ -255,8 +281,63 @@ describe('ProjectsSidebar', () => {
 
     await screen.findByRole('alert');
     await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith({
-      projectId: 'project-a', queryState: 'error', project: null, error: 'projects_overview_read_failed',
+      projectId: 'project-a', queryState: 'error', project: null, error: 'projects_overview_read_failed', reason: null,
     }));
+  });
+
+  it.each([
+    ['projects_overview_disconnected: Core desconectado', 'disconnected'],
+    ['projects_overview_unavailable: almacén no disponible', 'degraded'],
+    ['projects_overview_read_failed', 'error'],
+  ])('preserva el estado inicial %s del overview', async (message, queryState) => {
+    const onProjectSnapshot = vi.fn();
+    mountCore({ overviews: () => { throw new Error(message); } });
+    render(
+      <ProjectsSidebar
+        selection={{ projectId: 'project-a', taskId: null }}
+        onProjectSnapshot={onProjectSnapshot}
+      />,
+    );
+
+    await screen.findByRole('alert');
+    await waitFor(() => expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', queryState, project: null, error: message, reason: null,
+    })));
+  });
+
+  it('mantiene refreshing separado de stale durante un polling sano', async () => {
+    vi.useFakeTimers();
+    const pendingRefresh = deferred();
+    let reads = 0;
+    const onProjectSnapshot = vi.fn();
+    mountCore({
+      overviews: () => {
+        reads += 1;
+        return reads === 1 ? overview([project('project-a', 'Alpha')]) : pendingRefresh.promise;
+      },
+    });
+    render(
+      <ProjectsSidebar
+        pollMs={1_000}
+        selection={{ projectId: 'project-a', taskId: null }}
+        onProjectSnapshot={onProjectSnapshot}
+      />,
+    );
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ queryState: 'ready', reason: null }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-a', queryState: 'refreshing', project: expect.objectContaining({ projectId: 'project-a' }),
+      error: null, reason: null,
+    }));
+    expect(screen.getByRole('tree', { name: 'Projects y Tasks del Core' }).getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByText(/Datos desactualizados/)).toBeNull();
+
+    pendingRefresh.resolve(overview([project('project-a', 'Alpha')]));
+    await flush();
+    expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ queryState: 'ready', reason: null }));
   });
 
   it('conserva metadata marcada stale mientras no se pueda actualizar el overview', async () => {
@@ -286,6 +367,7 @@ describe('ProjectsSidebar', () => {
     expect(onProjectSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({
       projectId: 'project-a', queryState: 'stale', project: expect.objectContaining({ projectId: 'project-a' }),
       error: 'projects_overview_disconnected',
+      reason: 'disconnected',
     }));
   });
 
@@ -1589,9 +1671,12 @@ describe('ProjectsSidebar', () => {
     fireEvent.keyDown(more, { key: ' ' });
     expect(alpha.getAttribute('aria-expanded')).toBe('true');
     expect(document.activeElement).toBe(more);
+
+    fireEvent.click(more);
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('el espacio vacío de una fila no pliega el Project', async () => {
+  it('la tarjeta visible activa el Project y el contenido anidado conserva su interacción', async () => {
     mountCore({
       overviews: () => overview([project('project-a', 'Alpha')]),
       tasks: (args) => page(args.project_id, args.status, []),
@@ -1603,12 +1688,16 @@ describe('ProjectsSidebar', () => {
     await screen.findByText(/Este Project no tiene Tasks activas/);
     expect(alpha.getAttribute('aria-expanded')).toBe('true');
 
-    fireEvent.click(alpha);
-    fireEvent.click(alpha.querySelector('.ps__line'));
+    fireEvent.click(alpha.querySelector('.ps__meta'));
+    await waitFor(() => expect(alpha.getAttribute('aria-expanded')).toBe('false'));
+    clickProject(alpha);
+    await screen.findByText(/Este Project no tiene Tasks activas/);
     expect(alpha.getAttribute('aria-expanded')).toBe('true');
 
-    clickProject(alpha);
-    expect(alpha.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(alpha.querySelector('.ps__empty'));
+    expect(alpha.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(alpha);
+    await waitFor(() => expect(alpha.getAttribute('aria-expanded')).toBe('false'));
   });
 
   it('mantiene el foco en una fila utilizable cuando desaparece el botón de paginación', async () => {

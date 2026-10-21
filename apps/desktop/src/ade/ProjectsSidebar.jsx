@@ -183,11 +183,13 @@ function toProjectViewSummary(project) {
 }
 
 function selectedProjectQueryState(overview, project, projectId) {
-  if (overview.status === 'empty') return 'empty';
-  if (overview.status === 'stale' || overview.status === 'refreshing') return 'stale';
-  if (['error', 'disconnected', 'degraded'].includes(overview.status)) return 'error';
+  if (overview.status === 'idle' || overview.status === 'loading') return 'loading';
+  if (overview.status === 'refreshing') return 'refreshing';
+  if (overview.status === 'stale') return 'stale';
+  if (['error', 'disconnected', 'degraded'].includes(overview.status)) return overview.status;
+  if (overview.status === 'empty') return projectId ? 'missing' : 'empty';
   if (overview.status === 'ready') {
-    return project && project.id === projectId ? 'ready' : 'unknown';
+    return project && project.id === projectId ? 'ready' : projectId ? 'missing' : 'unknown';
   }
   return 'unknown';
 }
@@ -373,8 +375,9 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
       onClick={(event) => {
         // Los controles anidados (Cargar más, Reintentar lectura) no activan la fila del Project.
         if (event.target.closest?.('button, input, select, textarea, a')) return;
-        // El espacio vacío de la fila es inerte; solo activan el nombre/ID/chevron visibles.
-        if (!event.target.closest?.('.ps__line > *')) return;
+        // La tarjeta del Project (nombre, metadatos y su espacio libre) es un único target.
+        // El contenido de Tasks, estados y avisos anidados conserva su propia interacción.
+        if (event.target.closest?.('.ps__tasks, .ps__state, .ps__empty, .ps__item--task')) return;
         onActivate(project);
       }}
     >
@@ -1211,8 +1214,9 @@ export function ProjectsSidebar({
       queryState: projectQueryState,
       project: projectViewSummary,
       error: overview.error ?? null,
+      reason: overview.reason ?? null,
     });
-  }, [onProjectSnapshot, overview.error, projectQueryState, projectViewSummary, selected.projectId]);
+  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId]);
 
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;

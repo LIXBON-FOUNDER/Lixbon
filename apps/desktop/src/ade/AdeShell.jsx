@@ -15,10 +15,30 @@ import './TaskWorkspace.css';
 
 function projectViewQueryState(query) {
   if (query.status === 'ready' || query.status === 'empty') return 'ready';
-  if (query.status === 'loading' || query.status === 'refreshing') return 'loading';
+  if (query.status === 'idle' || query.status === 'loading' || query.status === 'refreshing') return 'loading';
   if (query.status === 'stale' || query.status === 'degraded') return 'degraded';
   if (query.status === 'error' || query.status === 'disconnected') return 'error';
+  if (query.status === 'missing') return 'unavailable';
   return 'unavailable';
+}
+
+function projectQueryMessage(query) {
+  if (query.status === 'stale') {
+    const cause = {
+      disconnected: 'Core desconectado',
+      degraded: 'Core degradado',
+      error: 'Core con error',
+    }[query.reason];
+    return `Datos desactualizados${cause ? ` (${cause})` : ''}; se conserva la última respuesta. ${query.error || ''}`.trim();
+  }
+  if (query.status === 'refreshing') return 'Actualizando desde Core.';
+  const sourceLabel = {
+    disconnected: 'Core desconectado',
+    degraded: 'Core degradado',
+    error: 'Core con error',
+  }[query.status];
+  if (sourceLabel) return `${sourceLabel}. ${query.error || ''}`.trim();
+  return query.error || null;
 }
 
 function projectViewSlice(query, items, { hasMore = false } = {}) {
@@ -26,13 +46,8 @@ function projectViewSlice(query, items, { hasMore = false } = {}) {
   const state = queryState === 'ready' && hasMore ? 'partial' : queryState;
   const canShowItems = ['ready', 'partial', 'loading', 'degraded'].includes(state);
   const messages = [];
-  if (query.status === 'stale') {
-    messages.push(`Datos desactualizados; se conserva la última respuesta. ${query.error || ''}`.trim());
-  } else if (query.status === 'refreshing') {
-    messages.push('Actualizando desde Core.');
-  } else if (query.error) {
-    messages.push(query.error);
-  }
+  const queryMessage = projectQueryMessage(query);
+  if (queryMessage) messages.push(queryMessage);
   if (hasMore) messages.push('Core indica que hay más elementos después de esta página.');
   return {
     state,
@@ -42,10 +57,10 @@ function projectViewSlice(query, items, { hasMore = false } = {}) {
 }
 
 function overviewUnavailableSlice(projects, subject) {
-  if (['ready', 'empty'].includes(projects.status)) {
+  if (['ready', 'empty', 'missing'].includes(projects.status)) {
     return { state: 'unavailable', items: [], message: `El Project seleccionado no aparece en el overview activo de Core; no hay ${subject} autoritativos para mostrar.` };
   }
-  if (projects.status === 'unknown') {
+  if (projects.status === 'unknown' || projects.status === 'unavailable') {
     return { state: 'unavailable', items: [], message: `Core no confirmó metadata autoritativa para este Project; no hay ${subject} autoritativos para mostrar.` };
   }
   return projectViewSlice(projects, []);
@@ -127,9 +142,10 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
   const projectOverview = {
-    status: currentProjectSnapshot?.queryState ?? 'unknown',
+    status: currentProjectSnapshot?.queryState ?? (selectedProjectId ? 'loading' : 'unknown'),
     data: currentProjectSnapshot?.project ? { projects: [currentProjectSnapshot.project] } : null,
     error: currentProjectSnapshot?.error ?? null,
+    reason: currentProjectSnapshot?.reason ?? null,
   };
   const projectTasks = useCoreQuery('tasks_by_project', {
     project_id: selectedProjectId,
@@ -176,11 +192,11 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       resources: null,
     },
     ...(!selectedProject
-      ? { message: projectOverview.status === 'unknown'
+      ? { message: ['unknown', 'unavailable'].includes(projectOverview.status)
         ? 'Core no confirmó metadata autoritativa para este Project.'
-        : ['ready', 'empty'].includes(projectOverview.status)
+        : ['ready', 'empty', 'missing'].includes(projectOverview.status)
           ? 'El Project seleccionado no aparece en el overview activo de Core.'
-          : projectOverview.error || 'No hay metadata autoritativa para este Project.' }
+          : projectQueryMessage(projectOverview) || 'No hay metadata autoritativa para este Project.' }
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
   const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
