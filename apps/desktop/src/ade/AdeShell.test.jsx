@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { AdeShell } from './AdeShell';
+import adeShellStyles from './AdeShell.css?inline';
 import { queryAdeCore } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
@@ -52,6 +53,7 @@ const operation = <div data-testid="operation-canvas"><span data-testid="pty-sen
 const shell = (props = {}) => (
   <AdeShell active leftOpen rightOpen drawerOpen={false} operationWorkspace={operation} {...props} />
 );
+let adeShellStyleElement;
 
 const pickTask = async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
@@ -60,10 +62,14 @@ const pickTask = async () => {
 };
 
 beforeEach(() => {
+  adeShellStyleElement = document.createElement('style');
+  adeShellStyleElement.textContent = adeShellStyles;
+  document.head.appendChild(adeShellStyleElement);
   useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
 });
 afterEach(() => {
   cleanup();
+  adeShellStyleElement.remove();
   vi.useRealTimers();
   queryAdeCore.mockReset();
 });
@@ -114,6 +120,23 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
     expect(projectsRegion.parentElement).toBe(operationRegion.parentElement);
     expect(projectsRegion.tabIndex).toBe(0);
     expect(operationRegion.tabIndex).toBe(0);
+
+    const navigationContentStyle = getComputedStyle(projectsRegion.parentElement);
+    expect(navigationContentStyle.flexGrow).toBe('1');
+    expect(navigationContentStyle.minHeight).toBe('0px');
+    expect(navigationContentStyle.maxHeight).toBe('100%');
+    expect(navigationContentStyle.overflowY).toBe('hidden');
+    for (const region of [projectsRegion, operationRegion]) {
+      const style = getComputedStyle(region);
+      expect(style.overflowY).toBe('auto');
+      expect(style.minHeight).toBe('0px');
+      expect(style.maxHeight).toBe('100%');
+    }
+
+    projectsRegion.focus();
+    expect(document.activeElement).toBe(projectsRegion);
+    operationRegion.focus();
+    expect(document.activeElement).toBe(operationRegion);
   });
 });
 

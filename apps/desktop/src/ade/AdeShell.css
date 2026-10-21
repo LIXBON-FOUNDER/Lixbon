@@ -1,13 +1,17 @@
 .ade__nav .ade__nav-content {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
   padding: 0;
 }
 
 .ade__nav .ade__nav-scroll-region {
+  flex: 1 1 0;
   min-height: 0;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
