@@ -41,6 +41,9 @@ function core(detail, { attention = () => attentionPage([]) } = {}) {
 }
 
 const attentionCalls = () => queryAdeCore.mock.calls.filter(([query]) => query === 'attention_list');
+// El Project View consulta Attention acotada al Project (projectId durable); el Attention Inbox global no lleva Project.
+const projectAttentionCalls = () => attentionCalls().filter(([, args]) => args.projectId === PROJECT.id);
+const inboxAttentionCalls = () => attentionCalls().filter(([, args]) => args.projectId === null);
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 const attentionRows = () => within(screen.getByRole('list', { name: 'Attention activa' })).getAllByRole('listitem');
 const openAttentionTab = () => fireEvent.click(screen.getByRole('tab', { name: 'Attention' }));
@@ -344,34 +347,62 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
     await flush();
 
-    // Subvista Workspace: ni consulta ni sondeo de Attention; sus consultas siguen siendo las de siempre.
+    // Subvista Workspace con un Project abierto: solo sondea la Attention del Project; el Inbox global ni se consulta.
+    const projectOnOpen = projectAttentionCalls().length;
+    expect(projectOnOpen).toBeGreaterThan(0);
     await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
-    expect(attentionCalls()).toHaveLength(0);
+    expect(inboxAttentionCalls()).toHaveLength(0);
+    expect(projectAttentionCalls().length).toBeGreaterThan(projectOnOpen);
+    expect(attentionCalls()).toHaveLength(projectAttentionCalls().length);
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'projects_overview').every(([, args]) => args.archived === 'exclude')).toBe(true);
 
+    // Subvista Attention: el Inbox global consulta y sondea; la consulta del Project se detiene.
     openAttentionTab();
     await flush();
-    expect(attentionCalls()).toHaveLength(1);
-    expect(attentionCalls()[0][1]).toEqual({ projectId: null, targetKind: null, targetId: null, category: null, severity: null });
+    expect(inboxAttentionCalls()).toHaveLength(1);
+    expect(inboxAttentionCalls()[0][1]).toEqual({ projectId: null, targetKind: null, targetId: null, category: null, severity: null });
     // Los contadores del inbox usan su propia clave (`include`), distinta de la del navegador (`exclude`).
     expect(queryAdeCore.mock.calls.filter(([query, args]) => query === 'projects_overview' && args.archived === 'include')).toHaveLength(1);
+    const projectInAttention = projectAttentionCalls().length;
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
-    expect(attentionCalls()).toHaveLength(2);
+    expect(inboxAttentionCalls()).toHaveLength(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(projectAttentionCalls()).toHaveLength(projectInAttention);
 
-    // De vuelta a Workspace, o con el ADE inactivo (vista Runs), el sondeo se detiene.
+    // De vuelta a Workspace, el Inbox se detiene y el Project retoma su sondeo.
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    const afterWorkspace = attentionCalls().length;
+    await flush();
+    const inboxAfterWorkspace = inboxAttentionCalls().length;
+    const projectAfterWorkspace = projectAttentionCalls().length;
+    expect(projectAfterWorkspace).toBeGreaterThan(projectInAttention);
     await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
-    expect(attentionCalls()).toHaveLength(afterWorkspace);
+    expect(inboxAttentionCalls()).toHaveLength(inboxAfterWorkspace);
+    expect(projectAttentionCalls().length).toBeGreaterThan(projectAfterWorkspace);
 
+    // Con el ADE inactivo (vista Runs) se detiene el Project View; al reactivarlo se reanuda.
+    rerender(shell({ active: false }));
+    await flush();
+    const projectWhenInactive = projectAttentionCalls().length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
+    expect(projectAttentionCalls()).toHaveLength(projectWhenInactive);
+    expect(inboxAttentionCalls()).toHaveLength(inboxAfterWorkspace);
+    rerender(shell());
+    await flush();
+    expect(projectAttentionCalls().length).toBeGreaterThan(projectWhenInactive);
+
+    // Lo mismo para el Inbox: se reanuda en la subvista Attention y se detiene con el ADE inactivo.
     openAttentionTab();
     await flush();
-    const afterReopen = attentionCalls().length;
-    expect(afterReopen).toBeGreaterThan(afterWorkspace);
+    const inboxAfterReopen = inboxAttentionCalls().length;
+    expect(inboxAfterReopen).toBeGreaterThan(inboxAfterWorkspace);
     rerender(shell({ active: false }));
+    await flush();
+    const inboxWhenInactive = inboxAttentionCalls().length;
+    const projectEnd = projectAttentionCalls().length;
     await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
-    expect(attentionCalls()).toHaveLength(afterReopen);
+    expect(inboxAttentionCalls()).toHaveLength(inboxWhenInactive);
+    expect(projectAttentionCalls()).toHaveLength(projectEnd);
   });
 
   it('el enlace Attention de la Task abre la vista filtrada por target en el Core, sin filtrar localmente', async () => {
@@ -417,7 +448,7 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
     await flush();
     fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: 'Task Real' }));
+    fireEvent.click(within(screen.getByRole('region', { name: `Tasks del Project ${PROJECT.id}` })).getByRole('button', { name: 'Task Real' }));
     await flush();
     fireEvent.click(screen.getAllByRole('button', { name: `Abrir Attention de la Task ${ITEM.id}` })[0]);
     await flush();
