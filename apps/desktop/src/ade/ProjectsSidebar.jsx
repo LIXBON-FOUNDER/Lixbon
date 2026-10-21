@@ -183,7 +183,9 @@ function toProjectViewSummary(project) {
 }
 
 function selectedProjectQueryState(overview, project, projectId) {
-  if (overview.status === 'idle' || overview.status === 'loading') return 'loading';
+  // `idle` es una consulta sin habilitar (sección inactiva), no una carga pendiente: no se disfraza de `loading`.
+  if (overview.status === 'idle') return 'idle';
+  if (overview.status === 'loading') return 'loading';
   if (overview.status === 'refreshing') return 'refreshing';
   if (overview.status === 'stale') return 'stale';
   if (['error', 'disconnected', 'degraded'].includes(overview.status)) return overview.status;
@@ -917,7 +919,7 @@ function ProjectTasks({
  * @param {(summary: ProjectSummary) => void} [props.onSelectProject] Se invoca al activar una fila de Project.
  * @param {(summary: TaskSummary | null, context?: {projectId: string, taskId: string | null}) => void} [props.onSelectTask]
  *   Se invoca al activar una Task; al cambiar a otro Project sin conservarla, con `null` y el contexto nuevo.
- * @param {(snapshot: {projectId: string|null, queryState: 'ready'|'stale'|'error'|'empty'|'unknown', project: ProjectViewSummary|null, error: string|null}) => void} [props.onProjectSnapshot]
+ * @param {(snapshot: {projectId: string|null, queryState: 'idle'|'loading'|'refreshing'|'ready'|'stale'|'error'|'disconnected'|'degraded'|'missing'|'empty'|'unknown', project: ProjectViewSummary|null, error: string|null}) => void} [props.onProjectSnapshot]
  *   Publica la metadata del Project que coincide con la selección controlada y el estado de su overview.
  * @returns {import('react').ReactElement}
  */
@@ -1208,7 +1210,14 @@ export function ProjectsSidebar({
   const selectedProject = projects.find((project) => project.id === selected.projectId);
   const projectViewSummary = useMemo(() => toProjectViewSummary(selectedProject), [selectedProject]);
   const projectQueryState = selectedProjectQueryState(overview, selectedProject, selected.projectId);
+  // Al reactivarse, el primer render aún devuelve la última lectura de `useCoreQuery` como si fuera
+  // vigente (su refresco arranca en el efecto de ese mismo commit). Ese render no se publica: el host
+  // recibe después `refreshing` con la última lectura, o el estado real de la consulta ya reanudada.
+  const [queryResumed, setQueryResumed] = useState(active);
+  useEffect(() => { setQueryResumed(active); }, [active]);
+  const snapshotCurrent = !active || queryResumed;
   useEffect(() => {
+    if (!snapshotCurrent) return;
     onProjectSnapshot?.({
       projectId: selected.projectId,
       queryState: projectQueryState,
@@ -1216,7 +1225,7 @@ export function ProjectsSidebar({
       error: overview.error ?? null,
       reason: overview.reason ?? null,
     });
-  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId]);
+  }, [onProjectSnapshot, overview.error, overview.reason, projectQueryState, projectViewSummary, selected.projectId, snapshotCurrent]);
 
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
