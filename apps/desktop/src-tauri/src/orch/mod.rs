@@ -11,6 +11,9 @@ mod attention_read;
 mod projects_overview;
 mod activity_format;
 mod activity_read;
+mod tasks_read;
+#[cfg(test)]
+mod tasks_read_tests;
 mod resource_git;
 mod resource_inventory;
 mod attention_action;
