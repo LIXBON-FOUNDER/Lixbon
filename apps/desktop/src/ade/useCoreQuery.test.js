@@ -259,6 +259,22 @@ describe('useCoreQuery: umbral visual y escaneos solapados (LXO-101)', () => {
     late.resolve({ repos: [], worktrees: [], preserved_branches: [] });
   });
 
+  it('expone inFlight mientras hay una petición viva para la clave (P2-1)', async () => {
+    const late = deferred();
+    queryAdeCore.mockImplementation(() => late.promise);
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: 'project-1', probe: true }, { pollMs: 1_000 }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(31_000); });
+    expect(result.current.inFlight).toBe(true);
+    expect(result.current.error).toContain('ade_query_timeout');
+    await act(async () => {
+      late.resolve({ repos: [], worktrees: [], preserved_branches: [] });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.inFlight).toBe(false);
+    expect(result.current.status).toBe('ready');
+  });
+
   it('exige project_id para resource_inventory y no pregunta al Core sin él', async () => {
     const { result } = renderHook(() => useCoreQuery('resource_inventory', { project_id: null, probe: true }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });

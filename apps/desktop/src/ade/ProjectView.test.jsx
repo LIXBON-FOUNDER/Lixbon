@@ -4,6 +4,28 @@ import { ProjectView, taskMatchesFilter, ACTIVE_TASK_STATUSES, FINAL_TASK_STATUS
 
 afterEach(cleanup);
 
+describe('ProjectView · destinos sin handler en F2 (P3-6)', () => {
+  it('Activity y Resources pintan texto plano, no enlaces, cuando no hay handler', () => {
+    render(
+      <ProjectView
+        projectId="synthetic-project-1"
+        projectName="Synthetic"
+        activity={{ state: 'ready', items: [{ activity_id: 'act-1', text: 'Algo pasó', attempt_id: 'att-1' }] }}
+        resources={{ state: 'ready', items: [{ resource_id: 'res-1', kind: 'worktree', label: 'Worktree 1', availability: 'available' }] }}
+        onOpenTask={() => {}}
+      />,
+    );
+    const activity = screen.getByTestId('activity-act-1');
+    expect(within(activity).queryByRole('button')).toBeNull();
+    expect(screen.queryByTestId('activity-open-attempt-att-1')).toBeNull();
+    expect(within(activity).getByText('Attempt att-1').tagName).toBe('SPAN');
+    const resource = screen.getByTestId('resource-res-1');
+    expect(within(resource).queryByRole('button')).toBeNull();
+    expect(screen.queryByTestId('open-resource-res-1')).toBeNull();
+    expect(within(resource).getByText('Worktree 1')).toBeTruthy();
+  });
+});
+
 // Todos los datos son SINTÉTICOS: ni IDs, ni hosts, ni rutas, ni textos vienen de Core real.
 const PID = 'synthetic-project-1';
 // Forma del DTO de solo lectura de LXO-90: sin location_id ni disponibilidad.

@@ -76,6 +76,7 @@ export function resourceInventoryStatus(query) {
     state: query.status,
     message: typeof query.error === 'string' && query.error ? query.error : null,
     reason: query.reason ?? null,
+    inFlight: query.inFlight === true,
   };
 }
 
