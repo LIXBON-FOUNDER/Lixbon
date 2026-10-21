@@ -87,18 +87,24 @@ struct ListParams {
     project_id: String,
     status: StatusFilter,
     limit: usize,
-    offset: usize,
+    after: Option<(u64, String)>,
 }
 
-/// El cursor es opaco para el cliente (`o<offset>`); solo vale el `next_cursor` de la página anterior.
-fn parse_cursor(value: Option<&Value>) -> Result<usize, String> {
+/// El cursor es opaco para el cliente (`k<created_at>.<id>` de la última Task entregada); solo vale el
+/// `next_cursor` de la página anterior. Al ser por clave y no por posición, una Task creada o cambiada
+/// entre páginas no repite ni salta las que ya existían.
+fn parse_cursor(value: Option<&Value>) -> Result<Option<(u64, String)>, String> {
+    let bad = || invalid("`cursor` no es un next_cursor de esta query");
     match value {
-        None => Ok(0),
-        Some(Value::String(s)) => s
-            .strip_prefix('o')
-            .filter(|n| !n.is_empty() && n.len() <= 12 && n.bytes().all(|b| b.is_ascii_digit()))
-            .and_then(|n| n.parse().ok())
-            .ok_or_else(|| invalid("`cursor` no es un next_cursor de esta query")),
+        None => Ok(None),
+        Some(Value::String(s)) => {
+            let rest = s.strip_prefix('k').ok_or_else(bad)?;
+            let (created, id) = rest.split_once('.').ok_or_else(bad)?;
+            if created.is_empty() || created.len() > 20 || !created.bytes().all(|b| b.is_ascii_digit()) || id.is_empty() || id.len() > 128 {
+                return Err(bad());
+            }
+            Ok(Some((created.parse().map_err(|_| bad())?, id.to_string())))
+        }
         Some(_) => Err(invalid("`cursor` debe ser texto")),
     }
 }
@@ -122,8 +128,8 @@ fn parse_list(args: &Value) -> Result<ListParams, String> {
             .filter(|n| *n >= 1 && *n <= MAX_LIMIT as u64)
             .ok_or_else(|| invalid(format!("`limit` debe ser un entero entre 1 y {MAX_LIMIT}")))? as usize,
     };
-    let offset = parse_cursor(get("cursor"))?;
-    Ok(ListParams { project_id, status, limit, offset })
+    let after = parse_cursor(get("cursor"))?;
+    Ok(ListParams { project_id, status, limit, after })
 }
 
 /// Comprueba en el registro que el Project existe. Se llama con el guard del estado tomado.
@@ -172,16 +178,22 @@ pub(super) fn list(core: &Core, caller: &Caller, context: Option<&MutationContex
         .filter(|t| t.project_id.as_deref() == Some(params.project_id.as_str()))
         .filter(|t| params.status.keeps(t))
         .collect();
-    // Orden estable: lo más reciente primero y, a igualdad, por id.
-    tasks.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.id.cmp(&b.id)));
-    let page: Vec<Value> = tasks
+    // Orden estable por clave inmutable: lo creado más reciente primero y, a igualdad, por id.
+    tasks.sort_by(|a, b| (b.created as u64).cmp(&(a.created as u64)).then_with(|| a.id.cmp(&b.id)));
+    let rest: Vec<&&Task> = tasks
         .iter()
-        .skip(params.offset)
-        .take(params.limit)
-        .map(|t| item(&state, t))
+        .filter(|t| match &params.after {
+            None => true,
+            Some((created, id)) => (t.created as u64) < *created || ((t.created as u64) == *created && t.id.as_str() > id.as_str()),
+        })
         .collect();
-    let end = params.offset.saturating_add(params.limit);
-    let has_more = tasks.len() > end;
+    let has_more = rest.len() > params.limit;
+    let shown = &rest[..rest.len().min(params.limit)];
+    let page: Vec<Value> = shown.iter().map(|t| item(&state, t)).collect();
+    let next_cursor = match (has_more, shown.last()) {
+        (true, Some(last)) => Value::String(format!("k{}.{}", last.created as u64, last.id)),
+        _ => Value::Null,
+    };
     Ok(json!({
         "v": API_VERSION,
         "project_id": params.project_id,
@@ -189,7 +201,7 @@ pub(super) fn list(core: &Core, caller: &Caller, context: Option<&MutationContex
         "limit": params.limit,
         "tasks": page,
         "has_more": has_more,
-        "next_cursor": if has_more { Value::String(format!("o{end}")) } else { Value::Null },
+        "next_cursor": next_cursor,
     }))
 }
 
