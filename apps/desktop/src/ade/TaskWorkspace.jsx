@@ -296,6 +296,7 @@ function Banner({ state, hasData, projectId, taskId }) {
  * - `detail`: estado de `useCoreQuery('task_detail', …)`: `{ status, data, error, reason, updatedAt, retry }`.
  * - `project`: `{ id, name }` opcional; el nombre solo se usa si `project.id === projectId`.
  * - `onNavigate({ projectId, taskId })`: opcional; navegación a padre/raíz/hijas por ID durable. Sin él, son texto.
+ *   Debe devolver `true` solo si aceptó ese target exacto; solo entonces el foco pasa al nuevo encabezado.
  * - `onOpenActivity({ projectId, taskId })` / `onOpenAttention({ projectId, taskId })`: opcionales; contrato para
  *   que el shell abra la superficie real de Activity/Attention de esta Task. Solo se invocan con la Task verificada
  *   y con los IDs seleccionados. Sin callback se muestra "No disponible" (no hay vista simulada ni ruta legacy).
@@ -316,7 +317,9 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
   const projectName = project && project.id === projectId ? text(project.name) : null;
   const missingFields = visible ? DETAIL_FIELDS.filter((field) => !(field in visible)) : [];
   const childIds = Array.isArray(visible?.child_ids) ? [...new Set(visible.child_ids.filter((id) => text(id)))] : null;
-  const noDetail = hasTarget && !task && !['loading', 'refreshing', 'stale', 'degraded', 'disconnected', 'error'].includes(state.status);
+  // `idle` es una lectura pausada (consulta deshabilitada), no una respuesta de Core: no se afirma que Core no devolvió nada.
+  const paused = hasTarget && !task && state.status === 'idle';
+  const noDetail = hasTarget && !task && !['idle', 'loading', 'refreshing', 'stale', 'degraded', 'disconnected', 'error'].includes(state.status);
   const health = visible ? readHealth(state) : null;
 
   // Al navegar por un ID durable desde el propio detalle, el foco pasa al encabezado de la nueva Task en vez de
@@ -328,8 +331,13 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
     pendingFocus.current = null;
     if (pending && pending.projectId === projectId && pending.taskId === taskId) headingRef.current?.focus();
   }, [projectId, taskId]);
+  // El foco solo se programa si el dueño de la navegación confirma explícitamente (`true`) que aceptó ese target
+  // exacto; cualquier otro retorno (rechazo, ignorado, sin confirmación) limpia el pendiente para que una
+  // selección externa posterior al mismo target no robe el foco.
   const navigate = typeof onNavigate === 'function'
-    ? (target) => { pendingFocus.current = target; onNavigate(target); }
+    ? (target) => {
+      pendingFocus.current = onNavigate(target) === true ? target : null;
+    }
     : undefined;
   const refreshable = verified && state.status === 'ready' && state.retry;
 
@@ -359,6 +367,14 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
       )}
 
       <Banner state={state} hasData={Boolean(visible)} projectId={projectId} taskId={taskId} />
+
+      {paused && (
+        <div className="twk__banner" role="status">
+          <strong>Lectura pausada</strong>
+          <span>La consulta del detalle está inactiva; todavía no se ha pedido ni recibido nada de Core para este target.</span>
+          <span className="twk__hint">Target: Project <code className="twk__mono">{projectId}</code> · Task <code className="twk__mono">{taskId}</code></span>
+        </div>
+      )}
 
       {noDetail && (
         <div className="twk__banner twk__banner--error" role="alert">

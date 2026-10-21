@@ -572,13 +572,33 @@ describe('TaskWorkspace · target sin detalle y errores inesperados (LXO-98)', (
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('task: null y lectura inactiva (idle) con target tampoco quedan en blanco', () => {
+  it('task: null con target tampoco queda en blanco', () => {
     const { unmount } = render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={{ status: 'ready', data: { v: 1, task: null } }} />);
     expect(screen.getByRole('alert').textContent).toContain('Core no devolvió el detalle de la Task');
     unmount();
 
-    render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" />);
-    expect(screen.getByRole('alert').textContent).toContain('Core no devolvió el detalle de la Task');
+  });
+
+  it('lectura inactiva (idle) con target: estado pausado, sin afirmar que Core no devolvió detalle ni ofrecer reintento', () => {
+    const retry = vi.fn();
+    const { unmount } = render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" />);
+    for (const detail of [undefined, { status: 'idle', data: null, error: null, reason: null, updatedAt: null, retry }]) {
+      if (detail) { unmount(); render(<TaskWorkspaceView projectId={PROJECT_ID} taskId="task-root" detail={detail} />); }
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('status').textContent).toContain('Lectura pausada');
+      expect(document.body.textContent).not.toContain('Core no devolvió');
+      expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
+      expect(screen.queryByRole('region', { name: 'Identidad' })).toBeNull();
+      expect(document.querySelector('.twk').getAttribute('data-state')).toBe('idle');
+    }
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('TaskWorkspace con enabled=false queda pausado y no consulta Core', () => {
+    render(<TaskWorkspace projectId={PROJECT_ID} taskId="task-root" enabled={false} />);
+    expect(screen.getByRole('status').textContent).toContain('Lectura pausada');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(queryAdeCore).not.toHaveBeenCalled();
   });
 
   it('un error que no es string no rompe el render ni se muestra como código inventado', () => {
@@ -633,8 +653,8 @@ describe('TaskWorkspace · relaciones y navegación por ID (LXO-98)', () => {
     expect(field('Identidad', 'Tipo').textContent).toBe('Hija');
   });
 
-  it('tras navegar por un enlace el foco pasa al encabezado de la nueva Task', () => {
-    const onNavigate = vi.fn();
+  it('tras navegar por un enlace aceptado el foco pasa al encabezado de la nueva Task', () => {
+    const onNavigate = vi.fn(() => true);
     const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={onNavigate} />;
     const { rerender } = render(view(taskFixture()));
 
@@ -649,6 +669,19 @@ describe('TaskWorkspace · relaciones y navegación por ID (LXO-98)', () => {
     expect(document.activeElement).toBe(heading);
   });
 
+  it('sin confirmación explícita (undefined, false, truthy no booleano) el foco no se programa', () => {
+    for (const result of [undefined, false, 'ok', 1]) {
+      const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={() => result} />;
+      const { rerender, unmount } = render(view(taskFixture()));
+      const link = screen.getByRole('button', { name: 'Abrir Task hija task-child-a' });
+      link.focus();
+      fireEvent.click(link);
+      rerender(view(childFixture()));
+      expect(document.activeElement).not.toBe(screen.getByRole('heading', { level: 2, name: 'Hija A' }));
+      unmount();
+    }
+  });
+
   it('si el shell ignora la navegación o el cambio viene de fuera, el foco no se mueve', () => {
     const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={vi.fn()} />;
     const { rerender } = render(view(taskFixture()));
@@ -658,6 +691,23 @@ describe('TaskWorkspace · relaciones y navegación por ID (LXO-98)', () => {
 
     rerender(view(taskFixture({ title: 'Refresco' })));
     expect(document.activeElement).toBe(link);
+  });
+
+  it('navegación rechazada y selección externa posterior al mismo target: el pendiente se limpió y no roba el foco', () => {
+    const onNavigate = vi.fn(() => false);
+    const view = (task) => <TaskWorkspaceView projectId={PROJECT_ID} taskId={task.id} detail={stateFixture(task)} onNavigate={onNavigate} />;
+    const { rerender } = render(view(taskFixture()));
+    const link = screen.getByRole('button', { name: 'Abrir Task hija task-child-a' });
+    link.focus();
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(link);
+
+    // Más tarde, una selección externa llega exactamente al target que se había intentado abrir.
+    rerender(view(childFixture()));
+    expect(screen.getByRole('heading', { level: 2, name: 'Hija A' })).toBeTruthy();
+    expect(document.activeElement).not.toBe(screen.getByRole('heading', { level: 2, name: 'Hija A' }));
+    expect(document.activeElement).toBe(document.body);
   });
 });
 

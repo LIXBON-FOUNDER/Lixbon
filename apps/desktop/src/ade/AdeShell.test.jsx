@@ -97,6 +97,31 @@ describe('AdeShell · Task Workspace como canvas e Inspector', () => {
     expect(screen.queryByRole('region', { name: /Attention/i })).toBeNull();
   });
 
+  it('navegar a una Task hija del mismo Project confirma la aceptación, selecciona el ID exacto y mueve el foco al encabezado', async () => {
+    const CHILD = { ...ITEM, id: 'task-uuid-child', parent_id: ITEM.id, title: 'Hija Real' };
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
+      if (query === 'tasks_by_project') return { v: 1, project_id: PROJECT.id, filters: { status: 'active' }, limit: 50, tasks: [ITEM], has_more: false, next_cursor: null };
+      if (query === 'task_detail') {
+        return args.taskId === CHILD.id
+          ? detailOf({ ...CHILD, root_id: ITEM.id, child_ids: [] })
+          : detailOf({ child_ids: [CHILD.id] });
+      }
+      if (query === 'attention_list') return attentionPage([]);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+    await pickTask();
+    await screen.findAllByRole('region', { name: 'Identidad' });
+
+    fireEvent.click(screen.getAllByRole('button', { name: `Abrir Task hija ${CHILD.id}` })[0]);
+
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: CHILD.id });
+    const headings = await screen.findAllByRole('heading', { level: 2, name: 'Hija Real' });
+    expect(headings).toHaveLength(2);
+    expect(headings).toContain(document.activeElement);
+  });
+
   it('entrega a Activity exactamente los IDs seleccionados', async () => {
     core(detailOf());
     const onOpenTaskActivity = vi.fn();
