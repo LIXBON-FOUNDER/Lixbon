@@ -18,7 +18,7 @@ beforeAll(() => registerBuiltinCommands());
 beforeEach(() => {
   localStorage.clear();
   resetBindings();
-  useWorkbenchStore.setState({ mode: 'editor', jumpPaletteOpen: false });
+  useWorkbenchStore.setState({ mode: 'editor', orchView: 'ade', jumpPaletteOpen: false });
   useAppStore.setState({ quickOpen: false, commandPalette: false });
 });
 afterEach(() => resetBindings());
@@ -76,6 +76,38 @@ describe('Jump Palette · atajo configurable', () => {
     await flush();
     useWorkbenchStore.getState().setMode('editor');
     expect(jumpOpen()).toBe(false);
+  });
+
+  it('no persiste la apertura cuando Orchestrator no tiene ADE activo ni la muestra al entrar después', () => {
+    useWorkbenchStore.setState({ mode: 'orch', orchView: 'executions', jumpPaletteOpen: false });
+
+    getCommand(JUMP).run();
+    expect(jumpOpen()).toBe(false);
+
+    useWorkbenchStore.getState().setOrchView('ade');
+    expect(jumpOpen()).toBe(false);
+  });
+
+  it('cierra la paleta al salir de ADE y conserva el cierre al volver', () => {
+    useWorkbenchStore.setState({ mode: 'orch', orchView: 'ade', jumpPaletteOpen: false });
+
+    getCommand(JUMP).run();
+    expect(jumpOpen()).toBe(true);
+
+    useWorkbenchStore.getState().setOrchView('executions');
+    expect(jumpOpen()).toBe(false);
+    useWorkbenchStore.getState().setOrchView('ade');
+    expect(jumpOpen()).toBe(false);
+  });
+
+  it('desde otro modo entra a ADE antes de abrir la paleta', () => {
+    useWorkbenchStore.setState({ mode: 'editor', orchView: 'executions', jumpPaletteOpen: false });
+
+    getCommand(JUMP).run();
+
+    expect(useWorkbenchStore.getState().mode).toBe('orch');
+    expect(useWorkbenchStore.getState().orchView).toBe('ade');
+    expect(jumpOpen()).toBe(true);
   });
 
   it('se puede reasignar con el mismo mecanismo de overrides y deja libre el chord anterior', async () => {

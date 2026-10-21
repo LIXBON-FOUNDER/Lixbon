@@ -24,6 +24,16 @@ function orderMatches(items, query) {
   return [...primary, ...metadata];
 }
 
+function isRestorableFocusTarget(target) {
+  if (!(target instanceof HTMLElement) || !target.isConnected || target.matches(':disabled')) return false;
+  for (let node = target; node; node = node.parentElement) {
+    if (node.hasAttribute('hidden') || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true') return false;
+    const style = window.getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden') return false;
+  }
+  return true;
+}
+
 // Clave de resultado de un destino recordado (misma identidad durable que usan los resultados).
 function recentResultKey(recent) {
   if (recent?.kind === 'project') return resultKey('project', asText(recent.projectId), asText(recent.projectId));
@@ -172,6 +182,7 @@ export function JumpPalette({
   const noticeActionRef = useRef(null);
   const handlersRef = useRef({});
   const returnFocusRef = useRef(null);
+  const restoreFocusRequestedRef = useRef(false);
   const lastQueryRef = useRef(query);
   const initializedRef = useRef(false);
   const [activeKey, setActiveKey] = useState(null);
@@ -192,7 +203,7 @@ export function JumpPalette({
     ? 'Cargando resultados…'
     : results.length === 0
       ? 'Sin resultados para esta búsqueda.'
-      : `${results.length} ${results.length === 1 ? 'resultado' : 'resultados'} · ↑↓ mover · Home/End ir al inicio/final · Enter abrir · Esc cerrar`;
+      : `${results.length} ${results.length === 1 ? 'resultado' : 'resultados'} · ↑↓ mover · Ctrl+Home/End ir al inicio/final · Enter abrir · Esc cerrar`;
   const statusMessage = note ? `${baseMessage} ${note}` : baseMessage;
   const listId = `${uid}-results`;
   const headingId = `${uid}-heading`;
@@ -202,10 +213,15 @@ export function JumpPalette({
   useEffect(() => {
     if (!open) return undefined;
     returnFocusRef.current = document.activeElement;
+    restoreFocusRequestedRef.current = false;
     inputRef.current?.focus();
     return () => {
       const restore = returnFocusRef.current;
-      if (restore instanceof HTMLElement && restore.isConnected && !dialogRef.current?.contains(restore)) {
+      const active = document.activeElement;
+      const focusStayedWithPalette = active === document.body || active === document.documentElement
+        || !active?.isConnected || Boolean(dialogRef.current?.contains(active));
+      if (restoreFocusRequestedRef.current && focusStayedWithPalette && isRestorableFocusTarget(restore)
+        && !dialogRef.current?.contains(restore)) {
         restore.focus();
       }
     };
@@ -242,12 +258,16 @@ export function JumpPalette({
     const entry = current.find((item) => item.key === key);
     if (!entry || typeof navigate !== 'function') return;
     if (navigate(entry.target) === false) return;
+    restoreFocusRequestedRef.current = true;
     dismiss?.();
   }, []);
 
   if (!open) return null;
 
-  const close = () => onClose?.();
+  const close = () => {
+    restoreFocusRequestedRef.current = true;
+    onClose?.();
+  };
   const handleKeyDown = (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -269,10 +289,10 @@ export function JumpPalette({
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
       if (results.length) setActiveKey(results[Math.max(activeIndex < 0 ? results.length - 1 : activeIndex - 1, 0)]?.key);
-    } else if (event.key === 'Home') {
+    } else if (event.key === 'Home' && event.ctrlKey) {
       event.preventDefault();
       setActiveKey(results[0]?.key ?? null);
-    } else if (event.key === 'End') {
+    } else if (event.key === 'End' && event.ctrlKey) {
       event.preventDefault();
       setActiveKey(results.at(-1)?.key ?? null);
     } else if (event.key === 'Enter') {

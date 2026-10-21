@@ -88,14 +88,17 @@ const dedupe = (items, keyOf) => {
   });
 };
 
-// `status` es el estado agregado del Project (failed · attention · active · idle); `state` solo dice si está
-// activo o archivado y nunca se usa como estado agregado.
-function normalizeProject(project) {
-  const id = text(project.id);
+function projectMachines(project) {
   const machines = (Array.isArray(project.locations) ? project.locations : [])
     .map((location) => text(location?.machine))
     .filter(Boolean);
-  const hosts = [...new Set(machines)];
+  return [...new Set(machines)];
+}
+
+// `status` es el estado agregado del Project; `state` solo indica si está activo o archivado.
+function normalizeProject(project) {
+  const id = text(project.id);
+  const hosts = projectMachines(project);
   const status = text(project.status);
   return {
     id,
@@ -104,14 +107,13 @@ function normalizeProject(project) {
     facts: [
       `Estado ${status || NOT_REPORTED}`,
       ...(text(project.state) === 'archived' ? ['Archivado'] : []),
-      hosts.length ? `Host ${hosts.join(', ')}` : `Host/origen ${NOT_REPORTED}`,
+      hosts.length ? `Host ${hosts.join(', ')}` : `Ubicación/host del Project ${NOT_REPORTED}`,
     ],
   };
 }
 
-function normalizeTask(projectId, task) {
-  const host = text(task.host);
-  const origin = text(task.origin);
+function normalizeTask(projectId, task, project) {
+  const hosts = projectMachines(project);
   return {
     id: text(task.id),
     projectId,
@@ -119,7 +121,7 @@ function normalizeTask(projectId, task) {
     branch: text(task.branch),
     facts: [
       `Estado ${text(task.status) || NOT_REPORTED}`,
-      host || origin ? `Host/origen ${[host, origin].filter(Boolean).join(' / ')}` : `Host/origen ${NOT_REPORTED}`,
+      hosts.length ? `Ubicación/host del Project ${hosts.join(', ')}` : `Ubicación/host del Project ${NOT_REPORTED}`,
     ],
   };
 }
@@ -208,6 +210,7 @@ export async function loadJumpPaletteResults({ previous = EMPTY_RESULTS, initial
         : 'No se pudieron leer los Projects.');
       return;
     }
+    const sourceProjects = new Map(overview.projects.map((project) => [text(project.id), project]));
     draft.projects = dedupe(overview.projects.map(normalizeProject).filter((project) => project.id), (project) => project.id);
     draft.progress = { done: 0, total: draft.projects.length };
     progressive();
@@ -217,7 +220,7 @@ export async function loadJumpPaletteResults({ previous = EMPTY_RESULTS, initial
     await mapBounded(draft.projects, PALETTE_CONCURRENCY, async (project) => {
       const result = await readPages(
         (cursor) => read('tasks_by_project', { projectId: project.id, status: PALETTE_TASK_STATUS, cursor }),
-        (page) => page.tasks.map((task) => normalizeTask(project.id, task)),
+        (page) => page.tasks.map((task) => normalizeTask(project.id, task, sourceProjects.get(project.id))),
         { maxPages: MAX_TASK_PAGES_PER_PROJECT, shouldStop: () => !isAlive() },
       );
       if (!isAlive()) return;
