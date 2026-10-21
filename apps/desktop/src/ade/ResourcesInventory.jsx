@@ -524,7 +524,8 @@ function InventoryStatus({ status, onRetry }) {
       >
         {notice.text}
       </p>
-      {message && (
+      {/* En espera (plazo sin foto) el código de plazo no aporta nada: no se muestra el detalle. */}
+      {message && !waiting && (
         <details className="resinv__status-detail" data-testid="resinv-status-detail">
           <summary>Detalle técnico</summary>
           <code>{message}</code>
@@ -532,7 +533,8 @@ function InventoryStatus({ status, onRetry }) {
       )}
       {RETRYABLE_STATUS.has(state) && typeof onRetry === 'function' && (
         inFlight
-          ? <button type="button" className="resinv__retry" disabled data-testid="resinv-retry">{WAITING_RETRY_TEXT}</button>
+          // aria-disabled (y no disabled) para que siga siendo enfocable y se lea su motivo; el click no reintenta.
+          ? <button type="button" className="resinv__retry" aria-disabled="true" onClick={(event) => event.preventDefault()} data-testid="resinv-retry">{WAITING_RETRY_TEXT}</button>
           : <button type="button" className="resinv__retry" onClick={onRetry} data-testid="resinv-retry">Reintentar</button>
       )}
     </div>

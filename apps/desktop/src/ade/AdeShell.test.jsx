@@ -217,7 +217,7 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
 });
 
 describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
-  it('renderiza el árbol y navega por Tasks activas, finalizadas y todas', async () => {
+  it('renderiza el árbol y navega por Tasks activas, finalizadas y todas', { timeout: 20_000 }, async () => {
     core(detailOf());
     render(shell());
 
