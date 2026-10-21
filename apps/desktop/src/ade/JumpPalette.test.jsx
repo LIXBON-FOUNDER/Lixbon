@@ -43,7 +43,7 @@ describe('JumpPalette', () => {
         onNavigate={onNavigate}
         projects={[{ id: 'project-a', name: 'Workspace Alpha' }]}
         tasks={[{ id: 'task-a', projectId: 'project-b', title: 'Ship auth', branch: 'feat/auth-flow' }]}
-        attention={[{ projectId: 'project-c', taskId: 'task-c', title: 'Review diff' }]}
+        attention={[{ id: 'att-c', projectId: 'project-c', targetKind: 'task', targetId: 'task-c', title: 'Review diff' }]}
       />,
     );
 
@@ -236,7 +236,7 @@ describe('JumpPalette', () => {
         initialOpen={false}
         onNavigate={onNavigate}
         onClose={onClose}
-        attention={[{ projectId: 'project-3', taskId: 'task-3', title: 'Review this diff' }]}
+        attention={[{ id: 'att-3', projectId: 'project-3', targetKind: 'task', targetId: 'task-3', title: 'Review this diff' }]}
       />,
     );
 
@@ -253,7 +253,7 @@ describe('JumpPalette', () => {
 
     fireEvent.click(screen.getByRole('option', { name: /Review this diff/ }));
     expect(onNavigate).toHaveBeenCalledTimes(1);
-    expect(onNavigate).toHaveBeenCalledWith({ kind: 'attention', projectId: 'project-3', taskId: 'task-3' });
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'attention', attentionId: 'att-3', targetKind: 'task', targetId: 'task-3', projectId: 'project-3' });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(trigger);
 
@@ -263,5 +263,111 @@ describe('JumpPalette', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+  it('keeps the palette open when onNavigate rejects, announces the notice, and reaches its action with Tab', () => {
+    const onNavigate = vi.fn(() => false);
+    const onClose = vi.fn();
+    const onAction = vi.fn();
+    render(
+      <JumpPalette
+        open
+        query=""
+        onQueryChange={vi.fn()}
+        tasks={[{ id: 'task-1', projectId: 'project-1', title: 'Task One' }]}
+        onNavigate={onNavigate}
+        onClose={onClose}
+        notice={{ message: 'La Task task-1 ya no está en Core.', actionLabel: 'Actualizar resultados', onAction }}
+      />,
+    );
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    expect(screen.getByRole('alert').textContent).toContain('La Task task-1 ya no está');
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    const action = screen.getByRole('button', { name: 'Actualizar resultados' });
+    const closeButton = screen.getByRole('button', { name: 'Cerrar Jump Palette' });
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(document.activeElement).toBe(action);
+    fireEvent.keyDown(action, { key: 'Tab' });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(closeButton, { key: 'Tab' });
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(closeButton);
+
+    fireEvent.click(action);
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('shows display-only facts without searching them and appends the status note', () => {
+    render(
+      <Harness
+        projects={[{ id: 'project-a', name: 'Alpha', facts: ['Estado active', 'Host/origen no informado'] }]}
+        tasks={[{ id: 'task-a', projectId: 'project-a', title: 'Ship', facts: ['Estado running'] }]}
+      />,
+    );
+    expect(screen.getByRole('option', { name: /Alpha/ }).textContent).toContain('Host/origen no informado');
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    fireEvent.change(input, { target: { value: 'running' } });
+    expect(screen.queryByRole('option')).toBeNull();
+  });
+
+  it('exposes the exact Attention target (id, kind, target id, project) and keeps focus while results change in the background', () => {
+    const onNavigate = vi.fn();
+    const attention = [{ id: 'att-9', projectId: '', targetKind: 'spawn_request', targetId: 'pend-1', title: 'Approve spawn' }];
+    const { rerender } = render(<Harness attention={attention} onNavigate={onNavigate} />);
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    expect(document.activeElement).toBe(input);
+
+    rerender(<Harness attention={[...attention, { id: 'att-10', targetKind: 'task', targetId: 't', projectId: 'p', title: 'Other' }]} onNavigate={onNavigate} />);
+    expect(document.activeElement).toBe(input);
+    expect(activeOption(input).textContent).toContain('Approve spawn');
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'attention', attentionId: 'att-9', targetKind: 'spawn_request', targetId: 'pend-1', projectId: null });
+  });
+});
+
+describe('JumpPalette · recientes', () => {
+  const projects = [{ id: 'p-1', name: 'Alpha' }, { id: 'p-2', name: 'Beta' }];
+  const tasks = [{ id: 't-1', projectId: 'p-1', title: 'Primera' }, { id: 't-2', projectId: 'p-1', title: 'Segunda' }];
+  const recents = [
+    { kind: 'task', projectId: 'p-1', taskId: 't-2' },
+    { kind: 'task', projectId: 'p-9', taskId: 't-2' }, // obsoleto: no está en los resultados
+    { kind: 'project', projectId: 'p-2' },
+    { kind: 'task', projectId: 'p-1', taskId: 't-2' }, // repetido
+  ];
+  const renderPalette = (query = '', onNavigate = vi.fn()) => render(
+    <JumpPalette open query={query} onQueryChange={vi.fn()} projects={projects} tasks={tasks} recents={recents} onNavigate={onNavigate} onClose={vi.fn()} />,
+  );
+
+  it('sin búsqueda muestra primero los que siguen existiendo, en orden y sin repetirlos en sus grupos', () => {
+    const onNavigate = vi.fn();
+    renderPalette('', onNavigate);
+
+    const groupNames = screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'));
+    expect(groupNames).toEqual(['Recientes', 'Projects', 'Tasks']);
+    const recent = within(screen.getByRole('group', { name: 'Recientes' })).getAllByRole('option');
+    expect(recent.map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Segunda'),
+      expect.stringContaining('Beta'),
+    ]);
+    expect(within(screen.getByRole('group', { name: 'Projects' })).getAllByRole('option')).toHaveLength(1);
+    expect(within(screen.getByRole('group', { name: 'Tasks' })).getAllByRole('option')).toHaveLength(1);
+
+    const input = screen.getByRole('combobox', { name: 'Buscar Projects, Tasks y Attention' });
+    expect(activeOption(input)).toBe(recent[0]);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'p-1', taskId: 't-2' });
+  });
+
+  it('con una búsqueda vuelve a los grupos normales', () => {
+    renderPalette('Segunda');
+    expect(screen.queryByRole('group', { name: 'Recientes' })).toBeNull();
+    expect(within(screen.getByRole('group', { name: 'Tasks' })).getAllByRole('option')).toHaveLength(1);
   });
 });
