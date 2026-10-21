@@ -173,6 +173,27 @@ export function toProjectSummary(project) {
   };
 }
 
+function toProjectViewSummary(project) {
+  if (!project) return null;
+  const summary = { id: project.id, projectId: project.id };
+  for (const field of ['name', 'state', 'status', 'counts', 'locations']) {
+    if (Object.hasOwn(project, field)) summary[field] = project[field];
+  }
+  return summary;
+}
+
+function selectedProjectQueryState(overview, project, projectId) {
+  if (overview.status === 'empty') return 'empty';
+  if (overview.status === 'stale' || overview.status === 'refreshing') return 'stale';
+  if (['error', 'disconnected', 'degraded'].includes(overview.status)) return 'error';
+  if (overview.status === 'ready') {
+    return project && project.id === projectId ? 'ready' : 'unknown';
+  }
+  return 'unknown';
+}
+
+/** @typedef {{id: string, projectId: string, name?: string, state?: string, status?: string, counts?: object, locations?: object[]}} ProjectViewSummary */
+
 /**
  * @typedef {object} TaskSummary
  * @property {string} taskId ID durable de la Task; es la identidad.
@@ -893,6 +914,8 @@ function ProjectTasks({
  * @param {(summary: ProjectSummary) => void} [props.onSelectProject] Se invoca al activar una fila de Project.
  * @param {(summary: TaskSummary | null, context?: {projectId: string, taskId: string | null}) => void} [props.onSelectTask]
  *   Se invoca al activar una Task; al cambiar a otro Project sin conservarla, con `null` y el contexto nuevo.
+ * @param {(snapshot: {projectId: string|null, queryState: 'ready'|'stale'|'error'|'empty'|'unknown', project: ProjectViewSummary|null, error: string|null}) => void} [props.onProjectSnapshot]
+ *   Publica la metadata del Project que coincide con la selección controlada y el estado de su overview.
  * @returns {import('react').ReactElement}
  */
 export function ProjectsSidebar({
@@ -904,6 +927,7 @@ export function ProjectsSidebar({
   onExpandedChange,
   onSelectProject,
   onSelectTask,
+  onProjectSnapshot,
 }) {
   const headingId = useId();
   const statusFilterName = useId();
@@ -1179,6 +1203,17 @@ export function ProjectsSidebar({
   };
 
   const selectedProject = projects.find((project) => project.id === selected.projectId);
+  const projectViewSummary = useMemo(() => toProjectViewSummary(selectedProject), [selectedProject]);
+  const projectQueryState = selectedProjectQueryState(overview, selectedProject, selected.projectId);
+  useEffect(() => {
+    onProjectSnapshot?.({
+      projectId: selected.projectId,
+      queryState: projectQueryState,
+      project: projectViewSummary,
+      error: overview.error ?? null,
+    });
+  }, [onProjectSnapshot, overview.error, projectQueryState, projectViewSummary, selected.projectId]);
+
   const selectedProjectMissing = Boolean(selected.projectId) && ['ready', 'empty'].includes(overview.status) && !selectedProject;
   const unassignedTasks = overview.data?.unassigned?.tasks;
   const isEmpty = overview.status === 'empty';

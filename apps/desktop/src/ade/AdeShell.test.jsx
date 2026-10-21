@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { AdeShell } from './AdeShell';
 import { queryAdeCore } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 // Vitest omite CSS por defecto; cargar las fuentes mantiene sus reglas reales en esta prueba.
-const adeShellStyles = readFileSync(new URL('./AdeShell.css', import.meta.url), 'utf8');
-const orchStyles = readFileSync(new URL('../styles/orch.css', import.meta.url), 'utf8');
+const sourceRoot = [resolve(process.cwd(), 'src'), resolve(process.cwd(), 'apps/desktop/src')]
+  .find((candidate) => existsSync(resolve(candidate, 'ade/AdeShell.css')));
+if (!sourceRoot) throw new Error('No se encontró el origen de CSS de ADE desde el directorio actual.');
+const adeShellStyles = readFileSync(resolve(sourceRoot, 'ade/AdeShell.css'), 'utf8');
+const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 
 // Solo se sustituye el transporte; los códigos y constantes del contrato son los reales.
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
@@ -37,7 +41,8 @@ function core(detail, { attention = () => attentionPage([]) } = {}) {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
     if (query === 'tasks_by_project') return {
       v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
-      tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+      tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : args.status === 'final' ? [FINAL_ITEM] : [ITEM],
+      has_more: false, next_cursor: null,
     };
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
@@ -60,9 +65,8 @@ const shell = (props = {}) => (
 let adeShellStyleElement;
 
 const pickTask = async () => {
-  fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
-  const taskNav = await screen.findByRole('region', { name: `Tasks del Project ${PROJECT.id}` });
-  fireEvent.click(await within(taskNav).findByRole('button', { name: 'Task Real' }));
+  fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+  fireEvent.click(await screen.findByRole('treeitem', { name: /Task Real/ }));
 };
 
 beforeEach(() => {
@@ -113,11 +117,11 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
     }));
 
     const projectsRegion = await screen.findByRole('region', { name: 'Projects y Tasks' });
-    expect(within(projectsRegion).getAllByRole('button', { name: /^Repo / })).toHaveLength(32);
-    fireEvent.click(within(projectsRegion).getByRole('button', { name: 'Repo 0' }));
-    const tasksRegion = await screen.findByRole('region', { name: 'Tasks del Project project-0' });
-    await within(tasksRegion).findByRole('button', { name: 'Task 49' });
-    expect(within(tasksRegion).getAllByRole('button', { name: /^Task / })).toHaveLength(50);
+    const tree = await within(projectsRegion).findByRole('tree', { name: 'Projects y Tasks del Core' });
+    expect(within(tree).getAllByRole('treeitem', { name: /^Repo / })).toHaveLength(32);
+    fireEvent.click(within(tree).getByRole('treeitem', { name: /Repo 0/ }));
+    await within(tree).findByRole('treeitem', { name: /Task 49/ });
+    expect(within(tree).getAllByRole('treeitem', { name: /^Task / })).toHaveLength(50);
 
     const operationRegion = screen.getByRole('region', { name: 'Navegación de Operación' });
     expect(within(operationRegion).getByRole('button', { name: 'Aprobar spawn pendiente' })).toBeTruthy();
@@ -148,12 +152,66 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
   });
 });
 
+describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
+  it('renderiza el árbol y navega por Tasks activas, finalizadas y todas', async () => {
+    core(detailOf());
+    render(shell());
+
+    const tree = await screen.findByRole('tree', { name: 'Projects y Tasks del Core' });
+    const projectRow = await within(tree).findByRole('treeitem', { name: /Repo Real/ });
+    expect(projectRow.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(projectRow);
+
+    expect(screen.getByRole('radio', { name: 'Activas' }).checked).toBe(true);
+    expect(await within(tree).findByRole('treeitem', { name: /Task Real/ })).toBeTruthy();
+    expect(within(tree).queryByRole('treeitem', { name: /Task Final/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Finalizadas' }));
+    expect(await within(tree).findByRole('treeitem', { name: /Task Final/ })).toBeTruthy();
+    expect(within(tree).queryByRole('treeitem', { name: /Task Real/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Todas' }));
+    expect(await within(tree).findByRole('treeitem', { name: /Task Real/ })).toBeTruthy();
+    expect(within(tree).getByRole('treeitem', { name: /Task Final/ })).toBeTruthy();
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project').map(([, args]) => args.status))
+      .toEqual(expect.arrayContaining(['active', 'final', 'all']));
+  });
+
+  it('mantiene la selección controlada por IDs durables y limpia Task al activar explícitamente su Project', async () => {
+    core(detailOf());
+    useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: ITEM.id } });
+    render(shell());
+
+    const tree = await screen.findByRole('tree', { name: 'Projects y Tasks del Core' });
+    const taskRow = await within(tree).findByRole('treeitem', { name: /Task Real/ });
+    expect(taskRow.getAttribute('aria-selected')).toBe('true');
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+
+    fireEvent.click(within(tree).getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+    expect(screen.queryByRole('heading', { level: 2, name: 'Task Real' })).toBeNull();
+  });
+
+  it('resuelve metadata para una selección externa y no duplica projects_overview en AdeShell', async () => {
+    core(detailOf());
+    useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+    render(shell());
+
+    const projectView = await screen.findByTestId('project-view');
+    await within(projectView).findByTestId('location-machine');
+    expect(within(projectView).getByTestId('location-machine').textContent).toBe('machine-real');
+    expect(within(projectView).getByTestId('location-path').textContent).toBe('C:/repos/repo-real');
+    expect(queryAdeCore.mock.calls.filter(([query]) => query === 'projects_overview')).toHaveLength(1);
+  });
+});
+
 describe('AdeShell · Project View (LXO-204)', () => {
   it('abre por el ID durable y muestra metadata real del overview, Tasks all y slices pendientes', async () => {
     core(detailOf(), { attention: () => attentionPage([att({ id: 'att-project-1' })]) });
     render(shell());
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
     const projectView = await screen.findByTestId('project-view');
     await within(projectView).findByTestId('location-machine');
     await within(projectView).findByTestId('attention-att-project-1');
@@ -196,7 +254,7 @@ describe('AdeShell · Project View (LXO-204)', () => {
     await flush();
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project')).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
     await flush();
     const taskCalls = () => queryAdeCore.mock.calls.filter(([query]) => query === 'tasks_by_project');
     const allReads = () => taskCalls().filter(([, args]) => args.status === 'all');
@@ -204,7 +262,7 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(allReads()).toHaveLength(1);
     expect(activeReads()).toHaveLength(1);
 
-    fireEvent.click(within(screen.getByRole('region', { name: `Tasks del Project ${PROJECT.id}` })).getByRole('button', { name: 'Task Real' }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /Task Real/ }));
     await flush();
     const allReadsAfterTaskSelection = allReads().length;
     const activeReadsAfterTaskSelection = activeReads().length;
@@ -220,7 +278,7 @@ describe('AdeShell · Project View (LXO-204)', () => {
     core(detailOf(), { attention: () => attentionPage([row]) });
     render(shell());
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
     fireEvent.click(await screen.findByTestId('open-attention-att-project-route'));
     await flush();
 
@@ -243,7 +301,7 @@ describe('AdeShell · Project View (LXO-204)', () => {
     });
     render(shell());
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
     const projectView = await screen.findByTestId('project-view');
     const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
     expect((await within(tasksRegion).findByRole('alert')).textContent).toContain('tasks_by_project_read_failed');
@@ -424,7 +482,7 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
     core(detailOf(), { attention: () => attentionPage([att()]) });
     const { rerender } = render(shell());
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
     await flush();
 
     // Subvista Workspace con un Project abierto: solo sondea la Attention del Project; el Inbox global ni se consulta.
@@ -526,9 +584,9 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
     });
     render(shell());
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: 'Repo Real' }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
     await flush();
-    fireEvent.click(within(screen.getByRole('region', { name: `Tasks del Project ${PROJECT.id}` })).getByRole('button', { name: 'Task Real' }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /Task Real/ }));
     await flush();
     fireEvent.click(screen.getAllByRole('button', { name: `Abrir Attention de la Task ${ITEM.id}` })[0]);
     await flush();
