@@ -171,6 +171,35 @@ describe('ActivityPanel', () => {
     expect(document.body.textContent).not.toContain('NO_INFERIR');
   });
 
+  it('traduce activity.unknown con fallback=true usando solo los args permitidos', async () => {
+    snapshot = readySnapshot([activity(7, {
+      kind: 'task.teleported',
+      message_key: 'activity.unknown',
+      fallback: true,
+      args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 2 },
+      payload: { message: 'NO_INFERIR' },
+    })], 1);
+    render(<ActivityPanel />);
+
+    expect((await screen.findByTestId('activity-message-event-7')).textContent)
+      .toBe('No se reconoce el evento «task.teleported» (versión 2, motivo: unknown_kind).');
+    expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBe('activity.unknown');
+    expect(document.body.textContent).not.toContain('NO_INFERIR');
+  });
+
+  it.each([
+    ['args fuera del contrato', { message_key: 'activity.unknown', args: { reason: 'unknown_kind' } }],
+    ['una clave conocida marcada fallback', { message_key: 'activity.task.created' }],
+    ['una clave ajena marcada fallback', { message_key: 'activity.future_event', args: { text: 'NO_INFERIR' } }],
+  ])('un fallback con %s conserva el texto genérico seguro', async (_name, overrides) => {
+    snapshot = readySnapshot([activity(7, { kind: 'future.event', fallback: true, ...overrides })], 1);
+    render(<ActivityPanel />);
+
+    expect((await screen.findByTestId('activity-message-event-7')).textContent).toBe('Evento desconocido');
+    expect(screen.getByTestId('activity-kind-event-7').textContent).toContain('future.event');
+    expect(document.body.textContent).not.toContain('NO_INFERIR');
+  });
+
   it('pagina con el cursor numérico exclusivo y elimina duplicados sin reordenar', async () => {
     snapshot = readySnapshot([activity(9), activity(8)], 1, { hasMore: true });
     mocks.listAdeActivity.mockResolvedValue(activityPage(

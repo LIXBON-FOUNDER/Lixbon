@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AdeShell } from './AdeShell';
 import { queryAdeCore } from './coreQueries';
 import { useWorkbenchStore } from '../store/workbenchStore';
 
 // Vitest omite CSS por defecto; cargar las fuentes mantiene sus reglas reales en esta prueba.
-const adeShellStyles = readFileSync(new URL('./AdeShell.css', import.meta.url), 'utf8');
-const orchStyles = readFileSync(new URL('../styles/orch.css', import.meta.url), 'utf8');
+// Con `--environment jsdom` el `URL` global no es el de Node y `readFileSync(new URL(...))` falla: se resuelve por ruta.
+const here = dirname(fileURLToPath(import.meta.url));
+const adeShellStyles = readFileSync(resolve(here, 'AdeShell.css'), 'utf8');
+const orchStyles = readFileSync(resolve(here, '../styles/orch.css'), 'utf8');
 
 // Solo se sustituye el transporte; los códigos y constantes del contrato son los reales.
 vi.mock('./coreQueries', async (importOriginal) => ({ ...(await importOriginal()), queryAdeCore: vi.fn() }));
@@ -275,7 +279,7 @@ describe('AdeShell · Task Workspace como canvas e Inspector', () => {
     }
   });
 
-  it('Activity queda no disponible sin callback; Attention se sirve en el shell y no usa la AttentionList legacy', async () => {
+  it('Activity y Attention se sirven en el shell y no usan la AttentionList legacy', async () => {
     core(detailOf());
     render(shell());
     await pickTask();
@@ -284,11 +288,12 @@ describe('AdeShell · Task Workspace como canvas e Inspector', () => {
     const lists = screen.getAllByRole('list', { name: 'Contexto de la Task' });
     expect(lists).toHaveLength(2);
     for (const list of lists) {
-      const activity = list.querySelector('[data-context="activity"]');
-      expect(activity.getAttribute('data-available')).toBe('false');
-      expect(activity.textContent).toContain('No disponible: esta superficie todavía no está conectada');
-      expect(list.querySelector('[data-context="attention"]').getAttribute('data-available')).toBe('true');
-      expect(within(list).getAllByRole('button')).toHaveLength(1);
+      for (const key of ['activity', 'attention']) {
+        const entry = list.querySelector(`[data-context="${key}"]`);
+        expect(entry.getAttribute('data-available')).toBe('true');
+        expect(entry.textContent).not.toContain('No disponible');
+      }
+      expect(within(list).getAllByRole('button')).toHaveLength(2);
     }
     expect(screen.queryByRole('region', { name: /Attention/i })).toBeNull();
   });
@@ -407,9 +412,17 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
     fireEvent.keyDown(attentionTab, { key: 'Home' });
     expect(workspaceTab.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(workspaceTab);
+    const activityTab = within(tablist).getByRole('tab', { name: 'Activity' });
     fireEvent.keyDown(workspaceTab, { key: 'End' });
+    expect(activityTab.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(activityTab);
+    fireEvent.keyDown(activityTab, { key: 'ArrowRight' });
+    expect(workspaceTab.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(workspaceTab, { key: 'ArrowLeft' });
+    expect(activityTab.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(activityTab, { key: 'ArrowLeft' });
     expect(attentionTab.getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(attentionTab, { key: 'ArrowLeft' });
+    fireEvent.keyDown(attentionTab, { key: 'Home' });
     expect(workspaceTab.getAttribute('aria-selected')).toBe('true');
 
     // El canvas operativo (PTY/AgentPanel) no se remonta ni se oculta por cambiar de subvista.
@@ -608,5 +621,155 @@ describe('AdeShell · subvista Attention (LXO-100)', () => {
 
     fireEvent.click(document.querySelector('[data-attention-id="att_run"]'));
     expect(screen.getByText('El Run run-7 ya no está disponible en esta superficie.')).toBeTruthy();
+  });
+});
+
+// Activity (LXO-99): la subvista monta ActivityPanel con alcance derivado de los IDs durables seleccionados.
+const activityItem = (seq, over = {}) => ({
+  seq, event_id: `event-${seq}`, ts: 1_800_000_000_000 + seq, kind: 'task.created', v: 1, class: 'state',
+  message_key: 'activity.task.created', args: { title: `Tarea ${seq}`, agent: 'codex', depth: 0, external: false },
+  visual: 'info', fallback: false, target: { kind: 'task', id: ITEM.id }, project_id: PROJECT.id, run_id: 'run-1',
+  actor: { kind: 'system', id: null }, provenance: { channel: 'core', client_id: 'core-system' }, correlation_id: null, ...over,
+});
+const activityPage = (items) => ({
+  v: 1, projection: 1, order: 'desc', items, next_cursor: items.at(-1)?.seq ?? 0, has_more: false, head_seq: items[0]?.seq ?? 0, limit: 100,
+});
+function coreWithActivity(items = [activityItem(3)]) {
+  core(detailOf());
+  const base = queryAdeCore.getMockImplementation();
+  queryAdeCore.mockImplementation(async (query, args) => (query === 'activity_list' ? activityPage(items) : base(query, args)));
+}
+const activityCalls = () => queryAdeCore.mock.calls.filter(([query]) => query === 'activity_list').map(([, args]) => args);
+const openActivityTab = () => fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+const scopeButton = (name) => within(screen.getByRole('group', { name: 'Alcance de Activity' })).getByRole('button', { name });
+
+describe('AdeShell · subvista Activity (LXO-99)', () => {
+  it('monta ActivityPanel solo al abrir la subvista y consulta el alcance global sin selección', async () => {
+    coreWithActivity();
+    render(shell());
+    await flush();
+    expect(activityCalls()).toEqual([]);
+
+    openActivityTab();
+    await flush();
+
+    expect(await screen.findByTestId('activity-list')).toBeTruthy();
+    expect(activityCalls()).toEqual([{ cursor: 0, limit: 100, order: 'desc', projectId: null, runId: null, targetKind: null, targetId: null }]);
+    expect(scopeButton('Global').getAttribute('aria-pressed')).toBe('true');
+    expect(scopeButton('Project').disabled).toBe(true);
+    expect(scopeButton('Task').disabled).toBe(true);
+    expect(document.getElementById(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-controls')).hidden).toBe(false);
+  });
+
+  it('usa el Project seleccionado y permite pasar a Global sin perder la selección', async () => {
+    coreWithActivity();
+    render(shell());
+    fireEvent.click(await screen.findByRole('button', { name: 'Repo Real' }));
+    openActivityTab();
+    await flush();
+    await screen.findByTestId('activity-list');
+
+    expect(scopeButton('Project').getAttribute('aria-pressed')).toBe('true');
+    expect(activityCalls().at(-1)).toMatchObject({ projectId: PROJECT.id, targetKind: null, targetId: null });
+    expect(scopeButton('Task').disabled).toBe(true);
+    expect(screen.getByTestId('activity-scope-id').textContent).toBe(PROJECT.id);
+
+    fireEvent.click(scopeButton('Global'));
+    await flush();
+    expect(activityCalls().at(-1)).toMatchObject({ projectId: null, targetKind: null, targetId: null });
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+  });
+
+  it('el enlace Activity de la Task abre la subvista con alcance Task y llama al callback con los IDs exactos', async () => {
+    coreWithActivity();
+    const onOpenTaskActivity = vi.fn();
+    render(shell({ onOpenTaskActivity }));
+    await pickTask();
+    await screen.findAllByRole('region', { name: 'Identidad' });
+    const pty = screen.getByTestId('pty-sentinel');
+
+    fireEvent.click(screen.getAllByRole('button', { name: `Abrir Activity de la Task ${ITEM.id}` })[0]);
+    await flush();
+
+    expect(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-selected')).toBe('true');
+    expect(scopeButton('Task').getAttribute('aria-pressed')).toBe('true');
+    expect(activityCalls().at(-1)).toMatchObject({ projectId: null, targetKind: 'task', targetId: ITEM.id });
+    expect(onOpenTaskActivity.mock.calls).toEqual([[{ projectId: PROJECT.id, taskId: ITEM.id }]]);
+    expect(screen.getByTestId('pty-sentinel')).toBe(pty);
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: ITEM.id });
+  });
+
+  it('no sondea Activity al salir de la subvista ni con el ADE inactivo y conserva el canvas operativo', async () => {
+    vi.useFakeTimers();
+    coreWithActivity();
+    const { rerender } = render(shell());
+    openActivityTab();
+    await flush();
+    const pty = screen.getByTestId('pty-sentinel');
+    const initial = activityCalls().length;
+    expect(initial).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(activityCalls()).toHaveLength(initial);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    await flush();
+    rerender(shell({ active: false }));
+    await flush();
+    const afterInactive = activityCalls().length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(activityCalls()).toHaveLength(afterInactive);
+    expect(screen.getByTestId('pty-sentinel')).toBe(pty);
+  });
+
+  it('abre un Project desde un destino de Activity solo si existe en el overview, por su ID exacto', async () => {
+    coreWithActivity([activityItem(5, {
+      target: { kind: 'project', id: PROJECT.id },
+      kind: 'project.registered',
+      message_key: 'activity.project.registered',
+      args: { name: 'Repo Real', origin: 'auto' },
+    })]);
+    const onActivate = vi.fn();
+    render(shell({ onActivate }));
+    await flush();
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-5'));
+
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
+    expect(screen.getByRole('tab', { name: 'Workspace' }).getAttribute('aria-selected')).toBe('true');
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('no adivina el Project de una Task ajena: avisa y conserva la selección', async () => {
+    coreWithActivity([activityItem(5, { target: { kind: 'task', id: 'task-otra' } })]);
+    render(shell());
+    await flush();
+    openActivityTab();
+    await flush();
+
+    fireEvent.click(await screen.findByTestId('activity-target-event-5'));
+
+    expect(screen.getByText('La Task task-otra no se puede abrir desde Activity: el evento no identifica su Project.')).toBeTruthy();
+    expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
+    expect(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('muestra el texto seguro de un evento desconocido que Core marca fallback=true', async () => {
+    coreWithActivity([activityItem(9, {
+      kind: 'task.teleported',
+      message_key: 'activity.unknown',
+      fallback: true,
+      args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 1 },
+    })]);
+    render(shell());
+    await flush();
+    openActivityTab();
+    await flush();
+
+    expect((await screen.findByTestId('activity-message-event-9')).textContent)
+      .toBe('No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind).');
   });
 });
