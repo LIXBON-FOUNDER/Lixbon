@@ -6,6 +6,7 @@ import { RightDock } from '../layout/RightDock';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { AttentionInbox } from './AttentionInbox';
 import { JumpPaletteHost } from './JumpPaletteHost';
+import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { useCoreQuery } from './useCoreQuery';
 import './TaskWorkspace.css';
@@ -28,6 +29,47 @@ function describeCoreError(error) {
   if (/(_read_failed|_internal)/i.test(error)) return 'Core no pudo leer este dato.';
   if (/(disconnected|connection|transport|timeout|ipc.*closed)/i.test(error)) return 'No se pudo completar la conexión con Core.';
   return 'Core devolvió un error al leer este dato.';
+}
+
+function projectViewQueryState(query) {
+  if (query.status === 'ready' || query.status === 'empty') return 'ready';
+  if (query.status === 'loading' || query.status === 'refreshing') return 'loading';
+  if (query.status === 'stale' || query.status === 'degraded') return 'degraded';
+  if (query.status === 'error' || query.status === 'disconnected') return 'error';
+  return 'unavailable';
+}
+
+function projectViewSlice(query, items, { hasMore = false } = {}) {
+  const queryState = projectViewQueryState(query);
+  const state = queryState === 'ready' && hasMore ? 'partial' : queryState;
+  const canShowItems = ['ready', 'partial', 'loading', 'degraded'].includes(state);
+  const messages = [];
+  if (query.status === 'stale') {
+    messages.push(`Datos desactualizados; se conserva la última respuesta. ${query.error || ''}`.trim());
+  } else if (query.status === 'refreshing') {
+    messages.push('Actualizando desde Core.');
+  } else if (query.error) {
+    messages.push(query.error);
+  }
+  if (hasMore) messages.push('Core indica que hay más elementos después de esta página.');
+  return {
+    state,
+    items: canShowItems && Array.isArray(items) ? items : [],
+    ...(messages.length ? { message: messages.join(' ') } : {}),
+  };
+}
+
+function overviewUnavailableSlice(projects, subject) {
+  if (['ready', 'empty'].includes(projects.status)) {
+    return { state: 'unavailable', items: [], message: `El Project seleccionado no aparece en el overview activo de Core; no hay ${subject} autoritativos para mostrar.` };
+  }
+  return projectViewSlice(projects, []);
+}
+
+function locationLastSeen(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 function QueryFeedback({ state, subject }) {
@@ -159,6 +201,15 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     status: 'active',
     limit: 50,
   }, { enabled: Boolean(selectedProjectId) });
+  const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
+  const projectTasks = useCoreQuery('tasks_by_project', {
+    project_id: selectedProjectId,
+    status: 'all',
+    limit: 50,
+  }, { enabled: projectViewActive });
+  const projectAttention = useCoreQuery('attention_list', {
+    project_id: selectedProjectId,
+  }, { enabled: projectViewActive });
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
     task_id: selectedTaskId,
@@ -169,13 +220,65 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const selectedTaskMissingFromCompletePage = selectedTaskId && tasks.data && !tasks.data.has_more
     && !tasks.data.tasks.some((item) => item.id === selectedTaskId);
 
+  const overviewState = projectViewQueryState(projects);
+  const projectLocations = Array.isArray(selectedProject?.locations)
+    ? selectedProject.locations.map((location) => ({
+      machine: location.machine,
+      path: location.path,
+      primary: location.primary,
+      state: location.state,
+      last_seen: locationLastSeen(location.last_seen),
+    }))
+    : null;
+  const projectLocationSlice = projectLocations
+    ? projectViewSlice(projects, projectLocations)
+    : selectedProject
+      ? { state: overviewState === 'ready' ? 'unknown' : overviewState, items: [], message: 'Core no incluyó ubicaciones en el overview de este Project.' }
+      : overviewUnavailableSlice(projects, 'ubicaciones');
+  const projectCounts = selectedProject?.counts && typeof selectedProject.counts === 'object'
+    ? selectedProject.counts
+    : null;
+  const projectSummary = {
+    state: selectedProject
+      ? projectCounts ? overviewState : overviewState === 'ready' ? 'unknown' : overviewState
+      : overviewState === 'ready' ? 'unavailable' : overviewState,
+    counts: {
+      tasks: projectCounts?.tasks ?? null,
+      attempts: null,
+      attention: projectCounts?.attention?.total ?? null,
+      resources: null,
+    },
+    ...(!selectedProject
+      ? { message: 'El Project seleccionado no aparece en el overview activo de Core.' }
+      : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
+  };
+  const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
+    ? projectTasks.data.tasks.map((task) => ({ task_id: task.id, title: task.title, status: task.status }))
+    : [];
+  const projectTaskSlice = projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTasks.data?.has_more === true });
+  const projectAttentionItems = Array.isArray(projectAttention.data?.items)
+    ? projectAttention.data.items.map((item) => ({
+      attention_id: item.id,
+      kind: item.category,
+      ...(item.target_kind === 'task' ? { task_id: item.target_id } : {}),
+      ...(item.target_kind === 'attempt' ? { attempt_id: item.target_id } : {}),
+      project_id: item.project_id,
+    }))
+    : [];
+  const projectAttentionSlice = projectViewSlice(projectAttention, projectAttentionItems, { hasMore: projectAttention.data?.has_more === true });
+
   const selectProject = (projectId) => {
-    if (projectId !== selectedProjectId) {
+    if (projectId !== selectedProjectId || selectedTaskId !== null) {
       setAdeSelection({ projectId, taskId: null });
     }
+    setWorkspaceView('workspace');
     onActivate?.();
   };
-  const selectTask = (taskId) => { setAdeSelection({ projectId: selectedProjectId, taskId }); onActivate?.(); };
+  const selectTask = (taskId) => {
+    setAdeSelection({ projectId: selectedProjectId, taskId });
+    setWorkspaceView('workspace');
+    onActivate?.();
+  };
   const changeWorkspaceView = (view) => { setWorkspaceView(view); if (view !== 'attention') setAttentionNotice(null); };
 
   // Attention de un target: filtro por (kind + ID durable) resuelto por el Core, no por la página global.
@@ -189,6 +292,11 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const openTaskAttention = ({ projectId, taskId }) => {
     if (typeof taskId !== 'string' || !taskId.trim()) return;
     openAttentionFilter({ kind: 'task', id: taskId, projectId });
+  };
+  const openProjectAttention = (attentionId) => {
+    const item = projectAttention.data?.items.find((candidate) => candidate.id === attentionId);
+    if (!item || typeof item.target_kind !== 'string' || typeof item.target_id !== 'string' || !item.target_id.trim()) return;
+    openAttentionFilter({ kind: item.target_kind, id: item.target_id, projectId: item.project_id });
   };
   const clearAttentionTarget = useCallback(() => setAttentionTarget(null), []);
 
@@ -256,7 +364,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     project: selectedProject,
     // Devuelve `true` solo si aceptó el target exacto (mismo Project); el workspace usa esa confirmación para el foco.
     onNavigate: ({ projectId, taskId }) => {
-      if (projectId !== selectedProjectId || typeof taskId !== 'string' || !taskId.trim()) return false;
+      if (projectId !== selectedProjectId || typeof taskId !== 'string' || !taskId.trim() || taskId === selectedTaskId) return false;
       selectTask(taskId);
       return true;
     },
@@ -322,7 +430,22 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
               hidden={workspaceView !== 'workspace'}
             >
               {!selectedProjectId && <div className="ade__workspace-empty changes__empty">Selecciona un Project del Core.</div>}
-              {selectedProjectId && !selectedTaskId && <div className="ade__workspace-empty changes__empty">Selecciona una Task de este Project.</div>}
+              {selectedProjectId && !selectedTaskId && (
+                <div className="ade__task-overview scroll">
+                  <ProjectView
+                    projectId={selectedProjectId}
+                    projectName={selectedProject?.name}
+                    locations={projectLocationSlice}
+                    summary={projectSummary}
+                    tasks={projectTaskSlice}
+                    attention={projectAttentionSlice}
+                    activity={{ state: 'unavailable', items: [], message: 'Activity permanece en Backlog (LXO-92).' }}
+                    resources={{ state: 'unavailable', items: [], message: 'Resources permanece en Backlog (LXO-93).' }}
+                    onOpenTask={selectTask}
+                    onOpenAttention={openProjectAttention}
+                  />
+                </div>
+              )}
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   {selectedTaskMissingFromCompletePage && <div className="ade__notice" role="status">Esta Task ya no aparece en la lista de Tasks activas. La selección se conserva y el detalle refleja el estado actual del Core.</div>}
