@@ -99,10 +99,10 @@ export default function AttentionScreen({ obs, route }) {
   const now = obs.now;
   const f = list.filters;
 
-  // Filtro inicial que llega por la ruta (por ejemplo desde un Project de Home).
+  // Filtro inicial que llega por la ruta (desde un Project o una categoría de Home).
   React.useEffect(() => {
-    if (route?.projectId) setFilters({ ...EMPTY_FILTERS, project_id: route.projectId });
-  }, [route?.projectId, setFilters]);
+    if (route?.projectId || route?.category) setFilters({ ...EMPTY_FILTERS, project_id: route.projectId || null, category: route.category || null });
+  }, [route?.projectId, route?.category, setFilters]);
 
   const pick = async (title, key, options) => {
     const value = await sheet({

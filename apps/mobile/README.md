@@ -82,6 +82,15 @@ hasta validarla en dispositivo.
   - `actionGate` solo deja mandar algo en línea: ninguna acción futura puede
     aparentar éxito sin conexión.
 
+- **Inicio** (`screens/observe/HomeScreen.js`, `observe/home.js`, LXO-108):
+  el resumen operativo del IDE, sacado de la snapshot.
+  - Atención por categoría, trabajo activo global (el origen solo cuando es
+    un coordinador externo) y proyectos con su estado.
+  - Activas, fallidas y Attention se cuentan siempre por separado.
+  - Lo recortado se dice («y N más»), y se avisa si el Core del escritorio
+    está en solo lectura.
+  - Cada fila abre su pantalla por id; un proyecto enseña sus tareas activas
+    y su Attention.
 - **Atención** (`screens/observe/AttentionScreen.js`, `observe/attention.js`,
   LXO-109): la bandeja de Attention activa del Core, en su orden.
   - Filtros por proyecto, categoría y severidad; agrupación opcional por
