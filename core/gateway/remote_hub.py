@@ -30,8 +30,13 @@ HOST_GRACE_SECONDS = 45
 # guarda solo el último, que el controller recibe al conectar.
 STATE_EVENTS = frozenset({"orch"})
 # Respuestas a una petición puntual de un controller (diff, terminal…): se
-# reparten y se olvidan.
-EPHEMERAL_EVENTS = frozenset({"orch_diff", "orch_term", "orch_agents", "orch_error"})
+# reparten y se olvidan. `orch_core_snapshot` y `orch_core_events` son el
+# bootstrap observacional de Mobile (LXO-107): estado del Core que el relay no
+# guarda ni repite; el móvil las empareja por `rid`.
+EPHEMERAL_EVENTS = frozenset({
+    "orch_diff", "orch_term", "orch_agents", "orch_error",
+    "orch_core_snapshot", "orch_core_events",
+})
 
 HELLO_META_KEYS = (
     "source", "title", "machine", "mode", "model",

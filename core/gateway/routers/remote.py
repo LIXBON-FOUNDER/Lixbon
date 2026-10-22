@@ -64,7 +64,12 @@ AGENTS = ("lixbon", "claude")
 CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch", "config")
 # Lo que un controller puede pedirle al orquestador del host. El host vuelve a
 # validar cada acción: esto solo evita reenviar basura.
-ORCH_ACTIONS = ("refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents")
+# `core_snapshot` y `core_events` son lecturas del Core para el bootstrap de
+# Mobile (LXO-107); el IDE las hace con su propia identidad y no escriben nada.
+ORCH_ACTIONS = (
+    "refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents",
+    "core_snapshot", "core_events",
+)
 MAX_ORCH_ARGS = 4_000
 MAX_ATTACHMENTS = 6
 MAX_DOC_CHARS = 20_000
