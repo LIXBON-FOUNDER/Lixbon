@@ -9,6 +9,8 @@ mod agents;
 mod attention_rules;
 mod attention_read;
 mod projects_overview;
+// Snapshot compacta para clientes ligeros (LXO-94).
+mod compact_snapshot;
 mod activity_format;
 mod activity_read;
 mod tasks_read;
@@ -43,6 +45,8 @@ mod attention_update_api_tests;
 mod attention_read_tests;
 #[cfg(test)]
 mod projects_overview_tests;
+#[cfg(test)]
+mod compact_snapshot_tests;
 #[cfg(test)]
 mod activity_tests;
 #[cfg(test)]
