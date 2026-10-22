@@ -243,6 +243,17 @@ impl Store {
         f(&self.conn)
     }
 
+    /// Varias lecturas sobre UNA instantánea de la base: abre una transacción de lectura, ejecuta `f` y la
+    /// descarta (no escribe nada). Lo que lea `f` con los métodos de lectura del `Store` pertenece al mismo
+    /// punto de la base, aunque sean varias consultas. `f` no debe abrir otra transacción (p. ej.
+    /// [`Store::events_page`]); para el `seq` actual se usa [`Store::events_head`].
+    pub fn read_snapshot<T>(&self, f: impl FnOnce(&Store) -> StoreResult<T>) -> StoreResult<T> {
+        let snapshot = self.conn.unchecked_transaction()?;
+        let out = f(self);
+        drop(snapshot);
+        out
+    }
+
     /// Escritura atómica: `BEGIN IMMEDIATE`, `COMMIT` si `f` devuelve `Ok`,
     /// `ROLLBACK` si devuelve `Err` (o hace panic).
     pub fn write<T>(&mut self, f: impl FnOnce(&Transaction<'_>) -> StoreResult<T>) -> StoreResult<T> {

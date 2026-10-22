@@ -314,7 +314,7 @@ mod authenticated_client_tests {
         (status, serde_json::from_str(payload).unwrap())
     }
 
-    fn get(port: u16, token: &str, path: &str) -> (u16, Value) {
+    pub(super) fn get(port: u16, token: &str, path: &str) -> (u16, Value) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(stream, "GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").unwrap();
         let mut raw = String::new();
@@ -1313,6 +1313,82 @@ mod tasks_http_tests {
             assert_eq!(r["ok"], false, "{cmd} con agente: {st} {r}");
             assert!(st == 403 || error_code(&r) == "tasks_auth_required", "{cmd} con agente: {st} {r}");
         }
+        server.stop();
+    }
+}
+
+#[cfg(test)]
+mod compact_snapshot_http_tests {
+    use super::*;
+    use super::authenticated_client_tests::{get, post, register};
+    use crate::orch::boot_tests;
+    use crate::orch::tasks_read_tests::{proyecto, tarea};
+    use crate::store::{ClientPrincipal, ClientSurface};
+
+    const PERSON: &str = "snapshot-http-person-secret-lxo94-test-32by";
+    const AGENT: &str = "snapshot-http-agent-secret-lxo94-test-only-32";
+
+    fn call(port: u16, token: &str, args: Value) -> (u16, Value) {
+        post(port, token, &json!({ "cmd": "compact_snapshot", "args": args, "cwd": std::env::current_dir().unwrap().to_string_lossy() }))
+    }
+
+    /// Bootstrap de un cliente ligero de punta a punta: snapshot por `POST /rpc` y continuación por `GET /events`
+    /// desde su cursor, sin huecos, también tras reiniciar el Core.
+    #[test]
+    fn bootstrap_por_post_rpc_y_continuacion_por_events() {
+        let (_cleanup, data, core_dir) = boot_tests::dirs();
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        register(&core, ClientSurface::Cli, ClientPrincipal::Person("person-snapshot-http".into()), "install-snapshot-http-person", PERSON);
+        register(&core, ClientSurface::Cli, ClientPrincipal::Agent("task-snapshot-http".into()), "install-snapshot-http-agent", AGENT);
+        let server = start(core.clone()).unwrap();
+
+        // Vacío.
+        let (st, r) = call(server.port, PERSON, json!({}));
+        assert_eq!((st, r["ok"].clone()), (200, json!(true)), "{r}");
+        assert_eq!(r["data"]["snapshot_version"], 1);
+        assert_eq!(r["data"]["projects"]["total"], 0);
+
+        // Con trabajo: la snapshot lo refleja y el cursor deja fuera lo posterior.
+        let p = proyecto(&core, "snapshot-http");
+        let t1 = tarea(&core, "uno", Some(&p));
+        let (_, r) = call(server.port, PERSON, json!({}));
+        let snap = &r["data"];
+        assert_eq!(snap["projects"]["items"][0]["id"], json!(p), "{r}");
+        assert_eq!(snap["active_tasks"]["items"][0]["id"], json!(t1), "{r}");
+        let cursor = snap["cursor"]["events"].as_i64().unwrap();
+        let t2 = tarea(&core, "dos", Some(&p));
+        let (st, ev) = get(server.port, PERSON, &format!("/events?cursor={cursor}"));
+        assert_eq!(st, 200, "{ev}");
+        let creadas: Vec<&str> = ev["data"]["events"].as_array().unwrap().iter()
+            .filter(|e| e["kind"] == "task.created").map(|e| e["entity"]["id"].as_str().unwrap()).collect();
+        assert_eq!(creadas, [t2.as_str()], "solo lo posterior a la snapshot: {ev}");
+        assert!(ev["data"]["events"].as_array().unwrap().iter().all(|e| e["seq"].as_i64().unwrap() > cursor));
+
+        // Parámetro inválido y Agent rechazados.
+        let (_, r) = call(server.port, PERSON, json!({ "attention_items": 99 }));
+        assert!(r["error"].as_str().unwrap_or("").starts_with("compact_snapshot_invalid_request"), "{r}");
+        let (st, r) = call(server.port, AGENT, json!({}));
+        assert_eq!(r["ok"], false, "{st} {r}");
+        assert!(st == 403 || r["error"].as_str().unwrap_or("").starts_with("compact_snapshot_auth_required"), "{st} {r}");
+        server.stop();
+        drop(core);
+
+        // Reinicio: el cliente reconecta con su cursor anterior y sigue sin huecos.
+        boot_tests::espera_lock_libre(&core_dir);
+        let (core, _host, started) = boot_tests::arranca(&data, &core_dir);
+        started.unwrap();
+        core.settings.lock().unwrap().enabled = true;
+        let server = start(core.clone()).unwrap();
+        let t3 = tarea(&core, "tres", Some(&p));
+        let (st, ev) = get(server.port, PERSON, &format!("/events?cursor={cursor}"));
+        assert_eq!(st, 200, "{ev}");
+        let creadas: Vec<&str> = ev["data"]["events"].as_array().unwrap().iter()
+            .filter(|e| e["kind"] == "task.created").map(|e| e["entity"]["id"].as_str().unwrap()).collect();
+        assert_eq!(creadas, [t2.as_str(), t3.as_str()], "{ev}");
+        let (_, r) = call(server.port, PERSON, json!({}));
+        assert_eq!(r["data"]["active_tasks"]["total"], 3, "{r}");
         server.stop();
     }
 }
