@@ -49,7 +49,9 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 * Con `core_task` y `core_activity` el IDE anuncia la capability `core_task`. `task` es `task_detail` sin
   cuerpos de mensaje (solo `pending_questions`: cuántas preguntas suyas siguen sin respuesta) y sin el nombre
   ni la nota de la fase (como Activity). La ruta va en `location` (el worktree o, si comparte checkout, su
-  carpeta) y el móvil la enseña solo como ubicación secundaria. `core_activity` pide `activity_list` de esa
+  carpeta) y el móvil la enseña solo como ubicación secundaria. `origin` sale de `external` (LXO-38):
+  `external` o `lixbon`, y `null` con un Core que no lo da (el móvil usa entonces el de la snapshot).
+  `core_activity` pide `activity_list` de esa
   Task con `order: desc`. Cada item va sin `provenance`, `event_id`, `correlation_id` ni el id del actor; el
   móvil traduce `message_key` con una copia del traductor de Desktop (`apps/mobile/src/observe/activityMessages.js`,
   con una prueba que exige que sea idéntica). `core_attention` admite también `target_kind` y `target_id`. El gateway admite las dos acciones en
@@ -102,6 +104,13 @@ presencia del IDE a un banner (`ConnectionBanner.js`). Las tres capas no se mezc
 * Offline y desactualizado no usan el rojo de los fallos: eso queda para autorización y versión.
 * `actionGate(view)` solo permite mandar una acción con el banner «En línea». F2 no tiene acciones; la
   puerta queda para las futuras, que no podrán aparentar éxito sin conexión.
+* **Acciones deshabilitadas con su razón (LXO-46).** La ficha de una Task enseña lo que habría que hacer
+  (responder, aprobar o rechazar, revisar e integrar, resolver el conflicto, reintentar), según su estado y
+  su Attention, siempre deshabilitado (`taskActions` en `observe/task.js`). La razón la pone `actionGate`:
+  sin «En línea», la de la conexión; en línea, «llegará más adelante: hazlo en Lixbon Desktop». «Abrir en
+  Desktop» no muta y lleva siempre la suya (F6).
+* **Host.** El modelo legacy no guarda el host en la Task. La ficha enseña el IDE de la sesión `/remote`:
+  el Core que responde es el de ese equipo, y es donde corren sus Tasks.
 
 ## Caché
 

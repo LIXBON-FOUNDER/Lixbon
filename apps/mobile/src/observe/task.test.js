@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 import { ACTIVITY_V1_MESSAGE_KEYS } from './activityMessages.js';
 import { RELAY_PROTOCOL, createCoreLink } from './link.js';
-import { activityLine, activityReducer, initialActivity, isFinal, snapshotTask, statusOf, taskModel, taskNotice } from './task.js';
+import { activityLine, activityReducer, initialActivity, isFinal, snapshotTask, statusOf, taskActions, taskModel, taskNotice } from './task.js';
+import { connectionView } from './connection.js';
+import { STATUS as CORE } from './bootstrap.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const snapshot = {
@@ -138,4 +140,45 @@ describe('4 · relé', () => {
       assert.equal((await p).ok, true);
     });
   }
+});
+
+describe('LXO-46 · host, origen y acciones deshabilitadas con su razón', () => {
+  const online = connectionView({ core: { status: CORE.ONLINE, snapshot, syncedAt: 1000 }, link: 'open', hostConnected: true, now: 2000 });
+  const offline = connectionView({ core: { status: CORE.OFFLINE, snapshot, syncedAt: 1000 }, link: 'closed', hostConnected: false, now: 2000 });
+
+  it('el host es el IDE conectado; sin sesión, desconocido', () => {
+    assert.equal(taskModel({ taskId: 't2', detail: detail(), snapshot, hostLabel: 'portatil-gabriel' }).host, 'portatil-gabriel');
+    assert.equal(taskModel({ taskId: 't2', detail: detail(), snapshot }).host, null);
+  });
+
+  it('el origen sale del detalle si el Core lo da; si no, de la snapshot', () => {
+    assert.equal(taskModel({ taskId: 't2', detail: detail({ origin: 'lixbon' }), snapshot }).origin, 'lixbon');
+    assert.equal(taskModel({ taskId: 't1', detail: detail({ id: 't1', parent_id: null, origin: null }), snapItem: snapshotTask(snapshot, 't1'), snapshot }).origin, 'external');
+  });
+
+  it('lo que habría que hacer sale deshabilitado, con su razón; Abrir en Desktop siempre al final', () => {
+    const m = taskModel({ taskId: 't2', detail: detail({ status: 'failed', pending_questions: 1 }), snapshot });
+    const related = [{ category: 'approval' }, { category: 'review_ready' }, { category: 'conflict' }];
+    const actions = taskActions(m, related, online);
+    assert.deepEqual(actions.map((a) => a.key), ['reply', 'approve', 'review', 'conflict', 'retry', 'desktop']);
+    for (const a of actions) assert.ok(a.reason, `${a.key} lleva razón`);
+    assert.match(actions[0].reason, /llegará más adelante: hazlo en Lixbon Desktop/);
+    assert.match(actions.at(-1).reason, /F6/);
+  });
+
+  it('sin conexión confirmada la razón es la conexión (actionGate): nada aparenta enviarse', () => {
+    assert.equal(offline.canMutate, false);
+    const m = taskModel({ taskId: 't2', detail: detail({ pending_questions: 1 }), snapshot });
+    const [reply, desktop] = taskActions(m, [], offline);
+    assert.equal(reply.key, 'reply');
+    assert.match(reply.reason, /Sin conexión|Actualiza/);
+    assert.match(desktop.reason, /F6/, 'Abrir en Desktop no muta: su razón es la suya');
+  });
+
+  it('una tarea sin nada pendiente solo enseña Abrir en Desktop; sin datos, nada', () => {
+    const m = taskModel({ taskId: 't2', detail: detail(), snapshot });
+    assert.deepEqual(taskActions(m, [], online).map((a) => a.key), ['desktop']);
+    assert.deepEqual(taskActions(taskModel({ taskId: 'x' }), [], online), []);
+    assert.deepEqual(taskActions(taskModel({ taskId: 't2', detail: detail({ status: 'awaiting_terminal_approval' }), snapshot }), [], online).map((a) => a.key), ['approve', 'desktop']);
+  });
 });
