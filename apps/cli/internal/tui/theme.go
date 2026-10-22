@@ -93,7 +93,7 @@ func applyTheme(p palette) {
 	sOK, sErr, sWarn, sPlan = fg(p.ok), fg(p.err), fg(p.warn), fg(p.info)
 	sAddNum, sDelNum, sCode = fg(p.addFg), fg(p.delFg), fg(p.code)
 	sTrack = fg(p.rail)
-	sShell = fg(p.shell).Bold(true)
+	sShell = fg(p.shell)
 	sSelected = fg(p.ink).Background(c(p.olive))
 }
 
