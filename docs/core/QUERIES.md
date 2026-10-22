@@ -454,6 +454,25 @@ Event Log para lo que pase después.
 
 Mobile la consume por la sesión `/remote` a través del IDE: ver [MOBILE_BOOTSTRAP.md](MOBILE_BOOTSTRAP.md) (LXO-107).
 
+### Cliente de terminal: `lxo summary` (LXO-106)
+
+`lxo summary [--json]` lee la snapshot como **Person** (con la credencial CLI del almacén seguro, como `lxo projects`)
+con `attention_items: 0`, y **solo cuenta**: Projects con trabajo, Tasks activas, Attention por categoría, versión
+y salud del Core. No imprime nombres, títulos ni ids. `--json` es una allowlist propia de `lxo`:
+`{v: 1, core, cursor, projects: {total, with_work, with_work_complete}, active_tasks, attention}`.
+`with_work_complete` es `false` cuando la lista de Projects viene recortada y todos los que caben tienen trabajo;
+entonces el número es un mínimo (`≥`). Los códigos de salida son los de `lxo projects`.
+
+El CLI de Lixbon (`apps/cli`) lo muestra al abrir el chat:
+
+* Lanza `lxo summary` en segundo plano con un plazo de 1,5 s; el proceso se mata al vencer.
+* Limpia la salida de caracteres de control y la pinta como nota, aparte del aviso de versión nueva.
+* Con Desktop cerrado, o dentro de una tarea del orquestador, no dice nada.
+* Si el Core no responde a tiempo, lo dice en una nota sin tratarlo como error.
+* Dentro del chat la pista dice `! lxo attention`: con `!`, el chat ejecuta `lxo` con la ruta que publica Desktop y
+  pinta `attention`, `tasks`, `task show`, `projects` y `summary` con sus estilos (`apps/cli/internal/tui/lxoview.go`).
+* Se desactiva con `"startup_summary": false` en `~/.lixbon/config.json` o con `LIXBON_NO_STARTUP_SUMMARY=1`.
+
 ### Errores
 
 | Código | Cuándo |

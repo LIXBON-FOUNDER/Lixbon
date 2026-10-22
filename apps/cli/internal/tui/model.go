@@ -33,6 +33,9 @@ type Options struct {
 	Notes []string
 	// UpdateNotice consulta en segundo plano si hay una versión nueva; nil la desactiva.
 	UpdateNotice func(ctx context.Context) (update.Outcome, bool)
+	// CoreSummary pide al abrir el resumen del trabajo activo y la Attention del
+	// Core (LXO-106); nil lo desactiva. Va aparte del aviso de versión.
+	CoreSummary func(ctx context.Context) ([]string, error)
 }
 
 type liveState struct {
@@ -428,7 +431,7 @@ func (m *Model) refreshContext() {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.fetchQuota()}
+	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.coreSummaryCmd(), m.fetchQuota()}
 	if m.login != nil {
 		cmds = append(cmds, m.startTick())
 	}

@@ -887,3 +887,39 @@ fn lxo_bin_e2e_tasks_person_real_store() {
     core.stop_server_with(&server.discovery);
     assert_eq!(server.lxo(&["tasks"], None).status.code(), Some(5), "Lixbon cerrado");
 }
+
+/// LXO-106 · `lxo summary` con el binario real como persona y el almacén seguro real: vacío, con trabajo y
+/// Attention, sin contenido en la salida, y Lixbon cerrado (5) rápido para que el arranque del CLI no espere.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_summary_person_real_store() {
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+
+    let empty = server.json(&["summary", "--json"]);
+    assert_eq!(empty["v"], 1, "{empty}");
+    assert_eq!((empty["active_tasks"].clone(), empty["attention"]["total"].clone()), (json!(0), json!(0)), "{empty}");
+    let text = String::from_utf8_lossy(&server.lxo(&["summary"], None).stdout).into_owned();
+    assert!(text.starts_with("Lixbon · sin proyectos con trabajo · 0 tareas activas · nada pide atención"), "{text}");
+
+    let api = proyecto(&core, "SENTINEL-PROYECTO", MACHINE, "C:/r/SENTINEL-RUTA");
+    let t = tarea(&core, "SENTINEL-TITULO", Some(&api));
+    raise(&core, attention(AttentionCategory::Question, &t, &api, Severity::High, 10));
+    let full = server.json(&["summary", "--json"]);
+    assert_eq!(full["active_tasks"], 1, "{full}");
+    assert_eq!(full["projects"]["with_work"], 1, "{full}");
+    assert_eq!(full["attention"]["by_category"]["question"], 1, "{full}");
+    assert_eq!(full["cursor"], json!(core.storage.with_store(|s| s.events_head().unwrap()).unwrap()));
+    let human = server.lxo(&["summary"], None);
+    let text = String::from_utf8_lossy(&human.stdout).into_owned();
+    assert!(text.contains("1 tarea activa · 1 pide atención (1 pregunta)") && text.contains("lxo attention"), "{text}");
+    for out in [full.to_string(), text] {
+        assert!(!out.contains("SENTINEL") && !out.contains(&t) && !out.contains(&api), "el resumen solo cuenta: {out}");
+    }
+
+    core.stop_server_with(&server.discovery);
+    let started = std::time::Instant::now();
+    let closed = server.lxo(&["summary", "--json"], None);
+    assert_eq!(closed.status.code(), Some(5), "Lixbon cerrado");
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500), "cerrado se sabe enseguida: {:?}", started.elapsed());
+}
