@@ -2,7 +2,7 @@
 //
 // Sustituye al prototipo de datos de ejemplo (LXO-227, SupervisionScreen.js), que se queda en el repo sin
 // montar. Aquí: cabecera con el IDE (host) que se supervisa, banner de conexión (LXO-111) y la pantalla de
-// la ruta actual. Home (LXO-108), Attention (LXO-109) y Task Detail (LXO-110) se montan en `routes`.
+// la ruta actual: Home (LXO-108), Proyecto, Attention (LXO-109) y Task Detail (LXO-110).
 import React from 'react';
 import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,34 +12,20 @@ import { ChatHeader } from '../components/ui';
 import ConnectionBanner from '../observe/ConnectionBanner';
 import { KIND } from '../observe/connection';
 import { hostName, sessionOnline } from '../observe/hosts';
-import { Body, Notice } from '../observe/ui';
-import { PillButton } from '../components/ui';
+import { Notice } from '../observe/ui';
 import AttentionScreen from './observe/AttentionScreen';
+import HomeScreen from './observe/HomeScreen';
+import ProjectScreen from './observe/ProjectScreen';
 import TaskScreen from './observe/TaskScreen';
 
-// Pantallas de cada ruta. Home (LXO-108) se añade aquí.
-const ROUTES = { attention: AttentionScreen, task: TaskScreen };
+// Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
+const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
   task: 'Tarea',
   project: 'Proyecto',
 };
-
-/** Resumen provisional hasta que Home (LXO-108) monte su pantalla. */
-function Summary({ obs }) {
-  const s = obs.core?.snapshot;
-  if (!s) return null;
-  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  return (
-    <View style={{ gap: 12, alignItems: 'flex-start' }}>
-      <Body muted>
-        {`${plural(s.projects.total, 'proyecto', 'proyectos')} · ${plural(s.active_tasks.total, 'tarea activa', 'tareas activas')} · ${plural(s.attention.total, 'pide atención', 'piden atención')}`}
-      </Body>
-      <PillButton size="sm" outline icon="bell" label="Ver atención" onPress={() => obs.push({ name: 'attention' })} />
-    </View>
-  );
-}
 
 export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
   const insets = useSafeAreaInsets();
@@ -84,8 +70,6 @@ export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
         <ConnectionBanner view={obs.view} onRetry={obs.retry} hostLabel={session ? hostName(session, obs.meta) : null} />
         {Route ? (
           <Route obs={obs} route={route} />
-        ) : atHome ? (
-          <Summary obs={obs} />
         ) : (
           <Notice tone="muted" icon="warning" title="Pantalla no disponible">
             Vuelve a Supervisar.
