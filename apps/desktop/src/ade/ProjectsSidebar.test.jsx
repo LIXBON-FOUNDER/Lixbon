@@ -2073,6 +2073,161 @@ describe('ProjectsSidebar', () => {
     expect(screen.getByRole('treeitem', { name: /Alpha/ })).toBeTruthy();
   });
 
+  it('mantiene el control de paginación enfocado durante el sondeo rutinario de Tasks', async () => {
+    vi.useFakeTimers();
+    const refreshingHead = deferred();
+    let headReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) return page(args.project_id, args.status, [task('page-task')]);
+        headReads += 1;
+        return headReads === 1
+          ? page(args.project_id, args.status, [task('head-task')], { hasMore: true, cursor: 'cursor-1' })
+          : refreshingHead.promise;
+      },
+    });
+    const { container } = render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+
+    const loadMore = screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    loadMore.focus();
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      await flush();
+
+      expect(headReads).toBe(2);
+      expect(container.querySelector('.ps__more')).toBe(loadMore);
+      expect(document.activeElement).toBe(loadMore);
+      expect(screen.queryByTestId('stale-task-head-project-a')).toBeNull();
+      expect(screen.queryByText('Datos previos')).toBeNull();
+      expect(loadMore.disabled).toBe(false);
+      expect(container.querySelector('.ps__tasks').getAttribute('aria-busy')).toBe('true');
+    } finally {
+      refreshingHead.resolve(page('project-a', 'active', [task('head-task')], { hasMore: true, cursor: 'cursor-1' }));
+      await flush();
+    }
+    expect(container.querySelector('.ps__tasks').getAttribute('aria-busy')).toBe('false');
+  });
+
+  it('quita aria-busy y explica el dato retenido cuando falla la cabecera de Tasks', async () => {
+    vi.useFakeTimers();
+    let headReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        headReads += 1;
+        if (headReads === 1) {
+          return page(args.project_id, args.status, [task('head-task')], { hasMore: true, cursor: 'cursor-1' });
+        }
+        throw new Error('tasks_by_project_read_failed: no se pudo leer la cabecera');
+      },
+    });
+    const { container } = render(<ProjectsSidebar pollMs={1_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await flush();
+
+    expect(headReads).toBe(2);
+    expect(container.querySelector('.ps__tasks').getAttribute('aria-busy')).toBe('false');
+    expect(screen.getByTestId('stale-task-head-project-a').textContent).toMatch(/no pudo confirmar|no se pudo confirmar/i);
+    expect(screen.getByTestId('stale-task-head-project-a').textContent).not.toMatch(/mientras Core confirma/i);
+  });
+
+  it('no pagina con el cursor cacheado hasta confirmar la cabecera real al reactivar', async () => {
+    vi.useFakeTimers();
+    const resumedHead = deferred();
+    const cursorReads = [];
+    let allHeadReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) {
+          cursorReads.push(args.cursor);
+          return page(args.project_id, args.status, []);
+        }
+        if (args.status !== 'all') return page(args.project_id, args.status, [task('active-task')]);
+        allHeadReads += 1;
+        return allHeadReads === 1
+          ? page(args.project_id, args.status, [task('head-task')], { hasMore: true, cursor: 'old-cursor' })
+          : resumedHead.promise;
+      },
+    });
+    const { container, rerender } = render(<ProjectsSidebar pollMs={60_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('radio', { name: 'Todas' }));
+    await flush();
+    expect(screen.getByText('Task head-task')).toBeTruthy();
+    expect(allHeadReads).toBe(1);
+
+    const props = { pollMs: 60_000, selection: { projectId: 'project-a', taskId: 'missing-task' } };
+    rerender(<ProjectsSidebar active={false} {...props} />);
+    await flush();
+    rerender(<ProjectsSidebar active {...props} />);
+    await flush();
+
+    expect(allHeadReads).toBe(2);
+    expect(cursorReads).toEqual([]);
+    expect(container.querySelector('.ps__tree')).toBeTruthy();
+    expect(screen.getByTestId('stale-task-head-project-a')).toBeTruthy();
+    expect(screen.queryByTestId('selected-task-missing')).toBeNull();
+
+    resumedHead.resolve(page('project-a', 'all', [task('head-task')], { hasMore: true, cursor: 'new-cursor' }));
+    await flush();
+    expect(cursorReads).toEqual(['new-cursor']);
+  });
+
+  it('reutiliza una lectura de página huérfana al reactivar el ADE', async () => {
+    vi.useFakeTimers();
+    const pendingPage = deferred();
+    const cursorReads = [];
+    let allHeadReads = 0;
+    mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) {
+          cursorReads.push(args.cursor);
+          return pendingPage.promise;
+        }
+        if (args.status !== 'all') return page(args.project_id, args.status, []);
+        allHeadReads += 1;
+        return page(args.project_id, args.status, [task('head-task')], { hasMore: true, cursor: 'stable-cursor' });
+      },
+    });
+    const { rerender } = render(<ProjectsSidebar pollMs={60_000} />);
+    await flush();
+    clickProject(screen.getByRole('treeitem', { name: /Alpha/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('radio', { name: 'Todas' }));
+    await flush();
+    expect(allHeadReads).toBe(1);
+
+    const missing = { projectId: 'project-a', taskId: 'missing-task' };
+    rerender(<ProjectsSidebar pollMs={60_000} selection={missing} />);
+    await flush();
+    expect(cursorReads).toEqual(['stable-cursor']);
+
+    rerender(<ProjectsSidebar pollMs={60_000} selection={{ projectId: 'project-a', taskId: null }} />);
+    await flush();
+    rerender(<ProjectsSidebar active={false} pollMs={60_000} selection={missing} />);
+    await flush();
+    rerender(<ProjectsSidebar active pollMs={60_000} selection={missing} />);
+    await flush();
+
+    expect(allHeadReads).toBe(2);
+    expect(cursorReads).toEqual(['stable-cursor']);
+    pendingPage.resolve(page('project-a', 'all', []));
+    await flush();
+    expect(cursorReads).toEqual(['stable-cursor']);
+  });
+
   it('no consulta el Core cuando la vista está inactiva', async () => {
     render(<ProjectsSidebar active={false} />);
     await flush();
