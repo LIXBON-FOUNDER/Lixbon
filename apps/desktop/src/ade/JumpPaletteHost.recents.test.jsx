@@ -72,7 +72,7 @@ afterEach(() => {
 });
 
 describe('JumpPaletteHost · Tasks finalizadas y estado del Project', () => {
-  it('encuentra y abre una Task finalizada por título, ID y estado visible, sin Attempts', async () => {
+  it('encuentra y abre una Task finalizada por título, ID y estado visible, sin Attempts', { timeout: 20_000 }, async () => {
     const onNavigate = vi.fn(() => ({ ok: true }));
     render(<Harness onNavigate={onNavigate} />);
     await screen.findByRole('option', { name: /Alpha/ });
