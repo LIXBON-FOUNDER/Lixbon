@@ -278,15 +278,52 @@ func lxoTitle(text, right string) block {
 
 // item: una fila de dos líneas (cabecera con estado a la derecha y detalle apagado debajo), sangrada.
 func lxoItem(indent int, glyph, head, right, detail string) block {
+	lead := strings.Repeat("  ", indent)
+	return lxoRow(lead, lead+"  ", glyph, head, right, detail)
+}
+
+// lxoRow: la fila de un elemento de lista. headLead y detailLead van delante de la cabecera y del detalle
+// (sangría y guías del árbol); entre el nombre y el estado de la derecha, una guía de puntos.
+func lxoRow(headLead, detailLead, glyph, head, right, detail string) block {
 	return funcBlock(func(width int) string {
-		lead := pad + strings.Repeat("  ", indent)
-		line := fitRight(lead+glyph+" "+head, right, width)
+		line := lxoLeader(pad+headLead+glyph+" "+head, right, width)
 		if detail == "" {
 			return line
 		}
-		sub := lead + "  " + sDim.Render(detail)
+		sub := pad + detailLead + sDim.Render(detail)
 		return line + "\n" + ansi.Truncate(sub, max(1, width-1), glyphEllipsis)
 	})
+}
+
+// lxoLeader: izquierda y derecha unidas por puntos tenues, para seguir la fila con la vista en una
+// terminal ancha. Si no caben, como fitRight.
+func lxoLeader(left, right string, width int) string {
+	if right == "" {
+		return left
+	}
+	w := max(1, width-1)
+	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if gap < 5 {
+		return twoCol(left, right, w)
+	}
+	return left + " " + sDim2.Render(strings.Repeat(glyphSep, gap-2)) + " " + right
+}
+
+// lxoGap: la línea en blanco entre dos elementos; lead lleva las guías del árbol que siguen abiertas.
+func lxoGap(lead string) block {
+	return funcBlock(func(int) string { return strings.TrimRight(pad+lead, " ") })
+}
+
+// lxoSpaced: los elementos con una línea en blanco entre uno y otro.
+func lxoSpaced(items []block) []block {
+	var out []block
+	for i, item := range items {
+		if i > 0 {
+			out = append(out, lxoGap(""))
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // lxoText: texto sangrado que se reenvuelve al ancho de la terminal.
@@ -390,6 +427,7 @@ func renderSummary(doc jsonMap, sep string) []block {
 func renderProjects(doc jsonMap, sep string) []block {
 	projects := jlist(doc, "projects")
 	lines := []block{lxoTitle("Proyectos", noun(len(projects), "proyecto", "proyectos"))}
+	var items []block
 	if len(projects) == 0 {
 		return append(lines, lxoText(sDim.Render("Sin proyectos registrados. Se registran desde Lixbon o al lanzar un run en un repositorio.")))
 	}
@@ -415,13 +453,13 @@ func renderProjects(doc jsonMap, sep string) []block {
 			noun(int(jnum(counts, "tasks")), "tarea en total", "tareas en total"),
 			loc,
 		)
-		lines = append(lines, lxoItem(0, st.Render(glyphDot), sInk.Render(jstr(p, "name")), right, detail))
+		items = append(items, lxoItem(0, st.Render(glyphDot), sInk.Render(jstr(p, "name")), right, detail))
 	}
 	un := jobj(doc, "unassigned")
 	if jnum(un, "tasks") > 0 {
-		lines = append(lines, lxoText(sDim.Render("Sin proyecto"+sep+noun(int(jnum(un, "active")), "activa", "activas")+sep+noun(int(jnum(un, "failed")), "fallida", "fallidas"))))
+		items = append(items, lxoText(sDim.Render("Sin proyecto"+sep+noun(int(jnum(un, "active")), "activa", "activas")+sep+noun(int(jnum(un, "failed")), "fallida", "fallidas"))))
 	}
-	return lines
+	return append(lines, lxoSpaced(items)...)
 }
 
 func renderAttention(doc jsonMap, names map[string]string, now time.Time, sep string) []block {
@@ -430,6 +468,7 @@ func renderAttention(doc jsonMap, names map[string]string, now time.Time, sep st
 	if len(items) == 0 {
 		return append(lines, lxoText(sOK.Render(glyphDone)+" "+sDim.Render("Nada pide atención ahora mismo.")))
 	}
+	var rows []block
 	for _, a := range items {
 		sev := jstr(a, "severity")
 		glyph := lxoSeverityStyle(sev).Render(glyphDot)
@@ -441,12 +480,14 @@ func renderAttention(doc jsonMap, names map[string]string, now time.Time, sep st
 			target = jstr(a, "target_kind") + " " + jstr(a, "target_id")
 		}
 		head := sInk.Render(lxoLabel(categoryLabel, jstr(a, "category"))) + sDim.Render(sep) + lxoSeverityStyle(sev).Render(lxoLabel(severityLabel, sev))
-		lines = append(lines, lxoItem(0, glyph, head, sDim.Render(lxoAgo(jnum(a, "created_at"), now)),
+		rows = append(rows, lxoItem(0, glyph, head, sDim.Render(lxoAgo(jnum(a, "created_at"), now)),
 			lxoJoin(sep, target, lxoProject(jstr(a, "project_id"), names), jstr(a, "id"))))
 	}
+	lines = append(lines, lxoSpaced(rows)...)
 	if more, _ := doc["has_more"].(bool); more {
 		lines = append(lines, lxoText(sWarn.Render("Hay más: filtra con --project, --category o --severity.")))
 	}
+	lines = append(lines, lxoGap(""))
 	return append(lines, lxoHint("! lxo attention show <id> para el detalle"+sep+"! lxo task show <tarea>"))
 }
 
@@ -499,24 +540,61 @@ func renderTasks(doc jsonMap, names map[string]string, sep string) []block {
 	if len(tasks) == 0 {
 		return append(lines, lxoText(sDim.Render("Sin tareas con estos filtros.")))
 	}
-	depth := map[string]int{}
-	for _, t := range tasks {
-		d := 0
+	byID := map[string]int{}
+	depths := make([]int, len(tasks))
+	for i, t := range tasks {
 		if parent := jstr(t, "parent_id"); parent != "" {
-			if pd, ok := depth[parent]; ok {
-				d = pd + 1
+			if pd, ok := byID[parent]; ok {
+				depths[i] = pd + 1
 			}
 		}
-		depth[jstr(t, "id")] = d
+		byID[jstr(t, "id")] = depths[i]
+	}
+	for i, t := range tasks {
+		if i > 0 {
+			lines = append(lines, lxoGap(lxoGuides(depths, i-1, depths[i-1]+1, -1)))
+		}
+		d := depths[i]
 		status := jstr(t, "status")
 		origin := ""
 		if jstr(t, "origin") == "external" {
 			origin = "externa"
 		}
 		detail := lxoJoin(sep, jstr(t, "id"), lxoProject(jstr(t, "project_id"), names), lxoAgent(t), lxoPlace(t), origin)
-		lines = append(lines, lxoItem(d, lxoStatusMark(status), sInk.Render(jstr(t, "title")), lxoStatusStyle(status).Render(lxoLabel(statusLabel, status)), detail))
+		lines = append(lines, lxoRow(lxoGuides(depths, i, d, d-1), lxoGuides(depths, i, d+1, -1),
+			lxoStatusMark(status), sInk.Render(jstr(t, "title")), lxoStatusStyle(status).Render(lxoLabel(statusLabel, status)), detail))
 	}
+	lines = append(lines, lxoGap(""))
 	return append(lines, lxoHint("! lxo task show <id o nombre> para el detalle"))
+}
+
+// lxoGuides: las guías del árbol de tareas en las primeras cols columnas de la fila del elemento i: «│» en
+// la columna k si a ese nivel quedan hermanas por debajo. En elbow (la columna de su propio padre) va «│» o,
+// si es la última hija, «└». depths va en el orden del árbol: raíz y luego sus hijas.
+func lxoGuides(depths []int, i, cols, elbow int) string {
+	more := func(k int) bool {
+		for j := i + 1; j < len(depths); j++ {
+			if depths[j] <= k {
+				return false
+			}
+			if depths[j] == k+1 {
+				return true
+			}
+		}
+		return false
+	}
+	var b strings.Builder
+	for k := 0; k < cols; k++ {
+		switch {
+		case more(k):
+			b.WriteString(sDim2.Render(glyphRail) + " ")
+		case k == elbow:
+			b.WriteString(sDim2.Render(glyphCorner) + " ")
+		default:
+			b.WriteString("  ")
+		}
+	}
+	return b.String()
 }
 
 func renderTaskShow(doc jsonMap, names map[string]string, now time.Time, sep string) []block {
