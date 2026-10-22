@@ -337,7 +337,7 @@ func TestRunCommandExecutesAndFeedsTheModel(t *testing.T) {
 	h.key("enter")
 	h.settle()
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), glyphs.check+" $")
+	contains(t, h.out(), glyphs.check+" !")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)
@@ -506,9 +506,9 @@ func TestBangRunsTheCommandWithoutAskingAndFeedsTheModel(t *testing.T) {
 	h.send("!echo hola")
 	h.settle()
 	notContains(t, h.view(), "Ejecutar «")
-	contains(t, h.out(), "$       echo hola")
+	contains(t, h.out(), "!       echo hola")
 	contains(t, h.out(), "hola")
-	contains(t, h.out(), glyphs.check+" $")
+	contains(t, h.out(), glyphs.check+" !")
 	last := h.chat.History[len(h.chat.History)-1]
 	if last.Role != "user" || !strings.HasPrefix(last.Content, "TOOL_RESULT run_command `echo hola` (EXIT 0):") {
 		t.Fatalf("historial: %+v", last)

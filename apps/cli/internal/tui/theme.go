@@ -30,6 +30,8 @@ type palette struct {
 	shBase, shMid, shHigh string
 	// chipLive es el fondo de la etiqueta de una herramienta en marcha.
 	chipLive string
+	// shell: las órdenes que escribe el usuario con «!», en un rosa fluorescente que se ve de un vistazo.
+	shell string
 }
 
 var darkPalette = palette{
@@ -42,6 +44,7 @@ var darkPalette = palette{
 	kw: "#E59AD6", str: "#F2C98A", fn: "#8EC5FF", ty: "#C3B4FF", num: "#F5D98A", com: "#6A6A65",
 	f1: "#ECEBE5", f2: "#ABAAA3", f3: "#53534E", f4: "#33332F", spark: "#FAF9F4", dot: "#151514",
 	shBase: "#85847F", shMid: "#B9B8B2", shHigh: "#FAF9F4", chipLive: "#222220",
+	shell: "#FF4FD8",
 }
 
 var lightPalette = palette{
@@ -53,6 +56,7 @@ var lightPalette = palette{
 	kw: "#9B3D86", str: "#8A5A12", fn: "#2B63A6", ty: "#6046B0", num: "#7A6210", com: "#A3A39B",
 	f1: "#1A1A18", f2: "#5A5954", f3: "#AFAEA6", f4: "#CDCCC3", spark: "#0B0B0A", dot: "#E2E1D9",
 	shBase: "#75746D", shMid: "#45443F", shHigh: "#0B0B0A", chipLive: "#E1E0D9",
+	shell: "#C0158F",
 }
 
 // pal es el tema en uso. themeVersion cambia con cada applyTheme para que
@@ -67,7 +71,7 @@ var (
 	cAddBG, cDelBG, cAddFG, cDelFG, cBubble                       color.Color
 
 	sDim, sDim2, sAccent, sBeige, sPrimary, sBold, sOK, sErr, sWarn, sPlan lipgloss.Style
-	sAddNum, sDelNum, sInk, sSoft, sCode, sSelected, sTrack                lipgloss.Style
+	sAddNum, sDelNum, sInk, sSoft, sCode, sSelected, sTrack, sShell        lipgloss.Style
 )
 
 func init() {
@@ -89,6 +93,7 @@ func applyTheme(p palette) {
 	sOK, sErr, sWarn, sPlan = fg(p.ok), fg(p.err), fg(p.warn), fg(p.info)
 	sAddNum, sDelNum, sCode = fg(p.addFg), fg(p.delFg), fg(p.code)
 	sTrack = fg(p.rail)
+	sShell = fg(p.shell).Bold(true)
 	sSelected = fg(p.ink).Background(c(p.olive))
 }
 

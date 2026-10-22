@@ -228,6 +228,10 @@ func (b echoBlock) render(width int, _ bool) string {
 		parts := keyArg.FindStringSubmatch(s)
 		return parts[1] + maskKey(parts[2])
 	})
+	// Una orden de terminal («!…») se destaca entera en el color de shell.
+	if strings.HasPrefix(text, "!") {
+		return mark(glyphPrompt, sShell) + sShell.Render(ansi.Truncate(text, max(1, width-4), glyphEllipsis))
+	}
 	return mark(glyphPrompt, sAccent) + sSoft.Render(ansi.Truncate(text, max(1, width-4), glyphEllipsis))
 }
 
@@ -530,7 +534,9 @@ func stateMark(state toolState, spin *int) string {
 // lo demás.
 func (b *toolBlock) label() string {
 	switch {
-	case b.command || b.shell || b.tone == toneCommand:
+	case b.shell:
+		return "!"
+	case b.command || b.tone == toneCommand:
 		return "$"
 	case b.fetch:
 		return "Fetch"
@@ -542,6 +548,13 @@ func (b *toolBlock) header(width int) string {
 	left := " " + b.dot() + " " + chip(b.label(), b.tone, b.state == toolRunning)
 	if b.target != "" {
 		left += " " + sInk.Render(b.target)
+	}
+	// Las órdenes que escribe el usuario con «!» se ven de un vistazo: «!» y la orden en el color de shell.
+	if b.shell {
+		left = " " + b.dot() + " " + sShell.Render("!"+strings.Repeat(" ", 6))
+		if b.target != "" {
+			left += " " + sShell.Render(b.target)
+		}
 	}
 	right := ""
 	switch {
