@@ -52,11 +52,13 @@ function FilterChip({ label, value, onPress }) {
   );
 }
 
-export function AttentionRow({ item, names, now, onOpen }) {
+/** Fila de Attention. `inert`: no navega (por ejemplo, la Attention de la Task que ya se está viendo). */
+export function AttentionRow({ item, names, now, onOpen, inert = false }) {
   const c = useColors();
   const cat = categoryOf(item.category);
   const sev = severityOf(item.severity);
-  const target = attentionTarget(item);
+  const found = attentionTarget(item);
+  const target = inert ? { ...found, navigable: false } : found;
   return (
     <Pressable
       accessibilityRole={target.navigable ? 'button' : 'text'}

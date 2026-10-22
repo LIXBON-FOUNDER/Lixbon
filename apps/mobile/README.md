@@ -90,6 +90,16 @@ hasta validarla en dispositivo.
   - Con un IDE anterior o sin conexión se ven las más urgentes de la
     snapshot, marcadas como parciales o guardadas.
 
+- **Tarea** (`screens/observe/TaskScreen.js`, `observe/task.js`, LXO-110):
+  - proyecto y tarea, estado real con sus señales (pregunta sin responder,
+    revisión, integración) y proveedor y modelo conocidos;
+  - rama, worktree o checkout compartido, host y origen; lo que el modelo
+    no registra se dice como desconocido, y la ruta va como ubicación
+    secundaria;
+  - Activity reciente paginable y la Attention de esa tarea;
+  - «Abrir en Desktop» está deshabilitado hasta F6;
+  - una tarea que ya no existe se muestra como no encontrada.
+
 El prototipo con datos de ejemplo (`SupervisionScreen.js`, `src/supervision/`)
 sigue en el repo, pero sin montar.
 
