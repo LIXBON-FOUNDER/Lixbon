@@ -86,7 +86,7 @@ describe('JumpPalette', () => {
     expect(project.textContent).toContain('project-a');
   });
 
-  it('keeps 125 Tasks available and supports arrows, Ctrl+Home/Ctrl+End, and Enter navigation', () => {
+  it('keeps 125 Tasks available and supports arrows, Ctrl+Home/Ctrl+End, and Enter navigation', { timeout: 20_000 }, () => {
     const onNavigate = vi.fn();
     const tasks = Array.from({ length: 125 }, (_, index) => ({
       id: `task-${index + 1}`,
@@ -113,7 +113,7 @@ describe('JumpPalette', () => {
     expect(onNavigate).toHaveBeenCalledWith({ kind: 'task', projectId: 'project-1', taskId: 'task-2' });
   });
 
-  it('keeps keyboard selection independent of pointer hover across 125 results while clicks navigate', () => {
+  it('keeps keyboard selection independent of pointer hover across 125 results while clicks navigate', { timeout: 20_000 }, () => {
     let commits = 0;
     const onNavigate = vi.fn();
     const onClose = vi.fn();

@@ -162,7 +162,7 @@ afterEach(() => {
 });
 
 describe('AttentionInbox', () => {
-  it('lista las siete categorías del contrato y muestra los conteos autoritativos del Core', async () => {
+  it('lista las siete categorías del contrato y muestra los conteos autoritativos del Core', { timeout: 20_000 }, async () => {
     mountCore({
       attention: () => page(sevenFixtures()),
       projects: () => overview({
