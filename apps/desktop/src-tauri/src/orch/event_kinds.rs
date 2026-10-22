@@ -25,6 +25,12 @@
 //! | `environment.blocked` · `environment.cleared` | state | `agent` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
 //!
+//! # Kinds del Attempt (LXO-114, inertes hasta el corte; los emite `attempt_ops`)
+//! | kind | class | entidad |
+//! |---|---|---|
+//! | `attempt.requested` · `attempt.started` · `attempt.completed` · `attempt.failed` · `attempt.stopped` | state | `attempt` |
+//! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
+//!
 //! # Kinds de la Task como intención (LXO-113, inertes hasta el corte; los emite `task_ops`)
 //! | kind | class | entidad |
 //! |---|---|---|
@@ -37,7 +43,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{EventClass, Fingerprint, IntentField, Resolution, RunRow, TaskRow};
+use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, Resolution, RunRow, TaskRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -699,6 +705,202 @@ pub(super) fn task_discarded(t: &TaskRow) -> Result<EventDraft, EventError> {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn task_restored(t: &TaskRow) -> Result<EventDraft, EventError> {
     task_draft(t, &TaskRestored {})
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attempt (LXO-114): attempt.requested · approved · rejected · started · completed · failed · stopped
+// ---------------------------------------------------------------------------------------------
+//
+// Los emite `attempt_ops` sobre las filas de `store::attempts` (inertes hasta el corte). El Attempt es la entidad
+// del hecho (`entity_id = <task>-a<n>`); Run y Project salen de su Task y van EXPLÍCITOS. Todos llevan la Task y el
+// número. Nunca el resumen, el informe, rutas, argv, proceso, worktree ni sesión: solo códigos e ids.
+// `attempt.waiting` está reservado en el contrato y lo emitirá el runtime (F4) cuando entre en las esperas.
+
+/// Por qué se detuvo un Attempt (o se rechazó su aprobación). Cerrado: quién lo pidió va en el actor.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum StopCause {
+    /// Alguien pidió detenerlo (persona, coordinador o el propio Core).
+    Cancelled,
+    /// Se cerró el Run al que pertenece.
+    RunClosed,
+}
+
+/// Motivo máquina del fallo de un Attempt. Cerrado: nunca texto libre.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum FailureCode {
+    /// El proceso no llegó a arrancar.
+    LaunchFailed,
+    /// Nadie aprobó en la terminal a tiempo (`approval_deadline`).
+    TerminalApprovalTimeout,
+    /// El agente dejó de dar señales.
+    AgentIdleTimeout,
+    /// El propio agente cerró diciendo que falló (`lxo done --failed`).
+    AgentReported,
+}
+
+impl FailureCode {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(super) fn code(self) -> &'static str {
+        match self {
+            FailureCode::LaunchFailed => "launch_failed",
+            FailureCode::TerminalApprovalTimeout => "terminal_approval_timeout",
+            FailureCode::AgentIdleTimeout => "agent_idle_timeout",
+            FailureCode::AgentReported => "agent_reported",
+        }
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn attempt_draft<P: EventPayload>(a: &AttemptRow, t: &TaskRow, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Attempt, a.id.as_str(), p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+#[derive(Serialize)]
+pub(super) struct AttemptRequested {
+    task: String,
+    n: i64,
+    provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    external: bool,
+    /// Nace `pending_approval`: espera a una persona.
+    approval_required: bool,
+}
+
+impl EventPayload for AttemptRequested {
+    const KIND: &'static str = "attempt.requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_requested(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = AttemptRequested {
+        task: a.task_id.clone(),
+        n: a.n,
+        provider: clip(&a.provider, 80),
+        model: a.model.as_deref().map(|v| clip(v, 80)),
+        effort: a.effort.as_deref().map(|v| clip(v, 80)),
+        role: a.role.as_deref().map(|v| clip(v, 80)),
+        profile: a.profile.as_deref().map(|v| clip(v, 80)),
+        external: a.external,
+        approval_required: a.status == AttemptStatus::PendingApproval,
+    };
+    attempt_draft(a, t, &p)
+}
+
+macro_rules! attempt_ref_payload {
+    ($name:ident, $kind:literal, $class:expr) => {
+        #[derive(Serialize)]
+        pub(super) struct $name {
+            task: String,
+            n: i64,
+        }
+
+        impl EventPayload for $name {
+            const KIND: &'static str = $kind;
+            const VERSION: i64 = 1;
+            const CLASS: EventClass = $class;
+        }
+    };
+}
+
+attempt_ref_payload!(AttemptApproved, "attempt.approved", EventClass::Decision);
+attempt_ref_payload!(AttemptStarted, "attempt.started", EventClass::State);
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_approved(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptApproved { task: a.task_id.clone(), n: a.n })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_started(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptStarted { task: a.task_id.clone(), n: a.n })
+}
+
+/// La aprobación se rechazó (o dejó de tener sentido): el Attempt pasó de `pending_approval` a `stopped`.
+#[derive(Serialize)]
+pub(super) struct AttemptRejected {
+    task: String,
+    n: i64,
+    cause: StopCause,
+}
+
+impl EventPayload for AttemptRejected {
+    const KIND: &'static str = "attempt.rejected";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_rejected(a: &AttemptRow, t: &TaskRow, cause: StopCause) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptRejected { task: a.task_id.clone(), n: a.n, cause })
+}
+
+/// El resumen NO viaja: solo si lo había.
+#[derive(Serialize)]
+pub(super) struct AttemptCompleted {
+    task: String,
+    n: i64,
+    has_summary: bool,
+}
+
+impl EventPayload for AttemptCompleted {
+    const KIND: &'static str = "attempt.completed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_completed(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptCompleted { task: a.task_id.clone(), n: a.n, has_summary: !a.summary.is_empty() })
+}
+
+#[derive(Serialize)]
+pub(super) struct AttemptFailed {
+    task: String,
+    n: i64,
+    reason: FailureCode,
+    has_summary: bool,
+}
+
+impl EventPayload for AttemptFailed {
+    const KIND: &'static str = "attempt.failed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_failed(a: &AttemptRow, t: &TaskRow, reason: FailureCode) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptFailed { task: a.task_id.clone(), n: a.n, reason, has_summary: !a.summary.is_empty() })
+}
+
+/// `from` es el estado del que venía (`starting`, `running`, `waiting`…); nunca `pending_approval` (eso es `rejected`).
+#[derive(Serialize)]
+pub(super) struct AttemptStopped {
+    task: String,
+    n: i64,
+    from: AttemptStatus,
+    cause: StopCause,
+}
+
+impl EventPayload for AttemptStopped {
+    const KIND: &'static str = "attempt.stopped";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_stopped(a: &AttemptRow, t: &TaskRow, from: AttemptStatus, cause: StopCause) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptStopped { task: a.task_id.clone(), n: a.n, from, cause })
 }
 
 // ---------------------------------------------------------------------------------------------

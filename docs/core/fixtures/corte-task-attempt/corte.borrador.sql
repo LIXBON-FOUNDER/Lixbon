@@ -1,9 +1,10 @@
 -- BORRADOR DE DISEÑO (LXO-112). NO es una migración: no vive en store/migrations/, build.rs no lo
 -- embebe y ningún binario lo ejecuta. Fija, de forma ejecutable, el mapeo legacy_state → tablas que
 -- la ADR (docs/core/CORTE_TASK_ATTEMPT.md) describe. `verificar.py` lo aplica a la fixture sobre TODAS las
--- migraciones publicadas anteriores al corte (001..007) y compara el resultado con `normalizado.after.json`.
+-- migraciones publicadas anteriores al corte (001..008) y compara el resultado con `normalizado.after.json`.
 --
--- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113).
+-- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113;
+-- `008_attempts`: attempts, LXO-114).
 -- Este borrador crea solo lo que todavía no está publicado; según se publique cada entidad, su CREATE sale de
 -- aquí. El corte real será `NNN_task_attempt_cut` (el siguiente número libre) y, desde ese momento, su texto
 -- no se edita (checksum). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms
@@ -25,50 +26,29 @@ INSERT INTO meta (key, value) VALUES ('agentic_model', 'task_attempt_v1');
 -- ───────────────────────────── 1. DDL ─────────────────────────────
 -- `runs` y `tasks` ya existen (007_tasks, LXO-113): tasks guarda la intención (`intent` = 'open' por defecto).
 
--- Attempt = ejecución concreta. Un retry o un seguimiento crea otra fila (n + 1); nunca se pisa.
-CREATE TABLE attempts (
-  id                    TEXT    PRIMARY KEY,
-  task_id               TEXT    NOT NULL REFERENCES tasks (id),
-  n                     INTEGER NOT NULL CHECK (n >= 1),
-  status                TEXT    NOT NULL CHECK (status IN ('pending_approval', 'starting', 'running', 'waiting',
-                                  'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited')),
-  external              INTEGER NOT NULL CHECK (external IN (0, 1)),
-  provider              TEXT    NOT NULL,
-  role                  TEXT,
-  profile               TEXT,
-  model                 TEXT,
-  effort                TEXT,
-  instruction           TEXT,                 -- encargo propio del intento (seguimiento); NULL en legacy
-  cwd                   TEXT    NOT NULL,
-  checkout_branch       TEXT,                 -- rama del checkout cuando NO hay Worktree propio (raíz)
-  worktree_id           TEXT    REFERENCES worktrees (id) DEFERRABLE INITIALLY DEFERRED,
-  provider_session_id   TEXT    REFERENCES provider_sessions (id) DEFERRABLE INITIALLY DEFERRED,
-  policy                TEXT    CHECK (policy IS NULL OR json_valid(policy)),
-  ack_unverified        INTEGER NOT NULL CHECK (ack_unverified IN (0, 1)),
-  requested_argv        TEXT    CHECK (requested_argv IS NULL OR json_valid(requested_argv)),
-  plan_mode             INTEGER NOT NULL CHECK (plan_mode IN (0, 1)),
-  stream_json           INTEGER NOT NULL CHECK (stream_json IN (0, 1)),
-  report_nonce          TEXT,
-  delivered             TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(delivered)),
-  delivery_channel      TEXT,
-  model_requested       TEXT,
-  model_effective       TEXT,
-  model_source          TEXT,
-  model_mismatch        INTEGER NOT NULL CHECK (model_mismatch IN (0, 1)),
-  model_mismatch_reason TEXT,
-  approval_deadline     INTEGER,
-  failure_reason        TEXT,
-  summary               TEXT    NOT NULL DEFAULT '',
-  files                 TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(files)),
-  integrated            INTEGER NOT NULL DEFAULT 0 CHECK (integrated IN (0, 1)),
-  started_at            INTEGER,
-  ended_at              INTEGER,
-  created_at            INTEGER NOT NULL,
-  updated_at            INTEGER NOT NULL,
-  origin                TEXT    NOT NULL CHECK (origin IN ('legacy', 'core')),
-  UNIQUE (task_id, n),
-  CHECK (id = task_id || '-a' || n)
-) STRICT;
+-- `attempts` ya existe (008_attempts, LXO-114): identidad, selección, ciclo de vida y resultado mínimo. Un retry o un
+-- seguimiento crea otra fila (n + 1); nunca se pisa. Las columnas de RUNTIME (cwd, política, entrega, modelo efectivo…)
+-- llegan con la migración del slice que las usa, como `ALTER TABLE ... ADD COLUMN`; aquí se añaden para que el borrador
+-- sea ejecutable de punta a punta y el corte real las omitirá según se vayan publicando.
+ALTER TABLE attempts ADD COLUMN instruction           TEXT;                 -- encargo propio del intento (seguimiento); NULL en legacy
+ALTER TABLE attempts ADD COLUMN cwd                   TEXT    NOT NULL DEFAULT '';
+ALTER TABLE attempts ADD COLUMN checkout_branch       TEXT;                 -- rama del checkout cuando NO hay Worktree propio (raíz)
+ALTER TABLE attempts ADD COLUMN policy                TEXT    CHECK (policy IS NULL OR json_valid(policy));
+ALTER TABLE attempts ADD COLUMN ack_unverified        INTEGER NOT NULL DEFAULT 0 CHECK (ack_unverified IN (0, 1));
+ALTER TABLE attempts ADD COLUMN requested_argv        TEXT    CHECK (requested_argv IS NULL OR json_valid(requested_argv));
+ALTER TABLE attempts ADD COLUMN plan_mode             INTEGER NOT NULL DEFAULT 0 CHECK (plan_mode IN (0, 1));
+ALTER TABLE attempts ADD COLUMN stream_json           INTEGER NOT NULL DEFAULT 0 CHECK (stream_json IN (0, 1));
+ALTER TABLE attempts ADD COLUMN report_nonce          TEXT;
+ALTER TABLE attempts ADD COLUMN delivered             TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(delivered));
+ALTER TABLE attempts ADD COLUMN delivery_channel      TEXT;
+ALTER TABLE attempts ADD COLUMN model_requested       TEXT;
+ALTER TABLE attempts ADD COLUMN model_effective       TEXT;
+ALTER TABLE attempts ADD COLUMN model_source          TEXT;
+ALTER TABLE attempts ADD COLUMN model_mismatch        INTEGER NOT NULL DEFAULT 0 CHECK (model_mismatch IN (0, 1));
+ALTER TABLE attempts ADD COLUMN model_mismatch_reason TEXT;
+ALTER TABLE attempts ADD COLUMN approval_deadline     INTEGER;
+ALTER TABLE attempts ADD COLUMN files                 TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(files));
+ALTER TABLE attempts ADD COLUMN integrated            INTEGER NOT NULL DEFAULT 0 CHECK (integrated IN (0, 1));
 
 CREATE TABLE attempt_phases (
   attempt_id TEXT    NOT NULL REFERENCES attempts (id),
@@ -175,7 +155,6 @@ CREATE TABLE legacy_residue (
   PRIMARY KEY (entity_kind, legacy_id, field)
 ) STRICT;
 
-CREATE INDEX attempts_by_status ON attempts (status);
 CREATE INDEX thread_messages_by_thread ON thread_messages (thread_id, id);
 CREATE INDEX decisions_by_attempt ON decisions (attempt_id, kind, id);
 CREATE INDEX reviews_by_attempt ON reviews (attempt_id, decision_id);

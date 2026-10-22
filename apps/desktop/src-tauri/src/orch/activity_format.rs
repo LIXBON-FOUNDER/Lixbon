@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 27] = [
+pub(super) const KINDS: [&str; 34] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -45,6 +45,13 @@ pub(super) const KINDS: [&str; 27] = [
     "task.updated",
     "task.discarded",
     "task.restored",
+    "attempt.requested",
+    "attempt.approved",
+    "attempt.rejected",
+    "attempt.started",
+    "attempt.completed",
+    "attempt.failed",
+    "attempt.stopped",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -71,6 +78,12 @@ const TASK_STATUSES: [&str; 8] = [
     "stopped",
     "exited",
 ];
+/// Por qué se detuvo un Attempt (`attempt.stopped`, `attempt.rejected`).
+const STOP_CAUSES: [&str; 2] = ["cancelled", "run_closed"];
+/// Motivo máquina de `attempt.failed`.
+const ATTEMPT_FAILURES: [&str; 4] = ["launch_failed", "terminal_approval_timeout", "agent_idle_timeout", "agent_reported"];
+/// Estados de los que se puede detener un Attempt ya aprobado (el pendiente es `attempt.rejected`).
+const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
 /// Campos de la intención que puede nombrar `task.updated`.
 const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
 const ENV_CODES: [&str; 3] = [
@@ -391,6 +404,54 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         }
         "task.discarded" => rendered("activity.task.discarded", Visual::Warning, vec![]),
         "task.restored" => rendered("activity.task.restored", Visual::Info, vec![]),
+
+        "attempt.requested" => rendered(
+            "activity.attempt.requested",
+            Visual::Info,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("provider", token(p, "provider")),
+                ("model?", opt_token(p, "model")),
+                ("effort?", opt_token(p, "effort")),
+                ("role?", opt_token(p, "role")),
+                ("profile?", opt_token(p, "profile")),
+                ("external", flag(p, "external")),
+                ("approval_required", flag(p, "approval_required")),
+            ],
+        ),
+        "attempt.approved" => rendered("activity.attempt.approved", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.started" => rendered("activity.attempt.started", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.rejected" => rendered(
+            "activity.attempt.rejected",
+            Visual::Warning,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("cause", closed(p, "cause", &STOP_CAUSES))],
+        ),
+        "attempt.completed" => rendered(
+            "activity.attempt.completed",
+            Visual::Success,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("has_summary", flag(p, "has_summary"))],
+        ),
+        "attempt.failed" => rendered(
+            "activity.attempt.failed",
+            Visual::Error,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("reason", closed(p, "reason", &ATTEMPT_FAILURES)),
+                ("has_summary", flag(p, "has_summary")),
+            ],
+        ),
+        "attempt.stopped" => rendered(
+            "activity.attempt.stopped",
+            Visual::Warning,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("from", closed(p, "from", &STOPPED_FROM)),
+                ("cause", closed(p, "cause", &STOP_CAUSES)),
+            ],
+        ),
         "task.review_requested" => rendered(
             "activity.task.review_requested",
             Visual::Info,
