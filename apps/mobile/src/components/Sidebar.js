@@ -378,6 +378,7 @@ function SupervisionTab({ sup, onOpen }) {
       <Eyebrow style={{ paddingHorizontal: 12, paddingBottom: 4 }}>{sup.view.title}</Eyebrow>
       {row('Atención', count(snap?.attention.total ?? 0), { name: 'attention' })}
       {row('Trabajo activo', count(snap?.active_tasks.total ?? 0), null)}
+      {row('Proyectos', count(snap?.projects.total ?? 0), null)}
       <Eyebrow style={{ paddingHorizontal: 12, paddingTop: 18, paddingBottom: 4 }}>IDE</Eyebrow>
       {sup.candidates.length === 0 ? (
         <Text style={{ paddingHorizontal: 12, fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
