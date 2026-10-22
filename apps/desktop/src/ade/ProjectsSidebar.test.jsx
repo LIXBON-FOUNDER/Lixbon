@@ -2208,6 +2208,71 @@ describe('ProjectsSidebar', () => {
     })));
   });
 
+  it('oculta sin consultar Core y conserva páginas extra, cursor y scroll de .ps__tree hasta una lectura autoritativa', async () => {
+    const refresh = deferred();
+    const cursors = [];
+    let headReads = 0;
+    const calls = mountCore({
+      overviews: () => overview([project('project-a', 'Alpha')]),
+      tasks: (args) => {
+        if (args.cursor) {
+          cursors.push(args.cursor);
+          return page(args.project_id, args.status, [task('t2', { created_at: 900 })], { hasMore: true, cursor: 'cursor-2' });
+        }
+        headReads += 1;
+        const head = page(args.project_id, args.status, [task('t1', { created_at: 1_000 })], { hasMore: true, cursor: 'cursor-1' });
+        return headReads === 2 ? refresh.promise.then(() => head) : head;
+      },
+    });
+    const props = { pollMs: 60_000 };
+    const { container, rerender } = render(<ProjectsSidebar {...props} />);
+    const rowIds = () => [...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id'));
+
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task t1');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await screen.findByText('Task t2');
+    expect(cursors).toEqual(['cursor-1']);
+
+    // El scroller real es el árbol; se ancla ahí la posición.
+    const tree = container.querySelector('.ps__tree');
+    tree.scrollTop = 42;
+    fireEvent.scroll(tree);
+    const callsBeforeHide = calls.length;
+
+    rerender(<ProjectsSidebar active={false} {...props} />);
+    await flush();
+    // Oculto: ni lecturas nuevas ni árbol desmontado; las páginas y el scroll siguen donde estaban.
+    expect(calls).toHaveLength(callsBeforeHide);
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(tree.scrollTop).toBe(42);
+    expect(rowIds()).toEqual(['t1', 't2']);
+    expect(screen.getByTestId('projects-sidebar').getAttribute('aria-hidden')).toBe('true');
+
+    rerender(<ProjectsSidebar active {...props} />);
+    await flush();
+    // Reactivada, la cabecera previa se vuelve a leer: hasta entonces la página extra se marca como previa.
+    expect(headReads).toBe(2);
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(tree.scrollTop).toBe(42);
+    expect(rowIds()).toEqual(['t1', 't2']);
+    expect(screen.getByTestId('stale-task-pages-project-a').textContent).toContain('Se conservan las Tasks cargadas');
+    expect(within(container.querySelector('li[data-task-id="t2"]')).getByText('Datos previos')).toBeTruthy();
+    expect(container.querySelector('li[data-task-id="t1"]').textContent).not.toContain('Datos previos');
+    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+    expect(cursors).toEqual(['cursor-1']);
+
+    // La lectura autoritativa llega idéntica (mismo updatedAt): aun así las páginas cargadas se releen una vez.
+    refresh.resolve();
+    await waitFor(() => expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull());
+    expect(cursors).toEqual(['cursor-1', 'cursor-1']);
+    expect(rowIds()).toEqual(['t1', 't2']);
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(tree.scrollTop).toBe(42);
+    expect(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeTruthy();
+    expect(onlyReadQueries(calls)).toBe(true);
+  });
+
   it('transporta el filtro archived al overview', async () => {
     const calls = mountCore({ overviews: (args) => overview([], { archived: args.archived }) });
     render(<ProjectsSidebar archived="only" />);
