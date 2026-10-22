@@ -15,9 +15,10 @@ import { hostName, sessionOnline } from '../observe/hosts';
 import { Body, Notice } from '../observe/ui';
 import { PillButton } from '../components/ui';
 import AttentionScreen from './observe/AttentionScreen';
+import TaskScreen from './observe/TaskScreen';
 
-// Pantallas de cada ruta. Home (LXO-108) y Task Detail (LXO-110) se añaden aquí.
-const ROUTES = { attention: AttentionScreen };
+// Pantallas de cada ruta. Home (LXO-108) se añade aquí.
+const ROUTES = { attention: AttentionScreen, task: TaskScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',

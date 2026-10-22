@@ -33,10 +33,12 @@ STATE_EVENTS = frozenset({"orch"})
 # reparten y se olvidan. `orch_core_snapshot` y `orch_core_events` son el
 # bootstrap observacional de Mobile (LXO-107): estado del Core que el relay no
 # guarda ni repite; el móvil las empareja por `rid`. `orch_core_attention` es
-# la bandeja de Attention completa (LXO-109).
+# la bandeja de Attention completa (LXO-109); `orch_core_task` y
+# `orch_core_activity`, el detalle de una Task (LXO-110).
 EPHEMERAL_EVENTS = frozenset({
     "orch_diff", "orch_term", "orch_agents", "orch_error",
     "orch_core_snapshot", "orch_core_events", "orch_core_attention",
+    "orch_core_task", "orch_core_activity",
 })
 
 HELLO_META_KEYS = (
