@@ -18,19 +18,20 @@ const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 // Se espía aparte de `queryAdeCore` porque son dos canales distintos: la verificación de Activity
 // (`readAdeTask`) y las lecturas del shell (`useCoreQuery` → `queryAdeCore`). Contarlos juntos mezclaría
 // una lectura del shell con una verificación de un destino.
-// Como ambos canales pasan por el mismo mock de transporte, cada llamada emitida por la verificación se
-// marca con su índice dentro de `queryAdeCore.mock.calls`. Así el canal del shell se mide sin contar las
-// verificaciones: sin esa marca, cualquier lectura del shell sería indistinguible de una verificación.
-const transport = vi.hoisted(() => ({ verificationCallIndexes: new Set() }));
+// Como ambos canales pasan por el mismo mock de transporte, cada registro de llamada emitido por la
+// verificación se conserva por identidad. Así el canal del shell se mide sin contar las verificaciones.
+const transport = vi.hoisted(() => ({ verificationQueryCalls: new Set() }));
 
 vi.mock('./coreQueries', async (importOriginal) => {
   const queryAdeCore = vi.fn();
   const readAdeTask = vi.fn((projectId, taskId) => {
-    // La llamada se registra de forma síncrona en `mock.calls`, así que su índice es el de esta verificación.
-    const index = queryAdeCore.mock.calls.length;
-    const result = queryAdeCore('task_detail', { projectId, taskId });
-    transport.verificationCallIndexes.add(index);
-    return result;
+    // Marca el registro exacto aunque el transporte lance sincrónicamente.
+    const callIndex = queryAdeCore.mock.calls.length;
+    try {
+      return queryAdeCore('task_detail', { projectId, taskId });
+    } finally {
+      transport.verificationQueryCalls.add(queryAdeCore.mock.calls[callIndex]);
+    }
   });
   return {
     ...(await importOriginal()),
@@ -141,8 +142,7 @@ afterEach(() => {
   vi.useRealTimers();
   queryAdeCore.mockReset();
   readAdeTask.mockClear();
-  // Los índices marcan llamadas de `queryAdeCore.mock.calls`, que `mockReset` deja vacío: se descartan con él.
-  transport.verificationCallIndexes.clear();
+  transport.verificationQueryCalls.clear();
 });
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
@@ -1178,16 +1178,17 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     const verificationCallsFor = (projectId, taskId) => verificationCalls()
       .filter((call) => call.projectId === projectId && call.taskId === taskId);
     const verificationCallsForTask = (taskId) => verificationCalls().filter((call) => call.taskId === taskId);
+    const verificationQueryCallsFor = (projectId, taskId) => [...transport.verificationQueryCalls]
+      .filter(([query, args]) => query === 'task_detail'
+        && args.projectId === projectId && args.taskId === taskId);
     // Lecturas del shell: `task_detail` emitidas por `useCoreQuery` → `queryAdeCore`, SIN contar las que
     // emite la verificación de Activity (`readAdeTask`), que comparte el mismo mock de transporte. Sin esta
     // separación, una lectura del shell y una verificación serían la misma llamada y el conteo del shell
     // sería tautológico (siempre ≥ 1 si hubo una verificación).
     const shellTaskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls
-      .map((call, index) => ({ call, index }))
-      .filter(({ call: [query, args] }) => query === 'task_detail'
+      .filter(([query, args]) => query === 'task_detail'
         && args.projectId === projectId && args.taskId === taskId)
-      .filter(({ index }) => !transport.verificationCallIndexes.has(index))
-      .map(({ call }) => call);
+      .filter((call) => !transport.verificationQueryCalls.has(call));
     // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
     const settle = async () => { for (let i = 0; i < 6; i += 1) await flush(); };
     // Toda lectura de `task_detail` del destino queda pendiente hasta que la prueba la resuelva.
@@ -1224,7 +1225,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       await settle();
       expect(overviewReads).toBeGreaterThan(1);
-      fireEvent.click(screen.getByTestId('activity-target-event-11'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-11'));
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
       expect(screen.queryByText(/No se pudo verificar el Project/)).toBeNull();
@@ -1237,7 +1238,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-11'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-11'));
       await settle();
       expect(screen.getByText(`No se pudo verificar el Project ${PROJECT.id} en el overview de Core; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
@@ -1351,7 +1352,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
 
       fireEvent.click(await screen.findByTestId('activity-target-event-13'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-14'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-14'));
       await settle();
       pending.resolve(detailOf({ id: slowTaskId }));
       await settle();
@@ -1370,7 +1371,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-15'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-15'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
@@ -1413,7 +1414,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       fireEvent.click(await screen.findByTestId('activity-target-event-17'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-17'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-17'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
@@ -1447,11 +1448,11 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-18'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-19'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-19'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-18'));
       await settle();
 
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1480,7 +1481,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-20'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
@@ -1490,7 +1491,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       // El timeout de la UI no libera la ranura de deduplicación: la lectura subyacente sigue en vuelo.
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
-      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-20'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
@@ -1499,16 +1500,6 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
       expect(screen.queryByText(/Core no respondió a tiempo al verificar la Task/)).toBeNull();
-
-      // La ranura se liberó al asentarse la consulta subyacente (no al vencer el timeout): sin Task seleccionada
-      // en el shell, el mismo destino vuelve a verificarse con una lectura nueva.
-      useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
-      await settle();
-      openActivityTab();
-      await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-20'));
-      await settle();
-      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
 
     it('conserva la selección y avisa si task_detail devuelve otro task.id', async () => {
@@ -1528,7 +1519,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-21'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-21'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1552,7 +1543,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-22'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-22'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1581,9 +1572,9 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-23'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-23'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-24'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-24'));
       await settle();
 
       // Mismo Project, Tasks distintas: dos lecturas en vuelo independientes (la ranura es el par completo).
@@ -1604,11 +1595,13 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: taskB });
       expect(screen.queryByText(/Verificando la Task/)).toBeNull();
-      // La lectura del shell es otro canal: no cuenta como verificación del destino.
-      // El conteo del shell excluye las llamadas de verificación, así que `> 0` prueba que el shell leyó
-      // el detalle por su cuenta (no que la verificación ya lo dejó hecho).
+      // La verificación y el shell pueden compartir el transporte, pero no el registro de llamada.
       expect(verificationCallsFor(PROJECT.id, taskB)).toHaveLength(1);
-      expect(shellTaskDetailCallsFor(PROJECT.id, taskB).length).toBeGreaterThan(0);
+      const taskBVerificationReads = verificationQueryCallsFor(PROJECT.id, taskB);
+      const taskBShellReads = shellTaskDetailCallsFor(PROJECT.id, taskB);
+      expect(taskBVerificationReads).toHaveLength(1);
+      expect(taskBShellReads.length).toBeGreaterThan(0);
+      expect(taskBShellReads).not.toContain(taskBVerificationReads[0]);
     });
 
     it('libera la ranura de deduplicación cuando la consulta subyacente se asienta', async () => {
@@ -1627,14 +1620,14 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-25'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
 
       // La consulta ya se asentó: la ranura quedó libre y el mismo destino se verifica con una lectura nueva.
-      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-25'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
@@ -1649,7 +1642,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-26'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-26'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
