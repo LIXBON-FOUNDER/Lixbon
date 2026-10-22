@@ -50,11 +50,12 @@ struct Params {
     machine: Option<String>,
 }
 
+/// Contadores de Tasks de un Project. También los usa la snapshot compacta (LXO-94): misma definición.
 #[derive(Default, Clone, Copy)]
-struct TaskCounts {
-    total: u64,
-    active: u64,
-    failed: u64,
+pub(super) struct TaskCounts {
+    pub(super) total: u64,
+    pub(super) active: u64,
+    pub(super) failed: u64,
 }
 
 fn invalid(message: impl Into<String>) -> String {
@@ -108,7 +109,7 @@ fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<
     }
 }
 
-fn task_counts(state: &State) -> (HashMap<String, TaskCounts>, TaskCounts) {
+pub(super) fn task_counts(state: &State) -> (HashMap<String, TaskCounts>, TaskCounts) {
     let mut by_project: HashMap<String, TaskCounts> = HashMap::new();
     let mut unassigned = TaskCounts::default();
     for task in state.tasks.values() {
@@ -174,7 +175,7 @@ fn attention_json(by_category: Option<&BTreeMap<&'static str, u64>>) -> Value {
 }
 
 /// Estado agregado en un código estable (la interfaz lo traduce). Prioridad: `failed` > `attention` > `active` > `idle`.
-fn aggregate_status(counts: &TaskCounts, attention_total: u64) -> &'static str {
+pub(super) fn aggregate_status(counts: &TaskCounts, attention_total: u64) -> &'static str {
     if counts.failed > 0 {
         "failed"
     } else if attention_total > 0 {

@@ -1,8 +1,8 @@
 # Queries de lectura del Core para clientes observacionales (F2)
 
 Estado: **`projects_overview` implementado (LXO-90)**; **`tasks_by_project` y `task_detail` implementados
-(LXO-98, lectura de Tasks por Project prevista en LXO-91)**. Activity (LXO-92), inventario de worktrees (LXO-93) y snapshot compacto (LXO-94) se documentan aquí cuando se
-implementen.
+(LXO-98, lectura de Tasks por Project prevista en LXO-91)**; **`compact_snapshot` implementado (LXO-94)**. Activity
+(LXO-92) e inventario de worktrees (LXO-93) se documentan aquí cuando se implementen.
 
 F2 es observacional: Desktop, CLI y Mobile muestran lo que el Core dice, sin agrupar por rutas ni reconstruir
 autoridad desde `state.json`. Todas las queries son de **solo lectura** y no crean Tasks, no reintentan ni
@@ -31,7 +31,8 @@ Resumen multiproyecto: los Projects conocidos con su trabajo activo, fallos y At
 | `machine` | id de máquina de una ubicación (1–200 caracteres) | sin filtro |
 
 Los parámetros desconocidos o inválidos se rechazan con `projects_overview_invalid_request`. No hay paginación
-ni cursor: el overview devuelve todos los Projects que cumplen el filtro (el cursor de snapshot es LXO-94).
+ni cursor: el overview devuelve todos los Projects que cumplen el filtro (el cursor de snapshot está en
+[`compact_snapshot`](#compact_snapshot)).
 
 ### Respuesta
 
@@ -299,3 +300,145 @@ inexistente, Task inexistente o de otro Project, el DTO del detalle y el rechazo
 `orch/server.rs::tasks_http_tests::consultas_de_tasks_por_post_rpc` lo repite de punta a punta por `POST /rpc` con
 credencial de Person registrada: `limit` en 0, 1, 100 y 101, paginación con una Task creada entre páginas, cursor
 inválido, `status`, Project inexistente, `task_detail` propio, inexistente y de otro Project, y rechazo de un Agent.
+
+## `compact_snapshot`
+
+Snapshot compacta para arrancar un cliente ligero (Mobile, el resumen al abrir el CLI, una rehidratación
+rápida) con **una sola query**: Projects con su resumen, Tasks activas mínimas, Attention (contadores y los
+elementos más urgentes), los metadatos del Core y el cursor del Event Log desde el que seguir.
+Implementación: `orch/compact_snapshot.rs`.
+
+* **Es una vista derivada, no una autoridad.** Sale de las mismas fuentes que `projects_overview`,
+  `tasks_by_project` y `attention_list`. El cliente no la guarda como verdad: la usa para pintar y sigue con
+  `events` desde `cursor.events`. Para cambios posteriores manda el Event Log.
+* **Solo Person autenticada.** Un Agent, o una petición sin cliente autenticado (token legacy), reciben
+  `compact_snapshot_auth_required`.
+* **Transporte:** el mismo comando por el RPC de Tauri y por `POST /rpc`, clasificado como `ClientAction::Read`.
+* **No escribe.** No crea eventos, no persiste estado y no crea `meta.machine_id` si aún no existe.
+
+### Petición
+
+```json
+{"cmd":"compact_snapshot","args":{"attention_items":5}}
+```
+
+| Parámetro | Valores | Por defecto |
+|---|---|---|
+| `attention_items` | entero JSON de 0 a 20: cuántas Attention destacadas incluir | 5 |
+
+Un `null` cuenta como ausente. Los parámetros desconocidos y un `attention_items` que no sea un entero en rango
+se rechazan con `compact_snapshot_invalid_request` (no se recorta).
+
+### Respuesta
+
+Ejemplo real (un Project con una Task en marcha y otra fallida, y una pregunta pendiente):
+
+```json
+{
+  "snapshot_version": 1,
+  "generated_at": 1792644871974,
+  "core": {"version": "2.2.0", "health": "ok", "machine_id": "<machine_id>"},
+  "cursor": {"events": 42},
+  "projects": {
+    "total": 1,
+    "truncated": false,
+    "items": [{"id": "<project_id>", "name": "lixbon", "status": "failed", "active": 1, "failed": 1, "attention": 2}]
+  },
+  "active_tasks": {
+    "total": 1,
+    "truncated": false,
+    "items": [{
+      "id": "t3", "project_id": "<project_id>", "run_id": "r2", "parent_id": null, "root_id": "t3",
+      "status": "running", "title": "Arreglar la reconexión", "provider": "claude", "origin": "lixbon",
+      "updated_at": 1792644870000
+    }]
+  },
+  "attention": {
+    "total": 2,
+    "by_category": {"question": 1, "approval": 0, "review_ready": 0, "conflict": 0, "failed": 1,
+                    "environment_blocked": 0, "risk": 0},
+    "truncated": false,
+    "items": [{"id": "<attention_id>", "category": "question", "severity": "high", "target_kind": "task",
+               "target_id": "t3", "project_id": "<project_id>", "created_at": 1792644860000}]
+  },
+  "unassigned": {"active": 0, "failed": 0, "attention": 0},
+  "limits": {"projects": 50, "active_tasks": 50, "attention_items": 5, "text_chars": 120}
+}
+```
+
+| Campo | Definición |
+|---|---|
+| `snapshot_version` | versión del esquema; sube solo si se rompe la forma (los campos nuevos no la suben) |
+| `generated_at` | hora del Core al generarla (ms epoch); solo informativa |
+| `core.version` | versión de Lixbon que sirve la snapshot |
+| `core.health` | `ok`, o `read_only` si el Core está degradado (lecturas sí, mutaciones no). El motivo interno no viaja |
+| `core.machine_id` | máquina del Core que responde (`meta.machine_id`); `null` si aún no se ha creado |
+| `cursor.events` | `head_seq` del Event Log en el punto de la snapshot: el `cursor` con el que pedir `events` después |
+| `projects.items[]` | Projects **no archivados**: `id`, `name`, `status` (el mismo código agregado que `projects_overview`), `active`, `failed` y `attention` (total activo) |
+| `active_tasks.items[]` | Tasks que **no** están en un estado final, de cualquier Project o sin Project |
+| `active_tasks.items[].origin` | `lixbon` si la lanzó Lixbon, `external` si es un coordinador externo (una terminal cualquiera) |
+| `attention` | `total` y `by_category` (las siete siempre, con 0) de **toda** la Attention activa; `items`, las más urgentes |
+| `unassigned` | Tasks activas y fallidas sin `project_id`, y su Attention activa |
+| `limits` | los topes aplicados en esta respuesta |
+
+Lo que **no** lleva, a propósito: el encargo (`spec`), `cwd`, repo, rama y worktree, rutas de las ubicaciones,
+`subject` y `facts` de la Attention, ids de correlación, argv ni transcript. Hay una prueba con centinelas.
+
+### Orden, topes y recorte
+
+| Lista | Orden | Tope |
+|---|---|---|
+| `projects.items` | estado (`failed` > `attention` > `active` > `idle`), nombre en minúsculas, `project_id` | 50 |
+| `active_tasks.items` | `updated_at` descendente, `id` | 50 |
+| `attention.items` | severidad (`critical` > `high` > `medium` > `low`), `created_at` descendente, `id` | `attention_items` (≤ 20) |
+
+* El orden es también el orden de recorte: lo que pide algo sale primero.
+* **Nunca aparenta completitud.** Cada lista lleva `total` (cuántas hay de verdad) y `truncated` (`true` si
+  `total` es mayor que los elementos devueltos). Con `attention_items: 0` y Attention activa, `truncated` es
+  `true`. El detalle completo está en `projects_overview`, `tasks_by_project` y `attention_list`.
+* **Textos libres** (`name` de Project, `title` de Task): los caracteres de control pasan a espacio y se recortan
+  a 120 caracteres; si se recortan, acaban en `…`.
+
+### Presupuesto de tamaño
+
+**128 KiB** de JSON como máximo con los topes de arriba. Medido en `workspace_grande_recorta_marca_y_cabe_en_el_presupuesto`
+con 150 Projects, 150 Tasks activas y 40 Attention (`attention_items: 20`):
+
+| Caso | Tamaño |
+|---|---|
+| Workspace grande típico (títulos de una línea) | ~26 KB |
+| Peor caso que permiten los topes (todos los textos de 120 caracteres de 4 bytes) | ~67 KB |
+
+### Consistencia con el Event Log
+
+La query toma el guard del estado y, **con él tomado**, lee en **una sola transacción de lectura** de SQLite el
+registro de Projects, la Attention activa y el `head_seq` del Event Log (`Store::read_snapshot`). `mutate` persiste
+estado y eventos con el mismo guard tomado, y los hechos que se añaden sin él (`record_facts`) solo tocan SQLite,
+que se lee en una única instantánea. Por eso Tasks, Attention y `cursor.events` son del mismo punto:
+
+* todo lo que refleja la snapshot tiene su evento con `seq <= cursor.events`;
+* todo lo posterior llega con `events` y `cursor = cursor.events`, sin huecos ni repetidos;
+* tras reiniciar el Core, el mismo cursor sigue valiendo (el Event Log es durable) y la snapshot del mismo
+  estado es la misma salvo `generated_at`.
+
+Un cliente que reconecta puede seguir desde su último cursor o pedir otra snapshot; la snapshot no sustituye al
+Event Log para lo que pase después.
+
+### Errores
+
+| Código | Cuándo |
+|---|---|
+| `compact_snapshot_auth_required` | sin cliente autenticado, o un Agent / token legacy |
+| `compact_snapshot_invalid_request` | parámetro desconocido o `attention_items` inválido |
+| `compact_snapshot_unavailable` | el Core no tiene almacén abierto |
+| `compact_snapshot_read_failed` | falló la lectura de SQLite |
+
+### Pruebas
+
+`orch/compact_snapshot_tests.rs`: bootstrap vacío y forma estable; coherencia con `projects_overview` y orden
+por estado; workspace grande con recorte, `truncated` y presupuesto de tamaño (típico y peor caso); recorte de
+textos y `attention_items: 0`; cursor que continúa `events` sin huecos ni repetidos; snapshot y cursor del mismo
+punto con escrituras concurrentes; reinicio y reconexión con el cursor anterior; centinela de secretos; solo
+Person y parámetros inválidos; solo lectura y Core degradado.
+`orch/server.rs::compact_snapshot_http_tests::bootstrap_por_post_rpc_y_continuacion_por_events` lo repite de punta
+a punta: `POST /rpc` y `GET /events?cursor=` antes y después de reiniciar el Core.
