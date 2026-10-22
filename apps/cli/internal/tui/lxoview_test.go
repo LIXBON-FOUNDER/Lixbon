@@ -104,8 +104,8 @@ func TestLxoTasksViewIsATree(t *testing.T) {
 	lines := strings.Split(out, "\n")
 	indent := func(title string) int {
 		for _, l := range lines {
-			if strings.Contains(l, title) {
-				return len(l) - len(strings.TrimLeft(l, " "))
+			if i := strings.Index(l, title); i >= 0 {
+				return ansi.StringWidth(l[:i]) // la columna donde empieza el título, con las guías del árbol delante
 			}
 		}
 		t.Fatalf("no está %q en:\n%s", title, out)
@@ -113,6 +113,14 @@ func TestLxoTasksViewIsATree(t *testing.T) {
 	}
 	if indent("Relé core_task") <= indent("Coordinar Supervisar móvil") {
 		t.Fatalf("las hijas van sangradas bajo su raíz:\n%s", out)
+	}
+	// Guías: «│» une la raíz con sus hijas, «└» marca la última, y una línea en blanco separa las tareas.
+	plain := strings.ReplaceAll(strings.ReplaceAll(out, glyphRail, "│"), glyphCorner, "└")
+	for _, want := range []string{"│ ● Relé core_task", "└ ✓ Revisar traductor", "│   t3 · lixbon-app", "externa\n   │\n"} {
+		contains(t, plain, want)
+	}
+	if !strings.Contains(out, strings.Repeat(glyphSep, 5)) {
+		t.Fatalf("puntos guía entre el título y el estado:\n%s", out)
 	}
 	for _, want := range []string{"en curso", "fallida", "terminada", "codex (gpt-5)", "⎇ lxo/rele", "checkout compartido", "externa", "sin proyecto", "! lxo task show <id o nombre>"} {
 		if !strings.Contains(out, want) && !strings.Contains(out, strings.ReplaceAll(want, "⎇", glyphBranch)) {
