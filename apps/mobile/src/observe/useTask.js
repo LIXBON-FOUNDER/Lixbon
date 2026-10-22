@@ -8,7 +8,7 @@ import { activityReducer, initialActivity, snapshotTask, taskModel } from './tas
 export const TASK_CAPABILITY = 'core_task';
 const NOT_FOUND = /^(tasks_not_found|tasks_project_not_found)$/;
 
-export function useTask(obs, { taskId, projectId: routeProject }) {
+export function useTask(obs, { taskId, projectId: routeProject, hostLabel = null }) {
   const snapshot = obs.core?.snapshot;
   const snapItem = snapshotTask(snapshot, taskId);
   const projectId = routeProject || snapItem?.project_id || null;
@@ -67,7 +67,7 @@ export function useTask(obs, { taskId, projectId: routeProject }) {
     loadAttention();
   }, [loadDetail, loadActivity, loadAttention, cursorKey]);
 
-  const model = taskModel({ taskId, detail, snapItem, snapshot, missing });
+  const model = taskModel({ taskId, detail, snapItem, snapshot, missing, hostLabel });
   // Sin la lista propia, la Attention de esta Task que venga en la snapshot (las más urgentes).
   const related = attention ?? (snapshot?.attention?.items || []).filter((a) => a.target_kind === 'task' && a.target_id === taskId);
   return {

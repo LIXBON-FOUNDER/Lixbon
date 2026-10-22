@@ -1,8 +1,10 @@
 // observe/task.js — Task Detail de Supervisar (LXO-110). Sin dependencias de React Native.
 //
 // Junta lo que dice el Core de una Task legacy: el detalle (`task_detail` por el relé, `core_task`), su
-// Activity (`activity_list`, `core_activity`) y la fila de la snapshot. Lo que el modelo legacy no registra
-// (host, a veces el modelo) queda como desconocido; nunca se inventa. La ruta es ubicación secundaria.
+// Activity (`activity_list`, `core_activity`) y la fila de la snapshot. Lo que no se sabe (a veces el modelo)
+// queda como desconocido; nunca se inventa. El host es el IDE de la sesión /remote: el Core que responde es el
+// de ese equipo, y es donde corren sus Tasks. La ruta es ubicación secundaria.
+import { actionGate } from './connection.js';
 import { translateActivityMessage } from './activityMessages.js';
 
 export const STATUS = Object.freeze({
@@ -32,7 +34,7 @@ export function snapshotTask(snapshot, taskId) {
  * Modelo de la pantalla. `source`: 'detail' (task_detail), 'snapshot' (solo la fila de la snapshot) o 'none'.
  * `missing`: el Core respondió que la Task no existe (o ya no es de ese Project).
  */
-export function taskModel({ taskId, detail, snapItem, snapshot, missing = false }) {
+export function taskModel({ taskId, detail, snapItem, snapshot, missing = false, hostLabel = null }) {
   const d = detail || null;
   const s = snapItem || null;
   const base = d || s;
@@ -66,15 +68,43 @@ export function taskModel({ taskId, detail, snapItem, snapshot, missing = false 
     branch: d ? d.branch : null,
     location: d ? d.location : null,
     sharedCheckout: d ? !d.worktree : null,
-    // El modelo legacy no guarda el host; el origen solo lo da la snapshot.
-    host: null,
-    origin: s?.origin ?? null,
+    // El modelo legacy no guarda el host en la Task: es el equipo del Core que responde (el IDE conectado).
+    host: hostLabel || null,
+    origin: d?.origin ?? s?.origin ?? null,
+    pendingQuestions: d?.pending_questions ?? 0,
     phase: d?.phase ? (d.phase.done ? 'Última fase terminada' : 'Fase en curso') : null,
     phaseAt: d?.phase?.at ?? null,
     createdAt: d?.created_at ?? null,
     updatedAt: d?.updated_at ?? s?.updated_at ?? null,
     flags,
   };
+}
+
+// ── Acciones ─────────────────────────────────────────────────────────────────
+
+const LATER = 'Desde el teléfono llegará más adelante: hazlo en Lixbon Desktop.';
+
+/**
+ * Lo que habría que hacer con esta Task, según su estado y su Attention, deshabilitado y con la razón
+ * (invariante de LXO-46: Mobile no aparenta acciones que aún no soporta). La razón la da primero la conexión
+ * (`actionGate`, LXO-111): sin confirmación en línea nada puede parecer enviado. «Abrir en Desktop» no muta:
+ * su razón es siempre la suya.
+ */
+export function taskActions(model, related, view) {
+  if (!model || model.source === 'none') return [];
+  const categories = new Set((Array.isArray(related) ? related : []).map((a) => a?.category));
+  const actions = [];
+  if (model.pendingQuestions > 0 || categories.has('question')) actions.push({ key: 'reply', label: 'Responder la pregunta', icon: 'chat' });
+  if (categories.has('approval') || model.status === 'awaiting_terminal_approval') actions.push({ key: 'approve', label: 'Aprobar o rechazar', icon: 'check' });
+  if (categories.has('review_ready')) actions.push({ key: 'review', label: 'Revisar e integrar', icon: 'git' });
+  if (categories.has('conflict')) actions.push({ key: 'conflict', label: 'Resolver el conflicto', icon: 'warning' });
+  if (model.status === 'failed' || categories.has('failed')) actions.push({ key: 'retry', label: 'Reintentar', icon: 'rotate' });
+  const gate = view ? actionGate(view) : { allowed: false, reason: null };
+  const mutation = gate.allowed || !gate.reason ? LATER : gate.reason;
+  return [
+    ...actions.map((a) => ({ ...a, reason: mutation })),
+    { key: 'desktop', label: 'Abrir en Desktop', icon: 'monitor', reason: 'Abrir en el escritorio llegará más adelante (F6).' },
+  ];
 }
 
 // ── Activity ─────────────────────────────────────────────────────────────────

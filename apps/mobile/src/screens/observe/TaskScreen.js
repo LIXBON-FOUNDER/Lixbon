@@ -2,15 +2,16 @@
 //
 // Identidad (Project + Task), estado real con sus señales (pregunta, revisión, integración), proveedor y modelo
 // conocidos, ubicación resumida (rama, worktree o checkout compartido, host y origen), Activity reciente
-// paginable y la Attention de esta Task. Sin editor, terminal, respuestas ni Attempts (F3). «Abrir en Desktop»
-// es un marcador deshabilitado hasta F6.
+// paginable y la Attention de esta Task. Sin editor, terminal, respuestas ni Attempts (F3). Lo que habría que
+// hacer (responder, aprobar, revisar, reintentar, abrir en Desktop) sale deshabilitado y con su razón (LXO-46).
 import React from 'react';
 import { Text, View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { Eyebrow, PillButton, useColors } from '../../components/ui';
 import { ageText, projectNames } from '../../observe/attention';
-import { activityLine, taskNotice } from '../../observe/task';
+import { hostName } from '../../observe/hosts';
+import { activityLine, taskActions, taskNotice } from '../../observe/task';
 import { Body, Dot, Mono, Notice, StateText, Title, toneColor } from '../../observe/ui';
 import { useTask } from '../../observe/useTask';
 import { FONTS, RADIUS } from '../../theme';
@@ -37,8 +38,9 @@ const VISUAL_TONE = { success: 'ok', warning: 'warn', error: 'error', info: 'mut
 
 export default function TaskScreen({ obs, route }) {
   const c = useColors();
-  const t = useTask(obs, { taskId: route.taskId, projectId: route.projectId });
+  const t = useTask(obs, { taskId: route.taskId, projectId: route.projectId, hostLabel: obs.session ? hostName(obs.session, obs.meta) : null });
   const m = t.model;
+  const actions = taskActions(m, t.related, obs.view);
   const names = projectNames(obs.core?.snapshot);
   const notice = taskNotice(m, { online: t.online, error: t.error });
 
@@ -65,7 +67,7 @@ export default function TaskScreen({ obs, route }) {
             <Field label="Modelo">{m.model || (m.source === 'detail' ? 'por defecto' : unknown)}</Field>
             <Field label="Rama" mono>{m.branch || (m.source === 'detail' ? 'sin rama propia' : unknown)}</Field>
             <Field label="Checkout">{m.sharedCheckout === null ? unknown : m.sharedCheckout ? 'Compartido con su padre' : 'Worktree propio'}</Field>
-            <Field label="Host">{m.host || 'no lo registra el modelo actual'}</Field>
+            <Field label="Host">{m.host ? `${m.host} (el equipo de este Lixbon)` : unknown}</Field>
             <Field label="Origen">{m.origin === 'external' ? 'Coordinador externo' : m.origin === 'lixbon' ? 'Lanzada por Lixbon' : unknown}</Field>
             <Field label="Árbol">{m.isRoot ? `Raíz${m.children ? ` · ${m.children} hija${m.children === 1 ? '' : 's'}` : ''}` : 'Hija de otra tarea'}</Field>
             {m.updatedAt ? <Field label="Actualizada">{ageText(m.updatedAt, obs.now)}</Field> : null}
@@ -74,14 +76,15 @@ export default function TaskScreen({ obs, route }) {
             <Field label="Id" mono secondary>{m.id}</Field>
           </View>
 
-          <PillButton
-            outline
-            icon="monitor"
-            label="Abrir en Desktop"
-            disabled
-            onPress={() => {}}
-          />
-          <Body muted style={{ marginTop: -10, fontSize: 12.5 }}>Abrir en el escritorio llegará más adelante (F6).</Body>
+          <View style={{ gap: 10 }}>
+            <Eyebrow>Acciones</Eyebrow>
+            {actions.map((a) => (
+              <View key={a.key} style={{ gap: 4 }} accessible accessibilityRole="button" accessibilityState={{ disabled: true }} accessibilityLabel={`${a.label}, no disponible. ${a.reason}`}>
+                <PillButton outline icon={a.icon} label={a.label} disabled onPress={() => {}} />
+                <Body muted style={{ fontSize: 12.5 }}>{a.reason}</Body>
+              </View>
+            ))}
+          </View>
         </>
       )}
 

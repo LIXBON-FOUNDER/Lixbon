@@ -100,6 +100,8 @@ export function slimTaskDetail(t) {
     phase,
     pending_questions: pendingQuestions,
     merged: !!t?.merged,
+    // `external` del Core (LXO-38): quién lanzó la Task. Sin el campo (Core anterior), desconocido.
+    origin: typeof t?.external === 'boolean' ? (t.external ? 'external' : 'lixbon') : null,
     review: t?.review ? { decision: text(t.review.decision, 40), at: int(t.review.at) } : null,
     integration: t?.integration ? { outcome: text(t.integration.outcome, 40), at: int(t.integration.at) } : null,
   };
