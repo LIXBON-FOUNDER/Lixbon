@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -62,12 +63,13 @@ func (m *Model) coreSummaryCmd() tea.Cmd {
 func (m *Model) onCoreSummary(msg coreSummaryMsg) {
 	switch {
 	case errors.Is(msg.err, orch.ErrSummarySlow):
-		m.add(note("Lixbon Desktop no respondió a tiempo: resumen del arranque omitido (lxo summary para verlo)."))
+		m.add(note("Lixbon Desktop no respondió a tiempo: resumen del arranque omitido (! lxo summary para verlo)."))
 	case msg.err != nil:
-		m.add(note("No se pudo leer el resumen de Lixbon Desktop (lxo summary para ver por qué)."))
+		m.add(note("No se pudo leer el resumen de Lixbon Desktop (! lxo summary para ver por qué)."))
 	default:
 		for _, line := range msg.lines {
-			m.add(note(line))
+			// Dentro del chat, lxo se ejecuta con «!»: la pista dice lo que hay que escribir aquí.
+			m.add(note(strings.Replace(line, "→ lxo ", "→ ! lxo ", 1)))
 		}
 	}
 }

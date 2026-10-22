@@ -22,7 +22,7 @@ func TestStartupSummaryShowsTheCoreSummary(t *testing.T) {
 	withSummary(h, []string{"Lixbon · 2 proyectos con trabajo · 3 tareas activas · 1 pide atención (1 pregunta)", "  → lxo attention para verla"}, nil)
 	h.update(h.m.coreSummaryCmd()())
 	contains(t, h.out(), "3 tareas activas · 1 pide atención (1 pregunta)")
-	contains(t, h.out(), "→ lxo attention para verla")
+	contains(t, h.out(), "→ ! lxo attention para verla")
 }
 
 func TestStartupSummaryWithoutAttention(t *testing.T) {
