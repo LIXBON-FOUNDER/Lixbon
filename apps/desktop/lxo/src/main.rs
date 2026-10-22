@@ -12,6 +12,7 @@ mod attention;
 mod client_auth;
 mod events;
 mod projects;
+mod summary;
 mod tasks;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
@@ -43,6 +44,7 @@ Coordinador (el agente con el que habla el usuario):
   lxo task show <task_id>                          tareas del Core (modelo legacy) en árbol (solo lectura)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
+  lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
   lxo stop <tarea> | lxo release <tarea> [--force]
   (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
    lxo merge y lxo pr se rechazan)
@@ -1012,6 +1014,9 @@ fn main() -> ExitCode {
     }
     if matches!(a.at(0).as_deref(), Some("tasks" | "task")) {
         return tasks::run(&a);
+    }
+    if a.at(0).as_deref() == Some("summary") {
+        return summary::run(&a);
     }
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
     if a.at(0).as_deref() == Some("ask") && a.s("resume").is_some() {
