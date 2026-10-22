@@ -376,7 +376,7 @@ function SupervisionTab({ sup, onOpen }) {
   return (
     <ScrollView style={{ flex: 1, marginTop: 18 }} showsVerticalScrollIndicator={false}>
       <Eyebrow style={{ paddingHorizontal: 12, paddingBottom: 4 }}>{sup.view.title}</Eyebrow>
-      {row('Atención', count(snap?.attention.total ?? 0), null)}
+      {row('Atención', count(snap?.attention.total ?? 0), { name: 'attention' })}
       {row('Trabajo activo', count(snap?.active_tasks.total ?? 0), null)}
       <Eyebrow style={{ paddingHorizontal: 12, paddingTop: 18, paddingBottom: 4 }}>IDE</Eyebrow>
       {sup.candidates.length === 0 ? (

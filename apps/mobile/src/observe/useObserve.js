@@ -110,7 +110,8 @@ export function useObserve({ sessions, active }) {
   const view = connectionView({ core: core.state, link, hostConnected, hasHost: !!session, now });
   return {
     session, candidates, select, meta, link, hostConnected,
-    core: core.state, retry: core.retry, view, now,
+    core: core.state, retry: core.retry, request: core.request, view, now,
+    capabilities: Array.isArray(meta?.capabilities) ? meta.capabilities : null,
     stack, route: stack[stack.length - 1], push, pop, home,
   };
 }

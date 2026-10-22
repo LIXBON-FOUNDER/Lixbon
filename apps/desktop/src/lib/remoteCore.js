@@ -17,6 +17,11 @@ const MAX_ATTENTION_ITEMS = 20;
 const RID = /^[A-Za-z0-9_-]{1,64}$/;
 const CODE = /^([a-z][a-z0-9_]{0,63}):/;
 const ID_CHARS = 200;
+const ATTENTION_CATEGORIES = new Set(['question', 'approval', 'review_ready', 'conflict', 'failed', 'environment_blocked', 'risk']);
+const ATTENTION_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
+export const CORE_ATTENTION_MAX_LIMIT = 100;
+const CORE_ATTENTION_DEFAULT_LIMIT = 50;
+const CURSOR_CHARS = 4096;
 
 /** Código estable de un error del Core. El mensaje no viaja: puede llevar rutas o detalles internos. */
 export function coreErrorCode(error) {
@@ -43,6 +48,22 @@ export function slimEvent(e) {
   };
 }
 
+/** Una fila de `attention_list` (LXO-89) con su allowlist: categoría, severidad, destino, edad y estado. */
+export function slimAttention(a) {
+  return {
+    id: id(a?.id),
+    category: typeof a?.category === 'string' ? a.category.slice(0, 40) : null,
+    severity: typeof a?.severity === 'string' ? a.severity.slice(0, 20) : null,
+    status: typeof a?.status === 'string' ? a.status.slice(0, 20) : null,
+    target_kind: id(a?.target_kind),
+    target_id: id(a?.target_id),
+    project_id: id(a?.project_id),
+    run_id: id(a?.run_id),
+    occurrence: int(a?.occurrence),
+    created_at: int(a?.created_at),
+  };
+}
+
 /** Valida los argumentos que llegan del controller. Devuelve `{ rid, args }` o `{ rid, code }`. */
 export function parseCoreRequest(action, raw = {}) {
   const rid = typeof raw.rid === 'string' && RID.test(raw.rid) ? raw.rid : null;
@@ -61,6 +82,29 @@ export function parseCoreRequest(action, raw = {}) {
     if (!Number.isInteger(limit) || limit < 1 || limit > CORE_EVENTS_MAX_LIMIT) return { rid, code: 'invalid_request' };
     return { rid, args: { cursor, limit } };
   }
+  if (action === 'core_attention') {
+    const args = {};
+    if (raw.project_id !== undefined && raw.project_id !== null) {
+      if (!id(raw.project_id) || !raw.project_id) return { rid, code: 'invalid_request' };
+      args.project_id = raw.project_id;
+    }
+    if (raw.category !== undefined && raw.category !== null) {
+      if (!ATTENTION_CATEGORIES.has(raw.category)) return { rid, code: 'invalid_request' };
+      args.category = raw.category;
+    }
+    if (raw.severity !== undefined && raw.severity !== null) {
+      if (!ATTENTION_SEVERITIES.has(raw.severity)) return { rid, code: 'invalid_request' };
+      args.severity = raw.severity;
+    }
+    if (raw.cursor !== undefined && raw.cursor !== null) {
+      if (typeof raw.cursor !== 'string' || !raw.cursor || raw.cursor.length > CURSOR_CHARS) return { rid, code: 'invalid_cursor' };
+      args.cursor = raw.cursor;
+    }
+    const limit = raw.limit ?? CORE_ATTENTION_DEFAULT_LIMIT;
+    if (!Number.isInteger(limit) || limit < 1 || limit > CORE_ATTENTION_MAX_LIMIT) return { rid, code: 'invalid_request' };
+    args.limit = limit;
+    return { rid, args };
+  }
   return { rid, code: 'invalid_request' };
 }
 
@@ -69,13 +113,27 @@ export function parseCoreRequest(action, raw = {}) {
  * `call(cmd, args)` llama al Core con la identidad del IDE (`orch_call`).
  */
 export async function handleCoreAction(action, raw, call) {
-  const type = action === 'core_events' ? 'orch_core_events' : 'orch_core_snapshot';
+  const type = { core_events: 'orch_core_events', core_attention: 'orch_core_attention' }[action] || 'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
   try {
     if (action === 'core_snapshot') {
       const snapshot = await call('compact_snapshot', req.args);
       return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, snapshot } };
+    }
+    if (action === 'core_attention') {
+      const list = await call('attention_list', req.args);
+      return {
+        type,
+        fields: {
+          rid: req.rid,
+          ok: true,
+          protocol: CORE_RELAY_PROTOCOL,
+          items: (list?.items || []).map(slimAttention),
+          next_cursor: typeof list?.next_cursor === 'string' && list.next_cursor.length <= CURSOR_CHARS ? list.next_cursor : null,
+          has_more: !!list?.has_more,
+        },
+      };
     }
     const page = await call('events', req.args);
     return {
