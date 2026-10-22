@@ -129,9 +129,12 @@ npm run build
 $env:LXO_BIN = (Resolve-Path .\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe).Path
 cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_events_empty_history_pagination_and_follow_resume_no_duplicates -- --ignored --exact --nocapture
 cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::events_read_tests::lxo_bin_e2e_attention_question_appears_and_reply_resolves_it -- --ignored --exact --nocapture
+cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_projects_person_real_store -- --ignored --exact --nocapture
 ```
 
-El test arranca el servidor HTTP del Core dentro del harness y usa una credencial Agent de fixture. `lxo` recibe un `USERPROFILE` temporal y solo lee el `orch.json` y los cursores de esa carpeta; no utiliza el home ni las credenciales del usuario. La prueba cubre cursor vacío en el head actual, history, paginación y reanudación de `--follow` tras reiniciar el proceso, sin secuencias duplicadas. La segunda (`lxo attention`, LXO-105) cubre el estado vacío, la pregunta de una hija que aparece en su inbox, la respuesta externa que la saca de las activas y el detalle resuelto. CI ejecuta las dos en Windows desde `.github/workflows/ci.yml`.
+El test arranca el servidor HTTP del Core dentro del harness y usa una credencial Agent de fixture. `lxo` recibe un `USERPROFILE` temporal y solo lee el `orch.json` y los cursores de esa carpeta; no utiliza el home ni las credenciales del usuario. La prueba cubre cursor vacío en el head actual, history, paginación y reanudación de `--follow` tras reiniciar el proceso, sin secuencias duplicadas. La segunda (`lxo attention`, LXO-105) cubre el estado vacío, la pregunta de una hija que aparece en su inbox, la respuesta externa que la saca de las activas y el detalle resuelto. CI ejecuta las tres en Windows desde `.github/workflows/ci.yml`.
+
+La tercera (`lxo projects`, LXO-103) entra como **persona**: el Core aprovisiona la credencial CLI en el almacén seguro real del sistema (como al abrir Lixbon), con un `installation_id` aleatorio, y la borra al terminar. Cubre 0 y N proyectos, archivados, filtro de máquina, que el JSON de `lxo` es el overview del Core sin tocar y los códigos de salida de filtro inválido (2), agente (3) y Core caído (5).
 
 
 ## Entorno del worktree de una tarea del orquestador
