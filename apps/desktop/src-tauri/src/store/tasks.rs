@@ -68,7 +68,7 @@ pub enum TaskOrigin {
 }
 
 impl TaskOrigin {
-    fn parse(s: &str) -> StoreResult<TaskOrigin> {
+    pub(super) fn parse(s: &str) -> StoreResult<TaskOrigin> {
         match s {
             "legacy" => Ok(TaskOrigin::Legacy),
             "core" => Ok(TaskOrigin::Core),
@@ -183,11 +183,11 @@ fn run_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {
     Ok(RunRow { id: r.get(0)?, objective: r.get(1)?, root_task_id: r.get(2)?, created_at: r.get(3)?, closed: closed == 1, last_activity: r.get(5)? })
 }
 
-fn task_in(c: &Connection, id: &str) -> StoreResult<Option<TaskRow>> {
+pub(super) fn task_in(c: &Connection, id: &str) -> StoreResult<Option<TaskRow>> {
     c.query_row(&format!("SELECT {TASK_COLS} FROM tasks WHERE id = ?1"), [id], task_from_row).optional()?.map(finish_task).transpose()
 }
 
-fn run_in(c: &Connection, id: &str) -> StoreResult<Option<RunRow>> {
+pub(super) fn run_in(c: &Connection, id: &str) -> StoreResult<Option<RunRow>> {
     Ok(c.query_row(&format!("SELECT {RUN_COLS} FROM runs WHERE id = ?1"), [id], run_from_row).optional()?)
 }
 
@@ -203,7 +203,7 @@ fn active_in(c: &Connection) -> StoreResult<bool> {
 }
 
 /// Antes del corte nada de esto escribe: la autoridad de las tareas es `legacy_state`.
-fn require_active(c: &Connection) -> StoreResult<()> {
+pub(super) fn require_active(c: &Connection) -> StoreResult<()> {
     if active_in(c)? {
         Ok(())
     } else {
@@ -248,7 +248,7 @@ fn check_run_event(run: &RunRow, project_id: &str, e: &NewEvent) -> StoreResult<
 }
 
 /// Inserta los hechos del cambio. Un duplicado por `(kind, idem_key)` deshace el cambio en lugar de dejarlo sin su hecho.
-fn insert_all(tx: &Transaction<'_>, events: &[NewEvent], projector: Option<&dyn EventProjector>) -> StoreResult<()> {
+pub(super) fn insert_all(tx: &Transaction<'_>, events: &[NewEvent], projector: Option<&dyn EventProjector>) -> StoreResult<()> {
     if events.is_empty() {
         return Err(StoreError::InvalidEvent("un cambio de una Task no se confirma sin su hecho".into()));
     }
@@ -401,6 +401,12 @@ impl Store {
                 return Ok(ChangeOutcome::Unchanged);
             }
             if discarded {
+                let activo: Option<String> = tx
+                    .query_row("SELECT id FROM attempts WHERE task_id = ?1 AND status NOT IN ('done', 'failed', 'stopped', 'exited')", [id], |r| r.get(0))
+                    .optional()?;
+                if let Some(activo) = activo {
+                    return Err(StoreError::TaskConflict(format!("la Task {id} tiene el Attempt activo {activo}: cancélalo antes de descartarla")));
+                }
                 let abiertas: Vec<String> = tx
                     .prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND intent = 'open' ORDER BY created_at, id")?
                     .query_map([id], |r| r.get(0))?
@@ -441,6 +447,10 @@ impl Store {
             let hijas: i64 = tx.query_row("SELECT COUNT(*) FROM tasks WHERE parent_task_id = ?1", [id], |r| r.get(0))?;
             if hijas > 0 {
                 return Err(StoreError::TaskConflict(format!("{id} tiene {hijas} hija(s): no se borra una Task con descendientes (descártala)")));
+            }
+            let intentos: i64 = tx.query_row("SELECT COUNT(*) FROM attempts WHERE task_id = ?1", [id], |r| r.get(0))?;
+            if intentos > 0 {
+                return Err(StoreError::TaskConflict(format!("{id} tiene {intentos} Attempt(s): su historia no se borra (descártala)")));
             }
             tx.execute("DELETE FROM tasks WHERE id = ?1", [id])?;
             let e = event(&t)?;
