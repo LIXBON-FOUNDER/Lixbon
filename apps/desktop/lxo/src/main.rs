@@ -11,6 +11,7 @@ use serde_json::{json, Map, Value};
 mod attention;
 mod client_auth;
 mod events;
+mod projects;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
 const WORKER: &str = include_str!("../guide/worker.md");
@@ -32,8 +33,9 @@ Coordinador (el agente con el que habla el usuario):
   lxo send <tarea> \"mensaje\"             instrucciones a una hija en marcha
   lxo continue <tarea> --task \"...\"      nuevo encargo a una hija que ya entregó
   lxo list | lxo show [<tarea>] | lxo diff <tarea>
-  lxo projects [--all]                             proyectos registrados en Lixbon y dónde están (solo lectura;
-                                                   registrarlos o archivarlos lo decide una persona en Lixbon)
+  lxo projects [--archived exclude|include|only] [--machine ID] [--json]
+                                                  overview de proyectos: estado, tareas, Attention y ubicaciones
+                                                  (solo lectura y solo personas; registrar o archivar se decide en Lixbon)
   lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
                                                   Event Log paginado con autenticación de cliente
   lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
@@ -254,58 +256,6 @@ fn task_line(t: &Value) -> String {
     )
 }
 
-/// `lxo projects`: una línea por proyecto y una por ubicación. Lo mismo que muestra la interfaz.
-fn projects_text(data: &Value) -> String {
-    let projects = data["projects"].as_array().cloned().unwrap_or_default();
-    if projects.is_empty() {
-        return "Sin proyectos registrados. Se registran desde Lixbon (o al lanzar un run en un repositorio).".into();
-    }
-    let mut out: Vec<String> = projects
-        .iter()
-        .map(|p| {
-            let mut lines = vec![format!(
-                "{} · {}{} · {} tarea(s) · {}",
-                p["id"].as_str().unwrap_or("?"),
-                p["name"].as_str().unwrap_or(""),
-                if p["state"].as_str() == Some("archived") {
-                    " (archivado)"
-                } else {
-                    ""
-                },
-                p["tasks"].as_u64().unwrap_or(0),
-                p["fingerprint"]["remotes"]
-                    .as_array()
-                    .and_then(|r| r.first())
-                    .and_then(Value::as_str)
-                    .unwrap_or("sin remoto")
-            )];
-            for l in p["locations"].as_array().into_iter().flatten() {
-                lines.push(format!(
-                    "    {}{}{}",
-                    l["path"].as_str().unwrap_or(""),
-                    if l["primary"].as_bool() == Some(true) {
-                        " [principal]"
-                    } else {
-                        ""
-                    },
-                    if l["state"].as_str() == Some("missing") {
-                        " (no existe: indica dónde está con project_locate)"
-                    } else {
-                        ""
-                    }
-                ));
-            }
-            lines.join("\n")
-        })
-        .collect();
-    if let Some(n) = data["unassigned_tasks"].as_u64().filter(|n| *n > 0) {
-        out.push(format!(
-            "{n} tarea(s) aún sin proyecto (repositorio ambiguo o que ya no existe)."
-        ));
-    }
-    out.join("\n")
-}
-
 fn human(cmd: &str, data: &Value) -> String {
     match cmd {
         "guide" => data.as_str().unwrap_or("").to_string(),
@@ -384,7 +334,6 @@ fn human(cmd: &str, data: &Value) -> String {
             let tasks = data["tasks"].as_array().cloned().unwrap_or_default();
             if tasks.is_empty() { "Sin tareas.".into() } else { tasks.iter().map(task_line).collect::<Vec<_>>().join("\n") }
         }
-        "projects" => projects_text(data),
         "show" => {
             let mut out = vec![task_line(&data["task"])];
             if let Some(s) = data["task"]["summary"].as_str().filter(|s| !s.is_empty()) {
@@ -912,10 +861,6 @@ fn run(a: &Args) -> Result<(String, Value), String> {
         "check" => ("check", call("check", json!({}), me)?),
         "inbox" => ("inbox", call("inbox", json!({}), me)?),
         "list" => ("list", call("list", json!({}), me)?),
-        "projects" => (
-            "projects",
-            call("projects", json!({ "all": a.b("all") }), me)?,
-        ),
         "show" => ("show", call("show", json!({ "task": sub(1) }), me)?),
         "diff" => (
             "diff",
@@ -1059,6 +1004,9 @@ fn main() -> ExitCode {
     if a.at(0).as_deref() == Some("attention") {
         return attention::run(&a);
     }
+    if a.at(0).as_deref() == Some("projects") {
+        return projects::run(&a);
+    }
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
     if a.at(0).as_deref() == Some("ask") && a.s("resume").is_some() {
         let id = a.s("resume").unwrap_or_default();
@@ -1106,35 +1054,6 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn lxo_projects_muestra_lo_mismo_que_la_interfaz_y_marca_lo_que_falta() {
-        use serde_json::json;
-        let vacio = super::projects_text(&json!({ "projects": [], "unassigned_tasks": 0 }));
-        assert!(vacio.contains("Sin proyectos"));
-        let data = json!({
-            "projects": [
-                { "id": "p1", "name": "api", "state": "active", "tasks": 3, "fingerprint": { "remotes": ["github.com/o/api"] },
-                  "locations": [ { "path": "C:/r/api", "primary": true, "state": "ok" }, { "path": "D:/viejo/api", "primary": false, "state": "missing" } ] },
-                { "id": "p2", "name": "docs", "state": "archived", "tasks": 0, "fingerprint": { "remotes": [] }, "locations": [] }
-            ],
-            "unassigned_tasks": 2
-        });
-        let t = super::projects_text(&data);
-        assert!(
-            t.contains("p1 · api · 3 tarea(s) · github.com/o/api"),
-            "{t}"
-        );
-        assert!(t.contains("C:/r/api [principal]"), "{t}");
-        assert!(t.contains("D:/viejo/api (no existe"), "{t}");
-        assert!(
-            t.contains("p2 · docs (archivado) · 0 tarea(s) · sin remoto"),
-            "{t}"
-        );
-        assert!(t.contains("2 tarea(s) aún sin proyecto"), "{t}");
-        // --all es un indicador, no se come el argumento siguiente.
-        assert!(super::BOOL_FLAGS.contains(&"all"));
-    }
-
     /// Ejemplos de la guía (bloques de código y `código` en línea) con `lxo` encadenado.
     fn chained_examples(guide: &str) -> Vec<String> {
         let mut bad = vec![];
