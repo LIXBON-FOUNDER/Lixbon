@@ -162,6 +162,7 @@ fn item(state: &State, task: &Task) -> Value {
         "model": task.model,
         "branch": task.branch,
         "worktree": task.worktree,
+        "external": task.external,
         "created_at": task.created,
         "updated_at": task.updated,
     })
@@ -255,6 +256,12 @@ pub(super) fn detail(core: &Core, caller: &Caller, context: Option<&MutationCont
         "messages": messages,
         "cwd": task.cwd,
         "merged": task.merged,
+        // Para `lxo task show` (LXO-38): lo que la Task legacy ya registra y el CLI enseñaba.
+        "role": task.role,
+        "base": task.base,
+        "model_effective": task.model_effective,
+        "failure_reason": task.failure_reason,
+        "pr_url": task.pr_url,
         "review": review,
         "integration": integration,
     });
