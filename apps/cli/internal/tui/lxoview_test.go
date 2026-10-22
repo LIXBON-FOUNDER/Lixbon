@@ -114,7 +114,7 @@ func TestLxoTasksViewIsATree(t *testing.T) {
 	if indent("Relé core_task") <= indent("Coordinar Supervisar móvil") {
 		t.Fatalf("las hijas van sangradas bajo su raíz:\n%s", out)
 	}
-	for _, want := range []string{"en curso", "fallida", "terminada", "codex (gpt-5)", "⎇ lxo/rele", "checkout compartido", "externa", "sin proyecto", "! lxo task show <id>"} {
+	for _, want := range []string{"en curso", "fallida", "terminada", "codex (gpt-5)", "⎇ lxo/rele", "checkout compartido", "externa", "sin proyecto", "! lxo task show <id o nombre>"} {
 		if !strings.Contains(out, want) && !strings.Contains(out, strings.ReplaceAll(want, "⎇", glyphBranch)) {
 			t.Errorf("falta %q en:\n%s", want, out)
 		}

@@ -516,7 +516,7 @@ func renderTasks(doc jsonMap, names map[string]string, sep string) []block {
 		detail := lxoJoin(sep, jstr(t, "id"), lxoProject(jstr(t, "project_id"), names), lxoAgent(t), lxoPlace(t), origin)
 		lines = append(lines, lxoItem(d, lxoStatusMark(status), sInk.Render(jstr(t, "title")), lxoStatusStyle(status).Render(lxoLabel(statusLabel, status)), detail))
 	}
-	return append(lines, lxoHint("! lxo task show <id> para el detalle"))
+	return append(lines, lxoHint("! lxo task show <id o nombre> para el detalle"))
 }
 
 func renderTaskShow(doc jsonMap, names map[string]string, now time.Time, sep string) []block {

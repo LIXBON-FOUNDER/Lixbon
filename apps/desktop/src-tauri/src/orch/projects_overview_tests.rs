@@ -889,6 +889,9 @@ fn lxo_bin_e2e_tasks_person_real_store() {
     assert!(human.contains("fallida") && human.contains(&format!("lxo events --task {wt}")), "{human}");
     assert!(human.contains("Actividad (UTC, lo último al final):") && human.contains("· La tarea falló."), "{human}");
     assert_eq!(server.lxo(&["task", "show", &loose], None).status.code(), Some(6), "sin proyecto no hay ficha");
+    // Por nombre, además de por id: título exacto en varias palabras y un trozo que solo encaja en una.
+    assert_eq!(server.json(&["task", "show", "con-worktree", "--json"])["task"]["id"].as_str(), Some(wt.as_str()));
+    assert_eq!(server.json(&["task", "show", "COMPARTI", "--json"])["task"]["id"].as_str(), Some(shared.as_str()));
     let missing = server.lxo(&["task", "show", "no-existe", "--json"], None);
     assert_eq!(missing.status.code(), Some(6));
     let error: Value = serde_json::from_slice(&missing.stderr).unwrap();
