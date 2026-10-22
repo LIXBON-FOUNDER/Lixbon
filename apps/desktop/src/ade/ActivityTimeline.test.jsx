@@ -50,21 +50,43 @@ describe('ActivityTimeline · estados de la vista', () => {
     expect(screen.queryByTestId('activity-list')).toBeNull();
   });
 
-  it('error: muestra el mensaje y el código, y reintenta con el alcance', () => {
+  it('error: muestra copy seguro sin mensaje ni código crudos, y reintenta con el alcance', () => {
     const onRetry = vi.fn();
     render(
       <ActivityTimeline
         status="error"
-        error={{ code: 'internal', message: 'Fallo de lectura.' }}
+        error={{ code: 'LXO229_CODE', message: 'LXO229_DETALLE: SELECT * FROM events', kind: 'timeout' }}
         onRetry={onRetry}
       />,
     );
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('No se pudo cargar la actividad');
-    expect(alert.textContent).toContain('Fallo de lectura.');
-    expect(alert.textContent).toContain('internal');
+    expect(alert.textContent).toContain('Core no respondió a tiempo.');
+    expect(document.body.textContent).not.toContain('LXO229_CODE');
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+    expect(document.body.textContent).not.toContain('SELECT');
+    expect(alert.querySelector('code')).toBeNull();
     fireEvent.click(screen.getByTestId('activity-retry'));
     expect(onRetry).toHaveBeenCalledWith({ scope: { kind: 'global' } });
+  });
+
+  it.each([
+    ['disconnected', 'Core está desconectado.'],
+    ['degraded', 'Core está degradado.'],
+    ['page', 'No se pudieron cargar más eventos.'],
+    ['desconocido', 'El Core no devolvió actividad.'],
+  ])('error %s: copy localizado por categoría', (kind, copy) => {
+    render(<ActivityTimeline status="error" error={{ kind, message: 'LXO229_DETALLE' }} />);
+    expect(screen.getByTestId('activity-error').textContent).toContain(copy);
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+  });
+
+  it('error en string o sin objeto no filtra el texto y usa el copy genérico', () => {
+    const { rerender } = render(<ActivityTimeline status="error" error="LXO229_DETALLE: boom" />);
+    expect(screen.getByTestId('activity-error').textContent).toContain('El Core no devolvió actividad.');
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+    rerender(<ActivityTimeline status="error" error={{ kind: '__proto__' }} />);
+    expect(screen.getByTestId('activity-error').textContent).toContain('El Core no devolvió actividad.');
   });
 
   it('error sin stale no muestra filas cacheadas', () => {
@@ -89,13 +111,15 @@ describe('ActivityTimeline · estados de la vista', () => {
         status="error"
         stale
         items={[activityItem()]}
-        error={{ code: 'internal', message: 'Reconexión fallida.' }}
+        error={{ code: 'LXO229_CODE', message: 'LXO229_DETALLE', kind: 'disconnected' }}
         onRetry={onRetry}
         onRefresh={onRefresh}
       />,
     );
 
-    expect(screen.getByTestId('activity-error').textContent).toContain('Reconexión fallida.');
+    expect(screen.getByTestId('activity-error').textContent).toContain('Core está desconectado.');
+    expect(document.body.textContent).not.toContain('LXO229_CODE');
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
     expect(screen.getByTestId('activity-stale').textContent).toContain('Vista desactualizada');
     expect(screen.getByTestId('activity-list')).toBeTruthy();
     expect(screen.getByTestId('activity-evt-1')).toBeTruthy();
