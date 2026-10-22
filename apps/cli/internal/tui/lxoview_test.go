@@ -40,7 +40,7 @@ const tasksJSON = `{"v":1,"task_model":"legacy","tasks":[
  {"id":"t18","title":"Limpiar descargas","project_id":null,"run_id":"r17","parent_id":null,"status":"running","final":false,"provider":"claude","model":null,"branch":null,"shared_checkout":false,"origin":"external"}
 ]}`
 
-const taskShowJSON = `{"v":1,"task_model":"legacy","task":{"id":"t4","title":"Pantalla de Atención","project_id":"` + pApp + `","run_id":"r1","root_id":"t2","parent_id":"t2","status":"failed","final":true,"phase":null,"provider":"claude","model":null,"role":"implementador","branch":"lxo/bandeja","base":"main","worktree":"C:/repos/lixbon-app-wt/bandeja","shared_checkout":false,"origin":"lixbon","updated_at":1799999940000,"failure_reason":"agent_idle_timeout","merged":false,"pr_url":null},"children":[]}`
+const taskShowJSON = `{"v":1,"task_model":"legacy","task":{"id":"t4","title":"Pantalla de Atención","project_id":"` + pApp + `","run_id":"r1","root_id":"t2","parent_id":"t2","status":"failed","final":true,"phase":null,"provider":"claude","model":null,"role":"implementador","branch":"lxo/bandeja","base":"main","worktree":"C:/repos/lixbon-app-wt/bandeja","shared_checkout":false,"origin":"lixbon","updated_at":1799999940000,"failure_reason":"agent_idle_timeout","merged":false,"pr_url":null},"children":[],"activity":{"has_more":true,"items":[{"seq":10,"ts":1799999880000,"kind":"task.created","message_key":"activity.task.created","visual":"info","text":"Se creó la tarea «Pantalla de Atención» para claude (profundidad 1)."},{"seq":11,"ts":1799999900000,"kind":"task.teleported","message_key":"activity.unknown","visual":"info","text":null},{"seq":12,"ts":1799999940000,"kind":"task.status_changed","message_key":"activity.task.failed","visual":"error","text":"La tarea falló."}]}}`
 
 const summaryJSON = `{"v":1,"core":{"version":"2.2.0","health":"ok"},"cursor":42,"projects":{"total":3,"with_work":2,"with_work_complete":true},"active_tasks":5,"attention":{"total":7,"by_category":{"question":1,"approval":1,"review_ready":1,"conflict":1,"failed":1,"environment_blocked":1,"risk":1}}}`
 
@@ -114,7 +114,7 @@ func TestLxoTasksViewIsATree(t *testing.T) {
 	if indent("Relé core_task") <= indent("Coordinar Supervisar móvil") {
 		t.Fatalf("las hijas van sangradas bajo su raíz:\n%s", out)
 	}
-	for _, want := range []string{"en curso", "fallida", "terminada", "codex (gpt-5)", "⎇ lxo/rele", "checkout compartido", "externa", "sin proyecto", "! lxo task show <id>"} {
+	for _, want := range []string{"en curso", "fallida", "terminada", "codex (gpt-5)", "⎇ lxo/rele", "checkout compartido", "externa", "sin proyecto", "! lxo task show <id o nombre>"} {
 		if !strings.Contains(out, want) && !strings.Contains(out, strings.ReplaceAll(want, "⎇", glyphBranch)) {
 			t.Errorf("falta %q en:\n%s", want, out)
 		}
@@ -126,6 +126,16 @@ func TestLxoTaskShowView(t *testing.T) {
 	for _, want := range []string{"Pantalla de Atención", "fallida", "t4 · run r1 · hija de t2", "lixbon-app", "claude · implementador", "lxo/bandeja · base main", "C:/repos/lixbon-app-wt/bandeja", "agent_idle_timeout", "Lixbon", "! lxo attention --task t4"} {
 		contains(t, out, want)
 	}
+	for _, want := range []string{"lo último al final", "lo anterior con ! lxo events --task t4", "Se creó la tarea «Pantalla de Atención»", "Evento task.teleported sin texto", "La tarea falló."} {
+		contains(t, out, want)
+	}
+	if strings.Index(out, "Se creó la tarea") > strings.Index(out, "La tarea falló.") {
+		t.Fatalf("la actividad va en orden, lo último al final:\n%s", out)
+	}
+	none := render(t, []string{"task", "show", "t4"}, strings.Replace(taskShowJSON, `"activity":{`, `"activity":null,"x":{`, 1), 100)
+	contains(t, none, "no disponible en este Core")
+	empty := render(t, []string{"task", "show", "t4"}, strings.Replace(taskShowJSON, `"has_more":true,"items":[`, `"has_more":false,"items":[],"y":[`, 1), 100)
+	contains(t, empty, "sin eventos todavía")
 }
 
 func TestLxoProjectsAndSummaryViews(t *testing.T) {

@@ -114,6 +114,7 @@ func (m *Model) inputBox() []string {
 	case m.running:
 		m.input.Placeholder = "Guía a lixbon mientras trabaja"
 	}
+	m.syncInputStyle()
 	lines := strings.Split(m.input.View(), "\n")
 	hint := ""
 	switch {

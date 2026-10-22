@@ -516,7 +516,7 @@ func renderTasks(doc jsonMap, names map[string]string, sep string) []block {
 		detail := lxoJoin(sep, jstr(t, "id"), lxoProject(jstr(t, "project_id"), names), lxoAgent(t), lxoPlace(t), origin)
 		lines = append(lines, lxoItem(d, lxoStatusMark(status), sInk.Render(jstr(t, "title")), lxoStatusStyle(status).Render(lxoLabel(statusLabel, status)), detail))
 	}
-	return append(lines, lxoHint("! lxo task show <id> para el detalle"))
+	return append(lines, lxoHint("! lxo task show <id o nombre> para el detalle"))
 }
 
 func renderTaskShow(doc jsonMap, names map[string]string, now time.Time, sep string) []block {
@@ -574,5 +574,40 @@ func renderTaskShow(doc jsonMap, names map[string]string, now time.Time, sep str
 		lines = append(lines, lxoField("hijas", strings.Join(children, ", ")))
 	}
 	lines = append(lines, lxoField("actualizada", lxoAgo(jnum(t, "updated_at"), now)))
+	lines = append(lines, lxoActivity(doc, id, now, sep)...)
 	return append(lines, lxoHint("! lxo attention --task "+id+sep+"! lxo events --task "+id))
+}
+
+// lxoActivity: la Activity de la Task que da lxo (proyección del Core, ya traducida), lo último al final.
+func lxoActivity(doc jsonMap, id string, now time.Time, sep string) []block {
+	activity, ok := doc["activity"].(map[string]any)
+	if !ok {
+		return []block{lxoField("actividad", sDim.Render("no disponible en este Core"))}
+	}
+	items := jlist(activity, "items")
+	if len(items) == 0 {
+		return []block{lxoField("actividad", sDim.Render("sin eventos todavía"))}
+	}
+	head := "lo último al final"
+	if more, _ := activity["has_more"].(bool); more {
+		head += sep + "lo anterior con ! lxo events --task " + id
+	}
+	lines := []block{lxoField("actividad", sDim.Render(head))}
+	for _, item := range items {
+		text := jstr(item, "text")
+		style := sInk
+		switch jstr(item, "visual") {
+		case "error":
+			style = sErr
+		case "warning":
+			style = sWarn
+		case "success":
+			style = sOK
+		}
+		if text == "" {
+			text, style = "Evento "+jstr(item, "kind")+" sin texto", sDim
+		}
+		lines = append(lines, lxoField(lxoAgo(jnum(item, "ts"), now), style.Render(text)))
+	}
+	return lines
 }
