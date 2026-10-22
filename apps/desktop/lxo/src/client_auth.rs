@@ -77,8 +77,10 @@ impl CredentialReader for OsCredentialReader {
             #[cfg(not(windows))]
             let entry = keyring::Entry::new(service, account);
             let entry = entry.map_err(|_| ())?;
-            match entry.get_password() {
-                Ok(secret) => Ok(Some(secret)),
+            // El escritorio guarda bytes UTF-8 (`set_secret`); `get_password` los leería como
+            // UTF-16 en Windows y daría otro secreto.
+            match entry.get_secret() {
+                Ok(bytes) => String::from_utf8(bytes).map(Some).map_err(|_| ()),
                 Err(keyring::Error::NoEntry) => Ok(None),
                 Err(_) => Err(()),
             }
@@ -313,6 +315,23 @@ fn remote_error(status: u16, body: &Value) -> String {
     }
 }
 
+/// Fallo de una llamada RPC: del transporte o la autenticación (con su clase, para
+/// el código de salida) o un rechazo del propio comando (`ok: false`).
+#[derive(Debug)]
+pub(crate) enum RpcFailure {
+    Transport(EventRequestFailure),
+    Rejected(String),
+}
+
+impl RpcFailure {
+    pub(crate) fn message(&self) -> &str {
+        match self {
+            Self::Transport(failure) => failure.message(),
+            Self::Rejected(message) => message,
+        }
+    }
+}
+
 fn send_authenticated(
     info: &OrchInfo,
     credential: &ResolvedCredential,
@@ -320,14 +339,28 @@ fn send_authenticated(
     args: &Value,
     cwd: &str,
 ) -> Result<Value, String> {
-    authenticate(info, credential).map_err(|e| e.message().to_string())?;
+    rpc_authenticated(info, credential, cmd, args, cwd).map_err(|e| e.message().to_string())
+}
+
+fn rpc_authenticated(
+    info: &OrchInfo,
+    credential: &ResolvedCredential,
+    cmd: &str,
+    args: &Value,
+    cwd: &str,
+) -> Result<Value, RpcFailure> {
+    authenticate(info, credential).map_err(RpcFailure::Transport)?;
 
     // `caller` se omite intencionalmente: la autoridad proviene de la credencial
     // autenticada; el Core liga las credenciales Agent a su tarea al emitirlas.
     let body = json!({ "cmd": cmd, "args": args, "cwd": cwd }).to_string();
-    let response = request(info.port, "POST", "/rpc", &credential.secret, Some(&body))?;
+    let response = request(info.port, "POST", "/rpc", &credential.secret, Some(&body))
+        .map_err(|e| RpcFailure::Transport(classify_request_error(e)))?;
     if response.status < 200 || response.status >= 300 {
-        return Err(remote_error(response.status, &response.body));
+        return Err(RpcFailure::Transport(handshake_failure(
+            response.status,
+            &response.body,
+        )));
     }
     if response.body["ok"].as_bool() == Some(true) {
         Ok(response.body["data"].clone())
@@ -335,7 +368,10 @@ fn send_authenticated(
         let error = response.body["error"]
             .as_str()
             .unwrap_or("Error desconocido");
-        Err(redact_secret(error, &credential.secret))
+        Err(RpcFailure::Rejected(redact_secret(
+            error,
+            &credential.secret,
+        )))
     }
 }
 
@@ -493,6 +529,12 @@ fn redact_value(value: &mut Value, secret: &str) {
 pub(super) fn send(cmd: &str, args: &Value, cwd: &str) -> Result<Value, String> {
     let (info, credential) = client_configuration().map_err(|e| e.message().to_string())?;
     send_authenticated(&info, &credential, cmd, args, cwd)
+}
+
+/// Como [`send`], pero conserva la clase del fallo para elegir el código de salida.
+pub(super) fn rpc(cmd: &str, args: &Value, cwd: &str) -> Result<Value, RpcFailure> {
+    let (info, credential) = client_configuration().map_err(RpcFailure::Transport)?;
+    rpc_authenticated(&info, &credential, cmd, args, cwd)
 }
 
 #[cfg(test)]
