@@ -12,6 +12,17 @@ import {
 import { TASK_PAGE_LIMIT } from './coreQueries';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+const useCoreQueryOverride = vi.hoisted(() => ({ current: null }));
+vi.mock('./useCoreQuery', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useCoreQuery: (...args) => {
+      const result = actual.useCoreQuery(...args);
+      return useCoreQueryOverride.current?.(...args, result) ?? result;
+    },
+  };
+});
 
 const ZERO = {
   question: 0,
@@ -128,6 +139,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   invoke.mockReset();
+  useCoreQueryOverride.current = null;
 });
 
 describe('ProjectsSidebar', () => {
@@ -2210,10 +2222,15 @@ describe('ProjectsSidebar', () => {
 
   it('oculta sin consultar Core y conserva páginas extra, cursor y scroll de .ps__tree hasta una lectura autoritativa', async () => {
     const refresh = deferred();
+    const overviewRefresh = deferred();
     const cursors = [];
     let headReads = 0;
+    let overviewReads = 0;
     const calls = mountCore({
-      overviews: () => overview([project('project-a', 'Alpha')]),
+      overviews: () => {
+        overviewReads += 1;
+        return overviewReads === 1 ? overview([project('project-a', 'Alpha')]) : overviewRefresh.promise;
+      },
       tasks: (args) => {
         if (args.cursor) {
           cursors.push(args.cursor);
@@ -2225,7 +2242,12 @@ describe('ProjectsSidebar', () => {
       },
     });
     const props = { pollMs: 60_000 };
-    const { container, rerender } = render(<ProjectsSidebar {...props} />);
+    const { container, rerender } = render(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar {...props} />
+      </>,
+    );
     const rowIds = () => [...container.querySelectorAll('li[data-task-id]')].map((node) => node.getAttribute('data-task-id'));
 
     clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
@@ -2233,14 +2255,25 @@ describe('ProjectsSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
     await screen.findByText('Task t2');
     expect(cursors).toEqual(['cursor-1']);
+    const extraTask = container.querySelector('li[data-task-id="t2"]');
+    extraTask.focus();
+    expect(document.activeElement).toBe(extraTask);
 
     // El scroller real es el árbol; se ancla ahí la posición.
     const tree = container.querySelector('.ps__tree');
     tree.scrollTop = 42;
     fireEvent.scroll(tree);
+    const externalFocus = screen.getByRole('button', { name: 'Foco externo' });
+    externalFocus.focus();
+    expect(document.activeElement).toBe(externalFocus);
     const callsBeforeHide = calls.length;
 
-    rerender(<ProjectsSidebar active={false} {...props} />);
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active={false} {...props} />
+      </>,
+    );
     await flush();
     // Oculto: ni lecturas nuevas ni árbol desmontado; las páginas y el scroll siguen donde estaban.
     expect(calls).toHaveLength(callsBeforeHide);
@@ -2248,21 +2281,46 @@ describe('ProjectsSidebar', () => {
     expect(tree.scrollTop).toBe(42);
     expect(rowIds()).toEqual(['t1', 't2']);
     expect(screen.getByTestId('projects-sidebar').getAttribute('aria-hidden')).toBe('true');
+    expect(document.activeElement).toBe(externalFocus);
 
-    rerender(<ProjectsSidebar active {...props} />);
+    // Simula que la lectura reactivada todavía no tiene datos: el resultado anterior solo puede
+    // seguir visible si el sidebar preserva su árbol y las cabeceras por identidad.
+    useCoreQueryOverride.current = (query, _args, result) => (
+      ['projects_overview', 'tasks_by_project'].includes(query)
+        ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
+        : result
+    );
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
     await flush();
-    // Reactivada, la cabecera previa se vuelve a leer: hasta entonces la página extra se marca como previa.
+    // Ni la overview ni la cabecera tienen datos nuevos: el árbol, las filas y el scroll reales
+    // permanecen montados, y ambas partes del snapshot previo se anuncian como desactualizadas.
+    await waitFor(() => expect(overviewReads).toBe(2));
+    await waitFor(() => expect(headReads).toBe(2));
     expect(headReads).toBe(2);
     expect(container.querySelector('.ps__tree')).toBe(tree);
     expect(tree.scrollTop).toBe(42);
     expect(rowIds()).toEqual(['t1', 't2']);
+    expect(within(container.querySelector('li[data-task-id="t1"]')).getByText('Datos previos')).toBeTruthy();
+    expect(container.querySelector('li[data-task-id="t1"]').getAttribute('aria-setsize')).toBe('-1');
     expect(screen.getByTestId('stale-task-pages-project-a').textContent).toContain('Se conservan las Tasks cargadas');
+    expect(screen.getByTestId('stale-task-head-project-a').textContent).toMatch(/cabecera.*Core|Core.*cabecera/i);
+    expect(container.querySelector('.ps__tasks').getAttribute('aria-busy')).toBe('true');
     expect(within(container.querySelector('li[data-task-id="t2"]')).getByText('Datos previos')).toBeTruthy();
-    expect(container.querySelector('li[data-task-id="t1"]').textContent).not.toContain('Datos previos');
-    expect(screen.queryByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeNull();
+    expect(container.querySelector('li[data-task-id="t2"]').getAttribute('tabindex')).toBe('0');
+    expect(screen.getByRole('button', { name: 'Foco externo' })).toBe(externalFocus);
+    expect(document.activeElement).toBe(externalFocus);
+    expect(container.querySelector('.ps__more').disabled).toBe(true);
     expect(cursors).toEqual(['cursor-1']);
 
-    // La lectura autoritativa llega idéntica (mismo updatedAt): aun así las páginas cargadas se releen una vez.
+    // La overview autoritativa y su cabecera llegan idénticas: aun así las páginas cargadas se
+    // releen una vez desde el cursor confirmado, sin perder el árbol ni mover el foco externo.
+    useCoreQueryOverride.current = null;
+    overviewRefresh.resolve(overview([project('project-a', 'Alpha')]));
     refresh.resolve();
     await waitFor(() => expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull());
     expect(cursors).toEqual(['cursor-1', 'cursor-1']);
@@ -2270,7 +2328,333 @@ describe('ProjectsSidebar', () => {
     expect(container.querySelector('.ps__tree')).toBe(tree);
     expect(tree.scrollTop).toBe(42);
     expect(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' })).toBeTruthy();
+    expect(document.activeElement).toBe(externalFocus);
     expect(onlyReadQueries(calls)).toBe(true);
+  });
+
+  it('marca como stale la cabecera retenida aunque no haya páginas extra durante la reactivación', async () => {
+    const overviewRefresh = deferred();
+    const resumedHead = deferred();
+    let overviewReads = 0;
+    let headReads = 0;
+    mountCore({
+      overviews: () => {
+        overviewReads += 1;
+        return overviewReads === 1 ? overview([project('project-a', 'Alpha')]) : overviewRefresh.promise;
+      },
+      tasks: (args) => {
+        headReads += 1;
+        return headReads === 1
+          ? page(args.project_id, args.status, [task('head-only')])
+          : resumedHead.promise;
+      },
+    });
+    const { container, rerender } = render(<ProjectsSidebar pollMs={60_000} />);
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task head-only');
+    const tree = container.querySelector('.ps__tree');
+    const headRow = container.querySelector('li[data-task-id="head-only"]');
+    expect(headRow.getAttribute('aria-setsize')).toBe('1');
+
+    rerender(<ProjectsSidebar active={false} pollMs={60_000} />);
+    await flush();
+    useCoreQueryOverride.current = (query, _args, result) => (
+      ['projects_overview', 'tasks_by_project'].includes(query)
+        ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
+        : result
+    );
+    rerender(<ProjectsSidebar active pollMs={60_000} />);
+
+    await waitFor(() => expect(overviewReads).toBe(2));
+    await waitFor(() => expect(headReads).toBe(2));
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(container.querySelector('li[data-task-id="head-only"]')).toBe(headRow);
+    expect(headRow.getAttribute('aria-setsize')).toBe('-1');
+    expect(screen.getByTestId('stale-task-head-project-a')).toBeTruthy();
+    expect(screen.queryByTestId('stale-task-pages-project-a')).toBeNull();
+
+    useCoreQueryOverride.current = null;
+    overviewRefresh.resolve(overview([project('project-a', 'Alpha')]));
+    resumedHead.resolve(page('project-a', 'active', [task('head-only')]));
+    await waitFor(() => expect(screen.queryByTestId('stale-task-head-project-a')).toBeNull());
+    expect(container.querySelector('li[data-task-id="head-only"]').getAttribute('aria-setsize')).toBe('1');
+  });
+
+  it('comparte una página oculta del mismo cursor y descarta su resultado al cambiar filtro', async () => {
+    const overviewRefresh = deferred();
+    const resumedHead = deferred();
+    const pendingActivePage = deferred();
+    let overviewReads = 0;
+    let headReads = 0;
+    let activePageReads = 0;
+    const calls = mountCore({
+      overviews: () => {
+        overviewReads += 1;
+        return overviewReads === 1 ? overview([project('project-a', 'Alpha')]) : overviewRefresh.promise;
+      },
+      tasks: (args) => {
+        if (args.status === 'final') return page(args.project_id, args.status, [task('final-task')]);
+        if (args.cursor) {
+          activePageReads += 1;
+          return pendingActivePage.promise;
+        }
+        headReads += 1;
+        return headReads === 1
+          ? page(args.project_id, args.status, [task('active-head')], { hasMore: true, cursor: 'active-cursor' })
+          : resumedHead.promise;
+      },
+    });
+    const props = { pollMs: 60_000 };
+    const { container, rerender } = render(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar {...props} />
+      </>,
+    );
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task active-head');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await waitFor(() => expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('true'));
+    expect(activePageReads).toBe(1);
+    const tree = container.querySelector('.ps__tree');
+    const externalFocus = screen.getByRole('button', { name: 'Foco externo' });
+    externalFocus.focus();
+
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active={false} {...props} />
+      </>,
+    );
+    await flush();
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
+    expect(document.activeElement).toBe(externalFocus);
+
+    useCoreQueryOverride.current = (query, _args, result) => (
+      ['projects_overview', 'tasks_by_project'].includes(query)
+        ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
+        : result
+    );
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
+    await waitFor(() => expect(overviewReads).toBe(2));
+    await waitFor(() => expect(headReads).toBe(2));
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(document.activeElement).toBe(externalFocus);
+
+    useCoreQueryOverride.current = null;
+    overviewRefresh.resolve(overview([project('project-a', 'Alpha')]));
+    resumedHead.resolve(page('project-a', 'active', [task('active-head')], { hasMore: true, cursor: 'active-cursor' }));
+    await waitFor(() => expect(screen.queryByTestId('stale-task-head-project-a')).toBeNull());
+
+    const resumedLoadMore = screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    fireEvent.click(resumedLoadMore);
+    await waitFor(() => expect(resumedLoadMore.getAttribute('aria-busy')).toBe('true'));
+    expect(activePageReads).toBe(1);
+    expect(taskCalls(calls).filter(({ args }) => args.cursor).map(({ args }) => [args.status, args.cursor]))
+      .toEqual([['active', 'active-cursor']]);
+
+    const finalFilter = screen.getByRole('radio', { name: 'Finalizadas' });
+    finalFilter.focus();
+    fireEvent.click(finalFilter);
+    await screen.findByText('Task final-task');
+    expect(finalFilter.checked).toBe(true);
+    expect(document.activeElement).toBe(finalFilter);
+
+    await act(async () => {
+      pendingActivePage.resolve(page('project-a', 'active', [task('obsolete-active-page')]));
+      await pendingActivePage.promise;
+    });
+    await flush();
+    expect(screen.queryByText('Task obsolete-active-page')).toBeNull();
+    expect(screen.getByText('Task final-task')).toBeTruthy();
+    expect(activePageReads).toBe(1);
+    expect(taskCalls(calls).filter(({ args }) => args.cursor).map(({ args }) => [args.status, args.cursor]))
+      .toEqual([['active', 'active-cursor']]);
+    expect(document.activeElement).toBe(finalFilter);
+  });
+
+  it('no espera una página retenida si la cabecera cambió y descarta resultados tras invalidar el filtro', async () => {
+    const overviewRefresh = deferred();
+    const resumedHead = deferred();
+    const oldPage = deferred();
+    const resumedPage = deferred();
+    let overviewReads = 0;
+    let headReads = 0;
+    let activePageReads = 0;
+    const calls = mountCore({
+      overviews: () => {
+        overviewReads += 1;
+        return overviewReads === 1 ? overview([project('project-a', 'Alpha')]) : overviewRefresh.promise;
+      },
+      tasks: (args) => {
+        if (args.status === 'final') return page(args.project_id, args.status, [task('final-task')]);
+        if (args.cursor) {
+          activePageReads += 1;
+          return activePageReads === 1 ? oldPage.promise : resumedPage.promise;
+        }
+        headReads += 1;
+        return headReads === 1
+          ? page(args.project_id, args.status, [task('old-head')], { hasMore: true, cursor: 'shared-cursor' })
+          : resumedHead.promise;
+      },
+    });
+    const props = { pollMs: 60_000 };
+    const { container, rerender } = render(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar {...props} />
+      </>,
+    );
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task old-head');
+    fireEvent.click(screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' }));
+    await waitFor(() => expect(activePageReads).toBe(1));
+    const tree = container.querySelector('.ps__tree');
+
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active={false} {...props} />
+      </>,
+    );
+    await flush();
+    expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
+
+    useCoreQueryOverride.current = (query, _args, result) => (
+      ['projects_overview', 'tasks_by_project'].includes(query)
+        ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
+        : result
+    );
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
+    await waitFor(() => expect(overviewReads).toBe(2));
+    await waitFor(() => expect(headReads).toBe(2));
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+
+    useCoreQueryOverride.current = null;
+    overviewRefresh.resolve(overview([project('project-a', 'Alpha')]));
+    resumedHead.resolve(page('project-a', 'active', [task('new-head', { updated_at: 3_000 })], {
+      hasMore: true,
+      cursor: 'shared-cursor',
+    }));
+    await screen.findByText('Task new-head');
+    await waitFor(() => expect(screen.queryByTestId('stale-task-head-project-a')).toBeNull());
+
+    const more = screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    fireEvent.click(more);
+    await waitFor(() => expect(activePageReads).toBe(2));
+    await waitFor(() => expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('true'));
+
+    const finalFilter = screen.getByRole('radio', { name: 'Finalizadas' });
+    finalFilter.focus();
+    fireEvent.click(finalFilter);
+    await screen.findByText('Task final-task');
+    await act(async () => {
+      oldPage.resolve(page('project-a', 'active', [task('obsolete-old-page')]));
+      resumedPage.resolve(page('project-a', 'active', [task('obsolete-resumed-page')]));
+      await Promise.all([oldPage.promise, resumedPage.promise]);
+    });
+    await flush();
+
+    expect(finalFilter.checked).toBe(true);
+    expect(screen.getByText('Task final-task')).toBeTruthy();
+    expect(screen.queryByText('Task obsolete-old-page')).toBeNull();
+    expect(screen.queryByText('Task obsolete-resumed-page')).toBeNull();
+    expect(activePageReads).toBe(2);
+    expect(taskCalls(calls).filter(({ args }) => args.cursor).map(({ args }) => [args.status, args.cursor]))
+      .toEqual([
+        ['active', 'shared-cursor'],
+        ['active', 'shared-cursor'],
+      ]);
+    expect(document.activeElement).toBe(finalFilter);
+  });
+
+  it('libera una página oculta y descarta su resultado tras cambiar la identidad del Project', async () => {
+    const overviewRefresh = deferred();
+    const obsoletePage = deferred();
+    let overviewReads = 0;
+    let obsoletePageReads = 0;
+    const calls = mountCore({
+      overviews: () => {
+        overviewReads += 1;
+        return overviewReads === 1
+          ? overview([project('project-a', 'Alpha')])
+          : overviewRefresh.promise;
+      },
+      tasks: (args) => {
+        if (args.project_id === 'project-b') return page(args.project_id, args.status, [task('beta-task')]);
+        if (args.cursor) {
+          obsoletePageReads += 1;
+          return obsoletePage.promise;
+        }
+        return page(args.project_id, args.status, [task('alpha-task')], { hasMore: true, cursor: 'alpha-cursor' });
+      },
+    });
+    const props = { pollMs: 60_000 };
+    const { container, rerender } = render(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar {...props} />
+      </>,
+    );
+    clickProject(await screen.findByRole('treeitem', { name: /Alpha/ }));
+    await screen.findByText('Task alpha-task');
+    const tree = container.querySelector('.ps__tree');
+    const loadMore = screen.getByRole('button', { name: 'Cargar más Tasks de Alpha' });
+    fireEvent.click(loadMore);
+    await waitFor(() => expect(loadMore.getAttribute('aria-busy')).toBe('true'));
+    const externalFocus = screen.getByRole('button', { name: 'Foco externo' });
+    externalFocus.focus();
+
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active={false} {...props} />
+      </>,
+    );
+    await flush();
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(container.querySelector('.ps__more').disabled).toBe(false);
+    expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
+    expect(obsoletePageReads).toBe(1);
+
+    useCoreQueryOverride.current = (query, _args, result) => (
+      query === 'projects_overview'
+        ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
+        : result
+    );
+    rerender(
+      <>
+        <button type="button" aria-label="Foco externo">Fuera del sidebar</button>
+        <ProjectsSidebar active {...props} />
+      </>,
+    );
+    await waitFor(() => expect(overviewReads).toBe(2));
+    expect(container.querySelector('.ps__tree')).toBe(tree);
+    expect(obsoletePageReads).toBe(1);
+    expect(document.activeElement).toBe(externalFocus);
+
+    useCoreQueryOverride.current = null;
+    overviewRefresh.resolve(overview([project('project-b', 'Beta')]));
+    clickProject(await screen.findByRole('treeitem', { name: /Beta/ }));
+    await screen.findByText('Task beta-task');
+    await act(async () => { obsoletePage.resolve(page('project-a', 'active', [task('obsolete-alpha-task')])); });
+    await flush();
+    expect(screen.queryByText('Task obsolete-alpha-task')).toBeNull();
+    expect(screen.queryByText('Task alpha-task')).toBeNull();
+    expect(screen.getByText('Task beta-task')).toBeTruthy();
+    expect(taskCalls(calls).filter(({ args }) => args.cursor)).toHaveLength(1);
+    expect(document.activeElement).toBe(externalFocus);
   });
 
   it('transporta el filtro archived al overview', async () => {

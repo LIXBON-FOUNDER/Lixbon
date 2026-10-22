@@ -59,6 +59,11 @@ const coreQuery = async (query, args) => {
 };
 const coreCalls = () => invoke.mock.calls.filter(([command]) => command === 'orch_query').length;
 const orchHost = () => document.querySelector('[data-retained-mode="orch"]');
+const deferred = () => {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+};
 
 const treeitem = (region, attribute, id) => within(region).findByRole('treeitem', { name: (_, el) => el.getAttribute(attribute) === id && (attribute === 'data-task-id' || !el.hasAttribute('data-task-id')) });
 
@@ -157,11 +162,34 @@ describe('AppShell · modo Orquestador (ADE) al cambiar de modo', () => {
     expect(coreCalls()).toBe(hiddenCalls);
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
 
+    const overviewRefresh = deferred();
+    let overviewRefreshStarted = false;
+    const originalInvoke = invoke.getMockImplementation();
+    invoke.mockImplementation(async (command, payload) => {
+      if (command === 'orch_query' && payload.query === 'projects_overview') {
+        overviewRefreshStarted = true;
+        return overviewRefresh.promise;
+      }
+      return originalInvoke(command, payload);
+    });
     await setMode('orch');
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
     expect(screen.getByRole('tab', { name: 'Attention' }).getAttribute('aria-selected')).toBe('true');
     const returned = await screen.findByRole('region', { name: 'Projects y Tasks' });
     const returnedRow = await treeitem(returned, 'data-task-id', item.id);
+    await waitFor(() => expect(overviewRefreshStarted).toBe(true));
+    // Antes de que el overview autoritativo responda, el árbol real conserva filas, cursor y scroll.
+    expect(returned.querySelector('.ps__tree')).toBe(scroller);
+    expect(await treeitem(returned, 'data-task-id', extraItem.id)).toBeTruthy();
+    expect(scroller.scrollTop).toBe(37);
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-task-id')).toBe(item.id));
+    const cursorReadsBeforeOverview = invoke.mock.calls.filter(([command, payload]) => (
+      command === 'orch_query' && payload.query === 'tasks_by_project' && payload.args?.cursor
+    )).length;
+    expect(coreCalls()).toBeGreaterThan(hiddenCalls);
+
+    const freshOverview = await coreQuery('projects_overview', {});
+    await act(async () => { overviewRefresh.resolve(freshOverview); });
     expect(returnedRow.getAttribute('aria-selected')).toBe('true');
     expect(returned.querySelector('.ps__tree')).toBe(scroller);
     expect(await treeitem(returned, 'data-task-id', extraItem.id)).toBeTruthy();
@@ -172,6 +200,9 @@ describe('AppShell · modo Orquestador (ADE) al cambiar de modo', () => {
     expect(returned.querySelector('li[data-task-id="task-uuid-2"]')).toBeTruthy();
     expect(returned.querySelector('.ps__tree')).toBe(scroller);
     expect(scroller.scrollTop).toBe(37);
+    expect(invoke.mock.calls.filter(([command, payload]) => (
+      command === 'orch_query' && payload.query === 'tasks_by_project' && payload.args?.cursor
+    )).length).toBeGreaterThanOrEqual(cursorReadsBeforeOverview);
     await waitFor(() => expect(document.activeElement?.getAttribute('data-task-id')).toBe(item.id));
   });
 
