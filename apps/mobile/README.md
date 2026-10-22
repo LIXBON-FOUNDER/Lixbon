@@ -39,6 +39,8 @@ src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), 
 src/components/         primitivas del IDE (ui.js), barra de título, paleta, barra de
                         estado, sidebar, diálogos e iconos
 src/screens/            Auth, Chat y Remoto (secciones), Uso, Cuenta y Personalizar (apiladas)
+src/observe/            bootstrap observacional del Core (LXO-107): snapshot compacta por
+                        /remote, cursor de Events, caché no autoritativa y estados de conexión
 src/supervision/        prototipo de supervisión: reglas (model), datos de ejemplo
                         (fixtures), estado (store) y pruebas (`npm test`)
 assets/                 fuentes embebidas + iconos de la app (desde favicon.svg)
@@ -107,3 +109,14 @@ reanimated 4), así que se prueba con una build de desarrollo:
   mismas conversaciones que la web.
 - **Cambiar de servidor (dev)**: mantener pulsado el pie «lixbon.com» de la
   pantalla de login.
+
+## Bootstrap observacional del Core (LXO-107)
+
+`src/observe/` arranca la vista observacional desde la snapshot compacta del Core
+y sigue los cambios por el Event Log desde su cursor. Pasa por la sesión
+`/remote`: el IDE lee el Core con su identidad Desktop de F1 y devuelve solo lo
+permitido, y el móvil se autentica con su cuenta. La caché (AsyncStorage) nunca es autoridad
+y se pinta como desactualizada. Estados: `connecting`, `online`, `stale`,
+`offline`, `unauthorized`, `version_mismatch`. Por ahora hay un indicador mínimo
+en la pestaña Orquestar; las pantallas son LXO-108 a LXO-111. Contrato y
+amenazas: [`docs/core/MOBILE_BOOTSTRAP.md`](../../docs/core/MOBILE_BOOTSTRAP.md).
