@@ -1,14 +1,14 @@
 """Prueba conceptual del corte Task/Attempt y de su rollback por copia (LXO-112).
 
 NO es código productivo: ejercita la ADR (docs/core/CORTE_TASK_ATTEMPT.md) sobre la fixture con SQLite
-real y TODAS las migraciones publicadas anteriores al corte (001..007, con el esquema inerte de Task), sin
+real y TODAS las migraciones publicadas anteriores al corte (001..008, con el esquema inerte de Task y Attempt), sin
 tocar ningún binario ni ~/.lixbon.
 
     python -I docs/core/fixtures/corte-task-attempt/verificar.py            # comprueba
     python -I docs/core/fixtures/corte-task-attempt/verificar.py --escribir # regenera normalizado.after.json
 
 Escenarios:
-  S0  base anterior al corte (001..007) con legacy_state = fixture y las tablas de Task vacías e inertes.
+  S0  base anterior al corte (001..008) con legacy_state = fixture y las tablas de Task y Attempt vacías e inertes.
   S1  copia previa obligatoria (VACUUM INTO + integrity_check + sidecar con SHA-256).
   S2  corte (borrador SQL en UNA transacción) → tablas normalizadas == normalizado.after.json.
   S3  invariantes: sin ProviderSession por cwd+tiempo, 1 Attempt por Task, legacy congelado,
@@ -31,9 +31,9 @@ MIGRACIONES = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "migra
 BEFORE = AQUI / "legacy_state.before.json"
 AFTER = AQUI / "normalizado.after.json"
 CORTE = AQUI / "corte.borrador.sql"
-# «F2» = cualquier binario anterior al corte, aunque ya traiga el esquema inerte (la 007).
-VERSION_F2 = 7
-VERSION_CORTE = 8
+# «F2» = cualquier binario anterior al corte, aunque ya traiga el esquema inerte (007 tasks, 008 attempts).
+VERSION_F2 = 8
+VERSION_CORTE = 9
 LEGACY_REV = 42
 
 TABLAS = ["runs", "tasks", "attempts", "attempt_phases", "worktrees", "provider_sessions", "threads",
