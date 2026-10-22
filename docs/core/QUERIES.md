@@ -467,6 +467,8 @@ El CLI de Lixbon (`apps/cli`) lo muestra al abrir el chat:
 * Limpia la salida de caracteres de control y la pinta como nota, aparte del aviso de versión nueva.
 * Con Desktop cerrado, o dentro de una tarea del orquestador, no dice nada.
 * Si el Core no responde a tiempo, lo dice en una nota sin tratarlo como error.
+* Dentro del chat la pista dice `! lxo attention`: con `!`, el chat ejecuta `lxo` con la ruta que publica Desktop y
+  pinta `attention`, `tasks`, `task show`, `projects` y `summary` con sus estilos (`apps/cli/internal/tui/lxoview.go`).
 * Se desactiva con `"startup_summary": false` en `~/.lixbon/config.json` o con `LIXBON_NO_STARTUP_SUMMARY=1`.
 
 ### Errores
