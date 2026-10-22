@@ -233,6 +233,35 @@ fn casos() -> Vec<Caso> {
         ),
         ("task.discarded", Decision, t, json!({}), "activity.task.discarded", "warning"),
         ("task.restored", Decision, t, json!({}), "activity.task.restored", "info"),
+        // state/decision · Attempt (LXO-114)
+        (
+            "attempt.requested",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "provider": "claude", "model": "claude-opus-5-5", "external": false, "approval_required": true }),
+            "activity.attempt.requested",
+            "info",
+        ),
+        ("attempt.approved", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.approved", "success"),
+        ("attempt.rejected", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "cause": "cancelled" }), "activity.attempt.rejected", "warning"),
+        ("attempt.started", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.started", "info"),
+        ("attempt.completed", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "has_summary": true }), "activity.attempt.completed", "success"),
+        (
+            "attempt.failed",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "reason": "agent_idle_timeout", "has_summary": false }),
+            "activity.attempt.failed",
+            "error",
+        ),
+        (
+            "attempt.stopped",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "from": "running", "cause": "run_closed" }),
+            "activity.attempt.stopped",
+            "warning",
+        ),
         // decision
         (
             "decision.recorded",
@@ -532,7 +561,14 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 58] = [
+const CLAVES: [&str; 65] = [
+    "activity.attempt.approved",
+    "activity.attempt.completed",
+    "activity.attempt.failed",
+    "activity.attempt.rejected",
+    "activity.attempt.requested",
+    "activity.attempt.started",
+    "activity.attempt.stopped",
     "activity.attention.created",
     "activity.attention.resolved",
     "activity.attention.risk_acted",

@@ -42,7 +42,7 @@ fn finalize(drafts: Vec<Result<EventDraft, EventError>>, ctx: &MutationContext, 
     finalize_all(drafts, ctx, at, &|_: &str| None).map_err(StoreError::InvalidEvent)
 }
 
-fn finalize_single(draft: Result<EventDraft, EventError>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+pub(super) fn finalize_single(draft: Result<EventDraft, EventError>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize(vec![draft], ctx, at)?.pop().ok_or_else(|| StoreError::InvalidEvent("un borrador produce exactamente un evento".into()))
 }
 
@@ -52,7 +52,7 @@ fn denied(what: &str, ctx: &MutationContext) -> StoreError {
 
 /// ¿`ancestor` es `id` o uno de sus antecesores? Recorre los padres en el almacén (el árbol no cambia: la 007
 /// impide mover una Task).
-fn manages(st: &Store, ancestor: &str, id: &str) -> StoreResult<bool> {
+pub(super) fn manages(st: &Store, ancestor: &str, id: &str) -> StoreResult<bool> {
     let mut cur = Some(id.to_string());
     while let Some(t) = cur {
         if t == ancestor {
