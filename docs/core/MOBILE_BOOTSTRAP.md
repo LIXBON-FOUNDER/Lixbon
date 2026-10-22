@@ -31,6 +31,7 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 |---|---|---|
 | `core_snapshot` | `rid`, `attention_items?` (0–20) | `orch_core_snapshot` · `{rid, ok, protocol: 1, snapshot}` |
 | `core_events` | `rid`, `cursor` (entero ≥ 0), `limit?` (1–200, por defecto 100) | `orch_core_events` · `{rid, ok, protocol: 1, events, next_cursor, has_more, head_seq}` |
+| `core_attention` (LXO-109) | `rid`, `project_id?`, `category?`, `severity?`, `cursor?` (texto opaco), `limit?` (1–100, por defecto 50) | `orch_core_attention` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
 
 * `rid`: 1–64 caracteres `[A-Za-z0-9_-]`. Sin `rid` válido, la petición no llega al Core.
 * `events[]` va **reducido**: `seq`, `kind`, `ts`, `project_id`, `run_id` y `entity {kind, id}`. No lleva
@@ -38,7 +39,11 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 * Si falla, la respuesta es `{rid, ok: false, code, protocol: 1}`. `code` es el código estable del Core
   (`cursor_ahead`, `compact_snapshot_unavailable`…), `forbidden` o `core_error`. **El mensaje del error no
   viaja**: puede llevar rutas.
-* El IDE anuncia la capability `core_snapshot` en su `hello`. El gateway admite las dos acciones en
+* El IDE anuncia la capability `core_snapshot` en su `hello`. Con `core_attention` anuncia también la capability `core_attention`; sin ella, la bandeja del móvil enseña
+  las más urgentes de la snapshot y pide actualizar. `items[]` de `core_attention` es la allowlist de
+  `attention_list` (`id`, `category`, `severity`, `status`, `target_kind`, `target_id`, `project_id`, `run_id`,
+  `occurrence`, `created_at`), sin `subject` ni `facts`. El cursor es el opaco de `attention_list`, ligado a la
+  identidad del IDE que hace la lectura. El gateway admite las dos acciones en
   `ORCH_ACTIONS` y trata las dos respuestas como `EPHEMERAL_EVENTS`.
 
 ## Estados en el móvil

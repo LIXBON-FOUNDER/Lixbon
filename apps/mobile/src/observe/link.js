@@ -6,7 +6,7 @@
 // Sin dependencias de React Native: se prueba con `node --test`.
 
 export const RELAY_PROTOCOL = 1;
-const RESPONSES = { orch_core_snapshot: 'core_snapshot', orch_core_events: 'core_events' };
+const RESPONSES = { orch_core_snapshot: 'core_snapshot', orch_core_events: 'core_events', orch_core_attention: 'core_attention' };
 const DEFAULT_TIMEOUT_MS = 20000;
 
 let ridSeq = 0;

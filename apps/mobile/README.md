@@ -82,6 +82,14 @@ hasta validarla en dispositivo.
   - `actionGate` solo deja mandar algo en línea: ninguna acción futura puede
     aparentar éxito sin conexión.
 
+- **Atención** (`screens/observe/AttentionScreen.js`, `observe/attention.js`,
+  LXO-109): la bandeja de Attention activa del Core, en su orden.
+  - Filtros por proyecto, categoría y severidad; agrupación opcional por
+    proyecto; icono por categoría, severidad, destino y edad.
+  - Las de una tarea abren su detalle; abrir no resuelve ni marca nada.
+  - Con un IDE anterior o sin conexión se ven las más urgentes de la
+    snapshot, marcadas como parciales o guardadas.
+
 El prototipo con datos de ejemplo (`SupervisionScreen.js`, `src/supervision/`)
 sigue en el repo, pero sin montar.
 

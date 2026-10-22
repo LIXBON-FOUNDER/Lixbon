@@ -22,7 +22,8 @@ const log = (code, fields) => {
  * - `sessionId`: la sesión /remote (clave de la caché).
  * - `send(command)`: entrega un comando y resuelve su acuse `{ ok, status? }`.
  * - `transportOpen`, `hostConnected`, `capabilities`: estado del enlace y `hello` del IDE.
- * Devuelve `{ state, retry, handleEvent }`; `handleEvent(ev)` es `true` si el evento era del bootstrap.
+ * Devuelve `{ state, retry, handleEvent, request }`; `handleEvent(ev)` es `true` si el evento era del bootstrap
+ * y `request(action, args)` hace otra lectura por el mismo enlace (por ejemplo `core_attention`).
  */
 export function useCoreBootstrap({ enabled = true, sessionId, send, transportOpen, hostConnected, capabilities }) {
   const [state, setState] = useState(null);
@@ -63,5 +64,9 @@ export function useCoreBootstrap({ enabled = true, sessionId, send, transportOpe
 
   const retry = useCallback(() => bootRef.current?.retry(), []);
   const handleEvent = useCallback((ev) => linkRef.current?.handleEvent(ev) ?? false, []);
-  return { state, retry, handleEvent };
+  const request = useCallback(
+    (action, args) => (linkRef.current ? linkRef.current.request(action, args) : Promise.resolve({ ok: false, transport: 'closed' })),
+    [],
+  );
+  return { state, retry, handleEvent, request };
 }

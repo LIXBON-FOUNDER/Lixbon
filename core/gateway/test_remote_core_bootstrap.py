@@ -19,13 +19,14 @@ def test_respuestas_del_core_se_reparten_pero_no_entran_en_el_replay_ni_en_la_bd
             {"type": "user_msg", "text": "hola"},
             {"type": "orch_core_snapshot", "rid": "m1", "ok": True, "snapshot": {"snapshot_version": 1}},
             {"type": "orch_core_events", "rid": "m2", "ok": True, "events": [], "next_cursor": 0},
+            {"type": "orch_core_attention", "rid": "m3", "ok": True, "items": [], "has_more": False},
         ])
-        assert [q.get_nowait()["type"] for _ in range(3)] == ["user_msg", "orch_core_snapshot", "orch_core_events"]
+        assert [q.get_nowait()["type"] for _ in range(4)] == ["user_msg", "orch_core_snapshot", "orch_core_events", "orch_core_attention"]
         assert [ev["type"] for ev in hub.replay(ch, 0)] == ["user_msg"]
         assert ch.orch is None, "no sustituyen al estado `orch` del host"
 
     asyncio.run(scenario())
-    for kind in ("orch_core_snapshot", "orch_core_events"):
+    for kind in ("orch_core_snapshot", "orch_core_events", "orch_core_attention"):
         assert kind not in REMOTE_PERSISTED_EVENTS, f"{kind} no se guarda en la BD"
 
 
@@ -41,6 +42,7 @@ def host_online(monkeypatch):
 @pytest.mark.parametrize("action,args", [
     ("core_snapshot", {"rid": "m1", "attention_items": 5}),
     ("core_events", {"rid": "m2", "cursor": 42, "limit": 100}),
+    ("core_attention", {"rid": "m3", "category": "question", "limit": 50}),
 ])
 def test_el_controller_puede_pedir_las_lecturas_del_core(host_online, action, args):
     hub, ch = host_online
