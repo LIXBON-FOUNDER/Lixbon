@@ -32,6 +32,8 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 | `core_snapshot` | `rid`, `attention_items?` (0–20) | `orch_core_snapshot` · `{rid, ok, protocol: 1, snapshot}` |
 | `core_events` | `rid`, `cursor` (entero ≥ 0), `limit?` (1–200, por defecto 100) | `orch_core_events` · `{rid, ok, protocol: 1, events, next_cursor, has_more, head_seq}` |
 | `core_attention` (LXO-109) | `rid`, `project_id?`, `category?`, `severity?`, `cursor?` (texto opaco), `limit?` (1–100, por defecto 50) | `orch_core_attention` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
+| `core_task` (LXO-110) | `rid`, `project_id`, `task_id` | `orch_core_task` · `{rid, ok, protocol: 1, task}` |
+| `core_activity` (LXO-110) | `rid`, `task_id`, `cursor?` (entero ≥ 0; 0 = lo más nuevo), `limit?` (1–50, por defecto 30) | `orch_core_activity` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
 
 * `rid`: 1–64 caracteres `[A-Za-z0-9_-]`. Sin `rid` válido, la petición no llega al Core.
 * `events[]` va **reducido**: `seq`, `kind`, `ts`, `project_id`, `run_id` y `entity {kind, id}`. No lleva
@@ -43,7 +45,14 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
   las más urgentes de la snapshot y pide actualizar. `items[]` de `core_attention` es la allowlist de
   `attention_list` (`id`, `category`, `severity`, `status`, `target_kind`, `target_id`, `project_id`, `run_id`,
   `occurrence`, `created_at`), sin `subject` ni `facts`. El cursor es el opaco de `attention_list`, ligado a la
-  identidad del IDE que hace la lectura. El gateway admite las dos acciones en
+  identidad del IDE que hace la lectura.
+* Con `core_task` y `core_activity` el IDE anuncia la capability `core_task`. `task` es `task_detail` sin
+  cuerpos de mensaje (solo `pending_questions`: cuántas preguntas suyas siguen sin respuesta) y sin el nombre
+  ni la nota de la fase (como Activity). La ruta va en `location` (el worktree o, si comparte checkout, su
+  carpeta) y el móvil la enseña solo como ubicación secundaria. `core_activity` pide `activity_list` de esa
+  Task con `order: desc`. Cada item va sin `provenance`, `event_id`, `correlation_id` ni el id del actor; el
+  móvil traduce `message_key` con una copia del traductor de Desktop (`apps/mobile/src/observe/activityMessages.js`,
+  con una prueba que exige que sea idéntica). `core_attention` admite también `target_kind` y `target_id`. El gateway admite las dos acciones en
   `ORCH_ACTIONS` y trata las dos respuestas como `EPHEMERAL_EVENTS`.
 
 ## Estados en el móvil

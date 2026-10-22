@@ -20,13 +20,16 @@ def test_respuestas_del_core_se_reparten_pero_no_entran_en_el_replay_ni_en_la_bd
             {"type": "orch_core_snapshot", "rid": "m1", "ok": True, "snapshot": {"snapshot_version": 1}},
             {"type": "orch_core_events", "rid": "m2", "ok": True, "events": [], "next_cursor": 0},
             {"type": "orch_core_attention", "rid": "m3", "ok": True, "items": [], "has_more": False},
+            {"type": "orch_core_task", "rid": "m4", "ok": True, "task": {"id": "t1"}},
+            {"type": "orch_core_activity", "rid": "m5", "ok": True, "items": [], "has_more": False},
         ])
-        assert [q.get_nowait()["type"] for _ in range(4)] == ["user_msg", "orch_core_snapshot", "orch_core_events", "orch_core_attention"]
+        kinds = ["user_msg", "orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity"]
+        assert [q.get_nowait()["type"] for _ in range(6)] == kinds
         assert [ev["type"] for ev in hub.replay(ch, 0)] == ["user_msg"]
         assert ch.orch is None, "no sustituyen al estado `orch` del host"
 
     asyncio.run(scenario())
-    for kind in ("orch_core_snapshot", "orch_core_events", "orch_core_attention"):
+    for kind in ("orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity"):
         assert kind not in REMOTE_PERSISTED_EVENTS, f"{kind} no se guarda en la BD"
 
 
@@ -43,6 +46,8 @@ def host_online(monkeypatch):
     ("core_snapshot", {"rid": "m1", "attention_items": 5}),
     ("core_events", {"rid": "m2", "cursor": 42, "limit": 100}),
     ("core_attention", {"rid": "m3", "category": "question", "limit": 50}),
+    ("core_task", {"rid": "m4", "project_id": "p1", "task_id": "t1"}),
+    ("core_activity", {"rid": "m5", "task_id": "t1", "cursor": 0, "limit": 30}),
 ])
 def test_el_controller_puede_pedir_las_lecturas_del_core(host_online, action, args):
     hub, ch = host_online
