@@ -116,6 +116,8 @@ Secrets necesarios en el repo: `TAURI_SIGNING_PRIVATE_KEY`,
 2. Generar el sidecar `lxo` (ignorado por git) antes de `cargo test`: `npm run build:lxo` (ejecuta `node scripts/build-lxo.mjs`). Sin él, el build de Tauri falla porque no encuentra `binaries/lxo-<target>`.
 3. `cd src-tauri && cargo test`
 
+En una copia limpia (worktree recién creado o `git clean`), `npm run build:lxo` es obligatorio antes del primer `cargo test`: en Windows falta `src-tauri/binaries/lxo-x86_64-pc-windows-msvc.exe` y la compilación del host falla hasta generarlo.
+
 ## E2E de `lxo events` contra el Core HTTP real
 
 En Windows, desde `apps/desktop`, instala y construye el sidecar y el frontend que requiere `tauri-build`; luego ejecuta la prueba ignorada con el binario compilado:

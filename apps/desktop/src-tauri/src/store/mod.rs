@@ -44,6 +44,8 @@ mod lock;
 mod migrate;
 mod private;
 mod projects;
+mod attempts;
+mod tasks;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -52,6 +54,10 @@ mod authority_tests;
 mod events_tests;
 #[cfg(test)]
 mod projects_tests;
+#[cfg(test)]
+mod tasks_tests;
+#[cfg(test)]
+mod attempts_tests;
 #[cfg(test)]
 mod tests;
 
@@ -86,6 +92,12 @@ pub use events::{ActorKind, EventClass, EventPage, EventQuery, EventRow, Inserte
 #[allow(unused_imports)]
 pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, SnapshotCheck};
 pub use lock::InstanceLock;
+// Attempt como ejecución (LXO-114): inerte hasta el corte; hasta entonces solo la usan `orch::attempt_ops` y las pruebas.
+#[allow(unused_imports)]
+pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, MAX_SUMMARY_CHARS};
+// Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
+#[allow(unused_imports)]
+pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 use migrate::now_ms;

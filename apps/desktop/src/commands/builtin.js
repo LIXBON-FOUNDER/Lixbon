@@ -172,6 +172,26 @@ export function registerBuiltinCommands() {
       run: () => { const a = app(); a.setCommandPalette(false); a.setQuickOpen(true); },
     },
     {
+      id: 'ade.jumpPalette', title: 'Ir a Project, Task o Attention…',
+      category: 'Ver', keywords: 'jump palette saltar ir project proyecto task attention orquestador ade navegar',
+      run: () => {
+        const state = wb();
+        const a = app();
+        a.setCommandPalette(false);
+        a.setQuickOpen(false);
+        if (state.mode === 'orch' && state.orchView !== 'ade') {
+          state.setJumpPaletteOpen(false);
+          return;
+        }
+        if (state.mode === 'orch' && state.jumpPaletteOpen) { state.setJumpPaletteOpen(false); return; }
+        if (state.mode !== 'orch') {
+          state.setMode('orch');
+          state.setOrchView('ade');
+        }
+        state.setJumpPaletteOpen(true);
+      },
+    },
+    {
       id: 'chat.newConversation', title: 'Nueva conversación',
       category: 'Chat', keywords: 'nuevo chat conversacion agente',
       run: () => useChatStore.getState().newConversation(),
@@ -184,7 +204,10 @@ export function registerBuiltinCommands() {
     {
       id: 'workbench.toggleExplorer', title: 'Mostrar u ocultar la barra lateral',
       category: 'Ver', keywords: 'archivos explorer sidebar barra lateral',
-      run: () => { if (wb().mode !== 'editor') { inEditor(); wb().showSide('files'); } else wb().toggleSide(); },
+      run: () => {
+        if (wb().mode === 'orch') { wb().toggleSide(); return; }
+        if (wb().mode !== 'editor') { inEditor(); wb().showSide('files'); } else wb().toggleSide();
+      },
     },
     {
       id: 'workbench.showFiles', title: 'Archivos',
@@ -204,7 +227,7 @@ export function registerBuiltinCommands() {
     {
       id: 'workbench.toggleAgent', title: 'Mostrar u ocultar el panel del agente',
       category: 'Ver', keywords: 'agente panel derecho chat',
-      run: () => { inEditor(); wb().toggleAgent(); },
+      run: () => { if (wb().mode !== 'orch') inEditor(); wb().toggleAgent(); },
     },
     {
       id: 'workbench.toggleTerminal', title: 'Alternar terminal',

@@ -12,8 +12,17 @@ import { currentXtermTheme } from '../editor/xtermThemes';
 import { watchTheme } from '../editor/themeMode';
 import { computePtySize, ptyCols } from '../lib/orchTermSize';
 
-export function AgentTerminal({ task, live }) {
+export function AgentTerminal({ task, live, visible = true }) {
   const hostRef = useRef(null);
+  const visibleRef = useRef(visible);
+  const resizeRef = useRef(null);
+  visibleRef.current = visible;
+
+  useEffect(() => {
+    // El canvas operativo permanece montado en ADE. Conserva el tamaño del
+    // PTY mientras está oculto y lo ajusta al volver a mostrarlo.
+    if (visible) resizeRef.current?.();
+  }, [visible]);
 
   useEffect(() => {
     const term = new Terminal({
@@ -36,6 +45,7 @@ export function AgentTerminal({ task, live }) {
     let ready = false;
     const unlisten = [];
     const resize = () => {
+      if (!visibleRef.current) return;
       try {
         // No fit.fit(): eso bajaría las columnas al ancho del panel. Se mide lo
         // que cabe y se aplica el mínimo; si sobra, el contenedor hace scroll.
@@ -46,6 +56,7 @@ export function AgentTerminal({ task, live }) {
         invoke('orch_term_resize', { task, cols, rows }).then(() => ptyCols.set(task, cols)).catch(() => {});
       } catch { /* oculto */ }
     };
+    resizeRef.current = resize;
 
     (async () => {
       await document.fonts.load(`12.5px ${FONT}`).catch(() => {});
@@ -69,6 +80,7 @@ export function AgentTerminal({ task, live }) {
 
     return () => {
       disposed = true;
+      if (resizeRef.current === resize) resizeRef.current = null;
       ro.disconnect();
       stopThemeWatch();
       unlisten.forEach((u) => u());
