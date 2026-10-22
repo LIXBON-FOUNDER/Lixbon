@@ -41,7 +41,7 @@ Consecuencias que el corte corrige:
    `runs`, `decisions`, `reviews`, `env_blocks` y `legacy_residue`.
 2. El corte de **datos** es **una sola migración** (`NNN_task_attempt_cut`), en **una transacción**, que copia el
    documento con SQL determinista (JSON1), verifica conteos y **congela** `legacy_state`. El esquema de cada entidad
-   llega antes, en su propia migración (`007_tasks` en LXO-113, Attempt y el resto después), **inerte** hasta el corte
+   llega antes, en su propia migración (`007_tasks` en LXO-113, `008_attempts` en LXO-114, el resto después), **inerte** hasta el corte
    (D15, revisada en LXO-113).
 3. Antes del corte se hace una **copia previa obligatoria** y verificada. Si no se puede hacer, no hay corte.
 4. **Rollback = restaurar esa copia** con un binario F2. Nunca una migración hacia atrás ni un deshacer parcial.
@@ -250,7 +250,7 @@ destino **no se descarta**: va a `legacy_residue` con un motivo.
 ## 9. Orden de migraciones y del arranque
 
 La numeración sigue [`MIGRACIONES.md`](MIGRACIONES.md). El esquema de las entidades llega **antes** del corte, una
-migración por slice (`007_tasks` en LXO-113; Attempt y el resto, las siguientes), con sus tablas **vacías e inertes**:
+migración por slice (`007_tasks` en LXO-113; `008_attempts` en LXO-114; ProviderSession, Worktree, Artifact y Thread, las siguientes), con sus tablas **vacías e inertes**:
 triggers que abortan cualquier escritura mientras no exista `meta.agentic_model` ([TASKS.md](TASKS.md)). La migración
 del corte (`NNN_task_attempt_cut`, el siguiente número libre cuando se escriba) solo copia datos y congela, y es la que
 escribe `meta.agentic_model`, **antes** de copiar. Ninguna migración anterior al corte puede tocar `legacy_state`.
@@ -373,6 +373,18 @@ y la fixture en la misma PR.
 | D16 | `Run` se conserva (tabla `runs`) | retirarlo en F3: amplía el corte sin necesidad |
 | D17 | El estado de ejecución de la Task se deriva, no se guarda. Solo se guarda la **intención** (`open` · `discarded`), que es una decisión de la persona y no se puede derivar (LXO-113) | columna `tasks.status`: se desincroniza de sus Attempts |
 | D18 | **Rutas:** `tasks.repo` y `attempts.cwd` se conservan; `tasks.repo` se retira cuando `project_locations` resuelva la ubicación de toda Task (§14) | retirarlas ya: el runtime todavía las necesita para git |
+
+**Decisiones añadidas por los slices de F3** (cada una vive en el contrato de su slice, que es su fuente):
+
+| # | Decisión | Dónde |
+|---|---|---|
+| D19 | A lo sumo un Attempt activo por Task; race/compare lo retirará en su slice | [`ATTEMPTS.md`](ATTEMPTS.md) (LXO-114) |
+| D20 | Entrar en `waiting`, `awaiting_terminal_approval` y `exited` es del runtime (F4); existen como estados | [`ATTEMPTS.md`](ATTEMPTS.md) |
+| D21 | `worktree_id` y `provider_session_id` son referencias blandas de fijado único hasta que existan sus tablas | [`ATTEMPTS.md`](ATTEMPTS.md) |
+| D22–D25 | Cancelar lo pendiente es rechazarlo; reintento idempotente = `Unchanged`; una Task con un Attempt activo no se descarta; una Task con Attempts no se borra | [`ATTEMPTS.md`](ATTEMPTS.md) |
+
+La columna `attempts.cwd` de D18 y el resto de las columnas de runtime del borrador del corte (política, entrega, modelo
+efectivo…) **no** están en la `008_attempts`: cada slice las añade con `ALTER TABLE ... ADD COLUMN` cuando las usa.
 
 ## 14. Criterios para eliminar campos legacy (C3)
 

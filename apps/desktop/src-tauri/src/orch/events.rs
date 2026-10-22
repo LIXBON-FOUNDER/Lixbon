@@ -179,6 +179,8 @@ impl Channel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EntityKind {
     Task,
+    /// Una ejecución concreta de una Task (LXO-114). Id `<task>-a<n>`.
+    Attempt,
     Run,
     Project,
     SpawnRequest,
@@ -193,6 +195,7 @@ impl EntityKind {
     fn as_str(self) -> &'static str {
         match self {
             EntityKind::Task => "task",
+            EntityKind::Attempt => "attempt",
             EntityKind::Run => "run",
             EntityKind::Project => "project",
             EntityKind::SpawnRequest => "spawn_request",

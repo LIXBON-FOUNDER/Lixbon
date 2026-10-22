@@ -62,6 +62,14 @@ pub enum StoreError {
     TaskConflict(String),
     /// Una Task no cumple el contrato (título vacío, cambio vacío…). Se rechaza ANTES de tocar la base.
     InvalidTask(String),
+    /// Un Attempt no admite la operación (Task inexistente, descartada o de un Run cerrado; ya hay uno activo…).
+    /// No se escribió nada.
+    AttemptConflict(String),
+    /// Un Attempt no cumple el contrato (proveedor vacío, resumen demasiado largo, motivo que no es un código…).
+    /// Se rechaza ANTES de tocar la base.
+    InvalidAttempt(String),
+    /// La transición pedida no está en la tabla cerrada del ciclo de vida del Attempt. No se escribió nada.
+    AttemptTransition { id: String, from: String, to: String },
 }
 
 impl StoreError {
@@ -167,6 +175,9 @@ impl fmt::Display for StoreError {
             ),
             StoreError::TaskConflict(m) => write!(f, "tasks: {m}"),
             StoreError::InvalidTask(m) => write!(f, "task inválida: {m}"),
+            StoreError::AttemptConflict(m) => write!(f, "attempts: {m}"),
+            StoreError::InvalidAttempt(m) => write!(f, "attempt inválido: {m}"),
+            StoreError::AttemptTransition { id, from, to } => write!(f, "attempts: el Attempt {id} no puede pasar de {from} a {to}"),
         }
     }
 }
