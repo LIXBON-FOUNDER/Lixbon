@@ -131,19 +131,32 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
 * Es solo para personas: con credencial Agent responde con código 3. Salidas: 0 correcto, 1 error interno, 2 uso o
   filtro inválido, 3 autenticación o sin permiso, 4 versión o contrato, 5 Lixbon cerrado o Core no disponible.
 
-### Cliente de terminal: `lxo tasks` y `lxo task show` (LXO-104)
+### Cliente de terminal: `lxo tasks` y `lxo task show` (LXO-104, LXO-38)
 
 * Tasks del **modelo legacy**, presentadas como tales (`task_model: "legacy"`), nunca como Attempts.
-* **Fuente provisional:** la lectura `list` del Core por el RPC autenticado (no `state.json`), mientras la query de
-  Tasks por Project de LXO-91 no esté en master. `list_tasks` en `lxo/src/tasks.rs` es el único punto que la usa; al
-  publicarse LXO-91 se sustituye ahí sin cambiar el `--json` de lxo.
+* **Fuente:** las queries de este documento por el RPC autenticado, como Person; nunca `state.json` ni las lecturas
+  `list`/`show` del orquestador.
+  * `lxo tasks` lee los Projects con `projects_overview` (también archivados) y las Tasks de cada uno con
+    `tasks_by_project` (`status: all`, páginas de 100 siguiendo `next_cursor`). Monta el árbol en el cliente: cada
+    raíz seguida de sus hijas, por `created_at` y luego `id`, con la profundidad calculada. Los filtros
+    `--active`, `--final`, `--status` y `--run` se aplican sobre ese árbol.
+  * `lxo task show <id>` busca la Task con `task_detail` en cada Project y añade los últimos 10 items de
+    `activity_list` (`target_kind: task`), traducidos con las mismas frases que Desktop
+    (`lxo/src/activity.rs`, comprobado contra `fixtures/activity_messages_es.json`).
+* **Tasks sin Project:** el Core no las lista. `lxo tasks` las cuenta (`unassigned_tasks` y, sin `--project`, una
+  línea «Sin proyecto: N tareas, que no salen aquí») y `lxo task show` responde 6 para ellas.
+* **Solo personas:** con la credencial de un agente, `lxo tasks` y `lxo task show` salen con 3. Dentro de una tarea
+  del orquestador se usan `lxo list` y `lxo show`.
 * `lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--run ID] [--json]`: en árbol (raíz y sus hijas).
   `--project` acepta el id o el nombre, que se resuelve con `projects_overview`.
-* `lxo task show <task_id> [--json]`: Project, run, raíz y padre, hijas, estado y fase, proveedor y modelo, rama,
-  worktree o checkout compartido, origen, fechas, motivo de fallo y PR, con `lxo events --task` y
-  `lxo attention --task` para seguirla.
-* `--json` es una allowlist de lxo: `{v, task_model, tasks}` y `{v, task_model, task, children}`. No copia el encargo
-  (`spec`), el argv ni otros campos internos; lo que el modelo legacy no registra (`host`) va como `null`.
+* `lxo task show <task_id> [--json]`: Project, run, raíz y padre, hijas, estado y fase, proveedor y modelo (el
+  efectivo si consta), rol, rama y base, worktree o checkout compartido, origen, fechas, motivo de fallo, PR y la
+  Activity reciente, con `lxo events --task` y `lxo attention --task` para seguirla.
+* `--json` es una allowlist de lxo: `{v, task_model, tasks, unassigned_tasks}` y
+  `{v, task_model, task, children, activity}`. `activity` es `{items: [{seq, ts, kind, message_key, visual, text}],
+  has_more}`, o `null` si el Core no ofrece Activity; `text` es `null` cuando el item no se puede traducir. No copia
+  el encargo (`spec`), el argv, los mensajes ni otros campos internos. Lo que el Core no da queda `null`: `host`
+  siempre, y en la lista la fase, el rol, la base, el cwd, el fallo y el PR (salen en `task show`).
 * Salidas: 0 correcto, 1 interno, 2 uso, 3 autenticación, 4 versión, 5 Core no disponible, 6 tarea o proyecto
   inexistente.
 
@@ -206,6 +219,7 @@ Lista paginada de las Tasks de un Project. Implementación: `orch/tasks_read.rs`
     "model": null,
     "branch": null,
     "worktree": null,
+    "external": false,
     "created_at": 1760000000000,
     "updated_at": 1760000000000
   }],
@@ -222,6 +236,7 @@ Lista paginada de las Tasks de un Project. Implementación: `orch/tasks_read.rs`
 | `status` | `starting` · `running` · `waiting` · `awaiting_terminal_approval` · `done` · `failed` · `stopped` · `exited` |
 | `provider` | `agent` |
 | `model` | `model` tal como se pidió (no el modelo efectivo) |
+| `external` | `true` si la Task la lanzó un coordinador externo (el campo legacy; no es un host ni un origen de cliente) |
 | `created_at` / `updated_at` | `created` / `updated` (ms epoch) |
 
 `project_id`, `filters.status` y `limit` repiten los valores ya validados de la petición.
@@ -279,7 +294,7 @@ Detalle de una Task dentro de su Project, para el Task Workspace y el Inspector.
   "task": {
     "id": "<task_id>", "run_id": "<run_id>", "parent_id": null, "root_id": "<task_id>",
     "status": "running", "title": "…", "provider": "claude", "model": null,
-    "branch": null, "worktree": null, "created_at": 1760000000000, "updated_at": 1760000000000,
+    "branch": null, "worktree": null, "external": false, "created_at": 1760000000000, "updated_at": 1760000000000,
     "project_id": "<project_id>",
     "child_ids": [],
     "phase": {"name": "…", "done": false, "note": "", "at": 1760000000000},
@@ -301,6 +316,9 @@ Lleva los mismos campos que un elemento de `tasks_by_project`, más:
 | `phase` | la **última** fase registrada; `null` si no hay ninguna |
 | `messages` | mensajes del buzón cuyo `from` o `to` es esta Task, en el orden del estado |
 | `cwd` / `merged` | los de la Task |
+| `role` / `base` | rol y rama base de la Task (`null` si no constan) |
+| `model_effective` | el modelo que el proveedor dice haber usado (`null` si no lo dijo); `model` sigue siendo el pedido |
+| `failure_reason` / `pr_url` | código del fallo y enlace del PR, si los hay |
 | `review` | la última decisión `review` de la Task (`decision` y `head_commit` salen de su detalle, `null` si faltan); `null` si no hay |
 | `integration` | la última decisión `merge` de la Task (`outcome` de su detalle, `decision_id` es el id de la decisión); `null` si no hay |
 

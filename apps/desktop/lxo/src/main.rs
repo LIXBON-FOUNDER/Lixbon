@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
+mod activity;
 mod attention;
 mod client_auth;
 mod events;
