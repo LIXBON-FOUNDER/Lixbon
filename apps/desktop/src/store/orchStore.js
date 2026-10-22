@@ -21,9 +21,18 @@ export const isFinal = (status) => ['done', 'failed', 'stopped', 'exited'].inclu
 
 let listening = false;
 let refreshTimer = null;
+let snapshotRefreshSequence = 0;
+
+function snapshotErrorMessage(error) {
+  if (typeof error === 'string') return error || 'Error de conexión desconocido';
+  if (error instanceof Error) return error.message || error.name || 'Error de conexión desconocido';
+  try { return JSON.stringify(error) || String(error); } catch { return String(error); }
+}
 
 export const useOrchStore = create((set, get) => ({
   snap: null,
+  snapshotError: null,
+  snapshotRefreshing: false,
   /** Avisos del último guardado de roles ({ flat, byRole }), ver roleSaveContract.js. */
   saveWarnings: EMPTY_SAVE_WARNINGS,
   agents: [],
@@ -40,7 +49,19 @@ export const useOrchStore = create((set, get) => ({
     });
   },
   refresh: async () => {
-    try { set({ snap: await invoke('orch_snapshot') }); } catch { /* sin backend (vite solo) */ }
+    const sequence = ++snapshotRefreshSequence;
+    set({ snapshotRefreshing: true });
+    try {
+      const snap = await invoke('orch_snapshot');
+      if (sequence !== snapshotRefreshSequence) return false;
+      set({ snap, snapshotError: null, snapshotRefreshing: false });
+      return true;
+    } catch (error) {
+      if (sequence === snapshotRefreshSequence) {
+        set({ snapshotError: snapshotErrorMessage(error), snapshotRefreshing: false });
+      }
+      return false;
+    }
   },
   loadAgents: async () => {
     try { set({ agents: await invoke('orch_agents') }); } catch { set({ agents: [] }); }
@@ -60,7 +81,7 @@ export const useOrchStore = create((set, get) => ({
       set({ saveWarnings: normalizeSaveWarnings(res, providersOfSettings(settings)) });
       // { ok, warnings, snapshot }: se usa su snapshot; solo si falta se pide orch_snapshot.
       const snap = snapshotFromSaveResponse(res);
-      if (snap) set({ snap });
+      if (snap) set({ snap, snapshotError: null });
       else await get().refresh();
     } catch (e) {
       // Los avisos del guardado anterior ya no corresponden a lo que se intentó guardar.

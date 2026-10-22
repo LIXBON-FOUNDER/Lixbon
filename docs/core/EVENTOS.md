@@ -36,8 +36,8 @@ relleno histórico.
   tabla append-only con los triggers desactivados. `class` y `actor_kind` son conjuntos cerrados.
 * **Referencias blandas:** archivar un proyecto, borrar un run o revocar un cliente no toca su historia.
   "Blanda" no es "sin validar": el Core comprueba al emitir.
-* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `agent` · `core`. Una Attempt
-  futura será un valor nuevo.
+* **Vocabulario de `entity_kind`:** `task` · `run` · `project` · `spawn_request` · `attention` · `agent` · `core` y, desde
+  LXO-114 (inerte hasta el corte), `attempt`.
 
 ## Cómo nace un evento (outbox en `Tx`, no en `State`)
 ```text
@@ -97,7 +97,7 @@ Todos opcionales; un parámetro desconocido, repetido o con tipo erróneo es un 
 | `cursor` | entero decimal ≥ 0, por defecto `0`. Devuelve los eventos con `seq > cursor` (**exclusivo**). |
 | `limit` | entero ≥ 1, por defecto `100`, máximo `500`: cualquier entero hasta 2⁶⁴−1 (número JSON o texto decimal) por encima de 500 se recorta a 500 y la respuesta informa el `limit` efectivo; más allá de 2⁶⁴−1 es `invalid_limit`. |
 | `project` · `run` | igualdad con `project_id` / `run_id`. |
-| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`agent`·`core`); `entity_id` exige `entity_kind`. |
+| `entity_kind` · `entity_id` | igualdad con la entidad (`task`·`run`·`project`·`spawn_request`·`attention`·`agent`·`core`·`attempt`); `entity_id` exige `entity_kind`. |
 | `kind` · `kind_prefix` | igualdad exacta o prefijo literal (sensible a mayúsculas, sin comodines); incompatibles entre sí. |
 | `class` | `state` · `effect` · `decision` · `system`. |
 
@@ -844,6 +844,52 @@ la misma transacción. El mismo `attention_id` deduplica reintentos. Esta decisi
   commit que los origina (`NULL` si el origen no confirmó `legacy_state`, p. ej. `spawn.requested`).
 * Actualizar `severity`/`facts` de la activa **no** emite nada (no hay `attention.updated`).
 * `source_event_id` es el `events.id` (no el `seq`) del Event que levantó o resolvió.
+
+## Task como intención (LXO-113)
+Los hechos de la Task del modelo Task/Attempt ([`TASKS.md`](TASKS.md)). **Inertes hasta el corte**: hasta que exista
+`meta.agentic_model` ningún mutador escribe, así que estos eventos no aparecen en una instalación sin cortar. Los
+construye solo `orch/task_ops.rs` (prueba de arquitectura) y viajan en la transacción de sus filas (`store::tasks`,
+`state_rev = NULL`), con la proyección de Attention dentro.
+
+| kind | v | class | entidad | Payload | Quién |
+|---|---|---|---|---|---|
+| `run.created` | 1 | state | `run` | `root_task` (misma forma que el legacy) | persona · agente · sistema |
+| `task.created` | **2** | state | `task` | `parent`, `depth`, `title` (recortado a 120) | persona · agente bajo su Task · sistema |
+| `task.updated` | 1 | state | `task` | `changed` ⊆ {`title`, `spec`}, `title?` (solo si cambió) | persona · agente que la coordina |
+| `task.discarded` · `task.restored` | 1 | decision | `task` | — | persona |
+| `task.removed` | 1 | state | `task` | `cause = unused` (nueva causa, junto a `launch_failed`) | persona |
+
+* `run_id` y `project_id` salen de la fila confirmada (nunca de `project_from_task`): no hay `State` que leer.
+* **`task.created` v2** no lleva `agent`, `role`, `model` ni `external`: son de la ejecución y, tras el corte, del
+  Attempt. La v1 la sigue emitiendo el runtime legacy; un lector distingue por `v`.
+* El encargo (`spec`) **nunca** viaja: `task.updated` solo dice que cambió.
+* Un `Unchanged` (nada cambió de verdad) no emite nada. Un evento que no se refiere a la Task (otra entidad, otro
+  Run, otro Project) o un duplicado por `(kind, idem_key)` deshace el cambio entero.
+
+## Attempt (LXO-114)
+Los hechos del Attempt del modelo Task/Attempt ([`ATTEMPTS.md`](ATTEMPTS.md)). **Inertes hasta el corte**: hasta que
+exista `meta.agentic_model` ningún mutador escribe, así que estos eventos no aparecen en una instalación sin cortar. Los
+construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la transacción de su fila (`store::attempts`,
+`state_rev = NULL`), con la proyección de Attention dentro. Son los `kind` ya reservados en
+`contracts/status-vocabulary.json`.
+
+| kind | v | class | Payload | Quién |
+|---|---|---|---|---|
+| `attempt.requested` | 1 | state | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | persona · agente que coordina la Task |
+| `attempt.approved` | 1 | decision | `task`, `n` | persona |
+| `attempt.rejected` | 1 | decision | `task`, `n`, `cause` ∈ `cancelled` · `run_closed` | persona · agente que coordina · Core |
+| `attempt.started` | 1 | state | `task`, `n` | Core |
+| `attempt.completed` | 1 | state | `task`, `n`, `has_summary` | agente de esa Task · Core |
+| `attempt.failed` | 1 | state | `task`, `n`, `reason` ∈ `launch_failed` · `terminal_approval_timeout` · `agent_idle_timeout` · `agent_reported`, `has_summary` | agente de esa Task · Core |
+| `attempt.stopped` | 1 | state | `task`, `n`, `from` ∈ `starting` · `running` · `waiting` · `awaiting_terminal_approval`, `cause` ∈ `cancelled` · `run_closed` | persona · agente que coordina · Core |
+
+* La entidad es el **Attempt** (`entity_kind = attempt`, `entity_id = <task>-a<n>`); `run_id` y `project_id` salen de la
+  fila de su Task confirmada (no hay `State` que leer). `entity_kind=attempt` ya se puede usar como filtro de `events`.
+* El **resumen nunca viaja**: solo `has_summary`. Tampoco rutas, argv, proceso, worktree ni sesión.
+* Cancelar un Attempt todavía `pending_approval` es **rechazarlo**: emite `attempt.rejected`, no `attempt.stopped`.
+* Un `Unchanged` (reintento idempotente) no emite nada. Un evento que no se refiere al Attempt o un duplicado por
+  `(kind, idem_key)` deshace el cambio entero.
+* `attempt.waiting` está reservado y lo emitirá el runtime (F4). Los `attempt.*` no levantan Attention todavía.
 
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia

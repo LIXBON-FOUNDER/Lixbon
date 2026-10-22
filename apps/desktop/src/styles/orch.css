@@ -1,5 +1,44 @@
 /* Orquestador de agentes: modo Orquestar y Ajustes → Orquestador. */
 
+.orch__shell { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ade__layout { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.ade__nav { display: flex; flex-direction: column; }
+.ade__nav-content { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.ade__nav-section { display: flex; flex-direction: column; gap: 4px; }
+.ade__nav-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 7px; font-size: 11px; font-weight: 600; color: var(--ink-50); }
+.orch__operation-nav { margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(var(--ink-rgb), 0.08); }
+.ade__canvas-stack { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.ade__context-canvas { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.ade__context-canvas.is-hidden { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+/* The hidden operation canvas stays measurable so AgentTerminal's ResizeObserver never resizes a live PTY to one row. */
+.ade__task-list { display: flex; flex-direction: column; gap: 4px; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(var(--ink-rgb), 0.08); }
+.ade__section-head { display: flex; flex-direction: column; gap: 3px; padding: 0 4px 5px; font-size: 11px; font-weight: 600; color: var(--ink-50); }
+.ade__project, .ade__task { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 9px 10px; border: 1px solid transparent; border-radius: var(--radius); text-align: left; color: var(--ink-70); background: transparent; cursor: pointer; }
+.ade__project:hover, .ade__task:hover { color: var(--ink); background: var(--surface-3); }
+.ade__project.is-active, .ade__task.is-active { color: var(--ink); background: var(--surface-4, var(--surface-5)); border-color: rgba(var(--accent-rgb), 0.24); box-shadow: inset 2px 0 var(--accent); }
+.ade__project:focus-visible, .ade__task:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+.ade__project-name, .ade__task-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.ade__task-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--ink-50); }
+.ade__durable-id { overflow-wrap: anywhere; font-size: 10px; font-weight: 400; color: var(--ink-70); }
+.ade__query-state { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; padding: 9px 10px; border-radius: var(--radius); font-size: 11px; line-height: 1.45; color: var(--ink-70); background: var(--surface-3); overflow-wrap: anywhere; }
+.ade__query-state code { font-size: 10px; opacity: 0.8; }
+.ade__query-state--error { color: var(--danger); background: var(--danger-soft); }
+.ade__query-state--stale { color: var(--warn); background: var(--warn-soft); }
+.ade__notice { margin: 6px 0 10px; padding: 9px 10px; border-radius: var(--radius); font-size: 11px; line-height: 1.45; color: var(--ink-50); background: var(--surface-3); }
+.ade__partial { padding: 7px 4px; font-size: 10.5px; color: var(--ink-50); }
+.ade__workspace { display: flex; flex-direction: column; }
+.ade__workspace-empty { margin: auto; max-width: 420px; padding: 24px; text-align: center; }
+.ade__task-overview { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+.ade__task-overview h1 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
+.ade__status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ade__selection-row { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--ink-50); }
+.ade__inspector { display: flex; flex-direction: column; }
+.ade__inspector-content { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.ade__inspector-section { display: flex; flex-direction: column; gap: 8px; }
+.ade__inspector-section p { margin: 0; }
+.rightdock__retained { position: absolute; inset: 0; display: flex; justify-content: flex-end; visibility: hidden; pointer-events: none; overflow: hidden; }
+.rightdock__retained .drawer__panel { height: 100%; }
+
 .orch__badge-exp { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; margin-left: 8px; border-radius: 9px; vertical-align: middle; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--warn); background: rgba(var(--warn-rgb), 0.12); }
 .orch__hint { font-size: 11.5px; line-height: 1.5; color: var(--ink-50); }
 .orch__warn { margin: 8px; padding: 8px 10px; border-radius: var(--radius); font-size: 11.5px; line-height: 1.5; color: var(--warn); background: rgba(var(--warn-rgb), 0.08); }

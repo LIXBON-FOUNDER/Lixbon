@@ -88,7 +88,7 @@ export async function importVsCode() {
     for (const k of keys) {
       const target = COMMANDS[k?.command];
       if (!target || !k.key || k.key.includes(' ')) continue; // sin acordes de dos pasos
-      setBinding(target, toChord(k.key));
+      if (!setBinding(target, toChord(k.key)).ok) continue; // no desaloja un atajo ajeno
       n++;
     }
     if (n) done.push(`${n} ${n === 1 ? 'atajo' : 'atajos'}`);

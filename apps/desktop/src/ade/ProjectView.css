@@ -1,0 +1,69 @@
+/* Vista de Project (LXO-204, slice parcial). Solo lectura. Tres ejes distintos: estado de Task (pastilla), Attention (borde de acento) y Activity (línea de tiempo). */
+.pv { display: flex; flex-direction: column; gap: 18px; padding: 16px; color: var(--ink-body, inherit); font-size: 13px; min-width: 0; }
+.pv__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+.pv__name { margin: 0; font-size: 18px; color: var(--ink, inherit); overflow-wrap: anywhere; }
+
+.pv__section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pv__h { margin: 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
+.pv__tag { font-size: 10px; letter-spacing: .02em; text-transform: none; padding: 1px 6px; border-radius: 8px; background: var(--bg-tertiary, rgba(127, 127, 127, .15)); color: var(--ink-soft); }
+.pv__tag--attn { background: var(--warn-soft); color: var(--warn); }
+.pv__hint { margin: 0; font-size: 11px; color: var(--ink-soft); }
+.pv__empty { margin: 0; color: var(--ink-soft); font-style: italic; }
+.pv__muted { color: var(--ink-soft); }
+
+.pv__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pv__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; border-radius: 6px; background: var(--bg-secondary, rgba(127, 127, 127, .08)); border-left: 3px solid transparent; }
+.pv__row--attn { border-left-color: var(--warn); }
+.pv__row--act { border-left-color: var(--ink-faint, rgba(127, 127, 127, .4)); }
+.pv__rowlink { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; flex: 1 1 14rem; text-align: left; }
+.pv__title { overflow-wrap: anywhere; }
+.pv__time { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--ink-soft); }
+
+.pv__link { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; }
+.pv__link:hover .pv__title, .pv__link:hover { text-decoration: underline; }
+.pv__sublink { font-size: 11px; color: var(--info); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; }
+.pv__sublink:hover { text-decoration: underline; }
+.pv__plain { cursor: default; }
+.pv__link:focus-visible, .pv__sublink:focus-visible, .pv__filter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+.pv__id, .pv__kind { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--ink-soft); background: var(--bg-tertiary, rgba(127, 127, 127, .15)); padding: 0 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.pv__id--project { color: var(--accent); }
+
+.pv__loc-host { font-weight: 600; }
+.pv__loc-path { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.pv__current { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+
+.pv__avail { font-size: 11px; padding: 1px 7px; border-radius: 8px; }
+.pv__avail--available { background: var(--good-soft); color: var(--good); }
+.pv__avail--unavailable { background: var(--danger-soft); color: var(--danger); }
+.pv__avail--loc-ok { background: var(--good-soft); color: var(--good); }
+.pv__avail--loc-missing { background: var(--danger-soft); color: var(--danger); }
+.pv__avail--unknown { background: var(--warn-soft); color: var(--warn); }
+
+/* El color nunca es la única señal: cada pastilla lleva su texto. */
+.pv__status { font-size: 11px; padding: 1px 8px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
+.pv__status--starting, .pv__status--running { color: var(--run-ink, var(--accent)); }
+.pv__status--waiting, .pv__status--awaiting_terminal_approval { color: var(--warn); }
+.pv__status--done { color: var(--good); }
+.pv__status--failed, .pv__status--exited { color: var(--danger); }
+.pv__status--stopped { color: var(--ink-soft); }
+.pv__status--unknown { color: var(--warn); border-style: dashed; }
+
+.pv__filterbar { display: flex; align-items: center; gap: 10px; }
+.pv__filterlabel { font-size: 11px; color: var(--ink-soft); }
+.pv__filters { display: inline-flex; border: 1px solid var(--ink-faint, rgba(127, 127, 127, .35)); border-radius: 8px; overflow: hidden; }
+.pv__filter { background: none; border: 0; color: var(--ink-soft); padding: 4px 12px; font: inherit; cursor: pointer; }
+.pv__filter:hover { background: var(--hover, rgba(127, 127, 127, .12)); }
+.pv__filter.is-on { background: var(--accent-soft); color: var(--accent); }
+
+.pv__counts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.pv__count { min-width: 6.5rem; padding: 8px 12px; border-radius: 8px; background: var(--bg-secondary, rgba(127, 127, 127, .08)); }
+.pv__count dt { font-size: 11px; color: var(--ink-soft); }
+.pv__count dd { margin: 2px 0 0; font-size: 20px; font-weight: 600; color: var(--ink); }
+.pv__count dd.pv__muted { color: var(--ink-soft); font-weight: 400; }
+
+.pv__notice { margin: 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; border: 1px solid transparent; }
+.pv__notice--loading { background: var(--bg-secondary, rgba(127, 127, 127, .08)); color: var(--ink-soft); }
+.pv__notice--error { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.pv__notice--partial, .pv__notice--degraded, .pv__notice--unknown { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.pv__notice--unavailable { background: var(--bg-secondary, rgba(127, 127, 127, .08)); color: var(--ink-soft); border: 1px dashed var(--ink-faint, rgba(127, 127, 127, .4)); }
