@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { coreErrorCode, handleCoreAction, parseCoreRequest, slimEvent, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
+import { coreErrorCode, handleCoreAction, parseCoreRequest, slimAttention, slimEvent, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
 
 const event = {
   seq: 7, id: 'ev-7', ts: 1000, v: 2, kind: 'task.created', class: 'state',
@@ -72,5 +72,46 @@ describe('handleCoreAction', () => {
     const out = await handleCoreAction('core_events', { rid: 'r4', cursor: -5 }, call);
     expect(call).not.toHaveBeenCalled();
     expect(out.fields.code).toBe('invalid_cursor');
+  });
+});
+
+describe('core_attention (LXO-109)', () => {
+  const row = {
+    id: 'att-1', category: 'question', severity: 'high', status: 'active', target_kind: 'task', target_id: 't1',
+    project_id: 'p1', run_id: 'r1', occurrence: 2, created_at: 100, resolved_at: null, resolution: null,
+    subject: 'SENTINEL-SUBJECT', facts: '{"secret":"SENTINEL-FACTS"}',
+  };
+
+  it('valida filtros, cursor y límite', () => {
+    expect(parseCoreRequest('core_attention', { rid: 'r1' })).toEqual({ rid: 'r1', args: { limit: 50 } });
+    expect(parseCoreRequest('core_attention', { rid: 'r1', project_id: 'p1', category: 'failed', severity: 'critical', cursor: 'abc', limit: 10 }).args)
+      .toEqual({ project_id: 'p1', category: 'failed', severity: 'critical', cursor: 'abc', limit: 10 });
+    expect(parseCoreRequest('core_attention', { rid: 'r1', category: 'otra' }).code).toBe('invalid_request');
+    expect(parseCoreRequest('core_attention', { rid: 'r1', severity: 'urgent' }).code).toBe('invalid_request');
+    expect(parseCoreRequest('core_attention', { rid: 'r1', project_id: '' }).code).toBe('invalid_request');
+    expect(parseCoreRequest('core_attention', { rid: 'r1', cursor: 5 }).code).toBe('invalid_cursor');
+    expect(parseCoreRequest('core_attention', { rid: 'r1', limit: CORE_ATTENTION_MAX_LIMIT + 1 }).code).toBe('invalid_request');
+  });
+
+  it('cada fila pasa por la allowlist', () => {
+    const slim = slimAttention(row);
+    expect(Object.keys(slim).sort()).toEqual(['category', 'created_at', 'id', 'occurrence', 'project_id', 'run_id', 'severity', 'status', 'target_id', 'target_kind']);
+    expect(JSON.stringify(slim)).not.toContain('SENTINEL');
+  });
+
+  it('llama a attention_list y devuelve la página', async () => {
+    const call = vi.fn().mockResolvedValue({ v: 1, items: [row], next_cursor: 'nx', has_more: true, limit: 50 });
+    const out = await handleCoreAction('core_attention', { rid: 'r5', category: 'question' }, call);
+    expect(call).toHaveBeenCalledWith('attention_list', { category: 'question', limit: 50 });
+    expect(out.type).toBe('orch_core_attention');
+    expect(out.fields).toMatchObject({ rid: 'r5', ok: true, protocol: 1, next_cursor: 'nx', has_more: true });
+    expect(out.fields.items).toHaveLength(1);
+    expect(JSON.stringify(out)).not.toContain('SENTINEL');
+  });
+
+  it('un cursor inválido del Core sale como código', async () => {
+    const call = vi.fn().mockRejectedValue('attention_invalid_cursor: el cursor no es de esta consulta');
+    const out = await handleCoreAction('core_attention', { rid: 'r6', cursor: 'viejo' }, call);
+    expect(out.fields).toEqual({ rid: 'r6', ok: false, code: 'attention_invalid_cursor', protocol: 1 });
   });
 });

@@ -13,6 +13,11 @@ import ConnectionBanner from '../observe/ConnectionBanner';
 import { KIND } from '../observe/connection';
 import { hostName, sessionOnline } from '../observe/hosts';
 import { Body, Notice } from '../observe/ui';
+import { PillButton } from '../components/ui';
+import AttentionScreen from './observe/AttentionScreen';
+
+// Pantallas de cada ruta. Home (LXO-108) y Task Detail (LXO-110) se añaden aquí.
+const ROUTES = { attention: AttentionScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
@@ -26,13 +31,16 @@ function Summary({ obs }) {
   if (!s) return null;
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   return (
-    <Body muted>
-      {`${plural(s.projects.total, 'proyecto', 'proyectos')} · ${plural(s.active_tasks.total, 'tarea activa', 'tareas activas')} · ${plural(s.attention.total, 'pide atención', 'piden atención')}`}
-    </Body>
+    <View style={{ gap: 12, alignItems: 'flex-start' }}>
+      <Body muted>
+        {`${plural(s.projects.total, 'proyecto', 'proyectos')} · ${plural(s.active_tasks.total, 'tarea activa', 'tareas activas')} · ${plural(s.attention.total, 'pide atención', 'piden atención')}`}
+      </Body>
+      <PillButton size="sm" outline icon="bell" label="Ver atención" onPress={() => obs.push({ name: 'attention' })} />
+    </View>
   );
 }
 
-export default function ObserveScreen({ obs, onMenu, routes = {} }) {
+export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { sheet } = useDialogs();
