@@ -37,7 +37,7 @@ Salida:
 
 `lxo task show <id o nombre>` añade fase, padre y raíz, worktree, fechas, la
 actividad reciente y cómo seguirla con lxo events --task <id> y lxo attention
---task <id>. El nombre es el título de la tarea, sin distinguir mayúsculas: vale el
+--task <id>. El nombre es el título de la tarea, sin distinguir mayúsculas ni acentos: vale el
 título exacto o un trozo; si encajan varias, lxo dice sus ids.
 
 Solo para personas: dentro de una tarea del orquestador, usa lxo list y lxo show.
@@ -115,9 +115,13 @@ fn parse(a: &Args) -> Result<Request, Failure> {
     }
     if a.at(0).as_deref() == Some("task") || a.at(1).as_deref() == Some("show") {
         if a.at(1).as_deref() != Some("show") {
-            return Err(usage(
-                "Uso: lxo task show <id o nombre>. Para la lista: lxo tasks.",
-            ));
+            return Err(usage(match a.at(1) {
+                Some(other) if "show".starts_with(&other) || other.starts_with("sh") => format!(
+                    "«{}» no es una orden de lxo task; ¿querías lxo task show <id o nombre>?",
+                    clean(&other)
+                ),
+                _ => "Uso: lxo task show <id o nombre>. Para la lista: lxo tasks.".into(),
+            }));
         }
         check_flags(a, &["json", "help"], "lxo task show")?;
         let wanted = task_wanted(&a.pos[2.min(a.pos.len())..]);
@@ -500,6 +504,28 @@ fn activity(rpc: Rpc, id: &str) -> Result<Value, Failure> {
     Ok(json!({ "items": items, "has_more": data["has_more"].as_bool().unwrap_or(false) }))
 }
 
+/// Forma de comparar nombres: minúsculas, sin acentos ni marcas de acento sueltas (una «ó» que llega como
+/// «o» más el acento combinado, como al escribir con tecla muerta) y con los espacios reducidos a uno.
+fn fold(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
+        .map(|c| match c {
+            'á' | 'à' | 'ä' | 'â' | 'ã' => 'a',
+            'é' | 'è' | 'ë' | 'ê' => 'e',
+            'í' | 'ì' | 'ï' | 'î' => 'i',
+            'ó' | 'ò' | 'ö' | 'ô' | 'õ' => 'o',
+            'ú' | 'ù' | 'ü' | 'û' => 'u',
+            'ñ' => 'n',
+            'ç' => 'c',
+            other => other,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// `task_detail` de `id` en `project`; `None` si la Task no está en ese Project.
 fn detail_in(rpc: Rpc, project: &str, id: &str) -> Result<Option<Value>, Failure> {
     let data = match rpc(
@@ -531,8 +557,8 @@ fn find_by_name(
     for project in overview.ids() {
         tasks.extend(project_tasks(rpc, &project)?);
     }
-    let needle = wanted.to_lowercase();
-    let title = |t: &Value| t["title"].as_str().unwrap_or("").trim().to_lowercase();
+    let needle = fold(wanted);
+    let title = |t: &Value| fold(t["title"].as_str().unwrap_or(""));
     let mut found: Vec<&Value> = tasks.iter().filter(|t| title(t) == needle).collect();
     if found.is_empty() {
         found = tasks
@@ -1551,6 +1577,43 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn el_nombre_no_distingue_acentos() {
+        let mut tasks = fixture();
+        tasks[1]["title"] = json!("Pantalla de Atención");
+        let id_of = |wanted: &str| {
+            show_data(&mut core(tasks.clone()), wanted).unwrap().0["task"]["id"].clone()
+        };
+        assert_eq!(id_of("Pantalla de Atención"), "t2");
+        assert_eq!(id_of("pantalla de atencion"), "t2", "sin tilde");
+        assert_eq!(
+            id_of("Pantalla de Atencio\u{301}n"),
+            "t2",
+            "acento combinado (tecla muerta)"
+        );
+        assert_eq!(
+            id_of("  PANTALLA   de  ATENCIÓN "),
+            "t2",
+            "mayúsculas y espacios de más"
+        );
+        assert_eq!(fold("Ñandú Çà"), "nandu ca");
+    }
+
+    #[test]
+    fn una_errata_en_show_sugiere_la_orden() {
+        let typo = parse(&args(&["task", "sho", "x"])).err().unwrap();
+        assert_eq!(typo.code().1, 2);
+        assert!(
+            typo.message().contains("¿querías lxo task show"),
+            "{typo:?}"
+        );
+        assert!(parse(&args(&["task", "ver", "x"]))
+            .err()
+            .unwrap()
+            .message()
+            .starts_with("Uso: lxo task show"));
     }
 
     #[test]
