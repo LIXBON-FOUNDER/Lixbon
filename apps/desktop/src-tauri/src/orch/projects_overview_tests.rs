@@ -700,3 +700,190 @@ fn es_de_solo_lectura_no_comprueba_el_disco_y_es_reproducible() {
         .unwrap();
     assert!(!guardada[0].missing, "la base sigue como estaba");
 }
+
+/// Core con su servidor HTTP arrancado como lo arranca Lixbon: la credencial CLI Person va al almacén
+/// seguro REAL del sistema (con un `installation_id` aleatorio) y `orch.json` a un home temporal. Al
+/// soltarse para el servidor y borra su entrada del almacén. Requiere `LXO_BIN`.
+pub(super) struct RealStoreServer {
+    core: Arc<Core>,
+    pub(super) discovery: std::path::PathBuf,
+    home: std::path::PathBuf,
+    binary: std::path::PathBuf,
+    key: Option<crate::secure_store::SecretKey>,
+}
+
+impl RealStoreServer {
+    pub(super) fn start(core: &Arc<Core>, data: &std::path::Path, root: &std::path::Path) -> Self {
+        use crate::secure_store::{OsStore, SecretKey};
+        let binary = std::path::PathBuf::from(std::env::var_os("LXO_BIN").expect("define LXO_BIN con el binario lxo"));
+        assert!(binary.is_file(), "LXO_BIN no apunta a un archivo: {}", binary.display());
+        let home = root.join("lxo-home");
+        let discovery = home.join(".lixbon").join("orch.json");
+        std::fs::create_dir_all(discovery.parent().unwrap()).unwrap();
+        let mut server = Self { core: core.clone(), discovery, home, binary, key: None };
+        core.start_server_with(&OsStore::new(), &data.join("cli-client.json"), &server.discovery).unwrap();
+        let published: Value = serde_json::from_slice(&std::fs::read(&server.discovery).unwrap()).unwrap();
+        let installation = published["installation_id"].as_str().unwrap();
+        server.key = Some(SecretKey::lixbon(&format!("client/cli/{installation}")).unwrap());
+        assert!(published.get("token").is_none(), "orch.json no publica secretos");
+        server
+    }
+
+    /// `lxo` como persona; con `agent`, con la credencial de esa tarea.
+    pub(super) fn lxo(&self, args: &[&str], agent: Option<(&str, &str)>) -> std::process::Output {
+        let mut command = std::process::Command::new(&self.binary);
+        command.args(args).env("USERPROFILE", &self.home).env("HOME", &self.home)
+            .env_remove("LXO_TASK_ID").env_remove("LXO_CLIENT_TOKEN");
+        if let Some((task, token)) = agent {
+            command.env("LXO_TASK_ID", task).env("LXO_CLIENT_TOKEN", token);
+        }
+        command.output().unwrap()
+    }
+
+    /// Salida JSON de un `lxo` que debe terminar bien.
+    pub(super) fn json(&self, args: &[&str]) -> Value {
+        let out = self.lxo(args, None);
+        assert!(out.status.success(), "lxo {args:?}: {:?} stderr={}", out.status.code(), String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap()
+    }
+}
+
+impl Drop for RealStoreServer {
+    fn drop(&mut self) {
+        use crate::secure_store::{OsStore, SecretStore};
+        self.core.stop_server_with(&self.discovery);
+        if let Some(key) = &self.key {
+            let _ = OsStore::new().delete(key);
+        }
+    }
+}
+
+/// LXO-103 · `lxo projects` real contra el HTTP del Core, como persona: el Core aprovisiona la credencial CLI
+/// en el almacén seguro REAL del sistema (como al abrir Lixbon) y `lxo` la lee de ahí. Usa un home temporal y
+/// borra su entrada del almacén al terminar.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_projects_person_real_store() {
+    use std::process::Output;
+
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+    let discovery = server.discovery.clone();
+    let lxo = |args: &[&str], agent: Option<(&str, &str)>| server.lxo(args, agent);
+    let text = |out: &Output| String::from_utf8_lossy(&out.stdout).into_owned();
+    let json_of = |args: &[&str]| server.json(args);
+
+    // Vacío.
+    let empty = json_of(&["projects", "--json"]);
+    assert_eq!((empty["total"].clone(), empty["projects"].clone()), (json!(0), json!([])), "{empty}");
+    assert!(text(&lxo(&["projects"], None)).starts_with("Sin proyectos registrados."));
+
+    // N proyectos: uno con trabajo activo, un fallo y su Attention; uno archivado; una tarea sin proyecto.
+    let api = proyecto(&core, "api", MACHINE, "C:/r/api");
+    let docs = proyecto(&core, "docs", MACHINE, "C:/r/docs");
+    let viva = tarea(&core, "en marcha", Some(&api));
+    let rota = tarea(&core, "rota", Some(&api));
+    falla(&core, &rota);
+    archiva(&core, &docs);
+    tarea(&core, "suelta", None);
+
+    let lxo_view = json_of(&["projects", "--json"]);
+    assert_eq!(lxo_view, overview(&core, &person(&core), json!({})), "lxo enseña el overview del Core sin tocarlo");
+    assert_eq!(lxo_view["projects"][0]["id"], api);
+    assert_eq!(lxo_view["projects"][0]["status"], "failed");
+    assert_eq!(lxo_view["projects"][0]["counts"]["attention"]["by_category"]["failed"], 1);
+    assert_eq!(lxo_view["unassigned"]["tasks"], 1);
+    let human = text(&lxo(&["projects"], None));
+    assert!(human.contains("api · con fallos") && human.contains(&format!("id {api}")) && human.contains("Sin proyecto: 1 tarea"), "{human}");
+    assert!(!human.contains("docs"), "los archivados no salen por defecto: {human}");
+
+    let only = json_of(&["projects", "--archived", "only", "--json"]);
+    assert_eq!(only["projects"].as_array().unwrap().iter().map(|p| p["id"].clone()).collect::<Vec<_>>(), vec![json!(docs)]);
+    assert_eq!(json_of(&["projects", "--all", "--json"])["total"], 2);
+    assert!(text(&lxo(&["projects", "--machine", "otra-maquina"], None)).contains("Ningún proyecto tiene ubicaciones en la máquina otra-maquina."));
+
+    // Códigos de salida: filtro que rechaza el Core, agente (solo personas) y Core caído.
+    assert_eq!(lxo(&["projects", "--archived", "nada"], None).status.code(), Some(2));
+    let agent_token = "agent-lxo-projects-e2e-token-with-32-bytes-minimum";
+    let registration = crate::store::ClientRegistration::new(
+        crate::store::ClientSurface::Cli,
+        crate::store::DeviceIdentity::new("install-agent-lxo-projects-e2e", None).unwrap(),
+    )
+    .unwrap();
+    let credential = crate::store::ClientCredential::new(crate::store::ClientPrincipal::Agent(viva.clone()), agent_token).unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64).unwrap())
+        .unwrap();
+    let as_agent = lxo(&["projects"], Some((&viva, agent_token)));
+    assert_eq!(as_agent.status.code(), Some(3), "stderr={}", String::from_utf8_lossy(&as_agent.stderr));
+    let agent_error = String::from_utf8_lossy(&as_agent.stderr).into_owned();
+    assert!(agent_error.contains("solo para personas"), "{agent_error}");
+    core.stop_server_with(&discovery);
+    assert_eq!(lxo(&["projects"], None).status.code(), Some(5), "Lixbon cerrado");
+}
+
+/// LXO-104 · `lxo tasks` y `lxo task show` reales como persona contra el HTTP del Core: árbol raíz →
+/// hija con worktree (que falla) y hija en checkout compartido, más una raíz sin proyecto.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_tasks_person_real_store() {
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+    let ids = |doc: &Value| -> Vec<String> {
+        doc["tasks"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect()
+    };
+
+    let empty = server.json(&["tasks", "--json"]);
+    assert_eq!((empty["task_model"].clone(), empty["tasks"].clone()), (json!("legacy"), json!([])), "{empty}");
+    assert!(String::from_utf8_lossy(&server.lxo(&["tasks"], None).stdout).starts_with("Sin tareas."));
+
+    let api = proyecto(&core, "api", MACHINE, "C:/r/api");
+    let root = tarea(&core, "raíz", Some(&api));
+    let child = |title: &str, worktree: Option<&str>| {
+        core.mutate(|tx| {
+            let id = tx.add_child(&root, 2, NewTask {
+                agent: "codex".into(), model: Some("gpt-5".into()), effort: None, role: Some("implementador".into()),
+                title: title.into(), spec: "encargo privado".into(), repo: "repo".into(), cwd: "C:/r/api".into(),
+                branch: worktree.map(|_| format!("lxo/{title}")), base: worktree.map(|_| "main".into()),
+                worktree: worktree.map(String::from), external: false,
+            })?;
+            tx.mark_running(&id)?;
+            if let Some(t) = tx.tasks.get_mut(&id) {
+                t.project_id = Some(api.clone());
+            }
+            Ok(id)
+        })
+        .unwrap()
+    };
+    let wt = child("con-worktree", Some("C:/r/api-wt/1"));
+    let shared = child("compartida", None);
+    falla(&core, &wt);
+    let loose = tarea(&core, "suelta", None);
+
+    let all = server.json(&["tasks", "--json"]);
+    assert_eq!(ids(&all), [root.clone(), wt.clone(), shared.clone(), loose.clone()], "árbol: raíz, hijas y la otra raíz");
+    assert!(!all.to_string().contains("encargo privado"), "el JSON no copia el encargo");
+    assert_eq!(ids(&server.json(&["tasks", "--project", "api", "--json"])), [root.clone(), wt.clone(), shared.clone()]);
+    assert_eq!(ids(&server.json(&["tasks", "--project", "api", "--active", "--json"])), [root.clone(), shared.clone()]);
+    assert_eq!(ids(&server.json(&["tasks", "--final", "--json"])), [wt.clone()]);
+    assert_eq!(ids(&server.json(&["tasks", "--status", "failed", "--json"])), [wt.clone()]);
+
+    let detail = server.json(&["task", "show", &wt, "--json"]);
+    let task = &detail["task"];
+    assert_eq!((task["root_id"].as_str(), task["parent_id"].as_str(), task["project_id"].as_str()), (Some(root.as_str()), Some(root.as_str()), Some(api.as_str())));
+    assert_eq!((task["worktree"].as_str(), task["branch"].as_str(), task["shared_checkout"].as_bool()), (Some("C:/r/api-wt/1"), Some("lxo/con-worktree"), Some(false)));
+    assert_eq!((task["status"].as_str(), task["final"].as_bool(), task["provider"].as_str()), (Some("failed"), Some(true), Some("codex")));
+    assert_eq!(task["host"], Value::Null, "lo que el modelo legacy no registra queda null");
+    assert_eq!(server.json(&["task", "show", &shared, "--json"])["task"]["shared_checkout"], true);
+    assert_eq!(server.json(&["task", "show", &root, "--json"])["children"], json!([wt, shared]));
+
+    let human = String::from_utf8_lossy(&server.lxo(&["task", "show", &wt], None).stdout).into_owned();
+    assert!(human.contains("fallida") && human.contains(&format!("lxo events --task {wt}")), "{human}");
+    let missing = server.lxo(&["task", "show", "no-existe", "--json"], None);
+    assert_eq!(missing.status.code(), Some(6));
+    let error: Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!((error["code"].as_str(), error["ok"].as_bool()), (Some("not_found"), Some(false)), "{error}");
+    assert_eq!(server.lxo(&["tasks", "--project", "no-existe"], None).status.code(), Some(6));
+    core.stop_server_with(&server.discovery);
+    assert_eq!(server.lxo(&["tasks"], None).status.code(), Some(5), "Lixbon cerrado");
+}
