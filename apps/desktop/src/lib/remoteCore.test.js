@@ -140,6 +140,13 @@ describe('core_task y core_activity (LXO-110)', () => {
     expect(slimTaskDetail({ ...detail, worktree: null }).location).toBe('C:/r/api');
   });
 
+  it('task_detail pasa el origen si el Core da `external` (LXO-38) y si no, desconocido', () => {
+    expect(slimTaskDetail({ ...detail, external: true }).origin).toBe('external');
+    expect(slimTaskDetail({ ...detail, external: false }).origin).toBe('lixbon');
+    expect(slimTaskDetail(detail).origin).toBeNull();
+    expect(slimTaskDetail({ ...detail, external: 'sí' }).origin).toBeNull();
+  });
+
   it('activity sin provenance, ids de evento ni de persona', () => {
     const a = slimActivity({
       seq: 9, event_id: 'ev', ts: 10, kind: 'task.status_changed', v: 1, class: 'state', message_key: 'activity.task.failed',
