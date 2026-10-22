@@ -246,8 +246,13 @@ func New(c *chat.Chat, opts Options) *Model {
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.SetVirtualCursor(false)
+	var self *Model
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {
+			// Al escribir una orden de terminal («!…») el prompt ya toma el color de shell.
+			if self != nil && strings.HasPrefix(self.input.Value(), "!") {
+				return sShell.Render(glyphPrompt) + " "
+			}
 			return glyphPrompt + " "
 		}
 		return "  "
@@ -271,6 +276,7 @@ func New(c *chat.Chat, opts Options) *Model {
 		hoverY:   -1,
 		moreY:    -1,
 	}
+	self = m
 	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
 	m.autoRunDefault = c.Session.AutoRunCommands
