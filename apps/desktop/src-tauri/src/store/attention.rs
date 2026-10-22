@@ -736,6 +736,27 @@ impl Store {
         })
     }
 
+    /// Las `limit` Attention ACTIVAS más urgentes, solo lectura y sin paginar: primero por severidad
+    /// (`critical` > `high` > `medium` > `low`), después la más reciente y, a igualdad, por `id`. La usa la
+    /// snapshot compacta (LXO-94) para sus elementos destacados; con `limit` 0 no consulta nada.
+    pub fn attention_active_top(&self, limit: usize) -> StoreResult<Vec<AttentionRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {COLS} FROM attention_items WHERE status = 'active' ORDER BY \
+             CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, \
+             created_at DESC, id ASC LIMIT ?1"
+        );
+        self.read(|connection| {
+            let mut statement = connection.prepare(&sql)?;
+            let raw = statement
+                .query_map([limit as i64], Raw::read)?
+                .collect::<Result<Vec<_>, _>>()?;
+            raw.into_iter().map(Raw::into_row).collect()
+        })
+    }
+
     /// Lee un detalle respetando el límite autenticado del Agent, si corresponde.
     /// Las filas resueltas siguen disponibles como historial de su mismo scope.
     pub fn attention_get_scoped(&self, id: &str, scope_task_id: Option<&str>) -> StoreResult<Option<AttentionRow>> {
