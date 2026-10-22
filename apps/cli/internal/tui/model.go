@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
@@ -78,7 +79,10 @@ type Model struct {
 	chat *chat.Chat
 	opts Options
 
-	input         textarea.Model
+	input textarea.Model
+	// inputShell y inputTheme: con qué estilos se pintó la entrada la última vez (ver syncInputStyle).
+	inputShell    bool
+	inputTheme    int
 	width, height int
 
 	send    func(tea.Msg)
@@ -151,11 +155,11 @@ type Model struct {
 	askEntry *entry
 	// imageEntry es la fila «Mostrar» abierta; pendingImage, la imagen que
 	// llegó antes que su fila.
-	imageEntry   *entry
+	imageEntry *entry
 	// liveTools son los pasos que dejaron un comando en segundo plano: se
 	// repintan cuando cambia cuántos siguen vivos (● pasa a ✓).
-	liveTools []*entry
-	liveSeen  int
+	liveTools    []*entry
+	liveSeen     int
 	pendingImage *tools.ShownImage
 	readGroup    *entry
 	browserGroup *entry
@@ -246,13 +250,8 @@ func New(c *chat.Chat, opts Options) *Model {
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.SetVirtualCursor(false)
-	var self *Model
 	ta.SetPromptFunc(2, func(info textarea.PromptInfo) string {
 		if info.LineNumber == 0 {
-			// Al escribir una orden de terminal («!…») el prompt ya toma el color de shell.
-			if self != nil && strings.HasPrefix(self.input.Value(), "!") {
-				return sShell.Render(glyphPrompt) + " "
-			}
 			return glyphPrompt + " "
 		}
 		return "  "
@@ -276,7 +275,6 @@ func New(c *chat.Chat, opts Options) *Model {
 		hoverY:   -1,
 		moreY:    -1,
 	}
-	self = m
 	m.log.resize(m.width)
 	m.histPos = len(m.hist.entries)
 	m.autoRunDefault = c.Session.AutoRunCommands
@@ -463,6 +461,31 @@ func (m *Model) renderMarkdown(text string, width int) string {
 		return text
 	}
 	return strings.Trim(out, "\n")
+}
+
+// shellInputStyles: con «!» delante, el texto, el prompt y el cursor van en el color de shell mientras se
+// escribe, para ver antes de enviar que la línea va a la terminal.
+func shellInputStyles() textarea.Styles {
+	styles := inputStyles()
+	for _, st := range []*textarea.StyleState{&styles.Focused, &styles.Blurred} {
+		st.Text, st.CursorLine, st.Prompt = sShell, sShell, sShell
+	}
+	styles.Cursor.Color = lipgloss.Color(pal.shell)
+	return styles
+}
+
+// syncInputStyle cambia los estilos de la entrada cuando empieza o deja de empezar por «!», o cambia el tema.
+func (m *Model) syncInputStyle() {
+	shell := strings.HasPrefix(m.input.Value(), "!")
+	if shell == m.inputShell && m.inputTheme == themeVersion {
+		return
+	}
+	m.inputShell, m.inputTheme = shell, themeVersion
+	if shell {
+		m.input.SetStyles(shellInputStyles())
+	} else {
+		m.input.SetStyles(inputStyles())
+	}
 }
 
 func inputStyles() textarea.Styles {

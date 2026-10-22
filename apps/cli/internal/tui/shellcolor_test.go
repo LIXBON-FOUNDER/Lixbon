@@ -37,15 +37,24 @@ func TestShellCommandsStandOutInTheShellColor(t *testing.T) {
 	}
 }
 
-func TestThePromptTurnsShellColoredWhileTypingABang(t *testing.T) {
+func TestTheInputTurnsShellColoredWhileTypingABang(t *testing.T) {
 	applyTheme(darkPalette)
 	h := newHarness(t, nil)
 	h.m.input.SetValue("!git status")
-	if view := h.m.input.View(); !strings.Contains(view, shellPink) {
-		t.Fatalf("con «!» el prompt toma el color de shell: %q", view)
+	box := strings.Join(h.m.inputBox(), "\n")
+	if strings.Count(box, shellPink) < 2 {
+		t.Fatalf("con «!» el prompt y el texto que se escribe van en el color de shell: %q", box)
 	}
 	h.m.input.SetValue("hola")
-	if view := h.m.input.View(); strings.Contains(view, shellPink) {
-		t.Fatalf("sin «!» el prompt sigue con su color: %q", view)
+	if box := strings.Join(h.m.inputBox(), "\n"); strings.Contains(box, shellPink) {
+		t.Fatalf("sin «!» la entrada vuelve a sus colores: %q", box)
+	}
+	// Al cambiar de tema se rehacen los estilos con el tono del tema nuevo.
+	h.m.input.SetValue("!ls")
+	h.m.inputBox()
+	applyTheme(lightPalette)
+	t.Cleanup(func() { applyTheme(darkPalette) })
+	if box := strings.Join(h.m.inputBox(), "\n"); !strings.Contains(box, "38;2;192;21;143") {
+		t.Fatalf("en tema claro, el rosa del tema claro: %q", box)
 	}
 }
