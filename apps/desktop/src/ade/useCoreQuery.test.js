@@ -133,6 +133,74 @@ describe('useCoreQuery', () => {
     expect(queryAdeCore).toHaveBeenCalledWith('tasks_by_project', { projectId: 'project-1', status: 'final' });
   });
 
+  it('ignora la respuesta tardía de una clave Project anterior', async () => {
+    const previous = deferred();
+    const current = deferred();
+    const previousData = {
+      v: 1,
+      project_id: 'project-1',
+      filters: { status: 'active' },
+      limit: 50,
+      tasks: [{ id: 'task-project-1', title: 'Tarea anterior', status: 'active' }],
+      has_more: false,
+      next_cursor: null,
+    };
+    const currentData = {
+      v: 1,
+      project_id: 'project-2',
+      filters: { status: 'active' },
+      limit: 50,
+      tasks: [{ id: 'task-project-2', title: 'Tarea actual', status: 'active' }],
+      has_more: false,
+      next_cursor: null,
+    };
+    queryAdeCore.mockImplementation((_query, args) => (
+      args.projectId === 'project-1' ? previous.promise : current.promise
+    ));
+
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useCoreQuery(
+        'tasks_by_project',
+        { project_id: projectId, status: 'active' },
+        { pollMs: 60_000 },
+      ),
+      { initialProps: { projectId: 'project-1' } },
+    );
+
+    expect(queryAdeCore).toHaveBeenCalledTimes(1);
+    expect(queryAdeCore).toHaveBeenLastCalledWith('tasks_by_project', { projectId: 'project-1', status: 'active' });
+
+    rerender({ projectId: 'project-2' });
+    expect(queryAdeCore).toHaveBeenCalledTimes(2);
+    expect(queryAdeCore).toHaveBeenLastCalledWith('tasks_by_project', { projectId: 'project-2', status: 'active' });
+
+    await act(async () => {
+      current.resolve(currentData);
+      await current.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe('ready');
+    expect(result.current.data).toBe(currentData);
+    expect(result.current.data.project_id).toBe('project-2');
+    expect(result.current.data.tasks[0].id).toBe('task-project-2');
+    expect(result.current.readEpoch).toBe(1);
+    const currentStatus = result.current.status;
+    const currentReadEpoch = result.current.readEpoch;
+
+    await act(async () => {
+      previous.resolve(previousData);
+      await previous.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe(currentStatus);
+    expect(result.current.data).toBe(currentData);
+    expect(result.current.data.project_id).toBe('project-2');
+    expect(result.current.data.tasks[0].id).toBe('task-project-2');
+    expect(result.current.readEpoch).toBe(currentReadEpoch);
+  });
+
   it('transporta los filtros numéricos de activity_list y marca empty sin items', async () => {
     queryAdeCore.mockResolvedValue({ items: [] });
     const { result } = renderHook(() => useCoreQuery('activity_list', {
