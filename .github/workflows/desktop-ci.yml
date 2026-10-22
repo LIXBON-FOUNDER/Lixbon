@@ -59,6 +59,9 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
+      - name: Contrato Core · comprobaciones sin dependencias
+        run: node scripts/check-core-query-contract.mjs
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: swatinem/rust-cache@v2

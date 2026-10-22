@@ -1,0 +1,473 @@
+const MAX_ARGUMENT_LENGTH = 120;
+const MAX_MESSAGE_LENGTH = 480;
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
+  'activity.run.created',
+  'activity.run.closed',
+  'activity.run.removed',
+  'activity.task.created',
+  'activity.task.starting',
+  'activity.task.running',
+  'activity.task.waiting',
+  'activity.task.awaiting_terminal_approval',
+  'activity.task.done',
+  'activity.task.failed',
+  'activity.task.stopped',
+  'activity.task.exited',
+  'activity.task.phase_done',
+  'activity.task.phase_started',
+  'activity.task.question',
+  'activity.task.reply',
+  'activity.task.removed',
+  'activity.task.review_requested',
+  'activity.decision.review.accepted',
+  'activity.decision.review.rejected',
+  'activity.decision.merge.merged',
+  'activity.decision.merge.conflict',
+  'activity.decision.merge.error',
+  'activity.decision.merge.target_moved',
+  'activity.decision.pr.created',
+  'activity.decision.pr.already_exists',
+  'activity.decision.pr.error',
+  'activity.effect.git_merge.merged',
+  'activity.effect.git_merge.conflict',
+  'activity.effect.git_merge.error',
+  'activity.effect.git_push_pr.created',
+  'activity.effect.git_push_pr.already_exists',
+  'activity.effect.git_push_pr.error',
+  'activity.effect.git_worktree.created',
+  'activity.effect.git_worktree.removed',
+  'activity.effect.process.launched',
+  'activity.effect.process.not_launched',
+  'activity.project.registered',
+  'activity.project.location_added',
+  'activity.project.archived',
+  'activity.project.restored',
+  'activity.project.relocated',
+  'activity.spawn.requested',
+  'activity.spawn.approved',
+  'activity.spawn.rejected',
+  'activity.spawn.launch_failed',
+  'activity.spawn.timeout',
+  'activity.spawn.coordinator_closed',
+  'activity.spawn.cancelled_run_removed',
+  'activity.environment.blocked',
+  'activity.environment.cleared',
+  'activity.attention.risk_acted',
+  'activity.attention.created',
+  'activity.attention.resolved',
+  'activity.unknown',
+]);
+
+const KEY_SET = new Set(ACTIVITY_V1_MESSAGE_KEYS);
+const TASK_STATUSES = new Set([
+  'starting',
+  'running',
+  'waiting',
+  'awaiting_terminal_approval',
+  'done',
+  'failed',
+  'stopped',
+  'exited',
+]);
+const PROJECT_ORIGINS = {
+  manual: 'registro manual',
+  auto: 'registro automático',
+  backfill: 'carga histórica',
+  import: 'importación',
+};
+const ENVIRONMENT_CODES = {
+  cli_missing: 'falta la CLI',
+  cli_flags_unsupported: 'la CLI no admite estas opciones',
+  windows_sandbox_elevated: 'el entorno de Windows requiere elevación',
+};
+const ATTENTION_CATEGORIES = {
+  question: 'pregunta',
+  approval: 'aprobación',
+  review_ready: 'revisión lista',
+  conflict: 'conflicto',
+  failed: 'fallo',
+  environment_blocked: 'entorno bloqueado',
+  risk: 'riesgo',
+};
+const ATTENTION_SEVERITIES = {
+  critical: 'crítica',
+  high: 'alta',
+  medium: 'media',
+  low: 'baja',
+};
+const RESOLUTIONS = {
+  acted: 'se tomó una acción',
+  condition_cleared: 'la condición dejó de ocurrir',
+  superseded: 'fue reemplazada por otra incidencia',
+};
+
+function safeText(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  return normalized.length > MAX_ARGUMENT_LENGTH
+    ? `${normalized.slice(0, MAX_ARGUMENT_LENGTH - 1)}…`
+    : normalized;
+}
+
+function requiredText(args, key) {
+  return safeText(args[key]);
+}
+
+function optionalText(args, key) {
+  if (args[key] === undefined || args[key] === null) return null;
+  return safeText(args[key]);
+}
+
+function requiredNumber(args, key) {
+  const value = args[key];
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function requiredIdentifier(args, key) {
+  const value = args[key];
+  if (typeof value === 'string') return safeText(value);
+  return requiredNumber(args, key);
+}
+
+function optionalNumber(args, key) {
+  if (args[key] === undefined || args[key] === null) return null;
+  return requiredNumber(args, key);
+}
+
+function requiredBoolean(args, key) {
+  return typeof args[key] === 'boolean' ? args[key] : null;
+}
+
+function requiredCode(args, key, allowed) {
+  const value = args[key];
+  return typeof value === 'string' && allowed.has(value) ? value : null;
+}
+
+function requiredArguments(...values) {
+  return values.every((value) => value !== null);
+}
+
+function optionalDetails(parts) {
+  const present = parts.filter(Boolean);
+  return present.length ? ` (${present.join('; ')})` : '';
+}
+
+function plural(count, one, many) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function formatMerge(key, args) {
+  const decision = requiredNumber(args, 'decision_id');
+  const branch = requiredText(args, 'branch');
+  const squash = requiredBoolean(args, 'squash');
+  const conflicts = optionalNumber(args, 'conflict_count');
+  if (!requiredArguments(decision, branch, squash) || (args.conflict_count != null && conflicts === null)) return null;
+  const subject = `la rama «${branch}» (decisión ${decision})`;
+  if (key.endsWith('.merged')) {
+    return `Se integró ${subject}${squash ? ' mediante squash' : ''}.`;
+  }
+  if (key.endsWith('.conflict')) {
+    return `Hubo conflictos al integrar ${subject}${conflicts === null ? '' : ` (${plural(conflicts, 'conflicto', 'conflictos')})`}.`;
+  }
+  if (key.endsWith('.target_moved')) return `No se integró ${subject} porque cambió el destino.`;
+  return `Falló la integración de ${subject}.`;
+}
+
+function formatPullRequest(key, args, idField, idLabel) {
+  const id = requiredIdentifier(args, idField);
+  const branch = requiredText(args, 'branch');
+  const hasUrl = requiredBoolean(args, 'has_pr_url');
+  if (!requiredArguments(id, branch, hasUrl)) return null;
+  const suffix = hasUrl ? ' con enlace al pull request' : '';
+  if (key.endsWith('.created')) return `Se creó un pull request para «${branch}» (${idLabel} ${id})${suffix}.`;
+  if (key.endsWith('.already_exists')) return `Ya existe un pull request para «${branch}» (${idLabel} ${id})${suffix}.`;
+  return `No se pudo crear el pull request para «${branch}» (${idLabel} ${id})${suffix}.`;
+}
+
+function formatTaskStatus(key, args) {
+  const from = requiredCode(args, 'from', TASK_STATUSES);
+  const to = requiredCode(args, 'to', TASK_STATUSES);
+  const cause = optionalText(args, 'cause');
+  if (!requiredArguments(from, to) || (args.cause != null && cause === null)) return null;
+  if (to !== key.slice('activity.task.'.length)) return null;
+  const messages = {
+    'activity.task.starting': 'La tarea está iniciando.',
+    'activity.task.running': 'La tarea está en ejecución.',
+    'activity.task.waiting': 'La tarea está en espera.',
+    'activity.task.awaiting_terminal_approval': 'La tarea espera aprobación para abrir una terminal.',
+    'activity.task.done': 'La tarea terminó correctamente.',
+    'activity.task.failed': 'La tarea falló.',
+    'activity.task.stopped': 'La tarea se detuvo.',
+    'activity.task.exited': 'La tarea salió con error.',
+  };
+  return messages[key] ?? null;
+}
+
+function formatSpawnResolved(key, args) {
+  const hasReason = requiredBoolean(args, 'has_reason');
+  const task = optionalText(args, 'task');
+  if (!requiredArguments(hasReason) || (args.task != null && task === null)) return null;
+  const outcomes = {
+    'activity.spawn.approved': 'La solicitud de lanzamiento fue aprobada',
+    'activity.spawn.rejected': 'La solicitud de lanzamiento fue rechazada',
+    'activity.spawn.launch_failed': 'No se pudo iniciar la tarea solicitada',
+    'activity.spawn.timeout': 'La solicitud de lanzamiento venció por tiempo',
+    'activity.spawn.coordinator_closed': 'La solicitud terminó al cerrarse el coordinador',
+    'activity.spawn.cancelled_run_removed': 'La solicitud se canceló al eliminarse la ejecución',
+  };
+  const details = [
+    task ? `tarea ${task}` : null,
+    hasReason ? 'con motivo registrado' : null,
+  ];
+  return `${outcomes[key]}${optionalDetails(details)}.`;
+}
+
+const FORMATTERS = {
+  'activity.run.created': (args) => {
+    const task = requiredText(args, 'root_task');
+    return task ? `Se creó la ejecución para la tarea ${task}.` : null;
+  },
+  'activity.run.closed': (args) => {
+    const forced = requiredBoolean(args, 'forced');
+    const stopped = requiredNumber(args, 'stopped_total');
+    if (!requiredArguments(forced, stopped)) return null;
+    return `La ejecución ${forced ? 'se cerró de forma forzada' : 'se cerró'}; ${plural(stopped, 'tarea detenida', 'tareas detenidas')}.`;
+  },
+  'activity.run.removed': (args) => {
+    const tasks = requiredNumber(args, 'tasks');
+    return tasks === null ? null : `Se eliminó la ejecución junto con ${plural(tasks, 'tarea', 'tareas')}.`;
+  },
+  'activity.task.created': (args) => {
+    const title = requiredText(args, 'title');
+    const agent = requiredText(args, 'agent');
+    const depth = requiredNumber(args, 'depth');
+    const external = requiredBoolean(args, 'external');
+    const role = optionalText(args, 'role');
+    const model = optionalText(args, 'model');
+    const parent = optionalText(args, 'parent');
+    if (!requiredArguments(title, agent, depth, external)
+      || (args.role != null && role === null)
+      || (args.model != null && model === null)
+      || (args.parent != null && parent === null)) return null;
+    return `Se creó la tarea «${title}» para ${agent}${optionalDetails([
+      role ? `rol ${role}` : null,
+      model ? `modelo ${model}` : null,
+      parent ? `depende de ${parent}` : null,
+      `profundidad ${depth}`,
+      external ? 'externa' : null,
+    ])}.`;
+  },
+  'activity.task.starting': formatTaskStatus,
+  'activity.task.running': formatTaskStatus,
+  'activity.task.waiting': formatTaskStatus,
+  'activity.task.awaiting_terminal_approval': formatTaskStatus,
+  'activity.task.done': formatTaskStatus,
+  'activity.task.failed': formatTaskStatus,
+  'activity.task.stopped': formatTaskStatus,
+  'activity.task.exited': formatTaskStatus,
+  'activity.task.phase_done': () => 'La tarea terminó una fase.',
+  'activity.task.phase_started': () => 'La tarea inició una fase.',
+  'activity.task.question': (args) => {
+    const message = requiredNumber(args, 'message_id');
+    const to = requiredText(args, 'to');
+    return requiredArguments(message, to) ? `La tarea envió la pregunta ${message} a ${to}.` : null;
+  },
+  'activity.task.reply': (args) => {
+    const question = requiredNumber(args, 'question_id');
+    const message = requiredNumber(args, 'message_id');
+    return requiredArguments(question, message)
+      ? `La tarea respondió a la pregunta ${question} con el mensaje ${message}.`
+      : null;
+  },
+  'activity.task.removed': (args) => {
+    const cause = requiredCode(args, 'cause', new Set(['launch_failed']));
+    return cause ? 'Se eliminó la tarea porque falló su lanzamiento.' : null;
+  },
+  'activity.task.review_requested': (args) => {
+    const branch = requiredText(args, 'branch');
+    return branch ? `Se solicitó revisar la rama «${branch}».` : null;
+  },
+  'activity.decision.review.accepted': (args) => {
+    const id = requiredNumber(args, 'decision_id');
+    const hasComment = requiredBoolean(args, 'has_comment');
+    return requiredArguments(id, hasComment)
+      ? `La revisión ${id} fue aceptada${hasComment ? ' con comentario' : ' sin comentario'}.`
+      : null;
+  },
+  'activity.decision.review.rejected': (args) => {
+    const id = requiredNumber(args, 'decision_id');
+    const hasComment = requiredBoolean(args, 'has_comment');
+    return requiredArguments(id, hasComment)
+      ? `La revisión ${id} fue rechazada${hasComment ? ' con comentario' : ' sin comentario'}.`
+      : null;
+  },
+  'activity.decision.merge.merged': formatMerge,
+  'activity.decision.merge.conflict': formatMerge,
+  'activity.decision.merge.error': formatMerge,
+  'activity.decision.merge.target_moved': formatMerge,
+  'activity.decision.pr.created': (args) => formatPullRequest('activity.decision.pr.created', args, 'decision_id', 'decisión'),
+  'activity.decision.pr.already_exists': (args) => formatPullRequest('activity.decision.pr.already_exists', args, 'decision_id', 'decisión'),
+  'activity.decision.pr.error': (args) => formatPullRequest('activity.decision.pr.error', args, 'decision_id', 'decisión'),
+  'activity.effect.git_merge.merged': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    const branch = requiredText(args, 'branch');
+    return requiredArguments(effect, branch) ? `El efecto ${effect} integró la rama «${branch}».` : null;
+  },
+  'activity.effect.git_merge.conflict': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    const branch = requiredText(args, 'branch');
+    return requiredArguments(effect, branch) ? `El efecto ${effect} encontró conflictos al integrar «${branch}».` : null;
+  },
+  'activity.effect.git_merge.error': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    const branch = requiredText(args, 'branch');
+    return requiredArguments(effect, branch) ? `Falló la integración de «${branch}» (efecto ${effect}).` : null;
+  },
+  'activity.effect.git_push_pr.created': (args) => formatPullRequest('activity.effect.git_push_pr.created', args, 'effect_id', 'efecto'),
+  'activity.effect.git_push_pr.already_exists': (args) => formatPullRequest('activity.effect.git_push_pr.already_exists', args, 'effect_id', 'efecto'),
+  'activity.effect.git_push_pr.error': (args) => formatPullRequest('activity.effect.git_push_pr.error', args, 'effect_id', 'efecto'),
+  'activity.effect.git_worktree.created': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    const branch = requiredText(args, 'branch');
+    const base = optionalText(args, 'base');
+    if (!requiredArguments(effect, branch) || (args.base != null && typeof args.base !== 'string')) return null;
+    return `Se creó un worktree para «${branch}»${base ? ` desde «${base}»` : ''} (efecto ${effect}).`;
+  },
+  'activity.effect.git_worktree.removed': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    const worktreeRemoved = requiredBoolean(args, 'worktree_removed');
+    const branchDeleted = requiredBoolean(args, 'branch_deleted');
+    const branch = optionalText(args, 'branch');
+    if (!requiredArguments(effect, worktreeRemoved, branchDeleted) || (args.branch != null && typeof args.branch !== 'string')) return null;
+    const details = [
+      branch ? `rama «${branch}»` : null,
+      branchDeleted ? 'rama eliminada' : null,
+    ];
+    return `${worktreeRemoved ? 'Se retiró' : 'No se retiró'} el worktree (efecto ${effect})${optionalDetails(details)}.`;
+  },
+  'activity.effect.process.launched': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    return effect ? `Se inició un proceso (efecto ${effect}).` : null;
+  },
+  'activity.effect.process.not_launched': (args) => {
+    const effect = requiredText(args, 'effect_id');
+    return effect ? `No se inició el proceso (efecto ${effect}).` : null;
+  },
+  'activity.project.registered': (args) => {
+    const name = requiredText(args, 'name');
+    const origin = requiredCode(args, 'origin', new Set(Object.keys(PROJECT_ORIGINS)));
+    const hasRemote = requiredBoolean(args, 'has_remote');
+    return requiredArguments(name, origin, hasRemote)
+      ? `Se registró el proyecto «${name}» por ${PROJECT_ORIGINS[origin]}${hasRemote ? ' con remoto' : ' sin remoto'}.`
+      : null;
+  },
+  'activity.project.location_added': (args) => {
+    const primary = requiredBoolean(args, 'primary');
+    const adopted = requiredBoolean(args, 'fingerprint_adopted');
+    return requiredArguments(primary, adopted)
+      ? `Se añadió una ubicación al proyecto${primary ? ' como principal' : ''}${adopted ? ' y se adoptó su huella' : ''}.`
+      : null;
+  },
+  'activity.project.archived': () => 'Se archivó el proyecto.',
+  'activity.project.restored': () => 'Se restauró el proyecto.',
+  'activity.project.relocated': (args) => {
+    const adopted = requiredBoolean(args, 'fingerprint_adopted');
+    const mismatch = requiredBoolean(args, 'confirmed_mismatch');
+    return requiredArguments(adopted, mismatch)
+      ? `Se reubicó el proyecto${adopted ? ' y se adoptó la huella' : ''}${mismatch ? '; se confirmó una discrepancia' : ''}.`
+      : null;
+  },
+  'activity.spawn.requested': (args) => {
+    const parent = requiredText(args, 'parent_task');
+    const title = requiredText(args, 'title');
+    const provider = requiredText(args, 'provider');
+    const profile = requiredText(args, 'profile');
+    const shared = requiredBoolean(args, 'shared');
+    const policy = requiredCode(args, 'policy_status', new Set(['ok', 'blocked', 'unverified']));
+    const role = optionalText(args, 'role');
+    const model = optionalText(args, 'model');
+    const effort = optionalText(args, 'effort');
+    if (!requiredArguments(parent, title, provider, profile, shared, policy)
+      || (args.role != null && role === null)
+      || (args.model != null && model === null)
+      || (args.effort != null && effort === null)) return null;
+    const policyText = { ok: 'permitida', blocked: 'bloqueada', unverified: 'sin verificar' }[policy];
+    return `Se solicitó iniciar «${title}» con ${provider} desde la tarea ${parent}${optionalDetails([
+      `perfil ${profile}`,
+      role ? `rol ${role}` : null,
+      model ? `modelo ${model}` : null,
+      effort ? `esfuerzo ${effort}` : null,
+      shared ? 'compartida' : 'no compartida',
+      `política ${policyText}`,
+    ])}.`;
+  },
+  'activity.spawn.approved': formatSpawnResolved,
+  'activity.spawn.rejected': formatSpawnResolved,
+  'activity.spawn.launch_failed': formatSpawnResolved,
+  'activity.spawn.timeout': formatSpawnResolved,
+  'activity.spawn.coordinator_closed': formatSpawnResolved,
+  'activity.spawn.cancelled_run_removed': formatSpawnResolved,
+  'activity.environment.blocked': (args) => {
+    const provider = requiredText(args, 'provider');
+    const profile = requiredText(args, 'profile');
+    const code = requiredCode(args, 'code', new Set(Object.keys(ENVIRONMENT_CODES)));
+    return requiredArguments(provider, profile, code)
+      ? `El entorno de ${provider} está bloqueado para el perfil ${profile}: ${ENVIRONMENT_CODES[code]}.`
+      : null;
+  },
+  'activity.environment.cleared': (args) => {
+    const provider = requiredText(args, 'provider');
+    const profile = requiredText(args, 'profile');
+    const code = requiredCode(args, 'code', new Set(Object.keys(ENVIRONMENT_CODES)));
+    return requiredArguments(provider, profile, code)
+      ? `Se despejó el bloqueo del entorno de ${provider} para el perfil ${profile}: ${ENVIRONMENT_CODES[code]}.`
+      : null;
+  },
+  'activity.attention.risk_acted': (args) => {
+    const resolution = requiredCode(args, 'resolution', new Set(Object.keys(RESOLUTIONS)));
+    return resolution ? `Se registró una acción relacionada con un riesgo: ${RESOLUTIONS[resolution]}.` : null;
+  },
+  'activity.attention.created': (args) => {
+    const category = requiredCode(args, 'category', new Set(Object.keys(ATTENTION_CATEGORIES)));
+    const severity = requiredCode(args, 'severity', new Set(Object.keys(ATTENTION_SEVERITIES)));
+    const occurrence = requiredNumber(args, 'occurrence');
+    const targetKind = requiredText(args, 'target_kind');
+    const targetId = requiredText(args, 'target_id');
+    return requiredArguments(category, severity, occurrence, targetKind, targetId)
+      ? `Se registró una incidencia de ${ATTENTION_CATEGORIES[category]} con severidad ${ATTENTION_SEVERITIES[severity]} para ${targetKind} ${targetId} (ocurrencia ${occurrence}).`
+      : null;
+  },
+  'activity.attention.resolved': (args) => {
+    const resolution = requiredCode(args, 'resolution', new Set(Object.keys(RESOLUTIONS)));
+    return resolution ? `Se registró la resolución de una incidencia: ${RESOLUTIONS[resolution]}.` : null;
+  },
+  'activity.unknown': (args) => {
+    const reason = requiredText(args, 'reason');
+    const kind = requiredText(args, 'kind');
+    const version = requiredNumber(args, 'event_version');
+    return requiredArguments(reason, kind, version)
+      ? `No se reconoce el evento «${kind}» (versión ${version}, motivo: ${reason}).`
+      : null;
+  },
+};
+
+export function translateActivityMessage(key, args = {}) {
+  if (typeof key !== 'string' || !KEY_SET.has(key)) return null;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  const formatter = FORMATTERS[key];
+  if (typeof formatter !== 'function') return null;
+  try {
+    const result = formatter.length > 1 ? formatter(key, args) : formatter(args);
+    if (typeof result !== 'string') return null;
+    const bounded = result.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim();
+    if (!bounded) return null;
+    return bounded.length > MAX_MESSAGE_LENGTH
+      ? `${bounded.slice(0, MAX_MESSAGE_LENGTH - 1)}…`
+      : bounded;
+  } catch {
+    return null;
+  }
+}
