@@ -188,7 +188,7 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
 // subvista con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
 // `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
 // ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
-export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
+export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
   const viewIds = useId();
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [attentionTarget, setAttentionTarget] = useState(null);
@@ -207,11 +207,14 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
   const jumpPaletteOpen = useWorkbenchStore((s) => s.jumpPaletteOpen);
   const setJumpPaletteOpen = useWorkbenchStore((s) => s.setJumpPaletteOpen);
+  // `active` dice qué canvas se ve (Workspace ADE o Ejecuciones); `modeActive`, si el modo Orquestador
+  // es el visible. Oculto, nada consulta ni sondea: el estado local y la selección se conservan.
+  const workspaceActive = active && modeActive;
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
-  const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
+  const projectViewActive = Boolean(workspaceActive && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
   const onProjectsSnapshot = useCallback((snapshot) => setProjectsSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
@@ -251,7 +254,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
     task_id: selectedTaskId,
-  }, { enabled: Boolean(selectedProjectId) && Boolean(selectedTaskId) });
+  }, { enabled: modeActive && Boolean(selectedProjectId) && Boolean(selectedTaskId) });
   const selectedProject = currentProjectSnapshot?.projectId === selectedProjectId
     ? currentProjectSnapshot.project
     : null;
@@ -589,7 +592,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       className="wb wb--orch ade__layout"
       data-testid="ade-composition"
     >
-      <JumpPaletteHost open={jumpPaletteOpen} onClose={closeJumpPalette} onNavigate={jumpTo} />
+      <JumpPaletteHost open={jumpPaletteOpen && modeActive} onClose={closeJumpPalette} onNavigate={jumpTo} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
@@ -601,6 +604,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 onSelectTask={selectTask}
                 onProjectSnapshot={onProjectSnapshot}
                 onProjectsSnapshot={onProjectsSnapshot}
+                active={modeActive}
               />
             </section>
             {operationNavigation && (
@@ -669,7 +673,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
             >
               {attentionNotice && <div className="ade__notice" role="status">{attentionNotice}</div>}
               <AttentionInbox
-                active={active && workspaceView === 'attention'}
+                active={workspaceActive && workspaceView === 'attention'}
                 target={attentionTarget}
                 onClearTarget={clearAttentionTarget}
                 onOpenTarget={openAttentionTarget}
@@ -705,7 +709,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
               {activityNotice && <div className="ade__notice" role="status">{activityNotice.text}</div>}
               <ActivityPanel
                 scope={activityScope}
-                active={active && workspaceView === 'activity'}
+                active={workspaceActive && workspaceView === 'activity'}
                 onOpenTarget={openActivityTarget}
               />
             </div>
@@ -716,7 +720,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
             sizeKey="inspector"
             className="ade__inspector"
             open={rightOpen}
-            visible={active}
+            visible={workspaceActive}
             keepMountedWhenHidden
             drawerOpen={drawerOpen}
             onCloseDrawer={onCloseDrawer}
