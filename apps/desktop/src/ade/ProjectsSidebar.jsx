@@ -478,9 +478,10 @@ function ProjectTasks({
   const headFailed = failureStatuses.has(head.status);
   const headFailedRef = useRef(headFailed);
   headFailedRef.current = headFailed;
+  const [headResumePending, setHeadResumePending] = useState(false);
   const headDataStale = Boolean(headData)
     && active
-    && (head.status === 'loading' || head.status === 'refreshing' || headFailed);
+    && (headResumePending || headFailed);
   const latestHeadUpdatedAtRef = useRef(head.updatedAt);
   latestHeadUpdatedAtRef.current = head.updatedAt;
 
@@ -551,7 +552,7 @@ function ProjectTasks({
 
   const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
   // Una lectura fallida sin datos no demuestra la ausencia de la Task: no cuenta como asentada.
-  const tasksSettled = Boolean(headData) && !headDataStale;
+  const tasksSettled = Boolean(headData) && active && !headDataStale;
   useEffect(() => {
     onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : [], tasksSettled, statusView.code);
     return () => onVisibleTasks(projectId, [], false, statusView.code);
@@ -566,7 +567,9 @@ function ProjectTasks({
     const flightKey = JSON.stringify([request.key, cursor]);
     const flights = inFlightPageReadsRef.current.get(flightKey) ?? [];
     const reusableFlight = flights.find((flight) => (
-      flight.reusable && flight.headUpdatedAt === request.headUpdatedAt
+      request.headUpdatedAt != null
+      && flight.reusable
+      && flight.headUpdatedAt === request.headUpdatedAt
     ));
     if (reusableFlight) return reusableFlight.promise;
 
@@ -691,16 +694,29 @@ function ProjectTasks({
   // mayor que el visto al volver) las vuelve a leer aunque la cabecera no haya cambiado.
   const wasActiveRef = useRef(active);
   const resumeEpochRef = useRef(null);
+  const previousPageKeyRef = useRef(pageKey);
   const headReadEpochRef = useRef(head.readEpoch);
   headReadEpochRef.current = head.readEpoch;
   useLayoutEffect(() => {
     const wasActive = wasActiveRef.current;
+    const pageChanged = previousPageKeyRef.current !== pageKey;
     wasActiveRef.current = active;
-    if (active === wasActive) return;
+    previousPageKeyRef.current = pageKey;
+    if (active === wasActive) {
+      if (active && pageChanged && resumeEpochRef.current != null) {
+        resumeEpochRef.current = headReadEpochRef.current ?? 0;
+      }
+      return;
+    }
     if (!active) {
       resumeEpochRef.current = null;
+      setHeadResumePending(false);
       // Una lectura en vuelo al ocultarse se descarta: no debe sellar como vigentes páginas que Core no confirmó.
-      for (const flight of pageRequestRef.current?.inFlightPageReads ?? []) flight.reusable = true;
+      for (const flights of inFlightPageReadsRef.current.values()) {
+        for (const flight of flights) {
+          if (flight.request?.key === pageKey) flight.reusable = true;
+        }
+      }
       pageRequestRef.current = null;
       pagingRequestActiveRef.current = false;
       pagingFocusRef.current = false;
@@ -716,12 +732,14 @@ function ProjectTasks({
       return;
     }
     resumeEpochRef.current = headReadEpochRef.current ?? 0;
+    setHeadResumePending(true);
   }, [active, pageKey]);
 
   useEffect(() => {
     const resumeEpoch = resumeEpochRef.current;
     if (!active || resumeEpoch == null || headFailed || !head.data || head.readEpoch <= resumeEpoch) return;
     resumeEpochRef.current = null;
+    setHeadResumePending(false);
     // Si la cabecera cambió, el efecto de versión ya está reconciliando.
     if (pageRequestRef.current || pages.key !== pageKey || pages.pageCount === 0) return;
     void reconcileLoadedPages(pages.pageCount, head.updatedAt);
@@ -750,7 +768,8 @@ function ProjectTasks({
     && !hasMoreTasks;
 
   const loadMore = useCallback(async ({ automatic = false, retry = false } = {}) => {
-    if (pageRequestRef.current || !moreCursor || currentPages.stale || headDataStale) return;
+    if (pageRequestRef.current || !moreCursor || currentPages.stale || headDataStale
+      || (activeRef.current && resumeEpochRef.current != null)) return;
     if (automatic && !pendingTaskId) return;
     if (retry && document.activeElement === pageRetryButtonRef.current) {
       pageRetryFocusRef.current = true;
@@ -815,6 +834,7 @@ function ProjectTasks({
   useEffect(() => {
     if (
       !active
+      || resumeEpochRef.current != null
       || !pendingTaskId
       || statusView.code !== 'all'
       || tasks.some((task) => task.id === pendingTaskId)
@@ -902,7 +922,9 @@ function ProjectTasks({
 
       {headDataStale && (
         <div className="ps__state ps__state--stale" role="status" data-testid={`stale-task-head-${projectId}`}>
-          Se conserva la cabecera anterior de Tasks de {projectName} mientras Core confirma la lectura actual.
+          {headFailed
+            ? `Core no pudo confirmar la cabecera de Tasks de ${projectName}. Se conserva la última lectura correcta y puede estar desactualizada.`
+            : `Se conserva la cabecera anterior de Tasks de ${projectName} mientras Core confirma la lectura actual.`}
         </div>
       )}
 
@@ -930,7 +952,7 @@ function ProjectTasks({
           className="ps__tasks"
           role="group"
           aria-label={`Tasks de ${project.name || projectId} · ${statusView.label}`}
-          aria-busy={currentPages.loading || headDataStale}
+          aria-busy={currentPages.loading || head.inFlight}
         >
           {tasks.map((task, index) => {
             const key = taskKey(projectId, task.id);
@@ -990,7 +1012,7 @@ function ProjectTasks({
             ? () => reconcileLoadedPages(currentPages.pageCount, head.updatedAt)
             : () => loadMore()}
           disabled={currentPages.loading || headDataStale}
-          aria-busy={currentPages.loading || headDataStale}
+          aria-busy={currentPages.loading}
           aria-label={currentPages.stale
             ? (currentPages.loading || headDataStale
               ? `Actualizando páginas de Tasks de ${projectName}`
