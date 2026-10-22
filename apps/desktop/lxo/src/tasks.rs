@@ -15,7 +15,7 @@ use crate::Args;
 
 pub(super) const HELP: &str =
     "Uso: lxo tasks [--project ID|NOMBRE] [--active | --final] [--status S] [--run ID] [--json]
-     lxo task show <task_id> [--json]          (también: lxo tasks show <task_id>)
+     lxo task show <id o nombre> [--json]      (también: lxo tasks show …)
 
 Las tareas que conoce el Core de Lixbon (modelo legacy: tarea raíz e hijas por
 run), en árbol. Solo lee: no lanza, reintenta, reanuda ni marca nada como leído.
@@ -35,8 +35,10 @@ Salida:
   Lo que el modelo legacy no registra (host) sale como null o «desconocido».
   Las tareas sin proyecto no se listan: se cuentan al final.
 
-`lxo task show <id>` añade fase, padre y raíz, worktree, fechas, la actividad
-reciente y cómo seguirla con lxo events --task <id> y lxo attention --task <id>.
+`lxo task show <id o nombre>` añade fase, padre y raíz, worktree, fechas, la
+actividad reciente y cómo seguirla con lxo events --task <id> y lxo attention
+--task <id>. El nombre es el título de la tarea, sin distinguir mayúsculas: vale el
+título exacto o un trozo; si encajan varias, lxo dice sus ids.
 
 Solo para personas: dentro de una tarea del orquestador, usa lxo list y lxo show.
 
@@ -114,14 +116,15 @@ fn parse(a: &Args) -> Result<Request, Failure> {
     if a.at(0).as_deref() == Some("task") || a.at(1).as_deref() == Some("show") {
         if a.at(1).as_deref() != Some("show") {
             return Err(usage(
-                "Uso: lxo task show <task_id>. Para la lista: lxo tasks.",
+                "Uso: lxo task show <id o nombre>. Para la lista: lxo tasks.",
             ));
         }
         check_flags(a, &["json", "help"], "lxo task show")?;
-        return match (a.at(2), a.at(3)) {
-            (Some(id), None) if !id.trim().is_empty() => Ok(Request::Show(id)),
-            (None, _) => Err(usage("Falta el id: lxo task show <task_id>.")),
-            _ => Err(usage("`lxo task show` recibe un solo id.")),
+        let wanted = task_wanted(&a.pos[2.min(a.pos.len())..]);
+        return if wanted.is_empty() {
+            Err(usage("Falta la tarea: lxo task show <id o nombre>."))
+        } else {
+            Ok(Request::Show(wanted))
         };
     }
     if let Some(extra) = a.at(1) {
@@ -149,6 +152,19 @@ fn parse(a: &Args) -> Result<Request, Failure> {
         }
     }
     Ok(Request::List(filters))
+}
+
+/// Lo que se pide a `task show`: las palabras juntas (un nombre con espacios no necesita comillas) y sin
+/// las comillas que las rodeen, porque el chat del CLI pasa cada palabra tal cual.
+fn task_wanted(words: &[String]) -> String {
+    let joined = words.join(" ");
+    let trimmed = joined.trim();
+    for q in ['"', '\''] {
+        if trimmed.len() >= 2 && trimmed.starts_with(q) && trimmed.ends_with(q) {
+            return trimmed[1..trimmed.len() - 1].trim().to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 fn contract_error() -> Failure {
@@ -484,52 +500,131 @@ fn activity(rpc: Rpc, id: &str) -> Result<Value, Failure> {
     Ok(json!({ "items": items, "has_more": data["has_more"].as_bool().unwrap_or(false) }))
 }
 
-/// `task_detail` necesita el Project: se busca la Task en cada uno. Devuelve también el overview.
-fn show_data(rpc: Rpc, id: &str) -> Result<(Value, Overview), Failure> {
-    let overview = overview(rpc)?;
-    for project in overview.ids() {
-        let data = match rpc(
-            "task_detail",
-            &json!({ "project_id": project, "task_id": id }),
-        ) {
-            Ok(data) => data,
-            Err(RpcFailure::Rejected(m)) if m.starts_with("tasks_not_found") => continue,
-            Err(error) => return Err(tasks_failure(error)),
-        };
-        let task = &data["task"];
-        if data["v"].as_u64() != Some(CONTRACT)
-            || !task["id"].is_string()
-            || !task["status"].is_string()
-        {
-            return Err(contract_error());
-        }
-        let mut task = task.clone();
-        // La ficha no trae la profundidad: 0 en la raíz, 1 si el padre es la raíz, desconocida si no.
-        task["depth"] = match (task["parent_id"].as_str(), task["root_id"].as_str()) {
-            (None, _) => json!(0),
-            (Some(parent), Some(root)) if parent == root => json!(1),
-            _ => Value::Null,
-        };
-        let children: Vec<Value> = task["child_ids"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(text)
-            .filter(|c| !c.is_null())
-            .collect();
-        let data = json!({
-            "v": CONTRACT,
-            "task_model": "legacy",
-            "task": dto(&task),
-            "children": children,
-            "activity": activity(rpc, id)?,
-        });
-        return Ok((data, overview));
+/// `task_detail` de `id` en `project`; `None` si la Task no está en ese Project.
+fn detail_in(rpc: Rpc, project: &str, id: &str) -> Result<Option<Value>, Failure> {
+    let data = match rpc(
+        "task_detail",
+        &json!({ "project_id": project, "task_id": id }),
+    ) {
+        Ok(data) => data,
+        Err(RpcFailure::Rejected(m)) if m.starts_with("tasks_not_found") => return Ok(None),
+        Err(error) => return Err(tasks_failure(error)),
+    };
+    let task = &data["task"];
+    if data["v"].as_u64() != Some(CONTRACT)
+        || !task["id"].is_string()
+        || !task["status"].is_string()
+    {
+        return Err(contract_error());
     }
-    Err(Failure::NotFound(format!(
-        "No existe la tarea {} en ningún proyecto, o no es visible para esta identidad. Las tareas sin proyecto no se pueden consultar.",
-        clean(id)
-    )))
+    Ok(Some(task.clone()))
+}
+
+/// Por nombre: el título exacto (sin distinguir mayúsculas) y, si ninguno coincide, el que lo contiene.
+/// Devuelve el Project y el id de la única Task que encaja; si encajan varias, pide el id.
+fn find_by_name(
+    rpc: Rpc,
+    overview: &Overview,
+    wanted: &str,
+) -> Result<Option<(String, String)>, Failure> {
+    let mut tasks = vec![];
+    for project in overview.ids() {
+        tasks.extend(project_tasks(rpc, &project)?);
+    }
+    let needle = wanted.to_lowercase();
+    let title = |t: &Value| t["title"].as_str().unwrap_or("").trim().to_lowercase();
+    let mut found: Vec<&Value> = tasks.iter().filter(|t| title(t) == needle).collect();
+    if found.is_empty() {
+        found = tasks
+            .iter()
+            .filter(|t| title(t).contains(&needle))
+            .collect();
+    }
+    by_creation(&mut found);
+    let pair = |t: &Value| {
+        (
+            t["project_id"].as_str().unwrap_or_default().to_string(),
+            t["id"].as_str().unwrap_or_default().to_string(),
+        )
+    };
+    match found.as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some(pair(one))),
+        many => {
+            let mut named: Vec<Value> = many.iter().map(|t| (*t).clone()).collect();
+            overview.name(&mut named);
+            let options: Vec<String> = named
+                .iter()
+                .take(8)
+                .map(|t| {
+                    format!(
+                        "{} «{}» ({})",
+                        field(t, "id").unwrap_or_default(),
+                        field(t, "title").unwrap_or_default(),
+                        field(t, "project_name")
+                            .unwrap_or_else(|| field(t, "project_id").unwrap_or_default())
+                    )
+                })
+                .collect();
+            let more = if many.len() > 8 {
+                format!(" y {} más", many.len() - 8)
+            } else {
+                String::new()
+            };
+            Err(usage(format!(
+                "Hay {} tareas que encajan con «{}»; usa su id: {}{more}.",
+                many.len(),
+                clean(wanted),
+                options.join(", ")
+            )))
+        }
+    }
+}
+
+/// La ficha de una Task, buscada por id y, si no hay ninguna con ese id, por nombre. `task_detail` necesita
+/// el Project: el id se busca en cada uno. Devuelve también el overview.
+fn show_data(rpc: Rpc, wanted: &str) -> Result<(Value, Overview), Failure> {
+    let overview = overview(rpc)?;
+    let mut found = None;
+    for project in overview.ids() {
+        if let Some(task) = detail_in(rpc, &project, wanted)? {
+            found = Some(task);
+            break;
+        }
+    }
+    if found.is_none() {
+        if let Some((project, id)) = find_by_name(rpc, &overview, wanted)? {
+            found = detail_in(rpc, &project, &id)?;
+        }
+    }
+    let Some(mut task) = found else {
+        return Err(Failure::NotFound(format!(
+            "No hay ninguna tarea con id o nombre «{}» en los proyectos, o no es visible para esta identidad. Las tareas sin proyecto no se pueden consultar.",
+            clean(wanted)
+        )));
+    };
+    let id = task["id"].as_str().unwrap_or_default().to_string();
+    // La ficha no trae la profundidad: 0 en la raíz, 1 si el padre es la raíz, desconocida si no.
+    task["depth"] = match (task["parent_id"].as_str(), task["root_id"].as_str()) {
+        (None, _) => json!(0),
+        (Some(parent), Some(root)) if parent == root => json!(1),
+        _ => Value::Null,
+    };
+    let children: Vec<Value> = task["child_ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(text)
+        .filter(|c| !c.is_null())
+        .collect();
+    let data = json!({
+        "v": CONTRACT,
+        "task_model": "legacy",
+        "task": dto(&task),
+        "children": children,
+        "activity": activity(rpc, &id)?,
+    });
+    Ok((data, overview))
 }
 
 fn status_text(code: &str) -> String {
@@ -1101,7 +1196,6 @@ mod tests {
             &["task"],
             &["task", "ver", "t1"],
             &["task", "show"],
-            &["task", "show", "t1", "t2"],
             &["task", "show", "t1", "--project", "p"],
         ] {
             let failure = parse(&args(raw))
@@ -1275,7 +1369,7 @@ mod tests {
         assert!(
             missing
                 .message()
-                .starts_with("No existe la tarea t404 en ningún proyecto"),
+                .starts_with("No hay ninguna tarea con id o nombre «t404» en los proyectos"),
             "{missing:?}"
         );
     }
@@ -1424,6 +1518,62 @@ mod tests {
         let (mut detail, overview) = show_data(&mut core(fixture()), "t2").unwrap();
         overview.name(std::slice::from_mut(&mut detail["task"]));
         assert!(show_text(&detail).contains("  Proyecto:    api (p-api)"));
+    }
+
+    #[test]
+    fn task_show_acepta_el_nombre_ademas_del_id() {
+        let id_of = |wanted: &str| show(wanted)["task"]["id"].as_str().unwrap().to_string();
+        assert_eq!(id_of("t2"), "t2", "primero por id");
+        assert_eq!(id_of("tarea t3"), "t3", "título exacto");
+        assert_eq!(id_of("TAREA T9"), "t9", "sin distinguir mayúsculas");
+        assert_eq!(
+            id_of("a t2"),
+            "t2",
+            "un trozo del título, si solo encaja una"
+        );
+        let many = show_data(&mut core(fixture()), "tarea").unwrap_err();
+        assert_eq!(many.code().1, 2);
+        assert!(
+            many.message().starts_with("Hay 4 tareas que encajan con «tarea»; usa su id: t1 «tarea t1» (api), t2 «tarea t2» (api)"),
+            "{many:?}"
+        );
+        let none = show_data(&mut core(fixture()), "no existe").unwrap_err();
+        assert_eq!(none.code().1, 6);
+        assert!(
+            none.message().contains("con id o nombre «no existe»"),
+            "{none:?}"
+        );
+        // La Activity es la de la Task encontrada, no la del texto pedido.
+        assert_eq!(
+            show("tarea t2")["activity"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn el_nombre_puede_llevar_espacios_y_comillas() {
+        for raw in [
+            &["task", "show", "Pantalla", "de", "Atención"][..],
+            &["task", "show", "\"Pantalla", "de", "Atención\""],
+            &["tasks", "show", "'Pantalla de Atención'"],
+            &["task", "show", "Pantalla", "de", "Atención", "--json"],
+        ] {
+            assert!(
+                matches!(parse(&args(raw)), Ok(Request::Show(w)) if w == "Pantalla de Atención"),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            parse(&args(&["task", "show", "\"\""]))
+                .err()
+                .unwrap()
+                .code()
+                .1,
+            2
+        );
     }
 
     #[test]

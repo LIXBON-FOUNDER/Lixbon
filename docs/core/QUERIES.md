@@ -140,7 +140,10 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
     `tasks_by_project` (`status: all`, páginas de 100 siguiendo `next_cursor`). Monta el árbol en el cliente: cada
     raíz seguida de sus hijas, por `created_at` y luego `id`, con la profundidad calculada. Los filtros
     `--active`, `--final`, `--status` y `--run` se aplican sobre ese árbol.
-  * `lxo task show <id>` busca la Task con `task_detail` en cada Project y añade los últimos 10 items de
+  * `lxo task show <id o nombre>` busca la Task con `task_detail` en cada Project. Si ningún Project tiene una
+    Task con ese id, la busca por título entre las de `tasks_by_project`, sin distinguir mayúsculas: primero el
+    título exacto y, si no hay, el que contiene el texto. Si encajan varias, sale con 2 y enumera sus ids; las
+    palabras sueltas se juntan, así que un nombre con espacios no necesita comillas. Añade los últimos 10 items de
     `activity_list` (`target_kind: task`), traducidos con las mismas frases que Desktop
     (`lxo/src/activity.rs`, comprobado contra `fixtures/activity_messages_es.json`).
 * **Tasks sin Project:** el Core no las lista. `lxo tasks` las cuenta (`unassigned_tasks` y, sin `--project`, una
@@ -149,7 +152,7 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
   del orquestador se usan `lxo list` y `lxo show`.
 * `lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--run ID] [--json]`: en árbol (raíz y sus hijas).
   `--project` acepta el id o el nombre, que se resuelve con `projects_overview`.
-* `lxo task show <task_id> [--json]`: Project, run, raíz y padre, hijas, estado y fase, proveedor y modelo (el
+* `lxo task show <id o nombre> [--json]`: Project, run, raíz y padre, hijas, estado y fase, proveedor y modelo (el
   efectivo si consta), rol, rama y base, worktree o checkout compartido, origen, fechas, motivo de fallo, PR y la
   Activity reciente, con `lxo events --task` y `lxo attention --task` para seguirla.
 * `--json` es una allowlist de lxo: `{v, task_model, tasks, unassigned_tasks}` y
