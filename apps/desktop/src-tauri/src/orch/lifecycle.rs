@@ -240,7 +240,7 @@ impl Core {
         self.start_server_with(secrets.as_ref(), &cli_installation_file(), &discovery_file())
     }
 
-    fn start_server_with(
+    pub(super) fn start_server_with(
         self: &Arc<Self>,
         secrets: &dyn SecretStore,
         installation_file: &Path,
@@ -273,7 +273,7 @@ impl Core {
         self.stop_server_with(&discovery_file());
     }
 
-    fn stop_server_with(&self, discovery: &Path) {
+    pub(super) fn stop_server_with(&self, discovery: &Path) {
         if let Some(h) = self.server.lock().ok().and_then(|mut s| s.take()) {
             h.stop();
             let _ = std::fs::remove_file(discovery);
