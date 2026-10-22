@@ -119,6 +119,34 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
 | `projects_overview_unavailable` | el Core no tiene almacén abierto |
 | `projects_overview_read_failed` | falló la lectura de SQLite |
 
+### Cliente de terminal: `lxo projects` (LXO-103)
+
+* `lxo projects [--archived exclude|include|only] [--all] [--machine ID] [--json]` pide `projects_overview` con la
+  credencial Person del CLI (almacén seguro). `--all` es `--archived include`. Sustituye al `lxo projects` anterior,
+  que leía `projects` (registro con comprobación de disco).
+* Salida humana por Project: nombre y estado traducido, `id`, contadores de Tasks y Attention (por categoría) y sus
+  ubicaciones como metadato; al final, lo que va a `unassigned`. Cada dato en su línea para terminales estrechas.
+* `--json` imprime el documento del Core sin tocar (`{v, filters, total, projects, unassigned}`): ids, contadores y
+  códigos, sin textos traducidos.
+* Es solo para personas: con credencial Agent responde con código 3. Salidas: 0 correcto, 1 error interno, 2 uso o
+  filtro inválido, 3 autenticación o sin permiso, 4 versión o contrato, 5 Lixbon cerrado o Core no disponible.
+
+### Cliente de terminal: `lxo tasks` y `lxo task show` (LXO-104)
+
+* Tasks del **modelo legacy**, presentadas como tales (`task_model: "legacy"`), nunca como Attempts.
+* **Fuente provisional:** la lectura `list` del Core por el RPC autenticado (no `state.json`), mientras la query de
+  Tasks por Project de LXO-91 no esté en master. `list_tasks` en `lxo/src/tasks.rs` es el único punto que la usa; al
+  publicarse LXO-91 se sustituye ahí sin cambiar el `--json` de lxo.
+* `lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--run ID] [--json]`: en árbol (raíz y sus hijas).
+  `--project` acepta el id o el nombre, que se resuelve con `projects_overview`.
+* `lxo task show <task_id> [--json]`: Project, run, raíz y padre, hijas, estado y fase, proveedor y modelo, rama,
+  worktree o checkout compartido, origen, fechas, motivo de fallo y PR, con `lxo events --task` y
+  `lxo attention --task` para seguirla.
+* `--json` es una allowlist de lxo: `{v, task_model, tasks}` y `{v, task_model, task, children}`. No copia el encargo
+  (`spec`), el argv ni otros campos internos; lo que el modelo legacy no registra (`host`) va como `null`.
+* Salidas: 0 correcto, 1 interno, 2 uso, 3 autenticación, 4 versión, 5 Core no disponible, 6 tarea o proyecto
+  inexistente.
+
 ### Pruebas
 
 `orch/projects_overview_tests.rs` (0/1/N Projects, orden, activo+fallido+Attention, estado agregado, Attention
