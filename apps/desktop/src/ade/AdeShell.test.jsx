@@ -1225,7 +1225,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       await settle();
       expect(overviewReads).toBeGreaterThan(1);
-      fireEvent.click(await screen.findByTestId('activity-target-event-11'));
+      fireEvent.click(screen.getByTestId('activity-target-event-11'));
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: null });
       expect(screen.queryByText(/No se pudo verificar el Project/)).toBeNull();
@@ -1238,7 +1238,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
       await settle();
-      fireEvent.click(await screen.findByTestId('activity-target-event-11'));
+      fireEvent.click(screen.getByTestId('activity-target-event-11'));
       await settle();
       expect(screen.getByText(`No se pudo verificar el Project ${PROJECT.id} en el overview de Core; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
@@ -1371,7 +1371,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(await screen.findByTestId('activity-target-event-15'));
+      fireEvent.click(screen.getByTestId('activity-target-event-15'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
@@ -1481,7 +1481,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(await screen.findByTestId('activity-target-event-20'));
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
@@ -1491,7 +1491,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       // El timeout de la UI no libera la ranura de deduplicación: la lectura subyacente sigue en vuelo.
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
-      fireEvent.click(await screen.findByTestId('activity-target-event-20'));
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Verificando la Task ${targetTaskId} en el Project ${PROJECT.id}…`)).toBeTruthy();
@@ -1500,6 +1500,16 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: targetTaskId });
       expect(screen.queryByText(/Core no respondió a tiempo al verificar la Task/)).toBeNull();
+
+      // La ranura se liberó al asentarse la consulta subyacente (no al vencer el timeout): sin Task seleccionada
+      // en el shell, el mismo destino vuelve a verificarse con una lectura nueva.
+      useWorkbenchStore.setState({ adeSelection: { projectId: null, taskId: null } });
+      await settle();
+      openActivityTab();
+      await settle();
+      fireEvent.click(screen.getByTestId('activity-target-event-20'));
+      await settle();
+      expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
 
     it('conserva la selección y avisa si task_detail devuelve otro task.id', async () => {
@@ -1600,6 +1610,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       const taskBVerificationReads = verificationQueryCallsFor(PROJECT.id, taskB);
       const taskBShellReads = shellTaskDetailCallsFor(PROJECT.id, taskB);
       expect(taskBVerificationReads).toHaveLength(1);
+      expect(queryAdeCore.mock.calls).toContain(taskBVerificationReads[0]);
       expect(taskBShellReads.length).toBeGreaterThan(0);
       expect(taskBShellReads).not.toContain(taskBVerificationReads[0]);
     });
