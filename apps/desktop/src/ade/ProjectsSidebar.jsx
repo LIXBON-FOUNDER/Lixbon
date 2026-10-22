@@ -99,7 +99,7 @@ export const byCoreTaskOrder = (a, b) => (b.created_at - a.created_at)
   || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 const EMPTY_PAGE = Object.freeze({
-  items: [], nextCursor: null, hasMore: false, pageCount: 0, loading: false, stale: false, error: null, notice: null,
+  items: [], nextCursor: null, hasMore: false, pageCount: 0, loading: false, stale: false, preserved: false, error: null, notice: null,
 });
 const EMPTY_PROJECT_IDS = Object.freeze([]);
 const emptyPageState = (key) => ({ ...EMPTY_PAGE, key });
@@ -453,6 +453,11 @@ function ProjectTasks({
     status: statusView.code,
     limit: TASK_PAGE_LIMIT,
   }, { enabled: active, pollMs });
+  // Oculto, `useCoreQuery` devuelve `data: null`. La última cabecera leída se conserva aquí para que las
+  // filas, el cursor y el scroll sigan en su sitio sin consultar Core; al volver, `head.data` la reemplaza.
+  const preservedHeadRef = useRef(null);
+  if (head.data) preservedHeadRef.current = { key: pageKey, data: head.data };
+  const headData = head.data ?? (!active && preservedHeadRef.current?.key === pageKey ? preservedHeadRef.current.data : null);
   const [pages, setPages] = useState(() => emptyPageState(pageKey));
   const pageRequestRef = useRef(null);
   const pageRequestSequence = useRef(0);
@@ -522,7 +527,7 @@ function ProjectTasks({
 
   // Nunca se leen páginas de otro filtro; las de la última cabecera siguen visibles como stale.
   const currentPages = pages.key === pageKey ? pages : EMPTY_PAGE;
-  const headTasks = head.data?.tasks ?? [];
+  const headTasks = headData?.tasks ?? [];
   const headTaskIds = useMemo(() => new Set(headTasks.map((task) => task.id)), [headTasks]);
   const tasks = useMemo(() => {
     return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder);
@@ -535,13 +540,13 @@ function ProjectTasks({
 
   const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
   // Una lectura fallida sin datos no demuestra la ausencia de la Task: no cuenta como asentada.
-  const tasksSettled = Boolean(head.data);
+  const tasksSettled = Boolean(headData);
   useEffect(() => {
     onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : [], tasksSettled, statusView.code);
     return () => onVisibleTasks(projectId, [], false, statusView.code);
   }, [projectId, taskIdSignature, tasksSettled, onVisibleTasks, statusView.code]);
 
-  const headCursor = head.data?.has_more ? head.data.next_cursor : null;
+  const headCursor = headData?.has_more ? headData.next_cursor : null;
   const moreCursor = currentPages.pageCount > 0 ? currentPages.nextCursor : headCursor;
   // Una página extra se leyó por separado; tras refrescar la cabecera, se vuelve a leer cada cursor
   // ya cargado desde el cursor nuevo. Core no publica una instantánea común para ambas consultas.
@@ -592,6 +597,7 @@ function ProjectTasks({
         hasMore,
         loading: false,
         stale: false,
+        preserved: false,
         error: null,
         notice: null,
       }));
@@ -635,17 +641,51 @@ function ProjectTasks({
       : { ...current, loading: false, error: null }));
   }, [head.updatedAt, headFailed, pageKey, pages.key, pages.pageCount, reconcileLoadedPages]);
 
+  // Al ocultarse el modo, las páginas ya cargadas (y su cursor) se conservan pero dejan de ser vigentes:
+  // se marcan como previas. Al reactivarse, la primera lectura autoritativa de la cabecera (`readEpoch`
+  // mayor que el visto al volver) las vuelve a leer aunque la cabecera no haya cambiado.
+  const wasActiveRef = useRef(active);
+  const resumeEpochRef = useRef(null);
+  const headReadEpochRef = useRef(head.readEpoch);
+  headReadEpochRef.current = head.readEpoch;
+  useLayoutEffect(() => {
+    const wasActive = wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (active === wasActive) return;
+    if (!active) {
+      resumeEpochRef.current = null;
+      // Una lectura en vuelo al ocultarse se descarta: no debe sellar como vigentes páginas que Core no confirmó.
+      pageRequestRef.current = null;
+      pagingRequestActiveRef.current = false;
+      setPages((current) => (current.key !== pageKey || current.pageCount === 0
+        ? current
+        : { ...current, loading: false, stale: true, preserved: true }));
+      return;
+    }
+    resumeEpochRef.current = headReadEpochRef.current ?? 0;
+  }, [active, pageKey]);
+
+  useEffect(() => {
+    const resumeEpoch = resumeEpochRef.current;
+    if (!active || resumeEpoch == null || headFailed || !head.data || head.readEpoch <= resumeEpoch) return;
+    resumeEpochRef.current = null;
+    // Si la cabecera cambió, el efecto de versión ya está reconciliando.
+    if (pageRequestRef.current || pages.key !== pageKey || pages.pageCount === 0) return;
+    void reconcileLoadedPages(pages.pageCount, head.updatedAt);
+  }, [active, head.data, head.readEpoch, head.updatedAt, headFailed, pageKey, pages.key, pages.pageCount, reconcileLoadedPages]);
+
   // Con una cabecera stale/desconectada no se encadenan cursores de otra versión del Core.
   const canLoadMore = !headFailed
     && !currentPages.stale
     && (currentPages.pageCount > 0 ? currentPages.hasMore : Boolean(headCursor));
 
-  const hasData = Boolean(head.data);
+  const hasData = Boolean(headData);
   const hasMoreTasks = currentPages.pageCount > 0
     ? currentPages.hasMore
-    : Boolean(head.data?.has_more);
+    : Boolean(headData?.has_more);
   const taskSetSize = (headFailed || currentPages.stale || hasMoreTasks) ? -1 : tasks.length;
   const allStatusReadComplete = statusView.code === 'all'
+    && active
     && hasData
     && !headFailed
     && head.status !== 'refreshing'
@@ -689,6 +729,7 @@ function ProjectTasks({
         hasMore: page.has_more,
         loading: false,
         stale: false,
+        preserved: false,
         error: null,
       }));
     } catch (error) {
@@ -716,7 +757,8 @@ function ProjectTasks({
 
   useEffect(() => {
     if (
-      !pendingTaskId
+      !active
+      || !pendingTaskId
       || statusView.code !== 'all'
       || tasks.some((task) => task.id === pendingTaskId)
       || !canLoadMore
@@ -727,6 +769,7 @@ function ProjectTasks({
     ) return;
     void loadMore({ automatic: true });
   }, [
+    active,
     canLoadMore,
     currentPages.error,
     currentPages.loading,
@@ -803,7 +846,9 @@ function ProjectTasks({
       {currentPages.stale && (
         <div className="ps__state ps__state--stale" role="status" data-testid={`stale-task-pages-${projectId}`}>
           <span>
-            {headFailed
+            {currentPages.preserved
+              ? `Se conservan las Tasks cargadas de ${projectName} de la última lectura de Core; se vuelven a leer al confirmar los datos y pueden estar desactualizadas.`
+              : headFailed
               ? `Core no confirmó la cabecera de Tasks de ${projectName}. Se conservan las páginas adicionales de la última lectura correcta y pueden estar desactualizadas.`
               : `La primera página de ${projectName} se actualizó. Las páginas adicionales provienen de lecturas independientes anteriores y pueden tener estados o títulos desactualizados.`}
           </span>
@@ -1008,6 +1053,14 @@ export function ProjectsSidebar({
 
   const overview = useCoreQuery('projects_overview', { archived }, { enabled: active, pollMs });
   const projects = overview.data?.projects ?? [];
+  // Oculta la sección, `overview.data` es `null`. El árbol sigue montado con la última lista leída (inerte,
+  // sin consultar Core) para conservar nodos, filas cargadas y scroll; los snapshots publicados al host
+  // siguen saliendo de `projects`, que oculto queda vacío como antes.
+  const preservedOverviewRef = useRef(null);
+  if (overview.data) preservedOverviewRef.current = { archived, projects: overview.data.projects };
+  const treeProjects = projects.length > 0 || active || preservedOverviewRef.current?.archived !== archived
+    ? projects
+    : preservedOverviewRef.current.projects;
   const projectIds = useMemo(() => overview.data?.projects.map((project) => project.id) ?? EMPTY_PROJECT_IDS, [overview.data]);
 
   const registerItem = useCallback((key) => (node) => {
@@ -1365,14 +1418,14 @@ export function ProjectsSidebar({
 
       {isEmpty && <div className="ps__empty" role="status">No hay Projects registrados con este filtro del Core.</div>}
 
-      {projects.length > 0 && (
+      {treeProjects.length > 0 && (
         <ul
           className="ps__tree scroll"
           role="tree"
           aria-label="Projects y Tasks del Core"
           aria-busy={overview.status === 'refreshing'}
         >
-          {projects.map((project, index) => {
+          {treeProjects.map((project, index) => {
             const isExpanded = expanded.has(project.id);
             return (
               <ProjectRow
@@ -1382,7 +1435,7 @@ export function ProjectsSidebar({
                 selected={project.id === selected.projectId && !selected.taskId}
                 context={project.id === selected.projectId && Boolean(selected.taskId)}
                 position={index + 1}
-                setSize={projects.length}
+                setSize={treeProjects.length}
                 isActiveKey={projectKey(project.id) === effectiveActiveKey}
                 registerRef={registerItem}
                 onKeyDown={onTreeKeyDown}

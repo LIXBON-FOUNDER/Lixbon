@@ -39,12 +39,20 @@ const item = {
   id: 'task-uuid-1', run_id: 'run-1', parent_id: null, root_id: 'task-uuid-1', status: 'running',
   title: 'Task Real', provider: 'claude', model: null, created_at: 1, updated_at: 2,
 };
+const extraItem = {
+  ...item, id: 'task-uuid-2', root_id: 'task-uuid-2', title: 'Task Extra', created_at: 0,
+};
 const snap = {
   settings: { enabled: true }, lxo_exists: true, live: [], messages: [], runs: {}, tasks: {},
 };
-const coreQuery = async (query) => {
+const coreQuery = async (query, args) => {
   if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
-  if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [item], has_more: false, next_cursor: null };
+  // La cabecera anuncia otra página (has_more) y el cursor devuelve la extra: el sidebar real puede paginar.
+  if (query === 'tasks_by_project') {
+    return args?.cursor
+      ? { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [extraItem], has_more: false, next_cursor: null }
+      : { v: 1, project_id: project.id, filters: { status: 'active' }, limit: 50, tasks: [item], has_more: true, next_cursor: 'cursor-1' };
+  }
   if (query === 'attention_list') return { v: 1, items: [], next_cursor: null, has_more: false, limit: 100 };
   if (query === 'task_detail') return { v: 1, task: { ...item, project_id: project.id, child_ids: [], phase: null, messages: [], cwd: '', branch: null, worktree: null, merged: false, review: null, integration: null } };
   throw new Error(`Query no permitida en fixture: ${query}`);
@@ -128,15 +136,25 @@ describe('AppShell · modo Orquestador (ADE) al cambiar de modo', () => {
     expect(screen.getByRole('tab', { name: 'Attention' }).getAttribute('aria-selected')).toBe('true');
     taskRow.focus();
     expect(document.activeElement).toBe(taskRow);
-    const scroller = document.querySelector('.ade__nav-content');
+    // Segunda página del Project: el cursor y las filas extra deben sobrevivir al cambio de modo.
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Cargar más Tasks de Repo Real' }));
+    await treeitem(sidebar, 'data-task-id', extraItem.id);
+    // El scroller real del sidebar es el árbol (`.ps__tree`), no el contenedor de navegación.
+    const scroller = sidebar.querySelector('.ps__tree');
     scroller.scrollTop = 37;
     fireEvent.scroll(scroller);
 
     await setMode('editor');
-    // Lo que haría el navegador al ocultar: el foco queda vacante y la lista vacía recorta el scroll.
+    const hiddenCalls = coreCalls();
+    // Lo que haría el navegador al ocultar: el foco queda vacante y `display: none` pierde el scroll.
     taskRow.blur();
     scroller.scrollTop = 0;
     fireEvent.scroll(scroller);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    // Oculto, el árbol y las páginas cargadas siguen montados y Core no se consulta.
+    expect(scroller.isConnected).toBe(true);
+    expect(orchHost().querySelectorAll('li[data-task-id]')).toHaveLength(2);
+    expect(coreCalls()).toBe(hiddenCalls);
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: project.id, taskId: item.id });
 
     await setMode('orch');
@@ -145,7 +163,15 @@ describe('AppShell · modo Orquestador (ADE) al cambiar de modo', () => {
     const returned = await screen.findByRole('region', { name: 'Projects y Tasks' });
     const returnedRow = await treeitem(returned, 'data-task-id', item.id);
     expect(returnedRow.getAttribute('aria-selected')).toBe('true');
+    expect(returned.querySelector('.ps__tree')).toBe(scroller);
+    expect(await treeitem(returned, 'data-task-id', extraItem.id)).toBeTruthy();
     await waitFor(() => expect(scroller.scrollTop).toBe(37));
+    // La autoridad llega de Core: las páginas se releen y dejan de estar marcadas como previas.
+    await waitFor(() => expect(coreCalls()).toBeGreaterThan(hiddenCalls));
+    await waitFor(() => expect(returned.querySelector('[data-testid="stale-task-pages-project-uuid-1"]')).toBeNull());
+    expect(returned.querySelector('li[data-task-id="task-uuid-2"]')).toBeTruthy();
+    expect(returned.querySelector('.ps__tree')).toBe(scroller);
+    expect(scroller.scrollTop).toBe(37);
     await waitFor(() => expect(document.activeElement?.getAttribute('data-task-id')).toBe(item.id));
   });
 
