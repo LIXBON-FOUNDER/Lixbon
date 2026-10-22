@@ -82,6 +82,10 @@ transacción; el evento lo construye `task_ops` con un closure puro que recibe l
 
 Lecturas: `task_row`, `run_row`, `tasks_of_run`, `tasks_of_project(include_discarded)`, `task_children`.
 
+**Desde LXO-114** ([`ATTEMPTS.md`](ATTEMPTS.md)): una Task con un Attempt **activo** no se descarta (`task_set_discarded_recorded`
+y un trigger de la 008; se cancela antes) y una Task con **cualquier** Attempt no se borra (`task_remove_recorded`): su
+historia se conserva descartándola.
+
 ## Quién puede (`orch/task_ops.rs`)
 
 | Operación | Persona | Agente (su Task) | Sistema |

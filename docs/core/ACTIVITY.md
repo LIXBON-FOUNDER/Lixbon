@@ -75,6 +75,13 @@ no son del tipo esperado, el item cae al respaldo.
 | `task.created` **v2** (Task como intención, LXO-113) | `activity.task.intent_created` | `title`, `parent?`, `depth` | info |
 | `task.updated` | `activity.task.updated` | `changed` (lista ⊆ `title` `spec`), `title?` | info |
 | `task.discarded` · `task.restored` | `activity.task.discarded` / `.restored` | — | warning / info |
+| `attempt.requested` (LXO-114) | `activity.attempt.requested` | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | info |
+| `attempt.approved` | `activity.attempt.approved` | `task`, `n` | success |
+| `attempt.rejected` | `activity.attempt.rejected` | `task`, `n`, `cause` ∈ `cancelled` `run_closed` | warning |
+| `attempt.started` | `activity.attempt.started` | `task`, `n` | info |
+| `attempt.completed` | `activity.attempt.completed` | `task`, `n`, `has_summary` | success |
+| `attempt.failed` | `activity.attempt.failed` | `task`, `n`, `reason` ∈ `launch_failed` `terminal_approval_timeout` `agent_idle_timeout` `agent_reported`, `has_summary` | error |
+| `attempt.stopped` | `activity.attempt.stopped` | `task`, `n`, `from` ∈ `starting` `running` `waiting` `awaiting_terminal_approval`, `cause` ∈ `cancelled` `run_closed` | warning |
 | `decision.recorded` · `review` | `activity.decision.review.accepted` / `.rejected` | `decision_id`, `has_comment` | success / warning |
 | `decision.recorded` · `merge` | `activity.decision.merge.merged` / `.conflict` / `.error` / `.target_moved` | `decision_id`, `branch`, `squash`, `conflict_count?` | success / error / error / warning |
 | `decision.recorded` · `pr` | `activity.decision.pr.created` / `.already_exists` / `.error` | `decision_id`, `branch`, `has_pr_url` | success / info / error |
