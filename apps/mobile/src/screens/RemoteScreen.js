@@ -24,6 +24,7 @@ import { markdownRules, markdownStyles } from '../components/markdown';
 import { AgentMark, ChatHeader, FadeUp, IconButton, KeyboardAware, Segmented, SkeletonLines, agentStyle, useColors, useKeyboardOpen, useReducedMotion, useScale } from '../components/ui';
 import { initialRemoteState, keepStreamAlive, openEventStream, remoteReducer } from '../remote';
 import { openRemoteSocket } from '../remoteSocket';
+import { useCoreBootstrap } from '../observe/useCoreBootstrap';
 import { agentOf } from '../remoteSessions';
 import { buildBlocks, changedTurns, contextLevels, diffLines, fmtSecs, fmtTokens, toolState } from '../remoteTurns';
 import { useApi, useAuth } from '../state';
@@ -215,8 +216,11 @@ function RemoteSessionView({ session, onBack, onUsage }) {
     setOverlayState(next);
   }, []);
 
+  // Respuestas del bootstrap del Core (LXO-107): no son transcript y no pasan por el reducer.
+  const coreEventRef = useRef(null);
   const onRemoteEvent = useCallback((ev) => {
     if (typeof ev.seq === 'number' && ev.type !== 'channel_status') seqRef.current = Math.max(seqRef.current, ev.seq);
+    if (coreEventRef.current?.(ev)) return;
     dispatch(ev);
   }, []);
 
@@ -312,6 +316,33 @@ function RemoteSessionView({ session, onBack, onUsage }) {
     },
     [api, session.id, toast],
   );
+
+  // Bootstrap observacional del Core (LXO-107): el acuse se devuelve tal cual (con su estado HTTP) para
+  // distinguir IDE desconectado, sesión no autorizada y gateway anterior.
+  const sendCoreCommand = useCallback(
+    async (command) => {
+      const socket = socketRef.current;
+      if (socket) {
+        const res = await socket.send(command);
+        return res.retry ? { ok: false } : res;
+      }
+      try {
+        await api.post(`/api/remote/sessions/${session.id}/commands`, command);
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, status: err instanceof ApiException ? err.status : undefined };
+      }
+    },
+    [api, session.id],
+  );
+  const core = useCoreBootstrap({
+    sessionId: session.id,
+    send: sendCoreCommand,
+    transportOpen: link === 'open',
+    hostConnected: state.hostConnected,
+    capabilities: state.meta?.capabilities,
+  });
+  coreEventRef.current = core.handleEvent;
 
   // @archivo: el host busca en su workspace y responde con un evento `files`.
   const mentionQuery = useMemo(() => {
@@ -541,7 +572,7 @@ function RemoteSessionView({ session, onBack, onUsage }) {
 
         <View style={{ flex: 1 }}>
           {canOrch && tab === 'orch' ? (
-            <RemoteOrch state={state} sendCommand={sendCommand} />
+            <RemoteOrch state={state} sendCommand={sendCommand} core={core} />
           ) : tab === 'changes' ? (
             <ChangesView changes={changes} open={open} toggle={toggle} />
           ) : state.items.length === 0 ? (

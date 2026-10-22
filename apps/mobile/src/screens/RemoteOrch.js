@@ -13,6 +13,7 @@ import ShimmerText from '../components/ShimmerText';
 import { useDialogs } from '../components/dialogs';
 import { Eyebrow, FadeUp, IconButton, PillButton, Row, Section, Segmented, Toggle, useColors } from '../components/ui';
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
+import { coreStatusLabel } from '../observe/status';
 
 const FINAL = ['done', 'failed', 'stopped', 'exited'];
 const isFinal = (st) => FINAL.includes(st);
@@ -515,7 +516,23 @@ function Settings({ state, send, onBack }) {
 
 // ── Vista ───────────────────────────────────────────────────────────────────
 
-export default function RemoteOrch({ state, sendCommand }) {
+/** Indicador mínimo del bootstrap del Core (LXO-107); la UX completa de conexión es LXO-111. */
+function CoreStatus({ core }) {
+  const c = useColors();
+  const now = useNow(core?.state?.status === 'stale', 30000);
+  const label = coreStatusLabel(core?.state, now);
+  if (!label) return null;
+  const dot = { ok: c.ok, warn: c.warn, error: c.danger, muted: c.inkFaint }[label.tone];
+  return (
+    <View accessibilityRole="text" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36, paddingHorizontal: 4 }}>
+      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: dot }} />
+      <Text style={{ flex: 1, fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }} numberOfLines={2}>{label.text}</Text>
+      {label.retry && <PillButton size="sm" outline icon="refresh" label="Reintentar" onPress={core.retry} />}
+    </View>
+  );
+}
+
+export default function RemoteOrch({ state, sendCommand, core }) {
   const c = useColors();
   const { toast } = useDialogs();
   const [view, setView] = useState('runs');
@@ -567,6 +584,7 @@ export default function RemoteOrch({ state, sendCommand }) {
 
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+      <CoreStatus core={core} />
       {body}
     </ScrollView>
   );

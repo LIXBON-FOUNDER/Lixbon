@@ -10,6 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { DEFAULT_COLS, ptyCols } from './orchTermSize';
 import { useOrchStore, prepareOrchestrate } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
+import { handleCoreAction } from './remoteCore';
 
 const RUNS = 12;
 const MESSAGES = 150;
@@ -191,6 +192,13 @@ export async function handleOrchAction(action, args = {}) {
             models: (a.models || []).slice(0, 60).map((m) => m.id), efforts: a.efforts || [],
           })),
         });
+        return;
+      }
+      case 'core_snapshot':
+      case 'core_events': {
+        // Bootstrap observacional de Mobile (LXO-107): lectura del Core con la identidad del IDE.
+        const out = await handleCoreAction(action, args, (cmd, a) => invoke('orch_call', { cmd, args: a }));
+        emitFn?.(out.type, out.fields);
         return;
       }
       default:
