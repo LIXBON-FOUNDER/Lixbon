@@ -57,6 +57,7 @@ func Interactive(ctx context.Context, stdout, stderr io.Writer, configPath strin
 		Notes:       notes,
 
 		UpdateNotice: updateNotice(cfg, configPath),
+		CoreSummary:  coreSummary(cfg, configPath),
 	})
 	// Sin sesión de lixbon.com se abre la pantalla de login; Esc la cierra y
 	// deja el chat sin sesión, desde donde /provider sigue funcionando.
