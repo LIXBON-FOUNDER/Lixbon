@@ -228,6 +228,9 @@ describe('JumpPaletteHost · lecturas', () => {
     render(<Harness onNavigate={vi.fn()} />);
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('No se pudieron leer los resultados de Core');
+    expect(alert.textContent).not.toContain('read_failed');
+    expect(alert.textContent).not.toContain('fixture');
+    expect(document.body.textContent).not.toContain('projects_overview');
 
     core();
     fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }));
