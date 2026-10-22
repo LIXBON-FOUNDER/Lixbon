@@ -28,6 +28,7 @@ import { WorktreeEnv } from './spawn/WorktreeEnv';
 import { roleName } from './agent/agentIdentity';
 import { AttentionList } from './AttentionList';
 
+const NO_SPAWNS = [];
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
 const ago = (ms) => {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -62,6 +63,7 @@ function useNow(active, ms = 5000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!active) return undefined;
+    setNow(Date.now()); // al reactivarse tras una pausa (modo oculto) no espera al primer tick
     const t = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(t);
   }, [active, ms]);
@@ -275,13 +277,13 @@ function DiffTab({ task }) {
   );
 }
 
-function TaskView({ task, snap, intent, terminalVisible = true }) {
+function TaskView({ task, snap, intent, terminalVisible = true, modeActive = true }) {
   const call = useOrchStore((s) => s.call);
   const [tab, setTab] = useState(task.parent && intent !== ATTENTION.review && intent !== ATTENTION.integrate ? 'term' : 'activity');
   const live = snap.live.includes(task.id);
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
-  const now = useNow(!final, 1000);
+  const now = useNow(!final && modeActive, 1000);
   // Regla única en ./canIntegrate.js.
   const canIntegrate = canIntegrateTask(task);
   const [integrating, setIntegrating] = useState(intent === ATTENTION.integrate);
@@ -289,7 +291,7 @@ function TaskView({ task, snap, intent, terminalVisible = true }) {
   const canReview = Boolean(task.parent && task.status === 'done' && task.branch);
   const [reviewing, setReviewing] = useState(intent === ATTENTION.review);
   // orch-task-reviewed: refresca la snapshot para que last_review (y con él Integrar) se actualice.
-  useEffect(() => subscribeTaskReviewed(() => useOrchStore.getState().refresh()), []);
+  useEffect(() => (modeActive ? subscribeTaskReviewed(() => useOrchStore.getState().refresh()) : undefined), [modeActive]);
 
   useEffect(() => { if (!task.branch && tab === 'diff') setTab('term'); }, [task.id, task.branch, tab]);
 
@@ -346,7 +348,8 @@ function TaskView({ task, snap, intent, terminalVisible = true }) {
         </div>
       )}
       <div className="orch__body">
-        {tab === 'term' && task.parent && <AgentTerminal key={task.id} task={task.id} live={live} visible={terminalVisible} />}
+        {/* Oculto el modo, la terminal se desmonta: el PTY vive en Rust y al volver repone su buffer. */}
+        {tab === 'term' && task.parent && modeActive && <AgentTerminal key={task.id} task={task.id} live={live} visible={terminalVisible} />}
         {tab === 'activity' && <Activity task={task} messages={snap.messages} tasks={snap.tasks} />}
         {tab === 'diff' && <DiffTab task={task} />}
       </div>
@@ -384,7 +387,9 @@ function SnapshotFailure({ error, refreshing, onRetry, stale = false }) {
   );
 }
 
-export function OrchestratorMode() {
+/** `modeActive`: el modo Orquestador es el visible. Oculto (AppShell lo retiene montado) no consulta,
+    no sondea ni escucha nada propio; el estado local y los stores se conservan. */
+export function OrchestratorMode({ modeActive = true }) {
   const open = useWorkbenchStore((s) => s.modePanels.orch?.left ?? true);
   const rightOpen = useWorkbenchStore((s) => s.modePanels.orch?.right ?? true);
   const adeRightOpen = useWorkbenchStore((s) => s.modePanels.orch?.adeRight ?? true);
@@ -433,7 +438,9 @@ export function OrchestratorMode() {
   const anyLive = useMemo(() => Object.values(snap?.tasks || {}).some((t) => !isFinal(t.status)), [snap]);
   // Cuenta atrás de la aprobación en terminal: refresco por segundo solo mientras alguna espera.
   const anyAwaiting = useMemo(() => Object.values(snap?.tasks || {}).some(isAwaitingTerminalApproval), [snap]);
-  const now = useNow(anyLive, anyAwaiting ? 1000 : 5000);
+  const now = useNow(anyLive && modeActive, anyAwaiting ? 1000 : 5000);
+  // Sin lista visible no corre la cuenta atrás; la suscripción de usePendingSpawns sigue viva para no dejar pendientes rancios.
+  const listedSpawns = modeActive ? spawns.items : NO_SPAWNS;
 
   if (!snap) {
     return (
@@ -471,7 +478,7 @@ export function OrchestratorMode() {
     <section className="ade__nav-section orch__operation-nav" aria-label="Operación">
       <div className="ade__nav-section-head"><span>Operación</span><span className="ade__source">Runs</span></div>
       <SpawnNotice notice={spawns.notice} onClose={spawns.clearNotice} />
-      <PendingSpawnList items={spawns.items} selected={!adeActive ? pendingItem?.pending_id ?? null : null} onSelect={pickPendingSpawn} tasks={snap.tasks} />
+      <PendingSpawnList items={listedSpawns} selected={!adeActive ? pendingItem?.pending_id ?? null : null} onSelect={pickPendingSpawn} tasks={snap.tasks} />
       <AttentionList items={attention} selected={!adeActive && !pendingItem ? selected : null} onSelect={pickTask} />
       <div className="orch__runs scroll">
         {!runs.length && <div className="changes__empty">Todavía no hay runs en este repositorio. Escribe /orquestar &lt;objetivo&gt; en el chat.</div>}
@@ -508,9 +515,9 @@ export function OrchestratorMode() {
       <Panel id="orchmain" className="wb__grow orch__main">
         {pendingItem
           ? <PendingSpawnDetail key={pendingItem.pending_id} item={pendingItem} busy={spawns.busy.has(pendingItem.pending_id)} error={spawns.errors[pendingItem.pending_id]} onApprove={spawns.approve} onReject={spawns.reject} />
-          : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} terminalVisible={!adeActive} /> : <HowTo />}
+          : task ? <TaskView key={`${task.id}:${intent}`} task={task} snap={snap} intent={intent} terminalVisible={!adeActive} modeActive={modeActive} /> : <HowTo />}
       </Panel>
-      <RightDock open={rightOpen} visible={!adeActive} keepMountedWhenHidden={adeActive}>
+      <RightDock open={rightOpen} visible={!adeActive && modeActive} keepMountedWhenHidden={adeActive || !modeActive}>
         <AgentPanel onClose={toggleAgent} />
       </RightDock>
     </>
@@ -521,6 +528,7 @@ export function OrchestratorMode() {
       {snapshotError && <SnapshotFailure error={snapshotError} refreshing={snapshotRefreshing} onRetry={refresh} stale />}
       <AdeShell
         active={adeActive}
+        modeActive={modeActive}
         leftOpen={open}
         rightOpen={adeRightOpen}
         drawerOpen={adeDrawer}

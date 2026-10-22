@@ -1,8 +1,10 @@
 // AppShell.jsx — cuerpo del IDE: el modo activo (Agente, Editor, Diseño, Git),
 // la barra de estado y las capas flotantes (paleta, Quick Open, ajustes…).
 // El modo Editor se queda montado siempre: ahí viven los PTY del terminal y el
-// estado de CodeMirror, que se perderían al desmontarlo.
-import { useEffect, useRef, useState } from 'react';
+// estado de CodeMirror, que se perderían al desmontarlo. El Orquestador (ADE)
+// se queda montado tras su primera visita, oculto e inerte, para conservar su
+// vista, filtros, scroll y foco; mientras está oculto no consulta ni sondea.
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useGitStore } from '../store/gitStore';
 import { useChatStore } from '../store/chatStore';
@@ -32,6 +34,108 @@ import { useVersion } from '../hooks/useVersion';
 import { registerBuiltinCommands } from '../commands/builtin';
 import { dispatchKeydown } from '../lib/keymap';
 
+const ID_ATTRIBUTES = ['data-project-id', 'data-task-id', 'data-attention-id'];
+const quoteAttr = (value) => `"${String(value).replace(/["\\]/g, '\\$&')}"`;
+
+/** Firma de un elemento con foco: React recrea nodos al vaciarse las listas ocultas, así que se
+    guarda con qué IDs durables volver a encontrarlo. */
+function focusSignature(el) {
+  const ids = ID_ATTRIBUTES.filter((name) => el.hasAttribute(name));
+  return { node: el, id: el.id || null, role: el.getAttribute('role'), tag: el.tagName.toLowerCase(), ids: ids.map((name) => [name, el.getAttribute(name)]) };
+}
+
+function resolveFocus(signature, host) {
+  if (!signature || !host) return null;
+  if (signature.node.isConnected && host.contains(signature.node)) return signature.node;
+  if (signature.id) {
+    const byId = document.getElementById(signature.id);
+    return byId && host.contains(byId) ? byId : null;
+  }
+  if (!signature.ids.length) return null;
+  let selector = signature.tag;
+  if (signature.role) selector += `[role=${quoteAttr(signature.role)}]`;
+  for (const [name, value] of signature.ids) selector += `[${name}=${quoteAttr(value)}]`;
+  for (const name of ID_ATTRIBUTES) {
+    if (!signature.ids.some(([present]) => present === name)) selector += `:not([${name}])`;
+  }
+  return host.querySelector(selector);
+}
+
+// Las listas ocultas se rellenan de nuevo desde la última foto de Core y las filas por Project tardan
+// algo más: el scroll y el foco se reintentan en esta ventana, salvo que la persona interactúe antes.
+const SETTLE_DELAYS = [0, 60, 150, 300, 600];
+
+/** Mantiene un modo montado pero fuera de juego mientras no es el activo: `inert` + `aria-hidden`
+    (sin foco ni teclado) y `visibility: hidden` en una caja que conserva su tamaño, de modo que el
+    scroll no se pierde. Al volver restaura el scroll y, solo si el foco está vacante, el foco. */
+function RetainedMode({ active, name, children }) {
+  const hostRef = useRef(null);
+  const activeRef = useRef(active);
+  const settling = useRef(false);
+  const scrolls = useRef(new Map());
+  const lastFocus = useRef(null);
+
+  useLayoutEffect(() => {
+    const wasActive = activeRef.current;
+    activeRef.current = active;
+    if (!active || wasActive) return undefined;
+    const host = hostRef.current;
+    let focusDone = false;
+    const attempt = () => {
+      for (const [el, top] of scrolls.current) {
+        if (!el.isConnected) scrolls.current.delete(el);
+        else if (el.scrollTop !== top) el.scrollTop = top;
+      }
+      if (focusDone) return;
+      // Si la persona ya movió el foco a otro sitio, no se le quita.
+      const current = document.activeElement;
+      if (current && current !== document.body && current !== document.documentElement) { focusDone = true; return; }
+      const target = resolveFocus(lastFocus.current, host);
+      if (!target) return;
+      target.focus({ preventScroll: true });
+      focusDone = document.activeElement === target;
+    };
+    const timers = [];
+    const finish = () => {
+      timers.forEach(clearTimeout);
+      host.removeEventListener('wheel', finish);
+      host.removeEventListener('keydown', finish);
+      host.removeEventListener('pointerdown', finish);
+      settling.current = false;
+    };
+    settling.current = true;
+    attempt();
+    SETTLE_DELAYS.forEach((delay, index) => {
+      timers.push(setTimeout(() => {
+        attempt();
+        if (index === SETTLE_DELAYS.length - 1) finish();
+      }, delay));
+    });
+    host.addEventListener('wheel', finish);
+    host.addEventListener('keydown', finish);
+    host.addEventListener('pointerdown', finish);
+    return finish;
+  }, [active]);
+
+  return (
+    <div
+      ref={hostRef}
+      data-retained-mode={name}
+      data-retained-state={active ? 'active' : 'hidden'}
+      aria-hidden={!active}
+      inert={!active}
+      style={active ? { display: 'contents' } : { position: 'absolute', inset: 0, display: 'flex', visibility: 'hidden', pointerEvents: 'none' }}
+      onScrollCapture={(e) => {
+        // Solo con el modo visible y asentado: vaciar una lista oculta o rellenarla recorta el scroll y eso no es de la persona.
+        if (activeRef.current && !settling.current && e.target instanceof Element) scrolls.current.set(e.target, e.target.scrollTop);
+      }}
+      onFocus={(e) => { if (activeRef.current) lastFocus.current = focusSignature(e.target); }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function AppShell() {
   const {
     diffData, serverUrl, quickOpen, commandPalette, workspaceRoot, workspaceReady,
@@ -41,6 +145,9 @@ export function AppShell() {
   const page = useWorkbenchStore((s) => s.page);
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate, error: updateError } = useVersion();
   const [skipWelcome, setSkipWelcome] = useState(false);
+  // El Orquestador se monta en la primera visita y ya no se desmonta al cambiar de modo.
+  const [orchRetained, setOrchRetained] = useState(mode === 'orch');
+  if (mode === 'orch' && !orchRetained) setOrchRetained(true);
   useAvisoFlotante(); // la mascota sobre otras apps cuando el agente termina
 
   useEffect(() => {
@@ -104,7 +211,11 @@ export function AppShell() {
             {mode === 'agent' && <AgentMode />}
             {mode === 'design' && <DesignMode />}
             {mode === 'git' && <GitMode />}
-            {mode === 'orch' && <OrchestratorMode />}
+            {orchRetained && (
+              <RetainedMode active={mode === 'orch'} name="orch">
+                <OrchestratorMode modeActive={mode === 'orch'} />
+              </RetainedMode>
+            )}
           </>
         )}
       </div>
