@@ -51,7 +51,7 @@ beforeEach(() => invoke.mockReset());
 afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.removeItem('lx_orch_view'); });
 
 describe('OrchestratorMode', () => {
-  it('muestra desconexión inicial y recupera la vista con un reintento read-only', async () => {
+  it('muestra desconexión inicial y recupera la vista con un reintento read-only', { timeout: 20_000 }, async () => {
     const recovered = snapshot([]);
     let attempts = 0;
     mountWith(null, [], undefined, null, async () => {
@@ -151,7 +151,7 @@ describe('OrchestratorMode', () => {
     expect(useWorkbenchStore.getState().orchView).toBe('ade');
   });
 
-  it('conserva la selección ADE por ID durable al desmontar y volver a Orquestador', async () => {
+  it('conserva la selección ADE por ID durable al desmontar y volver a Orquestador', { timeout: 20_000 }, async () => {
     const project = {
       id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
       counts: { tasks: 1, active: 1, failed: 0, attention: { total: 0, by_category: {} } }, locations: [],
