@@ -141,7 +141,7 @@ El orden de bloqueo `estado -> almacén` es el de todo el Core; esta query no lo
     raíz seguida de sus hijas, por `created_at` y luego `id`, con la profundidad calculada. Los filtros
     `--active`, `--final`, `--status` y `--run` se aplican sobre ese árbol.
   * `lxo task show <id o nombre>` busca la Task con `task_detail` en cada Project. Si ningún Project tiene una
-    Task con ese id, la busca por título entre las de `tasks_by_project`, sin distinguir mayúsculas: primero el
+    Task con ese id, la busca por título entre las de `tasks_by_project`, sin distinguir mayúsculas ni acentos: primero el
     título exacto y, si no hay, el que contiene el texto. Si encajan varias, sale con 2 y enumera sus ids; las
     palabras sueltas se juntan, así que un nombre con espacios no necesita comillas. Añade los últimos 10 items de
     `activity_list` (`target_kind: task`), traducidos con las mismas frases que Desktop
