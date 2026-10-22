@@ -21,12 +21,12 @@ import AuthScreen from './src/screens/AuthScreen';
 import ChatScreen from './src/screens/ChatScreen';
 import RemoteScreen from './src/screens/RemoteScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
-import SupervisionScreen from './src/screens/SupervisionScreen';
+import ObserveScreen from './src/screens/ObserveScreen';
 import UsageScreen from './src/screens/UsageScreen';
 import { onRemoteNotificationTap } from './src/push';
 import { shareConversation } from './src/share';
 import { useRemoteSessions } from './src/remoteSessions';
-import { useSupervision } from './src/supervision/useSupervision';
+import { useObserve } from './src/observe/useObserve';
 import { AppState, useApi, useAuth, useChat, usePrefs } from './src/state';
 import { ACCENTS, FONTS, MOTION } from './src/theme';
 
@@ -107,7 +107,7 @@ function useCommands({ setSection, pushScreen, pickModel, openRemote, supervise 
       chat.messages.length > 0 && { id: 'share', title: 'Compartir conversación (Markdown)', category: 'chat', icon: 'share', run: () => shareConversation(chat.title, chat.messages) },
       { id: 'go.chat', title: 'Ir al chat', category: 'ir a', icon: 'chat', run: () => setSection('chat') },
       { id: 'go.remote', title: 'Ir a Remoto', category: 'ir a', icon: 'activity', keywords: 'ide cli sesiones', run: openRemote },
-      supervise && { id: 'go.supervise', title: 'Ir a Supervisar (prototipo)', category: 'ir a', icon: 'eye', keywords: 'atención aprobar revisar hosts', run: () => setSection('supervise') },
+      supervise && { id: 'go.supervise', title: 'Ir a Supervisar', category: 'ir a', icon: 'eye', keywords: 'atención proyectos tareas hosts', run: () => setSection('supervise') },
       { id: 'go.usage', title: 'Uso y límites', category: 'ir a', icon: 'chart', run: () => pushScreen('usage') },
       { id: 'go.settings', title: 'Ajustes', category: 'ir a', icon: 'gear', keywords: 'cuenta perfil', run: () => pushScreen('settings') },
       { id: 'go.appearance', title: 'Personalizar la interfaz', category: 'apariencia', icon: 'palette', keywords: 'tema color acento', run: () => pushScreen('appearance') },
@@ -151,8 +151,8 @@ function HomeShell() {
   const [remoteToken, setRemoteToken] = useState(null);
   const [remoteSession, setRemoteSession] = useState(null);
   const remote = useRemoteSessions();
-  // El prototipo de supervisión solo aparece en desarrollo o si se activa en
-  // Ajustes › Desarrolladores: usa datos de ejemplo, no los del usuario.
+  // Supervisar (datos reales del Core desde F2) sigue tras la misma puerta que el prototipo: desarrollo o
+  // Ajustes › Desarrolladores, hasta validarlo en dispositivo y decidir su lanzamiento.
   const supervise = __DEV__ || prefs.ui.labs;
   useEffect(() => {
     if (!supervise && section === 'supervise') setSection('chat');
@@ -164,8 +164,9 @@ function HomeShell() {
   // Entra deslizándose 40px mientras aparece, como en el diseño: un recorrido
   // corto y lento se siente más calmado que cruzar toda la pantalla.
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const sup = useSupervision(supervise && (section === 'supervise' || drawerOpen));
-  const { stack: supStack, pop: supPop } = sup;
+  // Supervisar con datos reales del Core (F2): conecta con el IDE solo mientras se ve la sección o el menú.
+  const obs = useObserve({ sessions: remote.sessions, active: supervise && (section === 'supervise' || drawerOpen) });
+  const { stack: supStack, pop: supPop } = obs;
   const drawer = useRef(new Animated.Value(0)).current;
 
   const animateDrawer = useCallback(
@@ -338,7 +339,7 @@ function HomeShell() {
         />
       )}
 
-      {section === 'supervise' && <SupervisionScreen sup={sup} onMenu={openDrawer} />}
+      {section === 'supervise' && <ObserveScreen obs={obs} onMenu={openDrawer} />}
 
       {top != null && (
         <Animated.View
@@ -388,7 +389,7 @@ function HomeShell() {
               onSearch={openSearch}
               remote={remote}
               activeRemoteId={remoteSession?.id}
-              supervision={supervise ? sup : null}
+              supervision={supervise ? obs : null}
               onOpenSession={(sx) => {
                 setSection('remote');
                 setRemoteSession(sx);
