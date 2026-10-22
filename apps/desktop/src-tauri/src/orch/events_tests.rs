@@ -629,9 +629,9 @@ fn solo_store_events_escribe_en_la_tabla_y_solo_la_frontera_de_mutacion_emite() 
         (".push_event(", &[]),
         (".try_push_event(", &["tx_ops.rs"]),
         ("fn push_event(", &["mutation.rs"]),
-        // Los borradores se finalizan en la frontera de mutación y, para el nacimiento de un Project (que no vive en
-        // `State`), en `project_ops.rs`, que entrega el `NewEvent` al almacén.
-        ("finalize_all(", &["mutation.rs", "events.rs", "project_ops.rs"]),
+        // Los borradores se finalizan en la frontera de mutación y, para lo que no vive en `State` (el registro de
+        // proyectos y la Task como intención), en `project_ops.rs` y `task_ops.rs`, que entregan el `NewEvent` al almacén.
+        ("finalize_all(", &["mutation.rs", "events.rs", "project_ops.rs", "task_ops.rs"]),
         // Solo el catálogo (`event_kinds.rs`) define contratos y construye borradores de dominio.
         ("impl EventPayload for", &["event_kinds.rs"]),
         ("EventDraft::new", &["events.rs", "event_kinds.rs"]),

@@ -9,6 +9,13 @@ mod agents;
 mod attention_rules;
 mod attention_read;
 mod projects_overview;
+mod activity_format;
+mod activity_read;
+mod tasks_read;
+#[cfg(test)]
+mod tasks_read_tests;
+mod resource_git;
+mod resource_inventory;
 mod attention_action;
 mod authority;
 mod boot_authority;
@@ -37,6 +44,10 @@ mod attention_read_tests;
 #[cfg(test)]
 mod projects_overview_tests;
 #[cfg(test)]
+mod activity_tests;
+#[cfg(test)]
+mod resource_tests;
+#[cfg(test)]
 mod attention_action_tests;
 #[cfg(test)]
 mod attention_rules_tests;
@@ -52,6 +63,12 @@ mod spawn_blocked_tests;
 mod hardening_tests;
 mod projects;
 mod project_ops;
+mod task_ops;
+mod attempt_ops;
+#[cfg(test)]
+mod attempt_ops_tests;
+#[cfg(test)]
+mod task_ops_tests;
 #[cfg(test)]
 mod projects_tests;
 #[cfg(test)]
