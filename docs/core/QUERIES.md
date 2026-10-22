@@ -452,6 +452,8 @@ que se lee en una única instantánea. Por eso Tasks, Attention y `cursor.events
 Un cliente que reconecta puede seguir desde su último cursor o pedir otra snapshot; la snapshot no sustituye al
 Event Log para lo que pase después.
 
+Mobile la consume por la sesión `/remote` a través del IDE: ver [MOBILE_BOOTSTRAP.md](MOBILE_BOOTSTRAP.md) (LXO-107).
+
 ### Cliente de terminal: `lxo summary` (LXO-106)
 
 `lxo summary [--json]` lee la snapshot como **Person** (con la credencial CLI del almacén seguro, como `lxo projects`)
