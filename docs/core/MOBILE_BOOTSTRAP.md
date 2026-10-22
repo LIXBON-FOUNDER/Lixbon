@@ -67,6 +67,28 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 * **Cursor ajeno** (`invalid_cursor`, `cursor_ahead`, por ejemplo una base nueva): se borra la caché y se
   pide otra snapshot.
 
+## UX de conexión (LXO-111)
+
+`apps/mobile/src/observe/connection.js` traduce el estado del bootstrap, el socket con el gateway y la
+presencia del IDE a un banner (`ConnectionBanner.js`). Las tres capas no se mezclan:
+
+| Banner | Cuándo | Reintentar |
+|---|---|---|
+| En línea | sincronizado hace < 60 s, con socket y con el IDE conectado | — |
+| Conectando… | primera conexión sin datos | — |
+| Datos guardados | hay caché y se está conectando o actualizando | sí, cuando ya conectó |
+| Reconectando… | el socket se rehace; lo visible es de la última sincronización | — |
+| Desactualizado | la última sincronización es vieja (por ejemplo, al volver de segundo plano) | sí |
+| IDE desconectado / Sin conexión | sin el IDE en su sesión, sin servidor o el Core sin almacén | sí |
+| Sesión no autorizada | 401/403 del gateway o `*_auth_required` del Core | sí |
+| Versiones incompatibles | capability, acción, protocolo o `snapshot_version` | sí |
+
+* Cada aviso dice qué hacer y la hora de la última sincronización. Debajo va un código de diagnóstico estable
+  (`host_offline`, `unsupported_action`…), nunca mensajes ni rutas.
+* Offline y desactualizado no usan el rojo de los fallos: eso queda para autorización y versión.
+* `actionGate(view)` solo permite mandar una acción con el banner «En línea». F2 no tiene acciones; la
+  puerta queda para las futuras, que no podrán aparentar éxito sin conexión.
+
 ## Caché
 
 `apps/mobile/src/observe/cache.js`: la última snapshot y su cursor, en AsyncStorage

@@ -18,12 +18,13 @@ const log = (code, fields) => {
 };
 
 /**
+ * - `enabled`: si es `false` no se conecta nada (sección oculta o sin IDE); por defecto `true`.
  * - `sessionId`: la sesión /remote (clave de la caché).
  * - `send(command)`: entrega un comando y resuelve su acuse `{ ok, status? }`.
  * - `transportOpen`, `hostConnected`, `capabilities`: estado del enlace y `hello` del IDE.
  * Devuelve `{ state, retry, handleEvent }`; `handleEvent(ev)` es `true` si el evento era del bootstrap.
  */
-export function useCoreBootstrap({ sessionId, send, transportOpen, hostConnected, capabilities }) {
+export function useCoreBootstrap({ enabled = true, sessionId, send, transportOpen, hostConnected, capabilities }) {
   const [state, setState] = useState(null);
   const bootRef = useRef(null);
   const linkRef = useRef(null);
@@ -33,6 +34,10 @@ export function useCoreBootstrap({ sessionId, send, transportOpen, hostConnected
   linkState.current = { transportOpen, hostConnected, capabilities };
 
   useEffect(() => {
+    if (!enabled) {
+      setState(null);
+      return undefined;
+    }
     const link = createCoreLink({ send: (command) => sendRef.current(command) });
     const boot = createCoreBootstrap({ hostKey: sessionId, request: link.request, cache, log, onChange: setState });
     linkRef.current = link;
@@ -48,7 +53,7 @@ export function useCoreBootstrap({ sessionId, send, transportOpen, hostConnected
       bootRef.current = null;
       linkRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, enabled]);
 
   const capsKey = Array.isArray(capabilities) ? capabilities.join(',') : '';
   useEffect(() => {

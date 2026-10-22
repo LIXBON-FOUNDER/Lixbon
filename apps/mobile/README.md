@@ -60,6 +60,31 @@ guarda en AsyncStorage (`uiPrefs`). Cada respuesta tiene Copiar y, la última,
 Regenerar (usa `POST /api/conversations/{id}/rewind` para no duplicar el
 turno guardado).
 
+## Supervisar con datos reales (F2)
+
+La sección **Supervisar** muestra el estado real del Core del IDE que eliges:
+`src/screens/ObserveScreen.js` y `src/observe/`. Es solo lectura. Sigue tras
+la misma puerta que el prototipo (desarrollo o *Ajustes › Desarrolladores*)
+hasta validarla en dispositivo.
+
+- **IDE (host)**: una sesión `/remote` es un IDE. Se usa el que elijas en la
+  cabecera o en el menú lateral; si no eliges, el primero en línea. Si el
+  elegido se desconecta no se salta a otro, se dice.
+- **Conexión** (`useObserve.js`): socket propio a la sesión, sin repetir el
+  transcript del chat, y el bootstrap del Core de LXO-107.
+- **UX de conexión** (`connection.js`, `ConnectionBanner.js`, LXO-111):
+  - estados en línea, conectando, reconectando, desactualizado (también la
+    caché), sin conexión (servidor, IDE o Core), sesión no autorizada y
+    versiones incompatibles;
+  - hora de la última sincronización, «Reintentar», un código de diagnóstico
+    estable y texto para lectores de pantalla;
+  - offline nunca usa el rojo de los fallos;
+  - `actionGate` solo deja mandar algo en línea: ninguna acción futura puede
+    aparentar éxito sin conexión.
+
+El prototipo con datos de ejemplo (`SupervisionScreen.js`, `src/supervision/`)
+sigue en el repo, pero sin montar.
+
 ## Prototipo de supervisión (Sprint D)
 
 Sección **Supervisar** con datos de ejemplo para validar Mobile como superficie
