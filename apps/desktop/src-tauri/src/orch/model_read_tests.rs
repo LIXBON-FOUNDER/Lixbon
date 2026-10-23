@@ -75,7 +75,7 @@ fn son_lecturas_y_solo_una_person_las_hace() {
 fn antes_del_corte_el_core_anuncia_legacy_y_las_lecturas_vnext_lo_dicen() {
     let (_l, _d, _c, core) = con_fixture();
     let me = yo(&core);
-    assert_eq!(rpc(&core, &me, "core_model", json!({})).unwrap(), json!({ "core_model": "legacy", "compat": [], "queries": [] }));
+    assert_eq!(rpc(&core, &me, "core_model", json!({})).unwrap(), json!({ "core_model": "legacy", "compat": [], "queries": [], "storage": { "status": "ready", "code": null, "message": null } }));
     for (q, args) in [
         ("task_list_v2", json!({ "project_id": "p-1" })),
         ("task_detail_v2", json!({ "task_id": "t3" })),

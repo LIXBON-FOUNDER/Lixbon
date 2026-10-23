@@ -35,6 +35,9 @@ pub const CUT_IDEM_KEY: &str = "task_attempt_v1";
 /// orden y la versión «de esquema» de una base ignoran esta fila ([`super::migrate`]).
 pub const CUT_VERSION: i64 = 900;
 
+/// Código estable del rechazo de una base cortada con la numeración anterior (`StoreError::CutLegacyNumbering`).
+pub const LEGACY_NUMBERING_CODE: &str = "core_cut_legacy_numbering";
+
 /// La migración publicada sobre la que se aplica el corte: la última del binario.
 pub fn cut_base_version() -> i64 {
     embedded().last().map(|m| m.version).unwrap_or(0)
@@ -225,6 +228,19 @@ impl<'a> CutView<'a> {
                 otro => return Err(view_err(format!("{id}: Artifact de tipo {otro} en el legado"))),
             };
             o.insert(key.into(), json!(uri));
+        }
+        // LXO-234: lo que el corte no pudo guardar en su columna (motivo de fallo de una Task no fallida, PR que no es
+        // https, carpeta compartida con otra Task) está en `legacy_residue`; mientras el Attempt actual sea el migrado,
+        // la vista legacy repone el valor original.
+        if !core {
+            let mut res = c.prepare(
+                "SELECT field, value FROM legacy_residue WHERE entity_kind = 'task' AND legacy_id = ?1
+                 AND reason IN ('failure_reason_not_failed', 'failure_reason_invalid', 'pr_url_not_https', 'worktree_path_shared')",
+            )?;
+            for row in res.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+                let (field, value) = row?;
+                o.insert(field, json_col(Some(value)));
+            }
         }
         // Un seguimiento no borra las fases del documento: las de todos los Attempts, en orden.
         let mut ph = c.prepare(
