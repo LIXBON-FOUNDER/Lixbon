@@ -313,6 +313,39 @@ describe('queryAdeCore', () => {
     await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
   });
 
+  it.each(['unknown_kind', 'unsupported_version', 'invalid_payload'])(
+    'acepta activity.unknown con reason contractual %s',
+    async (reason) => {
+      const response = activityPage({
+        items: [activityItem({
+          message_key: 'activity.unknown',
+          args: { reason, kind: 'task.future', event_version: 2 },
+          fallback: true,
+        })],
+      });
+      invoke.mockResolvedValueOnce(response);
+
+      await expect(queryAdeCore('activity_list')).resolves.toMatchObject({
+        items: [expect.objectContaining({
+          message_key: 'activity.unknown',
+          args: { reason, kind: 'task.future', event_version: 2 },
+        })],
+      });
+    },
+  );
+
+  it('rechaza un reason no contractual de activity.unknown', async () => {
+    invoke.mockResolvedValueOnce(activityPage({
+      items: [activityItem({
+        message_key: 'activity.unknown',
+        args: { reason: 'PRIVATE_REASON_TOKEN', kind: 'task.future', event_version: 2 },
+        fallback: true,
+      })],
+    }));
+
+    await expect(queryAdeCore('activity_list')).rejects.toThrow('ade_query_invalid_response');
+  });
+
   it('exige los argumentos requeridos, opcionales y tipos exactos por cada message_key', async () => {
     expect(ACTIVITY_ARGS_CONTRACTS.map(([messageKey]) => messageKey).sort())
       .toEqual([...ACTIVITY_V1_MESSAGE_KEYS].sort());
