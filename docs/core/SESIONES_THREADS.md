@@ -106,7 +106,7 @@ reservado y se añade `thread.summarized`.
 
 ## En el corte (borrador de LXO-112)
 
-El [borrador](fixtures/corte-task-attempt/corte.borrador.sql) ya no crea estas tablas y rellena las columnas nuevas:
+El [SQL del corte](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql) ya no crea estas tablas y rellena las columnas nuevas:
 las sesiones del legado con vínculo declarado son **resumibles**; quedan `open` si su Attempt no terminó e `idle` si
 terminó; `created_at` es el arranque del intento (o la creación de la Task). Los Threads del legado no tienen fechas ni
 resumen. `verificar.py` lo comprueba sobre todas las migraciones publicadas.

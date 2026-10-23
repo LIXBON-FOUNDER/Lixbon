@@ -82,6 +82,8 @@ pub enum StoreError {
     /// Un Worktree o un Artifact no cumple el contrato (ruta vacía, localizador que no es del tipo, credencial…). Se
     /// rechaza ANTES de tocar la base.
     InvalidWorktree(String),
+    /// La base no está lista para el corte Task/Attempt (versión, `legacy_state`, copia previa…). No se tocó nada.
+    CutPreflight(String),
 }
 
 impl StoreError {
@@ -194,6 +196,7 @@ impl fmt::Display for StoreError {
             StoreError::InvalidSession(m) => write!(f, "sesión o thread inválido: {m}"),
             StoreError::WorktreeConflict(m) => write!(f, "worktrees y artifacts: {m}"),
             StoreError::InvalidWorktree(m) => write!(f, "worktree o artifact inválido: {m}"),
+            StoreError::CutPreflight(m) => write!(f, "corte Task/Attempt: {m}"),
         }
     }
 }

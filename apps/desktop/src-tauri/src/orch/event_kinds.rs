@@ -43,6 +43,11 @@
 //! | `worktree.created` · `adopted` · `attached` · `missing` · `found` · `removed` | state | `worktree` |
 //! | `artifact.created` | state | `artifact` |
 //!
+//! # Corte Task/Attempt (LXO-117, sin activar; lo emite `agentic_cut`)
+//! | kind | class | entidad |
+//! |---|---|---|
+//! | `core.agentic_cut` (`idem_key = task_attempt_v1`) | state | `core` |
+//!
 //! # Kinds de la Task como intención (LXO-113, inertes hasta el corte; los emite `task_ops`)
 //! | kind | class | entidad |
 //! |---|---|---|
@@ -55,7 +60,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, Provenance, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -1201,6 +1206,31 @@ impl EventPayload for ArtifactCreated {
 pub(super) fn artifact_created(x: &ArtifactRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     let p = ArtifactCreated { task: a.task_id.clone(), attempt: a.id.clone(), n: a.n, kind: x.kind, verifiable: x.sha256.is_some() };
     Ok(EventDraft::new(EntityKind::Artifact, x.id.as_str(), &p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// core.agentic_cut (LXO-117)
+// ---------------------------------------------------------------------------------------------
+
+/// El corte de datos se confirmó: el modelo activo, la copia que permite volver (solo su nombre) y las filas por
+/// entidad. Va en la MISMA transacción que el corte.
+#[derive(Serialize)]
+pub(super) struct AgenticCut {
+    model: &'static str,
+    backup: String,
+    counts: CutCounts,
+}
+
+impl EventPayload for AgenticCut {
+    const KIND: &'static str = "core.agentic_cut";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn agentic_cut(counts: &CutCounts, backup: &str) -> Result<EventDraft, EventError> {
+    let p = AgenticCut { model: crate::store::AGENTIC_MODEL, backup: clip(backup, 200), counts: counts.clone() };
+    Ok(EventDraft::new(EntityKind::Core, "core", &p)?.idempotent(crate::store::CUT_IDEM_KEY))
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -30,7 +30,7 @@ RAIZ = AQUI.parents[3]
 MIGRACIONES = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "migrations"
 BEFORE = AQUI / "legacy_state.before.json"
 AFTER = AQUI / "normalizado.after.json"
-CORTE = AQUI / "corte.borrador.sql"
+CORTE = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "cut" / "task_attempt_cut.sql"
 # «F2» = cualquier binario anterior al corte, aunque ya traiga el esquema inerte (007 tasks, 008 attempts, 009 sesiones y
 # threads…): la última migración publicada. El corte toma el número siguiente.
 VERSION_F2 = max(int(f.name[:3]) for f in MIGRACIONES.glob("*.sql"))
