@@ -384,6 +384,7 @@ y la fixture en la misma PR.
 | D22–D25 | Cancelar lo pendiente es rechazarlo; reintento idempotente = `Unchanged`; una Task con un Attempt activo no se descarta; una Task con Attempts no se borra | [`ATTEMPTS.md`](ATTEMPTS.md) |
 | D26–D29 | La sesión del proveedor nace sin referencia y la recibe una vez; `idle` solo si es resumible y `closed` es final; el Thread no tiene estado ni guarda secretos; solo el Core conduce la sesión | [`SESIONES_THREADS.md`](SESIONES_THREADS.md) (LXO-115) |
 | D30–D33 | La ruta del Worktree es ubicación, no identidad; procedencia `created`/`adopted`/`external` fija; quitar exige motivo (`integrated` del Core, `discarded` confirmado por una persona, `gone` si ya faltaba) y uno externo solo sale con `gone`; el Artifact apunta a la evidencia, inmutable | [`WORKTREES_ARTIFACTS.md`](WORKTREES_ARTIFACTS.md) (LXO-116) |
+| D34–D36 | Una revisión activa por Attempt; `stale` es final (reabrir es revisar otra vez); la puerta de integrar exige el Attempt actual | [`REVIEWS.md`](REVIEWS.md) (LXO-118) |
 
 La columna `attempts.cwd` de D18 y el resto de las columnas de runtime del borrador del corte (política, entrega, modelo
 efectivo…) **no** están en la `008_attempts`: cada slice las añade con `ALTER TABLE ... ADD COLUMN` cuando las usa.

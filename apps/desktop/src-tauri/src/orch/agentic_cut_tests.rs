@@ -220,6 +220,10 @@ fn grande(runs: usize, hijas: usize) -> (String, usize) {
                 let detail = json!({ "decision": "accepted", "head_commit": "c0ffee", "comment": null }).to_string();
                 decs.push(json!({ "id": next(), "task": id, "kind": "review", "actor": "human", "detail_json": detail, "at": 5_000 }));
             }
+            if n % 20 == 0 {
+                let detail = json!({ "decision": "rejected", "head_commit": "d00d00", "comment": "otra vuelta" }).to_string();
+                decs.push(json!({ "id": next(), "task": id, "kind": "review", "actor": "human", "detail_json": detail, "at": 6_000 }));
+            }
         }
     }
     let doc = json!({ "runs": rs, "tasks": tasks, "messages": msgs, "seq": seq, "decisions": decs, "env_blocks": { "codex/explorar": "windows_sandbox_elevated" } });
@@ -245,6 +249,11 @@ fn una_fixture_grande_con_todos_los_casos_se_corta_entera_y_sin_inventar() {
     let wts = d["worktrees"].as_array().unwrap();
     assert!(wts.iter().any(|w| w["state"] == "active") && wts.iter().any(|w| w["state"] == "removed" && w["branch_kept"] == 1));
     assert!(d["attempts"].as_array().unwrap().iter().all(|a| a["ended_at"].is_null()), "el legado no registra el fin: no se inventa");
+    // Varias revisiones legacy de la misma Task: la última queda activa y las anteriores, sustituidas (LXO-118).
+    let reviews = d["reviews"].as_array().unwrap();
+    let (activas, sustituidas) = (reviews.iter().filter(|r| r["status"] == "active").count(), reviews.iter().filter(|r| r["status"] == "superseded").count());
+    assert_eq!((activas, sustituidas), (40 * 25 / 10, 40 * 25 / 20));
+    assert!(reviews.iter().filter(|r| r["status"] == "superseded").all(|r| r["closed_at"] == 6_000));
 }
 
 // ---------------------------------------------------------------------------------------------
