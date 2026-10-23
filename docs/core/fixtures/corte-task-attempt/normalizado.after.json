@@ -711,15 +711,23 @@
       "decision_id": 1,
       "attempt_id": "t3-a1",
       "head_commit": "c3c3c3",
+      "base_commit": "b0b0b0",
       "verdict": "accepted",
-      "at": 1792000400000
+      "at": 1792000400000,
+      "status": "active",
+      "observed_head": null,
+      "closed_at": null
     },
     {
       "decision_id": 3,
       "attempt_id": "t5-a1",
       "head_commit": "c5c5c5",
+      "base_commit": "b0b0b0",
       "verdict": "rejected",
-      "at": 1792000700000
+      "at": 1792000700000,
+      "status": "active",
+      "observed_head": null,
+      "closed_at": null
     }
   ],
   "env_blocks": [
