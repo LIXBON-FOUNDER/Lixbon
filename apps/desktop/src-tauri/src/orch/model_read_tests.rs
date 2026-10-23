@@ -174,3 +174,70 @@ fn las_lecturas_f2_no_cambian_con_el_corte() {
     corta(&core, &core_dir, &data);
     assert_eq!(leer(), antes, "tasks_by_project y projects_overview (v1) responden igual: los clientes F2 no cambian");
 }
+
+#[test]
+fn cursores_por_clave_pertenencia_y_vigencia() {
+    let (_l, data, core_dir, core) = con_fixture();
+    corta(&core, &core_dir, &data);
+    let me = yo(&core);
+    // task_list_v2: el cursor es la clave (created_at, id), no una posición.
+    let p1 = rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "limit": 2 })).unwrap();
+    let cursor = p1["next_cursor"].as_str().unwrap().to_string();
+    assert!(cursor.starts_with("t3:"), "{cursor}");
+    let ajeno = rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-otro", "cursor": cursor })).unwrap_err();
+    assert!(ajeno.contains("model_invalid_request"), "{ajeno}");
+    // El cursor viejo `t2:` (posición) ya no se acepta.
+    assert!(rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "cursor": "t2:t3" })).unwrap_err().contains("model_invalid_request"));
+
+    // attempts_by_task pagina, y una Task de otro Project no se lee con ese Project.
+    let ctx = MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) };
+    let task = core
+        .storage
+        .with_store(|s| {
+            let intencion = NewTaskIntent { title: "tres intentos".into(), spec: String::new(), repo: "/home/ana/app".into() };
+            let (_, t) = create_run(s, &ctx, &NewRun { objective: "x".into(), project_id: "p-1".into(), root: intencion }).unwrap();
+            let new = NewAttempt { provider: "codex".into(), model: None, effort: None, role: None, profile: None, external: false, requires_approval: false };
+            let sistema = MutationContext::core();
+            for _ in 0..3 {
+                let a = attempt_ops::create(s, &ctx, &t.id, &new).unwrap();
+                attempt_ops::start(s, &sistema, &a.id).unwrap();
+                attempt_ops::fail(s, &sistema, &a.id, FailureCode::AgentIdleTimeout, "").unwrap();
+            }
+            t.id
+        })
+        .unwrap();
+    let a = rpc(&core, &me, "attempts_by_task", json!({ "task_id": task, "limit": 2 })).unwrap();
+    assert_eq!(a["items"].as_array().unwrap().len(), 2);
+    assert_eq!(a["next_cursor"], json!("a1:2"));
+    let b = rpc(&core, &me, "attempts_by_task", json!({ "task_id": task, "limit": 2, "cursor": a["next_cursor"] })).unwrap();
+    assert_eq!((b["items"][0]["n"].clone(), b["next_cursor"].clone()), (json!(3), Value::Null));
+    // Un Attempt del runtime que terminó trae `ended_at` y `origin = core`.
+    assert!(b["items"][0]["ended_at"].is_i64() && b["items"][0]["origin"] == "core" && b["items"][0]["ended_at_known"] == true);
+    assert!(rpc(&core, &me, "attempts_by_task", json!({ "task_id": task, "cursor": "a1:9" })).unwrap_err().contains("model_invalid_request"));
+    assert!(rpc(&core, &me, "attempts_by_task", json!({ "task_id": task, "project_id": "p-otro" })).unwrap_err().contains("model_not_found"));
+    assert!(rpc(&core, &me, "attempt_detail", json!({ "attempt_id": "t3-a1", "task_id": task })).unwrap_err().contains("model_not_found"));
+    assert!(rpc(&core, &me, "attempt_detail", json!({ "attempt_id": "t3-a1", "project_id": "p-otro" })).unwrap_err().contains("model_not_found"));
+    assert!(rpc(&core, &me, "task_detail_v2", json!({ "task_id": "t3", "project_id": "p-otro" })).unwrap_err().contains("model_not_found"));
+    // La revisión dice si sigue vigente.
+    let d = rpc(&core, &me, "attempt_detail", json!({ "attempt_id": "t3-a1", "task_id": "t3", "project_id": "p-1" })).unwrap();
+    let v = &d["attempt"]["review"]["validity"];
+    assert_eq!((v["attempt_is_current"].as_bool(), v["integrated"].as_bool()), (Some(true), Some(true)));
+    assert!(d["attempt"].get("integrated_at").is_some());
+    // Un migrado final sin fin registrado lo marca.
+    assert_eq!((d["attempt"]["origin"].as_str(), d["attempt"]["ended_at_known"].as_bool()), (Some("legacy"), Some(false)));
+}
+
+#[test]
+fn activity_por_attempt_incluye_sesion_worktree_y_revision() {
+    let (_l, data, core_dir, core) = con_fixture();
+    corta(&core, &core_dir, &data);
+    let me = yo(&core);
+    let r = rpc(&core, &me, "activity_list", json!({ "attempt_id": "t3-a1" })).unwrap();
+    assert!(r["next_cursor"].is_i64(), "next_cursor siempre");
+    for i in r["items"].as_array().unwrap() {
+        let kind = i["target"]["kind"].as_str().unwrap();
+        assert!(["attempt", "provider_session", "worktree", "artifact", "review"].contains(&kind), "{i}");
+    }
+    let e = rpc(&core, &me, "activity_list", json!({ "attempt_id": "t3-a1", "target_kind": "attempt" })).unwrap_err();
+    assert!(e.contains("activity_invalid_request"), "{e}");
+}

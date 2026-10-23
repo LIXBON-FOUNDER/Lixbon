@@ -4,16 +4,29 @@
     {
       "created_at": 1792000046000,
       "ended_at": null,
+      "ended_at_known": false,
       "external": false,
       "id": "t5-a1",
       "model": "sonnet",
       "n": 1,
+      "origin": "legacy",
       "provider": "claude",
+      "result": {
+        "failure_reason": null,
+        "summary": "Tests de login y logout",
+        "truncated": false
+      },
       "role": null,
       "started_at": 1792000070000,
-      "status": "done"
+      "status": "done",
+      "worktree": {
+        "branch": "lx/r1/t5-tests-de-login",
+        "id": "wt-t5-a1",
+        "state": "removed"
+      }
     }
   ],
+  "next_cursor": null,
   "task_id": "t5",
   "v": 1
 }
