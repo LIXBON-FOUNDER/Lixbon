@@ -161,7 +161,7 @@ describe('ProjectsSidebar · TaskNode (LXO-120)', () => {
     mountCore({ attempts: () => { throw new Error(ERRORS.unavailable); } });
     await renderSidebar();
     const unavailable = await within(row('t3')).findByRole('alert');
-    expect(unavailable.firstChild.textContent).toBe('El Core no responde; reintentando');
+    expect(unavailable.firstChild.textContent).toBe('El Core no responde');
     expect(within(unavailable).getByRole('button', { name: 'Reintentar' })).toBeTruthy();
     expect(unavailable.querySelector('details code').textContent).toContain('model_unavailable');
     expect(unavailable.firstChild.textContent).not.toContain('model_unavailable');
