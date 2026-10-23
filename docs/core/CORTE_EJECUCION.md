@@ -11,7 +11,7 @@ Piezas:
 * SQL: [`store/cut/task_attempt_cut.sql`](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql). Está fuera de
   `migrations/`, así que `build.rs` no lo mete en la lista de arranque.
 * Almacén: `store/cut.rs`.
-  * `cut_migration()`: el corte como la versión siguiente a la última publicada.
+  * `cut_migration()`: el corte con su versión **reservada** `CUT_VERSION = 900` (LXO-234); se aplica sobre la última migración publicada (`cut_base_version()`).
   * `Store::agentic_cut_recorded`: la transacción.
   * `CutView`: la vista legacy leída de las tablas.
   * `inspect_copy`: lo que dice una copia de sí misma.
@@ -97,15 +97,28 @@ y `una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura`.
 
 ## Activación
 
-Pendiente: LXO-234. El paso 1 ya está hecho (LXO-232).
+Estado tras LXO-234:
 
 1. **Hecho (LXO-232).** Con la base cortada, el runtime deja de escribir `legacy_state` y `state.json` (D4) y persiste
-   en las tablas; al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6). Un binario con
-   LXO-232 ya abre una base cortada (valida con el corte en la lista), pero nunca la corta él.
-2. Mover `store/cut/task_attempt_cut.sql` a `store/migrations/NNN_task_attempt_cut.sql`, con el siguiente número
-   libre. Desde ese momento su texto no se edita (checksum). Quitar de ella las columnas o tablas que otro slice haya
-   publicado antes (la 012 ya sacó las columnas de runtime del Attempt, `attempt_phases` y `env_blocks`).
-3. En el arranque (`store_boot`/`boot_authority`), tras las migraciones anteriores al corte y con `core.lock` tomado,
-   llamar a `agentic_cut::run`. Si falla, el arranque se bloquea (D13). Después, el paso 6.
-4. Ajustar `cut_migration()` para leer la migración embebida y quitar la prueba que exige que no esté en `migrations/`.
+   en las tablas; al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6).
+2. **Hecho (LXO-234): número fijo.** El corte ya no es «última migración + 1» (con 012/013 publicadas eso chocaba:
+   una base cortada como 012 daba `ChecksumMismatch` sin salida). Ahora ocupa la versión reservada **900** en
+   `schema_migrations`; `user_version` se queda en la última publicada. Las migraciones publicadas siguen numerándose
+   por debajo (014, 015…) y se aplican también sobre una base ya cortada: el orden y la versión de esquema ignoran la
+   fila del corte (`store/migrate.rs`). El SQL sigue en `store/cut/` y solo lo aplica el corte, nunca el arranque.
+3. **Hecho (LXO-234): función pública.** `Core::ensure_agentic_cut(&self) -> Result<AgenticCutStatus, String>`
+   (`orch/agentic_cut.rs`, reexportado `orch::AgenticCutStatus`). Síncrona e idempotente: `Applied { backup }` si
+   cortó ahora, `AlreadyCut` si ya lo estaba (no escribe). Errores `código: mensaje`: `core_cut_legacy_numbering`,
+   `model_unavailable` (almacén cerrado) y `core_cut_failed` (preflight, copia o validación; se deshace entero).
+4. **Pendiente (DESKTOP, LXO-123).** Llamarla en el arranque con el almacén abierto y `core.lock` tomado; si falla, el
+   arranque se bloquea (D13); tras `Applied`, recargar el estado desde las tablas (paso 6).
 5. Snapshot y `status` anuncian `core_model: "task_attempt_v1"` y `compat: ["legacy_task_v1"]` (ADR §11.1).
+
+### Bases cortadas con la numeración anterior
+
+Ningún arranque publicado llamó al corte (`store/cut.rs` estaba sin activar), así que una base cortada solo puede
+venir de pruebas o de una ejecución manual con un binario anterior a LXO-234 (corte en 012 o 014). **Se rechazan, no se
+renumeran**: al abrir, `StoreError::CutLegacyNumbering { version }`, texto
+`core_cut_legacy_numbering: … Restaura la copia pre-f3-cut …`, antes de abrir ninguna transacción y sin copia previa:
+la base no se modifica (solo la cabecera pasa a `journal_mode = WAL` al abrirla). Para seguir: restaurar la copia
+`pre-f3-cut` que dejó aquel corte (sección Rollback) y volver a cortar con este binario.

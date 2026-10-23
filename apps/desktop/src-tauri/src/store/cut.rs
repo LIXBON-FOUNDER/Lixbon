@@ -1,12 +1,12 @@
 //! Corte de datos Task/Attempt (LXO-117): lado del **almacén**. Contrato: `docs/core/CORTE_EJECUCION.md`; mapeo: ADR
 //! `docs/core/CORTE_TASK_ATTEMPT.md`.
 //!
-//! Aplica `cut/task_attempt_cut.sql` como la versión siguiente a la última migración publicada, en UNA transacción
+//! Aplica `cut/task_attempt_cut.sql` con su versión reservada ([`CUT_VERSION`]) sobre la última migración publicada, en UNA transacción
 //! con la comprobación semántica y el evento `core.agentic_cut` que le pasa `orch::agentic_cut`. Si cualquiera falla,
 //! ROLLBACK: la base queda exactamente en la versión anterior.
 //!
-//! **No está activado**: el arranque no lo llama (la SQL no vive en `migrations/`). Activarlo es tarea del slice que
-//! pase el runtime a las tablas; ver la sección «Activación» del contrato.
+//! El arranque no lo aplica por la lista de migraciones (la SQL no vive en `migrations/`): lo ejecuta
+//! `Core::ensure_agentic_cut` (LXO-234), que DESKTOP llama al arrancar (LXO-123). Ver «Activación» del contrato.
 
 #![cfg_attr(not(test), allow(dead_code))] // sin activar: solo lo usan `orch::agentic_cut` y las pruebas
 
@@ -30,11 +30,20 @@ pub const CUT_SQL: &str = include_str!("cut/task_attempt_cut.sql");
 /// Clave de idempotencia del evento `core.agentic_cut`.
 pub const CUT_IDEM_KEY: &str = "task_attempt_v1";
 
-/// El corte como migración: la versión siguiente a la última publicada. Con ella en la lista, un binario abre una base
-/// ya cortada; sin ella (cualquier binario anterior), la base cortada es `DatabaseNewer` y no se toca.
+/// Versión RESERVADA del corte en `schema_migrations` (LXO-234). Fija: no depende de cuántas migraciones publique el
+/// binario, así que una migración nueva (014…) nunca choca con el corte. Las migraciones publicadas van por debajo; el
+/// orden y la versión «de esquema» de una base ignoran esta fila ([`super::migrate`]).
+pub const CUT_VERSION: i64 = 900;
+
+/// La migración publicada sobre la que se aplica el corte: la última del binario.
+pub fn cut_base_version() -> i64 {
+    embedded().last().map(|m| m.version).unwrap_or(0)
+}
+
+/// El corte como migración, con su versión reservada. Con ella en la lista, un binario abre una base ya cortada; sin
+/// ella (cualquier binario anterior), la base cortada es `DatabaseNewer` y no se toca.
 pub fn cut_migration() -> Migration {
-    let last = embedded().last().map(|m| m.version).unwrap_or(0);
-    Migration::new(last + 1, CUT_NAME, CUT_SQL)
+    Migration::new(CUT_VERSION, CUT_NAME, CUT_SQL)
 }
 
 /// Las migraciones publicadas más el corte.
@@ -87,6 +96,9 @@ fn counts_in(c: &Connection) -> StoreResult<CutCounts> {
 /// ¿Ya se cortó esta base? Mira las dos huellas del corte: la migración registrada y `meta.agentic_model`.
 pub(super) fn is_cut(c: &Connection) -> StoreResult<bool> {
     let applied: Option<i64> = c.query_row("SELECT version FROM schema_migrations WHERE name = ?1", [CUT_NAME], |r| r.get(0)).optional()?;
+    if let Some(version) = applied.filter(|v| *v != CUT_VERSION) {
+        return Err(StoreError::CutLegacyNumbering { version });
+    }
     let model: Option<String> = c.query_row("SELECT value FROM meta WHERE key = ?1", [AGENTIC_MODEL_KEY], |r| r.get(0)).optional()?;
     Ok(applied.is_some() || model.is_some())
 }
@@ -342,8 +354,9 @@ impl Store {
             return Ok(CutOutcome::AlreadyCut);
         }
         let version = db_version(&tx)?;
-        if version != cut.version - 1 {
-            return Err(StoreError::CutPreflight(format!("la base está en la versión {version}; el corte se aplica sobre la {}", cut.version - 1)));
+        let base = cut_base_version();
+        if version != base {
+            return Err(StoreError::CutPreflight(format!("la base está en la versión {version}; el corte se aplica sobre la {base}")));
         }
         let fail = |detail: String| StoreError::MigrationFailed { version: cut.version, name: cut.name.to_string(), detail };
         tx.execute_batch(cut.sql).map_err(|e| fail(e.to_string()))?;
@@ -355,7 +368,7 @@ impl Store {
             rusqlite::params![cut.version, cut.name, cut.checksum(), app_version, now_ms()],
         )
         .map_err(|e| fail(e.to_string()))?;
-        tx.pragma_update(None, "user_version", cut.version)?;
+        // `user_version` sigue siendo la última migración publicada: el corte se identifica por su fila reservada.
         let counts = counts_in(&tx)?;
         let e = verify(&CutView(&tx), &counts)?;
         if e.kind != "core.agentic_cut" || e.idem_key.as_deref() != Some(CUT_IDEM_KEY) {

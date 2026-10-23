@@ -97,6 +97,19 @@ fn has_user_tables(conn: &Connection) -> StoreResult<bool> {
 }
 
 /// Filas de `schema_migrations` (vacío si la tabla aún no existe).
+/// Las filas de `schema_migrations` sin la del corte (versión reservada): la numeración publicada.
+fn published(rows: &[(i64, String, String)]) -> impl Iterator<Item = &(i64, String, String)> {
+    rows.iter().filter(|r| r.0 != super::cut::CUT_VERSION)
+}
+
+/// Una base cortada con la numeración anterior a LXO-234 (el corte como «última + 1»): se rechaza sin escribir.
+fn reject_legacy_cut(rows: &[(i64, String, String)]) -> StoreResult<()> {
+    match rows.iter().find(|r| r.1 == super::cut::CUT_NAME && r.0 != super::cut::CUT_VERSION) {
+        Some(r) => Err(StoreError::CutLegacyNumbering { version: r.0 }),
+        None => Ok(()),
+    }
+}
+
 fn applied_rows(conn: &Connection) -> StoreResult<Vec<(i64, String, String)>> {
     if !table_exists(conn, "schema_migrations")? {
         return Ok(vec![]);
@@ -119,10 +132,12 @@ struct Plan {
 /// La lista COMPLETA sirve para validar (checksums, migraciones desconocidas, base más nueva);
 /// `ceiling` solo limita cuáles se APLICAN: las pendientes con versión mayor se dejan sin tocar.
 fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResult<Plan> {
-    let binary_max = migrations.last().map(|m| m.version).unwrap_or(0);
+    // La versión de esquema es la de las migraciones publicadas: la fila reservada del corte no cuenta.
+    let binary_max = migrations.iter().filter(|m| m.version != super::cut::CUT_VERSION).map(|m| m.version).max().unwrap_or(0);
     let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let rows = applied_rows(conn)?;
-    let applied_max = rows.last().map(|r| r.0).unwrap_or(0);
+    reject_legacy_cut(&rows)?;
+    let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
 
     let db_version = applied_max.max(user_version);
     if db_version > binary_max {
@@ -160,7 +175,9 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
 /// más nueva que el binario.
 pub(super) fn db_version(conn: &Connection) -> StoreResult<i64> {
     let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let applied_max = applied_rows(conn)?.last().map(|r| r.0).unwrap_or(0);
+    let rows = applied_rows(conn)?;
+    reject_legacy_cut(&rows)?;
+    let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
     Ok(applied_max.max(user_version))
 }
 

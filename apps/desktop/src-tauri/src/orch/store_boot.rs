@@ -180,7 +180,7 @@ impl Default for CoreStorage {
 fn with_cut(catalog: &[Migration]) -> Vec<Migration> {
     let cut = store::cut_migration();
     let mut all = catalog.to_vec();
-    if all.last().is_some_and(|m| m.version == cut.version - 1) {
+    if all.last().is_some_and(|m| m.version == store::cut_base_version()) {
         all.push(cut);
     }
     all
@@ -229,6 +229,12 @@ impl CoreStorage {
 
     /// Levanta el techo de la valla: aplica las migraciones posteriores (003+). Solo la llama el
     /// arranque, cuando `decide_boot` ya dio por coherente la instalación (ver `boot_authority`).
+    /// Ejecuta el corte Task/Attempt sobre el almacén abierto (LXO-234; ver `Core::ensure_agentic_cut`).
+    /// `None` = el almacén no está abierto.
+    pub(super) fn run_agentic_cut(&self, core_dir: &Path, data_dir: &Path) -> Option<Result<super::agentic_cut::CutReport, StoreError>> {
+        self.slot().store.as_mut().map(|s| super::agentic_cut::run(s, core_dir, data_dir, env!("CARGO_PKG_VERSION")))
+    }
+
     /// `None` = el almacén no está abierto.
     pub(super) fn migrate_authoritative(&self) -> Option<Result<MigrationReport, StoreError>> {
         let mut guard = self.slot();
