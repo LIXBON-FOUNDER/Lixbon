@@ -16,6 +16,13 @@ const ADE_READ_QUERIES: &[&str] = &[
     "attention_list",
     "activity_list",
     "resource_inventory",
+    // Lecturas vNext del modelo Task/Attempt (LXO-119, docs/core/QUERIES.md). Solo lectura; antes
+    // del corte el Core responde `core_model_inactive` y el ADE sigue con las lecturas F2.
+    "core_model",
+    "task_list_v2",
+    "task_detail_v2",
+    "attempts_by_task",
+    "attempt_detail",
 ];
 const MAX_SAFE_ACTIVITY_CURSOR: i64 = 9_007_199_254_740_991;
 
@@ -305,9 +312,16 @@ mod ade_query_tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn ade_solo_expone_queries_observacionales_de_f2() {
+    fn ade_solo_expone_queries_de_lectura_f2_y_del_modelo_task_attempt() {
         for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list", "resource_inventory"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
+        }
+        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"] {
+            assert!(is_ade_read_query(query), "{query} debe ser una lectura vNext permitida");
+        }
+        // Las mutaciones del Attempt no entran por esta superficie: el ADE F3 solo lee.
+        for operation in ["attempt_request", "attempt_start", "attempt_stop", "attempt_retry", "attempt_resume", "task_discard"] {
+            assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
         for operation in ["project_archive", "run_create", "spawn", "remove_run", "events", "unknown"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
