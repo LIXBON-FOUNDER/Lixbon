@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 34] = [
+pub(super) const KINDS: [&str; 41] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -52,6 +52,13 @@ pub(super) const KINDS: [&str; 34] = [
     "attempt.completed",
     "attempt.failed",
     "attempt.stopped",
+    "provider_session.opened",
+    "provider_session.bound",
+    "provider_session.resumed",
+    "provider_session.detached",
+    "provider_session.closed",
+    "thread.created",
+    "thread.summarized",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -84,6 +91,10 @@ const STOP_CAUSES: [&str; 2] = ["cancelled", "run_closed"];
 const ATTEMPT_FAILURES: [&str; 4] = ["launch_failed", "terminal_approval_timeout", "agent_idle_timeout", "agent_reported"];
 /// Estados de los que se puede detener un Attempt ya aprobado (el pendiente es `attempt.rejected`).
 const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
+/// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
+const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
+/// Estados desde los que se cierra una sesión (`provider_session.closed`).
+const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Campos de la intención que puede nombrar `task.updated`.
 const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
 const ENV_CODES: [&str; 3] = [
@@ -452,6 +463,31 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("cause", closed(p, "cause", &STOP_CAUSES)),
             ],
         ),
+        "provider_session.opened" => rendered(
+            "activity.provider_session.opened",
+            Visual::Info,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("provider", token(p, "provider")),
+                ("resumable", flag(p, "resumable")),
+                ("bound", flag(p, "bound")),
+            ],
+        ),
+        "provider_session.bound" => rendered(
+            "activity.provider_session.bound",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("binding", closed(p, "binding", &SESSION_BINDINGS))],
+        ),
+        "provider_session.resumed" => rendered("activity.provider_session.resumed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "provider_session.detached" => rendered("activity.provider_session.detached", Visual::Info, vec![("task", id(p, "task"))]),
+        "provider_session.closed" => rendered(
+            "activity.provider_session.closed",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("from", closed(p, "from", &SESSION_CLOSED_FROM))],
+        ),
+        "thread.created" => rendered("activity.thread.created", Visual::Info, vec![("task", id(p, "task"))]),
+        "thread.summarized" => rendered("activity.thread.summarized", Visual::Info, vec![("task", id(p, "task")), ("has_summary", flag(p, "has_summary"))]),
         "task.review_requested" => rendered(
             "activity.task.review_requested",
             Visual::Info,

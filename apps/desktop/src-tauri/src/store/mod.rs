@@ -45,6 +45,7 @@ mod migrate;
 mod private;
 mod projects;
 mod attempts;
+mod sessions;
 mod tasks;
 #[cfg(test)]
 mod attention_tests;
@@ -58,6 +59,8 @@ mod projects_tests;
 mod tasks_tests;
 #[cfg(test)]
 mod attempts_tests;
+#[cfg(test)]
+mod sessions_tests;
 #[cfg(test)]
 mod tests;
 
@@ -95,6 +98,9 @@ pub use lock::InstanceLock;
 // Attempt como ejecución (LXO-114): inerte hasta el corte; hasta entonces solo la usan `orch::attempt_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, MAX_SUMMARY_CHARS};
+// ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
+#[allow(unused_imports)]
+pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};

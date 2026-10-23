@@ -88,7 +88,7 @@ Hoy se calcula **solo en el frontend** (`src/orch/attention.js`); el slice G lo 
 2. *Mensajes del buzón (vigente):* `Kind` (§4), guardados en `state.json`.
 3. *Eventos de dominio durables (reservado, slice E):* `entidad.verbo`, p. ej. `attempt.requested|approved|rejected|started|waiting|completed|failed|stopped`, `attention.created|resolved` (lista completa en el contrato). Los efímeros (`attempt.progress`, `terminal.output`…) no se registran.
 
-**`entity_kind`** (reservado; columna `events.entity_kind` del slice E y prefijo de cada evento durable): `project`, `task`, `attempt`, `thread`, `worktree`, `artifact`, `review`, `integration`, `agent`, `decision`, `policy`, `attention`. Los prefijos de los efímeros (`terminal`, `token`, `tool`) **no** son entidades.
+**`entity_kind`** (reservado; columna `events.entity_kind` del slice E y prefijo de cada evento durable): `project`, `task`, `attempt`, `provider_session`, `thread`, `worktree`, `artifact`, `review`, `integration`, `agent`, `decision`, `policy`, `attention`. Los prefijos de los efímeros (`terminal`, `token`, `tool`) **no** son entidades.
 
 **Colisiones conocidas** (se resuelven al hablar, no en el código):
 

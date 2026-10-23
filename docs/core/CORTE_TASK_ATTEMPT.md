@@ -382,6 +382,7 @@ y la fixture en la misma PR.
 | D20 | Entrar en `waiting`, `awaiting_terminal_approval` y `exited` es del runtime (F4); existen como estados | [`ATTEMPTS.md`](ATTEMPTS.md) |
 | D21 | `worktree_id` y `provider_session_id` son referencias blandas de fijado único hasta que existan sus tablas | [`ATTEMPTS.md`](ATTEMPTS.md) |
 | D22–D25 | Cancelar lo pendiente es rechazarlo; reintento idempotente = `Unchanged`; una Task con un Attempt activo no se descarta; una Task con Attempts no se borra | [`ATTEMPTS.md`](ATTEMPTS.md) |
+| D26–D29 | La sesión del proveedor nace sin referencia y la recibe una vez; `idle` solo si es resumible y `closed` es final; el Thread no tiene estado ni guarda secretos; solo el Core conduce la sesión | [`SESIONES_THREADS.md`](SESIONES_THREADS.md) (LXO-115) |
 
 La columna `attempts.cwd` de D18 y el resto de las columnas de runtime del borrador del corte (política, entrega, modelo
 efectivo…) **no** están en la `008_attempts`: cada slice las añade con `ALTER TABLE ... ADD COLUMN` cuando las usa.

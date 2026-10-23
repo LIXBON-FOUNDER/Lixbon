@@ -31,6 +31,12 @@
 //! | `attempt.requested` · `attempt.started` · `attempt.completed` · `attempt.failed` · `attempt.stopped` | state | `attempt` |
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
 //!
+//! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
+//! | kind | class | entidad |
+//! |---|---|---|
+//! | `provider_session.opened` · `bound` · `resumed` · `detached` · `closed` | state | `provider_session` |
+//! | `thread.created` · `thread.summarized` | state | `thread` |
+//!
 //! # Kinds de la Task como intención (LXO-113, inertes hasta el corte; los emite `task_ops`)
 //! | kind | class | entidad |
 //! |---|---|---|
@@ -43,7 +49,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, Resolution, RunRow, TaskRow};
+use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ProviderSessionRow, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -901,6 +907,149 @@ impl EventPayload for AttemptStopped {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_stopped(a: &AttemptRow, t: &TaskRow, from: AttemptStatus, cause: StopCause) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptStopped { task: a.task_id.clone(), n: a.n, from, cause })
+}
+
+// ---------------------------------------------------------------------------------------------
+// ProviderSession y Thread (LXO-115)
+// ---------------------------------------------------------------------------------------------
+//
+// Los emite `session_ops` (inertes hasta el corte). Run y Project, los de la Task dueña. NUNCA la referencia del
+// proveedor (`external_ref`), el resumen del Thread ni cuerpos de mensaje: solo ids, códigos y si hay o no.
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn session_draft<P: EventPayload>(s: &ProviderSessionRow, t: &TaskRow, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::ProviderSession, s.id.as_str(), p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderSessionOpened {
+    task: String,
+    attempt: String,
+    n: i64,
+    provider: String,
+    resumable: bool,
+    /// La referencia ya llegó con la apertura.
+    bound: bool,
+}
+
+impl EventPayload for ProviderSessionOpened {
+    const KIND: &'static str = "provider_session.opened";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn provider_session_opened(s: &ProviderSessionRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = ProviderSessionOpened { task: s.task_id.clone(), attempt: a.id.clone(), n: a.n, provider: clip(&s.provider, 80), resumable: s.resumable, bound: s.external_ref.is_some() };
+    session_draft(s, t, &p)
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderSessionBound {
+    task: String,
+    binding: SessionBinding,
+}
+
+impl EventPayload for ProviderSessionBound {
+    const KIND: &'static str = "provider_session.bound";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn provider_session_bound(s: &ProviderSessionRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let binding = s.binding.ok_or_else(|| EventError::Serialize("provider_session.bound: la sesión no tiene vínculo".into()))?;
+    session_draft(s, t, &ProviderSessionBound { task: s.task_id.clone(), binding })
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderSessionResumed {
+    task: String,
+    attempt: String,
+    n: i64,
+}
+
+impl EventPayload for ProviderSessionResumed {
+    const KIND: &'static str = "provider_session.resumed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn provider_session_resumed(s: &ProviderSessionRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    session_draft(s, t, &ProviderSessionResumed { task: s.task_id.clone(), attempt: a.id.clone(), n: a.n })
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderSessionDetached {
+    task: String,
+}
+
+impl EventPayload for ProviderSessionDetached {
+    const KIND: &'static str = "provider_session.detached";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn provider_session_detached(s: &ProviderSessionRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    session_draft(s, t, &ProviderSessionDetached { task: s.task_id.clone() })
+}
+
+#[derive(Serialize)]
+pub(super) struct ProviderSessionClosed {
+    task: String,
+    from: SessionStatus,
+}
+
+impl EventPayload for ProviderSessionClosed {
+    const KIND: &'static str = "provider_session.closed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn provider_session_closed(s: &ProviderSessionRow, from: SessionStatus, t: &TaskRow) -> Result<EventDraft, EventError> {
+    session_draft(s, t, &ProviderSessionClosed { task: s.task_id.clone(), from })
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn thread_draft<P: EventPayload>(th: &ThreadRow, t: &TaskRow, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Thread, th.id.as_str(), p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+#[derive(Serialize)]
+pub(super) struct ThreadCreated {
+    task: String,
+}
+
+impl EventPayload for ThreadCreated {
+    const KIND: &'static str = "thread.created";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn thread_created(th: &ThreadRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    thread_draft(th, t, &ThreadCreated { task: th.task_id.clone() })
+}
+
+/// El resumen NO viaja: solo si lo hay.
+#[derive(Serialize)]
+pub(super) struct ThreadSummarized {
+    task: String,
+    has_summary: bool,
+}
+
+impl EventPayload for ThreadSummarized {
+    const KIND: &'static str = "thread.summarized";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn thread_summarized(th: &ThreadRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    thread_draft(th, t, &ThreadSummarized { task: th.task_id.clone(), has_summary: th.summary.is_some() })
 }
 
 // ---------------------------------------------------------------------------------------------

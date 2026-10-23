@@ -262,6 +262,20 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.stopped",
             "warning",
         ),
+        (
+            "provider_session.opened",
+            State,
+            ("provider_session", "ps-t-7-a2"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "provider": "claude", "resumable": true, "bound": false }),
+            "activity.provider_session.opened",
+            "info",
+        ),
+        ("provider_session.bound", State, ("provider_session", "ps-t-7-a2"), json!({ "task": "t-7", "binding": "stream_json" }), "activity.provider_session.bound", "info"),
+        ("provider_session.resumed", State, ("provider_session", "ps-t-7-a2"), json!({ "task": "t-7", "attempt": "t-7-a3", "n": 3 }), "activity.provider_session.resumed", "info"),
+        ("provider_session.detached", State, ("provider_session", "ps-t-7-a2"), json!({ "task": "t-7" }), "activity.provider_session.detached", "info"),
+        ("provider_session.closed", State, ("provider_session", "ps-t-7-a2"), json!({ "task": "t-7", "from": "idle" }), "activity.provider_session.closed", "info"),
+        ("thread.created", State, ("thread", "th-t-7"), json!({ "task": "t-7" }), "activity.thread.created", "info"),
+        ("thread.summarized", State, ("thread", "th-t-7"), json!({ "task": "t-7", "has_summary": true }), "activity.thread.summarized", "info"),
         // decision
         (
             "decision.recorded",
@@ -561,7 +575,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 65] = [
+const CLAVES: [&str; 72] = [
     "activity.attempt.approved",
     "activity.attempt.completed",
     "activity.attempt.failed",
@@ -598,6 +612,11 @@ const CLAVES: [&str; 65] = [
     "activity.project.registered",
     "activity.project.relocated",
     "activity.project.restored",
+    "activity.provider_session.bound",
+    "activity.provider_session.closed",
+    "activity.provider_session.detached",
+    "activity.provider_session.opened",
+    "activity.provider_session.resumed",
     "activity.run.closed",
     "activity.run.created",
     "activity.run.removed",
@@ -627,6 +646,8 @@ const CLAVES: [&str; 65] = [
     "activity.task.stopped",
     "activity.task.updated",
     "activity.task.waiting",
+    "activity.thread.created",
+    "activity.thread.summarized",
 ];
 
 #[test]
