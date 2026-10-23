@@ -148,14 +148,31 @@ fn task_cursor(t: &TaskRow) -> String {
     format!("t3:{}:{}", t.created_at, t.id)
 }
 
-fn parse_task_cursor(c: &str) -> Result<(i64, String), String> {
-    let rest = c.strip_prefix("t3:").ok_or_else(|| invalid("cursor desconocido"))?;
-    let (at, id) = rest.split_once(':').ok_or_else(|| invalid("cursor desconocido"))?;
-    let at = at.parse::<i64>().map_err(|_| invalid("cursor desconocido"))?;
-    if id.is_empty() || id.chars().count() > MAX_ID_CHARS {
-        return Err(invalid("cursor desconocido"));
+fn stale(m: &str) -> String {
+    format!("model_cursor_stale: {m}")
+}
+
+/// Un cursor de `task_list_v2` ya leído: la clave (`t3:`) o, en la ventana de `core_model.compat`, el formato anterior
+/// (`t2:<task_id>`), que se traduce a su clave al leer la Task.
+enum TaskCursor {
+    Key(i64, String),
+    Legacy(String),
+}
+
+fn parse_task_cursor(c: &str) -> Result<TaskCursor, String> {
+    if let Some(id) = c.strip_prefix("t2:") {
+        if id.is_empty() || id.chars().count() > MAX_ID_CHARS {
+            return Err(stale("cursor con formato no reconocido"));
+        }
+        return Ok(TaskCursor::Legacy(id.to_string()));
     }
-    Ok((at, id.to_string()))
+    let rest = c.strip_prefix("t3:").ok_or_else(|| stale("cursor con formato no reconocido"))?;
+    let (at, id) = rest.split_once(':').ok_or_else(|| stale("cursor con formato no reconocido"))?;
+    let at = at.parse::<i64>().map_err(|_| stale("cursor con formato no reconocido"))?;
+    if id.is_empty() || id.chars().count() > MAX_ID_CHARS {
+        return Err(stale("cursor con formato no reconocido"));
+    }
+    Ok(TaskCursor::Key(at, id.to_string()))
 }
 
 /// `task_list_v2 {project_id, include_discarded?, limit?, cursor?}`: las Tasks del Project por (creación, id), con su
@@ -177,13 +194,22 @@ pub(super) fn task_list(core: &Core, caller: &Caller, context: Option<&MutationC
         Some(_) => return Err(invalid("`cursor` debe ser texto")),
     };
     with_model(core, |s| {
-        // El cursor es de ESTE Project: su Task existe, es del Project y la clave coincide.
-        if let Some((at, id)) = &after {
-            match s.task_row(id)? {
-                Some(t) if t.project_id.as_deref() == Some(project.as_str()) && t.created_at == *at => {}
+        // El cursor es de ESTE Project: su Task existe, es del Project y la clave coincide. Un `t2:` (ventana de
+        // compatibilidad) toma la clave de su Task y la respuesta ya devuelve `t3:`.
+        let after: Option<(i64, String)> = match &after {
+            None => None,
+            Some(TaskCursor::Key(at, id)) => match s.task_row(id)? {
+                Some(t) if t.project_id.as_deref() == Some(project.as_str()) && t.created_at == *at => Some((*at, id.clone())),
                 _ => return Ok(Err(invalid("el cursor no es de esta lista"))),
-            }
-        }
+            },
+            Some(TaskCursor::Legacy(id)) => match s.task_row(id)? {
+                Some(t) if t.project_id.as_deref() == Some(project.as_str()) => {
+                    eprintln!("task_list_v2: cursor `t2:` (formato anterior) aceptado por compatibilidad; la respuesta usa `t3:`");
+                    Some((t.created_at, t.id))
+                }
+                _ => return Ok(Err(invalid("el cursor no es de esta lista"))),
+            },
+        };
         let ids = s.task_ids_after(&project, discarded, after.as_ref().map(|(at, id)| (*at, id.as_str())), limit + 1)?;
         let more = ids.len() > limit;
         let mut page = Vec::with_capacity(limit);
@@ -231,7 +257,7 @@ pub(super) fn attempts_by_task(core: &Core, caller: &Caller, context: Option<&Mu
     let limit = parse_limit(map)?;
     let after = match map.get("cursor") {
         None | Some(Value::Null) => None,
-        Some(Value::String(c)) => Some(c.strip_prefix("a1:").and_then(|n| n.parse::<i64>().ok()).filter(|n| *n >= 1).ok_or_else(|| invalid("cursor desconocido"))?),
+        Some(Value::String(c)) => Some(c.strip_prefix("a1:").and_then(|n| n.parse::<i64>().ok()).filter(|n| *n >= 1).ok_or_else(|| stale("cursor con formato no reconocido"))?),
         Some(_) => return Err(invalid("`cursor` debe ser texto")),
     };
     with_model(core, |s| {

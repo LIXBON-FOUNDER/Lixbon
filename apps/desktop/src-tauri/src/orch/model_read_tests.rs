@@ -118,7 +118,7 @@ fn tras_el_corte_las_lecturas_responden_con_su_version_y_cuadran_con_las_fixture
         ("task_detail_v2", json!({ "task_id": "t999" }), "model_not_found"),
         ("attempt_detail", json!({ "attempt_id": "t999-a1" }), "model_not_found"),
         ("task_list_v2", json!({ "project_id": "p-1", "limit": 0 }), "model_invalid_request"),
-        ("task_list_v2", json!({ "project_id": "p-1", "cursor": "nope" }), "model_invalid_request"),
+        ("task_list_v2", json!({ "project_id": "p-1", "cursor": "nope" }), "model_cursor_stale"),
         ("task_list_v2", json!({ "project_id": "p-1", "status": "all" }), "model_invalid_request"),
         ("attempts_by_task", json!({}), "model_invalid_request"),
     ] {
@@ -186,8 +186,17 @@ fn cursores_por_clave_pertenencia_y_vigencia() {
     assert!(cursor.starts_with("t3:"), "{cursor}");
     let ajeno = rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-otro", "cursor": cursor })).unwrap_err();
     assert!(ajeno.contains("model_invalid_request"), "{ajeno}");
-    // El cursor viejo `t2:` (posición) ya no se acepta.
-    assert!(rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "cursor": "t2:t3" })).unwrap_err().contains("model_invalid_request"));
+    // El cursor anterior `t2:<task>` se acepta en la ventana de compatibilidad y la respuesta ya va en `t3:`.
+    let id_corte = p1["items"][1]["id"].as_str().unwrap().to_string();
+    let viejo = rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "limit": 1, "cursor": format!("t2:{id_corte}") })).unwrap();
+    let nuevo = rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "limit": 1, "cursor": cursor })).unwrap();
+    assert_eq!(viejo, nuevo, "t2: y t3: de la misma Task dan la misma página");
+    assert!(viejo["next_cursor"].as_str().unwrap().starts_with("t3:"));
+    assert!(rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-otro", "cursor": format!("t2:{id_corte}") })).unwrap_err().contains("model_invalid_request"));
+    for raro in ["t9:x", "t3:no-es-numero:t3", "a1:1"] {
+        assert!(rpc(&core, &me, "task_list_v2", json!({ "project_id": "p-1", "cursor": raro })).unwrap_err().contains("model_cursor_stale"), "{raro}");
+    }
+    assert!(rpc(&core, &me, "attempts_by_task", json!({ "task_id": "t3", "cursor": "t3:1:t3" })).unwrap_err().contains("model_cursor_stale"));
 
     // attempts_by_task pagina, y una Task de otro Project no se lee con ese Project.
     let ctx = MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) };
@@ -229,15 +238,66 @@ fn cursores_por_clave_pertenencia_y_vigencia() {
 
 #[test]
 fn activity_por_attempt_incluye_sesion_worktree_y_revision() {
+    use crate::store::{ArtifactKind, NewArtifact, NewProviderSession, NewWorktree, Provenance, SessionBinding};
     let (_l, data, core_dir, core) = con_fixture();
     corta(&core, &core_dir, &data);
     let me = yo(&core);
-    let r = rpc(&core, &me, "activity_list", json!({ "attempt_id": "t3-a1" })).unwrap();
-    assert!(r["next_cursor"].is_i64(), "next_cursor siempre");
-    for i in r["items"].as_array().unwrap() {
-        let kind = i["target"]["kind"].as_str().unwrap();
-        assert!(["attempt", "provider_session", "worktree", "artifact", "review"].contains(&kind), "{i}");
+    let ana = MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) };
+    let (a1, a2) = core
+        .storage
+        .with_store(|s| {
+            let sistema = MutationContext::core();
+            let intencion = NewTaskIntent { title: "con worktree".into(), spec: String::new(), repo: "/home/ana/app".into() };
+            let (_, t) = create_run(s, &ana, &NewRun { objective: "act".into(), project_id: "p-1".into(), root: intencion }).unwrap();
+            let new = NewAttempt { provider: "codex".into(), model: None, effort: None, role: None, profile: None, external: false, requires_approval: false };
+            let a1 = attempt_ops::create(s, &ana, &t.id, &new).unwrap();
+            attempt_ops::start(s, &sistema, &a1.id).unwrap();
+            let wt = super::worktree_ops::register(s, &sistema, &a1.id, &NewWorktree {
+                provenance: Provenance::Created, machine: "m1".into(), repo: "/home/ana/app".into(), path: "/home/ana/app-wt".into(),
+                branch: Some("lx/act".into()), base_branch: Some("main".into()), base_commit: None,
+            }).unwrap();
+            let ps = super::session_ops::open(s, &sistema, &a1.id, &NewProviderSession { resumable: true, external_ref: None }).unwrap();
+            super::session_ops::bind(s, &sistema, &ps.id, "sesion-externa-1", SessionBinding::SessionId).unwrap();
+            super::worktree_ops::artifact(s, &sistema, &a1.id, &NewArtifact { kind: ArtifactKind::Commit, uri: "abcdef1".into(), sha256: None, bytes: None }).unwrap();
+            super::worktree_ops::lost(s, &sistema, &wt.id).unwrap();
+            attempt_ops::fail(s, &sistema, &a1.id, FailureCode::AgentIdleTimeout, "").unwrap();
+            let a2 = attempt_ops::create(s, &ana, &t.id, &new).unwrap();
+            attempt_ops::start(s, &sistema, &a2.id).unwrap();
+            super::worktree_ops::found(s, &sistema, &wt.id).unwrap();
+            super::worktree_ops::attach(s, &sistema, &wt.id, &a2.id).unwrap();
+            (a1.id, a2.id)
+        })
+        .unwrap();
+    let kinds = |id: &str, limit: u64| {
+        let r = rpc(&core, &me, "activity_list", json!({ "attempt_id": id, "limit": limit })).unwrap();
+        assert!(r["next_cursor"].is_i64(), "next_cursor siempre");
+        (r["items"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap().to_string()).collect::<Vec<_>>(), r)
+    };
+    let (k1, _) = kinds(&a1, 100);
+    assert_eq!(k1, ["attempt.requested", "attempt.started", "worktree.created", "provider_session.opened", "provider_session.bound", "artifact.created", "worktree.missing", "attempt.failed", "worktree.found"]);
+    let (k2, _) = kinds(&a2, 100);
+    // Los hechos sin Attempt de un Worktree compartido salen en todos los Attempts que lo usan (también antes de enlazarlo).
+    assert_eq!(k2, ["worktree.missing", "attempt.requested", "attempt.started", "worktree.found", "worktree.attached"]);
+    // a1: sus hechos, los de su sesión y su Worktree (también `bound` y `missing`, que no nombran Attempt); nunca
+    // los de a2 (`worktree.attached` nombra a2).
+    for k in ["worktree.created", "provider_session.opened", "provider_session.bound", "artifact.created", "worktree.missing"] {
+        assert_eq!(k1.iter().filter(|x| x.as_str() == k).count(), 1, "a1 tiene un {k}: {k1:?}");
     }
-    let e = rpc(&core, &me, "activity_list", json!({ "attempt_id": "t3-a1", "target_kind": "attempt" })).unwrap_err();
+    assert!(!k1.iter().any(|k| k == "worktree.attached"), "{k1:?}");
+    // a2 comparte el Worktree (lo enlazó): ve `attached` y los hechos sin Attempt de ese Worktree, no los que nombran a1.
+    assert_eq!(k2.iter().filter(|x| x.as_str() == "worktree.attached").count(), 1, "{k2:?}");
+    assert!(!k2.iter().any(|k| k == "worktree.created" || k == "artifact.created" || k.starts_with("provider_session.")), "{k2:?}");
+    // Paginación: con limit 2 se recorre lo mismo.
+    let (mut todo, mut cursor) = (Vec::new(), 0i64);
+    loop {
+        let r = rpc(&core, &me, "activity_list", json!({ "attempt_id": a1, "limit": 2, "cursor": cursor })).unwrap();
+        todo.extend(r["items"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap().to_string()));
+        cursor = r["next_cursor"].as_i64().unwrap();
+        if !r["has_more"].as_bool().unwrap() {
+            break;
+        }
+    }
+    assert_eq!(todo, k1);
+    let e = rpc(&core, &me, "activity_list", json!({ "attempt_id": a1, "target_kind": "attempt" })).unwrap_err();
     assert!(e.contains("activity_invalid_request"), "{e}");
 }
