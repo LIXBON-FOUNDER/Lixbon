@@ -189,6 +189,8 @@ pub(super) enum EntityKind {
     Worktree,
     /// Lo que deja un Attempt (LXO-116). Id UUID v7.
     Artifact,
+    /// Una revisión sobre (Attempt, head_commit) (LXO-118). Id = el de su decisión.
+    Review,
     Run,
     Project,
     SpawnRequest,
@@ -208,6 +210,7 @@ impl EntityKind {
             EntityKind::Thread => "thread",
             EntityKind::Worktree => "worktree",
             EntityKind::Artifact => "artifact",
+            EntityKind::Review => "review",
             EntityKind::Run => "run",
             EntityKind::Project => "project",
             EntityKind::SpawnRequest => "spawn_request",
