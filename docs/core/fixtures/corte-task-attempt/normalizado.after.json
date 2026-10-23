@@ -447,6 +447,11 @@
       "provider": "codex",
       "external_ref": "/home/ana/.codex/sessions/2026/10/rollout-t3.jsonl",
       "binding": "session_id",
+      "resumable": 1,
+      "status": "idle",
+      "created_at": 1792000050000,
+      "updated_at": 1792000300000,
+      "closed_at": null,
       "origin": "legacy"
     },
     {
@@ -456,6 +461,11 @@
       "provider": "claude",
       "external_ref": "6f1c2a9e-0b7d-4d1e-9a51-3c2f8e7d9b10",
       "binding": "stream_json",
+      "resumable": 1,
+      "status": "idle",
+      "created_at": 1792000070000,
+      "updated_at": 1792000800000,
+      "closed_at": null,
       "origin": "legacy"
     }
   ],
@@ -463,22 +473,38 @@
     {
       "id": "th-t2",
       "task_id": "t2",
-      "run_id": "r1"
+      "run_id": "r1",
+      "summary": null,
+      "created_at": null,
+      "updated_at": null,
+      "origin": "legacy"
     },
     {
       "id": "th-t3",
       "task_id": "t3",
-      "run_id": "r1"
+      "run_id": "r1",
+      "summary": null,
+      "created_at": null,
+      "updated_at": null,
+      "origin": "legacy"
     },
     {
       "id": "th-t4",
       "task_id": "t4",
-      "run_id": "r1"
+      "run_id": "r1",
+      "summary": null,
+      "created_at": null,
+      "updated_at": null,
+      "origin": "legacy"
     },
     {
       "id": "th-t5",
       "task_id": "t5",
-      "run_id": "r1"
+      "run_id": "r1",
+      "summary": null,
+      "created_at": null,
+      "updated_at": null,
+      "origin": "legacy"
     }
   ],
   "thread_messages": [

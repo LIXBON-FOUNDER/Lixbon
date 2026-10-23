@@ -10,7 +10,7 @@ python -I docs/core/fixtures/corte-task-attempt/verificar.py --escribir  # regen
 ```
 
 Solo usa la biblioteca estándar de Python (`sqlite3` con JSON1) y trabaja en un directorio temporal: no toca
-`~/.lixbon`. Aplica todas las migraciones **publicadas** anteriores al corte (hoy 001…008, con
+`~/.lixbon`. Aplica todas las migraciones **publicadas** anteriores al corte (hoy 001…009, con
 el esquema inerte de Task y de Attempt), así que si una de ellas cambia, la prueba lo nota.
 
 Si cambias el mapeo, cambia a la vez `corte.borrador.sql`, la ADR y, tras revisarlo a mano,
