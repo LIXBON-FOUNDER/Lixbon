@@ -12,4 +12,3 @@ export function attemptEvent(seq, attemptId, kind, args, visual = 'info', ts = 1
 export function attemptActivityPage(items) {
   return { v: 1, projection: 1, order: 'desc', items, next_cursor: items.length ? items[items.length - 1].seq : '0', has_more: false, head_seq: items[0]?.seq ?? '0', limit: ATTEMPT_ACTIVITY_LIMIT };
 }
-
