@@ -130,12 +130,16 @@ fn task_detail_devuelve_el_dto_del_task_workspace() {
     assert_eq!(task["project_id"], json!(a));
     assert_eq!(task["status"], "running");
     for field in ["run_id", "parent_id", "root_id", "provider", "model", "created_at", "updated_at", "child_ids",
-        "phase", "messages", "cwd", "branch", "worktree", "merged", "review", "integration"] {
+        "phase", "messages", "cwd", "branch", "worktree", "merged", "review", "integration", "role", "base",
+        "model_effective", "failure_reason", "pr_url", "external"] {
         assert!(task.get(field).is_some(), "falta {field}");
     }
     assert_eq!(task["child_ids"], json!([]));
     assert_eq!(task["review"], Value::Null);
     assert_eq!(task["integration"], Value::Null);
+    assert_eq!((task["failure_reason"].clone(), task["pr_url"].clone()), (Value::Null, Value::Null));
+    assert!(task["external"].is_boolean(), "external es el campo legacy, siempre presente");
+    assert!(!r.to_string().contains("requested_argv") && task.get("spec").is_none(), "ni el encargo ni el argv");
 }
 
 #[test]

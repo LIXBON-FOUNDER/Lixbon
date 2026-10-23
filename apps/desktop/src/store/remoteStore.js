@@ -28,7 +28,9 @@ const RESULT_CHARS = 600;
 const SNAPSHOT_MSGS = 80;
 const MACHINE = 'Lixbon IDE';
 // Lo que el móvil puede mandar con un prompt; un host sin esto solo recibe texto.
-const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config'];
+// `core_snapshot`: el IDE atiende el bootstrap observacional de Mobile (LXO-107, lib/remoteCore.js);
+// `core_attention`, la bandeja de Attention completa (LXO-109); `core_task`, detalle y Activity de una Task (LXO-110).
+const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config', 'core_snapshot', 'core_attention', 'core_task'];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;
 const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };

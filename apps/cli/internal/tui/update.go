@@ -308,6 +308,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.onUpdateNotice(msg.Outcome)
 		return m, nil
 
+	case coreSummaryMsg:
+		m.onCoreSummary(msg)
+		return m, nil
+
 	case runCommandMsg:
 		return m, m.runCommand(msg.name, msg.arg)
 

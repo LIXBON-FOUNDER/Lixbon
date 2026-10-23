@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ACTIVITY_V1_MESSAGE_KEYS, translateActivityMessage } from './activityMessages.js';
 
 const translate = translateActivityMessage;
@@ -198,5 +201,17 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.run.closed', { ...COMPLETE_ARGS, forced: false })).toContain('cerró');
     expect(translate('activity.decision.review.accepted', { ...COMPLETE_ARGS, has_comment: true }))
       .toContain('comentario');
+  });
+});
+
+describe('casos compartidos con lxo (docs/core/fixtures/activity_messages_es.json)', () => {
+  it('cada caso da la misma frase que espera lxo task show', () => {
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+    const path = resolve(root, 'docs', 'core', 'fixtures', 'activity_messages_es.json');
+    const { cases } = JSON.parse(readFileSync(path, 'utf8'));
+    for (const { key, args, text } of cases) {
+      expect(translate(key, args), `${key} ${JSON.stringify(args)}`).toBe(text);
+    }
+    expect(new Set(cases.map((c) => c.key))).toEqual(new Set(ACTIVITY_V1_MESSAGE_KEYS));
   });
 });
