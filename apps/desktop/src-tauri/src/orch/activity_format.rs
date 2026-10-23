@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 41] = [
+pub(super) const KINDS: [&str; 48] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -59,6 +59,13 @@ pub(super) const KINDS: [&str; 41] = [
     "provider_session.closed",
     "thread.created",
     "thread.summarized",
+    "worktree.created",
+    "worktree.adopted",
+    "worktree.attached",
+    "worktree.missing",
+    "worktree.found",
+    "worktree.removed",
+    "artifact.created",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -95,6 +102,12 @@ const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_ter
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
+/// Procedencia de un Worktree que ya existía (`worktree.adopted`).
+const ADOPTED_PROVENANCE: [&str; 2] = ["adopted", "external"];
+/// Por qué se quitó un Worktree (`worktree.removed`).
+const WORKTREE_REMOVAL: [&str; 3] = ["integrated", "discarded", "gone"];
+/// Tipos de Artifact (`artifact.created`).
+const ARTIFACT_KINDS: [&str; 5] = ["report", "pull_request", "last_message", "commit", "file"];
 /// Campos de la intención que puede nombrar `task.updated`.
 const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
 const ENV_CODES: [&str; 3] = [
@@ -488,6 +501,29 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         ),
         "thread.created" => rendered("activity.thread.created", Visual::Info, vec![("task", id(p, "task"))]),
         "thread.summarized" => rendered("activity.thread.summarized", Visual::Info, vec![("task", id(p, "task")), ("has_summary", flag(p, "has_summary"))]),
+        "worktree.created" => rendered(
+            "activity.worktree.created",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("branch?", text(p, "branch", 300))],
+        ),
+        "worktree.adopted" => rendered(
+            "activity.worktree.adopted",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("provenance", closed(p, "provenance", &ADOPTED_PROVENANCE)), ("branch?", text(p, "branch", 300))],
+        ),
+        "worktree.attached" => rendered("activity.worktree.attached", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "worktree.missing" => rendered("activity.worktree.missing", Visual::Warning, vec![("task", id(p, "task"))]),
+        "worktree.found" => rendered("activity.worktree.found", Visual::Info, vec![("task", id(p, "task"))]),
+        "worktree.removed" => rendered(
+            "activity.worktree.removed",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("reason", closed(p, "reason", &WORKTREE_REMOVAL)), ("branch_kept", flag(p, "branch_kept"))],
+        ),
+        "artifact.created" => rendered(
+            "activity.artifact.created",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("kind", closed(p, "kind", &ARTIFACT_KINDS)), ("verifiable", flag(p, "verifiable"))],
+        ),
         "task.review_requested" => rendered(
             "activity.task.review_requested",
             Visual::Info,

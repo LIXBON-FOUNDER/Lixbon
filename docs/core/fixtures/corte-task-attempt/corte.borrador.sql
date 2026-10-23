@@ -4,7 +4,8 @@
 -- migraciones publicadas anteriores al corte (001..008) y compara el resultado con `normalizado.after.json`.
 --
 -- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113;
--- `008_attempts`: attempts, LXO-114; `009_sessions_threads`: provider_sessions, threads y thread_messages, LXO-115).
+-- `008_attempts`: attempts, LXO-114; `009_sessions_threads`: provider_sessions, threads y thread_messages, LXO-115; `010_worktrees_artifacts`: worktrees y artifacts,
+-- LXO-116).
 -- Este borrador crea solo lo que todavía no está publicado; según se publique cada entidad, su CREATE sale de
 -- aquí. El corte real será `NNN_task_attempt_cut` (el siguiente número libre) y, desde ese momento, su texto
 -- no se edita (checksum). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms
@@ -60,36 +61,11 @@ CREATE TABLE attempt_phases (
   PRIMARY KEY (attempt_id, ord)
 ) STRICT;
 
--- Worktree: lo posee la Task (dura más que un intento); lo crea un Attempt concreto.
-CREATE TABLE worktrees (
-  id                    TEXT    PRIMARY KEY,
-  task_id               TEXT    NOT NULL REFERENCES tasks (id),
-  created_by_attempt_id TEXT    NOT NULL REFERENCES attempts (id) DEFERRABLE INITIALLY DEFERRED,
-  repo                  TEXT    NOT NULL,
-  path                  TEXT,                 -- NULL una vez liberado (la rama puede conservarse)
-  branch                TEXT,
-  base_branch           TEXT,
-  base_commit           TEXT,
-  env_plan              TEXT    CHECK (env_plan IS NULL OR json_valid(env_plan)),
-  state                 TEXT    NOT NULL CHECK (state IN ('active', 'released')),
-  origin                TEXT    NOT NULL CHECK (origin IN ('legacy', 'core')),
-  CHECK ((state = 'active') = (path IS NOT NULL)),
-  CHECK (state = 'active' OR branch IS NOT NULL)
-) STRICT;
+-- `worktrees` y `artifacts` ya existen (010_worktrees_artifacts, LXO-116): la ruta es ubicación, no identidad;
+-- procedencia created/adopted/external; ciclo active <-> missing -> removed; el Artifact apunta a la evidencia.
 
 -- `provider_sessions`, `threads` y `thread_messages` ya existen (009_sessions_threads, LXO-115): solo vínculos declarados
 -- por el proveedor (`cwd_time` no es un vínculo), ciclo de vida `open` · `idle` · `closed` y Thread por Task.
-
--- Artifact: lo que deja un Attempt concreto.
-CREATE TABLE artifacts (
-  id         TEXT    PRIMARY KEY,
-  attempt_id TEXT    NOT NULL REFERENCES attempts (id),
-  kind       TEXT    NOT NULL CHECK (kind IN ('report', 'pull_request', 'last_message')),
-  uri        TEXT    NOT NULL,
-  created_at INTEGER,
-  origin     TEXT    NOT NULL CHECK (origin IN ('legacy', 'core')),
-  CHECK (created_at IS NOT NULL OR origin = 'legacy')
-) STRICT;
 
 CREATE TABLE decisions (
   id          INTEGER PRIMARY KEY,            -- id legacy conservado (los eventos lo citan)
@@ -127,7 +103,6 @@ CREATE TABLE legacy_residue (
 
 CREATE INDEX decisions_by_attempt ON decisions (attempt_id, kind, id);
 CREATE INDEX reviews_by_attempt ON reviews (attempt_id, decision_id);
-CREATE UNIQUE INDEX worktrees_one_active_path ON worktrees (path) WHERE path IS NOT NULL;
 
 -- ───────────────────────────── 2. Copia ─────────────────────────────
 -- `L` = cada Task del documento. Los booleanos de serde ausentes son `false` (serde(default)).
@@ -215,15 +190,19 @@ SELECT t.key || '-a1', CAST(p.key AS INTEGER),
        coalesce(json_extract(p.value, '$.note'), ''), json_extract(p.value, '$.at')
 FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t, json_each(t.value, '$.phases') AS p;
 
-INSERT INTO worktrees (id, task_id, created_by_attempt_id, repo, path, branch, base_branch, base_commit, env_plan, state, origin)
-SELECT 'wt-' || t.key || '-a1', t.key, t.key || '-a1',
+-- Los creó Lixbon. Sin carpeta (rama conservada) el Worktree ya está quitado, con la rama guardada. El legado no
+-- registra la máquina, las fechas ni el motivo: quedan NULL.
+INSERT INTO worktrees (id, task_id, attempt_id, provenance, repo, path, branch, base_branch, base_commit, env_plan, state,
+                       branch_kept, origin)
+SELECT 'wt-' || t.key || '-a1', t.key, t.key || '-a1', 'created',
        json_extract(t.value, '$.repo'),
        json_extract(t.value, '$.worktree'),
        json_extract(t.value, '$.branch'),
        json_extract(t.value, '$.base'),
        json_extract(t.value, '$.base_commit'),
        json_extract(t.value, '$.env'),
-       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 'active' ELSE 'released' END,
+       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 'active' ELSE 'removed' END,
+       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 0 ELSE 1 END,
        'legacy'
 FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
 WHERE json_extract(t.value, '$.worktree') IS NOT NULL

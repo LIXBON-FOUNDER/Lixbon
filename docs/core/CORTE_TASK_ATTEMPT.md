@@ -116,7 +116,7 @@ erDiagram
 |---|---|---|
 | Task | Run (agrupación legacy) y Project | intención durable; sobrevive a todos sus intentos |
 | Attempt | Task | una ejecución concreta; nunca se reabre |
-| Worktree | **Task** (`task_id`), creado por un Attempt (`created_by_attempt_id`) | un seguimiento o un retry pueden reutilizarlo; liberar o conservar la rama es una decisión sobre la Task |
+| Worktree | **Task** (`task_id`), registrado por un Attempt (`attempt_id`; creado, adoptado o externo, LXO-116) | un seguimiento o un retry pueden reutilizarlo; liberar o conservar la rama es una decisión sobre la Task |
 | ProviderSession | **Task**, abierta por un Attempt (`opened_by_attempt_id`) | un seguimiento en la misma terminal sigue en la misma sesión del proveedor (D7) |
 | Artifact | Attempt | el informe, la PR y el último mensaje son de **ese** intento |
 | Thread | Task | la conversación con el coordinador continúa entre intentos |
@@ -175,7 +175,7 @@ destino **no se descarta**: va a `legacy_residue` con un motivo.
 | `pr_url` | `artifacts (kind = pull_request)` | |
 | `last_message_path` | `artifacts (kind = last_message)` | |
 | `merged` | `attempts.integrated` | un seguimiento posterior ya no «desfusiona» el intento anterior: crea otro |
-| `worktree`, `branch`, `base` | `worktrees` | fila si hay `worktree` (`state = active`) **o** si hay `branch` y `base` sin worktree (rama conservada, `state = released`, `path = NULL`) |
+| `worktree`, `branch`, `base` | `worktrees` | fila si hay `worktree` (`state = active`) **o** si hay `branch` y `base` sin worktree (rama conservada: `state = removed`, `branch_kept = 1`, `path = NULL`; LXO-116) |
 | `branch` sin `base` ni `worktree` | `attempts.checkout_branch` | la rama del propio checkout de una raíz (RESOURCES.md: no es una rama conservada) |
 | `base_commit`, `env` | `worktrees.base_commit`, `worktrees.env_plan` | |
 | `ack_unverified`, `requested_argv`, `policy`, `plan_mode`, `stream_json` | `attempts.*` | |
@@ -383,6 +383,7 @@ y la fixture en la misma PR.
 | D21 | `worktree_id` y `provider_session_id` son referencias blandas de fijado único hasta que existan sus tablas | [`ATTEMPTS.md`](ATTEMPTS.md) |
 | D22–D25 | Cancelar lo pendiente es rechazarlo; reintento idempotente = `Unchanged`; una Task con un Attempt activo no se descarta; una Task con Attempts no se borra | [`ATTEMPTS.md`](ATTEMPTS.md) |
 | D26–D29 | La sesión del proveedor nace sin referencia y la recibe una vez; `idle` solo si es resumible y `closed` es final; el Thread no tiene estado ni guarda secretos; solo el Core conduce la sesión | [`SESIONES_THREADS.md`](SESIONES_THREADS.md) (LXO-115) |
+| D30–D33 | La ruta del Worktree es ubicación, no identidad; procedencia `created`/`adopted`/`external` fija; quitar exige motivo (`integrated` del Core, `discarded` confirmado por una persona, `gone` si ya faltaba) y uno externo solo sale con `gone`; el Artifact apunta a la evidencia, inmutable | [`WORKTREES_ARTIFACTS.md`](WORKTREES_ARTIFACTS.md) (LXO-116) |
 
 La columna `attempts.cwd` de D18 y el resto de las columnas de runtime del borrador del corte (política, entrega, modelo
 efectivo…) **no** están en la `008_attempts`: cada slice las añade con `ALTER TABLE ... ADD COLUMN` cuando las usa.
