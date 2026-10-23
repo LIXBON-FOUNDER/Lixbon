@@ -43,6 +43,12 @@
 //! | `worktree.created` · `adopted` · `attached` · `missing` · `found` · `removed` | state | `worktree` |
 //! | `artifact.created` | state | `artifact` |
 //!
+//! # Review targeting (LXO-118, inertes hasta el corte; los emite `review_ops`)
+//! | kind | class | entidad |
+//! |---|---|---|
+//! | `review.completed` | decision | `review` |
+//! | `review.invalidated` | state | `review` |
+//!
 //! # Corte Task/Attempt (LXO-117, sin activar; lo emite `agentic_cut`)
 //! | kind | class | entidad |
 //! |---|---|---|
@@ -60,7 +66,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -1206,6 +1212,75 @@ impl EventPayload for ArtifactCreated {
 pub(super) fn artifact_created(x: &ArtifactRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     let p = ArtifactCreated { task: a.task_id.clone(), attempt: a.id.clone(), n: a.n, kind: x.kind, verifiable: x.sha256.is_some() };
     Ok(EventDraft::new(EntityKind::Artifact, x.id.as_str(), &p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review targeting (LXO-118)
+// ---------------------------------------------------------------------------------------------
+//
+// La entidad es la revisión (`entity_id` = id de su decisión) y el payload nombra su target: Task, Attempt y HEAD.
+// Nunca el comentario.
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn review_draft<P: EventPayload>(r: &ReviewRow, t: &TaskRow, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Review, r.decision_id.to_string(), p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+#[derive(Serialize)]
+pub(super) struct ReviewCompleted {
+    task: String,
+    attempt: String,
+    n: i64,
+    verdict: Verdict,
+    head_commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_commit: Option<String>,
+    /// La revisión anterior del mismo Attempt que deja de valer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    supersedes: Option<i64>,
+    has_comment: bool,
+}
+
+impl EventPayload for ReviewCompleted {
+    const KIND: &'static str = "review.completed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn review_completed(r: &ReviewRow, supersedes: Option<i64>, a: &AttemptRow, t: &TaskRow, has_comment: bool) -> Result<EventDraft, EventError> {
+    let p = ReviewCompleted {
+        task: a.task_id.clone(),
+        attempt: a.id.clone(),
+        n: a.n,
+        verdict: r.verdict,
+        head_commit: r.head_commit.clone(),
+        base_commit: r.base_commit.clone(),
+        supersedes,
+        has_comment,
+    };
+    review_draft(r, t, &p)
+}
+
+#[derive(Serialize)]
+pub(super) struct ReviewInvalidated {
+    task: String,
+    attempt: String,
+    n: i64,
+    head_commit: String,
+    observed_head: String,
+}
+
+impl EventPayload for ReviewInvalidated {
+    const KIND: &'static str = "review.invalidated";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn review_invalidated(r: &ReviewRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let observed = r.observed_head.clone().ok_or_else(|| EventError::Serialize("review.invalidated: la revisión no tiene HEAD observado".into()))?;
+    review_draft(r, t, &ReviewInvalidated { task: a.task_id.clone(), attempt: a.id.clone(), n: a.n, head_commit: r.head_commit.clone(), observed_head: observed })
 }
 
 // ---------------------------------------------------------------------------------------------
