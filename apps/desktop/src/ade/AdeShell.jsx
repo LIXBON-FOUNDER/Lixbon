@@ -156,12 +156,13 @@ function nextTaskCursor(page, cursor, visited) {
 /** Sigue `tasks_by_project(all)` y solo publica una generación cuando su conjunto de páginas queda listo. */
 function useProjectTaskContinuation(projectId, firstPage, enabled) {
   const epoch = Number.isSafeInteger(firstPage.readEpoch) ? firstPage.readEpoch : 0;
-  const context = JSON.stringify([projectId ?? null, epoch, enabled === true]);
+  const headVersion = JSON.stringify(firstPage.data ?? null);
+  const context = JSON.stringify([projectId ?? null, headVersion, enabled === true]);
   const contextRef = useRef(context);
   contextRef.current = context;
   const [continuation, setContinuation] = useState(null);
   const continuationRef = useRef(null);
-  const requestRef = useRef({ id: 0, inFlight: false, timeout: null });
+  const requestRef = useRef({ id: 0, inFlight: false, timeout: null, context: null, epoch: 0, reconcile: false });
 
   const publish = useCallback((next) => {
     continuationRef.current = next;
@@ -174,6 +175,9 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
     const requestId = request.id + 1;
     request.id = requestId;
     request.inFlight = true;
+    request.context = context;
+    request.epoch = epoch;
+    request.reconcile = reconcile;
     const requestContext = context;
     const firstData = firstPage.data;
     const isCurrentRequest = () => requestRef.current.id === requestId && contextRef.current === requestContext;
@@ -196,7 +200,8 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
         const visible = continuationRef.current?.projectId === projectId ? continuationRef.current : base;
         publish({
           ...visible,
-          targetEpoch: epoch,
+          ...(reconcile ? {} : { epoch: request.epoch }),
+          targetEpoch: request.epoch,
           loading: false,
           pending: true,
           error: PROJECT_TASK_PAGE_TIMEOUT_MESSAGE,
@@ -246,7 +251,7 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
         const loaded = addedCount === 1 ? 'Se cargó 1 Task.' : `Se cargaron ${addedCount} Tasks.`;
         publish({
           projectId,
-          epoch,
+          epoch: request.epoch,
           items,
           pageCount,
           cursor,
@@ -265,7 +270,7 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
         const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
         publish({
           ...base,
-          targetEpoch: epoch,
+          ...(reconcile ? { targetEpoch: request.epoch } : { epoch: request.epoch }),
           loading: false,
           pending: false,
           error: message,
@@ -276,6 +281,7 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
           if (request.timeout !== null) window.clearTimeout(request.timeout);
           request.timeout = null;
           request.inFlight = false;
+          request.context = null;
         }
       }
     };
@@ -283,12 +289,37 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
     void read();
   }, [context, enabled, epoch, firstPage.data, projectId, publish]);
 
+  // Same head content is still a new Core read epoch, but it does not invalidate a cursor walk.
+  // A changed Project, head DTO, or active state does invalidate it, including on unmount.
+  useEffect(() => {
+    return () => {
+      const request = requestRef.current;
+      request.id += 1;
+      request.inFlight = false;
+      if (request.timeout !== null) window.clearTimeout(request.timeout);
+      request.timeout = null;
+      request.context = null;
+    };
+  }, [context]);
+
   useEffect(() => {
     const request = requestRef.current;
+    if (request.inFlight && request.context === context) {
+      request.epoch = epoch;
+      const active = continuationRef.current;
+      if (active?.projectId === projectId && active.epoch !== epoch) {
+        publish(request.reconcile
+          ? { ...active, targetEpoch: epoch }
+          : { ...active, epoch });
+      }
+      return;
+    }
+
     request.id += 1;
     request.inFlight = false;
     if (request.timeout !== null) window.clearTimeout(request.timeout);
     request.timeout = null;
+    request.context = null;
 
     if (enabled && projectId && firstPage.data) {
       const previous = continuationRef.current;
@@ -296,14 +327,7 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
         runPageSet({ base: previous, reconcile: true });
       }
     }
-
-    return () => {
-      request.id += 1;
-      request.inFlight = false;
-      if (request.timeout !== null) window.clearTimeout(request.timeout);
-      request.timeout = null;
-    };
-  }, [context, enabled, epoch, firstPage.data, projectId, runPageSet]);
+  }, [context, enabled, epoch, firstPage.data, projectId, publish, runPageSet]);
 
   const sameProject = continuation?.projectId === projectId ? continuation : null;
   const current = sameProject?.epoch === epoch ? sameProject : null;
