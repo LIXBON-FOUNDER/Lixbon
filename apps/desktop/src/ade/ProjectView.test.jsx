@@ -813,7 +813,7 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
     const { container } = view({ resourceInventory: INV }, cb);
     const inv = container.querySelector('[data-testid="resinv"]');
     expect(inv.querySelectorAll('button, a, input, textarea, form, [role="button"]')).toHaveLength(0);
-    expect(inv.querySelectorAll('select')).toHaveLength(3);
+    expect(inv.querySelectorAll('select')).toHaveLength(4);
     const MUTATION = /(crear|lanzar|ejecutar|reintentar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|run|retry|delete|remove|clean|merge|approve|reject|save|submit)/i;
     const names = [...inv.querySelectorAll('select, option')].map((el) => el.textContent);
     expect(names.filter((n) => MUTATION.test(n))).toEqual([]);
