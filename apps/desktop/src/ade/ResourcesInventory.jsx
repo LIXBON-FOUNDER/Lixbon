@@ -286,6 +286,13 @@ export function matchesProject(row, filter) {
   return row?.projectId === filter;
 }
 
+/** ¿Cumple la fila el filtro del host/máquina publicado por Core? */
+export function matchesMachine(row, filter) {
+  if (filter === 'all') return true;
+  if (filter === NONE) return row?.machine === null;
+  return row?.machine === filter;
+}
+
 /** «Falta» solo lo afirma el sistema de archivos. Ni `unknown` ni un escaneo no disponible. */
 export function isMissing(row) {
   return row?.kind === 'worktree' && row?.entry?.state === 'missing_on_disk';
@@ -299,6 +306,13 @@ function idOptions(rows, noneLabel) {
   const vals = rows.map((r) => r.projectId).filter((v) => v !== null);
   const opts = [{ value: 'all', label: 'Todos' }, ...uniqueSorted(vals).map((v) => ({ value: v, label: v }))];
   if (rows.some((r) => r.projectId === null)) opts.push({ value: NONE, label: noneLabel });
+  return opts;
+}
+
+function machineOptions(rows) {
+  const vals = rows.map((r) => r.machine).filter((v) => v !== null);
+  const opts = [{ value: 'all', label: 'Todos' }, ...uniqueSorted(vals).map((v) => ({ value: v, label: v }))];
+  if (rows.some((r) => r.machine === null)) opts.push({ value: NONE, label: 'Sin host informado' });
   return opts;
 }
 
@@ -543,6 +557,7 @@ function InventoryStatus({ status, onRetry }) {
 
 export function ResourcesInventory({ inventory = null, projectId = null, status = null, onRetry = null }) {
   const [projectFilter, setProjectFilter] = useState('all');
+  const [machineFilter, setMachineFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [reviewFilter, setReviewFilter] = useState('all');
 
@@ -553,6 +568,7 @@ export function ResourcesInventory({ inventory = null, projectId = null, status 
   if (lastScopeId !== scopeId) {
     setLastScopeId(scopeId);
     setProjectFilter('all');
+    setMachineFilter('all');
     setStateFilter('all');
     setReviewFilter('all');
   }
@@ -560,10 +576,11 @@ export function ResourcesInventory({ inventory = null, projectId = null, status 
   const parsed = useMemo(() => readInventory(inventory), [inventory]);
   const scoped = useMemo(() => scopeByProject(parsed?.rows ?? [], projectId), [parsed, projectId]);
   const visible = useMemo(
-    () => scoped.rows.filter((r) => matchesProject(r, projectFilter) && matchesState(r, stateFilter) && matchesReview(r, reviewFilter)),
-    [scoped, projectFilter, stateFilter, reviewFilter],
+    () => scoped.rows.filter((r) => matchesProject(r, projectFilter) && matchesMachine(r, machineFilter) && matchesState(r, stateFilter) && matchesReview(r, reviewFilter)),
+    [scoped, projectFilter, machineFilter, stateFilter, reviewFilter],
   );
   const projectOptions = useMemo(() => idOptions(scoped.rows, 'Sin proyecto'), [scoped.rows]);
+  const hostOptions = useMemo(() => machineOptions(scoped.rows), [scoped.rows]);
   // Solo el número que Core suministra; nunca se calcula a partir de las filas. Su alcance es el de la
   // petición: si es de otro Project que el seleccionado, no se atribuye a este.
   const countScopeInfo = parsed?.scope ?? { kind: 'unknown', projectId: null };
@@ -625,6 +642,7 @@ export function ResourcesInventory({ inventory = null, projectId = null, status 
         <>
           <div className="resinv__filters">
             <FilterSelect id="resinv-project" label="Proyecto" value={projectFilter} onChange={setProjectFilter} options={projectOptions} />
+            <FilterSelect id="resinv-machine" label="Host" value={machineFilter} onChange={setMachineFilter} options={hostOptions} />
             <FilterSelect id="resinv-state" label="Estado" value={stateFilter} onChange={setStateFilter} options={STATE_FILTERS} />
             <FilterSelect id="resinv-review" label="Revisión" value={reviewFilter} onChange={setReviewFilter} options={REVIEW_FILTERS} />
           </div>
