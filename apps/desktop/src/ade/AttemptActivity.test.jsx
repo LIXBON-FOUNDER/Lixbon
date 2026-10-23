@@ -62,7 +62,7 @@ describe('AttemptActivity (LXO-121)', () => {
     mount(() => { throw new Error(ERRORS.unavailable); });
     render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
     await flush();
-    expect(screen.getByText('El Core no responde; reintentando')).toBeTruthy();
+    expect(screen.getByText('El Core no responde')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
   });
 

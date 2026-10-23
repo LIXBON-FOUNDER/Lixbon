@@ -33,7 +33,17 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
       ? <p role="status">Comprobando el modelo del Core.</p>
       : <CoreModelNotice error="core_model_inactive: modo legacy" />;
   } else if (attempt && taskId && attempt.task_id !== taskId) {
-    body = <CoreModelNotice error={`model_not_found: el Attempt ${attempt.id} es de la Task ${attempt.task_id}, no de ${taskId}`} onBack={onBack} />;
+    body = (
+      <div className="ade-notice ade-notice--error" role="alert" data-code="attempt_other_task">
+        <span>{COPY.attemptOtherTask}</span>
+        {onBack && <button type="button" className="lk" onClick={onBack}>{COPY.backToProject}</button>}
+        {onSelectTask && <button type="button" className="lk" onClick={() => onSelectTask(attempt.task_id)}>{COPY.openAttemptTask}</button>}
+        <details>
+          <summary>{COPY.technicalDetail}</summary>
+          <code>{`el Attempt ${attempt.id} es de la Task ${attempt.task_id}, no de ${taskId}`}</code>
+        </details>
+      </div>
+    );
   } else if (attempt) {
     const duration = attemptDuration(attempt);
     const session = attempt.provider_session;

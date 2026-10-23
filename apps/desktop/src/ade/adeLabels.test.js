@@ -19,7 +19,7 @@ describe('adeLabels / attemptFormat', () => {
     expect(errorCopy('core_model_inactive')).toMatchObject({ tone: 'info', text: COPY.modelInactive, retry: false });
     expect(errorCopy('query_unsupported').tone).toBe('info');
     expect(errorCopy('model_not_found')).toMatchObject({ text: 'Esta tarea ya no existe o no es de este proyecto', back: true });
-    expect(errorCopy('model_unavailable')).toMatchObject({ text: 'El Core no responde; reintentando', retry: true });
+    expect(errorCopy('model_unavailable')).toMatchObject({ text: 'El Core no responde', retry: true });
   });
 
   it('duración solo con inicio y fin; rutas como nombre o relativas, nunca resueltas', () => {

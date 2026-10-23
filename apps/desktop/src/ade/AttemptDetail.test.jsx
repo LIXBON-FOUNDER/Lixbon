@@ -83,14 +83,42 @@ describe('AttemptDetail (LXO-122)', () => {
     expect(screen.getByText(/Frescura desconocida/).className).toContain('--neutral');
   });
 
-  it('un Attempt de otra Task se trata como no encontrado, con vuelta al proyecto', async () => {
+  it('un Attempt de otra Task lo dice con su propio texto, con vuelta al proyecto y a su tarea', async () => {
     mount(() => CANONICAL['attempt_detail.v1.json']);
     const onBack = vi.fn();
-    render(<AttemptDetail attemptId="t3-a1" taskId="t4" coreModel={V1} onBack={onBack} />);
+    const onSelectTask = vi.fn();
+    render(<AttemptDetail attemptId="t3-a1" taskId="t4" coreModel={V1} onBack={onBack} onSelectTask={onSelectTask} />);
     await flush();
-    expect(screen.getByText('Esta tarea ya no existe o no es de este proyecto')).toBeTruthy();
+    expect(screen.getByText('Este intento no pertenece a esta tarea')).toBeTruthy();
+    expect(screen.queryByText('Esta tarea ya no existe o no es de este proyecto')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Volver al proyecto' }));
     expect(onBack).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Ir a su tarea' }));
+    expect(onSelectTask).toHaveBeenCalledWith('t3');
+  });
+
+  it('Copiar ruta confirma «Ruta copiada» y avisa si el portapapeles falla', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    try {
+      mount((payload) => (payload.query === 'activity_list' ? attemptActivityPage([]) : CANONICAL['attempt_detail.v1.json']));
+      render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
+      await flush();
+      const worktree = screen.getByTestId('attempt-worktree');
+      const feedback = within(worktree).getByTestId('path-copy-feedback');
+      expect(feedback.getAttribute('aria-live')).toBe('polite');
+      expect(feedback.textContent).toBe('');
+      await act(async () => { fireEvent.click(within(worktree).getByRole('button', { name: /Copiar ruta/ })); });
+      expect(writeText).toHaveBeenCalledWith('/home/ana/app.lixbon-wt/t3-api-de-sesiones');
+      expect(feedback.textContent).toBe('Ruta copiada');
+      writeText.mockRejectedValueOnce(new Error('denegado'));
+      await act(async () => { fireEvent.click(within(worktree).getByRole('button', { name: /Copiar ruta/ })); });
+      expect(feedback.textContent).toBe('No se pudo copiar la ruta');
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else delete navigator.clipboard;
+    }
   });
 
   it('legacy: no consulta; errores por código con su copia', async () => {
@@ -102,7 +130,7 @@ describe('AttemptDetail (LXO-122)', () => {
     cleanup();
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
     await flush();
-    expect(screen.getByText('El Core no responde; reintentando')).toBeTruthy();
+    expect(screen.getByText('El Core no responde')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
   });
 });

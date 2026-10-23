@@ -83,7 +83,7 @@ describe('AttemptHistory (LXO-121)', () => {
     ['inactive', 'El modelo de Attempts aún no está activo en este Core', null],
     ['unknownCommand', 'El modelo de Attempts aún no está activo en este Core', null],
     ['notFound', 'Esta tarea ya no existe o no es de este proyecto', 'Volver al proyecto'],
-    ['unavailable', 'El Core no responde; reintentando', 'Reintentar'],
+    ['unavailable', 'El Core no responde', 'Reintentar'],
   ])('error %s por código estructurado', async (key, text, button) => {
     mount(() => { throw new Error(ERRORS[key]); });
     const onBack = vi.fn();
