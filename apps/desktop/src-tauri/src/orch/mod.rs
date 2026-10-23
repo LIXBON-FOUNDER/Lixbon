@@ -89,6 +89,8 @@ mod agentic_cut_tests;
 mod runtime_tables_tests;
 #[cfg(test)]
 mod attempt_events_tests;
+#[cfg(test)]
+mod activation_tests;
 mod review_ops;
 #[cfg(test)]
 mod review_ops_tests;

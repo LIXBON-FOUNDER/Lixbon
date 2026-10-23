@@ -9,12 +9,14 @@ use serde_json::{json, Map, Value};
 
 use super::agentic_cut::{check_copy, restore, run, verify_legacy_view, CutReport, BACKUP_LABEL};
 use super::state::State;
-use crate::store::{cut_migration, embedded, migrations_with_cut, sha256_hex, EventQuery, Migration, Store, StoreError, AGENTIC_MODEL};
+use crate::store::{cut_migration, embedded, sha256_hex, EventQuery, Migration, Store, StoreError, AGENTIC_MODEL, CUT_NAME};
 
 static N: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE: &str = include_str!("../../../../../docs/core/fixtures/corte-task-attempt/legacy_state.before.json");
 const AFTER: &str = include_str!("../../../../../docs/core/fixtures/corte-task-attempt/normalizado.after.json");
+/// Checksum de la 014 (el corte), congelado al publicarla (LXO-234).
+const CHECKSUM_014: &str = "4c6692565a1eb65a4422e839b43842356d34cfd5eb212529ec1cb1396a582b64";
 const TABLAS: [&str; 13] =
     ["runs", "tasks", "attempts", "attempt_phases", "worktrees", "provider_sessions", "threads", "thread_messages", "artifacts", "decisions", "reviews", "env_blocks", "legacy_residue"];
 
@@ -47,6 +49,11 @@ fn sql(s: &mut Store, q: &str) {
 }
 
 /// Base anterior al corte (todas las migraciones publicadas), el Project `p-1` y `legacy_state = doc` en la rev 42.
+/// Las migraciones de un binario anterior al corte (F2): todas menos el corte.
+fn f2() -> Vec<Migration> {
+    embedded().into_iter().filter(|m| m.name != CUT_NAME).collect()
+}
+
 fn base(t: &Tmp, doc: Option<&str>) -> Store {
     base_with(t, doc, &embedded())
 }
@@ -402,13 +409,13 @@ fn restaurar_la_copia_vuelve_a_la_base_anterior_al_corte_y_aparta_la_cortada() {
     assert!(restore(&t.core(), t.data(), &backup).is_err());
     drop(s);
     // Un binario anterior al corte no toca la base cortada; uno con el corte, sí la abre.
-    assert!(matches!(Store::open_with(&t.core(), &embedded(), "f2"), Err(StoreError::DatabaseNewer { .. })));
-    drop(Store::open_with(&t.core(), &migrations_with_cut(), "f3").unwrap());
+    assert!(matches!(Store::open_with(&t.core(), &f2(), "f2"), Err(StoreError::DatabaseNewer { .. })));
+    drop(Store::open_with(&t.core(), &embedded(), "f3").unwrap());
     std::fs::write(t.data().join("state.json"), b"escrito tras el corte").unwrap();
 
     let apartada = restore(&t.core(), t.data(), &backup).unwrap();
     assert!(apartada.join("lixbon.db").exists(), "la base cortada se aparta, no se borra");
-    let mut r = Store::open_with(&t.core(), &embedded(), "f2").unwrap();
+    let mut r = Store::open_with(&t.core(), &f2(), "f2").unwrap();
     assert_eq!(esquema(&r), antes);
     assert_eq!(r.schema_version().unwrap(), cut_migration().version - 1);
     let legacy = r.legacy_state().unwrap().unwrap();
@@ -429,16 +436,19 @@ fn una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura() {
     sc["db_sha256"] = json!("0".repeat(64));
     std::fs::write(&sidecar, serde_json::to_vec(&sc).unwrap()).unwrap();
     assert!(restore(&t.core(), t.data(), &backup).is_err());
-    assert!(Store::open_with(&t.core(), &migrations_with_cut(), "f3").unwrap().agentic_model_active().unwrap(), "la base cortada sigue en su sitio");
+    assert!(Store::open_with(&t.core(), &embedded(), "f3").unwrap().agentic_model_active().unwrap(), "la base cortada sigue en su sitio");
 }
 
+/// LXO-234: el corte es la 014, pero el migrador general nunca la aplica (es una barrera): solo `agentic_cut::run`, que
+/// llama el arranque con el interruptor. Nadie más ejecuta el corte ni la restauración.
 #[test]
-fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
+fn el_migrador_no_aplica_el_corte_y_solo_el_arranque_con_el_interruptor_lo_ejecuta() {
     let t = Tmp::new();
     let s = Store::open(&t.core(), "t").unwrap();
     assert!(!s.agentic_model_active().unwrap() && !s.agentic_cut_done().unwrap());
-    assert_eq!(s.schema_version().unwrap(), embedded().last().unwrap().version, "la última publicada, sin el corte");
-    assert!(!embedded().iter().any(|m| m.name == crate::store::CUT_NAME), "la SQL del corte no está en migrations/");
+    assert_eq!(s.schema_version().unwrap(), cut_migration().version - 1, "todas las publicadas menos el corte");
+    assert!(embedded().iter().any(|m| m.name == CUT_NAME), "el corte vive en migrations/");
+    assert_eq!(cut_migration().version, 14);
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for dir in ["orch", "store"] {
         for entrada in std::fs::read_dir(src.join(dir)).unwrap() {
@@ -448,9 +458,15 @@ fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
                 continue;
             }
             let texto = std::fs::read_to_string(&ruta).unwrap();
-            for sim in ["agentic_cut::run", ".agentic_cut_recorded(", "agentic_cut::restore"] {
-                assert!(!texto.contains(sim), "{dir}/{nombre} llama a «{sim}»: el corte no está activado");
+            for (sim, donde) in [("agentic_cut::run", "boot_authority.rs"), (".agentic_cut_recorded(", ""), ("agentic_cut::restore(", ""), ("agentic_cut::restore_pending", "lifecycle.rs")] {
+                assert!(!texto.contains(sim) || nombre == donde, "{dir}/{nombre} llama a «{sim}»: solo {donde:?} puede");
             }
         }
     }
+}
+
+/// La 014 publicada no se edita: su checksum queda congelado desde LXO-234.
+#[test]
+fn la_014_del_corte_tiene_el_checksum_congelado() {
+    assert_eq!(cut_migration().checksum(), CHECKSUM_014, "una migración publicada no se edita: el cambio va en otra");
 }

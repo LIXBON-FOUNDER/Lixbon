@@ -446,6 +446,28 @@ impl Core {
                 };
                 self.close_run(&ctx_of()?, &run, b(args, "force"))
             }
+            // Restaurar la copia previa al corte (LXO-234): solo una persona. Se aplica en el siguiente arranque.
+            "core_restore" => {
+                if !matches!(caller, Caller::User) {
+                    return Err("Solo una persona puede restaurar la base".into());
+                }
+                let core = self.storage.dir().ok_or("El almacén del Core no está abierto")?;
+                if b(args, "cancel") {
+                    let had = super::agentic_cut::cancel_restore(&core).map_err(|e| e.to_string())?;
+                    return Ok(json!({ "cancelled": had }));
+                }
+                let copy = match s(args, "copy") {
+                    c if c.is_empty() => super::agentic_cut::latest_copy(&core).ok_or("No hay ninguna copia pre-f3-cut en core/backups")?,
+                    c => std::path::PathBuf::from(c),
+                };
+                let sidecar = super::agentic_cut::request_restore(&core, &copy).map_err(|e| e.to_string())?;
+                Ok(json!({
+                    "requested": true,
+                    "copy": copy,
+                    "counts": sidecar.counts,
+                    "message": "Cierra Lixbon y vuelve a abrirlo: al arrancar se restaurará la base de antes del corte. Se pierde lo posterior al corte.",
+                }))
+            }
             "remove_run" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz".into());
@@ -475,7 +497,8 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
             ClientAction::AgentCommand
         }
-        "stop" | "release" | "diff" => ClientAction::AgentOrDesktopCommand,
+        // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
+        "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
@@ -510,7 +533,8 @@ mod tests {
             | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
                 ClientAction::AgentCommand
             }
-            "stop" | "release" | "diff" => ClientAction::AgentOrDesktopCommand,
+            // core_restore: el despacho exige además una persona.
+            "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
             "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
             _ => ClientAction::Unknown,
         }

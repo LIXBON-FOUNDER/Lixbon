@@ -434,7 +434,7 @@ fn la_003_real_actualiza_desde_la_002_conserva_el_estado_y_bloquea_a_los_binario
     r.unwrap();
     assert_eq!(titulos(&c), vec!["propia".to_string()], "el estado se conserva");
     suelta(c, &core);
-    assert_eq!(base(&core).0, store::embedded().last().unwrap().version, "sube a la última migración del binario");
+    assert_eq!(base(&core).0, (store::cut_migration().version - 1), "sube a la última migración del binario");
     assert_eq!(tablas_de_proyectos(&core), (1, 1), "y aparecen las dos tablas de D");
     assert!(archivos(&core.join("backups")).iter().any(|n| n.contains("pre-migracion-v2")), "copia previa de la migración");
     assert_eq!(marcador(&core).promotion_id, marcador_antes.promotion_id, "la autoridad no cambia");
