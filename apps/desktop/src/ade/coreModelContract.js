@@ -35,7 +35,6 @@ const PS_STATUS_SET = set(PROVIDER_SESSION_STATUSES);
 const PS_BINDING_SET = set(PROVIDER_SESSION_BINDINGS);
 const ARTIFACT_SET = set(ARTIFACT_KINDS);
 const VERDICT_SET = set(REVIEW_VERDICTS);
-const REVIEW_STATUS_SET = set(REVIEW_STATUSES);
 
 const isRecord = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const id = (v) => typeof v === 'string' && Boolean(v.trim());
@@ -73,7 +72,9 @@ const SESSION_SCHEMA = {
 };
 const ARTIFACT_SCHEMA = { id, kind: oneOf(ARTIFACT_SET), uri: id, sha256: optText, bytes: (v) => v === null || count(v) };
 const REVIEW_SCHEMA = {
-  decision_id: count, head_commit: id, base_commit: optText, verdict: oneOf(VERDICT_SET), status: oneOf(REVIEW_STATUS_SET),
+  decision_id: count, head_commit: id, base_commit: optText, verdict: oneOf(VERDICT_SET),
+  // Como los estados de Attempt: un valor nuevo se acepta y la UI lo muestra «desconocido», no rompe el detalle.
+  status: (value) => typeof value === 'string' && value.trim() !== '',
 };
 const TASK_V2_SCHEMA = {
   id, project_id: id, run_id: optText, parent_task_id: optText, title: text, intent: oneOf(INTENT_SET),
