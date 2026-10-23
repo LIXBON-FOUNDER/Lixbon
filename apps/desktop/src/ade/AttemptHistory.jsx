@@ -1,4 +1,5 @@
 import { COPY, attemptStatusInfo } from './adeLabels';
+import { AttemptActivity } from './AttemptActivity';
 import { attemptDuration, attemptTime } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { useCoreQuery } from './useCoreQuery';
@@ -52,7 +53,7 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
       ) : (
         <p className="ade-attempts__state" role="status">Cargando intentos.</p>
       )}
-      <p className="ade-attempts__hint ade-attempts__state--neutral">{COPY.activityPerAttemptUnavailable}</p>
+      {selectedAttemptId && <AttemptActivity attemptId={selectedAttemptId} coreModel={coreModel} active={active} />}
     </section>
   );
 }

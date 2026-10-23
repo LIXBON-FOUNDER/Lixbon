@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { coreModelFromState } from './useCoreModel';
 import { CANONICAL, ERRORS, VARIANTS, attemptDetail } from './testFixtures/coreModelFixtures';
+import { attemptActivityPage, attemptEvent } from './testFixtures/attemptActivityFixtures';
 
 // LXO-122 · Detalle de Attempt contra la fixture canónica y variantes locales de prueba.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -19,12 +20,14 @@ afterEach(() => { cleanup(); invoke.mockReset(); });
 
 describe('AttemptDetail (LXO-122)', () => {
   it('fixture canónica: identidad, ciclo de vida, sesión opaca, worktree, artefactos como texto y revisión', async () => {
-    const calls = mount(() => CANONICAL['attempt_detail.v1.json']);
+    const calls = mount((payload) => (payload.query === 'activity_list'
+      ? attemptActivityPage([attemptEvent(1, 't3-a1', 'attempt.completed', { task: 't3', n: 1, has_summary: true }, 'success')])
+      : CANONICAL['attempt_detail.v1.json']));
     const onSelectTask = vi.fn();
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} onSelectTask={onSelectTask} />);
     await flush();
     const root = screen.getByTestId('attempt-detail');
-    expect(calls).toEqual([{ query: 'attempt_detail', args: { attempt_id: 't3-a1' } }]);
+    expect(calls[0]).toEqual({ query: 'attempt_detail', args: { attempt_id: 't3-a1' } });
     expect(within(root).getByText('t3-a1')).toBeTruthy();
     expect(within(root).getByText('Terminado', { selector: '.ade-status' })).toBeTruthy();
     expect(within(root).getByText('codex · gpt-6.1-sol')).toBeTruthy();
@@ -54,7 +57,11 @@ describe('AttemptDetail (LXO-122)', () => {
     const review = screen.getByTestId('attempt-review');
     expect(within(review).getByText('accepted')).toBeTruthy();
     expect(within(review).getByText('Vigente para este head')).toBeTruthy();
-    expect(within(root).getByText(/Activity por Attempt: no disponible/)).toBeTruthy();
+    const activity = screen.getByTestId('attempt-activity');
+    expect(within(activity).getByText('Actividad parcial: no incluye eventos de sesión ni worktree')).toBeTruthy();
+    expect(within(activity).getByRole('listitem').textContent).toContain('Completado');
+    expect(calls.map((call) => call.query)).toEqual(['attempt_detail', 'activity_list']);
+    expect(calls[1].args).toMatchObject({ target_kind: 'attempt', target_id: 't3-a1' });
   });
 
   it('variantes: host de worktree.machine, duración con fin, revisión stale/desconocida, sin worktree ni artefactos, estado desconocido', async () => {

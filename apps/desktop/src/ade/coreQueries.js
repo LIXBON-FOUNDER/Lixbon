@@ -156,6 +156,16 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
     },
   }],
   ['activity.attention.resolved', { required: { resolution: 'string' } }],
+  ['activity.attempt.requested', {
+    required: { task: 'string', n: 'integer', provider: 'string', external: 'boolean', approval_required: 'boolean' },
+    optional: { model: 'string', effort: 'string', role: 'string', profile: 'string' },
+  }],
+  ['activity.attempt.approved', { required: { task: 'string', n: 'integer' } }],
+  ['activity.attempt.started', { required: { task: 'string', n: 'integer' } }],
+  ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
+  ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
+  ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],
+  ['activity.attempt.stopped', { required: { task: 'string', n: 'integer', from: 'string', cause: 'string' } }],
   ['activity.unknown', { required: { reason: 'activityUnknownReason', kind: 'string', event_version: 'integer' } }],
 ]);
 
