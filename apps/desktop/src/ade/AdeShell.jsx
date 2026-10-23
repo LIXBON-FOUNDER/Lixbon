@@ -13,6 +13,7 @@ import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
+import { AttemptDetail } from './AttemptDetail';
 import { useCoreModel } from './useCoreModel';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
@@ -943,6 +944,16 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onSelectAttempt={(attemptId) => selectAttempt({ projectId: selectedProjectId, taskId: selectedTaskId, attemptId })}
                     onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
                   />
+                  {selectedAttemptId && (
+                    <AttemptDetail
+                      attemptId={selectedAttemptId}
+                      taskId={selectedTaskId}
+                      coreModel={coreModel}
+                      active={workspaceActive && workspaceView === 'workspace'}
+                      onSelectTask={(taskId) => selectTask({ projectId: selectedProjectId, taskId })}
+                      onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
+                    />
+                  )}
                 </div>
               )}
             </div>
