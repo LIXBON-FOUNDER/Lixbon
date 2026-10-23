@@ -145,13 +145,143 @@ function uniqueProjectTasks(...groups) {
   });
 }
 
-/** Sigue el cursor opaco de `tasks_by_project(all)` sin perder la última página válida. */
+function nextTaskCursor(page, cursor, visited) {
+  if (page?.has_more !== true) return null;
+  if (typeof page.next_cursor !== 'string' || !page.next_cursor || visited.has(page.next_cursor)) {
+    throw new Error('tasks_by_project_cursor_did_not_advance');
+  }
+  return page.next_cursor;
+}
+
+/** Sigue `tasks_by_project(all)` y solo publica una generación cuando su conjunto de páginas queda listo. */
 function useProjectTaskContinuation(projectId, firstPage, enabled) {
-  const context = JSON.stringify([projectId ?? null, firstPage.updatedAt ?? null]);
+  const epoch = Number.isSafeInteger(firstPage.readEpoch) ? firstPage.readEpoch : 0;
+  const context = JSON.stringify([projectId ?? null, epoch, enabled === true]);
   const contextRef = useRef(context);
   contextRef.current = context;
   const [continuation, setContinuation] = useState(null);
+  const continuationRef = useRef(null);
   const requestRef = useRef({ id: 0, inFlight: false, timeout: null });
+
+  const publish = useCallback((next) => {
+    continuationRef.current = next;
+    setContinuation(next);
+  }, []);
+
+  const runPageSet = useCallback(({ base, reconcile }) => {
+    if (!enabled || !projectId || requestRef.current.inFlight) return;
+    const request = requestRef.current;
+    const requestId = request.id + 1;
+    request.id = requestId;
+    request.inFlight = true;
+    const requestContext = context;
+    const firstData = firstPage.data;
+    const isCurrentRequest = () => requestRef.current.id === requestId && contextRef.current === requestContext;
+    const initialItems = Array.isArray(firstData?.tasks) ? uniqueProjectTasks(firstData.tasks) : [];
+
+    publish({
+      ...base,
+      targetEpoch: epoch,
+      loading: true,
+      pending: false,
+      error: null,
+      announcement: reconcile ? null : base.announcement ?? null,
+      started: true,
+    });
+
+    const readPage = async (cursor) => {
+      const timeoutId = window.setTimeout(() => {
+        if (!isCurrentRequest()) return;
+        request.timeout = null;
+        const visible = continuationRef.current?.projectId === projectId ? continuationRef.current : base;
+        publish({
+          ...visible,
+          targetEpoch: epoch,
+          loading: false,
+          pending: true,
+          error: PROJECT_TASK_PAGE_TIMEOUT_MESSAGE,
+          started: true,
+        });
+      }, PROJECT_TASK_PAGE_TIMEOUT_MS);
+      request.timeout = timeoutId;
+      try {
+        return await queryAdeCore('tasks_by_project', { projectId, status: 'all', cursor });
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (requestRef.current.id === requestId && request.timeout === timeoutId) request.timeout = null;
+      }
+    };
+
+    const read = async () => {
+      let items = reconcile ? initialItems : base.items;
+      let pageCount = reconcile ? 0 : base.pageCount;
+      let cursor = reconcile ? firstData?.next_cursor : base.cursor;
+      let hasMore = reconcile ? firstData?.has_more === true : base.hasMore === true;
+      let cursorHistory = reconcile ? [] : [...(base.cursorHistory ?? [])];
+      const pageLimit = reconcile ? base.pageCount : 1;
+      let addedCount = 0;
+
+      try {
+        for (let index = 0; index < pageLimit && hasMore; index += 1) {
+          if (typeof cursor !== 'string' || !cursor) {
+            throw new Error('tasks_by_project_cursor_did_not_advance');
+          }
+          const visited = new Set(cursorHistory);
+          if (visited.has(cursor)) throw new Error('tasks_by_project_cursor_did_not_advance');
+          visited.add(cursor);
+
+          const page = await readPage(cursor);
+          if (!isCurrentRequest()) return;
+          const pageTasks = Array.isArray(page?.tasks) ? page.tasks : [];
+          const knownIds = new Set(uniqueProjectTasks(items).map((task) => task.id));
+          addedCount += uniqueProjectTasks(pageTasks).filter((task) => !knownIds.has(task.id)).length;
+          items = uniqueProjectTasks(items, pageTasks);
+          pageCount += 1;
+          hasMore = page?.has_more === true;
+          cursor = nextTaskCursor(page, cursor, visited);
+          cursorHistory = [...visited];
+        }
+
+        if (!isCurrentRequest()) return;
+        const loaded = addedCount === 1 ? 'Se cargó 1 Task.' : `Se cargaron ${addedCount} Tasks.`;
+        publish({
+          projectId,
+          epoch,
+          items,
+          pageCount,
+          cursor,
+          cursorHistory,
+          hasMore,
+          started: pageCount > 0,
+          loading: false,
+          pending: false,
+          error: null,
+          announcement: reconcile
+            ? 'Se actualizó la lista de Tasks desde Core.'
+            : `${loaded} ${hasMore ? 'Hay más Tasks disponibles.' : 'No hay más Tasks.'}`,
+        });
+      } catch (error) {
+        if (!isCurrentRequest()) return;
+        const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
+        publish({
+          ...base,
+          targetEpoch: epoch,
+          loading: false,
+          pending: false,
+          error: message,
+          started: true,
+        });
+      } finally {
+        if (requestRef.current.id === requestId) {
+          if (request.timeout !== null) window.clearTimeout(request.timeout);
+          request.timeout = null;
+          request.inFlight = false;
+        }
+      }
+    };
+
+    void read();
+  }, [context, enabled, epoch, firstPage.data, projectId, publish]);
 
   useEffect(() => {
     const request = requestRef.current;
@@ -159,107 +289,66 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
     request.inFlight = false;
     if (request.timeout !== null) window.clearTimeout(request.timeout);
     request.timeout = null;
+
+    if (enabled && projectId && firstPage.data) {
+      const previous = continuationRef.current;
+      if (previous?.projectId === projectId && previous.epoch !== epoch && previous.pageCount > 0) {
+        runPageSet({ base: previous, reconcile: true });
+      }
+    }
+
     return () => {
       request.id += 1;
       request.inFlight = false;
       if (request.timeout !== null) window.clearTimeout(request.timeout);
       request.timeout = null;
     };
-  }, [context]);
+  }, [context, enabled, epoch, firstPage.data, projectId, runPageSet]);
 
-  const current = continuation?.context === context ? continuation : null;
-  const hasMore = current?.started === true
-    ? current.hasMore
-    : firstPage.data?.has_more === true;
-  const cursor = current?.started === true
-    ? current.cursor
-    : firstPage.data?.next_cursor;
+  const sameProject = continuation?.projectId === projectId ? continuation : null;
+  const current = sameProject?.epoch === epoch ? sameProject : null;
+  const stalePages = sameProject?.pageCount > 0 && sameProject.epoch !== epoch;
+  const reconciling = stalePages && firstPage.data?.has_more === true;
+  const refreshState = reconciling && sameProject.targetEpoch === epoch ? sameProject : null;
+  const hasMore = reconciling
+    ? refreshState?.error ? true : firstPage.data?.has_more === true
+    : current?.hasMore ?? firstPage.data?.has_more === true;
 
   const loadMore = useCallback(() => {
-    if (!enabled || !projectId || !hasMore || typeof cursor !== 'string' || !cursor) return;
-    if (requestRef.current.inFlight) return;
-
-    const request = requestRef.current;
-    const requestId = request.id + 1;
-    request.id = requestId;
-    request.inFlight = true;
-    const requestContext = context;
-    const isCurrentRequest = () => requestRef.current.id === requestId && contextRef.current === requestContext;
-
-    setContinuation((previous) => {
-      const active = previous?.context === requestContext ? previous : null;
-      return {
-        context: requestContext,
-        items: active?.items ?? [],
-        cursor,
-        hasMore: true,
-        started: true,
-        loading: true,
-        pending: true,
+    if (!enabled || !projectId || !hasMore) return;
+    const previous = continuationRef.current;
+    if (previous?.projectId === projectId && previous.epoch !== epoch && previous.pageCount > 0 && firstPage.data?.has_more === true) {
+      runPageSet({ base: previous, reconcile: true });
+      return;
+    }
+    const base = previous?.projectId === projectId && previous.epoch === epoch
+      ? previous
+      : {
+        projectId,
+        epoch,
+        items: Array.isArray(firstPage.data?.tasks) ? uniqueProjectTasks(firstPage.data.tasks) : [],
+        pageCount: 0,
+        cursor: firstPage.data?.next_cursor,
+        cursorHistory: [],
+        hasMore: firstPage.data?.has_more === true,
+        started: false,
+        loading: false,
+        pending: false,
         error: null,
-        announcement: active?.announcement ?? null,
+        announcement: null,
       };
-    });
+    if (base.hasMore !== true) return;
+    runPageSet({ base, reconcile: false });
+  }, [enabled, epoch, firstPage.data, hasMore, projectId, runPageSet]);
 
-    request.timeout = window.setTimeout(() => {
-      if (!isCurrentRequest()) return;
-      setContinuation((previous) => previous?.context === requestContext
-        ? { ...previous, loading: false, pending: true, error: PROJECT_TASK_PAGE_TIMEOUT_MESSAGE }
-        : previous);
-    }, PROJECT_TASK_PAGE_TIMEOUT_MS);
-
-    Promise.resolve()
-      .then(() => queryAdeCore('tasks_by_project', { projectId, status: 'all', cursor }))
-      .then((page) => {
-        if (!isCurrentRequest()) return;
-        if (page.has_more === true && page.next_cursor === cursor) {
-          throw new Error('tasks_by_project_cursor_did_not_advance');
-        }
-        window.clearTimeout(request.timeout);
-        request.timeout = null;
-        request.inFlight = false;
-        const pageTasks = Array.isArray(page.tasks) ? page.tasks : [];
-        setContinuation((previous) => {
-          const active = previous?.context === requestContext ? previous : null;
-          const previousItems = active?.items ?? [];
-          const firstItems = Array.isArray(firstPage.data?.tasks) ? firstPage.data.tasks : [];
-          const knownIds = new Set(uniqueProjectTasks(firstItems, previousItems).map((task) => task.id));
-          const addedCount = uniqueProjectTasks(pageTasks).filter((task) => !knownIds.has(task.id)).length;
-          const items = uniqueProjectTasks(previousItems, pageTasks);
-          const hasMoreAfterPage = page.has_more === true;
-          const loaded = addedCount === 1 ? 'Se cargó 1 Task.' : `Se cargaron ${addedCount} Tasks.`;
-          return {
-            context: requestContext,
-            items,
-            cursor: page.next_cursor,
-            hasMore: hasMoreAfterPage,
-            started: true,
-            loading: false,
-            pending: false,
-            error: null,
-            announcement: `${loaded} ${hasMoreAfterPage ? 'Hay más Tasks disponibles.' : 'No hay más Tasks.'}`,
-          };
-        });
-      })
-      .catch((error) => {
-        if (!isCurrentRequest()) return;
-        window.clearTimeout(request.timeout);
-        request.timeout = null;
-        request.inFlight = false;
-        const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
-        setContinuation((previous) => previous?.context === requestContext
-          ? { ...previous, loading: false, pending: false, error: message }
-          : previous);
-      });
-  }, [context, cursor, enabled, firstPage.data, hasMore, projectId]);
-
+  const items = current?.items ?? (reconciling ? sameProject.items : null);
   return {
-    items: current?.items ?? [],
+    items,
     hasMore,
-    started: current?.started === true,
-    loading: current?.loading === true,
-    pending: current?.pending === true,
-    error: current?.error ?? null,
+    started: reconciling ? true : current?.started === true,
+    loading: reconciling ? refreshState ? refreshState.loading === true : true : current?.loading === true,
+    pending: reconciling ? refreshState?.pending === true : current?.pending === true,
+    error: reconciling ? refreshState?.targetEpoch === epoch ? refreshState.error ?? null : null : current?.error ?? null,
     announcement: current?.announcement ?? null,
     loadMore,
   };
@@ -453,10 +542,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           : projectQueryMessage(projectOverview) || 'No hay metadata autoritativa para este Project.' }
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
-  const projectTaskDtos = uniqueProjectTasks(
-    Array.isArray(projectTasks.data?.tasks) ? projectTasks.data.tasks : [],
-    projectTaskContinuation.items,
-  );
+  const projectTaskDtos = projectTaskContinuation.items
+    ?? uniqueProjectTasks(Array.isArray(projectTasks.data?.tasks) ? projectTasks.data.tasks : []);
   const projectTaskItems = projectTaskDtos.map((task) => ({ task_id: task.id, title: task.title, status: task.status }));
   const projectTaskSlice = {
     ...projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTaskContinuation.hasMore }),
