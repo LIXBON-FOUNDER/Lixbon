@@ -95,7 +95,7 @@ export const COPY = Object.freeze({
   activityPerAttemptPartial: 'Actividad parcial: no incluye eventos de sesión ni worktree',
   noAttemptActivity: 'Sin eventos del intento todavía',
   loadingAttemptActivity: 'Cargando actividad del intento.',
-  attemptActivityTruncated: 'Mostrando los 50 eventos más recientes',
+  attemptActivityTruncated: (limit) => `Mostrando los ${limit} eventos más recientes`,
   unknownEvent: 'Evento desconocido',
 });
 
