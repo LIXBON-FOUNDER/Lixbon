@@ -27,7 +27,7 @@ Comando `activity_list`, clasificado `ClientAction::Read`. El mismo comando por 
 | `order` | `asc` · `desc` | `asc` |
 | `project_id`, `run_id` | filtro exacto | sin filtro |
 | `target_kind`, `target_id` | entidad del evento (`task`, `project`, `spawn_request`…). `target_id` exige `target_kind` | sin filtro |
-| `attempt_id` | todos los hechos de UN Attempt (LXO-119): los de la entidad `attempt`, los que lo nombran en el payload (`attempt`: `provider_session.*`, `worktree.*`, `artifact.*`, `review.*`) y los de la sesión y el Worktree vinculados a ese Attempt que no nombran ninguno (`provider_session.bound`, `worktree.missing`…). No se combina con `target_kind`; `next_cursor` sigue el mismo contrato | sin filtro |
+| `attempt_id` | todos los hechos de UN Attempt (LXO-119): los de la entidad `attempt`, los que lo nombran en el payload (`attempt`: `provider_session.*`, `worktree.*`, `artifact.*`, `review.*`) y los de la sesión y el Worktree vinculados a ese Attempt que no nombran ninguno (`provider_session.bound`, `worktree.missing`…). No se combina con `target_kind`; `next_cursor` sigue el mismo contrato. Los hechos sin Attempt de un Worktree o sesión compartidos (un seguimiento que los reutiliza) salen en todos los Attempts que los usan | sin filtro |
 
 Los parámetros desconocidos o inválidos se rechazan con `activity_invalid_request`.
 

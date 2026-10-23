@@ -534,7 +534,11 @@ versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y l
 
 * **Cursores por clave**: `task_list_v2` usa `t3:<created_at>:<task_id>` y `attempts_by_task` `a1:<n>`. Nunca un
   desplazamiento: si la lista cambia entre páginas no se salta ni repite ninguna fila. Un cursor de otra lista (otro
-  Project, otra Task o un Attempt que no existe) es `model_invalid_request`. El `t2:` anterior deja de aceptarse.
+  Project, otra Task o un Attempt que no existe) es `model_invalid_request`.
+* **Compatibilidad `t2:`**: mientras `core_model.compat` anuncie `legacy_task_v1`, `task_list_v2` sigue aceptando el
+  cursor anterior `t2:<task_id>`: lo traduce a la clave de esa Task (debe ser del Project pedido), deja un aviso en el
+  log del Core y devuelve `next_cursor` ya en `t3:`. Un cursor con formato no reconocido es `model_cursor_stale`: el
+  cliente descarta el cursor y vuelve a la primera página.
 * **Pertenencia**: con `project_id` / `task_id` opcionales, si la Task o el Attempt no es de ese Project/Task la respuesta
   es `model_not_found` (no se filtra información de otro Project).
 * **`attempt_brief`** añade `origin` (`core` · `legacy`), `ended_at_known`, `worktree` (`id`, `branch`, `state` o `null`)
@@ -565,7 +569,7 @@ payload). Activity filtra por `target_kind = attempt`; Attention de ejecución a
 ([ATTENTION.md](ATTENTION.md)).
 
 **Errores**: `model_auth_required` (no es una Person), `model_invalid_request` (parámetro desconocido o fuera de
-rango, cursor ajeno), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
+rango, cursor ajeno), `model_cursor_stale` (cursor con formato no reconocido), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
 o fallo de lectura).
 
 ### Compatibilidad con clientes F2 y campos deprecados
