@@ -190,20 +190,44 @@ describe('ActivityPanel', () => {
     expect(document.body.textContent).not.toContain(technicalToken);
   });
 
-  it('traduce activity.unknown con fallback=true usando solo los args permitidos', async () => {
+  it.each(['unknown_kind', 'unsupported_version', 'invalid_payload'])(
+    'traduce activity.unknown con el reason contractual %s y solo usa los args permitidos',
+    async (reason) => {
+      snapshot = readySnapshot([activity(7, {
+        kind: 'task.teleported',
+        message_key: 'activity.unknown',
+        fallback: true,
+        args: { reason, kind: 'task.teleported', event_version: 2 },
+        payload: { message: 'NO_INFERIR' },
+        correlation_id: 'correlation-7',
+      })], 1);
+      render(<ActivityPanel />);
+
+      expect((await screen.findByTestId('activity-message-event-7')).textContent)
+        .toBe(`No se reconoce el evento «task.teleported» (versión 2, motivo: ${reason}).`);
+      expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBe('activity.unknown');
+      expect(document.body.textContent).not.toContain('NO_INFERIR');
+      expect(screen.getByTestId('activity-event-7').getAttribute('data-event-id')).toBe('event-7');
+      expect(screen.getByTestId('activity-target-event-7').textContent).toContain('task-7');
+      expect(screen.getByTestId('activity-project-event-7').textContent).toContain('project-a');
+      expect(screen.getByTestId('activity-actor-event-7').textContent).toContain('task-7');
+      expect(screen.getByTestId('activity-client-event-7').textContent).toContain('desktop-a');
+      expect(screen.getByTestId('activity-correlation-event-7').textContent).toContain('correlation-7');
+    },
+  );
+
+  it('no traduce ni expone un reason arbitrario de activity.unknown', async () => {
     snapshot = readySnapshot([activity(7, {
       kind: 'task.teleported',
       message_key: 'activity.unknown',
       fallback: true,
-      args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 2 },
-      payload: { message: 'NO_INFERIR' },
+      args: { reason: 'PRIVATE_REASON_TOKEN', kind: 'task.teleported', event_version: 2 },
     })], 1);
     render(<ActivityPanel />);
 
-    expect((await screen.findByTestId('activity-message-event-7')).textContent)
-      .toBe('No se reconoce el evento «task.teleported» (versión 2, motivo: unknown_kind).');
-    expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBe('activity.unknown');
-    expect(document.body.textContent).not.toContain('NO_INFERIR');
+    expect((await screen.findByTestId('activity-message-event-7')).textContent).toBe('Evento desconocido');
+    expect(document.body.textContent).not.toContain('PRIVATE_REASON_TOKEN');
+    expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBeNull();
   });
 
   it.each([

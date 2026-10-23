@@ -71,6 +71,7 @@ const TASK_STATUSES = new Set([
   'stopped',
   'exited',
 ]);
+const UNKNOWN_EVENT_REASONS = new Set(['unknown_kind', 'unsupported_version', 'invalid_payload']);
 const PROJECT_ORIGINS = {
   manual: 'registro manual',
   auto: 'registro automático',
@@ -445,7 +446,7 @@ const FORMATTERS = {
     return resolution ? `Se registró la resolución de una incidencia: ${RESOLUTIONS[resolution]}.` : null;
   },
   'activity.unknown': (args) => {
-    const reason = requiredText(args, 'reason');
+    const reason = requiredCode(args, 'reason', UNKNOWN_EVENT_REASONS);
     const kind = requiredText(args, 'kind');
     const version = requiredNumber(args, 'event_version');
     return requiredArguments(reason, kind, version)
