@@ -110,6 +110,20 @@ fn reject_legacy_cut(rows: &[(i64, String, String)]) -> StoreResult<()> {
     }
 }
 
+/// Antes de abrir la base para escribir (y antes de que pase a `journal_mode = WAL`): una base cortada con la
+/// numeración vieja se rechaza leyéndola en SOLO LECTURA, así el archivo queda idéntico byte a byte. Cualquier otro
+/// problema al leer aquí se deja para la apertura normal, que lo clasifica.
+pub(super) fn reject_legacy_cut_readonly(db: &Path) -> StoreResult<()> {
+    if !db.exists() {
+        return Ok(());
+    }
+    let Ok(conn) = Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX) else { return Ok(()) };
+    match applied_rows(&conn) {
+        Ok(rows) => reject_legacy_cut(&rows),
+        Err(_) => Ok(()),
+    }
+}
+
 fn applied_rows(conn: &Connection) -> StoreResult<Vec<(i64, String, String)>> {
     if !table_exists(conn, "schema_migrations")? {
         return Ok(vec![]);

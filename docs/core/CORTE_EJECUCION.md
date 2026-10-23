@@ -114,11 +114,42 @@ Estado tras LXO-234:
    arranque se bloquea (D13); tras `Applied`, recargar el estado desde las tablas (paso 6).
 5. Snapshot y `status` anuncian `core_model: "task_attempt_v1"` y `compat: ["legacy_task_v1"]` (ADR §11.1).
 
+### El rechazo es consultable (`core_model.storage`)
+
+Si el arranque no puede usar la base (numeración vieja u otro error de apertura), el Core guarda el motivo y
+`core_model` lo devuelve en `storage`:
+
+```json
+{ "core_model": "legacy", "compat": [], "queries": [],
+  "storage": { "status": "rejected", "code": "core_cut_legacy_numbering", "message": "core_cut_legacy_numbering: … Restaura la copia pre-f3-cut …" } }
+```
+
+* `storage.status`: `ready` · `degraded` · `not_opened` · `rejected`; `code` y `message` solo con `rejected` (si no, `null`).
+* `code`: `core_cut_legacy_numbering`, o `core_store_open_failed` para cualquier otro error que impida arrancar.
+* Con `rejected`, `core_model` responde a la persona local (`Caller::User`) aunque no haya identidad autenticada (sin
+  base no hay registro de clientes); un agente sigue sin poder leerlo. Es la misma consulta `core_model` que ya usa
+  Desktop: DESKTOP muestra el aviso de restaurar `pre-f3-cut` cuando `storage.status == "rejected"`.
+
+### Datos reales que el corte tolera (LXO-234)
+
+Antes estos casos abortaban el corte entero. Ahora se cortan sin perder nada: el valor original va a `legacy_residue`
+(`entity_kind = 'task'`) y la vista `legacy_task_v1` lo repone mientras el Attempt actual sea el migrado, así que la
+validación semántica sigue exigiendo el documento idéntico.
+
+| Caso | Qué queda en las tablas | Residuo (`field` · `reason`) |
+|---|---|---|
+| Dos Tasks con la misma carpeta de Worktree | la primera por (`created`, id) conserva la carpeta `active`; las demás quedan `removed`, sin `path` y con `branch_kept = 1` si tenían rama | `worktree` · `worktree_path_shared` (ruta original) |
+| `failure_reason` en una Task que no está `failed` (o de más de 64 caracteres) | `attempts.failure_reason = NULL` | `failure_reason` · `failure_reason_not_failed` / `failure_reason_invalid` |
+| `pr_url` que no es `https://` | sin Artifact `pull_request` | `pr_url` · `pr_url_not_https` |
+
+Pruebas: `agentic_cut_tests::dos_tasks_con_la_misma_carpeta_…`, `un_motivo_de_fallo_en_una_task_no_fallida_…`,
+`un_pr_que_no_es_https_…` y `los_tres_casos_juntos_…`.
+
 ### Bases cortadas con la numeración anterior
 
 Ningún arranque publicado llamó al corte (`store/cut.rs` estaba sin activar), así que una base cortada solo puede
 venir de pruebas o de una ejecución manual con un binario anterior a LXO-234 (corte en 012 o 014). **Se rechazan, no se
 renumeran**: al abrir, `StoreError::CutLegacyNumbering { version }`, texto
 `core_cut_legacy_numbering: … Restaura la copia pre-f3-cut …`, antes de abrir ninguna transacción y sin copia previa:
-la base no se modifica (solo la cabecera pasa a `journal_mode = WAL` al abrirla). Para seguir: restaurar la copia
+la comprobación se hace abriendo la base en **solo lectura** antes de la apertura normal (antes de `journal_mode = WAL`), así que el archivo queda idéntico byte a byte (prueba con sha256, también con `base-cortada-v12.db` de TESTER). Para seguir: restaurar la copia
 `pre-f3-cut` que dejó aquel corte (sección Rollback) y volver a cortar con este binario.

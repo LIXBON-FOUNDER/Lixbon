@@ -73,14 +73,27 @@ fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, St
 }
 
 /// `core_model`: qué modelo sirve el Core y qué compatibilidad ofrece. Funciona antes y después del corte.
+///
+/// `storage` (LXO-234) dice si el almacén está abierto: `{status, code, message}` con `status` en `ready` · `degraded`
+/// · `not_opened` · `rejected`. Con `rejected` el arranque no abrió la base (`code` estable, p. ej.
+/// `core_cut_legacy_numbering`, y su mensaje): entonces `core_model` responde también sin identidad autenticada (sin
+/// base no hay registro de clientes) a la persona local, para que Desktop muestre el aviso en lugar de quedarse en blanco.
 pub(super) fn core_model(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    if let Some((code, message)) = core.storage.rejection() {
+        if !matches!(caller, Caller::User) {
+            return Err("model_auth_required: solo una Person autenticada puede leer el modelo Task/Attempt".into());
+        }
+        args_of(args, &[], &Map::new())?;
+        return Ok(json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [], "storage": { "status": "rejected", "code": code, "message": message } }));
+    }
     require_person(caller, context)?;
     args_of(args, &[], &Map::new())?;
     let active = core.storage.read_store(|s| s.agentic_model_active()).unwrap_or(Ok(false)).map_err(store_err)?;
+    let storage = json!({ "status": core.storage.status_name(), "code": null, "message": null });
     Ok(if active {
-        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"] })
+        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"], "storage": storage })
     } else {
-        json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [] })
+        json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [], "storage": storage })
     })
 }
 

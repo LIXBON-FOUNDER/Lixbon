@@ -532,6 +532,7 @@ fn una_base_cortada_con_la_numeracion_vieja_se_rechaza_sin_escribir() {
         let t = Tmp::new();
         let db = base_con_corte_viejo(&t, hasta);
         let antes = foto(&db);
+        let bytes = sha256_hex(&std::fs::read(&db).unwrap());
         for lista in [embedded(), migrations_with_cut()] {
             let e = Store::open_with(&t.core(), &lista, "t").err().expect("debe rechazarse");
             assert!(matches!(e, StoreError::CutLegacyNumbering { version } if version == hasta + 1), "v{}: {e:?}", hasta + 1);
@@ -539,6 +540,8 @@ fn una_base_cortada_con_la_numeracion_vieja_se_rechaza_sin_escribir() {
             assert!(txt.starts_with("core_cut_legacy_numbering:") && txt.contains("pre-f3-cut"), "{txt}");
         }
         assert_eq!(foto(&db), antes, "la base no se toca");
+        assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "idéntica byte a byte (se lee en solo lectura, sin pasar a WAL)");
+        assert!(!t.core().join("lixbon.db-wal").exists());
         assert!(backups(&t).is_empty(), "ni siquiera la copia previa");
     }
 }
@@ -551,8 +554,6 @@ fn la_base_v12_de_tester_se_rechaza_sin_escribir() {
     let t = Tmp::new();
     let db = t.core().join("lixbon.db");
     std::fs::copy(&src, &db).unwrap();
-    // Abrir la base pone `journal_mode = WAL` (cambian los bytes de la cabecera, no los datos): se comparan esquema,
-    // migraciones, `user_version` y filas.
     let filas = |db: &Path| {
         let c = rusqlite::Connection::open(db).unwrap();
         let tablas: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY 1").unwrap().query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
@@ -561,10 +562,105 @@ fn la_base_v12_de_tester_se_rechaza_sin_escribir() {
         (esquema, conteos)
     };
     let antes = (foto(&db), filas(&db));
+    let bytes = sha256_hex(&std::fs::read(&db).unwrap());
     for lista in [embedded(), migrations_with_cut()] {
         let e = Store::open_with(&t.core(), &lista, "t").err().expect("debe rechazarse");
         assert!(matches!(e, StoreError::CutLegacyNumbering { version: 12 }), "{e:?}");
     }
+    assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "idéntica byte a byte");
     assert_eq!((foto(&db), filas(&db)), antes, "ni el esquema ni las filas cambian");
     assert!(std::fs::read_dir(t.core()).unwrap().all(|e| e.unwrap().file_name() != "backups"), "sin copia previa: no se intentó migrar");
+}
+
+// ---------------------------------------------------------------------------------------------
+// LXO-234: datos reales que abortaban el corte; se toleran sin perder nada
+// ---------------------------------------------------------------------------------------------
+
+/// La fixture con un cambio en una Task; el corte debe aplicarse, dejar el original en `legacy_residue` y la vista
+/// legacy (la validación semántica del propio corte) debe reconstruir el documento igual.
+fn corta_con(cambio: impl FnOnce(&mut Value)) -> (Tmp, Store) {
+    let mut doc: Value = serde_json::from_str(FIXTURE).unwrap();
+    cambio(&mut doc);
+    let t = Tmp::new();
+    let mut s = base(&t, Some(&doc.to_string()));
+    assert!(matches!(corta(&mut s, &t), CutReport::Applied { .. }), "el corte se aplica");
+    let state: State = serde_json::from_value(doc).unwrap();
+    s.cut_view(|v| verify_legacy_view(v, &state)).unwrap();
+    (t, s)
+}
+
+fn residuo(s: &Store, task: &str, field: &str) -> Option<(String, String)> {
+    s.read(|c| {
+        Ok(rusqlite::OptionalExtension::optional(c.query_row(
+            "SELECT value, reason FROM legacy_residue WHERE entity_kind = 'task' AND legacy_id = ?1 AND field = ?2",
+            [task, field],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ))?)
+    })
+    .unwrap()
+}
+
+#[test]
+fn dos_tasks_con_la_misma_carpeta_solo_la_primera_queda_activa() {
+    let (_t, s) = corta_con(|d| d["tasks"]["t4"]["worktree"] = d["tasks"]["t3"]["worktree"].clone());
+    let fila = |id: &str| s.read(|c| Ok(c.query_row("SELECT state, path, branch_kept, branch FROM worktrees WHERE id = ?1", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<String>>(3)?)))?)).unwrap();
+    assert_eq!(fila("wt-t3-a1").0, "active", "la primera (por creación) conserva la carpeta");
+    let (st, path, kept, branch) = fila("wt-t4-a1");
+    assert_eq!((st.as_str(), path, kept, branch.as_deref()), ("removed", None, 1, Some("lx/r1/t4-formulario-de-login")), "la otra queda quitada con su rama");
+    assert_eq!(residuo(&s, "t4", "worktree"), Some(("\"/home/ana/app.lixbon-wt/t3-api-de-sesiones\"".into(), "worktree_path_shared".into())));
+    assert_eq!(residuo(&s, "t3", "worktree"), None);
+}
+
+#[test]
+fn un_motivo_de_fallo_en_una_task_no_fallida_va_a_residuo() {
+    let (_t, s) = corta_con(|d| d["tasks"]["t2"]["failure_reason"] = json!("agent_idle_timeout"));
+    let fr: Option<String> = s.read(|c| Ok(c.query_row("SELECT failure_reason FROM attempts WHERE id = 't2-a1'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(fr, None, "solo un Attempt fallido lleva motivo");
+    assert_eq!(residuo(&s, "t2", "failure_reason"), Some(("\"agent_idle_timeout\"".into(), "failure_reason_not_failed".into())));
+    let fr4: Option<String> = s.read(|c| Ok(c.query_row("SELECT failure_reason FROM attempts WHERE id = 't4-a1'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(fr4.as_deref(), Some("agent_idle_timeout"), "el fallido lo conserva en su columna");
+}
+
+#[test]
+fn un_pr_que_no_es_https_va_a_residuo_y_no_es_artifact() {
+    let (_t, s) = corta_con(|d| d["tasks"]["t5"]["pr_url"] = json!("http://github.com/ana/app/pull/42"));
+    let n: i64 = s.read(|c| Ok(c.query_row("SELECT count(*) FROM artifacts WHERE attempt_id = 't5-a1' AND kind = 'pull_request'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(residuo(&s, "t5", "pr_url"), Some(("\"http://github.com/ana/app/pull/42\"".into(), "pr_url_not_https".into())));
+}
+
+#[test]
+fn los_tres_casos_juntos_tambien_se_cortan() {
+    let (_t, s) = corta_con(|d| {
+        d["tasks"]["t4"]["worktree"] = d["tasks"]["t3"]["worktree"].clone();
+        d["tasks"]["t2"]["failure_reason"] = json!("x");
+        d["tasks"]["t5"]["pr_url"] = json!("ftp://x");
+    });
+    let n: i64 = s.read(|c| Ok(c.query_row("SELECT count(*) FROM legacy_residue WHERE reason IN ('worktree_path_shared', 'failure_reason_not_failed', 'pr_url_not_https')", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(n, 3);
+}
+
+#[test]
+fn un_arranque_rechazado_por_numeracion_vieja_queda_consultable_en_core_model() {
+    let (_l, data, core_dir) = super::boot_tests::dirs();
+    std::fs::create_dir_all(&core_dir).unwrap();
+    drop(Store::open_with(&core_dir, &embedded(), "t").unwrap());
+    {
+        let c = rusqlite::Connection::open(core_dir.join("lixbon.db")).unwrap();
+        c.execute("INSERT INTO schema_migrations (version, name, checksum, app_version, applied_at) VALUES (14, 'task_attempt_cut', 'viejo', 't', 0)", []).unwrap();
+        c.pragma_update(None, "journal_mode", "DELETE").unwrap();
+    }
+    let db = core_dir.join("lixbon.db");
+    let bytes = sha256_hex(&std::fs::read(&db).unwrap());
+    // Sin promocionar (C1) el arranque se degrada a state.json; promovida, se niega. En los dos casos el motivo queda
+    // en `core_model.storage`.
+    let (core, _host, _r) = super::boot_tests::arranca(&data, &core_dir);
+    let m = core.rpc(super::Caller::User, "", "core_model", &json!({})).unwrap();
+    assert_eq!(m["storage"]["status"], "rejected");
+    assert_eq!(m["storage"]["code"], "core_cut_legacy_numbering");
+    assert!(m["storage"]["message"].as_str().unwrap().contains("pre-f3-cut"));
+    assert_eq!((m["core_model"].as_str(), m["queries"].as_array().map(Vec::len)), (Some("legacy"), Some(0)));
+    assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "el arranque rechazado no toca la base");
+    // Un agente no lo lee.
+    assert!(core.rpc(super::Caller::Agent(Some("t1".into())), "", "core_model", &json!({})).is_err());
 }

@@ -210,7 +210,8 @@ impl fmt::Display for StoreError {
             StoreError::CutPreflight(m) => write!(f, "corte Task/Attempt: {m}"),
             StoreError::CutLegacyNumbering { version } => write!(
                 f,
-                "core_cut_legacy_numbering: la base se cortó como migración {version:03}, la numeración anterior a LXO-234 (el corte usa ahora la versión reservada {}); no se ha modificado nada. Restaura la copia pre-f3-cut que dejó el corte y vuelve a abrir Lixbon para cortar de nuevo",
+                "{}: la base se cortó como migración {version:03}, la numeración anterior a LXO-234 (el corte usa ahora la versión reservada {}); no se ha modificado nada. Restaura la copia pre-f3-cut que dejó el corte y vuelve a abrir Lixbon para cortar de nuevo",
+                super::cut::LEGACY_NUMBERING_CODE,
                 super::cut::CUT_VERSION
             ),
             StoreError::ReviewConflict(m) => write!(f, "reviews: {m}"),

@@ -522,7 +522,7 @@ cortada. Una prueba falla si cambian: cambiar una forma publicada exige subir su
 
 | Query | Parámetros | Devuelve | Versión |
 |---|---|---|---|
-| `core_model` | — | `core_model` (`legacy` · `task_attempt_v1`), `compat` (`["legacy_task_v1"]` tras el corte) y `queries` disponibles. Funciona siempre | [`core_model.v1.json`](fixtures/api/core_model.v1.json) |
+| `core_model` | — | `core_model` (`legacy` · `task_attempt_v1`), `compat` (`["legacy_task_v1"]` tras el corte) y `queries` disponibles; `storage {status, code, message}` (LXO-234: `rejected` si el arranque no pudo usar la base, ver [CORTE_EJECUCION.md](CORTE_EJECUCION.md)). Funciona siempre | [`core_model.v1.json`](fixtures/api/core_model.v1.json) |
 | `task_list_v2` | `project_id`, `include_discarded?`, `limit?` (1–100, 50), `cursor?` | Tasks del Project por (creación, id): intención, **estado derivado**, origen, `attempt_count` y `current_attempt`. `next_cursor` opaco **por clave** (keyset), ligado al Project | `v: 2` · [`task_list_v2.json`](fixtures/api/task_list_v2.json) |
 | `task_detail_v2` | `task_id`, `project_id?` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
 | `attempts_by_task` | `task_id`, `project_id?`, `limit?` (1–100, 50), `cursor?` | los Attempts de la Task por `n`, paginados por clave; `next_cursor` (`null` al terminar) | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
