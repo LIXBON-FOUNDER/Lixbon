@@ -185,6 +185,10 @@ pub(super) enum EntityKind {
     ProviderSession,
     /// La conversación de coordinación de una Task (LXO-115). Id `th-<task>`.
     Thread,
+    /// Dónde trabaja un Attempt (LXO-116). Id `wt-<attempt>`.
+    Worktree,
+    /// Lo que deja un Attempt (LXO-116). Id UUID v7.
+    Artifact,
     Run,
     Project,
     SpawnRequest,
@@ -202,6 +206,8 @@ impl EntityKind {
             EntityKind::Attempt => "attempt",
             EntityKind::ProviderSession => "provider_session",
             EntityKind::Thread => "thread",
+            EntityKind::Worktree => "worktree",
+            EntityKind::Artifact => "artifact",
             EntityKind::Run => "run",
             EntityKind::Project => "project",
             EntityKind::SpawnRequest => "spawn_request",

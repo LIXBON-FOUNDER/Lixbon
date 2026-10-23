@@ -912,6 +912,23 @@ de su fila (`store::sessions`). Run y Project, los de la Task dueña.
 * Los mensajes del Thread no tienen evento propio todavía: los escribe el runtime tras el corte (sin doble emisión
   con `task.question`/`task.reply`, ADR D9).
 
+## Worktree y Artifact (LXO-116)
+Hechos de dónde trabaja un Attempt y qué deja ([`WORKTREES_ARTIFACTS.md`](WORKTREES_ARTIFACTS.md)). **Inertes hasta el
+corte**. Los construye solo `orch/worktree_ops.rs`; viajan en la transacción de su fila (`store::worktrees`).
+
+| kind | v | class | entidad | Payload | Quién |
+|---|---|---|---|---|---|
+| `worktree.created` | 1 | state | `worktree` | `task`, `attempt`, `n`, `branch?` | Core |
+| `worktree.adopted` | 1 | state | `worktree` | `task`, `attempt`, `n`, `provenance` ∈ `adopted` · `external`, `branch?` | Core · persona |
+| `worktree.attached` | 1 | state | `worktree` | `task`, `attempt`, `n` (el seguimiento) | Core |
+| `worktree.missing` · `worktree.found` | 1 | state | `worktree` | `task` | Core |
+| `worktree.removed` | 1 | state | `worktree` | `task`, `reason` ∈ `integrated` · `discarded` · `gone`, `branch_kept` | Core (`integrated`, `gone`) · persona (`discarded`, `gone`) |
+| `artifact.created` | 1 | state | `artifact` | `task`, `attempt`, `n`, `kind` ∈ `report` · `pull_request` · `last_message` · `commit` · `file`, `verifiable` | Core · agente de esa Task |
+
+* `entity_id`: `wt-<attempt>` o el UUID v7 del Artifact.
+* **Ninguno lleva rutas** (carpeta, repo) **ni el localizador del Artifact**: solo la rama, como los efectos de git.
+* Un `Unchanged` (mismo estado, seguimiento ya enlazado) no emite nada.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.
