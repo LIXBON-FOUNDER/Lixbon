@@ -135,8 +135,8 @@ describe('ProjectView · Task status, Attention y Activity son ejes distintos', 
     const bare = screen.getByTestId('activity-a-bare');
     expect(within(bare).queryByTestId('activity-text')).toBeNull();
     const msg = within(bare).getByTestId('activity-no-text');
-    expect(msg.textContent).toContain('Core no suministró texto');
-    expect(msg.textContent).toContain('Tipo sin interpretar');
+    expect(msg.textContent).toContain('descripción interpretable');
+    expect(msg.textContent).not.toContain('task.failed');
     expect(bare.textContent).not.toMatch(/falló|fallo|failed task|ha fallado/i);
     expect(bare.textContent).toContain('Hora desconocida');
   });
