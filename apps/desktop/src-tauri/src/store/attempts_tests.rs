@@ -610,14 +610,18 @@ fn la_identidad_no_cambia_y_el_vinculo_se_fija_una_sola_vez() {
         assert!(e.contains("la identidad, la selección y el origen no cambian"), "{set}: {e}");
     }
     assert_eq!(w.s.attempt_row(&a.id).unwrap().unwrap(), a);
-    // Worktree y ProviderSession: de NULL a un valor sí (lo hacen sus slices); después, nunca otro.
-    sql(&mut w.s, &format!("UPDATE attempts SET worktree_id = 'wt-1', provider_session_id = 'ps-1' WHERE id = '{}'", a.id)).unwrap();
+    // Worktree y ProviderSession: de NULL a un valor sí (lo hacen sus slices); después, nunca otro. La sesión tiene que
+    // existir desde la 009 (LXO-115).
+    let ps = format!("ps-{}", a.id);
+    sql(&mut w.s, &format!("INSERT INTO provider_sessions (id, task_id, opened_by_attempt_id, provider, resumable, status, created_at, updated_at, origin) VALUES ('{ps}', '{}', '{}', '{}', 1, 'open', 1, 1, 'legacy')", a.task_id, a.id, a.provider)).unwrap();
+    sql(&mut w.s, &format!("UPDATE attempts SET worktree_id = 'wt-1', provider_session_id = '{ps}' WHERE id = '{}'", a.id)).unwrap();
     for set in ["worktree_id = 'wt-2'", "worktree_id = NULL", "provider_session_id = 'ps-2'", "provider_session_id = NULL"] {
         let e = error_sql(&mut w.s, &format!("UPDATE attempts SET {set} WHERE id = '{}'", a.id));
-        assert!(e.contains("se fija una sola vez"), "{set}: {e}");
+        // `ps-2` no existe: lo puede rechazar antes el trigger de existencia de la 009.
+        assert!(e.contains("se fija una sola vez") || (set.contains("ps-2") && e.contains("la sesión del proveedor no existe")), "{set}: {e}");
     }
     let v = w.s.attempt_row(&a.id).unwrap().unwrap();
-    assert_eq!((v.worktree_id.as_deref(), v.provider_session_id.as_deref()), (Some("wt-1"), Some("ps-1")));
+    assert_eq!((v.worktree_id.as_deref(), v.provider_session_id.as_deref()), (Some("wt-1"), Some(ps.as_str())));
     // El vínculo sobrevive al ciclo de vida.
     paso(&mut w, &a.id, AttemptAction::Start, 110).unwrap();
     assert_eq!(w.s.attempt_row(&a.id).unwrap().unwrap().worktree_id.as_deref(), Some("wt-1"));

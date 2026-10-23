@@ -240,11 +240,11 @@ fn finish_attempt((mut a, status, origin): RawAttempt) -> StoreResult<AttemptRow
     Ok(a)
 }
 
-fn attempt_in(c: &Connection, id: &str) -> StoreResult<Option<AttemptRow>> {
+pub(super) fn attempt_in(c: &Connection, id: &str) -> StoreResult<Option<AttemptRow>> {
     c.query_row(&format!("SELECT {ATTEMPT_COLS} FROM attempts WHERE id = ?1"), [id], attempt_from_row).optional()?.map(finish_attempt).transpose()
 }
 
-fn attempts_where(c: &Connection, filter: &str, arg: &str) -> StoreResult<Vec<AttemptRow>> {
+pub(super) fn attempts_where(c: &Connection, filter: &str, arg: &str) -> StoreResult<Vec<AttemptRow>> {
     let sql = format!("SELECT {ATTEMPT_COLS} FROM attempts WHERE {filter} ORDER BY task_id, n");
     let rows = c.prepare(&sql)?.query_map([arg], attempt_from_row)?.collect::<Result<Vec<_>, _>>()?;
     rows.into_iter().map(finish_attempt).collect()
@@ -296,6 +296,17 @@ fn check_attempt_event(a: &AttemptRow, t: &TaskRow, e: &NewEvent) -> StoreResult
         return Err(StoreError::InvalidEvent(format!("{}: el evento no se refiere al Attempt {}", e.kind, a.id)));
     }
     e.check()
+}
+
+/// Fija el vínculo blando del Attempt con su ProviderSession (D21), dentro de la transacción del hecho de la sesión
+/// (`store::sessions`). Lo valida el trigger `attempts_provider_session_exists` de la 009; este módulo sigue siendo el
+/// único que escribe `attempts`.
+pub(super) fn link_provider_session_in(tx: &Connection, attempt_id: &str, session_id: &str) -> StoreResult<()> {
+    let n = tx.execute("UPDATE attempts SET provider_session_id = ?2 WHERE id = ?1 AND provider_session_id IS NULL", params![attempt_id, session_id])?;
+    if n != 1 {
+        return Err(StoreError::SessionConflict(format!("el Attempt {attempt_id} ya tiene sesión o no existe")));
+    }
+    Ok(())
 }
 
 fn task_of(tx: &Connection, a: &AttemptRow) -> StoreResult<TaskRow> {

@@ -82,6 +82,13 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.completed` | `activity.attempt.completed` | `task`, `n`, `has_summary` | success |
 | `attempt.failed` | `activity.attempt.failed` | `task`, `n`, `reason` ∈ `launch_failed` `terminal_approval_timeout` `agent_idle_timeout` `agent_reported`, `has_summary` | error |
 | `attempt.stopped` | `activity.attempt.stopped` | `task`, `n`, `from` ∈ `starting` `running` `waiting` `awaiting_terminal_approval`, `cause` ∈ `cancelled` `run_closed` | warning |
+| `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
+| `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
+| `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |
+| `provider_session.detached` | `activity.provider_session.detached` | `task` | info |
+| `provider_session.closed` | `activity.provider_session.closed` | `task`, `from` ∈ `open` `idle` | info |
+| `thread.created` | `activity.thread.created` | `task` | info |
+| `thread.summarized` | `activity.thread.summarized` | `task`, `has_summary` | info |
 | `decision.recorded` · `review` | `activity.decision.review.accepted` / `.rejected` | `decision_id`, `has_comment` | success / warning |
 | `decision.recorded` · `merge` | `activity.decision.merge.merged` / `.conflict` / `.error` / `.target_moved` | `decision_id`, `branch`, `squash`, `conflict_count?` | success / error / error / warning |
 | `decision.recorded` · `pr` | `activity.decision.pr.created` / `.already_exists` / `.error` | `decision_id`, `branch`, `has_pr_url` | success / info / error |

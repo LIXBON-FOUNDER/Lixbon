@@ -4,7 +4,7 @@
 -- migraciones publicadas anteriores al corte (001..008) y compara el resultado con `normalizado.after.json`.
 --
 -- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113;
--- `008_attempts`: attempts, LXO-114).
+-- `008_attempts`: attempts, LXO-114; `009_sessions_threads`: provider_sessions, threads y thread_messages, LXO-115).
 -- Este borrador crea solo lo que todavía no está publicado; según se publique cada entidad, su CREATE sale de
 -- aquí. El corte real será `NNN_task_attempt_cut` (el siguiente número libre) y, desde ese momento, su texto
 -- no se edita (checksum). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms
@@ -77,38 +77,8 @@ CREATE TABLE worktrees (
   CHECK (state = 'active' OR branch IS NOT NULL)
 ) STRICT;
 
--- ProviderSession: SOLO con un vínculo declarado por el proveedor. `cwd_time` no es un vínculo.
-CREATE TABLE provider_sessions (
-  id                   TEXT PRIMARY KEY,
-  task_id              TEXT NOT NULL REFERENCES tasks (id),
-  opened_by_attempt_id TEXT NOT NULL REFERENCES attempts (id) DEFERRABLE INITIALLY DEFERRED,
-  provider             TEXT NOT NULL,
-  external_ref         TEXT NOT NULL,
-  binding              TEXT NOT NULL CHECK (binding IN ('stream_json', 'session_id')),
-  origin               TEXT NOT NULL CHECK (origin IN ('legacy', 'core')),
-  UNIQUE (provider, external_ref)
-) STRICT;
-
--- Thread: la conversación de coordinación de UNA Task (sobrevive a sus intentos).
-CREATE TABLE threads (
-  id      TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL UNIQUE REFERENCES tasks (id),
-  run_id  TEXT NOT NULL REFERENCES runs (id),
-  CHECK (id = 'th-' || task_id)
-) STRICT;
-
-CREATE TABLE thread_messages (
-  id              INTEGER PRIMARY KEY,        -- id legacy conservado (comparte contador con tN / rN)
-  thread_id       TEXT    NOT NULL REFERENCES threads (id),
-  from_task_id    TEXT    NOT NULL REFERENCES tasks (id),
-  to_task_id      TEXT    NOT NULL REFERENCES tasks (id),
-  from_attempt_id TEXT    REFERENCES attempts (id),   -- NULL en legacy: no se atribuye (decisión D6)
-  kind            TEXT    NOT NULL CHECK (kind IN ('phase', 'done', 'question', 'reply', 'note', 'exited')),
-  body            TEXT    NOT NULL,
-  reply_to        INTEGER REFERENCES thread_messages (id) DEFERRABLE INITIALLY DEFERRED,
-  read            INTEGER NOT NULL CHECK (read IN (0, 1)),
-  at              INTEGER NOT NULL
-) STRICT;
+-- `provider_sessions`, `threads` y `thread_messages` ya existen (009_sessions_threads, LXO-115): solo vínculos declarados
+-- por el proveedor (`cwd_time` no es un vínculo), ciclo de vida `open` · `idle` · `closed` y Thread por Task.
 
 -- Artifact: lo que deja un Attempt concreto.
 CREATE TABLE artifacts (
@@ -155,7 +125,6 @@ CREATE TABLE legacy_residue (
   PRIMARY KEY (entity_kind, legacy_id, field)
 ) STRICT;
 
-CREATE INDEX thread_messages_by_thread ON thread_messages (thread_id, id);
 CREATE INDEX decisions_by_attempt ON decisions (attempt_id, kind, id);
 CREATE INDEX reviews_by_attempt ON reviews (attempt_id, decision_id);
 CREATE UNIQUE INDEX worktrees_one_active_path ON worktrees (path) WHERE path IS NOT NULL;
@@ -260,11 +229,19 @@ FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
 WHERE json_extract(t.value, '$.worktree') IS NOT NULL
    OR (json_extract(t.value, '$.branch') IS NOT NULL AND json_extract(t.value, '$.base') IS NOT NULL);
 
-INSERT INTO provider_sessions (id, task_id, opened_by_attempt_id, provider, external_ref, binding, origin)
+-- Las dos formas de vínculo admiten reanudar (Claude `--resume`, Codex `resume`): resumible. Sigue `open` mientras su
+-- Attempt no ha terminado; si terminó, queda en espera de un seguimiento (`idle`). El legado no fecha la sesión: se
+-- toma el arranque del intento o, sin él, la creación de la Task.
+INSERT INTO provider_sessions (id, task_id, opened_by_attempt_id, provider, external_ref, binding, resumable, status,
+                               created_at, updated_at, origin)
 SELECT 'ps-' || t.key || '-a1', t.key, t.key || '-a1',
        json_extract(t.value, '$.agent'),
        json_extract(t.value, '$.session_ref'),
        CASE WHEN json_extract(t.value, '$.session_match') = 'session_id' THEN 'session_id' ELSE 'stream_json' END,
+       1,
+       CASE WHEN json_extract(t.value, '$.status') IN ('done', 'failed', 'stopped', 'exited') THEN 'idle' ELSE 'open' END,
+       coalesce(json_extract(t.value, '$.attempt_started'), json_extract(t.value, '$.created')),
+       json_extract(t.value, '$.updated'),
        'legacy'
 FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
 WHERE json_extract(t.value, '$.session_ref') IS NOT NULL
@@ -294,8 +271,8 @@ SELECT CAST(json_extract(m.value, '$.id') AS INTEGER) AS id,
            AND (f.id = d.id OR f.depth <> d.depth)) AS owner
 FROM legacy_state, json_each(legacy_state.doc, '$.messages') AS m;
 
-INSERT INTO threads (id, task_id, run_id)
-SELECT DISTINCT 'th-' || owner, owner, run_id FROM f3_msg WHERE owner IS NOT NULL;
+INSERT INTO threads (id, task_id, run_id, origin)
+SELECT DISTINCT 'th-' || owner, owner, run_id, 'legacy' FROM f3_msg WHERE owner IS NOT NULL;
 
 INSERT INTO thread_messages (id, thread_id, from_task_id, to_task_id, from_attempt_id, kind, body, reply_to, read, at)
 SELECT id, 'th-' || owner, from_id, to_id, NULL,

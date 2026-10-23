@@ -70,6 +70,12 @@ pub enum StoreError {
     InvalidAttempt(String),
     /// La transición pedida no está en la tabla cerrada del ciclo de vida del Attempt. No se escribió nada.
     AttemptTransition { id: String, from: String, to: String },
+    /// Una ProviderSession o un Thread no admite la operación (Attempt de otra Task o ya terminado, sesión cerrada o
+    /// no resumible, referencia del proveedor ya fijada…). No se escribió nada.
+    SessionConflict(String),
+    /// Una ProviderSession o un Thread no cumple el contrato (referencia que no es opaca, resumen con un secreto…).
+    /// Se rechaza ANTES de tocar la base.
+    InvalidSession(String),
 }
 
 impl StoreError {
@@ -178,6 +184,8 @@ impl fmt::Display for StoreError {
             StoreError::AttemptConflict(m) => write!(f, "attempts: {m}"),
             StoreError::InvalidAttempt(m) => write!(f, "attempt inválido: {m}"),
             StoreError::AttemptTransition { id, from, to } => write!(f, "attempts: el Attempt {id} no puede pasar de {from} a {to}"),
+            StoreError::SessionConflict(m) => write!(f, "sesiones y threads: {m}"),
+            StoreError::InvalidSession(m) => write!(f, "sesión o thread inválido: {m}"),
         }
     }
 }
