@@ -51,7 +51,7 @@ const baseProps = () => ({
   projectId: PID,
   projectName: 'Project sintético',
   locations: ready([LOC_A, LOC_B]),
-  summary: { state: 'ready', counts: { tasks: 9, attempts: 3, attention: 2, resources: 1 } },
+  summary: { state: 'ready', counts: { tasks: 9, active: 4, failed: 1, review_ready: 2, attempts: 3, attention: 2, resources: 1 } },
   tasks: ready(ALL_TASKS),
   attention: ready([
     { attention_id: 'attn-review', kind: 'review', text: 'Texto sintético de revisión', task_id: 't-done' },
@@ -77,7 +77,7 @@ describe('ProjectView · vacío y estados básicos', () => {
     expect(screen.getByTestId('attention-empty')).toBeTruthy();
     expect(screen.getByTestId('activity-empty')).toBeTruthy();
     expect(screen.getByTestId('resources-empty')).toBeTruthy();
-    for (const k of ['tasks', 'attempts', 'attention', 'resources']) {
+    for (const k of ['tasks', 'active', 'failed', 'review_ready', 'attempts', 'attention', 'resources']) {
       expect(screen.getByTestId(`count-${k}`).querySelector('dd').textContent).toBe('—');
     }
   });
@@ -239,8 +239,11 @@ describe('ProjectView · filtros active/final/all', () => {
 
 describe('ProjectView · contadores solo de Core', () => {
   it('muestra los números de Core aunque no coincidan con las filas visibles', () => {
-    view({ summary: { state: 'ready', counts: { tasks: 41, attempts: 7, attention: 5, resources: 9 } } });
+    view({ summary: { state: 'ready', counts: { tasks: 41, active: 17, failed: 13, review_ready: 29, attempts: 7, attention: 5, resources: 9 } } });
     expect(screen.getByTestId('count-tasks').querySelector('dd').textContent).toBe('41');
+    expect(screen.getByTestId('count-active').querySelector('dd').textContent).toBe('17');
+    expect(screen.getByTestId('count-failed').querySelector('dd').textContent).toBe('13');
+    expect(screen.getByTestId('count-review_ready').querySelector('dd').textContent).toBe('29');
     expect(screen.getByTestId('count-attempts').querySelector('dd').textContent).toBe('7');
     expect(screen.getByTestId('count-attention').querySelector('dd').textContent).toBe('5');
     expect(screen.getByTestId('count-resources').querySelector('dd').textContent).toBe('9');
@@ -249,7 +252,7 @@ describe('ProjectView · contadores solo de Core', () => {
 
   it('sin contadores de Core no sustituye nada contando filas', () => {
     view({ summary: { state: 'ready' } });
-    for (const k of ['tasks', 'attempts', 'attention', 'resources']) {
+    for (const k of ['tasks', 'active', 'failed', 'review_ready', 'attempts', 'attention', 'resources']) {
       expect(screen.getByTestId(`count-${k}`).querySelector('dd').textContent).toBe('—');
     }
     // ni encabezados ni filtros llevan números calculados
@@ -258,15 +261,18 @@ describe('ProjectView · contadores solo de Core', () => {
   });
 
   it('valores no válidos (negativos, decimales, texto, NaN) se tratan como no informados', () => {
-    view({ summary: { state: 'ready', counts: { tasks: -1, attempts: 1.5, attention: '3', resources: NaN } } });
-    for (const k of ['tasks', 'attempts', 'attention', 'resources']) {
+    view({ summary: { state: 'ready', counts: { tasks: -1, active: 1.5, failed: '3', review_ready: NaN, attempts: 1.5, attention: '3', resources: NaN } } });
+    for (const k of ['tasks', 'active', 'failed', 'review_ready', 'attempts', 'attention', 'resources']) {
       expect(screen.getByTestId(`count-${k}`).querySelector('dd').textContent).toBe('—');
     }
   });
 
   it('un 0 de Core se muestra como 0 (distinto de no informado)', () => {
-    view({ summary: { state: 'ready', counts: { tasks: 0, attempts: 0, attention: 0, resources: 0 } } });
+    view({ summary: { state: 'ready', counts: { tasks: 0, active: 0, failed: 0, review_ready: 0, attempts: 0, attention: 0, resources: 0 } } });
     expect(screen.getByTestId('count-tasks').querySelector('dd').textContent).toBe('0');
+    expect(screen.getByTestId('count-active').querySelector('dd').textContent).toBe('0');
+    expect(screen.getByTestId('count-failed').querySelector('dd').textContent).toBe('0');
+    expect(screen.getByTestId('count-review_ready').querySelector('dd').textContent).toBe('0');
   });
 
   it('resumen en error o no disponible: no se pintan contadores', () => {

@@ -7,7 +7,7 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
 import { translateActivityMessage } from './activityMessages';
-import { readAdeTask } from './coreQueries';
+import { queryAdeCore, readAdeTask } from './coreQueries';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
@@ -120,6 +120,8 @@ const WORKSPACE_VIEWS = [
 
 // Misma política que useCoreQuery: ninguna lectura de Core queda abierta indefinidamente.
 const ACTIVITY_VERIFY_TIMEOUT_MS = 10_000;
+const PROJECT_TASK_PAGE_TIMEOUT_MS = 10_000;
+const PROJECT_TASK_PAGE_TIMEOUT_MESSAGE = 'El Core tarda en responder; se conservan las Tasks ya cargadas.';
 
 /** Espera la lectura con el límite de 10 s; vencer el plazo solo rechaza al llamante, no libera la lectura en vuelo. */
 function withinVerifyPolicy(read) {
@@ -128,6 +130,136 @@ function withinVerifyPolicy(read) {
     timeoutId = window.setTimeout(() => reject(new Error('ade_query_timeout: Core no respondió a tiempo')), ACTIVITY_VERIFY_TIMEOUT_MS);
   });
   return Promise.race([read, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
+function uniqueProjectTasks(...groups) {
+  const seen = new Set();
+  return groups.flat().filter((task) => {
+    const id = task?.id;
+    if (typeof id !== 'string' || !id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+/** Sigue el cursor opaco de `tasks_by_project(all)` sin perder la última página válida. */
+function useProjectTaskContinuation(projectId, firstPage, enabled) {
+  const context = JSON.stringify([projectId ?? null, firstPage.updatedAt ?? null]);
+  const contextRef = useRef(context);
+  contextRef.current = context;
+  const [continuation, setContinuation] = useState(null);
+  const requestRef = useRef({ id: 0, inFlight: false, timeout: null });
+
+  useEffect(() => {
+    const request = requestRef.current;
+    request.id += 1;
+    request.inFlight = false;
+    if (request.timeout !== null) window.clearTimeout(request.timeout);
+    request.timeout = null;
+    return () => {
+      request.id += 1;
+      request.inFlight = false;
+      if (request.timeout !== null) window.clearTimeout(request.timeout);
+      request.timeout = null;
+    };
+  }, [context]);
+
+  const current = continuation?.context === context ? continuation : null;
+  const hasMore = current?.started === true
+    ? current.hasMore
+    : firstPage.data?.has_more === true;
+  const cursor = current?.started === true
+    ? current.cursor
+    : firstPage.data?.next_cursor;
+
+  const loadMore = useCallback(() => {
+    if (!enabled || !projectId || !hasMore || typeof cursor !== 'string' || !cursor) return;
+    if (requestRef.current.inFlight) return;
+
+    const request = requestRef.current;
+    const requestId = request.id + 1;
+    request.id = requestId;
+    request.inFlight = true;
+    const requestContext = context;
+    const isCurrentRequest = () => requestRef.current.id === requestId && contextRef.current === requestContext;
+
+    setContinuation((previous) => {
+      const active = previous?.context === requestContext ? previous : null;
+      return {
+        context: requestContext,
+        items: active?.items ?? [],
+        cursor,
+        hasMore: true,
+        started: true,
+        loading: true,
+        pending: true,
+        error: null,
+        announcement: active?.announcement ?? null,
+      };
+    });
+
+    request.timeout = window.setTimeout(() => {
+      if (!isCurrentRequest()) return;
+      setContinuation((previous) => previous?.context === requestContext
+        ? { ...previous, loading: false, pending: true, error: PROJECT_TASK_PAGE_TIMEOUT_MESSAGE }
+        : previous);
+    }, PROJECT_TASK_PAGE_TIMEOUT_MS);
+
+    Promise.resolve()
+      .then(() => queryAdeCore('tasks_by_project', { projectId, status: 'all', cursor }))
+      .then((page) => {
+        if (!isCurrentRequest()) return;
+        if (page.has_more === true && page.next_cursor === cursor) {
+          throw new Error('tasks_by_project_cursor_did_not_advance');
+        }
+        window.clearTimeout(request.timeout);
+        request.timeout = null;
+        request.inFlight = false;
+        const pageTasks = Array.isArray(page.tasks) ? page.tasks : [];
+        setContinuation((previous) => {
+          const active = previous?.context === requestContext ? previous : null;
+          const previousItems = active?.items ?? [];
+          const firstItems = Array.isArray(firstPage.data?.tasks) ? firstPage.data.tasks : [];
+          const knownIds = new Set(uniqueProjectTasks(firstItems, previousItems).map((task) => task.id));
+          const addedCount = uniqueProjectTasks(pageTasks).filter((task) => !knownIds.has(task.id)).length;
+          const items = uniqueProjectTasks(previousItems, pageTasks);
+          const hasMoreAfterPage = page.has_more === true;
+          const loaded = addedCount === 1 ? 'Se cargó 1 Task.' : `Se cargaron ${addedCount} Tasks.`;
+          return {
+            context: requestContext,
+            items,
+            cursor: page.next_cursor,
+            hasMore: hasMoreAfterPage,
+            started: true,
+            loading: false,
+            pending: false,
+            error: null,
+            announcement: `${loaded} ${hasMoreAfterPage ? 'Hay más Tasks disponibles.' : 'No hay más Tasks.'}`,
+          };
+        });
+      })
+      .catch((error) => {
+        if (!isCurrentRequest()) return;
+        window.clearTimeout(request.timeout);
+        request.timeout = null;
+        request.inFlight = false;
+        const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
+        setContinuation((previous) => previous?.context === requestContext
+          ? { ...previous, loading: false, pending: false, error: message }
+          : previous);
+      });
+  }, [context, cursor, enabled, firstPage.data, hasMore, projectId]);
+
+  return {
+    items: current?.items ?? [],
+    hasMore,
+    started: current?.started === true,
+    loading: current?.loading === true,
+    pending: current?.pending === true,
+    error: current?.error ?? null,
+    announcement: current?.announcement ?? null,
+    loadMore,
+  };
 }
 
 const ACTIVITY_SCOPES = [
@@ -229,6 +361,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     status: 'all',
     limit: 50,
   }, { enabled: projectViewActive });
+  const projectTaskContinuation = useProjectTaskContinuation(selectedProjectId, projectTasks, projectViewActive);
   const projectAttention = useCoreQuery('attention_list', {
     project_id: selectedProjectId,
   }, { enabled: projectViewActive });
@@ -302,6 +435,9 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}),
     counts: {
       tasks: projectCounts?.tasks ?? null,
+      active: projectCounts?.active ?? null,
+      failed: projectCounts?.failed ?? null,
+      review_ready: projectCounts?.attention?.by_category?.review_ready ?? null,
       attempts: null,
       attention: projectCounts?.attention?.total ?? null,
       resources: null,
@@ -314,13 +450,20 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           : projectQueryMessage(projectOverview) || 'No hay metadata autoritativa para este Project.' }
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
-  const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
-    ? projectTasks.data.tasks
-      // El cursor de tasks_by_project no es snapshot: una Task puede repetirse; se deduplica por task_id.
-      .filter((task, index, all) => all.findIndex((other) => other?.id === task?.id) === index)
-      .map((task) => ({ task_id: task.id, title: task.title, status: task.status }))
-    : [];
-  const projectTaskSlice = projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTasks.data?.has_more === true });
+  const projectTaskDtos = uniqueProjectTasks(
+    Array.isArray(projectTasks.data?.tasks) ? projectTasks.data.tasks : [],
+    projectTaskContinuation.items,
+  );
+  const projectTaskItems = projectTaskDtos.map((task) => ({ task_id: task.id, title: task.title, status: task.status }));
+  const projectTaskSlice = {
+    ...projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTaskContinuation.hasMore }),
+    hasMore: projectTaskContinuation.hasMore,
+    paginationStarted: projectTaskContinuation.started,
+    loadingMore: projectTaskContinuation.loading,
+    pendingMore: projectTaskContinuation.pending,
+    loadMoreError: projectTaskContinuation.error,
+    pageAnnouncement: projectTaskContinuation.announcement,
+  };
   const projectAttentionItems = Array.isArray(projectAttention.data?.items)
     ? projectAttention.data.items.map((item) => ({
       attention_id: item.id,
@@ -643,6 +786,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     locations={projectLocationSlice}
                     summary={projectSummary}
                     tasks={projectTaskSlice}
+                    onLoadMoreTasks={projectTaskContinuation.loadMore}
                     attention={projectAttentionSlice}
                     activity={projectActivitySlice}
                     // El slice legacy de Resources (resource_id/kind/label/availability) no lo da ninguna
