@@ -31,6 +31,7 @@
 | [`core/CORTE_TASK_ATTEMPT.md`](core/CORTE_TASK_ATTEMPT.md) | ADR F3: corte Task/Attempt, mapping del legado, compatibilidad F2 y rollback por copia |
 | [`core/TASKS.md`](core/TASKS.md) | Task como intención durable: esquema, mutadores y Events (inerte hasta el corte) |
 | [`core/ATTEMPTS.md`](core/ATTEMPTS.md) | Attempt como ejecución concreta: esquema, ciclo de vida cerrado, mutadores y Events (inerte hasta el corte) |
+| [`core/RUNTIME_TABLAS.md`](core/RUNTIME_TABLAS.md) | El runtime persiste y carga su estado desde las tablas Task/Attempt tras el corte (LXO-232) |
 | [`secure-store/README.md`](secure-store/README.md) | Almacén seguro de credenciales |
 
 ## Operación

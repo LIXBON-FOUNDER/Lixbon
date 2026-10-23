@@ -167,6 +167,39 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],
   ['activity.attempt.stopped', { required: { task: 'string', n: 'integer', from: 'string', cause: 'string' } }],
   ['activity.unknown', { required: { reason: 'activityUnknownReason', kind: 'string', event_version: 'integer' } }],
+  // Modelo Task/Attempt (LXO-233): los argumentos que da `activity_format.rs` para cada clave.
+  ['activity.task.intent_created', { required: { title: 'text', depth: 'integer' }, optional: { parent: 'string' } }],
+  ['activity.task.updated', { required: { changed: 'stringList' }, optional: { title: 'text' } }],
+  ['activity.task.discarded', { required: {} }],
+  ['activity.task.restored', { required: {} }],
+  ['activity.attempt.requested', {
+    required: { task: 'string', n: 'integer', provider: 'string', external: 'boolean', approval_required: 'boolean' },
+    optional: { model: 'string', effort: 'string', role: 'string', profile: 'string' },
+  }],
+  ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
+  ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
+  ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],
+  ['activity.attempt.stopped', { required: { task: 'string', n: 'integer', from: 'string', cause: 'string' } }],
+  ['activity.provider_session.opened', {
+    required: { task: 'string', n: 'integer', provider: 'string', resumable: 'boolean', bound: 'boolean' },
+  }],
+  ['activity.provider_session.bound', { required: { task: 'string', binding: 'string' } }],
+  ['activity.provider_session.resumed', { required: { task: 'string', n: 'integer' } }],
+  ['activity.provider_session.detached', { required: { task: 'string' } }],
+  ['activity.provider_session.closed', { required: { task: 'string', from: 'string' } }],
+  ['activity.thread.created', { required: { task: 'string' } }],
+  ['activity.thread.summarized', { required: { task: 'string', has_summary: 'boolean' } }],
+  ['activity.worktree.created', { required: { task: 'string', n: 'integer' }, optional: { branch: 'text' } }],
+  ['activity.worktree.adopted', { required: { task: 'string', n: 'integer', provenance: 'string' }, optional: { branch: 'text' } }],
+  ['activity.worktree.attached', { required: { task: 'string', n: 'integer' } }],
+  ['activity.worktree.missing', { required: { task: 'string' } }],
+  ['activity.worktree.found', { required: { task: 'string' } }],
+  ['activity.worktree.removed', { required: { task: 'string', reason: 'string', branch_kept: 'boolean' } }],
+  ['activity.artifact.created', { required: { task: 'string', n: 'integer', kind: 'string', verifiable: 'boolean' } }],
+  ['activity.review.accepted', { required: { task: 'string', n: 'integer', head_commit: 'string', has_comment: 'boolean' } }],
+  ['activity.review.rejected', { required: { task: 'string', n: 'integer', head_commit: 'string', has_comment: 'boolean' } }],
+  ['activity.review.invalidated', { required: { task: 'string', n: 'integer', head_commit: 'string', observed_head: 'string' } }],
+  ['activity.core.agentic_cut', { required: { tasks: 'integer', attempts: 'integer' } }],
 ]);
 
 for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']) {
@@ -174,6 +207,12 @@ for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approv
     required: { from: 'string', to: 'string' },
     optional: { cause: 'string' },
   });
+}
+for (const step of ['approved', 'started', 'integrated']) {
+  ACTIVITY_ARG_SCHEMAS.set(`activity.attempt.${step}`, { required: { task: 'string', n: 'integer' } });
+}
+for (const step of ['waiting', 'awaiting_terminal_approval', 'resumed', 'exited']) {
+  ACTIVITY_ARG_SCHEMAS.set(`activity.attempt.${step}`, { required: { task: 'string', n: 'integer', from: 'string' } });
 }
 for (const outcome of ['approved', 'rejected', 'launch_failed', 'timeout', 'coordinator_closed', 'cancelled_run_removed']) {
   ACTIVITY_ARG_SCHEMAS.set(`activity.spawn.${outcome}`, {
@@ -389,6 +428,7 @@ function validActivityArgs(messageKey, args) {
     text: freeText,
     boolean: (value) => typeof value === 'boolean',
     integer: nonNegativeSafeInteger,
+    stringList: (value) => Array.isArray(value) && value.length > 0 && value.every(nonEmptyText),
     activityUnknownReason: (value) => typeof value === 'string' && ACTIVITY_UNKNOWN_REASONS.has(value),
   };
   return Object.keys(required).every((key) => Object.hasOwn(args, key))

@@ -103,7 +103,14 @@ Contrato en [`EVENTOS.md`](EVENTOS.md#worktree-y-artifact-lxo-116) y Activity en
 ## En el corte
 
 El [SQL del corte](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql) ya no crea estas tablas: los Worktrees del legado son
-`created`; con carpeta quedan `active`; sin carpeta pero con rama conservada, `removed` con `branch_kept = 1`.
+`created`; con carpeta quedan `active`; sin carpeta, `removed`, con `branch_kept = 1` si queda la rama y `0` si se borró
+(queda la base).
+
+**Runtime (LXO-232).** Tras el corte, el lanzamiento registra el Worktree y `release` lo quita
+([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)). La 013 admite dos cosas más:
+
+* un Worktree quitado deja de conservar su rama si `git branch -d` la borra después;
+* la ruta de `codex exec -o` (`last_message`) se registra al lanzar, con el Attempt `starting`.
 
 ## Decisiones (LXO-116)
 

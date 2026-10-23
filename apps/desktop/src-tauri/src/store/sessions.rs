@@ -595,6 +595,56 @@ impl Store {
     }
 }
 
+/// Un mensaje nuevo del Thread (LXO-231).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewThreadMessage {
+    pub thread_id: String,
+    pub from_task_id: String,
+    pub to_task_id: String,
+    pub from_attempt_id: Option<String>,
+    /// `phase` · `done` · `question` · `reply` · `note` · `exited` (lo valida la base).
+    pub kind: String,
+    pub body: String,
+    pub reply_to: Option<i64>,
+    pub at: i64,
+}
+
+/// Añade un mensaje al Thread con el siguiente id del contador compartido (`meta.id_seq`, como los `tN`). **Sin evento
+/// propio**: el hecho sigue siendo `task.question` / `task.reply` (ADR D9) y lo emite el runtime (LXO-232) en la misma
+/// transacción.
+pub(crate) fn thread_message_append_in(tx: &Connection, m: &NewThreadMessage) -> StoreResult<i64> {
+    require_active(tx)?;
+    let id = super::tasks::next_seq_in(tx)? as i64;
+    tx.execute(
+        "INSERT INTO thread_messages (id, thread_id, from_task_id, to_task_id, from_attempt_id, kind, body, reply_to, read, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9)",
+        params![id, m.thread_id, m.from_task_id, m.to_task_id, m.from_attempt_id, m.kind, m.body, m.reply_to, m.at],
+    )?;
+    Ok(id)
+}
+
+/// Marca leídos mensajes del Thread (lo único que cambia de un mensaje). Devuelve cuántos cambiaron.
+pub(crate) fn thread_messages_mark_read_in(tx: &Connection, ids: &[i64]) -> StoreResult<usize> {
+    require_active(tx)?;
+    let mut n = 0;
+    for id in ids {
+        n += tx.execute("UPDATE thread_messages SET read = 1 WHERE id = ?1 AND read = 0", [id])?;
+    }
+    Ok(n)
+}
+
+/// Bloqueos de entorno por alcance `proveedor/perfil` (migración 012). Devuelve si cambió algo. Sin evento propio: el
+/// hecho es `environment.blocked` / `environment.cleared` del runtime.
+pub(crate) fn env_block_set_in(tx: &Connection, scope: &str, cause: &str, blocked: bool) -> StoreResult<bool> {
+    require_active(tx)?;
+    let n = if blocked {
+        tx.execute("INSERT INTO env_blocks (scope, cause) VALUES (?1, ?2) ON CONFLICT (scope, cause) DO NOTHING", params![scope, cause])?
+    } else {
+        tx.execute("DELETE FROM env_blocks WHERE scope = ?1 AND cause = ?2", params![scope, cause])?
+    };
+    Ok(n == 1)
+}
+
 /// Una referencia que ya es de otra sesión del mismo proveedor es un conflicto, no un error de la base.
 fn unique_ref(e: rusqlite::Error, provider: &str) -> StoreError {
     match &e {
@@ -603,4 +653,66 @@ fn unique_ref(e: rusqlite::Error, provider: &str) -> StoreError {
         }
         _ => e.into(),
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe provider_sessions, threads y thread_messages.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Una sesión que el proveedor declaró en el Attempt `attempt_id` (`ps-<attempt>`): abierta, o en espera si el Attempt
+/// ya terminó (migración 013).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn runtime_session_insert_in(
+    c: &Connection,
+    task_id: &str,
+    attempt_id: &str,
+    provider: &str,
+    external_ref: &str,
+    binding: SessionBinding,
+    status: SessionStatus,
+    at: i64,
+) -> StoreResult<String> {
+    require_active(c)?;
+    let id = format!("ps-{attempt_id}");
+    c.execute(
+        "INSERT INTO provider_sessions (id, task_id, opened_by_attempt_id, provider, external_ref, binding, resumable, status, created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?8, 'core')",
+        params![id, task_id, attempt_id, provider, external_ref, binding.as_str(), status.as_str(), at],
+    )
+    .map_err(|e| unique_ref(e, provider))?;
+    Ok(id)
+}
+
+/// `open` <-> `idle`: la sesión espera mientras su Attempt no corre y vuelve con un seguimiento que la reutiliza.
+pub(crate) fn runtime_session_status_in(c: &Connection, id: &str, from: SessionStatus, to: SessionStatus, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE provider_sessions SET status = ?3, updated_at = max(updated_at, ?4) WHERE id = ?1 AND status = ?2",
+        params![id, from.as_str(), to.as_str(), at],
+    )?;
+    Ok(())
+}
+
+/// El Thread de una Task, si aún no lo tiene (`th-<task>`).
+pub(crate) fn runtime_thread_ensure_in(c: &Connection, task_id: &str, run_id: &str, at: i64) -> StoreResult<String> {
+    require_active(c)?;
+    let id = format!("th-{task_id}");
+    c.execute(
+        "INSERT INTO threads (id, task_id, run_id, created_at, updated_at, origin) VALUES (?1, ?2, ?3, ?4, ?4, 'core') ON CONFLICT (id) DO NOTHING",
+        params![id, task_id, run_id, at],
+    )?;
+    Ok(id)
+}
+
+/// Un mensaje del runtime con el id que ya le dio el contador del documento (a diferencia de `thread_message_append_in`).
+pub(crate) fn runtime_message_insert_in(c: &Connection, id: i64, m: &NewThreadMessage, read: bool) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO thread_messages (id, thread_id, from_task_id, to_task_id, from_attempt_id, kind, body, reply_to, read, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![id, m.thread_id, m.from_task_id, m.to_task_id, m.from_attempt_id, m.kind, m.body, m.reply_to, read as i64, m.at],
+    )?;
+    c.execute("UPDATE threads SET updated_at = max(coalesce(updated_at, ?2), ?2) WHERE id = ?1", params![m.thread_id, m.at])?;
+    Ok(())
 }

@@ -74,6 +74,8 @@ mod task_ops;
 mod attempt_ops;
 #[cfg(test)]
 mod attempt_ops_tests;
+#[cfg(test)]
+mod attempt_runtime_ops_tests;
 mod session_ops;
 #[cfg(test)]
 mod session_ops_tests;
@@ -83,6 +85,10 @@ mod worktree_ops_tests;
 mod agentic_cut;
 #[cfg(test)]
 mod agentic_cut_tests;
+#[cfg(test)]
+mod runtime_tables_tests;
+#[cfg(test)]
+mod attempt_events_tests;
 mod review_ops;
 #[cfg(test)]
 mod review_ops_tests;

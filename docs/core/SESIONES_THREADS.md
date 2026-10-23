@@ -111,6 +111,11 @@ las sesiones del legado con vínculo declarado son **resumibles**; quedan `open`
 terminó; `created_at` es el arranque del intento (o la creación de la Task). Los Threads del legado no tienen fechas ni
 resumen. `verificar.py` lo comprueba sobre todas las migraciones publicadas.
 
+**Runtime (LXO-232).** Tras el corte, el runtime abre la sesión que declara el proveedor y la deja `idle` al terminar
+el Attempt. Un seguimiento la reutiliza si el proveedor vuelve a declarar la misma referencia. Si la declara tarde (Codex,
+tras salir el proceso), nace `idle` (013). Los mensajes nuevos van al Thread con el id del documento
+([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)).
+
 ## Decisiones (LXO-115)
 
 | # | Decisión | Alternativa descartada |

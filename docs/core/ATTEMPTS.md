@@ -5,7 +5,9 @@ Estado: **esquema y mutadores implementados, inertes hasta el corte**. Segundo p
 proveedor y modelo se eligieron, en qué punto del ciclo de vida está, cuándo empezó y terminó y su resultado mínimo. Un
 retry **nunca** reabre un Attempt: crea otro.
 
-* Migración: [`008_attempts.sql`](../../apps/desktop/src-tauri/src/store/migrations/008_attempts.sql).
+* Migraciones: [`008_attempts.sql`](../../apps/desktop/src-tauri/src/store/migrations/008_attempts.sql) y
+  [`012_attempt_runtime.sql`](../../apps/desktop/src-tauri/src/store/migrations/012_attempt_runtime.sql) (esperas,
+  salida, integración y columnas de runtime: [§ Runtime](#runtime-lxo-231)).
 * Almacén: `store/attempts.rs` (filas, ciclo de vida, atomicidad). Pruebas: `store/attempts_tests.rs`.
 * Hechos y permisos: `orch/attempt_ops.rs` (el único que construye sus eventos). Pruebas: `orch/attempt_ops_tests.rs`.
 
@@ -70,9 +72,8 @@ Tabla cerrada (14 pares). Cualquier otro par es `AttemptTransition` y **no escri
   `Unchanged`: sin cambio y sin evento. Un reintento del Core no duplica nada. En cambio, pedir `cancel` sobre uno
   `done` **es un error**: un final no vuelve atrás.
 * **Reloj.** Las marcas las fija quien llama y nunca retroceden respecto a `updated_at`.
-* **`waiting`, `awaiting_terminal_approval` y `exited`** existen como estados (el corte importa filas del legado en
-  ellos y el vocabulario los reserva) pero **entrar en ellos es del runtime (F4)**: su slice ampliará el trigger y
-  emitirá `attempt.waiting`. Desde ellos sí se puede terminar, fallar o cancelar. Ver D20.
+* **`waiting`, `awaiting_terminal_approval` y `exited`**: desde la 012 se entra en ellos y se vuelve de las esperas.
+  La tabla pasa a 26 pares ([§ Runtime](#runtime-lxo-231)).
 
 ## Esquema (`008_attempts.sql`)
 
@@ -94,8 +95,8 @@ estado final ⇔ `ended_at`, `running`/`done` ⇒ `started_at`, `pending_approva
 ordenados y resumen acotado. Una fila del Core **nace** `pending_approval` o `starting`, con el `n` siguiente, en una
 Task abierta de un Run abierto (trigger `attempts_core_create`).
 
-**Nada del runtime** (PID, PTY, argv, rutas, política, canal de entrega, nonce, modelo efectivo…): llega con la
-migración del slice que lo usa, como `ALTER TABLE attempts ADD COLUMN`. Una prueba fija la lista de columnas.
+**Nada del runtime** en la 008: sus columnas llegan con la 012 ([§ Runtime](#runtime-lxo-231)). Una prueba fija
+las 19 columnas de la 008.
 
 ## Mutadores
 
@@ -105,7 +106,7 @@ Todos en `store/attempts.rs`, todos `*_recorded`: una transacción con la fila y
 | Mutador | Qué hace | Rechaza | Resultado |
 |---|---|---|---|
 | `attempt_create_recorded(task, NewAttempt)` | nace el Attempt `n + 1` | Task inexistente o descartada; Run cerrado; **ya hay uno activo**; proveedor o etiquetas vacíos | `AttemptRow` |
-| `attempt_transition_recorded(id, AttemptAction)` | aplica `Approve` · `Start` · `Finish` · `Fail` · `Cancel` | par fuera de la tabla (`AttemptTransition`); resumen largo o motivo que no es un código | `Changed` · `Unchanged` · `Missing` |
+| `attempt_transition_recorded(id, AttemptAction)` | aplica `Approve` · `Start` · `Wait` · `AwaitTerminal` · `Resume` · `Finish` · `Fail` · `Cancel` · `Exit` | par fuera de la tabla (`AttemptTransition`); resumen largo o motivo que no es un código | `Changed` · `Unchanged` · `Missing` |
 
 Lecturas (índices `attempts_by_status` y `attempts_one_active`, más `UNIQUE (task_id, n)`): `attempt_row`,
 `attempts_of_task` (la historia, por `n`), `attempt_current` (el de mayor `n`), `attempt_active` (el no final) y
@@ -120,6 +121,8 @@ Lecturas (índices `attempts_by_status` y `attempts_one_active`, más `UNIQUE (t
 | arrancar | no | no | sí (el Core lanza el proceso) |
 | terminar · fallar | no | el de **esa** Task | sí (recogida de informes, vigilantes) |
 | cancelar | sí | el que la coordina | sí (cierre de Run, apagado) |
+| esperar · volver (LXO-231) | no | el de **esa** Task | sí |
+| esperar en la terminal · salir · integrar (LXO-231) | no | no | sí |
 
 Aprobar o rechazar una ejecución es una decisión de una persona; el resto del ciclo lo conduce el Core o el agente.
 Una denegación es `AttemptConflict` y no escribe nada. Un Attempt que no existe es `Missing`, no una denegación.
@@ -138,17 +141,71 @@ Project, de su Task. Todos llevan `task` y `n`. **Nunca** el resumen, rutas, arg
 | `fail` | `attempt.failed` | state | `task`, `n`, `reason` ∈ `launch_failed` · `terminal_approval_timeout` · `agent_idle_timeout` · `agent_reported`, `has_summary` |
 | `cancel` (pendiente) | `attempt.rejected` | decision | `task`, `n`, `cause` ∈ `cancelled` · `run_closed` |
 | `cancel` (el resto) | `attempt.stopped` | state | `task`, `n`, `from`, `cause` |
+| `wait` · `await_terminal` (LXO-231) | `attempt.waiting` | state | `task`, `n`, `state`, `from` |
+| `resume` | `attempt.resumed` | state | `task`, `n`, `from` |
+| `exit` | `attempt.exited` | state | `task`, `n`, `from` |
+| `integrate` | `attempt.integrated` | state | `task`, `n` |
 
-Los siete `kind` están **reservados** en `contracts/status-vocabulary.json`. `attempt.waiting` también lo está, pero lo
-emitirá el runtime (D20). Desde LXO-119, `attempt.failed` levanta `failed` y `attempt.requested` con aprobación levanta
+Los once `kind` están **reservados** en `contracts/status-vocabulary.json`. Desde LXO-119, `attempt.failed` levanta `failed` y `attempt.requested` con aprobación levanta
 `approval` (que resuelven `attempt.approved`/`attempt.rejected`), **sobre el Attempt** ([ATTENTION.md](ATTENTION.md)).
+
+## Runtime (LXO-231)
+
+La [`012_attempt_runtime.sql`](../../apps/desktop/src-tauri/src/store/migrations/012_attempt_runtime.sql) cierra lo que
+el runtime legacy hace y este esquema no admitía. Sigue **inerte hasta el corte**. Pruebas: `store/attempt_runtime_tests.rs`
+y `orch/attempt_runtime_ops_tests.rs`.
+
+**Ciclo de vida ampliado (26 pares, sustituye D20).** La 012 reemplaza `attempts_lifecycle` y `attempts_final_is_final`
+de la 008 (una migración publicada no se edita):
+
+| Acción | Desde | Hasta | Evento |
+|---|---|---|---|
+| `Wait` | `starting` · `running` | `waiting` | `attempt.waiting` (`state = waiting`) |
+| `AwaitTerminal` | `starting` · `running` · `waiting` | `awaiting_terminal_approval` | `attempt.waiting` (`state = awaiting_terminal_approval`) |
+| `Resume` | `waiting` · `awaiting_terminal_approval` | `running` | `attempt.resumed` |
+| `Finish` | ahora también `starting` (un `done` antes del primer comando) | `done` | `attempt.completed` |
+| `Exit` | `starting` · `running` · `waiting` · `awaiting_terminal_approval` | `exited` | `attempt.exited` |
+
+Cada acción solo vale desde sus estados (`AttemptStep::from_states`): `Start` no saca a un Attempt de una espera, lo
+hace `Resume`. En filas `core`, salir de `starting` sin pasar por `start` fija `started_at`; en filas `legacy` no se
+toca (el legado no lo tenía).
+
+**Integración.** Un final sigue siendo final, con una sola excepción: marcar integrado (`integrated` 0 → 1) un Attempt
+`done`, con `attempt_integrate_recorded` y su evento `attempt.integrated`. Repetirlo es `Unchanged`; sobre uno que no es
+`done`, error. Nada más cambia en la fila (trigger).
+
+**Columnas de runtime** (`ALTER TABLE attempts ADD COLUMN`, antes en el SQL del corte): `instruction`, `cwd`,
+`checkout_branch`, `policy`, `ack_unverified`, `requested_argv`, `plan_mode`, `stream_json`, `report_nonce`, `delivered`,
+`delivery_channel`, `model_requested`, `model_effective`, `model_source`, `model_mismatch`, `model_mismatch_reason`,
+`approval_deadline`, `files` e `integrated`. JSON validado en la base.
+
+**Piezas sin evento propio.** El runtime (LXO-232) las usa **dentro de la transacción de un hecho**, nunca solas, y son
+`pub(crate)`:
+
+| Pieza | Qué hace | Rechaza |
+|---|---|---|
+| `attempt_runtime_update_in(tx, id, &[(RuntimeField, valor)], at)` | actualiza columnas de runtime de un Attempt activo | un Attempt final (trigger) |
+| `attempt_phase_append_in(tx, attempt, name, done, note, at)` | añade la fase siguiente (`attempt_phases`, `ord` creciente) | cambiar o borrar una fase; fases nuevas en un final |
+| `thread_message_append_in(tx, NewThreadMessage)` | añade un mensaje al Thread con el siguiente id de `meta.id_seq` | — |
+| `thread_messages_mark_read_in(tx, ids)` | marca leídos; es lo único que cambia de un mensaje | — |
+| `env_block_set_in(tx, scope, cause, blocked)` | pone o quita un bloqueo de entorno (`env_blocks`) | una causa fuera de las tres conocidas |
+
+**Quién puede.** Esperar y volver: el agente de **esa** Task o el Core. Esperar en la terminal, salir e integrar: solo
+el Core (el host detecta la aprobación, el proceso y el efecto de integración).
+
+**Attention.** `attempt.waiting` con `state = awaiting_terminal_approval` levanta `approval` sobre el Attempt (subject
+`terminal`); la resuelven `attempt.resumed` (`acted`) y los finales (`condition_cleared`). Ver [ATTENTION.md](ATTENTION.md).
+
+**Desde la 013 (LXO-232).** Un final admite además la observación tardía (modelo efectivo, su procedencia y la sesión,
+una vez) y la integración de cualquier final, no solo `done`; el mutador vNext sigue exigiendo `done`. El arranque del
+proceso pasa a `launched_at`. Ver [RUNTIME_TABLAS.md](RUNTIME_TABLAS.md#la-013).
 
 ## Decisiones (LXO-114)
 
 | # | Decisión | Alternativa descartada |
 |---|---|---|
 | D19 | **A lo sumo un Attempt activo por Task** (índice único parcial `attempts_one_active`, comprobado también en el mutador con un mensaje claro). Reintentar es posible cuando el anterior es final | permitir varios activos desde ya: abre race/compare sin haber decidido sus reglas ni sus credenciales (ADR D11). Esa decisión llegará en su slice y retirará el índice |
-| D20 | **Entrar en `waiting`, `awaiting_terminal_approval` y `exited` es del runtime (F4).** Existen como estados y se puede salir de ellos; el slice del runtime añadirá las transiciones al trigger, el mutador y `attempt.waiting` | implementarlas ahora: el contrato del runtime (preguntas al coordinador, aprobación en la terminal, apagado) aún no existe |
+| D20 | *(Sustituida por la 012, LXO-231.)* **Entrar en `waiting`, `awaiting_terminal_approval` y `exited` es del runtime (F4).** Existen como estados y se puede salir de ellos; el slice del runtime añadirá las transiciones al trigger, el mutador y `attempt.waiting` | implementarlas ahora: el contrato del runtime (preguntas al coordinador, aprobación en la terminal, apagado) aún no existe |
 | D21 | **`worktree_id` y `provider_session_id` son referencias blandas** con fijado único. Los slices de esas entidades añadirán la comprobación de existencia (trigger) y escribirán el vínculo en la misma transacción que su propio hecho | FK ya: las tablas no existen; o un mutador de enlace aquí, que sería un cambio de estado sin evento |
 | D22 | **Cancelar lo pendiente es rechazarlo:** `pending_approval → stopped` emite `attempt.rejected` (decisión), no `attempt.stopped` | un único evento de parada: pierde que la aprobación se denegó |
 | D23 | **Pedir el estado en el que ya está es `Unchanged`; el resto de los pares fuera de la tabla, error** | error siempre: obliga al Core a distinguir reintentos de verdad de carreras |
@@ -162,6 +219,7 @@ Manual, como en [`TASKS_MUTACION.md`](TASKS_MUTACION.md): inventario y resultado
 
 ## Fuera de este slice
 
-Migrar los datos del legado (lo hace el corte), adapters reales de proveedores (F4), el runtime de las esperas,
+Migrar los datos del legado (lo hace el corte), adapters reales de proveedores (F4), que el runtime escriba en las
+tablas (hecho en LXO-232: [RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)),
 Worktree, ProviderSession, Artifact y Thread (sus propios slices), conectar los mutadores al RPC o a `lxo`, UI
 (Compare incluida), reglas de Attention de los `attempt.*` y el estado derivado de la Task.
