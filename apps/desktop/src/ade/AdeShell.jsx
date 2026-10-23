@@ -12,6 +12,7 @@ import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
+import { AttemptHistory } from './AttemptHistory';
 import { useCoreModel } from './useCoreModel';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
@@ -934,6 +935,14 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   <TaskWorkspace {...workspaceProps} variant="workspace" />
+                  <AttemptHistory
+                    taskId={selectedTaskId}
+                    coreModel={coreModel}
+                    active={workspaceActive && workspaceView === 'workspace'}
+                    selectedAttemptId={selectedAttemptId}
+                    onSelectAttempt={(attemptId) => selectAttempt({ projectId: selectedProjectId, taskId: selectedTaskId, attemptId })}
+                    onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
+                  />
                 </div>
               )}
             </div>

@@ -80,6 +80,13 @@ export const COPY = Object.freeze({
   notAvailable: 'no disponible',
   unknown: 'desconocido',
   copyPath: 'Copiar ruta',
+  attemptHistory: 'Historial de intentos',
+  attemptDetail: 'Detalle del intento',
+  durationUnavailable: 'duración no disponible',
+  hostUnavailable: 'Host: no disponible (el Core no lo informa)',
+  noArtifacts: 'Sin artefactos',
+  noReview: 'Sin revisión registrada',
+  noWorktree: 'Sin worktree registrado',
   activityPerAttemptUnavailable: 'Activity por Attempt: no disponible (activity_list no filtra por Attempt en este contrato)',
 });
 
@@ -89,4 +96,18 @@ export function errorCopy(code) {
   if (code === 'model_not_found') return { tone: 'error', text: COPY.notFound, retry: false, back: true };
   if (code === 'model_unavailable') return { tone: 'error', text: COPY.unavailable, retry: true, back: false };
   return { tone: 'error', text: COPY.genericError, retry: true, back: false };
+}
+
+/** Frescura de la revisión: solo `review.status` del Core; si no se puede decidir, «desconocida». */
+export const REVIEW_FRESHNESS_LABELS = Object.freeze({
+  active: 'Vigente para este head',
+  stale: 'Desactualizada: el head cambió desde la revisión',
+  superseded: 'Reemplazada por una revisión posterior',
+});
+export function reviewFreshnessInfo(review) {
+  if (!review || typeof review !== 'object') return { label: COPY.noReview, tone: 'neutral', known: true, raw: null };
+  const known = typeof review.status === 'string' && Object.hasOwn(REVIEW_FRESHNESS_LABELS, review.status) && typeof review.head_commit === 'string' && review.head_commit !== '';
+  return known
+    ? { label: REVIEW_FRESHNESS_LABELS[review.status], tone: review.status === 'active' ? 'ok' : 'warn', known: true, raw: review.status }
+    : { label: 'Frescura desconocida', tone: 'neutral', known: false, raw: review.status ?? null };
 }

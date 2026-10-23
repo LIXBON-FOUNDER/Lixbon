@@ -312,3 +312,14 @@
 .ps__note--info { opacity: 0.85; }
 .ps__notice { font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
 .ps__notice--error { color: var(--error, #d14343); }
+
+/* LXO-121/122 · Historial y detalle de Attempts (solo lectura). */
+.ade-attempts, .ade-attempt { margin-top: 12px; display: grid; gap: 6px; }
+.ade-attempts__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ade-attempts__item { display: grid; gap: 2px; padding: 4px 6px; border-radius: 4px; }
+.ade-attempts__item.is-selected { background: var(--bg-active, rgba(127,127,127,.15)); }
+.ade-attempts__open { text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; }
+.ade-attempts__meta, .ade-attempts__hint { font-size: 12px; opacity: .8; }
+.ade-attempt dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; }
+.ade-attempt dt { opacity: .7; }
+.ade-attempt dd { margin: 0; overflow-wrap: anywhere; }
