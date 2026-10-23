@@ -541,6 +541,274 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(queryAdeCore.mock.calls.filter(([query, args]) => query === 'tasks_by_project' && args.cursor === cursor)).toHaveLength(2);
   });
 
+  it('reconcilia las páginas cargadas tras un poll idéntico sin soltar filas ni foco', async () => {
+    vi.useFakeTimers();
+    const cursorA = 'opaque-cursor:poll-a';
+    const cursorB = 'opaque-cursor:poll-b';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...ITEM, id: `poll-${index}`, title: `Task ${index}`, status: 'running',
+    }));
+    const task50 = { ...ITEM, id: 'poll-50', title: 'Task 50', status: 'running' };
+    const task51 = { ...ITEM, id: 'poll-51', title: 'Task 51', status: 'running' };
+    const refreshedPageTwo = deferred();
+    const refreshedPageThree = deferred();
+    let headReads = 0;
+    let pageTwoReads = 0;
+    let pageThreeReads = 0;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) {
+          headReads += 1;
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursorA };
+        }
+        if (args.cursor === cursorA) {
+          pageTwoReads += 1;
+          return pageTwoReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [firstTasks[49], task50], has_more: true, next_cursor: cursorB }
+            : refreshedPageTwo.promise;
+        }
+        if (args.cursor === cursorB) {
+          pageThreeReads += 1;
+          return pageThreeReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [task51], has_more: false, next_cursor: null }
+            : refreshedPageThree.promise;
+        }
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
+    const focusedLink = within(tasksRegion).getByTestId('open-task-poll-51');
+    const focusedRow = within(tasksRegion).getByTestId('task-poll-51');
+    focusedLink.focus();
+    expect(document.activeElement).toBe(focusedLink);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBeGreaterThan(1);
+    expect(pageTwoReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
+    await act(async () => {
+      refreshedPageTwo.resolve({
+        v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+        tasks: [{ ...firstTasks[49], title: 'Título duplicado que debe ignorarse' }, { ...task50, title: 'Task 50 actualizada' }],
+        has_more: true, next_cursor: cursorB,
+      });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(pageThreeReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getByTestId('task-poll-50').textContent).toContain('Task 50');
+    expect(within(tasksRegion).getByTestId('task-poll-50').textContent).not.toContain('Título duplicado');
+
+    await act(async () => {
+      refreshedPageThree.resolve({
+        v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+        tasks: [{ ...task51, title: 'Task 51 actualizada' }], has_more: false, next_cursor: null,
+      });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(within(tasksRegion).getByTestId('task-poll-51').textContent).toContain('Task 51 actualizada');
+    expect(document.activeElement).toBe(focusedLink);
+  });
+
+  it('ignora una continuación tardía al cambiar de Project', async () => {
+    const secondProject = { ...PROJECT, id: 'project-uuid-2', name: 'Otro Repo' };
+    const pendingPage = deferred();
+    const firstTasks = [{ ...ITEM, id: 'project-a-head', title: 'Task de A', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'project-b-head', title: 'Task de B', status: 'running' }];
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return {
+        v: 1, filters: { archived: args.archived, machine: null }, total: 2, projects: [PROJECT, secondProject], unassigned: {},
+      };
+      if (query === 'tasks_by_project') {
+        if (args.status !== 'all') return { v: 1, project_id: args.projectId, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (args.projectId === PROJECT.id) return args.cursor
+          ? pendingPage.promise
+          : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'project-a-cursor' };
+        return { v: 1, project_id: secondProject.id, filters: { status: 'all' }, limit: 50, tasks: secondTasks, has_more: false, next_cursor: null };
+      }
+      if (query === 'task_detail') return detailOf();
+      if (query === 'attention_list') return attentionPage([]);
+      if (query === 'resource_inventory') return { ...INVENTORY, filters: { project_id: args.projectId, probe: true } };
+      if (query === 'activity_list') return projectActivityPage([], args);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    fireEvent.click(within(tasksRegion).getByTestId('tasks-load-more'));
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-project-a-head')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Otro Repo/ }));
+    await flush();
+    const otherTasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    expect(within(otherTasksRegion).getByTestId('task-project-b-head')).toBeTruthy();
+    expect(within(otherTasksRegion).queryByTestId('task-project-a-head')).toBeNull();
+
+    pendingPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'project-a-late', title: 'Respuesta tardía de A', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(otherTasksRegion).getByTestId('task-project-b-head')).toBeTruthy();
+    expect(within(otherTasksRegion).queryByTestId('task-project-a-late')).toBeNull();
+  });
+
+  it('ignora una generación de lectura tardía y conserva la más reciente', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'read-head', title: 'Task de cabecera', status: 'running' }];
+    const staleRefresh = deferred();
+    const currentRefresh = deferred();
+    let cursorReads = 0;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'read-cursor' };
+        cursorReads += 1;
+        if (cursorReads === 1) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'read-old-page', title: 'Task ya cargada', status: 'running' }], has_more: false, next_cursor: null };
+        return cursorReads === 2 ? staleRefresh.promise : currentRefresh.promise;
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    fireEvent.click(within(tasksRegion).getByTestId('tasks-load-more'));
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(cursorReads).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(cursorReads).toBe(3);
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    staleRefresh.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'read-stale-only', title: 'Respuesta de lectura anterior', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).queryByTestId('task-read-stale-only')).toBeNull();
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    currentRefresh.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'read-current-page', title: 'Respuesta de lectura actual', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-read-current-page')).toBeTruthy();
+    expect(within(tasksRegion).queryByTestId('task-read-old-page')).toBeNull();
+  });
+
+  it('conserva la última lista si falla la reconciliación y permite reintentarla', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'retry-refresh-head', title: 'Task de cabecera', status: 'running' }];
+    let cursorReads = 0;
+    let failRefresh = true;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'retry-refresh-cursor' };
+        cursorReads += 1;
+        if (cursorReads === 1) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-refresh-old', title: 'Task anterior', status: 'running' }], has_more: false, next_cursor: null };
+        if (failRefresh) throw new Error('tasks_by_project_refresh_failed');
+        return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-refresh-new', title: 'Task nueva', status: 'running' }], has_more: false, next_cursor: null };
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-old')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(within(tasksRegion).getByTestId('tasks-page-error').textContent).toContain('tasks_by_project_refresh_failed');
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-old')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(2);
+    expect(loadMore.textContent).toBe('Reintentar carga');
+
+    failRefresh = false;
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-new')).toBeTruthy();
+    expect(within(tasksRegion).queryByTestId('task-retry-refresh-old')).toBeNull();
+    expect(cursorReads).toBe(3);
+  });
+
+  it('detiene la reconciliación cuando el cursor no avanza', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'cursor-head', title: 'Task de cabecera', status: 'running' }];
+    let cursorAReads = 0;
+    let cursorBReads = 0;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'cursor-A' };
+        if (args.cursor === 'cursor-A') {
+          cursorAReads += 1;
+          return cursorAReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-page-2', title: 'Task 2', status: 'running' }], has_more: true, next_cursor: 'cursor-B' }
+            : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-new-page-2', title: 'Task 2 nueva', status: 'running' }], has_more: true, next_cursor: 'cursor-A' };
+        }
+        if (args.cursor === 'cursor-B') {
+          cursorBReads += 1;
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-page-3', title: 'Task 3', status: 'running' }], has_more: false, next_cursor: null };
+        }
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-cursor-page-3')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(within(tasksRegion).getByTestId('tasks-page-error').textContent).toContain('tasks_by_project_cursor_did_not_advance');
+    expect(within(tasksRegion).getByTestId('task-cursor-page-3')).toBeTruthy();
+    expect(cursorAReads).toBe(2);
+    expect(cursorBReads).toBe(1);
+  });
+
   it('consulta el inventario del Project durable y monta la foto del Core en Resources tal cual', async () => {
     core(detailOf());
     render(shell());
