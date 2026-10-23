@@ -630,3 +630,74 @@ impl Store {
         self.read(|c| artifacts_where(c, "attempt_id IN (SELECT a.id FROM attempts AS a JOIN tasks AS t ON t.id = a.task_id WHERE t.project_id = ?1)", project_id))
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe worktrees y artifacts.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Un Worktree que el lanzamiento acaba de crear (`created`), activo, registrado por el Attempt que lo usa.
+pub(crate) struct RuntimeWorktree<'a> {
+    pub id: &'a str,
+    pub task_id: &'a str,
+    pub attempt_id: &'a str,
+    pub machine: &'a str,
+    pub repo: &'a str,
+    pub path: &'a str,
+    pub branch: Option<&'a str>,
+    pub base_branch: Option<&'a str>,
+    pub base_commit: Option<&'a str>,
+    pub env_plan: Option<&'a str>,
+    pub at: i64,
+}
+
+pub(crate) fn runtime_worktree_insert_in(c: &Connection, w: &RuntimeWorktree<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO worktrees (id, task_id, attempt_id, provenance, machine, repo, path, branch, base_branch, base_commit, env_plan, state,
+                                created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, 'created', ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'active', ?11, ?11, 'core')",
+        params![w.id, w.task_id, w.attempt_id, w.machine, w.repo, w.path, w.branch, w.base_branch, w.base_commit, w.env_plan, w.at],
+    )?;
+    Ok(())
+}
+
+/// Una rama y una base sin Worktree conocido (la carpeta ya no está y el runtime no sabe dónde ni en qué máquina estuvo):
+/// la fila que el corte importa en ese caso, `legacy` y ya quitada, con la rama si se conserva.
+pub(crate) fn runtime_worktree_insert_removed_in(c: &Connection, w: &RuntimeWorktree<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO worktrees (id, task_id, attempt_id, provenance, repo, path, branch, base_branch, base_commit, env_plan, state, branch_kept, origin)
+         VALUES (?1, ?2, ?3, 'created', ?4, NULL, ?5, ?6, ?7, ?8, 'removed', ?9, 'legacy')",
+        params![w.id, w.task_id, w.attempt_id, w.repo, w.branch, w.base_branch, w.base_commit, w.env_plan, w.branch.is_some() as i64],
+    )?;
+    Ok(())
+}
+
+/// Quitado al liberarlo: pierde la ruta y conserva la rama si `git branch -d` no la borró.
+pub(crate) fn runtime_worktree_remove_in(c: &Connection, id: &str, reason: RemovalReason, branch_kept: bool, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE worktrees SET state = 'removed', path = NULL, removed_reason = ?2, branch_kept = ?3, missing_since = NULL,
+                              updated_at = max(coalesce(updated_at, ?4), ?4) WHERE id = ?1",
+        params![id, reason.as_str(), branch_kept as i64, at],
+    )?;
+    Ok(())
+}
+
+/// La rama que se conservaba al quitarlo se borró después (migración 013).
+pub(crate) fn runtime_worktree_drop_branch_in(c: &Connection, id: &str, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute("UPDATE worktrees SET branch_kept = 0, updated_at = max(coalesce(updated_at, ?2), ?2) WHERE id = ?1", params![id, at])?;
+    Ok(())
+}
+
+/// Un Artifact nuevo del Attempt (informe, PR, ruta de `codex exec -o`). No se modifica nunca: uno nuevo lo sustituye.
+pub(crate) fn runtime_artifact_insert_in(c: &Connection, id: &str, attempt_id: &str, kind: ArtifactKind, uri: &str, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO artifacts (id, attempt_id, kind, uri, created_at, origin) VALUES (?1, ?2, ?3, ?4, ?5, 'core')",
+        params![id, attempt_id, kind.as_str(), uri, at],
+    )?;
+    Ok(())
+}

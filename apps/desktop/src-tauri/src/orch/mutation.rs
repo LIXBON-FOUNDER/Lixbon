@@ -299,17 +299,24 @@ pub(super) struct PersistError {
     /// Parece transitorio (contención de archivo, interrupción): vale reintentar.
     pub transient: bool,
     pub message: String,
+    /// La persistencia no admite ESTE cambio (LXO-232: las tablas no lo representan) y lo deshizo entero: no es un fallo
+    /// del almacén. La mutación se rechaza (`MutateError::Rejected`) y el Core sigue sano: la memoria no cambió.
+    pub rejected: bool,
 }
 
 impl PersistError {
     /// Hoy solo lo usan las pruebas de inyección de fallos; C2b lo usará para SQLite (`SQLITE_BUSY`).
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn transient(message: impl Into<String>) -> Self {
-        PersistError { transient: true, message: message.into() }
+        PersistError { transient: true, message: message.into(), rejected: false }
     }
 
     pub(super) fn structural(message: impl Into<String>) -> Self {
-        PersistError { transient: false, message: message.into() }
+        PersistError { transient: false, message: message.into(), rejected: false }
+    }
+
+    pub(super) fn rejected(message: impl Into<String>) -> Self {
+        PersistError { transient: false, message: message.into(), rejected: true }
     }
 }
 
@@ -369,7 +376,7 @@ fn io_error(e: std::io::Error) -> PersistError {
     use std::io::ErrorKind::*;
     let transient = matches!(e.kind(), Interrupted | WouldBlock | TimedOut | PermissionDenied)
         || matches!(e.raw_os_error(), Some(5) | Some(32) | Some(33));
-    PersistError { transient, message: e.to_string() }
+    PersistError { transient, message: e.to_string(), rejected: false }
 }
 
 // ---------------------------------------------------------------------------
@@ -589,6 +596,9 @@ impl Core {
         let finalized = tx.finalize_events().map_err(MutateError::Rejected)?;
         let events = if self.persister.records_events() { finalized } else { Vec::new() };
         if let Err(e) = self.persister.persist(&tx.state, &events) {
+            if e.rejected {
+                return Err(MutateError::Rejected(e.message));
+            }
             self.enter_read_only(&e.message);
             return Err(MutateError::Persist(e.message));
         }

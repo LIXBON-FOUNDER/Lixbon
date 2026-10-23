@@ -7,7 +7,8 @@
 -- no se edita (checksum). `verificar.py` lo aplica a la fixture y compara con `normalizado.after.json`.
 --
 -- El esquema de cada entidad ya está publicado e INERTE (007 tasks, 008 attempts, 009 sesiones y threads, 010
--- worktrees y artifacts, 011 revisiones, 012 runtime del Attempt). Aquí solo va lo que todavía falta: el residuo.
+-- worktrees y artifacts, 011 revisiones, 012 runtime del Attempt, 013 runtime sobre las tablas). Aquí solo va lo que
+-- todavía falta: el residuo.
 -- Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms epoch, identificadores TEXT.
 --
 -- Orden dentro de la transacción:
@@ -94,8 +95,7 @@ SELECT t.key || '-a1', t.key, 1,
        json_extract(t.value, '$.cwd'),
        CASE WHEN json_extract(t.value, '$.worktree') IS NULL AND json_extract(t.value, '$.base') IS NULL
             THEN json_extract(t.value, '$.branch') END,
-       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL
-              OR (json_extract(t.value, '$.branch') IS NOT NULL AND json_extract(t.value, '$.base') IS NOT NULL)
+       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL OR json_extract(t.value, '$.base') IS NOT NULL
             THEN 'wt-' || t.key || '-a1' END,
        CASE WHEN (json_extract(t.value, '$.agent') = 'claude' AND coalesce(json_extract(t.value, '$.stream_json'), 0) = 1
                   OR json_extract(t.value, '$.session_match') = 'session_id')
@@ -134,8 +134,8 @@ SELECT t.key || '-a1', CAST(p.key AS INTEGER),
        coalesce(json_extract(p.value, '$.note'), ''), json_extract(p.value, '$.at')
 FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t, json_each(t.value, '$.phases') AS p;
 
--- Los creó Lixbon. Sin carpeta (rama conservada) el Worktree ya está quitado, con la rama guardada. El legado no
--- registra la máquina, las fechas ni el motivo: quedan NULL.
+-- Los creó Lixbon. Sin carpeta el Worktree ya está quitado: con la rama guardada o, si `git branch -d` la borró al
+-- liberarlo (queda la base), sin ella. El legado no registra la máquina, las fechas ni el motivo: quedan NULL.
 INSERT INTO worktrees (id, task_id, attempt_id, provenance, repo, path, branch, base_branch, base_commit, env_plan, state,
                        branch_kept, origin)
 SELECT 'wt-' || t.key || '-a1', t.key, t.key || '-a1', 'created',
@@ -146,11 +146,10 @@ SELECT 'wt-' || t.key || '-a1', t.key, t.key || '-a1', 'created',
        json_extract(t.value, '$.base_commit'),
        json_extract(t.value, '$.env'),
        CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 'active' ELSE 'removed' END,
-       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 0 ELSE 1 END,
+       CASE WHEN json_extract(t.value, '$.worktree') IS NULL AND json_extract(t.value, '$.branch') IS NOT NULL THEN 1 ELSE 0 END,
        'legacy'
 FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
-WHERE json_extract(t.value, '$.worktree') IS NOT NULL
-   OR (json_extract(t.value, '$.branch') IS NOT NULL AND json_extract(t.value, '$.base') IS NOT NULL);
+WHERE json_extract(t.value, '$.worktree') IS NOT NULL OR json_extract(t.value, '$.base') IS NOT NULL;
 
 -- Las dos formas de vínculo admiten reanudar (Claude `--resume`, Codex `resume`): resumible. Sigue `open` mientras su
 -- Attempt no ha terminado; si terminó, queda en espera de un seguimiento (`idle`). El legado no fecha la sesión: se

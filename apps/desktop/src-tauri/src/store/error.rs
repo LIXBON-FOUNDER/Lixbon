@@ -89,6 +89,9 @@ pub enum StoreError {
     /// Una revisión no cumple el contrato (commit que no es hexadecimal, comentario largo…). Se rechaza ANTES de tocar la
     /// base.
     InvalidReview(String),
+    /// Un cambio del runtime legacy que las tablas Task/Attempt no pueden representar (LXO-232). Se rechaza la
+    /// transacción entera: ni el cambio ni sus eventos.
+    RuntimeMapping(String),
 }
 
 impl StoreError {
@@ -204,6 +207,7 @@ impl fmt::Display for StoreError {
             StoreError::CutPreflight(m) => write!(f, "corte Task/Attempt: {m}"),
             StoreError::ReviewConflict(m) => write!(f, "reviews: {m}"),
             StoreError::InvalidReview(m) => write!(f, "review inválida: {m}"),
+            StoreError::RuntimeMapping(m) => write!(f, "runtime sobre las tablas: {m}"),
         }
     }
 }

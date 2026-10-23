@@ -44,7 +44,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, Store, StoreError, StoreResult};
+use crate::store::{self, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -174,6 +174,18 @@ impl Default for CoreStorage {
     }
 }
 
+/// Las migraciones con las que se VALIDA una base: las del binario más el corte Task/Attempt (LXO-117), para abrir una
+/// base ya cortada. Nunca se aplica el corte por esta vía: lo aplica solo el módulo del corte, tras su copia previa.
+/// Un catálogo que no llega a la última migración publicada (un binario anterior en las pruebas) no conoce el corte.
+fn with_cut(catalog: &[Migration]) -> Vec<Migration> {
+    let cut = store::cut_migration();
+    let mut all = catalog.to_vec();
+    if all.last().is_some_and(|m| m.version == cut.version - 1) {
+        all.push(cut);
+    }
+    all
+}
+
 impl CoreStorage {
     fn slot(&self) -> MutexGuard<'_, Slot> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
@@ -208,7 +220,7 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        let mut store = Store::open_boot_under_lock(core_dir, lock, catalog, env!("CARGO_PKG_VERSION"))?;
+        let mut store = Store::open_boot_under_lock(core_dir, lock, &with_cut(catalog), env!("CARGO_PKG_VERSION"))?;
         // Attention (LXO-88): cada inserción de Events del Core proyecta en su misma transacción.
         store.set_event_projector(Arc::new(store::AttentionProjection::new(Arc::new(super::attention_rules::EventRules))));
         *store_slot = Some(store);
@@ -221,7 +233,37 @@ impl CoreStorage {
     pub(super) fn migrate_authoritative(&self) -> Option<Result<MigrationReport, StoreError>> {
         let mut guard = self.slot();
         let Slot { store, catalog, .. } = &mut *guard;
-        store.as_mut().map(|s| s.migrate_authoritative(catalog, env!("CARGO_PKG_VERSION")))
+        store.as_mut().map(|s| {
+            // Una base cortada se valida con el corte; una sin cortar no lo recibe aquí (LXO-117: solo `agentic_cut`).
+            let all = match s.runtime_on_tables() {
+                Ok(true) => with_cut(catalog),
+                Ok(false) => catalog.clone(),
+                Err(e) => return Err(e),
+            };
+            s.migrate_authoritative(&all, env!("CARGO_PKG_VERSION"))
+        })
+    }
+
+    /// El estado del runtime reconstruido desde las tablas, si la base ya está cortada (LXO-232). `None` = sin cortar:
+    /// el estado sigue en `legacy_state`.
+    pub(super) fn load_from_tables(&self) -> Result<Option<State>, OpenStoreError> {
+        let slot = self.slot();
+        let Some(store) = slot.store.as_ref() else { return Ok(None) };
+        if !store.runtime_on_tables().map_err(OpenStoreError::from)? {
+            return Ok(None);
+        }
+        let load = store.runtime_load().map_err(OpenStoreError::from)?;
+        let mut state: State = serde_json::from_value(load.doc).map_err(|e| OpenStoreError::Authority {
+            detail: format!("el estado de las tablas Task/Attempt no se puede interpretar: {e}. No se usa legacy_state ni state.json en su lugar"),
+        })?;
+        state.decision_floor = load.decision_floor.max(0) as u64;
+        Ok(Some(state))
+    }
+
+    /// La persistencia del runtime sobre las tablas (LXO-232), a partir del estado cargado de ellas.
+    pub(super) fn tables_persistence(&self, loaded: &State) -> Arc<dyn Persistence> {
+        let doc = serde_json::to_value(loaded).ok().and_then(|v| RuntimeDoc::from_value(v).ok()).unwrap_or_default();
+        Arc::new(TablesPersistence { slot: Arc::clone(&self.0), committed: Mutex::new(doc) })
     }
 
     /// Solo pruebas: sustituye la lista de migraciones del binario (p. ej. añade una 003 ficticia).
@@ -246,6 +288,7 @@ impl CoreStorage {
     /// La `rev` realmente confirmada en la fila de SQLite ahora mismo (no la cargada al abrir).
     pub(super) fn confirmed_rev(&self) -> Result<Option<i64>, String> {
         match self.slot().store.as_ref() {
+            Some(store) if store.runtime_on_tables().map_err(|e| e.to_string())? => store.runtime_rev().map(Some).map_err(|e| e.to_string()),
             Some(store) => store.row_rev().map_err(|e| e.to_string()),
             None => Err("el almacén no está abierto".into()),
         }
@@ -323,7 +366,7 @@ impl Persistence for SqlitePersistence {
                 Ok(())
             }
             // La ÚNICA clasificación de transitorios vive en el almacén.
-            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string() }),
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false }),
         }
     }
 
@@ -334,7 +377,7 @@ impl Persistence for SqlitePersistence {
         let Some(store) = slot.store.as_mut() else {
             return Err(PersistError::structural("el almacén SQLite no está abierto"));
         };
-        store.append_events(events).map(|_| ()).map_err(|e| PersistError { transient: e.is_transient(), message: e.to_string() })
+        store.append_events(events).map(|_| ()).map_err(|e| PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false })
     }
 
     fn after_publish(&self, _state: &State) -> Result<(), String> {
@@ -342,6 +385,51 @@ impl Persistence for SqlitePersistence {
         let Some((rev, doc)) = pending else { return Ok(()) };
         store::crash_point("mutate_after_commit");
         mirror::write_mirror(&self.data_dir, &doc, rev).map_err(|e| e.to_string())
+    }
+}
+
+/// `Persistence` del runtime sobre las tablas Task/Attempt (LXO-232): cada mutación compara el documento confirmado con
+/// el candidato y lo traduce a las tablas, con sus eventos, en UNA transacción (`Store::runtime_commit_recorded`). La
+/// vista legacy reconstruida de lo que cambió debe ser el candidato; si no, no se confirma nada. Sin espejo: desde el
+/// corte `state.json` no se escribe (ADR D4) y `legacy_state` está congelado.
+struct TablesPersistence {
+    slot: Arc<Mutex<Slot>>,
+    /// El documento de la última confirmación (o el cargado al arrancar): contra él se compara el siguiente. Los
+    /// latidos de actividad que solo viven en memoria viajan así en la siguiente mutación.
+    committed: Mutex<RuntimeDoc>,
+}
+
+impl Persistence for TablesPersistence {
+    fn records_events(&self) -> bool {
+        true
+    }
+
+    fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
+        let next = serde_json::to_value(state)
+            .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
+            .and_then(|v| RuntimeDoc::from_value(v).map_err(|e| PersistError::structural(e.to_string())))?;
+        let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        match store.runtime_commit_recorded(&committed, &next, events, |view, changes| super::agentic_cut::verify_runtime_view(view, changes, state)) {
+            Ok(_) => {
+                *committed = next;
+                Ok(())
+            }
+            // Lo que las tablas no representan se rechaza sin degradar el Core: la transacción se deshizo entera.
+            Err(e @ StoreError::RuntimeMapping(_)) => Err(PersistError::rejected(e.to_string())),
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false }),
+        }
+    }
+
+    fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        store.append_events(events).map(|_| ()).map_err(|e| PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false })
     }
 }
 
