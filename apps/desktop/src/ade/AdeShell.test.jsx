@@ -603,6 +603,13 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(document.activeElement).toBe(focusedLink);
     expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
 
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(pageTwoReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
     await act(async () => {
       refreshedPageTwo.resolve({
         v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
@@ -617,6 +624,12 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(document.activeElement).toBe(focusedLink);
     expect(within(tasksRegion).getByTestId('task-poll-50').textContent).toContain('Task 50');
     expect(within(tasksRegion).getByTestId('task-poll-50').textContent).not.toContain('Título duplicado');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(pageThreeReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
 
     await act(async () => {
       refreshedPageThree.resolve({
@@ -678,19 +691,29 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(otherTasksRegion).queryByTestId('task-project-a-late')).toBeNull();
   });
 
-  it('ignora una generación de lectura tardía y conserva la más reciente', async () => {
+  it('ignora una reconciliación tardía al cambiar la cabecera y conserva la generación más reciente', async () => {
     vi.useFakeTimers();
-    const firstTasks = [{ ...ITEM, id: 'read-head', title: 'Task de cabecera', status: 'running' }];
+    const firstTasks = [{ ...ITEM, id: 'read-head-v1', title: 'Task de cabecera v1', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'read-head-v2', title: 'Task de cabecera v2', status: 'running' }];
+    const thirdTasks = [{ ...ITEM, id: 'read-head-v3', title: 'Task de cabecera v3', status: 'running' }];
     const staleRefresh = deferred();
     const currentRefresh = deferred();
-    let cursorReads = 0;
+    let headReads = 0;
+    const cursorReads = [];
     core(detailOf(), {
       tasks: (args) => {
         if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
-        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'read-cursor' };
-        cursorReads += 1;
-        if (cursorReads === 1) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'read-old-page', title: 'Task ya cargada', status: 'running' }], has_more: false, next_cursor: null };
-        return cursorReads === 2 ? staleRefresh.promise : currentRefresh.promise;
+        if (!args.cursor) {
+          headReads += 1;
+          const tasks = headReads === 1 ? firstTasks : headReads === 2 ? secondTasks : thirdTasks;
+          const cursor = headReads === 1 ? 'read-cursor-v1' : headReads === 2 ? 'read-cursor-v2' : 'read-cursor-v3';
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks, has_more: true, next_cursor: cursor };
+        }
+        cursorReads.push(args.cursor);
+        if (args.cursor === 'read-cursor-v1') return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'read-old-page', title: 'Task ya cargada', status: 'running' }], has_more: false, next_cursor: null };
+        if (args.cursor === 'read-cursor-v2') return staleRefresh.promise;
+        if (args.cursor === 'read-cursor-v3') return currentRefresh.promise;
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
       },
     });
     render(shell());
@@ -704,15 +727,17 @@ describe('AdeShell · Project View (LXO-204)', () => {
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     await flush();
-    expect(cursorReads).toBe(2);
+    expect(headReads).toBe(2);
+    expect(cursorReads).toEqual(['read-cursor-v1', 'read-cursor-v2']);
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     await flush();
-    expect(cursorReads).toBe(3);
+    expect(headReads).toBe(3);
+    expect(cursorReads).toEqual(['read-cursor-v1', 'read-cursor-v2', 'read-cursor-v3']);
     expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
 
     staleRefresh.resolve({
       v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
-      tasks: [{ ...ITEM, id: 'read-stale-only', title: 'Respuesta de lectura anterior', status: 'running' }], has_more: false, next_cursor: null,
+      tasks: [{ ...ITEM, id: 'read-stale-only', title: 'Respuesta de cabecera anterior', status: 'running' }], has_more: false, next_cursor: null,
     });
     await flush();
     expect(within(tasksRegion).queryByTestId('task-read-stale-only')).toBeNull();
@@ -720,11 +745,68 @@ describe('AdeShell · Project View (LXO-204)', () => {
 
     currentRefresh.resolve({
       v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
-      tasks: [{ ...ITEM, id: 'read-current-page', title: 'Respuesta de lectura actual', status: 'running' }], has_more: false, next_cursor: null,
+      tasks: [{ ...ITEM, id: 'read-current-page', title: 'Respuesta de cabecera actual', status: 'running' }], has_more: false, next_cursor: null,
     });
     await flush();
     expect(within(tasksRegion).getByTestId('task-read-current-page')).toBeTruthy();
     expect(within(tasksRegion).queryByTestId('task-read-old-page')).toBeNull();
+  });
+
+  it('permite reintentar la carga inicial invalidada por una cabecera nueva', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'initial-head-v1', title: 'Task de cabecera v1', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'initial-head-v2', title: 'Task de cabecera v2', status: 'running' }];
+    const invalidatedPage = deferred();
+    let headReads = 0;
+    const cursors = [];
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) {
+          headReads += 1;
+          const tasks = headReads === 1 ? firstTasks : secondTasks;
+          const cursor = headReads === 1 ? 'initial-cursor-v1' : 'initial-cursor-v2';
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks, has_more: true, next_cursor: cursor };
+        }
+        cursors.push(args.cursor);
+        if (args.cursor === 'initial-cursor-v1') return invalidatedPage.promise;
+        if (args.cursor === 'initial-cursor-v2') return {
+          v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+          tasks: [{ ...ITEM, id: 'initial-page-v2', title: 'Task inicial recuperada', status: 'running' }], has_more: false, next_cursor: null,
+        };
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    expect(cursors).toEqual(['initial-cursor-v1']);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-initial-head-v2')).toBeTruthy();
+    expect(loadMore.getAttribute('aria-disabled')).toBeNull();
+    expect(loadMore.textContent).toBe('Cargar más Tasks');
+
+    fireEvent.click(loadMore);
+    await flush();
+    expect(cursors).toEqual(['initial-cursor-v1', 'initial-cursor-v2']);
+    expect(within(tasksRegion).getByTestId('task-initial-page-v2')).toBeTruthy();
+
+    invalidatedPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'initial-page-stale', title: 'Respuesta de cabecera anterior', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).queryByTestId('task-initial-page-stale')).toBeNull();
+    expect(within(tasksRegion).getByTestId('task-initial-page-v2')).toBeTruthy();
   });
 
   it('conserva la última lista si falla la reconciliación y permite reintentarla', async () => {
