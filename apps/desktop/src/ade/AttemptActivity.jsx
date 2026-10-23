@@ -1,10 +1,10 @@
 import { COPY, attemptActivityLabel, isKnownAttemptActivity } from './adeLabels';
 import { formatUtc } from './attemptFormat';
 import { CoreModelNotice } from './CoreModelNotice';
+import { ATTEMPT_ACTIVITY_LIMIT } from './attemptActivityLimit';
 import { useCoreQuery } from './useCoreQuery';
 
-/** Tamaño de la única página que se pide: el filtro por Attempt devuelve pocos eventos. */
-export const ATTEMPT_ACTIVITY_LIMIT = 50;
+export { ATTEMPT_ACTIVITY_LIMIT };
 
 /**
  * LXO-121 · Actividad de UN Attempt con `activity_list` filtrado por `target_kind=attempt`.
