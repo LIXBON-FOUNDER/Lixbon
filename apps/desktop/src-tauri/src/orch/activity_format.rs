@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 48] = [
+pub(super) const KINDS: [&str; 49] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -66,6 +66,7 @@ pub(super) const KINDS: [&str; 48] = [
     "worktree.found",
     "worktree.removed",
     "artifact.created",
+    "core.agentic_cut",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -523,6 +524,11 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             "activity.artifact.created",
             Visual::Info,
             vec![("task", id(p, "task")), ("n", number(p, "n")), ("kind", closed(p, "kind", &ARTIFACT_KINDS)), ("verifiable", flag(p, "verifiable"))],
+        ),
+        "core.agentic_cut" => rendered(
+            "activity.core.agentic_cut",
+            Visual::Info,
+            vec![("tasks", p.get("counts").and_then(|c| number(c, "tasks"))), ("attempts", p.get("counts").and_then(|c| number(c, "attempts")))],
         ),
         "task.review_requested" => rendered(
             "activity.task.review_requested",

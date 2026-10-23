@@ -47,6 +47,7 @@ mod projects;
 mod attempts;
 mod sessions;
 mod worktrees;
+mod cut;
 mod tasks;
 #[cfg(test)]
 mod attention_tests;
@@ -107,6 +108,9 @@ pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessi
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewArtifact, NewWorktree, Provenance, RemovalReason, WorktreeRow, WorktreeState, WorktreeStep};
+// Corte de datos Task/Attempt (LXO-117): sin activar; solo lo usan `orch::agentic_cut` y las pruebas.
+#[allow(unused_imports)]
+pub use cut::{cut_migration, inspect_copy, migrations_with_cut, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
