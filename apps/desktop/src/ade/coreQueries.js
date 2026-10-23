@@ -82,6 +82,7 @@ const ACTIVITY_CLASS_SET = new Set(['state', 'effect', 'decision', 'system']);
 const ACTIVITY_VISUAL_SET = new Set(['info', 'success', 'warning', 'error']);
 const ACTIVITY_ACTOR_KIND_SET = new Set(['person', 'agent', 'system']);
 const ACTIVITY_I64_MAX = 9_223_372_036_854_775_807n;
+const ACTIVITY_UNKNOWN_REASONS = new Set(['unknown_kind', 'unsupported_version', 'invalid_payload']);
 
 const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.run.created', { required: { root_task: 'string' } }],
@@ -155,7 +156,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
     },
   }],
   ['activity.attention.resolved', { required: { resolution: 'string' } }],
-  ['activity.unknown', { required: { reason: 'string', kind: 'string', event_version: 'integer' } }],
+  ['activity.unknown', { required: { reason: 'activityUnknownReason', kind: 'string', event_version: 'integer' } }],
 ]);
 
 for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']) {
@@ -380,6 +381,7 @@ function validActivityArgs(messageKey, args) {
     text: freeText,
     boolean: (value) => typeof value === 'boolean',
     integer: nonNegativeSafeInteger,
+    activityUnknownReason: (value) => typeof value === 'string' && ACTIVITY_UNKNOWN_REASONS.has(value),
   };
   return Object.keys(required).every((key) => Object.hasOwn(args, key))
     && Object.keys(args).every((key) => Object.hasOwn(fields, key)

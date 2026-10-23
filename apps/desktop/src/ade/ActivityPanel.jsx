@@ -141,25 +141,10 @@ function toTimelineItem(item) {
   };
 }
 
-function errorText(error, reason) {
-  const raw = typeof error === 'string'
-    ? error.trim()
-    : error instanceof Error
-      ? error.message.trim()
-      : '';
-  if (reason === 'disconnected') {
-    return `Core está desconectado${raw ? `: ${raw}` : '.'}`;
-  }
-  if (reason === 'degraded') {
-    return `Core está degradado${raw ? `: ${raw}` : '.'}`;
-  }
-  return raw || 'El Core no devolvió actividad.';
-}
-
-function errorCode(message, reason) {
-  if (reason) return reason;
-  const prefix = typeof message === 'string' ? message.match(/^[a-z][a-z0-9_]+/i)?.[0] : null;
-  return prefix ?? '';
+// El detalle crudo del Core (mensaje, código de error) nunca llega a la UI: solo la categoría del fallo.
+function errorKind(pageFailed, reason) {
+  if (pageFailed) return 'page';
+  return reason === 'disconnected' || reason === 'degraded' || reason === 'timeout' ? reason : 'unknown';
 }
 
 function coreStatus(status, hasData, pageError) {
@@ -268,15 +253,14 @@ export function ActivityPanel({
           loading: false,
           error: null,
         }));
-    } catch (error) {
+    } catch {
       if (pageGeneration.current !== requestedGeneration) return;
-      const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
       setPages((current) => (current.key !== requestedKey
         || current.headData !== requestedHead
         || current.readEpoch !== requestedEpoch
         || pageGeneration.current !== requestedGeneration
         ? current
-        : { ...current, loading: false, error: message }));
+        : { ...current, loading: false, error: true }));
     } finally {
       if (loadingMore.current === token) loadingMore.current = null;
     }
@@ -291,11 +275,8 @@ export function ActivityPanel({
   const hasData = Boolean(list.data);
   const timelineStatus = coreStatus(list.status, hasData, pageState.error);
   const stale = Boolean(pageState.error) || (headFailure && hasData);
-  const message = pageState.error || errorText(list.error, list.reason
+  const kind = errorKind(Boolean(pageState.error), list.reason
     ?? (list.status === 'disconnected' ? 'disconnected' : list.status === 'degraded' ? 'degraded' : null));
-  const code = pageState.error
-    ? errorCode(pageState.error)
-    : errorCode(list.error, list.reason);
 
   return (
     <ActivityTimeline
@@ -303,7 +284,7 @@ export function ActivityPanel({
       scope={scope}
       status={timelineStatus}
       stale={stale}
-      error={failure ? { message, code } : null}
+      error={failure ? { kind } : null}
       cursor={cursor}
       loadingMore={pageState.loading}
       onLoadMore={loadMore}

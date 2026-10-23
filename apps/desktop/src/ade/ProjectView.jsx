@@ -21,11 +21,16 @@ import './ProjectView.css';
  *                    disponibilidad: no se inventan, y la ruta NO es identidad del Project.
  *                    Las ubicaciones se muestran y no son navegables (no hay ID duradero).
  *
- *  summary           { state, counts, message }. counts: { tasks, attempts, attention,
- *                    resources } con enteros ≥ 0 o null. SOLO se muestran los números que
- *                    Core suministra; la vista jamás cuenta filas ni suma nada.
+ *  summary           { state, counts, message }. counts: { tasks, active, failed, review_ready,
+ *                    attempts, attention, resources } con enteros ≥ 0 o null. `active` y `failed`
+ *                    salen de `projects_overview.counts`; `review_ready` sale de
+ *                    `counts.attention.by_category.review_ready`. SOLO se muestran los números
+ *                    que Core suministra; la vista jamás cuenta filas ni suma nada.
  *
- *  tasks             Slice de filas Task legacy: { state, items, message }.
+ *  tasks             Slice de filas Task legacy: { state, items, message, hasMore,
+ *                    paginationStarted, loadingMore, pendingMore, loadMoreError,
+ *                    pageAnnouncement }. `hasMore` y el callback `onLoadMoreTasks` siguen el
+ *                    cursor opaco y `has_more` de `tasks_by_project(all)`.
  *                    item: { task_id, title?, status, project_id? }
  *  filter            'active' | 'final' | 'all' (controlada) · defaultFilter (no controlada)
  *  onFilterChange    (filter) => void
@@ -100,6 +105,9 @@ const LOCATION_STATE_LABEL = {
 
 const COUNT_KEYS = [
   ['tasks', 'Tasks'],
+  ['active', 'Activas'],
+  ['failed', 'Fallidas'],
+  ['review_ready', 'Review ready'],
   ['attempts', 'Attempts'],
   ['attention', 'Attention'],
   ['resources', 'Resources'],
@@ -131,6 +139,12 @@ function normalizeSlice(slice) {
     items: Array.isArray(slice.items) ? slice.items : [],
     message: typeof slice.message === 'string' && slice.message ? slice.message : null,
     refreshing: slice.refreshing === true,
+    hasMore: slice.hasMore === true,
+    paginationStarted: slice.paginationStarted === true,
+    loadingMore: slice.loadingMore === true,
+    pendingMore: slice.pendingMore === true,
+    loadMoreError: typeof slice.loadMoreError === 'string' && slice.loadMoreError ? slice.loadMoreError : null,
+    pageAnnouncement: typeof slice.pageAnnouncement === 'string' && slice.pageAnnouncement ? slice.pageAnnouncement : null,
     supplied: true,
   };
 }
@@ -276,14 +290,22 @@ function FilterGroup({ value, onChange, labelId, hintId }) {
   );
 }
 
-function Tasks({ slice, projectId, filter, onFilter, onOpenTask, headingId }) {
+function Tasks({ slice, projectId, filter, onFilter, onOpenTask, onLoadMore, headingId }) {
   const labelId = `${headingId}-filter`;
   const hintId = `${headingId}-hint`;
   const { kept, foreign } = scopeToProject(slice.items, projectId);
   const visible = kept.filter((t) => taskMatchesFilter(t?.status, filter));
   const unknownHidden = filter !== 'all' && kept.some((t) => !ACTIVE_TASK_STATUSES.includes(t?.status) && !FINAL_TASK_STATUSES.includes(t?.status));
+  const pageBusy = slice.loadingMore === true || slice.pendingMore === true;
+  const paginationVisible = slice.hasMore === true || slice.paginationStarted === true;
+  const loadMoreDisabled = pageBusy || slice.hasMore !== true || typeof onLoadMore !== 'function';
+  const loadMoreLabel = pageBusy
+    ? slice.pendingMore === true ? 'Esperando a Core…' : 'Cargando más Tasks…'
+    : slice.hasMore === true
+      ? slice.loadMoreError ? 'Reintentar carga' : 'Cargar más Tasks'
+      : 'No hay más Tasks';
   return (
-    <section className="pv__section" aria-labelledby={headingId}>
+    <section className="pv__section" aria-labelledby={headingId} aria-busy={pageBusy ? 'true' : undefined}>
       <h3 className="pv__h" id={headingId}>Tasks <span className="pv__tag">estado de la Task</span></h3>
       <div className="pv__filterbar">
         <span id={labelId} className="pv__filterlabel">Filtro</span>
@@ -302,7 +324,7 @@ function Tasks({ slice, projectId, filter, onFilter, onOpenTask, headingId }) {
             <p className="pv__empty" data-testid="tasks-filtered-empty">Ninguna Task coincide con el filtro «{TASK_FILTERS.find((f) => f.id === filter)?.label}».</p>
           )}
           {visible.length > 0 && (
-            <ul className="pv__list" aria-labelledby={headingId}>
+            <ul className="pv__list" aria-labelledby={headingId} aria-busy={pageBusy ? 'true' : undefined}>
               {visible.map((t, i) => {
                 const known = Boolean(STATUS_LABEL[t?.status]);
                 return (
@@ -317,6 +339,38 @@ function Tasks({ slice, projectId, filter, onFilter, onOpenTask, headingId }) {
                 );
               })}
             </ul>
+          )}
+          {slice.loadingMore === true && (
+            <p className="pv__notice pv__notice--loading" role="status" aria-live="polite" aria-busy="true" data-testid="tasks-page-loading">
+              Cargando más Tasks desde Core…
+            </p>
+          )}
+          {slice.pendingMore === true && slice.loadMoreError && (
+            <p className="pv__notice pv__notice--loading" role="status" aria-live="polite" data-testid="tasks-page-stale">
+              {slice.loadMoreError} La lectura sigue en curso.
+            </p>
+          )}
+          {slice.loadMoreError && slice.pendingMore !== true && (
+            <p className="pv__notice pv__notice--error" role="alert" data-testid="tasks-page-error">
+              No se pudieron cargar más Tasks; se conservan las Tasks ya cargadas. {slice.loadMoreError}
+            </p>
+          )}
+          {slice.pageAnnouncement && (
+            <p className="pv__hint" role="status" aria-live="polite" aria-atomic="true" data-testid="tasks-page-announcement">
+              {slice.pageAnnouncement}
+            </p>
+          )}
+          {paginationVisible && (
+            <button
+              type="button"
+              className="pv__filter"
+              data-testid="tasks-load-more"
+              aria-disabled={loadMoreDisabled ? 'true' : undefined}
+              aria-busy={pageBusy ? 'true' : undefined}
+              onClick={() => { if (!loadMoreDisabled) onLoadMore(); }}
+            >
+              {loadMoreLabel}
+            </button>
           )}
         </>
       )}
@@ -378,7 +432,7 @@ function Activity({ slice, projectId, onOpenTask, onOpenAttempt, headingId }) {
                   {ev?.text
                     ? <span className="pv__title" data-testid="activity-text">{ev.text}</span>
                     : <span className="pv__title pv__muted" data-testid="activity-no-text">
-                      Core no suministró texto para esta Activity.{isId(ev?.kind) && <> Tipo sin interpretar: <code className="pv__kind">{ev.kind}</code></>}
+                      Core no suministró una descripción interpretable para esta Activity.
                     </span>}
                   <RelatedTargets scope="activity" item={ev} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} />
                 </li>
@@ -430,6 +484,7 @@ export function ProjectView({
   locations,
   summary,
   tasks, filter, defaultFilter = 'active', onFilterChange,
+  onLoadMoreTasks,
   attention, activity, resources, resourceInventory, resourceInventoryStatus, onRetryResourceInventory,
   onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
 }) {
@@ -457,7 +512,7 @@ export function ProjectView({
       <Summary summary={summary} headingId={`${uid}-summary`} />
       <Locations slice={locSlice} headingId={`${uid}-locations`} />
       <Attention slice={normalizeSlice(attention)} projectId={projectId} onOpenAttention={onOpenAttention} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-attention`} />
-      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} headingId={`${uid}-tasks`} />
+      <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} onLoadMore={onLoadMoreTasks} headingId={`${uid}-tasks`} />
       <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
       <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} inventoryStatus={resourceInventoryStatus} onRetryInventory={onRetryResourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
     </article>

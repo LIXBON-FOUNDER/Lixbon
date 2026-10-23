@@ -7,7 +7,7 @@ import { useWorkbenchStore } from '../store/workbenchStore';
 import { ActivityPanel } from './ActivityPanel';
 import { AttentionInbox } from './AttentionInbox';
 import { translateActivityMessage } from './activityMessages';
-import { readAdeTask } from './coreQueries';
+import { queryAdeCore, readAdeTask } from './coreQueries';
 import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
@@ -53,12 +53,15 @@ export const PROJECT_ACTIVITY_LIMIT = 20;
 
 /**
  * Proyecta un item de `activity_list` (LXO-92) a la fila de Project View. Solo se usan campos del
- * contrato: el texto sale de `message_key`/`args` traducidos; un fallback o una clave desconocida
- * dejan el texto vacío y Project View dice que Core no dio texto, sin inventarlo.
+ * contrato: el único fallback permitido (`activity.unknown`) se traduce con los argumentos seguros
+ * de Core; fallbacks ajenos o claves inválidas dejan un mensaje genérico en ProjectView.
  */
 export function projectActivityItem(item) {
   const target = item?.target && typeof item.target === 'object' ? item.target : null;
-  const text = item?.fallback === true ? null : translateActivityMessage(item?.message_key, item?.args);
+  const translated = translateActivityMessage(item?.message_key, item?.args);
+  const text = item?.fallback === true
+    ? item?.message_key === 'activity.unknown' ? translated : null
+    : translated;
   return {
     activity_id: typeof item?.event_id === 'string' ? item.event_id : undefined,
     kind: typeof item?.kind === 'string' ? item.kind : undefined,
@@ -120,6 +123,8 @@ const WORKSPACE_VIEWS = [
 
 // Misma política que useCoreQuery: ninguna lectura de Core queda abierta indefinidamente.
 const ACTIVITY_VERIFY_TIMEOUT_MS = 10_000;
+const PROJECT_TASK_PAGE_TIMEOUT_MS = 10_000;
+const PROJECT_TASK_PAGE_TIMEOUT_MESSAGE = 'El Core tarda en responder; se conservan las Tasks ya cargadas.';
 
 /** Espera la lectura con el límite de 10 s; vencer el plazo solo rechaza al llamante, no libera la lectura en vuelo. */
 function withinVerifyPolicy(read) {
@@ -128,6 +133,249 @@ function withinVerifyPolicy(read) {
     timeoutId = window.setTimeout(() => reject(new Error('ade_query_timeout: Core no respondió a tiempo')), ACTIVITY_VERIFY_TIMEOUT_MS);
   });
   return Promise.race([read, timeout]).finally(() => window.clearTimeout(timeoutId));
+}
+
+function uniqueProjectTasks(...groups) {
+  const seen = new Set();
+  return groups.flat().filter((task) => {
+    const id = task?.id;
+    if (typeof id !== 'string' || !id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function nextTaskCursor(page, cursor, visited) {
+  if (page?.has_more !== true) return null;
+  if (typeof page.next_cursor !== 'string' || !page.next_cursor || visited.has(page.next_cursor)) {
+    throw new Error('tasks_by_project_cursor_did_not_advance');
+  }
+  return page.next_cursor;
+}
+
+/** Sigue `tasks_by_project(all)` y solo publica una generación cuando su conjunto de páginas queda listo. */
+function useProjectTaskContinuation(projectId, firstPage, enabled) {
+  const epoch = Number.isSafeInteger(firstPage.readEpoch) ? firstPage.readEpoch : 0;
+  const headVersion = JSON.stringify(firstPage.data ?? null);
+  const context = JSON.stringify([projectId ?? null, headVersion, enabled === true]);
+  const contextRef = useRef(context);
+  contextRef.current = context;
+  const [continuation, setContinuation] = useState(null);
+  const continuationRef = useRef(null);
+  const requestRef = useRef({ id: 0, inFlight: false, timeout: null, context: null, epoch: 0, reconcile: false });
+
+  const publish = useCallback((next) => {
+    continuationRef.current = next;
+    setContinuation(next);
+  }, []);
+
+  const runPageSet = useCallback(({ base, reconcile }) => {
+    if (!enabled || !projectId || requestRef.current.inFlight) return;
+    const request = requestRef.current;
+    const requestId = request.id + 1;
+    request.id = requestId;
+    request.inFlight = true;
+    request.context = context;
+    request.epoch = epoch;
+    request.reconcile = reconcile;
+    const requestContext = context;
+    const firstData = firstPage.data;
+    const isCurrentRequest = () => requestRef.current.id === requestId && contextRef.current === requestContext;
+    const initialItems = Array.isArray(firstData?.tasks) ? uniqueProjectTasks(firstData.tasks) : [];
+
+    publish({
+      ...base,
+      targetEpoch: epoch,
+      loading: true,
+      pending: false,
+      error: null,
+      announcement: reconcile ? null : base.announcement ?? null,
+      started: true,
+    });
+
+    const readPage = async (cursor) => {
+      const timeoutId = window.setTimeout(() => {
+        if (!isCurrentRequest()) return;
+        request.timeout = null;
+        const visible = continuationRef.current?.projectId === projectId ? continuationRef.current : base;
+        publish({
+          ...visible,
+          ...(reconcile ? {} : { epoch: request.epoch }),
+          targetEpoch: request.epoch,
+          loading: false,
+          pending: true,
+          error: PROJECT_TASK_PAGE_TIMEOUT_MESSAGE,
+          started: true,
+        });
+      }, PROJECT_TASK_PAGE_TIMEOUT_MS);
+      request.timeout = timeoutId;
+      try {
+        return await queryAdeCore('tasks_by_project', { projectId, status: 'all', cursor });
+      } finally {
+        window.clearTimeout(timeoutId);
+        if (requestRef.current.id === requestId && request.timeout === timeoutId) request.timeout = null;
+      }
+    };
+
+    const read = async () => {
+      let items = reconcile ? initialItems : base.items;
+      let pageCount = reconcile ? 0 : base.pageCount;
+      let cursor = reconcile ? firstData?.next_cursor : base.cursor;
+      let hasMore = reconcile ? firstData?.has_more === true : base.hasMore === true;
+      let cursorHistory = reconcile ? [] : [...(base.cursorHistory ?? [])];
+      const pageLimit = reconcile ? base.pageCount : 1;
+      let addedCount = 0;
+
+      try {
+        for (let index = 0; index < pageLimit && hasMore; index += 1) {
+          if (typeof cursor !== 'string' || !cursor) {
+            throw new Error('tasks_by_project_cursor_did_not_advance');
+          }
+          const visited = new Set(cursorHistory);
+          if (visited.has(cursor)) throw new Error('tasks_by_project_cursor_did_not_advance');
+          visited.add(cursor);
+
+          const page = await readPage(cursor);
+          if (!isCurrentRequest()) return;
+          const pageTasks = Array.isArray(page?.tasks) ? page.tasks : [];
+          const knownIds = new Set(uniqueProjectTasks(items).map((task) => task.id));
+          addedCount += uniqueProjectTasks(pageTasks).filter((task) => !knownIds.has(task.id)).length;
+          items = uniqueProjectTasks(items, pageTasks);
+          pageCount += 1;
+          hasMore = page?.has_more === true;
+          cursor = nextTaskCursor(page, cursor, visited);
+          cursorHistory = [...visited];
+        }
+
+        if (!isCurrentRequest()) return;
+        const loaded = addedCount === 1 ? 'Se cargó 1 Task.' : `Se cargaron ${addedCount} Tasks.`;
+        publish({
+          projectId,
+          epoch: request.epoch,
+          items,
+          pageCount,
+          cursor,
+          cursorHistory,
+          hasMore,
+          started: pageCount > 0,
+          loading: false,
+          pending: false,
+          error: null,
+          announcement: reconcile
+            ? 'Se actualizó la lista de Tasks desde Core.'
+            : `${loaded} ${hasMore ? 'Hay más Tasks disponibles.' : 'No hay más Tasks.'}`,
+        });
+      } catch (error) {
+        if (!isCurrentRequest()) return;
+        const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
+        publish({
+          ...base,
+          ...(reconcile ? { targetEpoch: request.epoch } : { epoch: request.epoch }),
+          loading: false,
+          pending: false,
+          error: message,
+          started: true,
+        });
+      } finally {
+        if (requestRef.current.id === requestId) {
+          if (request.timeout !== null) window.clearTimeout(request.timeout);
+          request.timeout = null;
+          request.inFlight = false;
+          request.context = null;
+        }
+      }
+    };
+
+    void read();
+  }, [context, enabled, epoch, firstPage.data, projectId, publish]);
+
+  // Same head content is still a new Core read epoch, but it does not invalidate a cursor walk.
+  // A changed Project, head DTO, or active state does invalidate it, including on unmount.
+  useEffect(() => {
+    return () => {
+      const request = requestRef.current;
+      request.id += 1;
+      request.inFlight = false;
+      if (request.timeout !== null) window.clearTimeout(request.timeout);
+      request.timeout = null;
+      request.context = null;
+    };
+  }, [context]);
+
+  useEffect(() => {
+    const request = requestRef.current;
+    if (request.inFlight && request.context === context) {
+      request.epoch = epoch;
+      const active = continuationRef.current;
+      if (active?.projectId === projectId && active.epoch !== epoch) {
+        publish(request.reconcile
+          ? { ...active, targetEpoch: epoch }
+          : { ...active, epoch });
+      }
+      return;
+    }
+
+    request.id += 1;
+    request.inFlight = false;
+    if (request.timeout !== null) window.clearTimeout(request.timeout);
+    request.timeout = null;
+    request.context = null;
+
+    if (enabled && projectId && firstPage.data) {
+      const previous = continuationRef.current;
+      if (previous?.projectId === projectId && previous.epoch !== epoch && previous.pageCount > 0) {
+        runPageSet({ base: previous, reconcile: true });
+      }
+    }
+  }, [context, enabled, epoch, firstPage.data, projectId, publish, runPageSet]);
+
+  const sameProject = continuation?.projectId === projectId ? continuation : null;
+  const current = sameProject?.epoch === epoch ? sameProject : null;
+  const stalePages = sameProject?.pageCount > 0 && sameProject.epoch !== epoch;
+  const reconciling = stalePages && firstPage.data?.has_more === true;
+  const refreshState = reconciling && sameProject.targetEpoch === epoch ? sameProject : null;
+  const hasMore = reconciling
+    ? refreshState?.error ? true : firstPage.data?.has_more === true
+    : current?.hasMore ?? firstPage.data?.has_more === true;
+
+  const loadMore = useCallback(() => {
+    if (!enabled || !projectId || !hasMore) return;
+    const previous = continuationRef.current;
+    if (previous?.projectId === projectId && previous.epoch !== epoch && previous.pageCount > 0 && firstPage.data?.has_more === true) {
+      runPageSet({ base: previous, reconcile: true });
+      return;
+    }
+    const base = previous?.projectId === projectId && previous.epoch === epoch
+      ? previous
+      : {
+        projectId,
+        epoch,
+        items: Array.isArray(firstPage.data?.tasks) ? uniqueProjectTasks(firstPage.data.tasks) : [],
+        pageCount: 0,
+        cursor: firstPage.data?.next_cursor,
+        cursorHistory: [],
+        hasMore: firstPage.data?.has_more === true,
+        started: false,
+        loading: false,
+        pending: false,
+        error: null,
+        announcement: null,
+      };
+    if (base.hasMore !== true) return;
+    runPageSet({ base, reconcile: false });
+  }, [enabled, epoch, firstPage.data, hasMore, projectId, runPageSet]);
+
+  const items = current?.items ?? (reconciling ? sameProject.items : null);
+  return {
+    items,
+    hasMore,
+    started: reconciling ? true : current?.started === true,
+    loading: reconciling ? refreshState ? refreshState.loading === true : true : current?.loading === true,
+    pending: reconciling ? refreshState?.pending === true : current?.pending === true,
+    error: reconciling ? refreshState?.targetEpoch === epoch ? refreshState.error ?? null : null : current?.error ?? null,
+    announcement: current?.announcement ?? null,
+    loadMore,
+  };
 }
 
 const ACTIVITY_SCOPES = [
@@ -188,7 +436,7 @@ function WorkspaceViewSwitch({ view, onChange, idPrefix }) {
 // subvista con alcance Task; `onOpenTaskActivity` (opcional) además recibe `{ projectId, taskId }`.
 // `onOpenRun(runId)` / `onOpenSpawnRequest(pendingId)` son los callbacks existentes de Operación: reciben el
 // ID durable exacto y devuelven `true` si lo abrieron (o `false` si ya no existe en esa superficie).
-export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
+export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawerOpen, onCloseDrawer, onActivate, operationNavigation, operationWorkspace, onOpenTaskActivity, onOpenRun, onOpenSpawnRequest }) {
   const viewIds = useId();
   const [workspaceView, setWorkspaceView] = useState('workspace');
   const [attentionTarget, setAttentionTarget] = useState(null);
@@ -207,11 +455,14 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
   const jumpPaletteOpen = useWorkbenchStore((s) => s.jumpPaletteOpen);
   const setJumpPaletteOpen = useWorkbenchStore((s) => s.setJumpPaletteOpen);
+  // `active` dice qué canvas se ve (Workspace ADE o Ejecuciones); `modeActive`, si el modo Orquestador
+  // es el visible. Oculto, nada consulta ni sondea: el estado local y la selección se conservan.
+  const workspaceActive = active && modeActive;
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
-  const projectViewActive = Boolean(active && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
+  const projectViewActive = Boolean(workspaceActive && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
   const onProjectSnapshot = useCallback((snapshot) => setProjectSnapshot(snapshot), []);
   const onProjectsSnapshot = useCallback((snapshot) => setProjectsSnapshot(snapshot), []);
   const currentProjectSnapshot = projectSnapshot?.projectId === selectedProjectId ? projectSnapshot : null;
@@ -226,6 +477,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     status: 'all',
     limit: 50,
   }, { enabled: projectViewActive });
+  const projectTaskContinuation = useProjectTaskContinuation(selectedProjectId, projectTasks, projectViewActive);
   const projectAttention = useCoreQuery('attention_list', {
     project_id: selectedProjectId,
   }, { enabled: projectViewActive });
@@ -251,7 +503,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
   const detail = useCoreQuery('task_detail', {
     project_id: selectedProjectId,
     task_id: selectedTaskId,
-  }, { enabled: Boolean(selectedProjectId) && Boolean(selectedTaskId) });
+  }, { enabled: modeActive && Boolean(selectedProjectId) && Boolean(selectedTaskId) });
   const selectedProject = currentProjectSnapshot?.projectId === selectedProjectId
     ? currentProjectSnapshot.project
     : null;
@@ -299,6 +551,9 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
     ...(projectOverview.status === 'refreshing' ? { refreshing: true } : {}),
     counts: {
       tasks: projectCounts?.tasks ?? null,
+      active: projectCounts?.active ?? null,
+      failed: projectCounts?.failed ?? null,
+      review_ready: projectCounts?.attention?.by_category?.review_ready ?? null,
       attempts: null,
       attention: projectCounts?.attention?.total ?? null,
       resources: null,
@@ -311,13 +566,18 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
           : projectQueryMessage(projectOverview) || 'No hay metadata autoritativa para este Project.' }
       : !projectCounts ? { message: 'Core no incluyó contadores para este Project.' } : {}),
   };
-  const projectTaskItems = Array.isArray(projectTasks.data?.tasks)
-    ? projectTasks.data.tasks
-      // El cursor de tasks_by_project no es snapshot: una Task puede repetirse; se deduplica por task_id.
-      .filter((task, index, all) => all.findIndex((other) => other?.id === task?.id) === index)
-      .map((task) => ({ task_id: task.id, title: task.title, status: task.status }))
-    : [];
-  const projectTaskSlice = projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTasks.data?.has_more === true });
+  const projectTaskDtos = projectTaskContinuation.items
+    ?? uniqueProjectTasks(Array.isArray(projectTasks.data?.tasks) ? projectTasks.data.tasks : []);
+  const projectTaskItems = projectTaskDtos.map((task) => ({ task_id: task.id, title: task.title, status: task.status }));
+  const projectTaskSlice = {
+    ...projectViewSlice(projectTasks, projectTaskItems, { hasMore: projectTaskContinuation.hasMore }),
+    hasMore: projectTaskContinuation.hasMore,
+    paginationStarted: projectTaskContinuation.started,
+    loadingMore: projectTaskContinuation.loading,
+    pendingMore: projectTaskContinuation.pending,
+    loadMoreError: projectTaskContinuation.error,
+    pageAnnouncement: projectTaskContinuation.announcement,
+  };
   const projectAttentionItems = Array.isArray(projectAttention.data?.items)
     ? projectAttention.data.items.map((item) => ({
       attention_id: item.id,
@@ -589,7 +849,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
       className="wb wb--orch ade__layout"
       data-testid="ade-composition"
     >
-      <JumpPaletteHost open={jumpPaletteOpen} onClose={closeJumpPalette} onNavigate={jumpTo} />
+      <JumpPaletteHost open={jumpPaletteOpen && modeActive} onClose={closeJumpPalette} onNavigate={jumpTo} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
@@ -601,6 +861,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                 onSelectTask={selectTask}
                 onProjectSnapshot={onProjectSnapshot}
                 onProjectsSnapshot={onProjectsSnapshot}
+                active={modeActive}
               />
             </section>
             {operationNavigation && (
@@ -639,6 +900,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
                     locations={projectLocationSlice}
                     summary={projectSummary}
                     tasks={projectTaskSlice}
+                    onLoadMoreTasks={projectTaskContinuation.loadMore}
                     attention={projectAttentionSlice}
                     activity={projectActivitySlice}
                     // El slice legacy de Resources (resource_id/kind/label/availability) no lo da ninguna
@@ -669,7 +931,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
             >
               {attentionNotice && <div className="ade__notice" role="status">{attentionNotice}</div>}
               <AttentionInbox
-                active={active && workspaceView === 'attention'}
+                active={workspaceActive && workspaceView === 'attention'}
                 target={attentionTarget}
                 onClearTarget={clearAttentionTarget}
                 onOpenTarget={openAttentionTarget}
@@ -705,7 +967,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
               {activityNotice && <div className="ade__notice" role="status">{activityNotice.text}</div>}
               <ActivityPanel
                 scope={activityScope}
-                active={active && workspaceView === 'activity'}
+                active={workspaceActive && workspaceView === 'activity'}
                 onOpenTarget={openActivityTarget}
               />
             </div>
@@ -716,7 +978,7 @@ export function AdeShell({ active, leftOpen, rightOpen, drawerOpen, onCloseDrawe
             sizeKey="inspector"
             className="ade__inspector"
             open={rightOpen}
-            visible={active}
+            visible={workspaceActive}
             keepMountedWhenHidden
             drawerOpen={drawerOpen}
             onCloseDrawer={onCloseDrawer}

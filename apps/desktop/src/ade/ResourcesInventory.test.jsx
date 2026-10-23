@@ -548,6 +548,25 @@ describe('ResourcesInventory · filtros', () => {
     expect(shownTargets()).toEqual(['/srv/remoto']);
   });
 
+  it('Host filtra por la máquina del target de Core, incluido otro equipo', () => {
+    render(<ResourcesInventory inventory={DTO} />);
+    pick('Host', 'otro-equipo');
+    expect(shownTargets()).toEqual(['/srv/remoto']);
+    pick('Host', 'm-1');
+    expect(shownTargets()).not.toContain('/srv/remoto');
+    expect(shownTargets()).toHaveLength(9);
+  });
+
+  it('Host distingue filas cuyo host no fue informado', () => {
+    const dto = {
+      ...DTO,
+      repos: [...DTO.repos, { project_id: 'p-4', machine: null, path: '/home/ana/sin-host', scan: 'ok' }],
+    };
+    render(<ResourcesInventory inventory={dto} />);
+    pick('Host', '__none__');
+    expect(shownTargets()).toEqual(['/home/ana/sin-host']);
+  });
+
   it('los filtros se combinan (AND) y el vacío tiene mensaje propio', () => {
     render(<ResourcesInventory inventory={DTO} />);
     pick('Proyecto', 'p-1');
@@ -619,7 +638,7 @@ describe('ResourcesInventory · solo lectura', () => {
     expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryAllByRole('link')).toHaveLength(0);
     expect(document.querySelectorAll('button, a, input, textarea, form, [onclick], [role="button"]')).toHaveLength(0);
-    expect(screen.getAllByRole('combobox')).toHaveLength(3);
+    expect(screen.getAllByRole('combobox')).toHaveLength(4);
     // La ruta se pinta como texto plano.
     expect(rowOf('/home/ana/app.lixbon-wt/wt-c').querySelector('a')).toBeNull();
   });
@@ -965,14 +984,17 @@ describe('ResourcesInventory · cambio de Project externo', () => {
     ],
   };
 
-  it('al cambiar el projectId se restablecen los tres filtros locales', () => {
+  it('al cambiar el projectId se restablecen los filtros locales', () => {
     const { rerender } = render(<ResourcesInventory inventory={MULTI} projectId="p-1" />);
+    pick('Host', 'm-1');
     pick('Estado', 'tracked');
     pick('Revisión', 'needs_review');
+    expect(screen.getByLabelText('Host').value).toBe('m-1');
     expect(screen.getByLabelText('Estado').value).toBe('tracked');
     expect(screen.getByLabelText('Revisión').value).toBe('needs_review');
     rerender(<ResourcesInventory inventory={MULTI} projectId="p-2" />);
     expect(screen.getByLabelText('Proyecto').value).toBe('all');
+    expect(screen.getByLabelText('Host').value).toBe('all');
     expect(screen.getByLabelText('Estado').value).toBe('all');
     expect(screen.getByLabelText('Revisión').value).toBe('all');
     // Todo lo de p-2 se ve, no solo lo que casaba con los filtros del Project anterior.

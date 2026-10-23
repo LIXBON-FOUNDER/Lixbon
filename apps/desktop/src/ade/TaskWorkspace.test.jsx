@@ -19,6 +19,7 @@ const taskFixture = (over = {}) => ({
   phase: { name: 'probar', done: false, at: T0 + 4000 },
   messages: [], cwd: 'C:/work/wt-root', branch: 'lxo/inspector', worktree: 'C:/work/wt-root',
   merged: false, review: null, integration: null,
+  failure_reason: null,
   ...over,
 });
 
@@ -123,6 +124,7 @@ describe('TaskWorkspace · identidad y metadatos (fixtures)', () => {
   it('Task fallida: estado real, grupo final y revisión rechazada sin integración', () => {
     renderView(taskFixture({
       status: 'failed', phase: { name: 'compilar', done: true, at: T0 },
+      failure_reason: 'El compilador devolvió código 1.',
       review: { decision: 'rejected', head_commit: 'def456', at: T0 },
       integration: { decision_id: 9, outcome: 'conflict', at: T0 },
     }));
@@ -131,6 +133,7 @@ describe('TaskWorkspace · identidad y metadatos (fixtures)', () => {
     expect(document.querySelector('.twk__status').textContent).toBe('Fallida');
     expect(field('Estado', 'Grupo').textContent).toBe('Final');
     expect(field('Estado', 'Fase').textContent).toContain('compilar · completada');
+    expect(field('Estado', 'Motivo del fallo').textContent).toBe('El compilador devolvió código 1.');
     expect(field('Estado', 'Revisión').textContent).toContain('Rechazada');
     expect(field('Estado', 'Integración').textContent).toContain('Conflicto');
   });
@@ -348,12 +351,13 @@ describe('TaskWorkspace · refresh y target ausente', () => {
 describe('TaskWorkspace · metadatos desconocidos o parciales', () => {
   it('respuesta parcial: lista los campos ausentes y muestra "No informado"', () => {
     const task = taskFixture();
-    for (const key of ['provider', 'model', 'phase', 'messages', 'cwd', 'branch', 'worktree', 'merged', 'review', 'integration', 'created_at', 'updated_at', 'child_ids', 'root_id']) delete task[key];
+    for (const key of ['provider', 'model', 'phase', 'messages', 'cwd', 'branch', 'worktree', 'merged', 'review', 'integration', 'failure_reason', 'created_at', 'updated_at', 'child_ids', 'root_id']) delete task[key];
     renderView(task);
 
     const banner = screen.getByText('Respuesta parcial de Core').closest('[role=status]');
     expect(banner.textContent).toContain('provider');
     expect(banner.textContent).toContain('integration');
+    expect(banner.textContent).toContain('failure_reason');
     for (const [section, label] of [
       ['Ejecución y jerarquía', 'Proveedor'], ['Ejecución y jerarquía', 'Modelo solicitado'], ['Ejecución y jerarquía', 'Hijas'],
       ['Estado', 'Fase'], ['Estado', 'Preguntas'], ['Estado', 'Revisión'], ['Estado', 'Integración'], ['Estado', 'Marca merged'],

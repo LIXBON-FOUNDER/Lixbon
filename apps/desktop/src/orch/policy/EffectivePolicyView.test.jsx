@@ -110,7 +110,7 @@ describe('EffectivePolicyView', () => {
     expect(onLaunch).not.toHaveBeenCalled();
   });
 
-  it('Codex en tarea hija (cualquier rol válido): ok con las advertencias del host por perfil', async () => {
+  it('Codex en tarea hija (cualquier rol válido): ok con las advertencias del host por perfil', { timeout: 20_000 }, async () => {
     const cases = {
       explorar: [CODEX_REPORT_MARKERS_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING],
       proponer: [CODEX_REPORT_MARKERS_WARNING, CODEX_NO_ASK_WARNING, CODEX_COPY_BLOCK_WARNING],

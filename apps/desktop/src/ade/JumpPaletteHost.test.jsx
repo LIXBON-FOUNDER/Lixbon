@@ -189,12 +189,14 @@ describe('JumpPaletteHost · lecturas', () => {
     const alpha = screen.getByRole('option', { name: /Alpha/ });
     expect(alpha.textContent).toContain('Estado active');
     expect(alpha.textContent).toContain('Host host-a');
+    expect(alpha.textContent).toContain('Origen no informado');
     expect(screen.getByRole('option', { name: /Beta/ }).textContent).toContain('Ubicación/host del Project no informado');
     fireEvent.change(input(), { target: { value: 'prj-3-task-1' } });
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
     fireEvent.change(input(), { target: { value: 'prj-3-task-2' } });
     expect(screen.getByRole('option').textContent).toContain('Estado running');
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
+    expect(screen.getByRole('option').textContent).toContain('Origen no informado');
     fireEvent.change(input(), { target: { value: 'prj-2-task-1' } });
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project no informado');
   }, PALETTE_TEST_TIMEOUT);
@@ -218,9 +220,15 @@ describe('JumpPaletteHost · lecturas', () => {
     core({ fail: { tasks_by_project: (args) => args.projectId === 'prj-2' } });
     render(<Harness onNavigate={vi.fn()} />);
     await screen.findByRole('option', { name: /prj-1 tarea 120/ });
+    const taskGroup = screen.getByRole('group', { name: 'Tasks' });
+    // prj-1 (120), prj-3 (3), prj-5 (1) y prj-6 (2); prj-2 falla y prj-4 está vacío.
+    await waitFor(() => expect(within(taskGroup).getAllByRole('option')).toHaveLength(126));
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('No se pudieron leer las Tasks de 1 Project.'));
-    expect(screen.queryByText('prj-2 tarea 1')).toBeNull();
-    expect(screen.getByText('prj-3 tarea 1')).toBeTruthy();
+    expect(within(taskGroup).getByRole('option', { name: /prj-1 tarea 120/ })).toBeTruthy();
+    expect(within(taskGroup).getByRole('option', { name: /prj-3 tarea 1/ })).toBeTruthy();
+    expect(within(taskGroup).queryByRole('option', { name: /prj-2 tarea 1/ })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body.outerHTML).not.toContain('tasks_by_project_read_failed: fixture');
   }, PALETTE_TEST_TIMEOUT);
 
   it('muestra un error recuperable cuando Core no responde y reintenta', async () => {
@@ -228,6 +236,9 @@ describe('JumpPaletteHost · lecturas', () => {
     render(<Harness onNavigate={vi.fn()} />);
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('No se pudieron leer los resultados de Core');
+    expect(alert.textContent).not.toContain('read_failed');
+    expect(alert.textContent).not.toContain('fixture');
+    expect(document.body.textContent).not.toContain('projects_overview');
 
     core();
     fireEvent.click(within(alert).getByRole('button', { name: 'Reintentar' }));
