@@ -44,7 +44,10 @@ vi.mock('./coreQueries', async (importOriginal) => {
 
 const PROJECT = {
   id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
-  counts: { tasks: 2, active: 1, failed: 0, attention: { total: 1, by_category: { question: 1 } } },
+  counts: {
+    tasks: 2, active: 1, failed: 0,
+    attention: { total: 1, by_category: { question: 1, approval: 0, review_ready: 0, conflict: 0, failed: 0, environment_blocked: 0, risk: 0 } },
+  },
   locations: [{ machine: 'machine-real', path: 'C:/repos/repo-real', primary: true, state: 'ok', last_seen: 1760000000000 }],
 };
 const ITEM = { id: 'task-uuid-1', run_id: 'run-1', parent_id: null, root_id: 'task-uuid-1', status: 'running', title: 'Task Real', provider: 'claude', model: null, created_at: 1, updated_at: 2 };
@@ -90,14 +93,19 @@ const ACTIVITY_EVENT = {
   target: { kind: 'task', id: 'task-durable-1' }, project_id: 'project-durable-1',
 };
 
-function core(detail, { attention = () => attentionPage([]), inventory = () => INVENTORY, activity = (args) => projectActivityPage([], args) } = {}) {
+function core(detail, {
+  attention = () => attentionPage([]),
+  inventory = () => INVENTORY,
+  activity = (args) => projectActivityPage([], args),
+  tasks = (args) => ({
+    v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+    tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : args.status === 'final' ? [FINAL_ITEM] : [ITEM],
+    has_more: false, next_cursor: null,
+  }),
+} = {}) {
   queryAdeCore.mockImplementation(async (query, args) => {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
-    if (query === 'tasks_by_project') return {
-      v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
-      tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : args.status === 'final' ? [FINAL_ITEM] : [ITEM],
-      has_more: false, next_cursor: null,
-    };
+    if (query === 'tasks_by_project') return tasks(args);
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
     if (query === 'resource_inventory') return inventory(args);
@@ -385,6 +393,9 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId('location-last-seen').querySelector('time').dateTime)
       .toBe(new Date(PROJECT.locations[0].last_seen).toISOString());
     expect(within(projectView).getByTestId('count-tasks').querySelector('dd').textContent).toBe('2');
+    expect(within(projectView).getByTestId('count-active').querySelector('dd').textContent).toBe('1');
+    expect(within(projectView).getByTestId('count-failed').querySelector('dd').textContent).toBe('0');
+    expect(within(projectView).getByTestId('count-review_ready').querySelector('dd').textContent).toBe('0');
     expect(within(projectView).getByTestId('count-attention').querySelector('dd').textContent).toBe('1');
     for (const name of ['attempts', 'resources']) {
       const count = within(projectView).getByTestId(`count-${name}`).querySelector('dd');
@@ -415,6 +426,98 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId(`task-${FINAL_ITEM.id}`)).toBeTruthy();
     fireEvent.click(within(projectView).getByTestId(`open-task-${FINAL_ITEM.id}`));
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: FINAL_ITEM.id });
+  });
+
+  it('continúa Tasks all con el cursor opaco, deduplica IDs y conserva el foco al completar la página', async () => {
+    const cursor = 'opaque-cursor:page-two';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...ITEM,
+      id: `page-${index}`,
+      title: `Task ${index}`,
+      status: 'running',
+    }));
+    const repeated = { ...firstTasks[49], title: 'Task repetida de la segunda página' };
+    const secondTasks = [repeated, { ...ITEM, id: 'page-50', title: 'Task 50' }, { ...ITEM, id: 'page-51', title: 'Task 51' }];
+    const pendingPage = deferred();
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status === 'all') return args.cursor
+          ? pendingPage.promise
+          : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursor };
+        return {
+          v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+          tasks: args.status === 'final' ? [FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+        };
+      },
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+    const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
+    expect(await within(tasksRegion).findByTestId('task-page-49')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(50);
+
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    loadMore.focus();
+    fireEvent.click(loadMore);
+    expect(within(tasksRegion).getByTestId('tasks-page-loading').getAttribute('aria-busy')).toBe('true');
+    expect(loadMore.getAttribute('aria-disabled')).toBe('true');
+    expect(within(tasksRegion).getByRole('list').getAttribute('aria-busy')).toBe('true');
+
+    pendingPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: secondTasks, has_more: false, next_cursor: null,
+    });
+    expect(await within(tasksRegion).findByTestId('task-page-51')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+    expect(within(tasksRegion).getAllByTestId('task-page-49')).toHaveLength(1);
+    expect(within(tasksRegion).getByTestId('task-page-49').textContent).toContain('Task 49');
+    expect(document.activeElement).toBe(loadMore);
+    expect(loadMore.textContent).toBe('No hay más Tasks');
+    expect(loadMore.getAttribute('aria-disabled')).toBe('true');
+    expect(within(tasksRegion).getByTestId('tasks-page-announcement').textContent).toContain('Se cargaron 2 Tasks');
+    expect(queryAdeCore.mock.calls).toContainEqual(['tasks_by_project', { projectId: PROJECT.id, status: 'all', cursor }]);
+  });
+
+  it('si falla una página conserva la lista como stale y permite reintentar el mismo cursor', async () => {
+    const cursor = 'opaque-cursor:retry';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({ ...ITEM, id: `retry-${index}`, title: `Task ${index}`, status: 'running' }));
+    let failPage = true;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status === 'all') {
+          if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursor };
+          if (failPage) throw new Error('tasks_by_project_read_failed: página siguiente');
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-50', title: 'Task 50', status: 'running' }], has_more: false, next_cursor: null };
+        }
+        return {
+          v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+          tasks: args.status === 'final' ? [FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+        };
+      },
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+    const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
+    expect(await within(tasksRegion).findByTestId('task-retry-49')).toBeTruthy();
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+
+    const pageError = await within(tasksRegion).findByTestId('tasks-page-error');
+    expect(pageError.getAttribute('role')).toBe('alert');
+    expect(pageError.textContent).toContain('se conservan las Tasks ya cargadas');
+    expect(pageError.textContent).toContain('tasks_by_project_read_failed');
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(50);
+    expect(loadMore.textContent).toBe('Reintentar carga');
+    expect(loadMore.getAttribute('aria-disabled')).toBeNull();
+
+    failPage = false;
+    fireEvent.click(loadMore);
+    expect(await within(tasksRegion).findByTestId('task-retry-50')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(51);
+    expect(queryAdeCore.mock.calls.filter(([query, args]) => query === 'tasks_by_project' && args.cursor === cursor)).toHaveLength(2);
   });
 
   it('consulta el inventario del Project durable y monta la foto del Core en Resources tal cual', async () => {
