@@ -49,8 +49,8 @@ export function AttemptActivity({ attemptId, coreModel, active = true }) {
       ) : (
         <p className="ade-attempts__state" role="status">{COPY.loadingAttemptActivity}</p>
       )}
-      {items && items.length > 0 && state.data?.next_cursor && state.data?.has_more ? (
-        <p className="ade-attempts__hint ade-attempts__state--neutral" data-testid="attempt-activity-truncated">{COPY.attemptActivityTruncated}</p>
+      {items && items.length > 0 && state.data?.has_more === true ? (
+        <p className="ade-attempts__hint ade-attempts__state--neutral" data-testid="attempt-activity-truncated">{COPY.attemptActivityTruncated(ATTEMPT_ACTIVITY_LIMIT)}</p>
       ) : null}
     </div>
   );

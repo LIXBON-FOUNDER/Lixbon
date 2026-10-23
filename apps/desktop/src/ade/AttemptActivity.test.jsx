@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ATTEMPT_ACTIVITY_LIMIT, AttemptActivity } from './AttemptActivity';
 import { coreModelFromState } from './useCoreModel';
+import { COPY } from './adeLabels';
 import { CANONICAL, ERRORS, VARIANTS } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage, attemptEvent } from './testFixtures/attemptActivityFixtures';
 
@@ -72,17 +73,22 @@ describe('AttemptActivity (LXO-121)', () => {
     expect(screen.getByRole('status').textContent).toBe('Cargando actividad del intento.');
   });
 
-  it('has_more con next_cursor: avisa que solo se muestran los 50 más recientes; sin más páginas no avisa', async () => {
+  it('has_more con next_cursor: avisa con el número de ATTEMPT_ACTIVITY_LIMIT; sin más páginas no avisa', async () => {
     const events = Array.from({ length: ATTEMPT_ACTIVITY_LIMIT }, (_, k) => attemptEvent(ATTEMPT_ACTIVITY_LIMIT + 1 - k, 't3-a2', 'attempt.started', { task: 't3', n: 2 }));
     mount(() => ({ ...attemptActivityPage(events), has_more: true }));
     render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
     await flush();
-    expect(screen.getByTestId('attempt-activity-truncated').textContent).toBe('Mostrando los 50 eventos más recientes');
+    expect(screen.getByTestId('attempt-activity-truncated').textContent).toBe(`Mostrando los ${ATTEMPT_ACTIVITY_LIMIT} eventos más recientes`);
     cleanup();
     mount(() => attemptActivityPage(events));
     render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
     await flush();
     expect(screen.queryByTestId('attempt-activity-truncated')).toBeNull();
+  });
+
+  it('el texto del corte sale del límite recibido', () => {
+    expect(COPY.attemptActivityTruncated(20)).toBe('Mostrando los 20 eventos más recientes');
+    expect(COPY.attemptActivityTruncated(ATTEMPT_ACTIVITY_LIMIT)).toBe(`Mostrando los ${ATTEMPT_ACTIVITY_LIMIT} eventos más recientes`);
   });
 
   it('un message_key que no es attempt.* se muestra como «Evento desconocido» con la clave en «Detalle técnico»', async () => {
