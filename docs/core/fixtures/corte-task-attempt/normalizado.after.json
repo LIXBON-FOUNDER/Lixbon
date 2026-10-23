@@ -156,7 +156,8 @@
       "ended_at": null,
       "created_at": 1791000000000,
       "updated_at": 1791000500000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     },
     {
       "id": "t17-a1",
@@ -196,7 +197,8 @@
       "ended_at": null,
       "created_at": 1792001000000,
       "updated_at": 1792001200000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     },
     {
       "id": "t2-a1",
@@ -236,7 +238,8 @@
       "ended_at": null,
       "created_at": 1792000000000,
       "updated_at": 1792000900000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     },
     {
       "id": "t3-a1",
@@ -289,7 +292,8 @@
       "ended_at": null,
       "created_at": 1792000040000,
       "updated_at": 1792000300000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     },
     {
       "id": "t4-a1",
@@ -329,7 +333,8 @@
       "ended_at": null,
       "created_at": 1792000045000,
       "updated_at": 1792000500000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     },
     {
       "id": "t5-a1",
@@ -369,7 +374,8 @@
       "ended_at": null,
       "created_at": 1792000046000,
       "updated_at": 1792000800000,
-      "origin": "legacy"
+      "origin": "legacy",
+      "launched_at": null
     }
   ],
   "attempt_phases": [

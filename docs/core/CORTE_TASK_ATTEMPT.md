@@ -175,7 +175,7 @@ destino **no se descarta**: va a `legacy_residue` con un motivo.
 | `pr_url` | `artifacts (kind = pull_request)` | |
 | `last_message_path` | `artifacts (kind = last_message)` | |
 | `merged` | `attempts.integrated` | un seguimiento posterior ya no «desfusiona» el intento anterior: crea otro |
-| `worktree`, `branch`, `base` | `worktrees` | fila si hay `worktree` (`state = active`) **o** si hay `branch` y `base` sin worktree (rama conservada: `state = removed`, `branch_kept = 1`, `path = NULL`; LXO-116) |
+| `worktree`, `branch`, `base` | `worktrees` | fila si hay `worktree` (`state = active`) **o** si hay `base` sin worktree (ya quitado: `state = removed`, `path = NULL`; `branch_kept = 1` si queda la rama, `0` si `git branch -d` la borró; LXO-116, LXO-232) |
 | `branch` sin `base` ni `worktree` | `attempts.checkout_branch` | la rama del propio checkout de una raíz (RESOURCES.md: no es una rama conservada) |
 | `base_commit`, `env` | `worktrees.base_commit`, `worktrees.env_plan` | |
 | `ack_unverified`, `requested_argv`, `policy`, `plan_mode`, `stream_json` | `attempts.*` | |

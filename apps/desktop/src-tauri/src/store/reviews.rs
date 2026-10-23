@@ -319,3 +319,30 @@ impl Store {
         })
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe decisions y reviews.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Una decisión del documento con su id, atada al Attempt actual de su Task.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn runtime_decision_insert_in(c: &Connection, id: i64, task_id: &str, attempt_id: Option<&str>, kind: &str, actor: &str, detail_json: Option<&str>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO decisions (id, task_id, attempt_id, kind, actor, detail_json, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, task_id, attempt_id, kind, actor, detail_json, at],
+    )?;
+    Ok(())
+}
+
+/// La revisión de esa decisión sobre (Attempt, head): deja `superseded` la activa anterior de ese Attempt (LXO-118).
+pub(crate) fn runtime_review_insert_in(c: &Connection, decision_id: i64, attempt_id: &str, head_commit: &str, base_commit: Option<&str>, verdict: &str, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute("UPDATE reviews SET status = 'superseded', closed_at = ?2 WHERE attempt_id = ?1 AND status = 'active'", params![attempt_id, at])?;
+    c.execute(
+        "INSERT INTO reviews (decision_id, attempt_id, head_commit, base_commit, verdict, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![decision_id, attempt_id, head_commit, base_commit, verdict, at],
+    )?;
+    Ok(())
+}

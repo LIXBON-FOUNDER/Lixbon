@@ -25,7 +25,7 @@ use super::events::MutationContext;
 use super::fsio::write_atomic_durable;
 use super::state::{now_ms, Message, Run, State, Task};
 use super::task_ops::finalize_single;
-use crate::store::{cut_migration, inspect_copy, lock_path, sha256_hex, CutCounts, CutOutcome, CutView, InstanceLock, Store, StoreError, StoreResult, CUT_NAME};
+use crate::store::{cut_migration, inspect_copy, lock_path, sha256_hex, CutCounts, CutOutcome, CutView, InstanceLock, RuntimeChanges, Store, StoreError, StoreResult, CUT_NAME};
 
 /// Etiqueta de la copia previa obligatoria.
 pub(super) const BACKUP_LABEL: &str = "pre-f3-cut";
@@ -186,6 +186,47 @@ pub(super) fn verify_legacy_view(v: &CutView<'_>, state: &State) -> StoreResult<
     }
     if let Some(t) = v.foreign_key_violation()? {
         return Err(check_err(format!("referencia rota en {t}")));
+    }
+    Ok(())
+}
+
+fn runtime_err(m: impl Into<String>) -> StoreError {
+    StoreError::RuntimeMapping(format!("la vista reconstruida no es el estado: {}", m.into()))
+}
+
+/// Runtime sobre las tablas (LXO-232): dentro de la transacción de cada mutación, lo que cambió se lee de vuelta de las
+/// tablas en la forma del documento y debe ser el estado nuevo, salvo D3 (como en el corte). Así una mutación que las
+/// tablas no reproducen no se confirma: nunca hay una memoria que el siguiente arranque no vería.
+pub(super) fn verify_runtime_view(v: &CutView<'_>, changes: &RuntimeChanges, state: &State) -> StoreResult<()> {
+    for id in &changes.tasks {
+        let t = state.tasks.get(id).ok_or_else(|| runtime_err(format!("{id} no está en el estado")))?;
+        let task: Task = serde_json::from_value(v.legacy_task(id)?).map_err(|e| runtime_err(format!("{id}: no es un Task: {e}")))?;
+        let (got, want) = (to_value(&task)?, to_value(&expected_task(t))?);
+        if got != want {
+            let campo = want.as_object().and_then(|w| w.iter().find(|(k, x)| got.get(*k) != Some(*x)).map(|(k, _)| k.clone())).unwrap_or_default();
+            return Err(runtime_err(format!("la Task {id} no se reconstruye igual (campo {campo})")));
+        }
+    }
+    for id in &changes.removed_tasks {
+        if v.task_visible(id)? {
+            return Err(runtime_err(format!("la Task retirada {id} sigue a la vista")));
+        }
+    }
+    for id in &changes.messages {
+        let m = state.messages.iter().find(|m| m.id as i64 == *id).ok_or_else(|| runtime_err(format!("el mensaje {id} no está en el estado")))?;
+        let got = v.legacy_message(*id)?.ok_or_else(|| runtime_err(format!("el mensaje {id} no está en las tablas")))?;
+        let got: Message = serde_json::from_value(got).map_err(|e| runtime_err(format!("mensaje {id}: {e}")))?;
+        if to_value(&got)? != to_value(m)? {
+            return Err(runtime_err(format!("el mensaje {id} no se reconstruye igual")));
+        }
+    }
+    for id in &changes.runs {
+        let r = state.runs.get(id).ok_or_else(|| runtime_err(format!("el Run {id} no está en el estado")))?;
+        let got = v.legacy_run(id)?.ok_or_else(|| runtime_err(format!("el Run {id} no está en las tablas")))?;
+        let got: Run = serde_json::from_value(got).map_err(|e| runtime_err(format!("Run {id}: {e}")))?;
+        if to_value(&got)? != to_value(r)? {
+            return Err(runtime_err(format!("el Run {id} no se reconstruye igual")));
+        }
     }
     Ok(())
 }
