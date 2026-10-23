@@ -394,7 +394,9 @@
     {
       "id": "wt-t3-a1",
       "task_id": "t3",
-      "created_by_attempt_id": "t3-a1",
+      "attempt_id": "t3-a1",
+      "provenance": "created",
+      "machine": null,
       "repo": "/home/ana/app",
       "path": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
       "branch": "lx/r1/t3-api-de-sesiones",
@@ -410,12 +412,19 @@
         "skipped": []
       },
       "state": "active",
+      "removed_reason": null,
+      "branch_kept": 0,
+      "missing_since": null,
+      "created_at": null,
+      "updated_at": null,
       "origin": "legacy"
     },
     {
       "id": "wt-t4-a1",
       "task_id": "t4",
-      "created_by_attempt_id": "t4-a1",
+      "attempt_id": "t4-a1",
+      "provenance": "created",
+      "machine": null,
       "repo": "/home/ana/app",
       "path": "/home/ana/app.lixbon-wt/t4-formulario-de-login",
       "branch": "lx/r1/t4-formulario-de-login",
@@ -423,19 +432,31 @@
       "base_commit": null,
       "env_plan": null,
       "state": "active",
+      "removed_reason": null,
+      "branch_kept": 0,
+      "missing_since": null,
+      "created_at": null,
+      "updated_at": null,
       "origin": "legacy"
     },
     {
       "id": "wt-t5-a1",
       "task_id": "t5",
-      "created_by_attempt_id": "t5-a1",
+      "attempt_id": "t5-a1",
+      "provenance": "created",
+      "machine": null,
       "repo": "/home/ana/app",
       "path": null,
       "branch": "lx/r1/t5-tests-de-login",
       "base_branch": "main",
       "base_commit": "b0b0b0",
       "env_plan": null,
-      "state": "released",
+      "state": "removed",
+      "removed_reason": null,
+      "branch_kept": 1,
+      "missing_since": null,
+      "created_at": null,
+      "updated_at": null,
       "origin": "legacy"
     }
   ],
@@ -599,6 +620,8 @@
       "attempt_id": "t3-a1",
       "kind": "last_message",
       "uri": "/home/ana/app.lixbon-wt/t3-api-de-sesiones/.lixbon/out/t3/last.txt",
+      "sha256": null,
+      "bytes": null,
       "created_at": null,
       "origin": "legacy"
     },
@@ -607,6 +630,8 @@
       "attempt_id": "t3-a1",
       "kind": "report",
       "uri": "/home/ana/app/.lixbon/informes/r1/t3.md",
+      "sha256": null,
+      "bytes": null,
       "created_at": null,
       "origin": "legacy"
     },
@@ -615,6 +640,8 @@
       "attempt_id": "t5-a1",
       "kind": "pull_request",
       "uri": "https://github.com/ana/app/pull/42",
+      "sha256": null,
+      "bytes": null,
       "created_at": null,
       "origin": "legacy"
     }

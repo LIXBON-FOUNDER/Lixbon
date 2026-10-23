@@ -46,6 +46,7 @@ mod private;
 mod projects;
 mod attempts;
 mod sessions;
+mod worktrees;
 mod tasks;
 #[cfg(test)]
 mod attention_tests;
@@ -61,6 +62,8 @@ mod tasks_tests;
 mod attempts_tests;
 #[cfg(test)]
 mod sessions_tests;
+#[cfg(test)]
+mod worktrees_tests;
 #[cfg(test)]
 mod tests;
 
@@ -101,6 +104,9 @@ pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus,
 // ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
+// Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
+#[allow(unused_imports)]
+pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewArtifact, NewWorktree, Provenance, RemovalReason, WorktreeRow, WorktreeState, WorktreeStep};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};

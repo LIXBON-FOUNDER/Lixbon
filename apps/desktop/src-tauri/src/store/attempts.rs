@@ -309,6 +309,16 @@ pub(super) fn link_provider_session_in(tx: &Connection, attempt_id: &str, sessio
     Ok(())
 }
 
+/// Fija el vínculo blando del Attempt con su Worktree (D21), dentro de la transacción del hecho del Worktree
+/// (`store::worktrees`). Lo valida el trigger `attempts_worktree_exists` de la 010.
+pub(super) fn link_worktree_in(tx: &Connection, attempt_id: &str, worktree_id: &str) -> StoreResult<()> {
+    let n = tx.execute("UPDATE attempts SET worktree_id = ?2 WHERE id = ?1 AND worktree_id IS NULL", params![attempt_id, worktree_id])?;
+    if n != 1 {
+        return Err(StoreError::WorktreeConflict(format!("el Attempt {attempt_id} ya tiene Worktree o no existe")));
+    }
+    Ok(())
+}
+
 fn task_of(tx: &Connection, a: &AttemptRow) -> StoreResult<TaskRow> {
     task_in(tx, &a.task_id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt {} apunta a la Task inexistente {}", a.id, a.task_id)))
 }
