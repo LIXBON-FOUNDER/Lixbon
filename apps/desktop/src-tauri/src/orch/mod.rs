@@ -14,6 +14,9 @@ mod compact_snapshot;
 mod activity_format;
 mod activity_read;
 mod tasks_read;
+mod model_read;
+#[cfg(test)]
+mod model_read_tests;
 #[cfg(test)]
 mod tasks_read_tests;
 mod resource_git;
