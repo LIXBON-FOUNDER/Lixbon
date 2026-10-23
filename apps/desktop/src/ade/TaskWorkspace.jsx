@@ -34,7 +34,7 @@ const INTEGRATION_LABELS = {
 // Campos del contrato `task_detail` que pueden faltar en una respuesta parcial.
 const DETAIL_FIELDS = [
   'run_id', 'parent_id', 'root_id', 'provider', 'model', 'created_at', 'updated_at', 'child_ids',
-  'phase', 'messages', 'cwd', 'branch', 'worktree', 'merged', 'review', 'integration',
+  'phase', 'messages', 'cwd', 'branch', 'worktree', 'merged', 'review', 'integration', 'failure_reason',
 ];
 const MAX_QUESTIONS_SHOWN = 5;
 
@@ -423,6 +423,9 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
             <Row label="Preguntas"><QuestionsValue messages={visible.messages} /></Row>
             <Row label="Revisión"><ReviewValue review={visible.review} /></Row>
             <Row label="Integración"><IntegrationValue integration={visible.integration} /></Row>
+            {visible.status === 'failed' && (
+              <Row label="Motivo del fallo"><Value value={visible.failure_reason} /></Row>
+            )}
             <Row label="Marca merged">
               {visible.merged === true ? 'Marcada como integrada' : visible.merged === false ? 'No marcada' : <Missing />}
             </Row>
