@@ -27,6 +27,12 @@
 //! | `environment.blocked` (`code` cerrado, `profile` conocido) | levanta `environment_blocked` | high | agent (proveedor) · `code@profile` |
 //! | `environment.cleared` (`code`, `profile`) | resuelve `environment_blocked` (`condition_cleared`) | | agent · `code@profile` |
 //! | `task.removed` | resuelve `failed`, `conflict`, `review_ready` y `approval` (terminal) de esa task (`condition_cleared`) | | task |
+//! | `attempt.requested` con `approval_required` (LXO-119) | levanta `approval` | medium | attempt · `launch` |
+//! | `attempt.approved` · `attempt.rejected` | resuelve `approval` (`acted`) | | attempt · `launch` |
+//! | `attempt.failed` | levanta `failed` | high | attempt |
+//!
+//! Los hechos de EJECUCIÓN del modelo Task/Attempt apuntan al Attempt, no a la Task: dos Attempts de una Task tienen
+//! su propia Attention. Solo existen tras el corte (los `task.*` históricos siguen con sus reglas; ADR D10).
 //!
 //! `risk` nace SOLO de `spawn.requested.policy_status = blocked`, y ese Event solo se emite para una denegación
 //! explícita de policy (`agents::explicit_denial`); los bloqueos del entorno y la entrada inválida no dejan
@@ -60,6 +66,8 @@ fn copy_codes(from: &Value, keys: &[&str]) -> Value {
 }
 
 const TERMINAL: &str = "terminal";
+/// Subject de la aprobación de lanzar un Attempt (`pending_approval`).
+const LAUNCH: &str = "launch";
 
 /// El alcance de un `environment.*`: la causa (del conjunto cerrado `EnvBlock`) y el perfil (de los conocidos). Un código
 /// o un perfil fuera de esos conjuntos no es una señal y no levanta ni resuelve nada.
@@ -165,6 +173,17 @@ pub(super) fn derive(e: &EventRow) -> Derived {
         }
         ("attention.risk_acted", "attention") if p["resolution"] == "acted" => {
             d.resolve_id(C::Risk, id, Resolution::Acted);
+        }
+        ("attempt.requested", "attempt") if p["approval_required"] == true => {
+            d.raise(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Severity::Medium, copy_codes(&p, &["task", "provider"]))
+        }
+        ("attempt.approved" | "attempt.rejected", "attempt") => d.resolve(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Resolution::Acted),
+        ("attempt.failed", "attempt") => {
+            let mut facts = copy_codes(&p, &["task"]);
+            if let Some(reason) = code(&p["reason"]) {
+                facts["failure_reason"] = reason;
+            }
+            d.raise(C::Failed, TargetKind::Attempt, id, None, Severity::High, facts);
         }
         ("task.removed", "task") => {
             d.resolve(C::Failed, TargetKind::Task, id, None, Resolution::ConditionCleared);

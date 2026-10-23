@@ -1,0 +1,12 @@
+{
+  "compat": [
+    "legacy_task_v1"
+  ],
+  "core_model": "task_attempt_v1",
+  "queries": [
+    "task_list_v2",
+    "task_detail_v2",
+    "attempts_by_task",
+    "attempt_detail"
+  ]
+}

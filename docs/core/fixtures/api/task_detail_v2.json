@@ -1,0 +1,50 @@
+{
+  "core_model": "task_attempt_v1",
+  "task": {
+    "attempt_count": 1,
+    "attempts": [
+      {
+        "created_at": 1792000040000,
+        "ended_at": null,
+        "external": false,
+        "id": "t3-a1",
+        "model": "gpt-6.1-sol",
+        "n": 1,
+        "provider": "codex",
+        "role": "implementador",
+        "started_at": 1792000050000,
+        "status": "done"
+      }
+    ],
+    "children": [],
+    "created_at": 1792000040000,
+    "current_attempt": {
+      "created_at": 1792000040000,
+      "ended_at": null,
+      "external": false,
+      "id": "t3-a1",
+      "model": "gpt-6.1-sol",
+      "n": 1,
+      "provider": "codex",
+      "role": "implementador",
+      "started_at": 1792000050000,
+      "status": "done"
+    },
+    "depth": 1,
+    "id": "t3",
+    "intent": "open",
+    "origin": "legacy",
+    "parent_task_id": "t2",
+    "project_id": "p-1",
+    "run_id": "r1",
+    "spec": "Implementa /api/session.",
+    "state": "integrated",
+    "thread": {
+      "has_summary": false,
+      "id": "th-t3"
+    },
+    "title": "API de sesiones",
+    "updated_at": 1792000300000
+  },
+  "v": 2
+}

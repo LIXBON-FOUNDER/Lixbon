@@ -1,0 +1,64 @@
+{
+  "attempt": {
+    "artifacts": [
+      {
+        "bytes": null,
+        "id": "t3-a1-last_message",
+        "kind": "last_message",
+        "sha256": null,
+        "uri": "/home/ana/app.lixbon-wt/t3-api-de-sesiones/.lixbon/out/t3/last.txt"
+      },
+      {
+        "bytes": null,
+        "id": "t3-a1-report",
+        "kind": "report",
+        "sha256": null,
+        "uri": "/home/ana/app/.lixbon/informes/r1/t3.md"
+      }
+    ],
+    "created_at": 1792000040000,
+    "effort": "high",
+    "ended_at": null,
+    "external": false,
+    "failure_reason": null,
+    "id": "t3-a1",
+    "integrated": true,
+    "model": "gpt-6.1-sol",
+    "n": 1,
+    "profile": "implementar",
+    "provider": "codex",
+    "provider_session": {
+      "binding": "session_id",
+      "bound": true,
+      "id": "ps-t3-a1",
+      "opened_by_attempt_id": "t3-a1",
+      "resumable": true,
+      "status": "idle"
+    },
+    "review": {
+      "base_commit": "b0b0b0",
+      "decision_id": 1,
+      "head_commit": "c3c3c3",
+      "status": "active",
+      "verdict": "accepted"
+    },
+    "role": "implementador",
+    "started_at": 1792000050000,
+    "status": "done",
+    "summary": "API lista",
+    "task_id": "t3",
+    "worktree": {
+      "base_branch": "main",
+      "branch": "lx/r1/t3-api-de-sesiones",
+      "branch_kept": false,
+      "id": "wt-t3-a1",
+      "machine": null,
+      "path": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "provenance": "created",
+      "registered_by_attempt_id": "t3-a1",
+      "state": "active"
+    }
+  },
+  "core_model": "task_attempt_v1",
+  "v": 1
+}
