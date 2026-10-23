@@ -405,13 +405,18 @@ function correlationOf(item) {
     : '';
 }
 
-function errorOf(error) {
-  if (typeof error === 'string') return { message: error.trim(), code: '' };
-  if (!error || typeof error !== 'object') return { message: '', code: '' };
-  return {
-    message: typeof error.message === 'string' ? error.message.trim() : '',
-    code: typeof error.code === 'string' ? error.code.trim() : '',
-  };
+// Copy seguro por categoría: el mensaje y el código crudos del Core nunca se renderizan.
+const ERROR_COPY = {
+  disconnected: 'Core está desconectado.',
+  degraded: 'Core está degradado.',
+  timeout: 'Core no respondió a tiempo.',
+  page: 'No se pudieron cargar más eventos.',
+};
+const GENERIC_ERROR_COPY = 'El Core no devolvió actividad.';
+
+function errorCopyOf(error) {
+  const kind = error && typeof error === 'object' ? error.kind : null;
+  return Object.hasOwn(ERROR_COPY, kind) ? ERROR_COPY[kind] : GENERIC_ERROR_COPY;
 }
 
 export function ActivityTimeline({
@@ -460,7 +465,7 @@ export function ActivityTimeline({
   const showFooter = viewStatus === 'ready' && safeItems.length > 0 && (canLoadMore || showEnd);
   const displayCount = showCachedRows ? safeItems.length : 0;
   const scopeName = scopeTitle(safeScope);
-  const normalizedError = errorOf(error);
+  const errorCopy = errorCopyOf(error);
   const emptyHint =
     safeScope.kind === 'project'
       ? 'No hay hechos registrados para este proyecto.'
@@ -532,8 +537,7 @@ export function ActivityTimeline({
       {viewStatus === 'error' ? (
         <div className="activity__state activity__state--error" role="alert" data-testid="activity-error">
           <strong>No se pudo cargar la actividad.</strong>
-          <p>{normalizedError.message || 'El Core no devolvió actividad.'}</p>
-          {normalizedError.code ? <code className="activity__code">{normalizedError.code}</code> : null}
+          <p>{errorCopy}</p>
           {typeof onRetry === 'function' ? (
             <button
               type="button"

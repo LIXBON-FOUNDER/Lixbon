@@ -190,20 +190,44 @@ describe('ActivityPanel', () => {
     expect(document.body.textContent).not.toContain(technicalToken);
   });
 
-  it('traduce activity.unknown con fallback=true usando solo los args permitidos', async () => {
+  it.each(['unknown_kind', 'unsupported_version', 'invalid_payload'])(
+    'traduce activity.unknown con el reason contractual %s y solo usa los args permitidos',
+    async (reason) => {
+      snapshot = readySnapshot([activity(7, {
+        kind: 'task.teleported',
+        message_key: 'activity.unknown',
+        fallback: true,
+        args: { reason, kind: 'task.teleported', event_version: 2 },
+        payload: { message: 'NO_INFERIR' },
+        correlation_id: 'correlation-7',
+      })], 1);
+      render(<ActivityPanel />);
+
+      expect((await screen.findByTestId('activity-message-event-7')).textContent)
+        .toBe(`No se reconoce el evento «task.teleported» (versión 2, motivo: ${reason}).`);
+      expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBe('activity.unknown');
+      expect(document.body.textContent).not.toContain('NO_INFERIR');
+      expect(screen.getByTestId('activity-event-7').getAttribute('data-event-id')).toBe('event-7');
+      expect(screen.getByTestId('activity-target-event-7').textContent).toContain('task-7');
+      expect(screen.getByTestId('activity-project-event-7').textContent).toContain('project-a');
+      expect(screen.getByTestId('activity-actor-event-7').textContent).toContain('task-7');
+      expect(screen.getByTestId('activity-client-event-7').textContent).toContain('desktop-a');
+      expect(screen.getByTestId('activity-correlation-event-7').textContent).toContain('correlation-7');
+    },
+  );
+
+  it('no traduce ni expone un reason arbitrario de activity.unknown', async () => {
     snapshot = readySnapshot([activity(7, {
       kind: 'task.teleported',
       message_key: 'activity.unknown',
       fallback: true,
-      args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 2 },
-      payload: { message: 'NO_INFERIR' },
+      args: { reason: 'PRIVATE_REASON_TOKEN', kind: 'task.teleported', event_version: 2 },
     })], 1);
     render(<ActivityPanel />);
 
-    expect((await screen.findByTestId('activity-message-event-7')).textContent)
-      .toBe('No se reconoce el evento «task.teleported» (versión 2, motivo: unknown_kind).');
-    expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBe('activity.unknown');
-    expect(document.body.textContent).not.toContain('NO_INFERIR');
+    expect((await screen.findByTestId('activity-message-event-7')).textContent).toBe('Evento desconocido');
+    expect(document.body.textContent).not.toContain('PRIVATE_REASON_TOKEN');
+    expect(screen.getByTestId('activity-message-event-7').getAttribute('data-message-key')).toBeNull();
   });
 
   it.each([
@@ -298,7 +322,7 @@ describe('ActivityPanel', () => {
     snapshot = {
       ...snapshot,
       status: 'stale',
-      error: 'connection refused',
+      error: 'LXO229_DETALLE: connection refused',
       reason: 'disconnected',
     };
     view.rerender(<ActivityPanel />);
@@ -307,6 +331,8 @@ describe('ActivityPanel', () => {
     expect(screen.queryByTestId('activity-event-9007199254740992')).toBeNull();
     expect(screen.getByTestId('activity-timeline').getAttribute('data-status')).toBe('error');
     expect(screen.getByRole('alert').textContent).toMatch(/desconectad/i);
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+    expect(document.body.textContent).not.toContain('connection refused');
 
     snapshot = readySnapshot([
       activity('9007199254740996'),
@@ -340,15 +366,32 @@ describe('ActivityPanel', () => {
 
   it.each([
     ['disconnected', 'error', /desconectad/i],
-    ['error', 'error', /error|fallida/i],
+    ['error', 'error', /no devolvió actividad/i],
     ['degraded', 'degraded', /degradado/i],
   ])('representa el estado inicial %s como %s', async (status, timelineStatus, message) => {
-    snapshot = { status, data: null, error: `${status}: lectura fallida`, reason: status, readEpoch: 0 };
+    snapshot = { status, data: null, error: `LXO229_DETALLE ${status}: lectura fallida`, reason: status, readEpoch: 0 };
     render(<ActivityPanel />);
     const timeline = await screen.findByTestId('activity-timeline');
     expect(timeline.getAttribute('data-status')).toBe(timelineStatus);
     if (timelineStatus === 'error') expect(screen.getByRole('alert').textContent).toMatch(message);
     else expect(screen.getByTestId('activity-degraded').textContent).toMatch(message);
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+    expect(document.body.textContent).not.toContain('lectura fallida');
+  });
+
+  it('un timeout del Core se muestra como copy seguro sin código de máquina', async () => {
+    snapshot = {
+      status: 'error',
+      data: null,
+      error: 'ade_query_timeout: LXO229_DETALLE',
+      reason: 'timeout',
+      readEpoch: 0,
+    };
+    render(<ActivityPanel />);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/no respondió a tiempo/i);
+    expect(document.body.textContent).not.toContain('ade_query_timeout');
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
   });
 
   it('preserva loading y empty como estados de la línea de tiempo', async () => {
@@ -364,12 +407,15 @@ describe('ActivityPanel', () => {
 
   it('una página anterior fallida conserva la cabecera y ofrece reintento', async () => {
     snapshot = readySnapshot([activity(9), activity(8)], 1, { hasMore: true });
-    mocks.listAdeActivity.mockRejectedValue(new Error('activity_read_failed'));
+    mocks.listAdeActivity.mockRejectedValue(new Error('activity_read_failed: LXO229_DETALLE'));
     render(<ActivityPanel />);
     fireEvent.click(await screen.findByTestId('activity-load-more'));
 
     expect(await screen.findByTestId('activity-stale')).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByRole('alert').textContent).toContain('No se pudieron cargar más eventos.');
+    expect(document.body.textContent).not.toContain('activity_read_failed');
+    expect(document.body.textContent).not.toContain('LXO229_DETALLE');
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
     expect(retry).toHaveBeenCalledTimes(1);
   });

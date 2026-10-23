@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '../store/appStore';
+import { classifyCoreError } from './coreQueryPolicy';
 import { JumpPalette } from './JumpPalette';
 import { useJumpPaletteData, useJumpPaletteRecents } from './jumpPaletteData';
 
@@ -21,6 +22,18 @@ export function buildAttentionResults(attention, tasks, projects) {
       ],
     };
   });
+}
+
+// Copy seguro por categoría: el texto crudo de `data.error` solo se clasifica, nunca se renderiza.
+const READ_FAILURE_COPY = {
+  degraded: 'Core está degradado.',
+  disconnected: 'Core está desconectado.',
+  timeout: 'Core no respondió a tiempo.',
+};
+
+function readFailureMessage(error) {
+  const detail = READ_FAILURE_COPY[classifyCoreError(error)];
+  return `No se pudieron leer los resultados de Core${detail ? `. ${detail}` : '.'}`;
 }
 
 function staleMessage(target) {
@@ -93,7 +106,7 @@ export function JumpPaletteHost({ open, onClose, onNavigate }) {
   let shownNotice = notice;
   if (!shownNotice && data.phase === 'error') {
     shownNotice = {
-      message: `No se pudieron leer los resultados de Core (${data.error}).`,
+      message: readFailureMessage(data.error),
       actionLabel: 'Reintentar',
       onAction: refresh,
     };

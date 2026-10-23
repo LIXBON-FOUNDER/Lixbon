@@ -136,6 +136,8 @@ describe('translateActivityMessage', () => {
   it.each(EXPECTED_V1_KEYS)('traduce la clave contractual %s', (key) => {
     const args = TASK_STATUS_KEYS.has(key)
       ? { ...COMPLETE_ARGS, to: key.slice('activity.task.'.length) }
+      : key === 'activity.unknown'
+        ? { ...COMPLETE_ARGS, reason: 'unknown_kind', kind: 'task.future', event_version: 2 }
       : COMPLETE_ARGS;
     const translated = translate(key, args);
     expect(translated).toBeTypeOf('string');

@@ -18,19 +18,20 @@ const orchStyles = readFileSync(resolve(sourceRoot, 'styles/orch.css'), 'utf8');
 // Se espía aparte de `queryAdeCore` porque son dos canales distintos: la verificación de Activity
 // (`readAdeTask`) y las lecturas del shell (`useCoreQuery` → `queryAdeCore`). Contarlos juntos mezclaría
 // una lectura del shell con una verificación de un destino.
-// Como ambos canales pasan por el mismo mock de transporte, cada llamada emitida por la verificación se
-// marca con su índice dentro de `queryAdeCore.mock.calls`. Así el canal del shell se mide sin contar las
-// verificaciones: sin esa marca, cualquier lectura del shell sería indistinguible de una verificación.
-const transport = vi.hoisted(() => ({ verificationCallIndexes: new Set() }));
+// Como ambos canales pasan por el mismo mock de transporte, cada registro de llamada emitido por la
+// verificación se conserva por identidad. Así el canal del shell se mide sin contar las verificaciones.
+const transport = vi.hoisted(() => ({ verificationQueryCalls: new Set() }));
 
 vi.mock('./coreQueries', async (importOriginal) => {
   const queryAdeCore = vi.fn();
   const readAdeTask = vi.fn((projectId, taskId) => {
-    // La llamada se registra de forma síncrona en `mock.calls`, así que su índice es el de esta verificación.
-    const index = queryAdeCore.mock.calls.length;
-    const result = queryAdeCore('task_detail', { projectId, taskId });
-    transport.verificationCallIndexes.add(index);
-    return result;
+    // Marca el registro exacto aunque el transporte lance sincrónicamente.
+    const callIndex = queryAdeCore.mock.calls.length;
+    try {
+      return queryAdeCore('task_detail', { projectId, taskId });
+    } finally {
+      transport.verificationQueryCalls.add(queryAdeCore.mock.calls[callIndex]);
+    }
   });
   return {
     ...(await importOriginal()),
@@ -43,7 +44,10 @@ vi.mock('./coreQueries', async (importOriginal) => {
 
 const PROJECT = {
   id: 'project-uuid-1', name: 'Repo Real', state: 'active', status: 'active',
-  counts: { tasks: 2, active: 1, failed: 0, attention: { total: 1, by_category: { question: 1 } } },
+  counts: {
+    tasks: 2, active: 1, failed: 0,
+    attention: { total: 1, by_category: { question: 1, approval: 0, review_ready: 0, conflict: 0, failed: 0, environment_blocked: 0, risk: 0 } },
+  },
   locations: [{ machine: 'machine-real', path: 'C:/repos/repo-real', primary: true, state: 'ok', last_seen: 1760000000000 }],
 };
 const ITEM = { id: 'task-uuid-1', run_id: 'run-1', parent_id: null, root_id: 'task-uuid-1', status: 'running', title: 'Task Real', provider: 'claude', model: null, created_at: 1, updated_at: 2 };
@@ -89,14 +93,19 @@ const ACTIVITY_EVENT = {
   target: { kind: 'task', id: 'task-durable-1' }, project_id: 'project-durable-1',
 };
 
-function core(detail, { attention = () => attentionPage([]), inventory = () => INVENTORY, activity = (args) => projectActivityPage([], args) } = {}) {
+function core(detail, {
+  attention = () => attentionPage([]),
+  inventory = () => INVENTORY,
+  activity = (args) => projectActivityPage([], args),
+  tasks = (args) => ({
+    v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+    tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : args.status === 'final' ? [FINAL_ITEM] : [ITEM],
+    has_more: false, next_cursor: null,
+  }),
+} = {}) {
   queryAdeCore.mockImplementation(async (query, args) => {
     if (query === 'projects_overview') return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [PROJECT], unassigned: {} };
-    if (query === 'tasks_by_project') return {
-      v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
-      tasks: args.status === 'all' ? [ITEM, FINAL_ITEM] : args.status === 'final' ? [FINAL_ITEM] : [ITEM],
-      has_more: false, next_cursor: null,
-    };
+    if (query === 'tasks_by_project') return tasks(args);
     if (query === 'task_detail') return detail;
     if (query === 'attention_list') return attention(args);
     if (query === 'resource_inventory') return inventory(args);
@@ -141,8 +150,7 @@ afterEach(() => {
   vi.useRealTimers();
   queryAdeCore.mockReset();
   readAdeTask.mockClear();
-  // Los índices marcan llamadas de `queryAdeCore.mock.calls`, que `mockReset` deja vacío: se descartan con él.
-  transport.verificationCallIndexes.clear();
+  transport.verificationQueryCalls.clear();
 });
 
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
@@ -385,6 +393,9 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId('location-last-seen').querySelector('time').dateTime)
       .toBe(new Date(PROJECT.locations[0].last_seen).toISOString());
     expect(within(projectView).getByTestId('count-tasks').querySelector('dd').textContent).toBe('2');
+    expect(within(projectView).getByTestId('count-active').querySelector('dd').textContent).toBe('1');
+    expect(within(projectView).getByTestId('count-failed').querySelector('dd').textContent).toBe('0');
+    expect(within(projectView).getByTestId('count-review_ready').querySelector('dd').textContent).toBe('0');
     expect(within(projectView).getByTestId('count-attention').querySelector('dd').textContent).toBe('1');
     for (const name of ['attempts', 'resources']) {
       const count = within(projectView).getByTestId(`count-${name}`).querySelector('dd');
@@ -396,7 +407,8 @@ describe('AdeShell · Project View (LXO-204)', () => {
     // Activity del Project (LXO-204): la proyección real de Events acotada al Project durable.
     const activityRegion = within(projectView).getByRole('region', { name: /Activity/ });
     expect(activityRegion.querySelector('[data-testid="slice-notice"]')).toBeNull();
-    expect(within(activityRegion).getByTestId('activity-no-text').textContent).toContain('task.created');
+    expect(within(activityRegion).getByTestId('activity-no-text').textContent).toContain('descripción interpretable');
+    expect(within(activityRegion).getByTestId('activity-no-text').textContent).not.toContain('task.created');
     expect(within(activityRegion).getByTestId('activity-evt-project-1').querySelector('time').dateTime)
       .toBe(new Date(ACTIVITY_EVENT.ts).toISOString());
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'activity_list'))
@@ -415,6 +427,468 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId(`task-${FINAL_ITEM.id}`)).toBeTruthy();
     fireEvent.click(within(projectView).getByTestId(`open-task-${FINAL_ITEM.id}`));
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: FINAL_ITEM.id });
+  });
+
+  it('Project View traduce el fallback seguro de Core para un Event desconocido', async () => {
+    core(detailOf(), {
+      activity: (args) => projectActivityPage([{
+        ...ACTIVITY_EVENT,
+        project_id: PROJECT.id,
+        kind: 'task.teleported',
+        message_key: 'activity.unknown',
+        fallback: true,
+        args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 1 },
+      }], args),
+    });
+    useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+    render(shell());
+
+    const projectView = await screen.findByTestId('project-view');
+    const row = await within(projectView).findByTestId('activity-evt-project-1');
+    expect(within(row).getByTestId('activity-text').textContent)
+      .toBe('No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind).');
+  });
+
+  it('continúa Tasks all con el cursor opaco, deduplica IDs y conserva el foco al completar la página', async () => {
+    const cursor = 'opaque-cursor:page-two';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...ITEM,
+      id: `page-${index}`,
+      title: `Task ${index}`,
+      status: 'running',
+    }));
+    const repeated = { ...firstTasks[49], title: 'Task repetida de la segunda página' };
+    const secondTasks = [repeated, { ...ITEM, id: 'page-50', title: 'Task 50' }, { ...ITEM, id: 'page-51', title: 'Task 51' }];
+    const pendingPage = deferred();
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status === 'all') return args.cursor
+          ? pendingPage.promise
+          : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursor };
+        return {
+          v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+          tasks: args.status === 'final' ? [FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+        };
+      },
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+    const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
+    expect(await within(tasksRegion).findByTestId('task-page-49')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(50);
+
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    loadMore.focus();
+    fireEvent.click(loadMore);
+    expect(within(tasksRegion).getByTestId('tasks-page-loading').getAttribute('aria-busy')).toBe('true');
+    expect(loadMore.getAttribute('aria-disabled')).toBe('true');
+    expect(within(tasksRegion).getByRole('list').getAttribute('aria-busy')).toBe('true');
+
+    pendingPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: secondTasks, has_more: false, next_cursor: null,
+    });
+    expect(await within(tasksRegion).findByTestId('task-page-51')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+    expect(within(tasksRegion).getAllByTestId('task-page-49')).toHaveLength(1);
+    expect(within(tasksRegion).getByTestId('task-page-49').textContent).toContain('Task 49');
+    expect(document.activeElement).toBe(loadMore);
+    expect(loadMore.textContent).toBe('No hay más Tasks');
+    expect(loadMore.getAttribute('aria-disabled')).toBe('true');
+    expect(within(tasksRegion).getByTestId('tasks-page-announcement').textContent).toContain('Se cargaron 2 Tasks');
+    expect(queryAdeCore.mock.calls).toContainEqual(['tasks_by_project', { projectId: PROJECT.id, status: 'all', cursor }]);
+  });
+
+  it('si falla una página conserva la lista como stale y permite reintentar el mismo cursor', async () => {
+    const cursor = 'opaque-cursor:retry';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({ ...ITEM, id: `retry-${index}`, title: `Task ${index}`, status: 'running' }));
+    let failPage = true;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status === 'all') {
+          if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursor };
+          if (failPage) throw new Error('tasks_by_project_read_failed: página siguiente');
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-50', title: 'Task 50', status: 'running' }], has_more: false, next_cursor: null };
+        }
+        return {
+          v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50,
+          tasks: args.status === 'final' ? [FINAL_ITEM] : [ITEM], has_more: false, next_cursor: null,
+        };
+      },
+    });
+    render(shell());
+
+    fireEvent.click(await screen.findByRole('treeitem', { name: /Repo Real/ }));
+    const projectView = await screen.findByTestId('project-view');
+    const tasksRegion = within(projectView).getByRole('region', { name: /^Tasks/ });
+    expect(await within(tasksRegion).findByTestId('task-retry-49')).toBeTruthy();
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+
+    const pageError = await within(tasksRegion).findByTestId('tasks-page-error');
+    expect(pageError.getAttribute('role')).toBe('alert');
+    expect(pageError.textContent).toContain('se conservan las Tasks ya cargadas');
+    expect(pageError.textContent).toContain('tasks_by_project_read_failed');
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(50);
+    expect(loadMore.textContent).toBe('Reintentar carga');
+    expect(loadMore.getAttribute('aria-disabled')).toBeNull();
+
+    failPage = false;
+    fireEvent.click(loadMore);
+    expect(await within(tasksRegion).findByTestId('task-retry-50')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(51);
+    expect(queryAdeCore.mock.calls.filter(([query, args]) => query === 'tasks_by_project' && args.cursor === cursor)).toHaveLength(2);
+  });
+
+  it('reconcilia las páginas cargadas tras un poll idéntico sin soltar filas ni foco', async () => {
+    vi.useFakeTimers();
+    const cursorA = 'opaque-cursor:poll-a';
+    const cursorB = 'opaque-cursor:poll-b';
+    const firstTasks = Array.from({ length: 50 }, (_, index) => ({
+      ...ITEM, id: `poll-${index}`, title: `Task ${index}`, status: 'running',
+    }));
+    const task50 = { ...ITEM, id: 'poll-50', title: 'Task 50', status: 'running' };
+    const task51 = { ...ITEM, id: 'poll-51', title: 'Task 51', status: 'running' };
+    const refreshedPageTwo = deferred();
+    const refreshedPageThree = deferred();
+    let headReads = 0;
+    let pageTwoReads = 0;
+    let pageThreeReads = 0;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) {
+          headReads += 1;
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: cursorA };
+        }
+        if (args.cursor === cursorA) {
+          pageTwoReads += 1;
+          return pageTwoReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [firstTasks[49], task50], has_more: true, next_cursor: cursorB }
+            : refreshedPageTwo.promise;
+        }
+        if (args.cursor === cursorB) {
+          pageThreeReads += 1;
+          return pageThreeReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [task51], has_more: false, next_cursor: null }
+            : refreshedPageThree.promise;
+        }
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
+    const focusedLink = within(tasksRegion).getByTestId('open-task-poll-51');
+    const focusedRow = within(tasksRegion).getByTestId('task-poll-51');
+    focusedLink.focus();
+    expect(document.activeElement).toBe(focusedLink);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBeGreaterThan(1);
+    expect(pageTwoReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(pageTwoReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+
+    await act(async () => {
+      refreshedPageTwo.resolve({
+        v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+        tasks: [{ ...firstTasks[49], title: 'Título duplicado que debe ignorarse' }, { ...task50, title: 'Task 50 actualizada' }],
+        has_more: true, next_cursor: cursorB,
+      });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(pageThreeReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+    expect(within(tasksRegion).getByTestId('task-poll-50').textContent).toContain('Task 50');
+    expect(within(tasksRegion).getByTestId('task-poll-50').textContent).not.toContain('Título duplicado');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(pageThreeReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedLink);
+
+    await act(async () => {
+      refreshedPageThree.resolve({
+        v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+        tasks: [{ ...task51, title: 'Task 51 actualizada' }], has_more: false, next_cursor: null,
+      });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(52);
+    expect(within(tasksRegion).getByTestId('task-poll-51')).toBe(focusedRow);
+    expect(within(tasksRegion).getByTestId('task-poll-51').textContent).toContain('Task 51 actualizada');
+    expect(document.activeElement).toBe(focusedLink);
+  });
+
+  it('ignora una continuación tardía al cambiar de Project', async () => {
+    const secondProject = { ...PROJECT, id: 'project-uuid-2', name: 'Otro Repo' };
+    const pendingPage = deferred();
+    const firstTasks = [{ ...ITEM, id: 'project-a-head', title: 'Task de A', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'project-b-head', title: 'Task de B', status: 'running' }];
+    queryAdeCore.mockImplementation(async (query, args) => {
+      if (query === 'projects_overview') return {
+        v: 1, filters: { archived: args.archived, machine: null }, total: 2, projects: [PROJECT, secondProject], unassigned: {},
+      };
+      if (query === 'tasks_by_project') {
+        if (args.status !== 'all') return { v: 1, project_id: args.projectId, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (args.projectId === PROJECT.id) return args.cursor
+          ? pendingPage.promise
+          : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'project-a-cursor' };
+        return { v: 1, project_id: secondProject.id, filters: { status: 'all' }, limit: 50, tasks: secondTasks, has_more: false, next_cursor: null };
+      }
+      if (query === 'task_detail') return detailOf();
+      if (query === 'attention_list') return attentionPage([]);
+      if (query === 'resource_inventory') return { ...INVENTORY, filters: { project_id: args.projectId, probe: true } };
+      if (query === 'activity_list') return projectActivityPage([], args);
+      throw new Error(`Query no permitida en fixture: ${query}`);
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    fireEvent.click(within(tasksRegion).getByTestId('tasks-load-more'));
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-project-a-head')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Otro Repo/ }));
+    await flush();
+    const otherTasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    expect(within(otherTasksRegion).getByTestId('task-project-b-head')).toBeTruthy();
+    expect(within(otherTasksRegion).queryByTestId('task-project-a-head')).toBeNull();
+
+    pendingPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'project-a-late', title: 'Respuesta tardía de A', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(otherTasksRegion).getByTestId('task-project-b-head')).toBeTruthy();
+    expect(within(otherTasksRegion).queryByTestId('task-project-a-late')).toBeNull();
+  });
+
+  it('ignora una reconciliación tardía al cambiar la cabecera y conserva la generación más reciente', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'read-head-v1', title: 'Task de cabecera v1', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'read-head-v2', title: 'Task de cabecera v2', status: 'running' }];
+    const thirdTasks = [{ ...ITEM, id: 'read-head-v3', title: 'Task de cabecera v3', status: 'running' }];
+    const staleRefresh = deferred();
+    const currentRefresh = deferred();
+    let headReads = 0;
+    const cursorReads = [];
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) {
+          headReads += 1;
+          const tasks = headReads === 1 ? firstTasks : headReads === 2 ? secondTasks : thirdTasks;
+          const cursor = headReads === 1 ? 'read-cursor-v1' : headReads === 2 ? 'read-cursor-v2' : 'read-cursor-v3';
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks, has_more: true, next_cursor: cursor };
+        }
+        cursorReads.push(args.cursor);
+        if (args.cursor === 'read-cursor-v1') return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'read-old-page', title: 'Task ya cargada', status: 'running' }], has_more: false, next_cursor: null };
+        if (args.cursor === 'read-cursor-v2') return staleRefresh.promise;
+        if (args.cursor === 'read-cursor-v3') return currentRefresh.promise;
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    fireEvent.click(within(tasksRegion).getByTestId('tasks-load-more'));
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBe(2);
+    expect(cursorReads).toEqual(['read-cursor-v1', 'read-cursor-v2']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBe(3);
+    expect(cursorReads).toEqual(['read-cursor-v1', 'read-cursor-v2', 'read-cursor-v3']);
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    staleRefresh.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'read-stale-only', title: 'Respuesta de cabecera anterior', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).queryByTestId('task-read-stale-only')).toBeNull();
+    expect(within(tasksRegion).getByTestId('task-read-old-page')).toBeTruthy();
+
+    currentRefresh.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'read-current-page', title: 'Respuesta de cabecera actual', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-read-current-page')).toBeTruthy();
+    expect(within(tasksRegion).queryByTestId('task-read-old-page')).toBeNull();
+  });
+
+  it('permite reintentar la carga inicial invalidada por una cabecera nueva', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'initial-head-v1', title: 'Task de cabecera v1', status: 'running' }];
+    const secondTasks = [{ ...ITEM, id: 'initial-head-v2', title: 'Task de cabecera v2', status: 'running' }];
+    const invalidatedPage = deferred();
+    let headReads = 0;
+    const cursors = [];
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) {
+          headReads += 1;
+          const tasks = headReads === 1 ? firstTasks : secondTasks;
+          const cursor = headReads === 1 ? 'initial-cursor-v1' : 'initial-cursor-v2';
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks, has_more: true, next_cursor: cursor };
+        }
+        cursors.push(args.cursor);
+        if (args.cursor === 'initial-cursor-v1') return invalidatedPage.promise;
+        if (args.cursor === 'initial-cursor-v2') return {
+          v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+          tasks: [{ ...ITEM, id: 'initial-page-v2', title: 'Task inicial recuperada', status: 'running' }], has_more: false, next_cursor: null,
+        };
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    expect(cursors).toEqual(['initial-cursor-v1']);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(headReads).toBe(2);
+    expect(within(tasksRegion).getByTestId('task-initial-head-v2')).toBeTruthy();
+    expect(loadMore.getAttribute('aria-disabled')).toBeNull();
+    expect(loadMore.textContent).toBe('Cargar más Tasks');
+
+    fireEvent.click(loadMore);
+    await flush();
+    expect(cursors).toEqual(['initial-cursor-v1', 'initial-cursor-v2']);
+    expect(within(tasksRegion).getByTestId('task-initial-page-v2')).toBeTruthy();
+
+    invalidatedPage.resolve({
+      v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50,
+      tasks: [{ ...ITEM, id: 'initial-page-stale', title: 'Respuesta de cabecera anterior', status: 'running' }], has_more: false, next_cursor: null,
+    });
+    await flush();
+    expect(within(tasksRegion).queryByTestId('task-initial-page-stale')).toBeNull();
+    expect(within(tasksRegion).getByTestId('task-initial-page-v2')).toBeTruthy();
+  });
+
+  it('conserva la última lista si falla la reconciliación y permite reintentarla', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'retry-refresh-head', title: 'Task de cabecera', status: 'running' }];
+    let cursorReads = 0;
+    let failRefresh = true;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'retry-refresh-cursor' };
+        cursorReads += 1;
+        if (cursorReads === 1) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-refresh-old', title: 'Task anterior', status: 'running' }], has_more: false, next_cursor: null };
+        if (failRefresh) throw new Error('tasks_by_project_refresh_failed');
+        return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'retry-refresh-new', title: 'Task nueva', status: 'running' }], has_more: false, next_cursor: null };
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-old')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(within(tasksRegion).getByTestId('tasks-page-error').textContent).toContain('tasks_by_project_refresh_failed');
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-old')).toBeTruthy();
+    expect(within(tasksRegion).getAllByRole('listitem')).toHaveLength(2);
+    expect(loadMore.textContent).toBe('Reintentar carga');
+
+    failRefresh = false;
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-retry-refresh-new')).toBeTruthy();
+    expect(within(tasksRegion).queryByTestId('task-retry-refresh-old')).toBeNull();
+    expect(cursorReads).toBe(3);
+  });
+
+  it('detiene la reconciliación cuando el cursor no avanza', async () => {
+    vi.useFakeTimers();
+    const firstTasks = [{ ...ITEM, id: 'cursor-head', title: 'Task de cabecera', status: 'running' }];
+    let cursorAReads = 0;
+    let cursorBReads = 0;
+    core(detailOf(), {
+      tasks: (args) => {
+        if (args.status !== 'all') return { v: 1, project_id: PROJECT.id, filters: { status: args.status }, limit: 50, tasks: [], has_more: false, next_cursor: null };
+        if (!args.cursor) return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: firstTasks, has_more: true, next_cursor: 'cursor-A' };
+        if (args.cursor === 'cursor-A') {
+          cursorAReads += 1;
+          return cursorAReads === 1
+            ? { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-page-2', title: 'Task 2', status: 'running' }], has_more: true, next_cursor: 'cursor-B' }
+            : { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-new-page-2', title: 'Task 2 nueva', status: 'running' }], has_more: true, next_cursor: 'cursor-A' };
+        }
+        if (args.cursor === 'cursor-B') {
+          cursorBReads += 1;
+          return { v: 1, project_id: PROJECT.id, filters: { status: 'all' }, limit: 50, tasks: [{ ...ITEM, id: 'cursor-page-3', title: 'Task 3', status: 'running' }], has_more: false, next_cursor: null };
+        }
+        throw new Error(`Cursor inesperado: ${args.cursor}`);
+      },
+    });
+    render(shell());
+    await flush();
+    fireEvent.click(screen.getByRole('treeitem', { name: /Repo Real/ }));
+    await flush();
+    const tasksRegion = within(screen.getByTestId('project-view')).getByRole('region', { name: /^Tasks/ });
+    const loadMore = within(tasksRegion).getByTestId('tasks-load-more');
+    fireEvent.click(loadMore);
+    await flush();
+    fireEvent.click(loadMore);
+    await flush();
+    expect(within(tasksRegion).getByTestId('task-cursor-page-3')).toBeTruthy();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await flush();
+    expect(within(tasksRegion).getByTestId('tasks-page-error').textContent).toContain('tasks_by_project_cursor_did_not_advance');
+    expect(within(tasksRegion).getByTestId('task-cursor-page-3')).toBeTruthy();
+    expect(cursorAReads).toBe(2);
+    expect(cursorBReads).toBe(1);
   });
 
   it('consulta el inventario del Project durable y monta la foto del Core en Resources tal cual', async () => {
@@ -1178,16 +1652,17 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
     const verificationCallsFor = (projectId, taskId) => verificationCalls()
       .filter((call) => call.projectId === projectId && call.taskId === taskId);
     const verificationCallsForTask = (taskId) => verificationCalls().filter((call) => call.taskId === taskId);
+    const verificationQueryCallsFor = (projectId, taskId) => [...transport.verificationQueryCalls]
+      .filter(([query, args]) => query === 'task_detail'
+        && args.projectId === projectId && args.taskId === taskId);
     // Lecturas del shell: `task_detail` emitidas por `useCoreQuery` → `queryAdeCore`, SIN contar las que
     // emite la verificación de Activity (`readAdeTask`), que comparte el mismo mock de transporte. Sin esta
     // separación, una lectura del shell y una verificación serían la misma llamada y el conteo del shell
     // sería tautológico (siempre ≥ 1 si hubo una verificación).
     const shellTaskDetailCallsFor = (projectId, taskId) => queryAdeCore.mock.calls
-      .map((call, index) => ({ call, index }))
-      .filter(({ call: [query, args] }) => query === 'task_detail'
+      .filter(([query, args]) => query === 'task_detail'
         && args.projectId === projectId && args.taskId === taskId)
-      .filter(({ index }) => !transport.verificationCallIndexes.has(index))
-      .map(({ call }) => call);
+      .filter((call) => !transport.verificationQueryCalls.has(call));
     // Resuelve las lecturas encadenadas (render -> efecto -> promesa) sin depender de los temporizadores reales.
     const settle = async () => { for (let i = 0; i < 6; i += 1) await flush(); };
     // Toda lectura de `task_detail` del destino queda pendiente hasta que la prueba la resuelva.
@@ -1351,7 +1826,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
 
       fireEvent.click(await screen.findByTestId('activity-target-event-13'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-14'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-14'));
       await settle();
       pending.resolve(detailOf({ id: slowTaskId }));
       await settle();
@@ -1413,7 +1888,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       fireEvent.click(await screen.findByTestId('activity-target-event-17'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-17'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-17'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
@@ -1447,11 +1922,11 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-18'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-19'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-19'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-18'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-18'));
       await settle();
 
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1528,7 +2003,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-21'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-21'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1552,7 +2027,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-22'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-22'));
 
       expect(await screen.findByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
@@ -1581,9 +2056,9 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-23'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-23'));
       await settle();
-      fireEvent.click(screen.getByTestId('activity-target-event-24'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-24'));
       await settle();
 
       // Mismo Project, Tasks distintas: dos lecturas en vuelo independientes (la ranura es el par completo).
@@ -1604,11 +2079,14 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       await settle();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: taskB });
       expect(screen.queryByText(/Verificando la Task/)).toBeNull();
-      // La lectura del shell es otro canal: no cuenta como verificación del destino.
-      // El conteo del shell excluye las llamadas de verificación, así que `> 0` prueba que el shell leyó
-      // el detalle por su cuenta (no que la verificación ya lo dejó hecho).
+      // La verificación y el shell pueden compartir el transporte, pero no el registro de llamada.
       expect(verificationCallsFor(PROJECT.id, taskB)).toHaveLength(1);
-      expect(shellTaskDetailCallsFor(PROJECT.id, taskB).length).toBeGreaterThan(0);
+      const taskBVerificationReads = verificationQueryCallsFor(PROJECT.id, taskB);
+      const taskBShellReads = shellTaskDetailCallsFor(PROJECT.id, taskB);
+      expect(taskBVerificationReads).toHaveLength(1);
+      expect(queryAdeCore.mock.calls).toContain(taskBVerificationReads[0]);
+      expect(taskBShellReads.length).toBeGreaterThan(0);
+      expect(taskBShellReads).not.toContain(taskBVerificationReads[0]);
     });
 
     it('libera la ranura de deduplicación cuando la consulta subyacente se asienta', async () => {
@@ -1627,14 +2105,14 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-25'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
       expect(screen.getByText(`Core no confirmó la Task ${targetTaskId} del Project ${PROJECT.id}; no se cambió la selección.`)).toBeTruthy();
       expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: null, taskId: null });
 
       // La consulta ya se asentó: la ranura quedó libre y el mismo destino se verifica con una lectura nueva.
-      fireEvent.click(screen.getByTestId('activity-target-event-25'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-25'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(2);
     });
@@ -1649,7 +2127,7 @@ describe('AdeShell · subvista Activity (LXO-99)', () => {
       openActivityTab();
       await settle();
 
-      fireEvent.click(screen.getByTestId('activity-target-event-26'));
+      fireEvent.click(await screen.findByTestId('activity-target-event-26'));
       await settle();
       expect(verificationCallsFor(PROJECT.id, targetTaskId)).toHaveLength(1);
 
