@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{activity_read, attention_read, compact_snapshot, projects_overview, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
@@ -154,6 +154,12 @@ impl Core {
             "attention_detail" => attention_read::detail(self, &caller, authenticated_context.as_ref(), args),
             "tasks_by_project" => tasks_read::list(self, &caller, authenticated_context.as_ref(), args),
             "task_detail" => tasks_read::detail(self, &caller, authenticated_context.as_ref(), args),
+            // Modelo Task/Attempt (LXO-119): `core_model` siempre; el resto, solo tras el corte.
+            "core_model" => model_read::core_model(self, &caller, authenticated_context.as_ref(), args),
+            "task_list_v2" => model_read::task_list(self, &caller, authenticated_context.as_ref(), args),
+            "task_detail_v2" => model_read::task_detail(self, &caller, authenticated_context.as_ref(), args),
+            "attempts_by_task" => model_read::attempts_by_task(self, &caller, authenticated_context.as_ref(), args),
+            "attempt_detail" => model_read::attempt_detail(self, &caller, authenticated_context.as_ref(), args),
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
@@ -456,7 +462,8 @@ impl Core {
 fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
-        | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
+        | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,

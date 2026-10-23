@@ -280,6 +280,13 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `task.removed` | resuelve `condition_cleared` | `failed`, `conflict`, `review_ready`, `approval`(terminal) de esa task | `task` |
 | `spawn.requested` · `policy_status = blocked` | levanta | `risk` · high | `spawn_request` · — |
 | `task.review_requested` | levanta | `review_ready` · medium | `task` |
+| `attempt.requested` con `approval_required` (LXO-119) | levanta | `approval` · medium | `attempt` · `launch` |
+| `attempt.approved` / `attempt.rejected` | resuelve `acted` | `approval` | `attempt` · `launch` |
+| `attempt.failed` (el motivo va en `facts.failure_reason`) | levanta | `failed` · high | `attempt` |
+
+Los hechos de **ejecución** del modelo Task/Attempt apuntan al **Attempt**: dos Attempts de una Task tienen su propia
+Attention (`model_read_tests::dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity`). Solo existen
+tras el corte; las reglas `task.*` siguen para los hechos históricos sin duplicarlos (ADR D9 y D10).
 | `decision.recorded` `review` · `accepted` / `rejected` | resuelve `acted` | `review_ready` | `task` |
 | `task.status_changed` desde `done` | resuelve `condition_cleared` | `review_ready` | `task` |
 | `environment.blocked` (`code` cerrado, `profile` conocido) | levanta | `environment_blocked` · high | `agent` (proveedor) · `code@profile` |
