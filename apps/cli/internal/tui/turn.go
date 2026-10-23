@@ -61,6 +61,9 @@ func (m *Model) shell(command string) tea.Cmd {
 		m.add(note("Escribe un comando tras «!», p. ej. !git status. Se ejecuta en el workspace y el modelo ve la salida."))
 		return nil
 	}
+	if isLxoCommand(command) {
+		return m.lxoShell(command)
+	}
 	return m.execShell(command)
 }
 

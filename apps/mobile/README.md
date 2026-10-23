@@ -39,6 +39,8 @@ src/state.js            contextos: prefs (AsyncStorage), sesión (SecureStore), 
 src/components/         primitivas del IDE (ui.js), barra de título, paleta, barra de
                         estado, sidebar, diálogos e iconos
 src/screens/            Auth, Chat y Remoto (secciones), Uso, Cuenta y Personalizar (apiladas)
+src/observe/            bootstrap observacional del Core (LXO-107): snapshot compacta por
+                        /remote, cursor de Events, caché no autoritativa y estados de conexión
 src/supervision/        prototipo de supervisión: reglas (model), datos de ejemplo
                         (fixtures), estado (store) y pruebas (`npm test`)
 assets/                 fuentes embebidas + iconos de la app (desde favicon.svg)
@@ -57,6 +59,58 @@ densidad, enviar con Enter, barra de estado, luz ambiente y animaciones; se
 guarda en AsyncStorage (`uiPrefs`). Cada respuesta tiene Copiar y, la última,
 Regenerar (usa `POST /api/conversations/{id}/rewind` para no duplicar el
 turno guardado).
+
+## Supervisar con datos reales (F2)
+
+La sección **Supervisar** muestra el estado real del Core del IDE que eliges:
+`src/screens/ObserveScreen.js` y `src/observe/`. Es solo lectura. Sigue tras
+la misma puerta que el prototipo (desarrollo o *Ajustes › Desarrolladores*)
+hasta validarla en dispositivo.
+
+- **IDE (host)**: una sesión `/remote` es un IDE. Se usa el que elijas en la
+  cabecera o en el menú lateral; si no eliges, el primero en línea. Si el
+  elegido se desconecta no se salta a otro, se dice.
+- **Conexión** (`useObserve.js`): socket propio a la sesión, sin repetir el
+  transcript del chat, y el bootstrap del Core de LXO-107.
+- **UX de conexión** (`connection.js`, `ConnectionBanner.js`, LXO-111):
+  - estados en línea, conectando, reconectando, desactualizado (también la
+    caché), sin conexión (servidor, IDE o Core), sesión no autorizada y
+    versiones incompatibles;
+  - hora de la última sincronización, «Reintentar», un código de diagnóstico
+    estable y texto para lectores de pantalla;
+  - offline nunca usa el rojo de los fallos;
+  - `actionGate` solo deja mandar algo en línea: ninguna acción futura puede
+    aparentar éxito sin conexión.
+
+- **Inicio** (`screens/observe/HomeScreen.js`, `observe/home.js`, LXO-108):
+  el resumen operativo del IDE, sacado de la snapshot.
+  - Atención por categoría, trabajo activo global (el origen solo cuando es
+    un coordinador externo) y proyectos con su estado.
+  - Activas, fallidas y Attention se cuentan siempre por separado.
+  - Lo recortado se dice («y N más»), y se avisa si el Core del escritorio
+    está en solo lectura.
+  - Cada fila abre su pantalla por id; un proyecto enseña sus tareas activas
+    y su Attention.
+- **Atención** (`screens/observe/AttentionScreen.js`, `observe/attention.js`,
+  LXO-109): la bandeja de Attention activa del Core, en su orden.
+  - Filtros por proyecto, categoría y severidad; agrupación opcional por
+    proyecto; icono por categoría, severidad, destino y edad.
+  - Las de una tarea abren su detalle; abrir no resuelve ni marca nada.
+  - Con un IDE anterior o sin conexión se ven las más urgentes de la
+    snapshot, marcadas como parciales o guardadas.
+
+- **Tarea** (`screens/observe/TaskScreen.js`, `observe/task.js`, LXO-110):
+  - proyecto y tarea, estado real con sus señales (pregunta sin responder,
+    revisión, integración) y proveedor y modelo conocidos;
+  - rama, worktree o checkout compartido, host y origen; lo que el modelo
+    no registra se dice como desconocido, y la ruta va como ubicación
+    secundaria;
+  - Activity reciente paginable y la Attention de esa tarea;
+  - «Abrir en Desktop» está deshabilitado hasta F6;
+  - una tarea que ya no existe se muestra como no encontrada.
+
+El prototipo con datos de ejemplo (`SupervisionScreen.js`, `src/supervision/`)
+sigue en el repo, pero sin montar.
 
 ## Prototipo de supervisión (Sprint D)
 
@@ -107,3 +161,14 @@ reanimated 4), así que se prueba con una build de desarrollo:
   mismas conversaciones que la web.
 - **Cambiar de servidor (dev)**: mantener pulsado el pie «lixbon.com» de la
   pantalla de login.
+
+## Bootstrap observacional del Core (LXO-107)
+
+`src/observe/` arranca la vista observacional desde la snapshot compacta del Core
+y sigue los cambios por el Event Log desde su cursor. Pasa por la sesión
+`/remote`: el IDE lee el Core con su identidad Desktop de F1 y devuelve solo lo
+permitido, y el móvil se autentica con su cuenta. La caché (AsyncStorage) nunca es autoridad
+y se pinta como desactualizada. Estados: `connecting`, `online`, `stale`,
+`offline`, `unauthorized`, `version_mismatch`. Por ahora hay un indicador mínimo
+en la pestaña Orquestar; las pantallas son LXO-108 a LXO-111. Contrato y
+amenazas: [`docs/core/MOBILE_BOOTSTRAP.md`](../../docs/core/MOBILE_BOOTSTRAP.md).

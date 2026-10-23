@@ -1,0 +1,544 @@
+{
+  "about": "Casos compartidos por apps/desktop/src/ade/activityMessages.js y apps/desktop/lxo/src/activity.rs: misma frase para la misma clave y argumentos. text null = sin frase.",
+  "cases": [
+    {
+      "key": "activity.run.created",
+      "args": {
+        "root_task": "t-1"
+      },
+      "text": "Se creó la ejecución para la tarea t-1."
+    },
+    {
+      "key": "activity.run.closed",
+      "args": {
+        "forced": true,
+        "stopped_total": 1
+      },
+      "text": "La ejecución se cerró de forma forzada; 1 tarea detenida."
+    },
+    {
+      "key": "activity.run.closed",
+      "args": {
+        "forced": false,
+        "stopped_total": 3
+      },
+      "text": "La ejecución se cerró; 3 tareas detenidas."
+    },
+    {
+      "key": "activity.run.removed",
+      "args": {
+        "tasks": 2
+      },
+      "text": "Se eliminó la ejecución junto con 2 tareas."
+    },
+    {
+      "key": "activity.task.created",
+      "args": {
+        "title": "Migrar la tabla",
+        "agent": "claude",
+        "depth": 1,
+        "external": true,
+        "role": "implementador",
+        "model": "sonnet",
+        "parent": "t-1"
+      },
+      "text": "Se creó la tarea «Migrar la tabla» para claude (rol implementador; modelo sonnet; depende de t-1; profundidad 1; externa)."
+    },
+    {
+      "key": "activity.task.created",
+      "args": {
+        "title": "Raíz",
+        "agent": "codex",
+        "depth": 0,
+        "external": false
+      },
+      "text": "Se creó la tarea «Raíz» para codex (profundidad 0)."
+    },
+    {
+      "key": "activity.task.starting",
+      "args": {
+        "from": "starting",
+        "to": "starting"
+      },
+      "text": "La tarea está iniciando."
+    },
+    {
+      "key": "activity.task.running",
+      "args": {
+        "from": "starting",
+        "to": "running"
+      },
+      "text": "La tarea está en ejecución."
+    },
+    {
+      "key": "activity.task.waiting",
+      "args": {
+        "from": "running",
+        "to": "waiting"
+      },
+      "text": "La tarea está en espera."
+    },
+    {
+      "key": "activity.task.awaiting_terminal_approval",
+      "args": {
+        "from": "running",
+        "to": "awaiting_terminal_approval"
+      },
+      "text": "La tarea espera aprobación para abrir una terminal."
+    },
+    {
+      "key": "activity.task.done",
+      "args": {
+        "from": "running",
+        "to": "done"
+      },
+      "text": "La tarea terminó correctamente."
+    },
+    {
+      "key": "activity.task.failed",
+      "args": {
+        "from": "running",
+        "to": "failed",
+        "cause": "agent_idle_timeout"
+      },
+      "text": "La tarea falló."
+    },
+    {
+      "key": "activity.task.failed",
+      "args": {
+        "from": "running",
+        "to": "done"
+      },
+      "text": null
+    },
+    {
+      "key": "activity.task.stopped",
+      "args": {
+        "from": "running",
+        "to": "stopped"
+      },
+      "text": "La tarea se detuvo."
+    },
+    {
+      "key": "activity.task.exited",
+      "args": {
+        "from": "running",
+        "to": "exited"
+      },
+      "text": "La tarea salió con error."
+    },
+    {
+      "key": "activity.task.phase_done",
+      "args": {},
+      "text": "La tarea terminó una fase."
+    },
+    {
+      "key": "activity.task.phase_started",
+      "args": {},
+      "text": "La tarea inició una fase."
+    },
+    {
+      "key": "activity.task.question",
+      "args": {
+        "message_id": 5,
+        "to": "t-1"
+      },
+      "text": "La tarea envió la pregunta 5 a t-1."
+    },
+    {
+      "key": "activity.task.question",
+      "args": {
+        "message_id": -1,
+        "to": "t-1"
+      },
+      "text": null
+    },
+    {
+      "key": "activity.task.reply",
+      "args": {
+        "question_id": 5,
+        "message_id": 6
+      },
+      "text": "La tarea respondió a la pregunta 5 con el mensaje 6."
+    },
+    {
+      "key": "activity.task.removed",
+      "args": {
+        "cause": "launch_failed"
+      },
+      "text": "Se eliminó la tarea porque falló su lanzamiento."
+    },
+    {
+      "key": "activity.task.removed",
+      "args": {
+        "cause": "otra"
+      },
+      "text": null
+    },
+    {
+      "key": "activity.task.review_requested",
+      "args": {
+        "branch": "lxo/t-7"
+      },
+      "text": "Se solicitó revisar la rama «lxo/t-7»."
+    },
+    {
+      "key": "activity.decision.review.accepted",
+      "args": {
+        "decision_id": 3,
+        "has_comment": true
+      },
+      "text": "La revisión 3 fue aceptada con comentario."
+    },
+    {
+      "key": "activity.decision.review.rejected",
+      "args": {
+        "decision_id": 4,
+        "has_comment": false
+      },
+      "text": "La revisión 4 fue rechazada sin comentario."
+    },
+    {
+      "key": "activity.decision.merge.merged",
+      "args": {
+        "decision_id": 2,
+        "branch": "lxo/t-7",
+        "squash": true
+      },
+      "text": "Se integró la rama «lxo/t-7» (decisión 2) mediante squash."
+    },
+    {
+      "key": "activity.decision.merge.conflict",
+      "args": {
+        "decision_id": 2,
+        "branch": "lxo/t-7",
+        "squash": false,
+        "conflict_count": 1
+      },
+      "text": "Hubo conflictos al integrar la rama «lxo/t-7» (decisión 2) (1 conflicto)."
+    },
+    {
+      "key": "activity.decision.merge.conflict",
+      "args": {
+        "decision_id": 2,
+        "branch": "lxo/t-7",
+        "squash": false
+      },
+      "text": "Hubo conflictos al integrar la rama «lxo/t-7» (decisión 2)."
+    },
+    {
+      "key": "activity.decision.merge.error",
+      "args": {
+        "decision_id": 2,
+        "branch": "lxo/t-7",
+        "squash": false
+      },
+      "text": "Falló la integración de la rama «lxo/t-7» (decisión 2)."
+    },
+    {
+      "key": "activity.decision.merge.target_moved",
+      "args": {
+        "decision_id": 2,
+        "branch": "lxo/t-7",
+        "squash": false
+      },
+      "text": "No se integró la rama «lxo/t-7» (decisión 2) porque cambió el destino."
+    },
+    {
+      "key": "activity.decision.pr.created",
+      "args": {
+        "decision_id": 8,
+        "branch": "lxo/t-7",
+        "has_pr_url": true
+      },
+      "text": "Se creó un pull request para «lxo/t-7» (decisión 8) con enlace al pull request."
+    },
+    {
+      "key": "activity.decision.pr.already_exists",
+      "args": {
+        "decision_id": 8,
+        "branch": "lxo/t-7",
+        "has_pr_url": false
+      },
+      "text": "Ya existe un pull request para «lxo/t-7» (decisión 8)."
+    },
+    {
+      "key": "activity.decision.pr.error",
+      "args": {
+        "decision_id": 8,
+        "branch": "lxo/t-7",
+        "has_pr_url": false
+      },
+      "text": "No se pudo crear el pull request para «lxo/t-7» (decisión 8)."
+    },
+    {
+      "key": "activity.effect.git_merge.merged",
+      "args": {
+        "effect_id": "eff-1",
+        "branch": "lxo/t-7"
+      },
+      "text": "El efecto eff-1 integró la rama «lxo/t-7»."
+    },
+    {
+      "key": "activity.effect.git_merge.conflict",
+      "args": {
+        "effect_id": "eff-1",
+        "branch": "lxo/t-7"
+      },
+      "text": "El efecto eff-1 encontró conflictos al integrar «lxo/t-7»."
+    },
+    {
+      "key": "activity.effect.git_merge.error",
+      "args": {
+        "effect_id": "eff-1",
+        "branch": "lxo/t-7"
+      },
+      "text": "Falló la integración de «lxo/t-7» (efecto eff-1)."
+    },
+    {
+      "key": "activity.effect.git_push_pr.created",
+      "args": {
+        "effect_id": "eff-2",
+        "branch": "lxo/t-7",
+        "has_pr_url": true
+      },
+      "text": "Se creó un pull request para «lxo/t-7» (efecto eff-2) con enlace al pull request."
+    },
+    {
+      "key": "activity.effect.git_push_pr.already_exists",
+      "args": {
+        "effect_id": "eff-2",
+        "branch": "lxo/t-7",
+        "has_pr_url": false
+      },
+      "text": "Ya existe un pull request para «lxo/t-7» (efecto eff-2)."
+    },
+    {
+      "key": "activity.effect.git_push_pr.error",
+      "args": {
+        "effect_id": "eff-2",
+        "branch": "lxo/t-7",
+        "has_pr_url": true
+      },
+      "text": "No se pudo crear el pull request para «lxo/t-7» (efecto eff-2) con enlace al pull request."
+    },
+    {
+      "key": "activity.effect.git_worktree.created",
+      "args": {
+        "effect_id": "eff-3",
+        "branch": "lxo/t-7",
+        "base": "main"
+      },
+      "text": "Se creó un worktree para «lxo/t-7» desde «main» (efecto eff-3)."
+    },
+    {
+      "key": "activity.effect.git_worktree.created",
+      "args": {
+        "effect_id": "eff-3",
+        "branch": "lxo/t-7",
+        "base": 5
+      },
+      "text": null
+    },
+    {
+      "key": "activity.effect.git_worktree.removed",
+      "args": {
+        "effect_id": "eff-4",
+        "worktree_removed": true,
+        "branch_deleted": true,
+        "branch": "lxo/t-7"
+      },
+      "text": "Se retiró el worktree (efecto eff-4) (rama «lxo/t-7»; rama eliminada)."
+    },
+    {
+      "key": "activity.effect.git_worktree.removed",
+      "args": {
+        "effect_id": "eff-4",
+        "worktree_removed": false,
+        "branch_deleted": false
+      },
+      "text": "No se retiró el worktree (efecto eff-4)."
+    },
+    {
+      "key": "activity.effect.process.launched",
+      "args": {
+        "effect_id": "eff-5"
+      },
+      "text": "Se inició un proceso (efecto eff-5)."
+    },
+    {
+      "key": "activity.effect.process.not_launched",
+      "args": {
+        "effect_id": "eff-5"
+      },
+      "text": "No se inició el proceso (efecto eff-5)."
+    },
+    {
+      "key": "activity.project.registered",
+      "args": {
+        "name": "lixbon",
+        "origin": "auto",
+        "has_remote": true
+      },
+      "text": "Se registró el proyecto «lixbon» por registro automático con remoto."
+    },
+    {
+      "key": "activity.project.registered",
+      "args": {
+        "name": "x",
+        "origin": "otro",
+        "has_remote": true
+      },
+      "text": null
+    },
+    {
+      "key": "activity.project.location_added",
+      "args": {
+        "primary": true,
+        "fingerprint_adopted": true
+      },
+      "text": "Se añadió una ubicación al proyecto como principal y se adoptó su huella."
+    },
+    {
+      "key": "activity.project.archived",
+      "args": {},
+      "text": "Se archivó el proyecto."
+    },
+    {
+      "key": "activity.project.restored",
+      "args": {},
+      "text": "Se restauró el proyecto."
+    },
+    {
+      "key": "activity.project.relocated",
+      "args": {
+        "fingerprint_adopted": true,
+        "confirmed_mismatch": true
+      },
+      "text": "Se reubicó el proyecto y se adoptó la huella; se confirmó una discrepancia."
+    },
+    {
+      "key": "activity.project.relocated",
+      "args": {
+        "fingerprint_adopted": false,
+        "confirmed_mismatch": false
+      },
+      "text": "Se reubicó el proyecto."
+    },
+    {
+      "key": "activity.spawn.requested",
+      "args": {
+        "parent_task": "t-1",
+        "title": "Revisar",
+        "provider": "claude",
+        "profile": "terminal",
+        "shared": false,
+        "policy_status": "unverified",
+        "role": "revisor",
+        "model": "opus",
+        "effort": "high"
+      },
+      "text": "Se solicitó iniciar «Revisar» con claude desde la tarea t-1 (perfil terminal; rol revisor; modelo opus; esfuerzo high; no compartida; política sin verificar)."
+    },
+    {
+      "key": "activity.spawn.approved",
+      "args": {
+        "has_reason": true,
+        "task": "t-9"
+      },
+      "text": "La solicitud de lanzamiento fue aprobada (tarea t-9; con motivo registrado)."
+    },
+    {
+      "key": "activity.spawn.rejected",
+      "args": {
+        "has_reason": false,
+        "task": null
+      },
+      "text": "La solicitud de lanzamiento fue rechazada."
+    },
+    {
+      "key": "activity.spawn.launch_failed",
+      "args": {
+        "has_reason": true,
+        "task": "t-9"
+      },
+      "text": "No se pudo iniciar la tarea solicitada (tarea t-9; con motivo registrado)."
+    },
+    {
+      "key": "activity.spawn.timeout",
+      "args": {
+        "has_reason": true,
+        "task": "t-9"
+      },
+      "text": "La solicitud de lanzamiento venció por tiempo (tarea t-9; con motivo registrado)."
+    },
+    {
+      "key": "activity.spawn.coordinator_closed",
+      "args": {
+        "has_reason": true,
+        "task": "t-9"
+      },
+      "text": "La solicitud terminó al cerrarse el coordinador (tarea t-9; con motivo registrado)."
+    },
+    {
+      "key": "activity.spawn.cancelled_run_removed",
+      "args": {
+        "has_reason": true,
+        "task": "t-9"
+      },
+      "text": "La solicitud se canceló al eliminarse la ejecución (tarea t-9; con motivo registrado)."
+    },
+    {
+      "key": "activity.environment.blocked",
+      "args": {
+        "provider": "codex",
+        "profile": "terminal",
+        "code": "cli_missing"
+      },
+      "text": "El entorno de codex está bloqueado para el perfil terminal: falta la CLI."
+    },
+    {
+      "key": "activity.environment.cleared",
+      "args": {
+        "provider": "codex",
+        "profile": "terminal",
+        "code": "windows_sandbox_elevated"
+      },
+      "text": "Se despejó el bloqueo del entorno de codex para el perfil terminal: el entorno de Windows requiere elevación."
+    },
+    {
+      "key": "activity.attention.risk_acted",
+      "args": {
+        "resolution": "acted"
+      },
+      "text": "Se registró una acción relacionada con un riesgo: se tomó una acción."
+    },
+    {
+      "key": "activity.attention.created",
+      "args": {
+        "category": "question",
+        "severity": "high",
+        "occurrence": 1,
+        "target_kind": "task",
+        "target_id": "t-1"
+      },
+      "text": "Se registró una incidencia de pregunta con severidad alta para task t-1 (ocurrencia 1)."
+    },
+    {
+      "key": "activity.attention.resolved",
+      "args": {
+        "resolution": "superseded"
+      },
+      "text": "Se registró la resolución de una incidencia: fue reemplazada por otra incidencia."
+    },
+    {
+      "key": "activity.unknown",
+      "args": {
+        "reason": "unknown_kind",
+        "kind": "task.teleported",
+        "event_version": 1
+      },
+      "text": "No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind)."
+    }
+  ]
+}

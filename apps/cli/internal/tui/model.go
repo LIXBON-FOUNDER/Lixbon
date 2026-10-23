@@ -12,6 +12,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"lixbon.com/cli/internal/chat"
 	"lixbon.com/cli/internal/config"
@@ -33,6 +34,9 @@ type Options struct {
 	Notes []string
 	// UpdateNotice consulta en segundo plano si hay una versión nueva; nil la desactiva.
 	UpdateNotice func(ctx context.Context) (update.Outcome, bool)
+	// CoreSummary pide al abrir el resumen del trabajo activo y la Attention del
+	// Core (LXO-106); nil lo desactiva. Va aparte del aviso de versión.
+	CoreSummary func(ctx context.Context) ([]string, error)
 }
 
 type liveState struct {
@@ -75,7 +79,10 @@ type Model struct {
 	chat *chat.Chat
 	opts Options
 
-	input         textarea.Model
+	input textarea.Model
+	// inputShell y inputTheme: con qué estilos se pintó la entrada la última vez (ver syncInputStyle).
+	inputShell    bool
+	inputTheme    int
 	width, height int
 
 	send    func(tea.Msg)
@@ -148,11 +155,11 @@ type Model struct {
 	askEntry *entry
 	// imageEntry es la fila «Mostrar» abierta; pendingImage, la imagen que
 	// llegó antes que su fila.
-	imageEntry   *entry
+	imageEntry *entry
 	// liveTools son los pasos que dejaron un comando en segundo plano: se
 	// repintan cuando cambia cuántos siguen vivos (● pasa a ✓).
-	liveTools []*entry
-	liveSeen  int
+	liveTools    []*entry
+	liveSeen     int
 	pendingImage *tools.ShownImage
 	readGroup    *entry
 	browserGroup *entry
@@ -428,7 +435,7 @@ func (m *Model) refreshContext() {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.fetchQuota()}
+	cmds := []tea.Cmd{m.input.Focus(), m.updateNoticeCmd(), m.coreSummaryCmd(), m.fetchQuota()}
 	if m.login != nil {
 		cmds = append(cmds, m.startTick())
 	}
@@ -454,6 +461,31 @@ func (m *Model) renderMarkdown(text string, width int) string {
 		return text
 	}
 	return strings.Trim(out, "\n")
+}
+
+// shellInputStyles: con «!» delante, el texto, el prompt y el cursor van en el color de shell mientras se
+// escribe, para ver antes de enviar que la línea va a la terminal.
+func shellInputStyles() textarea.Styles {
+	styles := inputStyles()
+	for _, st := range []*textarea.StyleState{&styles.Focused, &styles.Blurred} {
+		st.Text, st.CursorLine, st.Prompt = sShell, sShell, sShell
+	}
+	styles.Cursor.Color = lipgloss.Color(pal.shell)
+	return styles
+}
+
+// syncInputStyle cambia los estilos de la entrada cuando empieza o deja de empezar por «!», o cambia el tema.
+func (m *Model) syncInputStyle() {
+	shell := strings.HasPrefix(m.input.Value(), "!")
+	if shell == m.inputShell && m.inputTheme == themeVersion {
+		return
+	}
+	m.inputShell, m.inputTheme = shell, themeVersion
+	if shell {
+		m.input.SetStyles(shellInputStyles())
+	} else {
+		m.input.SetStyles(inputStyles())
+	}
 }
 
 func inputStyles() textarea.Styles {
