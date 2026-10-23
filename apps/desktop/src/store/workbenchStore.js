@@ -57,6 +57,29 @@ export const selectSidePanels = (s) => {
 /** El cajón del botón derecho es independiente entre Ejecuciones y ADE. */
 export const selectRightDrawer = (s) => (s.mode === 'orch' && s.orchView === 'ade' ? s.adeDrawer : s.drawer);
 
+/**
+ * Selección del ADE persistida (LXO-120): solo IDs durables del Core, nunca títulos ni rutas.
+ * `v: 2` es la forma Task/Attempt; lo que no cumple la forma se descarta al leer (no se adivina).
+ * `attemptId` solo aparece si hay Attempt: la forma F2 `{projectId, taskId}` no cambia.
+ */
+export const ADE_SELECTION_STORAGE_KEY = 'lx_ade_selection';
+const durable = (value) => (typeof value === 'string' && value.trim() && value.length <= 200 ? value : null);
+
+export function normalizeAdeSelection(selection) {
+  const projectId = durable(selection?.projectId);
+  const taskId = projectId ? durable(selection?.taskId) : null;
+  const attemptId = taskId ? durable(selection?.attemptId) : null;
+  // Un Attempt es siempre `<task>-a<n>` (migración 008): otro valor no es un Attempt de esa Task.
+  const validAttempt = attemptId && attemptId.startsWith(`${taskId}-a`) && /^[1-9][0-9]*$/.test(attemptId.slice(taskId.length + 2));
+  return validAttempt ? { projectId, taskId, attemptId } : { projectId, taskId };
+}
+
+export function readPersistedAdeSelection() {
+  const raw = read(ADE_SELECTION_STORAGE_KEY, null);
+  if (!raw || typeof raw !== 'object' || raw.v !== 2) return { projectId: null, taskId: null };
+  return normalizeAdeSelection(raw);
+}
+
 const readOrchView = () => (read('lx_orch_view', 'executions') === 'ade' ? 'ade' : 'executions');
 
 export const useWorkbenchStore = create((set, get) => ({
@@ -64,7 +87,7 @@ export const useWorkbenchStore = create((set, get) => ({
   // Preferencia de presentación interna; nunca cambia las selecciones operativas.
   orchView: readOrchView(),
   // La selección observacional usa IDs Core y sobrevive al desmontaje de Orquestador.
-  adeSelection: { projectId: null, taskId: null },
+  adeSelection: readPersistedAdeSelection(),
   adeDrawer: false,
   // Jump Palette del ADE (LXO-102): abierta solo mientras AdeShell está montado; no se persiste.
   jumpPaletteOpen: false,
@@ -110,12 +133,11 @@ export const useWorkbenchStore = create((set, get) => ({
     set({ orchView, ...(orchView === 'ade' ? {} : { jumpPaletteOpen: false }) });
   },
 
-  setAdeSelection: (selection) => set({
-    adeSelection: {
-      projectId: selection?.projectId ?? null,
-      taskId: selection?.taskId ?? null,
-    },
-  }),
+  setAdeSelection: (selection) => {
+    const adeSelection = normalizeAdeSelection(selection);
+    write(ADE_SELECTION_STORAGE_KEY, { v: 2, ...adeSelection });
+    set({ adeSelection });
+  },
 
   setJumpPaletteOpen: (open) => set({ jumpPaletteOpen: Boolean(open) }),
 

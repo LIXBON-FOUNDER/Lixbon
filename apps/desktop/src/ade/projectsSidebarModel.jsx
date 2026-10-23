@@ -1,4 +1,5 @@
 import { ATTENTION_CATEGORIES } from './coreQueries';
+import { TASK_STATUS_LABELS } from './adeLabels';
 
 // Modelo compartido del sidebar Projects → Tasks (LXO-97): etiquetas, claves de fila, orden del
 // Core y piezas de presentación comunes a `ProjectsSidebar.jsx` y `ProjectTasks.jsx`.
@@ -6,16 +7,7 @@ import { ATTENTION_CATEGORIES } from './coreQueries';
  * Etiquetas de los ocho estados reales de Task (LXO-91). El Core no devuelve textos ni tiene un
  * estado `review`: la revisión se representa aparte como Attention `review_ready`, nunca como status.
  */
-export const TASK_STATUS_LABELS = Object.freeze({
-  starting: 'Iniciando',
-  running: 'En ejecución',
-  waiting: 'Esperando',
-  awaiting_terminal_approval: 'Esperando aprobación de terminal',
-  done: 'Terminada',
-  failed: 'Fallida',
-  stopped: 'Detenida',
-  exited: 'Cerrada',
-});
+export { TASK_STATUS_LABELS };
 
 /** Estados finales del contrato (LXO-91): nunca se presentan como activos. */
 export const FINAL_TASK_STATUSES = new Set(['done', 'failed', 'stopped', 'exited']);

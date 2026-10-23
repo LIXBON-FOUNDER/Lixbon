@@ -18,6 +18,9 @@ export function useCoreModel({ active = true, pollMs } = {}) {
   return coreModelFromState(state);
 }
 
+/** Antes de saber nada del Core: ni vNext ni aviso de legacy. */
+export const UNKNOWN_CORE_MODEL = Object.freeze({ mode: 'unknown', vNext: false, code: null, modelKey: 'unknown', retry: undefined });
+
 export function coreModelFromState(state) {
   const model = state.data?.core_model;
   if (model === 'task_attempt_v1' || model === 'legacy') {

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { useCoreQuery } from './useCoreQuery';
 import { ProjectTasks } from './ProjectTasks';
 import { useTreeNavigation } from './useTreeNavigation';
+import { UNKNOWN_CORE_MODEL } from './useCoreModel';
+import { coreErrorCode, isLegacyModelCode } from './coreModelContract';
+import { COPY } from './adeLabels';
+import { AttemptTreeContext, attemptKey, taskKeyOfAttemptKey } from './SidebarAttempts';
 import {
   ALL_TASKS_VIEW,
   EMPTY_PROJECT_IDS,
@@ -170,6 +174,8 @@ export function ProjectsSidebar({
   onExpandedChange,
   onSelectProject,
   onSelectTask,
+  onSelectAttempt,
+  coreModel: coreModelProp,
   onProjectSnapshot,
   onProjectsSnapshot,
 }) {
@@ -195,6 +201,15 @@ export function ProjectsSidebar({
   const [automaticFilterNotice, setAutomaticFilterNotice] = useState(null);
   const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
   const [activeKey, setActiveKey] = useState(null);
+  // LXO-120 · Task → Attempt. Todo esto es estado de presentación: no lee ni escribe el Core.
+  // La decisión legacy / task_attempt_v1 la toma `useCoreModel` en el host (AdeShell) y llega aquí.
+  const coreModel = coreModelProp ?? UNKNOWN_CORE_MODEL;
+  const [vNextRejected, setVNextRejected] = useState(null);
+  const vNext = coreModel.vNext && vNextRejected !== coreModel.modelKey;
+  const [taskExpandOverrides, setTaskExpandOverrides] = useState(() => new Map());
+  const [expandableTaskKeys, setExpandableTaskKeys] = useState(() => new Set());
+  const [attemptIdsByTaskKey, setAttemptIdsByTaskKey] = useState({});
+  const selectedAttemptId = selectedTaskId && typeof selection?.attemptId === 'string' ? selection.attemptId : null;
   const itemRefs = useRef(new Map());
   const previousSelectionRef = useRef(null);
   const pendingSelectionAnnouncementRef = useRef(null);
@@ -264,11 +279,21 @@ export function ProjectsSidebar({
         expanded: expanded.has(project.id), firstChildKey: taskIds[0] ? taskKey(project.id, taskIds[0]) : null,
       });
       for (const taskId of taskIds) {
-        nodes.push({ key: taskKey(project.id, taskId), kind: 'task', id: taskId, projectId: project.id, parentKey: pKey, expandable: false, expanded: false, firstChildKey: null });
+        const tKey = taskKey(project.id, taskId);
+        const expandable = vNext && expandableTaskKeys.has(tKey);
+        const isOpen = expandable && (taskExpandOverrides.get(tKey) ?? true);
+        const attemptIds = isOpen ? attemptIdsByTaskKey[tKey] ?? [] : [];
+        nodes.push({
+          key: tKey, kind: 'task', id: taskId, projectId: project.id, parentKey: pKey, expandable, expanded: isOpen,
+          firstChildKey: attemptIds[0] ? attemptKey(project.id, taskId, attemptIds[0]) : null,
+        });
+        for (const attemptId of attemptIds) {
+          nodes.push({ key: attemptKey(project.id, taskId, attemptId), kind: 'attempt', id: attemptId, parentKey: tKey, expandable: false, expanded: false, firstChildKey: null });
+        }
       }
     }
     return nodes;
-  }, [treeProjects, expanded, taskIdsByProject]);
+  }, [treeProjects, expanded, taskIdsByProject, vNext, expandableTaskKeys, taskExpandOverrides, attemptIdsByTaskKey]);
   const visibleKeys = useMemo(() => treeNodes.map((node) => node.key), [treeNodes]);
 
   // Solo una modificación de IDs controlados inicia scroll. La solicitud de Task sigue pendiente
@@ -369,7 +394,11 @@ export function ProjectsSidebar({
   // cercana sin llamar a `focus()`: una actualización en segundo plano nunca mueve el foco.
   const effectiveActiveKey = useMemo(() => {
     if (activeKey && visibleKeys.includes(activeKey)) return activeKey;
-    if (activeKey?.startsWith('t:')) {
+    if (activeKey?.startsWith('a:')) {
+      const parentTaskKey = taskKeyOfAttemptKey(activeKey);
+      if (visibleKeys.includes(parentTaskKey)) return parentTaskKey;
+    }
+    if (activeKey?.startsWith('t:') || activeKey?.startsWith('a:')) {
       const parentKey = projectKey(projectIdOfTaskKey(activeKey));
       if (visibleKeys.includes(parentKey)) return parentKey;
     }
@@ -423,8 +452,54 @@ export function ProjectsSidebar({
     },
     setExpanded: (node, next) => {
       if (node.kind === 'project') setExpandedTo(node.id, next);
+      if (node.kind === 'task') setTaskExpanded(node.key, next);
     },
   });
+
+  const setTaskExpanded = (key, next) => {
+    setTaskExpandOverrides((current) => {
+      if (current.get(key) === next) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
+  };
+  const onTaskExpandable = useCallback((key, expandable) => {
+    setExpandableTaskKeys((current) => {
+      if (current.has(key) === expandable) return current;
+      const updated = new Set(current);
+      if (expandable) updated.add(key); else updated.delete(key);
+      return updated;
+    });
+  }, []);
+  const onAttemptIds = useCallback((key, ids) => {
+    setAttemptIdsByTaskKey((current) => {
+      const previous = current[key];
+      if (ids === null) {
+        if (!previous) return current;
+        const { [key]: _removed, ...rest } = current;
+        return rest;
+      }
+      if (previous && previous.length === ids.length && previous.every((id, index) => id === ids[index])) return current;
+      return { ...current, [key]: ids };
+    });
+  }, []);
+  // Si una lectura vNext dice que el modelo no está activo, el sidebar vuelve a F2 para ese modelo.
+  const modelKey = coreModel.modelKey;
+  const onModelCode = useCallback((error) => {
+    if (isLegacyModelCode(coreErrorCode(error))) setVNextRejected(modelKey);
+  }, [modelKey]);
+  const activateAttempt = ({ projectId, taskId, attemptId }) => {
+    setActiveKey(attemptKey(projectId, taskId, attemptId));
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (selected.projectId !== projectId && project) onSelectProject?.(toProjectSummary(project));
+    if (!selectionControlled) setUncontrolledSelection({ projectId, taskId, taskProjectId: projectId });
+    onSelectAttempt?.({ projectId, taskId, attemptId });
+  };
+  const backToProject = (projectId) => {
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (project) selectProject(project);
+  };
 
   const selectedProject = projects.find((project) => project.id === selected.projectId);
   const projectViewSummary = useMemo(() => toProjectViewSummary(selectedProject), [selectedProject]);
@@ -477,7 +552,27 @@ export function ProjectsSidebar({
     ? `Filtro cambiado automáticamente a Todas para buscar la Task seleccionada (${automaticFilterNotice.taskId}).`
     : '';
 
+  const attemptTree = {
+    active,
+    pollMs,
+    vNext,
+    modelKey: vNext ? modelKey : 'legacy',
+    selection: { projectId: selected.projectId, taskId: selected.taskId, attemptId: selectedAttemptId },
+    isTaskExpanded: (key) => taskExpandOverrides.get(key) ?? true,
+    setTaskExpanded,
+    onTaskExpandable,
+    isActiveKey: (key) => key === effectiveActiveKey,
+    registerRef: registerItem,
+    onFocusKey,
+    onKeyDown: onTreeKeyDown,
+    onAttemptIds,
+    onModelCode,
+    onActivateAttempt: activateAttempt,
+    onBackToProject: backToProject,
+  };
+
   return (
+    <AttemptTreeContext.Provider value={attemptTree}>
     <section
       className={`ps${active ? '' : ' is-hidden'}`}
       aria-labelledby={headingId}
@@ -609,9 +704,13 @@ export function ProjectsSidebar({
       )}
 
       <p className="ps__note">
-        Solo lectura: sin Attempts, sin crear ni reintentar Tasks, sin arrastrar y sin marcar como leído.
+        Solo lectura: sin crear, reintentar ni lanzar Tasks o intentos, sin arrastrar y sin marcar como leído.
         La identidad de cada fila es su ID durable; host, origen, rama y worktree son metadato.
       </p>
+      {coreModel.mode === 'legacy' && (
+        <p className="ps__note ps__note--info" role="status" data-testid="core-model-legacy">{COPY.modelInactive}</p>
+      )}
     </section>
+    </AttemptTreeContext.Provider>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react';
 import { useCoreQuery } from './useCoreQuery';
+import { TASK_STATUS_LABELS } from './adeLabels';
 import './TaskWorkspace.css';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
@@ -10,16 +11,8 @@ import './TaskWorkspace.css';
 
 const MISSING = 'No informado';
 
-export const TASK_STATUS_LABELS = {
-  starting: 'Iniciando',
-  running: 'En ejecución',
-  waiting: 'Esperando',
-  awaiting_terminal_approval: 'Esperando aprobación de terminal',
-  done: 'Terminada',
-  failed: 'Fallida',
-  stopped: 'Detenida',
-  exited: 'Cerrada',
-};
+// Etiquetas compartidas con el sidebar en `adeLabels.js` (módulo único de textos).
+export { TASK_STATUS_LABELS };
 const ACTIVE_STATUSES = new Set(['starting', 'running', 'waiting', 'awaiting_terminal_approval']);
 const FINAL_STATUSES = new Set(['done', 'failed', 'stopped', 'exited']);
 

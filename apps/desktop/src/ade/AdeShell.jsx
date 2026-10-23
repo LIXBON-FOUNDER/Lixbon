@@ -12,6 +12,7 @@ import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
+import { useCoreModel } from './useCoreModel';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
 import './TaskWorkspace.css';
@@ -460,6 +461,9 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const workspaceActive = active && modeActive;
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
+  const selectedAttemptId = adeSelection.attemptId ?? null;
+  // ÚNICA decisión legacy / task_attempt_v1 del ADE (LXO-120); los hijos la reciben por props.
+  const coreModel = useCoreModel({ active: modeActive });
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
   const projectViewActive = Boolean(workspaceActive && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
@@ -618,6 +622,14 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     if (typeof projectId !== 'string' || !projectId.trim()) return;
     invalidateActivityRequest();
     setAdeSelection({ projectId, taskId: typeof taskId === 'string' && taskId.trim() ? taskId : null });
+    setWorkspaceView('workspace');
+    onActivate?.();
+  };
+  // LXO-120: un Attempt se selecciona por su trío durable; la Task sigue siendo la del Attempt.
+  const selectAttempt = ({ projectId, taskId, attemptId } = {}) => {
+    if (![projectId, taskId, attemptId].every((value) => typeof value === 'string' && value.trim())) return;
+    invalidateActivityRequest();
+    setAdeSelection({ projectId, taskId, attemptId });
     setWorkspaceView('workspace');
     onActivate?.();
   };
@@ -856,9 +868,13 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar
-                selection={{ projectId: selectedProjectId, taskId: selectedTaskId }}
+                selection={selectedAttemptId
+                  ? { projectId: selectedProjectId, taskId: selectedTaskId, attemptId: selectedAttemptId }
+                  : { projectId: selectedProjectId, taskId: selectedTaskId }}
+                coreModel={coreModel}
                 onSelectProject={selectProject}
                 onSelectTask={selectTask}
+                onSelectAttempt={selectAttempt}
                 onProjectSnapshot={onProjectSnapshot}
                 onProjectsSnapshot={onProjectsSnapshot}
                 active={modeActive}
@@ -989,6 +1005,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                 <div className="ssec__label">Selección ADE</div>
                 <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
                 <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
+                {selectedAttemptId && <div className="ade__selection-row"><span>Attempt ID</span><span className="mono">{selectedAttemptId}</span></div>}
               </section>
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
             </div>
