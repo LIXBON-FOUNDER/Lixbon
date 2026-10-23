@@ -929,6 +929,12 @@ corte**. Los construye solo `orch/worktree_ops.rs`; viajan en la transacción de
 * **Ninguno lleva rutas** (carpeta, repo) **ni el localizador del Artifact**: solo la rama, como los efectos de git.
 * Un `Unchanged` (mismo estado, seguimiento ya enlazado) no emite nada.
 
+## Corte Task/Attempt (LXO-117)
+`core.agentic_cut` (v1, `state`, entidad `core`, `idem_key = task_attempt_v1`): se confirmó el corte de datos
+([`CORTE_EJECUCION.md`](CORTE_EJECUCION.md)). Payload: `model` (`task_attempt_v1`), `backup` (solo el nombre de la copia
+`pre-f3-cut`) y `counts` (filas por entidad). Va en la MISMA transacción que el corte. **Sin activar**: no aparece
+mientras el arranque no ejecute el corte.
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.

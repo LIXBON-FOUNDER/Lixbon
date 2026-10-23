@@ -1,15 +1,15 @@
--- BORRADOR DE DISEÑO (LXO-112). NO es una migración: no vive en store/migrations/, build.rs no lo
--- embebe y ningún binario lo ejecuta. Fija, de forma ejecutable, el mapeo legacy_state → tablas que
--- la ADR (docs/core/CORTE_TASK_ATTEMPT.md) describe. `verificar.py` lo aplica a la fixture sobre TODAS las
--- migraciones publicadas anteriores al corte (001..008) y compara el resultado con `normalizado.after.json`.
+-- task_attempt_cut: corte de datos legacy_state -> Task/Attempt/ProviderSession/Thread/Worktree/Artifact (LXO-117).
+-- Mapeo y reglas: docs/core/CORTE_TASK_ATTEMPT.md (ADR de LXO-112). Contrato del corte: docs/core/CORTE_EJECUCION.md.
 --
--- El esquema de cada entidad llega antes, en su propia migración e INERTE (`007_tasks`: runs y tasks, LXO-113;
--- `008_attempts`: attempts, LXO-114; `009_sessions_threads`: provider_sessions, threads y thread_messages, LXO-115; `010_worktrees_artifacts`: worktrees y artifacts,
--- LXO-116).
--- Este borrador crea solo lo que todavía no está publicado; según se publique cada entidad, su CREATE sale de
--- aquí. El corte real será `NNN_task_attempt_cut` (el siguiente número libre) y, desde ese momento, su texto
--- no se edita (checksum). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms
--- epoch, identificadores TEXT.
+-- NO está en store/migrations/: el arranque NO lo aplica. Lo aplica solo `orch::agentic_cut::run`, después de la
+-- comprobación previa y de la copia `pre-f3-cut`, como la versión siguiente a la última migración publicada. Se
+-- activará (pasará a `migrations/NNN_task_attempt_cut.sql`) cuando el runtime use las tablas; desde entonces su texto
+-- no se edita (checksum). `verificar.py` lo aplica a la fixture y compara con `normalizado.after.json`.
+--
+-- El esquema de cada entidad ya está publicado e INERTE (007 tasks, 008 attempts, 009 sesiones y threads, 010
+-- worktrees y artifacts). Aquí solo va lo que todavía falta (columnas de runtime del Attempt, fases, decisiones,
+-- revisiones, bloqueos de entorno y residuo). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT),
+-- STRICT, ms epoch, identificadores TEXT.
 --
 -- Orden dentro de la transacción:
 --   0. Activar el modelo (`meta.agentic_model`): los triggers de la 007 impiden escribir sin esa clave.
@@ -29,8 +29,8 @@ INSERT INTO meta (key, value) VALUES ('agentic_model', 'task_attempt_v1');
 
 -- `attempts` ya existe (008_attempts, LXO-114): identidad, selección, ciclo de vida y resultado mínimo. Un retry o un
 -- seguimiento crea otra fila (n + 1); nunca se pisa. Las columnas de RUNTIME (cwd, política, entrega, modelo efectivo…)
--- llegan con la migración del slice que las usa, como `ALTER TABLE ... ADD COLUMN`; aquí se añaden para que el borrador
--- sea ejecutable de punta a punta y el corte real las omitirá según se vayan publicando.
+-- llegan con la migración del slice que las usa, como `ALTER TABLE ... ADD COLUMN`; las que ningún slice ha publicado
+-- todavía se añaden aquí, y salen de aquí si un slice las publica antes de activar el corte.
 ALTER TABLE attempts ADD COLUMN instruction           TEXT;                 -- encargo propio del intento (seguimiento); NULL en legacy
 ALTER TABLE attempts ADD COLUMN cwd                   TEXT    NOT NULL DEFAULT '';
 ALTER TABLE attempts ADD COLUMN checkout_branch       TEXT;                 -- rama del checkout cuando NO hay Worktree propio (raíz)

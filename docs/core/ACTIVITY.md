@@ -96,6 +96,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `worktree.found` | `activity.worktree.found` | `task` | info |
 | `worktree.removed` | `activity.worktree.removed` | `task`, `reason` ∈ `integrated` `discarded` `gone`, `branch_kept` | info |
 | `artifact.created` | `activity.artifact.created` | `task`, `n`, `kind` ∈ `report` `pull_request` `last_message` `commit` `file`, `verifiable` | info |
+| `core.agentic_cut` (LXO-117) | `activity.core.agentic_cut` | `tasks`, `attempts` (de `counts`) | info |
 | `decision.recorded` · `review` | `activity.decision.review.accepted` / `.rejected` | `decision_id`, `has_comment` | success / warning |
 | `decision.recorded` · `merge` | `activity.decision.merge.merged` / `.conflict` / `.error` / `.target_moved` | `decision_id`, `branch`, `squash`, `conflict_count?` | success / error / error / warning |
 | `decision.recorded` · `pr` | `activity.decision.pr.created` / `.already_exists` / `.error` | `decision_id`, `branch`, `has_pr_url` | success / info / error |
