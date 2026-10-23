@@ -13,7 +13,7 @@ use crate::store::{EventQuery, StoreError, DEFAULT_PAGE, MAX_PAGE};
 
 const API_VERSION: u8 = 1;
 const MAX_FILTER_CHARS: usize = 200;
-const PARAMS: [&str; 7] = [
+const PARAMS: [&str; 8] = [
     "cursor",
     "limit",
     "order",
@@ -21,6 +21,7 @@ const PARAMS: [&str; 7] = [
     "run_id",
     "target_kind",
     "target_id",
+    "attempt_id",
 ];
 
 fn invalid(message: impl Into<String>) -> String {
@@ -46,6 +47,7 @@ struct Params {
     run_id: Option<String>,
     target_kind: Option<String>,
     target_id: Option<String>,
+    attempt_id: Option<String>,
 }
 
 fn text_filter(map: &Map<String, Value>, name: &str) -> Result<Option<String>, String> {
@@ -110,6 +112,10 @@ fn parse_params(args: &Value) -> Result<Params, String> {
     if target_id.is_some() && target_kind.is_none() {
         return Err(invalid("`target_id` exige `target_kind`"));
     }
+    let attempt_id = text_filter(map, "attempt_id")?;
+    if attempt_id.is_some() && target_kind.is_some() {
+        return Err(invalid("`attempt_id` no se combina con `target_kind`: ya incluye los hechos de su sesión, Worktree, Artifacts y revisiones"));
+    }
     Ok(Params {
         cursor,
         limit,
@@ -118,6 +124,7 @@ fn parse_params(args: &Value) -> Result<Params, String> {
         run_id: text_filter(map, "run_id")?,
         target_kind,
         target_id,
+        attempt_id,
     })
 }
 
@@ -139,6 +146,7 @@ pub(super) fn list(
         run_id: params.run_id.clone(),
         entity_kind: params.target_kind.clone(),
         entity_id: params.target_id.clone(),
+        attempt_id: params.attempt_id.clone(),
         ..Default::default()
     };
     let page = match core.storage.events_page(&query) {

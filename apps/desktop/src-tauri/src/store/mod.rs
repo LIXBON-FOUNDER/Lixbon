@@ -50,6 +50,7 @@ mod worktrees;
 mod cut;
 mod reviews;
 mod tasks;
+mod model_pages;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
