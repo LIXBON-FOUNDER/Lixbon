@@ -84,6 +84,11 @@ pub enum StoreError {
     InvalidWorktree(String),
     /// La base no está lista para el corte Task/Attempt (versión, `legacy_state`, copia previa…). No se tocó nada.
     CutPreflight(String),
+    /// Una revisión no admite la operación (Attempt inexistente o que no arrancó…). No se escribió nada.
+    ReviewConflict(String),
+    /// Una revisión no cumple el contrato (commit que no es hexadecimal, comentario largo…). Se rechaza ANTES de tocar la
+    /// base.
+    InvalidReview(String),
 }
 
 impl StoreError {
@@ -197,6 +202,8 @@ impl fmt::Display for StoreError {
             StoreError::WorktreeConflict(m) => write!(f, "worktrees y artifacts: {m}"),
             StoreError::InvalidWorktree(m) => write!(f, "worktree o artifact inválido: {m}"),
             StoreError::CutPreflight(m) => write!(f, "corte Task/Attempt: {m}"),
+            StoreError::ReviewConflict(m) => write!(f, "reviews: {m}"),
+            StoreError::InvalidReview(m) => write!(f, "review inválida: {m}"),
         }
     }
 }

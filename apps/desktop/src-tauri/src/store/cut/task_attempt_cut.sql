@@ -67,24 +67,8 @@ CREATE TABLE attempt_phases (
 -- `provider_sessions`, `threads` y `thread_messages` ya existen (009_sessions_threads, LXO-115): solo vínculos declarados
 -- por el proveedor (`cwd_time` no es un vínculo), ciclo de vida `open` · `idle` · `closed` y Thread por Task.
 
-CREATE TABLE decisions (
-  id          INTEGER PRIMARY KEY,            -- id legacy conservado (los eventos lo citan)
-  task_id     TEXT    NOT NULL REFERENCES tasks (id),
-  attempt_id  TEXT    REFERENCES attempts (id),
-  kind        TEXT    NOT NULL,
-  actor       TEXT    NOT NULL,
-  detail_json TEXT    CHECK (detail_json IS NULL OR json_valid(detail_json)),
-  at          INTEGER NOT NULL
-) STRICT;
-
--- Review targeting: una revisión apunta a (Attempt, commit), no a la Task.
-CREATE TABLE reviews (
-  decision_id INTEGER PRIMARY KEY REFERENCES decisions (id),
-  attempt_id  TEXT    NOT NULL REFERENCES attempts (id),
-  head_commit TEXT    NOT NULL,
-  verdict     TEXT    NOT NULL CHECK (verdict IN ('accepted', 'rejected')),
-  at          INTEGER NOT NULL
-) STRICT;
+-- `decisions` y `reviews` ya existen (011_reviews, LXO-118): la revisión apunta a (Attempt, head_commit), con a lo sumo
+-- una activa por Attempt.
 
 CREATE TABLE env_blocks (
   scope TEXT NOT NULL,
@@ -101,8 +85,6 @@ CREATE TABLE legacy_residue (
   PRIMARY KEY (entity_kind, legacy_id, field)
 ) STRICT;
 
-CREATE INDEX decisions_by_attempt ON decisions (attempt_id, kind, id);
-CREATE INDEX reviews_by_attempt ON reviews (attempt_id, decision_id);
 
 -- ───────────────────────────── 2. Copia ─────────────────────────────
 -- `L` = cada Task del documento. Los booleanos de serde ausentes son `false` (serde(default)).
@@ -268,12 +250,22 @@ SELECT json_extract(d.value, '$.id'), json_extract(d.value, '$.task'), json_extr
 FROM legacy_state, json_each(legacy_state.doc, '$.decisions') AS d
 WHERE EXISTS (SELECT 1 FROM tasks WHERE id = json_extract(d.value, '$.task'));
 
-INSERT INTO reviews (decision_id, attempt_id, head_commit, verdict, at)
-SELECT id, attempt_id, json_extract(detail_json, '$.head_commit'), json_extract(detail_json, '$.decision'), at
+-- La última revisión válida de cada Attempt queda activa; las anteriores, `superseded` desde la siguiente (como hoy:
+-- integrar mira la última). El legado no registra cuándo cambió el HEAD: ninguna se marca `stale` aquí.
+CREATE TEMP TABLE f3_reviews AS
+SELECT id, attempt_id, json_extract(detail_json, '$.head_commit') AS head_commit,
+       json_extract(detail_json, '$.base_commit') AS base_commit, json_extract(detail_json, '$.decision') AS verdict, at
 FROM decisions
 WHERE kind = 'review'
   AND json_extract(detail_json, '$.head_commit') IS NOT NULL
   AND json_extract(detail_json, '$.decision') IN ('accepted', 'rejected');
+
+INSERT INTO reviews (decision_id, attempt_id, head_commit, base_commit, verdict, at, status, closed_at)
+SELECT r.id, r.attempt_id, r.head_commit, r.base_commit, r.verdict, r.at,
+       CASE WHEN n.id IS NULL THEN 'active' ELSE 'superseded' END, n.at
+FROM f3_reviews AS r
+LEFT JOIN f3_reviews AS n ON n.id = (SELECT min(x.id) FROM f3_reviews AS x WHERE x.attempt_id = r.attempt_id AND x.id > r.id);
+DROP TABLE f3_reviews;
 
 -- env_blocks admite los dos formatos legacy: una causa (texto) o una lista.
 INSERT INTO env_blocks (scope, cause)

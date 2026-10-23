@@ -298,6 +298,30 @@ fn casos() -> Vec<Caso> {
             "info",
         ),
         (
+            "review.completed",
+            Decision,
+            ("review", "5"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "verdict": "accepted", "head_commit": "c3c3c3", "has_comment": false }),
+            "activity.review.accepted",
+            "success",
+        ),
+        (
+            "review.completed",
+            Decision,
+            ("review", "6"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "verdict": "rejected", "head_commit": "c3c3c3", "has_comment": true }),
+            "activity.review.rejected",
+            "warning",
+        ),
+        (
+            "review.invalidated",
+            State,
+            ("review", "5"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "head_commit": "c3c3c3", "observed_head": "d4d4d4" }),
+            "activity.review.invalidated",
+            "warning",
+        ),
+        (
             "core.agentic_cut",
             State,
             ("core", "core"),
@@ -604,7 +628,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 80] = [
+const CLAVES: [&str; 83] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.completed",
@@ -659,6 +683,9 @@ const CLAVES: [&str; 80] = [
     "activity.spawn.requested",
     "activity.spawn.timeout",
     "activity.task.awaiting_terminal_approval",
+    "activity.review.accepted",
+    "activity.review.invalidated",
+    "activity.review.rejected",
     "activity.task.created",
     "activity.task.discarded",
     "activity.task.done",
