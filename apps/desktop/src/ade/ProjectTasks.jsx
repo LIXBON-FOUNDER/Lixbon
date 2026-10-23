@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { TASK_PAGE_LIMIT, listAdeTasks } from './coreQueries';
 import { useCoreQuery } from './useCoreQuery';
 import {
@@ -17,6 +17,7 @@ import {
   failureStatuses,
   Feedback,
 } from './projectsSidebarModel';
+import { AttemptChip, AttemptMeta, AttemptTreeContext, NoAttempts, TaskAttemptGroup, attemptSummaryOf } from './SidebarAttempts';
 
 // Tasks de un Project expandido del sidebar (LXO-97), extraídas de `ProjectsSidebar.jsx` sin cambiar
 // su comportamiento: lectura paginada por cursor opaco, filas de Task y su teclado.
@@ -27,14 +28,30 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
   const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
   const isFinal = FINAL_TASK_STATUSES.has(task.status);
   const tone = TASK_STATUS_TONES[task.status] || 'unknown';
+  // LXO-120 · TaskNode: con 1 Attempt, plegada y con el Attempt como chip; con N, expandida.
+  const tree = useContext(AttemptTreeContext);
+  const attempts = tree?.vNext ? task.attemptSummary ?? null : null;
+  const latest = attempts?.count > 0 ? attempts.latest : null;
+  const expandable = Boolean(attempts && attempts.count > 1);
+  const expandedAttempts = expandable && tree.isTaskExpanded(key, attempts.count);
+  // Con un Attempt seleccionado, la selección es el Attempt (un solo `aria-selected`).
+  const rowSelected = selected && !tree?.selection.attemptId;
+  const onTaskExpandable = tree?.onTaskExpandable;
+  useEffect(() => {
+    if (!onTaskExpandable) return undefined;
+    onTaskExpandable(key, expandable);
+    return () => onTaskExpandable(key, false);
+  }, [onTaskExpandable, key, expandable]);
+  const attemptsLabel = attempts ? `. ${attempts.count === 0 ? 'Sin intentos' : attempts.count === 1 ? '1 intento' : `${attempts.count} intentos`}` : '';
   return (
     <li
       role="treeitem"
       aria-level={2}
       aria-posinset={position}
       aria-setsize={setSize}
-      aria-selected={selected}
-      aria-label={`${stale ? 'Datos desactualizados. ' : ''}${task.title || task.id}. ${statusLabel}`}
+      aria-selected={rowSelected}
+      aria-expanded={expandable ? expandedAttempts : undefined}
+      aria-label={`${stale ? 'Datos desactualizados. ' : ''}${task.title || task.id}. ${statusLabel}${attemptsLabel}`}
       aria-describedby={metaId}
       data-task-id={task.id}
       data-project-id={project.id}
@@ -42,7 +59,7 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
       data-final={isFinal ? 'true' : 'false'}
       tabIndex={isActiveKey ? 0 : -1}
       ref={registerRef(key)}
-      className={`ps__item ps__item--task${selected ? ' is-selected' : ''}${isFinal ? ' is-final' : ''}${stale ? ' is-stale' : ''}`}
+      className={`ps__item ps__item--task${rowSelected ? ' is-selected' : ''}${isFinal ? ' is-final' : ''}${stale ? ' is-stale' : ''}`}
       onFocus={(event) => {
         if (event.target === event.currentTarget) onFocus();
       }}
@@ -72,13 +89,40 @@ function TaskRow({ project, task, selected, stale, position, setSize, isActiveKe
         {stale && <span className="ps__badge ps__badge--stale">Datos previos</span>}
         <span className="ps__name">{task.title || task.id}</span>
         <span className="ps__id mono">{task.id}</span>
+        {expandable && (
+          <button
+            type="button"
+            className="ps__toggle lk"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={(event) => {
+              event.stopPropagation();
+              tree.setTaskExpanded(key, !expandedAttempts);
+            }}
+          >
+            {expandedAttempts ? 'Ocultar intentos' : `${attempts.count} intentos`}
+          </button>
+        )}
       </span>
+      {attempts && (
+        <span className="ps__line ps__line--attempt" data-testid="task-attempt-summary">
+          {latest ? <AttemptChip attempt={latest} /> : <NoAttempts />}
+          {attempts.count > 1 && <span className="ps__hint">último de {attempts.count}</span>}
+        </span>
+      )}
       <span className="ps__meta" id={metaId}>
-        <span>Proveedor {metaValue(task.provider)}</span>
-        <span>Modelo {metaValue(task.model)}</span>
-        <span>Rama {asText(task.branch) ?? 'Solo en detalle'}</span>
-        <span>Worktree {asText(task.worktree) ?? 'Solo en detalle'}</span>
+        {latest ? <AttemptMeta attempt={latest} /> : (
+          <>
+            <span>Proveedor {metaValue(task.provider)}</span>
+            <span>Modelo {metaValue(task.model)}</span>
+            <span>Rama {asText(task.branch) ?? 'Solo en detalle'}</span>
+            <span>Worktree {asText(task.worktree) ?? 'Solo en detalle'}</span>
+          </>
+        )}
       </span>
+      {expandedAttempts && (
+        <TaskAttemptGroup projectId={project.id} taskId={task.id} taskTitle={task.title || task.id} expectedCount={attempts.count} />
+      )}
     </li>
   );
 }
@@ -108,7 +152,22 @@ export function ProjectTasks({
 }) {
   const projectId = project.id;
   const projectName = project.name || projectId;
-  const pageKey = `${projectId}\u0000${statusView.code}`;
+  const tree = useContext(AttemptTreeContext);
+  // Los cursores guardados son de un modelo concreto: al cambiar `core_model` se descartan.
+  const pageKey = `${projectId}\u0000${statusView.code}\u0000${tree?.modelKey ?? 'legacy'}`;
+  // LXO-120: resumen de Attempts por Task desde `task_list_v2` (LXO-119), solo con el modelo vNext
+  // activo. Cubre la primera página vNext (100 Tasks); más allá, la fila queda como en F2.
+  const v2 = useCoreQuery('task_list_v2', { project_id: projectId }, { enabled: Boolean(active && tree?.vNext), pollMs });
+  const attemptSummaries = useMemo(() => {
+    const map = new Map();
+    for (const item of Array.isArray(v2.data?.items) ? v2.data.items : []) {
+      const summary = attemptSummaryOf(item);
+      if (summary) map.set(item.id, summary);
+    }
+    return map;
+  }, [v2.data]);
+  const { onModelCode } = tree ?? {};
+  useEffect(() => { if (v2.error) onModelCode?.(v2.error); }, [onModelCode, v2.error]);
   const head = useCoreQuery('tasks_by_project', {
     project_id: projectId,
     status: statusView.code,
@@ -201,8 +260,9 @@ export function ProjectTasks({
   const headTasks = headData?.tasks ?? [];
   const headTaskIds = useMemo(() => new Set(headTasks.map((task) => task.id)), [headTasks]);
   const tasks = useMemo(() => {
-    return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder);
-  }, [headTasks, currentPages.items]);
+    return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder)
+      .map((task) => (attemptSummaries.has(task.id) ? { ...task, attemptSummary: attemptSummaries.get(task.id) } : task));
+  }, [headTasks, currentPages.items, attemptSummaries]);
   const staleTaskIds = useMemo(() => {
     const ids = (currentPages.stale || headFailed)
       ? currentPages.items.filter((task) => !headTaskIds.has(task.id)).map((task) => task.id)
