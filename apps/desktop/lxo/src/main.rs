@@ -46,6 +46,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
+  lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
+                                                  Lixbon (solo personas; se pierde lo posterior al corte)
   lxo stop <tarea> | lxo release <tarea> [--force]
   (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
    lxo merge y lxo pr se rechazan)
@@ -1018,6 +1020,29 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
+    }
+    // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
+    if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {
+        let args = json!({ "copy": a.s("copy").unwrap_or_default(), "cancel": a.b("cancel") });
+        return match call("core_restore", args, caller().as_deref()) {
+            Ok(r) if a.b("json") => {
+                println!("{}", serde_json::to_string_pretty(&r).unwrap_or_default());
+                ExitCode::SUCCESS
+            }
+            Ok(r) if a.b("cancel") => {
+                println!("{}", if r["cancelled"] == true { "Restauración retirada." } else { "No había ninguna restauración pedida." });
+                ExitCode::SUCCESS
+            }
+            Ok(r) => {
+                println!("Copia: {}", r["copy"].as_str().unwrap_or_default());
+                println!("{}", r["message"].as_str().unwrap_or_default());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("lxo: {e}");
+                ExitCode::FAILURE
+            }
+        };
     }
     // `lxo ask --resume <id>` reanuda la espera de una pregunta ya enviada.
     if a.at(0).as_deref() == Some("ask") && a.s("resume").is_some() {

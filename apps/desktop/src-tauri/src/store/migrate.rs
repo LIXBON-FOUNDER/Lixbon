@@ -138,6 +138,14 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
             }
         }
     }
+    // El corte Task/Attempt (LXO-117) no lo aplica nunca este migrador: es una barrera. Solo
+    // `Store::agentic_cut_recorded` lo aplica, con su copia previa y su comprobación semántica; hasta
+    // entonces, nada posterior a él se aplica.
+    let barrier = migrations
+        .iter()
+        .find(|m| m.name == super::cut::CUT_NAME && !rows.iter().any(|r| r.0 == m.version))
+        .map(|m| m.version - 1)
+        .unwrap_or(i64::MAX);
     let mut pending = vec![];
     for (i, m) in migrations.iter().enumerate() {
         if rows.iter().any(|r| r.0 == m.version) {
@@ -146,7 +154,7 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
         if m.version < applied_max {
             return Err(StoreError::OutOfOrderMigration { pending: m.version, applied: applied_max });
         }
-        if m.version > ceiling {
+        if m.version > ceiling || m.version > barrier {
             continue;
         }
         pending.push(i);

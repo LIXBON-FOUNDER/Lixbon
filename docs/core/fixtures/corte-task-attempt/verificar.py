@@ -30,11 +30,12 @@ RAIZ = AQUI.parents[3]
 MIGRACIONES = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "migrations"
 BEFORE = AQUI / "legacy_state.before.json"
 AFTER = AQUI / "normalizado.after.json"
-CORTE = RAIZ / "apps" / "desktop" / "src-tauri" / "src" / "store" / "cut" / "task_attempt_cut.sql"
+# El corte es una migración publicada (LXO-234), pero el migrador no la aplica: la aplica el corte.
+CORTE = next(MIGRACIONES.glob("*_task_attempt_cut.sql"))
 # «F2» = cualquier binario anterior al corte, aunque ya traiga el esquema inerte (007 tasks, 008 attempts, 009 sesiones y
 # threads…): la última migración publicada. El corte toma el número siguiente.
-VERSION_F2 = max(int(f.name[:3]) for f in MIGRACIONES.glob("*.sql"))
-VERSION_CORTE = VERSION_F2 + 1
+VERSION_CORTE = int(CORTE.name[:3])
+VERSION_F2 = VERSION_CORTE - 1
 LEGACY_REV = 42
 
 TABLAS = ["runs", "tasks", "attempts", "attempt_phases", "worktrees", "provider_sessions", "threads",
@@ -90,7 +91,7 @@ def base_f2(path, doc):
     """S0: una base con 001..VERSION_F2 aplicadas, un Project registrado y legacy_state = doc."""
     c = conectar(path)
     c.execute("PRAGMA journal_mode = WAL")
-    for f in sorted(MIGRACIONES.glob("*.sql")):
+    for f in sorted(m for m in MIGRACIONES.glob("*.sql") if int(m.name[:3]) < VERSION_CORTE):
         n = int(f.name[:3])
         if n > VERSION_F2:
             break

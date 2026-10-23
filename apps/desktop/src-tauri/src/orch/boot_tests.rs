@@ -172,7 +172,7 @@ fn el_primer_arranque_promociona_y_deja_todo_coherente() {
     // Base: cruzó la valla, es autoritativa y lleva la misma promoción.
     let f = facts(&core);
     // El primer arranque promueve Y migra hasta la última migración del binario (la 003 en adelante).
-    assert!(f.fenced && f.db_version == store::embedded().last().unwrap().version);
+    assert!(f.fenced && f.db_version == (store::cut_migration().version - 1));
     assert_eq!((f.mode.as_deref(), f.row_rev), (Some(MODE_SQLITE_AUTHORITATIVE), Some(1)));
     assert_eq!(f.auth.as_ref().unwrap().promotion_id, m.promotion_id);
     assert_eq!(f.db_id.as_deref(), Some(m.db_id.as_str()));
@@ -238,7 +238,7 @@ fn tras_promocionar_c1_y_c2a_no_pueden_abrir_la_instalacion() {
     let (_l, data, core_dir) = dirs();
     promovida(&data, &core_dir, "previa");
     // Es la llamada de `Core::init` de C1/C2a: su `embedded()` solo conocía la 001.
-    let ultima = store::embedded().last().unwrap().version;
+    let ultima = store::cut_migration().version - 1;
     match Store::open_with(&core_dir, &db_version_c1(), "c2a") {
         Err(store::StoreError::DatabaseNewer { db_version, binary_version: 1 }) if db_version == ultima => {}
         otro => panic!("se esperaba DatabaseNewer, salió {otro:?}"),

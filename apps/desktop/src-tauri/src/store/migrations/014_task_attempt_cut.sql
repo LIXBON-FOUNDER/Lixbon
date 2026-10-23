@@ -1,10 +1,10 @@
 -- task_attempt_cut: corte de datos legacy_state -> Task/Attempt/ProviderSession/Thread/Worktree/Artifact (LXO-117).
 -- Mapeo y reglas: docs/core/CORTE_TASK_ATTEMPT.md (ADR de LXO-112). Contrato del corte: docs/core/CORTE_EJECUCION.md.
 --
--- NO está en store/migrations/: el arranque NO lo aplica. Lo aplica solo `orch::agentic_cut::run`, después de la
--- comprobación previa y de la copia `pre-f3-cut`, como la versión siguiente a la última migración publicada. Se
--- activará (pasará a `migrations/NNN_task_attempt_cut.sql`) cuando el runtime use las tablas; desde entonces su texto
--- no se edita (checksum). `verificar.py` lo aplica a la fixture y compara con `normalizado.after.json`.
+-- Es la 014, pero el migrador general NO la aplica nunca (`migrate::plan` se detiene antes): la aplica solo
+-- `orch::agentic_cut::run`, después de la comprobación previa y de la copia `pre-f3-cut`, en el arranque y con el
+-- interruptor de dogfood (LXO-234, `docs/core/CORTE_EJECUCION.md` § Activación). Publicada: su texto no se edita
+-- (checksum). `verificar.py` la aplica a la fixture y compara con `normalizado.after.json`.
 --
 -- El esquema de cada entidad ya está publicado e INERTE (007 tasks, 008 attempts, 009 sesiones y threads, 010
 -- worktrees y artifacts, 011 revisiones, 012 runtime del Attempt, 013 runtime sobre las tablas). Aquí solo va lo que

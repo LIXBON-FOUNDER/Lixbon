@@ -123,7 +123,7 @@ fn la_004_se_aplica_sobre_una_base_con_la_003_conservando_todo() {
         p.id
     };
     let s = abre(tmp.path());
-    assert_eq!(s.schema_version().unwrap(), embedded().last().unwrap().version, "sube a la última migración del binario");
+    assert_eq!(s.schema_version().unwrap(), (super::cut_migration().version - 1), "sube a la última migración del binario");
     assert_eq!(s.migration_report().from_version, 3, "se aplicaron 004 y las siguientes");
     assert_eq!(s.project(&id).unwrap().unwrap().name, "api", "la 004 no toca los proyectos");
     assert_eq!(s.meta("marca").unwrap().as_deref(), Some("intacta"));
@@ -137,7 +137,7 @@ fn una_base_con_la_005_no_la_abre_un_binario_que_no_la_conoce() {
     let r = Store::open_with(tmp.path(), &hasta_la_003(), "t");
     assert!(matches!(r, Err(StoreError::DatabaseNewer { .. }) | Err(StoreError::UnknownMigration { .. })), "{r:?}");
     // Y no se modificó nada: con el binario completo sigue abriendo igual.
-    assert_eq!(abre(tmp.path()).schema_version().unwrap(), embedded().last().unwrap().version);
+    assert_eq!(abre(tmp.path()).schema_version().unwrap(), (super::cut_migration().version - 1));
 }
 
 #[test]
