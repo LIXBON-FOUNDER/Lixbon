@@ -929,6 +929,17 @@ corte**. Los construye solo `orch/worktree_ops.rs`; viajan en la transacción de
 * **Ninguno lleva rutas** (carpeta, repo) **ni el localizador del Artifact**: solo la rama, como los efectos de git.
 * Un `Unchanged` (mismo estado, seguimiento ya enlazado) no emite nada.
 
+## Review targeting (LXO-118)
+Hechos de la revisión sobre un Attempt ([`REVIEWS.md`](REVIEWS.md)). **Inertes hasta el corte**. Los construye solo
+`orch/review_ops.rs`.
+
+| kind | v | class | entidad | Payload | Quién |
+|---|---|---|---|---|---|
+| `review.completed` | 1 | decision | `review` | `task`, `attempt`, `n`, `verdict` ∈ `accepted` · `rejected`, `head_commit`, `base_commit?`, `supersedes?`, `has_comment` | persona |
+| `review.invalidated` | 1 | state | `review` | `task`, `attempt`, `n`, `head_commit`, `observed_head` | Core · persona |
+
+* `entity_id` = id de la decisión. El comentario nunca viaja (solo `has_comment`).
+
 ## Corte Task/Attempt (LXO-117)
 `core.agentic_cut` (v1, `state`, entidad `core`, `idem_key = task_attempt_v1`): se confirmó el corte de datos
 ([`CORTE_EJECUCION.md`](CORTE_EJECUCION.md)). Payload: `model` (`task_attempt_v1`), `backup` (solo el nombre de la copia

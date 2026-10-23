@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 49] = [
+pub(super) const KINDS: [&str; 51] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -67,6 +67,8 @@ pub(super) const KINDS: [&str; 49] = [
     "worktree.removed",
     "artifact.created",
     "core.agentic_cut",
+    "review.completed",
+    "review.invalidated",
     "decision.recorded",
     "effect.observed",
     "project.registered",
@@ -107,6 +109,8 @@ const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 const ADOPTED_PROVENANCE: [&str; 2] = ["adopted", "external"];
 /// Por qué se quitó un Worktree (`worktree.removed`).
 const WORKTREE_REMOVAL: [&str; 3] = ["integrated", "discarded", "gone"];
+/// Veredicto de una revisión (`review.completed`).
+const VERDICTS: [&str; 2] = ["accepted", "rejected"];
 /// Tipos de Artifact (`artifact.created`).
 const ARTIFACT_KINDS: [&str; 5] = ["report", "pull_request", "last_message", "commit", "file"];
 /// Campos de la intención que puede nombrar `task.updated`.
@@ -524,6 +528,19 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             "activity.artifact.created",
             Visual::Info,
             vec![("task", id(p, "task")), ("n", number(p, "n")), ("kind", closed(p, "kind", &ARTIFACT_KINDS)), ("verifiable", flag(p, "verifiable"))],
+        ),
+        "review.completed" => {
+            let accepted = one_of(p, "verdict", &VERDICTS)? == "accepted";
+            rendered(
+                if accepted { "activity.review.accepted" } else { "activity.review.rejected" },
+                if accepted { Visual::Success } else { Visual::Warning },
+                vec![("task", id(p, "task")), ("n", number(p, "n")), ("head_commit", token(p, "head_commit")), ("has_comment", flag(p, "has_comment"))],
+            )
+        }
+        "review.invalidated" => rendered(
+            "activity.review.invalidated",
+            Visual::Warning,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("head_commit", token(p, "head_commit")), ("observed_head", token(p, "observed_head"))],
         ),
         "core.agentic_cut" => rendered(
             "activity.core.agentic_cut",
