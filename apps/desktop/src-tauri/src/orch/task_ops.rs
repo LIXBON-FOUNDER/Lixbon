@@ -123,5 +123,5 @@ pub(super) fn remove(st: &mut Store, ctx: &MutationContext, id: &str, policy: Ta
     let cause = match policy {
         TaskRemoval::IfUnused => RemovalCause::Unused,
     };
-    st.task_remove_recorded(id, policy, |t| finalize_single(event_kinds::task_removed(&t.id, &t.run_id, t.project_id.clone(), cause), ctx, at))
+    st.task_remove_recorded(id, policy, |t| finalize_single(event_kinds::task_removed(&t.id, &t.run_id, t.project_id.clone(), cause, None), ctx, at))
 }

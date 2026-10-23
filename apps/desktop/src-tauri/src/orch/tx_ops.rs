@@ -19,6 +19,10 @@
 //! * **Orden**: primero el hecho de contenido (`task.phase`, `task.question`, `task.reply`) y después
 //!   las transiciones de estado que provocó; en `close_run`, las transiciones y al final `run.closed`.
 //! * Los internos (`post`, `touch`, `mark_read`…) NO emiten: son consecuencias, no hechos.
+//! * **Runtime sobre las tablas (LXO-233, ADR D9):** con esa persistencia, los cambios de estado de ejecución se emiten
+//!   como `attempt.*` del Attempt actual (`attempt.requested` al nacer una Task o un seguimiento) y **no** como
+//!   `task.status_changed`. Los hechos de la Task (`task.created`, `task.phase`, `task.question`, `task.removed`…) no
+//!   cambian. Un mismo hecho nunca aparece en los dos modelos.
 
 use std::collections::BTreeMap;
 
@@ -103,7 +107,8 @@ impl Tx {
         self.tasks.values().map(|t| (t.id.clone(), (t.status, t.run.clone()))).collect()
     }
 
-    /// Emite UN `task.status_changed` por cada tarea cuyo estado difiere del de `before`.
+    /// Emite UN `task.status_changed` por cada tarea cuyo estado difiere del de `before` o, con el runtime sobre las
+    /// tablas, los `attempt.*` de esa transición ([`Tx::push_attempt_changes`]).
     fn push_status_changes(&mut self, before: Snapshot, cause: Option<&str>) {
         let changes: Vec<_> = before
             .into_iter()
@@ -113,8 +118,68 @@ impl Tx {
             })
             .collect();
         for (id, run, from, to) in changes {
-            self.try_push_event(ev::task_status_changed(&id, &run, from, to, cause.map(String::from)));
+            if self.attempt_model() {
+                self.push_attempt_changes(&id, from, to, cause);
+            } else {
+                self.try_push_event(ev::task_status_changed(&id, &run, from, to, cause.map(String::from)));
+            }
         }
+    }
+
+    /// Los hechos de ejecución de una transición, sobre el Attempt actual. De un final a uno activo es un seguimiento:
+    /// nace el Attempt `n + 1` (`attempt.requested`) y arranca desde `starting`, como en las tablas.
+    fn push_attempt_changes(&mut self, id: &str, from: Status, to: Status, cause: Option<&str>) {
+        let Some(t) = self.tasks.get(id).cloned() else { return };
+        let mut n = self.attempt_n.get(id).copied().unwrap_or(1);
+        let mut from = from;
+        if from.is_final() && !to.is_final() {
+            n += 1;
+            self.state_mut().attempt_n.insert(id.to_string(), n);
+            self.try_push_event(ev::runtime_new_attempt(&t, n));
+            self.mark_attempt_request(id, n);
+            from = Status::Starting;
+        }
+        for draft in ev::runtime_attempt_transition(&t, n, from, to, cause) {
+            self.try_push_event(draft);
+        }
+    }
+
+    /// Rehace cada `attempt.requested` de esta mutación con la Task tal como quedó: su selección (el perfil que
+    /// `create_child` fija después de crearla) es la de la fila del Attempt. Lo llama la frontera al finalizar.
+    pub(super) fn refresh_attempt_requests(&mut self) {
+        for (idx, task, n) in self.take_attempt_requests() {
+            if let Some(t) = self.tasks.get(&task).cloned() {
+                self.replace_draft(idx, ev::runtime_new_attempt(&t, n));
+            }
+        }
+    }
+
+    /// Con el runtime sobre las tablas, una Task nueva nace con su Attempt 1 (`attempt.requested`).
+    fn push_attempt_created(&mut self, id: &str) {
+        if !self.attempt_model() {
+            return;
+        }
+        let Some(t) = self.tasks.get(id).cloned() else { return };
+        self.state_mut().attempt_n.insert(id.to_string(), 1);
+        self.try_push_event(ev::runtime_new_attempt(&t, 1));
+        self.mark_attempt_request(id, 1);
+    }
+
+    /// Con el runtime sobre las tablas, retirar una Task para su Attempt activo (`attempt.stopped`): es lo que queda en
+    /// las tablas (D24). Devuelve el Attempt actual, que `task.removed` lleva para cerrar su Attention.
+    fn push_attempt_retired(&mut self, id: &str) -> Option<u32> {
+        if !self.attempt_model() {
+            return None;
+        }
+        let t = self.tasks.get(id).cloned()?;
+        let n = self.attempt_n.get(id).copied().unwrap_or(1);
+        if !t.status.is_final() {
+            for draft in ev::runtime_attempt_transition(&t, n, t.status, Status::Stopped, None) {
+                self.try_push_event(draft);
+            }
+        }
+        self.state_mut().attempt_n.remove(id);
+        Some(n)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -130,6 +195,7 @@ impl Tx {
         if let Some(t) = self.tasks.get(&task).cloned() {
             self.try_push_event(ev::task_created(&t));
         }
+        self.push_attempt_created(&task);
         (run, task)
     }
 
@@ -141,6 +207,7 @@ impl Tx {
         if let Some(t) = self.tasks.get(&id).cloned() {
             self.try_push_event(ev::task_created(&t));
         }
+        self.push_attempt_created(&id);
         Ok(id)
     }
 
@@ -153,6 +220,7 @@ impl Tx {
         if let Some(t) = self.tasks.get(&id).cloned() {
             self.try_push_event(ev::task_created(&t).map(|d| d.correlated(pending_id)));
         }
+        self.push_attempt_created(&id);
         Ok(id)
     }
 
@@ -296,7 +364,11 @@ impl Tx {
             return;
         };
         let project = self.tasks.get(&r.root).and_then(|t| t.project_id.clone());
-        let tasks = self.tasks.values().filter(|t| t.run == run).count();
+        let ids: Vec<String> = self.tasks.values().filter(|t| t.run == run).map(|t| t.id.clone()).collect();
+        let tasks = ids.len();
+        for id in &ids {
+            self.push_attempt_retired(id);
+        }
         self.state_mut().remove_run(run);
         self.try_push_event(ev::run_removed(run, project, tasks));
     }
@@ -452,8 +524,15 @@ impl Tx {
             Some(t) => (t.run.clone(), t.project_id.clone()),
             None => return Err(format!("La tarea {id} no existe")),
         };
+        if let Some(t) = self.tasks.get(id) {
+            // Lo que bloquea retirarla se comprueba antes de emitir nada (el Attempt no se para por un rechazo).
+            if self.runs.get(&t.run).is_some_and(|r| r.root == id) || self.tasks.values().any(|c| c.parent.as_deref() == Some(id)) {
+                return self.state_mut().remove_task(id);
+            }
+        }
+        let attempt = self.push_attempt_retired(id);
         self.state_mut().remove_task(id)?;
-        self.try_push_event(ev::task_removed(id, &run, project, ev::RemovalCause::LaunchFailed).map(|d| d.by(Actor::System, Channel::Core)));
+        self.try_push_event(ev::task_removed(id, &run, project, ev::RemovalCause::LaunchFailed, attempt).map(|d| d.by(Actor::System, Channel::Core)));
         Ok(())
     }
 }

@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 55] = [
+pub(crate) const MESSAGE_KEYS: [&str; 89] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -66,6 +66,41 @@ pub(crate) const MESSAGE_KEYS: [&str; 55] = [
     "activity.attention.risk_acted",
     "activity.attention.created",
     "activity.attention.resolved",
+    // Modelo Task/Attempt (LXO-233): intención de la Task, ejecución del Attempt y sus entidades.
+    "activity.task.intent_created",
+    "activity.task.updated",
+    "activity.task.discarded",
+    "activity.task.restored",
+    "activity.attempt.requested",
+    "activity.attempt.approved",
+    "activity.attempt.rejected",
+    "activity.attempt.started",
+    "activity.attempt.completed",
+    "activity.attempt.failed",
+    "activity.attempt.stopped",
+    "activity.attempt.waiting",
+    "activity.attempt.awaiting_terminal_approval",
+    "activity.attempt.resumed",
+    "activity.attempt.exited",
+    "activity.attempt.integrated",
+    "activity.provider_session.opened",
+    "activity.provider_session.bound",
+    "activity.provider_session.resumed",
+    "activity.provider_session.detached",
+    "activity.provider_session.closed",
+    "activity.thread.created",
+    "activity.thread.summarized",
+    "activity.worktree.created",
+    "activity.worktree.adopted",
+    "activity.worktree.attached",
+    "activity.worktree.missing",
+    "activity.worktree.found",
+    "activity.worktree.removed",
+    "activity.artifact.created",
+    "activity.review.accepted",
+    "activity.review.rejected",
+    "activity.review.invalidated",
+    "activity.core.agentic_cut",
     "activity.unknown",
 ];
 
@@ -127,6 +162,55 @@ fn resolution(code: &str) -> Option<&'static str> {
         "acted" => "se tomó una acción",
         "condition_cleared" => "la condición dejó de ocurrir",
         "superseded" => "fue reemplazada por otra incidencia",
+        _ => return None,
+    })
+}
+
+const STOP_CAUSES: [&str; 2] = ["cancelled", "run_closed"];
+const ACTIVE_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
+
+fn intent_field(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "title" => "el título",
+        "spec" => "el encargo",
+        _ => return None,
+    })
+}
+
+fn attempt_failure(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "launch_failed" => "no llegó a arrancar",
+        "terminal_approval_timeout" => "nadie aprobó en la terminal a tiempo",
+        "agent_idle_timeout" => "el agente dejó de dar señales",
+        "agent_reported" => "el agente informó el fallo",
+        _ => return None,
+    })
+}
+
+fn session_binding(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "stream_json" => "por stream-json",
+        "session_id" => "por su id de sesión",
+        _ => return None,
+    })
+}
+
+fn worktree_removal(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "integrated" => "integrado",
+        "discarded" => "descartado",
+        "gone" => "ya no existía",
+        _ => return None,
+    })
+}
+
+fn artifact_kind(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "report" => "un informe",
+        "pull_request" => "un pull request",
+        "last_message" => "su último mensaje",
+        "commit" => "un commit",
+        "file" => "un archivo",
         _ => return None,
     })
 }
@@ -334,6 +418,75 @@ fn spawn_resolved(key: &str, a: &A) -> Option<String> {
     ))
 }
 
+/// «intento N de la tarea T» (sin artículo): las claves de un Attempt nombran siempre su Task y su número.
+fn attempt_of(a: &A) -> Option<String> {
+    let task = a.text("task")?;
+    let n = a.number("n")?;
+    Some(format!("intento {n} de la tarea {task}"))
+}
+
+fn run_closed(cause: &str) -> &'static str {
+    if cause == "run_closed" {
+        " al cerrarse la ejecución"
+    } else {
+        ""
+    }
+}
+
+fn attempt(key: &str, a: &A) -> Option<String> {
+    let at = attempt_of(a)?;
+    Some(match key {
+        "activity.attempt.approved" => format!("Se aprobó el {at}."),
+        "activity.attempt.started" => format!("Empezó el {at}."),
+        "activity.attempt.integrated" => format!("Se integró el trabajo del {at}."),
+        "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
+        "activity.attempt.completed" => {
+            let summary = a.boolean("has_summary")?;
+            format!("El {at} terminó correctamente{}.", if summary { " con resumen" } else { "" })
+        }
+        "activity.attempt.failed" => {
+            let reason = a.code_in("reason", attempt_failure)?;
+            a.boolean("has_summary")?;
+            format!("El {at} falló: {reason}.")
+        }
+        "activity.attempt.stopped" => {
+            a.code("from", &ACTIVE_FROM)?;
+            format!("Se detuvo el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?))
+        }
+        _ => {
+            a.code("from", &ACTIVE_FROM)?;
+            let state = match key {
+                "activity.attempt.waiting" => "espera una respuesta",
+                "activity.attempt.awaiting_terminal_approval" => "espera aprobación en la terminal",
+                "activity.attempt.resumed" => "siguió en ejecución",
+                "activity.attempt.exited" => "salió sin cerrarse",
+                _ => return None,
+            };
+            format!("El {at} {state}.")
+        }
+    })
+}
+
+fn review(key: &str, a: &A) -> Option<String> {
+    let at = attempt_of(a)?;
+    let head = a.text("head_commit")?;
+    if key == "activity.review.invalidated" {
+        let observed = a.text("observed_head")?;
+        return Some(format!("La revisión del {at} sobre {head} dejó de valer: la rama está en {observed}."));
+    }
+    let comment = a.boolean("has_comment")?;
+    let verdict = if key == "activity.review.accepted" { "aceptó" } else { "rechazó" };
+    Some(format!("Se {verdict} la revisión del {at} sobre {head}{}.", if comment { " con comentario" } else { "" }))
+}
+
+/// Una rama opcional: ausente, `null` o texto vacío se omiten; otro tipo deja el item sin texto.
+fn optional_branch(a: &A) -> Option<Option<String>> {
+    if a.present("branch") && !a.get("branch").is_string() {
+        return None;
+    }
+    Some(a.text("branch"))
+}
+
 fn worktree_removed(a: &A) -> Option<String> {
     let effect = a.text("effect_id")?;
     let removed = a.boolean("worktree_removed")?;
@@ -420,9 +573,144 @@ fn format(key: &str, a: &A) -> Option<String> {
                 "La tarea respondió a la pregunta {question} con el mensaje {message}."
             ))
         }
-        "activity.task.removed" => {
-            a.code("cause", &["launch_failed"])?;
-            Some("Se eliminó la tarea porque falló su lanzamiento.".into())
+        "activity.task.removed" => Some(
+            if a.code("cause", &["launch_failed", "unused"])? == "unused" {
+                "Se eliminó la tarea porque no llegó a usarse."
+            } else {
+                "Se eliminó la tarea porque falló su lanzamiento."
+            }
+            .into(),
+        ),
+        "activity.task.intent_created" => {
+            let title = a.text("title")?;
+            let depth = a.number("depth")?;
+            let parent = a.optional_text("parent")?;
+            Some(format!(
+                "Se creó la tarea «{title}»{}.",
+                details(&[parent.map(|p| format!("depende de {p}")), Some(format!("profundidad {depth}"))])
+            ))
+        }
+        "activity.task.updated" => {
+            let changed = a.get("changed").as_array()?;
+            if changed.is_empty() {
+                return None;
+            }
+            let fields = changed.iter().map(|f| f.as_str().and_then(intent_field)).collect::<Option<Vec<_>>>()?;
+            let title = a.optional_text("title")?;
+            Some(format!(
+                "Se actualizó {} de la tarea{}.",
+                fields.join(" y "),
+                title.map(|t| format!(" («{t}»)")).unwrap_or_default()
+            ))
+        }
+        "activity.task.discarded" => Some("Se descartó la tarea.".into()),
+        "activity.task.restored" => Some("Se recuperó la tarea descartada.".into()),
+        "activity.attempt.requested" => {
+            let at = attempt_of(a)?;
+            let provider = a.text("provider")?;
+            let external = a.boolean("external")?;
+            let approval = a.boolean("approval_required")?;
+            let model = a.optional_text("model")?;
+            let effort = a.optional_text("effort")?;
+            let role = a.optional_text("role")?;
+            let profile = a.optional_text("profile")?;
+            Some(format!(
+                "Se pidió el {at} con {provider}{}.",
+                details(&[
+                    role.map(|r| format!("rol {r}")),
+                    model.map(|m| format!("modelo {m}")),
+                    effort.map(|e| format!("esfuerzo {e}")),
+                    profile.map(|p| format!("perfil {p}")),
+                    external.then(|| "externo".into()),
+                    approval.then(|| "pendiente de aprobación".into()),
+                ])
+            ))
+        }
+        "activity.attempt.approved"
+        | "activity.attempt.rejected"
+        | "activity.attempt.started"
+        | "activity.attempt.completed"
+        | "activity.attempt.failed"
+        | "activity.attempt.stopped"
+        | "activity.attempt.waiting"
+        | "activity.attempt.awaiting_terminal_approval"
+        | "activity.attempt.resumed"
+        | "activity.attempt.exited"
+        | "activity.attempt.integrated" => attempt(key, a),
+        "activity.provider_session.opened" => {
+            let at = attempt_of(a)?;
+            let provider = a.text("provider")?;
+            let resumable = a.boolean("resumable")?;
+            let bound = a.boolean("bound")?;
+            Some(format!(
+                "Se abrió una sesión de {provider} en el {at}{}.",
+                details(&[resumable.then(|| "reanudable".into()), bound.then(|| "vinculada".into())])
+            ))
+        }
+        "activity.provider_session.bound" => {
+            let task = a.text("task")?;
+            let binding = a.code_in("binding", session_binding)?;
+            Some(format!("La sesión de la tarea {task} quedó vinculada {binding}."))
+        }
+        "activity.provider_session.resumed" => {
+            let task = a.text("task")?;
+            let n = a.number("n")?;
+            Some(format!("Se reanudó la sesión de la tarea {task} en el intento {n}."))
+        }
+        "activity.provider_session.detached" => Some(format!("La sesión de la tarea {} quedó en espera.", a.text("task")?)),
+        "activity.provider_session.closed" => {
+            let task = a.text("task")?;
+            a.code("from", &["open", "idle"])?;
+            Some(format!("Se cerró la sesión de la tarea {task}."))
+        }
+        "activity.thread.created" => Some(format!("Se abrió la conversación de la tarea {}.", a.text("task")?)),
+        "activity.thread.summarized" => {
+            let task = a.text("task")?;
+            Some(if a.boolean("has_summary")? {
+                format!("Se resumió la conversación de la tarea {task}.")
+            } else {
+                format!("Se quitó el resumen de la conversación de la tarea {task}.")
+            })
+        }
+        "activity.worktree.created" => {
+            let at = attempt_of(a)?;
+            let branch = optional_branch(a)?;
+            Some(format!("Se creó el worktree del {at}{}.", branch.map(|b| format!(" para «{b}»")).unwrap_or_default()))
+        }
+        "activity.worktree.adopted" => {
+            let at = attempt_of(a)?;
+            let external = a.code("provenance", &["adopted", "external"])? == "external";
+            let branch = optional_branch(a)?;
+            Some(format!(
+                "{} en el {at}{}.",
+                if external { "Se registró un worktree externo" } else { "Se adoptó un worktree existente" },
+                branch.map(|b| format!(" («{b}»)")).unwrap_or_default()
+            ))
+        }
+        "activity.worktree.attached" => Some(format!("El {} reutiliza su worktree.", attempt_of(a)?)),
+        "activity.worktree.missing" => Some(format!("No se encuentra el worktree de la tarea {}.", a.text("task")?)),
+        "activity.worktree.found" => Some(format!("Se volvió a encontrar el worktree de la tarea {}.", a.text("task")?)),
+        "activity.worktree.removed" => {
+            let task = a.text("task")?;
+            let reason = a.code_in("reason", worktree_removal)?;
+            let kept = a.boolean("branch_kept")?;
+            Some(format!("Se quitó el worktree de la tarea {task} ({reason}{}).", if kept { "; se conserva la rama" } else { "" }))
+        }
+        "activity.artifact.created" => {
+            let at = attempt_of(a)?;
+            let kind = a.code_in("kind", artifact_kind)?;
+            let verifiable = a.boolean("verifiable")?;
+            Some(format!("El {at} dejó {kind}{}.", if verifiable { " verificable" } else { "" }))
+        }
+        "activity.review.accepted" | "activity.review.rejected" | "activity.review.invalidated" => review(key, a),
+        "activity.core.agentic_cut" => {
+            let tasks = a.number("tasks")?;
+            let attempts = a.number("attempts")?;
+            Some(format!(
+                "Se pasó al modelo de tareas e intentos ({}, {}).",
+                plural(tasks, "tarea", "tareas"),
+                plural(attempts, "intento", "intentos")
+            ))
         }
         "activity.task.review_requested" => Some(format!(
             "Se solicitó revisar la rama «{}».",

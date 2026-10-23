@@ -61,8 +61,80 @@ const EXPECTED_V1_KEYS = [
   'activity.attention.risk_acted',
   'activity.attention.created',
   'activity.attention.resolved',
+  'activity.task.intent_created',
+  'activity.task.updated',
+  'activity.task.discarded',
+  'activity.task.restored',
+  'activity.attempt.requested',
+  'activity.attempt.approved',
+  'activity.attempt.rejected',
+  'activity.attempt.started',
+  'activity.attempt.completed',
+  'activity.attempt.failed',
+  'activity.attempt.stopped',
+  'activity.attempt.waiting',
+  'activity.attempt.awaiting_terminal_approval',
+  'activity.attempt.resumed',
+  'activity.attempt.exited',
+  'activity.attempt.integrated',
+  'activity.provider_session.opened',
+  'activity.provider_session.bound',
+  'activity.provider_session.resumed',
+  'activity.provider_session.detached',
+  'activity.provider_session.closed',
+  'activity.thread.created',
+  'activity.thread.summarized',
+  'activity.worktree.created',
+  'activity.worktree.adopted',
+  'activity.worktree.attached',
+  'activity.worktree.missing',
+  'activity.worktree.found',
+  'activity.worktree.removed',
+  'activity.artifact.created',
+  'activity.review.accepted',
+  'activity.review.rejected',
+  'activity.review.invalidated',
+  'activity.core.agentic_cut',
   'activity.unknown',
 ];
+
+/** Argumentos válidos de las claves del modelo Task/Attempt (LXO-233): sus códigos cerrados no son los de la v1. */
+const MODEL_ARGS = {
+  'activity.task.intent_created': { title: 'Preparar entrega', parent: 'task-parent', depth: 1 },
+  'activity.task.updated': { changed: ['title'], title: 'Nuevo' },
+  'activity.task.discarded': {},
+  'activity.task.restored': {},
+  'activity.attempt.requested': { task: 'task-1', n: 1, provider: 'codex', external: false, approval_required: true },
+  'activity.attempt.approved': { task: 'task-1', n: 1 },
+  'activity.attempt.rejected': { task: 'task-1', n: 1, cause: 'cancelled' },
+  'activity.attempt.started': { task: 'task-1', n: 1 },
+  'activity.attempt.completed': { task: 'task-1', n: 1, has_summary: false },
+  'activity.attempt.failed': { task: 'task-1', n: 1, reason: 'launch_failed', has_summary: true },
+  'activity.attempt.stopped': { task: 'task-1', n: 1, from: 'running', cause: 'run_closed' },
+  'activity.attempt.waiting': { task: 'task-1', n: 1, from: 'running' },
+  'activity.attempt.awaiting_terminal_approval': { task: 'task-1', n: 1, from: 'running' },
+  'activity.attempt.resumed': { task: 'task-1', n: 1, from: 'waiting' },
+  'activity.attempt.exited': { task: 'task-1', n: 1, from: 'running' },
+  'activity.attempt.integrated': { task: 'task-1', n: 1 },
+  'activity.provider_session.opened': { task: 'task-1', n: 1, provider: 'claude', resumable: true, bound: true },
+  'activity.provider_session.bound': { task: 'task-1', binding: 'stream_json' },
+  'activity.provider_session.resumed': { task: 'task-1', n: 2 },
+  'activity.provider_session.detached': { task: 'task-1' },
+  'activity.provider_session.closed': { task: 'task-1', from: 'open' },
+  'activity.thread.created': { task: 'task-1' },
+  'activity.thread.summarized': { task: 'task-1', has_summary: true },
+  'activity.worktree.created': { task: 'task-1', n: 1 },
+  'activity.worktree.adopted': { task: 'task-1', n: 1, provenance: 'adopted', branch: 'lx/x' },
+  'activity.worktree.attached': { task: 'task-1', n: 2 },
+  'activity.worktree.missing': { task: 'task-1' },
+  'activity.worktree.found': { task: 'task-1' },
+  'activity.worktree.removed': { task: 'task-1', reason: 'gone', branch_kept: false },
+  'activity.artifact.created': { task: 'task-1', n: 1, kind: 'report', verifiable: true },
+  'activity.review.accepted': { task: 'task-1', n: 1, head_commit: 'abc1234', has_comment: false },
+  'activity.review.rejected': { task: 'task-1', n: 1, head_commit: 'abc1234', has_comment: true },
+  'activity.review.invalidated': { task: 'task-1', n: 1, head_commit: 'abc1234', observed_head: 'def5678' },
+  'activity.core.agentic_cut': { tasks: 1, attempts: 2 },
+};
 
 const COMPLETE_ARGS = {
   root_task: 'task-root',
@@ -138,7 +210,7 @@ describe('translateActivityMessage', () => {
       ? { ...COMPLETE_ARGS, to: key.slice('activity.task.'.length) }
       : key === 'activity.unknown'
         ? { ...COMPLETE_ARGS, reason: 'unknown_kind', kind: 'task.future', event_version: 2 }
-      : COMPLETE_ARGS;
+      : MODEL_ARGS[key] ?? COMPLETE_ARGS;
     const translated = translate(key, args);
     expect(translated).toBeTypeOf('string');
     expect(translated.trim().length).toBeGreaterThan(0);
@@ -196,6 +268,15 @@ describe('translateActivityMessage', () => {
     ['activity.effect.git_worktree.removed', { branch: '' }],
   ])('sigue rechazando un effect_id vacío en %s', (key, optionalText) => {
     expect(translate(key, { ...COMPLETE_ARGS, ...optionalText, effect_id: '' })).toBeNull();
+  });
+
+  it('las claves del modelo Task/Attempt rechazan códigos fuera de su lista y nombran el intento', () => {
+    expect(translate('activity.attempt.failed', { ...MODEL_ARGS['activity.attempt.failed'], reason: 'otra' })).toBeNull();
+    expect(translate('activity.attempt.stopped', { ...MODEL_ARGS['activity.attempt.stopped'], from: 'done' })).toBeNull();
+    expect(translate('activity.attempt.started', { task: 'task-1' })).toBeNull();
+    expect(translate('activity.task.updated', { changed: ['otro'] })).toBeNull();
+    expect(translate('activity.worktree.created', { task: 'task-1', n: 1, branch: ['x'] })).toBeNull();
+    expect(translate('activity.attempt.integrated', { task: 'task-1', n: 3 })).toBe('Se integró el trabajo del intento 3 de la tarea task-1.');
   });
 
   it('formatea estados y argumentos booleanos desde la clave y argumentos contractuales', () => {

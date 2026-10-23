@@ -206,6 +206,8 @@ pub struct RuntimeLoad {
     pub rev: i64,
     /// El mayor id de decisión de la base, también de las Tasks retiradas: una decisión nueva va por encima.
     pub decision_floor: i64,
+    /// El número del Attempt actual de cada Task a la vista.
+    pub attempts: BTreeMap<String, i64>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -270,7 +272,9 @@ fn load_in(c: &Connection) -> StoreResult<RuntimeLoad> {
     }
     let seq = meta_i64(c, "id_seq")?.unwrap_or(0);
     let doc = json!({ "runs": runs, "tasks": tasks, "messages": messages, "seq": seq, "decisions": decisions, "env_blocks": env_blocks });
-    Ok(RuntimeLoad { doc, rev: rev_in(c)?, decision_floor })
+    let mut q = c.prepare("SELECT a.task_id, max(a.n) FROM attempts AS a JOIN tasks AS t ON t.id = a.task_id WHERE t.intent = 'open' GROUP BY a.task_id")?;
+    let attempts = q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?.collect::<Result<BTreeMap<_, _>, _>>()?;
+    Ok(RuntimeLoad { doc, rev: rev_in(c)?, decision_floor, attempts })
 }
 
 impl Store {
