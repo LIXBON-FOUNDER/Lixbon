@@ -447,6 +447,12 @@ impl Store {
         })
     }
 
+    /// ¿Está integrado el trabajo del Attempt? La columna `integrated` la añade el corte (LXO-117): solo tiene sentido
+    /// con el modelo activo.
+    pub fn attempt_integrated(&self, id: &str) -> StoreResult<bool> {
+        self.read(|c| Ok(c.query_row("SELECT integrated FROM attempts WHERE id = ?1", [id], |r| r.get::<_, i64>(0)).optional()? == Some(1)))
+    }
+
     /// Los Attempts en un estado, ordenados por Task y número (la cola de aprobaciones, los que corren…).
     pub fn attempts_by_status(&self, status: AttemptStatus) -> StoreResult<Vec<AttemptRow>> {
         self.read(|c| attempts_where(c, "status = ?1", status.as_str()))

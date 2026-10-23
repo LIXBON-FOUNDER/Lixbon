@@ -140,8 +140,8 @@ Project, de su Task. Todos llevan `task` y `n`. **Nunca** el resumen, rutas, arg
 | `cancel` (el resto) | `attempt.stopped` | state | `task`, `n`, `from`, `cause` |
 
 Los siete `kind` están **reservados** en `contracts/status-vocabulary.json`. `attempt.waiting` también lo está, pero lo
-emitirá el runtime (D20). Los `attempt.*` **no levantan Attention todavía**: las reglas (`failed`, `approval`…) llegan
-con el runtime; la proyección sí los ve.
+emitirá el runtime (D20). Desde LXO-119, `attempt.failed` levanta `failed` y `attempt.requested` con aprobación levanta
+`approval` (que resuelven `attempt.approved`/`attempt.rejected`), **sobre el Attempt** ([ATTENTION.md](ATTENTION.md)).
 
 ## Decisiones (LXO-114)
 

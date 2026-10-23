@@ -512,3 +512,64 @@ punto con escrituras concurrentes; reinicio y reconexión con el cursor anterior
 Person y parámetros inválidos; solo lectura y Core degradado.
 `orch/server.rs::compact_snapshot_http_tests::bootstrap_por_post_rpc_y_continuacion_por_events` lo repite de punta
 a punta: `POST /rpc` y `GET /events?cursor=` antes y después de reiniciar el Core.
+
+## Modelo Task/Attempt (LXO-119)
+
+Lecturas **vNext** sobre las tablas normalizadas (`orch/model_read.rs`). Solo Person autenticada (`ClientAction::Read`).
+**Antes del corte** responden `core_model_inactive` y el cliente sigue con las lecturas F2 de arriba, que no cambian.
+Las respuestas de referencia están en [`fixtures/api/`](fixtures/api/), generadas desde la fixture de la ADR ya
+cortada. Una prueba falla si cambian: cambiar una forma publicada exige subir su versión.
+
+| Query | Parámetros | Devuelve | Versión |
+|---|---|---|---|
+| `core_model` | — | `core_model` (`legacy` · `task_attempt_v1`), `compat` (`["legacy_task_v1"]` tras el corte) y `queries` disponibles. Funciona siempre | [`core_model.v1.json`](fixtures/api/core_model.v1.json) |
+| `task_list_v2` | `project_id`, `include_discarded?`, `limit?` (1–100, 50), `cursor?` | Tasks del Project por creación: intención, **estado derivado**, origen, `attempt_count` y `current_attempt`. `next_cursor` opaco | `v: 2` · [`task_list_v2.json`](fixtures/api/task_list_v2.json) |
+| `task_detail_v2` | `task_id` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
+| `attempts_by_task` | `task_id` | los Attempts de la Task por `n` | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
+| `attempt_detail` | `attempt_id` | la ejecución: selección, fechas, resultado, `integrated`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts` y su última `review` | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
+
+**Estado derivado de la Task** (ADR D17, `contracts/status-vocabulary.json` `task_derived_state`):
+
+| Estado | Cuándo |
+|---|---|
+| `discarded` | la persona descartó la intención |
+| `in_progress` | el Attempt actual no ha terminado |
+| `integrated` | el Attempt actual terminó y su trabajo está integrado |
+| `in_review` | el Attempt actual terminó y no está integrado |
+| `open` | sin Attempts, o el actual falló, se detuvo o salió |
+
+**Task y Attempt no se mezclan.** La Task es intención y estado derivado; todo lo de la ejecución (estado del proceso,
+sesión, Worktree, Artifacts y revisión) está en el Attempt. Un cliente vNext no infiere el Attempt por la rama ni por la
+carpeta: lo nombran `current_attempt` y cada hecho (`attempt.*`, `review.*`, `worktree.*`… con `attempt` en el
+payload). Activity filtra por `target_kind = attempt`; Attention de ejecución apunta al Attempt
+([ATTENTION.md](ATTENTION.md)).
+
+**Errores**: `model_auth_required` (no es una Person), `model_invalid_request` (parámetro desconocido o fuera de
+rango, cursor ajeno), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
+o fallo de lectura).
+
+### Compatibilidad con clientes F2 y campos deprecados
+
+Tras el corte (fase C1 de la ADR §11.1) las lecturas F2 (`projects_overview`, `tasks_by_project`, `task_detail`,
+`compact_snapshot`, `resource_inventory`) **mantienen su forma**. La vista de compatibilidad es `legacy_task_v1`:
+`store::cut::CutView`, la misma que valida el corte. `model_read_tests::las_lecturas_f2_no_cambian_con_el_corte`
+comprueba que responden igual antes y después.
+
+En la fase **C2**, al activar el corte, estos campos de las lecturas F2 quedan **deprecated**: tienen su sitio en el
+modelo nuevo y un cliente nuevo no debe leerlos.
+
+| Campo F2 (`task_detail` / `tasks_by_project`) | Dónde está en vNext |
+|---|---|
+| `status` | `current_attempt.status` (ejecución) y `state` (estado derivado de la Task) |
+| `provider`, `model`, `model_effective`, `role` | `attempt_detail` (`provider`, `model`, `role`…) |
+| `worktree`, `branch`, `base`, `cwd` | `attempt_detail.worktree` |
+| `pr_url` | `attempt_detail.artifacts` (`pull_request`) |
+| `merged` | `attempt_detail.integrated` |
+| `failure_reason` | `attempt_detail.failure_reason` |
+| `review` | `attempt_detail.review` (target Attempt + HEAD) |
+| `external` | `current_attempt.external` |
+
+**Criterio de retirada (C3)**: los de la ADR §14. Desktop, Mobile, `lxo` y el TUI tienen una versión publicada que lee
+vNext, con una prueba de contrato que falla si leen un campo deprecated; al menos una release completa en C2 sin
+rollback; y la decisión explícita de cerrar la ventana de rollback. `core_model.compat` deja de anunciar
+`legacy_task_v1` una release **antes** de retirar los datos.

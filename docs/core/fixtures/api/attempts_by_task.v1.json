@@ -1,0 +1,19 @@
+{
+  "core_model": "task_attempt_v1",
+  "items": [
+    {
+      "created_at": 1792000046000,
+      "ended_at": null,
+      "external": false,
+      "id": "t5-a1",
+      "model": "sonnet",
+      "n": 1,
+      "provider": "claude",
+      "role": null,
+      "started_at": 1792000070000,
+      "status": "done"
+    }
+  ],
+  "task_id": "t5",
+  "v": 1
+}
