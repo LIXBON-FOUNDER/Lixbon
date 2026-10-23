@@ -30,6 +30,9 @@
 //! | `attempt.requested` con `approval_required` (LXO-119) | levanta `approval` | medium | attempt · `launch` |
 //! | `attempt.approved` · `attempt.rejected` | resuelve `approval` (`acted`) | | attempt · `launch` |
 //! | `attempt.failed` | levanta `failed` | high | attempt |
+//! | `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta `approval` | medium | attempt · `terminal` |
+//! | `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `approval` (`acted`) | | attempt · `terminal` |
+//! | `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `approval` (`condition_cleared`) | | attempt · `terminal` |
 //!
 //! Los hechos de EJECUCIÓN del modelo Task/Attempt apuntan al Attempt, no a la Task: dos Attempts de una Task tienen
 //! su propia Attention. Solo existen tras el corte (los `task.*` históricos siguen con sus reglas; ADR D10).
@@ -178,7 +181,17 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             d.raise(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Severity::Medium, copy_codes(&p, &["task", "provider"]))
         }
         ("attempt.approved" | "attempt.rejected", "attempt") => d.resolve(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Resolution::Acted),
+        ("attempt.waiting", "attempt") if p["state"] == "awaiting_terminal_approval" => {
+            d.raise(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Severity::Medium, copy_codes(&p, &["task"]))
+        }
+        ("attempt.resumed", "attempt") if p["from"] == "awaiting_terminal_approval" => {
+            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::Acted)
+        }
+        ("attempt.completed" | "attempt.stopped" | "attempt.exited", "attempt") => {
+            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared)
+        }
         ("attempt.failed", "attempt") => {
+            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
             let mut facts = copy_codes(&p, &["task"]);
             if let Some(reason) = code(&p["reason"]) {
                 facts["failure_reason"] = reason;
