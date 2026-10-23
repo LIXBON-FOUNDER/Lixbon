@@ -74,6 +74,9 @@ mod attempt_ops_tests;
 mod session_ops;
 #[cfg(test)]
 mod session_ops_tests;
+mod worktree_ops;
+#[cfg(test)]
+mod worktree_ops_tests;
 #[cfg(test)]
 mod task_ops_tests;
 #[cfg(test)]

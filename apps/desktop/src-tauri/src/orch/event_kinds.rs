@@ -37,6 +37,12 @@
 //! | `provider_session.opened` · `bound` · `resumed` · `detached` · `closed` | state | `provider_session` |
 //! | `thread.created` · `thread.summarized` | state | `thread` |
 //!
+//! # Kinds de Worktree y Artifact (LXO-116, inertes hasta el corte; los emite `worktree_ops`)
+//! | kind | class | entidad |
+//! |---|---|---|
+//! | `worktree.created` · `adopted` · `attached` · `missing` · `found` · `removed` | state | `worktree` |
+//! | `artifact.created` | state | `artifact` |
+//!
 //! # Kinds de la Task como intención (LXO-113, inertes hasta el corte; los emite `task_ops`)
 //! | kind | class | entidad |
 //! |---|---|---|
@@ -49,7 +55,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ProviderSessionRow, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow};
+use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, Provenance, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -1050,6 +1056,151 @@ impl EventPayload for ThreadSummarized {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn thread_summarized(th: &ThreadRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     thread_draft(th, t, &ThreadSummarized { task: th.task_id.clone(), has_summary: th.summary.is_some() })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Worktree y Artifact (LXO-116)
+// ---------------------------------------------------------------------------------------------
+//
+// Los emite `worktree_ops` (inertes hasta el corte). Run y Project, los de la Task dueña. NUNCA rutas (ni la carpeta, ni
+// el repo, ni el localizador del Artifact): la rama, que ya viaja en los efectos de git, y códigos.
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn worktree_draft<P: EventPayload>(w: &WorktreeRow, t: &TaskRow, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Worktree, w.id.as_str(), p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
+}
+
+#[derive(Serialize)]
+pub(super) struct WorktreeCreated {
+    task: String,
+    attempt: String,
+    n: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+}
+
+impl EventPayload for WorktreeCreated {
+    const KIND: &'static str = "worktree.created";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Un Worktree que ya existía: lo gestiona Lixbon (`adopted`) o solo lo usa (`external`).
+#[derive(Serialize)]
+pub(super) struct WorktreeAdopted {
+    task: String,
+    attempt: String,
+    n: i64,
+    provenance: Provenance,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+}
+
+impl EventPayload for WorktreeAdopted {
+    const KIND: &'static str = "worktree.adopted";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// `worktree.created` si lo creó Lixbon; `worktree.adopted` si ya existía.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn worktree_registered(w: &WorktreeRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let branch = w.branch.as_deref().map(|b| clip(b, 255));
+    match w.provenance {
+        Provenance::Created => worktree_draft(w, t, &WorktreeCreated { task: w.task_id.clone(), attempt: a.id.clone(), n: a.n, branch }),
+        p => worktree_draft(w, t, &WorktreeAdopted { task: w.task_id.clone(), attempt: a.id.clone(), n: a.n, provenance: p, branch }),
+    }
+}
+
+#[derive(Serialize)]
+pub(super) struct WorktreeAttached {
+    task: String,
+    attempt: String,
+    n: i64,
+}
+
+impl EventPayload for WorktreeAttached {
+    const KIND: &'static str = "worktree.attached";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn worktree_attached(w: &WorktreeRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    worktree_draft(w, t, &WorktreeAttached { task: w.task_id.clone(), attempt: a.id.clone(), n: a.n })
+}
+
+#[derive(Serialize)]
+pub(super) struct WorktreeMissing {
+    task: String,
+}
+
+impl EventPayload for WorktreeMissing {
+    const KIND: &'static str = "worktree.missing";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn worktree_missing(w: &WorktreeRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    worktree_draft(w, t, &WorktreeMissing { task: w.task_id.clone() })
+}
+
+#[derive(Serialize)]
+pub(super) struct WorktreeFound {
+    task: String,
+}
+
+impl EventPayload for WorktreeFound {
+    const KIND: &'static str = "worktree.found";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn worktree_found(w: &WorktreeRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    worktree_draft(w, t, &WorktreeFound { task: w.task_id.clone() })
+}
+
+#[derive(Serialize)]
+pub(super) struct WorktreeRemoved {
+    task: String,
+    reason: RemovalReason,
+    branch_kept: bool,
+}
+
+impl EventPayload for WorktreeRemoved {
+    const KIND: &'static str = "worktree.removed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn worktree_removed(w: &WorktreeRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let reason = w.removed_reason.ok_or_else(|| EventError::Serialize("worktree.removed: el Worktree no tiene motivo".into()))?;
+    worktree_draft(w, t, &WorktreeRemoved { task: w.task_id.clone(), reason, branch_kept: w.branch_kept })
+}
+
+/// El localizador NO viaja: solo el tipo y si trae hash para verificarlo.
+#[derive(Serialize)]
+pub(super) struct ArtifactCreated {
+    task: String,
+    attempt: String,
+    n: i64,
+    kind: ArtifactKind,
+    verifiable: bool,
+}
+
+impl EventPayload for ArtifactCreated {
+    const KIND: &'static str = "artifact.created";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn artifact_created(x: &ArtifactRow, a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = ArtifactCreated { task: a.task_id.clone(), attempt: a.id.clone(), n: a.n, kind: x.kind, verifiable: x.sha256.is_some() };
+    Ok(EventDraft::new(EntityKind::Artifact, x.id.as_str(), &p)?.run(Some(t.run_id.clone())).project(t.project_id.clone()))
 }
 
 // ---------------------------------------------------------------------------------------------

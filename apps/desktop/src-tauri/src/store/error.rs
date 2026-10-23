@@ -76,6 +76,12 @@ pub enum StoreError {
     /// Una ProviderSession o un Thread no cumple el contrato (referencia que no es opaca, resumen con un secreto…).
     /// Se rechaza ANTES de tocar la base.
     InvalidSession(String),
+    /// Un Worktree o un Artifact no admite la operación (Attempt terminado o con Worktree, ruta ya registrada, quitar
+    /// uno en uso o externo…). No se escribió nada.
+    WorktreeConflict(String),
+    /// Un Worktree o un Artifact no cumple el contrato (ruta vacía, localizador que no es del tipo, credencial…). Se
+    /// rechaza ANTES de tocar la base.
+    InvalidWorktree(String),
 }
 
 impl StoreError {
@@ -186,6 +192,8 @@ impl fmt::Display for StoreError {
             StoreError::AttemptTransition { id, from, to } => write!(f, "attempts: el Attempt {id} no puede pasar de {from} a {to}"),
             StoreError::SessionConflict(m) => write!(f, "sesiones y threads: {m}"),
             StoreError::InvalidSession(m) => write!(f, "sesión o thread inválido: {m}"),
+            StoreError::WorktreeConflict(m) => write!(f, "worktrees y artifacts: {m}"),
+            StoreError::InvalidWorktree(m) => write!(f, "worktree o artifact inválido: {m}"),
         }
     }
 }
