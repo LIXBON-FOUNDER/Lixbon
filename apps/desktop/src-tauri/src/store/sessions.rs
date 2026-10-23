@@ -274,7 +274,7 @@ pub(crate) fn looks_secret(s: &str) -> bool {
     if MARKERS.iter().any(|m| lower.contains(m)) {
         return true;
     }
-    lower.split(|c: char| c.is_whitespace() || "\"'`,;()[]{}<>".contains(c)).any(|w| PREFIXES.iter().any(|p| w.starts_with(p) && w.len() >= p.len() + 8))
+    lower.split(|c: char| c.is_whitespace() || "\"'`,;()[]{}<>/\\?&=:@".contains(c)).any(|w| PREFIXES.iter().any(|p| w.starts_with(p) && w.len() >= p.len() + 8))
 }
 
 fn check_external_ref(r: &str) -> StoreResult<()> {
