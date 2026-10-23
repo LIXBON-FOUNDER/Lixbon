@@ -102,7 +102,7 @@ Contrato en [`EVENTOS.md`](EVENTOS.md#worktree-y-artifact-lxo-116) y Activity en
 
 ## En el corte
 
-El [borrador](fixtures/corte-task-attempt/corte.borrador.sql) ya no crea estas tablas: los Worktrees del legado son
+El [SQL del corte](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql) ya no crea estas tablas: los Worktrees del legado son
 `created`; con carpeta quedan `active`; sin carpeta pero con rama conservada, `removed` con `branch_kept = 1`.
 
 ## Decisiones (LXO-116)

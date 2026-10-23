@@ -297,6 +297,14 @@ fn casos() -> Vec<Caso> {
             "activity.artifact.created",
             "info",
         ),
+        (
+            "core.agentic_cut",
+            State,
+            ("core", "core"),
+            json!({ "model": "task_attempt_v1", "backup": "lixbon-1-0-pre-f3-cut.db", "counts": { "tasks": 7, "attempts": 7 } }),
+            "activity.core.agentic_cut",
+            "info",
+        ),
         // decision
         (
             "decision.recorded",
@@ -596,7 +604,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 79] = [
+const CLAVES: [&str; 80] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.completed",
@@ -608,6 +616,7 @@ const CLAVES: [&str; 79] = [
     "activity.attention.created",
     "activity.attention.resolved",
     "activity.attention.risk_acted",
+    "activity.core.agentic_cut",
     "activity.decision.merge.conflict",
     "activity.decision.merge.error",
     "activity.decision.merge.merged",

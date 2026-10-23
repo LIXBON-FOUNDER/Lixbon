@@ -77,6 +77,9 @@ mod session_ops_tests;
 mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;
+mod agentic_cut;
+#[cfg(test)]
+mod agentic_cut_tests;
 #[cfg(test)]
 mod task_ops_tests;
 #[cfg(test)]
