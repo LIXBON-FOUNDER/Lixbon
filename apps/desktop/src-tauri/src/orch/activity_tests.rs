@@ -276,6 +276,27 @@ fn casos() -> Vec<Caso> {
         ("provider_session.closed", State, ("provider_session", "ps-t-7-a2"), json!({ "task": "t-7", "from": "idle" }), "activity.provider_session.closed", "info"),
         ("thread.created", State, ("thread", "th-t-7"), json!({ "task": "t-7" }), "activity.thread.created", "info"),
         ("thread.summarized", State, ("thread", "th-t-7"), json!({ "task": "t-7", "has_summary": true }), "activity.thread.summarized", "info"),
+        ("worktree.created", State, ("worktree", "wt-t-7-a2"), json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "branch": "lx/r1/t-7-api" }), "activity.worktree.created", "info"),
+        (
+            "worktree.adopted",
+            State,
+            ("worktree", "wt-t-7-a2"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "provenance": "external" }),
+            "activity.worktree.adopted",
+            "info",
+        ),
+        ("worktree.attached", State, ("worktree", "wt-t-7-a2"), json!({ "task": "t-7", "attempt": "t-7-a3", "n": 3 }), "activity.worktree.attached", "info"),
+        ("worktree.missing", State, ("worktree", "wt-t-7-a2"), json!({ "task": "t-7" }), "activity.worktree.missing", "warning"),
+        ("worktree.found", State, ("worktree", "wt-t-7-a2"), json!({ "task": "t-7" }), "activity.worktree.found", "info"),
+        ("worktree.removed", State, ("worktree", "wt-t-7-a2"), json!({ "task": "t-7", "reason": "integrated", "branch_kept": false }), "activity.worktree.removed", "info"),
+        (
+            "artifact.created",
+            State,
+            ("artifact", "0192f0aa-0000-7000-8000-000000000001"),
+            json!({ "task": "t-7", "attempt": "t-7-a2", "n": 2, "kind": "pull_request", "verifiable": false }),
+            "activity.artifact.created",
+            "info",
+        ),
         // decision
         (
             "decision.recorded",
@@ -575,7 +596,8 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 72] = [
+const CLAVES: [&str; 79] = [
+    "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.completed",
     "activity.attempt.failed",
@@ -648,6 +670,12 @@ const CLAVES: [&str; 72] = [
     "activity.task.waiting",
     "activity.thread.created",
     "activity.thread.summarized",
+    "activity.worktree.adopted",
+    "activity.worktree.attached",
+    "activity.worktree.created",
+    "activity.worktree.found",
+    "activity.worktree.missing",
+    "activity.worktree.removed",
 ];
 
 #[test]
