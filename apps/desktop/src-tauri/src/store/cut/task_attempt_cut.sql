@@ -7,9 +7,8 @@
 -- no se edita (checksum). `verificar.py` lo aplica a la fixture y compara con `normalizado.after.json`.
 --
 -- El esquema de cada entidad ya está publicado e INERTE (007 tasks, 008 attempts, 009 sesiones y threads, 010
--- worktrees y artifacts). Aquí solo va lo que todavía falta (columnas de runtime del Attempt, fases, decisiones,
--- revisiones, bloqueos de entorno y residuo). Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT),
--- STRICT, ms epoch, identificadores TEXT.
+-- worktrees y artifacts, 011 revisiones, 012 runtime del Attempt). Aquí solo va lo que todavía falta: el residuo.
+-- Mismas reglas que toda migración: una transacción (sin BEGIN/COMMIT), STRICT, ms epoch, identificadores TEXT.
 --
 -- Orden dentro de la transacción:
 --   0. Activar el modelo (`meta.agentic_model`): los triggers de la 007 impiden escribir sin esa clave.
@@ -27,39 +26,8 @@ INSERT INTO meta (key, value) VALUES ('agentic_model', 'task_attempt_v1');
 -- ───────────────────────────── 1. DDL ─────────────────────────────
 -- `runs` y `tasks` ya existen (007_tasks, LXO-113): tasks guarda la intención (`intent` = 'open' por defecto).
 
--- `attempts` ya existe (008_attempts, LXO-114): identidad, selección, ciclo de vida y resultado mínimo. Un retry o un
--- seguimiento crea otra fila (n + 1); nunca se pisa. Las columnas de RUNTIME (cwd, política, entrega, modelo efectivo…)
--- llegan con la migración del slice que las usa, como `ALTER TABLE ... ADD COLUMN`; las que ningún slice ha publicado
--- todavía se añaden aquí, y salen de aquí si un slice las publica antes de activar el corte.
-ALTER TABLE attempts ADD COLUMN instruction           TEXT;                 -- encargo propio del intento (seguimiento); NULL en legacy
-ALTER TABLE attempts ADD COLUMN cwd                   TEXT    NOT NULL DEFAULT '';
-ALTER TABLE attempts ADD COLUMN checkout_branch       TEXT;                 -- rama del checkout cuando NO hay Worktree propio (raíz)
-ALTER TABLE attempts ADD COLUMN policy                TEXT    CHECK (policy IS NULL OR json_valid(policy));
-ALTER TABLE attempts ADD COLUMN ack_unverified        INTEGER NOT NULL DEFAULT 0 CHECK (ack_unverified IN (0, 1));
-ALTER TABLE attempts ADD COLUMN requested_argv        TEXT    CHECK (requested_argv IS NULL OR json_valid(requested_argv));
-ALTER TABLE attempts ADD COLUMN plan_mode             INTEGER NOT NULL DEFAULT 0 CHECK (plan_mode IN (0, 1));
-ALTER TABLE attempts ADD COLUMN stream_json           INTEGER NOT NULL DEFAULT 0 CHECK (stream_json IN (0, 1));
-ALTER TABLE attempts ADD COLUMN report_nonce          TEXT;
-ALTER TABLE attempts ADD COLUMN delivered             TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(delivered));
-ALTER TABLE attempts ADD COLUMN delivery_channel      TEXT;
-ALTER TABLE attempts ADD COLUMN model_requested       TEXT;
-ALTER TABLE attempts ADD COLUMN model_effective       TEXT;
-ALTER TABLE attempts ADD COLUMN model_source          TEXT;
-ALTER TABLE attempts ADD COLUMN model_mismatch        INTEGER NOT NULL DEFAULT 0 CHECK (model_mismatch IN (0, 1));
-ALTER TABLE attempts ADD COLUMN model_mismatch_reason TEXT;
-ALTER TABLE attempts ADD COLUMN approval_deadline     INTEGER;
-ALTER TABLE attempts ADD COLUMN files                 TEXT    NOT NULL DEFAULT '[]' CHECK (json_valid(files));
-ALTER TABLE attempts ADD COLUMN integrated            INTEGER NOT NULL DEFAULT 0 CHECK (integrated IN (0, 1));
-
-CREATE TABLE attempt_phases (
-  attempt_id TEXT    NOT NULL REFERENCES attempts (id),
-  ord        INTEGER NOT NULL CHECK (ord >= 0),
-  name       TEXT    NOT NULL,
-  done       INTEGER NOT NULL CHECK (done IN (0, 1)),
-  note       TEXT    NOT NULL DEFAULT '',
-  at         INTEGER NOT NULL,
-  PRIMARY KEY (attempt_id, ord)
-) STRICT;
+-- `attempts` ya existe (008_attempts, LXO-114) con sus columnas de runtime, `attempt_phases` y `env_blocks`
+-- (012_attempt_runtime, LXO-231). Un retry o un seguimiento crea otra fila (n + 1); nunca se pisa.
 
 -- `worktrees` y `artifacts` ya existen (010_worktrees_artifacts, LXO-116): la ruta es ubicación, no identidad;
 -- procedencia created/adopted/external; ciclo active <-> missing -> removed; el Artifact apunta a la evidencia.
@@ -69,12 +37,6 @@ CREATE TABLE attempt_phases (
 
 -- `decisions` y `reviews` ya existen (011_reviews, LXO-118): la revisión apunta a (Attempt, head_commit), con a lo sumo
 -- una activa por Attempt.
-
-CREATE TABLE env_blocks (
-  scope TEXT NOT NULL,
-  cause TEXT NOT NULL CHECK (cause IN ('cli_missing', 'cli_flags_unsupported', 'windows_sandbox_elevated')),
-  PRIMARY KEY (scope, cause)
-) STRICT;
 
 CREATE TABLE legacy_residue (
   entity_kind TEXT NOT NULL,

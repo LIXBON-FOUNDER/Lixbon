@@ -82,6 +82,11 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.completed` | `activity.attempt.completed` | `task`, `n`, `has_summary` | success |
 | `attempt.failed` | `activity.attempt.failed` | `task`, `n`, `reason` ∈ `launch_failed` `terminal_approval_timeout` `agent_idle_timeout` `agent_reported`, `has_summary` | error |
 | `attempt.stopped` | `activity.attempt.stopped` | `task`, `n`, `from` ∈ `starting` `running` `waiting` `awaiting_terminal_approval`, `cause` ∈ `cancelled` `run_closed` | warning |
+| `attempt.waiting` `state = waiting` (LXO-231) | `activity.attempt.waiting` | `task`, `n`, `from` | info |
+| `attempt.waiting` `state = awaiting_terminal_approval` | `activity.attempt.awaiting_terminal_approval` | `task`, `n`, `from` | warning |
+| `attempt.resumed` | `activity.attempt.resumed` | `task`, `n`, `from` | info |
+| `attempt.exited` | `activity.attempt.exited` | `task`, `n`, `from` | error |
+| `attempt.integrated` | `activity.attempt.integrated` | `task`, `n` | success |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
 | `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |

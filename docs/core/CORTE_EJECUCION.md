@@ -99,7 +99,7 @@ Pendiente. Lo hará el slice que pase el runtime a las tablas. Hoy ninguna issue
    vista `legacy_task_v1` (LXO-119).
 2. Mover `store/cut/task_attempt_cut.sql` a `store/migrations/NNN_task_attempt_cut.sql`, con el siguiente número
    libre. Desde ese momento su texto no se edita (checksum). Quitar de ella las columnas o tablas que otro slice haya
-   publicado antes.
+   publicado antes (la 012 ya sacó las columnas de runtime del Attempt, `attempt_phases` y `env_blocks`).
 3. En el arranque (`store_boot`/`boot_authority`), tras las migraciones anteriores al corte y con `core.lock` tomado,
    llamar a `agentic_cut::run`. Si falla, el arranque se bloquea (D13). Después, el paso 6.
 4. Ajustar `cut_migration()` para leer la migración embebida y quitar la prueba que exige que no esté en `migrations/`.

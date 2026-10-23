@@ -19,6 +19,7 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 009 | `sessions_threads` | F3 · ProviderSession y Thread (LXO-115) | en revisión (PR de LXO-115). Esquema **inerte** hasta el corte. Ver `SESIONES_THREADS.md` |
 | 010 | `worktrees_artifacts` | F3 · Worktree y Artifact (LXO-116) | en revisión (PR de LXO-116, tras la 009). Esquema **inerte** hasta el corte. Ver `WORKTREES_ARTIFACTS.md` |
 | 011 | `reviews` | F3 · Review targeting (LXO-118) | en revisión (PR de LXO-118, tras la 010). Esquema **inerte** hasta el corte. Ver `REVIEWS.md` |
+| 012 | `attempt_runtime` | F3 · huecos del modelo para el runtime (LXO-231) | en revisión (PR de LXO-231, tras la 011). Esquema **inerte** hasta el corte. Ver `ATTEMPTS.md` § Runtime |
 | — | `task_attempt_cut` | F3 · corte de datos (LXO-117) | **escrito y probado, sin activar**: vive en `store/cut/` (fuera de esta lista) y toma el siguiente número libre al activarse. Ver `CORTE_EJECUCION.md` |
 
 La numeración inicial (002 proyectos · 003 eventos · 004 clientes · 005 attention) quedó obsoleta

@@ -882,6 +882,10 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | `attempt.completed` | 1 | state | `task`, `n`, `has_summary` | agente de esa Task · Core |
 | `attempt.failed` | 1 | state | `task`, `n`, `reason` ∈ `launch_failed` · `terminal_approval_timeout` · `agent_idle_timeout` · `agent_reported`, `has_summary` | agente de esa Task · Core |
 | `attempt.stopped` | 1 | state | `task`, `n`, `from` ∈ `starting` · `running` · `waiting` · `awaiting_terminal_approval`, `cause` ∈ `cancelled` · `run_closed` | persona · agente que coordina · Core |
+| `attempt.waiting` (LXO-231) | 1 | state | `task`, `n`, `state` ∈ `waiting` · `awaiting_terminal_approval`, `from` | agente de esa Task (`waiting`) · Core |
+| `attempt.resumed` | 1 | state | `task`, `n`, `from` ∈ `waiting` · `awaiting_terminal_approval` | agente de esa Task · Core |
+| `attempt.exited` | 1 | state | `task`, `n`, `from` ∈ `starting` · `running` · `waiting` · `awaiting_terminal_approval` | Core |
+| `attempt.integrated` | 1 | state | `task`, `n` | Core |
 
 * La entidad es el **Attempt** (`entity_kind = attempt`, `entity_id = <task>-a<n>`); `run_id` y `project_id` salen de la
   fila de su Task confirmada (no hay `State` que leer). `entity_kind=attempt` ya se puede usar como filtro de `events`.
@@ -889,7 +893,7 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 * Cancelar un Attempt todavía `pending_approval` es **rechazarlo**: emite `attempt.rejected`, no `attempt.stopped`.
 * Un `Unchanged` (reintento idempotente) no emite nada. Un evento que no se refiere al Attempt o un duplicado por
   `(kind, idem_key)` deshace el cambio entero.
-* `attempt.waiting` está reservado y lo emitirá el runtime (F4). Los `attempt.*` no levantan Attention todavía.
+* Las reglas de Attention de los `attempt.*` están en [ATTENTION.md](ATTENTION.md) (LXO-119 y LXO-231).
 
 ## ProviderSession y Thread (LXO-115)
 Hechos de la sesión del proveedor y del Thread de coordinación ([`SESIONES_THREADS.md`](SESIONES_THREADS.md)).
