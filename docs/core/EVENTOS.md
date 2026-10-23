@@ -891,6 +891,27 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
   `(kind, idem_key)` deshace el cambio entero.
 * `attempt.waiting` está reservado y lo emitirá el runtime (F4). Los `attempt.*` no levantan Attention todavía.
 
+## ProviderSession y Thread (LXO-115)
+Hechos de la sesión del proveedor y del Thread de coordinación ([`SESIONES_THREADS.md`](SESIONES_THREADS.md)).
+**Inertes hasta el corte**, como los del Attempt. Los construye solo `orch/session_ops.rs` y viajan en la transacción
+de su fila (`store::sessions`). Run y Project, los de la Task dueña.
+
+| kind | v | class | entidad | Payload | Quién |
+|---|---|---|---|---|---|
+| `provider_session.opened` | 1 | state | `provider_session` | `task`, `attempt`, `n`, `provider`, `resumable`, `bound` | Core |
+| `provider_session.bound` | 1 | state | `provider_session` | `task`, `binding` ∈ `stream_json` · `session_id` | Core |
+| `provider_session.resumed` | 1 | state | `provider_session` | `task`, `attempt`, `n` (el Attempt que la reanuda) | Core |
+| `provider_session.detached` | 1 | state | `provider_session` | `task` | Core |
+| `provider_session.closed` | 1 | state | `provider_session` | `task`, `from` ∈ `open` · `idle` | Core · persona |
+| `thread.created` | 1 | state | `thread` | `task` | Core |
+| `thread.summarized` | 1 | state | `thread` | `task`, `has_summary` | Core |
+
+* `entity_id` es `ps-<attempt que la abrió>` o `th-<task>`.
+* **La referencia del proveedor (`external_ref`) nunca viaja**, ni el resumen del Thread ni cuerpos de mensaje.
+* Un `Unchanged` (misma referencia, misma sesión ya reanudada por ese Attempt, mismo resumen) no emite nada.
+* Los mensajes del Thread no tienen evento propio todavía: los escribe el runtime tras el corte (sin doble emisión
+  con `task.question`/`task.reply`, ADR D9).
+
 ## Hoja de ruta
 * **E1a (cerrada):** migración, almacén, `EventDraft`/`NewEvent`/`EventRow`, outbox en `Tx`, persistencia
   atómica con `legacy_state`, cursor básico, triggers, pruebas.

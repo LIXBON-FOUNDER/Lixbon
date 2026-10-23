@@ -181,6 +181,10 @@ pub(super) enum EntityKind {
     Task,
     /// Una ejecución concreta de una Task (LXO-114). Id `<task>-a<n>`.
     Attempt,
+    /// La sesión durable del proveedor (LXO-115). Id `ps-<attempt>`.
+    ProviderSession,
+    /// La conversación de coordinación de una Task (LXO-115). Id `th-<task>`.
+    Thread,
     Run,
     Project,
     SpawnRequest,
@@ -196,6 +200,8 @@ impl EntityKind {
         match self {
             EntityKind::Task => "task",
             EntityKind::Attempt => "attempt",
+            EntityKind::ProviderSession => "provider_session",
+            EntityKind::Thread => "thread",
             EntityKind::Run => "run",
             EntityKind::Project => "project",
             EntityKind::SpawnRequest => "spawn_request",
