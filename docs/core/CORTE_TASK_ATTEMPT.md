@@ -263,7 +263,7 @@ En esta sección y en §12, «binario F2» es cualquier binario **anterior al co
 | 2 | Migraciones pendientes anteriores al corte (003… incluido el esquema inerte, 007…) | existente, con `pre-migracion-vN` | bloquea (como hoy) |
 | 3 | **Preflight F3** (solo lectura): base exactamente en la última de F2; fila `legacy_state` con `doc_schema = 0`; el documento se deserializa como `State`; Core no degradado; `core.lock` tomado | Rust, nuevo | bloquea sin tocar nada |
 | 4 | **Copia previa `pre-f3-cut`** (§10) | Rust, `backup_to` + sidecar | bloquea sin tocar nada (D13) |
-| 5 | **`NNN_task_attempt_cut`** en UNA transacción: `meta.agentic_model` → DDL que aún falte → copia → residuo → asserts de conteo → congelar `legacy_state` → `meta` | SQL ([borrador](fixtures/corte-task-attempt/corte.borrador.sql)) | ROLLBACK: la base sigue en la versión anterior al corte (S4) |
+| 5 | **`NNN_task_attempt_cut`** en UNA transacción: `meta.agentic_model` → DDL que aún falte → copia → residuo → asserts de conteo → congelar `legacy_state` → `meta` | SQL ([`task_attempt_cut.sql`](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql), LXO-117) | ROLLBACK: la base sigue en la versión anterior al corte (S4) |
 | 5b | **Dentro de la misma transacción**, antes del COMMIT: comprobación semántica (la vista legacy reconstruida == documento, salvo D3) y evento `system` `core.agentic_cut` (`idem_key = task_attempt_v1`, conteos y nombre de la copia) | Rust: el marco necesita un *check* por migración (nuevo) | ROLLBACK, igual que 5 |
 | 6 | Runtime: los Attempts no externos y no finales pasan a `exited` (lo que hoy hace `orphan_all`) | Rust | — |
 | — | Migraciones de F3 posteriores al corte (índices, columnas nuevas…) | las siguientes | solo después del corte |
@@ -413,7 +413,7 @@ ProviderSession o Artifact (`status`, `phases`, `report`, `pr_url`, `merged`, `w
 | Archivo | Qué es |
 |---|---|
 | `legacy_state.before.json` | un `State` real (se deserializa con `orch::state::State`) con los casos límite |
-| `corte.borrador.sql` | el mapeo ejecutable. **No es una migración** |
+| [`task_attempt_cut.sql`](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql) | el mapeo ejecutable: la SQL del corte (LXO-117), fuera de `migrations/` hasta activarlo |
 | `normalizado.after.json` | las filas esperadas tras el corte |
 | `verificar.py` | aplica las migraciones publicadas anteriores al corte (hoy 001…007), la copia, el corte, un corte roto y el rollback |
 
