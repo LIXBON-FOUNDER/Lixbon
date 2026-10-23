@@ -148,14 +148,14 @@ fn dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity() {
         })
         .unwrap();
     let att = rpc(&core, &me, "attention_list", json!({ "target_kind": "attempt" })).unwrap();
-    let items = att["items"].as_array().unwrap_or_else(|| panic!("{att}"));
+    let items = att["items"].as_array().expect("attention_list devuelve items");
     let de = |id: &str| items.iter().filter(|i| i["target_id"] == id).map(|i| i["category"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(de(&a1), ["failed"], "el fallo del intento 1 es suyo");
     assert_eq!(de(&a2), ["approval"], "la aprobación pendiente es del intento 2");
     let de_la_task = rpc(&core, &me, "attention_list", json!({ "target_kind": "task", "target_id": task })).unwrap();
     assert!(de_la_task["items"].as_array().unwrap().is_empty(), "los hechos de ejecución no apuntan a la Task");
     let act = rpc(&core, &me, "activity_list", json!({ "target_kind": "attempt", "target_id": a1 })).unwrap();
-    let claves: Vec<&str> = act["items"].as_array().unwrap_or_else(|| panic!("{act}")).iter().map(|i| i["message_key"].as_str().unwrap()).collect();
+    let claves: Vec<&str> = act["items"].as_array().expect("activity_list devuelve items").iter().map(|i| i["message_key"].as_str().unwrap()).collect();
     assert_eq!(claves, ["activity.attempt.requested", "activity.attempt.started", "activity.attempt.failed"]);
     let lista = rpc(&core, &me, "attempts_by_task", json!({ "task_id": task })).unwrap();
     assert_eq!(lista["items"].as_array().unwrap().iter().map(|a| a["status"].clone()).collect::<Vec<_>>(), [json!("failed"), json!("pending_approval")]);
