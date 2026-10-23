@@ -189,12 +189,14 @@ describe('JumpPaletteHost · lecturas', () => {
     const alpha = screen.getByRole('option', { name: /Alpha/ });
     expect(alpha.textContent).toContain('Estado active');
     expect(alpha.textContent).toContain('Host host-a');
+    expect(alpha.textContent).toContain('Origen no informado');
     expect(screen.getByRole('option', { name: /Beta/ }).textContent).toContain('Ubicación/host del Project no informado');
     fireEvent.change(input(), { target: { value: 'prj-3-task-1' } });
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
     fireEvent.change(input(), { target: { value: 'prj-3-task-2' } });
     expect(screen.getByRole('option').textContent).toContain('Estado running');
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project maquina-7');
+    expect(screen.getByRole('option').textContent).toContain('Origen no informado');
     fireEvent.change(input(), { target: { value: 'prj-2-task-1' } });
     expect(screen.getByRole('option').textContent).toContain('Ubicación/host del Project no informado');
   }, PALETTE_TEST_TIMEOUT);

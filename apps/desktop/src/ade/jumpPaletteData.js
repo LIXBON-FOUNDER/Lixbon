@@ -108,6 +108,7 @@ function normalizeProject(project) {
       `Estado ${status || NOT_REPORTED}`,
       ...(text(project.state) === 'archived' ? ['Archivado'] : []),
       hosts.length ? `Host ${hosts.join(', ')}` : `Ubicación/host del Project ${NOT_REPORTED}`,
+      `Origen ${NOT_REPORTED}`,
     ],
   };
 }
@@ -122,6 +123,7 @@ function normalizeTask(projectId, task, project) {
     facts: [
       `Estado ${text(task.status) || NOT_REPORTED}`,
       hosts.length ? `Ubicación/host del Project ${hosts.join(', ')}` : `Ubicación/host del Project ${NOT_REPORTED}`,
+      `Origen ${NOT_REPORTED}`,
     ],
   };
 }

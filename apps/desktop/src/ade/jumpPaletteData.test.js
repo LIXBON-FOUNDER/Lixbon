@@ -127,14 +127,15 @@ describe('jumpPaletteData · Tasks finalizadas', () => {
     const result = await load();
 
     expect(result.projects[0].facts).toContain('Host machine-alpha');
-    expect(result.tasks[0].facts).toEqual(['Estado running', 'Ubicación/host del Project machine-alpha']);
+    expect(result.projects[0].facts).toContain('Origen no informado');
+    expect(result.tasks[0].facts).toEqual(['Estado running', 'Ubicación/host del Project machine-alpha', 'Origen no informado']);
   });
 
   it('indica ubicación/host del Project no informado si el DTO no publica ubicaciones', async () => {
     core({ projects: [projectDto()], tasksOf: { 'prj-1': [task('t-1', 'running')] } });
     const result = await load();
 
-    expect(result.tasks[0].facts).toEqual(['Estado running', 'Ubicación/host del Project no informado']);
+    expect(result.tasks[0].facts).toEqual(['Estado running', 'Ubicación/host del Project no informado', 'Origen no informado']);
   });
 
   it('alcanza las finalizadas que quedan más allá de 100 Tasks siguiendo el cursor opaco', async () => {
