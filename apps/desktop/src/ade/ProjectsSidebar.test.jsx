@@ -2440,7 +2440,7 @@ describe('ProjectsSidebar', () => {
 
     // Simula que la lectura reactivada todavía no tiene datos: el resultado anterior solo puede
     // seguir visible si el sidebar preserva su árbol y las cabeceras por identidad.
-    useCoreQueryOverride.current = (query, _args, result) => (
+    useCoreQueryOverride.current = (query, _args, _options, result) => (
       ['projects_overview', 'tasks_by_project'].includes(query)
         ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
         : result
@@ -2513,7 +2513,7 @@ describe('ProjectsSidebar', () => {
 
     rerender(<ProjectsSidebar active={false} pollMs={60_000} />);
     await flush();
-    useCoreQueryOverride.current = (query, _args, result) => (
+    useCoreQueryOverride.current = (query, _args, _options, result) => (
       ['projects_overview', 'tasks_by_project'].includes(query)
         ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
         : result
@@ -2586,7 +2586,7 @@ describe('ProjectsSidebar', () => {
     expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
     expect(document.activeElement).toBe(externalFocus);
 
-    useCoreQueryOverride.current = (query, _args, result) => (
+    useCoreQueryOverride.current = (query, _args, _options, result) => (
       ['projects_overview', 'tasks_by_project'].includes(query)
         ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
         : result
@@ -2681,7 +2681,7 @@ describe('ProjectsSidebar', () => {
     await flush();
     expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
 
-    useCoreQueryOverride.current = (query, _args, result) => (
+    useCoreQueryOverride.current = (query, _args, _options, result) => (
       ['projects_overview', 'tasks_by_project'].includes(query)
         ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
         : result
@@ -2783,7 +2783,7 @@ describe('ProjectsSidebar', () => {
     expect(container.querySelector('.ps__more').getAttribute('aria-busy')).toBe('false');
     expect(obsoletePageReads).toBe(1);
 
-    useCoreQueryOverride.current = (query, _args, result) => (
+    useCoreQueryOverride.current = (query, _args, _options, result) => (
       query === 'projects_overview'
         ? { ...result, status: 'loading', data: null, error: null, reason: null, updatedAt: null, readEpoch: 0, inFlight: true }
         : result
