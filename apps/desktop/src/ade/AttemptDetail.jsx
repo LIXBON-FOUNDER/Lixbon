@@ -1,4 +1,5 @@
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
+import { AttemptActivity } from './AttemptActivity';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
@@ -103,7 +104,7 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
 
-        <p className="ade-attempts__hint">{COPY.activityPerAttemptUnavailable}</p>
+        <AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active} />
       </>
     );
   } else if (state.error) {

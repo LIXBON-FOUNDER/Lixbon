@@ -87,7 +87,9 @@ export const COPY = Object.freeze({
   noArtifacts: 'Sin artefactos',
   noReview: 'Sin revisión registrada',
   noWorktree: 'Sin worktree registrado',
-  activityPerAttemptUnavailable: 'Activity por Attempt: no disponible (activity_list no filtra por Attempt en este contrato)',
+  attemptActivity: 'Actividad del intento',
+  activityPerAttemptPartial: 'Actividad parcial: no incluye eventos de sesión ni worktree',
+  noAttemptActivity: 'Sin eventos del intento todavía',
 });
 
 /** Copia por código de error estructurado (`coreErrorCode`). */
@@ -110,4 +112,19 @@ export function reviewFreshnessInfo(review) {
   return known
     ? { label: REVIEW_FRESHNESS_LABELS[review.status], tone: review.status === 'active' ? 'ok' : 'warn', known: true, raw: review.status }
     : { label: 'Frescura desconocida', tone: 'neutral', known: false, raw: review.status ?? null };
+}
+
+/** LXO-121 · Texto corto de cada evento `activity.attempt.*`; cualquier otra clave, «Evento no reconocido». */
+export const ATTEMPT_ACTIVITY_LABELS = Object.freeze({
+  'activity.attempt.requested': 'Solicitado',
+  'activity.attempt.approved': 'Aprobado',
+  'activity.attempt.rejected': 'Rechazado',
+  'activity.attempt.started': 'Iniciado',
+  'activity.attempt.completed': 'Completado',
+  'activity.attempt.failed': 'Falló',
+  'activity.attempt.stopped': 'Detenido',
+});
+
+export function attemptActivityLabel(messageKey) {
+  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey) ? ATTEMPT_ACTIVITY_LABELS[messageKey] : 'Evento no reconocido';
 }

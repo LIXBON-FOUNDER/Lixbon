@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptHistory } from './AttemptHistory';
 import { coreModelFromState, UNKNOWN_CORE_MODEL } from './useCoreModel';
 import { CANONICAL, ERRORS, VARIANTS, attemptsPage, brief } from './testFixtures/coreModelFixtures';
+import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 
 // LXO-121 · Historial de Attempts, contra fixtures y en los dos modos de core_model.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -25,7 +26,7 @@ describe('AttemptHistory (LXO-121)', () => {
       brief('t3', 1, 'failed', { started_at: 1792000001000, ended_at: 1792000063000 }),
       brief('t3', 2, 'stopped'),
     ];
-    const calls = mount(() => attemptsPage('t3', items));
+    const calls = mount((payload) => (payload.query === 'activity_list' ? attemptActivityPage([]) : attemptsPage('t3', items)));
     const onSelectAttempt = vi.fn();
     render(<AttemptHistory taskId="t3" coreModel={V1} selectedAttemptId="t3-a2" onSelectAttempt={onSelectAttempt} />);
     await flush();
@@ -38,9 +39,11 @@ describe('AttemptHistory (LXO-121)', () => {
     expect(within(rows[1]).getByRole('button').getAttribute('aria-current')).toBe('true');
     fireEvent.click(within(rows[2]).getByRole('button'));
     expect(onSelectAttempt).toHaveBeenCalledWith('t3-a3');
-    expect(screen.getByText(/Activity por Attempt: no disponible/)).toBeTruthy();
-    expect(calls.map((call) => call.query)).toEqual(['attempts_by_task']);
-    expect(calls[0].args).toEqual({ task_id: 't3' });
+    // La actividad (parcial) es solo del Attempt seleccionado: nunca attempt_detail ni una query por fila.
+    expect(screen.getByText('Actividad parcial: no incluye eventos de sesión ni worktree')).toBeTruthy();
+    expect(calls.map((call) => call.query).sort()).toEqual(['activity_list', 'attempts_by_task']);
+    expect(calls.find((call) => call.query === 'attempts_by_task').args).toEqual({ task_id: 't3' });
+    expect(calls.find((call) => call.query === 'activity_list').args).toMatchObject({ target_kind: 'attempt', target_id: 't3-a2' });
   });
 
   it('fixture canónica, 0 intentos neutro y estado desconocido sin estilo de error', async () => {
