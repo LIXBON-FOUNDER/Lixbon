@@ -139,6 +139,12 @@ pub(super) struct Tx {
     /// Efecto externo ya observado en esta mutación (`Tx::observe_effect`): las decisiones que se registren
     /// dentro de `mutate_after_effect` lo llevan como `correlation_id`. Efímero: no es estado.
     active_effect: Option<String>,
+    /// La persistencia vigente es la de las tablas Task/Attempt (LXO-233): los hechos de ejecución se emiten como
+    /// `attempt.*` y no como `task.status_changed` (ADR D9).
+    attempt_model: bool,
+    /// Posición en el outbox de cada `attempt.requested` del runtime, con su Task y su número: al finalizar se rehace con
+    /// la Task tal como quedó (`create_child` fija el perfil después de crearla, en la misma mutación).
+    attempt_requests: Vec<(usize, String, u32)>,
 }
 
 impl Deref for Tx {
@@ -171,6 +177,34 @@ impl Tx {
         self.unchanged = true;
         self.events.clear();
         self.event_error = None;
+        self.attempt_requests.clear();
+    }
+
+    /// El último borrador es el `attempt.requested` del Attempt `n` de `task`: se rehace al finalizar con la selección
+    /// final de la Task (LXO-233, `Tx::refresh_attempt_requests`).
+    pub(super) fn mark_attempt_request(&mut self, task: &str, n: u32) {
+        if let Some(idx) = self.events.len().checked_sub(1) {
+            self.attempt_requests.push((idx, task.to_string(), n));
+        }
+    }
+
+    /// Los `attempt.requested` marcados, para rehacerlos (una sola vez).
+    pub(super) fn take_attempt_requests(&mut self) -> Vec<(usize, String, u32)> {
+        std::mem::take(&mut self.attempt_requests)
+    }
+
+    /// Sustituye el borrador de la posición `idx` (rehecho por el mismo mutador que lo emitió).
+    pub(super) fn replace_draft(&mut self, idx: usize, draft: Result<EventDraft, EventError>) {
+        match draft {
+            Ok(d) => {
+                if let Some(slot) = self.events.get_mut(idx) {
+                    *slot = d;
+                }
+            }
+            Err(e) => {
+                self.event_error.get_or_insert_with(|| e.to_string());
+            }
+        }
     }
 
     /// ÚNICO punto de entrada de un evento a la transacción: lo emite quien describe el hecho (los
@@ -227,6 +261,7 @@ impl Tx {
     /// Finaliza y VALIDA los borradores de esta mutación (una sola vez). El `project_id` de un
     /// borrador con `project_from_task` sale del candidato, sin git ni registro.
     fn finalize_events(&mut self) -> Result<Vec<NewEvent>, String> {
+        self.refresh_attempt_requests();
         if let Some(e) = self.event_error.take() {
             return Err(e);
         }
@@ -238,10 +273,15 @@ impl Tx {
         finalize_all(drafts, &self.ctx, super::state::now_ms() as i64, &|task| state.tasks.get(task).and_then(|t| t.project_id.clone()))
     }
 
+    /// ¿Se emiten los hechos de ejecución como `attempt.*`? Solo con el runtime sobre las tablas (LXO-233).
+    pub(super) fn attempt_model(&self) -> bool {
+        self.attempt_model
+    }
+
     /// Prueba: un `Tx` sin `Core` (los adaptadores de prueba de `review` e `integration`).
     #[cfg(test)]
     pub(super) fn detached(state: State) -> Tx {
-        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None }
+        Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None, attempt_model: false, attempt_requests: Vec::new() }
     }
 
     /// Prueba: devuelve el estado del `Tx` detached.
@@ -299,17 +339,24 @@ pub(super) struct PersistError {
     /// Parece transitorio (contención de archivo, interrupción): vale reintentar.
     pub transient: bool,
     pub message: String,
+    /// La persistencia no admite ESTE cambio (LXO-232: las tablas no lo representan) y lo deshizo entero: no es un fallo
+    /// del almacén. La mutación se rechaza (`MutateError::Rejected`) y el Core sigue sano: la memoria no cambió.
+    pub rejected: bool,
 }
 
 impl PersistError {
     /// Hoy solo lo usan las pruebas de inyección de fallos; C2b lo usará para SQLite (`SQLITE_BUSY`).
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn transient(message: impl Into<String>) -> Self {
-        PersistError { transient: true, message: message.into() }
+        PersistError { transient: true, message: message.into(), rejected: false }
     }
 
     pub(super) fn structural(message: impl Into<String>) -> Self {
-        PersistError { transient: false, message: message.into() }
+        PersistError { transient: false, message: message.into(), rejected: false }
+    }
+
+    pub(super) fn rejected(message: impl Into<String>) -> Self {
+        PersistError { transient: false, message: message.into(), rejected: true }
     }
 }
 
@@ -327,6 +374,11 @@ pub(super) trait Persistence: Send + Sync {
     /// mutación no depende del backend); donde no hay Event Log, el resultado materializado se descarta
     /// antes de persistir.
     fn records_events(&self) -> bool {
+        false
+    }
+
+    /// ¿Persiste en las tablas Task/Attempt? Entonces los hechos de ejecución son `attempt.*` (LXO-233, ADR D9).
+    fn attempt_model(&self) -> bool {
         false
     }
 
@@ -369,7 +421,7 @@ fn io_error(e: std::io::Error) -> PersistError {
     use std::io::ErrorKind::*;
     let transient = matches!(e.kind(), Interrupted | WouldBlock | TimedOut | PermissionDenied)
         || matches!(e.raw_os_error(), Some(5) | Some(32) | Some(33));
-    PersistError { transient, message: e.to_string() }
+    PersistError { transient, message: e.to_string(), rejected: false }
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +513,10 @@ impl Persister {
 
     fn records_events(&self) -> bool {
         lock(&self.backend).records_events()
+    }
+
+    fn attempt_model(&self) -> bool {
+        lock(&self.backend).attempt_model()
     }
 
     /// Persiste con reintentos para los fallos transitorios. `Err` ya incluye el
@@ -577,7 +633,18 @@ impl Core {
         if let Health::DegradedReadOnly(reason) = self.persister.health() {
             return Err(MutateError::ReadOnly(reason));
         }
-        let mut tx = Tx { state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None };
+        let attempt_model = self.persister.attempt_model();
+        let mut tx = Tx {
+            state: (*st.0).clone(),
+            notify: Vec::new(),
+            unchanged: false,
+            events: Vec::new(),
+            event_error: None,
+            ctx: MutationContext::core(),
+            active_effect: None,
+            attempt_model,
+            attempt_requests: Vec::new(),
+        };
         let value = f(&mut tx).map_err(MutateError::Rejected)?;
         if tx.unchanged {
             return Ok(value);
@@ -589,6 +656,9 @@ impl Core {
         let finalized = tx.finalize_events().map_err(MutateError::Rejected)?;
         let events = if self.persister.records_events() { finalized } else { Vec::new() };
         if let Err(e) = self.persister.persist(&tx.state, &events) {
+            if e.rejected {
+                return Err(MutateError::Rejected(e.message));
+            }
             self.enter_read_only(&e.message);
             return Err(MutateError::Persist(e.message));
         }

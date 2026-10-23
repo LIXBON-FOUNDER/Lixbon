@@ -262,6 +262,18 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.stopped",
             "warning",
         ),
+        ("attempt.waiting", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "state": "waiting", "from": "running" }), "activity.attempt.waiting", "info"),
+        (
+            "attempt.waiting",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "state": "awaiting_terminal_approval", "from": "running" }),
+            "activity.attempt.awaiting_terminal_approval",
+            "warning",
+        ),
+        ("attempt.resumed", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "from": "waiting" }), "activity.attempt.resumed", "info"),
+        ("attempt.exited", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "from": "running" }), "activity.attempt.exited", "error"),
+        ("attempt.integrated", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.integrated", "success"),
         (
             "provider_session.opened",
             State,
@@ -628,15 +640,20 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 83] = [
+const CLAVES: [&str; 88] = [
     "activity.artifact.created",
     "activity.attempt.approved",
+    "activity.attempt.awaiting_terminal_approval",
     "activity.attempt.completed",
+    "activity.attempt.exited",
     "activity.attempt.failed",
+    "activity.attempt.integrated",
     "activity.attempt.rejected",
     "activity.attempt.requested",
+    "activity.attempt.resumed",
     "activity.attempt.started",
     "activity.attempt.stopped",
+    "activity.attempt.waiting",
     "activity.attention.created",
     "activity.attention.resolved",
     "activity.attention.risk_acted",
@@ -1443,4 +1460,25 @@ fn es_de_solo_lectura_y_reproducible() {
         antes,
         "leer no escribe eventos"
     );
+}
+
+/// LXO-233: ninguna clave que dé el Core cae al texto de respaldo en un cliente. Desktop traduce todas (y su prueba exige
+/// el esquema de argumentos de cada una en `coreQueries.js`); `lxo` y Mobile comprueban que su lista es la de Desktop.
+#[test]
+fn cada_clave_que_da_el_core_la_traducen_los_clientes() {
+    const FORMAT: &str = include_str!("activity_format.rs");
+    const DESKTOP: &str = include_str!("../../../src/ade/activityMessages.js");
+    const SCHEMAS: &str = include_str!("../../../src/ade/coreQueries.js");
+    let claves: BTreeSet<&str> = FORMAT.split('"').filter(|s| s.starts_with("activity.") && s.len() > "activity.".len()).collect();
+    assert!(claves.len() > 80, "revisó {} claves", claves.len());
+    for clave in claves {
+        assert!(DESKTOP.contains(&format!("'{clave}'")), "{clave} no tiene texto en Desktop (activityMessages.js)");
+        // Las familias de pasos se registran en un bucle: `activity.attempt.${step}` con su lista de pasos.
+        let (familia, paso) = clave.rsplit_once('.').unwrap();
+        let en_bucle = SCHEMAS.contains(&format!("`{familia}.${{")) && SCHEMAS.contains(&format!("'{paso}'"));
+        assert!(
+            SCHEMAS.contains(&format!("'{clave}'")) || en_bucle,
+            "{clave} no tiene esquema de argumentos en coreQueries.js: Desktop rechazaría la página entera"
+        );
+    }
 }

@@ -539,6 +539,355 @@
         "event_version": 1
       },
       "text": "No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind)."
+    },
+    {
+      "key": "activity.task.intent_created",
+      "args": {
+        "title": "Preparar entrega",
+        "parent": "t-1",
+        "depth": 1
+      },
+      "text": "Se creó la tarea «Preparar entrega» (depende de t-1; profundidad 1)."
+    },
+    {
+      "key": "activity.task.intent_created",
+      "args": {
+        "title": "Raíz",
+        "depth": 0
+      },
+      "text": "Se creó la tarea «Raíz» (profundidad 0)."
+    },
+    {
+      "key": "activity.task.updated",
+      "args": {
+        "changed": [
+          "title",
+          "spec"
+        ],
+        "title": "Nuevo título"
+      },
+      "text": "Se actualizó el título y el encargo de la tarea («Nuevo título»)."
+    },
+    {
+      "key": "activity.task.updated",
+      "args": {
+        "changed": [
+          "spec"
+        ]
+      },
+      "text": "Se actualizó el encargo de la tarea."
+    },
+    {
+      "key": "activity.task.updated",
+      "args": {
+        "changed": []
+      },
+      "text": null
+    },
+    {
+      "key": "activity.task.discarded",
+      "args": {},
+      "text": "Se descartó la tarea."
+    },
+    {
+      "key": "activity.task.restored",
+      "args": {},
+      "text": "Se recuperó la tarea descartada."
+    },
+    {
+      "key": "activity.task.removed",
+      "args": {
+        "cause": "unused"
+      },
+      "text": "Se eliminó la tarea porque no llegó a usarse."
+    },
+    {
+      "key": "activity.attempt.requested",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "provider": "claude",
+        "profile": "implementar",
+        "external": false,
+        "approval_required": false
+      },
+      "text": "Se pidió el intento 1 de la tarea t-3 con claude (perfil implementar)."
+    },
+    {
+      "key": "activity.attempt.requested",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "provider": "codex",
+        "model": "gpt-6",
+        "effort": "high",
+        "role": "implementador",
+        "external": true,
+        "approval_required": true
+      },
+      "text": "Se pidió el intento 2 de la tarea t-3 con codex (rol implementador; modelo gpt-6; esfuerzo high; externo; pendiente de aprobación)."
+    },
+    {
+      "key": "activity.attempt.approved",
+      "args": {
+        "task": "t-3",
+        "n": 1
+      },
+      "text": "Se aprobó el intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.rejected",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "cause": "run_closed"
+      },
+      "text": "Se rechazó el intento 1 de la tarea t-3 al cerrarse la ejecución."
+    },
+    {
+      "key": "activity.attempt.started",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Empezó el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.completed",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "has_summary": true
+      },
+      "text": "El intento 2 de la tarea t-3 terminó correctamente con resumen."
+    },
+    {
+      "key": "activity.attempt.failed",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "reason": "agent_idle_timeout",
+        "has_summary": false
+      },
+      "text": "El intento 1 de la tarea t-3 falló: el agente dejó de dar señales."
+    },
+    {
+      "key": "activity.attempt.failed",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "reason": "otra_cosa",
+        "has_summary": false
+      },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.stopped",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "from": "running",
+        "cause": "cancelled"
+      },
+      "text": "Se detuvo el intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.waiting",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "from": "running"
+      },
+      "text": "El intento 1 de la tarea t-3 espera una respuesta."
+    },
+    {
+      "key": "activity.attempt.awaiting_terminal_approval",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "from": "waiting"
+      },
+      "text": "El intento 1 de la tarea t-3 espera aprobación en la terminal."
+    },
+    {
+      "key": "activity.attempt.resumed",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "from": "awaiting_terminal_approval"
+      },
+      "text": "El intento 1 de la tarea t-3 siguió en ejecución."
+    },
+    {
+      "key": "activity.attempt.exited",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "from": "starting"
+      },
+      "text": "El intento 1 de la tarea t-3 salió sin cerrarse."
+    },
+    {
+      "key": "activity.attempt.integrated",
+      "args": {
+        "task": "t-3",
+        "n": 1
+      },
+      "text": "Se integró el trabajo del intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.provider_session.opened",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "provider": "claude",
+        "resumable": true,
+        "bound": false
+      },
+      "text": "Se abrió una sesión de claude en el intento 1 de la tarea t-3 (reanudable)."
+    },
+    {
+      "key": "activity.provider_session.bound",
+      "args": {
+        "task": "t-3",
+        "binding": "session_id"
+      },
+      "text": "La sesión de la tarea t-3 quedó vinculada por su id de sesión."
+    },
+    {
+      "key": "activity.provider_session.resumed",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Se reanudó la sesión de la tarea t-3 en el intento 2."
+    },
+    {
+      "key": "activity.provider_session.detached",
+      "args": {
+        "task": "t-3"
+      },
+      "text": "La sesión de la tarea t-3 quedó en espera."
+    },
+    {
+      "key": "activity.provider_session.closed",
+      "args": {
+        "task": "t-3",
+        "from": "idle"
+      },
+      "text": "Se cerró la sesión de la tarea t-3."
+    },
+    {
+      "key": "activity.thread.created",
+      "args": {
+        "task": "t-3"
+      },
+      "text": "Se abrió la conversación de la tarea t-3."
+    },
+    {
+      "key": "activity.thread.summarized",
+      "args": {
+        "task": "t-3",
+        "has_summary": false
+      },
+      "text": "Se quitó el resumen de la conversación de la tarea t-3."
+    },
+    {
+      "key": "activity.worktree.created",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "branch": "lx/r1/t3-api"
+      },
+      "text": "Se creó el worktree del intento 1 de la tarea t-3 para «lx/r1/t3-api»."
+    },
+    {
+      "key": "activity.worktree.adopted",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "provenance": "external"
+      },
+      "text": "Se registró un worktree externo en el intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.worktree.attached",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "El intento 2 de la tarea t-3 reutiliza su worktree."
+    },
+    {
+      "key": "activity.worktree.missing",
+      "args": {
+        "task": "t-3"
+      },
+      "text": "No se encuentra el worktree de la tarea t-3."
+    },
+    {
+      "key": "activity.worktree.found",
+      "args": {
+        "task": "t-3"
+      },
+      "text": "Se volvió a encontrar el worktree de la tarea t-3."
+    },
+    {
+      "key": "activity.worktree.removed",
+      "args": {
+        "task": "t-3",
+        "reason": "integrated",
+        "branch_kept": true
+      },
+      "text": "Se quitó el worktree de la tarea t-3 (integrado; se conserva la rama)."
+    },
+    {
+      "key": "activity.artifact.created",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "kind": "pull_request",
+        "verifiable": false
+      },
+      "text": "El intento 1 de la tarea t-3 dejó un pull request."
+    },
+    {
+      "key": "activity.review.accepted",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "head_commit": "a1b2c3d",
+        "has_comment": true
+      },
+      "text": "Se aceptó la revisión del intento 1 de la tarea t-3 sobre a1b2c3d con comentario."
+    },
+    {
+      "key": "activity.review.rejected",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "head_commit": "a1b2c3d",
+        "has_comment": false
+      },
+      "text": "Se rechazó la revisión del intento 1 de la tarea t-3 sobre a1b2c3d."
+    },
+    {
+      "key": "activity.review.invalidated",
+      "args": {
+        "task": "t-3",
+        "n": 1,
+        "head_commit": "a1b2c3d",
+        "observed_head": "e4f5a6b"
+      },
+      "text": "La revisión del intento 1 de la tarea t-3 sobre a1b2c3d dejó de valer: la rama está en e4f5a6b."
+    },
+    {
+      "key": "activity.core.agentic_cut",
+      "args": {
+        "tasks": 6,
+        "attempts": 6
+      },
+      "text": "Se pasó al modelo de tareas e intentos (6 tareas, 6 intentos)."
     }
   ]
 }

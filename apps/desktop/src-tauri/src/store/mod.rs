@@ -49,6 +49,7 @@ mod sessions;
 mod worktrees;
 mod cut;
 mod reviews;
+mod runtime;
 mod tasks;
 mod model_pages;
 #[cfg(test)]
@@ -63,6 +64,8 @@ mod projects_tests;
 mod tasks_tests;
 #[cfg(test)]
 mod attempts_tests;
+#[cfg(test)]
+mod attempt_runtime_tests;
 #[cfg(test)]
 mod sessions_tests;
 #[cfg(test)]
@@ -105,7 +108,12 @@ pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, Snap
 pub use lock::InstanceLock;
 // Attempt como ejecución (LXO-114): inerte hasta el corte; hasta entonces solo la usan `orch::attempt_ops` y las pruebas.
 #[allow(unused_imports)]
-pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, MAX_SUMMARY_CHARS};
+pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, RuntimeField, MAX_SUMMARY_CHARS};
+// Piezas sin evento propio para el runtime sobre las tablas (LXO-231 → LXO-232): se llaman dentro de `Store::write`.
+#[allow(unused_imports)]
+pub(crate) use attempts::{attempt_phase_append_in, attempt_runtime_update_in};
+#[allow(unused_imports)]
+pub(crate) use sessions::{env_block_set_in, thread_message_append_in, thread_messages_mark_read_in, NewThreadMessage};
 // ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
@@ -115,6 +123,8 @@ pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewA
 // Corte de datos Task/Attempt (LXO-117): sin activar; solo lo usan `orch::agentic_cut` y las pruebas.
 #[allow(unused_imports)]
 pub use cut::{cut_migration, inspect_copy, migrations_with_cut, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
+// Runtime sobre las tablas Task/Attempt (LXO-232): lo usa la persistencia del Core tras el corte.
+pub use runtime::{RuntimeChanges, RuntimeDoc};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};

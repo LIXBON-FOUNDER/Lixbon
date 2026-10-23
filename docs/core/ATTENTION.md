@@ -283,10 +283,21 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `attempt.requested` con `approval_required` (LXO-119) | levanta | `approval` · medium | `attempt` · `launch` |
 | `attempt.approved` / `attempt.rejected` | resuelve `acted` | `approval` | `attempt` · `launch` |
 | `attempt.failed` (el motivo va en `facts.failure_reason`) | levanta | `failed` · high | `attempt` |
+| `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta | `approval` · medium | `attempt` · `terminal` |
+| `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `acted` | `approval` | `attempt` · `terminal` |
+| `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `condition_cleared` | `approval` | `attempt` · `terminal` |
+| `attempt.resumed` desde la terminal · `attempt.completed` · `failed` · `stopped` · `exited` (LXO-233, D10) | resuelve como arriba | `approval` levantada **sobre la Task** antes del corte | `task` · `terminal` |
+| `attempt.requested` con `n > 1` (un seguimiento, LXO-233) | resuelve `condition_cleared` | `review_ready` y el `failed` levantado sobre la Task antes del corte | `task` |
+| `task.removed` con `attempt` (LXO-233) | resuelve `condition_cleared` | `failed` y `approval`(terminal) de ese Attempt | `attempt` |
 
 Los hechos de **ejecución** del modelo Task/Attempt apuntan al **Attempt**: dos Attempts de una Task tienen su propia
 Attention (`model_read_tests::dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity`). Solo existen
 tras el corte; las reglas `task.*` siguen para los hechos históricos sin duplicarlos (ADR D9 y D10).
+
+**Desde LXO-233 el runtime emite estos `attempt.*`** ([EVENTOS.md](EVENTOS.md#runtime-sobre-las-tablas-lxo-233)). La
+Attention levantada sobre la Task antes del corte se respeta hasta que la resuelve un hecho del Attempt (D10). Un
+seguimiento **no** se lleva el `failed` de un Attempt anterior: es de ese Attempt y lo resuelve una persona
+(`attempt_events_tests::el_fallo_es_del_attempt_y_retirar_la_task_cierra_lo_suyo`).
 | `decision.recorded` `review` · `accepted` / `rejected` | resuelve `acted` | `review_ready` | `task` |
 | `task.status_changed` desde `done` | resuelve `condition_cleared` | `review_ready` | `task` |
 | `environment.blocked` (`code` cerrado, `profile` conocido) | levanta | `environment_blocked` · high | `agent` (proveedor) · `code@profile` |

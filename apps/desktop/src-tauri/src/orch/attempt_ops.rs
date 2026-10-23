@@ -24,6 +24,9 @@
 //! | terminar (`attempt.completed`) | no | el de ESA Task | sí (recogida de informes) |
 //! | fallar (`attempt.failed`) | no | el de ESA Task | sí (vigilantes, lanzamiento fallido) |
 //! | cancelar (`attempt.stopped` · `attempt.rejected` si estaba pendiente) | sí | el que la coordina | sí (cierre de Run, apagado) |
+//! | esperar una respuesta · volver de una espera (`attempt.waiting` · `attempt.resumed`) | no | el de ESA Task | sí |
+//! | esperar la aprobación en la terminal (`attempt.waiting`) | no | no | sí (el host la detecta) |
+//! | salir (`attempt.exited`) · marcar integrado (`attempt.integrated`) | no | no | sí |
 //!
 //! Aprobar o rechazar una ejecución es una decisión de una persona; el resto del ciclo lo conduce el Core o el agente.
 //!
@@ -111,6 +114,53 @@ pub(super) fn fail(st: &mut Store, ctx: &MutationContext, id: &str, reason: Fail
     let at = now_ms() as i64;
     let action = AttemptAction::Fail { reason: reason.code().into(), summary: summary.into() };
     st.attempt_transition_recorded(id, &action, at, |a, _, t| finalize_single(event_kinds::attempt_failed(a, t, reason), ctx, at))
+}
+
+/// Espera una respuesta (`lxo ask`): `attempt.waiting`. El agente de ESA Task o el Core.
+pub(super) fn wait(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    let Some(task) = task_of(st, id)? else { return Ok(ChangeOutcome::Missing) };
+    if !(is_system(ctx) || own_agent(ctx, &task)) {
+        return Err(denied(&format!("dejar en espera {id}"), ctx));
+    }
+    let at = now_ms() as i64;
+    st.attempt_transition_recorded(id, &AttemptAction::Wait, at, |a, from, t| finalize_single(event_kinds::attempt_waiting(a, t, from), ctx, at))
+}
+
+/// Espera que una persona apruebe en la terminal: `attempt.waiting`. Solo el Core (el host lo detecta).
+pub(super) fn await_terminal(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    if !is_system(ctx) {
+        return Err(denied(&format!("esperar la aprobación de {id}"), ctx));
+    }
+    let at = now_ms() as i64;
+    st.attempt_transition_recorded(id, &AttemptAction::AwaitTerminal, at, |a, from, t| finalize_single(event_kinds::attempt_waiting(a, t, from), ctx, at))
+}
+
+/// Vuelve a `running` tras una espera: `attempt.resumed`. El agente de ESA Task o el Core.
+pub(super) fn resume(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    let Some(task) = task_of(st, id)? else { return Ok(ChangeOutcome::Missing) };
+    if !(is_system(ctx) || own_agent(ctx, &task)) {
+        return Err(denied(&format!("reanudar {id}"), ctx));
+    }
+    let at = now_ms() as i64;
+    st.attempt_transition_recorded(id, &AttemptAction::Resume, at, |a, from, t| finalize_single(event_kinds::attempt_resumed(a, t, from), ctx, at))
+}
+
+/// El proceso terminó sin cerrar el Attempt: `attempt.exited`. Solo el Core.
+pub(super) fn exit(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    if !is_system(ctx) {
+        return Err(denied(&format!("dar por salido {id}"), ctx));
+    }
+    let at = now_ms() as i64;
+    st.attempt_transition_recorded(id, &AttemptAction::Exit, at, |a, from, t| finalize_single(event_kinds::attempt_exited(a, t, from), ctx, at))
+}
+
+/// Su trabajo quedó integrado: `attempt.integrated`. Solo el Core, tras el efecto de integración.
+pub(super) fn integrate(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    if !is_system(ctx) {
+        return Err(denied(&format!("marcar integrado {id}"), ctx));
+    }
+    let at = now_ms() as i64;
+    st.attempt_integrate_recorded(id, at, |a, t| finalize_single(event_kinds::attempt_integrated(a, t), ctx, at))
 }
 
 /// Cancela: `attempt.stopped` (o `attempt.rejected` si todavía esperaba aprobación). Una persona, el que coordina la

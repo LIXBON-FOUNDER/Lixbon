@@ -30,6 +30,7 @@
 //! |---|---|---|
 //! | `attempt.requested` · `attempt.started` · `attempt.completed` · `attempt.failed` · `attempt.stopped` | state | `attempt` |
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
+//! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -626,6 +627,9 @@ pub(super) enum RemovalCause {
 #[derive(Serialize)]
 pub(super) struct TaskRemoved {
     cause: RemovalCause,
+    /// El Attempt actual de la Task (LXO-233): solo con el runtime sobre las tablas, para cerrar su Attention.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt: Option<u32>,
 }
 
 impl EventPayload for TaskRemoved {
@@ -637,8 +641,8 @@ impl EventPayload for TaskRemoved {
 /// «La Task existió y después fue retirada»: un hecho distinto de que la solicitud de spawn terminara en
 /// `launch_failed` (eso será `spawn.resolved`). La Task YA NO existe cuando se finaliza el borrador, así que
 /// `run` y `project` los captura el mutador ANTES de borrar y van explícitos (nunca `project_from_task`).
-pub(super) fn task_removed(task: &str, run: &str, project: Option<String>, cause: RemovalCause) -> Result<EventDraft, EventError> {
-    Ok(EventDraft::new(EntityKind::Task, task, &TaskRemoved { cause })?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project(project))
+pub(super) fn task_removed(task: &str, run: &str, project: Option<String>, cause: RemovalCause, attempt: Option<u32>) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Task, task, &TaskRemoved { cause, attempt })?.run(Some(run.to_string()).filter(|r| !r.is_empty())).project(project))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -924,6 +928,171 @@ impl EventPayload for AttemptStopped {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_stopped(a: &AttemptRow, t: &TaskRow, from: AttemptStatus, cause: StopCause) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptStopped { task: a.task_id.clone(), n: a.n, from, cause })
+}
+
+/// Entró en una espera: una respuesta (`waiting`) o la aprobación de una persona en la terminal
+/// (`awaiting_terminal_approval`). `from` es el estado del que venía.
+#[derive(Serialize)]
+pub(super) struct AttemptWaiting {
+    task: String,
+    n: i64,
+    state: AttemptStatus,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptWaiting {
+    const KIND: &'static str = "attempt.waiting";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_waiting(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptWaiting { task: a.task_id.clone(), n: a.n, state: a.status, from })
+}
+
+/// Volvió a `running` tras una espera.
+#[derive(Serialize)]
+pub(super) struct AttemptResumed {
+    task: String,
+    n: i64,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptResumed {
+    const KIND: &'static str = "attempt.resumed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_resumed(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptResumed { task: a.task_id.clone(), n: a.n, from })
+}
+
+/// El proceso terminó sin cerrar el Attempt (huérfano al arrancar o terminal cerrada).
+#[derive(Serialize)]
+pub(super) struct AttemptExited {
+    task: String,
+    n: i64,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptExited {
+    const KIND: &'static str = "attempt.exited";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_exited(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptExited { task: a.task_id.clone(), n: a.n, from })
+}
+
+/// Su trabajo quedó integrado (después de terminar).
+#[derive(Serialize)]
+pub(super) struct AttemptIntegrated {
+    task: String,
+    n: i64,
+}
+
+impl EventPayload for AttemptIntegrated {
+    const KIND: &'static str = "attempt.integrated";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptIntegrated { task: a.task_id.clone(), n: a.n })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-233): los hechos de ejecución del Attempt actual de una Task del `State`
+// ---------------------------------------------------------------------------------------------
+//
+// Mismos payloads que los de `attempt_ops` (sin doble emisión, ADR D9): el runtime los emite en lugar de
+// `task.status_changed`. El Attempt es el `n` actual de la Task (`State.attempt_n`); su Project sale de la Task.
+
+fn runtime_attempt<P: EventPayload>(task: &str, run: &str, n: u32, p: &P) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Attempt, format!("{task}-a{n}"), p)?.run(Some(run.into())).project_from_task(task))
+}
+
+fn attempt_status(s: Status) -> AttemptStatus {
+    match s {
+        Status::Starting => AttemptStatus::Starting,
+        Status::Running => AttemptStatus::Running,
+        Status::Waiting => AttemptStatus::Waiting,
+        Status::AwaitingTerminalApproval => AttemptStatus::AwaitingTerminalApproval,
+        Status::Done => AttemptStatus::Done,
+        Status::Failed => AttemptStatus::Failed,
+        Status::Stopped => AttemptStatus::Stopped,
+        Status::Exited => AttemptStatus::Exited,
+    }
+}
+
+/// `attempt.requested` del Attempt `n` de una Task del runtime: nace sin aprobación pendiente (la pide `spawn`).
+pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let label = |v: &Option<String>| v.as_deref().filter(|s| !s.trim().is_empty()).map(|s| clip(s, 80));
+    let p = AttemptRequested {
+        task: t.id.clone(),
+        n: n as i64,
+        provider: clip(&t.agent, 80),
+        model: label(&t.model),
+        effort: label(&t.effort),
+        role: label(&t.role),
+        profile: label(&t.profile),
+        external: t.external,
+        approval_required: false,
+    };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// Los hechos del paso de `from` a `to` del Attempt `n`, en el orden del ciclo de vida (de una espera a otra se pasa
+/// por `running`, como en las tablas). `cause` es la del mutador (`run_closed` al cerrar un Run).
+pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Status, cause: Option<&str>) -> Vec<Result<EventDraft, EventError>> {
+    let (from, to) = (attempt_status(from), attempt_status(to));
+    let steps = if from == to {
+        vec![]
+    } else if crate::store::transition_allowed(from, to) {
+        vec![to]
+    } else if crate::store::transition_allowed(from, AttemptStatus::Running) && crate::store::transition_allowed(AttemptStatus::Running, to) {
+        vec![AttemptStatus::Running, to]
+    } else {
+        vec![]
+    };
+    let (task, n64) = (t.id.clone(), n as i64);
+    let mut prev = from;
+    let mut out = vec![];
+    for s in steps {
+        out.push(match s {
+            AttemptStatus::Running if matches!(prev, AttemptStatus::Waiting | AttemptStatus::AwaitingTerminalApproval) => {
+                runtime_attempt(&t.id, &t.run, n, &AttemptResumed { task: task.clone(), n: n64, from: prev })
+            }
+            AttemptStatus::Running => runtime_attempt(&t.id, &t.run, n, &AttemptStarted { task: task.clone(), n: n64 }),
+            AttemptStatus::Waiting | AttemptStatus::AwaitingTerminalApproval => {
+                runtime_attempt(&t.id, &t.run, n, &AttemptWaiting { task: task.clone(), n: n64, state: s, from: prev })
+            }
+            AttemptStatus::Done => runtime_attempt(&t.id, &t.run, n, &AttemptCompleted { task: task.clone(), n: n64, has_summary: !t.summary.is_empty() }),
+            AttemptStatus::Failed => {
+                let reason = match t.failure_reason.as_deref() {
+                    Some("terminal_approval_timeout") => FailureCode::TerminalApprovalTimeout,
+                    Some("agent_idle_timeout") => FailureCode::AgentIdleTimeout,
+                    Some("launch_failed") => FailureCode::LaunchFailed,
+                    _ => FailureCode::AgentReported,
+                };
+                runtime_attempt(&t.id, &t.run, n, &AttemptFailed { task: task.clone(), n: n64, reason, has_summary: !t.summary.is_empty() })
+            }
+            AttemptStatus::Stopped => {
+                let cause = if cause == Some("run_closed") { StopCause::RunClosed } else { StopCause::Cancelled };
+                runtime_attempt(&t.id, &t.run, n, &AttemptStopped { task: task.clone(), n: n64, from: prev, cause })
+            }
+            AttemptStatus::Exited => runtime_attempt(&t.id, &t.run, n, &AttemptExited { task: task.clone(), n: n64, from: prev }),
+            AttemptStatus::PendingApproval | AttemptStatus::Starting => continue,
+        });
+        prev = s;
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------------------------

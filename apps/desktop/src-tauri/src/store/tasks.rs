@@ -68,6 +68,13 @@ pub enum TaskOrigin {
 }
 
 impl TaskOrigin {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            TaskOrigin::Legacy => "legacy",
+            TaskOrigin::Core => "core",
+        }
+    }
+
     pub(super) fn parse(s: &str) -> StoreResult<TaskOrigin> {
         match s {
             "legacy" => Ok(TaskOrigin::Legacy),
@@ -214,6 +221,11 @@ pub(super) fn require_active(c: &Connection) -> StoreResult<()> {
 /// Siguiente id del contador compartido del legado (`tN`, `rN` y mensajes). El corte lo deja en el `seq`
 /// del documento; sin él, empieza en 1.
 fn next_id(tx: &Transaction<'_>, prefix: char) -> StoreResult<String> {
+    Ok(format!("{prefix}{}", next_seq_in(tx)?))
+}
+
+/// Siguiente número del contador compartido (`tN`, `rN` y mensajes).
+pub(super) fn next_seq_in(tx: &Connection) -> StoreResult<u64> {
     let value: String = tx.query_row(
         "INSERT INTO meta (key, value) VALUES ('id_seq', '1')
          ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
@@ -221,8 +233,7 @@ fn next_id(tx: &Transaction<'_>, prefix: char) -> StoreResult<String> {
         [],
         |r| r.get(0),
     )?;
-    let n: u64 = value.parse().map_err(|_| StoreError::InvalidDocument(format!("meta.id_seq no es un entero: {value}")))?;
-    Ok(format!("{prefix}{n}"))
+    value.parse().map_err(|_| StoreError::InvalidDocument(format!("meta.id_seq no es un entero: {value}")))
 }
 
 fn check_title(title: &str) -> StoreResult<()> {
@@ -481,4 +492,72 @@ impl Store {
     pub fn task_children(&self, id: &str) -> StoreResult<Vec<TaskRow>> {
         self.read(|c| tasks_where(c, "parent_task_id = ?1", id))
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe runs y tasks.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Una Task tal como la crea el runtime legacy.
+pub(crate) struct RuntimeTask<'a> {
+    pub id: &'a str,
+    pub run_id: &'a str,
+    pub parent_task_id: Option<&'a str>,
+    pub depth: i64,
+    pub project_id: Option<&'a str>,
+    pub title: &'a str,
+    pub spec: &'a str,
+    pub repo: &'a str,
+    pub origin: TaskOrigin,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+pub(crate) fn runtime_task_insert_in(c: &Connection, t: &RuntimeTask<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO tasks (id, run_id, parent_task_id, depth, project_id, title, spec, repo, origin, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![t.id, t.run_id, t.parent_task_id, t.depth, t.project_id, t.title, t.spec, t.repo, t.origin.as_str(), t.created_at, t.updated_at.max(t.created_at)],
+    )?;
+    Ok(())
+}
+
+/// Lo que cambia de una Task en el documento: título, `spec` (los seguimientos lo amplían) y el Project, una vez.
+pub(crate) fn runtime_task_update_in(c: &Connection, id: &str, title: &str, spec: &str, project_id: Option<&str>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE tasks SET title = ?2, spec = ?3, project_id = coalesce(project_id, ?4), updated_at = max(updated_at, ?5) WHERE id = ?1",
+        params![id, title, spec, project_id, at],
+    )?;
+    Ok(())
+}
+
+/// Retirar una Task del runtime es descartarla: su historia se conserva.
+pub(crate) fn runtime_task_discard_in(c: &Connection, id: &str, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE tasks SET intent = 'discarded', discarded_at = ?2, updated_at = max(updated_at, ?2) WHERE id = ?1 AND intent = 'open'",
+        params![id, at],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn runtime_run_insert_in(c: &Connection, id: &str, objective: &str, root: &str, created_at: i64, last_activity: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO runs (id, objective, root_task_id, created_at, closed, last_activity) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
+        params![id, objective, root, created_at, last_activity],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn runtime_run_update_in(c: &Connection, id: &str, objective: &str, root: &str, closed: bool, last_activity: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE runs SET objective = ?2, root_task_id = ?3, closed = ?4, last_activity = ?5 WHERE id = ?1",
+        params![id, objective, root, closed as i64, last_activity],
+    )?;
+    Ok(())
 }

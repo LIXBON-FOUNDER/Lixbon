@@ -248,6 +248,14 @@ pub struct State {
     /// reiniciado entre medias. Se lee también el formato anterior (una sola causa por alcance).
     #[serde(default, deserialize_with = "de_env_blocks")]
     pub env_blocks: BTreeMap<String, BTreeSet<EnvBlock>>,
+    /// Mayor id de decisión ya usado aunque su Task se retirara (LXO-232): en las tablas las decisiones son historia y
+    /// no se reutiliza su id. No se guarda en el documento: lo fija la carga desde las tablas.
+    #[serde(skip)]
+    pub decision_floor: u64,
+    /// Número del Attempt actual de cada Task (LXO-233): los hechos `attempt.*` lo llevan. No va en el documento: lo
+    /// fija la carga desde las tablas y lo avanza un seguimiento. Vacío sin el runtime sobre las tablas.
+    #[serde(skip)]
+    pub attempt_n: BTreeMap<String, u32>,
 }
 
 /// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),
@@ -302,7 +310,8 @@ impl State {
     }
 
     pub fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> u64 {
-        let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0) + 1;
+        let id = self.decisions.iter().map(|d| d.id).max().unwrap_or(0).max(self.decision_floor) + 1;
+        self.decision_floor = id;
         self.decisions.push(Decision { id, task: task.into(), kind: kind.into(), actor: actor.into(), detail_json: Some(detail.to_string()), at: now_ms() });
         id
     }

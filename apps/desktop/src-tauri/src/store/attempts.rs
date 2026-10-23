@@ -100,18 +100,39 @@ impl AttemptStatus {
 pub enum AttemptStep {
     Approve,
     Start,
+    /// Espera una respuesta (`lxo ask`). LXO-231.
+    Wait,
+    /// Espera que una persona apruebe en la terminal. LXO-231.
+    AwaitTerminal,
+    /// Vuelve a `running` tras una espera. LXO-231.
+    Resume,
     Finish,
     Fail,
     Cancel,
+    /// El proceso terminó sin cerrar el Attempt (huérfano). LXO-231.
+    Exit,
 }
 
 impl AttemptStep {
-    pub const ALL: [AttemptStep; 5] = [AttemptStep::Approve, AttemptStep::Start, AttemptStep::Finish, AttemptStep::Fail, AttemptStep::Cancel];
+    pub const ALL: [AttemptStep; 9] = [
+        AttemptStep::Approve,
+        AttemptStep::Start,
+        AttemptStep::Wait,
+        AttemptStep::AwaitTerminal,
+        AttemptStep::Resume,
+        AttemptStep::Finish,
+        AttemptStep::Fail,
+        AttemptStep::Cancel,
+        AttemptStep::Exit,
+    ];
 
     pub fn to(self) -> AttemptStatus {
         match self {
             AttemptStep::Approve => AttemptStatus::Starting,
-            AttemptStep::Start => AttemptStatus::Running,
+            AttemptStep::Start | AttemptStep::Resume => AttemptStatus::Running,
+            AttemptStep::Wait => AttemptStatus::Waiting,
+            AttemptStep::AwaitTerminal => AttemptStatus::AwaitingTerminalApproval,
+            AttemptStep::Exit => AttemptStatus::Exited,
             AttemptStep::Finish => AttemptStatus::Done,
             AttemptStep::Fail => AttemptStatus::Failed,
             AttemptStep::Cancel => AttemptStatus::Stopped,
@@ -123,7 +144,10 @@ impl AttemptStep {
         match self {
             AttemptStep::Approve => &[PendingApproval],
             AttemptStep::Start => &[Starting],
-            AttemptStep::Finish => &[Running, Waiting, AwaitingTerminalApproval],
+            AttemptStep::Wait => &[Starting, Running],
+            AttemptStep::AwaitTerminal => &[Starting, Running, Waiting],
+            AttemptStep::Resume => &[Waiting, AwaitingTerminalApproval],
+            AttemptStep::Finish | AttemptStep::Exit => &[Starting, Running, Waiting, AwaitingTerminalApproval],
             AttemptStep::Fail => &[Starting, Running, Waiting, AwaitingTerminalApproval],
             AttemptStep::Cancel => &[PendingApproval, Starting, Running, Waiting, AwaitingTerminalApproval],
         }
@@ -186,6 +210,10 @@ pub enum AttemptAction {
     /// `reason` es un código (`snake_case`, hasta 64 caracteres), nunca texto libre.
     Fail { reason: String, summary: String },
     Cancel,
+    Wait,
+    AwaitTerminal,
+    Resume,
+    Exit,
 }
 
 impl AttemptAction {
@@ -196,6 +224,10 @@ impl AttemptAction {
             AttemptAction::Finish { .. } => AttemptStep::Finish,
             AttemptAction::Fail { .. } => AttemptStep::Fail,
             AttemptAction::Cancel => AttemptStep::Cancel,
+            AttemptAction::Wait => AttemptStep::Wait,
+            AttemptAction::AwaitTerminal => AttemptStep::AwaitTerminal,
+            AttemptAction::Resume => AttemptStep::Resume,
+            AttemptAction::Exit => AttemptStep::Exit,
         }
     }
 }
@@ -319,6 +351,96 @@ pub(super) fn link_worktree_in(tx: &Connection, attempt_id: &str, worktree_id: &
     Ok(())
 }
 
+/// Una columna de runtime del Attempt (migración 012, LXO-231): lo que el runtime actualiza mientras el Attempt corre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeField {
+    Instruction,
+    Cwd,
+    CheckoutBranch,
+    Policy,
+    AckUnverified,
+    RequestedArgv,
+    PlanMode,
+    StreamJson,
+    ReportNonce,
+    Delivered,
+    DeliveryChannel,
+    ModelRequested,
+    ModelEffective,
+    ModelSource,
+    ModelMismatch,
+    ModelMismatchReason,
+    ApprovalDeadline,
+    Files,
+}
+
+impl RuntimeField {
+    pub fn column(self) -> &'static str {
+        match self {
+            RuntimeField::Instruction => "instruction",
+            RuntimeField::Cwd => "cwd",
+            RuntimeField::CheckoutBranch => "checkout_branch",
+            RuntimeField::Policy => "policy",
+            RuntimeField::AckUnverified => "ack_unverified",
+            RuntimeField::RequestedArgv => "requested_argv",
+            RuntimeField::PlanMode => "plan_mode",
+            RuntimeField::StreamJson => "stream_json",
+            RuntimeField::ReportNonce => "report_nonce",
+            RuntimeField::Delivered => "delivered",
+            RuntimeField::DeliveryChannel => "delivery_channel",
+            RuntimeField::ModelRequested => "model_requested",
+            RuntimeField::ModelEffective => "model_effective",
+            RuntimeField::ModelSource => "model_source",
+            RuntimeField::ModelMismatch => "model_mismatch",
+            RuntimeField::ModelMismatchReason => "model_mismatch_reason",
+            RuntimeField::ApprovalDeadline => "approval_deadline",
+            RuntimeField::Files => "files",
+        }
+    }
+}
+
+/// Un valor JSON como valor de SQLite: `null` → NULL, booleano → 0/1, número → entero, texto → texto y una lista u
+/// objeto → su JSON (las columnas JSON lo validan con `json_valid`).
+fn sql_value(v: &serde_json::Value) -> StoreResult<rusqlite::types::Value> {
+    use rusqlite::types::Value as V;
+    Ok(match v {
+        serde_json::Value::Null => V::Null,
+        serde_json::Value::Bool(b) => V::Integer(*b as i64),
+        serde_json::Value::Number(n) => V::Integer(n.as_i64().ok_or_else(|| StoreError::InvalidAttempt("un campo de runtime numérico es un entero".into()))?),
+        serde_json::Value::String(s) => V::Text(s.clone()),
+        otro => V::Text(otro.to_string()),
+    })
+}
+
+/// Actualiza columnas de runtime de un Attempt que no ha terminado. **Sin evento propio**: es una pieza para el runtime
+/// (LXO-232), que la llama dentro de la transacción del hecho que la provoca. La base rechaza tocar un Attempt final.
+pub(crate) fn attempt_runtime_update_in(tx: &Connection, id: &str, changes: &[(RuntimeField, serde_json::Value)], at: i64) -> StoreResult<()> {
+    require_active(tx)?;
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let sets: Vec<String> = changes.iter().enumerate().map(|(i, (f, _))| format!("{} = ?{}", f.column(), i + 2)).collect();
+    let sql = format!("UPDATE attempts SET {}, updated_at = max(updated_at, ?{}) WHERE id = ?1", sets.join(", "), changes.len() + 2);
+    let mut values: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Text(id.into())];
+    for (_, v) in changes {
+        values.push(sql_value(v)?);
+    }
+    values.push(rusqlite::types::Value::Integer(at));
+    if tx.execute(&sql, rusqlite::params_from_iter(values))? != 1 {
+        return Err(StoreError::AttemptConflict(format!("no existe el Attempt {id}")));
+    }
+    Ok(())
+}
+
+/// Añade una fase al Attempt (el orden lo da la base). Sin evento propio, como [`attempt_runtime_update_in`]: el hecho
+/// es `task.phase` del runtime.
+pub(crate) fn attempt_phase_append_in(tx: &Connection, attempt_id: &str, name: &str, done: bool, note: &str, at: i64) -> StoreResult<i64> {
+    require_active(tx)?;
+    let ord: i64 = tx.query_row("SELECT coalesce(max(ord) + 1, 0) FROM attempt_phases WHERE attempt_id = ?1", [attempt_id], |r| r.get(0))?;
+    tx.execute("INSERT INTO attempt_phases (attempt_id, ord, name, done, note, at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![attempt_id, ord, name, done as i64, note, at])?;
+    Ok(ord)
+}
+
 fn task_of(tx: &Connection, a: &AttemptRow) -> StoreResult<TaskRow> {
     task_in(tx, &a.task_id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt {} apunta a la Task inexistente {}", a.id, a.task_id)))
 }
@@ -379,7 +501,7 @@ impl Store {
                 check_reason(reason)?;
                 check_summary(summary)?;
             }
-            AttemptAction::Approve | AttemptAction::Start | AttemptAction::Cancel => {}
+            AttemptAction::Approve | AttemptAction::Start | AttemptAction::Cancel | AttemptAction::Wait | AttemptAction::AwaitTerminal | AttemptAction::Resume | AttemptAction::Exit => {}
         }
         let projector = self.projector.clone();
         self.write(|tx| {
@@ -389,16 +511,27 @@ impl Store {
             if current.status == target {
                 return Ok(ChangeOutcome::Unchanged);
             }
-            if !transition_allowed(current.status, target) {
+            // El par tiene que ser de ESTE paso: `Start` no vale para salir de una espera (eso es `Resume`).
+            if !action.step().from_states().contains(&current.status) {
                 return Err(StoreError::AttemptTransition { id: id.into(), from: current.status.as_str().into(), to: target.as_str().into() });
             }
             let stamp = at.max(current.updated_at);
             let changed = match action {
                 AttemptAction::Approve => tx.execute("UPDATE attempts SET status = ?2, updated_at = ?3 WHERE id = ?1", params![id, target.as_str(), stamp])?,
                 AttemptAction::Start => tx.execute("UPDATE attempts SET status = ?2, started_at = ?3, updated_at = ?3 WHERE id = ?1", params![id, target.as_str(), stamp])?,
-                AttemptAction::Finish { summary } => {
-                    tx.execute("UPDATE attempts SET status = ?2, summary = ?3, ended_at = ?4, updated_at = ?4 WHERE id = ?1", params![id, target.as_str(), summary, stamp])?
+                // Terminar o esperar sin haber pasado por `running` (un `done` antes del primer comando): arrancó al salir.
+                AttemptAction::Finish { summary } => tx.execute(
+                    "UPDATE attempts SET status = ?2, summary = ?3, started_at = CASE WHEN origin = 'core' THEN coalesce(started_at, ?4) ELSE started_at END, ended_at = ?4, updated_at = ?4 WHERE id = ?1",
+                    params![id, target.as_str(), summary, stamp],
+                )?,
+                AttemptAction::Wait | AttemptAction::AwaitTerminal => {
+                    tx.execute(
+                        "UPDATE attempts SET status = ?2, started_at = CASE WHEN origin = 'core' THEN coalesce(started_at, ?3) ELSE started_at END, updated_at = ?3 WHERE id = ?1",
+                        params![id, target.as_str(), stamp],
+                    )?
                 }
+                AttemptAction::Resume => tx.execute("UPDATE attempts SET status = ?2, updated_at = ?3 WHERE id = ?1", params![id, target.as_str(), stamp])?,
+                AttemptAction::Exit => tx.execute("UPDATE attempts SET status = ?2, ended_at = ?3, updated_at = ?3 WHERE id = ?1", params![id, target.as_str(), stamp])?,
                 AttemptAction::Fail { reason, summary } => tx.execute(
                     "UPDATE attempts SET status = ?2, failure_reason = ?3, summary = ?4, ended_at = ?5, updated_at = ?5 WHERE id = ?1",
                     params![id, target.as_str(), reason, summary, stamp],
@@ -411,6 +544,30 @@ impl Store {
             let attempt = attempt_in(tx, id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt {id} desapareció")))?;
             let task = task_of(tx, &attempt)?;
             let e = event(&attempt, current.status, &task)?;
+            check_attempt_event(&attempt, &task, &e)?;
+            insert_event(tx, &e, projector.as_deref())?;
+            Ok(ChangeOutcome::Changed)
+        })
+    }
+
+    /// Marca integrado el trabajo de un Attempt `done` (la integración llega después de terminar), con su evento, en UNA
+    /// transacción. Ya integrado: `Unchanged`. Uno que no terminó bien: [`StoreError::AttemptConflict`].
+    pub fn attempt_integrate_recorded(&mut self, id: &str, at: i64, event: impl FnOnce(&AttemptRow, &TaskRow) -> StoreResult<NewEvent>) -> StoreResult<ChangeOutcome> {
+        let projector = self.projector.clone();
+        self.write(|tx| {
+            require_active(tx)?;
+            let Some(current) = attempt_in(tx, id)? else { return Ok(ChangeOutcome::Missing) };
+            if current.status != AttemptStatus::Done {
+                return Err(StoreError::AttemptConflict(format!("el Attempt {id} está {}: solo se integra uno done", current.status.as_str())));
+            }
+            let integrated: i64 = tx.query_row("SELECT integrated FROM attempts WHERE id = ?1", [id], |r| r.get(0))?;
+            if integrated == 1 {
+                return Ok(ChangeOutcome::Unchanged);
+            }
+            tx.execute("UPDATE attempts SET integrated = 1, updated_at = ?2 WHERE id = ?1", params![id, at.max(current.updated_at)])?;
+            let attempt = attempt_in(tx, id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt {id} desapareció")))?;
+            let task = task_of(tx, &attempt)?;
+            let e = event(&attempt, &task)?;
             check_attempt_event(&attempt, &task, &e)?;
             insert_event(tx, &e, projector.as_deref())?;
             Ok(ChangeOutcome::Changed)
@@ -457,4 +614,72 @@ impl Store {
     pub fn attempts_by_status(&self, status: AttemptStatus) -> StoreResult<Vec<AttemptRow>> {
         self.read(|c| attempts_where(c, "status = ?1", status.as_str()))
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe attempts.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// La selección y el arranque de un Attempt que nace en el runtime.
+pub(crate) struct RuntimeAttempt<'a> {
+    pub id: &'a str,
+    pub task_id: &'a str,
+    pub n: i64,
+    pub external: bool,
+    pub provider: &'a str,
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub role: Option<&'a str>,
+    pub profile: Option<&'a str>,
+    /// El Worktree activo de la Task que reutiliza un seguimiento (D7).
+    pub worktree_id: Option<&'a str>,
+    pub instruction: Option<&'a str>,
+    pub cwd: &'a str,
+    pub at: i64,
+}
+
+/// Nace `starting` con el `n` que le toca (lo comprueba el trigger `attempts_core_create`).
+pub(crate) fn runtime_attempt_insert_in(c: &Connection, a: &RuntimeAttempt<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, instruction, cwd,
+                               created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, 'starting', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, 'core')",
+        params![a.id, a.task_id, a.n, a.external as i64, a.provider, a.model, a.effort, a.role, a.profile, a.worktree_id, a.instruction, a.cwd, a.at],
+    )?;
+    Ok(())
+}
+
+/// Un paso intermedio del ciclo de vida (de una espera a otra pasando por `running`): solo el estado y su arranque.
+pub(crate) fn runtime_attempt_step_in(c: &Connection, id: &str, status: AttemptStatus, started_at: Option<i64>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute("UPDATE attempts SET status = ?2, started_at = ?3, updated_at = max(updated_at, ?4) WHERE id = ?1", params![id, status.as_str(), started_at, at])?;
+    Ok(())
+}
+
+/// Escribe columnas del Attempt (las de runtime, el estado, el resultado y las marcas de tiempo) en UNA sentencia: la
+/// base decide si el cambio es válido (ciclo de vida, final que es final, identidad).
+pub(crate) fn runtime_attempt_set_in(c: &Connection, id: &str, cols: Vec<(&'static str, rusqlite::types::Value)>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    if cols.is_empty() {
+        return Ok(());
+    }
+    let sets: Vec<String> = cols.iter().enumerate().map(|(i, (k, _))| format!("{k} = ?{}", i + 2)).collect();
+    let sql = format!("UPDATE attempts SET {}, updated_at = max(updated_at, ?{}) WHERE id = ?1", sets.join(", "), cols.len() + 2);
+    let mut values = vec![rusqlite::types::Value::Text(id.into())];
+    values.extend(cols.into_iter().map(|(_, v)| v));
+    values.push(rusqlite::types::Value::Integer(at));
+    c.execute(&sql, rusqlite::params_from_iter(values))?;
+    Ok(())
+}
+
+/// Para el Attempt activo de una Task que el runtime retira (D24: se para antes de descartarla).
+pub(crate) fn runtime_attempt_stop_in(c: &Connection, id: &str, ended_at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE attempts SET status = 'stopped', failure_reason = NULL, ended_at = ?2, updated_at = max(updated_at, ?2) WHERE id = ?1",
+        params![id, ended_at],
+    )?;
+    Ok(())
 }

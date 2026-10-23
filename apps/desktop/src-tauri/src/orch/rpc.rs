@@ -271,6 +271,10 @@ impl Core {
                     .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
                     .unwrap_or_default();
                 let summary = s(args, "summary");
+                // El resumen es el resultado mínimo del Attempt (LXO-114): lo largo va en el informe.
+                if summary.chars().count() > crate::store::MAX_SUMMARY_CHARS {
+                    return Err(format!("El resumen pasa de {} caracteres: pon el detalle en el informe (--report)", crate::store::MAX_SUMMARY_CHARS));
+                }
                 let report = self.store_report(&me, &s(args, "report"), &s(args, "report_text"), &summary)?;
                 let status = self.mutate_as(&ctx_of()?, |st| {
                     let msg = st.done(&me, !b(args, "failed"), &summary, files, Some(report.clone()))?;
