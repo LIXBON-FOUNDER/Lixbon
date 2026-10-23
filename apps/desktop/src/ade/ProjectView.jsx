@@ -432,7 +432,7 @@ function Activity({ slice, projectId, onOpenTask, onOpenAttempt, headingId }) {
                   {ev?.text
                     ? <span className="pv__title" data-testid="activity-text">{ev.text}</span>
                     : <span className="pv__title pv__muted" data-testid="activity-no-text">
-                      Core no suministró texto para esta Activity.{isId(ev?.kind) && <> Tipo sin interpretar: <code className="pv__kind">{ev.kind}</code></>}
+                      Core no suministró una descripción interpretable para esta Activity.
                     </span>}
                   <RelatedTargets scope="activity" item={ev} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} />
                 </li>

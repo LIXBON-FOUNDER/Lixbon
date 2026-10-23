@@ -407,7 +407,8 @@ describe('AdeShell · Project View (LXO-204)', () => {
     // Activity del Project (LXO-204): la proyección real de Events acotada al Project durable.
     const activityRegion = within(projectView).getByRole('region', { name: /Activity/ });
     expect(activityRegion.querySelector('[data-testid="slice-notice"]')).toBeNull();
-    expect(within(activityRegion).getByTestId('activity-no-text').textContent).toContain('task.created');
+    expect(within(activityRegion).getByTestId('activity-no-text').textContent).toContain('descripción interpretable');
+    expect(within(activityRegion).getByTestId('activity-no-text').textContent).not.toContain('task.created');
     expect(within(activityRegion).getByTestId('activity-evt-project-1').querySelector('time').dateTime)
       .toBe(new Date(ACTIVITY_EVENT.ts).toISOString());
     expect(queryAdeCore.mock.calls.filter(([query]) => query === 'activity_list'))
@@ -426,6 +427,26 @@ describe('AdeShell · Project View (LXO-204)', () => {
     expect(within(projectView).getByTestId(`task-${FINAL_ITEM.id}`)).toBeTruthy();
     fireEvent.click(within(projectView).getByTestId(`open-task-${FINAL_ITEM.id}`));
     expect(useWorkbenchStore.getState().adeSelection).toEqual({ projectId: PROJECT.id, taskId: FINAL_ITEM.id });
+  });
+
+  it('Project View traduce el fallback seguro de Core para un Event desconocido', async () => {
+    core(detailOf(), {
+      activity: (args) => projectActivityPage([{
+        ...ACTIVITY_EVENT,
+        project_id: PROJECT.id,
+        kind: 'task.teleported',
+        message_key: 'activity.unknown',
+        fallback: true,
+        args: { reason: 'unknown_kind', kind: 'task.teleported', event_version: 1 },
+      }], args),
+    });
+    useWorkbenchStore.setState({ adeSelection: { projectId: PROJECT.id, taskId: null } });
+    render(shell());
+
+    const projectView = await screen.findByTestId('project-view');
+    const row = await within(projectView).findByTestId('activity-evt-project-1');
+    expect(within(row).getByTestId('activity-text').textContent)
+      .toBe('No se reconoce el evento «task.teleported» (versión 1, motivo: unknown_kind).');
   });
 
   it('continúa Tasks all con el cursor opaco, deduplica IDs y conserva el foco al completar la página', async () => {

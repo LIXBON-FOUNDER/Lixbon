@@ -53,12 +53,15 @@ export const PROJECT_ACTIVITY_LIMIT = 20;
 
 /**
  * Proyecta un item de `activity_list` (LXO-92) a la fila de Project View. Solo se usan campos del
- * contrato: el texto sale de `message_key`/`args` traducidos; un fallback o una clave desconocida
- * dejan el texto vacío y Project View dice que Core no dio texto, sin inventarlo.
+ * contrato: el único fallback permitido (`activity.unknown`) se traduce con los argumentos seguros
+ * de Core; fallbacks ajenos o claves inválidas dejan un mensaje genérico en ProjectView.
  */
 export function projectActivityItem(item) {
   const target = item?.target && typeof item.target === 'object' ? item.target : null;
-  const text = item?.fallback === true ? null : translateActivityMessage(item?.message_key, item?.args);
+  const translated = translateActivityMessage(item?.message_key, item?.args);
+  const text = item?.fallback === true
+    ? item?.message_key === 'activity.unknown' ? translated : null
+    : translated;
   return {
     activity_id: typeof item?.event_id === 'string' ? item.event_id : undefined,
     kind: typeof item?.kind === 'string' ? item.kind : undefined,
