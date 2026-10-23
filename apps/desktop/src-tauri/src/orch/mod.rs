@@ -278,6 +278,7 @@ impl Default for Orch {
 pub use commands::*;
 pub use fsio::{lxo_path, random_token};
 pub use tauri_host::TauriHost;
+pub use agentic_cut::AgenticCutStatus;
 use args::{b, kinds, n, s};
 use fsio::{core_dir, data_dir, discovery_file, read_json, write_json, write_private_json};
 use taskfile::task_file;

@@ -21,7 +21,7 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 011 | `reviews` | F3 · Review targeting (LXO-118) | en revisión (PR de LXO-118, tras la 010). Esquema **inerte** hasta el corte. Ver `REVIEWS.md` |
 | 012 | `attempt_runtime` | F3 · huecos del modelo para el runtime (LXO-231) | en revisión (PR de LXO-231, tras la 011). Esquema **inerte** hasta el corte. Ver `ATTEMPTS.md` § Runtime |
 | 013 | `runtime_tables` | F3 · runtime sobre las tablas (LXO-232) | en revisión (PR de LXO-232, tras la 012). Solo triggers y una columna: **inerte** hasta el corte. Ver `RUNTIME_TABLAS.md` § La 013 |
-| — | `task_attempt_cut` | F3 · corte de datos (LXO-117) | **escrito y probado, sin activar**: vive en `store/cut/` (fuera de esta lista) y toma el siguiente número libre al activarse. Ver `CORTE_EJECUCION.md` |
+| — | `task_attempt_cut` | F3 · corte de datos (LXO-117) | **versión reservada 900** (LXO-234): vive en `store/cut/` (fuera de esta lista), lo aplica solo `Core::ensure_agentic_cut`. Las migraciones publicadas siguen por debajo. Ver `CORTE_EJECUCION.md` |
 
 La numeración inicial (002 proyectos · 003 eventos · 004 clientes · 005 attention) quedó obsoleta
 cuando C2b ocupó la 002 con la valla: D, E, F1 y G pasaron a 003..006. Los números aún no escritos son una **reserva

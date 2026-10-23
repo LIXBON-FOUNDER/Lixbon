@@ -77,7 +77,7 @@ fn check_err(m: impl Into<String>) -> StoreError {
 /// Paso 3 (solo lectura): base en la última migración publicada y documento legible. Sin fila `legacy_state` (una
 /// instalación nueva) el documento es un `State` vacío.
 fn preflight(st: &Store) -> StoreResult<(Option<(i64, String)>, State)> {
-    let expected = cut_migration().version - 1;
+    let expected = crate::store::cut_base_version();
     let version = st.schema_version()?;
     if version != expected {
         return Err(preflight_err(format!("la base está en la versión {version}; el corte se aplica sobre la {expected}")));
@@ -292,4 +292,39 @@ pub(super) fn restore(core: &Path, data: &Path, backup: &Path) -> StoreResult<Pa
         }
     }
     Ok(aside)
+}
+
+/// Resultado de [`Core::ensure_agentic_cut`] (LXO-234).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum AgenticCutStatus {
+    /// Se cortó ahora; `backup` es la copia `pre-f3-cut` que permite volver.
+    Applied { backup: PathBuf },
+    /// La base ya estaba cortada: no se tocó nada.
+    AlreadyCut,
+}
+
+impl super::Core {
+    /// Corta la base del Core al modelo Task/Attempt si aún no lo está (LXO-234). **Síncrona** y **idempotente**: con la
+    /// base ya cortada devuelve `AlreadyCut` sin escribir. La llama quien arranca el Core (DESKTOP, LXO-123) con el
+    /// almacén ya abierto; tras `Applied` el runtime debe recargar su estado desde las tablas.
+    ///
+    /// Errores (texto `código: mensaje`):
+    /// * `core_cut_legacy_numbering: …` — base cortada con la numeración anterior (corte como «última + 1»). No se
+    ///   escribe nada; hay que restaurar la copia `pre-f3-cut`.
+    /// * `model_unavailable: …` — el almacén no está abierto.
+    /// * `core_cut_failed: …` — cualquier otro fallo (preflight, copia, validación); el corte se deshace entero.
+    pub fn ensure_agentic_cut(&self) -> Result<AgenticCutStatus, String> {
+        let (core, data) = (super::fsio::core_dir(), super::fsio::data_dir());
+        let r = self
+            .storage
+            .run_agentic_cut(&core, &data)
+            .ok_or_else(|| "model_unavailable: el almacén no está abierto".to_string())?;
+        match r {
+            Ok(CutReport::Applied { backup, .. }) => Ok(AgenticCutStatus::Applied { backup }),
+            Ok(CutReport::AlreadyCut) => Ok(AgenticCutStatus::AlreadyCut),
+            Err(e @ StoreError::CutLegacyNumbering { .. }) => Err(e.to_string()),
+            Err(e) => Err(format!("core_cut_failed: {e}")),
+        }
+    }
 }
