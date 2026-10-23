@@ -1,4 +1,4 @@
-import { COPY, attemptActivityLabel } from './adeLabels';
+import { COPY, attemptActivityLabel, isKnownAttemptActivity } from './adeLabels';
 import { formatUtc } from './attemptFormat';
 import { CoreModelNotice } from './CoreModelNotice';
 import { useCoreQuery } from './useCoreQuery';
@@ -36,6 +36,9 @@ export function AttemptActivity({ attemptId, coreModel, active = true }) {
                 <li key={item.event_id} data-event-id={item.event_id}>
                   {time ? <time dateTime={time.iso}>{time.label}</time> : <span className="ade-missing">{COPY.notAvailable}</span>}
                   {' · '}{attemptActivityLabel(item.message_key)}
+                  {!isKnownAttemptActivity(item.message_key) && (
+                    <details className="ade-status__raw"><summary>{COPY.technicalDetail}</summary><code>{String(item.message_key ?? '')}</code></details>
+                  )}
                 </li>
               );
             })}
@@ -44,8 +47,11 @@ export function AttemptActivity({ attemptId, coreModel, active = true }) {
       ) : state.error ? (
         <CoreModelNotice error={state.error} onRetry={state.retry} />
       ) : (
-        <p className="ade-attempts__state" role="status">Cargando actividad del intento.</p>
+        <p className="ade-attempts__state" role="status">{COPY.loadingAttemptActivity}</p>
       )}
+      {items && items.length > 0 && state.data?.next_cursor && state.data?.has_more ? (
+        <p className="ade-attempts__hint ade-attempts__state--neutral" data-testid="attempt-activity-truncated">{COPY.attemptActivityTruncated}</p>
+      ) : null}
     </div>
   );
 }

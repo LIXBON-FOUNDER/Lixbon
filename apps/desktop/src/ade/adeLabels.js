@@ -90,6 +90,9 @@ export const COPY = Object.freeze({
   attemptActivity: 'Actividad del intento',
   activityPerAttemptPartial: 'Actividad parcial: no incluye eventos de sesión ni worktree',
   noAttemptActivity: 'Sin eventos del intento todavía',
+  loadingAttemptActivity: 'Cargando actividad del intento.',
+  attemptActivityTruncated: 'Mostrando los 50 eventos más recientes',
+  unknownEvent: 'Evento desconocido',
 });
 
 /** Copia por código de error estructurado (`coreErrorCode`). */
@@ -114,7 +117,7 @@ export function reviewFreshnessInfo(review) {
     : { label: 'Frescura desconocida', tone: 'neutral', known: false, raw: review.status ?? null };
 }
 
-/** LXO-121 · Texto corto de cada evento `activity.attempt.*`; cualquier otra clave, «Evento no reconocido». */
+/** LXO-121 · Texto corto de cada evento `activity.attempt.*`; cualquier otra clave, COPY.unknownEvent. */
 export const ATTEMPT_ACTIVITY_LABELS = Object.freeze({
   'activity.attempt.requested': 'Solicitado',
   'activity.attempt.approved': 'Aprobado',
@@ -126,5 +129,9 @@ export const ATTEMPT_ACTIVITY_LABELS = Object.freeze({
 });
 
 export function attemptActivityLabel(messageKey) {
-  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey) ? ATTEMPT_ACTIVITY_LABELS[messageKey] : 'Evento no reconocido';
+  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey) ? ATTEMPT_ACTIVITY_LABELS[messageKey] : COPY.unknownEvent;
+}
+
+export function isKnownAttemptActivity(messageKey) {
+  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey);
 }

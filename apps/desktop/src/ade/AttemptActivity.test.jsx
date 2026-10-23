@@ -66,10 +66,41 @@ describe('AttemptActivity (LXO-121)', () => {
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
   });
 
-  it('un message_key que no es attempt.* se muestra como evento no reconocido, sin inventar texto', async () => {
+  it('carga: el texto viene de COPY', () => {
+    mount(() => new Promise(() => {}));
+    render(<AttemptActivity attemptId="loading-a1" coreModel={V1} />);
+    expect(screen.getByRole('status').textContent).toBe('Cargando actividad del intento.');
+  });
+
+  it('has_more con next_cursor: avisa que solo se muestran los 50 más recientes; sin más páginas no avisa', async () => {
+    const events = Array.from({ length: ATTEMPT_ACTIVITY_LIMIT }, (_, k) => attemptEvent(ATTEMPT_ACTIVITY_LIMIT + 1 - k, 't3-a2', 'attempt.started', { task: 't3', n: 2 }));
+    mount(() => ({ ...attemptActivityPage(events), has_more: true }));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    expect(screen.getByTestId('attempt-activity-truncated').textContent).toBe('Mostrando los 50 eventos más recientes');
+    cleanup();
+    mount(() => attemptActivityPage(events));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    expect(screen.queryByTestId('attempt-activity-truncated')).toBeNull();
+  });
+
+  it('un message_key que no es attempt.* se muestra como «Evento desconocido» con la clave en «Detalle técnico»', async () => {
     mount(() => attemptActivityPage([attemptEvent(1, 't3-a2', 'attempt.started', { task: 't3', n: 2 })].map((e) => ({ ...e, message_key: 'activity.unknown', fallback: true, args: { reason: 'unknown_kind', kind: 'attempt.future', event_version: 2 } }))));
     render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
     await flush();
-    expect(screen.getByRole('listitem').textContent).toContain('Evento no reconocido');
+    const row = screen.getByRole('listitem');
+    expect(row.textContent).toContain('Evento desconocido');
+    expect(row.textContent).not.toContain('Evento no reconocido');
+    const detail = row.querySelector('details');
+    expect(detail.querySelector('summary').textContent).toBe('Detalle técnico');
+    expect(detail.querySelector('code').textContent).toBe('activity.unknown');
+  });
+
+  it('un evento attempt.* conocido no muestra «Detalle técnico»', async () => {
+    mount(() => attemptActivityPage([attemptEvent(1, 't3-a2', 'attempt.started', { task: 't3', n: 2 })]));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    expect(screen.getByRole('listitem').querySelector('details')).toBeNull();
   });
 });
