@@ -25,18 +25,18 @@ use super::{Caller, Core, Orch};
 // ---------------------------------------------------------------------------------------------
 
 /// `(data, core)` de un `Env` (`dirs()` deja `orch/` y `core/` junto a `repos/`).
-fn carpetas(e: &Env) -> (PathBuf, PathBuf) {
+pub(super) fn carpetas(e: &Env) -> (PathBuf, PathBuf) {
     let base = e.repo.parent().unwrap().parent().unwrap();
     (base.join("orch"), base.join("core"))
 }
 
-fn sql<T: rusqlite::types::FromSql>(core: &Core, q: &str) -> Vec<T> {
+pub(super) fn sql<T: rusqlite::types::FromSql>(core: &Core, q: &str) -> Vec<T> {
     core.storage
         .with_store(|s| s.read(|c| Ok(c.prepare(q)?.query_map([], |r| r.get::<_, T>(0))?.collect::<Result<Vec<_>, _>>()?)).unwrap())
         .unwrap()
 }
 
-fn uno<T: rusqlite::types::FromSql>(core: &Core, q: &str) -> T {
+pub(super) fn uno<T: rusqlite::types::FromSql>(core: &Core, q: &str) -> T {
     sql::<T>(core, q).into_iter().next().unwrap_or_else(|| panic!("sin filas: {q}"))
 }
 
@@ -54,7 +54,7 @@ fn legacy_rev(core: &Core) -> i64 {
 }
 
 /// Para el Core de `e` y arranca otro sobre las mismas carpetas (el lanzador simulado, como `setup`).
-fn reinicia(e: Env) -> Env {
+pub(super) fn reinicia(e: Env) -> Env {
     let (data, core_dir) = carpetas(&e);
     let Env { _l, core, root, run, project, repo, .. } = e;
     core.shutdown();
@@ -69,7 +69,7 @@ fn reinicia(e: Env) -> Env {
 }
 
 /// Corta la base del Core en marcha (pasos 3–5b) y reinicia: desde ahí el runtime vive en las tablas.
-fn corta_y_reinicia(e: Env) -> Env {
+pub(super) fn corta_y_reinicia(e: Env) -> Env {
     let (data, core_dir) = carpetas(&e);
     let r = e.core.storage.with_store(|s| agentic_cut::run(s, &core_dir, &data, "t")).unwrap().unwrap();
     assert!(matches!(r, agentic_cut::CutReport::Applied { .. }), "{r:?}");
@@ -78,7 +78,7 @@ fn corta_y_reinicia(e: Env) -> Env {
     e
 }
 
-fn como(id: &str) -> Caller {
+pub(super) fn como(id: &str) -> Caller {
     Caller::Agent(Some(id.to_string()))
 }
 
@@ -299,7 +299,7 @@ fn muere_en(data: &Path, punto: &str) {
 // ---------------------------------------------------------------------------------------------
 
 /// Una Task con su Run, lista para mutar sobre las tablas.
-fn con_hija(nombre: &str) -> (Env, String) {
+pub(super) fn con_hija(nombre: &str) -> (Env, String) {
     let e = corta_y_reinicia(setup(nombre));
     let pid = e.spawn(false);
     e.aprobar(&pid);

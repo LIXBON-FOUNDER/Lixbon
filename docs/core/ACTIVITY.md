@@ -127,6 +127,15 @@ no son del tipo esperado, el item cae al respaldo.
 Las claves de esta tabla están fijadas por una prueba (`activity_tests::CLAVES`): cambiar una a propósito exige
 actualizar la prueba y esta tabla en el mismo PR, porque los clientes las traducen.
 
+**Clientes (LXO-233).** Desktop (`activityMessages.js`), Mobile (su copia exacta) y `lxo` (`activity.rs`) traducen
+**todas** las claves, incluidas las del modelo Task/Attempt: `activity.task.intent_created`, `.updated`, `.discarded`,
+`.restored`, `activity.attempt.*`, `activity.provider_session.*`, `activity.thread.*`, `activity.worktree.*`,
+`activity.artifact.created`, `activity.review.*` y `activity.core.agentic_cut`. Las mismas frases están en
+`docs/core/fixtures/activity_messages_es.json`. Además, `coreQueries.js` tiene el esquema de argumentos de cada clave:
+una clave sin esquema invalidaría la página entera de `activity_list` en Desktop.
+`activity_tests::cada_clave_que_da_el_core_la_traducen_los_clientes` falla si el Core da una clave sin texto o sin
+esquema.
+
 ## Respaldo seguro
 
 Un evento nunca rompe la timeline. Si no se puede formatear, el item es `activity.unknown` con `fallback: true`,
