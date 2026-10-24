@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { COPY, startupCutCopy } from './adeLabels';
 import { PathText } from './PathText';
+import './StartupCutNotice.css';
 
 const SEEN_KEY = 'lixbon.ade.startupCutSeen';
 
@@ -32,7 +33,7 @@ function Detail({ message }) {
 }
 
 /**
- * LXO-123 · Aviso de arranque del corte Task/Attempt.
+ * LXO-234 · Aviso de arranque del corte Task/Attempt.
  * - `storage.status === 'rejected'` (de `core_model`, p. ej. `core_cut_legacy_numbering`): pide restaurar la copia.
  * - Corte aplicado ahora: aviso único con la ruta de la copia `pre-f3-cut`.
  * - Corte fallido / sin almacén: dice que los datos quedaron sin cambios. El mensaje completo va a «Detalle técnico».

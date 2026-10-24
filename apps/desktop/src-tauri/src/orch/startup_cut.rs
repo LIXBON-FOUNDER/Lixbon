@@ -1,4 +1,4 @@
-//! LXO-123: activación del corte Task/Attempt al arrancar y aviso único para la UI.
+//! LXO-234: activación del corte Task/Attempt al arrancar y aviso único para la UI.
 //!
 //! El arranque (`lifecycle.rs`) llama a [`Core::activate_cut_at_boot`] con el almacén abierto y `core.lock` tomado.
 //! El corte es idempotente (`AlreadyCut` no escribe). Tras `Applied` el estado se recarga desde las tablas y la UI

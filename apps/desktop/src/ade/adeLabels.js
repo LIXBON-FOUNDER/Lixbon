@@ -97,7 +97,7 @@ export const COPY = Object.freeze({
   loadingAttemptActivity: 'Cargando actividad del intento.',
   attemptActivityTruncated: (limit) => `Mostrando los ${limit} eventos más recientes`,
   unknownEvent: 'Evento desconocido',
-  // LXO-123 · Corte Task/Attempt al arrancar.
+  // LXO-234 · Corte Task/Attempt al arrancar.
   cutApplied: 'El almacén del Core se actualizó al modelo de tareas e intentos. Se guardó una copia de seguridad previa:',
   cutDismiss: 'Entendido',
   cutLegacyNumbering: 'El almacén del Core se actualizó con una numeración anterior y no se puede abrir. Restaura la copia de seguridad «pre-f3-cut» para continuar.',
@@ -127,7 +127,7 @@ export function navNoticeCopy(notice) {
   return { tone: 'warn', text: COPY.navLegacyInvalid };
 }
 
-/** LXO-123 · Copia del aviso de arranque por código del corte. */
+/** LXO-234 · Copia del aviso de arranque por código del corte. */
 export function startupCutCopy(code) {
   if (code === 'core_cut_legacy_numbering') return { tone: 'error', text: COPY.cutLegacyNumbering };
   if (code === 'model_unavailable') return { tone: 'error', text: COPY.cutModelUnavailable };
