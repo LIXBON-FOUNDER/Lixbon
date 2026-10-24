@@ -65,6 +65,8 @@ impl Core {
             Ok(b) => b,
             Err(e) => return Err(self.refuse_to_start(&e)),
         };
+        #[cfg(test)]
+        let boot = self.cut_for_tests(boot, data, core);
         let settings: Settings = read_json(&data.join("settings.json")).unwrap_or_default();
         let proof = BootProof::new();
         match boot {
@@ -150,11 +152,19 @@ impl Core {
 
     /// SQLite manda: adopta su estado, instala su persistencia y deja el espejo vigente.
     fn finish_authoritative(&self, proof: &BootProof, data: &Path, a: Authoritative) {
-        let Authoritative { state, rev, doc, promotion_id, known_legacy_hash, promoted_now, marker_pending, needs_orphan } = a;
-        self.adopt_state(proof, state); // carga inicial: no es una mutación
-        self.install_persistence(proof, self.storage.sqlite_persistence(data, rev));
+        let Authoritative { state, rev, doc, promotion_id, known_legacy_hash, promoted_now, marker_pending, needs_orphan, on_tables } = a;
+        if on_tables {
+            // Desde el corte (LXO-232) las tablas mandan y `state.json` deja de escribirse (ADR D4): no hay espejo.
+            let persistence = self.storage.tables_persistence(&state);
+            self.adopt_state(proof, state); // carga inicial: no es una mutación
+            self.install_persistence(proof, persistence);
+        } else {
+            self.adopt_state(proof, state); // carga inicial: no es una mutación
+            self.install_persistence(proof, self.storage.sqlite_persistence(data, rev));
+        }
         // El espejo es una copia: un fallo aquí no invalida nada, solo se diagnostica.
-        match mirror::reconcile(data, rev, &doc, known_legacy_hash.as_deref()) {
+        let reconciled = if on_tables { Ok(Reconciled::Current) } else { mirror::reconcile(data, rev, &doc, known_legacy_hash.as_deref()) };
+        match reconciled {
             Ok(Reconciled::DivergentPreserved(copy)) => {
                 let msg = format!("state.json contenía cambios que no vienen de SQLite (probablemente lo escribió una versión anterior de Lixbon). SQLite manda; se conservó una copia en {}", copy.display());
                 eprintln!("[core] {msg}");

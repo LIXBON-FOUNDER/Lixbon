@@ -81,6 +81,8 @@ pub(super) struct Authoritative {
     /// ¿Hay que cerrar las tareas abiertas (`orphan_all`) pasando por `mutate`? Solo
     /// cuando el estado se cargó de SQLite; el promovido ya viene con ellas cerradas.
     pub needs_orphan: bool,
+    /// Desde el corte Task/Attempt el estado vive en las tablas (LXO-232): `doc` va vacío y no hay espejo.
+    pub on_tables: bool,
 }
 
 pub(super) enum BootResult {
@@ -215,6 +217,22 @@ impl Core {
     /// Carga el estado de la fila de SQLite (arranque ya promovido).
     fn load_authoritative(&self, probe: &DbProbe, promoted_now: bool, marker_pending: bool) -> Result<BootResult, OpenStoreError> {
         let DbProbe::Opens(f) = probe else { unreachable!() };
+        let auth = f.auth.as_ref();
+        // Base cortada (LXO-232): el estado se reconstruye desde las tablas; `legacy_state` está congelado.
+        if let Some(state) = self.storage.load_from_tables()? {
+            let rev = self.storage.confirmed_rev().map_err(|e| authority_error(e))?.unwrap_or(0);
+            return Ok(BootResult::Authoritative(Box::new(Authoritative {
+                state,
+                rev,
+                doc: String::new(),
+                promotion_id: auth.map(|a| a.promotion_id.clone()).unwrap_or_default(),
+                known_legacy_hash: None,
+                promoted_now,
+                marker_pending,
+                needs_orphan: true,
+                on_tables: true,
+            })));
+        }
         let row = self
             .storage
             .with_store(|s| s.legacy_state())
@@ -223,7 +241,6 @@ impl Core {
             .ok_or_else(|| authority_error("la base es autoritativa pero no tiene fila de estado"))?;
         let state: State = serde_json::from_str(&row.doc)
             .map_err(|e| authority_error(format!("el estado guardado en SQLite no se puede interpretar: {e}. No se usa state.json en su lugar")))?;
-        let auth = f.auth.as_ref();
         Ok(BootResult::Authoritative(Box::new(Authoritative {
             state,
             rev: row.rev,
@@ -233,6 +250,7 @@ impl Core {
             promoted_now,
             marker_pending,
             needs_orphan: true,
+            on_tables: false,
         })))
     }
 
@@ -253,6 +271,7 @@ impl Core {
                     promoted_now: true,
                     marker_pending: p.marker_pending,
                     needs_orphan: false,
+                    on_tables: false,
                 })))
             }
             Err(PromoteError::Recoverable(why)) => {

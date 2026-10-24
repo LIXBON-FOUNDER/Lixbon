@@ -104,11 +104,17 @@ fn view_err(m: String) -> StoreError {
     StoreError::MigrationFailed { version: 0, name: CUT_NAME.into(), detail: format!("vista legacy: {m}") }
 }
 
-impl CutView<'_> {
-    /// Una Task en la forma del documento legacy (JSON).
+impl<'a> CutView<'a> {
+    pub(super) fn new(c: &'a Connection) -> CutView<'a> {
+        CutView(c)
+    }
+
+    /// Una Task en la forma del documento legacy (JSON). La ejecución es la del Attempt actual (`max(n)`); lo que en el
+    /// documento sobrevive a un seguimiento (`lxo continue`) sale de toda la Task (LXO-232): su Worktree (lo reutilizan
+    /// los seguimientos, D7), sus fases, el PR y la ruta de `codex exec -o`. El informe es solo del Attempt actual.
     pub fn legacy_task(&self, id: &str) -> StoreResult<Value> {
         let c = self.0;
-        let mut o: Map<String, Value> = c.query_row(
+        let (mut o, repo): (Map<String, Value>, String) = c.query_row(
             "SELECT id, run_id, parent_task_id, depth, title, spec, repo, project_id, created_at, updated_at FROM tasks WHERE id = ?1",
             [id],
             |r| {
@@ -123,13 +129,14 @@ impl CutView<'_> {
                 o.insert("project_id".into(), json!(r.get::<_, Option<String>>(7)?));
                 o.insert("created".into(), json!(r.get::<_, i64>(8)?));
                 o.insert("updated".into(), json!(r.get::<_, i64>(9)?));
-                Ok(o)
+                Ok((o, r.get::<_, String>(6)?))
             },
         )?;
-        let (aid, worktree_id, session_id) = c.query_row(
+        let (aid, session_id, core) = c.query_row(
             "SELECT id, worktree_id, provider_session_id, provider, model, effort, role, profile, cwd, checkout_branch, status, summary, files, external,
                     integrated, ack_unverified, requested_argv, policy, report_nonce, delivered, delivery_channel, model_effective, model_requested,
-                    model_mismatch, model_mismatch_reason, plan_mode, approval_deadline, failure_reason, model_source, started_at, stream_json
+                    model_mismatch, model_mismatch_reason, plan_mode, approval_deadline, failure_reason, model_source, started_at, stream_json,
+                    origin, launched_at
              FROM attempts WHERE task_id = ?1 ORDER BY n DESC LIMIT 1",
             [id],
             |r| {
@@ -146,19 +153,44 @@ impl CutView<'_> {
                     o.insert(k.into(), json!(r.get::<_, Option<String>>(col)?));
                 }
                 o.insert("approval_deadline".into(), json!(r.get::<_, Option<i64>>(26)?));
-                o.insert("attempt_started".into(), json!(r.get::<_, Option<i64>>(29)?));
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?))
+                // El corte copió el arranque legacy en `started_at`; en una fila del Core es `launched_at` (013).
+                let core = r.get::<_, String>(31)? == "core";
+                let started = if core { r.get::<_, Option<i64>>(32)? } else { r.get::<_, Option<i64>>(29)? };
+                o.insert("attempt_started".into(), json!(started));
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(2)?, core))
             },
         )?;
-        if let Some(w) = worktree_id {
-            c.query_row("SELECT path, branch, base_branch, base_commit, env_plan FROM worktrees WHERE id = ?1", [&w], |r| {
-                o.insert("worktree".into(), json!(r.get::<_, Option<String>>(0)?));
-                o.insert("branch".into(), json!(r.get::<_, Option<String>>(1)?));
-                o.insert("base".into(), json!(r.get::<_, Option<String>>(2)?));
-                o.insert("base_commit".into(), json!(r.get::<_, Option<String>>(3)?));
-                o.insert("env".into(), json_col(r.get(4)?));
-                Ok(())
-            })?;
+        // El Worktree es de la Task: el último que se registró, aunque lo registrara un Attempt anterior.
+        let wt = c
+            .query_row(
+                "SELECT path, branch, base_branch, base_commit, env_plan, state, branch_kept, origin FROM worktrees WHERE task_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                [id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<String>>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                        r.get::<_, Option<String>>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, i64>(6)? == 1,
+                        r.get::<_, String>(7)? == "core",
+                    ))
+                },
+            )
+            .optional()?;
+        if let Some((path, branch, base, base_commit, env, state, kept, wt_core)) = wt {
+            let removed = state == "removed";
+            o.insert("worktree".into(), json!(path));
+            // Quitado sin conservar la rama: `git branch -d` la borró y el documento ya no la afirma.
+            o.insert("branch".into(), json!(branch.filter(|_| !removed || kept)));
+            o.insert("base".into(), json!(base));
+            o.insert("base_commit".into(), json!(base_commit));
+            o.insert("env".into(), json_col(env));
+            // Al quitar un Worktree que registró el Core la Task vuelve a su repositorio; el Attempt conserva dónde corrió.
+            if core && wt_core && removed {
+                o.insert("cwd".into(), json!(repo));
+            }
         }
         if let Some(ps) = session_id {
             c.query_row("SELECT external_ref, binding FROM provider_sessions WHERE id = ?1", [&ps], |r| {
@@ -167,8 +199,12 @@ impl CutView<'_> {
                 Ok(())
             })?;
         }
-        let mut arts = c.prepare("SELECT kind, uri FROM artifacts WHERE attempt_id = ?1")?;
-        for row in arts.query_map([&aid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+        // Por orden de Attempt y de alta: el último de cada tipo manda. El informe, solo el del Attempt actual.
+        let mut arts = c.prepare(
+            "SELECT x.kind, x.uri FROM artifacts AS x JOIN attempts AS a ON a.id = x.attempt_id
+             WHERE a.task_id = ?1 AND (x.kind <> 'report' OR x.attempt_id = ?2) ORDER BY a.n, x.rowid",
+        )?;
+        for row in arts.query_map(rusqlite::params![id, aid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
             let (kind, uri) = row?;
             let key = match kind.as_str() {
                 "report" => "report",
@@ -178,9 +214,13 @@ impl CutView<'_> {
             };
             o.insert(key.into(), json!(uri));
         }
-        let mut ph = c.prepare("SELECT name, done, note, at FROM attempt_phases WHERE attempt_id = ?1 ORDER BY ord")?;
+        // Un seguimiento no borra las fases del documento: las de todos los Attempts, en orden.
+        let mut ph = c.prepare(
+            "SELECT p.name, p.done, p.note, p.at FROM attempt_phases AS p JOIN attempts AS a ON a.id = p.attempt_id
+             WHERE a.task_id = ?1 ORDER BY a.n, p.ord",
+        )?;
         let phases = ph
-            .query_map([&aid], |r| Ok(json!({ "name": r.get::<_, String>(0)?, "done": r.get::<_, i64>(1)? == 1, "note": r.get::<_, String>(2)?, "at": r.get::<_, i64>(3)? })))?
+            .query_map([id], |r| Ok(json!({ "name": r.get::<_, String>(0)?, "done": r.get::<_, i64>(1)? == 1, "note": r.get::<_, String>(2)?, "at": r.get::<_, i64>(3)? })))?
             .collect::<Result<Vec<_>, _>>()?;
         o.insert("phases".into(), json!(phases));
         Ok(Value::Object(o))
@@ -207,6 +247,38 @@ impl CutView<'_> {
                        "closed": r.get::<_, i64>(4)? == 1, "last_activity": r.get::<_, i64>(5)? }))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Un mensaje en la forma del documento legacy, si está en las tablas.
+    pub fn legacy_message(&self, id: i64) -> StoreResult<Option<Value>> {
+        Ok(self
+            .0
+            .query_row(
+                "SELECT m.id, th.run_id, m.from_task_id, m.to_task_id, m.kind, m.body, m.reply_to, m.read, m.at
+                 FROM thread_messages AS m JOIN threads AS th ON th.id = m.thread_id WHERE m.id = ?1",
+                [id],
+                |r| {
+                    Ok(json!({ "id": r.get::<_, i64>(0)?, "run": r.get::<_, String>(1)?, "from": r.get::<_, String>(2)?, "to": r.get::<_, String>(3)?, "kind": r.get::<_, String>(4)?,
+                               "body": r.get::<_, String>(5)?, "reply_to": r.get::<_, Option<i64>>(6)?, "read": r.get::<_, i64>(7)? == 1, "at": r.get::<_, i64>(8)? }))
+                },
+            )
+            .optional()?)
+    }
+
+    /// Un Run en la forma del documento legacy, si está en las tablas.
+    pub fn legacy_run(&self, id: &str) -> StoreResult<Option<Value>> {
+        Ok(self
+            .0
+            .query_row("SELECT id, objective, root_task_id, created_at, closed, last_activity FROM runs WHERE id = ?1", [id], |r| {
+                Ok(json!({ "id": r.get::<_, String>(0)?, "objective": r.get::<_, String>(1)?, "root": r.get::<_, String>(2)?, "created": r.get::<_, i64>(3)?,
+                           "closed": r.get::<_, i64>(4)? == 1, "last_activity": r.get::<_, i64>(5)? }))
+            })
+            .optional()?)
+    }
+
+    /// ¿Sigue la Task a la vista (no retirada)?
+    pub fn task_visible(&self, id: &str) -> StoreResult<bool> {
+        Ok(self.0.query_row("SELECT 1 FROM tasks WHERE id = ?1 AND intent = 'open'", [id], |_| Ok(())).optional()?.is_some())
     }
 
     /// Los mensajes legacy que fueron a residuo (participante inexistente): la vista no los tiene.

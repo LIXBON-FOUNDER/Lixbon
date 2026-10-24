@@ -338,6 +338,24 @@ fn si_la_validacion_semantica_falla_se_deshace_todo() {
     assert!(s2.cut_view(|v| verify_legacy_view(v, &menos)).is_err());
 }
 
+/// Liberar una tarea integrada borra su rama (`git branch -d`): el documento conserva la base sin worktree ni rama. Esa
+/// Task se corta con su Worktree quitado y sin rama, y la vista legacy la reconstruye igual (LXO-232).
+#[test]
+fn una_tarea_liberada_cuya_rama_se_borro_se_corta_con_su_base() {
+    let mut doc: Value = serde_json::from_str(FIXTURE).unwrap();
+    doc["tasks"]["t5"]["branch"] = Value::Null;
+    doc["tasks"]["t5"]["merged"] = json!(true);
+    let t = Tmp::new();
+    let mut s = base(&t, Some(&doc.to_string()));
+    assert!(matches!(corta(&mut s, &t), CutReport::Applied { .. }), "la validación semántica no la rechaza");
+    let fila: (String, i64, Option<String>, Option<String>) = s
+        .read(|c| Ok(c.query_row("SELECT state, branch_kept, branch, base_branch FROM worktrees WHERE task_id = 't5'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?))
+        .unwrap();
+    assert_eq!(fila, ("removed".into(), 0, None, Some("main".into())));
+    let vista = s.cut_view(|v| v.legacy_task("t5")).unwrap();
+    assert_eq!((vista["branch"].clone(), vista["base"].clone(), vista["worktree"].clone()), (Value::Null, json!("main"), Value::Null));
+}
+
 #[test]
 fn cortar_dos_veces_no_hace_nada_la_segunda() {
     let t = Tmp::new();

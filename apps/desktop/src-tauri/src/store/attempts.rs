@@ -615,3 +615,71 @@ impl Store {
         self.read(|c| attempts_where(c, "status = ?1", status.as_str()))
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Runtime sobre las tablas (LXO-232): piezas sin evento propio. Las llama `store::runtime` dentro de la transacción de
+// la mutación del runtime, cuyo hecho ya va en sus eventos. Este módulo sigue siendo el único que escribe attempts.
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// La selección y el arranque de un Attempt que nace en el runtime.
+pub(crate) struct RuntimeAttempt<'a> {
+    pub id: &'a str,
+    pub task_id: &'a str,
+    pub n: i64,
+    pub external: bool,
+    pub provider: &'a str,
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub role: Option<&'a str>,
+    pub profile: Option<&'a str>,
+    /// El Worktree activo de la Task que reutiliza un seguimiento (D7).
+    pub worktree_id: Option<&'a str>,
+    pub instruction: Option<&'a str>,
+    pub cwd: &'a str,
+    pub at: i64,
+}
+
+/// Nace `starting` con el `n` que le toca (lo comprueba el trigger `attempts_core_create`).
+pub(crate) fn runtime_attempt_insert_in(c: &Connection, a: &RuntimeAttempt<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, instruction, cwd,
+                               created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, 'starting', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, 'core')",
+        params![a.id, a.task_id, a.n, a.external as i64, a.provider, a.model, a.effort, a.role, a.profile, a.worktree_id, a.instruction, a.cwd, a.at],
+    )?;
+    Ok(())
+}
+
+/// Un paso intermedio del ciclo de vida (de una espera a otra pasando por `running`): solo el estado y su arranque.
+pub(crate) fn runtime_attempt_step_in(c: &Connection, id: &str, status: AttemptStatus, started_at: Option<i64>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute("UPDATE attempts SET status = ?2, started_at = ?3, updated_at = max(updated_at, ?4) WHERE id = ?1", params![id, status.as_str(), started_at, at])?;
+    Ok(())
+}
+
+/// Escribe columnas del Attempt (las de runtime, el estado, el resultado y las marcas de tiempo) en UNA sentencia: la
+/// base decide si el cambio es válido (ciclo de vida, final que es final, identidad).
+pub(crate) fn runtime_attempt_set_in(c: &Connection, id: &str, cols: Vec<(&'static str, rusqlite::types::Value)>, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    if cols.is_empty() {
+        return Ok(());
+    }
+    let sets: Vec<String> = cols.iter().enumerate().map(|(i, (k, _))| format!("{k} = ?{}", i + 2)).collect();
+    let sql = format!("UPDATE attempts SET {}, updated_at = max(updated_at, ?{}) WHERE id = ?1", sets.join(", "), cols.len() + 2);
+    let mut values = vec![rusqlite::types::Value::Text(id.into())];
+    values.extend(cols.into_iter().map(|(_, v)| v));
+    values.push(rusqlite::types::Value::Integer(at));
+    c.execute(&sql, rusqlite::params_from_iter(values))?;
+    Ok(())
+}
+
+/// Para el Attempt activo de una Task que el runtime retira (D24: se para antes de descartarla).
+pub(crate) fn runtime_attempt_stop_in(c: &Connection, id: &str, ended_at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE attempts SET status = 'stopped', failure_reason = NULL, ended_at = ?2, updated_at = max(updated_at, ?2) WHERE id = ?1",
+        params![id, ended_at],
+    )?;
+    Ok(())
+}

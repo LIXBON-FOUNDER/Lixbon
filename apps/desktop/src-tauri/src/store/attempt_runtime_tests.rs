@@ -184,14 +184,17 @@ fn integrar_es_lo_unico_que_cambia_en_un_attempt_terminado() {
     assert_eq!(integra(&mut w, &a.id).unwrap(), ChangeOutcome::Changed);
     assert_eq!(integra(&mut w, &a.id).unwrap(), ChangeOutcome::Unchanged);
     assert_eq!(columna(&w.s, &a.id, "integrated"), rusqlite::types::Value::Integer(1));
-    for set in ["integrated = 0", "summary = 'otro'", "delivered = '[\"x\"]'", "model_effective = 'otro'", "status = 'running'"] {
+    for set in ["integrated = 0", "summary = 'otro'", "delivered = '[\"x\"]'", "status = 'running'", "updated_at = 999", "status = 'done'"] {
         assert!(sql(&mut w.s, &format!("UPDATE attempts SET {set} WHERE id = '{}'", a.id)).is_err(), "{set}");
     }
+    // Desde la 013 (LXO-232) la base admite además la observación tardía del modelo: Codex lo declara al salir.
+    assert!(sql(&mut w.s, &format!("UPDATE attempts SET model_effective = 'otro' WHERE id = '{}'", a.id)).is_ok());
     let b = pide(&mut w);
     paso(&mut w, &b.id, AttemptAction::Start, 130).unwrap();
     paso(&mut w, &b.id, AttemptAction::Fail { reason: "agent_reported".into(), summary: String::new() }, 140).unwrap();
-    assert!(integra(&mut w, &b.id).is_err(), "uno fallido no se integra");
-    assert!(sql(&mut w.s, &format!("UPDATE attempts SET integrated = 1 WHERE id = '{}'", b.id)).is_err());
+    assert!(integra(&mut w, &b.id).is_err(), "el mutador vNext solo integra uno done");
+    // La base admite integrar cualquier final desde la 013: el runtime integra la rama de una tarea fallida.
+    assert!(sql(&mut w.s, &format!("UPDATE attempts SET integrated = 1 WHERE id = '{}'", b.id)).is_ok());
     assert_eq!(integra(&mut w, "t99-a1").unwrap(), ChangeOutcome::Missing);
 }
 

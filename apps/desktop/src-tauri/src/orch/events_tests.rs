@@ -623,7 +623,7 @@ fn fuentes(dir: &Path) -> Vec<(String, String)> {
 fn solo_store_events_escribe_en_la_tabla_y_solo_la_frontera_de_mutacion_emite() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     // (símbolo, archivos de `orch/` donde puede aparecer)
-    let orch_permitido: [(&str, &[&str]); 8] = [
+    let orch_permitido: [(&str, &[&str]); 9] = [
         // El único punto de emisión de estado son los mutadores semánticos de `Tx` (`tx_ops.rs`), que
         // llaman a `try_push_event`; nadie más empuja borradores a una transacción.
         (".push_event(", &[]),
@@ -637,6 +637,7 @@ fn solo_store_events_escribe_en_la_tabla_y_solo_la_frontera_de_mutacion_emite() 
         ("EventDraft::new", &["events.rs", "event_kinds.rs"]),
         // Solo la persistencia de SQLite escribe eventos; nadie más de `orch/` toca el INSERT ni la inserción suelta.
         ("commit_authoritative_with_events", &["store_boot.rs"]),
+        ("runtime_commit_recorded", &["store_boot.rs"]),
         ("append_events(", &["store_boot.rs"]),
     ];
     let mut revisados = 0;
