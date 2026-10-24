@@ -67,7 +67,7 @@ impl Core {
         };
         #[cfg(test)]
         let boot = self.cut_for_tests(boot, data, core);
-        // LXO-123: con el almacén abierto y `core.lock` tomado, el corte Task/Attempt se activa aquí (idempotente).
+        // LXO-234: con el almacén abierto y `core.lock` tomado, el corte Task/Attempt se activa aquí (idempotente).
         #[cfg(not(test))]
         let boot = match self.activate_cut_at_boot(boot) {
             Ok(b) => b,

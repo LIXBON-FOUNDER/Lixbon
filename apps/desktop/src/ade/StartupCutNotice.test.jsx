@@ -10,7 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 const BACKUP = 'C:/Users/u/AppData/Roaming/lixbon/core/backups/pre-f3-cut-20261023.db';
 const mount = (cut, storage = null) => render(<StartupCutNotice storage={storage} load={() => Promise.resolve(cut)} />);
 
-describe('StartupCutNotice (LXO-123)', () => {
+describe('StartupCutNotice (LXO-234)', () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 

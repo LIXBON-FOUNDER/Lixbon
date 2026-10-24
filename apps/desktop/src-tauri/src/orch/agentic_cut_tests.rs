@@ -451,7 +451,7 @@ fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
             }
             let texto = std::fs::read_to_string(&ruta).unwrap();
             // LXO-234: la única entrada es `Core::ensure_agentic_cut` (agentic_cut.rs) -> `CoreStorage::run_agentic_cut`
-            // (store_boot.rs). LXO-123 la conecta al arranque SOLO desde startup_cut.rs, y una sola vez.
+            // (store_boot.rs). LXO-234 la conecta al arranque SOLO desde startup_cut.rs, y una sola vez.
             if nombre == "startup_cut.rs" {
                 assert_eq!(texto.matches("ensure_agentic_cut(").count(), 1, "startup_cut.rs llama al corte una sola vez");
             } else {

@@ -1,0 +1,17 @@
+/* LXO-234 · Aviso de arranque del corte: el mensaje técnico largo se ajusta al ancho del aviso, sin desbordar. */
+.ade-startup-cut {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ade-startup-cut details {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ade-startup-cut details code {
+  display: block;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
