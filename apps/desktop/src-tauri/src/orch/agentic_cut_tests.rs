@@ -668,3 +668,46 @@ fn un_arranque_rechazado_por_numeracion_vieja_queda_consultable_en_core_model() 
     // Un agente no lo lee.
     assert!(core.rpc(super::Caller::Agent(Some("t1".into())), "", "core_model", &json!({})).is_err());
 }
+
+/// LXO-234: aplicar el corte por `migrate` (`migrations_with_cut()`) deja `user_version` en la última migración
+/// publicada, igual que `Core::ensure_agentic_cut`, y una migración nueva posterior se aplica sin `DatabaseNewer`.
+#[test]
+fn el_corte_por_migrate_deja_user_version_como_el_arranque_real() {
+    let uv = |t: &Tmp| -> i64 { rusqlite::Connection::open(t.core().join("lixbon.db")).unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap() };
+    let real = Tmp::new();
+    let mut s = base(&real, Some(FIXTURE));
+    corta(&mut s, &real);
+    drop(s);
+    let esperado = uv(&real);
+
+    let t = Tmp::new();
+    let s = Store::open_with(&t.core(), &migrations_with_cut(), "t").unwrap();
+    assert!(s.migration_report().applied.contains(&crate::store::CUT_VERSION));
+    drop(s);
+    assert_ne!(uv(&t), crate::store::CUT_VERSION);
+    assert_eq!(uv(&t), esperado, "mismo user_version que el camino real");
+    assert_eq!(esperado, crate::store::cut_base_version());
+
+    let mut lista = embedded();
+    let next = lista.last().unwrap().version + 1;
+    lista.push(Migration::new(next, "despues_del_corte", "CREATE TABLE despues_del_corte (x INTEGER) STRICT;"));
+    lista.push(cut_migration());
+    let s = Store::open_with(&t.core(), &lista, "t").unwrap();
+    assert_eq!(s.migration_report().applied, vec![next]);
+    drop(s);
+    assert_eq!(uv(&t), next);
+}
+
+/// Una base que quedó con `user_version` = 900 por el camino viejo de `migrate` se sigue abriendo con una 014.
+#[test]
+fn una_base_con_user_version_900_del_corte_no_es_database_newer() {
+    let t = Tmp::new();
+    drop(Store::open_with(&t.core(), &migrations_with_cut(), "t").unwrap());
+    rusqlite::Connection::open(t.core().join("lixbon.db")).unwrap().pragma_update(None, "user_version", crate::store::CUT_VERSION).unwrap();
+    let mut lista = embedded();
+    let next = lista.last().unwrap().version + 1;
+    lista.push(Migration::new(next, "despues_del_corte", "CREATE TABLE despues_del_corte (x INTEGER) STRICT;"));
+    lista.push(cut_migration());
+    let s = Store::open_with(&t.core(), &lista, "t").unwrap();
+    assert_eq!(s.migration_report().applied, vec![next]);
+}
