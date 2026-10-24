@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { ADE_SELECTION_STORAGE_KEY, normalizeAdeSelection, readPersistedAdeSelection, useWorkbenchStore } from './workbenchStore';
+import { ADE_SELECTION_STORAGE_KEY, normalizeAdeSelection, readLegacyAdeSelection, readPersistedAdeSelection, useWorkbenchStore } from './workbenchStore';
 
 // LXO-120 · la selección del ADE (Project/Task/Attempt) sobrevive a un refresh por IDs durables.
 afterEach(() => localStorage.clear());
@@ -26,5 +26,15 @@ describe('selección ADE persistida', () => {
     expect(readPersistedAdeSelection()).toEqual({ projectId: null, taskId: null });
     localStorage.setItem(ADE_SELECTION_STORAGE_KEY, JSON.stringify({ v: 9, projectId: 'p' }));
     expect(readPersistedAdeSelection()).toEqual({ projectId: null, taskId: null });
+  });
+
+  it('LXO-123: conserva en bruto lo guardado F2 (sin v o v1) para migrarlo; v2 no es legacy', () => {
+    localStorage.setItem(ADE_SELECTION_STORAGE_KEY, JSON.stringify({ projectId: 'p', taskId: 't' }));
+    expect(readLegacyAdeSelection()).toEqual({ projectId: 'p', taskId: 't' });
+    expect(readPersistedAdeSelection()).toEqual({ projectId: null, taskId: null });
+    localStorage.setItem(ADE_SELECTION_STORAGE_KEY, JSON.stringify({ v: 1, projectId: 'p' }));
+    expect(readLegacyAdeSelection()).toEqual({ v: 1, projectId: 'p' });
+    useWorkbenchStore.getState().setAdeSelection({ projectId: 'p', taskId: 't' });
+    expect(readLegacyAdeSelection()).toBeNull();
   });
 });

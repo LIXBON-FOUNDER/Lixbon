@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COPY } from './adeLabels';
 import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { AdeShell } from './AdeShell';
 import { queryAdeCore } from './coreQueries';
@@ -155,7 +156,8 @@ describe('AdeShell · Jump Palette (LXO-102)', () => {
     await openPalette({ onOpenRun, onOpenSpawnRequest });
     await pick('att-attempt', 'Attention');
 
-    expect(screen.getByRole('alert').textContent).toContain('aún no abre destinos de tipo attempt (attempt-5)');
+    // LXO-123: un destino attempt ya se resuelve; attempt-5 no es <task>-a<n> (o el modelo no es vNext): se rechaza con texto, sin navegar.
+    expect([COPY.navAttemptNeedsModel, COPY.navAttemptInvalid].some((t) => screen.getByRole('alert').textContent.includes(t))).toBe(true);
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(onOpenRun).not.toHaveBeenCalled();
     expect(onOpenSpawnRequest).not.toHaveBeenCalled();

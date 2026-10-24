@@ -17,6 +17,8 @@ import {
   failureStatuses,
   Feedback,
 } from './projectsSidebarModel';
+import { discardedTaskIds } from './cutoverNavigation';
+import { COPY } from './adeLabels';
 import { AttemptChip, AttemptMeta, AttemptTreeContext, NoAttempts, TaskAttemptGroup, attemptSummaryOf } from './SidebarAttempts';
 
 // Tasks de un Project expandido del sidebar (LXO-97), extraídas de `ProjectsSidebar.jsx` sin cambiar
@@ -259,10 +261,18 @@ export function ProjectTasks({
   const currentPages = pages.key === pageKey ? pages : EMPTY_PAGE;
   const headTasks = headData?.tasks ?? [];
   const headTaskIds = useMemo(() => new Set(headTasks.map((task) => task.id)), [headTasks]);
-  const tasks = useMemo(() => {
+  const allTasks = useMemo(() => {
     return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder)
       .map((task) => (attemptSummaries.has(task.id) ? { ...task, attemptSummary: attemptSummaries.get(task.id) } : task));
   }, [headTasks, currentPages.items, attemptSummaries]);
+  // LXO-123: tras el corte las Tasks descartadas se ocultan por defecto (la seleccionada sigue visible).
+  const [showDiscarded, setShowDiscarded] = useState(false);
+  const discarded = useMemo(() => discardedTaskIds(allTasks, v2.data, projectId, tree), [allTasks, v2.data, projectId, tree]);
+  const tasks = useMemo(() => (showDiscarded || discarded.size === 0
+    ? allTasks
+    : allTasks.filter((task) => !discarded.has(task.id) || (task.id === selectedTaskId && selectedTaskProjectId === projectId))),
+  [allTasks, discarded, showDiscarded, selectedTaskId, selectedTaskProjectId, projectId]);
+  const hiddenDiscarded = discarded.size;
   const staleTaskIds = useMemo(() => {
     const ids = (currentPages.stale || headFailed)
       ? currentPages.items.filter((task) => !headTaskIds.has(task.id)).map((task) => task.id)
@@ -695,6 +705,12 @@ export function ProjectTasks({
             );
           })}
         </ul>
+      )}
+
+      {hiddenDiscarded > 0 && (
+        <button type="button" className="lk ps__discarded-toggle" data-testid={`discarded-toggle-${projectId}`} aria-pressed={showDiscarded} onClick={() => setShowDiscarded((v) => !v)}>
+          {showDiscarded ? COPY.hideDiscarded : COPY.showDiscarded(hiddenDiscarded)}
+        </button>
       )}
 
       {hasData && tasks.length === 0 && (
