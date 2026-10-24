@@ -97,6 +97,12 @@ pub fn orch_snapshot(orch: TauriState<'_, Orch>) -> Value {
     orch.0.snapshot()
 }
 
+/// LXO-123: resultado del corte Task/Attempt en este arranque (solo lectura; ver `startup_cut.rs`).
+#[tauri::command]
+pub fn orch_startup_cut() -> Value {
+    super::startup_cut::startup_cut_status()
+}
+
 #[tauri::command]
 pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Result<Value, String> {
     let core = &orch.0;
