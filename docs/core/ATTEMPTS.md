@@ -196,6 +196,10 @@ el Core (el host detecta la aprobación, el proceso y el efecto de integración)
 **Attention.** `attempt.waiting` con `state = awaiting_terminal_approval` levanta `approval` sobre el Attempt (subject
 `terminal`); la resuelven `attempt.resumed` (`acted`) y los finales (`condition_cleared`). Ver [ATTENTION.md](ATTENTION.md).
 
+**Desde la 013 (LXO-232).** Un final admite además la observación tardía (modelo efectivo, su procedencia y la sesión,
+una vez) y la integración de cualquier final, no solo `done`; el mutador vNext sigue exigiendo `done`. El arranque del
+proceso pasa a `launched_at`. Ver [RUNTIME_TABLAS.md](RUNTIME_TABLAS.md#la-013).
+
 ## Decisiones (LXO-114)
 
 | # | Decisión | Alternativa descartada |
@@ -216,6 +220,6 @@ Manual, como en [`TASKS_MUTACION.md`](TASKS_MUTACION.md): inventario y resultado
 ## Fuera de este slice
 
 Migrar los datos del legado (lo hace el corte), adapters reales de proveedores (F4), que el runtime escriba en las
-tablas (LXO-232),
+tablas (hecho en LXO-232: [RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)),
 Worktree, ProviderSession, Artifact y Thread (sus propios slices), conectar los mutadores al RPC o a `lxo`, UI
 (Compare incluida), reglas de Attention de los `attempt.*` y el estado derivado de la Task.

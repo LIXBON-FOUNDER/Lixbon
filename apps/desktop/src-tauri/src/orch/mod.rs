@@ -85,6 +85,8 @@ mod worktree_ops_tests;
 mod agentic_cut;
 #[cfg(test)]
 mod agentic_cut_tests;
+#[cfg(test)]
+mod runtime_tables_tests;
 mod review_ops;
 #[cfg(test)]
 mod review_ops_tests;

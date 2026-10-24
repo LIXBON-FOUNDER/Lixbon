@@ -1,8 +1,8 @@
 # Ejecución del corte Task/Attempt (LXO-117)
 
-Estado: **implementado y probado, sin activar**. El arranque **no** aplica el corte: el runtime legacy todavía guarda
-las tareas en `legacy_state`, y el corte lo congela. Activarlo es parte del slice que pase el runtime a las tablas (ver
-[Activación](#activación)).
+Estado: **implementado y probado, sin activar**. El arranque **no** aplica el corte. Si la base ya está cortada, el
+runtime persiste y carga desde las tablas ([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md), LXO-232); sin cortar, sigue en
+`legacy_state`. Activar el corte al arrancar es LXO-234 (ver [Activación](#activación)).
 
 Mapeo, decisiones e invariantes: la [ADR de LXO-112](CORTE_TASK_ATTEMPT.md). Este documento fija cómo se ejecuta.
 
@@ -29,7 +29,7 @@ Piezas:
 | 4 | **Copia `pre-f3-cut`** (`VACUUM INTO` + `integrity_check`). En la misma carpeta y con el mismo prefijo, guarda también `state.json` y `authority.json` y el **sidecar** `…-pre-f3-cut.db.json`. Antes comprueba que la copia tiene el mismo `legacy_state` (rev y SHA-256) | `Backup`, sin corte (D13) |
 | 5 | **Una transacción** `BEGIN IMMEDIATE`: <br>• la SQL (activar, DDL pendiente, copia, residuo, asserts de conteo, congelar `legacy_state`); <br>• su fila en `schema_migrations`; <br>• `user_version` | ROLLBACK: la base queda en la versión anterior, con el mismo esquema y el mismo `legacy_state` |
 | 5b | **Dentro de la misma transacción**: <br>• la vista legacy reconstruida desde las tablas es el documento, salvo D3: cada Task, mensaje y Run se lee de vuelta como `Task`/`Message`/`Run` y se compara campo a campo; <br>• `foreign_key_check` vacío; <br>• el evento `core.agentic_cut` (`idem_key = task_attempt_v1`), con los conteos y el nombre de la copia | ROLLBACK, igual que 5 |
-| 6 | Pasar a `exited` los Attempts no externos y no finales (lo que hoy hace `orphan_all`) | **No está aquí**: es del runtime al activar |
+| 6 | Pasar a `exited` los Attempts no externos y no finales (lo que hoy hace `orphan_all`) | **No está aquí**: lo hace el runtime en cada arranque sobre las tablas (`close_orphans`, LXO-232) |
 
 **Sidecar:** `{v, label, db, db_sha256, user_version, legacy_rev, legacy_doc_sha256, integrity_check, app_version,
 counts {runs, tasks, messages, decisions}, state_json, authority_json}`. Permite verificar la copia sin abrir la base
@@ -63,6 +63,10 @@ cortada. La copia no entra en ninguna retención automática (D14).
 | — | | attempt_phases · worktrees · provider_sessions · artifacts | 2 · 3 · 2 · 3 |
 | seq | 17 | `meta.id_seq` | 17 |
 
+**Worktrees legacy sin carpeta.** Si `git branch -d` borró la rama al liberar la tarea, el documento conserva `base` sin
+`worktree` ni `branch`. Esa Task también tiene fila: el Worktree `removed` con `branch_kept = 0` y la base (LXO-232; antes
+la validación semántica rechazaba el corte por el campo `base`).
+
 **Anomalías** (van a `legacy_residue`; no se descartan):
 
 | Entidad | Id | Motivo |
@@ -93,10 +97,11 @@ y `una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura`.
 
 ## Activación
 
-Pendiente. Lo hará el slice que pase el runtime a las tablas. Hoy ninguna issue lo cubre; está anotado en LXO-117.
+Pendiente: LXO-234. El paso 1 ya está hecho (LXO-232).
 
-1. El runtime deja de escribir `legacy_state` y `state.json` (D4) y persiste en las tablas. Los clientes F2 leen la
-   vista `legacy_task_v1` (LXO-119).
+1. **Hecho (LXO-232).** Con la base cortada, el runtime deja de escribir `legacy_state` y `state.json` (D4) y persiste
+   en las tablas; al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6). Un binario con
+   LXO-232 ya abre una base cortada (valida con el corte en la lista), pero nunca la corta él.
 2. Mover `store/cut/task_attempt_cut.sql` a `store/migrations/NNN_task_attempt_cut.sql`, con el siguiente número
    libre. Desde ese momento su texto no se edita (checksum). Quitar de ella las columnas o tablas que otro slice haya
    publicado antes (la 012 ya sacó las columnas de runtime del Attempt, `attempt_phases` y `env_blocks`).
