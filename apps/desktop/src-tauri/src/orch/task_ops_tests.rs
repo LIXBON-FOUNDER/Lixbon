@@ -270,12 +270,12 @@ fn un_core_real_aplica_la_007_y_sus_tablas_quedan_inertes_mientras_el_legacy_sig
             })
             .unwrap()
     };
-    assert_eq!(filas(&core), (crate::store::embedded().last().unwrap().version, false, 0, 0), "el arranque autoritativo aplica todas las migraciones (007 en adelante); las tablas nacen vacías e inertes");
+    assert_eq!(filas(&core), ((crate::store::cut_migration().version - 1), false, 0, 0), "el arranque autoritativo aplica todas las migraciones (007 en adelante); las tablas nacen vacías e inertes");
     // El runtime legacy sigue siendo la autoridad de las tareas: un run nuevo va al documento, no a estas tablas.
     let r = repo(&base_de(&data), "app", None);
     let out = core.rpc(Caller::Agent(None), &ruta(&r), "run_create", &json!({ "objective": "hacer algo" })).unwrap();
     assert!(core.lock().tasks.contains_key(out["task"].as_str().unwrap()));
-    assert_eq!(filas(&core), (crate::store::embedded().last().unwrap().version, false, 0, 0));
+    assert_eq!(filas(&core), ((crate::store::cut_migration().version - 1), false, 0, 0));
 }
 
 // ---------------------------------------------------------------------------------------------

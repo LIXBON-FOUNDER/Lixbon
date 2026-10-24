@@ -174,18 +174,6 @@ impl Default for CoreStorage {
     }
 }
 
-/// Las migraciones con las que se VALIDA una base: las del binario más el corte Task/Attempt (LXO-117), para abrir una
-/// base ya cortada. Nunca se aplica el corte por esta vía: lo aplica solo el módulo del corte, tras su copia previa.
-/// Un catálogo que no llega a la última migración publicada (un binario anterior en las pruebas) no conoce el corte.
-fn with_cut(catalog: &[Migration]) -> Vec<Migration> {
-    let cut = store::cut_migration();
-    let mut all = catalog.to_vec();
-    if all.last().is_some_and(|m| m.version == cut.version - 1) {
-        all.push(cut);
-    }
-    all
-}
-
 impl CoreStorage {
     fn slot(&self) -> MutexGuard<'_, Slot> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
@@ -220,28 +208,25 @@ impl CoreStorage {
             *lock_slot = Some(acquire(core_dir)?);
         }
         let lock = lock_slot.as_ref().expect("bloqueo adquirido arriba");
-        let mut store = Store::open_boot_under_lock(core_dir, lock, &with_cut(catalog), env!("CARGO_PKG_VERSION"))?;
+        let mut store = Store::open_boot_under_lock(core_dir, lock, catalog, env!("CARGO_PKG_VERSION"))?;
         // Attention (LXO-88): cada inserción de Events del Core proyecta en su misma transacción.
         store.set_event_projector(Arc::new(store::AttentionProjection::new(Arc::new(super::attention_rules::EventRules))));
         *store_slot = Some(store);
         Ok(())
     }
 
-    /// Levanta el techo de la valla: aplica las migraciones posteriores (003+). Solo la llama el
-    /// arranque, cuando `decide_boot` ya dio por coherente la instalación (ver `boot_authority`).
-    /// `None` = el almacén no está abierto.
+    /// Levanta el techo de la valla: aplica las migraciones posteriores (003+), hasta el corte Task/Attempt, que este
+    /// camino nunca aplica (`migrate::plan`). Solo la llama el arranque, cuando `decide_boot` ya dio por coherente la
+    /// instalación (ver `boot_authority`). `None` = el almacén no está abierto.
     pub(super) fn migrate_authoritative(&self) -> Option<Result<MigrationReport, StoreError>> {
         let mut guard = self.slot();
         let Slot { store, catalog, .. } = &mut *guard;
-        store.as_mut().map(|s| {
-            // Una base cortada se valida con el corte; una sin cortar no lo recibe aquí (LXO-117: solo `agentic_cut`).
-            let all = match s.runtime_on_tables() {
-                Ok(true) => with_cut(catalog),
-                Ok(false) => catalog.clone(),
-                Err(e) => return Err(e),
-            };
-            s.migrate_authoritative(&all, env!("CARGO_PKG_VERSION"))
-        })
+        store.as_mut().map(|s| s.migrate_authoritative(catalog, env!("CARGO_PKG_VERSION")))
+    }
+
+    /// La carpeta del almacén abierto (`core/`): la de `lixbon.db`. `None` = cerrado.
+    pub(super) fn dir(&self) -> Option<PathBuf> {
+        self.slot().store.as_ref().and_then(|s| s.db_path().parent().map(Path::to_path_buf))
     }
 
     /// El estado del runtime reconstruido desde las tablas, si la base ya está cortada (LXO-232). `None` = sin cortar:
