@@ -1,14 +1,12 @@
 //! Corte de datos Task/Attempt (LXO-117): lado del **almacén**. Contrato: `docs/core/CORTE_EJECUCION.md`; mapeo: ADR
 //! `docs/core/CORTE_TASK_ATTEMPT.md`.
 //!
-//! Aplica `cut/task_attempt_cut.sql` como la versión siguiente a la última migración publicada, en UNA transacción
-//! con la comprobación semántica y el evento `core.agentic_cut` que le pasa `orch::agentic_cut`. Si cualquiera falla,
-//! ROLLBACK: la base queda exactamente en la versión anterior.
+//! Aplica `migrations/014_task_attempt_cut.sql` (la migración del corte) en UNA transacción con la comprobación
+//! semántica y el evento `core.agentic_cut` que le pasa `orch::agentic_cut`. Si cualquiera falla, ROLLBACK: la base
+//! queda exactamente en la versión anterior.
 //!
-//! **No está activado**: el arranque no lo llama (la SQL no vive en `migrations/`). Activarlo es tarea del slice que
-//! pase el runtime a las tablas; ver la sección «Activación» del contrato.
-
-#![cfg_attr(not(test), allow(dead_code))] // sin activar: solo lo usan `orch::agentic_cut` y las pruebas
+//! El migrador general no la aplica nunca (`migrate::plan`): solo esta transacción, que llama el arranque con el
+//! interruptor de dogfood (LXO-234). Ver «Activación» en el contrato.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -23,25 +21,15 @@ use super::migrate::{db_version, embedded, now_ms, Migration};
 use super::tasks::{insert_all, AGENTIC_MODEL_KEY};
 use super::Store;
 
-/// Nombre del corte en `schema_migrations`.
+/// Nombre del corte en `schema_migrations` (y de su migración, `014_task_attempt_cut.sql`).
 pub const CUT_NAME: &str = "task_attempt_cut";
-/// El SQL del corte. Fuera de `migrations/`: el arranque no lo aplica.
-pub const CUT_SQL: &str = include_str!("cut/task_attempt_cut.sql");
 /// Clave de idempotencia del evento `core.agentic_cut`.
 pub const CUT_IDEM_KEY: &str = "task_attempt_v1";
 
-/// El corte como migración: la versión siguiente a la última publicada. Con ella en la lista, un binario abre una base
-/// ya cortada; sin ella (cualquier binario anterior), la base cortada es `DatabaseNewer` y no se toca.
+/// El corte como migración: la embebida con su nombre. Un binario anterior no la conoce: la base cortada es
+/// `DatabaseNewer` para él y no la toca.
 pub fn cut_migration() -> Migration {
-    let last = embedded().last().map(|m| m.version).unwrap_or(0);
-    Migration::new(last + 1, CUT_NAME, CUT_SQL)
-}
-
-/// Las migraciones publicadas más el corte.
-pub fn migrations_with_cut() -> Vec<Migration> {
-    let mut all = embedded();
-    all.push(cut_migration());
-    all
+    embedded().into_iter().find(|m| m.name == CUT_NAME).expect("la migración del corte está embebida")
 }
 
 /// Filas por entidad tras el corte (el informe «después» y el payload de `core.agentic_cut`).

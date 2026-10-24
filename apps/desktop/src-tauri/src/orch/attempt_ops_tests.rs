@@ -409,11 +409,11 @@ fn un_core_real_aplica_la_008_y_sus_tablas_quedan_inertes_mientras_el_legacy_sig
             })
             .unwrap()
     };
-    assert_eq!(estado(&core), (crate::store::embedded().last().unwrap().version, false, 0, 0), "el arranque autoritativo aplica la 008 y las siguientes; las tablas nacen vacías e inertes");
+    assert_eq!(estado(&core), ((crate::store::cut_migration().version - 1), false, 0, 0), "el arranque autoritativo aplica la 008 y las siguientes; las tablas nacen vacías e inertes");
     let r = repo(&base_de(&data), "app", None);
     let out = core.rpc(Caller::Agent(None), &ruta(&r), "run_create", &json!({ "objective": "hacer algo" })).unwrap();
     assert!(core.lock().tasks.contains_key(out["task"].as_str().unwrap()));
-    assert_eq!(estado(&core), (crate::store::embedded().last().unwrap().version, false, 0, 0), "el runtime legacy no escribe en attempts");
+    assert_eq!(estado(&core), ((crate::store::cut_migration().version - 1), false, 0, 0), "el runtime legacy no escribe en attempts");
 }
 
 // ---------------------------------------------------------------------------------------------

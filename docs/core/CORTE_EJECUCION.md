@@ -1,24 +1,28 @@
 # Ejecución del corte Task/Attempt (LXO-117)
 
-Estado: **implementado y probado, sin activar**. El arranque **no** aplica el corte. Si la base ya está cortada, el
-runtime persiste y carga desde las tablas ([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md), LXO-232); sin cortar, sigue en
-`legacy_state`. Activar el corte al arrancar es LXO-234 (ver [Activación](#activación)).
+Estado: **activado en dogfood (LXO-234)**. El arranque corta la base solo con el interruptor `LIXBON_AGENTIC_CUT=1`,
+que está desactivado por defecto. Ya cortada, el runtime persiste y carga desde las tablas
+([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)); sin cortar, sigue en `legacy_state`. Activarlo para todos espera a una release
+en dogfood sin rollback (ver [Activación](#activación)).
 
 Mapeo, decisiones e invariantes: la [ADR de LXO-112](CORTE_TASK_ATTEMPT.md). Este documento fija cómo se ejecuta.
 
 Piezas:
 
-* SQL: [`store/cut/task_attempt_cut.sql`](../../apps/desktop/src-tauri/src/store/cut/task_attempt_cut.sql). Está fuera de
-  `migrations/`, así que `build.rs` no lo mete en la lista de arranque.
+* SQL: [`migrations/014_task_attempt_cut.sql`](../../apps/desktop/src-tauri/src/store/migrations/014_task_attempt_cut.sql),
+  publicada y con el checksum congelado. El migrador general **no la aplica nunca**: `migrate::plan` se detiene antes de
+  ella (y de lo que venga después) mientras la base no esté cortada.
 * Almacén: `store/cut.rs`.
-  * `cut_migration()`: el corte como la versión siguiente a la última publicada.
+  * `cut_migration()`: la migración embebida del corte.
   * `Store::agentic_cut_recorded`: la transacción.
   * `CutView`: la vista legacy leída de las tablas.
   * `inspect_copy`: lo que dice una copia de sí misma.
 * Orquestación: `orch/agentic_cut.rs`.
-  * `run`: los pasos 3–5b.
-  * `check_copy` y `restore`: el rollback.
-* Pruebas: `orch/agentic_cut_tests.rs` y [`verificar.py`](fixtures/corte-task-attempt/verificar.py), que aplica la misma SQL.
+  * `run`: los pasos 3–5b. Lo llama el arranque (`boot_authority::cut_if_switched`).
+  * `check_copy`, `request_restore`, `restore_pending` y `restore`: el rollback.
+* Pruebas:
+  * `orch/agentic_cut_tests.rs` y `orch/activation_tests.rs`;
+  * [`verificar.py`](fixtures/corte-task-attempt/verificar.py), que aplica la misma SQL.
 
 ## Pasos (ADR §9)
 
@@ -83,29 +87,51 @@ tipos, Worktrees activos y ramas conservadas, mensajes y revisiones) pasa la mis
 Solo si el corte se confirmó y aparece una regresión crítica. Un corte que falla no lo necesita: la transacción se
 deshace.
 
-1. Cerrar Lixbon (Desktop y servidor local). `restore` exige el bloqueo de instancia libre.
-2. `agentic_cut::check_copy(copia)`: la copia coincide con su sidecar (SHA-256, `integrity_check`, `user_version` y
-   SHA-256 del documento). Si no, no se restaura nada.
-3. `agentic_cut::restore(core, data, copia)`:
-   * aparta (no borra) `lixbon.db`, `-wal`, `-shm` y los espejos actuales a `core/rollback-<ms>/`;
-   * pone en su sitio la copia, `state.json` y `authority.json` del mismo conjunto.
-4. Instalar un binario anterior al corte y **fijar la versión** (si no, la actualización automática volvería a cortar).
-5. Arrancar: el binario F2 valida marcador y base y vuelve a escribir `legacy_state`.
+**Con `lxo core restore` (LXO-234):**
 
-Se pierde todo lo posterior al corte (ADR §12). Probado en `restaurar_la_copia_vuelve_a_la_base_anterior_al_corte_…`
-y `una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura`.
+1. `lxo core restore [--copy <ruta>]`, como persona y con Lixbon abierto. Sin `--copy` toma la copia `pre-f3-cut` más
+   reciente de `core/backups/`. Comprueba la copia contra su sidecar con `check_copy`: SHA-256, `integrity_check`,
+   `user_version` y SHA-256 del documento. Si no cuadra, no pide nada. Si cuadra, deja la petición en
+   `core/agentic-cut-restore.json`.
+2. Cerrar Lixbon y volver a abrirlo. El arranque, con `core.lock` tomado y la base aún sin abrir, aplica la petición:
+   * aparta (no borra) `lixbon.db`, `-wal`, `-shm` y los espejos actuales a `core/rollback-<ms>/`;
+   * pone en su sitio la copia, `state.json` y `authority.json` del mismo conjunto;
+   * avisa en Desktop.
+3. **Versión fijada.** La restauración deja `core/agentic-cut-hold.json`, y con ella el arranque no vuelve a cortar
+   aunque `LIXBON_AGENTIC_CUT` siga puesto. Este binario funciona sobre la base restaurada (la 013, legacy). Si además
+   se instala un binario anterior a LXO-232, hay que desactivar sus actualizaciones. Borrar la espera es volver a
+   intentar el corte.
+4. `lxo core restore --cancel` retira una petición que aún no se ha aplicado. Si la restauración falla al arrancar, el
+   arranque se bloquea y el mensaje dice qué archivo borrar para arrancar sin restaurar.
+
+Sin Lixbon abierto, `agentic_cut::restore(core, data, copia)` hace lo mismo y exige el bloqueo de instancia libre.
+
+Se pierde todo lo posterior al corte (ADR §12). Probado en:
+
+* `la_restauracion_vuelve_a_la_base_de_antes_del_corte_de_punta_a_punta`;
+* `una_restauracion_pedida_se_puede_retirar_y_una_copia_que_no_cuadra_no_se_pide`;
+* `restaurar_la_copia_vuelve_a_la_base_anterior_al_corte_…`;
+* `una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura`.
 
 ## Activación
 
-Pendiente: LXO-234. El paso 1 ya está hecho (LXO-232).
+Activado en **dogfood** (LXO-234).
 
-1. **Hecho (LXO-232).** Con la base cortada, el runtime deja de escribir `legacy_state` y `state.json` (D4) y persiste
-   en las tablas; al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6). Un binario con
-   LXO-232 ya abre una base cortada (valida con el corte en la lista), pero nunca la corta él.
-2. Mover `store/cut/task_attempt_cut.sql` a `store/migrations/NNN_task_attempt_cut.sql`, con el siguiente número
-   libre. Desde ese momento su texto no se edita (checksum). Quitar de ella las columnas o tablas que otro slice haya
-   publicado antes (la 012 ya sacó las columnas de runtime del Attempt, `attempt_phases` y `env_blocks`).
-3. En el arranque (`store_boot`/`boot_authority`), tras las migraciones anteriores al corte y con `core.lock` tomado,
-   llamar a `agentic_cut::run`. Si falla, el arranque se bloquea (D13). Después, el paso 6.
-4. Ajustar `cut_migration()` para leer la migración embebida y quitar la prueba que exige que no esté en `migrations/`.
-5. Snapshot y `status` anuncian `core_model: "task_attempt_v1"` y `compat: ["legacy_task_v1"]` (ADR §11.1).
+1. **Hecho (LXO-232).** Con la base cortada, el runtime deja de escribir `legacy_state` y `state.json` (D4) y persiste en
+   las tablas. Al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6).
+2. **Hecho.** El corte es `migrations/014_task_attempt_cut.sql`, con el checksum congelado
+   (`la_014_del_corte_tiene_el_checksum_congelado`). Es una **barrera**: el migrador general no la aplica, ni nada
+   posterior a ella, mientras la base no esté cortada.
+3. **Hecho.** En el arranque (`boot_authority::cut_if_switched`), tras las migraciones anteriores al corte y con
+   `core.lock` tomado, se llama a `agentic_cut::run`. Solo ocurre con `LIXBON_AGENTIC_CUT=1` y si no hay espera de
+   restauración (`core/agentic-cut-hold.json`).
+   * Si falla, el arranque se bloquea con su mensaje en Desktop (D13) y la base queda como estaba
+     (`un_corte_que_falla_bloquea_el_arranque_…`). Sin el interruptor, arranca como siempre.
+   * Después, el paso 6.
+4. **Hecho.** `cut_migration()` lee la migración embebida. La prueba que exigía que no estuviera en `migrations/` pasa a
+   ser `el_migrador_no_aplica_el_corte_y_solo_el_arranque_con_el_interruptor_lo_ejecuta`.
+5. **Hecho (LXO-119).** `core_model` anuncia `task_attempt_v1` y `compat: ["legacy_task_v1"]` una vez cortada.
+6. **Copias de bases reales.** `activation_tests::real_copy_corte_uso_reinicio_y_restauracion` se lanza a mano con
+   `LIXBON_REAL_COPY=<carpeta con lixbon.db, state.json y authority.json>`. Trabaja sobre una copia temporal y recorre
+   el corte, el uso, el reinicio y la restauración. La copia de la base se hace en solo lectura (`VACUUM INTO`).
+7. **Pendiente.** Activarlo por defecto requiere al menos una release en dogfood sin rollback.

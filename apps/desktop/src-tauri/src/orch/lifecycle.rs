@@ -56,6 +56,25 @@ impl Core {
         if let Err(e) = self.acquire_instance_lock(core) {
             return Err(self.refuse_to_start(&e));
         }
+        // 1b. Una restauración de la copia previa al corte pedida con `lxo core restore` (LXO-234): con el bloqueo
+        // tomado y la base aún sin abrir. Si falla, no se arranca sobre una base a medio restaurar.
+        match super::agentic_cut::restore_pending(core, data) {
+            Ok(Some(aside)) => {
+                let msg = format!("Se restauró la base de antes del corte Task/Attempt; la cortada quedó apartada en {}. El arranque no volverá a cortar mientras exista {}.", aside.display(), core.join(super::agentic_cut::HOLD_FILE).display());
+                eprintln!("[core] {msg}");
+                if let Some(host) = self.host.get() {
+                    host.notify("Lixbon: base restaurada", &msg);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let detail = format!(
+                    "no se pudo restaurar la copia previa al corte: {e}. Para arrancar sin restaurar, borra {}",
+                    core.join(super::agentic_cut::RESTORE_REQUEST_FILE).display()
+                );
+                return Err(self.refuse_to_start(&OpenStoreError::Authority { detail }));
+            }
+        }
         // 2. Autoridad del estado (C2b): marcador + base + legado -> `decide_boot` -> acción.
         // Abre la base SOLO hasta donde permite la valla, valida y promociona (o carga el
         // estado de SQLite). Todo fallo posterior a la valla, o con evidencia de
@@ -65,8 +84,6 @@ impl Core {
             Ok(b) => b,
             Err(e) => return Err(self.refuse_to_start(&e)),
         };
-        #[cfg(test)]
-        let boot = self.cut_for_tests(boot, data, core);
         let settings: Settings = read_json(&data.join("settings.json")).unwrap_or_default();
         let proof = BootProof::new();
         match boot {

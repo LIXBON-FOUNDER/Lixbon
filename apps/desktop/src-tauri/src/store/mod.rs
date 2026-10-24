@@ -119,9 +119,9 @@ pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessi
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewArtifact, NewWorktree, Provenance, RemovalReason, WorktreeRow, WorktreeState, WorktreeStep};
-// Corte de datos Task/Attempt (LXO-117): sin activar; solo lo usan `orch::agentic_cut` y las pruebas.
+// Corte de datos Task/Attempt (LXO-117): lo aplica `orch::agentic_cut` (en el arranque, con el interruptor: LXO-234).
 #[allow(unused_imports)]
-pub use cut::{cut_migration, inspect_copy, migrations_with_cut, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
+pub use cut::{cut_migration, inspect_copy, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
 // Runtime sobre las tablas Task/Attempt (LXO-232): lo usa la persistencia del Core tras el corte.
 pub use runtime::{RuntimeChanges, RuntimeDoc};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
