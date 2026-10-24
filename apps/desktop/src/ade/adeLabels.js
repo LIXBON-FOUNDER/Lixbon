@@ -102,8 +102,30 @@ export const COPY = Object.freeze({
   cutDismiss: 'Entendido',
   cutLegacyNumbering: 'El almacén del Core se actualizó con una numeración anterior y no se puede abrir. Restaura la copia de seguridad «pre-f3-cut» para continuar.',
   cutFailed: 'No se pudo actualizar el almacén al modelo de tareas e intentos. El cambio se deshizo por completo: tus datos quedaron sin cambios.',
+  navLegacyMigrated: 'Tu selección guardada del Orquestador era de la versión anterior y se abrió en el modelo de tareas e intentos.',
+  navLegacyExpired: 'Tu selección guardada del Orquestador era de la versión anterior y ya no es compatible: se descartó. Elige de nuevo un proyecto o una tarea.',
+  navLegacyInvalid: 'La selección guardada del Orquestador no era válida y se descartó.',
+  navAttemptNeedsModel: 'Este intento no se puede abrir: el modelo de Attempts aún no está activo en este Core.',
+  navAttemptInvalid: 'Este destino no identifica un intento válido.',
+  navAttemptNoProject: 'Este intento no trae su proyecto: no se puede abrir.',
+  showDiscarded: (n) => `Mostrar descartadas (${n})`,
+  hideDiscarded: 'Ocultar descartadas',
   cutModelUnavailable: 'El almacén del Core no está abierto: no se pudo comprobar la actualización al modelo de tareas e intentos.',
 });
+
+/** LXO-123 · Texto de un destino de navegación rechazado (`resolveNavTarget`). */
+export function navRejectText(reason) {
+  if (reason === 'model_inactive') return COPY.navAttemptNeedsModel;
+  if (reason === 'no_project') return COPY.navAttemptNoProject;
+  return COPY.navAttemptInvalid;
+}
+
+/** LXO-123 · Aviso de la migración de la selección F2 (`migratePersistedSelection`). */
+export function navNoticeCopy(notice) {
+  if (notice === 'migrated') return { tone: 'info', text: COPY.navLegacyMigrated };
+  if (notice === 'expired') return { tone: 'warn', text: COPY.navLegacyExpired };
+  return { tone: 'warn', text: COPY.navLegacyInvalid };
+}
 
 /** LXO-123 · Copia del aviso de arranque por código del corte. */
 export function startupCutCopy(code) {

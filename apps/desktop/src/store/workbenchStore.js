@@ -74,6 +74,17 @@ export function normalizeAdeSelection(selection) {
   return validAttempt ? { projectId, taskId, attemptId } : { projectId, taskId };
 }
 
+/**
+ * LXO-123 · Lo guardado con la forma F2 (sin `v` o `v: 1`) NO se lee como selección: se conserva en bruto para
+ * que `cutoverNavigation.migratePersistedSelection` lo migre o lo invalide con aviso cuando se sepa el `core_model`.
+ * `null` si no hay nada F2 pendiente.
+ */
+export function readLegacyAdeSelection() {
+  const raw = read(ADE_SELECTION_STORAGE_KEY, null);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  return raw.v === undefined || raw.v === 1 ? raw : null;
+}
+
 export function readPersistedAdeSelection() {
   const raw = read(ADE_SELECTION_STORAGE_KEY, null);
   if (!raw || typeof raw !== 'object' || raw.v !== 2) return { projectId: null, taskId: null };
