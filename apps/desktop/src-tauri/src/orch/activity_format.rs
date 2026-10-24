@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 51] = [
+pub(super) const KINDS: [&str; 55] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -52,6 +52,10 @@ pub(super) const KINDS: [&str; 51] = [
     "attempt.completed",
     "attempt.failed",
     "attempt.stopped",
+    "attempt.waiting",
+    "attempt.resumed",
+    "attempt.exited",
+    "attempt.integrated",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -113,6 +117,8 @@ const WORKTREE_REMOVAL: [&str; 3] = ["integrated", "discarded", "gone"];
 const VERDICTS: [&str; 2] = ["accepted", "rejected"];
 /// Tipos de Artifact (`artifact.created`).
 const ARTIFACT_KINDS: [&str; 5] = ["report", "pull_request", "last_message", "commit", "file"];
+/// Estados de los que sale un Attempt al esperar, volver o salir (`attempt.waiting`, `attempt.resumed`, `attempt.exited`).
+const ACTIVE_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
 /// Campos de la intención que puede nombrar `task.updated`.
 const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
 const ENV_CODES: [&str; 3] = [
@@ -481,6 +487,17 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("cause", closed(p, "cause", &STOP_CAUSES)),
             ],
         ),
+        "attempt.waiting" => {
+            let terminal = one_of(p, "state", &["waiting", "awaiting_terminal_approval"])? == "awaiting_terminal_approval";
+            rendered(
+                if terminal { "activity.attempt.awaiting_terminal_approval" } else { "activity.attempt.waiting" },
+                if terminal { Visual::Warning } else { Visual::Info },
+                vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))],
+            )
+        }
+        "attempt.resumed" => rendered("activity.attempt.resumed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
+        "attempt.exited" => rendered("activity.attempt.exited", Visual::Error, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
+        "attempt.integrated" => rendered("activity.attempt.integrated", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",
             Visual::Info,
