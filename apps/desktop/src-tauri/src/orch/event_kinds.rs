@@ -30,6 +30,7 @@
 //! |---|---|---|
 //! | `attempt.requested` · `attempt.started` · `attempt.completed` · `attempt.failed` · `attempt.stopped` | state | `attempt` |
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
+//! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -924,6 +925,83 @@ impl EventPayload for AttemptStopped {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_stopped(a: &AttemptRow, t: &TaskRow, from: AttemptStatus, cause: StopCause) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptStopped { task: a.task_id.clone(), n: a.n, from, cause })
+}
+
+/// Entró en una espera: una respuesta (`waiting`) o la aprobación de una persona en la terminal
+/// (`awaiting_terminal_approval`). `from` es el estado del que venía.
+#[derive(Serialize)]
+pub(super) struct AttemptWaiting {
+    task: String,
+    n: i64,
+    state: AttemptStatus,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptWaiting {
+    const KIND: &'static str = "attempt.waiting";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_waiting(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptWaiting { task: a.task_id.clone(), n: a.n, state: a.status, from })
+}
+
+/// Volvió a `running` tras una espera.
+#[derive(Serialize)]
+pub(super) struct AttemptResumed {
+    task: String,
+    n: i64,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptResumed {
+    const KIND: &'static str = "attempt.resumed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_resumed(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptResumed { task: a.task_id.clone(), n: a.n, from })
+}
+
+/// El proceso terminó sin cerrar el Attempt (huérfano al arrancar o terminal cerrada).
+#[derive(Serialize)]
+pub(super) struct AttemptExited {
+    task: String,
+    n: i64,
+    from: AttemptStatus,
+}
+
+impl EventPayload for AttemptExited {
+    const KIND: &'static str = "attempt.exited";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_exited(a: &AttemptRow, t: &TaskRow, from: AttemptStatus) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptExited { task: a.task_id.clone(), n: a.n, from })
+}
+
+/// Su trabajo quedó integrado (después de terminar).
+#[derive(Serialize)]
+pub(super) struct AttemptIntegrated {
+    task: String,
+    n: i64,
+}
+
+impl EventPayload for AttemptIntegrated {
+    const KIND: &'static str = "attempt.integrated";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptIntegrated { task: a.task_id.clone(), n: a.n })
 }
 
 // ---------------------------------------------------------------------------------------------

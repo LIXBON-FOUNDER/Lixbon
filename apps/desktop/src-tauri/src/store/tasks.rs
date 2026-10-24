@@ -214,6 +214,11 @@ pub(super) fn require_active(c: &Connection) -> StoreResult<()> {
 /// Siguiente id del contador compartido del legado (`tN`, `rN` y mensajes). El corte lo deja en el `seq`
 /// del documento; sin él, empieza en 1.
 fn next_id(tx: &Transaction<'_>, prefix: char) -> StoreResult<String> {
+    Ok(format!("{prefix}{}", next_seq_in(tx)?))
+}
+
+/// Siguiente número del contador compartido (`tN`, `rN` y mensajes).
+pub(super) fn next_seq_in(tx: &Connection) -> StoreResult<u64> {
     let value: String = tx.query_row(
         "INSERT INTO meta (key, value) VALUES ('id_seq', '1')
          ON CONFLICT (key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
@@ -221,8 +226,7 @@ fn next_id(tx: &Transaction<'_>, prefix: char) -> StoreResult<String> {
         [],
         |r| r.get(0),
     )?;
-    let n: u64 = value.parse().map_err(|_| StoreError::InvalidDocument(format!("meta.id_seq no es un entero: {value}")))?;
-    Ok(format!("{prefix}{n}"))
+    value.parse().map_err(|_| StoreError::InvalidDocument(format!("meta.id_seq no es un entero: {value}")))
 }
 
 fn check_title(title: &str) -> StoreResult<()> {

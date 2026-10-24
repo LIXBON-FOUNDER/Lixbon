@@ -160,13 +160,15 @@ fn la_008_es_una_migracion_hacia_adelante_y_el_attempt_no_lleva_runtime() {
     let t = Tmp::new();
     let w = mundo(t.path());
     let columnas: Vec<String> = w.s.read(|c| Ok(c.prepare("SELECT name FROM pragma_table_info('attempts') ORDER BY cid")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)).unwrap();
+    // Las 19 primeras son las de la 008 (identidad y ciclo de vida); el runtime llega después, con la 012 (LXO-231).
     assert_eq!(
-        columnas,
+        columnas[..19],
         [
             "id", "task_id", "n", "status", "external", "provider", "model", "effort", "role", "profile", "worktree_id", "provider_session_id", "summary", "failure_reason",
             "created_at", "started_at", "ended_at", "updated_at", "origin"
         ]
     );
+    let columnas: Vec<String> = columnas[..19].to_vec();
     // El Attempt es identidad + ciclo de vida: nada de proceso, terminal, rutas, política ni entrega (llegan con su slice).
     for c in &columnas {
         for runtime in ["pid", "pty", "argv", "cwd", "path", "policy", "nonce", "delivery", "report", "branch", "repo", "env"] {
@@ -522,7 +524,7 @@ fn la_tabla_de_transiciones_de_rust_cuadra_con_el_trigger_en_las_81_combinacione
             }
         }
     }
-    assert_eq!(esperadas, 14, "la tabla cerrada tiene exactamente 14 pares");
+    assert_eq!(esperadas, 26, "la tabla cerrada tiene exactamente 26 pares (14 de la 008 + 12 de las esperas y la salida, 012)");
     // Ningún estado final tiene salida; el pendiente solo va a starting o stopped.
     for f in AttemptStatus::ALL.into_iter().filter(|s| s.is_final()) {
         assert!(AttemptStatus::ALL.into_iter().all(|to| !transition_allowed(f, to)), "{f:?} no tiene salida");
@@ -534,7 +536,17 @@ fn la_tabla_de_transiciones_de_rust_cuadra_con_el_trigger_en_las_81_combinacione
 fn desde_cualquier_estado_cada_accion_hace_lo_que_dice_la_tabla_o_se_rechaza_sin_rastro() {
     let t = Tmp::new();
     let mut w = mundo(t.path());
-    let acciones = [AttemptAction::Approve, AttemptAction::Start, finaliza("ok"), falla("agent_reported"), AttemptAction::Cancel];
+    let acciones = [
+        AttemptAction::Approve,
+        AttemptAction::Start,
+        AttemptAction::Wait,
+        AttemptAction::AwaitTerminal,
+        AttemptAction::Resume,
+        finaliza("ok"),
+        falla("agent_reported"),
+        AttemptAction::Cancel,
+        AttemptAction::Exit,
+    ];
     for accion in acciones {
         for (from, _) in uno_en_cada_estado(&mut w) {
             let task = w
@@ -552,7 +564,7 @@ fn desde_cualquier_estado_cada_accion_hace_lo_que_dice_la_tabla_o_se_rechaza_sin
             if from == destino {
                 assert_eq!(r.unwrap(), ChangeOutcome::Unchanged, "{from:?} {accion:?}");
                 assert_eq!(foto(&w.s), antes);
-            } else if transition_allowed(from, destino) {
+            } else if accion.step().from_states().contains(&from) {
                 assert_eq!(r.unwrap(), ChangeOutcome::Changed, "{from:?} {accion:?}");
                 assert_eq!(w.s.attempt_row(&id).unwrap().unwrap().status, destino);
                 assert_eq!(foto(&w.s).1, antes.1 + 1, "exactamente un evento");

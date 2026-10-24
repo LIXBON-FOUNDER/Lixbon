@@ -283,6 +283,9 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `attempt.requested` con `approval_required` (LXO-119) | levanta | `approval` · medium | `attempt` · `launch` |
 | `attempt.approved` / `attempt.rejected` | resuelve `acted` | `approval` | `attempt` · `launch` |
 | `attempt.failed` (el motivo va en `facts.failure_reason`) | levanta | `failed` · high | `attempt` |
+| `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta | `approval` · medium | `attempt` · `terminal` |
+| `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `acted` | `approval` | `attempt` · `terminal` |
+| `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `condition_cleared` | `approval` | `attempt` · `terminal` |
 
 Los hechos de **ejecución** del modelo Task/Attempt apuntan al **Attempt**: dos Attempts de una Task tienen su propia
 Attention (`model_read_tests::dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity`). Solo existen
