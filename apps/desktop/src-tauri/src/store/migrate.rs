@@ -102,6 +102,17 @@ fn published(rows: &[(i64, String, String)]) -> impl Iterator<Item = &(i64, Stri
     rows.iter().filter(|r| r.0 != super::cut::CUT_VERSION)
 }
 
+/// `user_version` como versión de esquema. Una base cortada con el corte en la lista de `migrate` antes de LXO-234
+/// pudo quedar con `user_version` = versión reservada del corte; si su fila del corte está registrada, ese valor no
+/// cuenta (manda la última migración publicada aplicada).
+fn schema_user_version(user_version: i64, rows: &[(i64, String, String)]) -> i64 {
+    if user_version == super::cut::CUT_VERSION && rows.iter().any(|r| r.0 == super::cut::CUT_VERSION) {
+        0
+    } else {
+        user_version
+    }
+}
+
 /// Una base cortada con la numeración anterior a LXO-234 (el corte como «última + 1»): se rechaza sin escribir.
 fn reject_legacy_cut(rows: &[(i64, String, String)]) -> StoreResult<()> {
     match rows.iter().find(|r| r.1 == super::cut::CUT_NAME && r.0 != super::cut::CUT_VERSION) {
@@ -152,6 +163,7 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
     let rows = applied_rows(conn)?;
     reject_legacy_cut(&rows)?;
     let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
+    let user_version = schema_user_version(user_version, &rows);
 
     let db_version = applied_max.max(user_version);
     if db_version > binary_max {
@@ -192,7 +204,7 @@ pub(super) fn db_version(conn: &Connection) -> StoreResult<i64> {
     let rows = applied_rows(conn)?;
     reject_legacy_cut(&rows)?;
     let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
-    Ok(applied_max.max(user_version))
+    Ok(applied_max.max(schema_user_version(user_version, &rows)))
 }
 
 pub(super) fn now_ms() -> i64 {
@@ -259,7 +271,11 @@ pub fn migrate_capped(
         report.applied.push(m.version);
         report.to_version = m.version;
     }
-    tx.pragma_update(None, "user_version", report.to_version)?;
+    // `user_version` es la versión de ESQUEMA: la última migración publicada, nunca la reservada del corte. Así este
+    // camino (`migrations_with_cut()`) deja la base igual que `Core::ensure_agentic_cut`, y un binario con una
+    // migración nueva (014…) no la ve como `DatabaseNewer` (LXO-234).
+    let schema_version = plan.pending.iter().map(|&i| migrations[i].version).filter(|v| *v != super::cut::CUT_VERSION).fold(plan.applied_max, i64::max);
+    tx.pragma_update(None, "user_version", schema_version)?;
     tx.commit()?;
     Ok(report)
 }
