@@ -97,44 +97,6 @@ fn has_user_tables(conn: &Connection) -> StoreResult<bool> {
 }
 
 /// Filas de `schema_migrations` (vacío si la tabla aún no existe).
-/// Las filas de `schema_migrations` sin la del corte (versión reservada): la numeración publicada.
-fn published(rows: &[(i64, String, String)]) -> impl Iterator<Item = &(i64, String, String)> {
-    rows.iter().filter(|r| r.0 != super::cut::CUT_VERSION)
-}
-
-/// `user_version` como versión de esquema. Una base cortada con el corte en la lista de `migrate` antes de LXO-234
-/// pudo quedar con `user_version` = versión reservada del corte; si su fila del corte está registrada, ese valor no
-/// cuenta (manda la última migración publicada aplicada).
-fn schema_user_version(user_version: i64, rows: &[(i64, String, String)]) -> i64 {
-    if user_version == super::cut::CUT_VERSION && rows.iter().any(|r| r.0 == super::cut::CUT_VERSION) {
-        0
-    } else {
-        user_version
-    }
-}
-
-/// Una base cortada con la numeración anterior a LXO-234 (el corte como «última + 1»): se rechaza sin escribir.
-fn reject_legacy_cut(rows: &[(i64, String, String)]) -> StoreResult<()> {
-    match rows.iter().find(|r| r.1 == super::cut::CUT_NAME && r.0 != super::cut::CUT_VERSION) {
-        Some(r) => Err(StoreError::CutLegacyNumbering { version: r.0 }),
-        None => Ok(()),
-    }
-}
-
-/// Antes de abrir la base para escribir (y antes de que pase a `journal_mode = WAL`): una base cortada con la
-/// numeración vieja se rechaza leyéndola en SOLO LECTURA, así el archivo queda idéntico byte a byte. Cualquier otro
-/// problema al leer aquí se deja para la apertura normal, que lo clasifica.
-pub(super) fn reject_legacy_cut_readonly(db: &Path) -> StoreResult<()> {
-    if !db.exists() {
-        return Ok(());
-    }
-    let Ok(conn) = Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX) else { return Ok(()) };
-    match applied_rows(&conn) {
-        Ok(rows) => reject_legacy_cut(&rows),
-        Err(_) => Ok(()),
-    }
-}
-
 fn applied_rows(conn: &Connection) -> StoreResult<Vec<(i64, String, String)>> {
     if !table_exists(conn, "schema_migrations")? {
         return Ok(vec![]);
@@ -157,13 +119,10 @@ struct Plan {
 /// La lista COMPLETA sirve para validar (checksums, migraciones desconocidas, base más nueva);
 /// `ceiling` solo limita cuáles se APLICAN: las pendientes con versión mayor se dejan sin tocar.
 fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResult<Plan> {
-    // La versión de esquema es la de las migraciones publicadas: la fila reservada del corte no cuenta.
-    let binary_max = migrations.iter().filter(|m| m.version != super::cut::CUT_VERSION).map(|m| m.version).max().unwrap_or(0);
+    let binary_max = migrations.last().map(|m| m.version).unwrap_or(0);
     let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     let rows = applied_rows(conn)?;
-    reject_legacy_cut(&rows)?;
-    let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
-    let user_version = schema_user_version(user_version, &rows);
+    let applied_max = rows.last().map(|r| r.0).unwrap_or(0);
 
     let db_version = applied_max.max(user_version);
     if db_version > binary_max {
@@ -179,6 +138,14 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
             }
         }
     }
+    // El corte Task/Attempt (LXO-117) no lo aplica nunca este migrador: es una barrera. Solo
+    // `Store::agentic_cut_recorded` lo aplica, con su copia previa y su comprobación semántica; hasta
+    // entonces, nada posterior a él se aplica.
+    let barrier = migrations
+        .iter()
+        .find(|m| m.name == super::cut::CUT_NAME && !rows.iter().any(|r| r.0 == m.version))
+        .map(|m| m.version - 1)
+        .unwrap_or(i64::MAX);
     let mut pending = vec![];
     for (i, m) in migrations.iter().enumerate() {
         if rows.iter().any(|r| r.0 == m.version) {
@@ -187,7 +154,7 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
         if m.version < applied_max {
             return Err(StoreError::OutOfOrderMigration { pending: m.version, applied: applied_max });
         }
-        if m.version > ceiling {
+        if m.version > ceiling || m.version > barrier {
             continue;
         }
         pending.push(i);
@@ -201,10 +168,8 @@ fn plan(conn: &Connection, migrations: &[Migration], ceiling: i64) -> StoreResul
 /// más nueva que el binario.
 pub(super) fn db_version(conn: &Connection) -> StoreResult<i64> {
     let user_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let rows = applied_rows(conn)?;
-    reject_legacy_cut(&rows)?;
-    let applied_max = published(&rows).last().map(|r| r.0).unwrap_or(0);
-    Ok(applied_max.max(schema_user_version(user_version, &rows)))
+    let applied_max = applied_rows(conn)?.last().map(|r| r.0).unwrap_or(0);
+    Ok(applied_max.max(user_version))
 }
 
 pub(super) fn now_ms() -> i64 {
@@ -271,11 +236,7 @@ pub fn migrate_capped(
         report.applied.push(m.version);
         report.to_version = m.version;
     }
-    // `user_version` es la versión de ESQUEMA: la última migración publicada, nunca la reservada del corte. Así este
-    // camino (`migrations_with_cut()`) deja la base igual que `Core::ensure_agentic_cut`, y un binario con una
-    // migración nueva (014…) no la ve como `DatabaseNewer` (LXO-234).
-    let schema_version = plan.pending.iter().map(|&i| migrations[i].version).filter(|v| *v != super::cut::CUT_VERSION).fold(plan.applied_max, i64::max);
-    tx.pragma_update(None, "user_version", schema_version)?;
+    tx.pragma_update(None, "user_version", report.to_version)?;
     tx.commit()?;
     Ok(report)
 }

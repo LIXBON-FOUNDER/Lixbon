@@ -387,27 +387,3 @@ fn preguntas_respuestas_esperas_y_bloqueos_de_entorno_van_a_sus_tablas() {
     }
     assert_eq!(despues, esperado);
 }
-
-// ---------------------------------------------------------------------------------------------
-// Barrido de la suite sobre las tablas
-// ---------------------------------------------------------------------------------------------
-
-impl Core {
-    /// SOLO PRUEBAS (`LIXBON_TEST_ON_TABLES=1`): corta la base en cada arranque autoritativo y sigue sobre las tablas,
-    /// para pasar la suite entera por el runtime de LXO-232 y encontrar lo que las tablas no representan.
-    pub(super) fn cut_for_tests(&self, boot: super::boot_authority::BootResult, data: &Path, core: &Path) -> super::boot_authority::BootResult {
-        let super::boot_authority::BootResult::Authoritative(mut a) = boot else { return boot };
-        let ultima = crate::store::cut_migration().version - 1;
-        let lista = self.storage.with_store(|s| s.schema_version().ok() == Some(ultima)).unwrap_or(false);
-        if a.on_tables || !lista || std::env::var("LIXBON_TEST_ON_TABLES").as_deref() != Ok("1") {
-            return super::boot_authority::BootResult::Authoritative(a);
-        }
-        let cut = self.storage.with_store(|s| super::agentic_cut::run(s, core, data, "t")).expect("almacén abierto");
-        if let Err(e) = cut {
-            panic!("[tablas] el corte de prueba falló: {e}");
-        }
-        a.state = self.storage.load_from_tables().expect("carga").expect("cortada");
-        a.on_tables = true;
-        super::boot_authority::BootResult::Authoritative(a)
-    }
-}

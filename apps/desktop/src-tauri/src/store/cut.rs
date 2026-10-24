@@ -1,14 +1,12 @@
 //! Corte de datos Task/Attempt (LXO-117): lado del **almacén**. Contrato: `docs/core/CORTE_EJECUCION.md`; mapeo: ADR
 //! `docs/core/CORTE_TASK_ATTEMPT.md`.
 //!
-//! Aplica `cut/task_attempt_cut.sql` con su versión reservada ([`CUT_VERSION`]) sobre la última migración publicada, en UNA transacción
-//! con la comprobación semántica y el evento `core.agentic_cut` que le pasa `orch::agentic_cut`. Si cualquiera falla,
-//! ROLLBACK: la base queda exactamente en la versión anterior.
+//! Aplica `migrations/014_task_attempt_cut.sql` (la migración del corte) en UNA transacción con la comprobación
+//! semántica y el evento `core.agentic_cut` que le pasa `orch::agentic_cut`. Si cualquiera falla, ROLLBACK: la base
+//! queda exactamente en la versión anterior.
 //!
-//! El arranque no lo aplica por la lista de migraciones (la SQL no vive en `migrations/`): lo ejecuta
-//! `Core::ensure_agentic_cut` (LXO-234), que DESKTOP llama al arrancar (LXO-123). Ver «Activación» del contrato.
-
-#![cfg_attr(not(test), allow(dead_code))] // sin activar: solo lo usan `orch::agentic_cut` y las pruebas
+//! El migrador general no la aplica nunca (`migrate::plan`): solo esta transacción, que llama el arranque con el
+//! interruptor de dogfood (LXO-234). Ver «Activación» en el contrato.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -23,37 +21,15 @@ use super::migrate::{db_version, embedded, now_ms, Migration};
 use super::tasks::{insert_all, AGENTIC_MODEL_KEY};
 use super::Store;
 
-/// Nombre del corte en `schema_migrations`.
+/// Nombre del corte en `schema_migrations` (y de su migración, `014_task_attempt_cut.sql`).
 pub const CUT_NAME: &str = "task_attempt_cut";
-/// El SQL del corte. Fuera de `migrations/`: el arranque no lo aplica.
-pub const CUT_SQL: &str = include_str!("cut/task_attempt_cut.sql");
 /// Clave de idempotencia del evento `core.agentic_cut`.
 pub const CUT_IDEM_KEY: &str = "task_attempt_v1";
 
-/// Versión RESERVADA del corte en `schema_migrations` (LXO-234). Fija: no depende de cuántas migraciones publique el
-/// binario, así que una migración nueva (014…) nunca choca con el corte. Las migraciones publicadas van por debajo; el
-/// orden y la versión «de esquema» de una base ignoran esta fila ([`super::migrate`]).
-pub const CUT_VERSION: i64 = 900;
-
-/// Código estable del rechazo de una base cortada con la numeración anterior (`StoreError::CutLegacyNumbering`).
-pub const LEGACY_NUMBERING_CODE: &str = "core_cut_legacy_numbering";
-
-/// La migración publicada sobre la que se aplica el corte: la última del binario.
-pub fn cut_base_version() -> i64 {
-    embedded().last().map(|m| m.version).unwrap_or(0)
-}
-
-/// El corte como migración, con su versión reservada. Con ella en la lista, un binario abre una base ya cortada; sin
-/// ella (cualquier binario anterior), la base cortada es `DatabaseNewer` y no se toca.
+/// El corte como migración: la embebida con su nombre. Un binario anterior no la conoce: la base cortada es
+/// `DatabaseNewer` para él y no la toca.
 pub fn cut_migration() -> Migration {
-    Migration::new(CUT_VERSION, CUT_NAME, CUT_SQL)
-}
-
-/// Las migraciones publicadas más el corte.
-pub fn migrations_with_cut() -> Vec<Migration> {
-    let mut all = embedded();
-    all.push(cut_migration());
-    all
+    embedded().into_iter().find(|m| m.name == CUT_NAME).expect("la migración del corte está embebida")
 }
 
 /// Filas por entidad tras el corte (el informe «después» y el payload de `core.agentic_cut`).
@@ -99,9 +75,6 @@ fn counts_in(c: &Connection) -> StoreResult<CutCounts> {
 /// ¿Ya se cortó esta base? Mira las dos huellas del corte: la migración registrada y `meta.agentic_model`.
 pub(super) fn is_cut(c: &Connection) -> StoreResult<bool> {
     let applied: Option<i64> = c.query_row("SELECT version FROM schema_migrations WHERE name = ?1", [CUT_NAME], |r| r.get(0)).optional()?;
-    if let Some(version) = applied.filter(|v| *v != CUT_VERSION) {
-        return Err(StoreError::CutLegacyNumbering { version });
-    }
     let model: Option<String> = c.query_row("SELECT value FROM meta WHERE key = ?1", [AGENTIC_MODEL_KEY], |r| r.get(0)).optional()?;
     Ok(applied.is_some() || model.is_some())
 }
@@ -228,19 +201,6 @@ impl<'a> CutView<'a> {
                 otro => return Err(view_err(format!("{id}: Artifact de tipo {otro} en el legado"))),
             };
             o.insert(key.into(), json!(uri));
-        }
-        // LXO-234: lo que el corte no pudo guardar en su columna (motivo de fallo de una Task no fallida, PR que no es
-        // https, carpeta compartida con otra Task) está en `legacy_residue`; mientras el Attempt actual sea el migrado,
-        // la vista legacy repone el valor original.
-        if !core {
-            let mut res = c.prepare(
-                "SELECT field, value FROM legacy_residue WHERE entity_kind = 'task' AND legacy_id = ?1
-                 AND reason IN ('failure_reason_not_failed', 'failure_reason_invalid', 'pr_url_not_https', 'worktree_path_shared')",
-            )?;
-            for row in res.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
-                let (field, value) = row?;
-                o.insert(field, json_col(Some(value)));
-            }
         }
         // Un seguimiento no borra las fases del documento: las de todos los Attempts, en orden.
         let mut ph = c.prepare(
@@ -370,9 +330,8 @@ impl Store {
             return Ok(CutOutcome::AlreadyCut);
         }
         let version = db_version(&tx)?;
-        let base = cut_base_version();
-        if version != base {
-            return Err(StoreError::CutPreflight(format!("la base está en la versión {version}; el corte se aplica sobre la {base}")));
+        if version != cut.version - 1 {
+            return Err(StoreError::CutPreflight(format!("la base está en la versión {version}; el corte se aplica sobre la {}", cut.version - 1)));
         }
         let fail = |detail: String| StoreError::MigrationFailed { version: cut.version, name: cut.name.to_string(), detail };
         tx.execute_batch(cut.sql).map_err(|e| fail(e.to_string()))?;
@@ -384,7 +343,7 @@ impl Store {
             rusqlite::params![cut.version, cut.name, cut.checksum(), app_version, now_ms()],
         )
         .map_err(|e| fail(e.to_string()))?;
-        // `user_version` sigue siendo la última migración publicada: el corte se identifica por su fila reservada.
+        tx.pragma_update(None, "user_version", cut.version)?;
         let counts = counts_in(&tx)?;
         let e = verify(&CutView(&tx), &counts)?;
         if e.kind != "core.agentic_cut" || e.idem_key.as_deref() != Some(CUT_IDEM_KEY) {

@@ -84,9 +84,6 @@ pub enum StoreError {
     InvalidWorktree(String),
     /// La base no está lista para el corte Task/Attempt (versión, `legacy_state`, copia previa…). No se tocó nada.
     CutPreflight(String),
-    /// La base se cortó con un binario que numeraba el corte como «última migración + 1» (anterior a LXO-234). No se
-    /// renumera ni se escribe nada: hay que restaurar la copia `pre-f3-cut` y volver a cortar.
-    CutLegacyNumbering { version: i64 },
     /// Una revisión no admite la operación (Attempt inexistente o que no arrancó…). No se escribió nada.
     ReviewConflict(String),
     /// Una revisión no cumple el contrato (commit que no es hexadecimal, comentario largo…). Se rechaza ANTES de tocar la
@@ -208,12 +205,6 @@ impl fmt::Display for StoreError {
             StoreError::WorktreeConflict(m) => write!(f, "worktrees y artifacts: {m}"),
             StoreError::InvalidWorktree(m) => write!(f, "worktree o artifact inválido: {m}"),
             StoreError::CutPreflight(m) => write!(f, "corte Task/Attempt: {m}"),
-            StoreError::CutLegacyNumbering { version } => write!(
-                f,
-                "{}: la base se cortó como migración {version:03}, la numeración anterior a LXO-234 (el corte usa ahora la versión reservada {}); no se ha modificado nada. Restaura la copia pre-f3-cut que dejó el corte y vuelve a abrir Lixbon para cortar de nuevo",
-                super::cut::LEGACY_NUMBERING_CODE,
-                super::cut::CUT_VERSION
-            ),
             StoreError::ReviewConflict(m) => write!(f, "reviews: {m}"),
             StoreError::InvalidReview(m) => write!(f, "review inválida: {m}"),
             StoreError::RuntimeMapping(m) => write!(f, "runtime sobre las tablas: {m}"),

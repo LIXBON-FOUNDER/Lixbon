@@ -191,6 +191,7 @@ impl Core {
             }
             Boot::Normal => {
                 self.apply_post_fence_migrations()?;
+                self.cut_if_switched(data, core)?;
                 self.load_authoritative(&probe, false, false)
             }
             Boot::RebuildMarker => {
@@ -198,12 +199,14 @@ impl Core {
                 let rebuilt = f.auth.as_ref().and_then(|a| Marker::from_database(f, a)).ok_or_else(|| authority_error("no se pudo reconstruir el marcador de autoridad desde la base"))?;
                 let pending = write_marker(core, &rebuilt, ("marker_final_tmp", "marker_final_published")).is_err();
                 self.apply_post_fence_migrations()?;
+                self.cut_if_switched(data, core)?;
                 self.load_authoritative(&probe, false, pending)
             }
             Boot::Complete => {
                 let MarkerRead::Valid(m) = &marker else { unreachable!() };
                 let pending = write_marker(core, &m.confirmed(), ("marker_final_tmp", "marker_final_published")).is_err();
                 self.apply_post_fence_migrations()?;
+                self.cut_if_switched(data, core)?;
                 self.load_authoritative(&probe, false, pending)
             }
             Boot::Redo => {
@@ -262,6 +265,22 @@ impl Core {
             Ok(p) => {
                 // La promoción terminó (COMMIT y marcador): desde aquí la instalación es autoritativa.
                 self.apply_post_fence_migrations()?;
+                if self.cut_if_switched(data, core)? {
+                    // Recién promovida y cortada en el mismo arranque: el estado ya vive en las tablas.
+                    let state = self.storage.load_from_tables()?.ok_or_else(|| authority_error("el corte terminó pero la base no está cortada"))?;
+                    let rev = self.storage.confirmed_rev().map_err(authority_error)?.unwrap_or(0);
+                    return Ok(BootResult::Authoritative(Box::new(Authoritative {
+                        state,
+                        rev,
+                        doc: String::new(),
+                        promotion_id: p.plan.promotion_id,
+                        known_legacy_hash: None,
+                        promoted_now: true,
+                        marker_pending: p.marker_pending,
+                        needs_orphan: false,
+                        on_tables: true,
+                    })));
+                }
                 Ok(BootResult::Authoritative(Box::new(Authoritative {
                     known_legacy_hash: Some(p.plan.source_hash.clone()).filter(|h| h != NO_SOURCE),
                     rev: p.plan.sqlite_target_rev,
@@ -301,6 +320,44 @@ impl Core {
                         "no se pudieron aplicar las migraciones del almacén: {e}. La instalación es autoritativa en SQLite: no se vuelve a state.json. La base quedó como estaba"
                     )))
                 }
+            }
+        }
+    }
+
+    /// El corte Task/Attempt en el arranque (LXO-234): tras las migraciones anteriores y con `core.lock` tomado, solo con
+    /// el interruptor de dogfood y sin una espera de restauración. `true` si cortó ahora. Si falla, el arranque se
+    /// bloquea (D13): la transacción del corte se deshizo y la base quedó como estaba.
+    fn cut_if_switched(&self, data: &Path, core: &Path) -> Result<bool, OpenStoreError> {
+        if !super::agentic_cut::switch_on() {
+            return Ok(false);
+        }
+        if super::agentic_cut::held(core) {
+            eprintln!("[core] {} está puesto, pero tras restaurar la copia previa no se vuelve a cortar ({} en {})", super::agentic_cut::SWITCH, super::agentic_cut::HOLD_FILE, core.display());
+            return Ok(false);
+        }
+        let outcome = self.storage.with_store(|s| super::agentic_cut::run(s, core, data, env!("CARGO_PKG_VERSION"))).ok_or_else(|| authority_error("el almacén no está abierto"))?;
+        match outcome {
+            Ok(super::agentic_cut::CutReport::Applied { backup, before, after }) => {
+                eprintln!(
+                    "[core] corte Task/Attempt aplicado: {} Tasks, {} Attempts (copia previa: {})",
+                    before.tasks,
+                    after.attempts,
+                    backup.display()
+                );
+                super::startup_cut::record(super::startup_cut::applied_view(&backup));
+                Ok(true)
+            }
+            Ok(super::agentic_cut::CutReport::AlreadyCut) => {
+                super::startup_cut::record(super::startup_cut::already_cut_view());
+                Ok(false)
+            }
+            Err(e) => {
+                let msg = format!(
+                    "no se pudo pasar al modelo Task/Attempt: {e}. La base no cambió. Para arrancar con el modelo anterior, quita {}=1",
+                    super::agentic_cut::SWITCH
+                );
+                super::startup_cut::record(super::startup_cut::failed_view(&msg));
+                Err(authority_error(msg))
             }
         }
     }

@@ -10,12 +10,17 @@
 //!      )                                                        <- UNA transacción: o todo, o nada
 //! ```
 //!
-//! **Sin activar**: el arranque no llama a [`run`]. Activarlo (y el paso 6, que pasa a `exited` los Attempts
-//! huérfanos) es del slice que mueva el runtime a las tablas.
-
-#![cfg_attr(not(test), allow(dead_code))] // sin activar: solo lo usan las pruebas
+//! **Activación (LXO-234):** el arranque llama a [`run`] tras las migraciones anteriores al corte, con `core.lock` tomado,
+//! solo con el interruptor de dogfood ([`SWITCH`]) y si no hay una espera ([`HOLD_FILE`]: la deja una restauración).
+//! El paso 6 (Attempts huérfanos a `exited`) lo hace el runtime en cada arranque sobre las tablas.
+//!
+//! **Restauración:** [`request_restore`] (desde `lxo core restore`, con el Core en marcha) comprueba la copia y la deja
+//! pedida; el siguiente arranque la aplica con [`restore_pending`] antes de abrir la base.
 
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,6 +34,33 @@ use crate::store::{cut_migration, inspect_copy, lock_path, sha256_hex, CutCounts
 
 /// Etiqueta de la copia previa obligatoria.
 pub(super) const BACKUP_LABEL: &str = "pre-f3-cut";
+/// Interruptor de dogfood (LXO-234): el arranque corta la base solo con `LIXBON_AGENTIC_CUT=1`. Desactivado por defecto.
+pub(super) const SWITCH: &str = "LIXBON_AGENTIC_CUT";
+/// En `core/`: tras restaurar la copia previa, el arranque no vuelve a cortar aunque el interruptor siga puesto (el
+/// «fijar la versión» de la ADR §12). Se borra a mano cuando se quiera volver a intentarlo.
+pub(super) const HOLD_FILE: &str = "agentic-cut-hold.json";
+/// En `core/`: una restauración pedida con el Core en marcha, que aplica el siguiente arranque.
+pub(super) const RESTORE_REQUEST_FILE: &str = "agentic-cut-restore.json";
+
+#[cfg(test)]
+thread_local! {
+    /// Las pruebas fijan el interruptor por hilo (sin tocar el entorno del proceso).
+    pub(super) static SWITCH_FOR_TESTS: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+/// ¿Pide el entorno el corte al arrancar?
+pub(super) fn switch_on() -> bool {
+    #[cfg(test)]
+    if let Some(v) = SWITCH_FOR_TESTS.with(Cell::get) {
+        return v;
+    }
+    std::env::var(SWITCH).as_deref() == Ok("1")
+}
+
+/// ¿Hay una espera (tras una restauración) que impide cortar?
+pub(super) fn held(core: &Path) -> bool {
+    core.join(HOLD_FILE).exists()
+}
 const SIDECAR_VERSION: u32 = 1;
 
 /// Lo que había en el documento legacy (el informe «antes»).
@@ -77,7 +109,7 @@ fn check_err(m: impl Into<String>) -> StoreError {
 /// Paso 3 (solo lectura): base en la última migración publicada y documento legible. Sin fila `legacy_state` (una
 /// instalación nueva) el documento es un `State` vacío.
 fn preflight(st: &Store) -> StoreResult<(Option<(i64, String)>, State)> {
-    let expected = crate::store::cut_base_version();
+    let expected = cut_migration().version - 1;
     let version = st.schema_version()?;
     if version != expected {
         return Err(preflight_err(format!("la base está en la versión {version}; el corte se aplica sobre la {expected}")));
@@ -268,9 +300,64 @@ pub(super) fn check_copy(backup: &Path) -> StoreResult<Sidecar> {
 
 /// Rollback (ADR §12, pasos 2–4), **offline**: con el bloqueo de instancia libre, verifica la copia, aparta (no
 /// borra) la base actual a `core/rollback-<ms>/` y pone en su sitio la copia, `state.json` y `authority.json` del
-/// mismo conjunto. Devuelve la carpeta apartada. Fijar la versión del binario (paso 5) es del instalador.
+/// mismo conjunto. Deja la espera ([`HOLD_FILE`]) para que el arranque no vuelva a cortar. Devuelve la carpeta apartada.
 pub(super) fn restore(core: &Path, data: &Path, backup: &Path) -> StoreResult<PathBuf> {
     let _lock = InstanceLock::acquire(&lock_path(core))?;
+    restore_in(core, data, backup)
+}
+
+fn write_json(path: &Path, v: &serde_json::Value) -> StoreResult<()> {
+    let bytes = serde_json::to_vec_pretty(v).map_err(|e| StoreError::Backup(e.to_string()))?;
+    write_atomic_durable(path, &bytes, true).map_err(|e| io(&format!("no se pudo escribir {}", path.display()), e))
+}
+
+/// La copia `pre-f3-cut` más reciente de `core/backups/` (el nombre empieza por la hora).
+pub(super) fn latest_copy(core: &Path) -> Option<PathBuf> {
+    let mut copias: Vec<PathBuf> = std::fs::read_dir(core.join("backups"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "db") && p.file_name().is_some_and(|n| n.to_string_lossy().contains(BACKUP_LABEL)))
+        .collect();
+    copias.sort();
+    copias.pop()
+}
+
+/// Pide la restauración de `backup` para el próximo arranque (el Core en marcha tiene la base abierta). Comprueba antes
+/// la copia contra su sidecar: una copia que no cuadra no se pide.
+pub(super) fn request_restore(core: &Path, backup: &Path) -> StoreResult<Sidecar> {
+    let s = check_copy(backup)?;
+    write_json(&core.join(RESTORE_REQUEST_FILE), &serde_json::json!({ "v": 1, "copy": backup, "requested_at": now_ms() }))?;
+    Ok(s)
+}
+
+/// Retira una restauración pedida y aún no aplicada. `true` si había una.
+pub(super) fn cancel_restore(core: &Path) -> StoreResult<bool> {
+    match std::fs::remove_file(core.join(RESTORE_REQUEST_FILE)) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(io("no se pudo retirar la restauración pedida", e)),
+    }
+}
+
+/// En el arranque, con `core.lock` ya tomado y la base sin abrir: aplica la restauración pedida, si la hay. Devuelve la
+/// carpeta donde quedó apartada la base cortada.
+pub(super) fn restore_pending(core: &Path, data: &Path) -> StoreResult<Option<PathBuf>> {
+    let path = core.join(RESTORE_REQUEST_FILE);
+    let raw = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(io("no se pudo leer la restauración pedida", e)),
+    };
+    let req: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| StoreError::Backup(format!("restauración pedida ilegible: {e}")))?;
+    let copy = req["copy"].as_str().map(PathBuf::from).ok_or_else(|| StoreError::Backup("la restauración pedida no dice qué copia".into()))?;
+    let aside = restore_in(core, data, &copy)?;
+    std::fs::remove_file(&path).map_err(|e| io("no se pudo retirar la restauración ya aplicada", e))?;
+    Ok(Some(aside))
+}
+
+/// La restauración en sí, con el bloqueo ya tomado por quien llama.
+fn restore_in(core: &Path, data: &Path, backup: &Path) -> StoreResult<PathBuf> {
     let s = check_copy(backup)?;
     let aside = core.join(format!("rollback-{}", now_ms()));
     std::fs::create_dir_all(&aside).map_err(|e| io("no se pudo crear la carpeta de rollback", e))?;
@@ -291,40 +378,7 @@ pub(super) fn restore(core: &Path, data: &Path, backup: &Path) -> StoreResult<Pa
             std::fs::copy(dir.join(name), &dest).map_err(|e| io(&format!("no se pudo restaurar {name}"), e))?;
         }
     }
+    // ADR §12, paso 4: sin la espera, el siguiente arranque con el interruptor volvería a cortar.
+    write_json(&core.join(HOLD_FILE), &serde_json::json!({ "v": 1, "restored_at": now_ms(), "copy": backup, "aside": aside }))?;
     Ok(aside)
-}
-
-/// Resultado de [`Core::ensure_agentic_cut`] (LXO-234).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case", tag = "outcome")]
-pub enum AgenticCutStatus {
-    /// Se cortó ahora; `backup` es la copia `pre-f3-cut` que permite volver.
-    Applied { backup: PathBuf },
-    /// La base ya estaba cortada: no se tocó nada.
-    AlreadyCut,
-}
-
-impl super::Core {
-    /// Corta la base del Core al modelo Task/Attempt si aún no lo está (LXO-234). **Síncrona** y **idempotente**: con la
-    /// base ya cortada devuelve `AlreadyCut` sin escribir. La llama quien arranca el Core (DESKTOP, LXO-123) con el
-    /// almacén ya abierto; tras `Applied` el runtime debe recargar su estado desde las tablas.
-    ///
-    /// Errores (texto `código: mensaje`):
-    /// * `core_cut_legacy_numbering: …` — base cortada con la numeración anterior (corte como «última + 1»). No se
-    ///   escribe nada; hay que restaurar la copia `pre-f3-cut`.
-    /// * `model_unavailable: …` — el almacén no está abierto.
-    /// * `core_cut_failed: …` — cualquier otro fallo (preflight, copia, validación); el corte se deshace entero.
-    pub fn ensure_agentic_cut(&self) -> Result<AgenticCutStatus, String> {
-        let (core, data) = (super::fsio::core_dir(), super::fsio::data_dir());
-        let r = self
-            .storage
-            .run_agentic_cut(&core, &data)
-            .ok_or_else(|| "model_unavailable: el almacén no está abierto".to_string())?;
-        match r {
-            Ok(CutReport::Applied { backup, .. }) => Ok(AgenticCutStatus::Applied { backup }),
-            Ok(CutReport::AlreadyCut) => Ok(AgenticCutStatus::AlreadyCut),
-            Err(e @ StoreError::CutLegacyNumbering { .. }) => Err(e.to_string()),
-            Err(e) => Err(format!("core_cut_failed: {e}")),
-        }
-    }
 }

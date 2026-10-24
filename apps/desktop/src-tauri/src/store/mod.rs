@@ -120,9 +120,9 @@ pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessi
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewArtifact, NewWorktree, Provenance, RemovalReason, WorktreeRow, WorktreeState, WorktreeStep};
-// Corte de datos Task/Attempt (LXO-117): sin activar; solo lo usan `orch::agentic_cut` y las pruebas.
+// Corte de datos Task/Attempt (LXO-117): lo aplica `orch::agentic_cut` (en el arranque, con el interruptor: LXO-234).
 #[allow(unused_imports)]
-pub use cut::{cut_base_version, cut_migration, inspect_copy, migrations_with_cut, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME, CUT_VERSION, LEGACY_NUMBERING_CODE};
+pub use cut::{cut_migration, inspect_copy, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
 // Runtime sobre las tablas Task/Attempt (LXO-232): lo usa la persistencia del Core tras el corte.
 pub use runtime::{RuntimeChanges, RuntimeDoc};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
@@ -233,8 +233,6 @@ impl Store {
     ) -> StoreResult<Store> {
         let db_path = dir.join(DB_FILE);
         let backup_dir = dir.join(BACKUP_DIR);
-        // LXO-234: una base cortada con la numeración vieja se rechaza en solo lectura, sin tocar ni un byte.
-        migrate::reject_legacy_cut_readonly(&db_path)?;
         // Permisos de propietario (ver `private`): la base y las copias llevan el
         // estado completo del Core. `backups/` se crea privada con la primera copia.
         private::create_private_file(&db_path);
