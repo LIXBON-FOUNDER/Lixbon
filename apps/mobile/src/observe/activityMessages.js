@@ -62,6 +62,41 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attention.risk_acted',
   'activity.attention.created',
   'activity.attention.resolved',
+  // Modelo Task/Attempt (LXO-233): intención de la Task, ejecución del Attempt y sus entidades.
+  'activity.task.intent_created',
+  'activity.task.updated',
+  'activity.task.discarded',
+  'activity.task.restored',
+  'activity.attempt.requested',
+  'activity.attempt.approved',
+  'activity.attempt.rejected',
+  'activity.attempt.started',
+  'activity.attempt.completed',
+  'activity.attempt.failed',
+  'activity.attempt.stopped',
+  'activity.attempt.waiting',
+  'activity.attempt.awaiting_terminal_approval',
+  'activity.attempt.resumed',
+  'activity.attempt.exited',
+  'activity.attempt.integrated',
+  'activity.provider_session.opened',
+  'activity.provider_session.bound',
+  'activity.provider_session.resumed',
+  'activity.provider_session.detached',
+  'activity.provider_session.closed',
+  'activity.thread.created',
+  'activity.thread.summarized',
+  'activity.worktree.created',
+  'activity.worktree.adopted',
+  'activity.worktree.attached',
+  'activity.worktree.missing',
+  'activity.worktree.found',
+  'activity.worktree.removed',
+  'activity.artifact.created',
+  'activity.review.accepted',
+  'activity.review.rejected',
+  'activity.review.invalidated',
+  'activity.core.agentic_cut',
   'activity.unknown',
 ]);
 
@@ -76,6 +111,7 @@ const TASK_STATUSES = new Set([
   'stopped',
   'exited',
 ]);
+const UNKNOWN_EVENT_REASONS = new Set(['unknown_kind', 'unsupported_version', 'invalid_payload']);
 const PROJECT_ORIGINS = {
   manual: 'registro manual',
   auto: 'registro automático',
@@ -106,6 +142,25 @@ const RESOLUTIONS = {
   acted: 'se tomó una acción',
   condition_cleared: 'la condición dejó de ocurrir',
   superseded: 'fue reemplazada por otra incidencia',
+};
+const INTENT_FIELDS = { title: 'el título', spec: 'el encargo' };
+const STOP_CAUSES = new Set(['cancelled', 'run_closed']);
+const ACTIVE_FROM = new Set(['starting', 'running', 'waiting', 'awaiting_terminal_approval']);
+const ATTEMPT_FAILURES = {
+  launch_failed: 'no llegó a arrancar',
+  terminal_approval_timeout: 'nadie aprobó en la terminal a tiempo',
+  agent_idle_timeout: 'el agente dejó de dar señales',
+  agent_reported: 'el agente informó el fallo',
+};
+const SESSION_BINDINGS = { stream_json: 'por stream-json', session_id: 'por su id de sesión' };
+const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
+const WORKTREE_REMOVAL = { integrated: 'integrado', discarded: 'descartado', gone: 'ya no existía' };
+const ARTIFACT_KINDS = {
+  report: 'un informe',
+  pull_request: 'un pull request',
+  last_message: 'su último mensaje',
+  commit: 'un commit',
+  file: 'un archivo',
 };
 
 function safeText(value) {
@@ -211,6 +266,69 @@ function formatTaskStatus(key, args) {
   return messages[key] ?? null;
 }
 
+/** Las claves de un Attempt nombran siempre su Task y su número: «intento N de la tarea T» (sin artículo). */
+function attemptOf(args) {
+  const task = requiredText(args, 'task');
+  const n = requiredNumber(args, 'n');
+  return requiredArguments(task, n) ? `intento ${n} de la tarea ${task}` : null;
+}
+
+function formatAttempt(key, args) {
+  const attempt = attemptOf(args);
+  if (!attempt) return null;
+  switch (key) {
+    case 'activity.attempt.approved':
+      return `Se aprobó el ${attempt}.`;
+    case 'activity.attempt.started':
+      return `Empezó el ${attempt}.`;
+    case 'activity.attempt.integrated':
+      return `Se integró el trabajo del ${attempt}.`;
+    case 'activity.attempt.rejected': {
+      const cause = requiredCode(args, 'cause', STOP_CAUSES);
+      return cause ? `Se rechazó el ${attempt}${cause === 'run_closed' ? ' al cerrarse la ejecución' : ''}.` : null;
+    }
+    case 'activity.attempt.completed': {
+      const summary = requiredBoolean(args, 'has_summary');
+      return summary === null ? null : `El ${attempt} terminó correctamente${summary ? ' con resumen' : ''}.`;
+    }
+    case 'activity.attempt.failed': {
+      const reason = requiredCode(args, 'reason', new Set(Object.keys(ATTEMPT_FAILURES)));
+      const summary = requiredBoolean(args, 'has_summary');
+      return requiredArguments(reason, summary) ? `El ${attempt} falló: ${ATTEMPT_FAILURES[reason]}.` : null;
+    }
+    case 'activity.attempt.stopped': {
+      const from = requiredCode(args, 'from', ACTIVE_FROM);
+      const cause = requiredCode(args, 'cause', STOP_CAUSES);
+      return requiredArguments(from, cause) ? `Se detuvo el ${attempt}${cause === 'run_closed' ? ' al cerrarse la ejecución' : ''}.` : null;
+    }
+    default: {
+      const from = requiredCode(args, 'from', ACTIVE_FROM);
+      if (from === null) return null;
+      const states = {
+        'activity.attempt.waiting': 'espera una respuesta',
+        'activity.attempt.awaiting_terminal_approval': 'espera aprobación en la terminal',
+        'activity.attempt.resumed': 'siguió en ejecución',
+        'activity.attempt.exited': 'salió sin cerrarse',
+      };
+      return states[key] ? `El ${attempt} ${states[key]}.` : null;
+    }
+  }
+}
+
+function formatReview(key, args) {
+  const attempt = attemptOf(args);
+  const head = requiredText(args, 'head_commit');
+  if (!requiredArguments(attempt, head)) return null;
+  if (key === 'activity.review.invalidated') {
+    const observed = requiredText(args, 'observed_head');
+    return observed ? `La revisión del ${attempt} sobre ${head} dejó de valer: la rama está en ${observed}.` : null;
+  }
+  const comment = requiredBoolean(args, 'has_comment');
+  if (comment === null) return null;
+  const verdict = key === 'activity.review.accepted' ? 'aceptó' : 'rechazó';
+  return `Se ${verdict} la revisión del ${attempt} sobre ${head}${comment ? ' con comentario' : ''}.`;
+}
+
 function formatSpawnResolved(key, args) {
   const hasReason = requiredBoolean(args, 'has_reason');
   const task = optionalText(args, 'task');
@@ -288,8 +406,142 @@ const FORMATTERS = {
       : null;
   },
   'activity.task.removed': (args) => {
-    const cause = requiredCode(args, 'cause', new Set(['launch_failed']));
-    return cause ? 'Se eliminó la tarea porque falló su lanzamiento.' : null;
+    const cause = requiredCode(args, 'cause', new Set(['launch_failed', 'unused']));
+    if (!cause) return null;
+    return cause === 'unused' ? 'Se eliminó la tarea porque no llegó a usarse.' : 'Se eliminó la tarea porque falló su lanzamiento.';
+  },
+  'activity.task.intent_created': (args) => {
+    const title = requiredText(args, 'title');
+    const depth = requiredNumber(args, 'depth');
+    const parent = optionalText(args, 'parent');
+    if (!requiredArguments(title, depth) || (args.parent != null && parent === null)) return null;
+    return `Se creó la tarea «${title}»${optionalDetails([parent ? `depende de ${parent}` : null, `profundidad ${depth}`])}.`;
+  },
+  'activity.task.updated': (args) => {
+    const changed = Array.isArray(args.changed) ? args.changed : null;
+    const title = optionalText(args, 'title');
+    if (!changed || !changed.length || !changed.every((f) => typeof f === 'string' && INTENT_FIELDS[f])
+      || (args.title != null && title === null)) return null;
+    const fields = changed.map((f) => INTENT_FIELDS[f]).join(' y ');
+    return `Se actualizó ${fields} de la tarea${title ? ` («${title}»)` : ''}.`;
+  },
+  'activity.task.discarded': () => 'Se descartó la tarea.',
+  'activity.task.restored': () => 'Se recuperó la tarea descartada.',
+  'activity.attempt.requested': (args) => {
+    const attempt = attemptOf(args);
+    const provider = requiredText(args, 'provider');
+    const external = requiredBoolean(args, 'external');
+    const approval = requiredBoolean(args, 'approval_required');
+    const optional = ['model', 'effort', 'role', 'profile'].map((k) => [k, optionalText(args, k)]);
+    if (!requiredArguments(attempt, provider, external, approval)
+      || optional.some(([k, v]) => args[k] != null && v === null)) return null;
+    const [model, effort, role, profile] = optional.map(([, v]) => v);
+    return `Se pidió el ${attempt} con ${provider}${optionalDetails([
+      role ? `rol ${role}` : null,
+      model ? `modelo ${model}` : null,
+      effort ? `esfuerzo ${effort}` : null,
+      profile ? `perfil ${profile}` : null,
+      external ? 'externo' : null,
+      approval ? 'pendiente de aprobación' : null,
+    ])}.`;
+  },
+  'activity.attempt.approved': formatAttempt,
+  'activity.attempt.rejected': formatAttempt,
+  'activity.attempt.started': formatAttempt,
+  'activity.attempt.completed': formatAttempt,
+  'activity.attempt.failed': formatAttempt,
+  'activity.attempt.stopped': formatAttempt,
+  'activity.attempt.waiting': formatAttempt,
+  'activity.attempt.awaiting_terminal_approval': formatAttempt,
+  'activity.attempt.resumed': formatAttempt,
+  'activity.attempt.exited': formatAttempt,
+  'activity.attempt.integrated': formatAttempt,
+  'activity.provider_session.opened': (args) => {
+    const attempt = attemptOf(args);
+    const provider = requiredText(args, 'provider');
+    const resumable = requiredBoolean(args, 'resumable');
+    const bound = requiredBoolean(args, 'bound');
+    if (!requiredArguments(attempt, provider, resumable, bound)) return null;
+    return `Se abrió una sesión de ${provider} en el ${attempt}${optionalDetails([resumable ? 'reanudable' : null, bound ? 'vinculada' : null])}.`;
+  },
+  'activity.provider_session.bound': (args) => {
+    const task = requiredText(args, 'task');
+    const binding = requiredCode(args, 'binding', new Set(Object.keys(SESSION_BINDINGS)));
+    return requiredArguments(task, binding) ? `La sesión de la tarea ${task} quedó vinculada ${SESSION_BINDINGS[binding]}.` : null;
+  },
+  'activity.provider_session.resumed': (args) => {
+    const task = requiredText(args, 'task');
+    const n = requiredNumber(args, 'n');
+    return requiredArguments(task, n) ? `Se reanudó la sesión de la tarea ${task} en el intento ${n}.` : null;
+  },
+  'activity.provider_session.detached': (args) => {
+    const task = requiredText(args, 'task');
+    return task ? `La sesión de la tarea ${task} quedó en espera.` : null;
+  },
+  'activity.provider_session.closed': (args) => {
+    const task = requiredText(args, 'task');
+    const from = requiredCode(args, 'from', SESSION_CLOSED_FROM);
+    return requiredArguments(task, from) ? `Se cerró la sesión de la tarea ${task}.` : null;
+  },
+  'activity.thread.created': (args) => {
+    const task = requiredText(args, 'task');
+    return task ? `Se abrió la conversación de la tarea ${task}.` : null;
+  },
+  'activity.thread.summarized': (args) => {
+    const task = requiredText(args, 'task');
+    const summary = requiredBoolean(args, 'has_summary');
+    if (!requiredArguments(task, summary)) return null;
+    return summary ? `Se resumió la conversación de la tarea ${task}.` : `Se quitó el resumen de la conversación de la tarea ${task}.`;
+  },
+  'activity.worktree.created': (args) => {
+    const attempt = attemptOf(args);
+    const branch = optionalText(args, 'branch');
+    if (!attempt || (args.branch != null && typeof args.branch !== 'string')) return null;
+    return `Se creó el worktree del ${attempt}${branch ? ` para «${branch}»` : ''}.`;
+  },
+  'activity.worktree.adopted': (args) => {
+    const attempt = attemptOf(args);
+    const provenance = requiredCode(args, 'provenance', new Set(['adopted', 'external']));
+    const branch = optionalText(args, 'branch');
+    if (!requiredArguments(attempt, provenance) || (args.branch != null && typeof args.branch !== 'string')) return null;
+    const what = provenance === 'external' ? 'Se registró un worktree externo' : 'Se adoptó un worktree existente';
+    return `${what} en el ${attempt}${branch ? ` («${branch}»)` : ''}.`;
+  },
+  'activity.worktree.attached': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `El ${attempt} reutiliza su worktree.` : null;
+  },
+  'activity.worktree.missing': (args) => {
+    const task = requiredText(args, 'task');
+    return task ? `No se encuentra el worktree de la tarea ${task}.` : null;
+  },
+  'activity.worktree.found': (args) => {
+    const task = requiredText(args, 'task');
+    return task ? `Se volvió a encontrar el worktree de la tarea ${task}.` : null;
+  },
+  'activity.worktree.removed': (args) => {
+    const task = requiredText(args, 'task');
+    const reason = requiredCode(args, 'reason', new Set(Object.keys(WORKTREE_REMOVAL)));
+    const kept = requiredBoolean(args, 'branch_kept');
+    if (!requiredArguments(task, reason, kept)) return null;
+    return `Se quitó el worktree de la tarea ${task} (${WORKTREE_REMOVAL[reason]}${kept ? '; se conserva la rama' : ''}).`;
+  },
+  'activity.artifact.created': (args) => {
+    const attempt = attemptOf(args);
+    const kind = requiredCode(args, 'kind', new Set(Object.keys(ARTIFACT_KINDS)));
+    const verifiable = requiredBoolean(args, 'verifiable');
+    if (!requiredArguments(attempt, kind, verifiable)) return null;
+    return `El ${attempt} dejó ${ARTIFACT_KINDS[kind]}${verifiable ? ' verificable' : ''}.`;
+  },
+  'activity.review.accepted': formatReview,
+  'activity.review.rejected': formatReview,
+  'activity.review.invalidated': formatReview,
+  'activity.core.agentic_cut': (args) => {
+    const tasks = requiredNumber(args, 'tasks');
+    const attempts = requiredNumber(args, 'attempts');
+    return requiredArguments(tasks, attempts)
+      ? `Se pasó al modelo de tareas e intentos (${plural(tasks, 'tarea', 'tareas')}, ${plural(attempts, 'intento', 'intentos')}).`
+      : null;
   },
   'activity.task.review_requested': (args) => {
     const branch = requiredText(args, 'branch');
@@ -450,7 +702,7 @@ const FORMATTERS = {
     return resolution ? `Se registró la resolución de una incidencia: ${RESOLUTIONS[resolution]}.` : null;
   },
   'activity.unknown': (args) => {
-    const reason = requiredText(args, 'reason');
+    const reason = requiredCode(args, 'reason', UNKNOWN_EVENT_REASONS);
     const kind = requiredText(args, 'kind');
     const version = requiredNumber(args, 'event_version');
     return requiredArguments(reason, kind, version)

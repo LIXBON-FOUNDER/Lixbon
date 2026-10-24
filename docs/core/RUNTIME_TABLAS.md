@@ -119,7 +119,13 @@ y pasa la suite del Core por este runtime. Los fallos que deja son esperables en
 
 No queda ningún error de mapeo en los flujos reales.
 
+## Hechos de ejecución (LXO-233)
+
+Con esta persistencia, el `Tx` emite los cambios de estado de ejecución como `attempt.*` del Attempt actual, en lugar
+de `task.status_changed` (ADR D9). `State.attempt_n` lleva el número del Attempt actual de cada Task: lo carga el
+arranque desde las tablas y lo avanza un seguimiento. Contrato: [EVENTOS.md](EVENTOS.md#runtime-sobre-las-tablas-lxo-233).
+Attention: [ATTENTION.md](ATTENTION.md). Pruebas: `orch/attempt_events_tests.rs`.
+
 ## Fuera de este slice
 
-* Emitir `attempt.*` en lugar de `task.status_changed` (LXO-233).
 * Activar el corte al arrancar, el interruptor de dogfood y `lxo core restore` (LXO-234).

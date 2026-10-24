@@ -1461,3 +1461,24 @@ fn es_de_solo_lectura_y_reproducible() {
         "leer no escribe eventos"
     );
 }
+
+/// LXO-233: ninguna clave que dé el Core cae al texto de respaldo en un cliente. Desktop traduce todas (y su prueba exige
+/// el esquema de argumentos de cada una en `coreQueries.js`); `lxo` y Mobile comprueban que su lista es la de Desktop.
+#[test]
+fn cada_clave_que_da_el_core_la_traducen_los_clientes() {
+    const FORMAT: &str = include_str!("activity_format.rs");
+    const DESKTOP: &str = include_str!("../../../src/ade/activityMessages.js");
+    const SCHEMAS: &str = include_str!("../../../src/ade/coreQueries.js");
+    let claves: BTreeSet<&str> = FORMAT.split('"').filter(|s| s.starts_with("activity.") && s.len() > "activity.".len()).collect();
+    assert!(claves.len() > 80, "revisó {} claves", claves.len());
+    for clave in claves {
+        assert!(DESKTOP.contains(&format!("'{clave}'")), "{clave} no tiene texto en Desktop (activityMessages.js)");
+        // Las familias de pasos se registran en un bucle: `activity.attempt.${step}` con su lista de pasos.
+        let (familia, paso) = clave.rsplit_once('.').unwrap();
+        let en_bucle = SCHEMAS.contains(&format!("`{familia}.${{")) && SCHEMAS.contains(&format!("'{paso}'"));
+        assert!(
+            SCHEMAS.contains(&format!("'{clave}'")) || en_bucle,
+            "{clave} no tiene esquema de argumentos en coreQueries.js: Desktop rechazaría la página entera"
+        );
+    }
+}

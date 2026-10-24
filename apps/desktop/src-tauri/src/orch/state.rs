@@ -252,6 +252,10 @@ pub struct State {
     /// no se reutiliza su id. No se guarda en el documento: lo fija la carga desde las tablas.
     #[serde(skip)]
     pub decision_floor: u64,
+    /// Número del Attempt actual de cada Task (LXO-233): los hechos `attempt.*` lo llevan. No va en el documento: lo
+    /// fija la carga desde las tablas y lo avanza un seguimiento. Vacío sin el runtime sobre las tablas.
+    #[serde(skip)]
+    pub attempt_n: BTreeMap<String, u32>,
 }
 
 /// Fila de `decisions`: id, task, kind (merge|pr|release|discard|reopen|stop),

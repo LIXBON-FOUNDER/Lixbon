@@ -177,21 +177,39 @@ pub(super) fn derive(e: &EventRow) -> Derived {
         ("attention.risk_acted", "attention") if p["resolution"] == "acted" => {
             d.resolve_id(C::Risk, id, Resolution::Acted);
         }
-        ("attempt.requested", "attempt") if p["approval_required"] == true => {
-            d.raise(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Severity::Medium, copy_codes(&p, &["task", "provider"]))
+        ("attempt.requested", "attempt") => {
+            if p["approval_required"] == true {
+                d.raise(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Severity::Medium, copy_codes(&p, &["task", "provider"]));
+            }
+            // Un seguimiento (LXO-233) supera la revisión pendiente de la Task, como hacía `task.status_changed` desde `done`,
+            // y el fallo levantado sobre la Task antes del corte (D10). El fallo de un Attempt anterior sigue siendo suyo.
+            if let (Some(task), Some(_)) = (p["task"].as_str(), p["n"].as_u64().filter(|n| *n > 1)) {
+                d.resolve(C::Failed, TargetKind::Task, task, None, Resolution::ConditionCleared);
+                d.resolve(C::ReviewReady, TargetKind::Task, task, None, Resolution::ConditionCleared);
+            }
         }
         ("attempt.approved" | "attempt.rejected", "attempt") => d.resolve(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Resolution::Acted),
         ("attempt.waiting", "attempt") if p["state"] == "awaiting_terminal_approval" => {
             d.raise(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Severity::Medium, copy_codes(&p, &["task"]))
         }
         ("attempt.resumed", "attempt") if p["from"] == "awaiting_terminal_approval" => {
-            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::Acted)
+            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::Acted);
+            // La espera en la terminal levantada sobre la Task antes del corte se respeta hasta resolverse (D10).
+            if let Some(task) = p["task"].as_str() {
+                d.resolve(C::Approval, TargetKind::Task, task, Some(TERMINAL.into()), Resolution::Acted);
+            }
         }
         ("attempt.completed" | "attempt.stopped" | "attempt.exited", "attempt") => {
-            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared)
+            d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            if let Some(task) = p["task"].as_str() {
+                d.resolve(C::Approval, TargetKind::Task, task, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            }
         }
         ("attempt.failed", "attempt") => {
             d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            if let Some(task) = p["task"].as_str() {
+                d.resolve(C::Approval, TargetKind::Task, task, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            }
             let mut facts = copy_codes(&p, &["task"]);
             if let Some(reason) = code(&p["reason"]) {
                 facts["failure_reason"] = reason;
@@ -203,6 +221,12 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             d.resolve(C::Conflict, TargetKind::Task, id, None, Resolution::ConditionCleared);
             d.resolve(C::ReviewReady, TargetKind::Task, id, None, Resolution::ConditionCleared);
             d.resolve(C::Approval, TargetKind::Task, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            // Con el runtime sobre las tablas, lo levantado sobre su Attempt actual (LXO-233).
+            if let Some(n) = p["attempt"].as_u64() {
+                let attempt = format!("{id}-a{n}");
+                d.resolve(C::Failed, TargetKind::Attempt, &attempt, None, Resolution::ConditionCleared);
+                d.resolve(C::Approval, TargetKind::Attempt, &attempt, Some(TERMINAL.into()), Resolution::ConditionCleared);
+            }
         }
         _ => {}
     }

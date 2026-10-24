@@ -257,6 +257,7 @@ impl CoreStorage {
             detail: format!("el estado de las tablas Task/Attempt no se puede interpretar: {e}. No se usa legacy_state ni state.json en su lugar"),
         })?;
         state.decision_floor = load.decision_floor.max(0) as u64;
+        state.attempt_n = load.attempts.into_iter().map(|(task, n)| (task, n.max(1) as u32)).collect();
         Ok(Some(state))
     }
 
@@ -401,6 +402,10 @@ struct TablesPersistence {
 
 impl Persistence for TablesPersistence {
     fn records_events(&self) -> bool {
+        true
+    }
+
+    fn attempt_model(&self) -> bool {
         true
     }
 
