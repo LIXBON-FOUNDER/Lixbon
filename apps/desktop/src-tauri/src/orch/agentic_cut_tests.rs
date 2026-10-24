@@ -451,8 +451,12 @@ fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
             }
             let texto = std::fs::read_to_string(&ruta).unwrap();
             // LXO-234: la única entrada es `Core::ensure_agentic_cut` (agentic_cut.rs) -> `CoreStorage::run_agentic_cut`
-            // (store_boot.rs). Nadie la llama todavía: el arranque la conectará DESKTOP en LXO-123.
-            assert!(!texto.contains("ensure_agentic_cut("), "{dir}/{nombre} llama al corte: lo conecta LXO-123");
+            // (store_boot.rs). LXO-123 la conecta al arranque SOLO desde startup_cut.rs, y una sola vez.
+            if nombre == "startup_cut.rs" {
+                assert_eq!(texto.matches("ensure_agentic_cut(").count(), 1, "startup_cut.rs llama al corte una sola vez");
+            } else {
+                assert!(!texto.contains("ensure_agentic_cut("), "{dir}/{nombre} llama al corte: solo lo hace startup_cut.rs");
+            }
             if nombre == "store_boot.rs" {
                 assert_eq!(texto.matches("agentic_cut::run").count(), 1, "store_boot.rs solo envuelve el corte en run_agentic_cut");
                 assert!(!texto.replace("pub(super) fn run_agentic_cut", "").contains("run_agentic_cut("), "store_boot.rs no lo llama al arrancar");

@@ -24,7 +24,9 @@ export const UNKNOWN_CORE_MODEL = Object.freeze({ mode: 'unknown', vNext: false,
 export function coreModelFromState(state) {
   const model = state.data?.core_model;
   if (model === 'task_attempt_v1' || model === 'legacy') {
-    return { mode: model, vNext: model === 'task_attempt_v1', code: null, modelKey: model, retry: state.retry };
+    // LXO-123: `storage` dice si el almacén se rechazó al abrir (p. ej. `core_cut_legacy_numbering`).
+    const storage = state.data?.storage && typeof state.data.storage === 'object' ? state.data.storage : null;
+    return { mode: model, vNext: model === 'task_attempt_v1', code: null, modelKey: model, retry: state.retry, storage };
   }
   if (state.error) {
     const code = coreErrorCode(state.error);

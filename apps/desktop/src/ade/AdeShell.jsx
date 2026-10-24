@@ -15,6 +15,7 @@ import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { useCoreModel } from './useCoreModel';
+import { StartupCutNotice } from './StartupCutNotice';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
 import './TaskWorkspace.css';
@@ -864,6 +865,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       data-testid="ade-composition"
     >
       <JumpPaletteHost open={jumpPaletteOpen && modeActive} onClose={closeJumpPalette} onNavigate={jumpTo} />
+      {modeActive && <StartupCutNotice storage={coreModel.storage ?? null} />}
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
