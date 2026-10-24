@@ -469,9 +469,10 @@ Fuera de este bloque (sin evento de efecto): matar terminales (`kill_term`; el h
 (no la persona que lo aprobó) deshace el intento y registra dos hechos distintos de «la solicitud de spawn
 terminó en `launch_failed`» (que será `spawn.resolved`):
 
-* `task.removed { cause: "launch_failed" }` (`class = state`, entidad `task`, actor **system / core**, sin
+* `task.removed { cause: "launch_failed", attempt? }` (`class = state`, entidad `task`, actor **system / core**, sin
   `idem_key`): lo emite SOLO `Tx::remove_failed_launch`, que captura `run_id` y `project_id` ANTES de borrar y
-  los pone explícitos. Exige contexto System / Core. La cascada de `State::remove_task` retira las decisiones
+  los pone explícitos. `attempt` (el número del Attempt actual) solo va con el runtime sobre las tablas (LXO-233): cierra
+  la Attention de ese Attempt. Es un campo opcional y aditivo de la v1. Exige contexto System / Core. La cascada de `State::remove_task` retira las decisiones
   legacy de la tarea y los mensajes que la citan; con hijas, o siendo la raíz de un run, falla sin eliminar nada.
 * `effect.observed` de `git_worktree_removed` con `operation = "spawn_cleanup"` si se borró de verdad el
   worktree o la rama. Va primero en la misma mutación (`mutate_after_effect`, System / Core).
@@ -943,6 +944,27 @@ Hechos de la revisión sobre un Attempt ([`REVIEWS.md`](REVIEWS.md)). **Inertes 
 | `review.invalidated` | 1 | state | `review` | `task`, `attempt`, `n`, `head_commit`, `observed_head` | Core · persona |
 
 * `entity_id` = id de la decisión. El comentario nunca viaja (solo `has_comment`).
+
+### Runtime sobre las tablas (LXO-233)
+Desde el corte, el runtime ([`RUNTIME_TABLAS.md`](RUNTIME_TABLAS.md)) emite los hechos de **ejecución** del Attempt
+actual de cada Task con estos mismos `kind` y payloads, **en lugar de** `task.status_changed` (ADR D9: un mismo hecho
+nunca aparece en los dos modelos). Llevan `state_rev` (la del COMMIT del runtime) y su Project sale de la Task.
+
+| Cambio del runtime | Hechos |
+|---|---|
+| Nace una Task (`run_create`, `spawn`) | `task.created` y después `attempt.requested` (`n = 1`, `approval_required = false`) |
+| `starting → running` | `attempt.started` |
+| A una espera (`ask`, la terminal) | `attempt.waiting` (`state` = la espera, `from`) |
+| De una espera a `running` (`reply`, la terminal) | `attempt.resumed` |
+| De una espera a la otra | `attempt.resumed` + `attempt.waiting`: se pasa por `running`, como en las tablas |
+| `done` / `failed` / `stopped` / `exited` | `attempt.completed` / `attempt.failed` (`reason`: el código de vigilancia o `agent_reported`) / `attempt.stopped` (`cause = run_closed` al cerrar el Run, `cancelled` si no) / `attempt.exited` |
+| `lxo continue` | `attempt.requested` del `n + 1` y `attempt.started`: el anterior no se reabre |
+| Retirar una Task con su Attempt activo | `attempt.stopped` (`cancelled`), como queda en las tablas |
+
+`attempt.requested` describe el Attempt con la selección final de la mutación: `create_child` fija el perfil después
+de crear la Task. Los hechos de la Task (`task.created`, `task.phase`, `task.question`, `task.reply`,
+`task.review_requested`, `task.removed`), las decisiones y los efectos no cambian. Los `task.*` históricos no se
+reescriben. Sin cortar, todo sigue siendo `task.status_changed`.
 
 ## Corte Task/Attempt (LXO-117)
 `core.agentic_cut` (v1, `state`, entidad `core`, `idem_key = task_attempt_v1`): se confirmó el corte de datos
