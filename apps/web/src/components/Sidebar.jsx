@@ -14,7 +14,7 @@ import { Desplegable } from './Desplegable';
 import {
   IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
   IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX, IconSun, IconMoon,
-  IconBook, IconBolt, IconGlobe, IconUser, IconLayers, IconCorazon,
+  IconBook, IconBolt, IconGlobe, IconUser, IconLayers, IconCorazon, IconTerminal,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
@@ -288,6 +288,10 @@ export function Sidebar({
           </button>
           <button className="sb-nav" onClick={() => go('/apps')}>
             <IconGrid /> <span>{t('apps')}</span>
+          </button>
+          {/* Las sesiones del CLI y del IDE que el usuario abre en remoto. */}
+          <button className="sb-nav" onClick={() => go('/remote')}>
+            <IconTerminal /> <span>{t('remote')}</span>
           </button>
         </nav>
 
