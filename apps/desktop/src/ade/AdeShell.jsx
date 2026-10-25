@@ -20,6 +20,7 @@ import { migratePersistedSelection, resolveNavTarget } from './cutoverNavigation
 import { COPY, navNoticeCopy, navRejectText } from './adeLabels';
 import { readLegacyAdeSelection } from '../store/workbenchStore';
 import { useCoreQuery } from './useCoreQuery';
+import { AdeSourceSwitch } from './preview/AdeSourceSwitch';
 import './AdeShell.css';
 import './TaskWorkspace.css';
 
@@ -919,7 +920,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       )}
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
+          <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar

@@ -27,6 +27,9 @@ import { AgentChip } from './agent/AgentChip';
 import { WorktreeEnv } from './spawn/WorktreeEnv';
 import { roleName } from './agent/agentIdentity';
 import { AttentionList } from './AttentionList';
+import { PreviewShell } from '../ade/preview/PreviewShell';
+import { usePreviewSource } from '../ade/preview/previewSource';
+import { AdeSourceSwitch } from '../ade/preview/AdeSourceSwitch';
 
 const NO_SPAWNS = [];
 const KIND_LABELS = { phase: 'Fase', done: 'Entrega', question: 'Pregunta', reply: 'Respuesta', note: 'Nota', exited: 'Cerrada' };
@@ -368,6 +371,7 @@ function Disabled() {
         objetivo, elige agente y modelo para cada tarea, espera sus informes, integra y te cuenta el resultado.
       </p>
       <button className="btn btn--primary" onClick={() => openSettings('orch')}>Activar en Ajustes</button>
+      <AdeSourceSwitch />
     </div>
   );
 }
@@ -399,6 +403,7 @@ export function OrchestratorMode({ modeActive = true }) {
   const setOrchView = useWorkbenchStore((s) => s.setOrchView);
   const toggleAgent = useWorkbenchStore((s) => s.toggleAgent);
   const { snap, snapshotError, snapshotRefreshing, refresh, selected, select, init, call } = useOrchStore();
+  const adeSource = usePreviewSource((s) => s.source);
   const [allRepos, setAllRepos] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const root = useAppStore((s) => s.workspaceRoot);
@@ -416,6 +421,8 @@ export function OrchestratorMode({ modeActive = true }) {
   const pickPendingSpawn = (id) => { setPendingSel(id); setOrchView('executions'); };
 
   useEffect(() => { init(); }, [init]);
+  // La vista previa usa el lienzo del ADE: los botones de panel de la barra de título apuntan a su Inspector.
+  useEffect(() => { if (adeSource === 'preview' && orchView !== 'ade') setOrchView('ade'); }, [adeSource, orchView, setOrchView]);
 
   const removedText = (res) => (res?.kept?.length
     ? `Run quitado. Worktrees conservados en disco: ${res.kept.map((k) => `${k.task} (${k.reason})`).join(', ')}`
@@ -441,6 +448,16 @@ export function OrchestratorMode({ modeActive = true }) {
   const now = useNow(anyLive && modeActive, anyAwaiting ? 1000 : 5000);
   // Sin lista visible no corre la cuenta atrás; la suscripción de usePendingSpawns sigue viva para no dejar pendientes rancios.
   const listedSpawns = modeActive ? spawns.items : NO_SPAWNS;
+
+  // Vista previa del ADE (maqueta con datos simulados dentro del producto): no depende del Core ni de que
+  // el orquestador esté activado, porque no lee ni escribe nada real.
+  if (adeSource === 'preview') {
+    return (
+      <div className="orch__shell">
+        <PreviewShell leftOpen={open} rightOpen={adeRightOpen} drawerOpen={adeDrawer} onCloseDrawer={closeAdeDrawer} active={modeActive} />
+      </div>
+    );
+  }
 
   if (!snap) {
     return (
