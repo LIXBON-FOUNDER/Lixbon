@@ -1,0 +1,80 @@
+/* polish.css — perfeccionamiento visual y de movimiento del ADE (2026-10-24). Se carga DESPUÉS de hierarchy.css.
+   Refina lo aprobado el 13/10, no lo sustituye: mismos tokens, mismas pantallas, mismas funciones. Todo está aquí para poder
+   compararlo y retirarlo en bloque; las ediciones de JSX asociadas son mínimas (textos en frase, un contador, una clave de animación).
+   Criterios: jerarquía por peldaños de relleno (sin bordes, sin degradados), etiquetas en frase, el contenido manda sobre el marco,
+   movimiento = respuesta (≤200 ms, curvas fuertes, transform/opacity, nada en atajos de teclado). */
+
+.mkr {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --dur-press: 120ms;
+  --motion-fast: 140ms;   /* hover, color */
+  --motion-panel: 180ms;  /* detalle que se despliega, momento de estado */
+  --motion-view: 180ms;   /* inspector, vistas */
+}
+
+/* ── 1. Etiquetas en frase, no en mayúsculas con tracking ───────────────────────────────────────────────── */
+.hier-eyebrow, .tw__objective b, .tbl th, .zone b, .attn__k, .inbox__g h2, .feed__h h3, .cmpv__lab, .pp__c h3, .usec__big small,
+.sec__h h3, .menu__h, .ctxbar__k, .ade-preview__intro, .ade-moment__eyebrow, .ade-moment__request > span {
+  text-transform: none; letter-spacing: 0;
+}
+.tw__objective b, .tbl th, .zone b, .cmpv__lab, .pp__c h3, .usec__big small, .sec__h h3, .ctxbar__k { font-size: 12px; font-weight: 600; }
+.menu__h { font-size: 11.5px; }
+.attn__k, .inbox__g h2, .feed__h h3 { font-size: 12.5px; }
+.chip--tag, .risk, .src, .dbadge { text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 600; height: 18px; padding: 0 7px; }
+.chip--tag { border-radius: 6px; }
+.ade-preview__intro { font-size: 11px; font-weight: 600; }
+
+/* ── 2. Banda de estado y cabecera del Workspace: ver layout.css (composición del espacio, 2.ª ronda 2026-10-24) ── */
+/* (Los selectores de «preview» y las reglas de ventana baja de la 1.ª ronda se sustituyeron allí.) */
+
+/* ── 3. Sidebar: el nombre de la Task respira; los menús no parten sus títulos ──────────────────────────── */
+.sb-count { flex: none; min-width: 16px; text-align: center; color: var(--ink-50); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sb-grouphead .sb-row__title { flex: 0 1 auto; }
+.sb__new .menu { width: 224px; right: -4px !important; }
+.menu__i:has(small) { flex-direction: column; align-items: flex-start; gap: 1px; }
+.sb-ext b, .sb-ext .chip--tag { text-transform: none; letter-spacing: 0; }
+
+/* Estado vacío del filtro: dice qué pasó y cómo salir (antes el sidebar quedaba en blanco) */
+.sb-empty { display: grid; gap: 6px; justify-items: start; margin: 8px 12px; padding: 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-70); font-size: 12.5px; animation: arrive 180ms var(--ease-out) both; }
+.sb-empty b { color: var(--ink); font-size: 13px; }
+
+/* ── 4. Pantallas secundarias: «Volver» no pisa las acciones de la cabecera ────────────────────────────── */
+.ade__main:has(.ade__back) .rv__head, .ade__main:has(.ade__back) .tw__head { padding-right: 150px; }
+.ade__main:has(.ade__back) .ppx__head, .ade__main:has(.ade__back) .cmpx__head { padding-right: 150px; }
+
+/* ── 4b. Datos extremos (break-ui): nada se sale ni empuja a lo demás ───────────────────────────────────── */
+.v-title, .tw__title, .ade-moment h2, .sb-row__title, .attn h3 { overflow-wrap: anywhere; min-width: 0; }
+.tw__titlerow { flex-wrap: wrap; }
+.ade__main:has(.ade__back) .v-title { max-width: calc(100% - 170px); }
+.tw__latest { max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmp__target .chip, .cmp__target .chip--tag { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar > * { flex: none; }
+.statusbar > .mono { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.sb-grouphead .sb-row__title { min-width: 0; }
+
+/* ── 5. Movimiento ─────────────────────────────────────────────────────────────────────────────────────────
+   Pulsar se siente: escala 0.97 en controles, 0.99 en filas grandes. Sin ease-in; sin transition: all. */
+.mkr button, .mkr summary { transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease, opacity var(--motion-fast) ease, transform var(--dur-press) var(--ease-out); }
+.mkr button:not(:disabled):active, .mkr summary:active { opacity: 1; transform: scale(0.97); }
+.sb-row:not(.is-off):active, .sb-grouphead:active, .sb__attn:active, .astrip__t:active, .menu__i:active, .inbox__row:active { transform: scale(0.99); }
+.hier-detail, .hier-ide-review, .insp, .mwork[open] { animation-timing-function: var(--ease-out); }
+/* La marca de estado se re-dibuja al cambiar de estado (clave en Mark): entrada de 160 ms, no un salto */
+.mk svg { animation: mk-in 160ms var(--ease-out); }
+@keyframes mk-in { from { opacity: 0; transform: scale(0.82); } }
+/* Una Attention nueva llega con un asentamiento breve; el resto de la lista no se mueve */
+.attn { animation: arrive 180ms var(--ease-out) both; }
+@keyframes arrive { from { opacity: 0; transform: translateY(6px); } }
+.toast { animation-timing-function: var(--ease-out); animation-duration: 200ms; }
+/* Menús y popovers nacen de su disparador, no del centro */
+.sb__new .menu, .hier-actions .menu { transform-origin: top right; animation: menu-in 140ms var(--ease-out); }
+@keyframes menu-in { from { opacity: 0; transform: scale(0.96); } }
+
+/* Reducir movimiento = menos y más suave, no cero: se mantienen los fundidos que ayudan a entender, se quitan desplazamientos y bucles */
+@media (prefers-reduced-motion: reduce) {
+  .mkr *, .mkr *::before, .mkr *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .hier-detail, .hier-ide-review, .insp, .mwork[open], .ade-moment, .attn, .toast, .mk svg, .sb__new .menu, .hier-actions .menu, .dk .insp, .dk .side, .dk .ade__view {
+    animation: rm-fade 120ms ease-out both !important;
+  }
+  @keyframes rm-fade { from { opacity: 0; } }
+}

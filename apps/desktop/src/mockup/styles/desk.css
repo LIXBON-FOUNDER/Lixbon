@@ -1,0 +1,147 @@
+/* desk.css — marco del Desktop integrado (prefijo dk- / sk-). Solo variables de styles/base.css.
+   Misma gramática que el Desktop real: fondo surface-0, paneles flotantes surface-1 con radio 12 y hueco de 8 px, sin bordes.
+   Movimiento: solo respuesta. Cambio de modo con el ratón = fundido de 120 ms; con teclado (Alt 1..5) = ninguno.
+   Curvas fuertes (Emil Kowalski): --dk-out para entradas, nada con ease-in; todo ≤ 200 ms; transform y opacity. */
+
+.dk {
+  --dk-gap: 8px;
+  --dk-out: cubic-bezier(0.23, 1, 0.32, 1);
+  position: relative; height: 100%; min-width: 900px; display: grid; grid-template-rows: 48px minmax(0, 1fr) 30px;
+  background: var(--surface-0); color: var(--ink); overflow: hidden; font-family: var(--font-ui); font-size: 13px;
+}
+.dk__body { position: relative; min-height: 0; }
+
+/* ── Barra de título: las clases son las del Desktop real (studio.css); aquí solo lo que la maqueta añade ── */
+.dk-title { z-index: 5; }
+.dk-avatar { width: 24px; height: 24px; margin: 0 6px 0 4px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-5); color: var(--ink-70); font-size: 11px; font-weight: 700; }
+.dk-wc { display: inline-flex; align-items: center; gap: 14px; margin-left: 10px; padding: 0 14px; color: var(--ink-50); }
+.dk .ic.is-off { opacity: 0.35; cursor: default; }
+.dk .modeswitch { --tab-w: 114px; }
+.dk .modeswitch__tab { transition: color 140ms ease, transform 140ms var(--dk-out); }
+.dk .modeswitch__tab:active { transform: scale(0.97); }
+.dk .modeswitch__thumb { transition: transform 240ms var(--dk-out), opacity 140ms ease; }
+
+/* ── Modos montados a la vez (como RetainedMode): el activo se ve, el resto queda inerte conservando su estado ── */
+.dk-pane { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
+.dk-pane.is-active { visibility: visible; pointer-events: auto; }
+.dk-pane[data-fade] { animation: dk-fade 120ms ease-out; }
+@keyframes dk-fade { from { opacity: 0; } }
+
+/* ── ADE dentro del marco: tres paneles flotantes, un solo hueco ── */
+.dk .ade { background: var(--surface-0); height: 100%; grid-template-rows: minmax(0, 1fr); }
+.dk .ade__body, .dk .ade__body.has-insp { gap: var(--dk-gap); padding: 0 var(--dk-gap) var(--dk-gap); background: var(--surface-0); }
+.dk .ade__body { grid-template-columns: 276px minmax(0, 1fr); }
+.dk .ade__body.has-insp { grid-template-columns: 276px minmax(0, 1fr) 312px; }
+.dk[data-left='off'] .ade__body { grid-template-columns: minmax(0, 1fr); }
+.dk[data-left='off'] .ade__body.has-insp { grid-template-columns: minmax(0, 1fr) 312px; }
+.dk[data-left='off'] .ade__body > .sb { display: none; }
+.dk .sb, .dk .insp, .dk .ade__main { border-radius: 12px; overflow: hidden; }
+.dk .ade__main { background: var(--surface-1); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--surface-5) transparent; }
+.dk .insp { animation: dk-slide 200ms var(--dk-out); overflow-y: auto; }
+.dk .sb { animation: dk-fade 140ms ease-out; }
+@keyframes dk-slide { from { opacity: 0; transform: translateX(8px); } }
+.dk .ade__view { animation: dk-view 140ms var(--dk-out); }
+@keyframes dk-view { from { opacity: 0; transform: translateY(4px); } }
+
+/* Subnavegación del ADE: la dirección (Project › Task › Attempt) y las seis vistas, pegada arriba del lienzo */
+.viewbar { position: sticky; top: 0; z-index: 6; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px 0 16px; background: var(--surface-1); }
+.viewbar__crumb { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-50); font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.viewbar__crumb span { overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.viewbar__crumb b { color: var(--ink); font-weight: 600; }
+.viewbar .sp { flex: 1; }
+.viewbar .view-tabs { gap: 2px; padding: 2px; border-radius: 9px; background: var(--surface-2); }
+.viewbar .view-tabs button { height: 26px; padding: 0 9px; transition: background-color 140ms ease, color 140ms ease, transform 140ms var(--dk-out); }
+.viewbar .view-tabs button:active { transform: scale(0.97); }
+.viewbar .view-tabs button.is-on { background: var(--surface-5); color: var(--ink); font-weight: 600; }
+@media (hover: hover) and (pointer: fine) { .viewbar .view-tabs button:not(.is-on):hover { background: var(--surface-3); } }
+
+/* Lo que el marco ya ofrece no se repite dentro: la marca (barra de título), la ruta (subnavegación), los tres botones de panel (barra de título) */
+.dk .sb__brand, .dk .hier-eyebrow, .dk .hier-ide-toggle, .dk .hier-ide-tools:not(.is-review) { display: none; }
+.viewbar { container-type: inline-size; }
+.viewbar .view-tabs { flex: none; }
+.viewbar .view-tabs button .lbl { transition: opacity 140ms ease; }
+@container (max-width: 820px) { .viewbar .view-tabs button:not(.is-on) .lbl { display: none; } .viewbar__crumb span:first-child, .viewbar__crumb span:first-child + svg { display: none; } }
+
+/* ── IDE dentro del marco ── */
+.dk .ide { background: var(--surface-0); height: 100%; }
+.dk .ctxbar { margin: 0 var(--dk-gap) var(--dk-gap); border-radius: 10px; box-shadow: inset 3px 0 0 var(--accent); }
+.dk .ide__body { gap: var(--dk-gap); padding: 0 var(--dk-gap) var(--dk-gap); background: var(--surface-0); }
+.dk .abar, .dk .exp, .dk .edw, .dk .side { border-radius: 12px; overflow: hidden; }
+.dk .edw { background: var(--surface-1); }
+.dk .side { animation: dk-slide 200ms var(--dk-out); }
+.dk .hier-ide-review { margin: 0 var(--dk-gap) var(--dk-gap); border-radius: 12px; overflow: hidden; }
+
+/* ── Barra de estado compartida ── */
+.dk-status { display: flex; align-items: center; gap: 18px; padding: 0 16px; font-size: 12px; color: var(--ink-50); white-space: nowrap; overflow: hidden; }
+.dk-status .statusbar__item { color: var(--ink-50); transition: color 140ms ease; }
+.dk-status button.statusbar__item:active { transform: scale(0.97); }
+.dk-status .statusbar__item--strong, .dk-status .statusbar__item--agent { color: var(--ink-70); }
+.dk-status .statusbar__fill { flex: 1; }
+.dk-status .statusbar__conn { display: inline-flex; align-items: center; gap: 6px; }
+.dk-status .statusbar__conn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.dk-need { color: var(--warn) !important; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.dk-need .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); animation: dk-pulse 1.8s ease-in-out infinite; }
+@keyframes dk-pulse { 50% { opacity: 0.35; } }
+@media (hover: hover) and (pointer: fine) { .dk-status button.statusbar__item:hover { color: var(--ink); } }
+
+/* ── Esqueletos de Agente, Git y Diseño ── */
+.sk { height: 100%; display: flex; flex-direction: column; padding: 0 var(--dk-gap) var(--dk-gap); gap: var(--dk-gap); }
+.sk__ribbon { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 14px; border-radius: 10px; background: var(--surface-2); color: var(--ink-70); }
+.sk__ribbon b { color: var(--ink); font-size: 14px; }
+.sk__ribbon .sp { flex: 1; }
+.sk__tag { height: 20px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; background: var(--surface-4); color: var(--ink-50); font-size: 11.5px; }
+.sk[data-mode='agent'] .sk__grid { grid-template-columns: 260px minmax(0, 1fr) 340px; }
+.sk[data-mode='git'] .sk__grid { grid-template-columns: 320px minmax(0, 1fr) 380px; }
+.sk[data-mode='design'] .sk__grid { grid-template-columns: 240px minmax(0, 1fr) 320px; }
+.sk__grid { flex: 1; min-height: 0; display: grid; gap: var(--dk-gap); }
+.sk-region { background: var(--surface-1); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+.sk-region__h h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-50); }
+.sk-hint { margin: auto 0 0; color: var(--ink-35); font-size: 12px; }
+.sk-bars { display: grid; gap: 10px; }
+.sk-bars i { display: block; height: 10px; border-radius: 5px; background: var(--surface-3); }
+.sk-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.sk-list li { display: grid; gap: 1px; padding: 8px 10px; border-radius: 8px; }
+.sk-list li.is-on { background: var(--surface-4); }
+.sk-list li b { font-weight: 600; }
+.sk-list li span { color: var(--ink-50); font-size: 12px; }
+.sk-msg { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); color: var(--ink-body); line-height: 1.45; max-width: 64ch; }
+.sk-msg.is-user { background: var(--surface-4); align-self: flex-end; }
+.sk-composer { margin-top: auto; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); color: var(--ink-35); }
+.sk-center { min-width: 0; }
+.sk-agent__who { display: flex; align-items: center; justify-content: space-between; }
+.sk-agent__ctx { margin: 0; color: var(--ink-50); font-size: 12px; }
+.sk-branch { margin: 0; color: var(--ink-70); font-size: 12px; }
+.sk-files { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.sk-files li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 4px; }
+.sk-m { color: var(--warn); font-weight: 700; font-size: 11px; }
+.sk-files .mono { font-size: 12px; color: var(--ink-70); }
+.sk-num { font-family: var(--font-mono); font-size: 11.5px; }
+.sk-num i { font-style: normal; } .sk-num .good { color: var(--good); } .sk-num .bad { color: var(--danger); }
+.sk-empty { margin: 0; color: var(--ink-50); }
+.sk-canvas { background: var(--surface-2); align-items: center; justify-content: center; }
+.sk-frame { width: 70%; height: 60%; border-radius: 10px; background: var(--surface-1); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+.sk-frame i { border-radius: 8px; background: var(--surface-3); }
+.sk-stack { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: var(--dk-gap); min-height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-pane[data-fade], .dk .insp, .dk .side, .dk .sb, .dk .ade__view, .dk-need .dot { animation: none; }
+  .dk .modeswitch__thumb, .dk .modeswitch__tab, .viewbar .view-tabs button { transition: none; }
+}
+
+/* ── Ventanas estrechas: el marco cede lo accesorio como el Desktop real (solo icono en los modos, sin nombre de marca) ── */
+@media (max-width: 1320px) {
+  .dk .modeswitch { --tab-w: 44px; }
+  .dk .modeswitch__label, .dk .titlebar__word { display: none; }
+  .dk .modeswitch__count { position: absolute; top: 2px; right: 3px; }
+  .dk .tb__proj { max-width: 150px; }
+  .dk .ade__body { grid-template-columns: 240px minmax(0, 1fr); }
+  .dk .ade__body.has-insp { grid-template-columns: 240px minmax(0, 1fr) 280px; }
+  .dk[data-left='off'] .ade__body.has-insp { grid-template-columns: minmax(0, 1fr) 280px; }
+  .dk .ide__body { grid-template-columns: 44px 200px minmax(0, 1fr) 280px; }
+  .dk-status .statusbar__conn { display: none; }
+}
+@media (max-width: 1100px) {
+  .dk-wc { display: none; }
+  .dk .tb__proj { max-width: 96px; }
+  .sk[data-mode] .sk__grid { grid-template-columns: 200px minmax(0, 1fr) 260px; }
+}

@@ -1,0 +1,314 @@
+/* layout.css — redistribución del espacio del ADE aprobado (2.ª ronda, 2026-10-24). Se carga DESPUÉS de polish.css.
+   No crea vistas ni funciones: reparte mejor el espacio de las que existen. Criterios (patrones, no copias):
+   · el trabajo activo manda: lo que se supervisa (Actividad, comparación, evidencia) recibe el alto; el marco cede;
+   · divulgación progresiva a dos niveles (Orca/VS Code/NN g): arriba lo que decide, detalle bajo demanda;
+   · lista + detalle para triage (Linear): Attention elige una solicitud y la lee completa sin salir;
+   · la decisión acompaña a su contexto (Attempt + revisión) y no queda bajo el pliegue.
+   Respaldo para volver atrás: docs/mockup/baseline-2026-10-24-pre-redistribucion.zip. */
+
+.ade__main { container-type: inline-size; container-name: canvas; }
+
+/* ── 1. Workspace ─────────────────────────────────────────────────────────────────────────────────────────
+   Marco fijo al alto del lienzo: cabecera (2 filas útiles) · banda de estado · pestañas · ACTIVIDAD (flexible) · compositor.
+   Solo si el alto no alcanza (< 540 px) la página desplaza. */
+.tw { height: 100%; min-height: 540px; }
+.tw__head { padding: 12px 28px 2px; gap: 3px; }
+.tw__lede { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-size: 12.5px; color: var(--ink-50); }
+.tw__where { flex: none; font-size: 12px; }
+.tw__obj { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-70); }
+.tw__attline { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
+.tw__attline > .sp { flex: 1 1 0; min-width: 0; }
+.tw__one { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink-70); }
+.tw__one b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+.tw__host { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-70); }
+.tw__attline .astrip { flex: 0 1 auto; min-width: 0; margin: 0; padding: 0; min-height: 0; gap: 3px; }
+.tw__attline .astrip__t { padding: 4px 10px; }
+
+/* Banda de estado: una línea de lectura (estado · titular · detalle) + facts a la derecha; etapas debajo, finas */
+.ade-moment { margin: 6px 28px 2px; padding: 8px 14px 6px; border: 0; border-radius: 12px; background: rgba(var(--moment-rgb), 0.085); }
+.ade-moment__top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; }
+.ade-moment__copy { flex: 1 1 360px; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.ade-moment__eyebrow { flex: none; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; }
+.ade-moment h2 { flex: 0 1 auto; min-width: 0; max-width: 62%; margin: 0; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ade-moment p { flex: 1 1 0; min-width: 0; margin: 0; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.ade-moment__facts { flex: 0 1 auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 16px; max-width: 46%; }
+.ade-moment__fact { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; padding: 0; background: none; border-radius: 0; }
+.ade-moment__fact b { font-size: 13px; font-variant-numeric: tabular-nums; }
+.ade-moment__fact span { margin: 0; font-size: 12px; }
+.ade-moment__footer { margin-top: 4px; padding-top: 0; border-top: 0; gap: 12px; }
+.ade-stage { font-size: 11.5px; }
+.ade-stage:not(:last-child)::after { height: 2px; border-radius: 1px; background: var(--surface-5); margin: 0 6px; }
+.ade-stage__dot { width: 15px; height: 15px; flex-basis: 15px; margin-right: 5px; border: 0; background: var(--surface-5); font-size: 9px; }
+.ade-stage.is-done .ade-stage__dot { border: 0; background: rgba(var(--good-rgb), 0.18); }
+.ade-stage.is-current .ade-stage__dot, .ade-stage.is-blocked .ade-stage__dot { border: 0; }
+.ade-moment__resources { font-size: 12px; }
+
+/* La decisión pendiente vive bajo la banda; su contexto (Task, Attempt, agente, host) ya está en la cabecera */
+.tw__attn { padding: 4px 28px 4px; gap: 6px; }
+.attn--compact { padding: 8px 12px; gap: 5px; }
+.attn--compact .attn__ctx { display: none; }
+.attn--compact .attn__cmd { padding: 6px 10px; gap: 3px; }
+.attn--compact .attn__facts { gap: 2px 14px; }
+.attn--compact .attn__t { font-size: 13px; }
+
+.tw__tabs { padding: 4px 28px 0; }
+.tw__body { flex: 1 1 0; min-height: 200px; max-height: none; }
+.tw > .cmp, .cmp { margin: 0 28px 12px; padding-top: 8px; gap: 5px; flex-shrink: 0; }
+
+/* Compositor en reposo: una línea de texto (crece al escribir) + barra con destino, política y modo */
+.cmp__box { padding: 6px 8px 6px 12px; gap: 2px; }
+.cmp__ta { min-height: 24px; max-height: 120px; padding: 3px 0; }
+.cmp__bar { min-width: 0; gap: 8px; }
+.cmp__bar > .sp { display: none; }
+.cmp__target { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; overflow: hidden; gap: 4px; }
+.cmp__target .chip { flex: 0 1 auto; min-width: 0; }
+.cmp__hint { flex: 1 1 0; min-width: 0; }
+.cmp__mode, .cmp__idle, .cmp__send { flex: none; }
+
+/* Pestañas de los paneles que se abren al lado: la tira de Attempts no obliga a la cabecera a crecer */
+@container canvas (max-width: 880px) {
+  .tw__head, .tw__tabs, .tw__attn { padding-left: 18px; padding-right: 18px; }
+  .ade-moment, .tw > .cmp, .cmp { margin-left: 18px; margin-right: 18px; }
+  .tw__body { margin: 0 18px; }
+  .ade-moment__facts { max-width: none; flex-basis: 100%; justify-content: flex-start; }
+  .ade-stage:not(.is-current) .ade-stage__label { display: none; }
+  .cmp__hint { display: none; }
+  .tw__host { display: none; }
+}
+@media (max-height: 760px) {
+  .tw__obj, .tw__where { display: none; }
+  .ade-moment p { display: none; }
+  .tw__head { padding-top: 8px; }
+}
+
+/* ── 2. Inspector: complementa al lienzo ─────────────────────────────────────────────────────────────────
+   Se cierra desde su propia cabecera (y con Esc); su anchura sigue a la ventana; entra desde el borde del que sale. */
+.ade__body.has-insp { grid-template-columns: 260px minmax(0, 1fr) clamp(264px, 19vw, 320px); }
+@media (max-width: 1300px) { .ade__body.has-insp { grid-template-columns: 236px minmax(0, 1fr) 264px; } }
+.insp { overflow-x: hidden; }
+.insp__tabs { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; padding-right: 8px; }
+.insp__tabs .seg { flex: 1 1 0; min-width: 0; }
+.insp__tabs .seg button { padding: 0 7px; font-size: 11.5px; }
+.insp__close { flex: none; color: var(--ink-50); }
+.insp { animation: insp-in var(--motion-view, 180ms) var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)); }
+@keyframes insp-in { from { opacity: 0; transform: translateX(8px); } }
+
+/* ── 3. Sidebar: informativo sin ruido ───────────────────────────────────────────────────────────────────
+   La marca de Attention vive en la fila hoja (y en el padre solo si está plegado); «CLI» es texto, no chip; el worktree externo es una fila. */
+.sb-row { padding: 5px 8px; }
+.sb-main { padding-bottom: 2px; font-size: 10.5px; }
+.sb-ext { flex-direction: row; align-items: center; justify-content: space-between; gap: 6px; margin: 2px 8px 2px 20px; padding: 2px 4px 2px 10px; background: none; }
+.sb-ext__n { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-50); }
+.sb-ext__n small { display: none; }
+.sb-ext .row { flex: none; gap: 0; }
+.sb__attn { padding: 7px 10px; }
+
+/* ── 4. Compare: resumen arriba, exploración debajo ──────────────────────────────────────────────────────── */
+.cmpx { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 520px; padding: 14px 22px 14px; }
+.cmpx__head { flex: none; margin: 0; }
+.cmpx__top { flex: none; }
+.cmpx__grid { display: grid; gap: 1px; background: var(--surface-0); border-radius: var(--radius); overflow: hidden; }
+.cmpx__col { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px 12px; background: var(--surface-2); font-size: 12.5px; }
+.cmpx__col.is-chosen { box-shadow: inset 0 2px 0 var(--good); }
+.cmpx__choose { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpx .cmpv__lab, .cmpx .cmpv__cell { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 6px 12px; }
+.cmpx .cmpv__lab { justify-content: flex-start; }
+.cmpx__explore { flex: 1 1 0; min-height: 200px; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 6px; border-radius: 10px; background: var(--surface-1); }
+.cmpx__bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cmpx__ask { width: 260px; max-width: 100%; }
+.cmpx__pane { flex: 1 1 0; min-height: 0; overflow: auto; }
+.cmpx__cols { display: grid; gap: 10px; min-height: 100%; }
+.cmpx__card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); }
+.cmpx__card h3 { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink-50); }
+.cmpx__card p { margin: 0; line-height: 1.55; color: var(--ink-body); }
+.cmpx__delta { padding: 8px 10px; border-radius: var(--radius); background: var(--surface-3); }
+.cmpx__delta small { display: block; margin-top: 2px; color: var(--ink-50); }
+.cmpx__sum { font-weight: 550; }
+.cmpx__ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cmpx__ul li { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+.cmpx__ul li .risk { flex: none; margin-top: 2px; }
+.cmpx__files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.cmpx__files li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 0; box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.05); }
+.cmpx__card:has(.cmpx__files) { justify-content: flex-start; }
+.cmpx__flag { padding: 7px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; }
+.cmpx__flag b { display: block; margin-bottom: 1px; font-size: 11.5px; }
+.cmpx__flag--fail { background: var(--danger-soft); box-shadow: inset 3px 0 0 var(--danger); } .cmpx__flag--fail b { color: var(--danger); }
+.cmpx__flag--unv { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); } .cmpx__flag--unv b { color: var(--warn); }
+.cmpx .cmpv__note { flex: none; margin: 0; }
+@container canvas (max-width: 760px) { .cmpx__cols { grid-template-columns: 1fr !important; } .cmpx__grid { font-size: 12px; } }
+
+/* ── 5. Proof Pack: 1 revisión humana · 2 validación · 3 detalle · decisión fija a la derecha ─────────────── */
+.ppx { display: flex; flex-direction: column; gap: 10px; min-height: 100%; padding: 14px 22px 22px; }
+.ppx__head { flex: none; margin: 0; }
+.ppx__body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; max-width: 1560px; }
+.ppx__main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ppx__tier { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 14px; border-radius: 10px; background: var(--surface-2); }
+.ppx__tier--human { box-shadow: inset 3px 0 0 var(--warn); }
+.ppx__h { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; }
+.ppx__n { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 9px; background: var(--surface-5); color: var(--ink-70); font-size: 11px; font-weight: 700; }
+.ppx__tier--human .ppx__n { background: var(--warn); color: var(--on-accent); }
+.ppx__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ppx__item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; line-height: 1.5; }
+.ppx__item--fail { background: var(--danger-soft); box-shadow: inset 3px 0 0 var(--danger); }
+.ppx__item--unv { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+.ppx__tag { flex: none; margin-top: 1px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ppx__tag--fail { color: var(--danger); } .ppx__tag--unv { color: var(--warn); }
+.ppx__quiet { margin: 0; font-size: 12.5px; color: var(--ink-50); }
+.ppx__grp { display: flex; flex-direction: column; gap: 6px; }
+.ppx__grp h3, .ppx__sub { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-70); }
+.ppx__sub { margin-top: 8px; }
+.ppx__list--plain li { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; }
+.ppx__list--plain .risk { flex: none; margin-top: 2px; }
+.ppx__tbl { margin-top: 0; }
+.ppx__tbl tr.is-fail td { background: var(--danger-soft); }
+.ppx__tbl tr.is-skipped td { background: var(--warn-soft); }
+.ppx__st { white-space: nowrap; font-weight: 600; }
+.ppx__st--pass { color: var(--good); font-weight: 500; } .ppx__st--fail { color: var(--danger); } .ppx__st--skipped, .ppx__st--warn { color: var(--warn); }
+.ppx__sec { margin-top: 0; }
+.ppx__detail > summary { cursor: pointer; list-style: none; }
+.ppx__detail > summary::-webkit-details-marker { display: none; }
+.ppx__detail > summary svg { margin-left: auto; transition: transform var(--motion-fast, 140ms) var(--ease-out, ease); }
+.ppx__detail[open] > summary { margin-bottom: 10px; }
+.ppx__detail[open] > summary svg { transform: rotate(180deg); }
+.ppx__dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ppx__dgrid h3, .ppx__shots h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-50); }
+.ppx__dgrid p { margin: 0; line-height: 1.55; }
+.ppx__shots { margin-top: 12px; }
+.ppx__decide { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 12px; background: var(--surface-2); }
+.ppx__ctx { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ppx__ctx b { font-size: 14px; }
+.ppx__verdict { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--ink-70); }
+.ppx__verdict b { display: inline-block; min-width: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ppx__verdict .is-bad, .ppx__verdict .is-bad b { color: var(--danger); font-weight: 600; }
+.ppx__verdict .is-warn b { color: var(--warn); }
+.ppx__two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ppx__two .btn { min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ppx__note { margin: 0; font-size: 11.5px; line-height: 1.5; }
+@container canvas (max-width: 940px) {
+  .ppx__body { grid-template-columns: minmax(0, 1fr); }
+  .ppx__decide { position: static; order: -1; }
+  .ppx__dgrid { grid-template-columns: 1fr; }
+}
+
+/* ── 6. Attention: lista de solicitudes + detalle de la seleccionada ──────────────────────────────────────── */
+.atx { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); height: 100%; min-height: 520px; }
+.atx__list { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 14px 12px 10px; background: var(--surface-1); }
+.atx__h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 0 4px; }
+.atx__h h1 { margin: 0; font-size: 19px; font-weight: 650; }
+.atx .inbox__batch { flex: none; padding: 7px 10px; font-size: 12px; }
+.atx__scroll { flex: 1 1 0; min-height: 120px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.atx .inbox__g { margin-top: 6px; gap: 4px; }
+.atx .inbox__g h2 { padding: 0 6px; }
+.atx__ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.atx__row { --tone: var(--warn); display: flex; align-items: flex-start; gap: 6px; border-radius: 8px; }
+.atx__row--danger { --tone: var(--danger); } .atx__row--merged { --tone: var(--merged); } .atx__row--faint { --tone: var(--ink-35); }
+.atx__row > input { flex: none; margin: 13px 0 0 8px; }
+.atx__open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px; text-align: left; }
+.atx__row.is-sel { background: var(--surface-5); box-shadow: inset 3px 0 0 var(--tone); }
+.atx__r1 { display: flex; align-items: center; gap: 7px; font-size: 11.5px; }
+.atx__t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.atx__m { display: flex; gap: 8px; min-width: 0; font-size: 11.5px; color: var(--ink-70); }
+.atx__m > :first-child { flex: 0 1 auto; }
+.atx__m > :last-child { flex: 0 100 auto; }
+.atx .inbox__foot { flex: none; margin: 0; padding: 0 4px; }
+.atx__feed { flex: none; max-height: 200px; overflow-y: auto; border-radius: 10px; background: var(--surface-2); }
+.atx__feed .feed { background: none; padding: 10px 6px 6px; }
+.atx__detail { min-width: 0; overflow-y: auto; padding: 18px 24px 24px; }
+.atx__detail .attn { max-width: 880px; animation: none; }
+.attn--detail { gap: 12px; padding: 16px 18px; }
+.attn--detail .attn__t { font-size: 17px; }
+.attn--detail .attn__cmd { gap: 10px; padding: 12px 14px; }
+.attn--detail .attn__cmd code { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.attn--detail .attn__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; font-size: 12px; }
+.attn--detail .attn__facts b { display: block; margin: 0 0 1px; }
+.attn--detail .dec .btn { height: 32px; }
+@media (max-height: 760px) { .atx__feed { max-height: 120px; } }
+@container canvas (max-width: 900px) { .atx { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); } .atx__detail { padding: 14px 16px; } }
+
+/* ── 7. Movimiento de la redistribución ─────────────────────────────────────────────────────────────────────
+   Cambiar de solicitud, de pestaña o de panel de exploración es un gesto frecuente: sin animación. Lo que sí se mueve es lo que aparece. */
+.atx .attn, .cmpx__pane, .ppx__main { animation: none; }
+@media (hover: hover) and (pointer: fine) {
+  .atx__open:hover { background: var(--surface-3); }
+  .atx__row.is-sel .atx__open:hover { background: none; }
+}
+.atx__open:active { transform: scale(0.99); }
+@media (prefers-reduced-motion: reduce) { .atx .attn { animation: none !important; } }
+
+/* ── 8. Usage: el espacio libre sirve para decidir (gasto por Attempt) · Hosts · pestañas del inspector ─────── */
+.usx { margin-top: 6px; }
+.usx .tbl { margin-top: 4px; }
+.usx .num { text-align: right; font-variant-numeric: tabular-nums; }
+.usx tfoot td { padding-top: 8px; color: var(--ink-70); font-weight: 600; box-shadow: 0 -1px 0 rgba(var(--ink-rgb), 0.08); }
+.usx__open { display: block; max-width: 100%; text-align: left; font-weight: 550; }
+.usx__st { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .usx__open:hover { color: var(--accent); } .usx tbody tr:hover td { background: var(--surface-2); } }
+.insp__tabs { padding: 10px 8px 6px 10px; gap: 2px; }
+.insp__tabs .seg button { padding: 0 5px; font-size: 11px; }
+.insp__close { width: 22px; }
+.usx .tbl { table-layout: fixed; width: 100%; }
+.usx .tbl th:nth-child(2) { width: 150px; } .usx .tbl th:nth-child(3) { width: 150px; } .usx .tbl th:nth-child(4) { width: 96px; } .usx .tbl th:nth-child(5) { width: 78px; } .usx .tbl th:nth-child(6) { width: 78px; }
+.usx .tbl td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usx .agent { max-width: 100%; }
+.usx__open .trunc { display: block; }
+.insp__tabs .seg { flex-wrap: nowrap; }
+.insp__tabs .seg button { flex: 1 1 auto; min-width: 0; justify-content: center; padding: 0 4px; }
+
+/* ── 9. Compositor compacto (panel de agente del IDE y del marco integrado) ─────────────────────────────────
+   El destino ya está en la barra de contexto permanente del IDE; aquí solo caben adjuntar, modo y enviar. */
+.cmp--compact .cmp__target, .cmp--compact .cmp__hint { display: none; }
+.cmp--compact .cmp__bar { justify-content: space-between; }
+.cmp--compact .cmp__ta { min-height: 40px; }
+
+/* ── 10. Marco integrado (#desk): la vista llena el alto del lienzo bajo la barra de vistas ──────────────────── */
+.dk .ade__main { display: flex; flex-direction: column; }
+.dk .viewbar { flex: none; }
+.dk .ade__view { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.dk .ade__view > .tw, .dk .ade__view > .cmpx, .dk .ade__view > .atx, .dk .ade__view > .ppx { flex: 1 1 auto; height: auto; }
+
+/* ── 11. Vista envuelta: cada vista llena el lienzo como antes (ahora lleva su propia entrada) ──────────────── */
+.ade__main > .ade__view { height: 100%; display: flex; flex-direction: column; }
+.ade__view > .tw, .ade__view > .cmpx, .ade__view > .atx, .ade__view > .ppx { flex: 1 1 auto; height: auto; }
+.ade__view > .rv, .ade__view > .inbox { flex: 1 1 auto; height: auto; min-height: 0; }
+.ade__view > .pad { flex: 0 0 auto; }
+.dk .ade__view { height: auto; }
+
+/* ── 12. Movimiento (3.ª ronda) ────────────────────────────────────────────────────────────────────────────────
+   Entra = respuesta (≤200 ms, curva fuerte). Sale = más rápido que entra. Lo que se repite con teclado no se anima. */
+/* Cambio de vista con el ratón: fundido de opacidad; con teclado, ninguno */
+.ade__view { animation: view-in 140ms var(--ease-out); }
+@keyframes view-in { from { opacity: 0; } }
+:root[data-input="kbd"] .ade__view { animation: none; }
+
+/* Inspector: sale por el borde por el que entró */
+.insp.is-leaving { animation: insp-out 140ms var(--ease-out) forwards; pointer-events: none; }
+@keyframes insp-out { to { opacity: 0; transform: translateX(8px); } }
+
+/* Diálogos y scrim: el diálogo nace del centro con escala suave; la paleta Ctrl J (teclado) no se anima */
+.scrim { animation: scrim-in 140ms ease-out both; }
+.modal { animation: modal-in 180ms var(--ease-out) both; }
+.scrim--top, .scrim--top .jump { animation: none; }
+@keyframes scrim-in { from { opacity: 0; } }
+@keyframes modal-in { from { opacity: 0; transform: scale(0.96); } }
+
+/* Despliegues: grupos del sidebar, cola Pending y detalle del Proof Pack entran con un fundido corto (la altura no se interpola: no era fiable) */
+.sb-children, .dock__list, .dock__f { animation: fold-in 160ms var(--ease-out); }
+@keyframes fold-in { from { opacity: 0; transform: translateY(-4px); } }
+.ppx__detail[open] > :not(summary) { animation: fold-in 160ms var(--ease-out); }
+
+/* Datos que cambian: las barras y los fondos de estado no saltan */
+.meter i { transition: width 240ms var(--ease-out); }
+.pill, .attn-flag, .chip { transition: background-color var(--motion-fast, 140ms) ease, color var(--motion-fast, 140ms) ease; }
+.atx__open { transition: background-color var(--motion-fast, 140ms) ease, transform var(--dur-press, 120ms) var(--ease-out); }
+
+/* Avisos: entran (ya existía) y salen antes de retirarse (la tienda los quita a los 4,2 s) */
+.toast { animation: toast-in 200ms var(--ease-out) both, toast-out 200ms var(--ease-out) 3950ms forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translateY(4px); } }
+
+/* Movimiento reducido: la salida del inspector pasa a un fundido corto, sin desplazamiento */
+@media (prefers-reduced-motion: reduce) {
+  .insp.is-leaving { animation: rm-out 120ms ease-out forwards !important; }
+  .scrim, .modal, .ade__view, .sb-children, .dock__list, .dock__f, .ppx__detail[open] > :not(summary) { animation: rm-fade 120ms ease-out both !important; }
+  .scrim--top, .scrim--top .jump { animation: none !important; }
+  @keyframes rm-out { to { opacity: 0; } }
+}

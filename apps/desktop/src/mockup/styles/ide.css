@@ -1,0 +1,50 @@
+/* ide.css — Desktop IDE. Mismos tokens, mismas marcas de estado, misma barra de contexto. */
+.ide { position: relative; height: 100%; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+.ide > .topbar { height: 42px; flex-shrink: 0; } .ide > .statusbar { height: 26px; flex-shrink: 0; } .ide > .ctxbar { flex-shrink: 0; }
+.ctxbar { display: flex; align-items: center; gap: 14px; padding: 7px 14px; background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); flex-wrap: wrap; }
+.ctxbar__l, .ctxbar__m { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; }
+.ctxbar__k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-50); }
+.ide__warn { margin: 6px 14px 0; }
+.ide__body { display: grid; grid-template-columns: 44px 244px minmax(0, 1fr) 336px; min-height: 0; flex: 1; }
+.abar { background: var(--surface-1); display: flex; flex-direction: column; align-items: center; padding-top: 6px; gap: 2px; }
+.abar button { position: relative; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); color: var(--ink-50); }
+@media (hover: hover) and (pointer: fine) { .abar button:hover { color: var(--ink); background: var(--surface-3); } } .abar button.is-on { color: var(--ink); background: var(--surface-4); box-shadow: inset 2px 0 0 var(--accent); }
+.abar i { position: absolute; top: 2px; right: 1px; font-style: normal; font-size: 9px; font-weight: 700; background: var(--accent); color: var(--on-accent); border-radius: 7px; padding: 0 4px; }
+.exp { background: var(--surface-1); overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+.exp__h { padding: 10px 12px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--ink-50); }
+.exp__wt { display: flex; align-items: center; gap: 6px; padding: 2px 12px 8px; font-size: 11px; color: var(--accent); font-family: var(--font-mono); }
+.ftree { list-style: none; margin: 0; padding: 0; }
+.ftree__r { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; padding-right: 10px; font-size: 12.5px; color: var(--ink-70); text-align: left; }
+@media (hover: hover) and (pointer: fine) { .ftree__r:hover { background: var(--surface-3); color: var(--ink); } } .ftree__r.is-on { background: var(--surface-5); color: var(--ink); }
+.ftree__m { font-size: 10px; color: var(--warn); font-family: var(--font-mono); margin-left: auto; }
+.edw { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface-2); position: relative; }
+.etabs { display: flex; background: var(--surface-1); overflow-x: auto; flex-shrink: 0; }
+.etabs button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 12px; font-size: 12px; color: var(--ink-50); white-space: nowrap; }
+.etabs button.is-on { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 2px 0 var(--accent); }
+.etabs__x { display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; border-radius: 4px; color: var(--ink-35); }@media (hover: hover) and (pointer: fine) { .etabs__x:hover { background: var(--surface-5); color: var(--ink); } }
+.aibanner { display: flex; align-items: center; gap: 8px; padding: 5px 14px; background: var(--accent-soft); color: var(--ink-body); font-size: 12px; flex-shrink: 0; } .aibanner b { color: var(--accent); letter-spacing: 0.06em; font-size: 10.5px; }
+.ide__banner { margin: 6px 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.editor { flex: 1; min-height: 80px; overflow: auto; padding: 6px 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65; position: relative; background: var(--code-bg); }
+.eline { display: grid; grid-template-columns: 14px 42px 1fr; } .eline code { white-space: pre; font-family: inherit; color: var(--ink-body); }
+.eline__n { text-align: right; padding-right: 14px; color: var(--ink-35); user-select: none; }
+.eline__g i { display: block; width: 3px; height: 100%; background: var(--good); border-radius: 2px; margin-left: 4px; }
+.eline.is-ai { background: rgba(var(--good-rgb), 0.06); }
+.eline.has-diag code { text-decoration: underline wavy var(--warn); text-underline-offset: 3px; }
+.tk-k { color: var(--merged); } .tk-s { color: var(--good); } .tk-c { color: var(--ink-35); font-style: italic; }
+.delegate-btn { position: absolute; right: 14px; top: 10px; box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.45); }
+.delegate { padding: 10px 14px; background: var(--surface-4); display: flex; flex-direction: column; gap: 6px; font-size: 12px; } .delegate pre { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: 6px; font-size: 11px; max-height: 64px; overflow: auto; }
+.ibottom { height: 190px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-1); }
+.ibottom .tabs { padding: 0 8px; background: var(--surface-1); } .ibottom__scope { font-size: 11px; padding: 6px 4px 0; }
+.ibottom__b { flex: 1; overflow: auto; background: var(--surface-2); }
+.ibottom .term { background: transparent; min-height: 0; padding: 8px 14px; }
+.term__in { display: flex; gap: 8px; align-items: center; } .term__in input { flex: 1; background: none; border: 0; outline: 0; color: var(--ink); font: inherit; }
+.probs { list-style: none; margin: 0; padding: 6px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; } .probs li { display: flex; gap: 8px; }
+.side { background: var(--surface-1); display: flex; flex-direction: column; gap: 8px; padding: 10px; min-height: 0; overflow-y: auto; }
+.side__h { display: flex; align-items: center; gap: 8px; } .side__sub { font-size: 11.5px; }
+.side__tl { flex: 1; min-height: 60px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 6px 2px; }
+.side__e { display: grid; grid-template-columns: 38px 1fr; gap: 6px; font-size: 12px; color: var(--ink-body); line-height: 1.45; }
+.side__e--system { color: var(--ink-50); }
+.side .cmp { padding-top: 0; }
+.cmp--compact .cmp__hint, .cmp--compact .dock__hint, .cmp--compact .dock__h .muted { display: none; }
+.cmp--compact .dock__f { flex-wrap: wrap; gap: 4px; } .cmp--compact .cmp__target { gap: 4px; }
+.cmp--compact .cmp__modebtn span { display: none; }

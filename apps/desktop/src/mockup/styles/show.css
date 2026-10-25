@@ -1,0 +1,66 @@
+/* show.css — marco del showcase (no forma parte de las superficies). */
+.show { position: relative; height: 100%; display: flex; flex-direction: column; background: var(--surface-0); overflow: hidden; }
+.show__bar { display: flex; align-items: center; gap: 12px; padding: 0 12px; height: 40px; background: var(--surface-1); flex-shrink: 0; position: relative; z-index: 30; }
+.show__brand { font-family: var(--font-brand); letter-spacing: 0.08em; font-size: 12px; }
+.show__tag { font-size: 11.5px; white-space: nowrap; }
+.show__tabs { display: flex; gap: 2px; margin-left: 10px; }
+.show__tabs button { height: 28px; padding: 0 12px; border-radius: var(--radius); color: var(--ink-70); font-size: 12.5px; white-space: nowrap; }
+.show__tabs button:hover { background: var(--surface-3); color: var(--ink); }
+.show__tabs button.is-on { background: var(--primary); color: var(--on-primary); font-weight: 600; }
+.show__stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.show__stage > .ade, .show__stage > .ide { min-width: 1180px; }
+.sim { position: relative; }
+.sim__pop { top: 32px; right: 0; width: 330px; }
+.sim__grid { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 8px 8px; }
+
+.scaled { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.scaled__box { overflow: hidden; flex-shrink: 0; border-radius: 6px; }
+
+/* Overview */
+.ov { height: 100%; display: flex; flex-direction: column; padding: 10px 12px 12px; gap: 8px; }
+.ov__same { display: flex; align-items: center; gap: 10px; font-size: 12.5px; flex-wrap: wrap; }
+.ov__grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr); gap: 10px; grid-template-areas: 'ade ade ide ide' 'mob cli cli leg'; }
+.ov--ade { grid-area: ade; } .ov--mob { grid-area: mob; } .ov--ide { grid-area: ide; } .ov--cli { grid-area: cli; } .ov--leg { grid-area: leg; }
+.leg { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--ink-70); }
+.leg__g { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; } .leg__g span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-body); }
+.leg__r { display: flex; align-items: center; gap: 8px; line-height: 1.4; } .leg__c { padding: 5px 9px; border-radius: var(--radius); background: var(--surface-3); font-size: 11.5px; }
+.ovc { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; border-radius: 10px; background: var(--surface-1); padding: 8px 10px 10px; gap: 6px; }
+.ovc header { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; }
+.ovc__stage { flex: 1; min-height: 0; pointer-events: none; }
+.ovc__hit { position: absolute; inset: 0; border-radius: 10px; }
+.ovc__hit:hover { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Páginas Mobile / CLI */
+.page2 { height: 100%; display: flex; gap: 22px; padding: 14px 22px; min-height: 0; }
+.page2__main { flex: 0 0 auto; height: 100%; width: 440px; }
+.page2__side { flex: 1; max-width: 560px; overflow-y: auto; font-size: 13px; line-height: 1.6; color: var(--ink-70); }
+.page2__side h3 { margin: 14px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-50); }
+.page2__side ul { margin: 0; padding-left: 18px; } .page2__side p { margin: 0 0 6px; }
+.page2--cli { gap: 14px; } .page2__term { flex: 1; min-width: 0; height: 100%; }
+
+/* Continuity */
+.flow { height: 100%; display: flex; flex-direction: column; padding: 10px 14px 12px; gap: 10px; min-height: 0; }
+.flow__steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.flow__steps button { width: 100%; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: var(--radius); background: var(--surface-2); color: var(--ink-70); font-size: 11.5px; text-align: left; min-width: 0; }
+.flow__steps button.is-on { background: var(--surface-5); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); } .flow__steps button.is-done { color: var(--ink-50); }
+.flow__n { width: 18px; height: 18px; flex-shrink: 0; border-radius: 9px; background: var(--surface-6); display: inline-flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; }
+.flow__who { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-50); }
+.flow__cap { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: var(--radius); background: var(--surface-2); font-size: 12.5px; flex-wrap: wrap; }
+.flow__cap .muted { flex: 1 1 360px; min-width: 0; }
+.flow__stage { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; }
+.flow__pc, .flow__ph { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; border-radius: 10px; background: var(--surface-1); padding: 6px; opacity: 0.62; transition: opacity 0.2s; }
+.flow__pc.is-focus, .flow__ph.is-focus { opacity: 1; box-shadow: inset 0 0 0 2px var(--accent); }
+.flow__lab { position: absolute; left: 12px; bottom: 8px; padding: 2px 8px; border-radius: 9px; background: var(--surface-5); font-size: 10.5px; color: var(--ink-70); }
+.flow__pc > .scaled, .flow__ph > .scaled { flex: 1; min-height: 0; }
+
+/* Guide */
+.guide { height: 100%; overflow-y: auto; padding: 18px 28px 40px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 26px; align-content: start; }
+.guide h2 { margin: 0 0 10px; font-size: 14px; } .guide h2 .muted { font-weight: 400; font-size: 11.5px; margin-left: 8px; }
+.guide section:nth-child(3) { grid-column: 1 / -1; }
+.guide__q { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.guide__q button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 9px 12px; border-radius: var(--radius); background: var(--surface-2); text-align: left; font-size: 12.5px; } .guide__q button:hover { background: var(--surface-4); color: var(--accent); }
+.guide__d { display: flex; flex-direction: column; gap: 4px; }
+.guide__d article { border-radius: var(--radius); background: var(--surface-2); } .guide__d article.is-open { background: var(--surface-3); }
+.guide__d article > button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; text-align: left; font-size: 12.5px; }
+.guide__d dl { display: grid; grid-template-columns: 74px 1fr; gap: 6px 12px; margin: 0; padding: 0 14px 12px; font-size: 12.5px; line-height: 1.55; } .guide__d dt { color: var(--ink-50); } .guide__d dd { margin: 0; color: var(--ink-body); }
+.guide__s { margin: 0 0 10px; padding-left: 18px; font-size: 12.5px; line-height: 1.7; color: var(--ink-70); }
