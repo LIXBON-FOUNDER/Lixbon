@@ -1,2 +1,5 @@
 # Scripts que corren en Linux: nunca CRLF (bash y Docker los rompen)
 *.sh text eol=lf
+
+# Archivos de Pencil (pen.dev): binarios, sin conversión de saltos de línea
+*.pen binary
