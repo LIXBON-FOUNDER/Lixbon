@@ -13,6 +13,7 @@ import { languageLabel } from '../editor/languages';
 import { ProgressRing } from '../components/Ring';
 import { LogoMark } from '../components/Logo';
 import { IconGitBranch } from '../components/Icons';
+import { usePreviewStatusActive, PreviewStatusUsage, PreviewStatusHosts, previewHostName } from '../ade/preview/PreviewStatusItems';
 
 // Cupo del plan de Claude (sesión y semana), según Claude Code.
 function ClaudeUsage() {
@@ -47,6 +48,7 @@ export function StatusBar() {
   const bgWaiting = background.find((o) => o.waiting);
   const session = useUsageStore((s) => s.buckets?.session);
   const loadUsage = useUsageStore((s) => s.load);
+  const preview = usePreviewStatusActive();
   const checker = useProblemsStore((s) => s.checker);
   const { errors, warnings } = problemCounts(useProblemsStore((s) => s.problems));
   const showProblems = () => {
@@ -78,6 +80,12 @@ export function StatusBar() {
           {errors} {errors === 1 ? 'error' : 'errores'}{warnings ? ` · ${warnings} ${warnings === 1 ? 'aviso' : 'avisos'}` : ''}
         </button>
       )}
+      {preview && (
+        <>
+          <span className="statusbar__sep" aria-hidden="true" />
+          <PreviewStatusUsage />
+        </>
+      )}
       {background.length > 0 && (
         <button
           className="statusbar__item statusbar__item--agent"
@@ -96,8 +104,9 @@ export function StatusBar() {
           <span className="statusbar__item statusbar__item--strong">{languageLabel(activePath)}</span>
         </>
       )}
-      {engine === 'claude' && <ClaudeUsage />}
-      {engine !== 'claude' && session && !session.unlimited && (
+      {!preview && engine === 'claude' && <ClaudeUsage />}
+      {preview && <PreviewStatusHosts />}
+      {!preview && engine !== 'claude' && session && !session.unlimited && (
         <button
           className="statusbar__item"
           onClick={() => useAppStore.getState().openModal('settings', 'usage')}
@@ -109,8 +118,9 @@ export function StatusBar() {
       )}
       <span className={`statusbar__item statusbar__conn is-${connectionStatus}`}>
         <span className="dot" />
+        {preview && `${previewHostName()} · `}
         {CONN[connectionStatus] || connectionStatus}
-        {connectionStatus === 'connected' && latency > 0 ? ` · ${latency} ms` : ''}
+        {!preview && connectionStatus === 'connected' && latency > 0 ? ` · ${latency} ms` : ''}
       </span>
     </footer>
   );

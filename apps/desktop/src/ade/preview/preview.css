@@ -139,14 +139,10 @@
 .pv-unread { width: 6px; height: 6px; border-radius: 6px; background: var(--info); flex-shrink: 0; }
 .pv-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px 12px; font-size: 12.5px; color: var(--ink-50); }
 .pv-empty b { color: var(--ink-body); }
-.pv-nav__foot { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 12px; }
-.pv-foot__hosts, .pv-foot__usage { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 6px 8px; border-radius: var(--radius); background: var(--surface-2); font-size: 11.5px; color: var(--ink-50); text-align: left; transition: background-color 0.14s ease; }
-.pv-foot__host { display: inline-flex; align-items: center; gap: 4px; }
-.pv-foot__host i { width: 6px; height: 6px; border-radius: 6px; background: var(--good); }
-.pv-foot__host.is-off i { background: var(--ink-35); }
-.pv-foot__host b { color: var(--ink-70); font-weight: 500; }
-.pv-foot__use { display: inline-flex; align-items: center; gap: 6px; }
-.pv-foot__use .pv-meter { width: 40px; }
+/* Barra de estado en la vista previa: cuota junto a la rama, hosts junto a la conexión (como la maqueta). */
+.statusbar__sep { width: 1px; height: 14px; background: var(--line); flex-shrink: 0; }
+.pv-status__use, .pv-status__hosts { display: inline-flex; align-items: center; gap: 6px; }
+.pv-status__use .pv-meter { width: 40px; }
 .pv-menu__item { flex-direction: column; align-items: flex-start; gap: 2px; height: auto; padding-top: 7px; padding-bottom: 7px; }
 .pv-menu__main { font-size: 12.5px; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; }
 .pv-menu__hint { font-size: 11.5px; color: var(--ink-50); white-space: normal; text-align: left; }
@@ -448,7 +444,6 @@ details > summary.pv-pp__h { cursor: pointer; list-style: none; }
   .pv-row:hover:not(.is-sel), .pv-grouphead:hover, .pv-project__head:hover, .pv-feed button:hover,
   .pv-host__list button:hover, .pv-rv__files li:not(.is-on):hover, .pv-ev__g:hover, .pv-dock__head:hover { background: var(--surface-3); }
   .pv-strip__t:hover:not(.is-on), .pv-req:not(.is-sel):hover, .pv-node:hover:not(.is-sel), .pv-chipbtn:hover:not(.is-on) { background: var(--surface-4); }
-  .pv-foot__hosts:hover, .pv-foot__usage:hover { background: var(--surface-3); }
 }
 .pv-shell :focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 1px; }
 

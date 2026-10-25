@@ -6,9 +6,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { Popover } from '../../components/Popover';
 import { providerName } from '../../orch/agent/agentIdentity';
-import { usePreviewStore, attemptsOfTask, hostCount } from './previewStore';
-import { PROJECTS, USAGE } from './previewData';
-import { Mark, AttnFlag, Agent, I, Meter } from './PreviewUi';
+import { usePreviewStore, attemptsOfTask } from './previewStore';
+import { PROJECTS } from './previewData';
+import { Mark, AttnFlag, Agent, I } from './PreviewUi';
 import { stateLabel, agentName, isRemote, hostOf, meta, attemptName } from './previewVocab';
 
 const CHIPS = [
@@ -207,18 +207,6 @@ export function PreviewSidebar() {
         )}
       </div>
 
-      <div className="pv-nav__foot">
-        <button type="button" className="pv-foot__hosts" onClick={() => s.setView('hosts')} title="Hosts">
-          {s.hosts.map((h) => (
-            <span key={h.id} className={`pv-foot__host${h.status === 'offline' ? ' is-off' : ''}`}><i />{h.short}<b className="mono">{hostCount(s, h.id)}</b></span>
-          ))}
-        </button>
-        <button type="button" className="pv-foot__usage" onClick={() => s.setView('usage')} title="Uso">
-          {USAGE.slice(0, 2).map((u) => (
-            <span key={u.provider} className="pv-foot__use"><span>{providerName(u.provider)}</span><Meter pct={u.pct} /><b className="mono">{u.pct}%</b></span>
-          ))}
-        </button>
-      </div>
     </div>
   );
 }
