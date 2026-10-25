@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { localeDePath, otherLocalePath } from '../i18n/paths';
+import { useLocale } from '../i18n/LocaleContext';
+import { localeDePath, otherLocalePath, withLocale } from '../i18n/paths';
 
 export const SITE_URL = 'https://lixbon.com';
 export const SITE_NAME = 'lixbon';
@@ -68,15 +69,18 @@ function setAlternates(alternates) {
   });
 }
 
+// Las páginas pasan su ruta en inglés (`/plans`); se lleva al idioma que se
+// está pintando para que /es/plans sea canónica de sí misma y no de /plans.
 export function useSeo({ title, description, path, noindex = false, jsonLd = null } = {}) {
-  const resolvedPath = path ?? (typeof window === 'undefined' ? '/' : window.location.pathname);
+  const locale = useLocale();
+  const resolvedPath = withLocale(path ?? (typeof window === 'undefined' ? '/' : window.location.pathname), locale);
   const finalDescription = description ?? DESCRIPCION_BASE[localeDePath(resolvedPath)];
   if (typeof window === 'undefined') {
     seoDelRender = etiquetas({ title, description: finalDescription, path: resolvedPath, noindex, jsonLd });
   }
   useEffect(() => {
     const { titulo, url, ogLocale, alternates } = etiquetas({
-      title, description: finalDescription, path: path ?? window.location.pathname, noindex, jsonLd,
+      title, description: finalDescription, path: resolvedPath, noindex, jsonLd,
     });
 
     document.title = titulo;
@@ -98,19 +102,8 @@ export function useSeo({ title, description, path, noindex = false, jsonLd = nul
     canonica.href = url;
     setAlternates(alternates);
     setJsonLd(noindex ? null : jsonLd);
-  }, [title, finalDescription, path, noindex, jsonLd]);
+  }, [title, finalDescription, resolvedPath, noindex, jsonLd]);
 }
 
-// Perfiles públicos de la marca (GitHub, LinkedIn, X…): Google los usa para
-// asociar el sitio a la entidad. Rellenar con las URL reales.
-export const PERFILES = [];
-
-export const ORGANIZACION = {
-  '@context': 'https://schema.org',
-  '@type': 'Organization',
-  name: SITE_NAME,
-  url: SITE_URL,
-  logo: `${SITE_URL}/icon-512.png`,
-  email: 'support@lixbon.com',
-  ...(PERFILES.length ? { sameAs: PERFILES } : {}),
-};
+// La marca (Organization y WebSite) va fija en index.html: lixbon.com/ redirige
+// al chat y no tiene portada propia, así que la lleva cada página.
