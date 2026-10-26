@@ -503,7 +503,8 @@ fn el_parser_nunca_entra_en_panico() {
         let _ = parse_line(l);
     }
     assert_eq!(parse_line("{\"type\":\"system\",\"subtype\":\"hook_started\"}"), [Msg::Ignored]);
-    assert_eq!(parse_line("{\"type\":\"rate_limit_event\"}"), [Msg::Ignored]);
+    // `rate_limit_event` se lee desde LXO-205, pero solo las ventanas: ni `session_id` ni el resto.
+    assert!(matches!(parse_line("{\"type\":\"rate_limit_event\"}")[..], [Msg::RateLimit(_)]));
 }
 
 #[test]
@@ -657,4 +658,136 @@ fn real_claude_start_events_finish() {
     assert!(matches!(got.first(), Some(AdapterEvent::SessionBound { .. })), "la sesión debe anunciarse primero");
     assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+// ── Usage (LXO-205) ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+const USAGE_CMD: &str = include_str!("../../testdata/claude-2.1.296-usage-comando.jsonl");
+
+/// Una versión que no está entre las verificadas: `/usage` no se prueba (podría llegar al modelo).
+fn adapter_sin_verificar(l: Arc<FakeLauncher>) -> Arc<ClaudeAdapter> {
+    Arc::new(ClaudeAdapter::with_parts(cfg(), l, Arc::new(|| probe_from(true, Some("9.9.9"), Some(HELP)))))
+}
+
+#[test]
+fn antes_de_cualquier_ejecucion_y_sin_version_verificada_claude_no_inventa_limites() {
+    use crate::orch::adapter::{UsageErrorKind, UsageField};
+    let l = FakeLauncher::new(vec![]);
+    let a = adapter_sin_verificar(l.clone());
+    assert!(matches!(a.usage_support().state(UsageField::Windows), CapabilityState::Unavailable { .. }));
+    assert_eq!(a.usage_support().state(UsageField::Tokens), &CapabilityState::Unsupported);
+    assert_eq!(a.usage(&CancelToken::new()).unwrap_err().kind, UsageErrorKind::ProviderUnavailable);
+    assert!(l.launched.lock().unwrap().is_empty(), "en una versión sin verificar no se lanza `/usage`");
+}
+
+#[test]
+fn el_uso_de_claude_sale_del_comando_local_usage_sin_llamar_al_modelo() {
+    use crate::orch::adapter::{Provenance, UsageField};
+    let l = FakeLauncher::new(script_of(USAGE_CMD));
+    let a = adapter(cfg(), l.clone());
+    assert!(a.usage_support().state(UsageField::Windows).is_available());
+    let snap = a.usage(&CancelToken::new()).unwrap();
+
+    assert_eq!(snap.provenance, Provenance::ProviderQuery, "se pregunta ahora a la propia CLI");
+    let w: Vec<_> = snap.windows.iter().map(|w| (w.id.as_str(), w.minutes, w.used_percent, w.resets_at)).collect();
+    assert_eq!(w, [("five_hour", Some(300), Some(72.0), None), ("seven_day", Some(10080), Some(10.0), None)], "la hora de reinicio (texto con zona IANA) no se adivina");
+    assert_eq!(snap.limit_reached, None);
+    assert!(snap.plan.is_none() && snap.credits.is_none() && snap.models.is_empty());
+    let dump = format!("{snap:?}");
+    assert!(!dump.contains("habilidad") && !dump.contains("servidor-a"), "la actividad local de la persona no se copia");
+
+    let (spec, proc_) = l.last();
+    assert_eq!(spec.args, ["-p", "/usage", "--output-format", "stream-json", "--verbose"]);
+    assert!(proc_.written().is_empty(), "no se manda ningún mensaje de usuario");
+    assert!(proc_.was_killed());
+}
+
+#[test]
+fn si_usage_llega_al_modelo_se_corta_al_instante_y_no_se_usa_el_texto() {
+    use crate::orch::adapter::UsageErrorKind;
+    let mut s = script_of(USAGE_CMD);
+    s[1]["message"]["model"] = json!("claude-sonnet-5-5");
+    let l = FakeLauncher::new(s);
+    let a = adapter(cfg(), l.clone());
+    let e = a.usage(&CancelToken::new()).unwrap_err();
+    assert_eq!(e.kind, UsageErrorKind::ProviderUnavailable);
+    assert!(e.message.contains("no es un comando local"));
+    assert!(l.last().1.was_killed(), "el proceso se mata en cuanto aparece un mensaje del modelo");
+}
+
+#[test]
+fn una_cuenta_sin_limites_en_usage_no_inventa_ventanas() {
+    use crate::orch::adapter::UsageErrorKind;
+    let mut s = script_of(USAGE_CMD);
+    let t = "You are currently using an API key.\n\nLast 24h · 3 requests";
+    s[1]["message"]["content"][0]["text"] = json!(t);
+    s[2]["result"] = json!(t);
+    let a = adapter(cfg(), FakeLauncher::new(s));
+    assert_eq!(a.usage(&CancelToken::new()).unwrap_err().kind, UsageErrorKind::ProviderUnavailable);
+}
+
+#[test]
+fn tras_una_ejecucion_sin_comando_los_limites_son_una_observacion_de_esa_ejecucion() {
+    use crate::orch::adapter::{Provenance, UsageField};
+    let l = FakeLauncher::new(script_of(NORMAL));
+    let a = adapter_sin_verificar(l);
+    let reg = registro(Arc::clone(&a));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    g.events(&run, &cancel, &mut |_e: AdapterEvent| {}).unwrap();
+
+    assert!(a.usage_support().state(UsageField::Windows).is_available());
+    let snap = a.usage(&CancelToken::new()).unwrap();
+    assert_eq!(snap.provenance, Provenance::RunObservation, "sin `/usage`, lo último que Claude dijo mientras ejecutaba");
+    let w: Vec<_> = snap.windows.iter().map(|w| (w.id.as_str(), w.minutes, w.used_percent, w.resets_at)).collect();
+    // Lo último que dijo la captura: 14 % en 5 h y 2 % en 7 d.
+    assert_eq!(w, [("five_hour", Some(300), Some(14.0), Some(1793054400)), ("seven_day", Some(10080), Some(2.0), Some(1793613600))]);
+    assert_eq!(snap.limit_reached, Some(false));
+    assert_eq!(snap.plan, None, "Claude no dice el plan: desconocido");
+    assert!(snap.models.is_empty() && snap.credits.is_none(), "no se rellena lo que no se informó");
+}
+
+#[test]
+fn con_un_endpoint_ajeno_no_se_atribuyen_limites_de_anthropic() {
+    use crate::orch::adapter::UsageErrorKind;
+    let c = ClaudeConfig { id: "claude-local".into(), endpoint: Some(Endpoint::new("http://127.0.0.1:9", "LXO_TOKEN_LOCAL", Some("modelo")).unwrap()), ..cfg() };
+    let l = FakeLauncher::new(script_of(USAGE_CMD));
+    let a = adapter(c, l.clone());
+    assert!(!a.usage_support().offers_anything());
+    assert_eq!(a.usage(&CancelToken::new()).unwrap_err().kind, UsageErrorKind::Unsupported);
+    assert!(l.launched.lock().unwrap().is_empty());
+}
+
+#[test]
+fn un_rate_limit_event_raro_no_rompe_el_flujo_ni_se_vuelve_cero() {
+    let m = parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":7.5}}}}"#);
+    let Msg::RateLimit(info) = &m[0] else { panic!("{m:?}") };
+    assert_eq!(info.windows[0].utilization, Some(7.5));
+    assert_eq!(info.windows[0].resets_at, None);
+    assert_eq!(parse_line(r#"{"type":"rate_limit_event"}"#), vec![Msg::RateLimit(super::stream::RateInfo { status: None, windows: vec![] })]);
+}
+
+#[test]
+fn el_texto_de_usage_solo_aporta_lineas_de_limite() {
+    use super::usage::windows_from;
+    let ids = |t: &str| windows_from(t).into_iter().map(|w| (w.id, w.used_percent)).collect::<Vec<_>>();
+    assert_eq!(ids("Current session: 100% used · resets mañana"), [("five_hour".to_string(), Some(100.0))]);
+    assert_eq!(ids("Current week (Opus 4): 5% used"), [("seven_day_opus_4".to_string(), Some(5.0))]);
+    assert!(ids("Current session: 101% used").is_empty(), "más de 100 % no es un porcentaje");
+    assert!(ids("Current session: lots used\nLast 24h · 3 requests\n  Top skills: /x 6%").is_empty());
+    assert!(ids("").is_empty());
+}
+
+/// Validación manual de LXO-205: `claude -p /usage` real. Es un comando local: no llama al modelo ni gasta cuota.
+#[test]
+#[ignore = "validación manual: lanza la CLI real de Claude (comando local /usage, sin modelo)"]
+fn real_claude_usage_comando_local() {
+    let a = ClaudeAdapter::new(ClaudeConfig::default());
+    let probe = a.probe();
+    println!("version: {:?}", probe.cli_version);
+    let snap = a.usage(&CancelToken::new()).expect("`claude /usage` respondió");
+    println!("{snap:#?}");
+    assert_eq!(snap.provenance, crate::orch::adapter::Provenance::ProviderQuery);
+    assert!(snap.windows.iter().any(|w| w.id == "five_hour" && w.used_percent.is_some()));
 }

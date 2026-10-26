@@ -1,6 +1,6 @@
 //! Parser del flujo `--output-format stream-json` de Claude Code (LXO-129). Una línea de la CLI → cero o más [`Msg`].
 //! Solo lee los campos que el adapter necesita; todo lo demás se ignora a propósito (`hook_*`, `thinking_tokens`,
-//! `rate_limit_event`, resultados de herramientas…): ni el razonamiento (`thinking`) ni el contenido de las herramientas
+//! resultados de herramientas…). De `rate_limit_event` solo se leen las ventanas de cuota (LXO-205): ni el razonamiento (`thinking`) ni el contenido de las herramientas
 //! se copian (invariante 5), y un tipo nuevo de mensaje no rompe nada.
 //!
 //! Formato contrastado con Claude Code 2.1.296 (`testdata/claude-2.1.296-adapter-*.jsonl`, capturas reales saneadas).
@@ -34,8 +34,25 @@ pub struct ResultMsg {
     pub usage: UsageTotals,
 }
 
+/// Una ventana de cuota de un `rate_limit_event`. `utilization` llega como fracción 0..=1.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateWindow {
+    pub id: String,
+    pub utilization: Option<f64>,
+    pub resets_at: Option<i64>,
+}
+
+/// Lo que Claude dice de sus límites durante una ejecución (LXO-205). `status` es el texto del proveedor (`allowed`…).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RateInfo {
+    pub status: Option<String>,
+    pub windows: Vec<RateWindow>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Msg {
+    /// Ventanas de cuota observadas. No genera ningún evento del Attempt: el adapter las guarda para `usage`.
+    RateLimit(RateInfo),
     Init { session_id: String, model: Option<String>, version: Option<String>, capabilities: Vec<String> },
     Text(String),
     ToolUse { tool: String, summary: String },
@@ -106,6 +123,21 @@ fn result(v: &Value) -> Msg {
     })
 }
 
+fn rate_limit(v: &Value) -> Msg {
+    let info = v.get("rate_limit_info").unwrap_or(&Value::Null);
+    let mut windows: Vec<RateWindow> = info
+        .get("unifiedWindows")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .map(|(id, w)| RateWindow { id: safe_text(id, 40), utilization: w.get("utilization").and_then(Value::as_f64), resets_at: w.get("resetsAt").and_then(Value::as_i64) })
+                .collect()
+        })
+        .unwrap_or_default();
+    windows.sort_by(|a, b| a.id.cmp(&b.id));
+    Msg::RateLimit(RateInfo { status: s(info, "status").map(|t| safe_text(&t, 40)), windows })
+}
+
 /// Una línea del flujo → mensajes. Nunca entra en pánico, con cualquier entrada.
 pub fn parse_line(line: &str) -> Vec<Msg> {
     let line = line.trim();
@@ -151,6 +183,7 @@ pub fn parse_line(line: &str) -> Vec<Msg> {
             }
         }
         Some("result") => vec![result(&v)],
+        Some("rate_limit_event") => vec![rate_limit(&v)],
         _ => vec![Msg::Ignored],
     }
 }

@@ -14,6 +14,7 @@
 //! El canal es visible: `ProbeResult.transport` y el evento `Transport` (con el motivo si es un respaldo).
 
 mod rpc;
+mod usage;
 
 #[cfg(test)]
 mod fake;
@@ -37,6 +38,7 @@ use super::{
     ProviderRef, ResumeRequest, RunHandle, RunOutcome, StartRequest,
 };
 use crate::orch::agents::{self, EnvBlock, EnvProof, Profile};
+use super::usage::{system_clock, UsageScratch, UsageError, UsageField, UsageSnapshot, UsageSupport};
 use rpc::{Incoming, RpcError};
 
 pub const ID: &str = "codex";
@@ -818,6 +820,36 @@ impl ProviderAdapter for CodexAdapter {
             .call("turn/steer", Some(json!({ "threadId": thread, "expectedTurnId": turn, "input": rpc::text_input(instruction) })))
             .map(|_| ())
             .map_err(|e| if e.code == ErrorCode::Provider { AdapterError::unavailable(Capability::Steer, &e.message) } else { e })
+    }
+
+    /// Con `app-server`, los límites y el plan de la cuenta se piden sin gastar cuota. Con el respaldo `exec --json` no hay
+    /// canal para preguntar: `unavailable`, no `unsupported` (el proveedor sí lo ofrece).
+    fn usage_support(&self) -> UsageSupport {
+        if self.plan().transport == Some(Transport::AppServer) {
+            UsageSupport::none().with(UsageField::Windows, CapabilityState::Available).with(UsageField::Credits, CapabilityState::Available).with(UsageField::Plan, CapabilityState::Available)
+        } else {
+            let why = CapabilityState::unavailable("el uso de la cuenta solo se consulta con codex app-server");
+            UsageSupport::none().with(UsageField::Windows, why.clone()).with(UsageField::Credits, why.clone()).with(UsageField::Plan, why)
+        }
+    }
+
+    fn usage(&self, cancel: &CancelToken) -> Result<UsageSnapshot, UsageError> {
+        cancel.check()?;
+        if self.plan().transport != Some(Transport::AppServer) {
+            return Err(UsageError::unavailable("el uso de la cuenta solo se consulta con codex app-server"));
+        }
+        // Su propio proceso: no toca ninguna ejecución en curso ni espera a que termine.
+        let scratch = UsageScratch::create()?;
+        let run = self.spawn_server(scratch.path())?;
+        let read = Self::initialize(&run).and_then(|_| {
+            cancel.check()?;
+            run.call("account/rateLimits/read", None)
+        });
+        run.shutdown();
+        match read {
+            Ok(v) => Ok(usage::snapshot_from(&v, (system_clock())())),
+            Err(e) => Err(usage::classify(&e)),
+        }
     }
 
     fn resume(&self, req: ResumeRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProviderAdapter};
+use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProviderAdapter, UsageTarget};
 
 /// Versión del formato del snapshot (`docs/core/fixtures/api/provider_capabilities.v1.json`).
 pub const SNAPSHOT_VERSION: u32 = 1;
@@ -95,6 +95,20 @@ impl AdapterRegistry {
     pub fn gated(&self, id: &str) -> Result<Gated<'_>, AdapterError> {
         let e = self.entries.get(id).ok_or_else(|| AdapterError::unknown_provider(id))?;
         Ok(Gated::new(e.adapter.as_ref(), &e.probe.matrix))
+    }
+
+    /// Los proveedores registrados tal como los necesita el servicio de uso (LXO-205). Un entorno bloqueado no se consulta.
+    pub fn usage_targets(&self) -> Vec<UsageTarget> {
+        self.entries
+            .iter()
+            .map(|(id, e)| UsageTarget { id: id.clone(), adapter: Arc::clone(&e.adapter), environment_blocked: matches!(e.probe.environment, Environment::Blocked { .. }) })
+            .collect()
+    }
+
+    /// Solo el proveedor en uso (la vista de un Attempt), en lugar de la lista general.
+    pub fn usage_target(&self, id: &str) -> Result<UsageTarget, AdapterError> {
+        let e = self.entries.get(id).ok_or_else(|| AdapterError::unknown_provider(id))?;
+        Ok(UsageTarget { id: id.to_string(), adapter: Arc::clone(&e.adapter), environment_blocked: matches!(e.probe.environment, Environment::Blocked { .. }) })
     }
 
     pub fn snapshot(&self) -> RegistrySnapshot {

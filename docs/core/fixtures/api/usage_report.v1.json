@@ -1,0 +1,150 @@
+{
+  "generated_at_ms": 1800000000000,
+  "providers": [
+    {
+      "age_ms": 0,
+      "provider": "codex",
+      "snapshot": {
+        "account": "e7cbf1f7",
+        "credits": {
+          "balance": "42",
+          "has_credits": true,
+          "unlimited": false
+        },
+        "limit_reached": false,
+        "models": [
+          {
+            "cost_usd": 0.5,
+            "input_tokens": 10,
+            "model": "m1",
+            "output_tokens": 20
+          }
+        ],
+        "observed_at_ms": 1800000000000,
+        "plan": "plus",
+        "provenance": "provider_query",
+        "provider": "codex",
+        "windows": [
+          {
+            "id": "primary",
+            "minutes": 300,
+            "resets_at": 1800003600,
+            "used_percent": 12.0
+          },
+          {
+            "id": "secondary",
+            "minutes": 300,
+            "resets_at": 1800003600,
+            "used_percent": 3.0
+          }
+        ]
+      },
+      "status": "fresh",
+      "support": {
+        "fields": {
+          "cost": {
+            "state": "available"
+          },
+          "credits": {
+            "state": "available"
+          },
+          "plan": {
+            "state": "available"
+          },
+          "tokens": {
+            "state": "available"
+          },
+          "windows": {
+            "state": "available"
+          }
+        }
+      }
+    },
+    {
+      "age_ms": 120000,
+      "provider": "claude",
+      "snapshot": {
+        "observed_at_ms": 1799999880000,
+        "provenance": "run_observation",
+        "provider": "claude",
+        "windows": [
+          {
+            "id": "five_hour",
+            "resets_at": 1800003600
+          }
+        ]
+      },
+      "status": "fresh",
+      "support": {
+        "fields": {
+          "cost": {
+            "state": "unsupported"
+          },
+          "credits": {
+            "state": "unsupported"
+          },
+          "plan": {
+            "state": "unsupported"
+          },
+          "tokens": {
+            "state": "unsupported"
+          },
+          "windows": {
+            "state": "available"
+          }
+        }
+      }
+    },
+    {
+      "error": {
+        "kind": "auth_required",
+        "message": "el proveedor pide iniciar sesión"
+      },
+      "provider": "otro",
+      "status": "unknown",
+      "support": {
+        "fields": {
+          "cost": {
+            "state": "available"
+          },
+          "credits": {
+            "state": "available"
+          },
+          "plan": {
+            "state": "available"
+          },
+          "tokens": {
+            "state": "available"
+          },
+          "windows": {
+            "state": "available"
+          }
+        }
+      }
+    },
+    {
+      "provider": "minimo",
+      "status": "unsupported",
+      "support": {
+        "fields": {
+          "cost": {
+            "state": "unsupported"
+          },
+          "credits": {
+            "state": "unsupported"
+          },
+          "plan": {
+            "state": "unsupported"
+          },
+          "tokens": {
+            "state": "unsupported"
+          },
+          "windows": {
+            "state": "unsupported"
+          }
+        }
+      }
+    }
+  ],
+  "version": 1
+}

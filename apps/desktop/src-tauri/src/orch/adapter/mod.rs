@@ -17,7 +17,10 @@ mod error;
 mod process;
 mod redact;
 mod registry;
+mod usage;
 
+#[cfg(test)]
+mod usage_tests;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]
@@ -36,6 +39,10 @@ pub use codex::{env_proof, sandbox_conflict_error, CodexAdapter, CodexConfig, Re
 pub use error::{AdapterError, ErrorCode, FailureKind};
 pub use redact::{redact, REDACTED};
 pub use registry::{AdapterRegistry, ProviderEntry, RegistrySnapshot, SNAPSHOT_VERSION};
+pub use usage::{
+    account_fingerprint, Credits, ModelUsage, ProviderUsage, Provenance, Refresh, UsageConfig, UsageError, UsageErrorKind, UsageField, UsageReport,
+    UsageScratch, UsageService, UsageSnapshot, UsageStatus, UsageSupport, UsageTarget, UsageWindow, USAGE_VERSION,
+};
 
 use crate::orch::agents::EnvBlock;
 use crate::store::{looks_secret, MAX_EXTERNAL_REF_CHARS};
@@ -278,6 +285,17 @@ pub trait ProviderAdapter: Send + Sync {
 
     fn resume(&self, _req: ResumeRequest, _cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         Err(AdapterError::unsupported(Capability::Resume))
+    }
+
+    /// Qué campos de uso puede informar (LXO-205). Por defecto ninguno: no se finge una métrica que el proveedor no da.
+    fn usage_support(&self) -> UsageSupport {
+        UsageSupport::none()
+    }
+
+    /// El uso de cuenta/límites AHORA, sin gastar cuota ni tocar ninguna ejecución. No lo llama el Core directamente sino
+    /// el [`UsageService`] (caché, tope de tiempo, errores normalizados). Un adapter que no informa de uso lo rechaza.
+    fn usage(&self, _cancel: &CancelToken) -> Result<UsageSnapshot, UsageError> {
+        Err(UsageError::unsupported())
     }
 }
 

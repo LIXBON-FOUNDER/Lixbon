@@ -5,7 +5,7 @@ El Core no habla con Claude ni con Codex: habla con un **adapter** que cumple un
 deciden por el nombre o la versión del proveedor. Código en `apps/desktop/src-tauri/src/orch/adapter/`.
 
 Fuera de este contrato (otras issues): los adapters reales de Claude y Codex (LXO-129/130), el payload de ContextPackage
-(LXO-133), el comando de resume y su fallback (LXO-134) y Usage (LXO-205).
+(LXO-133) y el comando de resume y su fallback (LXO-134). Usage (LXO-205) está en la sección [Usage](#usage-lxo-205).
 
 ## El adapter
 
@@ -224,10 +224,70 @@ capabilities y canal `app_server`, `start→events→finish`, `resume` en un pro
 y 0.164.0), no con una prueba automática contra la CLI. **No validado:** apuntar Codex a modelos con formato OpenAI de otros
 servicios (`model_providers`), y el canal `exec --json` en un fallo real.
 
+## Usage (LXO-205)
+
+Cuánto le queda a la **cuenta** de cada proveedor, normalizado sin fingir lo que el proveedor no da. Código en
+`orch/adapter/usage.rs`; informe de ejemplo en `docs/core/fixtures/api/usage_report.v1.json`.
+
+**Qué cuota es.** La de la cuenta de cada proveedor (ventanas de rate limit, plan, créditos), no la de un modelo. El
+`UsageService` devuelve **una entrada por proveedor registrado**, en una lista y sin totales: el cliente decide si pinta
+todas (vista general) o solo la del proveedor en uso (`AdapterRegistry::usage_target(id)`). El campo `models`
+(tokens/coste por modelo) existe en el contrato, pero ningún adapter real lo rellena hoy: consta como `unsupported`.
+
+| Campo (`UsageField`) | Significa |
+|---|---|
+| `windows` | ventanas de cuota: `id`, `minutes`, `used_percent` (0–100), `resets_at` (Unix s) |
+| `tokens` | tokens por modelo (`models[]`) |
+| `credits` | `has_credits`, `unlimited`, `balance` (texto con la unidad del proveedor; no son dólares) |
+| `plan` | plan de la cuenta |
+| `cost` | coste en dólares **informado por el proveedor**; Lixbon nunca lo estima |
+
+`UsageSupport` (por adapter, `usage_support()`) declara el estado de cada campo con los mismos cuatro estados de la
+matriz: lo que no se declara es `unsupported`. Un adapter sin soporte no se consulta.
+
+| Proveedor | Qué da | Procedencia |
+|---|---|---|
+| Codex (`app-server`) | `account/rateLimits/read`: ventanas por `limitId` (`codex.primary`, `codex.secondary`…), plan, créditos, límite alcanzado, cuenta | `provider_query`: se pregunta ahora, sin crear hilo ni gastar cuota |
+| Codex (`exec --json`) | nada: `unavailable` (no hay canal para preguntar) | — |
+| Claude (nativo, versión verificada) | `claude -p /usage`, el comando local de la CLI (0 turnos, coste 0): ventanas `five_hour` (sesión) y `seven_day` (semana, todos los modelos). La hora de reinicio viene como texto con zona IANA y no se convierte: `resets_at` queda desconocido | `provider_query` |
+| Claude (versión sin verificar o `/usage` falla) | ventanas del último `rate_limit_event` de una ejecución, con la hora de reinicio que trae | `run_observation`; sin ninguna ejecución, `unavailable` |
+| Claude con endpoint propio | nada: no se atribuyen al servicio de otro los límites de Anthropic | — |
+
+**`claude /usage`.** Solo se lanza en versiones donde se comprobó que es un comando local (2.1.296): en otra podría llegar al modelo y gastar
+cuota. Aun así se vigila: si aparece un mensaje del modelo (cualquiera que no sea el sintético `<synthetic>`), se mata el proceso
+y no se usa el texto. De su salida solo se leen las líneas `Current session|week (…): N% used`; el resto (skills, servidores
+MCP, subagentes que más consumen) es actividad local de la persona y no se copia. Corre en una carpeta vacía propia, no en
+el TEMP del sistema (la CLI escanea su `cwd`: 20,7 s frente a 5,3 s), con un tope de 30 s.
+
+**Semántica**
+* `snapshot` lleva `provider`, `observed_at_ms`, `provenance` y `account` (huella de 8 hex de un SHA-256; el identificador
+  de la cuenta nunca sale). La frescura se mide desde `observed_at_ms`, no desde que se consultó.
+* `status`: `fresh` (dentro del TTL), `stale` (más viejo que el TTL, o el último refresco falló: se conserva el dato
+  anterior y `error` dice por qué), `unknown` (sin dato: **no es cero**), `unsupported`, `environment_blocked`.
+* Un valor ausente es desconocido. Un valor imposible (porcentaje fuera de 0–100, coste negativo o no finito) se
+  descarta; no se corrige. Claude da `utilization` como fracción 0–1: fuera de ese rango se descarta.
+* `limit_reached`: `Some(true/false)` solo si el proveedor lo dice; si no, ausente.
+* Errores (`UsageErrorKind`, conjunto cerrado): `auth_required`, `rate_limited`, `provider_unavailable`, `unsupported`,
+  `environment_blocked`, `internal`. Ninguno falla un Attempt: la consulta es una llamada aparte.
+* Caché: TTL de 5 min; tras un fallo no se reintenta en 30 s salvo refresco manual; un refresco manual (`Refresh::Force`)
+  se atiende con la caché (`throttled: true`) si hay otra consulta de hace menos de 5 s. Cada consulta tiene un tope de
+  15 s, tras el cual se cancela y cuenta como `provider_unavailable`; solo hay una consulta en vuelo por proveedor.
+* Los textos del proveedor (plan, ids de ventana, modelo, saldo, errores) salen redactados y acotados. Como mucho 8
+  ventanas y 16 modelos por proveedor.
+
+**No incluye:** facturación propia, estimación de coste, telemetría remota, ni `account/tokenUsage/read` de Codex
+(totales de por vida: no es uso de límites y mezclaría magnitudes).
+
+**Añadir un proveedor:** implementa `usage_support()` y `usage()` (ambos opcionales). Devuelve `Provenance::ProviderQuery`
+solo si preguntaste ahora; si reutilizas lo visto en una ejecución, `RunObservation` con el momento real. Pon el
+identificador de cuenta en `account_id` (el servicio lo convierte en huella) y no rellenes lo que el proveedor no dio.
+
 ## Compatibilidad
 
 * Añadir un estado, una capability o un código de error **cambia el contrato**: sube `MATRIX_VERSION`/`SNAPSHOT_VERSION`
   y regenera la fixture (`LXO_WRITE_API_FIXTURES=1 cargo test --lib orch::adapter`; revísala a mano).
+* Añadir un campo de uso, un estado o un tipo de error de Usage cambia el contrato: sube `USAGE_VERSION` y regenera
+  `usage_report.v1.json` con `LXO_WRITE_API_FIXTURES=1`.
 * Una matriz de versión desconocida, con una capability de menos o con un nombre ajeno **no se acepta** al leerla.
 * Un cliente que no conoce un estado nuevo debe tratarlo como "no disponible" y mostrar su `reason`/`block` si lo trae;
   nunca como disponible.

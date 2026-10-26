@@ -713,3 +713,87 @@ fn real_codex_start_steer_interrupt_resume() {
     assert_eq!(outcome, RunOutcome::Interrupted);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// ── Usage (LXO-205) ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+const RATE_LIMITS: &str = include_str!("../../testdata/codex-0.164.0-account-rate-limits.json");
+
+fn rate_limits() -> Value {
+    serde_json::from_str(RATE_LIMITS).unwrap()
+}
+
+fn usage_script(rate_limits_step: Value) -> Vec<Value> {
+    vec![json!({"on": "initialize"}), json!({"respond": "initialize", "result": {"userAgent": "codex/0.164.0"}}), json!({"on_notification": "initialized"}), json!({"on": "account/rateLimits/read"}), rate_limits_step]
+}
+
+#[test]
+fn usage_de_codex_sale_de_account_rate_limits_read_sin_crear_hilos() {
+    let l = FakeLauncher::new(usage_script(json!({"respond": "account/rateLimits/read", "result": rate_limits()})));
+    let reg = registro(plan_app_server(), l.clone());
+    let a = reg.usage_targets().remove(0).adapter;
+    let snap = a.usage(&CancelToken::new()).unwrap();
+    assert_eq!(snap.provenance, crate::orch::adapter::Provenance::ProviderQuery);
+    assert_eq!(snap.plan.as_deref(), Some("plus"));
+    assert_eq!(snap.windows.len(), 2);
+    assert_eq!((snap.windows[0].id.as_str(), snap.windows[0].minutes, snap.windows[0].used_percent, snap.windows[0].resets_at), ("codex.primary", Some(300), Some(0.0), Some(1793061241)));
+    assert_eq!((snap.windows[1].id.as_str(), snap.windows[1].minutes, snap.windows[1].used_percent), ("codex.secondary", Some(10080), Some(1.0)));
+    assert_eq!(snap.limit_reached, Some(false));
+    assert_eq!(snap.credits.as_ref().unwrap().balance.as_deref(), Some("0"));
+    // El identificador de la cuenta viaja solo hasta el servicio, que lo vuelve huella.
+    assert_eq!(snap.account_id.as_deref(), Some("00000000-0000-4000-8000-0000000000aa"));
+    let (_, server) = l.last();
+    assert!(server.was_killed(), "el proceso de la consulta no sobrevive a ella");
+    let metodos: Vec<String> = server.written().iter().filter_map(|m| m["method"].as_str().map(str::to_string)).collect();
+    assert_eq!(metodos, ["initialize", "initialized", "account/rateLimits/read"], "solo una consulta: ni `thread/start` ni `turn/start`");
+}
+
+#[test]
+fn usage_de_codex_con_el_respaldo_exec_es_no_disponible_y_no_lanza_nada() {
+    let l = FakeLauncher::new(vec![]);
+    let reg = registro(plan_exec(), l.clone());
+    let a = reg.usage_targets().remove(0).adapter;
+    let sup = a.usage_support();
+    assert!(matches!(sup.state(crate::orch::adapter::UsageField::Windows), CapabilityState::Unavailable { .. }));
+    assert_eq!(a.usage(&CancelToken::new()).unwrap_err().kind, crate::orch::adapter::UsageErrorKind::ProviderUnavailable);
+    assert!(l.launched.lock().unwrap().is_empty(), "sin app-server no se lanza ningún proceso");
+}
+
+#[test]
+fn el_texto_de_error_de_codex_se_clasifica_sin_inventar_auth() {
+    use crate::orch::adapter::UsageErrorKind as K;
+    let e = |m: &str| AdapterError::provider(m);
+    assert_eq!(usage::classify(&e("account/rateLimits/read: not logged in, run codex login")).kind, K::AuthRequired);
+    assert_eq!(usage::classify(&e("account/rateLimits/read: Too Many Requests")).kind, K::RateLimited);
+    assert_eq!(usage::classify(&e("account/rateLimits/read: algo raro")).kind, K::ProviderUnavailable);
+}
+
+#[test]
+fn un_cubo_sin_ventanas_ni_senales_no_afirma_nada() {
+    let snap = usage::snapshot_from(&json!({"rateLimits": {"limitId": "x", "planType": "unknown"}}), 5);
+    assert!(snap.windows.is_empty());
+    assert_eq!(snap.plan, None, "`unknown` es desconocido, no un plan");
+    assert_eq!(snap.limit_reached, None);
+    assert_eq!(snap.credits, None);
+    assert_eq!(snap.account_id, None);
+}
+
+#[test]
+fn limite_alcanzado_y_porcentajes_fuera_de_rango() {
+    let v = json!({"ordinaryUsageAllowed": false, "rateLimits": {"limitId": "codex", "primary": {"usedPercent": 140}, "secondary": {"usedPercent": 100, "windowDurationMins": 10080}, "rateLimitReachedType": "rate_limit_reached"}});
+    let snap = usage::snapshot_from(&v, 5);
+    assert_eq!(snap.limit_reached, Some(true));
+    assert_eq!(snap.windows[0].used_percent, None, "140 % no es un porcentaje: desconocido");
+    assert_eq!(snap.windows[1].used_percent, Some(100.0));
+}
+
+/// Validación manual de LXO-205: `account/rateLimits/read` real. Solo lectura: ni hilo ni modelo ni cuota.
+#[test]
+#[ignore = "validación manual: lanza codex app-server real y lee los límites de la cuenta"]
+fn real_codex_usage_rate_limits() {
+    let a = CodexAdapter::new(CodexConfig::default());
+    let p = a.probe();
+    println!("version: {:?} transporte: {:?}", p.cli_version, p.transport);
+    let snap = a.usage(&CancelToken::new()).expect("account/rateLimits/read respondió");
+    println!("{snap:#?}");
+    assert!(!snap.windows.is_empty());
+}

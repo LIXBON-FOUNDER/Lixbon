@@ -10,6 +10,7 @@
 //! CLI a otro servicio compatible. Cada configuración se registra con su propio id (`claude`, `claude-local`…).
 
 mod stream;
+mod usage;
 
 #[cfg(test)]
 mod fake;
@@ -25,18 +26,21 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 pub use super::process::{LaunchSpec, Launcher, Process, RealLauncher, Recv};
-use stream::{parse_line, Msg, ResultMsg};
+use stream::{parse_line, Msg, RateInfo, ResultMsg};
 
 use super::redact::{redact, safe_text};
 use super::{
     AdapterError, AdapterEvent, Answer, CancelToken, Capability, CapabilityMatrix, CapabilityState, EventSink, ProbeResult, ProviderAdapter, ProviderRef,
     ResumeRequest, RunHandle, RunOutcome, StartRequest,
 };
+use super::usage::{system_clock, Clock, Provenance, UsageError, UsageScratch, UsageField, UsageSnapshot, UsageSupport, UsageWindow};
 use crate::orch::agents::{self, EnvBlock, Profile};
 
 pub const ID: &str = "claude";
 
 const POLL: Duration = Duration::from_millis(50);
+/// Tope de `claude -p /usage`: no llama al modelo, pero arrancar la CLI (hooks incluidos) tarda unos 5-8 s.
+const USAGE_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_ID_CHARS: usize = 128;
 const MAX_PROMPT_BYTES: usize = 200_000;
 /// Un texto del modelo se parte en eventos de como mucho esto (invariante 5: la salida cruda no se copia entera).
@@ -211,6 +215,9 @@ pub struct ClaudeAdapter {
     cached: Mutex<Option<ProbeResult>>,
     runs: Mutex<HashMap<u64, Arc<Run>>>,
     seq: AtomicU64,
+    /// Lo último que Claude dijo de sus límites en CUALQUIER ejecución, con el momento en que lo dijo (LXO-205).
+    observed_limits: Mutex<Option<(i64, RateInfo)>>,
+    clock: Clock,
 }
 
 fn real_probe() -> ProbeResult {
@@ -259,7 +266,7 @@ impl ClaudeAdapter {
     }
 
     pub(crate) fn with_parts(cfg: ClaudeConfig, launcher: Arc<dyn Launcher>, probe_fn: ProbeFn) -> ClaudeAdapter {
-        ClaudeAdapter { cfg, launcher, probe_fn, cached: Mutex::new(None), runs: Mutex::new(HashMap::new()), seq: AtomicU64::new(0) }
+        ClaudeAdapter { cfg, launcher, probe_fn, cached: Mutex::new(None), runs: Mutex::new(HashMap::new()), seq: AtomicU64::new(0), observed_limits: Mutex::new(None), clock: system_clock() }
     }
 
     fn probe_cached(&self) -> ProbeResult {
@@ -354,10 +361,58 @@ impl ClaudeAdapter {
                         sink.push(AdapterEvent::Permission { request_id, tool, summary });
                     }
                     Msg::ApiRetry { attempt, max, delay_ms } => sink.push(AdapterEvent::Retry { attempt, max, delay_ms }),
+                    Msg::RateLimit(info) => *self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(((self.clock)(), info)),
                     Msg::Result(r) => return self.finish(run, r, sink),
                 }
             }
         }
+    }
+
+    /// ¿Se puede consultar el uso con `claude -p /usage`? Solo en versiones donde se comprobó que es un comando local: en
+    /// otra, `/usage` podría llegar al modelo y gastar cuota.
+    fn can_query_usage_command(&self) -> bool {
+        let probe = self.probe_cached();
+        matches!(probe.environment, super::Environment::Ready) && probe.cli_version.as_deref().is_some_and(|v| agents::version_verified(ID, v))
+    }
+
+    /// `claude -p /usage --output-format stream-json`: el comando local de la CLI. Se corta en seco si algún mensaje del
+    /// modelo aparece (el comando local responde con el modelo sintético `<synthetic>`): así una versión que lo trate
+    /// distinto no gasta más que el arranque.
+    fn query_usage_command(&self, cancel: &CancelToken) -> Result<Vec<UsageWindow>, UsageError> {
+        let program = self.program().map_err(UsageError::from)?;
+        let args = ["-p", "/usage", "--output-format", "stream-json", "--verbose"].iter().map(|s| s.to_string()).collect();
+        let scratch = UsageScratch::create()?;
+        let spec = LaunchSpec { program, args, cwd: scratch.path().to_path_buf(), env: vec![], env_remove: vec![] };
+        let process = self.launcher.launch(&spec).map_err(UsageError::from)?;
+        process.close_input();
+        let deadline = std::time::Instant::now() + USAGE_COMMAND_TIMEOUT;
+        let outcome = loop {
+            if cancel.is_cancelled() {
+                break Err(UsageError::unavailable("consulta de uso cancelada"));
+            }
+            if std::time::Instant::now() > deadline {
+                break Err(UsageError::unavailable("`claude /usage` no contestó a tiempo"));
+            }
+            match process.recv(POLL) {
+                Recv::Timeout => {}
+                Recv::Eof => break Err(UsageError::unavailable("`claude /usage` terminó sin resultado")),
+                Recv::Line(l) => {
+                    if let Ok(v) = serde_json::from_str::<Value>(&l) {
+                        if v["type"] == "assistant" && v.pointer("/message/model").and_then(Value::as_str) != Some("<synthetic>") {
+                            break Err(UsageError::unavailable("en esta versión `/usage` no es un comando local: no se usa"));
+                        }
+                    }
+                    if let Some(Msg::Result(r)) = parse_line(&l).into_iter().find(|m| matches!(m, Msg::Result(_))) {
+                        break match r.text.as_deref().map(usage::windows_from) {
+                            Some(w) if !r.is_error && !w.is_empty() => Ok(w),
+                            _ => Err(UsageError::unavailable("`claude /usage` no informa de límites en esta cuenta")),
+                        };
+                    }
+                }
+            }
+        };
+        process.kill();
+        outcome
     }
 
     fn finish(&self, run: &Run, r: ResultMsg, sink: &mut dyn EventSink) -> RunOutcome {
@@ -409,6 +464,69 @@ impl ProviderAdapter for ClaudeAdapter {
         state.process.kill();
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).remove(&run.seq);
         Ok(outcome)
+    }
+
+    /// Claude solo informa de sus límites DURANTE una ejecución: no hay consulta de cuenta sin gastar una. Por eso `windows`
+    /// consta como `unavailable` hasta que haya una observación, y la procedencia es siempre `run_observation`. Con un
+    /// endpoint ajeno no se atribuyen al servicio de otro los límites de Anthropic: sin uso.
+    fn usage_support(&self) -> UsageSupport {
+        if self.cfg.endpoint.is_some() {
+            return UsageSupport::none();
+        }
+        let observed = self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        let state = if self.can_query_usage_command() || observed {
+            CapabilityState::Available
+        } else {
+            CapabilityState::unavailable("`claude /usage` solo se usa en las versiones verificadas y aún no hay ninguna ejecución observada")
+        };
+        UsageSupport::none().with(UsageField::Windows, state)
+    }
+
+    fn usage(&self, cancel: &CancelToken) -> Result<UsageSnapshot, UsageError> {
+        cancel.check()?;
+        if self.cfg.endpoint.is_some() {
+            return Err(UsageError::unsupported());
+        }
+        // Lo exacto: el propio comando de uso de la CLI. Si no se puede (versión sin verificar, el comando falló), se cae a lo
+        // último que Claude dijo en una ejecución, con su procedencia y su antigüedad reales.
+        let command_error = if self.can_query_usage_command() {
+            match self.query_usage_command(cancel) {
+                Ok(windows) => {
+                    let mut snap = UsageSnapshot::new((self.clock)(), Provenance::ProviderQuery);
+                    snap.limit_reached = windows.iter().any(|w| w.used_percent.is_some_and(|p| p >= 100.0)).then_some(true);
+                    snap.windows = windows;
+                    return Ok(snap);
+                }
+                Err(e) => Some(e),
+            }
+        } else {
+            None
+        };
+        let Some((at, info)) = self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return Err(command_error.unwrap_or_else(|| UsageError::unavailable("`claude /usage` no está verificado en esta versión y aún no hay ninguna ejecución de la que leer los límites")));
+        };
+        let mut snap = UsageSnapshot::new(at, Provenance::RunObservation);
+        snap.windows = info
+            .windows
+            .iter()
+            .map(|w| UsageWindow {
+                id: w.id.clone(),
+                minutes: match w.id.as_str() {
+                    "five_hour" => Some(300),
+                    "seven_day" => Some(10_080),
+                    _ => None,
+                },
+                // `utilization` es una fracción; algo fuera de 0..=1 es un formato que no conocemos: desconocido.
+                used_percent: w.utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u)).map(|u| (u * 1000.0).round() / 10.0),
+                resets_at: w.resets_at,
+            })
+            .collect();
+        snap.limit_reached = match info.status.as_deref() {
+            Some("allowed") | Some("allowed_warning") => Some(false),
+            Some("rejected") => Some(true),
+            _ => None,
+        };
+        Ok(snap)
     }
 
     fn answer(&self, run: &RunHandle, answer: Answer) -> Result<(), AdapterError> {
