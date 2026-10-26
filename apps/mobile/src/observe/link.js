@@ -12,6 +12,8 @@ const RESPONSES = {
   orch_core_attention: 'core_attention',
   orch_core_task: 'core_task',
   orch_core_activity: 'core_activity',
+  orch_core_attempts: 'core_attempts',
+  orch_core_attempt: 'core_attempt',
 };
 const DEFAULT_TIMEOUT_MS = 20000;
 

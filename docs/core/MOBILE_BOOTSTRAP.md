@@ -34,6 +34,8 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 | `core_attention` (LXO-109) | `rid`, `project_id?`, `category?`, `severity?`, `cursor?` (texto opaco), `limit?` (1–100, por defecto 50) | `orch_core_attention` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
 | `core_task` (LXO-110) | `rid`, `project_id`, `task_id` | `orch_core_task` · `{rid, ok, protocol: 1, task}` |
 | `core_activity` (LXO-110) | `rid`, `task_id`, `cursor?` (entero ≥ 0; 0 = lo más nuevo), `limit?` (1–50, por defecto 30) | `orch_core_activity` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
+| `core_attempts` (LXO-126) | `rid`, `task_id` | `orch_core_attempts` · `{rid, ok, protocol: 1, task, attempts, truncated}` |
+| `core_attempt` (LXO-126) | `rid`, `attempt_id` | `orch_core_attempt` · `{rid, ok, protocol: 1, attempt}` |
 
 * `rid`: 1–64 caracteres `[A-Za-z0-9_-]`. Sin `rid` válido, la petición no llega al Core.
 * `events[]` va **reducido**: `seq`, `kind`, `ts`, `project_id`, `run_id` y `entity {kind, id}`. No lleva
@@ -56,6 +58,28 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
   móvil traduce `message_key` con una copia del traductor de Desktop (`apps/mobile/src/observe/activityMessages.js`,
   con una prueba que exige que sea idéntica). `core_attention` admite también `target_kind` y `target_id`. El gateway admite las dos acciones en
   `ORCH_ACTIONS` y trata las dos respuestas como `EPHEMERAL_EVENTS`.
+* **Intentos (LXO-126).** Con `core_attempts` y `core_attempt` el IDE anuncia la capability `core_attempts`. Solo
+  responden con el Core ya cortado al modelo Task/Attempt; antes, el código es `core_model_inactive` y el móvil sigue
+  con `core_task` como en LXO-110. Un IDE anterior contesta `orch_error` y el móvil lo trata igual.
+  * `core_attempts` lee `task_detail_v2` y el `attempt_detail` de los **20 últimos** intentos (por `n`).
+    * `task` va sin el encargo: `id`, `project_id`, `run_id`, `parent_task_id`, `title`, `intent`, `state`
+      (estado derivado), `origin`, `attempt_count`, `current_attempt_id` y fechas.
+    * Cada intento lleva `id`, `task_id`, `n`, `status`, `provider`, `model`, `role` y `origin` (de `external`).
+      También sus fechas, `failure_reason`, `integrated`, `has_summary` (no el resumen) y `host`, la máquina de su
+      Worktree si el Core la registra (`null` si no; nunca se deduce).
+    * Si el detalle de uno falla, va lo de la lista y lo demás queda `null`. `truncated` dice si hay más de 20.
+  * `core_attempt` es la ficha de un intento (`attempt_detail`): lo anterior más `effort`, `profile` y `summary`
+    (400 caracteres).
+    * `provider_session`: `status`, `resumable`, `bound`, `binding` y `opened_here`. Sin el id de la sesión ni la
+      referencia del proveedor.
+    * `worktree`: `path`, `branch`, `base_branch`, `provenance`, `state`, `machine` y `branch_kept`.
+    * `artifacts` (`kind` y `uri`, 20 como mucho) y la última `review` (`verdict`, `status`, `head_commit`,
+      `base_commit`).
+  * La Attention de ejecución apunta al intento (`target_kind: attempt`). El móvil la pide con `core_attention` y
+    abre **ese** intento, nunca «el último» de su tarea.
+  * Sin conexión, el móvil enseña los últimos intentos que vio de esa tarea, guardados solo en memoria (no en
+    disco), y los marca como desactualizados con su edad.
+  * El gateway admite las dos acciones en `ORCH_ACTIONS` y sus respuestas como `EPHEMERAL_EVENTS`.
 
 ## Estados en el móvil
 

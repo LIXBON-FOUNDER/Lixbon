@@ -16,14 +16,16 @@ import { Notice } from '../observe/ui';
 import AttentionScreen from './observe/AttentionScreen';
 import HomeScreen from './observe/HomeScreen';
 import ProjectScreen from './observe/ProjectScreen';
+import AttemptScreen from './observe/AttemptScreen';
 import TaskScreen from './observe/TaskScreen';
 
 // Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
-const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen };
+const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
   task: 'Tarea',
+  attempt: 'Intento',
   project: 'Proyecto',
 };
 
