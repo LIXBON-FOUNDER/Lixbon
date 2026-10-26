@@ -1,0 +1,429 @@
+{
+  "tarea": "LXO-205",
+  "base": "e73a74da",
+  "head": "b1cc12e3",
+  "version_arnes": 1,
+  "medicion": {
+    "tamanos": {
+      "objective": {
+        "bytes": 114,
+        "tokens_aprox": 29
+      },
+      "decisions": {
+        "bytes": 819,
+        "tokens_aprox": 204
+      },
+      "constraints": {
+        "bytes": 250,
+        "tokens_aprox": 62
+      },
+      "thread_summary": {
+        "bytes": 299,
+        "tokens_aprox": 74
+      },
+      "revision_refs": {
+        "bytes": 1623,
+        "tokens_aprox": 406
+      },
+      "test_results": {
+        "bytes": 155,
+        "tokens_aprox": 39
+      },
+      "artifacts": {
+        "bytes": 348,
+        "tokens_aprox": 87
+      },
+      "diff_completo": {
+        "bytes": 99407,
+        "tokens_aprox": 24207
+      }
+    },
+    "variantes": {
+      "nada": {
+        "bytes": 89,
+        "tokens_aprox": 23
+      },
+      "solo_refs": {
+        "bytes": 2207,
+        "tokens_aprox": 552
+      },
+      "solo_resumen": {
+        "bytes": 1595,
+        "tokens_aprox": 396
+      },
+      "completo": {
+        "bytes": 3768,
+        "tokens_aprox": 939
+      },
+      "diff_inline": {
+        "bytes": 102822,
+        "tokens_aprox": 25061
+      }
+    },
+    "redaccion": {
+      "lineas_del_diff": 1996,
+      "lineas_marcadas": 1,
+      "palabras_redactadas": 1,
+      "muestra_marcadas": [
+        "+const SECRETO: &str = \"sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef\";"
+      ],
+      "el_diff_redactado_conserva_el_hash": false,
+      "centinela_sale_del_paquete": false,
+      "el_diff_original_se_aplica": true,
+      "el_diff_redactado_se_aplica": true,
+      "error_redactado": "",
+      "cobertura_de_la_red_actual": {
+        "secretos_probados": 13,
+        "secretos_detectados": 6,
+        "detectados": [
+          "clave Anthropic",
+          "token GitHub",
+          "AWS access key",
+          "password=",
+          "Bearer",
+          "clave privada"
+        ],
+        "no_detectados": [
+          "JWT",
+          "URL con credenciales",
+          "token npm",
+          "token Google OAuth",
+          "AWS secret key",
+          "Stripe",
+          "variable .env"
+        ],
+        "no_secretos_probados": 5,
+        "falsos_positivos": []
+      }
+    }
+  },
+  "escenario_c": {
+    "commits_no_publicados": 5,
+    "head_resuelve_en_host_b_sin_transporte": false,
+    "bundle_bytes": 31019,
+    "transportes_bytes": {
+      "diff_binario": 99407,
+      "format_patch": 101932,
+      "bundle": 31019
+    },
+    "diff_aplicado_reproduce_el_arbol_de_head": true,
+    "arbol_head": "e3b8786a9a38",
+    "especifico_del_host": [
+      "ruta del worktree",
+      "id de máquina",
+      "rama local no publicada",
+      "ProviderSession (opaca, de ese proveedor y host)"
+    ]
+  },
+  "escenario_d": {
+    "solo_con_head_el_host_b_reproduce_el_estado": false,
+    "parche_sin_commit_bytes": 1100,
+    "archivos_sin_seguimiento": [
+      {
+        "path": "NOTAS_AGENTE_A.md",
+        "sha256": "dc62cf125622a018"
+      }
+    ],
+    "con_parche_y_archivos_el_host_b_reproduce_el_estado": true,
+    "preparado_y_no_preparado_por_separado_reproducen_el_indice": true,
+    "bytes_preparado_y_no_preparado": [
+      525,
+      575
+    ],
+    "bytes_sin_commit_frente_al_diff_completo": [
+      1100,
+      99407
+    ]
+  },
+  "modelos": {
+    "A1": {
+      "escenario": "A",
+      "proveedor": "claude",
+      "modelo": "haiku",
+      "variante": "nada",
+      "herramientas": false,
+      "prompt_tokens_aprox": 292,
+      "segundos": 7.2,
+      "costo_usd": 0.0005739,
+      "tokens": {
+        "entrada": 2,
+        "cache_creada": 1347,
+        "cache_leida": 0,
+        "salida": 240
+      },
+      "turnos": 1,
+      "puntaje": {
+        "detalle": {
+          "q1": "desconocido",
+          "q2": "desconocido",
+          "q3": "desconocido",
+          "q4": "desconocido",
+          "q5": "desconocido",
+          "q6": "desconocido",
+          "q7": "desconocido",
+          "q8": "desconocido",
+          "q9": "desconocido",
+          "q10": "desconocido"
+        },
+        "correcta": 0,
+        "desconocido": 10,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "A2": {
+      "escenario": "A",
+      "proveedor": "claude",
+      "modelo": "haiku",
+      "variante": "solo_resumen",
+      "herramientas": false,
+      "prompt_tokens_aprox": 666,
+      "segundos": 7.8,
+      "costo_usd": 0.0010459,
+      "tokens": {
+        "entrada": 2,
+        "cache_creada": 1960,
+        "cache_leida": 0,
+        "salida": 823
+      },
+      "turnos": 1,
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "correcta",
+          "q4": "desconocido",
+          "q5": "correcta",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "desconocido",
+          "q10": "desconocido"
+        },
+        "correcta": 7,
+        "desconocido": 3,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "A3": {
+      "escenario": "A",
+      "proveedor": "claude",
+      "modelo": "haiku",
+      "variante": "completo",
+      "herramientas": false,
+      "prompt_tokens_aprox": 1209,
+      "segundos": 8.7,
+      "costo_usd": 0.0015032000000000001,
+      "tokens": {
+        "entrada": 2,
+        "cache_creada": 3129,
+        "cache_leida": 0,
+        "salida": 1036
+      },
+      "turnos": 1,
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "correcta",
+          "q4": "correcta",
+          "q5": "correcta",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "correcta",
+          "q10": "correcta"
+        },
+        "correcta": 10,
+        "desconocido": 0,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "A4": {
+      "escenario": "A",
+      "proveedor": "claude",
+      "modelo": "haiku",
+      "variante": "diff_inline",
+      "herramientas": false,
+      "prompt_tokens_aprox": 25330,
+      "segundos": 10.3,
+      "costo_usd": 0.0157695,
+      "tokens": {
+        "entrada": 2,
+        "cache_creada": 50195,
+        "cache_leida": 0,
+        "salida": 1322
+      },
+      "turnos": 1,
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "correcta",
+          "q4": "desconocido",
+          "q5": "desconocido",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "desconocido",
+          "q10": "correcta"
+        },
+        "correcta": 7,
+        "desconocido": 3,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "A5": {
+      "escenario": "A",
+      "proveedor": "claude",
+      "modelo": "haiku",
+      "variante": "solo_refs",
+      "herramientas": true,
+      "prompt_tokens_aprox": 839,
+      "segundos": 15.7,
+      "costo_usd": 0.0040878500000000005,
+      "tokens": {
+        "entrada": 4,
+        "cache_creada": 13146,
+        "cache_leida": 14475,
+        "salida": 2029
+      },
+      "turnos": 3,
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "incorrecta",
+          "q4": "desconocido",
+          "q5": "correcta",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "correcta",
+          "q10": "correcta"
+        },
+        "correcta": 8,
+        "desconocido": 1,
+        "incorrecta": 1,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "B1": {
+      "escenario": "B",
+      "proveedor": "codex",
+      "modelo": "gpt-5.6-luna",
+      "variante": "nada",
+      "herramientas": false,
+      "prompt_tokens_aprox": 292,
+      "segundos": 14.2,
+      "costo_usd": null,
+      "tokens": {
+        "entrada": 22651,
+        "cache_leida": 11392,
+        "salida": 118
+      },
+      "herramientas_usadas": [],
+      "puntaje": {
+        "detalle": {
+          "q1": "desconocido",
+          "q2": "desconocido",
+          "q3": "desconocido",
+          "q4": "desconocido",
+          "q5": "desconocido",
+          "q6": "desconocido",
+          "q7": "desconocido",
+          "q8": "desconocido",
+          "q9": "desconocido",
+          "q10": "desconocido"
+        },
+        "correcta": 0,
+        "desconocido": 10,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "B2": {
+      "escenario": "B",
+      "proveedor": "codex",
+      "modelo": "gpt-5.6-luna",
+      "variante": "completo",
+      "herramientas": false,
+      "prompt_tokens_aprox": 1209,
+      "segundos": 12.9,
+      "costo_usd": null,
+      "tokens": {
+        "entrada": 22951,
+        "cache_leida": 11392,
+        "salida": 369
+      },
+      "herramientas_usadas": [],
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "correcta",
+          "q4": "correcta",
+          "q5": "correcta",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "correcta",
+          "q10": "correcta"
+        },
+        "correcta": 10,
+        "desconocido": 0,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    },
+    "B3": {
+      "escenario": "B",
+      "proveedor": "codex",
+      "modelo": "gpt-5.6-luna",
+      "variante": "solo_refs",
+      "herramientas": true,
+      "prompt_tokens_aprox": 839,
+      "segundos": 47.7,
+      "costo_usd": null,
+      "tokens": {
+        "entrada": 160453,
+        "cache_leida": 115200,
+        "salida": 2116
+      },
+      "herramientas_usadas": [
+        "command_execution: \"C:\\\\Users\\\\USUARIO\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\pwsh.exe\" -Command 'rg -n -C ",
+        "command_execution: \"C:\\\\Users\\\\USUARIO\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\pwsh.exe\" -Command '$files = ",
+        "command_execution: \"C:\\\\Users\\\\USUARIO\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\pwsh.exe\" -Command '$f='\"'doc"
+      ],
+      "puntaje": {
+        "detalle": {
+          "q1": "correcta",
+          "q2": "correcta",
+          "q3": "correcta",
+          "q4": "correcta",
+          "q5": "correcta",
+          "q6": "correcta",
+          "q7": "correcta",
+          "q8": "correcta",
+          "q9": "correcta",
+          "q10": "correcta"
+        },
+        "correcta": 10,
+        "desconocido": 0,
+        "incorrecta": 0,
+        "fuga_del_centinela": false
+      },
+      "contaminado": false
+    }
+  }
+}
