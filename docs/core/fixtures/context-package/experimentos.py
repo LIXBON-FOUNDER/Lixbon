@@ -481,7 +481,8 @@ def main():
     if salida:
         open(salida, "w", encoding="utf-8", newline="\n").write(texto + "\n")
     else:
-        print(texto)
+        # No se imprime el resultado: lleva las credenciales falsas del experimento y no debe acabar en un log.
+        print(f"resultado de {len(texto)} caracteres; indica una ruta de salida para guardarlo", file=sys.stderr)
 
 
 if __name__ == "__main__":
