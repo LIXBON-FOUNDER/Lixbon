@@ -201,6 +201,12 @@ def destino_web(path_name: str) -> tuple[str, int] | None:
     aparte); lixbon.com/ abre directamente el chat."""
     ruta = path_name.strip("/")
     partes = ruta.split("/")
+    # Antes el inglés iba bajo /en. Esas URLs siguen indexadas y, sin esto,
+    # devolvían 200 con el shell genérico: 301 a la ruta sin prefijo (o directo
+    # a su destino final, para no encadenar redirecciones).
+    if partes[0] == "en":
+        sin_prefijo = "/".join(partes[1:])
+        return destino_web(sin_prefijo) or (f"/{sin_prefijo}", 301)
     es = partes[0] == "es"
     resto = partes[1:] if es else partes
     if not resto or resto == [""]:
