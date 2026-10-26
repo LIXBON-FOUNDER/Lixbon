@@ -65,6 +65,12 @@ pub fn is_sandbox_setup_conflict(text: &str) -> bool {
     text.contains("helper_unknown_error") && text.contains("setup refresh had errors")
 }
 
+/// `thread/resume` de un hilo que Codex ya no tiene (observado en 0.164.0: «no rollout found for thread id <id>»). Solo
+/// vale para ESE método: el mismo texto en otra llamada no es una sesión caducada.
+pub fn is_thread_missing(method: &str, text: &str) -> bool {
+    method == "thread/resume" && text.contains("no rollout found for thread id")
+}
+
 const SANDBOX_UPDATE_REQUIRED: &str = "el sandbox de Windows de Codex necesita actualizarse: ábrelo desde Codex para completarlo y reintenta";
 const SANDBOX_IN_USE: &str = "el sandbox de Windows de Codex está en uso (por ejemplo, por la app de escritorio de Codex): ciérrala y reintenta; Lixbon no cierra procesos ajenos";
 const SANDBOX_NOT_READY: &str = "el sandbox de Windows de Codex no está listo (sin configurar o con una actualización pendiente): ábrelo desde Codex para configurarlo y reintenta";
@@ -528,7 +534,13 @@ impl Run {
         }
         match rx.recv_timeout(CALL_TIMEOUT) {
             Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(if is_sandbox_setup_conflict(&e.message) { environment_blocked(SANDBOX_IN_USE) } else { AdapterError::provider(&format!("{method}: {}", e.message)) }),
+            Ok(Err(e)) => Err(if is_sandbox_setup_conflict(&e.message) {
+                environment_blocked(SANDBOX_IN_USE)
+            } else if is_thread_missing(method, &e.message) {
+                AdapterError::session_not_found()
+            } else {
+                AdapterError::provider(&format!("{method}: {}", e.message))
+            }),
             Err(RecvTimeoutError::Timeout) => {
                 self.waiting.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 Err(AdapterError::provider(&format!("{method}: Codex no respondió a tiempo")))

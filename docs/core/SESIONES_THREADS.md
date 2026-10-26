@@ -125,6 +125,12 @@ tras salir el proceso), nace `idle` (013). Los mensajes nuevos van al Thread con
 | D28 | **El Thread no tiene estado** y su resumen pasa por `looks_secret`. Los mensajes nuevos y su evento son del runtime (ADR D9: sin doble emisión con `task.question`/`task.reply`) | `thread.message_added` ya: duplicaría los hechos de los mensajes legacy |
 | D29 | **Solo el Core conduce la sesión** (un agente nunca declara la suya); una persona puede cerrarla | dejar que el agente informe su sesión: vuelve a ser un dato no verificado |
 
+## Continuar un Attempt (LXO-134)
+
+Reanudar una sesión (`resume`) lo hace ahora el comando de continuidad, **en la misma transacción** que crea el Attempt nuevo y
+registra su procedencia (`attempt_continuations`, migración 016). Qué estrategia usar —resume nativo o ContextPackage— y qué
+pasa si la sesión caducó: [CONTINUIDAD.md](CONTINUIDAD.md).
+
 ## Fuera de este slice
 
 Adapters de Claude y Codex (F4), sincronizar transcripts, ContextPackage, escribir mensajes del Thread en el runtime,

@@ -31,6 +31,9 @@ pub enum ErrorCode {
     UnknownProvider,
     /// El adapter no conoce esa ejecución.
     UnknownRun,
+    /// El proveedor ya no tiene la sesión que se quiso reanudar (expiró o se borró). La petición no se atiende y el
+    /// Attempt anterior no cambia: el Core lo trata como sesión caducada (LXO-134), nunca como un fallo del Attempt.
+    SessionNotFound,
     /// El proveedor falló mientras ejecutaba.
     Provider,
     /// Fallo del propio adapter.
@@ -48,6 +51,7 @@ impl ErrorCode {
             ErrorCode::InvalidRequest => "invalid_request",
             ErrorCode::UnknownProvider => "unknown_provider",
             ErrorCode::UnknownRun => "unknown_run",
+            ErrorCode::SessionNotFound => "session_not_found",
             ErrorCode::Provider => "provider",
             ErrorCode::Internal => "internal",
         }
@@ -125,6 +129,10 @@ impl AdapterError {
         AdapterError::new(ErrorCode::UnknownRun, "ejecución desconocida para este adapter")
     }
 
+    pub fn session_not_found() -> AdapterError {
+        AdapterError::new(ErrorCode::SessionNotFound, "el proveedor ya no tiene esa sesión: no se puede reanudar")
+    }
+
     pub fn provider(message: &str) -> AdapterError {
         AdapterError::new(ErrorCode::Provider, message)
     }
@@ -136,7 +144,8 @@ impl AdapterError {
             | ErrorCode::CapabilityUnavailable
             | ErrorCode::InvalidRequest
             | ErrorCode::UnknownProvider
-            | ErrorCode::UnknownRun => FailureKind::Rejected,
+            | ErrorCode::UnknownRun
+            | ErrorCode::SessionNotFound => FailureKind::Rejected,
             ErrorCode::EnvironmentBlocked => FailureKind::EnvironmentBlocked,
             ErrorCode::Cancelled => FailureKind::Cancelled,
             ErrorCode::Provider | ErrorCode::Internal => FailureKind::AttemptFailure,

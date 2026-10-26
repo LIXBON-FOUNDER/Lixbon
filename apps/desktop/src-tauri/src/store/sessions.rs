@@ -223,7 +223,7 @@ fn finish_session((mut s, binding, status, origin): (ProviderSessionRow, Option<
     Ok(s)
 }
 
-fn session_in(c: &Connection, id: &str) -> StoreResult<Option<ProviderSessionRow>> {
+pub(super) fn session_in(c: &Connection, id: &str) -> StoreResult<Option<ProviderSessionRow>> {
     c.query_row(&format!("SELECT {SESSION_COLS} FROM provider_sessions WHERE id = ?1"), [id], session_from_row).optional()?.map(finish_session).transpose()
 }
 
@@ -335,6 +335,38 @@ fn session_in_use(tx: &Connection, id: &str) -> StoreResult<Option<String>> {
         .optional()?)
 }
 
+/// El cuerpo de [`Store::provider_session_resume_recorded`] dentro de una transacción ya abierta, para que
+/// `store::continuity` reanude la sesión en la misma que crea el Attempt nuevo.
+pub(super) fn session_resume_in(
+    tx: &rusqlite::Transaction<'_>,
+    projector: Option<&dyn super::events::EventProjector>,
+    id: &str,
+    attempt_id: &str,
+    at: i64,
+    event: impl FnOnce(&ProviderSessionRow, &AttemptRow, &TaskRow) -> StoreResult<NewEvent>,
+) -> StoreResult<ChangeOutcome> {
+    let Some(current) = session_in(tx, id)? else { return Ok(ChangeOutcome::Missing) };
+    if current.status == SessionStatus::Open && attempt_in(tx, attempt_id)?.is_some_and(|a| a.provider_session_id.as_deref() == Some(id)) {
+        return Ok(ChangeOutcome::Unchanged);
+    }
+    if current.status != SessionStatus::Idle {
+        return Err(StoreError::SessionConflict(format!("la sesión {id} está {}: solo se reanuda una sesión en espera", current.status.label())));
+    }
+    let attempt = attempt_ready(tx, attempt_id)?;
+    if attempt.task_id != current.task_id || attempt.provider != current.provider {
+        return Err(StoreError::SessionConflict(format!("el Attempt {attempt_id} no es de la Task y el proveedor de la sesión {id}")));
+    }
+    tx.execute("UPDATE provider_sessions SET status = 'open', updated_at = ?2 WHERE id = ?1", params![id, at.max(current.updated_at)])?;
+    link_provider_session_in(tx, attempt_id, id)?;
+    let session = session_in(tx, id)?.ok_or_else(|| StoreError::SessionConflict(format!("la sesión {id} desapareció")))?;
+    let attempt = attempt_in(tx, attempt_id)?.ok_or_else(|| StoreError::SessionConflict(format!("el Attempt {attempt_id} desapareció")))?;
+    let task = task_for(tx, &session.task_id)?;
+    let e = event(&session, &attempt, &task)?;
+    check_event("provider_session", id, &task, &e)?;
+    insert_event(tx, &e, projector)?;
+    Ok(ChangeOutcome::Changed)
+}
+
 impl Store {
     /// El Attempt `attempt_id` abre su sesión del proveedor (`ps-<attempt>`, `open`) y queda enlazado a ella, con su
     /// evento, en UNA transacción. Un Attempt terminado o que ya tiene sesión es [`StoreError::SessionConflict`].
@@ -424,26 +456,7 @@ impl Store {
         let projector = self.projector.clone();
         self.write(|tx| {
             require_active(tx)?;
-            let Some(current) = session_in(tx, id)? else { return Ok(ChangeOutcome::Missing) };
-            if current.status == SessionStatus::Open && attempt_in(tx, attempt_id)?.is_some_and(|a| a.provider_session_id.as_deref() == Some(id)) {
-                return Ok(ChangeOutcome::Unchanged);
-            }
-            if current.status != SessionStatus::Idle {
-                return Err(StoreError::SessionConflict(format!("la sesión {id} está {}: solo se reanuda una sesión en espera", current.status.label())));
-            }
-            let attempt = attempt_ready(tx, attempt_id)?;
-            if attempt.task_id != current.task_id || attempt.provider != current.provider {
-                return Err(StoreError::SessionConflict(format!("el Attempt {attempt_id} no es de la Task y el proveedor de la sesión {id}")));
-            }
-            tx.execute("UPDATE provider_sessions SET status = 'open', updated_at = ?2 WHERE id = ?1", params![id, at.max(current.updated_at)])?;
-            link_provider_session_in(tx, attempt_id, id)?;
-            let session = session_in(tx, id)?.ok_or_else(|| StoreError::SessionConflict(format!("la sesión {id} desapareció")))?;
-            let attempt = attempt_in(tx, attempt_id)?.ok_or_else(|| StoreError::SessionConflict(format!("el Attempt {attempt_id} desapareció")))?;
-            let task = task_for(tx, &session.task_id)?;
-            let e = event(&session, &attempt, &task)?;
-            check_event("provider_session", id, &task, &e)?;
-            insert_event(tx, &e, projector.as_deref())?;
-            Ok(ChangeOutcome::Changed)
+            session_resume_in(tx, projector.as_deref(), id, attempt_id, at, event)
         })
     }
 

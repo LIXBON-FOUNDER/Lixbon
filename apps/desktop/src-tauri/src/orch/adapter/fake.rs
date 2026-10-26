@@ -30,6 +30,12 @@ pub struct FakeAdapter {
     calls: Mutex<Vec<String>>,
     seq: AtomicU64,
     interrupted: AtomicBool,
+    /// Lo que llegó a `start` y a `resume` (LXO-134): una prueba comprueba QUÉ se lanzó y con qué mensaje.
+    starts: Mutex<Vec<StartRequest>>,
+    resumes: Mutex<Vec<ResumeRequest>>,
+    /// Si está, `start` / `resume` devuelven este error en lugar de lanzar.
+    start_error: Mutex<Option<AdapterError>>,
+    resume_error: Mutex<Option<AdapterError>>,
 }
 
 impl FakeAdapter {
@@ -46,7 +52,27 @@ impl FakeAdapter {
             calls: Mutex::new(vec![]),
             seq: AtomicU64::new(0),
             interrupted: AtomicBool::new(false),
+            starts: Mutex::new(vec![]),
+            resumes: Mutex::new(vec![]),
+            start_error: Mutex::new(None),
+            resume_error: Mutex::new(None),
         }
+    }
+
+    pub fn starts(&self) -> Vec<StartRequest> {
+        self.starts.lock().unwrap().clone()
+    }
+
+    pub fn resumes(&self) -> Vec<ResumeRequest> {
+        self.resumes.lock().unwrap().clone()
+    }
+
+    pub fn fail_start_with(&self, e: Option<AdapterError>) {
+        *self.start_error.lock().unwrap() = e;
+    }
+
+    pub fn fail_resume_with(&self, e: Option<AdapterError>) {
+        *self.resume_error.lock().unwrap() = e;
     }
 
     pub fn set_probe(&self, probe: ProbeResult) {
@@ -92,6 +118,10 @@ impl ProviderAdapter for FakeAdapter {
     fn start(&self, req: StartRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         self.note("start".into());
         cancel.check()?;
+        if let Some(e) = self.start_error.lock().unwrap().clone() {
+            return Err(e);
+        }
+        self.starts.lock().unwrap().push(req.clone());
         self.interrupted.store(false, Ordering::SeqCst);
         Ok(self.handle(&req.attempt_id))
     }
@@ -149,6 +179,10 @@ impl ProviderAdapter for FakeAdapter {
     fn resume(&self, req: ResumeRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         self.note("resume".into());
         cancel.check()?;
+        if let Some(e) = self.resume_error.lock().unwrap().clone() {
+            return Err(e);
+        }
+        self.resumes.lock().unwrap().push(req.clone());
         Ok(self.handle(&req.attempt_id))
     }
 }

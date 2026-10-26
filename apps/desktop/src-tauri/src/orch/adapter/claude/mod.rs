@@ -204,6 +204,14 @@ struct Run {
     /// Peticiones de permiso sin responder: id → entrada original de la herramienta (solo en memoria).
     pending: Mutex<HashMap<String, Value>>,
     interrupted: AtomicBool,
+    /// Se lanzó con `--resume`: un «no existe esa conversación» significa sesión caducada, no un fallo de la ejecución.
+    resumed: bool,
+}
+
+/// El mensaje con que Claude dice que ya no tiene la sesión que se le pidió reanudar (observado en 2.1.x: «No conversation
+/// found with session ID: <id>»). Se exige la frase COMPLETA: un texto parecido en otro error no es una sesión caducada.
+fn is_session_missing(message: &str) -> bool {
+    message.contains("No conversation found with session ID")
 }
 
 type ProbeFn = Arc<dyn Fn() -> ProbeResult + Send + Sync>;
@@ -314,7 +322,7 @@ impl ClaudeAdapter {
             return Err(e);
         }
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
-        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), interrupted: AtomicBool::new(false) };
+        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), interrupted: AtomicBool::new(false), resumed: resume.is_some() };
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).insert(seq, Arc::new(state));
         Ok(RunHandle { attempt_id: attempt_id.to_string(), adapter: self.cfg.id.clone(), seq })
     }
@@ -431,6 +439,10 @@ impl ClaudeAdapter {
         }
         if run.interrupted.load(Ordering::SeqCst) {
             return RunOutcome::Interrupted;
+        }
+        // Reanudar una sesión que Claude ya no tiene no es un fallo de la ejecución: es una sesión caducada (LXO-134).
+        if run.resumed && r.errors.iter().any(|m| is_session_missing(m)) {
+            return RunOutcome::Failed(AdapterError::session_not_found());
         }
         let mut e = AdapterError::provider(&format!("Claude terminó con error ({})", r.subtype));
         let detail = [r.terminal_reason.as_deref().map(|t| format!("terminal_reason={t}")), r.text.clone()].into_iter().flatten().collect::<Vec<_>>().join("; ");

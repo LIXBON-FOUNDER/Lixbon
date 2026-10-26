@@ -323,7 +323,40 @@ fn check_reason(reason: &str) -> StoreResult<()> {
 }
 
 /// El evento se refiere a este Attempt: su entidad, su Run y su Project (los de su Task).
-fn check_attempt_event(a: &AttemptRow, t: &TaskRow, e: &NewEvent) -> StoreResult<()> {
+/// Inserta el Attempt `n + 1` de `task_id` con las comprobaciones de [`Store::attempt_create_recorded`] (Task abierta, Run
+/// abierto, sin otro Attempt activo), SIN su evento: lo escribe quien llama en la MISMA transacción. Lo comparte
+/// `store::continuity`, que además enlaza la continuidad.
+pub(super) fn attempt_insert_in(tx: &Connection, task_id: &str, new: &NewAttempt, at: i64) -> StoreResult<(AttemptRow, TaskRow)> {
+    require_active(tx)?;
+    let task = task_in(tx, task_id)?.ok_or_else(|| StoreError::AttemptConflict(format!("no existe la Task {task_id}")))?;
+    if task.intent == TaskIntent::Discarded {
+        return Err(StoreError::AttemptConflict(format!("la Task {task_id} está descartada: no admite Attempts")));
+    }
+    if run_in(tx, &task.run_id)?.is_some_and(|r| r.closed) {
+        return Err(StoreError::AttemptConflict(format!("el Run {} está cerrado: no admite Attempts nuevos", task.run_id)));
+    }
+    let activo: Option<String> =
+        tx.query_row("SELECT id FROM attempts WHERE task_id = ?1 AND status NOT IN ('done', 'failed', 'stopped', 'exited')", [task_id], |r| r.get(0)).optional()?;
+    if let Some(activo) = activo {
+        return Err(StoreError::AttemptConflict(format!("la Task {task_id} ya tiene el Attempt activo {activo}: espera a que termine o cancélalo")));
+    }
+    let n: i64 = tx.query_row("SELECT COALESCE(MAX(n), 0) + 1 FROM attempts WHERE task_id = ?1", [task_id], |r| r.get(0))?;
+    let status = if new.requires_approval { AttemptStatus::PendingApproval } else { AttemptStatus::Starting };
+    let id = format!("{task_id}-a{n}");
+    tx.execute(
+        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'core')",
+        params![id, task_id, n, status.as_str(), new.external as i64, new.provider, new.model, new.effort, new.role, new.profile, at],
+    )?;
+    let attempt = attempt_in(tx, &id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt recién creado {id} no existe")))?;
+    Ok((attempt, task))
+}
+
+pub(super) fn check_new_attempt(new: &NewAttempt) -> StoreResult<()> {
+    check_new(new)
+}
+
+pub(super) fn check_attempt_event(a: &AttemptRow, t: &TaskRow, e: &NewEvent) -> StoreResult<()> {
     if e.entity_kind != "attempt" || e.entity_id != a.id || e.run_id.as_deref() != Some(t.run_id.as_str()) || e.project_id != t.project_id {
         return Err(StoreError::InvalidEvent(format!("{}: el evento no se refiere al Attempt {}", e.kind, a.id)));
     }
@@ -453,28 +486,7 @@ impl Store {
         check_new(new)?;
         let projector = self.projector.clone();
         self.write(|tx| {
-            require_active(tx)?;
-            let task = task_in(tx, task_id)?.ok_or_else(|| StoreError::AttemptConflict(format!("no existe la Task {task_id}")))?;
-            if task.intent == TaskIntent::Discarded {
-                return Err(StoreError::AttemptConflict(format!("la Task {task_id} está descartada: no admite Attempts")));
-            }
-            if run_in(tx, &task.run_id)?.is_some_and(|r| r.closed) {
-                return Err(StoreError::AttemptConflict(format!("el Run {} está cerrado: no admite Attempts nuevos", task.run_id)));
-            }
-            let activo: Option<String> =
-                tx.query_row("SELECT id FROM attempts WHERE task_id = ?1 AND status NOT IN ('done', 'failed', 'stopped', 'exited')", [task_id], |r| r.get(0)).optional()?;
-            if let Some(activo) = activo {
-                return Err(StoreError::AttemptConflict(format!("la Task {task_id} ya tiene el Attempt activo {activo}: espera a que termine o cancélalo")));
-            }
-            let n: i64 = tx.query_row("SELECT COALESCE(MAX(n), 0) + 1 FROM attempts WHERE task_id = ?1", [task_id], |r| r.get(0))?;
-            let status = if new.requires_approval { AttemptStatus::PendingApproval } else { AttemptStatus::Starting };
-            let id = format!("{task_id}-a{n}");
-            tx.execute(
-                "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, created_at, updated_at, origin)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'core')",
-                params![id, task_id, n, status.as_str(), new.external as i64, new.provider, new.model, new.effort, new.role, new.profile, at],
-            )?;
-            let attempt = attempt_in(tx, &id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt recién creado {id} no existe")))?;
+            let (attempt, task) = attempt_insert_in(tx, task_id, new, at)?;
             let e = event(&attempt, &task)?;
             check_attempt_event(&attempt, &task, &e)?;
             insert_event(tx, &e, projector.as_deref())?;

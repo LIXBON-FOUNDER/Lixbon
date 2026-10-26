@@ -341,6 +341,26 @@ fn resume_usa_thread_resume_con_el_hilo_original_y_conserva_el_perfil() {
     assert_eq!(g.resume(req(None), &cancel).unwrap_err().code, ErrorCode::InvalidRequest);
 }
 
+#[test]
+fn reanudar_un_hilo_que_codex_ya_no_tiene_es_session_not_found_y_no_un_fallo() {
+    // Mensaje observado con codex 0.164.0 al reanudar un id que no existe.
+    let mut s = script_of(REANUDAR);
+    let r = respond_de(&mut s, "thread/resume");
+    r.as_object_mut().unwrap().remove("result");
+    r["error"] = json!({"code": -32600, "message": "thread/resume failed: no rollout found for thread id 00000000-0000-4000-8000-000000000001"});
+    let l = FakeLauncher::new(s);
+    let reg = registro(plan_app_server(), l.clone());
+    let req = ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("00000000-0000-4000-8000-000000000001").unwrap(), worktree: PathBuf::from("wt"), prompt: Some("sigue".into()), profile: "proponer".into(), model: None, effort: None };
+    let e = reg.gated(ID).unwrap().resume(req, &CancelToken::new()).unwrap_err();
+    assert_eq!((e.code, e.kind()), (ErrorCode::SessionNotFound, FailureKind::Rejected));
+    assert!(l.last().1.was_killed(), "un arranque fallido no deja el servidor vivo");
+
+    // La frase solo vale para `thread/resume`: la misma en otra llamada sigue siendo un fallo del proveedor.
+    assert!(is_thread_missing("thread/resume", "no rollout found for thread id x"));
+    assert!(!is_thread_missing("thread/start", "no rollout found for thread id x"));
+    assert!(!is_thread_missing("thread/resume", "rollout corrupto"));
+}
+
 // ── cancelar, cortes y flujo malformado ───────────────────────────────────────────────────────────────────────────────
 
 fn hasta_turn_start(mut s: Vec<Value>) -> Vec<Value> {

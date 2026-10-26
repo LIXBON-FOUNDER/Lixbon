@@ -877,6 +877,7 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | kind | v | class | Payload | Quién |
 |---|---|---|---|---|
 | `attempt.requested` | 1 | state | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | persona · agente que coordina la Task |
+| `attempt.continued` (LXO-134) | 1 | state | `task`, `n`, `from_n`, `strategy` ∈ `native_resume` · `context_package`, `reason` ∈ `preferred` · `requested` · `provider_changed` · `resume_unsupported` · `session_unavailable` · `session_expired`, `package_id?` (solo con paquete; un hash). Nunca la referencia del proveedor ni el contenido del paquete. Va después de `attempt.requested` en la misma transacción | persona · agente que coordina · Core |
 | `attempt.approved` | 1 | decision | `task`, `n` | persona |
 | `attempt.rejected` | 1 | decision | `task`, `n`, `cause` ∈ `cancelled` · `run_closed` | persona · agente que coordina · Core |
 | `attempt.started` | 1 | state | `task`, `n` | Core |

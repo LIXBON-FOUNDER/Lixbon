@@ -4,8 +4,9 @@ El Core no habla con Claude ni con Codex: habla con un **adapter** que cumple un
 **matriz de capabilities**, lo que de verdad ofrece. Los clientes (Desktop, CLI, Mobile) pintan esa matriz; **nunca**
 deciden por el nombre o la versión del proveedor. Código en `apps/desktop/src-tauri/src/orch/adapter/`.
 
-Fuera de este contrato (otras issues): los adapters reales de Claude y Codex (LXO-129/130), el payload de ContextPackage
-(LXO-133) y el comando de resume y su fallback (LXO-134). Usage (LXO-205) está en la sección [Usage](#usage-lxo-205).
+Fuera de este contrato (otras issues): los adapters reales de Claude y Codex (LXO-129/130) y el payload de ContextPackage
+(LXO-133). El comando de resume y su fallback (LXO-134) está en [CONTINUIDAD.md](CONTINUIDAD.md). Usage (LXO-205) está en la
+sección [Usage](#usage-lxo-205).
 
 ## El adapter
 
@@ -54,8 +55,12 @@ cambia), `EnvironmentBlocked`, `Cancelled` y `AttemptFailure` (el proveedor fall
 
 Código estable + mensaje + diagnóstico crudo opcional (redactado y acotado a 2048 caracteres, con `…` si se corta).
 Códigos: `unknown_capability`, `unsupported_capability`, `capability_unavailable`, `environment_blocked`, `cancelled`,
-`invalid_request`, `unknown_provider`, `unknown_run`, `provider`, `internal`. Conjunto cerrado: añadir uno es un cambio de
-contrato.
+`invalid_request`, `unknown_provider`, `unknown_run`, `session_not_found`, `provider`, `internal`. Conjunto cerrado: añadir uno
+es un cambio de contrato.
+
+`session_not_found` (LXO-134) es el proveedor diciendo que ya no tiene la sesión que se quiso reanudar. Es `Rejected` (no es un
+fallo de la ejecución) y el Core lo trata como sesión caducada ([CONTINUIDAD.md](CONTINUIDAD.md#detección-de-la-sesión-caducada)).
+Cada adapter lo levanta solo al reanudar y con el texto observado en su CLI real.
 
 ## Registro y snapshot
 

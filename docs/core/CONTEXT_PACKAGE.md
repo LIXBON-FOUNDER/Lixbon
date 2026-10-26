@@ -258,7 +258,7 @@ diff real de LXO-205 (el centinela de una prueba), igual que antes. Una referenc
 * No convierte rutas absolutas ni nombres de host: las rechaza (`invalid_field`); quien construye el paquete aporta rutas
   relativas al repositorio.
 * No genera resúmenes con un modelo (D41) ni enlaza un paquete con el que corrige (`supersedes`).
-* No lo conecta todavía a ningún comando: el resume y su fallback (LXO-134) deben pasar **siempre** por `parse` antes de
+* No lo conectaba a ningún comando: desde LXO-134 el resume y su fallback ([CONTINUIDAD.md](CONTINUIDAD.md)) pasan **siempre** por `parse` antes de
   crear el Attempt; las pruebas lo demuestran con dos adapters falsos (un paquete inválido no arranca nada).
 
 **Fuga conocida de la redacción** (heredada de `looks_secret`, medida): `redact` trabaja por palabras, así que un secreto

@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 55] = [
+pub(super) const KINDS: [&str; 56] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -46,6 +46,7 @@ pub(super) const KINDS: [&str; 55] = [
     "task.discarded",
     "task.restored",
     "attempt.requested",
+    "attempt.continued",
     "attempt.approved",
     "attempt.rejected",
     "attempt.started",
@@ -107,6 +108,8 @@ const ATTEMPT_FAILURES: [&str; 4] = ["launch_failed", "terminal_approval_timeout
 const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
 /// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
+const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
+const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Procedencia de un Worktree que ya existía (`worktree.adopted`).
@@ -441,6 +444,17 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         "task.discarded" => rendered("activity.task.discarded", Visual::Warning, vec![]),
         "task.restored" => rendered("activity.task.restored", Visual::Info, vec![]),
 
+        "attempt.continued" => rendered(
+            "activity.attempt.continued",
+            Visual::Info,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("from_n", number(p, "from_n")),
+                ("strategy", closed(p, "strategy", &CONTINUITY_STRATEGIES)),
+                ("reason", closed(p, "reason", &CONTINUITY_REASONS)),
+            ],
+        ),
         "attempt.requested" => rendered(
             "activity.attempt.requested",
             Visual::Info,

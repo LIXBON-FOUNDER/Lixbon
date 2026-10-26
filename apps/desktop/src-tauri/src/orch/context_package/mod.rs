@@ -303,6 +303,11 @@ pub struct Receipt {
 }
 
 impl ContextPackage {
+    /// De dónde sale el paquete: lo fijó el Core al crearlo y quien lo recibe no puede cambiarlo.
+    pub fn source(&self) -> &Source {
+        &self.w.source
+    }
+
     pub fn id(&self) -> &str {
         &self.w.package_id
     }

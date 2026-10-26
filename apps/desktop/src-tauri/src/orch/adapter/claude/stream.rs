@@ -31,6 +31,9 @@ pub struct ResultMsg {
     pub subtype: String,
     pub terminal_reason: Option<String>,
     pub text: Option<String>,
+    /// Los mensajes de `errors` del resultado (Claude los usa cuando no llega a ejecutar, p. ej. al reanudar una sesión
+    /// que ya no existe).
+    pub errors: Vec<String>,
     pub usage: UsageTotals,
 }
 
@@ -113,6 +116,7 @@ fn result(v: &Value) -> Msg {
         subtype: s(v, "subtype").unwrap_or_default(),
         terminal_reason: s(v, "terminal_reason"),
         text: s(v, "result").filter(|t| !t.is_empty()),
+        errors: v.get("errors").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default(),
         usage: UsageTotals {
             input_tokens: n(u, "input_tokens"),
             output_tokens: n(u, "output_tokens"),

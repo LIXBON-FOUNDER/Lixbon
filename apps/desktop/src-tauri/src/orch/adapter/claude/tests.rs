@@ -615,6 +615,32 @@ fn resume_lanza_con_resume_y_el_perfil_original() {
 }
 
 #[test]
+fn reanudar_una_sesion_que_claude_ya_no_tiene_es_session_not_found_y_no_un_fallo() {
+    // Resultado observado con claude 2.1.296 al hacer `--resume` de un id inexistente: `errors`, sin `result`.
+    let falla = |texto: &str| {
+        vec![json!({"__gate": "prompt"}), json!({"type": "result", "subtype": "error_during_execution", "is_error": true, "num_turns": 0, "errors": [texto]})]
+    };
+    let corre_resume = |script: Vec<Value>| {
+        let l = FakeLauncher::new(script);
+        let reg = registro(adapter(cfg(), l.clone()));
+        let g = reg.gated(ID).unwrap();
+        let req = ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("sesion-previa-7").unwrap(), worktree: PathBuf::from("wt"), prompt: Some("sigue".into()), profile: "proponer".into(), model: None, effort: None };
+        let cancel = CancelToken::new();
+        let run = g.resume(req, &cancel).unwrap();
+        g.events(&run, &cancel, &mut |_: AdapterEvent| {}).unwrap()
+    };
+    let RunOutcome::Failed(e) = corre_resume(falla("No conversation found with session ID: sesion-previa-7")) else { panic!("debía fallar") };
+    assert_eq!((e.code, e.kind()), (ErrorCode::SessionNotFound, FailureKind::Rejected));
+
+    // Otro error al reanudar sigue siendo un fallo del proveedor, y la misma frase fuera de un `--resume` también.
+    let RunOutcome::Failed(e) = corre_resume(falla("rate limit")) else { panic!("debía fallar") };
+    assert_eq!(e.code, ErrorCode::Provider);
+    let (_, outcome, _) = corre(falla("No conversation found with session ID: x"), "");
+    let RunOutcome::Failed(e) = outcome else { panic!("{outcome:?}") };
+    assert_eq!(e.code, ErrorCode::Provider, "sin --resume no hay sesión caducada");
+}
+
+#[test]
 fn varias_configuraciones_conviven_con_ids_distintos() {
     std::env::set_var("TOKEN_MULTI_X", "t");
     let ep = Endpoint::new("http://localhost:11434", "TOKEN_MULTI_X", Some("qwen3")).unwrap();

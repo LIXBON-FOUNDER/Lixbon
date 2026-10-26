@@ -126,6 +126,7 @@ fn cada_estado_de_la_matriz_da_su_error_estable() {
         ErrorCode::InvalidRequest,
         ErrorCode::UnknownProvider,
         ErrorCode::UnknownRun,
+        ErrorCode::SessionNotFound,
         ErrorCode::Provider,
         ErrorCode::Internal,
     ]
@@ -136,7 +137,7 @@ fn cada_estado_de_la_matriz_da_su_error_estable() {
         codes,
         [
             "unknown_capability", "unsupported_capability", "capability_unavailable", "environment_blocked", "cancelled", "invalid_request",
-            "unknown_provider", "unknown_run", "provider", "internal"
+            "unknown_provider", "unknown_run", "session_not_found", "provider", "internal"
         ]
     );
     assert_eq!(serde_json::to_value(ErrorCode::UnsupportedCapability).unwrap(), json!("unsupported_capability"));

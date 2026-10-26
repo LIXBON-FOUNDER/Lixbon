@@ -79,9 +79,12 @@ mod attempt_ops;
 mod attempt_ops_tests;
 #[cfg(test)]
 mod attempt_runtime_ops_tests;
+mod continuity;
 mod session_ops;
 #[cfg(test)]
 mod session_ops_tests;
+#[cfg(test)]
+mod continuity_tests;
 mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;

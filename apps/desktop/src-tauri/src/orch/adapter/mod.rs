@@ -22,7 +22,7 @@ mod usage;
 #[cfg(test)]
 mod usage_tests;
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
 
