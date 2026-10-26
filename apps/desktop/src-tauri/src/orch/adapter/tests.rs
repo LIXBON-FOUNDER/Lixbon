@@ -431,3 +431,14 @@ fn el_registro_rechaza_ids_invalidos_repetidos_y_proveedores_desconocidos() {
     assert_eq!(reg.gated("nadie").err().map(|e| e.code), Some(ErrorCode::UnknownProvider));
     assert_eq!(reg.refresh("nadie").unwrap_err().code, ErrorCode::UnknownProvider);
 }
+
+#[test]
+fn la_deteccion_de_flags_exige_el_nombre_completo() {
+    let ayuda = "  --json            salida JSON\n  -p, --print\n  app-server   [experimental]\n  --output-format <f> (\"stream-json\")";
+    assert!(help_has(ayuda, "--json") && help_has(ayuda, "--print") && help_has(ayuda, "app-server") && help_has(ayuda, "stream-json"));
+    // Un flag o subcomando PARECIDO no cuenta.
+    for parecido in ["--jsonl", "--json-schema", "--no-json", "my-app-server", "app-servers", "--stream-json2"] {
+        assert!(!help_has(&format!("  {parecido}   otra cosa"), if parecido.contains("json") && !parecido.contains("stream") { "--json" } else if parecido.contains("stream") { "stream-json" } else { "app-server" }), "{parecido}");
+    }
+    assert!(!help_has("", "--json"));
+}

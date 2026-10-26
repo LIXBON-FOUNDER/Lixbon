@@ -12,7 +12,9 @@
 
 mod capability;
 mod claude;
+mod codex;
 mod error;
+mod process;
 mod redact;
 mod registry;
 
@@ -30,12 +32,24 @@ use serde::{Deserialize, Serialize};
 
 pub use capability::{Capability, CapabilityMatrix, CapabilityState, MATRIX_VERSION};
 pub use claude::{ClaudeAdapter, ClaudeConfig, Endpoint};
+pub use codex::{CodexAdapter, CodexConfig};
 pub use error::{AdapterError, ErrorCode, FailureKind};
 pub use redact::{redact, REDACTED};
 pub use registry::{AdapterRegistry, ProviderEntry, RegistrySnapshot, SNAPSHOT_VERSION};
 
 use crate::orch::agents::EnvBlock;
 use crate::store::{looks_secret, MAX_EXTERNAL_REF_CHARS};
+
+/// ¿Menciona la ayuda de una CLI este flag o subcomando COMPLETO? `--json` no se da por presente porque aparezca `--jsonl` o
+/// `--json-schema`: una CLI con un flag parecido no es compatible.
+pub(crate) fn help_has(help: &str, token: &str) -> bool {
+    let is_token_char = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+    help.match_indices(token).any(|(i, _)| {
+        let before = help[..i].chars().next_back();
+        let after = help[i + token.len()..].chars().next();
+        !before.is_some_and(is_token_char) && !after.is_some_and(is_token_char)
+    })
+}
 
 /// Cancelación cooperativa: el Core la dispara, el adapter la mira entre pasos y devuelve `Cancelled`. Se clona; todos
 /// los clones comparten el mismo estado.
@@ -109,18 +123,27 @@ pub struct ProbeResult {
     pub cli_version: Option<String>,
     pub environment: Environment,
     pub matrix: CapabilityMatrix,
+    /// Canal con que el adapter hablará con el proveedor, si ofrece más de uno (`app_server`, `exec_json`…). Un canal
+    /// degradado es visible aquí y en el evento `Transport`. Ausente en los adapters de un solo canal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
 }
 
 impl ProbeResult {
     /// Entorno listo con la matriz dada.
     pub fn ready(cli_version: Option<&str>, matrix: CapabilityMatrix) -> ProbeResult {
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix, transport: None }
+    }
+
+    pub fn with_transport(mut self, transport: &str) -> ProbeResult {
+        self.transport = Some(transport.to_string());
+        self
     }
 
     /// Entorno bloqueado: toda la matriz queda `environment_blocked` por el primer bloqueo.
     pub fn blocked(cli_version: Option<&str>, blocks: Vec<EnvBlock>) -> ProbeResult {
         let first = blocks.first().copied().unwrap_or(EnvBlock::CliMissing);
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first) }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first), transport: None }
     }
 }
 
@@ -169,6 +192,8 @@ pub struct RunHandle {
 pub enum AdapterEvent {
     /// El proveedor entregó el id de su sesión. El Core lo fija en `provider_sessions`; no viaja en ningún Event.
     SessionBound { provider_ref: ProviderRef },
+    /// Canal con que corre esta ejecución. `degraded` marca un respaldo; `reason` dice por qué se cayó al respaldo.
+    Transport { kind: String, degraded: bool, reason: Option<String> },
     /// Modelo EFECTIVO con el que corre (puede diferir del pedido).
     Model { model: String },
     Output { text: String },
@@ -218,6 +243,7 @@ impl EventSink for RedactingSink<'_> {
             AdapterEvent::Model { model } => AdapterEvent::Model { model: redact(&model) },
             AdapterEvent::Permission { request_id, tool, summary } => AdapterEvent::Permission { request_id, tool: redact(&tool), summary: redact(&summary) },
             AdapterEvent::ToolUse { tool, summary } => AdapterEvent::ToolUse { tool: redact(&tool), summary: redact(&summary) },
+            AdapterEvent::Transport { kind, degraded, reason } => AdapterEvent::Transport { kind: redact(&kind), degraded, reason: reason.map(|r| redact(&r)) },
             keep @ (AdapterEvent::SessionBound { .. } | AdapterEvent::Retry { .. } | AdapterEvent::Usage { .. }) => keep,
         };
         self.inner.push(event);

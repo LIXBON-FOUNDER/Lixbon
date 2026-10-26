@@ -9,7 +9,6 @@
 //! Varios modelos con formato Anthropic: un [`Endpoint`] (`base_url` + variable con el token + modelo) apunta la misma
 //! CLI a otro servicio compatible. Cada configuración se registra con su propio id (`claude`, `claude-local`…).
 
-mod process;
 mod stream;
 
 #[cfg(test)]
@@ -25,7 +24,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-pub use process::{LaunchSpec, Launcher, Process, RealLauncher, Recv};
+pub use super::process::{LaunchSpec, Launcher, Process, RealLauncher, Recv};
 use stream::{parse_line, Msg, ResultMsg};
 
 use super::redact::{redact, safe_text};
@@ -129,7 +128,7 @@ fn launch_env(cfg: &ClaudeConfig, get: &dyn Fn(&str) -> Option<String>) -> Resul
 // ── Probe ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 fn help_has(help: &str, flag: &str) -> bool {
-    help.contains(flag)
+    super::help_has(help, flag)
 }
 
 /// Qué ofrece la CLI instalada. Función pura: `version` y `help` salen de `claude --version` / `claude --help`.

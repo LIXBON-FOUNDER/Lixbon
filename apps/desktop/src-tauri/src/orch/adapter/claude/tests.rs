@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::fake::{script_of, FakeLauncher};
-use super::process::LaunchSpec;
+use crate::orch::adapter::process::LaunchSpec;
 use super::stream::{parse_line, summarize_tool, Msg};
 use super::*;
 use crate::orch::adapter::{AdapterRegistry, Environment, ErrorCode, FailureKind, REDACTED};

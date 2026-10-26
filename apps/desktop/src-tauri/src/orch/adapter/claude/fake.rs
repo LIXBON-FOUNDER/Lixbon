@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::process::{LaunchSpec, Launcher, Process, Recv};
+use crate::orch::adapter::process::{LaunchSpec, Launcher, Process, Recv};
 use crate::orch::adapter::redact::safe_text;
 use crate::orch::adapter::AdapterError;
 

@@ -22,6 +22,9 @@ pub struct ProviderEntry {
     pub cli_version: Option<String>,
     pub environment: Environment,
     pub matrix: CapabilityMatrix,
+    /// Canal con que habla el adapter (`app_server`, `exec_json`…), si tiene más de uno.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -101,7 +104,7 @@ impl AdapterRegistry {
             providers: self
                 .entries
                 .iter()
-                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone() })
+                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone(), transport: e.probe.transport.clone() })
                 .collect(),
         }
     }

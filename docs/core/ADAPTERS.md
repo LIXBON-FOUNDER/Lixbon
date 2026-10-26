@@ -90,6 +90,7 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | Hecho | Significa |
 |---|---|
 | `SessionBound { ProviderRef }` | el id de sesión del proveedor, opaco; el Core lo fija en `provider_sessions`, no viaja en ningún Event |
+| `Transport { kind, degraded, reason }` | el canal con que corre la ejecución; `degraded` marca un respaldo y `reason` dice por qué se cayó a él |
 | `Model { model }` | el modelo EFECTIVO (puede diferir del pedido) |
 | `Output { text }` | texto del modelo, redactado y acotado |
 | `Question { question_id, text }` | el proveedor pregunta algo a la persona |
@@ -97,6 +98,8 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | `ToolUse { tool, summary }` | usa una herramienta; `summary` es una ruta o un comando de una línea, nunca el contenido |
 | `Retry { attempt, max, delay_ms }` | reintento de red del proveedor; informativo |
 | `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0 |
+
+`ProbeResult.transport` (y el snapshot) dice el canal de un adapter que tiene más de uno (`app_server`, `exec_json`…); falta en los de un solo canal.
 
 `RunOutcome`: `Completed { summary }`, `Interrupted` (la pidió el Core: no es un fallo), `Cancelled`, `Failed(AdapterError)`.
 `ResumeRequest` lleva el `profile` (y `model`/`effort`) del Attempt original: reanudar no amplía ni pierde permisos.
@@ -151,6 +154,66 @@ esperaría. No existen en la salida real de Claude.
 `cargo test --lib orch::adapter::claude::tests::real_claude -- --ignored --nocapture` lanza `claude` de verdad (modelo
 haiku, un prompt de una línea, perfil de solo lectura) con el lanzador real. Verificado el 2026-10-26 con Claude Code 2.1.296
 en Windows: `probe` listo, `SessionBound`, `Model`, `Output`, `Usage`, `Completed`.
+
+## Adapter de Codex (LXO-130 y LXO-131)
+
+`codex app-server` (JSON por línea sobre stdio, **un proceso por ejecución**) como canal preferido y `codex exec --json`
+como respaldo degradado. No lee `~/.codex/sessions`, ni rollouts, ni la TUI. Código en `orch/adapter/codex/`; capturas
+reales saneadas de Codex 0.164.0 en `orch/testdata/codex-0.164.0-adapter-*.jsonl`. El esquema del protocolo lo genera la
+propia CLI (`codex app-server generate-json-schema`).
+
+| Capability | `app_server` | `exec_json` (degradado) |
+|---|---|---|
+| `start`, `events` | sí | sí |
+| `answer` | sí: `item/commandExecution/requestApproval` y `item/fileChange/requestApproval` → `{decision: accept\|decline}` | no |
+| `interrupt` | sí: `turn/interrupt` → el turno acaba `interrupted` | no (solo cancelar) |
+| **`steer`** | **sí, de verdad**: `turn/steer` inyecta en el turno EN CURSO (un solo `turn/completed`). En Claude esto es una cola | no |
+| `resume` | sí: `thread/resume`, también entre procesos distintos | no: `exec resume` existe pero no admite `-s`/`-C` y no está validado |
+
+**Canal.** Se elige en `probe`: `app-server` si la CLI lo incluye **y** la versión está en `APP_SERVER_VERIFIED` (`0.162.1`,
+`0.163.0`, `0.164.0`, lista distinta de `agents::VERIFIED`, que valida los flags de la CLI interactiva); si no, `exec --json`
+con el motivo (`app-server sin verificar en la versión X`), visible en `ProbeResult.transport` y en el evento `Transport`.
+`app-server` es **experimental**: el protocolo puede cambiar entre versiones. De la 0.163.0 a la 0.164.0 solo se añadió un
+método (`feedback/save`) y no se quitó ninguno; los esquemas de `turn/steer`, `turn/interrupt` y de las aprobaciones son
+idénticos.
+
+**Flujo.** `initialize` → `initialized` → `windowsSandbox/readiness` → `thread/start` (o `thread/resume`) → `turn/start`. El
+hilo es persistente (`ephemeral: false`) para poder reanudarlo. Perfiles: `explorar`/`proponer` → `read-only` y aprobación
+`never`; `delegar_con_revision` → `workspace-write` y `on-request` (lo que salga del worktree se pregunta al Core).
+`autonomia_amplia` (deshabilitado por el producto) no se lanza. Hechos: el texto del modelo se emite al **completarse** cada
+mensaje (los `delta` se ignoran), acotado a 4096 caracteres por evento y 64 KiB por ejecución; `commandExecution`/`fileChange`
+→ `ToolUse` con una sola línea; `thread/tokenUsage/updated` → `Usage` (sin coste: Codex no lo informa, `None`, nunca 0). Las
+peticiones del servidor que el adapter aún no atiende (`item/tool/requestUserInput`, permisos, MCP…) se **rechazan** con
+`-32601` y se avisa con un `Output`, para que Codex no se quede esperando.
+
+**`exec --json`** (observado): `thread.started{thread_id}`, `turn.started`, `item.completed{agent_message}`,
+`turn.completed{usage}`. El mensaje va por stdin y hay que **cerrarlo** o `codex exec` se queda esperando. La forma de un
+fallo (`turn.failed`, `error`) se lee con tolerancia pero **no tiene captura propia**.
+
+### LXO-131: entorno bloqueado
+
+`is_sandbox_setup_conflict` exige las DOS partes del patrón del piloto (`helper_unknown_error` **y** `setup refresh had
+errors`); un texto parecido, o solo una de las partes, es un fallo normal del Attempt. Se comprueba en el mensaje de error de
+una petición, en el error de un turno, en el stderr de un proceso cortado y en el preflight `windowsSandbox/readiness`
+(`notConfigured`/`updateRequired`). Resultado: `ErrorCode::EnvironmentBlocked` → `FailureKind::EnvironmentBlocked`: **no es
+`attempt.failed` y no consume reintentos**, y el mensaje sugiere cerrar la app que lo usa y reintentar (Lixbon nunca mata
+procesos ajenos).
+
+**Abierto en LXO-131 (no hecho aquí):** la causa no está en el conjunto cerrado `EnvBlock`, así que `env_block` queda vacío
+y el bloqueo **no se persiste ni genera Attention**. Añadirla exige (1) una migración que reconstruya `env_blocks` (su `cause`
+tiene un `CHECK` con solo `cli_missing`, `cli_flags_unsupported` y `windows_sandbox_elevated`, tabla `STRICT`), (2) la variante
+en `agents::EnvBlock` y su `EnvProof`, y (3) los textos de Activity de desktop, mobile y CLI (`activity.rs`,
+`activityMessages.js` ×2). Además, el patrón sale de la descripción de la issue: **no hay captura real** de ese error (no se
+reprodujo la condición), por lo que falta la validación manual en Windows.
+
+### Validación manual
+
+`cargo test --lib orch::adapter::codex::tests::real_codex -- --ignored --nocapture --test-threads=1` (modelo `gpt-5.6-luna`,
+perfil de solo lectura, lanzador real). Verificado el 2026-10-26 con Codex 0.164.0 en Windows: `probe` con las seis
+capabilities y canal `app_server`, `start→events→finish`, `resume` en un proceso nuevo (recordó la palabra) e `interrupt`
+→ `Interrupted`. Las ejecuciones con aprobación y `steer` se contrastaron con el `app-server` real en las capturas (0.163.0
+y 0.164.0), no con una prueba automática contra la CLI. **No validado:** apuntar Codex a modelos con formato OpenAI de otros
+servicios (`model_providers`), y el canal `exec --json` en un fallo real.
 
 ## Compatibilidad
 
