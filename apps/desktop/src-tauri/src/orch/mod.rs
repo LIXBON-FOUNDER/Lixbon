@@ -4,6 +4,7 @@
 //! informes, integra y responde. Todos hablan con Lixbon por `lxo` (HTTP local,
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
+mod adapter;
 mod agents;
 // Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
 mod attention_rules;

@@ -1,0 +1,106 @@
+{
+  "generation": 3,
+  "providers": [
+    {
+      "cli_version": null,
+      "environment": {
+        "blocks": [
+          "cli_missing"
+        ],
+        "state": "blocked"
+      },
+      "id": "fake-bloqueado",
+      "matrix": {
+        "capabilities": {
+          "answer": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          },
+          "events": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          },
+          "interrupt": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          },
+          "resume": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          },
+          "start": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          },
+          "steer": {
+            "block": "cli_missing",
+            "state": "environment_blocked"
+          }
+        },
+        "version": 1
+      }
+    },
+    {
+      "cli_version": "0.0.0-fake",
+      "environment": {
+        "state": "ready"
+      },
+      "id": "fake-completo",
+      "matrix": {
+        "capabilities": {
+          "answer": {
+            "state": "available"
+          },
+          "events": {
+            "state": "available"
+          },
+          "interrupt": {
+            "state": "available"
+          },
+          "resume": {
+            "state": "available"
+          },
+          "start": {
+            "state": "available"
+          },
+          "steer": {
+            "state": "available"
+          }
+        },
+        "version": 1
+      }
+    },
+    {
+      "cli_version": "1.2.3",
+      "environment": {
+        "state": "ready"
+      },
+      "id": "fake-parcial",
+      "matrix": {
+        "capabilities": {
+          "answer": {
+            "state": "available"
+          },
+          "events": {
+            "state": "available"
+          },
+          "interrupt": {
+            "state": "available"
+          },
+          "resume": {
+            "reason": "la sesión nativa no se puede reanudar con esta versión",
+            "state": "unavailable"
+          },
+          "start": {
+            "state": "available"
+          },
+          "steer": {
+            "state": "unsupported"
+          }
+        },
+        "version": 1
+      }
+    }
+  ],
+  "version": 1
+}
