@@ -35,7 +35,7 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 | `core_task` (LXO-110) | `rid`, `project_id`, `task_id` | `orch_core_task` · `{rid, ok, protocol: 1, task}` |
 | `core_activity` (LXO-110) | `rid`, `task_id`, `cursor?` (entero ≥ 0; 0 = lo más nuevo), `limit?` (1–50, por defecto 30) | `orch_core_activity` · `{rid, ok, protocol: 1, items, next_cursor, has_more}` |
 | `core_attempts` (LXO-126) | `rid`, `task_id` | `orch_core_attempts` · `{rid, ok, protocol: 1, task, attempts, truncated}` |
-| `core_attempt` (LXO-126) | `rid`, `attempt_id` | `orch_core_attempt` · `{rid, ok, protocol: 1, attempt}` |
+| `core_attempt` (LXO-126, LXO-127) | `rid`, `attempt_id` | `orch_core_attempt` · `{rid, ok, protocol: 1, attempt, task}` |
 
 * `rid`: 1–64 caracteres `[A-Za-z0-9_-]`. Sin `rid` válido, la petición no llega al Core.
 * `events[]` va **reducido**: `seq`, `kind`, `ts`, `project_id`, `run_id` y `entity {kind, id}`. No lleva
@@ -75,6 +75,10 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
     * `worktree`: `path`, `branch`, `base_branch`, `provenance`, `state`, `machine` y `branch_kept`.
     * `artifacts` (`kind` y `uri`, 20 como mucho) y la última `review` (`verdict`, `status`, `head_commit`,
       `base_commit`).
+  * `core_attempt` añade `task` (LXO-127): `id`, `title`, `state`, `project_id` y `current_attempt_id` de su Task, para
+    nombrarla y decir si este intento es el actual. Si esa lectura falla, `task` es `null` y la ficha se enseña igual.
+  * `core_activity` acepta `attempt_id` en lugar de `task_id` (nunca los dos): pide `activity_list` con
+    `target_kind: attempt`. Es la Activity de ese intento (LXO-127).
   * La Attention de ejecución apunta al intento (`target_kind: attempt`). El móvil la pide con `core_attention` y
     abre **ese** intento, nunca «el último» de su tarea.
   * Sin conexión, el móvil enseña los últimos intentos que vio de esa tarea, guardados solo en memoria (no en

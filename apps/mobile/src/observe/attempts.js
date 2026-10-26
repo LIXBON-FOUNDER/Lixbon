@@ -176,3 +176,106 @@ export function createAttemptsMemory(max = 30) {
     },
   };
 }
+
+// ── Ficha de un intento (LXO-127) ───────────────────────────────────────────
+
+const SESSION_STATUS = { open: 'Abierta', idle: 'En espera', closed: 'Cerrada' };
+const BINDING = { stream_json: 'por stream-json', session_id: 'por su id de sesión' };
+const PROVENANCE = { created: 'Creado por Lixbon', adopted: 'Adoptado por Lixbon', external: 'Externo: Lixbon no lo limpia' };
+const WORKTREE_STATE = { active: { label: 'En disco', tone: 'ok' }, missing: { label: 'No está en disco', tone: 'warn' }, removed: { label: 'Retirado', tone: 'muted' } };
+const ARTIFACT = { report: 'Informe', pull_request: 'Pull request', last_message: 'Último mensaje', commit: 'Commit', file: 'Archivo' };
+const VERDICT = { accepted: 'Aceptada', rejected: 'Rechazada' };
+const LIFECYCLE = {
+  pending_approval: 'Espera a que una persona apruebe su lanzamiento.',
+  starting: 'Arrancando el agente.',
+  running: 'El agente está trabajando.',
+  waiting: 'El agente espera una respuesta.',
+  awaiting_terminal_approval: 'Espera que alguien apruebe en la terminal del escritorio.',
+  done: 'Terminó.',
+  failed: 'Falló.',
+  stopped: 'Se detuvo (cancelado).',
+  exited: 'Se cerró la terminal del agente.',
+};
+
+/** Un Artifact en una línea: la PR por su número, el commit corto y un archivo por su nombre (la ruta, aparte). */
+export function artifactLine(x) {
+  const uri = typeof x?.uri === 'string' ? x.uri : '';
+  let short = uri || 'sin ubicación';
+  const pr = x?.kind === 'pull_request' ? uri.match(/\/pull\/(\d+)/) : null;
+  if (x?.kind === 'pull_request') short = pr ? `#${pr[1]}` : uri;
+  else if (x?.kind === 'commit') short = uri.slice(0, 10);
+  else if (uri) short = uri.split(/[\\/]/).filter(Boolean).pop() || uri;
+  return { kind: x?.kind || null, label: ARTIFACT[x?.kind] || 'Artefacto', short, uri: uri || null };
+}
+
+/** La revisión, sin ambigüedad: vigente (sobre el HEAD revisado), obsoleta o sustituida. */
+export function reviewLine(r) {
+  if (!r) return { present: false, tone: 'muted', title: 'Sin revisión', text: 'Nadie ha revisado este intento todavía.', current: null };
+  const verdict = VERDICT[r.verdict] || 'Sin veredicto';
+  const head = r.head_commit ? r.head_commit.slice(0, 10) : 'un commit desconocido';
+  const base = r.base_commit ? ` sobre ${r.base_commit.slice(0, 10)}` : '';
+  switch (r.status) {
+    case 'active':
+      return { present: true, tone: r.verdict === 'accepted' ? 'ok' : 'warn', title: `${verdict} · vigente`, text: `Revisó ${head}${base}, que sigue siendo el código del intento.`, current: true };
+    case 'stale':
+      return { present: true, tone: 'warn', title: `${verdict} · obsoleta`, text: `Revisó ${head}${base}, pero el código cambió después: hay que revisarlo otra vez.`, current: false };
+    case 'superseded':
+      return { present: true, tone: 'muted', title: `${verdict} · sustituida`, text: `Revisó ${head}${base}; hubo una revisión posterior de este intento.`, current: false };
+    default:
+      return { present: true, tone: 'muted', title: verdict, text: `Revisó ${head}${base}; no se sabe si sigue vigente.`, current: null };
+  }
+}
+
+/**
+ * Modelo de la ficha. Todo es de este intento (invariante 1): su sesión, su Worktree, sus Artifacts y su revisión.
+ * El id de la sesión del proveedor no llega (invariante 2) y la ruta del Worktree es ubicación, no identidad (3).
+ */
+export function attemptDetailModel(a, task = null) {
+  if (!a) return null;
+  const ps = a.provider_session;
+  const wt = a.worktree;
+  const wtState = wt ? WORKTREE_STATE[wt.state] || { label: wt.state ? String(wt.state) : 'estado desconocido', tone: 'muted' } : null;
+  return {
+    id: a.id,
+    n: a.n,
+    taskId: a.task_id || task?.id || null,
+    taskTitle: task?.title || null,
+    taskState: task?.state ? TASK_STATE[task.state] || null : null,
+    current: task?.current_attempt_id ? task.current_attempt_id === a.id : null,
+    status: attemptStatusOf(a.status),
+    final: FINAL.has(a.status),
+    lifecycle: LIFECYCLE[a.status] || 'Estado desconocido.',
+    result: attemptResult(a),
+    provider: providerName(a.provider) || 'agente desconocido',
+    model: a.model || null,
+    effort: a.effort || null,
+    profile: a.profile || null,
+    role: a.role || null,
+    origin: originText(a.origin),
+    host: a.host || wt?.machine || null,
+    summary: a.summary || null,
+    session: ps
+      ? {
+          present: true,
+          status: SESSION_STATUS[ps.status] || (ps.status ? String(ps.status) : 'estado desconocido'),
+          resumable: ps.resumable === true ? 'Se puede reanudar' : ps.resumable === false ? 'No se puede reanudar' : null,
+          bound: ps.bound ? `Vinculada al proveedor ${BINDING[ps.binding] || ''}`.trim() : 'Sin vincular al proveedor',
+          opened: ps.opened_here ? 'La abrió este intento' : 'Viene de un intento anterior de la tarea',
+        }
+      : { present: false },
+    worktree: wt
+      ? {
+          present: true,
+          branch: wt.branch || null,
+          base: wt.base_branch || null,
+          provenance: PROVENANCE[wt.provenance] || 'procedencia desconocida',
+          state: wtState,
+          host: wt.machine || null,
+          path: wt.path || null,
+          branchKept: wt.branch_kept === true,
+        }
+      : { present: false },
+    artifacts: (Array.isArray(a.artifacts) ? a.artifacts : []).map(artifactLine),
+    review: reviewLine(a.review),
+  };
+}
