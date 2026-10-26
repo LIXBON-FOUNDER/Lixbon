@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Estado** | Propuesta lista para el schema v1 de LXO-133. Las decisiones D37–D44 quedan abiertas hasta que la persona las confirme |
+| **Estado** | Decisiones D37–D44 confirmadas por la persona el 2026-10-26 e implementadas en LXO-133 (ver [§8](#8-implementación-lxo-133)) |
 | **Épica** | `[CORE][F4]` Adapters + ContextPackage |
 | **Entrega** | Investigación y ADR. **Ningún schema productivo, ninguna UI, ningún cambio de runtime** |
 | **Prueba** | [`fixtures/context-package/`](fixtures/context-package/): `python -I -X utf8 docs/core/fixtures/context-package/experimentos.py todo resultados.v0.json` |
@@ -165,7 +165,7 @@ El paquete es ≈26 veces más pequeño que el diff y sin él cuesta ≈10 veces
 {
   "schema_version": 1,                              // REQUERIDO
   "package_id": "sha256:…",                         // REQUERIDO · hash del contenido canónico (D44)
-  "created_at": "2026-10-26T20:11:09Z",             // REQUERIDO
+  "created_at_ms": 1793000000000,                   // REQUERIDO · Unix ms, como el resto del modelo
   "source": {                                       // REQUERIDO · lo fija el Core
     "project_id": "…", "task_id": "…", "attempt_id": "…",
     "provider": "claude",
@@ -176,7 +176,7 @@ El paquete es ≈26 veces más pequeño que el diff y sin él cuesta ≈10 veces
   "decisions": ["…"],                               // opcional · pero presente y vacío si no hay: ≤32 × 500
   "constraints": ["…"],                             // opcional · ídem
   "thread_summary": "…",                            // opcional · ≤2000 (el límite de Thread.summary)
-  "revision": {                                     // REQUERIDO, o null con `reason` si el Attempt no tiene repositorio
+  "revision": {                                     // REQUERIDO; `null` + `revision_absent_reason` si el Attempt no tiene repositorio
     "base_commit": "e73a74da…", "head_commit": "b1cc12e3…", "head_tree": "e3b8786a…",
     "branch": "feat/lxo-205-usage-cross-provider",  // informativa: puede no existir en el receptor
     "files": [{ "path": "docs/core/ADAPTERS.md", "added": 61, "deleted": 1 }],     // rutas relativas al repositorio
@@ -184,15 +184,16 @@ El paquete es ≈26 veces más pequeño que el diff y sin él cuesta ≈10 veces
   },
   "uncommitted": {                                  // opcional · el estado del worktree sucio
     "staged_patch": "att:…", "unstaged_patch": "att:…",
-    "untracked": [{ "path": "NOTAS.md", "sha256": "…", "bytes": 49 }]
+    "untracked": [{ "path": "NOTAS.md", "sha256": "…", "bytes": 49, "attachment": "att:…" }]
   },
   "test_results": { "command": "cargo test --lib", "passed": 1441, "failed": 0, "ignored": 19 },   // opcional
   "artifacts": [{ "kind": "commit", "uri": "b1cc12e3…" }],                                          // opcional · como `artifacts`
   "attachments": [                                  // opcional · blobs aparte, referenciados por hash
-    { "id": "att:…", "kind": "git_bundle", "sha256": "…", "bytes": 31019 },
-    { "id": "att:…", "omitted": "secret_detected" }
+    { "id": "att:…", "kind": "git_bundle", "sha256": "…", "bytes": 31019, "scanned": false },
+    { "id": "att:…", "kind": "patch", "sha256": "…", "bytes": 812, "scanned": true, "omitted": "secret_detected" }
   ],
-  "truncated": [{ "field": "thread_summary", "original_chars": 3120 }]                              // explícito, nunca en silencio
+  "truncated": [{ "field": "thread_summary", "original": 3120, "unit": "chars" }],                  // explícito, nunca en silencio
+  "redactions": 0                                   // REQUERIDO · cuántos valores se ocultaron
 }
 ```
 
@@ -220,13 +221,45 @@ y ≤ 8 MiB en total; una lista que se pasa de su tope se recorta y consta en `t
   `sha256` no coincide: el paquete es **inválido y no inicia ningún Attempt** (invariante 4 de LXO-133).
 * Un campo desconocido **opcional** se conserva pero no se interpreta; uno que cambie el significado de los existentes
   sube `schema_version`.
-* El paquete es **inmutable**: corregirlo es crear otro con otro `package_id`, que enlaza al anterior en `source`.
+* El paquete es **inmutable**: corregirlo es crear otro, con otro `package_id`. Enlazar el nuevo con el anterior
+  (`supersedes`) queda para cuando haya un consumidor que lo necesite (LXO-134/172): v1 no lo define.
 * Verificar no es confiar: el receptor comprueba `head_tree`/`diff_sha256` contra su repositorio antes de usar la
   evidencia, y lo que no pueda comprobar lo marca como `no verificado` en vez de darlo por bueno.
 
-## 8. Qué queda para LXO-133
+## 8. Implementación (LXO-133)
 
-Implementar el schema, el canonicalizador y `package_id`; la tubería de redacción con el detector ampliado (D42) y sus
-sentinelas; los adjuntos con `sha256`; los límites y `truncated`; y el export/import entre adapters falsos. El arnés de
-este documento sirve de **prueba de aceptación de contenido**: un paquete v1 construido para esta misma tarea debe
-sacar 10/10 en A3/B2 y no debe contener el centinela.
+Código en `apps/desktop/src-tauri/src/orch/context_package/`; pruebas en `tests.rs`; fixtures en
+[`fixtures/context-package/v1/`](fixtures/context-package/v1/) (`casos.json` dice qué se acepta y con qué código se rechaza
+cada archivo; se regeneran con `LXO_WRITE_API_FIXTURES=1 cargo test --lib orch::context_package`).
+
+| Pieza | Qué hace |
+|---|---|
+| `build(NewPackage)` | redacta cada texto **antes** de cortarlo, acota con marca en `truncated`, adjunta (omite los de texto con secreto), convierte `host` y `provider_session` en huellas, calcula `package_id`, se valida con las mismas reglas que `parse` y, si pasa de 64 KiB, recorta la lista de archivos a la mitad hasta que cabe |
+| `parse(&str)` | **la única puerta de entrada**. Orden: tamaño → JSON → `schema_version` → campos requeridos → números enteros → identidad → tipos y reglas → secretos |
+| `ContextPackage` | inmutable: sin `&mut`, sin `Deserialize` público; `to_json()` devuelve los mismos bytes canónicos con los que se calculó su identidad |
+| `verify_attachments(blobs)` | cada adjunto declarado, con su `sha256` y su tamaño; ninguno ajeno ni uno omitido que llegue igualmente |
+| `receipt(..)` | lo que añade el receptor, **aparte**: el `source` no se reescribe |
+| `continuation_prompt()` | el mensaje con que arranca el siguiente Attempt (el que se probó en LXO-132) |
+
+**Errores** (conjunto cerrado): `invalid_json`, `unsupported_version`, `missing_field`, `invalid_field`, `id_mismatch`,
+`too_large`, `secret_detected`, `attachment_mismatch`. La versión se comprueba antes que cualquier otra regla.
+
+**Límites**: paquete 64 KiB (sin adjuntos) · objetivo y resumen 2000 caracteres · 32 decisiones y 32 restricciones de 500 ·
+500 archivos · 64 artifacts · 100 archivos sin seguimiento · 128 adjuntos de 1 MiB y 8 MiB en total.
+
+**Detector (D42).** `context_package/secrets.rs` amplía `looks_secret`: JWT, URL con credenciales, prefijos `npm_` `ya29.`
+`sk_live_`…, clave AWS de 40 caracteres, `NOMBRE_TOKEN=valor` y bloques PEM de clave privada **con su cuerpo**. Medido con
+los mismos datos del experimento: **13 de 13** secretos (antes 6 de 13), **0 falsos positivos** en 10 textos que no lo son
+(sha, uuid, ruta, hash de integridad, `NOMBRE_TOKEN=$VARIABLE`, `API_TOKEN=<tu-token>`…) y **1 línea de 1996** marcada en el
+diff real de LXO-205 (el centinela de una prueba), igual que antes. Una referencia a una variable no es un secreto.
+
+**Qué NO hace v1 (y cómo se nota)**
+* No escanea un `git_bundle` (va comprimido): su adjunto consta con `scanned: false` y quien lo muestre debe decirlo.
+* No convierte rutas absolutas ni nombres de host: las rechaza (`invalid_field`); quien construye el paquete aporta rutas
+  relativas al repositorio.
+* No genera resúmenes con un modelo (D41) ni enlaza un paquete con el que corrige (`supersedes`).
+* No lo conecta todavía a ningún comando: el resume y su fallback (LXO-134) deben pasar **siempre** por `parse` antes de
+  crear el Attempt; las pruebas lo demuestran con dos adapters falsos (un paquete inválido no arranca nada).
+
+**Fuga conocida de la redacción** (heredada de `looks_secret`, medida): `redact` trabaja por palabras, así que un secreto
+que el detector no reconoce pasa. Por eso los adjuntos de código no se redactan: se omiten.

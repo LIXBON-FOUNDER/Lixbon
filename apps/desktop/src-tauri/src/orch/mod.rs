@@ -6,6 +6,8 @@
 
 mod adapter;
 mod agents;
+// ContextPackage v1 (LXO-133): paquete explícito e inmutable para cambiar de proveedor, host o sesión.
+mod context_package;
 // Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
 mod attention_rules;
 mod attention_read;

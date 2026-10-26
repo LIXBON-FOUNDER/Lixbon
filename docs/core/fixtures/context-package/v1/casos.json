@@ -1,0 +1,62 @@
+[
+  {
+    "archivo": "valido-minimo.json",
+    "esperado": "ok"
+  },
+  {
+    "archivo": "valido-completo.json",
+    "esperado": "ok"
+  },
+  {
+    "archivo": "valido-con-campo-extra.json",
+    "esperado": "ok"
+  },
+  {
+    "archivo": "invalido-version-desconocida.json",
+    "esperado": "unsupported_version"
+  },
+  {
+    "archivo": "invalido-falta-objective.json",
+    "esperado": "missing_field"
+  },
+  {
+    "archivo": "invalido-alterado.json",
+    "esperado": "id_mismatch"
+  },
+  {
+    "archivo": "invalido-origen-reescrito.json",
+    "esperado": "id_mismatch"
+  },
+  {
+    "archivo": "invalido-revision-sin-motivo.json",
+    "esperado": "invalid_field"
+  },
+  {
+    "archivo": "invalido-campo-anidado-desconocido.json",
+    "esperado": "invalid_field"
+  },
+  {
+    "archivo": "invalido-ruta-absoluta.json",
+    "esperado": "invalid_field"
+  },
+  {
+    "archivo": "invalido-adjunto-no-declarado.json",
+    "esperado": "invalid_field"
+  },
+  {
+    "archivo": "invalido-numero-no-entero.json",
+    "esperado": "invalid_field"
+  },
+  {
+    "archivo": "invalido-secreto.json",
+    "esperado": "secret_detected"
+  },
+  {
+    "archivo": "invalido-demasiadas-decisiones.json",
+    "esperado": "too_large"
+  },
+  {
+    "archivo": "invalido-json.json",
+    "esperado": "invalid_json"
+  }
+]
