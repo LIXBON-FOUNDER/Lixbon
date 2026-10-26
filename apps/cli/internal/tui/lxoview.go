@@ -36,7 +36,8 @@ func lxoStyled(args []string) bool {
 	}
 	for _, a := range args[1:] {
 		switch {
-		case a == "--json", a == "--help", a == "-h", a == "help", strings.HasPrefix(a, "--follow"):
+		// --schema elige otra forma del --json (LXO-125): sale tal cual, como con --json.
+		case a == "--json", a == "--help", a == "-h", a == "help", strings.HasPrefix(a, "--follow"), strings.HasPrefix(a, "--schema"):
 			return false
 		}
 	}
@@ -371,6 +372,11 @@ func renderLxo(args []string, out string, names map[string]string, now time.Time
 		return []block{errLine("lxo devolvió algo que este CLI no entiende; actualiza Lixbon.")}
 	}
 	sep := " " + glyphSep + " "
+	// Las tareas se pintan en la forma 1 (`task_model: "legacy"`), la que lxo da por defecto mientras dure la
+	// ventana de compatibilidad (docs/core/LXO_CORTE.md). Otra forma no se lee a medias.
+	if (args[0] == "tasks" || args[0] == "task") && jnum(doc, "v") != 1 {
+		return []block{errLine(fmt.Sprintf("lxo devolvió las tareas en una forma (v%d) que este CLI no pinta; actualiza el CLI o mira ! lxo %s --json.", jnum(doc, "v"), strings.Join(args, " ")))}
+	}
 	switch {
 	case args[0] == "summary":
 		return renderSummary(doc, sep)

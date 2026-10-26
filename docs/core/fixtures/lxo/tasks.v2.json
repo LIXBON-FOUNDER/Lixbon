@@ -1,0 +1,121 @@
+{
+  "task_model": "task_attempt_v1",
+  "tasks": [
+    {
+      "attempt_count": 1,
+      "created_at": 1792000000000,
+      "current_attempt": {
+        "attempt_id": "t2-a1",
+        "n": 1,
+        "status": "done"
+      },
+      "depth": 0,
+      "intent": "open",
+      "origin": "legacy",
+      "parent_task_id": null,
+      "project_id": "p-1",
+      "run_id": "r1",
+      "state": "in_review",
+      "task_id": "t2",
+      "title": "Coordinar login",
+      "updated_at": 1792000900000
+    },
+    {
+      "attempt_count": 1,
+      "created_at": 1792000040000,
+      "current_attempt": {
+        "attempt_id": "t3-a1",
+        "n": 1,
+        "status": "done"
+      },
+      "depth": 1,
+      "intent": "open",
+      "origin": "legacy",
+      "parent_task_id": "t2",
+      "project_id": "p-1",
+      "run_id": "r1",
+      "state": "integrated",
+      "task_id": "t3",
+      "title": "API de sesiones",
+      "updated_at": 1792000300000
+    },
+    {
+      "attempt_count": 1,
+      "created_at": 1792000045000,
+      "current_attempt": {
+        "attempt_id": "t4-a1",
+        "n": 1,
+        "status": "failed"
+      },
+      "depth": 1,
+      "intent": "open",
+      "origin": "legacy",
+      "parent_task_id": "t2",
+      "project_id": "p-1",
+      "run_id": "r1",
+      "state": "open",
+      "task_id": "t4",
+      "title": "Formulario de login",
+      "updated_at": 1792000500000
+    },
+    {
+      "attempt_count": 1,
+      "created_at": 1792000046000,
+      "current_attempt": {
+        "attempt_id": "t5-a1",
+        "n": 1,
+        "status": "done"
+      },
+      "depth": 1,
+      "intent": "open",
+      "origin": "legacy",
+      "parent_task_id": "t2",
+      "project_id": "p-1",
+      "run_id": "r1",
+      "state": "in_review",
+      "task_id": "t5",
+      "title": "Tests de login",
+      "updated_at": 1792000800000
+    },
+    {
+      "attempt_count": 2,
+      "created_at": 1792000100000,
+      "current_attempt": {
+        "attempt_id": "t9-a2",
+        "n": 2,
+        "status": "running"
+      },
+      "depth": 0,
+      "intent": "open",
+      "origin": "lixbon",
+      "parent_task_id": null,
+      "project_id": "p-1",
+      "run_id": "r9",
+      "state": "in_progress",
+      "task_id": "t9",
+      "title": "reintentada",
+      "updated_at": 1792000200000
+    },
+    {
+      "attempt_count": 1,
+      "created_at": 1792001000000,
+      "current_attempt": {
+        "attempt_id": "t17-a1",
+        "n": 1,
+        "status": "running"
+      },
+      "depth": 0,
+      "intent": "open",
+      "origin": "legacy",
+      "parent_task_id": null,
+      "project_id": "p-1",
+      "run_id": "r16",
+      "state": "in_progress",
+      "task_id": "t17",
+      "title": "Coordinar refactor",
+      "updated_at": 1792001200000
+    }
+  ],
+  "unassigned_tasks": 0,
+  "v": 2
+}

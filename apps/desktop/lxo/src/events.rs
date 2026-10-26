@@ -32,6 +32,8 @@ Paginacion:
 Filtros (se combinan con AND):
   --project ID       --run ID           --class state|effect|decision|system
   --task ID          atajo de --entity-kind task --entity-id ID
+  --attempt ID       atajo de --entity-kind attempt --entity-id ID (tras el corte
+                     Task/Attempt, los cambios de estado de la ejecución van aquí)
   --entity-kind K    --entity-id ID     --kind K | --kind-prefix PREFIJO
 
 Salida:
@@ -110,6 +112,7 @@ pub(super) fn parse_events_options(args: &Args) -> Result<EventsOptions, EventsE
         "project",
         "run",
         "task",
+        "attempt",
         "entity-kind",
         "entity-id",
         "kind",
@@ -174,15 +177,23 @@ pub(super) fn parse_events_options(args: &Args) -> Result<EventsOptions, EventsE
         }
     }
 
-    if let Some(task) = text_arg(args, "task")? {
-        validate_filter("task", &task).map_err(usage)?;
-        if text_arg(args, "entity-kind")?.is_some() || text_arg(args, "entity-id")?.is_some() {
-            return Err(usage(
-                "--task no se combina con --entity-kind ni --entity-id.",
-            ));
+    if text_arg(args, "task")?.is_some() && text_arg(args, "attempt")?.is_some() {
+        return Err(usage(
+            "--task y --attempt se excluyen: los eventos de un intento van con --attempt.",
+        ));
+    }
+    for kind in ["task", "attempt"] {
+        if let Some(id) = text_arg(args, kind)? {
+            validate_filter(kind, &id).map_err(usage)?;
+            if text_arg(args, "entity-kind")?.is_some() || text_arg(args, "entity-id")?.is_some()
+            {
+                return Err(usage(format!(
+                    "--{kind} no se combina con --entity-kind ni --entity-id."
+                )));
+            }
+            query.insert("entity_kind".into(), kind.into());
+            query.insert("entity_id".into(), id);
         }
-        query.insert("entity_kind".into(), "task".into());
-        query.insert("entity_id".into(), task);
     }
     if query.contains_key("entity_id") && !query.contains_key("entity_kind") {
         return Err(usage("--entity-id requiere --entity-kind."));
