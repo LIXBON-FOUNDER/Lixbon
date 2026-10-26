@@ -165,11 +165,11 @@ pub const LXO_TOOLS: [&str; 5] = ["Bash(lxo report:*)", "Bash(lxo guide)", "Bash
 
 /// `--allowedTools`/`--disallowedTools` aceptan varios valores y se tragarían lo
 /// que venga detrás: van en un solo token `--flag=a,b,c` (probado con Claude 2.1.296).
-fn allowed_tools() -> String {
+pub(super) fn allowed_tools() -> String {
     format!("--allowedTools={}", LXO_TOOLS.join(","))
 }
 
-fn disallowed_tools() -> String {
+pub(super) fn disallowed_tools() -> String {
     format!("--disallowedTools={}", READ_ONLY_BLOCKED.join(","))
 }
 

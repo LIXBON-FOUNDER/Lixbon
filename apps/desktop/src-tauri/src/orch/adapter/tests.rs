@@ -172,7 +172,7 @@ fn el_fake_cubre_las_seis_capabilities_a_traves_de_gated() {
     g.answer(&run, Answer { question_id: "q1".into(), text: "sí".into() }).unwrap();
     g.interrupt(&run).unwrap();
     g.steer(&run, "más corto").unwrap();
-    let again = g.resume(ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("sesion-1").unwrap(), worktree: "wt".into(), prompt: None }, &cancel).unwrap();
+    let again = g.resume(ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("sesion-1").unwrap(), worktree: "wt".into(), prompt: None, profile: "proponer".into(), model: None, effort: None }, &cancel).unwrap();
     assert_eq!(again.attempt_id, "a2");
 
     let llamadas = fake.calls();
@@ -190,7 +190,7 @@ fn una_capability_no_ofrecida_no_llega_al_adapter() {
     let run = g.start(start_req("a1"), &cancel).unwrap();
 
     assert_eq!(g.steer(&run, "x").unwrap_err().code, ErrorCode::UnsupportedCapability);
-    let r = ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("s").unwrap(), worktree: "wt".into(), prompt: None };
+    let r = ResumeRequest { attempt_id: "a2".into(), provider_ref: ProviderRef::new("s").unwrap(), worktree: "wt".into(), prompt: None, profile: "proponer".into(), model: None, effort: None };
     assert_eq!(g.resume(r, &cancel).unwrap_err().code, ErrorCode::CapabilityUnavailable);
 
     let llamadas = fake.calls();
@@ -204,7 +204,7 @@ fn un_adapter_que_no_implementa_una_capability_la_rechaza_sin_fingirla() {
     assert_eq!(a.answer(&run, Answer { question_id: "q".into(), text: "t".into() }).unwrap_err().code, ErrorCode::UnsupportedCapability);
     assert_eq!(a.interrupt(&run).unwrap_err().code, ErrorCode::UnsupportedCapability);
     assert_eq!(a.steer(&run, "x").unwrap_err().code, ErrorCode::UnsupportedCapability);
-    let r = ResumeRequest { attempt_id: "a".into(), provider_ref: ProviderRef::new("s").unwrap(), worktree: "wt".into(), prompt: None };
+    let r = ResumeRequest { attempt_id: "a".into(), provider_ref: ProviderRef::new("s").unwrap(), worktree: "wt".into(), prompt: None, profile: "proponer".into(), model: None, effort: None };
     assert_eq!(a.resume(r, &CancelToken::new()).unwrap_err().code, ErrorCode::UnsupportedCapability);
 
     // Y su matriz, la que declara, dice lo mismo: solo start y events.

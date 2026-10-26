@@ -83,6 +83,75 @@ repetido se rechaza.
 El fake (`adapter/fake.rs`, solo en pruebas) cubre las seis capabilities y apunta cada llamada que **llega** al adapter,
 de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_fake_cubre_las_seis_capabilities_a_traves_de_gated`.
 
+## Hechos que reporta un adapter
+
+`AdapterEvent` (no es `Serialize`: el Core decide qué se vuelve un Event) y `RunOutcome`:
+
+| Hecho | Significa |
+|---|---|
+| `SessionBound { ProviderRef }` | el id de sesión del proveedor, opaco; el Core lo fija en `provider_sessions`, no viaja en ningún Event |
+| `Model { model }` | el modelo EFECTIVO (puede diferir del pedido) |
+| `Output { text }` | texto del modelo, redactado y acotado |
+| `Question { question_id, text }` | el proveedor pregunta algo a la persona |
+| `Permission { request_id, tool, summary }` | el proveedor pide permiso para una herramienta; el Core decide y responde con `answer` (`allow` o `deny`); el adapter nunca responde por su cuenta |
+| `ToolUse { tool, summary }` | usa una herramienta; `summary` es una ruta o un comando de una línea, nunca el contenido |
+| `Retry { attempt, max, delay_ms }` | reintento de red del proveedor; informativo |
+| `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0 |
+
+`RunOutcome`: `Completed { summary }`, `Interrupted` (la pidió el Core: no es un fallo), `Cancelled`, `Failed(AdapterError)`.
+`ResumeRequest` lleva el `profile` (y `model`/`effort`) del Attempt original: reanudar no amplía ni pierde permisos.
+
+## Adapter de Claude (LXO-129)
+
+`claude -p --input-format stream-json --output-format stream-json`, el canal estructurado de la CLI. No lee
+`~/.claude/projects`, ni transcripts, ni la TUI. El prompt se envía por stdin (no por el argv). Código en
+`orch/adapter/claude/`; capturas reales de Claude Code 2.1.296 saneadas en `orch/testdata/claude-2.1.296-adapter-*.jsonl`.
+
+| Capability | Cómo se declara | Evidencia |
+|---|---|---|
+| `start`, `events` | flags `--input-format`/`--output-format`/`stream-json` en `--help`; si faltan → `environment_blocked (cli_flags_unsupported)`; sin CLI → `cli_missing` | captura normal |
+| `answer` | flag `--permission-prompt-tool` en `--help` y versión verificada | con `--permission-prompt-tool stdio`, Claude emite `control_request {subtype: "can_use_tool"}` y acepta `{behavior: "allow", updatedInput}` / `{behavior: "deny", message}`. **Sin ese flag, deniega solo** (`system/permission_denied`) y no pregunta |
+| `interrupt` | versión verificada, y además la sesión debe declarar `interrupt_*` en su `init` | `control_request {subtype: "interrupt"}` → `control_response` → `result` con `is_error` |
+| `resume` | flag `--resume` en `--help` | solo por `--help`; **no capturado** contra la CLI real |
+| `steer` | siempre `unsupported` | observado: un mensaje enviado en mitad de un turno **se encola** y se procesa después (la ejecución de 150 líneas terminó completa antes de "FIN"). Es una cola (LXO-143), no un steer; "Stop & Send" es `interrupt` + mensaje nuevo, lo compone el Core |
+
+En una versión de Claude **sin verificar**, `answer` e `interrupt` quedan `unavailable` con el motivo; `start`/`events`
+siguen disponibles si están los flags. Tipos de mensaje que se ignoran a propósito: `hook_*`, `thinking_tokens`,
+`rate_limit_event`, resultados de herramientas, y el razonamiento (`thinking`) no se copia nunca.
+
+**Salida acotada (invariante 5 de LXO-129):** un texto del modelo se parte en eventos de hasta 4096 caracteres y la
+ejecución tiene un techo de 64 KiB; pasado, solo queda un aviso. Cada línea de stdout se lee con tope de 1 MiB.
+**Flujo malformado:** una línea que no es JSON se cuenta y se salta; si el proceso termina sin `result`, la ejecución
+**falla** con un diagnóstico (`líneas malformadas: N; stderr: …`, redactado), no se da por completada. El perfil
+`autonomia_amplia` (deshabilitado por el producto) no se lanza por esta vía.
+
+### Otros modelos con formato Anthropic
+
+Un `Endpoint { base_url, token_env, model }` apunta la misma CLI a otro servicio compatible (`ANTHROPIC_BASE_URL`).
+Cada configuración se registra con su propio id (`claude`, `claude-local`…) y aparece como un proveedor más en el snapshot.
+
+* `base_url` es `https://…`, o `http://` solo hacia `localhost`/`127.0.0.1`/`[::1]`; sin usuario, contraseña, query ni fragmento.
+* El **token es obligatorio** y se indica con el NOMBRE de una variable de entorno; se copia a `ANTHROPIC_AUTH_TOKEN` del
+  hijo y nunca se guarda ni aparece en un `Debug`. Sin la variable, no se lanza.
+* Al hijo se le **quitan** `ANTHROPIC_API_KEY` y `CLAUDE_CODE_OAUTH_TOKEN`: la credencial propia del usuario no viaja a un
+  servicio ajeno.
+* Comprobado con la CLI real (2.1.296): respeta `ANTHROPIC_BASE_URL`; la CLI avisa de que el token de entorno tiene
+  prioridad sobre el login de claude.ai; la única petición observada contra un servidor local (`HEAD /api/hello`) no llevó
+  cabeceras de credencial. **Pendiente de validación manual**: qué cabeceras lleva el `POST` de mensajes contra un
+  endpoint compatible real.
+
+### Marcadores de las capturas
+
+Las capturas son líneas reales de la CLI. Los marcadores `{"__gate": …}` y `{"__echo": …}` que llevan los `.jsonl`
+son SOLO del arnés de pruebas (`claude/fake.rs`): detienen el proceso falso hasta que el adapter escribe lo que la CLI
+esperaría. No existen en la salida real de Claude.
+
+### Validación manual
+
+`cargo test --lib orch::adapter::claude::tests::real_claude -- --ignored --nocapture` lanza `claude` de verdad (modelo
+haiku, un prompt de una línea, perfil de solo lectura) con el lanzador real. Verificado el 2026-10-26 con Claude Code 2.1.296
+en Windows: `probe` listo, `SessionBound`, `Model`, `Output`, `Usage`, `Completed`.
+
 ## Compatibilidad
 
 * Añadir un estado, una capability o un código de error **cambia el contrato**: sube `MATRIX_VERSION`/`SNAPSHOT_VERSION`

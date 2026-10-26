@@ -11,6 +11,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod capability;
+mod claude;
 mod error;
 mod redact;
 mod registry;
@@ -28,6 +29,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 pub use capability::{Capability, CapabilityMatrix, CapabilityState, MATRIX_VERSION};
+pub use claude::{ClaudeAdapter, ClaudeConfig, Endpoint};
 pub use error::{AdapterError, ErrorCode, FailureKind};
 pub use redact::{redact, REDACTED};
 pub use registry::{AdapterRegistry, ProviderEntry, RegistrySnapshot, SNAPSHOT_VERSION};
@@ -140,7 +142,12 @@ pub struct ResumeRequest {
     pub attempt_id: String,
     pub provider_ref: ProviderRef,
     pub worktree: PathBuf,
+    /// El mensaje con el que continúa la sesión.
     pub prompt: Option<String>,
+    /// Los permisos con que corría el Attempt original: reanudar no los amplía ni los pierde.
+    pub profile: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -158,12 +165,23 @@ pub struct RunHandle {
 }
 
 /// Hechos que el adapter observa mientras corre. NO es `Serialize`: el Core decide qué se vuelve un Event.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AdapterEvent {
     /// El proveedor entregó el id de su sesión. El Core lo fija en `provider_sessions`; no viaja en ningún Event.
     SessionBound { provider_ref: ProviderRef },
+    /// Modelo EFECTIVO con el que corre (puede diferir del pedido).
+    Model { model: String },
     Output { text: String },
     Question { question_id: String, text: String },
+    /// El proveedor pide permiso para usar una herramienta. El Core decide (policy) y responde con `answer`, con el texto
+    /// `allow` o `deny`; el adapter nunca responde por su cuenta.
+    Permission { request_id: String, tool: String, summary: String },
+    /// El proveedor usa una herramienta (un hecho, no una petición). `summary` es corto: nunca el contenido completo.
+    ToolUse { tool: String, summary: String },
+    /// El proveedor reintenta una llamada de red: informativo, la ejecución sigue.
+    Retry { attempt: u32, max: u32, delay_ms: u64 },
+    /// Uso total al terminar. `None` = el proveedor no lo informó: desconocido, NUNCA cero.
+    Usage { input_tokens: Option<u64>, output_tokens: Option<u64>, cache_read_tokens: Option<u64>, cache_creation_tokens: Option<u64>, cost_usd: Option<f64> },
 }
 
 /// Cómo terminó una ejecución. Un fallo del proveedor es un RESULTADO (`Failed`); un error de la llamada (`Err`) es que
@@ -193,10 +211,14 @@ struct RedactingSink<'a> {
 
 impl EventSink for RedactingSink<'_> {
     fn push(&mut self, event: AdapterEvent) {
+        // Sin rama comodín: una variante nueva obliga a decidir aquí qué se redacta.
         let event = match event {
             AdapterEvent::Output { text } => AdapterEvent::Output { text: redact(&text) },
             AdapterEvent::Question { question_id, text } => AdapterEvent::Question { question_id, text: redact(&text) },
-            bound @ AdapterEvent::SessionBound { .. } => bound,
+            AdapterEvent::Model { model } => AdapterEvent::Model { model: redact(&model) },
+            AdapterEvent::Permission { request_id, tool, summary } => AdapterEvent::Permission { request_id, tool: redact(&tool), summary: redact(&summary) },
+            AdapterEvent::ToolUse { tool, summary } => AdapterEvent::ToolUse { tool: redact(&tool), summary: redact(&summary) },
+            keep @ (AdapterEvent::SessionBound { .. } | AdapterEvent::Retry { .. } | AdapterEvent::Usage { .. }) => keep,
         };
         self.inner.push(event);
     }
