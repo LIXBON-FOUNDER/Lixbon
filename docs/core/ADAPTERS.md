@@ -37,7 +37,7 @@ Lo que el proveedor no ofrece consta como `unsupported`; no hay huecos ni "desco
 | `available` | se puede usar | — | habilita la acción |
 | `unsupported` | el proveedor no lo ofrece, por diseño | `unsupported_capability` | no muestra botón funcional |
 | `unavailable` `{reason}` | lo ofrece, ahora no (sin autenticar, degradado…) | `capability_unavailable` | muestra por qué |
-| `environment_blocked` `{block}` | el entorno lo impide (`cli_missing`, `cli_flags_unsupported`, `windows_sandbox_elevated`) | `environment_blocked` | muestra el bloqueo; **no** es un Attempt fallido |
+| `environment_blocked` `{block}` | el entorno lo impide (`cli_missing`, `cli_flags_unsupported`, `windows_sandbox_elevated`, `windows_sandbox_setup`) | `environment_blocked` | muestra el bloqueo; **no** es un Attempt fallido |
 
 Forma en JSON (`{ "state": "available" }`, `{ "state": "unavailable", "reason": "…" }`,
 `{ "state": "environment_blocked", "block": "cli_missing" }`). La matriz lleva `version` (hoy `1`).
@@ -199,12 +199,21 @@ una petición, en el error de un turno, en el stderr de un proceso cortado y en 
 `attempt.failed` y no consume reintentos**, y el mensaje sugiere cerrar la app que lo usa y reintentar (Lixbon nunca mata
 procesos ajenos).
 
-**Abierto en LXO-131 (no hecho aquí):** la causa no está en el conjunto cerrado `EnvBlock`, así que `env_block` queda vacío
-y el bloqueo **no se persiste ni genera Attention**. Añadirla exige (1) una migración que reconstruya `env_blocks` (su `cause`
-tiene un `CHECK` con solo `cli_missing`, `cli_flags_unsupported` y `windows_sandbox_elevated`, tabla `STRICT`), (2) la variante
-en `agents::EnvBlock` y su `EnvProof`, y (3) los textos de Activity de desktop, mobile y CLI (`activity.rs`,
-`activityMessages.js` ×2). Además, el patrón sale de la descripción de la issue: **no hay captura real** de ese error (no se
-reprodujo la condición), por lo que falta la validación manual en Windows.
+La causa es `EnvBlock::WindowsSandboxSetup` (`windows_sandbox_setup`), TIPADA en `AdapterError.env_block`, y recorre el mismo
+camino que las demás: el Core la traduce con `Tx::environment_blocked(proveedor, perfil, causa)` → `environment.blocked` +
+Attention `environment_blocked` con sujeto `windows_sandbox_setup@<perfil>` (la migración **015** la admite en `env_blocks`;
+Activity la muestra en desktop, mobile y CLI con «el sandbox de Windows no está listo o está en uso»).
+
+**Cómo se levanta:** `CodexAdapter::preflight` pregunta a `windowsSandbox/readiness` SIN crear hilos ni gastar cuota, y
+`adapter::env_proof(Readiness::Ready)` es la evidencia que se pasa a `Tx::environment_verified`: solo `ready` desmiente la
+causa, y solo en el perfil preguntado. `notConfigured`, `updateRequired`, otra prueba de entorno o no haber podido preguntar no
+la levantan. En el probe, un sandbox no listo deja la matriz entera en `environment_blocked { windows_sandbox_setup }`.
+
+**Pendiente (no es del adapter):** ningún comando del Core consume todavía los adapters (F5), así que hoy nada llama a
+`Tx::environment_blocked` con este error ni lanza el `preflight`: el camino está probado de extremo a extremo
+(`el_bloqueo_del_sandbox_de_codex_que_llega_del_adapter_levanta_attention_y_solo_su_preflight_lo_levanta`), pero no cableado a
+un comando. Además, el patrón sale de la descripción de la issue: **no hay captura real** de ese error (no se reprodujo la
+condición), por lo que falta la validación manual en Windows con la app de escritorio de Codex reteniendo el sandbox.
 
 ### Validación manual
 

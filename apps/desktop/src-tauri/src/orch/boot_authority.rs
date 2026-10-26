@@ -344,6 +344,9 @@ impl Core {
                     after.attempts,
                     backup.display()
                 );
+                // Con el corte aplicado cae la barrera: las migraciones posteriores a él (015…) se aplican en ESTE arranque y
+                // no en el siguiente. Si no, durante toda esta sesión la base no admitiría las causas de entorno nuevas.
+                self.apply_post_fence_migrations()?;
                 Ok(true)
             }
             Ok(super::agentic_cut::CutReport::AlreadyCut) => Ok(false),

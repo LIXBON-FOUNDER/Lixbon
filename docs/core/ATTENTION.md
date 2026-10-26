@@ -390,7 +390,8 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
 * **Causa tipada, nunca texto:** cada punto de `agents::evaluate`/`evaluate_for`/`resolve_task_policy` que bloquea fija
   `Policy.block: BlockCause` (`Invalid`, `ProfileDisabled`, `Delivery`, `WorktreePath`, `Environment(EnvBlock)`). Solo
   `Environment` es una condición del PROVEEDOR: `EnvBlock` = `cli_missing` · `cli_flags_unsupported` ·
-  `windows_sandbox_elevated` (conjunto cerrado). La ruta del worktree inservible es de ESA solicitud (otra ruta
+  `windows_sandbox_elevated` · `windows_sandbox_setup` (conjunto cerrado; la última, LXO-131: el sandbox de Windows de Codex
+  está en uso por otra aplicación, sin configurar o por actualizar). La ruta del worktree inservible es de ESA solicitud (otra ruta
   funcionaría), no del proveedor: no produce `environment.blocked`. `reason` nunca se lee. `EnvBlock` viaja TIPADO hasta
   la frontera `Tx`/Event (`Tx::environment_blocked` recibe el enum; `Serialize` lo escribe con el mismo código): no hay
   cadenas libres que puedan persistirse y que el proyector ignore.
@@ -408,7 +409,9 @@ decisión, de Git ni de un `failed`/error genérico (`review_ready_y_environment
 * **Solo la evidencia POSITIVA tipada levanta, y solo lo que demuestra:** `Policy.env_proof` (`agents::EnvProof`) es
   independiente de `Policy.status`. La fija `agents::evaluate` únicamente con la CLI hallada, su `--help` LEGIBLE y todos
   los flags del perfil presentes; cada campo desmiente una causa (`cli_present` → `cli_missing`, `flags_supported` →
-  `cli_flags_unsupported`, `sandbox_not_elevated` → `windows_sandbox_elevated`). Los valores oficiales de `[windows] sandbox` son `mxc`,
+  `cli_flags_unsupported`, `sandbox_not_elevated` → `windows_sandbox_elevated`). `sandbox_ready` → `windows_sandbox_setup` NO lo fija `evaluate` sino el
+  adapter de Codex (`adapter::env_proof`), solo con un preflight `windowsSandbox/readiness` = `ready`: `notConfigured`,
+  `updateRequired` o no haber podido preguntar no demuestran nada y el bloqueo sigue. Los valores oficiales de `[windows] sandbox` son `mxc`,
   `elevated` y `unelevated`: SOLO `mxc` y `unelevated` demuestran un sandbox no elevado (`agents::sandbox_proves_not_elevated`,
   comparación exacta); `elevated` es el bloqueo, y un valor ausente o desconocido (`""`, otra capitalización, un valor
   futuro) no demuestra nada y conserva el bloqueo. Una policy BLOQUEADA lleva solo lo que llegó a demostrar: por flags,

@@ -1,7 +1,7 @@
 //! Pruebas del adapter de Codex (LXO-130 y LXO-131). Los guiones son capturas REALES de `codex app-server` 0.164.0
 //! (saneadas); `real_codex_*` (ignoradas por defecto) lanzan la CLI de verdad para la validación manual.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::time::Duration;
@@ -148,12 +148,19 @@ fn sin_cli_o_sin_ningun_canal_el_entorno_esta_bloqueado() {
 }
 
 #[test]
-fn si_el_sandbox_de_windows_no_esta_listo_las_capabilities_no_estan_disponibles_con_su_motivo() {
-    for (r, texto) in [(Readiness::NotConfigured, "no está listo"), (Readiness::UpdateRequired, "actualizarse")] {
+fn si_el_sandbox_de_windows_no_esta_listo_el_entorno_esta_bloqueado_con_su_causa_tipada() {
+    for r in [Readiness::NotConfigured, Readiness::UpdateRequired] {
         let p = probe_from(true, Some("0.164.0"), Some(HELP), Some(EXEC_HELP), Some(r));
+        assert_eq!(p.probe.environment, Environment::Blocked { blocks: vec![EnvBlock::WindowsSandboxSetup] }, "{r:?}");
+        assert_eq!(p.probe.transport.as_deref(), Some("app_server"));
         for c in Capability::ALL {
-            assert!(matches!(p.probe.matrix.state(c), CapabilityState::Unavailable { reason } if reason.contains(texto)), "{r:?} {}", c.code());
+            assert_eq!(p.probe.matrix.state(c), &CapabilityState::EnvironmentBlocked { block: EnvBlock::WindowsSandboxSetup }, "{r:?} {}", c.code());
         }
+        // Y arrancar contra ese plan es un bloqueo de entorno con la causa, sin lanzar ningún proceso.
+        let l = FakeLauncher::new(script_of(NORMAL));
+        let e = registro(p, l.clone()).gated(ID).unwrap().start(start_req("proponer"), &CancelToken::new()).unwrap_err();
+        assert_eq!((e.code, e.kind(), e.env_block), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked, Some(EnvBlock::WindowsSandboxSetup)));
+        assert!(l.launched.lock().unwrap().is_empty());
     }
     assert_eq!(Readiness::parse("ready"), Some(Readiness::Ready));
     assert_eq!(Readiness::parse("notConfigured"), Some(Readiness::NotConfigured));
@@ -465,7 +472,7 @@ fn el_conflicto_del_sandbox_en_un_turno_es_entorno_bloqueado_y_no_un_fallo() {
     falla_el_turno(&mut s, "helper_unknown_error: setup refresh had errors", Some("sandboxError"));
     let (_, outcome, _) = corre(plan_app_server(), s, "");
     let RunOutcome::Failed(e) = outcome else { panic!("{outcome:?}") };
-    assert_eq!((e.code, e.kind()), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked));
+    assert_eq!((e.code, e.kind(), e.env_block), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked, Some(EnvBlock::WindowsSandboxSetup)));
     // La acción sugerida es segura: cerrar y reintentar, nunca matar procesos ajenos.
     assert!(e.message.contains("ciérrala y reintenta") && e.message.contains("no cierra procesos ajenos"), "{}", e.message);
 }
@@ -480,7 +487,7 @@ fn el_conflicto_del_sandbox_tambien_se_reconoce_al_arrancar_y_en_stderr() {
     let l = FakeLauncher::new(s);
     let reg = registro(plan_app_server(), l.clone());
     let e = reg.gated(ID).unwrap().start(start_req("proponer"), &CancelToken::new()).unwrap_err();
-    assert_eq!((e.code, e.kind()), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked));
+    assert_eq!((e.code, e.kind(), e.env_block), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked, Some(EnvBlock::WindowsSandboxSetup)));
     assert!(l.last().1.was_killed(), "un arranque fallido no deja el servidor vivo");
 
     // Al cortarse el proceso, por su stderr.
@@ -511,7 +518,7 @@ fn si_el_preflight_dice_no_listo_se_bloquea_antes_de_crear_el_hilo() {
         let l = FakeLauncher::new(s);
         let reg = registro(plan_app_server(), l.clone());
         let e = reg.gated(ID).unwrap().start(start_req("proponer"), &CancelToken::new()).unwrap_err();
-        assert_eq!((e.code, e.kind()), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked), "{estado}");
+        assert_eq!((e.code, e.kind(), e.env_block), (ErrorCode::EnvironmentBlocked, FailureKind::EnvironmentBlocked, Some(EnvBlock::WindowsSandboxSetup)), "{estado}");
         assert!(l.last().1.sent("thread/start").is_empty(), "no se crea ningún hilo con el entorno bloqueado");
         assert!(l.last().1.was_killed());
     }
@@ -525,6 +532,54 @@ fn si_el_preflight_no_existe_en_esta_version_no_bloquea() {
     r["error"] = json!({"code": -32601, "message": "method not found"});
     let (_, outcome, _) = corre(plan_app_server(), s, "");
     assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
+}
+
+#[test]
+fn el_preflight_pregunta_al_sandbox_sin_crear_hilos_ni_gastar_cuota() {
+    let prefijo = |mut s: Vec<Value>| {
+        let i = s.iter().position(|p| p["respond"] == "windowsSandbox/readiness").unwrap();
+        s.truncate(i + 1);
+        s
+    };
+    for (estado, esperado) in [("ready", Readiness::Ready), ("notConfigured", Readiness::NotConfigured), ("updateRequired", Readiness::UpdateRequired)] {
+        let mut s = prefijo(script_of(NORMAL));
+        respond_de(&mut s, "windowsSandbox/readiness")["result"] = json!({ "status": estado });
+        let l = FakeLauncher::new(s);
+        let a = CodexAdapter::with_parts(cfg(), l.clone(), Arc::new(plan_app_server));
+        assert_eq!(a.preflight(Path::new("wt")).unwrap(), Some(esperado), "{estado}");
+        let srv = l.last().1;
+        assert!(srv.sent("thread/start").is_empty() && srv.sent("turn/start").is_empty(), "el preflight no crea hilos ni turnos");
+        assert!(srv.was_killed(), "ni deja el servidor vivo");
+    }
+    // Una versión que no tiene la consulta: no sabe contestar, y eso no es «no listo».
+    let mut s = prefijo(script_of(NORMAL));
+    let r = respond_de(&mut s, "windowsSandbox/readiness");
+    r.as_object_mut().unwrap().remove("result");
+    r["error"] = json!({"code": -32601, "message": "method not found"});
+    let a = CodexAdapter::with_parts(cfg(), FakeLauncher::new(s), Arc::new(plan_app_server));
+    assert_eq!(a.preflight(Path::new("wt")).unwrap(), None);
+    // El respaldo exec no tiene esta consulta ni lanza nada.
+    let l = FakeLauncher::new(vec![]);
+    let a = CodexAdapter::with_parts(cfg(), l.clone(), Arc::new(plan_exec));
+    assert_eq!(a.preflight(Path::new("wt")).unwrap(), None);
+    assert!(l.launched.lock().unwrap().is_empty());
+}
+
+#[test]
+fn solo_un_preflight_listo_desmiente_el_bloqueo_del_sandbox() {
+    use crate::orch::agents::EnvProof;
+    assert!(env_proof(Readiness::Ready).demonstrates(EnvBlock::WindowsSandboxSetup));
+    for no in [Readiness::NotConfigured, Readiness::UpdateRequired] {
+        assert!(!env_proof(no).any(), "{no:?} no demuestra nada");
+    }
+    // Y la prueba de listo no desmiente NINGUNA otra causa.
+    for otra in [EnvBlock::CliMissing, EnvBlock::CliFlagsUnsupported, EnvBlock::WindowsSandboxElevated] {
+        assert!(!env_proof(Readiness::Ready).demonstrates(otra), "{otra:?}");
+    }
+    // A la inversa, que la CLI exista, tenga los flags y el sandbox no sea elevado NO prueba que esté listo ni libre.
+    let otra = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true, sandbox_ready: false };
+    assert!(!otra.demonstrates(EnvBlock::WindowsSandboxSetup));
+    assert_eq!(sandbox_conflict_error().env_block, Some(EnvBlock::WindowsSandboxSetup));
 }
 
 // ── exec --json (respaldo degradado) ──────────────────────────────────────────────────────────────────────────────────

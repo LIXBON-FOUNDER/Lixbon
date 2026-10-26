@@ -22,6 +22,7 @@ Las migraciones viven en `apps/desktop/src-tauri/src/store/migrations/NNN_nombre
 | 012 | `attempt_runtime` | F3 · huecos del modelo para el runtime (LXO-231) | en revisión (PR de LXO-231, tras la 011). Esquema **inerte** hasta el corte. Ver `ATTEMPTS.md` § Runtime |
 | 013 | `runtime_tables` | F3 · runtime sobre las tablas (LXO-232) | en revisión (PR de LXO-232, tras la 012). Solo triggers y una columna: **inerte** hasta el corte. Ver `RUNTIME_TABLAS.md` § La 013 |
 | 014 | `task_attempt_cut` | F3 · corte de datos (LXO-117, activado en LXO-234) | en revisión (PR de LXO-234, tras la 013). **Barrera**: el migrador general no la aplica, ni nada posterior a ella; la aplica solo el corte (`agentic_cut::run`), en el arranque y con `LIXBON_AGENTIC_CUT=1`. Ver `CORTE_EJECUCION.md` |
+| 015 | `env_block_sandbox_setup` | F4 · bloqueo de entorno del sandbox de Windows de Codex (LXO-131) | en revisión (tras la 014, con el resto del Core F4). Reconstruye `env_blocks` (el `CHECK` de `cause` es cerrado y SQLite no lo cambia en su sitio) con la causa `windows_sandbox_setup`, copia las filas y recrea los dos triggers de «inerte hasta el corte». Va **después de la barrera**: solo se aplica en una base ya cortada, en el mismo arranque del corte o en el siguiente |
 
 La numeración inicial (002 proyectos · 003 eventos · 004 clientes · 005 attention) quedó obsoleta
 cuando C2b ocupó la 002 con la valla: D, E, F1 y G pasaron a 003..006. Los números aún no escritos son una **reserva

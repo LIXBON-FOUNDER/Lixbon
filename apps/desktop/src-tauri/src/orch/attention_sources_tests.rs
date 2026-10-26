@@ -256,7 +256,7 @@ fn con_sonda_codex(profile: &str, role: Option<&str>, worktree: &str, sandbox: O
 
 /// La evidencia completa de entorno de una policy `ok` (versión fijada) en estas pruebas.
 fn prueba_completa() -> agents::EnvProof {
-    agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true }
+    agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true, sandbox_ready: false }
 }
 
 /// La policy que el host resolvería según el modo del perfil pedido.
@@ -276,11 +276,11 @@ fn segun_modo(provider: &str, profile: &str, role: Option<&str>, worktree: &str)
         // Como la policy real: bloquear por flags demuestra que la CLI está; bloquear por sandbox, además los flags.
         SIN_FLAGS => {
             bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
-            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false, sandbox_ready: false };
         }
         SANDBOX => {
             bloqueo(&mut p, BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
-            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+            p.env_proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
         }
         // Flags que faltan SIN evidencia alguna (p. ej. una policy que no llegó a demostrar nada).
         SIN_FLAGS_SIN_PRUEBA => bloqueo(&mut p, BlockCause::Environment(EnvBlock::CliFlagsUnsupported)),
@@ -560,7 +560,7 @@ fn la_sonda_real_separa_la_evidencia_de_entorno_del_estado_de_version_y_modelo()
         agents::mark_model(&mut p, Some("modelo-no-listado"), Some(false));
         p
     };
-    let completa = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+    let completa = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
     assert_eq!((fijada.status, fijada.env_proof), (agents::Status::Ok, completa));
     assert_eq!((sin_fijar.status, sin_fijar.env_proof), (agents::Status::Unverified, completa), "versión sin fijar: sus flags sí están en --help");
     assert_eq!((modelo.status, modelo.env_proof), (agents::Status::Unverified, completa), "mark_model degrada el status, no la evidencia");
@@ -570,7 +570,7 @@ fn la_sonda_real_separa_la_evidencia_de_entorno_del_estado_de_version_y_modelo()
     let skip = fake("claude", "explorar", None, wt);
     assert_eq!((skip.status, skip.env_proof), (agents::Status::Unverified, agents::EnvProof::default()));
     let sin_flags = con_sonda("claude", "explorar", None, wt, "9.9.9", true, false);
-    assert_eq!((sin_flags.status, sin_flags.block, sin_flags.env_proof), (agents::Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported)), agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false }));
+    assert_eq!((sin_flags.status, sin_flags.block, sin_flags.env_proof), (agents::Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported)), agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false, sandbox_ready: false }));
 }
 
 #[test]
@@ -636,7 +636,7 @@ fn sin_ayuda_legible_o_sin_comprobar_ningun_bloqueo_se_levanta() {
     assert!(cleared_de(&desde(&e.core, antes)).is_empty(), "flags correctos no desmienten el sandbox elevado");
     assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::WindowsSandboxElevated)]);
     // Solo una lectura del sandbox NO elevado lo demuestra.
-    let proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true };
+    let proof = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true, sandbox_ready: false };
     e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", proof))).unwrap();
     assert!(bloqueos(&e).is_empty());
 }
@@ -664,7 +664,7 @@ fn la_evidencia_levanta_solo_lo_que_demuestra() {
     pide_perfil(&e, "proponer").expect_err("proponer");
     assert_eq!(bloqueos(&e).len(), 2);
     // Evidencia de CLI presente SIN flags demostrados: solo cae `cli_missing`; los flags de `explorar` se conservan.
-    let solo_cli = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+    let solo_cli = agents::EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false, sandbox_ready: false };
     let levantado = e.core.mutate_as(&MutationContext::core(), |tx| Ok(tx.environment_verified("claude", "explorar", solo_cli))).unwrap();
     assert!(levantado);
     assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliFlagsUnsupported)], "los flags no están demostrados");
@@ -1164,4 +1164,54 @@ fn toda_consulta_de_la_policy_real_pasa_por_resolve_and_observe() {
     }
     assert!(produccion_de("spawn.rs").contains("self.resolve_and_observe("), "el recheck de launch observa el entorno");
     assert!(produccion_de("spawn_approval.rs").matches("self.resolve_and_observe(").count() >= 3, "spawn_request, approve_spawn y fake_launch");
+}
+
+/// LXO-131: el bloqueo del sandbox de Windows de Codex llega TIPADO desde el adapter (`AdapterError.env_block`), levanta
+/// `environment_blocked` sin ser un fallo ni un riesgo, y solo un preflight `ready` de SU perfil lo levanta.
+#[test]
+fn el_bloqueo_del_sandbox_de_codex_que_llega_del_adapter_levanta_attention_y_solo_su_preflight_lo_levanta() {
+    use super::adapter::{env_proof, sandbox_conflict_error, FailureKind, Readiness};
+    let e = setup_con("src-env-sandbox-setup", fake);
+    let error = sandbox_conflict_error();
+    assert_eq!(error.kind(), FailureKind::EnvironmentBlocked, "no es un fallo del Attempt");
+    let causa = error.env_block.expect("el error del adapter lleva la causa tipada");
+
+    let antes = head(&e.core);
+    e.core
+        .mutate_as(&MutationContext::core(), |tx| {
+            tx.environment_blocked("codex", "explorar", causa);
+            Ok(())
+        })
+        .unwrap();
+    let evs = desde(&e.core, antes);
+    assert_eq!(kinds(&evs), vec!["environment.blocked", "attention.created"]);
+    assert_eq!(pl(&evs[0]), json!({ "profile": "explorar", "code": "windows_sandbox_setup" }));
+    assert_eq!((pl(&evs[1])["category"].as_str(), pl(&evs[1])["severity"].as_str()), (Some("environment_blocked"), Some("high")));
+    assert_eq!(activas(&e), vec!["environment_blocked"], "y ni failed ni risk");
+    assert_eq!(entorno_activo(&e), vec![("codex".to_string(), "windows_sandbox_setup@explorar".to_string())]);
+    assert_eq!(bloqueos(&e), vec![("codex/explorar".to_string(), EnvBlock::WindowsSandboxSetup)]);
+
+    let verifica = |perfil: &str, prueba: agents::EnvProof| {
+        e.core
+            .mutate_as(&MutationContext::core(), |tx| {
+                tx.environment_verified("codex", perfil, prueba);
+                Ok(())
+            })
+            .unwrap()
+    };
+    // Lo que no es su preflight listo no lo levanta: otras pruebas de entorno, un sandbox sin configurar o por actualizar…
+    verifica("explorar", agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true, sandbox_ready: false });
+    verifica("explorar", env_proof(Readiness::NotConfigured));
+    verifica("explorar", env_proof(Readiness::UpdateRequired));
+    // …ni el preflight listo de OTRO perfil.
+    verifica("proponer", env_proof(Readiness::Ready));
+    assert_eq!(bloqueos(&e), vec![("codex/explorar".to_string(), EnvBlock::WindowsSandboxSetup)]);
+    assert_eq!(entorno_activo(&e).len(), 1);
+
+    // El preflight listo de su perfil sí.
+    let antes = head(&e.core);
+    verifica("explorar", env_proof(Readiness::Ready));
+    assert!(kinds(&desde(&e.core, antes)).contains(&"environment.cleared"));
+    assert!(bloqueos(&e).is_empty(), "el bloqueo ya no consta");
+    assert!(activas(&e).is_empty(), "y su Attention se resolvió");
 }

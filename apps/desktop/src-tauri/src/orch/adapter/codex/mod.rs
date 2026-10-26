@@ -36,7 +36,7 @@ use super::{
     AdapterError, AdapterEvent, Answer, CancelToken, Capability, CapabilityMatrix, CapabilityState, ErrorCode, EventSink, ProbeResult, ProviderAdapter,
     ProviderRef, ResumeRequest, RunHandle, RunOutcome, StartRequest,
 };
-use crate::orch::agents::{self, EnvBlock, Profile};
+use crate::orch::agents::{self, EnvBlock, EnvProof, Profile};
 use rpc::{Incoming, RpcError};
 
 pub const ID: &str = "codex";
@@ -63,14 +63,28 @@ pub fn is_sandbox_setup_conflict(text: &str) -> bool {
     text.contains("helper_unknown_error") && text.contains("setup refresh had errors")
 }
 
+const SANDBOX_UPDATE_REQUIRED: &str = "el sandbox de Windows de Codex necesita actualizarse: ábrelo desde Codex para completarlo y reintenta";
 const SANDBOX_IN_USE: &str = "el sandbox de Windows de Codex está en uso (por ejemplo, por la app de escritorio de Codex): ciérrala y reintenta; Lixbon no cierra procesos ajenos";
 const SANDBOX_NOT_READY: &str = "el sandbox de Windows de Codex no está listo (sin configurar o con una actualización pendiente): ábrelo desde Codex para configurarlo y reintenta";
 
-/// Error de entorno de Codex. NO es un fallo del Attempt (`FailureKind::EnvironmentBlocked`): no consume reintentos.
-/// `env_block` queda vacío a propósito: el conjunto cerrado `EnvBlock` (con su `CHECK` en `env_blocks`) aún no tiene esta
-/// causa; modelarla exige una migración y los textos de Activity de los clientes (ver `docs/core/ADAPTERS.md`).
+/// Error de entorno de Codex. NO es un fallo del Attempt (`FailureKind::EnvironmentBlocked`): no consume reintentos. Lleva
+/// la causa TIPADA (`EnvBlock::WindowsSandboxSetup`, migración 015), que es lo que el Core traduce a `environment.blocked`
+/// y a su Attention con `Tx::environment_blocked`.
 fn environment_blocked(message: &str) -> AdapterError {
-    AdapterError::new(ErrorCode::EnvironmentBlocked, message)
+    let mut e = AdapterError::new(ErrorCode::EnvironmentBlocked, message);
+    e.env_block = Some(EnvBlock::WindowsSandboxSetup);
+    e
+}
+
+/// El error que produce el conflicto del sandbox de Windows (en uso por otra aplicación). Lo usan las pruebas del Core.
+pub fn sandbox_conflict_error() -> AdapterError {
+    environment_blocked(SANDBOX_IN_USE)
+}
+
+/// La evidencia POSITIVA que desmiente `windows_sandbox_setup`: solo un preflight `ready`. `NotConfigured`, `UpdateRequired`
+/// o no haber podido preguntar no demuestran nada y el bloqueo sigue (ver `Tx::environment_verified`).
+pub fn env_proof(readiness: Readiness) -> EnvProof {
+    EnvProof { sandbox_ready: readiness == Readiness::Ready, ..EnvProof::default() }
 }
 
 // ── Canal y probe ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -132,14 +146,12 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>, ex
     let exec_json = exec_help.is_some_and(|h| super::help_has(h, "--json"));
 
     if has_app_server && verified {
-        let m = match readiness {
-            Some(r) if r != Readiness::Ready => {
-                let why = if r == Readiness::NotConfigured { SANDBOX_NOT_READY } else { "el sandbox de Windows de Codex necesita actualizarse: ábrelo desde Codex para completarlo y reintenta" };
-                Capability::ALL.into_iter().fold(CapabilityMatrix::new(), |m, c| m.with(c, CapabilityState::unavailable(why)))
-            }
-            _ => CapabilityMatrix::all_available(),
-        };
-        return plan(ProbeResult::ready(version, m).with_transport(Transport::AppServer.code()), Some(Transport::AppServer), None);
+        // El sandbox de Windows no está listo: es un bloqueo de ENTORNO (no «no disponible» ni un fallo), con su causa tipada.
+        if matches!(readiness, Some(r) if r != Readiness::Ready) {
+            let probe = ProbeResult::blocked(version, vec![EnvBlock::WindowsSandboxSetup]).with_transport(Transport::AppServer.code());
+            return plan(probe, Some(Transport::AppServer), None);
+        }
+        return plan(ProbeResult::ready(version, CapabilityMatrix::all_available()).with_transport(Transport::AppServer.code()), Some(Transport::AppServer), None);
     }
     if exec_json {
         let reason = if !has_app_server {
@@ -341,20 +353,38 @@ impl CodexAdapter {
         })
     }
 
+    /// `initialize` → `initialized`.
+    fn initialize(run: &Run) -> Result<(), AdapterError> {
+        run.call("initialize", Some(json!({ "clientInfo": { "name": "lixbon", "title": "Lixbon", "version": env!("CARGO_PKG_VERSION") } })))?;
+        run.process.send(&rpc::notification_line("initialized"))
+    }
+
+    /// `windowsSandbox/readiness`. En otras plataformas o versiones la consulta puede no existir: `None`, y no bloquea nada.
+    fn readiness(run: &Run) -> Option<Readiness> {
+        run.call("windowsSandbox/readiness", None).ok().and_then(|v| v["status"].as_str().and_then(Readiness::parse))
+    }
+
     /// `initialize` → `initialized` → preflight del sandbox. Un servidor que no contesta es un fallo; un preflight que
     /// dice "no listo" es un bloqueo de entorno.
     fn handshake(run: &Run) -> Result<(), AdapterError> {
-        run.call("initialize", Some(json!({ "clientInfo": { "name": "lixbon", "title": "Lixbon", "version": env!("CARGO_PKG_VERSION") } })))?;
-        run.process.send(&rpc::notification_line("initialized"))?;
-        // En otras plataformas o versiones esta consulta puede no existir: un error aquí no bloquea nada.
-        if let Ok(v) = run.call("windowsSandbox/readiness", None) {
-            match v["status"].as_str().and_then(Readiness::parse) {
-                Some(Readiness::NotConfigured) => return Err(environment_blocked(SANDBOX_NOT_READY)),
-                Some(Readiness::UpdateRequired) => return Err(environment_blocked("el sandbox de Windows de Codex necesita actualizarse: ábrelo desde Codex para completarlo y reintenta")),
-                _ => {}
-            }
+        Self::initialize(run)?;
+        match Self::readiness(run) {
+            Some(Readiness::NotConfigured) => Err(environment_blocked(SANDBOX_NOT_READY)),
+            Some(Readiness::UpdateRequired) => Err(environment_blocked(SANDBOX_UPDATE_REQUIRED)),
+            _ => Ok(()),
         }
-        Ok(())
+    }
+
+    /// Pregunta al sandbox de Windows de Codex si está listo SIN crear ningún hilo ni gastar cuota. `Ok(None)`: este canal o
+    /// esta versión no sabe contestar. Es la prueba que levanta el bloqueo `windows_sandbox_setup` (ver [`env_proof`]).
+    pub fn preflight(&self, cwd: &Path) -> Result<Option<Readiness>, AdapterError> {
+        if self.plan().transport != Some(Transport::AppServer) {
+            return Ok(None);
+        }
+        let run = self.spawn_server(cwd)?;
+        let r = Self::initialize(&run).map(|_| Self::readiness(&run));
+        run.shutdown();
+        r
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -51,7 +51,8 @@ fn sql(s: &mut Store, q: &str) {
 /// Base anterior al corte (todas las migraciones publicadas), el Project `p-1` y `legacy_state = doc` en la rev 42.
 /// Las migraciones de un binario anterior al corte (F2): todas menos el corte.
 fn f2() -> Vec<Migration> {
-    embedded().into_iter().filter(|m| m.name != CUT_NAME).collect()
+    // Un binario anterior al corte no conoce el corte NI NADA POSTERIOR a él (la 015…).
+    embedded().into_iter().filter(|m| m.name != CUT_NAME && m.version < cut_migration().version).collect()
 }
 
 fn base(t: &Tmp, doc: Option<&str>) -> Store {

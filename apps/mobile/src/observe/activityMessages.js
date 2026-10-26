@@ -122,6 +122,7 @@ const ENVIRONMENT_CODES = {
   cli_missing: 'falta la CLI',
   cli_flags_unsupported: 'la CLI no admite estas opciones',
   windows_sandbox_elevated: 'el entorno de Windows requiere elevación',
+  windows_sandbox_setup: 'el sandbox de Windows no está listo o está en uso',
 };
 const ATTENTION_CATEGORIES = {
   question: 'pregunta',

@@ -498,6 +498,15 @@
       "text": "El entorno de codex está bloqueado para el perfil terminal: falta la CLI."
     },
     {
+      "key": "activity.environment.blocked",
+      "args": {
+        "provider": "codex",
+        "profile": "terminal",
+        "code": "windows_sandbox_setup"
+      },
+      "text": "El entorno de codex está bloqueado para el perfil terminal: el sandbox de Windows no está listo o está en uso."
+    },
+    {
       "key": "activity.environment.cleared",
       "args": {
         "provider": "codex",

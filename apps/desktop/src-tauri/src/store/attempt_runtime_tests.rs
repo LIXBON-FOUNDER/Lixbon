@@ -280,6 +280,67 @@ fn los_bloqueos_de_entorno_se_ponen_y_se_quitan() {
     assert_eq!(w.s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM env_blocks", [], |r| r.get::<_, i64>(0))?)).unwrap(), 0);
 }
 
+/// Las migraciones del binario con el CORTE sustituido por una migración vacía. El migrador general no aplica la 014 ni nada
+/// posterior (es una barrera); así se prueba la 015 aislada, sin la maquinaria del corte.
+fn con_el_corte_neutro() -> Vec<Migration> {
+    embedded().into_iter().map(|m| if m.name == super::cut::CUT_NAME { Migration::new(m.version, "corte_neutro_de_prueba", "SELECT 1;") } else { m }).collect()
+}
+
+#[test]
+fn la_causa_del_sandbox_de_windows_de_codex_se_guarda_y_una_desconocida_se_rechaza() {
+    let t = Tmp::new();
+    let mut s = Store::open_with(t.path(), &con_el_corte_neutro(), "t").unwrap();
+    s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
+    assert!(s.write(|tx| env_block_set_in(tx, "codex/explorar", "windows_sandbox_setup", true)).unwrap());
+    assert!(s.write(|tx| env_block_set_in(tx, "codex/explorar", "windows_sandbox_inventado", true)).is_err(), "el conjunto sigue cerrado");
+    assert!(s.write(|tx| env_block_set_in(tx, "codex/explorar", "windows_sandbox_setup", false)).unwrap());
+}
+
+/// La 015 reconstruye `env_blocks` (SQLite no cambia un CHECK en su sitio): conserva las filas, admite la causa nueva,
+/// mantiene cerrado el conjunto y recrea los dos triggers de «inerte hasta el corte».
+#[test]
+fn la_migracion_015_conserva_las_filas_admite_la_causa_nueva_y_mantiene_los_triggers() {
+    use rusqlite::Connection;
+    let t = Tmp::new();
+    let todas = con_el_corte_neutro();
+    let mut conn = Connection::open_in_memory().unwrap();
+    let r = super::migrate::migrate_capped(&mut conn, &todas, 14, "t", t.path()).unwrap();
+    assert_eq!(r.to_version, 14);
+    conn.execute("INSERT INTO meta (key, value) VALUES ('agentic_model', '1')", []).unwrap();
+    for (scope, cause) in [("claude/explorar", "cli_missing"), ("codex/explorar", "windows_sandbox_elevated"), ("codex/proponer", "cli_flags_unsupported")] {
+        conn.execute("INSERT INTO env_blocks (scope, cause) VALUES (?1, ?2)", [scope, cause]).unwrap();
+    }
+    assert!(conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'windows_sandbox_setup')", []).is_err(), "antes de la 015 la causa no existe");
+
+    let r = super::migrate::migrate_capped(&mut conn, &todas, i64::MAX, "t", t.path()).unwrap();
+    assert_eq!((r.from_version, r.applied.clone()), (14, vec![15]));
+    let filas: Vec<(String, String)> = conn.prepare("SELECT scope, cause FROM env_blocks ORDER BY scope").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
+    assert_eq!(
+        filas,
+        [("claude/explorar".into(), "cli_missing".into()), ("codex/explorar".into(), "windows_sandbox_elevated".into()), ("codex/proponer".into(), "cli_flags_unsupported".into())],
+        "las filas pasan intactas"
+    );
+    conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'windows_sandbox_setup')", []).expect("ya admite la causa nueva");
+    assert!(conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'otra')", []).is_err(), "el conjunto sigue cerrado");
+    assert!(conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'windows_sandbox_setup')", []).is_err(), "y la clave primaria (scope, cause) sigue");
+
+    // Los triggers sobreviven a la reconstrucción: sin el corte activo, ni insertar ni borrar.
+    conn.execute("DELETE FROM meta WHERE key = 'agentic_model'", []).unwrap();
+    let ins = conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('x/y', 'cli_missing')", []).unwrap_err().to_string();
+    let del = conn.execute("DELETE FROM env_blocks", []).unwrap_err().to_string();
+    assert!(ins.contains("inerte") && del.contains("inerte"), "{ins} / {del}");
+    let triggers: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'env_blocks'", [], |r| r.get(0)).unwrap();
+    assert_eq!(triggers, 2);
+}
+
+/// La 015 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).
+#[test]
+fn la_migracion_015_tiene_el_checksum_congelado() {
+    let m = embedded().into_iter().find(|m| m.version == 15).expect("existe la 015");
+    assert_eq!(m.name, "env_block_sandbox_setup");
+    assert_eq!(m.checksum(), "f2ca67ed936aee208e58dad78ce86e1b155002ae65c796e765b3173b0c6a6bea", "una migración publicada no se edita");
+}
+
 #[test]
 fn antes_del_corte_ninguna_pieza_escribe() {
     let t = Tmp::new();

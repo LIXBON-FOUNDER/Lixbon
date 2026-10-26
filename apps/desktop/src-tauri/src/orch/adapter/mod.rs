@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 pub use capability::{Capability, CapabilityMatrix, CapabilityState, MATRIX_VERSION};
 pub use claude::{ClaudeAdapter, ClaudeConfig, Endpoint};
-pub use codex::{CodexAdapter, CodexConfig};
+pub use codex::{env_proof, sandbox_conflict_error, CodexAdapter, CodexConfig, Readiness};
 pub use error::{AdapterError, ErrorCode, FailureKind};
 pub use redact::{redact, REDACTED};
 pub use registry::{AdapterRegistry, ProviderEntry, RegistrySnapshot, SNAPSHOT_VERSION};

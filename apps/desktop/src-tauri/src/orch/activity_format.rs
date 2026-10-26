@@ -121,10 +121,11 @@ const ARTIFACT_KINDS: [&str; 5] = ["report", "pull_request", "last_message", "co
 const ACTIVE_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
 /// Campos de la intención que puede nombrar `task.updated`.
 const INTENT_FIELDS: [&str; 2] = ["title", "spec"];
-const ENV_CODES: [&str; 3] = [
+const ENV_CODES: [&str; 4] = [
     "cli_missing",
     "cli_flags_unsupported",
     "windows_sandbox_elevated",
+    "windows_sandbox_setup",
 ];
 const ATTENTION_CATEGORIES: [&str; 7] = [
     "question",

@@ -807,7 +807,7 @@ decide el hecho; ningún consumidor los deduce de otros Events.
 | `environment.cleared` | state · `agent` | `profile`, `code` (el que se levanta) | `Tx::environment_verified`, SOLO con prueba positiva tipada de esa causa concreta (nunca por un cambio de causa); `system` / `core` |
 
 * `code` es el conjunto cerrado y TIPADO de `agents::EnvBlock` (`cli_missing` · `cli_flags_unsupported` ·
-  `windows_sandbox_elevated`), `profile` uno de los perfiles conocidos. La causa sale de un tipo (`Policy.block`), nunca
+  `windows_sandbox_elevated` · `windows_sandbox_setup`), `profile` uno de los perfiles conocidos. La causa sale de un tipo (`Policy.block`), nunca
   del texto de `reason`; un código o un perfil fuera de esos conjuntos no es una señal.
 * **Alcance proveedor + perfil:** `cli_missing` lo levanta una comprobación positiva de cualquier perfil del proveedor;
   las banderas y el sandbox, solo la del mismo perfil.
