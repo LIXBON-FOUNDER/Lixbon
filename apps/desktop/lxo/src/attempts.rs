@@ -173,7 +173,7 @@ fn contract_error() -> Failure {
 }
 
 /// Los errores de las lecturas vNext (`model_*`, `core_model_inactive`) y de `activity_list`.
-fn model_failure(error: RpcFailure) -> Failure {
+pub(super) fn model_failure(error: RpcFailure) -> Failure {
     if let RpcFailure::Rejected(m) = &error {
         if m.starts_with("core_model_inactive") {
             return Failure::Version(
@@ -1146,6 +1146,7 @@ mod tests {
             (data["v"].clone(), data["core_model"].clone()),
             (json!(1), json!(MODEL))
         );
+        crate::snapshot("attempt_show.v1.json", &data);
         assert!(
             attempt.as_object_mut().unwrap().remove("id").is_none(),
             "nunca un `id` a secas"
@@ -1189,6 +1190,7 @@ mod tests {
             !data.to_string().contains("texto privado"),
             "no copia el encargo de la Task"
         );
+        crate::snapshot("attempts.v1.json", &data);
     }
 
     #[test]

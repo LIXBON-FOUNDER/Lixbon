@@ -42,12 +42,13 @@ Coordinador (el agente con el que habla el usuario):
                                                   (solo lectura y solo personas; registrar o archivar se decide en Lixbon)
   lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
                                                   Event Log paginado con autenticación de cliente
-  lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--json]
-  lxo task show <task_id>                          tareas del Core (modelo legacy) en árbol (solo lectura)
+  lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--json [--schema 2]]
+  lxo task show <task_id> [--json [--schema 2]]    tareas del Core en árbol (solo lectura); --schema 2 es
+                                                  la forma del modelo Task/Attempt (docs/core/LXO_CORTE.md)
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
                                                   (solo lectura y solo personas)
-  lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
+  lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
   lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
@@ -1096,6 +1097,25 @@ fn main() -> ExitCode {
     }
 }
 
+/// Snapshots del `--json` de lxo en `docs/core/fixtures/lxo/` (LXO-125): las leen los scripts y el TUI de Go, así
+/// que cambiar una forma publicada exige subir su `v`. `LXO_WRITE_LXO_FIXTURES=1` las regenera; revísalas a mano.
+#[cfg(test)]
+fn snapshot(name: &str, got: &Value) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../docs/core/fixtures/lxo")
+        .join(name);
+    if std::env::var_os("LXO_WRITE_LXO_FIXTURES").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(got).unwrap() + "\n").unwrap();
+    }
+    let raw = std::fs::read(&path).unwrap_or_else(|_| panic!("falta {}", path.display()));
+    let want: Value = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(
+        got, &want,
+        "{name} cambió: si es a propósito, sube su `v`, regenera la fixture y anótalo en docs/core/LXO_CORTE.md"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     /// Ejemplos de la guía (bloques de código y `código` en línea) con `lxo` encadenado.
@@ -1439,5 +1459,20 @@ mod tests {
             "https://github.com/x/y/pull/4",
         ]);
         assert_eq!(a.s("pr").as_deref(), Some("#4"));
+    }
+
+    /// LXO-125 · `lxo events --attempt` es el atajo de los eventos de un intento; no se combina con --task.
+    #[test]
+    fn events_attempt_es_el_atajo_de_la_entidad_attempt() {
+        let p = |raw: &[&str]| super::parse(raw.iter().map(|s| s.to_string()).collect());
+        let opts = super::events::parse_events_options(&p(&["events", "--attempt", "t3-a2"])).unwrap();
+        assert_eq!((opts.query["entity_kind"].as_str(), opts.query["entity_id"].as_str()), ("attempt", "t3-a2"));
+        for raw in [
+            &["events", "--attempt", "t3-a2", "--task", "t3"][..],
+            &["events", "--attempt", "t3-a2", "--entity-kind", "task"],
+            &["events", "--attempt"],
+        ] {
+            assert!(super::events::parse_events_options(&p(raw)).is_err(), "{raw:?}");
+        }
     }
 }

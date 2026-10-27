@@ -1,0 +1,61 @@
+{
+  "activity": {
+    "has_more": true,
+    "items": [
+      {
+        "kind": "task.created",
+        "message_key": "activity.task.created",
+        "seq": 10,
+        "text": "Se creó la tarea «tarea t2» para claude (depende de t1; profundidad 1).",
+        "ts": 1760000000000,
+        "visual": "info"
+      },
+      {
+        "kind": "task.teleported",
+        "message_key": "activity.unknown",
+        "seq": 11,
+        "text": null,
+        "ts": 1760000060000,
+        "visual": "info"
+      },
+      {
+        "kind": "task.status_changed",
+        "message_key": "activity.task.failed",
+        "seq": 12,
+        "text": "La tarea falló.",
+        "ts": 1760000120000,
+        "visual": "error"
+      }
+    ]
+  },
+  "children": [],
+  "task": {
+    "base": "main",
+    "branch": "lxo/t2",
+    "created_at": 2000,
+    "cwd": "C:/r/api",
+    "depth": 1,
+    "failure_reason": "agent_idle_timeout",
+    "final": true,
+    "host": null,
+    "id": "t2",
+    "merged": false,
+    "model": "claude-sonnet-4",
+    "origin": "lixbon",
+    "parent_id": "t1",
+    "phase": null,
+    "pr_url": null,
+    "project_id": "p-api",
+    "provider": "claude",
+    "role": null,
+    "root_id": "t1",
+    "run_id": "r1",
+    "shared_checkout": false,
+    "status": "failed",
+    "title": "tarea t2",
+    "updated_at": 62000,
+    "worktree": "C:/r/api-wt/t2"
+  },
+  "task_model": "legacy",
+  "v": 1
+}

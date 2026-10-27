@@ -1,0 +1,86 @@
+{
+  "activity": {
+    "has_more": false,
+    "items": [
+      {
+        "kind": "attempt.started",
+        "message_key": "activity.attempt.started",
+        "seq": 20,
+        "text": "Empezó el intento 1 de la tarea t3.",
+        "ts": 1792000050000,
+        "visual": "info"
+      },
+      {
+        "kind": "attempt.finished",
+        "message_key": "activity.attempt.completed",
+        "seq": 21,
+        "text": "El intento 1 de la tarea t3 terminó correctamente con resumen.",
+        "ts": 1792000090000,
+        "visual": "success"
+      }
+    ]
+  },
+  "attempt": {
+    "artifacts": [
+      {
+        "artifact_id": "t3-a1-last_message",
+        "bytes": null,
+        "kind": "last_message",
+        "sha256": null,
+        "uri": "/home/ana/app.lixbon-wt/t3-api-de-sesiones/.lixbon/out/t3/last.txt"
+      },
+      {
+        "artifact_id": "t3-a1-report",
+        "bytes": null,
+        "kind": "report",
+        "sha256": null,
+        "uri": "/home/ana/app/.lixbon/informes/r1/t3.md"
+      }
+    ],
+    "attempt_id": "t3-a1",
+    "created_at": 1792000040000,
+    "effort": "high",
+    "ended_at": null,
+    "failure_reason": null,
+    "final": true,
+    "integrated": true,
+    "model": "gpt-6.1-sol",
+    "n": 1,
+    "origin": "lixbon",
+    "profile": "implementar",
+    "provider": "codex",
+    "provider_session": {
+      "binding": "session_id",
+      "bound": true,
+      "opened_by_attempt_id": "t3-a1",
+      "provider_session_id": "ps-t3-a1",
+      "resumable": true,
+      "status": "idle"
+    },
+    "review": {
+      "base_commit": "b0b0b0",
+      "decision_id": 1,
+      "head_commit": "c3c3c3",
+      "status": "active",
+      "verdict": "accepted"
+    },
+    "role": "implementador",
+    "started_at": 1792000050000,
+    "status": "done",
+    "summary": "API lista",
+    "task_id": "t3",
+    "worktree": {
+      "base_branch": "main",
+      "branch": "lx/r1/t3-api-de-sesiones",
+      "branch_kept": false,
+      "machine": null,
+      "path": "/home/ana/app.lixbon-wt/t3-api-de-sesiones",
+      "provenance": "created",
+      "registered_by_attempt_id": "t3-a1",
+      "state": "active",
+      "worktree_id": "wt-t3-a1"
+    }
+  },
+  "core_model": "task_attempt_v1",
+  "v": 1
+}

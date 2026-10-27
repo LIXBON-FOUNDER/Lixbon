@@ -594,6 +594,8 @@ o fallo de lectura).
   remiten a `lxo attempts --task`; `lxo task show` añade la línea «Intentos: N». Su `--json` no cambia.
 * Solo personas (3 con la credencial de un agente). Salidas: 0 correcto, 1 interno, 2 uso, 3 autenticación,
   4 versión o Core sin el modelo Task/Attempt, 5 Core no disponible, 6 Task o Attempt inexistente.
+* La forma 2 del `--json` de `lxo tasks` y `lxo task show` (`--schema 2`), `--attempt` en `lxo events` y
+  `lxo attention`, la matriz de órdenes y la retirada de lo legacy: [LXO_CORTE.md](LXO_CORTE.md) (LXO-125).
 * Pruebas: `lxo/src/attempts.rs` (Core simulado sobre las fixtures de `fixtures/api/`) y
   `orch/model_read_tests.rs::lxo_bin_e2e_attempts_person_real_store` (binario real contra un Core cortado).
 

@@ -194,6 +194,9 @@ fn lxo_bin_e2e_attempts_person_real_store() {
         let antes = server.lxo(&["attempts", "--task", "t3"], None);
         assert_eq!(antes.status.code(), Some(4), "sin el corte no hay intentos: {:?}", text(&antes));
         assert!(text(&antes).1.contains("lxo task show"), "{:?}", text(&antes));
+        // LXO-125 · la forma 2 llega con el corte; la 1 sigue igual.
+        assert_eq!(server.lxo(&["tasks", "--json", "--schema", "2"], None).status.code(), Some(4));
+        assert_eq!(server.json(&["tasks", "--json"])["v"], 1);
     }
     suelta(core, &core_dir);
     SWITCH_FOR_TESTS.with(|c| c.set(Some(true)));
@@ -270,6 +273,33 @@ fn lxo_bin_e2e_attempts_person_real_store() {
     assert!(aviso_lista.contains("lxo attempts --task <id>"), "{aviso_lista}");
     let legacy_json = server.lxo(&["task", "show", "t3", "--json"], None);
     assert!(legacy_json.status.success() && legacy_json.stderr.is_empty(), "el --json legacy no cambia en LXO-124");
+
+    // LXO-125 · forma 2 del --json: la Task sin nada de la ejecución y sus intentos por id; la 1 no cambia.
+    let v1 = server.json(&["tasks", "--json"]);
+    assert_eq!((v1["v"].clone(), v1["task_model"].clone()), (json!(1), json!("legacy")));
+    let v2 = server.json(&["tasks", "--json", "--schema", "2"]);
+    assert_eq!((v2["v"].clone(), v2["task_model"].clone()), (json!(2), json!("task_attempt_v1")));
+    let de = |doc: &Value, id: &str| doc["tasks"].as_array().unwrap().iter().find(|t| t["task_id"] == id).cloned().unwrap_or(Value::Null);
+    assert_eq!((de(&v2, &dos)["attempt_count"].clone(), de(&v2, &dos)["current_attempt"]["attempt_id"].clone()), (json!(2), json!(a2)));
+    assert_eq!(de(&v2, "t3")["state"], "integrated");
+    assert!(!v2.to_string().contains("\"branch\"") && !v2.to_string().contains("encargo privado"), "{v2}");
+    let en_revision = server.json(&["tasks", "--json", "--schema", "2", "--state", "in_review"]);
+    assert!(en_revision["tasks"].as_array().unwrap().iter().all(|t| t["state"] == "in_review"));
+    let detalle = server.json(&["task", "show", &dos, "--json", "--schema", "2"]);
+    assert_eq!(
+        detalle["task"]["attempts"],
+        json!([{ "attempt_id": a1, "n": 1, "status": "failed" }, { "attempt_id": a2, "n": 2, "status": "pending_approval" }]),
+        "con N intentos los nombra todos y no elige ninguno"
+    );
+    assert!(detalle["task"].get("provider").is_none() && detalle["task"].get("worktree").is_none());
+    assert_eq!(server.lxo(&["tasks", "--json", "--schema", "2", "--status", "running"], None).status.code(), Some(2));
+    assert_eq!(server.lxo(&["task", "show", "reintentada", "--json", "--schema", "2"], None).status.code(), Some(6), "la forma 2 va por id");
+    // --attempt: la Attention y los eventos de un intento concreto.
+    let att = server.json(&["attention", "--attempt", &a1, "--json"]);
+    assert_eq!(att["items"].as_array().unwrap().iter().map(|i| i["category"].clone()).collect::<Vec<_>>(), [json!("failed")], "{att}");
+    let ev = server.json(&["events", "--attempt", &a1, "--json"]);
+    assert!(!ev["events"].as_array().unwrap().is_empty() && ev["events"].as_array().unwrap().iter().all(|e| e["entity"]["id"] == a1.as_str()), "{ev}");
+    assert_eq!(server.lxo(&["events", "--task", &dos, "--attempt", &a1], None).status.code(), Some(2));
 
     // Solo personas.
     let token = "agent-lxo-attempts-e2e-token-with-32-bytes-ok";
