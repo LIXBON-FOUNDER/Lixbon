@@ -6,14 +6,26 @@
       {
         "created_at": 1792000040000,
         "ended_at": null,
+        "ended_at_known": false,
         "external": false,
         "id": "t3-a1",
         "model": "gpt-6.1-sol",
         "n": 1,
+        "origin": "legacy",
         "provider": "codex",
+        "result": {
+          "failure_reason": null,
+          "summary": "API lista",
+          "truncated": false
+        },
         "role": "implementador",
         "started_at": 1792000050000,
-        "status": "done"
+        "status": "done",
+        "worktree": {
+          "branch": "lx/r1/t3-api-de-sesiones",
+          "id": "wt-t3-a1",
+          "state": "active"
+        }
       }
     ],
     "children": [],
@@ -21,14 +33,26 @@
     "current_attempt": {
       "created_at": 1792000040000,
       "ended_at": null,
+      "ended_at_known": false,
       "external": false,
       "id": "t3-a1",
       "model": "gpt-6.1-sol",
       "n": 1,
+      "origin": "legacy",
       "provider": "codex",
+      "result": {
+        "failure_reason": null,
+        "summary": "API lista",
+        "truncated": false
+      },
       "role": "implementador",
       "started_at": 1792000050000,
-      "status": "done"
+      "status": "done",
+      "worktree": {
+        "branch": "lx/r1/t3-api-de-sesiones",
+        "id": "wt-t3-a1",
+        "state": "active"
+      }
     },
     "depth": 1,
     "id": "t3",

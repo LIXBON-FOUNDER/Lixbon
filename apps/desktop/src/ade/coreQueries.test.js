@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ATTENTION_LIMIT, TASK_PAGE_LIMIT, listAdeActivity, listAdeTasks, queryAdeCore, readAdeResources } from './coreQueries';
 import { ACTIVITY_V1_MESSAGE_KEYS } from './activityMessages.js';
+import { ATTEMPT_ACTIVITY_LABELS } from './adeLabels';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -94,6 +95,13 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.attention.created', { category: 'question', severity: 'high', occurrence: 1, target_kind: 'task', target_id: 'task-1' }],
   ['activity.attention.resolved', { resolution: 'condition_cleared' }],
   ['activity.unknown', { reason: 'unknown_kind', kind: 'task.future', event_version: 2 }],
+  ['activity.attempt.requested', { task: 't-7', n: 2, provider: 'claude', external: false, approval_required: true }, { model: 'claude-opus-5-5', effort: 'high', role: 'worker', profile: 'default' }],
+  ['activity.attempt.approved', { task: 't-7', n: 2 }],
+  ['activity.attempt.started', { task: 't-7', n: 2 }],
+  ['activity.attempt.rejected', { task: 't-7', n: 2, cause: 'cancelled' }],
+  ['activity.attempt.completed', { task: 't-7', n: 2, has_summary: true }],
+  ['activity.attempt.failed', { task: 't-7', n: 2, reason: 'agent_idle_timeout', has_summary: false }],
+  ['activity.attempt.stopped', { task: 't-7', n: 2, from: 'running', cause: 'run_closed' }],
   ...['starting', 'running', 'waiting', 'awaiting_terminal_approval', 'done', 'failed', 'stopped', 'exited']
     .map((to) => [`activity.task.${to}`, { from: 'running', to }, { cause: 'agent_idle_timeout' }]),
   // Modelo Task/Attempt (LXO-233).
@@ -378,7 +386,8 @@ describe('queryAdeCore', () => {
 
   it('exige los argumentos requeridos, opcionales y tipos exactos por cada message_key', async () => {
     expect(ACTIVITY_ARGS_CONTRACTS.map(([messageKey]) => messageKey).sort())
-      .toEqual([...ACTIVITY_V1_MESSAGE_KEYS].sort());
+      // activity.attempt.* se valida en el transporte aunque el catálogo compartido con lxo aún no lo traduzca.
+      .toEqual([...ACTIVITY_V1_MESSAGE_KEYS, ...Object.keys(ATTEMPT_ACTIVITY_LABELS)].sort());
 
     for (const [messageKey, required, optional = {}] of ACTIVITY_ARGS_CONTRACTS) {
       const allArgs = { ...required, ...optional };

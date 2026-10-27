@@ -99,7 +99,7 @@ function mountCore({ overviews = () => overview([]), tasks = (args) => page(args
 }
 
 const taskCalls = (calls) => calls.filter((call) => call.query === 'tasks_by_project');
-const onlyReadQueries = (calls) => calls.every((call) => ['projects_overview', 'tasks_by_project'].includes(call.query));
+const onlyReadQueries = (calls) => calls.every((call) => ['projects_overview', 'tasks_by_project', 'core_model', 'task_list_v2', 'attempts_by_task'].includes(call.query));
 const clickProject = (row) => fireEvent.click(row.querySelector('.ps__name'));
 const flush = async () => {
   await act(async () => {

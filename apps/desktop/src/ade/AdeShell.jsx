@@ -12,6 +12,13 @@ import { JumpPaletteHost } from './JumpPaletteHost';
 import { ProjectsSidebar } from './ProjectsSidebar';
 import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
+import { AttemptHistory } from './AttemptHistory';
+import { AttemptDetail } from './AttemptDetail';
+import { useCoreModel } from './useCoreModel';
+import { StartupCutNotice } from './StartupCutNotice';
+import { migratePersistedSelection, resolveNavTarget } from './cutoverNavigation';
+import { COPY, navNoticeCopy, navRejectText } from './adeLabels';
+import { readLegacyAdeSelection } from '../store/workbenchStore';
 import { useCoreQuery } from './useCoreQuery';
 import './AdeShell.css';
 import './TaskWorkspace.css';
@@ -460,6 +467,19 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const workspaceActive = active && modeActive;
   const selectedProjectId = adeSelection.projectId;
   const selectedTaskId = adeSelection.taskId;
+  const selectedAttemptId = adeSelection.attemptId ?? null;
+  // ÚNICA decisión legacy / task_attempt_v1 del ADE (LXO-120); los hijos la reciben por props.
+  const coreModel = useCoreModel({ active: modeActive });
+  // LXO-123: lo guardado con forma F2 se migra (o se invalida con aviso) en cuanto se sabe el modelo; una sola vez.
+  const legacySelectionRef = useRef(readLegacyAdeSelection());
+  const [navNotice, setNavNotice] = useState(null);
+  useEffect(() => {
+    const result = migratePersistedSelection(legacySelectionRef.current, coreModel);
+    if (!result) return;
+    legacySelectionRef.current = null;
+    setAdeSelection(result.selection);
+    if (result.notice) setNavNotice(result.notice);
+  }, [coreModel, setAdeSelection]);
   // Projects/Tasks viven en la navegación unificada, también mientras el canvas
   // contextual muestra un Run. Las selecciones Core no se derivan de Runs.
   const projectViewActive = Boolean(workspaceActive && workspaceView === 'workspace' && selectedProjectId && !selectedTaskId);
@@ -621,6 +641,14 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
     setWorkspaceView('workspace');
     onActivate?.();
   };
+  // LXO-120: un Attempt se selecciona por su trío durable; la Task sigue siendo la del Attempt.
+  const selectAttempt = ({ projectId, taskId, attemptId } = {}) => {
+    if (![projectId, taskId, attemptId].every((value) => typeof value === 'string' && value.trim())) return;
+    invalidateActivityRequest();
+    setAdeSelection({ projectId, taskId, attemptId });
+    setWorkspaceView('workspace');
+    onActivate?.();
+  };
   const changeWorkspaceView = (view) => {
     if (view !== 'activity') {
       invalidateActivityRequest();
@@ -747,6 +775,24 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           notify(`Core no pudo verificar la Task ${id} del Project ${projectId}; no se cambió la selección.`);
         }
       }
+    } else if (kind === 'attempt') {
+      // LXO-123: el Attempt se abre con su Task (`<task>-a<n>`) tras confirmar el Project; un destino stale lo explica.
+      const resolved = resolveNavTarget({ kind, id, projectId }, coreModel);
+      if (resolved.action !== 'select') {
+        notify(navRejectText(resolved.reason));
+        return;
+      }
+      if (!projectSnapshotReady) {
+        notify(`No se pudo verificar el Project ${projectId} en el overview de Core; no se cambió la selección.`);
+        return;
+      }
+      if (!projectExists(projectId)) {
+        notify(`El Project ${projectId} no aparece en el overview activo de Core.`);
+        return;
+      }
+      const restoreFocus = activityFocusNeedsRestore();
+      selectAttempt(resolved.selection);
+      if (restoreFocus) setWorkspaceFocusSeq((seq) => seq + 1);
     }
   };
 
@@ -788,6 +834,14 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       setAdeSelection({ projectId, taskId: id });
       setWorkspaceView('workspace');
       onActivate?.();
+    } else if (kind === 'attempt') {
+      // LXO-123: Attention de un Attempt abre ese Attempt (con su Task), en un solo paso.
+      const resolved = resolveNavTarget({ kind, id, projectId }, coreModel);
+      if (resolved.action !== 'select') {
+        setAttentionNotice(navRejectText(resolved.reason));
+        return;
+      }
+      selectAttempt(resolved.selection);
     } else if (kind === 'run') {
       if (typeof onOpenRun !== 'function' || onOpenRun(id) !== true) unavailable(`El Run ${id}`);
     } else if (kind === 'spawn_request') {
@@ -812,6 +866,12 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       return { ok: true };
     }
     const { targetKind, targetId, projectId } = target;
+    if (targetKind === 'attempt') {
+      const resolved = resolveNavTarget({ kind: 'attempt', id: targetId, projectId }, coreModel);
+      if (resolved.action !== 'select') return { ok: false, message: navRejectText(resolved.reason) };
+      selectAttempt(resolved.selection);
+      return { ok: true };
+    }
     if (targetKind === 'project' || targetKind === 'task') {
       openAttentionFilter({ kind: targetKind, id: targetId, projectId });
       return { ok: true };
@@ -850,15 +910,26 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       data-testid="ade-composition"
     >
       <JumpPaletteHost open={jumpPaletteOpen && modeActive} onClose={closeJumpPalette} onNavigate={jumpTo} />
+      {modeActive && <StartupCutNotice storage={coreModel.storage ?? null} />}
+      {modeActive && navNotice && (
+        <div className={`ade-notice ade-notice--${navNoticeCopy(navNotice).tone}`} role="status" data-testid="ade-nav-notice" data-notice={navNotice}>
+          <span>{navNoticeCopy(navNotice).text}</span>{' '}
+          <button type="button" className="lk" onClick={() => setNavNotice(null)}>{COPY.cutDismiss}</button>
+        </div>
+      )}
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar
-                selection={{ projectId: selectedProjectId, taskId: selectedTaskId }}
+                selection={selectedAttemptId
+                  ? { projectId: selectedProjectId, taskId: selectedTaskId, attemptId: selectedAttemptId }
+                  : { projectId: selectedProjectId, taskId: selectedTaskId }}
+                coreModel={coreModel}
                 onSelectProject={selectProject}
                 onSelectTask={selectTask}
+                onSelectAttempt={selectAttempt}
                 onProjectSnapshot={onProjectSnapshot}
                 onProjectsSnapshot={onProjectsSnapshot}
                 active={modeActive}
@@ -918,6 +989,24 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   <TaskWorkspace {...workspaceProps} variant="workspace" />
+                  <AttemptHistory
+                    taskId={selectedTaskId}
+                    coreModel={coreModel}
+                    active={workspaceActive && workspaceView === 'workspace'}
+                    selectedAttemptId={selectedAttemptId}
+                    onSelectAttempt={(attemptId) => selectAttempt({ projectId: selectedProjectId, taskId: selectedTaskId, attemptId })}
+                    onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
+                  />
+                  {selectedAttemptId && (
+                    <AttemptDetail
+                      attemptId={selectedAttemptId}
+                      taskId={selectedTaskId}
+                      coreModel={coreModel}
+                      active={workspaceActive && workspaceView === 'workspace'}
+                      onSelectTask={(taskId) => selectTask({ projectId: selectedProjectId, taskId })}
+                      onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -989,6 +1078,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                 <div className="ssec__label">Selección ADE</div>
                 <div className="ade__selection-row"><span>Project ID</span><span className="mono">{selectedProjectId || 'Ninguno'}</span></div>
                 <div className="ade__selection-row"><span>Task ID</span><span className="mono">{selectedTaskId || 'Ninguna'}</span></div>
+                {selectedAttemptId && <div className="ade__selection-row"><span>Attempt ID</span><span className="mono">{selectedAttemptId}</span></div>}
               </section>
               {selectedTaskId && <TaskWorkspace {...workspaceProps} variant="inspector" />}
             </div>

@@ -7,14 +7,22 @@
       "current_attempt": {
         "created_at": 1792000000000,
         "ended_at": null,
+        "ended_at_known": false,
         "external": false,
         "id": "t2-a1",
         "model": null,
         "n": 1,
+        "origin": "legacy",
         "provider": "claude",
+        "result": {
+          "failure_reason": null,
+          "summary": "",
+          "truncated": false
+        },
         "role": null,
         "started_at": null,
-        "status": "done"
+        "status": "done",
+        "worktree": null
       },
       "depth": 0,
       "id": "t2",
@@ -33,14 +41,26 @@
       "current_attempt": {
         "created_at": 1792000040000,
         "ended_at": null,
+        "ended_at_known": false,
         "external": false,
         "id": "t3-a1",
         "model": "gpt-6.1-sol",
         "n": 1,
+        "origin": "legacy",
         "provider": "codex",
+        "result": {
+          "failure_reason": null,
+          "summary": "API lista",
+          "truncated": false
+        },
         "role": "implementador",
         "started_at": 1792000050000,
-        "status": "done"
+        "status": "done",
+        "worktree": {
+          "branch": "lx/r1/t3-api-de-sesiones",
+          "id": "wt-t3-a1",
+          "state": "active"
+        }
       },
       "depth": 1,
       "id": "t3",
@@ -59,14 +79,26 @@
       "current_attempt": {
         "created_at": 1792000045000,
         "ended_at": null,
+        "ended_at_known": false,
         "external": false,
         "id": "t4-a1",
         "model": null,
         "n": 1,
+        "origin": "legacy",
         "provider": "codex",
+        "result": {
+          "failure_reason": "agent_idle_timeout",
+          "summary": "",
+          "truncated": false
+        },
         "role": null,
         "started_at": 1792000060000,
-        "status": "failed"
+        "status": "failed",
+        "worktree": {
+          "branch": "lx/r1/t4-formulario-de-login",
+          "id": "wt-t4-a1",
+          "state": "active"
+        }
       },
       "depth": 1,
       "id": "t4",
@@ -85,14 +117,26 @@
       "current_attempt": {
         "created_at": 1792000046000,
         "ended_at": null,
+        "ended_at_known": false,
         "external": false,
         "id": "t5-a1",
         "model": "sonnet",
         "n": 1,
+        "origin": "legacy",
         "provider": "claude",
+        "result": {
+          "failure_reason": null,
+          "summary": "Tests de login y logout",
+          "truncated": false
+        },
         "role": null,
         "started_at": 1792000070000,
-        "status": "done"
+        "status": "done",
+        "worktree": {
+          "branch": "lx/r1/t5-tests-de-login",
+          "id": "wt-t5-a1",
+          "state": "removed"
+        }
       },
       "depth": 1,
       "id": "t5",
@@ -111,14 +155,22 @@
       "current_attempt": {
         "created_at": 1792001000000,
         "ended_at": null,
+        "ended_at_known": true,
         "external": true,
         "id": "t17-a1",
         "model": null,
         "n": 1,
+        "origin": "legacy",
         "provider": "claude",
+        "result": {
+          "failure_reason": null,
+          "summary": "",
+          "truncated": false
+        },
         "role": null,
         "started_at": null,
-        "status": "running"
+        "status": "running",
+        "worktree": null
       },
       "depth": 0,
       "id": "t17",

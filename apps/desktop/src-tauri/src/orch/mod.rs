@@ -83,6 +83,7 @@ mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;
 mod agentic_cut;
+mod startup_cut;
 #[cfg(test)]
 mod agentic_cut_tests;
 #[cfg(test)]
