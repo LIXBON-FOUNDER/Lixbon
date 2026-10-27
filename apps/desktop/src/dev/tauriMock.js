@@ -265,6 +265,12 @@ function adeQuery(query, args) {
       }
       return { version: 1, generation: 1, providers, status: 'ready', refreshing: false, checked_at_ms: Date.now() };
     }
+    // LXO-136 (SIMULADO): el navegador no tiene el Core, así que NO verifica nada: un JSON ilegible es `invalid_json` y cualquier
+    // otro texto devuelve un paquete de ejemplo. La verificación real (identidad y secretos) es del Core.
+    case 'context_package_preview': {
+      try { JSON.parse(args.package); } catch { return { v: 1, status: 'invalid', error: { code: 'invalid_json', message: 'invalid_json: no es JSON' }, serialized_bytes: String(args.package ?? '').length }; }
+      return { v: 1, status: 'valid', package_id: `sha256:${'ab'.repeat(32)}`, verification: { identity: 'verified', secrets: 'none_found', attachments: 'not_checked' }, package: { schema_version: 1, package_id: `sha256:${'ab'.repeat(32)}`, created_at_ms: ADE_T0, source: { project_id: 'demo', task_id: 'demo-t3', attempt_id: 'demo-t3-a1', provider: 'claude', host: 'fp:00000000' }, objective: 'Paquete de ejemplo (simulado).', decisions: [], constraints: [], revision: null, revision_absent_reason: 'ejemplo del navegador', redactions: 0 }, summary: { serialized_bytes: 400, completeness: 'partial', notes: ['revision_absent'], counts: { decisions: 0, constraints: 0, files: 0, untracked: 0, artifacts: 0, attachments: 0, attachments_omitted: 0, attachments_not_scanned: 0, attachments_bytes: 0, redactions: 0, truncated_fields: 0 } } };
+    }
     case 'core_model':
       return vNext
         ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }

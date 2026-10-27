@@ -10,6 +10,7 @@ import {
   validateResourceInventory,
 } from './coreInventoryContract';
 import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
+import { CONTEXT_PREVIEW_QUERY_SPECS } from './contextPreviewContract';
 import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContract';
 
 
@@ -639,6 +640,8 @@ const QUERY_SPECS = Object.freeze({
   ...CORE_MODEL_QUERY_SPECS,
   // Qué ofrece cada proveedor ahora (LXO-135): la UI habilita por esta matriz, nunca por el nombre del proveedor.
   ...PROVIDER_CAPABILITIES_QUERY_SPECS,
+  // Revisar un ContextPackage antes de cualquier transferencia (LXO-136): el Core lo verifica; el cliente solo lo muestra.
+  ...CONTEXT_PREVIEW_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

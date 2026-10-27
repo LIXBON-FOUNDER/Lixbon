@@ -81,6 +81,9 @@ mod attempt_ops_tests;
 mod attempt_runtime_ops_tests;
 mod continuity;
 mod provider_registry;
+mod context_preview;
+#[cfg(test)]
+mod context_preview_tests;
 #[cfg(test)]
 mod provider_registry_tests;
 mod session_ops;
