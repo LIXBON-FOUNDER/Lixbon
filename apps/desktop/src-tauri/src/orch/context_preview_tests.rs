@@ -194,7 +194,7 @@ fn un_adjunto_omitido_no_cuenta_como_sin_escanear_ni_un_mensaje_largo_se_devuelv
         v["attachments"][0]["omitted"] = json!("secret_detected"); // el git bundle, que era el único sin escanear
     });
     let r = preview(&raw);
-    assert_eq!(r["status"], "valid", "estado inesperado: {}", r["status"]);
+    assert_eq!(r["status"], "valid", "estado inesperado de context_package_preview");
     assert_eq!(r["summary"]["counts"]["attachments_omitted"], 1);
     assert_eq!(r["summary"]["counts"]["attachments_not_scanned"], 0, "un adjunto omitido no viaja: no cuenta como sin escanear");
     assert_eq!(notas(&r), ["attachment_omitted"]);
