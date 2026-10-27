@@ -51,6 +51,7 @@ mod cut;
 mod reviews;
 mod runtime;
 mod tasks;
+mod model_pages;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]

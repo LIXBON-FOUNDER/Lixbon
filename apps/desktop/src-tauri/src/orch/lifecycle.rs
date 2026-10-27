@@ -227,6 +227,8 @@ impl Core {
     fn refuse_to_start(&self, e: &OpenStoreError) -> String {
         let msg = format!("Lixbon no puede iniciar el Core: {e}");
         eprintln!("[core] {msg}");
+        // LXO-234: el motivo queda consultable (`core_model.storage`) para que el cliente no se quede en blanco.
+        self.storage.reject("core_store_open_failed".to_string(), e.to_string());
         if let Some(host) = self.host.get() {
             host.notify("Lixbon no puede iniciar", &msg);
         }

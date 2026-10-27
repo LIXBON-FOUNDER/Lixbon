@@ -19,12 +19,15 @@
     "created_at": 1792000040000,
     "effort": "high",
     "ended_at": null,
+    "ended_at_known": false,
     "external": false,
     "failure_reason": null,
     "id": "t3-a1",
     "integrated": true,
+    "integrated_at": null,
     "model": "gpt-6.1-sol",
     "n": 1,
+    "origin": "legacy",
     "profile": "implementar",
     "provider": "codex",
     "provider_session": {
@@ -35,11 +38,25 @@
       "resumable": true,
       "status": "idle"
     },
+    "result": {
+      "failure_reason": null,
+      "summary": "API lista",
+      "truncated": false
+    },
     "review": {
+      "at": 1792000400000,
       "base_commit": "b0b0b0",
+      "closed_at": null,
       "decision_id": 1,
       "head_commit": "c3c3c3",
+      "observed_head": null,
       "status": "active",
+      "validity": {
+        "active": true,
+        "attempt_is_current": true,
+        "integrated": true,
+        "integrated_at": null
+      },
       "verdict": "accepted"
     },
     "role": "implementador",

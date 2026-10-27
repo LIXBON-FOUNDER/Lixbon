@@ -1529,6 +1529,7 @@ pub fn run() {
             claude_code::cc_config,
             claude_code::cc_config_open,
             orch::orch_snapshot,
+            orch::orch_startup_cut,
             orch::orch_settings_set,
             orch::orch_call,
             orch::orch_query,

@@ -9,8 +9,8 @@ import {
   RESOURCE_WORKTREE_STATES,
   validateResourceInventory,
 } from './coreInventoryContract';
+import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
 
-const QUERY_NAMES = new Set(['projects_overview', 'tasks_by_project', 'task_detail', 'attention_list', 'activity_list', 'resource_inventory']);
 
 /** Categorías del conjunto cerrado de Attention (LXO-87/89). No se amplían desde el cliente. */
 export const ATTENTION_CATEGORIES = Object.freeze([
@@ -156,6 +156,16 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
     },
   }],
   ['activity.attention.resolved', { required: { resolution: 'string' } }],
+  ['activity.attempt.requested', {
+    required: { task: 'string', n: 'integer', provider: 'string', external: 'boolean', approval_required: 'boolean' },
+    optional: { model: 'string', effort: 'string', role: 'string', profile: 'string' },
+  }],
+  ['activity.attempt.approved', { required: { task: 'string', n: 'integer' } }],
+  ['activity.attempt.started', { required: { task: 'string', n: 'integer' } }],
+  ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
+  ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
+  ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],
+  ['activity.attempt.stopped', { required: { task: 'string', n: 'integer', from: 'string', cause: 'string' } }],
   ['activity.unknown', { required: { reason: 'activityUnknownReason', kind: 'string', event_version: 'integer' } }],
   // Modelo Task/Attempt (LXO-233): los argumentos que da `activity_format.rs` para cada clave.
   ['activity.task.intent_created', { required: { title: 'text', depth: 'integer' }, optional: { parent: 'string' } }],
@@ -367,26 +377,24 @@ function attentionRequest(args) {
   return request;
 }
 
-function requestFor(query, args) {
-  if (!QUERY_NAMES.has(query)) throw new Error(`ade_query_forbidden: ${query} no es una query read-only del ADE`);
-  if (query === 'projects_overview') {
-    const archived = args?.archived ?? 'exclude';
-    if (!ARCHIVED_FILTERS.has(archived)) throw new Error('ade_query_invalid_request: archived no es un filtro del contrato');
-    return { archived };
-  }
-  if (query === 'attention_list') return attentionRequest(args);
-  if (query === 'activity_list') return activityRequest(args);
-  if (query === 'resource_inventory') return resourceInventoryRequest(args);
-  if (query === 'tasks_by_project') {
-    const request = {
-      project_id: durableId(args?.projectId, 'project_id'),
-      status: taskStatus(args?.status),
-      limit: TASK_PAGE_LIMIT,
-    };
-    const cursor = optionalCursor(args?.cursor);
-    if (cursor) request.cursor = cursor;
-    return request;
-  }
+function projectsOverviewRequest(args) {
+  const archived = args?.archived ?? 'exclude';
+  if (!ARCHIVED_FILTERS.has(archived)) throw new Error('ade_query_invalid_request: archived no es un filtro del contrato');
+  return { archived };
+}
+
+function tasksByProjectRequest(args) {
+  const request = {
+    project_id: durableId(args?.projectId, 'project_id'),
+    status: taskStatus(args?.status),
+    limit: TASK_PAGE_LIMIT,
+  };
+  const cursor = optionalCursor(args?.cursor);
+  if (cursor) request.cursor = cursor;
+  return request;
+}
+
+function taskDetailRequest(args) {
   return {
     project_id: durableId(args?.projectId, 'project_id'),
     task_id: durableId(args?.taskId, 'task_id'),
@@ -545,67 +553,103 @@ function validAttentionItem(item) {
     && (item.resolution === null || typeof item.resolution === 'string');
 }
 
-function validateResponse(query, args, response) {
+function requireObject(query, response, version = 1) {
   if (!response || typeof response !== 'object' || Array.isArray(response)) {
     throw invalidResponse(query, 'respuesta no es un objeto');
   }
-  if (response.v !== 1) throw invalidResponse(query, 'versión de respuesta no compatible');
-  if (query === 'activity_list') return validateActivityResponse(args, response);
-  if (query === 'projects_overview') {
-    if (response.filters?.archived !== args.archived || response.filters?.machine !== null
-      || !Array.isArray(response.projects) || response.total !== response.projects.length
-      || response.projects.some((project) => !project || typeof project.id !== 'string' || !project.id.trim() || typeof project.name !== 'string')) {
-      throw invalidResponse(query, 'falta la lista contractual de Projects');
-    }
-    return response;
-  }
-  if (query === 'attention_list') {
-    const cursorIsValid = response.has_more
-      ? typeof response.next_cursor === 'string' && response.next_cursor.length > 0
-      : response.next_cursor === null;
-    if (response.limit !== ATTENTION_LIMIT || typeof response.has_more !== 'boolean' || !cursorIsValid
-      || !Array.isArray(response.items)) {
-      throw invalidResponse(query, 'la página no corresponde a la consulta de Attention');
-    }
-    if (response.items.some((item) => !validAttentionItem(item))) {
-      throw invalidResponse(query, 'la lista contiene una Attention fuera del contrato');
-    }
-    // El filtro lo aplica el Core; aquí solo se verifica que la respuesta corresponde al target pedido.
-    if (args.target_kind && response.items.some((item) => item.target_kind !== args.target_kind || item.target_id !== args.target_id)) {
-      throw invalidResponse(query, 'la lista contiene una Attention de otro target');
-    }
-    return response;
-  }
-  if (query === 'tasks_by_project') {
-    const cursorIsValid = response.has_more
-      ? typeof response.next_cursor === 'string' && response.next_cursor.length > 0
-      : response.next_cursor === null;
-    if (response.project_id !== args.project_id || response.filters?.status !== args.status || response.limit !== TASK_PAGE_LIMIT
-      || !Array.isArray(response.tasks) || typeof response.has_more !== 'boolean' || !cursorIsValid) {
-      throw invalidResponse(query, 'la página no corresponde al Project, al filtro de estado y al límite solicitados');
-    }
-    if (response.tasks.some((task) => !validTask(task))) {
-      throw invalidResponse(query, 'la lista contiene una Task incompleta');
-    }
-    return response;
-  }
-  if (query === 'resource_inventory') {
-    // El contrato del inventario (vocabulario cerrado, eco de filtros y coherencia de las
-    // entradas entre sí) vive en `coreInventoryContract.js`.
-    return validateResourceInventory(response, args);
-  }
-  const task = response.task;
-  if (!task || task.id !== args.task_id || task.project_id !== args.project_id || typeof task.status !== 'string') {
-    throw invalidResponse(query, 'el detalle no corresponde al Project y Task solicitados');
+  if (response.v !== version) throw invalidResponse(query, 'versión de respuesta no compatible');
+}
+
+function validateProjectsOverview(response, args) {
+  requireObject('projects_overview', response);
+  if (response.filters?.archived !== args.archived || response.filters?.machine !== null
+    || !Array.isArray(response.projects) || response.total !== response.projects.length
+    || response.projects.some((project) => !project || typeof project.id !== 'string' || !project.id.trim() || typeof project.name !== 'string')) {
+    throw invalidResponse('projects_overview', 'falta la lista contractual de Projects');
   }
   return response;
 }
 
+function validateAttentionList(response, args) {
+  const query = 'attention_list';
+  requireObject(query, response);
+  const cursorIsValid = response.has_more
+    ? typeof response.next_cursor === 'string' && response.next_cursor.length > 0
+    : response.next_cursor === null;
+  if (response.limit !== ATTENTION_LIMIT || typeof response.has_more !== 'boolean' || !cursorIsValid
+    || !Array.isArray(response.items)) {
+    throw invalidResponse(query, 'la página no corresponde a la consulta de Attention');
+  }
+  if (response.items.some((item) => !validAttentionItem(item))) {
+    throw invalidResponse(query, 'la lista contiene una Attention fuera del contrato');
+  }
+  // El filtro lo aplica el Core; aquí solo se verifica que la respuesta corresponde al target pedido.
+  if (args.target_kind && response.items.some((item) => item.target_kind !== args.target_kind || item.target_id !== args.target_id)) {
+    throw invalidResponse(query, 'la lista contiene una Attention de otro target');
+  }
+  return response;
+}
+
+function validateTasksByProject(response, args) {
+  const query = 'tasks_by_project';
+  requireObject(query, response);
+  const cursorIsValid = response.has_more
+    ? typeof response.next_cursor === 'string' && response.next_cursor.length > 0
+    : response.next_cursor === null;
+  if (response.project_id !== args.project_id || response.filters?.status !== args.status || response.limit !== TASK_PAGE_LIMIT
+    || !Array.isArray(response.tasks) || typeof response.has_more !== 'boolean' || !cursorIsValid) {
+    throw invalidResponse(query, 'la página no corresponde al Project, al filtro de estado y al límite solicitados');
+  }
+  if (response.tasks.some((task) => !validTask(task))) {
+    throw invalidResponse(query, 'la lista contiene una Task incompleta');
+  }
+  return response;
+}
+
+function validateTaskDetail(response, args) {
+  requireObject('task_detail', response);
+  const task = response.task;
+  if (!task || task.id !== args.task_id || task.project_id !== args.project_id || typeof task.status !== 'string') {
+    throw invalidResponse('task_detail', 'el detalle no corresponde al Project y Task solicitados');
+  }
+  return response;
+}
+
+/**
+ * Única tabla de queries read-only del ADE: cada una declara cómo se construye su petición y cómo
+ * se valida su respuesta. Una query que no está aquí se rechaza; no hay caída silenciosa a otra.
+ * Las vNext del modelo Task/Attempt (LXO-119) viven en `coreModelContract.js`.
+ */
+const QUERY_SPECS = Object.freeze({
+  projects_overview: { request: projectsOverviewRequest, validate: validateProjectsOverview },
+  tasks_by_project: { request: tasksByProjectRequest, validate: validateTasksByProject },
+  task_detail: { request: taskDetailRequest, validate: validateTaskDetail },
+  attention_list: { request: attentionRequest, validate: validateAttentionList },
+  activity_list: {
+    request: activityRequest,
+    validate: (response, args) => { requireObject('activity_list', response); return validateActivityResponse(args, response); },
+  },
+  // El contrato del inventario (vocabulario cerrado, eco de filtros y coherencia) vive en `coreInventoryContract.js`.
+  resource_inventory: {
+    request: resourceInventoryRequest,
+    validate: (response, args) => { requireObject('resource_inventory', response); return validateResourceInventory(response, args); },
+  },
+  ...CORE_MODEL_QUERY_SPECS,
+});
+
+export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));
+
+function specFor(query) {
+  if (!Object.hasOwn(QUERY_SPECS, query)) throw new Error(`ade_query_forbidden: ${query} no es una query read-only del ADE`);
+  return QUERY_SPECS[query];
+}
+
 /** Ejecuta exclusivamente las queries read-only del shell F2 mediante el límite autenticado de Desktop. */
 export async function queryAdeCore(query, input = {}) {
-  const args = requestFor(query, input);
+  const spec = specFor(query);
+  const args = spec.request(input);
   const response = await invoke('orch_query', { query, args });
-  return validateResponse(query, args, response);
+  return spec.validate(response, args);
 }
 
 export const listAdeProjects = ({ archived = 'exclude' } = {}) => queryAdeCore('projects_overview', { archived });

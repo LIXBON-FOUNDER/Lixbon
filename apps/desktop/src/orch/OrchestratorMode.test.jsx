@@ -105,7 +105,7 @@ describe('OrchestratorMode', () => {
     expect(screen.getByRole('region', { name: 'Operación' })).toBeTruthy();
     expect(screen.getByTestId('execution-composition').getAttribute('aria-hidden')).toBe('false');
     expect(screen.getByTestId('ade-composition')).toBeTruthy();
-    expect(invoke.mock.calls.filter(([command]) => command === 'orch_query').map(([, args]) => args.query)).toEqual(['projects_overview']);
+    expect(invoke.mock.calls.filter(([command]) => command === 'orch_query').map(([, args]) => args.query)).toEqual(['projects_overview', 'core_model']);
     expect(useOrchStore.getState().selected).toBe('execution-task');
     expect(useWorkbenchStore.getState().focus).toBe('ade-nav');
   });
@@ -139,7 +139,9 @@ describe('OrchestratorMode', () => {
     expect(taskRow.getAttribute('data-task-id')).toBe(item.id);
     expect(within(projectTaskSidebar).getByRole('button', { name: 'Cargar más Tasks de Repo Real' })).toBeTruthy();
     expect(calls).toEqual([
+      // LXO-120: la decisión legacy / task_attempt_v1 (aquí el fixture F2 la rechaza: modo F2).
       ['projects_overview', { archived: 'exclude' }],
+      ['core_model', {}],
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'active', limit: 50 }],
       ['tasks_by_project', { project_id: 'project-uuid-1', status: 'all', limit: 50 }],
       ['attention_list', { limit: 100, project_id: 'project-uuid-1' }],

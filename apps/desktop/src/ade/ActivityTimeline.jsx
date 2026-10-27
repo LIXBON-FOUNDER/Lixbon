@@ -47,6 +47,7 @@
 
 import { useId, useMemo } from 'react';
 import './ActivityTimeline.css';
+import { COPY } from './adeLabels';
 
 const CLASS_LABELS = {
   state: 'Estado',
@@ -600,7 +601,7 @@ export function ActivityTimeline({
               `secuencia ${item.seq}`,
               CLASS_LABELS[classKey] || 'Sin clase',
               severity ? SEVERITY_LABELS[severity] : '',
-              text || (unknown ? 'Evento desconocido' : 'Actividad sin descripción'),
+              text || (unknown ? COPY.unknownEvent : 'Actividad sin descripción'),
               target ? `${TARGET_LABELS[target.kind] || 'Destino'} ${target.id}` : 'Sin destino',
             ]
               .filter(Boolean)
@@ -646,7 +647,7 @@ export function ActivityTimeline({
                       data-testid={`activity-message-${eventId}`}
                       data-message-key={messageKey || undefined}
                     >
-                      {text || (unknown ? 'Evento desconocido' : 'Actividad sin descripción')}
+                      {text || (unknown ? COPY.unknownEvent : 'Actividad sin descripción')}
                     </p>
                   </div>
 

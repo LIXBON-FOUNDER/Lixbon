@@ -8,5 +8,10 @@
     "task_detail_v2",
     "attempts_by_task",
     "attempt_detail"
-  ]
+  ],
+  "storage": {
+    "code": null,
+    "message": null,
+    "status": "ready"
+  }
 }

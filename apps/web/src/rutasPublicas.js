@@ -10,7 +10,9 @@ const BASE = [
   { path: '/apps', priority: '0.8', changefreq: 'monthly' },
   { path: '/skills', priority: '0.7', changefreq: 'weekly' },
   { path: '/status', priority: '0.5', changefreq: 'hourly' },
-  { path: '/docs', priority: '0.8', changefreq: 'weekly' },
+  // /docs se prerenderiza (lo enlazan la cabecera y el pie) pero no va al
+  // sitemap: su canónica es /docs/introduction.
+  { path: '/docs', priority: '0.8', changefreq: 'weekly', sitemap: false },
   { path: '/guides', priority: '0.8', changefreq: 'weekly' },
   ...GUIAS_INDEX.map((s) => ({ path: `/guides/${s.id}`, priority: '0.7', changefreq: 'monthly' })),
   ...DOCS_INDEX.map((s) => ({ path: `/docs/${s.id}`, priority: '0.7', changefreq: 'weekly' })),

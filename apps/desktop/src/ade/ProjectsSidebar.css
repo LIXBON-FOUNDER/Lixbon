@@ -295,3 +295,31 @@
   .ps { padding: 10px 12px; }
   .ps__id { max-width: 35%; }
 }
+
+/* LXO-120 · Task → Attempt. El estado va siempre como texto; el tono solo lo acompaña. */
+.ps__line--attempt { margin-top: 2px; gap: 6px; }
+.ps__attempt-chip { display: inline-flex; gap: 6px; align-items: baseline; }
+.ps__astatus { font-size: 11px; border: 1px dashed currentColor; border-radius: 3px; padding: 0 4px; }
+.ps__astatus--neutral { opacity: 0.75; }
+.ps__astatus--failed { color: var(--error, #d14343); }
+.ps__astatus--done { color: var(--success, #2f9e44); }
+.ps__astatus--active, .ps__astatus--waiting { color: var(--accent, #3b82f6); }
+.ps__atime { font-size: 11px; opacity: 0.8; }
+.ps__toggle { margin-left: auto; font-size: 11px; }
+.ps__attempts { list-style: none; margin: 4px 0 0; padding: 0 0 0 12px; border-left: 1px solid var(--border, rgba(127, 127, 127, 0.3)); }
+.ps__item--attempt { padding: 3px 6px; }
+.ps__item--attempt.is-selected { outline: 1px solid var(--accent, currentColor); }
+.ps__note--info { opacity: 0.85; }
+.ps__notice { font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; }
+.ps__notice--error { color: var(--error, #d14343); }
+
+/* LXO-121/122 · Historial y detalle de Attempts (solo lectura). */
+.ade-attempts, .ade-attempt { margin-top: 12px; display: grid; gap: 6px; }
+.ade-attempts__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ade-attempts__item { display: grid; gap: 2px; padding: 4px 6px; border-radius: 4px; }
+.ade-attempts__item.is-selected { background: var(--bg-active, rgba(127,127,127,.15)); }
+.ade-attempts__open { text-align: left; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; }
+.ade-attempts__meta, .ade-attempts__hint { font-size: 12px; opacity: .8; }
+.ade-attempt dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 0; }
+.ade-attempt dt { opacity: .7; }
+.ade-attempt dd { margin: 0; overflow-wrap: anywhere; }
