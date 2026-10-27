@@ -1,5 +1,6 @@
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AttemptCapabilities } from './AttemptCapabilities';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
@@ -81,6 +82,9 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
             )}
           </dl>
         ) : <p className="ade-missing">{COPY.notAvailable}</p>}
+
+        <h4 className="ssec__label">Capacidades del proveedor</h4>
+        <AttemptCapabilities providerId={attempt.provider} session={session} active={active} />
 
         <h4 className="ssec__label">Worktree</h4>
         {worktree ? (

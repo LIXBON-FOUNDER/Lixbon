@@ -624,3 +624,173 @@ modelo nuevo y un cliente nuevo no debe leerlos.
 vNext, con una prueba de contrato que falla si leen un campo deprecated; al menos una release completa en C2 sin
 rollback; y la decisión explícita de cerrar la ventana de rollback. `core_model.compat` deja de anunciar
 `legacy_task_v1` una release **antes** de retirar los datos.
+
+## `provider_capabilities` (LXO-135)
+
+Qué ofrece cada proveedor **ahora**: la matriz de capabilities del registro de adapters ([ADAPTERS.md](ADAPTERS.md)). Es lo único
+por lo que un cliente decide qué acciones ofrecer: **nunca por el nombre ni por la versión del proveedor**. No depende del
+corte (responde igual antes y después). Solo lectura, sin acciones. Código: `orch/provider_registry.rs`. Cliente de Desktop:
+`apps/desktop/src/ade/providerCapabilitiesContract.js`.
+
+### Petición
+
+`{ refresh?: bool }`. Solo una **Person autenticada** (`provider_capabilities_auth_required` si no lo es: es una pantalla de la
+persona, no de un agente). Un parámetro desconocido o un `refresh` que no es booleano es `provider_capabilities_invalid_request`.
+`refresh: true` pide un sondeo nuevo; el Core lo concede como mucho una vez cada 5 s.
+
+### Respuesta
+
+```json
+{
+  "version": 1,
+  "generation": 3,
+  "status": "ready",
+  "refreshing": false,
+  "checked_at_ms": 1792000000000,
+  "providers": [
+    { "id": "claude", "cli_version": "2.1.296", "environment": { "state": "ready" },
+      "matrix": { "version": 1, "capabilities": { "start": { "state": "available" }, "steer": { "state": "unsupported" } } } }
+  ]
+}
+```
+
+`version`, `generation` y `providers` son el snapshot del registro (fixture [`provider_capabilities.v1.json`](fixtures/api/provider_capabilities.v1.json));
+`status`, `refreshing` y `checked_at_ms` son de la lectura viva.
+
+* `providers`, ordenados por `id`. Cada uno trae `cli_version` (o `null`), `environment` (`ready` o `blocked` con sus `blocks`),
+  `transport` (si el adapter tiene más de un canal) y la `matrix` con **las seis capabilities siempre** (`start`, `events`,
+  `answer`, `interrupt`, `steer`, `resume`). Lo que el proveedor no ofrece consta como `unsupported`: no hay huecos.
+* Estados de una capability: `available` · `unsupported` (el proveedor no la tiene) · `unavailable` + `reason` (la tiene, ahora no)
+  · `environment_blocked` + `block` (el entorno lo impide: no es un Attempt fallido).
+* `generation` **sube solo si algo cambió** (un proveedor nuevo, una matriz, un entorno o una versión). Un cliente que la ve
+  distinta sabe que debe repintar, sin reiniciar la app.
+* `status`: `probing` mientras el Core hace el primer sondeo (todavía sin proveedores ni hora: `checked_at_ms: null`) y `ready`
+  después. `refreshing` dice que hay un sondeo en curso.
+
+### Por qué la lectura es viva y no espera
+
+Sondear un proveedor es lanzar su CLI (`--version`, `--help`, el preflight del sandbox…): tarda y puede colgarse. Por eso la
+query **nunca sondea**: devuelve al instante lo último que se supo y, si está viejo (60 s), falta o se fuerza, lanza el sondeo en un
+hilo aparte. Solo hay un sondeo a la vez y no se retiene el registro mientras una CLI contesta, así que un proveedor colgado no
+frena a los demás lectores. Un cliente repite la lectura (Desktop: cada 3 s mientras `probing`, cada 30 s después).
+
+### Qué NO trae
+
+Ninguna ruta, credencial, token ni identificador de cuenta (lo comprueba `provider_registry_tests`). El uso y la cuota son
+otra lectura (LXO-206); los paquetes de contexto, otra (LXO-136).
+
+### Pruebas
+
+`orch/provider_registry_tests.rs` (6): primera lectura sin esperar a una CLI colgada, matriz de cada proveedor con los cuatro
+estados, `generation` y tope del refresco forzado, cambio visible sin reiniciar, adapter repetido o inválido y query de persona.
+Cliente: `providerCapabilitiesContract.test.js`, `capabilityModel.test.js` y `ProviderInspector.test.jsx`.
+
+## `context_package_preview` (LXO-136)
+
+Qué contexto viajaría en un ContextPackage, para **revisarlo antes de cualquier transferencia**. Solo lectura: no guarda el
+paquete, no crea ningún Attempt y no inicia ningún handoff (F6). Código: `orch/context_preview.rs`. Cliente de Desktop:
+`apps/desktop/src/ade/contextPreviewContract.js` y `ContextPreview.jsx`.
+
+### Principios
+
+* **La verificación es del Core.** Se llama a la misma puerta por la que un paquete entra a un Attempt (`context_package::parse`):
+  versión, campos, formatos, **identidad** (`package_id` = sha256 del contenido canónico) y **secretos**. El cliente no calcula
+  ningún hash ni busca secretos.
+* **La vista refleja exactamente el paquete.** `package` es el documento serializado tal cual; `summary` solo añade lo que se
+  calcula sobre él.
+* **Un paquete rechazado no muestra su contenido.** Un paquete alterado no se presenta como si fuera de fiar.
+* **Lo redactado no se revela.** El paquete llega ya con `[redactado]` y el Core no tiene el original: no hay operación para verlo.
+
+### Petición
+
+`{ package: "<JSON del paquete, como texto>" }`. Solo una **Person autenticada** (`context_preview_auth_required`). Un parámetro
+desconocido, un `package` que no es texto o uno de más de 128 KiB es `context_preview_invalid_request`. Un paquete que no pasa la
+verificación **no** es un error de la petición: es una respuesta `invalid` (para poder mostrarla).
+
+### Respuesta válida
+
+```json
+{
+  "v": 1, "status": "valid", "package_id": "sha256:…",
+  "verification": { "identity": "verified", "secrets": "none_found", "attachments": "not_checked" },
+  "package": { "…": "el ContextPackage v1 tal cual" },
+  "summary": { "serialized_bytes": 2105, "completeness": "complete", "notes": ["attachment_not_scanned"], "counts": { "…": 0 } }
+}
+```
+
+* `verification`: lo que se comprobó. **Los adjuntos siempre `not_checked`**: sus bytes no llegan con el paquete; se verifican al
+  recibirlos (`verify_attachments`).
+* `summary.notes`, siempre en este orden y de un conjunto cerrado: `truncated` · `redacted` · `revision_absent` ·
+  `attachment_omitted` · `attachment_not_scanned` (un `git bundle` va comprimido y no se escanea).
+* `summary.completeness`: `partial` si falta algo que el receptor necesitaría (un campo **truncado**, **sin repositorio** o un
+  adjunto **omitido**); `complete` si no. **Redactado no hace parcial** a un paquete, y un adjunto sin escanear tampoco.
+* `summary.counts`: decisiones, restricciones, archivos, sin seguimiento, artefactos, adjuntos (y cuántos omitidos / sin escanear
+  y su peso), redacciones y campos truncados.
+
+### Respuesta inválida
+
+```json
+{ "v": 1, "status": "invalid", "error": { "code": "id_mismatch", "message": "…" }, "serialized_bytes": 2052,
+  "declared_id": "sha256:…", "recomputed_id": "sha256:…" }
+```
+
+`error.code` es uno de `invalid_json` · `unsupported_version` · `missing_field` · `invalid_field` · `id_mismatch` · `too_large` ·
+`secret_detected` · `attachment_mismatch`. El mensaje se redacta y se acota a 300 caracteres: el texto que dio la persona no vuelve
+entero. Solo `id_mismatch` trae `declared_id` y `recomputed_id` (hashes, no secretos): lo que hace **visible** la alteración.
+**Nunca** trae `package`, `summary` ni `package_id`.
+
+Fixtures: [`context_package_preview.v1.json`](fixtures/api/context_package_preview.v1.json) (paquete completo con cambios sin
+commit) y [`context_package_preview_invalid.v1.json`](fixtures/api/context_package_preview_invalid.v1.json) (paquete alterado).
+
+### Pruebas
+
+`orch/context_preview_tests.rs` (9): cada fixture publicada de `docs/core/fixtures/context-package/v1/` (las 15) se acepta o se
+rechaza como dice su manifiesto, el paquete se ve tal cual, completo / parcial / truncado / redactado, un paquete alterado hace
+visible la diferencia de identidad, ninguna respuesta lleva algo con forma de credencial, permisos y argumentos, y un paquete en el
+tope de tamaño (500 archivos, 100 sin seguimiento) se previsualiza sin coste desproporcionado.
+
+## `usage_report` (LXO-206)
+
+El uso y los límites de cada proveedor: lo que lee la vista de Usage de Desktop. Es el informe del contrato de LXO-205
+([ADAPTERS.md § Usage](ADAPTERS.md#usage-lxo-205); fixture [`usage_report.v1.json`](fixtures/api/usage_report.v1.json)) dentro de una
+lectura que **no espera a ninguna CLI**. Solo lectura. Código: `orch/usage_read.rs`. Cliente: `apps/desktop/src/ade/usageContract.js`,
+`usageModel.js` y `UsageView.jsx`.
+
+### Petición
+
+`{ refresh?: bool }`. Solo una **Person autenticada** (`usage_report_auth_required`): la cuota es de su cuenta. Un parámetro
+desconocido o un `refresh` que no es booleano es `usage_report_invalid_request`. `refresh: true` es el refresco **manual**: el servicio
+lo concede como mucho una vez cada 5 s por proveedor y, si se pide antes, atiende con el dato guardado y marca `throttled: true`.
+
+### Respuesta
+
+```json
+{ "v": 1, "status": "ready", "refreshing": false, "report": { "version": 1, "generated_at_ms": 1800000000000, "providers": [ "…" ] } }
+```
+
+* `status`: `loading` mientras todavía no hay ningún informe (`report: null`, sin inventar nada) y `ready` después. `refreshing`
+  dice que hay una consulta en curso. Un cliente repite la lectura (Desktop: cada 2 s mientras carga o consulta; cada 15 s después).
+* `report`: una entrada por proveedor, **sin totales** (sumar tokens de uno con porcentajes de otro no significa nada). Cada una trae
+  `status` (`fresh` · `stale` · `unknown` · `unsupported` · `environment_blocked`), `support` (qué campos informa: `windows`,
+  `tokens`, `credits`, `plan`, `cost`), y, si hay dato, `snapshot` con `observed_at_ms` y `provenance`
+  (`provider_query` o `run_observation`), más `age_ms`, `error` y `throttled` cuando aplican.
+* **Desconocido no es cero**: un campo que el proveedor no dio **no aparece**; el cliente lo dice «sin dato».
+* `stale` conserva el último dato y lleva el `error` de la actualización que falló (`auth_required` · `rate_limited` ·
+  `provider_unavailable` · `unsupported` · `environment_blocked` · `internal`). **Un fallo de uso no cambia el estado de ningún
+  proveedor ni Attempt.**
+* La cuenta es una **huella de 8 hex**; los textos de error pasan por la redacción. Ninguna credencial ni identificador de cuenta.
+
+### Por qué la lectura es viva y no espera
+
+`claude /usage` tarda varios segundos y Codex abre su `app-server`; el servicio bloquea hasta que contestan o vence su tope (15 s,
+30 s para Claude). Por eso la query **nunca consulta**: devuelve al instante el último informe y lanza la consulta en un hilo aparte
+(uno a la vez). La caché del servicio sigue mandando (TTL 5 min, backoff de 30 s tras un fallo): repetir la lectura no martillea a los
+proveedores. Mientras el registro de proveedores no ha terminado su primer sondeo (`provider_capabilities`), no hay nada que consultar y
+la respuesta es `loading`.
+
+### Pruebas
+
+`orch/usage_read_tests.rs` (8): una CLI colgada no bloquea la lectura, un solo vuelo y sin reconsultar con el informe reciente, el
+refresco manual seguido se atiende con la caché, sin proveedores aún no se inventa un informe, desconocido ≠ cero, sin uso o bloqueado
+no se consulta ni es un fallo, un fallo deja el dato anterior como `stale` (y sin dato es `unknown`), ningún secreto ni identificador
+de cuenta, y permisos y argumentos.

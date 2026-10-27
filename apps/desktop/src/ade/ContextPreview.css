@@ -1,0 +1,40 @@
+/* LXO-136 · vista previa de un ContextPackage. Los avisos se distinguen por texto y glifo, no solo por color. */
+.cp { display: flex; flex-direction: column; gap: 10px; }
+.cp__h { margin: 0; font-size: 13px; color: var(--ink, #f2f2ee); }
+.cp-note { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--surface-2, #161616); color: var(--ink-soft, #9a9a94); font-size: 12px; }
+.cp-note--warn { background: var(--warn-soft, rgba(232, 200, 114, 0.14)); color: var(--warn, #e8c872); }
+.cp__input { display: flex; flex-direction: column; gap: 8px; }
+.cp__file, .cp__text { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-70, #b5b5af); }
+.cp__text textarea { width: 100%; box-sizing: border-box; background: var(--surface-3, #1c1c1c); color: var(--ink-body, #dcdcd6); border: 1px solid var(--ink-faint, #44443f); border-radius: 6px; padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 11px; resize: vertical; }
+.cp__text textarea:focus-visible, .cp__file input:focus-visible { outline: 2px solid var(--accent, #7aa2ff); outline-offset: 1px; }
+.cp__actions { display: flex; gap: 12px; align-items: center; }
+.cp__go:disabled { opacity: 0.5; cursor: not-allowed; }
+.cp__out { display: flex; flex-direction: column; gap: 10px; }
+
+.cp-result { display: flex; flex-direction: column; gap: 12px; font-size: 12px; color: var(--ink-body, #dcdcd6); }
+.cp-result section { display: flex; flex-direction: column; gap: 4px; }
+.cp-result dl, .cp-ids { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+.cp-result dt, .cp-ids dt { color: var(--ink-50, #85857f); }
+.cp-result dd, .cp-ids dd { margin: 0; overflow-wrap: anywhere; }
+.cp-sub { margin: 6px 0 2px; font-size: 12px; color: var(--ink-70, #b5b5af); font-weight: 500; }
+.cp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.cp-list li { overflow-wrap: anywhere; }
+.cp-diffstat { color: var(--ink-soft, #9a9a94); }
+.cp-sub-note { color: var(--ink-soft, #9a9a94); }
+
+.cp-badges { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; }
+.cp-badge { padding: 1px 9px; border-radius: var(--radius-pill, 999px); border: 1px solid var(--ink-faint, #44443f); font-size: 11px; line-height: 18px; }
+.cp-badge--good { border-color: var(--good, #86d694); color: var(--good, #86d694); background: var(--good-soft, rgba(134, 214, 148, 0.12)); }
+.cp-badge--warn { border-style: dotted; border-width: 2px; border-color: var(--warn, #e8c872); color: var(--warn, #e8c872); background: var(--warn-soft, rgba(232, 200, 114, 0.14)); }
+.cp-badge--info { border-style: double; border-width: 3px; border-color: var(--info, #8ec5ff); color: var(--info, #8ec5ff); background: rgba(142, 197, 255, 0.1); }
+.cp-badge--danger { border-width: 2px; border-color: var(--danger, #f08c8c); color: var(--danger, #f08c8c); background: var(--danger-soft, rgba(240, 140, 140, 0.12)); font-weight: 600; }
+
+.cp-reject { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 8px; border-left: 3px solid var(--danger, #f08c8c); background: var(--danger-soft, rgba(240, 140, 140, 0.08)); font-size: 12px; }
+.cp-reject__title { margin: 0; color: var(--ink, #f2f2ee); }
+
+/* Lo redactado se marca y NO se puede mostrar: ni botón ni tooltip con el valor. */
+.cp-redacted { background: var(--surface-4, #222); color: var(--ink-70, #b5b5af); border-radius: 3px; padding: 0 4px; font-family: var(--font-mono, monospace); }
+.cp-att--omitted { color: var(--warn, #e8c872); }
+.cp-att--unscanned { color: var(--info, #8ec5ff); }
+.cp-att--included { color: var(--good, #86d694); }
+@media (prefers-contrast: more) { .cp-badge { border-width: 2px; } }

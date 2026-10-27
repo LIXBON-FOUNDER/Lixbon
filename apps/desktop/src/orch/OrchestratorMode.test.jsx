@@ -5,6 +5,7 @@ import { OrchestratorMode } from './OrchestratorMode';
 import { useOrchStore } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
+import { live } from '../ade/testFixtures/providerCapabilitiesFixtures';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -125,6 +126,10 @@ describe('OrchestratorMode', () => {
       if (query === 'projects_overview') return { v: 1, filters: { archived: 'exclude', machine: null }, total: 1, projects: [project], unassigned: {} };
       if (query === 'tasks_by_project') return { v: 1, project_id: project.id, filters: { status: args.status }, limit: 50, tasks: [item], has_more: true, next_cursor: 'next-page' };
       if (query === 'attention_list') return { v: 1, items: [], next_cursor: null, has_more: false, limit: 100 };
+      // LXO-135: el inspector de proveedores lee lo que ofrece cada uno; la respuesta es la canónica del Core.
+      if (query === 'provider_capabilities') return live();
+      // LXO-206: la vista de Usage lee el uso de cada proveedor; aquí el Core aún está consultando.
+      if (query === 'usage_report') return { v: 1, status: 'loading', refreshing: true, report: null };
       if (query === 'task_detail') return { v: 1, task: { ...item, project_id: project.id, child_ids: [], phase: null, messages: [], cwd: '', branch: null, worktree: null, merged: false, review: null, integration: null } };
       throw new Error(`Query no permitida en fixture: ${query}`);
     }, 'execution-task');
@@ -138,7 +143,14 @@ describe('OrchestratorMode', () => {
     expect((await screen.findAllByText('task-uuid-1')).length).toBeGreaterThan(0);
     expect(taskRow.getAttribute('data-task-id')).toBe(item.id);
     expect(within(projectTaskSidebar).getByRole('button', { name: 'Cargar más Tasks de Repo Real' })).toBeTruthy();
-    expect(calls).toEqual([
+    // LXO-135/136/206: las vistas de proveedores y de uso añaden sus propias lecturas, sin argumentos y de solo lectura (ninguna llama a
+    // un proveedor); el resto es lo de antes.
+    const PROPIAS = ['provider_capabilities', 'usage_report'];
+    for (const propia of PROPIAS) {
+      expect(calls.some(([query]) => query === propia)).toBe(true);
+      expect(calls.filter(([query]) => query === propia).every(([, args]) => Object.keys(args).length === 0)).toBe(true);
+    }
+    expect(calls.filter(([query]) => !PROPIAS.includes(query))).toEqual([
       // LXO-120: la decisión legacy / task_attempt_v1 (aquí el fixture F2 la rechaza: modo F2).
       ['projects_overview', { archived: 'exclude' }],
       ['core_model', {}],

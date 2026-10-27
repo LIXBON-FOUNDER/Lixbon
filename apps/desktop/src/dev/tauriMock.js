@@ -246,6 +246,41 @@ function adeQuery(query, args) {
   const vNext = qs.get('coremodel') === 'v1';
   const inactive = () => { throw new Error('core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail'); };
   switch (query) {
+    // LXO-135: qué ofrece cada proveedor. `?caps=bloqueado` simula un entorno bloqueado y `?caps=sondeando` el primer sondeo del Core.
+    case 'provider_capabilities': {
+      const ALL = ['start', 'events', 'answer', 'interrupt', 'steer', 'resume'];
+      const caps = (changes = {}) => Object.fromEntries(ALL.map((c) => [c, changes[c] ?? { state: 'available' }]));
+      const mode = qs.get('caps');
+      if (mode === 'sondeando') return { version: 1, generation: 0, providers: [], status: 'probing', refreshing: true, checked_at_ms: null };
+      const providers = [
+        { id: 'claude', cli_version: '2.1.296', environment: { state: 'ready' }, matrix: { version: 1, capabilities: caps({ steer: { state: 'unsupported' } }) } },
+        { id: 'codex', cli_version: '0.164.0', environment: { state: 'ready' }, transport: 'app_server', matrix: { version: 1, capabilities: caps() } },
+      ];
+      if (mode === 'bloqueado') {
+        const blockedState = { state: 'environment_blocked', block: 'windows_sandbox_setup' };
+        providers[1] = {
+          id: 'codex', cli_version: '0.164.0', environment: { state: 'blocked', blocks: ['windows_sandbox_setup'] }, transport: 'app_server',
+          matrix: { version: 1, capabilities: caps(Object.fromEntries(ALL.map((c) => [c, blockedState]))) },
+        };
+      }
+      return { version: 1, generation: 1, providers, status: 'ready', refreshing: false, checked_at_ms: Date.now() };
+    }
+    // LXO-136 (SIMULADO): el navegador no tiene el Core, así que NO verifica nada: un JSON ilegible es `invalid_json` y cualquier
+    // otro texto devuelve un paquete de ejemplo. La verificación real (identidad y secretos) es del Core.
+    case 'context_package_preview': {
+      try { JSON.parse(args.package); } catch { return { v: 1, status: 'invalid', error: { code: 'invalid_json', message: 'invalid_json: no es JSON' }, serialized_bytes: String(args.package ?? '').length }; }
+      return { v: 1, status: 'valid', package_id: `sha256:${'ab'.repeat(32)}`, verification: { identity: 'verified', secrets: 'none_found', attachments: 'not_checked' }, package: { schema_version: 1, package_id: `sha256:${'ab'.repeat(32)}`, created_at_ms: ADE_T0, source: { project_id: 'demo', task_id: 'demo-t3', attempt_id: 'demo-t3-a1', provider: 'claude', host: 'fp:00000000' }, objective: 'Paquete de ejemplo (simulado).', decisions: [], constraints: [], revision: null, revision_absent_reason: 'ejemplo del navegador', redactions: 0 }, summary: { serialized_bytes: 400, completeness: 'partial', notes: ['revision_absent'], counts: { decisions: 0, constraints: 0, files: 0, untracked: 0, artifacts: 0, attachments: 0, attachments_omitted: 0, attachments_not_scanned: 0, attachments_bytes: 0, redactions: 0, truncated_fields: 0 } } };
+    }
+    // LXO-206 (SIMULADO): informe de ejemplo. `?usage=sondeando` simula el primer sondeo del Core.
+    case 'usage_report': {
+      if (qs.get('usage') === 'sondeando') return { v: 1, status: 'loading', refreshing: true, report: null };
+      const F = (state) => ({ fields: Object.fromEntries(['windows', 'tokens', 'credits', 'plan', 'cost'].map((f) => [f, { state }])) });
+      const now = Date.now();
+      return { v: 1, status: 'ready', refreshing: false, report: { version: 1, generated_at_ms: now, providers: [
+        { provider: 'claude', status: 'fresh', support: { fields: { ...F('unsupported').fields, windows: { state: 'available' } } }, age_ms: 60000, snapshot: { provider: 'claude', observed_at_ms: now - 60000, provenance: 'run_observation', windows: [{ id: 'five_hour', resets_at: Math.floor(now / 1000) + 5400 }] } },
+        { provider: 'codex', status: 'fresh', support: F('available'), age_ms: 0, snapshot: { provider: 'codex', observed_at_ms: now, provenance: 'provider_query', account: 'e7cbf1f7', plan: 'plus', windows: [{ id: 'primary', minutes: 300, used_percent: 42, resets_at: Math.floor(now / 1000) + 3600 }, { id: 'secondary', minutes: 10080, used_percent: 8.5, resets_at: Math.floor(now / 1000) + 86400 * 4 }] } },
+      ] } };
+    }
     case 'core_model':
       return vNext
         ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }

@@ -1,0 +1,11 @@
+{
+  "declared_id": "sha256:ed8802df89b2fc0ce7b1535f6233a49548df5bdfd5ffaa984ccb6c2cd213b6a4",
+  "error": {
+    "code": "id_mismatch",
+    "message": "package_id no coincide con el contenido: el paquete se alteró"
+  },
+  "recomputed_id": "sha256:da2f30634f3fb2d893fc4ffffb176ccee763ece336b753987bb07d7bbb7880b6",
+  "serialized_bytes": 2052,
+  "status": "invalid",
+  "v": 1
+}

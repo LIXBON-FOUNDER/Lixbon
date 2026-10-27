@@ -64,7 +64,7 @@ Cada adapter lo levanta solo al reanudar y con el texto observado en su CLI real
 
 ## Registro y snapshot
 
-`AdapterRegistry` registra adapters y guarda la última `ProbeResult` de cada uno. `snapshot()` es lo que leen los
+`AdapterRegistry` registra adapters y guarda la última `ProbeResult` de cada uno. El Core lo mantiene vivo (sondeo en segundo plano, sin esperar a las CLIs) y lo expone con la query `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)), que es lo que lee Desktop. `snapshot()` es lo que leen los
 clientes (`docs/core/fixtures/api/provider_capabilities.v1.json`): por proveedor, `id`, `cli_version`, `environment` y
 `matrix`. `generation` sube cuando se registra un proveedor o cuando un `refresh` encuentra una matriz, un entorno o una
 versión distintos; un cliente compara `generation` para refrescar su vista **sin reiniciar la app**. Un id inválido o

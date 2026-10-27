@@ -68,21 +68,44 @@ impl AdapterRegistry {
             return Err(AdapterError::invalid(&format!("el proveedor {id} ya está registrado")));
         }
         let probe = adapter.probe();
+        self.register_probed(adapter, probe)
+    }
+
+    /// Como [`AdapterRegistry::register`], con la sonda ya hecha: quien la hizo fuera de un bloqueo (el registro vivo del Core,
+    /// que no puede retener el candado mientras una CLI contesta) no la repite aquí dentro.
+    pub fn register_probed(&mut self, adapter: Arc<dyn ProviderAdapter>, probe: ProbeResult) -> Result<(), AdapterError> {
+        let id = adapter.id().to_string();
+        if !valid_id(&id) {
+            return Err(AdapterError::invalid("el id del proveedor es `[a-z0-9-]`, de 1 a 64 caracteres"));
+        }
+        if self.entries.contains_key(&id) {
+            return Err(AdapterError::invalid(&format!("el proveedor {id} ya está registrado")));
+        }
         self.entries.insert(id, Entry { adapter, probe });
         self.generation += 1;
         Ok(())
     }
 
-    /// Vuelve a preguntar al proveedor. `true` si su matriz, su entorno o su versión cambiaron (y sube `generation`).
-    pub fn refresh(&mut self, id: &str) -> Result<bool, AdapterError> {
+    /// Los adapters registrados, para sondearlos SIN tener el registro tomado.
+    pub fn adapters(&self) -> Vec<Arc<dyn ProviderAdapter>> {
+        self.entries.values().map(|e| Arc::clone(&e.adapter)).collect()
+    }
+
+    /// Aplica una sonda ya hecha. `true` si cambió algo (y sube `generation`).
+    pub fn apply_probe(&mut self, id: &str, probe: ProbeResult) -> Result<bool, AdapterError> {
         let entry = self.entries.get_mut(id).ok_or_else(|| AdapterError::unknown_provider(id))?;
-        let probe = entry.adapter.probe();
         let changed = probe != entry.probe;
         if changed {
             entry.probe = probe;
             self.generation += 1;
         }
         Ok(changed)
+    }
+
+    /// Vuelve a preguntar al proveedor. `true` si su matriz, su entorno o su versión cambiaron (y sube `generation`).
+    pub fn refresh(&mut self, id: &str) -> Result<bool, AdapterError> {
+        let probe = self.entries.get(id).ok_or_else(|| AdapterError::unknown_provider(id))?.adapter.probe();
+        self.apply_probe(id, probe)
     }
 
     /// `refresh` de todos. `true` si alguno cambió.

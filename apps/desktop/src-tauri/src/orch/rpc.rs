@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
@@ -155,6 +155,12 @@ impl Core {
             "tasks_by_project" => tasks_read::list(self, &caller, authenticated_context.as_ref(), args),
             "task_detail" => tasks_read::detail(self, &caller, authenticated_context.as_ref(), args),
             // Modelo Task/Attempt (LXO-119): `core_model` siempre; el resto, solo tras el corte.
+            // Qué ofrece cada proveedor ahora (LXO-135): lectura inmediata; el sondeo corre en segundo plano.
+            "provider_capabilities" => provider_registry::query(self, &caller, authenticated_context.as_ref(), args),
+            // Revisar un ContextPackage antes de cualquier transferencia (LXO-136): solo lectura, no guarda ni inicia nada.
+            "context_package_preview" => context_preview::query(self, &caller, authenticated_context.as_ref(), args),
+            // El uso y los límites de cada proveedor (LXO-206): lectura inmediata; la consulta corre en segundo plano.
+            "usage_report" => usage_read::query(self, &caller, authenticated_context.as_ref(), args),
             "core_model" => model_read::core_model(self, &caller, authenticated_context.as_ref(), args),
             "task_list_v2" => model_read::task_list(self, &caller, authenticated_context.as_ref(), args),
             "task_detail_v2" => model_read::task_detail(self, &caller, authenticated_context.as_ref(), args),
@@ -489,7 +495,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "provider_capabilities" | "context_package_preview" | "usage_report" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
