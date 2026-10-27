@@ -15,7 +15,9 @@ use crate::Args;
 
 pub(super) const HELP: &str =
     "Uso: lxo tasks [--project ID|NOMBRE] [--active | --final] [--status S] [--run ID] [--json]
+     lxo tasks --json --schema 2 [--project ID|NOMBRE] [--state S] [--run ID]
      lxo task show <id o nombre> [--json]      (también: lxo tasks show …)
+     lxo task show <task_id> --json --schema 2
 
 Las tareas que conoce el Core de Lixbon (modelo legacy: tarea raíz e hijas por
 run), en árbol. Solo lee: no lanza, reintenta, reanuda ni marca nada como leído.
@@ -30,8 +32,13 @@ Filtros (se combinan con AND):
 
 Salida:
   (por defecto)      dos líneas por tarea: id, estado y título; proyecto, run, agente y rama
-  --json             {v, task_model, tasks, unassigned_tasks}; show da
-                     {v, task_model, task, children, activity}
+  --json             forma 1 (por defecto): {v: 1, task_model: \"legacy\", tasks,
+                     unassigned_tasks}; show da {v, task_model, task, children, activity}
+  --json --schema 2  forma 2, modelo Task/Attempt (tras el corte): la tarea sin nada
+                     de la ejecución y sus intentos por id (attempt_id), sin elegir
+                     ninguno. Filtra por el estado de la tarea con --state (open,
+                     in_progress, in_review, integrated o discarded); show va por id.
+  Matriz y paso de la forma 1 a la 2: docs/core/LXO_CORTE.md.
   Lo que el modelo legacy no registra (host) sale como null o «desconocido».
   Las tareas sin proyecto no se listan: se cuentan al final.
 
@@ -40,11 +47,16 @@ actividad reciente y cómo seguirla con lxo events --task <id> y lxo attention
 --task <id>. El nombre es el título de la tarea, sin distinguir mayúsculas ni acentos: vale el
 título exacto o un trozo; si encajan varias, lxo dice sus ids.
 
+Con el Core ya en el modelo Task/Attempt (tras el corte), el agente, la rama, el
+worktree, el fallo y el PR son los del intento actual y lxo lo avisa en stderr;
+cada ejecución se ve con lxo attempts --task <id> y lxo attempt show <attempt_id>.
+
 Solo para personas: dentro de una tarea del orquestador, usa lxo list y lxo show.
 
 Códigos de salida: 0 correcto, 1 error interno del Core, 2 uso o filtro inválido,
-3 autenticación, 4 versión o contrato, 5 Lixbon cerrado o Core no disponible,
-6 tarea o proyecto inexistente.
+3 autenticación, 4 versión o contrato (también: --schema 2 antes del corte),
+5 Lixbon cerrado o Core no disponible, 6 tarea o proyecto inexistente. El aviso de
+compatibilidad no cambia el código ni sale con --json.
 ";
 
 const CONTRACT: u64 = 1;
@@ -60,9 +72,14 @@ const STATUSES: [&str; 8] = [
 ];
 /// Estados finales del vocabulario del Core (`Status::is_final`).
 const FINAL: [&str; 4] = ["done", "failed", "stopped", "exited"];
-const LIST_FLAGS: [&str; 7] = [
-    "project", "active", "final", "status", "run", "json", "help",
+const LIST_FLAGS: [&str; 9] = [
+    "project", "active", "final", "status", "state", "run", "schema", "json", "help",
 ];
+/// Estado derivado de la Task (`contracts/status-vocabulary.json` `task_derived_state`), para `--state`.
+const STATES: [&str; 5] = ["open", "in_progress", "in_review", "integrated", "discarded"];
+/// Forma del `--json` vNext (LXO-125): `{v: 2, task_model: "task_attempt_v1"}`.
+const CONTRACT_V2: u64 = 2;
+const MODEL_V2: &str = "task_attempt_v1";
 
 type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 
@@ -70,6 +87,7 @@ type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 struct Filters {
     project: Option<String>,
     status: Option<String>,
+    state: Option<String>,
     run: Option<String>,
     active: bool,
     finished: bool,
@@ -123,7 +141,7 @@ fn parse(a: &Args) -> Result<Request, Failure> {
                 _ => "Uso: lxo task show <id o nombre>. Para la lista: lxo tasks.".into(),
             }));
         }
-        check_flags(a, &["json", "help"], "lxo task show")?;
+        check_flags(a, &["json", "schema", "help"], "lxo task show")?;
         let wanted = task_wanted(&a.pos[2.min(a.pos.len())..]);
         return if wanted.is_empty() {
             Err(usage("Falta la tarea: lxo task show <id o nombre>."))
@@ -140,10 +158,20 @@ fn parse(a: &Args) -> Result<Request, Failure> {
     let filters = Filters {
         project: text_flag(a, "project")?,
         status: text_flag(a, "status")?,
+        state: text_flag(a, "state")?,
         run: text_flag(a, "run")?,
         active: a.b("active"),
         finished: a.b("final"),
     };
+    if let Some(state) = &filters.state {
+        if !STATES.contains(&state.as_str()) {
+            return Err(usage(format!(
+                "--state no reconoce «{}»; usa {}.",
+                clean(state),
+                STATES.join(", ")
+            )));
+        }
+    }
     if filters.active && filters.finished {
         return Err(usage("--active y --final se excluyen: usa uno o ninguno."));
     }
@@ -470,11 +498,11 @@ fn list_data(rpc: Rpc, filters: &Filters) -> Result<(Value, Overview), Failure> 
     Ok((data, overview))
 }
 
-/// Los últimos items de Activity de la Task, en orden cronológico y ya traducidos. `null` si este Core no
-/// tiene Activity (la ficha se enseña igual); un fallo de transporte sí corta.
-fn activity(rpc: Rpc, id: &str) -> Result<Value, Failure> {
+/// Los últimos items de Activity de la Task (o del Attempt, con `kind = "attempt"`), en orden cronológico y ya
+/// traducidos. `null` si este Core no tiene Activity (la ficha se enseña igual); un fallo de transporte sí corta.
+pub(super) fn activity(rpc: Rpc, kind: &str, id: &str) -> Result<Value, Failure> {
     let args =
-        json!({ "target_kind": "task", "target_id": id, "order": "desc", "limit": ACTIVITY_LIMIT });
+        json!({ "target_kind": kind, "target_id": id, "order": "desc", "limit": ACTIVITY_LIMIT });
     let data = match rpc("activity_list", &args) {
         Ok(data) => data,
         Err(RpcFailure::Rejected(_)) => return Ok(Value::Null),
@@ -648,7 +676,7 @@ fn show_data(rpc: Rpc, wanted: &str) -> Result<(Value, Overview), Failure> {
         "task_model": "legacy",
         "task": dto(&task),
         "children": children,
-        "activity": activity(rpc, &id)?,
+        "activity": activity(rpc, "task", &id)?,
     });
     Ok((data, overview))
 }
@@ -817,7 +845,15 @@ fn show_text(data: &Value) -> String {
     if let Some(pr) = field(d, "pr_url") {
         lines.push(format!("  PR:          {pr}"));
     }
-    lines.extend(activity_lines(&data["activity"], &id));
+    lines.extend(activity_lines(
+        &data["activity"],
+        &format!("lxo events --task {id}"),
+    ));
+    if let Some(n) = data["attempt_count"].as_u64() {
+        lines.push(format!(
+            "  Intentos:    {n} · cada uno con lxo attempts --task {id}"
+        ));
+    }
     lines.push(format!(
         "  Seguir:      lxo events --task {id} · lxo attention --task {id}"
     ));
@@ -825,7 +861,7 @@ fn show_text(data: &Value) -> String {
 }
 
 /// Parte `text` en líneas de 80 columnas como mucho: la primera tras `first`, el resto tras `rest`.
-fn wrap(first: &str, rest: &str, text: &str) -> Vec<String> {
+pub(super) fn wrap(first: &str, rest: &str, text: &str) -> Vec<String> {
     let mut lines = vec![];
     let mut line = first.to_string();
     let mut empty = true;
@@ -844,8 +880,9 @@ fn wrap(first: &str, rest: &str, text: &str) -> Vec<String> {
     lines
 }
 
-/// La Activity de la Task (proyección del Core, LXO-92), traducida como en Desktop y Mobile.
-fn activity_lines(activity: &Value, id: &str) -> Vec<String> {
+/// La Activity (proyección del Core, LXO-92), traducida como en Desktop y Mobile. `more` es la orden que da
+/// lo anterior a los items enseñados.
+pub(super) fn activity_lines(activity: &Value, more: &str) -> Vec<String> {
     let Some(items) = activity["items"].as_array() else {
         return vec!["  Actividad:   no disponible en este Core".into()];
     };
@@ -854,7 +891,7 @@ fn activity_lines(activity: &Value, id: &str) -> Vec<String> {
     }
     let mut lines = vec!["  Actividad (UTC, lo último al final):".to_string()];
     if activity["has_more"] == true {
-        lines.push(format!("    … lo anterior, con lxo events --task {id}"));
+        lines.push(format!("    … lo anterior, con {more}"));
     }
     for item in items {
         let when = item["ts"]
@@ -876,10 +913,197 @@ fn activity_lines(activity: &Value, id: &str) -> Vec<String> {
     lines
 }
 
-fn execute(request: Request, json: bool) -> Result<(), Failure> {
+/// Los errores de las lecturas vNext. Antes del corte, la forma 2 no existe: se pide la 1.
+fn v2_failure(error: RpcFailure) -> Failure {
+    match &error {
+        RpcFailure::Rejected(m) if m.starts_with("core_model_inactive") => Failure::Version(
+            "Este Core aún usa el modelo anterior: --schema 2 (modelo Task/Attempt) llega con el corte. Mientras, usa --json sin --schema (forma 1)."
+                .into(),
+        ),
+        _ => crate::attempts::model_failure(error),
+    }
+}
+
+/// Todas las Tasks de un Project con `task_list_v2` (LXO-119), descartadas incluidas, página a página.
+fn project_tasks_v2(rpc: Rpc, project_id: &str) -> Result<Vec<Value>, Failure> {
+    let mut out = vec![];
+    let mut cursor: Option<String> = None;
+    for _ in 0..MAX_PAGES {
+        let mut args =
+            json!({ "project_id": project_id, "include_discarded": true, "limit": PAGE_LIMIT });
+        if let Some(cursor) = &cursor {
+            args["cursor"] = json!(cursor);
+        }
+        let data = rpc("task_list_v2", &args).map_err(v2_failure)?;
+        let page = data["items"]
+            .as_array()
+            .filter(|_| data["v"].as_u64() == Some(CONTRACT_V2) && data["core_model"] == MODEL_V2)
+            .ok_or_else(contract_error)?;
+        if page
+            .iter()
+            .any(|t| !t["id"].is_string() || !t["state"].is_string())
+        {
+            return Err(contract_error());
+        }
+        // `tree` enlaza por `parent_id`; en vNext es `parent_task_id`.
+        out.extend(page.iter().map(|t| {
+            let mut t = t.clone();
+            t["parent_id"] = t["parent_task_id"].clone();
+            t
+        }));
+        match data["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_string()),
+            None if data["next_cursor"].is_null() => return Ok(out),
+            None => return Err(contract_error()),
+        }
+    }
+    Err(Failure::Internal(
+        "El Core no terminó de paginar las tareas del proyecto.".into(),
+    ))
+}
+
+/// Un Attempt nombrado por su id, sin lo de la ejecución: eso se pide con `lxo attempt show`.
+fn attempt_ref(a: &Value) -> Value {
+    if !a.is_object() {
+        return Value::Null;
+    }
+    json!({ "attempt_id": text(&a["id"]), "n": a["n"].as_u64(), "status": text(&a["status"]) })
+}
+
+/// Allowlist de la Task vNext: intención y estado derivado; ninguna propiedad de ejecución (agente, rama,
+/// worktree, fallo, PR). El Attempt actual va nombrado.
+fn dto_v2(t: &Value) -> Value {
+    json!({
+        "task_id": text(&t["id"]),
+        "title": text(&t["title"]),
+        "project_id": text(&t["project_id"]),
+        "run_id": text(&t["run_id"]),
+        "parent_task_id": text(&t["parent_task_id"]),
+        "depth": t["depth"].as_u64(),
+        "intent": text(&t["intent"]),
+        "state": text(&t["state"]),
+        "origin": text(&t["origin"]),
+        "created_at": t["created_at"].as_u64(),
+        "updated_at": t["updated_at"].as_u64(),
+        "attempt_count": t["attempt_count"].as_u64(),
+        "current_attempt": attempt_ref(&t["current_attempt"]),
+    })
+}
+
+/// `lxo tasks --json --schema 2`: `{v: 2, task_model, tasks, unassigned_tasks}`, en árbol como la forma 1.
+fn list_v2(rpc: Rpc, filters: &Filters) -> Result<Value, Failure> {
+    let overview = overview(rpc)?;
+    let projects = match &filters.project {
+        Some(wanted) => vec![overview.resolve(wanted)?],
+        None => overview.ids(),
+    };
+    let mut tasks = vec![];
+    for project in &projects {
+        tasks.extend(project_tasks_v2(rpc, project)?);
+    }
+    let selected: Vec<Value> = tree(tasks)
+        .iter()
+        .map(|t| {
+            let mut d = dto_v2(t);
+            d["depth"] = t["depth"].clone();
+            d
+        })
+        .filter(|d| {
+            filters.run.as_deref().is_none_or(|r| d["run_id"] == r)
+                && filters.state.as_deref().is_none_or(|s| d["state"] == s)
+        })
+        .collect();
+    Ok(json!({
+        "v": CONTRACT_V2,
+        "task_model": MODEL_V2,
+        "tasks": selected,
+        "unassigned_tasks": overview.unassigned,
+    }))
+}
+
+/// `lxo task show <task_id> --json --schema 2`: la Task, sus hijas y sus intentos **por id**, sin elegir ninguno.
+/// Por id: el nombre se resuelve con la forma 1 (`lxo task show <nombre>`).
+fn show_v2(rpc: Rpc, id: &str) -> Result<Value, Failure> {
+    let data = match rpc("task_detail_v2", &json!({ "task_id": id })) {
+        Ok(data) => data,
+        Err(RpcFailure::Rejected(m)) if m.starts_with("model_not_found") => {
+            return Err(Failure::NotFound(format!(
+                "No hay ninguna tarea con id «{}». Con --schema 2 se busca por id: los ids salen en lxo tasks.",
+                clean(id)
+            )))
+        }
+        Err(error) => return Err(v2_failure(error)),
+    };
+    let t = &data["task"];
+    if data["v"].as_u64() != Some(CONTRACT_V2)
+        || data["core_model"] != MODEL_V2
+        || !t["id"].is_string()
+        || !t["attempts"].is_array()
+    {
+        return Err(contract_error());
+    }
+    let mut task = dto_v2(t);
+    task["children_ids"] = json!(t["children"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(text)
+        .filter(|c| !c.is_null())
+        .collect::<Vec<_>>());
+    let mut attempts: Vec<Value> = t["attempts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(attempt_ref)
+        .collect();
+    attempts.sort_by_key(|a| a["n"].as_u64().unwrap_or(0));
+    task["attempts"] = json!(attempts);
+    let id = t["id"].as_str().unwrap_or_default().to_string();
+    Ok(json!({
+        "v": CONTRACT_V2,
+        "task_model": MODEL_V2,
+        "task": task,
+        "activity": activity(rpc, "task", &id)?,
+    }))
+}
+
+/// Aviso de compatibilidad (LXO-124): tras el corte (`core_model` = `task_attempt_v1`) estas fichas son la vista
+/// `legacy_task_v1` y lo de ejecución (agente, rama, worktree, fallo, PR) es del intento actual, campos en desuso
+/// (`docs/core/QUERIES.md` § Compatibilidad). Da el aviso para stderr y, en la ficha (`task`), cuántos intentos
+/// tiene. `None` antes del corte o si el Core no lo dice: los comandos siguen como antes.
+fn legacy_notice(rpc: Rpc, task: Option<&str>) -> Option<(String, Option<usize>)> {
+    let model = rpc("core_model", &json!({})).ok()?;
+    if model["core_model"] != "task_attempt_v1" {
+        return None;
+    }
+    let Some(id) = task else {
+        return Some((
+            "Aviso: el Core ya usa el modelo Task/Attempt. El agente y la rama de cada tarea son los de su intento actual (campos en desuso); cada ejecución, con lxo attempts --task <id>.".into(),
+            None,
+        ));
+    };
+    let n = rpc("attempts_by_task", &json!({ "task_id": id }))
+        .ok()
+        .and_then(|d| d["items"].as_array().map(Vec::len));
+    let many = match n {
+        Some(n) if n > 1 => format!(" y la tarea tiene {n} intentos"),
+        _ => String::new(),
+    };
+    Some((
+        format!(
+            "Aviso: el Core ya usa el modelo Task/Attempt. El agente, la rama, el worktree, el fallo y el PR de esta ficha son los del intento actual (campos en desuso){many}; cada ejecución, con lxo attempts --task {}.",
+            clean(id)
+        ),
+        n,
+    ))
+}
+
+fn execute(request: Request, json: bool, schema: u64) -> Result<(), Failure> {
     let mut rpc = |cmd: &str, args: &Value| client_auth::rpc(cmd, args, &crate::cwd());
     match request {
         Request::Help => print!("{HELP}"),
+        Request::List(filters) if schema == 2 => println!("{}", list_v2(&mut rpc, &filters)?),
+        Request::Show(id) if schema == 2 => println!("{}", show_v2(&mut rpc, &id)?),
         Request::List(filters) => {
             let (mut data, overview) = list_data(&mut rpc, &filters)?;
             if json {
@@ -889,6 +1113,9 @@ fn execute(request: Request, json: bool) -> Result<(), Failure> {
                     overview.name(tasks);
                 }
                 println!("{}", list_text(&data, &filters));
+                if let Some((notice, _)) = legacy_notice(&mut rpc, None) {
+                    eprintln!("{notice}");
+                }
             }
         }
         Request::Show(id) => {
@@ -897,16 +1124,64 @@ fn execute(request: Request, json: bool) -> Result<(), Failure> {
                 println!("{data}");
             } else {
                 overview.name(std::slice::from_mut(&mut data["task"]));
+                let id = data["task"]["id"].as_str().unwrap_or_default().to_string();
+                let notice = legacy_notice(&mut rpc, Some(&id));
+                if let Some(n) = notice.as_ref().and_then(|(_, n)| *n) {
+                    data["attempt_count"] = json!(n);
+                }
                 println!("{}", show_text(&data));
+                if let Some((notice, _)) = notice {
+                    eprintln!("{notice}");
+                }
             }
         }
     }
     Ok(())
 }
 
+/// `--schema 1|2` (LXO-125): la forma del `--json`. 1 (por defecto mientras dure la ventana de compatibilidad) es
+/// el modelo legacy; 2, el modelo Task/Attempt. Sin `--json` no hay forma que elegir.
+fn schema(a: &Args, request: &Request) -> Result<u64, Failure> {
+    let schema = match text_flag(a, "schema")?.as_deref() {
+        None => 1,
+        Some("1") => 1,
+        Some("2") => 2,
+        Some(_) => {
+            return Err(usage(
+                "--schema admite 1 (modelo legacy, por defecto) o 2 (modelo Task/Attempt).",
+            ))
+        }
+    };
+    if a.flags.contains_key("schema") && !a.b("json") {
+        return Err(usage(
+            "--schema elige la forma del --json: úsalo junto a --json.",
+        ));
+    }
+    if let Request::List(f) = request {
+        if schema == 2 && (f.status.is_some() || f.active || f.finished) {
+            return Err(usage(format!(
+                "--status, --active y --final filtran por el estado de la ejecución (modelo legacy). Con --schema 2 filtra por el estado de la tarea con --state ({}), o mira cada intento con lxo attempts --task <id>.",
+                STATES.join(", ")
+            )));
+        }
+        if schema == 1 && f.state.is_some() {
+            return Err(usage(
+                "--state es el estado de la tarea del modelo Task/Attempt: úsalo con --json --schema 2.",
+            ));
+        }
+    }
+    Ok(schema)
+}
+
 pub(super) fn run(a: &Args) -> std::process::ExitCode {
     let json = a.b("json");
-    finish(parse(a).and_then(|request| execute(request, json)), json)
+    finish(
+        parse(a).and_then(|request| {
+            let schema = schema(a, &request)?;
+            execute(request, json, schema)
+        }),
+        json,
+    )
 }
 
 #[cfg(test)]
@@ -1652,5 +1927,201 @@ mod tests {
             );
         }
         assert_eq!(parse(&args(&["tasks", "show"])).err().unwrap().code().1, 2);
+    }
+
+    /// LXO-124 · tras el corte, `lxo tasks` y `lxo task show` avisan de que lo de ejecución es del intento actual
+    /// y remiten a `lxo attempts --task`; antes del corte, o con un Core que no conoce `core_model`, nada cambia.
+    #[test]
+    fn aviso_de_compatibilidad_solo_tras_el_corte() {
+        let cut = |attempts: usize| {
+            move |cmd: &str, args: &Value| match cmd {
+                "core_model" => Ok(json!({ "core_model": "task_attempt_v1", "compat": ["legacy_task_v1"] })),
+                "attempts_by_task" => {
+                    assert_eq!(args, &json!({ "task_id": "t2" }));
+                    Ok(json!({ "v": 1, "items": vec![json!({}); attempts] }))
+                }
+                other => panic!("{other}"),
+            }
+        };
+        let (notice, n) = legacy_notice(&mut cut(3), Some("t2")).unwrap();
+        assert_eq!(n, Some(3));
+        assert!(notice.contains("intento actual (campos en desuso) y la tarea tiene 3 intentos"), "{notice}");
+        assert!(notice.ends_with("lxo attempts --task t2."), "{notice}");
+        let (one, _) = legacy_notice(&mut cut(1), Some("t2")).unwrap();
+        assert!(!one.contains("intentos;"), "con uno no hace falta contarlo: {one}");
+        let (list, n) = legacy_notice(&mut cut(0), None).unwrap();
+        assert_eq!(n, None);
+        assert!(list.contains("lxo attempts --task <id>"), "{list}");
+
+        let mut legacy = |cmd: &str, _: &Value| match cmd {
+            "core_model" => Ok(json!({ "core_model": "legacy", "compat": [], "queries": [] })),
+            other => panic!("antes del corte no pide {other}"),
+        };
+        assert!(legacy_notice(&mut legacy, Some("t2")).is_none());
+        let mut old = |_: &str, _: &Value| Err(RpcFailure::Rejected("Comando desconocido: core_model".into()));
+        assert!(legacy_notice(&mut old, None).is_none());
+
+        let mut data = show("t2");
+        assert!(!show_text(&data).contains("Intentos:"), "sin el corte no hay línea de intentos");
+        data["attempt_count"] = json!(3);
+        assert!(show_text(&data).contains("  Intentos:    3 · cada uno con lxo attempts --task t2"));
+    }
+
+    const API_LIST: &str = include_str!("../../../../docs/core/fixtures/api/task_list_v2.json");
+    const API_DETAIL: &str = include_str!("../../../../docs/core/fixtures/api/task_detail_v2.json");
+
+    fn attempt_v2(task: &str, n: u64, status: &str) -> Value {
+        json!({ "id": format!("{task}-a{n}"), "n": n, "status": status, "provider": "codex", "model": "gpt-5",
+                "role": null, "external": false, "created_at": 1_792_000_100_000u64 + n, "started_at": null, "ended_at": null })
+    }
+
+    /// Core cortado simulado sobre las fixtures de la ADR (`fixtures/api/`), más t9 con dos intentos. Con `model`
+    /// distinto de `task_attempt_v1`, las lecturas vNext responden `core_model_inactive`.
+    fn core_v2(model: &'static str) -> impl FnMut(&str, &Value) -> Result<Value, RpcFailure> {
+        move |cmd, args| {
+            if model != MODEL_V2 && cmd != "projects_overview" {
+                return Err(RpcFailure::Rejected(
+                    "core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail".into(),
+                ));
+            }
+            let mut items = serde_json::from_str::<Value>(API_LIST).unwrap()["items"].as_array().unwrap().clone();
+            items.push(json!({
+                "id": "t9", "title": "reintentada", "project_id": "p-1", "run_id": "r9", "parent_task_id": null, "depth": 0,
+                "intent": "open", "state": "in_progress", "origin": "lixbon", "created_at": 1_792_000_100_000u64,
+                "updated_at": 1_792_000_200_000u64, "attempt_count": 2, "current_attempt": attempt_v2("t9", 2, "running"),
+                "spec": "encargo privado"
+            }));
+            match cmd {
+                "projects_overview" => Ok(json!({ "v": 1, "projects": [{ "id": "p-1", "name": "app" }], "unassigned": { "tasks": 0 } })),
+                "task_list_v2" => {
+                    assert_eq!((args["include_discarded"].as_bool(), args["limit"].as_u64()), (Some(true), Some(100)));
+                    let start: usize = args["cursor"].as_str().map(|c| c.parse().unwrap()).unwrap_or(0);
+                    let page: Vec<Value> = items.iter().skip(start).take(2).cloned().collect();
+                    let next = (start + 2 < items.len()).then(|| (start + 2).to_string());
+                    Ok(json!({ "v": 2, "core_model": MODEL_V2, "project_id": "p-1", "items": page, "next_cursor": next }))
+                }
+                "task_detail_v2" => match args["task_id"].as_str().unwrap() {
+                    "t3" => Ok(serde_json::from_str(API_DETAIL).unwrap()),
+                    "t9" => {
+                        let mut t = items.last().unwrap().clone();
+                        t["children"] = json!([]);
+                        // Del Core, en otro orden: lxo los ordena por n.
+                        t["attempts"] = json!([attempt_v2("t9", 2, "running"), attempt_v2("t9", 1, "failed")]);
+                        t["thread"] = Value::Null;
+                        Ok(json!({ "v": 2, "core_model": MODEL_V2, "task": t }))
+                    }
+                    id => Err(RpcFailure::Rejected(format!("model_not_found: no existe la Task {id}"))),
+                },
+                "activity_list" => Ok(json!({ "v": 1, "items": [], "has_more": false })),
+                other => panic!("comando inesperado {other}"),
+            }
+        }
+    }
+
+    fn schema_of(raw: &[&str]) -> Result<u64, Failure> {
+        let a = args(raw);
+        schema(&a, &parse(&a)?)
+    }
+
+    #[test]
+    fn la_forma_del_json_se_elige_con_schema_y_por_defecto_es_la_1() {
+        assert_eq!(schema_of(&["tasks", "--json"]).unwrap(), 1, "sin --schema, la forma 1 (ventana de compatibilidad)");
+        assert_eq!(schema_of(&["tasks", "--json", "--schema", "1"]).unwrap(), 1);
+        assert_eq!(schema_of(&["task", "show", "t3", "--json", "--schema", "2"]).unwrap(), 2);
+        assert_eq!(schema_of(&["tasks", "--json", "--schema", "2", "--state", "in_review", "--run", "r1"]).unwrap(), 2);
+        for (raw, wanted) in [
+            (&["tasks", "--json", "--schema", "3"][..], "--schema admite 1"),
+            (&["tasks", "--schema", "2"][..], "úsalo junto a --json"),
+            (&["tasks", "--json", "--schema", "2", "--status", "running"][..], "filtra por el estado de la tarea con --state"),
+            (&["tasks", "--json", "--schema", "2", "--active"][..], "lxo attempts --task <id>"),
+            (&["tasks", "--json", "--state", "open"][..], "úsalo con --json --schema 2"),
+            (&["tasks", "--json", "--schema", "2", "--state", "rara"][..], "--state no reconoce"),
+        ] {
+            match schema_of(raw) {
+                Err(Failure::Usage(m)) => assert!(m.contains(wanted), "{raw:?}: {m}"),
+                other => panic!("{raw:?}: {other:?}"),
+            }
+        }
+    }
+
+    /// Las formas publicadas del `--json` de `lxo tasks` y `lxo task show`, legacy (1) y vNext (2).
+    #[test]
+    fn snapshots_json_legacy_y_vnext() {
+        crate::snapshot("tasks.v1.json", &list(&[]));
+        crate::snapshot("task_show.v1.json", &show("t2"));
+        let v2 = list_v2(&mut core_v2(MODEL_V2), &Filters::default()).unwrap();
+        crate::snapshot("tasks.v2.json", &v2);
+        let detail = show_v2(&mut core_v2(MODEL_V2), "t3").unwrap();
+        crate::snapshot("task_show.v2.json", &detail);
+        // La forma 2 no lleva nada de la ejecución: eso es del Attempt (lxo attempt show).
+        for doc in [&v2, &detail] {
+            let text = doc.to_string();
+            for legacy in ["\"provider\"", "\"branch\"", "\"worktree\"", "\"pr_url\"", "\"failure_reason\"", "\"status\":\"done\",\"final\""] {
+                assert!(!text.contains(legacy), "{legacy} en la forma 2: {text}");
+            }
+            assert!(!text.contains("encargo privado") && !text.contains("Implementa /api/session"), "no copia el encargo");
+            assert!(!text.contains("\"id\":"), "ids nombrados: task_id, attempt_id…");
+        }
+    }
+
+    #[test]
+    fn forma_2_en_arbol_paginada_y_con_filtros() {
+        let all = list_v2(&mut core_v2(MODEL_V2), &Filters::default()).unwrap();
+        let ids: Vec<&str> = all["tasks"].as_array().unwrap().iter().map(|t| t["task_id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["t2", "t3", "t4", "t5", "t9", "t17"], "raíz y sus hijas, por creación, de las tres páginas");
+        assert_eq!((all["v"].clone(), all["task_model"].clone()), (json!(2), json!("task_attempt_v1")));
+        let depth: Vec<u64> = all["tasks"].as_array().unwrap().iter().map(|t| t["depth"].as_u64().unwrap()).collect();
+        assert_eq!(depth, [0, 1, 1, 1, 0, 0]);
+        let filtered = list_v2(
+            &mut core_v2(MODEL_V2),
+            &Filters { state: Some("in_review".into()), ..Filters::default() },
+        )
+        .unwrap();
+        let ids: Vec<&str> = filtered["tasks"].as_array().unwrap().iter().map(|t| t["task_id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["t2", "t5"]);
+        assert_eq!(
+            list_v2(&mut core_v2(MODEL_V2), &Filters { run: Some("r9".into()), ..Filters::default() }).unwrap()["tasks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    /// Invariante de LXO-125: con N intentos, la forma 2 los nombra a todos y no elige ninguno; el detalle de una
+    /// ejecución se pide por su id (`lxo attempt show`, que rechaza el id de una Task).
+    #[test]
+    fn una_tarea_con_n_intentos_obliga_a_elegir_uno() {
+        let doc = show_v2(&mut core_v2(MODEL_V2), "t9").unwrap();
+        let task = &doc["task"];
+        assert_eq!(
+            task["attempts"],
+            json!([
+                { "attempt_id": "t9-a1", "n": 1, "status": "failed" },
+                { "attempt_id": "t9-a2", "n": 2, "status": "running" }
+            ])
+        );
+        assert_eq!((task["attempt_count"].clone(), task["current_attempt"]["attempt_id"].clone()), (json!(2), json!("t9-a2")));
+        assert!(task.get("provider").is_none() && task.get("branch").is_none() && task.get("worktree").is_none());
+        match show_v2(&mut core_v2(MODEL_V2), "reintentada") {
+            Err(Failure::NotFound(m)) => assert!(m.contains("se busca por id"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn forma_2_antes_del_corte_sale_con_4() {
+        for result in [
+            list_v2(&mut core_v2("legacy"), &Filters::default()),
+            show_v2(&mut core_v2("legacy"), "t3"),
+        ] {
+            match result {
+                Err(f @ Failure::Version(_)) => {
+                    assert!(f.message().contains("--json sin --schema"), "{}", f.message());
+                    assert_eq!(f.code().1, 4);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
     }
 }

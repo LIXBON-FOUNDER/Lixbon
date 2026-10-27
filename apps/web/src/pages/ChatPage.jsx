@@ -20,6 +20,7 @@ import { VerifyBanner } from '../components/VerifyBanner';
 import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu } from '../components/Icons';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import { MascotaChat } from '../components/Mascota';
+import { AvisoChatCerrado, CHAT_CERRADO, ChatCerrado } from '../components/ChatCerrado';
 import { ChatVisualPanel, VISUAL_CHAT_PROMPT, VisualChip, sinBloquesVisuales } from '../components/ChatVisualPanel';
 import { FILE_PROMPT } from '../lib/archivos';
 import { tieneVisuals } from '../lib/planes';
@@ -570,9 +571,13 @@ export default function ChatPage() {
               <ThreadSkeleton />
             </div>
             <div className="chat-composer">
-              <ChatInput onSend={send} busy models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision} />
+              {CHAT_CERRADO ? <AvisoChatCerrado /> : (
+                <ChatInput onSend={send} busy models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision} />
+              )}
             </div>
           </>
+        ) : empty && CHAT_CERRADO ? (
+          <ChatCerrado />
         ) : empty ? (
           <div className="chat-hero">
             <div className="chat-hero__cabeza">
@@ -645,14 +650,18 @@ export default function ChatPage() {
                   <IconArrowDown size={16} />
                 </button>
               )}
-              <MascotaChat ocupado={busy} escribiendo={escribiendo} />
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
-                webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
-                nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
-              <p className="chat-disclaimer">
-                {t('disclaimer')}
-              </p>
+              {CHAT_CERRADO ? <AvisoChatCerrado /> : (
+                <>
+                  <MascotaChat ocupado={busy} escribiendo={escribiendo} />
+                  <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
+                    webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
+                    nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
+                    avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
+                  <p className="chat-disclaimer">
+                    {t('disclaimer')}
+                  </p>
+                </>
+              )}
             </div>
           </>
         )}

@@ -9,12 +9,14 @@ use serde_json::{json, Map, Value};
 
 use super::agentic_cut::{check_copy, restore, run, verify_legacy_view, CutReport, BACKUP_LABEL};
 use super::state::State;
-use crate::store::{cut_migration, embedded, migrations_with_cut, sha256_hex, EventQuery, Migration, Store, StoreError, AGENTIC_MODEL};
+use crate::store::{cut_migration, embedded, sha256_hex, EventQuery, Migration, Store, StoreError, AGENTIC_MODEL, CUT_NAME};
 
 static N: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE: &str = include_str!("../../../../../docs/core/fixtures/corte-task-attempt/legacy_state.before.json");
 const AFTER: &str = include_str!("../../../../../docs/core/fixtures/corte-task-attempt/normalizado.after.json");
+/// Checksum de la 014 (el corte), congelado al publicarla (LXO-234).
+const CHECKSUM_014: &str = "4c6692565a1eb65a4422e839b43842356d34cfd5eb212529ec1cb1396a582b64";
 const TABLAS: [&str; 13] =
     ["runs", "tasks", "attempts", "attempt_phases", "worktrees", "provider_sessions", "threads", "thread_messages", "artifacts", "decisions", "reviews", "env_blocks", "legacy_residue"];
 
@@ -47,6 +49,11 @@ fn sql(s: &mut Store, q: &str) {
 }
 
 /// Base anterior al corte (todas las migraciones publicadas), el Project `p-1` y `legacy_state = doc` en la rev 42.
+/// Las migraciones de un binario anterior al corte (F2): todas menos el corte.
+fn f2() -> Vec<Migration> {
+    embedded().into_iter().filter(|m| m.name != CUT_NAME).collect()
+}
+
 fn base(t: &Tmp, doc: Option<&str>) -> Store {
     base_with(t, doc, &embedded())
 }
@@ -141,8 +148,7 @@ fn la_fixture_pequena_queda_igual_que_normalizado_after_y_el_informe_cuadra() {
     assert!(backup.file_name().unwrap().to_string_lossy().contains(BACKUP_LABEL));
     // El modelo queda activo, `legacy_state` congelado y el corte registrado como la versión siguiente.
     assert!(s.agentic_model_active().unwrap());
-    assert_eq!(s.schema_version().unwrap(), crate::store::cut_base_version(), "user_version sigue en la última publicada");
-    assert!(s.agentic_cut_done().unwrap());
+    assert_eq!(s.schema_version().unwrap(), cut_migration().version);
     assert!(s.write(|tx| Ok(tx.execute("UPDATE legacy_state SET rev = rev + 1", [])?)).unwrap_err().to_string().contains("congelado"));
     // Su hecho, en la misma transacción.
     let ev = s.events_page(&EventQuery { kind: Some("core.agentic_cut".into()), limit: Some(10), ..Default::default() }).unwrap().events;
@@ -270,7 +276,7 @@ fn la_copia_previa_es_un_conjunto_coherente_con_su_sidecar() {
     let antes = esquema(&s);
     let CutReport::Applied { backup, .. } = corta(&mut s, &t) else { panic!("se esperaba el corte") };
     let sc = check_copy(&backup).unwrap();
-    assert_eq!((sc.label.as_str(), sc.user_version, sc.legacy_rev, sc.integrity_check.as_str()), (BACKUP_LABEL, crate::store::cut_base_version(), Some(42), "ok"));
+    assert_eq!((sc.label.as_str(), sc.user_version, sc.legacy_rev, sc.integrity_check.as_str()), (BACKUP_LABEL, cut_migration().version - 1, Some(42), "ok"));
     assert_eq!(sc.legacy_doc_sha256.as_deref(), Some(sha256_hex(FIXTURE.as_bytes()).as_str()));
     assert_eq!(sc.db_sha256, sha256_hex(&std::fs::read(&backup).unwrap()));
     let dir = backup.parent().unwrap();
@@ -294,7 +300,7 @@ fn un_documento_que_no_es_un_state_o_una_base_en_otra_version_no_llegan_a_copiar
     let mut s = base(&t, Some(r#"{"runs":{},"tasks":{"t1":{"id":"t1","status":"zombie"}},"messages":[],"seq":1}"#));
     assert!(matches!(run(&mut s, &t.core(), t.data(), "t"), Err(StoreError::CutPreflight(_))));
     let t2 = Tmp::new();
-    let viejas: Vec<Migration> = embedded().into_iter().filter(|m| m.version < crate::store::cut_base_version()).collect();
+    let viejas: Vec<Migration> = embedded().into_iter().filter(|m| m.version < cut_migration().version - 1).collect();
     let mut s2 = base_with(&t2, Some(FIXTURE), &viejas);
     assert!(matches!(run(&mut s2, &t2.core(), t2.data(), "t"), Err(StoreError::CutPreflight(m)) if m.contains("versión")));
     let t3 = Tmp::new();
@@ -403,16 +409,15 @@ fn restaurar_la_copia_vuelve_a_la_base_anterior_al_corte_y_aparta_la_cortada() {
     assert!(restore(&t.core(), t.data(), &backup).is_err());
     drop(s);
     // Un binario anterior al corte no toca la base cortada; uno con el corte, sí la abre.
-    // (con la versión reservada, un binario sin el corte ve la fila 900: más nueva o desconocida; nunca la toca)
-    assert!(matches!(Store::open_with(&t.core(), &embedded(), "f2"), Err(StoreError::DatabaseNewer { .. } | StoreError::UnknownMigration { version: 900, .. })));
-    drop(Store::open_with(&t.core(), &migrations_with_cut(), "f3").unwrap());
+    assert!(matches!(Store::open_with(&t.core(), &f2(), "f2"), Err(StoreError::DatabaseNewer { .. })));
+    drop(Store::open_with(&t.core(), &embedded(), "f3").unwrap());
     std::fs::write(t.data().join("state.json"), b"escrito tras el corte").unwrap();
 
     let apartada = restore(&t.core(), t.data(), &backup).unwrap();
     assert!(apartada.join("lixbon.db").exists(), "la base cortada se aparta, no se borra");
-    let mut r = Store::open_with(&t.core(), &embedded(), "f2").unwrap();
+    let mut r = Store::open_with(&t.core(), &f2(), "f2").unwrap();
     assert_eq!(esquema(&r), antes);
-    assert_eq!(r.schema_version().unwrap(), crate::store::cut_base_version());
+    assert_eq!(r.schema_version().unwrap(), cut_migration().version - 1);
     let legacy = r.legacy_state().unwrap().unwrap();
     assert_eq!((legacy.rev, legacy.doc.as_str()), (42, FIXTURE));
     r.save_legacy_state(42, FIXTURE).unwrap();
@@ -431,16 +436,19 @@ fn una_copia_que_no_cuadra_con_su_sidecar_no_se_restaura() {
     sc["db_sha256"] = json!("0".repeat(64));
     std::fs::write(&sidecar, serde_json::to_vec(&sc).unwrap()).unwrap();
     assert!(restore(&t.core(), t.data(), &backup).is_err());
-    assert!(Store::open_with(&t.core(), &migrations_with_cut(), "f3").unwrap().agentic_model_active().unwrap(), "la base cortada sigue en su sitio");
+    assert!(Store::open_with(&t.core(), &embedded(), "f3").unwrap().agentic_model_active().unwrap(), "la base cortada sigue en su sitio");
 }
 
+/// LXO-234: el corte es la 014, pero el migrador general nunca la aplica (es una barrera): solo `agentic_cut::run`, que
+/// llama el arranque con el interruptor. Nadie más ejecuta el corte ni la restauración.
 #[test]
-fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
+fn el_migrador_no_aplica_el_corte_y_solo_el_arranque_con_el_interruptor_lo_ejecuta() {
     let t = Tmp::new();
     let s = Store::open(&t.core(), "t").unwrap();
     assert!(!s.agentic_model_active().unwrap() && !s.agentic_cut_done().unwrap());
-    assert_eq!(s.schema_version().unwrap(), embedded().last().unwrap().version, "la última publicada, sin el corte");
-    assert!(!embedded().iter().any(|m| m.name == crate::store::CUT_NAME), "la SQL del corte no está en migrations/");
+    assert_eq!(s.schema_version().unwrap(), cut_migration().version - 1, "todas las publicadas menos el corte");
+    assert!(embedded().iter().any(|m| m.name == CUT_NAME), "el corte vive en migrations/");
+    assert_eq!(cut_migration().version, 14);
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for dir in ["orch", "store"] {
         for entrada in std::fs::read_dir(src.join(dir)).unwrap() {
@@ -450,264 +458,15 @@ fn el_arranque_no_aplica_el_corte_y_solo_agentic_cut_lo_ejecuta() {
                 continue;
             }
             let texto = std::fs::read_to_string(&ruta).unwrap();
-            // LXO-234: la única entrada es `Core::ensure_agentic_cut` (agentic_cut.rs) -> `CoreStorage::run_agentic_cut`
-            // (store_boot.rs). LXO-234 la conecta al arranque SOLO desde startup_cut.rs, y una sola vez.
-            if nombre == "startup_cut.rs" {
-                assert_eq!(texto.matches("ensure_agentic_cut(").count(), 1, "startup_cut.rs llama al corte una sola vez");
-            } else {
-                assert!(!texto.contains("ensure_agentic_cut("), "{dir}/{nombre} llama al corte: solo lo hace startup_cut.rs");
-            }
-            if nombre == "store_boot.rs" {
-                assert_eq!(texto.matches("agentic_cut::run").count(), 1, "store_boot.rs solo envuelve el corte en run_agentic_cut");
-                assert!(!texto.replace("pub(super) fn run_agentic_cut", "").contains("run_agentic_cut("), "store_boot.rs no lo llama al arrancar");
-                continue;
-            }
-            for sim in ["agentic_cut::run", ".agentic_cut_recorded(", "agentic_cut::restore"] {
-                assert!(!texto.contains(sim), "{dir}/{nombre} llama a «{sim}»: el corte no está activado");
+            for (sim, donde) in [("agentic_cut::run", "boot_authority.rs"), (".agentic_cut_recorded(", ""), ("agentic_cut::restore(", ""), ("agentic_cut::restore_pending", "lifecycle.rs")] {
+                assert!(!texto.contains(sim) || nombre == donde, "{dir}/{nombre} llama a «{sim}»: solo {donde:?} puede");
             }
         }
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// LXO-234: versión reservada del corte, numeración vieja y paso 011 -> 012 -> 013 -> corte
-// ---------------------------------------------------------------------------------------------
-
+/// La 014 publicada no se edita: su checksum queda congelado desde LXO-234.
 #[test]
-fn una_base_en_011_migra_a_012_y_013_y_el_corte_cuadra_con_normalizado_after() {
-    let t = Tmp::new();
-    let v11: Vec<Migration> = embedded().into_iter().filter(|m| m.version <= 11).collect();
-    drop(base_with(&t, Some(FIXTURE), &v11));
-    let mut s = Store::open_with(&t.core(), &embedded(), "t").unwrap();
-    assert_eq!(s.migration_report().applied, vec![12, 13], "abrir con el binario nuevo aplica 012 y 013");
-    let CutReport::Applied { after, .. } = corta(&mut s, &t) else { panic!("se esperaba el corte") };
-    let esperado: Value = serde_json::from_str(AFTER).unwrap();
-    let hecho = volcar(&s);
-    for tabla in TABLAS {
-        assert_eq!(hecho[tabla].as_array().map(Vec::len), esperado[tabla].as_array().map(Vec::len), "conteo de {tabla}");
-        assert_eq!(hecho[tabla], esperado[tabla], "tabla {tabla}");
-    }
-    assert_eq!(after.tasks, esperado["tasks"].as_array().unwrap().len() as i64);
-    let v: i64 = s.read(|c| Ok(c.query_row("SELECT version FROM schema_migrations WHERE name = 'task_attempt_cut'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(v, crate::store::CUT_VERSION, "el corte usa su versión reservada");
-    // Idempotente y reabrible con el corte en la lista.
-    assert!(matches!(corta(&mut s, &t), CutReport::AlreadyCut));
-    drop(s);
-    let s = Store::open_with(&t.core(), &migrations_with_cut(), "t").unwrap();
-    assert!(s.migration_report().applied.is_empty());
-}
-
-#[test]
-fn una_migracion_nueva_tras_el_corte_no_choca_con_su_numero() {
-    let t = Tmp::new();
-    let mut s = base(&t, Some(FIXTURE));
-    corta(&mut s, &t);
-    drop(s);
-    let mut lista = embedded();
-    let next = lista.last().unwrap().version + 1;
-    lista.push(Migration::new(next, "despues_del_corte", "CREATE TABLE despues_del_corte (x INTEGER) STRICT;"));
-    lista.push(cut_migration());
-    let s = Store::open_with(&t.core(), &lista, "t").unwrap();
-    assert_eq!(s.migration_report().applied, vec![next]);
-}
-
-/// Una base cortada con la numeración vieja (`task_attempt_cut` como «última + 1»): error propio y sin escribir.
-fn base_con_corte_viejo(t: &Tmp, hasta: i64) -> PathBuf {
-    let migs: Vec<Migration> = embedded().into_iter().filter(|m| m.version <= hasta).collect();
-    let s = base_with(t, None, &migs);
-    drop(s);
-    let db = t.core().join("lixbon.db");
-    let c = rusqlite::Connection::open(&db).unwrap();
-    c.execute("INSERT INTO schema_migrations (version, name, checksum, app_version, applied_at) VALUES (?1, 'task_attempt_cut', 'viejo', 't', 0)", [hasta + 1]).unwrap();
-    c.pragma_update(None, "user_version", hasta + 1).unwrap();
-    db
-}
-
-fn foto(db: &Path) -> (i64, Vec<(i64, String)>) {
-    let c = rusqlite::Connection::open(db).unwrap();
-    let uv: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-    let rows = c.prepare("SELECT version, name FROM schema_migrations ORDER BY version").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-    (uv, rows)
-}
-
-#[test]
-fn una_base_cortada_con_la_numeracion_vieja_se_rechaza_sin_escribir() {
-    for hasta in [11, 13] {
-        let t = Tmp::new();
-        let db = base_con_corte_viejo(&t, hasta);
-        let antes = foto(&db);
-        let bytes = sha256_hex(&std::fs::read(&db).unwrap());
-        for lista in [embedded(), migrations_with_cut()] {
-            let e = Store::open_with(&t.core(), &lista, "t").err().expect("debe rechazarse");
-            assert!(matches!(e, StoreError::CutLegacyNumbering { version } if version == hasta + 1), "v{}: {e:?}", hasta + 1);
-            let txt = e.to_string();
-            assert!(txt.starts_with("core_cut_legacy_numbering:") && txt.contains("pre-f3-cut"), "{txt}");
-        }
-        assert_eq!(foto(&db), antes, "la base no se toca");
-        assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "idéntica byte a byte (se lee en solo lectura, sin pasar a WAL)");
-        assert!(!t.core().join("lixbon.db-wal").exists());
-        assert!(backups(&t).is_empty(), "ni siquiera la copia previa");
-    }
-}
-
-/// La base real de TESTER (cortada en v12 con 3032a4f): `LIXBON_CUT_V12=/ruta/base-cortada-v12.db`.
-#[test]
-#[ignore]
-fn la_base_v12_de_tester_se_rechaza_sin_escribir() {
-    let src = PathBuf::from(std::env::var("LIXBON_CUT_V12").expect("LIXBON_CUT_V12"));
-    let t = Tmp::new();
-    let db = t.core().join("lixbon.db");
-    std::fs::copy(&src, &db).unwrap();
-    let filas = |db: &Path| {
-        let c = rusqlite::Connection::open(db).unwrap();
-        let tablas: Vec<String> = c.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY 1").unwrap().query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
-        let esquema: Vec<String> = c.prepare("SELECT coalesce(sql, name) FROM sqlite_master ORDER BY name").unwrap().query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
-        let conteos: Vec<(String, i64)> = tablas.iter().map(|t| (t.clone(), c.query_row(&format!("SELECT COUNT(*) FROM \"{t}\""), [], |r| r.get(0)).unwrap())).collect();
-        (esquema, conteos)
-    };
-    let antes = (foto(&db), filas(&db));
-    let bytes = sha256_hex(&std::fs::read(&db).unwrap());
-    for lista in [embedded(), migrations_with_cut()] {
-        let e = Store::open_with(&t.core(), &lista, "t").err().expect("debe rechazarse");
-        assert!(matches!(e, StoreError::CutLegacyNumbering { version: 12 }), "{e:?}");
-    }
-    assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "idéntica byte a byte");
-    assert_eq!((foto(&db), filas(&db)), antes, "ni el esquema ni las filas cambian");
-    assert!(std::fs::read_dir(t.core()).unwrap().all(|e| e.unwrap().file_name() != "backups"), "sin copia previa: no se intentó migrar");
-}
-
-// ---------------------------------------------------------------------------------------------
-// LXO-234: datos reales que abortaban el corte; se toleran sin perder nada
-// ---------------------------------------------------------------------------------------------
-
-/// La fixture con un cambio en una Task; el corte debe aplicarse, dejar el original en `legacy_residue` y la vista
-/// legacy (la validación semántica del propio corte) debe reconstruir el documento igual.
-fn corta_con(cambio: impl FnOnce(&mut Value)) -> (Tmp, Store) {
-    let mut doc: Value = serde_json::from_str(FIXTURE).unwrap();
-    cambio(&mut doc);
-    let t = Tmp::new();
-    let mut s = base(&t, Some(&doc.to_string()));
-    assert!(matches!(corta(&mut s, &t), CutReport::Applied { .. }), "el corte se aplica");
-    let state: State = serde_json::from_value(doc).unwrap();
-    s.cut_view(|v| verify_legacy_view(v, &state)).unwrap();
-    (t, s)
-}
-
-fn residuo(s: &Store, task: &str, field: &str) -> Option<(String, String)> {
-    s.read(|c| {
-        Ok(rusqlite::OptionalExtension::optional(c.query_row(
-            "SELECT value, reason FROM legacy_residue WHERE entity_kind = 'task' AND legacy_id = ?1 AND field = ?2",
-            [task, field],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        ))?)
-    })
-    .unwrap()
-}
-
-#[test]
-fn dos_tasks_con_la_misma_carpeta_solo_la_primera_queda_activa() {
-    let (_t, s) = corta_con(|d| d["tasks"]["t4"]["worktree"] = d["tasks"]["t3"]["worktree"].clone());
-    let fila = |id: &str| s.read(|c| Ok(c.query_row("SELECT state, path, branch_kept, branch FROM worktrees WHERE id = ?1", [id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<String>>(3)?)))?)).unwrap();
-    assert_eq!(fila("wt-t3-a1").0, "active", "la primera (por creación) conserva la carpeta");
-    let (st, path, kept, branch) = fila("wt-t4-a1");
-    assert_eq!((st.as_str(), path, kept, branch.as_deref()), ("removed", None, 1, Some("lx/r1/t4-formulario-de-login")), "la otra queda quitada con su rama");
-    assert_eq!(residuo(&s, "t4", "worktree"), Some(("\"/home/ana/app.lixbon-wt/t3-api-de-sesiones\"".into(), "worktree_path_shared".into())));
-    assert_eq!(residuo(&s, "t3", "worktree"), None);
-}
-
-#[test]
-fn un_motivo_de_fallo_en_una_task_no_fallida_va_a_residuo() {
-    let (_t, s) = corta_con(|d| d["tasks"]["t2"]["failure_reason"] = json!("agent_idle_timeout"));
-    let fr: Option<String> = s.read(|c| Ok(c.query_row("SELECT failure_reason FROM attempts WHERE id = 't2-a1'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(fr, None, "solo un Attempt fallido lleva motivo");
-    assert_eq!(residuo(&s, "t2", "failure_reason"), Some(("\"agent_idle_timeout\"".into(), "failure_reason_not_failed".into())));
-    let fr4: Option<String> = s.read(|c| Ok(c.query_row("SELECT failure_reason FROM attempts WHERE id = 't4-a1'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(fr4.as_deref(), Some("agent_idle_timeout"), "el fallido lo conserva en su columna");
-}
-
-#[test]
-fn un_pr_que_no_es_https_va_a_residuo_y_no_es_artifact() {
-    let (_t, s) = corta_con(|d| d["tasks"]["t5"]["pr_url"] = json!("http://github.com/ana/app/pull/42"));
-    let n: i64 = s.read(|c| Ok(c.query_row("SELECT count(*) FROM artifacts WHERE attempt_id = 't5-a1' AND kind = 'pull_request'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(n, 0);
-    assert_eq!(residuo(&s, "t5", "pr_url"), Some(("\"http://github.com/ana/app/pull/42\"".into(), "pr_url_not_https".into())));
-}
-
-#[test]
-fn los_tres_casos_juntos_tambien_se_cortan() {
-    let (_t, s) = corta_con(|d| {
-        d["tasks"]["t4"]["worktree"] = d["tasks"]["t3"]["worktree"].clone();
-        d["tasks"]["t2"]["failure_reason"] = json!("x");
-        d["tasks"]["t5"]["pr_url"] = json!("ftp://x");
-    });
-    let n: i64 = s.read(|c| Ok(c.query_row("SELECT count(*) FROM legacy_residue WHERE reason IN ('worktree_path_shared', 'failure_reason_not_failed', 'pr_url_not_https')", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(n, 3);
-}
-
-#[test]
-fn un_arranque_rechazado_por_numeracion_vieja_queda_consultable_en_core_model() {
-    let (_l, data, core_dir) = super::boot_tests::dirs();
-    std::fs::create_dir_all(&core_dir).unwrap();
-    drop(Store::open_with(&core_dir, &embedded(), "t").unwrap());
-    {
-        let c = rusqlite::Connection::open(core_dir.join("lixbon.db")).unwrap();
-        c.execute("INSERT INTO schema_migrations (version, name, checksum, app_version, applied_at) VALUES (14, 'task_attempt_cut', 'viejo', 't', 0)", []).unwrap();
-        c.pragma_update(None, "journal_mode", "DELETE").unwrap();
-    }
-    let db = core_dir.join("lixbon.db");
-    let bytes = sha256_hex(&std::fs::read(&db).unwrap());
-    // Sin promocionar (C1) el arranque se degrada a state.json; promovida, se niega. En los dos casos el motivo queda
-    // en `core_model.storage`.
-    let (core, _host, _r) = super::boot_tests::arranca(&data, &core_dir);
-    let m = core.rpc(super::Caller::User, "", "core_model", &json!({})).unwrap();
-    assert_eq!(m["storage"]["status"], "rejected");
-    assert_eq!(m["storage"]["code"], "core_cut_legacy_numbering");
-    assert!(m["storage"]["message"].as_str().unwrap().contains("pre-f3-cut"));
-    assert_eq!((m["core_model"].as_str(), m["queries"].as_array().map(Vec::len)), (Some("legacy"), Some(0)));
-    assert_eq!(sha256_hex(&std::fs::read(&db).unwrap()), bytes, "el arranque rechazado no toca la base");
-    // Un agente no lo lee.
-    assert!(core.rpc(super::Caller::Agent(Some("t1".into())), "", "core_model", &json!({})).is_err());
-}
-
-/// LXO-234: aplicar el corte por `migrate` (`migrations_with_cut()`) deja `user_version` en la última migración
-/// publicada, igual que `Core::ensure_agentic_cut`, y una migración nueva posterior se aplica sin `DatabaseNewer`.
-#[test]
-fn el_corte_por_migrate_deja_user_version_como_el_arranque_real() {
-    let uv = |t: &Tmp| -> i64 { rusqlite::Connection::open(t.core().join("lixbon.db")).unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap() };
-    let real = Tmp::new();
-    let mut s = base(&real, Some(FIXTURE));
-    corta(&mut s, &real);
-    drop(s);
-    let esperado = uv(&real);
-
-    let t = Tmp::new();
-    let s = Store::open_with(&t.core(), &migrations_with_cut(), "t").unwrap();
-    assert!(s.migration_report().applied.contains(&crate::store::CUT_VERSION));
-    drop(s);
-    assert_ne!(uv(&t), crate::store::CUT_VERSION);
-    assert_eq!(uv(&t), esperado, "mismo user_version que el camino real");
-    assert_eq!(esperado, crate::store::cut_base_version());
-
-    let mut lista = embedded();
-    let next = lista.last().unwrap().version + 1;
-    lista.push(Migration::new(next, "despues_del_corte", "CREATE TABLE despues_del_corte (x INTEGER) STRICT;"));
-    lista.push(cut_migration());
-    let s = Store::open_with(&t.core(), &lista, "t").unwrap();
-    assert_eq!(s.migration_report().applied, vec![next]);
-    drop(s);
-    assert_eq!(uv(&t), next);
-}
-
-/// Una base que quedó con `user_version` = 900 por el camino viejo de `migrate` se sigue abriendo con una 014.
-#[test]
-fn una_base_con_user_version_900_del_corte_no_es_database_newer() {
-    let t = Tmp::new();
-    drop(Store::open_with(&t.core(), &migrations_with_cut(), "t").unwrap());
-    rusqlite::Connection::open(t.core().join("lixbon.db")).unwrap().pragma_update(None, "user_version", crate::store::CUT_VERSION).unwrap();
-    let mut lista = embedded();
-    let next = lista.last().unwrap().version + 1;
-    lista.push(Migration::new(next, "despues_del_corte", "CREATE TABLE despues_del_corte (x INTEGER) STRICT;"));
-    lista.push(cut_migration());
-    let s = Store::open_with(&t.core(), &lista, "t").unwrap();
-    assert_eq!(s.migration_report().applied, vec![next]);
+fn la_014_del_corte_tiene_el_checksum_congelado() {
+    assert_eq!(cut_migration().checksum(), CHECKSUM_014, "una migración publicada no se edita: el cambio va en otra");
 }

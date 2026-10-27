@@ -1,8 +1,8 @@
 # Runtime sobre las tablas Task/Attempt (LXO-232)
 
-Estado: **implementado y probado; se usa en una base ya cortada**. El arranque todavía **no** corta la base: eso lo
-activa LXO-234 ([Activación](CORTE_EJECUCION.md#activación)). Mientras no haya corte, el runtime sigue con
-`legacy_state` y el espejo `state.json` exactamente como antes.
+Estado: **implementado y probado; se usa en una base ya cortada**. El arranque corta la base con el interruptor de
+dogfood `LIXBON_AGENTIC_CUT=1` (LXO-234, [Activación](CORTE_EJECUCION.md#activación)). Sin cortar, el runtime sigue
+con `legacy_state` y el espejo `state.json` exactamente como antes.
 
 Mapeo del legado y decisiones: la [ADR de LXO-112](CORTE_TASK_ATTEMPT.md). Ejecución del corte: [CORTE_EJECUCION.md](CORTE_EJECUCION.md).
 
@@ -111,11 +111,13 @@ y pide llevar el detalle al informe.
 | — | Lo que no se representa no se confirma | `verify_runtime_view` compara la vista con el candidato dentro de la transacción | `una_mutacion_que_las_tablas_no_representan_…` |
 | — | Huérfanos a `exited`, los externos no | `close_orphans` al arrancar | `al_arrancar_los_attempts_huerfanos_…` |
 
-**Barrido de la suite.** `LIXBON_TEST_ON_TABLES=1 cargo test --lib orch::` corta la base en cada arranque de las pruebas
-y pasa la suite del Core por este runtime. Los fallos que deja son esperables en ese modo:
+**Barrido de la suite.** `LIXBON_AGENTIC_CUT=1 cargo test --lib orch::` (el interruptor de dogfood de LXO-234) corta la
+base en cada arranque de las pruebas y pasa la suite del Core por este runtime. Los fallos que deja son esperables en ese modo:
 
 * pruebas que leen `legacy_state` o el espejo, o cuentan el evento `core.agentic_cut`;
-* estados fabricados a mano que ningún flujo produce, como un Project inexistente o cambiar el agente de una Task.
+* estados fabricados a mano que ningún flujo produce, como un Project inexistente o cambiar el agente de una Task;
+* `migration_gate_tests`, que simulan un binario que solo conoce hasta la 003: el corte no corre sobre una base que no
+  está en la versión anterior a él y bloquea el arranque, como debe.
 
 No queda ningún error de mapeo en los flujos reales.
 

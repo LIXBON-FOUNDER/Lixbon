@@ -4,8 +4,8 @@ export const CLAVE_TEMA = 'lixbon-tema';
 const oyentes = new Set();
 
 function leer() {
-  if (typeof document === 'undefined') return 'light';
-  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+  if (typeof document === 'undefined') return 'dark';
+  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
 export function fijarTema(tema) {
@@ -15,7 +15,7 @@ export function fijarTema(tema) {
 }
 
 // index.html solo aplica el tema guardado si hay esta marca: así la primera
-// pintura de un visitante sin sesión es siempre clara.
+// pintura de un visitante sin sesión es siempre oscura (founder va en claro).
 const CLAVE_SESION = 'lixbon-sesion';
 
 export function aplicarTemaDeSesion(conSesion) {
@@ -25,7 +25,7 @@ export function aplicarTemaDeSesion(conSesion) {
     else localStorage.removeItem(CLAVE_SESION);
     guardado = localStorage.getItem(CLAVE_TEMA);
   } catch { /* sin almacenamiento */ }
-  const tema = conSesion && guardado === 'dark' ? 'dark' : 'light';
+  const tema = conSesion && guardado === 'light' ? 'light' : 'dark';
   if (document.documentElement.dataset.theme === tema) return;
   document.documentElement.dataset.theme = tema;
   oyentes.forEach((f) => f());
@@ -37,6 +37,6 @@ function suscribir(f) {
 }
 
 export function useTema() {
-  const tema = useSyncExternalStore(suscribir, leer, () => 'light');
+  const tema = useSyncExternalStore(suscribir, leer, () => 'dark');
   return { tema, alternar: () => fijarTema(tema === 'dark' ? 'light' : 'dark') };
 }

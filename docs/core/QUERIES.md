@@ -572,6 +572,33 @@ payload). Activity filtra por `target_kind = attempt`; Attention de ejecución a
 rango, cursor ajeno), `model_cursor_stale` (cursor con formato no reconocido), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
 o fallo de lectura).
 
+### Cliente de terminal: `lxo attempts` y `lxo attempt show` (LXO-124)
+
+* **Fuente:** las lecturas vNext de esta sección por el RPC autenticado, como Person: `task_detail_v2` (título,
+  estado derivado y Attempt actual), `attempts_by_task`, `attempt_detail` y `activity_list` (`target_kind: attempt`).
+  Nunca `state.json`, carpetas ni archivos del proveedor: lo que el Core no da (la máquina del Worktree, por ejemplo)
+  sale `null` o «desconocido».
+* `lxo attempts --task <task_id> [--status S] [--provider P] [--json]`: los Attempts por `n`, con el actual marcado
+  según `current_attempt` de la Task. Los filtros se aplican en el cliente (`--status` con los ids de
+  `attempt_state`, `--provider` sin distinguir mayúsculas). La Task se nombra siempre: sin `--task` sale con 2.
+* `lxo attempt show <attempt_id> [--json]` (también `lxo attempts show`): estado y fechas, proveedor, modelo,
+  esfuerzo y perfil, la sesión resumida (sin la referencia del proveedor), el Worktree, los Artifacts, la revisión
+  vigente (veredicto, HEAD y base revisados, `active`/`stale`/`superseded`) y los últimos 10 items de Activity
+  traducidos. **El id de una Task no selecciona ningún Attempt:** responde 2 y remite a `lxo attempts --task`.
+* `--json` es una allowlist de lxo con `v: 1` y `core_model`: `{v, core_model, task, filters, total, attempts}` y
+  `{v, core_model, attempt, activity}`. Los ids van nombrados (`task_id`, `attempt_id`, `provider_session_id`,
+  `worktree_id`, `artifact_id`), nunca un `id` a secas. No copia el encargo de la Task.
+* **Antes del corte** (`core_model_inactive`) sale con 4 y remite a `lxo task show`.
+* **Aviso de compatibilidad:** con el Core cortado, `lxo tasks` y `lxo task show` en modo humano escriben en stderr que
+  el agente, la rama, el worktree, el fallo y el PR son los del Attempt actual (campos deprecated, tabla de abajo) y
+  remiten a `lxo attempts --task`; `lxo task show` añade la línea «Intentos: N». Su `--json` no cambia.
+* Solo personas (3 con la credencial de un agente). Salidas: 0 correcto, 1 interno, 2 uso, 3 autenticación,
+  4 versión o Core sin el modelo Task/Attempt, 5 Core no disponible, 6 Task o Attempt inexistente.
+* La forma 2 del `--json` de `lxo tasks` y `lxo task show` (`--schema 2`), `--attempt` en `lxo events` y
+  `lxo attention`, la matriz de órdenes y la retirada de lo legacy: [LXO_CORTE.md](LXO_CORTE.md) (LXO-125).
+* Pruebas: `lxo/src/attempts.rs` (Core simulado sobre las fixtures de `fixtures/api/`) y
+  `orch/model_read_tests.rs::lxo_bin_e2e_attempts_person_real_store` (binario real contra un Core cortado).
+
 ### Compatibilidad con clientes F2 y campos deprecados
 
 Tras el corte (fase C1 de la ADR §11.1) las lecturas F2 (`projects_overview`, `tasks_by_project`, `task_detail`,

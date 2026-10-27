@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { RUTAS_PUBLICAS, SITE_URL } from './src/rutasPublicas.js'
 
-const RUTAS = RUTAS_PUBLICAS
+const RUTAS = RUTAS_PUBLICAS.filter((r) => r.sitemap !== false)
 
 function sitemap() {
   return {

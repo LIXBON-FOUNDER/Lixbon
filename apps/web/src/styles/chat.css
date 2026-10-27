@@ -1813,3 +1813,59 @@
   .chat-input__box { padding: 14px 14px 12px 16px; }
   .chat-input__tools { gap: 4px; margin-left: 0; }
 }
+
+/* Chat en pausa (ChatCerrado.jsx): la lámina nocturna de founder, el titular
+   en Fraunces y los atajos a lo que sigue funcionando. */
+.chat-cerrado {
+  flex: 1; display: flex; flex-direction: column; gap: 28px;
+  width: 100%; max-width: 860px; margin: 0 auto; padding: 8px 32px 48px;
+  overflow-y: auto; animation: fade-up 0.4s ease;
+}
+.chat-cerrado__lamina { flex: none; aspect-ratio: 2 / 1; min-height: 200px; border-radius: var(--radius); }
+.chat-cerrado__cabeza { display: flex; flex-direction: column; gap: 14px; }
+.chat-cerrado__titulo {
+  font-family: var(--font-display); font-weight: 400; font-optical-sizing: auto;
+  font-size: clamp(36px, 4.4vw, 56px); line-height: 1; letter-spacing: -0.035em; text-wrap: balance;
+}
+.chat-cerrado__titulo em { font-style: italic; color: var(--accent); }
+.chat-cerrado__texto { max-width: 640px; margin: 0; font-family: var(--font-text); font-size: 18px; line-height: 1.6; color: var(--ink-soft); text-wrap: pretty; }
+.chat-cerrado__accesos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.chat-cerrado__acceso {
+  display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; row-gap: 4px;
+  height: 100%; padding: 16px 18px; border-radius: var(--radius);
+  background: var(--surface-1); color: var(--ink); text-decoration: none;
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.06), 0 6px 18px rgba(var(--shadow-rgb), 0.05);
+}
+.chat-cerrado__acceso svg { color: var(--accent); }
+.chat-cerrado__acceso-titulo { font-family: var(--font-ui); font-size: 15px; font-weight: 600; }
+.chat-cerrado__acceso-texto { grid-column: 1 / -1; font-family: var(--font-ui); font-size: 13.5px; line-height: 1.45; color: var(--ink-soft); }
+/* El donativo, en la lima de «Donar» de la barra lateral: es lo que lo reabre. */
+.chat-cerrado__apoyo {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px;
+  padding: 22px 24px; border-radius: var(--radius); background: var(--surface-1);
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.06), 0 6px 18px rgba(var(--shadow-rgb), 0.05);
+}
+.chat-cerrado__apoyo p {
+  flex: 1 1 280px; margin: 0; font-family: var(--font-display); font-weight: 400;
+  font-size: 24px; line-height: 1.2; letter-spacing: -0.02em; color: var(--ink); text-wrap: balance;
+}
+.chat-cerrado__apoyo em { font-style: italic; color: var(--accent); }
+.chat-cerrado__donar {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 18px; border-radius: 8px;
+  background: #B4C64E; color: #1F1B14; font-family: var(--font-ui); font-size: 15px; font-weight: 600; text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+.chat-cerrado__donar:hover { background: #C2D35C; }
+.chat-cerrado__aviso {
+  max-width: 760px; margin: 0 auto; padding: 14px 18px; border-radius: var(--radius);
+  background: var(--surface-1); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; color: var(--ink-soft);
+}
+.chat-cerrado__aviso a { color: var(--ink); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.chat-cerrado__aviso a:hover { color: var(--accent); }
+
+@media (max-width: 640px) {
+  .chat-cerrado { gap: 22px; padding: 4px 16px 32px; }
+  .chat-cerrado__lamina { aspect-ratio: 3 / 2; min-height: 0; }
+  .chat-cerrado__lamina img { object-position: 62% center; } /* el barco y la grúa no se cortan */
+  .chat-cerrado__texto { font-size: 16.5px; }
+}

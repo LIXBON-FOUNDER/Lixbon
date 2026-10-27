@@ -1,0 +1,35 @@
+{
+  "activity": {
+    "has_more": false,
+    "items": []
+  },
+  "task": {
+    "attempt_count": 1,
+    "attempts": [
+      {
+        "attempt_id": "t3-a1",
+        "n": 1,
+        "status": "done"
+      }
+    ],
+    "children_ids": [],
+    "created_at": 1792000040000,
+    "current_attempt": {
+      "attempt_id": "t3-a1",
+      "n": 1,
+      "status": "done"
+    },
+    "depth": 1,
+    "intent": "open",
+    "origin": "legacy",
+    "parent_task_id": "t2",
+    "project_id": "p-1",
+    "run_id": "r1",
+    "state": "integrated",
+    "task_id": "t3",
+    "title": "API de sesiones",
+    "updated_at": 1792000300000
+  },
+  "task_model": "task_attempt_v1",
+  "v": 2
+}

@@ -1,10 +1,10 @@
 -- task_attempt_cut: corte de datos legacy_state -> Task/Attempt/ProviderSession/Thread/Worktree/Artifact (LXO-117).
 -- Mapeo y reglas: docs/core/CORTE_TASK_ATTEMPT.md (ADR de LXO-112). Contrato del corte: docs/core/CORTE_EJECUCION.md.
 --
--- NO está en store/migrations/: el arranque NO lo aplica. Lo aplica solo `orch::agentic_cut::run`, después de la
--- comprobación previa y de la copia `pre-f3-cut`, como la versión siguiente a la última migración publicada. Se
--- activará (pasará a `migrations/NNN_task_attempt_cut.sql`) cuando el runtime use las tablas; desde entonces su texto
--- no se edita (checksum). `verificar.py` lo aplica a la fixture y compara con `normalizado.after.json`.
+-- Es la 014, pero el migrador general NO la aplica nunca (`migrate::plan` se detiene antes): la aplica solo
+-- `orch::agentic_cut::run`, después de la comprobación previa y de la copia `pre-f3-cut`, en el arranque y con el
+-- interruptor de dogfood (LXO-234, `docs/core/CORTE_EJECUCION.md` § Activación). Publicada: su texto no se edita
+-- (checksum). `verificar.py` la aplica a la fixture y compara con `normalizado.after.json`.
 --
 -- El esquema de cada entidad ya está publicado e INERTE (007 tasks, 008 attempts, 009 sesiones y threads, 010
 -- worktrees y artifacts, 011 revisiones, 012 runtime del Attempt, 013 runtime sobre las tablas). Aquí solo va lo que
@@ -117,9 +117,7 @@ SELECT t.key || '-a1', t.key, 1,
        coalesce(json_extract(t.value, '$.model_mismatch'), 0),
        json_extract(t.value, '$.model_mismatch_reason'),
        json_extract(t.value, '$.approval_deadline'),
-       -- Solo un Attempt fallido lleva motivo (CHECK de la 008); otro valor va a residuo (LXO-234).
-       CASE WHEN json_extract(t.value, '$.status') = 'failed' AND length(json_extract(t.value, '$.failure_reason')) BETWEEN 1 AND 64
-            THEN json_extract(t.value, '$.failure_reason') END,
+       json_extract(t.value, '$.failure_reason'),
        coalesce(json_extract(t.value, '$.summary'), ''),
        coalesce(json_extract(t.value, '$.files'), '[]'),
        coalesce(json_extract(t.value, '$.merged'), 0),
@@ -138,26 +136,20 @@ FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t, json_each(t.valu
 
 -- Los creó Lixbon. Sin carpeta el Worktree ya está quitado: con la rama guardada o, si `git branch -d` la borró al
 -- liberarlo (queda la base), sin ella. El legado no registra la máquina, las fechas ni el motivo: quedan NULL.
--- Dos Tasks con la MISMA carpeta (LXO-234): solo la primera (por creación, id) la conserva activa; las demás quedan
--- quitadas con su rama guardada y la ruta original va a residuo (`worktree_path_shared`). Nada se pierde.
 INSERT INTO worktrees (id, task_id, attempt_id, provenance, repo, path, branch, base_branch, base_commit, env_plan, state,
                        branch_kept, origin)
-SELECT 'wt-' || w.key || '-a1', w.key, w.key || '-a1', 'created',
-       json_extract(w.value, '$.repo'),
-       CASE WHEN w.rn = 1 THEN w.path END,
-       json_extract(w.value, '$.branch'),
-       json_extract(w.value, '$.base'),
-       json_extract(w.value, '$.base_commit'),
-       json_extract(w.value, '$.env'),
-       CASE WHEN w.path IS NOT NULL AND w.rn = 1 THEN 'active' ELSE 'removed' END,
-       CASE WHEN (w.path IS NULL OR w.rn > 1) AND json_extract(w.value, '$.branch') IS NOT NULL THEN 1 ELSE 0 END,
+SELECT 'wt-' || t.key || '-a1', t.key, t.key || '-a1', 'created',
+       json_extract(t.value, '$.repo'),
+       json_extract(t.value, '$.worktree'),
+       json_extract(t.value, '$.branch'),
+       json_extract(t.value, '$.base'),
+       json_extract(t.value, '$.base_commit'),
+       json_extract(t.value, '$.env'),
+       CASE WHEN json_extract(t.value, '$.worktree') IS NOT NULL THEN 'active' ELSE 'removed' END,
+       CASE WHEN json_extract(t.value, '$.worktree') IS NULL AND json_extract(t.value, '$.branch') IS NOT NULL THEN 1 ELSE 0 END,
        'legacy'
-FROM (SELECT t.key, t.value, json_extract(t.value, '$.worktree') AS path,
-             CASE WHEN json_extract(t.value, '$.worktree') IS NULL THEN 1
-                  ELSE row_number() OVER (PARTITION BY json_extract(t.value, '$.worktree')
-                                          ORDER BY json_extract(t.value, '$.created'), t.key) END AS rn
-      FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
-      WHERE json_extract(t.value, '$.worktree') IS NOT NULL OR json_extract(t.value, '$.base') IS NOT NULL) AS w;
+FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
+WHERE json_extract(t.value, '$.worktree') IS NOT NULL OR json_extract(t.value, '$.base') IS NOT NULL;
 
 -- Las dos formas de vínculo admiten reanudar (Claude `--resume`, Codex `resume`): resumible. Sigue `open` mientras su
 -- Attempt no ha terminado; si terminó, queda en espera de un seguimiento (`idle`). El legado no fecha la sesión: se
@@ -184,9 +176,7 @@ FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t,
      (SELECT 'report' AS kind, '$.report' AS path
       UNION ALL SELECT 'pull_request', '$.pr_url'
       UNION ALL SELECT 'last_message', '$.last_message_path') AS k
-WHERE json_extract(t.value, k.path) IS NOT NULL
-  -- Un PR que no es https no es un Artifact válido (CHECK de la 010): va a residuo (LXO-234).
-  AND (k.kind <> 'pull_request' OR json_extract(t.value, k.path) LIKE 'https://%');
+WHERE json_extract(t.value, k.path) IS NOT NULL;
 
 -- Mensajes: el Thread es el de la Task de MAYOR profundidad entre emisor y destino (la hija); un
 -- mensaje a sí misma (nota de la persona a la raíz) va al Thread de esa Task. Sin atribución a Attempt.
@@ -277,24 +267,6 @@ INSERT INTO legacy_residue (entity_kind, legacy_id, field, value, reason)
 SELECT 'decision', CAST(d.id AS TEXT), 'review', json(d.detail_json), 'review_without_target'
 FROM decisions AS d
 WHERE d.kind = 'review' AND NOT EXISTS (SELECT 1 FROM reviews AS r WHERE r.decision_id = d.id);
-
--- LXO-234: datos reales que antes abortaban el corte; el valor original se conserva aquí y la vista legacy lo repone.
-INSERT INTO legacy_residue (entity_kind, legacy_id, field, value, reason)
-SELECT 'task', t.key, 'failure_reason', json_quote(json_extract(t.value, '$.failure_reason')),
-       CASE WHEN json_extract(t.value, '$.status') = 'failed' THEN 'failure_reason_invalid' ELSE 'failure_reason_not_failed' END
-FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
-WHERE json_extract(t.value, '$.failure_reason') IS NOT NULL
-  AND NOT (json_extract(t.value, '$.status') = 'failed' AND length(json_extract(t.value, '$.failure_reason')) BETWEEN 1 AND 64);
-
-INSERT INTO legacy_residue (entity_kind, legacy_id, field, value, reason)
-SELECT 'task', t.key, 'pr_url', json_quote(json_extract(t.value, '$.pr_url')), 'pr_url_not_https'
-FROM legacy_state, json_each(legacy_state.doc, '$.tasks') AS t
-WHERE json_extract(t.value, '$.pr_url') IS NOT NULL AND json_extract(t.value, '$.pr_url') NOT LIKE 'https://%';
-
-INSERT INTO legacy_residue (entity_kind, legacy_id, field, value, reason)
-SELECT 'task', w.task_id, 'worktree', json_quote(json_extract(t.value, '$.worktree')), 'worktree_path_shared'
-FROM worktrees AS w JOIN legacy_state JOIN json_each(legacy_state.doc, '$.tasks') AS t ON t.key = w.task_id
-WHERE w.origin = 'legacy' AND w.path IS NULL AND json_extract(t.value, '$.worktree') IS NOT NULL;
 
 -- ───────────────────────────── 4. Asserts ─────────────────────────────
 -- Cada fila exige ok = 1; una sola que falle aborta la transacción y deja la base en la versión previa.

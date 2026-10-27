@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -214,4 +216,41 @@ func TestStartupSummaryHintSaysWhatToTypeInTheChat(t *testing.T) {
 	withSummary(h, []string{"Lixbon · 1 tarea activa · 1 pide atención (1 pregunta)", "  → lxo attention para verla"}, nil)
 	h.update(h.m.coreSummaryCmd()())
 	contains(t, h.out(), "→ ! lxo attention para verla")
+}
+
+// lxoFixture lee un snapshot publicado del --json de lxo (docs/core/fixtures/lxo, LXO-125): los genera
+// apps/desktop/lxo y fallan allí si cambian sin subir su `v`.
+func lxoFixture(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "core", "fixtures", "lxo", name))
+	if err != nil {
+		t.Fatalf("falta el snapshot de lxo %s: %v", name, err)
+	}
+	return string(raw)
+}
+
+// El chat pinta la forma 1 que publica lxo (la que da por defecto) y no lee a medias la forma 2 del modelo
+// Task/Attempt: dice que no la pinta y cómo verla.
+func TestLxoViewsReadThePublishedLegacySnapshots(t *testing.T) {
+	tasks := render(t, []string{"tasks"}, lxoFixture(t, "tasks.v1.json"), 100)
+	for _, want := range []string{"tarea t1", "tarea t2", "tarea t3", "tarea t9", "lxo/t2"} {
+		contains(t, tasks, want)
+	}
+	show := render(t, []string{"task", "show", "t2"}, lxoFixture(t, "task_show.v1.json"), 100)
+	for _, want := range []string{"tarea t2", "agent_idle_timeout", "La tarea falló."} {
+		contains(t, show, want)
+	}
+	for _, c := range []struct {
+		args []string
+		doc  string
+	}{{[]string{"tasks"}, "tasks.v2.json"}, {[]string{"task", "show", "t3"}, "task_show.v2.json"}} {
+		out := render(t, c.args, lxoFixture(t, c.doc), 100)
+		contains(t, out, "forma (v2) que este CLI no pinta")
+		if strings.Contains(out, "API de sesiones") {
+			t.Fatalf("la forma 2 no se pinta a medias:\n%s", out)
+		}
+	}
+	if lxoStyled([]string{"tasks", "--schema", "2"}) {
+		t.Fatal("con --schema, lxo sale tal cual")
+	}
 }
