@@ -25,7 +25,7 @@ fn yo(core: &Core) -> crate::store::AuthenticatedClient {
 }
 
 /// Un Core real con `legacy_state` = la fixture de la ADR y su Project `p-1`.
-fn con_fixture() -> (impl Drop, PathBuf, PathBuf, Arc<Core>) {
+fn con_fixture() -> (super::boot_tests::Limpia, PathBuf, PathBuf, Arc<Core>) {
     let (l, data, core_dir, core) = core_listo();
     core.storage
         .with_store(|s| {
@@ -173,6 +173,111 @@ fn las_lecturas_f2_no_cambian_con_el_corte() {
     let antes = leer();
     corta(&core, &core_dir, &data);
     assert_eq!(leer(), antes, "tasks_by_project y projects_overview (v1) responden igual: los clientes F2 no cambian");
+}
+
+/// LXO-124 · `lxo attempts --task` y `lxo attempt show` con el binario real, como persona, contra el HTTP de un Core
+/// **migrado por su arranque**: la fixture de la ADR como estado legacy, un arranque sin el interruptor (los comandos
+/// salen con 4 y remiten a `lxo task show`) y otro con `LIXBON_AGENTIC_CUT` (LXO-234), que corta y carga el estado
+/// de las tablas. Luego, una Task sin intentos y otra con dos. Requiere `LXO_BIN`; usa el almacén seguro real.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_attempts_person_real_store() {
+    use super::agentic_cut::SWITCH_FOR_TESTS;
+    use super::boot_tests::{arranca, suelta};
+    use super::projects_overview_tests::RealStoreServer;
+    let text = |out: &std::process::Output| (String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned());
+
+    SWITCH_FOR_TESTS.with(|c| c.set(Some(false)));
+    let (l, data, core_dir, core) = con_fixture();
+    {
+        let server = RealStoreServer::start(&core, &data, &l.0);
+        let antes = server.lxo(&["attempts", "--task", "t3"], None);
+        assert_eq!(antes.status.code(), Some(4), "sin el corte no hay intentos: {:?}", text(&antes));
+        assert!(text(&antes).1.contains("lxo task show"), "{:?}", text(&antes));
+    }
+    suelta(core, &core_dir);
+    SWITCH_FOR_TESTS.with(|c| c.set(Some(true)));
+    let (core, _host, ready) = arranca(&data, &core_dir);
+    ready.unwrap();
+    core.settings.lock().unwrap().enabled = true;
+    assert!(core.storage.with_store(|s| s.runtime_on_tables().unwrap()).unwrap(), "el arranque cortó la base");
+    let server = RealStoreServer::start(&core, &data, &l.0);
+
+    let ana = MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) };
+    let (vacia, dos, a1, a2) = core
+        .storage
+        .with_store(|s| {
+            let intencion = |t: &str| NewTaskIntent { title: t.into(), spec: "encargo privado".into(), repo: "/home/ana/app".into() };
+            let (_, vacia) = create_run(s, &ana, &NewRun { objective: "sin lanzar".into(), project_id: "p-1".into(), root: intencion("sin intentos") }).unwrap();
+            let (_, dos) = create_run(s, &ana, &NewRun { objective: "dos intentos".into(), project_id: "p-1".into(), root: intencion("reintentada") }).unwrap();
+            let new = NewAttempt { provider: "codex".into(), model: Some("gpt-5".into()), effort: None, role: None, profile: None, external: false, requires_approval: false };
+            let a1 = attempt_ops::create(s, &ana, &dos.id, &new).unwrap();
+            attempt_ops::start(s, &MutationContext::core(), &a1.id).unwrap();
+            attempt_ops::fail(s, &MutationContext::core(), &a1.id, FailureCode::AgentIdleTimeout, "").unwrap();
+            let a2 = attempt_ops::create(s, &ana, &dos.id, &NewAttempt { requires_approval: true, ..new }).unwrap();
+            (vacia.id, dos.id, a1.id, a2.id)
+        })
+        .unwrap();
+    let ids = |doc: &Value| -> Vec<String> { doc["attempts"].as_array().unwrap().iter().map(|a| a["attempt_id"].as_str().unwrap().to_string()).collect() };
+
+    // Task con 0, 1 y N intentos.
+    let cero = server.json(&["attempts", "--task", &vacia, "--json"]);
+    assert_eq!((cero["total"].clone(), cero["attempts"].clone(), cero["core_model"].clone()), (json!(0), json!([]), json!("task_attempt_v1")), "{cero}");
+    assert_eq!(ids(&server.json(&["attempts", "--task", "t5", "--json"])), ["t5-a1"]);
+    let n = server.json(&["attempts", "--task", &dos, "--json"]);
+    assert_eq!(ids(&n), [a1.clone(), a2.clone()]);
+    assert_eq!((n["task"]["task_id"].as_str(), n["task"]["current_attempt_id"].as_str()), (Some(dos.as_str()), Some(a2.as_str())));
+    assert_eq!((n["attempts"][0]["task_id"].as_str(), n["attempts"][0]["status"].as_str()), (Some(dos.as_str()), Some("failed")));
+    assert!(!n.to_string().contains("encargo privado"), "no copia el encargo");
+    let (lista, _) = text(&server.lxo(&["attempts", "--task", &dos], None));
+    assert!(lista.contains(&format!("#2 {a2} · pendiente de aprobación · codex (gpt-5) · actual")), "{lista}");
+
+    // Filtros.
+    assert_eq!(ids(&server.json(&["attempts", "--task", &dos, "--status", "failed", "--json"])), [a1.clone()]);
+    assert_eq!(ids(&server.json(&["attempts", "--task", &dos, "--provider", "CODEX", "--json"])).len(), 2);
+    assert!(ids(&server.json(&["attempts", "--task", &dos, "--provider", "claude", "--json"])).is_empty());
+
+    // Ficha: la ejecución con su sesión (sin la referencia del proveedor), Worktree, Artifacts y revisión.
+    let ficha = server.json(&["attempt", "show", "t3-a1", "--json"]);
+    let a = &ficha["attempt"];
+    assert_eq!((a["attempt_id"].as_str(), a["task_id"].as_str(), a["provider_session"]["provider_session_id"].as_str()), (Some("t3-a1"), Some("t3"), Some("ps-t3-a1")));
+    assert_eq!((a["worktree"]["path"].as_str(), a["review"]["verdict"].as_str(), a["review"]["head_commit"].as_str()), (Some("/home/ana/app.lixbon-wt/t3-api-de-sesiones"), Some("accepted"), Some("c3c3c3")));
+    assert_eq!(a["worktree"]["machine"], Value::Null, "lo que el Core no registra queda null");
+    assert!(!ficha.to_string().contains("rollout-t3.jsonl"), "la referencia opaca del proveedor no sale");
+    let fallo = server.json(&["attempt", "show", &a1, "--json"]);
+    assert_eq!((fallo["attempt"]["failure_reason"].as_str(), fallo["attempt"]["final"].as_bool()), (Some("agent_idle_timeout"), Some(true)));
+    let textos: Vec<String> = fallo["activity"]["items"].as_array().unwrap().iter().filter_map(|i| i["text"].as_str().map(String::from)).collect();
+    assert_eq!(textos.len(), 3, "requested, started y failed, traducidos: {}", fallo["activity"]);
+    let (humana, _) = text(&server.lxo(&["attempt", "show", "t3-a1"], None));
+    assert!(humana.contains("Revisión:    aceptada · HEAD c3c3c3 sobre base b0b0b0 · vigente") && humana.contains("máquina desconocida"), "{humana}");
+
+    // Intento inexistente, y el id de una Task no elige ningún intento.
+    let falta = server.lxo(&["attempt", "show", "t999-a1", "--json"], None);
+    assert_eq!(falta.status.code(), Some(6));
+    let error: Value = serde_json::from_slice(&falta.stderr).unwrap();
+    assert_eq!(error["code"], "not_found", "{error}");
+    let de_task = server.lxo(&["attempt", "show", &dos], None);
+    assert_eq!(de_task.status.code(), Some(2), "{:?}", text(&de_task));
+    assert!(text(&de_task).1.contains(&format!("lxo attempts --task {dos}")), "{:?}", text(&de_task));
+    assert_eq!(server.lxo(&["attempts", "--task", "t999"], None).status.code(), Some(6));
+    assert_eq!(server.lxo(&["attempts"], None).status.code(), Some(2), "la tarea se nombra siempre");
+
+    // Compatibilidad: los comandos legacy (lecturas F2 sobre el estado cargado de las tablas) avisan tras el corte.
+    let (ficha_legacy, aviso) = text(&server.lxo(&["task", "show", "t3"], None));
+    assert!(ficha_legacy.contains("Intentos:    1 · cada uno con lxo attempts --task t3"), "{ficha_legacy} / {aviso}");
+    assert!(aviso.contains("Aviso: el Core ya usa el modelo Task/Attempt") && aviso.contains("lxo attempts --task t3"), "{aviso}");
+    let (_, aviso_lista) = text(&server.lxo(&["tasks"], None));
+    assert!(aviso_lista.contains("lxo attempts --task <id>"), "{aviso_lista}");
+    let legacy_json = server.lxo(&["task", "show", "t3", "--json"], None);
+    assert!(legacy_json.status.success() && legacy_json.stderr.is_empty(), "el --json legacy no cambia en LXO-124");
+
+    // Solo personas.
+    let token = "agent-lxo-attempts-e2e-token-with-32-bytes-ok";
+    agente(&core, &dos, "install-agent-lxo-attempts-e2e", token);
+    let como_agente = server.lxo(&["attempts", "--task", &dos], Some((&dos, token)));
+    assert_eq!(como_agente.status.code(), Some(3), "{:?}", text(&como_agente));
+    core.stop_server_with(&server.discovery);
+    assert_eq!(server.lxo(&["attempts", "--task", &dos], None).status.code(), Some(5), "Lixbon cerrado");
 }
 
 #[test]

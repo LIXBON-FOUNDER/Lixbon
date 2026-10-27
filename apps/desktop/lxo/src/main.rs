@@ -9,6 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 mod activity;
+mod attempts;
 mod attention;
 mod client_auth;
 mod events;
@@ -43,6 +44,9 @@ Coordinador (el agente con el que habla el usuario):
                                                   Event Log paginado con autenticación de cliente
   lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--json]
   lxo task show <task_id>                          tareas del Core (modelo legacy) en árbol (solo lectura)
+  lxo attempts --task <task_id> [--status S] [--provider P] [--json]
+  lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
+                                                  (solo lectura y solo personas)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
@@ -1017,6 +1021,9 @@ fn main() -> ExitCode {
     }
     if matches!(a.at(0).as_deref(), Some("tasks" | "task")) {
         return tasks::run(&a);
+    }
+    if matches!(a.at(0).as_deref(), Some("attempts" | "attempt")) {
+        return attempts::run(&a);
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
