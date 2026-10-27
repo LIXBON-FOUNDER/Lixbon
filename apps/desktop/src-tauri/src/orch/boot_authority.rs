@@ -347,13 +347,21 @@ impl Core {
                 // Con el corte aplicado cae la barrera: las migraciones posteriores a él (015…) se aplican en ESTE arranque y
                 // no en el siguiente. Si no, durante toda esta sesión la base no admitiría las causas de entorno nuevas.
                 self.apply_post_fence_migrations()?;
+                super::startup_cut::record(super::startup_cut::applied_view(&backup));
                 Ok(true)
             }
-            Ok(super::agentic_cut::CutReport::AlreadyCut) => Ok(false),
-            Err(e) => Err(authority_error(format!(
-                "no se pudo pasar al modelo Task/Attempt: {e}. La base no cambió. Para arrancar con el modelo anterior, quita {}=1",
-                super::agentic_cut::SWITCH
-            ))),
+            Ok(super::agentic_cut::CutReport::AlreadyCut) => {
+                super::startup_cut::record(super::startup_cut::already_cut_view());
+                Ok(false)
+            }
+            Err(e) => {
+                let msg = format!(
+                    "no se pudo pasar al modelo Task/Attempt: {e}. La base no cambió. Para arrancar con el modelo anterior, quita {}=1",
+                    super::agentic_cut::SWITCH
+                );
+                super::startup_cut::record(super::startup_cut::failed_view(&msg));
+                Err(authority_error(msg))
+            }
         }
     }
 
