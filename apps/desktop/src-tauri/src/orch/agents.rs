@@ -165,11 +165,11 @@ pub const LXO_TOOLS: [&str; 5] = ["Bash(lxo report:*)", "Bash(lxo guide)", "Bash
 
 /// `--allowedTools`/`--disallowedTools` aceptan varios valores y se tragarían lo
 /// que venga detrás: van en un solo token `--flag=a,b,c` (probado con Claude 2.1.296).
-fn allowed_tools() -> String {
+pub(super) fn allowed_tools() -> String {
     format!("--allowedTools={}", LXO_TOOLS.join(","))
 }
 
-fn disallowed_tools() -> String {
+pub(super) fn disallowed_tools() -> String {
     format!("--disallowedTools={}", READ_ONLY_BLOCKED.join(","))
 }
 
@@ -387,16 +387,20 @@ pub enum EnvBlock {
     CliFlagsUnsupported,
     /// El sandbox elevado de Codex en Windows impide el perfil de solo lectura.
     WindowsSandboxElevated,
+    /// El sandbox de Windows de Codex no está listo: lo mantiene en uso otra aplicación (el conflicto `setup refresh had
+    /// errors`), está sin configurar o tiene una actualización pendiente. Es transitorio y no es un fallo del Attempt.
+    WindowsSandboxSetup,
 }
 
 impl EnvBlock {
-    pub const ALL: [EnvBlock; 3] = [EnvBlock::CliMissing, EnvBlock::CliFlagsUnsupported, EnvBlock::WindowsSandboxElevated];
+    pub const ALL: [EnvBlock; 4] = [EnvBlock::CliMissing, EnvBlock::CliFlagsUnsupported, EnvBlock::WindowsSandboxElevated, EnvBlock::WindowsSandboxSetup];
 
     pub fn code(self) -> &'static str {
         match self {
             EnvBlock::CliMissing => "cli_missing",
             EnvBlock::CliFlagsUnsupported => "cli_flags_unsupported",
             EnvBlock::WindowsSandboxElevated => "windows_sandbox_elevated",
+            EnvBlock::WindowsSandboxSetup => "windows_sandbox_setup",
         }
     }
 
@@ -421,6 +425,10 @@ pub struct EnvProof {
     /// [`sandbox_proves_not_elevated`]). Sin valor leído (no es Windows, no es Codex o el fichero no dice nada) o con un
     /// valor desconocido no se demuestra nada.
     pub sandbox_not_elevated: bool,
+    /// `windowsSandbox/readiness` de `codex app-server` respondió `ready`: el sandbox de Windows está listo y nadie lo
+    /// retiene. Es lo único que desmiente `windows_sandbox_setup`; cualquier otro estado, o no haber preguntado, no
+    /// demuestra nada y conserva el bloqueo. Lo fija el adapter de Codex, no `evaluate`.
+    pub sandbox_ready: bool,
 }
 
 impl EnvProof {
@@ -430,6 +438,7 @@ impl EnvProof {
             EnvBlock::CliMissing => self.cli_present,
             EnvBlock::CliFlagsUnsupported => self.flags_supported,
             EnvBlock::WindowsSandboxElevated => self.sandbox_not_elevated,
+            EnvBlock::WindowsSandboxSetup => self.sandbox_ready,
         }
     }
 
@@ -573,7 +582,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                     format!("{} {v} no admite: {}", a.label, missing.join(", ")), BlockCause::Environment(EnvBlock::CliFlagsUnsupported));
                 // La CLI se halló y su ayuda se leyó: eso desmiente `cli_missing`. Los flags faltan y el sandbox NO se
                 // examina antes de bloquear por flags, así que ni uno ni otro se demuestran.
-                pol.env_proof = EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false };
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false, sandbox_ready: false };
                 return pol;
             }
             if codex_exec(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
@@ -581,7 +590,7 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 w.push(ELEVATED.into());
                 let mut pol = blocked(provider, pid, argv.clone(), version.clone(), w, ELEVATED.into(), BlockCause::Environment(EnvBlock::WindowsSandboxElevated));
                 // Llegar aquí demuestra la CLI hallada y todos los flags del perfil; del sandbox solo que SIGUE elevado.
-                pol.env_proof = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+                pol.env_proof = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
                 return pol;
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
@@ -596,6 +605,8 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 cli_present: true,
                 flags_supported: true,
                 sandbox_not_elevated: sandbox_proves_not_elevated(p.windows_sandbox.as_deref()),
+                // `evaluate` no pregunta al sandbox de Windows (eso lo hace el adapter de Codex): no demuestra nada de él.
+                sandbox_ready: false,
             };
             if codex_elevated_warns(provider, profile) && p.windows_sandbox.as_deref() == Some("elevated") {
                 pol.warnings.push(WARN_ELEVATED_RW.into());
@@ -1457,8 +1468,8 @@ mod tests {
     #[test]
     fn solo_mxc_y_unelevated_demuestran_un_sandbox_no_elevado() {
         // Valores oficiales de `[windows] sandbox`: mxc, elevated, unelevated. Los desconocidos no prueban nada.
-        let completa = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true };
-        let sin_sandbox = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        let completa = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: true, sandbox_ready: false };
+        let sin_sandbox = EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
         for (valor, prueba) in [(Some("mxc"), true), (Some("unelevated"), true), (Some("elevated"), false), (None, false)] {
             assert_eq!(sandbox_proves_not_elevated(valor), prueba, "{valor:?}");
         }
@@ -1499,7 +1510,7 @@ sandbox = \"mxc\"", false)] {
         let found = Probe { exec_help: Some(vieja.clone()), ..probe("0.159.0", CODEX_HELP) };
         let p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&found), false);
         assert_eq!((p.status, p.block), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported))));
-        assert_eq!(p.env_proof, EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false });
+        assert_eq!(p.env_proof, EnvProof { cli_present: true, flags_supported: false, sandbox_not_elevated: false, sandbox_ready: false });
         // CLI ausente: nada.
         let ausente = evaluate("codex", Profile::Explorar, "wt", Detected::Missing, false);
         assert_eq!(ausente.env_proof, EnvProof::default());
@@ -1697,8 +1708,8 @@ sandbox = \"mxc\"", false)] {
         assert_eq!(causa(evaluate("codex", Profile::Explorar, "wt", Detected::Found(&elevado), false)), (b, Some(Environment(EnvBlock::WindowsSandboxElevated))));
         // Lo que no está bloqueado no lleva causa.
         assert_eq!(evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false).block, None);
-        // Solo estas tres causas son del entorno, y sus códigos son un conjunto cerrado y estable.
-        assert_eq!(EnvBlock::ALL.map(EnvBlock::code), ["cli_missing", "cli_flags_unsupported", "windows_sandbox_elevated"]);
+        // Solo estas cuatro causas son del entorno, y sus códigos son un conjunto cerrado y estable.
+        assert_eq!(EnvBlock::ALL.map(EnvBlock::code), ["cli_missing", "cli_flags_unsupported", "windows_sandbox_elevated", "windows_sandbox_setup"]);
         assert!(EnvBlock::ALL.into_iter().all(|c| EnvBlock::parse(c.code()) == Some(c)));
         assert_eq!(EnvBlock::parse("worktree_path_unusable"), None);
     }
@@ -1711,6 +1722,7 @@ sandbox = \"mxc\"", false)] {
             (EnvProof { cli_present: true, ..EnvProof::default() }, EnvBlock::CliMissing),
             (EnvProof { flags_supported: true, ..EnvProof::default() }, EnvBlock::CliFlagsUnsupported),
             (EnvProof { sandbox_not_elevated: true, ..EnvProof::default() }, EnvBlock::WindowsSandboxElevated),
+            (EnvProof { sandbox_ready: true, ..EnvProof::default() }, EnvBlock::WindowsSandboxSetup),
         ] {
             assert!(proof.any(), "{causa:?}");
             assert!(proof.demonstrates(causa), "{causa:?}");

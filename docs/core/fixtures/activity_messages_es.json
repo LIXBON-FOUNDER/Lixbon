@@ -498,6 +498,15 @@
       "text": "El entorno de codex está bloqueado para el perfil terminal: falta la CLI."
     },
     {
+      "key": "activity.environment.blocked",
+      "args": {
+        "provider": "codex",
+        "profile": "terminal",
+        "code": "windows_sandbox_setup"
+      },
+      "text": "El entorno de codex está bloqueado para el perfil terminal: el sandbox de Windows no está listo o está en uso."
+    },
+    {
       "key": "activity.environment.cleared",
       "args": {
         "provider": "codex",
@@ -626,6 +635,28 @@
         "approval_required": true
       },
       "text": "Se pidió el intento 2 de la tarea t-3 con codex (rol implementador; modelo gpt-6; esfuerzo high; externo; pendiente de aprobación)."
+    },
+    {
+      "key": "activity.attempt.continued",
+      "args": {
+        "task": "t-3",
+        "n": 3,
+        "from_n": 2,
+        "strategy": "native_resume",
+        "reason": "preferred"
+      },
+      "text": "El intento 3 de la tarea t-3 continúa el intento 2 reanudando la sesión del proveedor."
+    },
+    {
+      "key": "activity.attempt.continued",
+      "args": {
+        "task": "t-3",
+        "n": 4,
+        "from_n": 3,
+        "strategy": "context_package",
+        "reason": "provider_changed"
+      },
+      "text": "El intento 4 de la tarea t-3 continúa el intento 3 con un paquete de contexto (cambió el proveedor)."
     },
     {
       "key": "activity.attempt.approved",

@@ -4,7 +4,10 @@
 //! informes, integra y responde. Todos hablan con Lixbon por `lxo` (HTTP local,
 //! ver `server.rs`); cada hijo corre en su terminal, con su rama y su worktree.
 
+mod adapter;
 mod agents;
+// ContextPackage v1 (LXO-133): paquete explícito e inmutable para cambiar de proveedor, host o sesión.
+mod context_package;
 // Reglas Events -> Attention (LXO-88): el Core las proyecta dentro de la transacción de cada escritor de Events.
 mod attention_rules;
 mod attention_read;
@@ -76,9 +79,12 @@ mod attempt_ops;
 mod attempt_ops_tests;
 #[cfg(test)]
 mod attempt_runtime_ops_tests;
+mod continuity;
 mod session_ops;
 #[cfg(test)]
 mod session_ops_tests;
+#[cfg(test)]
+mod continuity_tests;
 mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;

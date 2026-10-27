@@ -242,6 +242,14 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.requested",
             "info",
         ),
+        (
+            "attempt.continued",
+            State,
+            ("attempt", "t-7-a3"),
+            json!({ "task": "t-7", "n": 3, "from_n": 2, "strategy": "context_package", "reason": "provider_changed", "package_id": format!("sha256:{}", "a".repeat(64)) }),
+            "activity.attempt.continued",
+            "info",
+        ),
         ("attempt.approved", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.approved", "success"),
         ("attempt.rejected", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "cause": "cancelled" }), "activity.attempt.rejected", "warning"),
         ("attempt.started", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.started", "info"),
@@ -640,11 +648,12 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 88] = [
+const CLAVES: [&str; 89] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
     "activity.attempt.completed",
+    "activity.attempt.continued",
     "activity.attempt.exited",
     "activity.attempt.failed",
     "activity.attempt.integrated",

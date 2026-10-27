@@ -20,7 +20,7 @@ use super::event_kinds;
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::finalize_single;
-use crate::store::{ChangeOutcome, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, Store, StoreError, StoreResult, ThreadRow};
+use crate::store::{AttemptRow, ChangeOutcome, NewEvent, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, Store, StoreError, StoreResult, TaskRow, ThreadRow};
 
 fn require(ok: bool, what: &str, ctx: &MutationContext) -> StoreResult<()> {
     if ok {
@@ -53,6 +53,11 @@ pub(super) fn resume(st: &mut Store, ctx: &MutationContext, id: &str, attempt_id
     require(system(ctx), &format!("reanudar {id}"), ctx)?;
     let at = now_ms() as i64;
     st.provider_session_resume_recorded(id, attempt_id, at, |s, a, t| finalize_single(event_kinds::provider_session_resumed(s, a, t), ctx, at))
+}
+
+/// El hecho de que un seguimiento reanudó la sesión, para la transacción de la continuidad (LXO-134).
+pub(super) fn resumed_fact(s: &ProviderSessionRow, a: &AttemptRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::provider_session_resumed(s, a, t), ctx, at)
 }
 
 /// Queda en espera de un seguimiento: `provider_session.detached`.

@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 89] = [
+pub(crate) const MESSAGE_KEYS: [&str; 90] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -72,6 +72,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 89] = [
     "activity.task.discarded",
     "activity.task.restored",
     "activity.attempt.requested",
+    "activity.attempt.continued",
     "activity.attempt.approved",
     "activity.attempt.rejected",
     "activity.attempt.started",
@@ -130,6 +131,7 @@ fn environment_code(code: &str) -> Option<&'static str> {
         "cli_missing" => "falta la CLI",
         "cli_flags_unsupported" => "la CLI no admite estas opciones",
         "windows_sandbox_elevated" => "el entorno de Windows requiere elevación",
+        "windows_sandbox_setup" => "el sandbox de Windows no está listo o está en uso",
         _ => return None,
     })
 }
@@ -191,6 +193,25 @@ fn session_binding(code: &str) -> Option<&'static str> {
     Some(match code {
         "stream_json" => "por stream-json",
         "session_id" => "por su id de sesión",
+        _ => return None,
+    })
+}
+
+fn continuity_strategy(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "native_resume" => "native_resume",
+        "context_package" => "context_package",
+        _ => return None,
+    })
+}
+
+fn continuity_reason(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "requested" => "pedido",
+        "provider_changed" => "cambió el proveedor",
+        "resume_unsupported" => "el proveedor no puede reanudar",
+        "session_unavailable" => "no había una sesión que reanudar",
+        "session_expired" => "la sesión caducó",
         _ => return None,
     })
 }
@@ -605,6 +626,17 @@ fn format(key: &str, a: &A) -> Option<String> {
         }
         "activity.task.discarded" => Some("Se descartó la tarea.".into()),
         "activity.task.restored" => Some("Se recuperó la tarea descartada.".into()),
+        "activity.attempt.continued" => {
+            let at = attempt_of(a)?;
+            let from_n = a.number("from_n")?;
+            Some(match a.code_in("strategy", continuity_strategy)? {
+                "native_resume" => {
+                    a.code("reason", &["preferred"])?;
+                    format!("El {at} continúa el intento {from_n} reanudando la sesión del proveedor.")
+                }
+                _ => format!("El {at} continúa el intento {from_n} con un paquete de contexto ({}).", a.code_in("reason", continuity_reason)?),
+            })
+        }
         "activity.attempt.requested" => {
             let at = attempt_of(a)?;
             let provider = a.text("provider")?;

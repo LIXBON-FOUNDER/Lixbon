@@ -87,7 +87,12 @@ fn con_el_interruptor_el_arranque_corta_sigue_sobre_las_tablas_y_reinicia() {
     let (c, host, r) = arranca(&data, &core_dir);
     r.unwrap();
     assert!(en_tablas(&c), "con el interruptor el arranque corta");
-    assert_eq!(version(&c), cut_migration().version);
+    // Con el corte aplicado cae la barrera: las migraciones posteriores (015…) se aplican en ESTE mismo arranque, no en el siguiente.
+    let ultima = crate::store::embedded().last().map(|m| m.version).unwrap();
+    assert!(ultima > cut_migration().version, "hay migraciones posteriores al corte");
+    assert_eq!(version(&c), ultima);
+    let tabla: String = c.storage.with_store(|s| s.read(|x| Ok(x.query_row("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'env_blocks'", [], |r| r.get(0))?)).unwrap()).unwrap();
+    assert!(tabla.contains("windows_sandbox_setup"), "en la misma sesión del corte la base ya admite la causa de entorno nueva: {tabla}");
     assert!(copias(&core_dir).iter().any(|n| n.contains("pre-f3-cut")), "con su copia previa: {:?}", copias(&core_dir));
     assert_eq!(titulos(&c), ["previa"], "el estado cargado de las tablas es el del legado");
     // Paso 6: la tarea del legado que estaba en marcha queda huérfana (no es externa).

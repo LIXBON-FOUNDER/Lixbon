@@ -121,7 +121,8 @@ Activado en **dogfood** (LXO-234).
    las tablas. Al arrancar carga la vista `legacy_task_v1` y pasa los huérfanos a `exited` (paso 6).
 2. **Hecho.** El corte es `migrations/014_task_attempt_cut.sql`, con el checksum congelado
    (`la_014_del_corte_tiene_el_checksum_congelado`). Es una **barrera**: el migrador general no la aplica, ni nada
-   posterior a ella, mientras la base no esté cortada.
+   posterior a ella, mientras la base no esté cortada. Al aplicarse el corte en el arranque, la barrera cae y
+   `cut_if_switched` vuelve a aplicar las migraciones posteriores (la 015…) en ESE mismo arranque, no en el siguiente.
 3. **Hecho.** En el arranque (`boot_authority::cut_if_switched`), tras las migraciones anteriores al corte y con
    `core.lock` tomado, se llama a `agentic_cut::run`. Solo ocurre con `LIXBON_AGENTIC_CUT=1` y si no hay espera de
    restauración (`core/agentic-cut-hold.json`).

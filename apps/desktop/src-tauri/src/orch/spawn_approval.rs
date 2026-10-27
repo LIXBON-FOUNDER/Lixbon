@@ -1302,7 +1302,7 @@ mod tests {
             p.env_proof = proof;
             p
         };
-        let prueba = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false };
+        let prueba = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
         // Hay un bloqueo de `claude` pero la comprobación no demuestra nada: no se intenta mutar.
         assert!(core.observe_environment(&con("claude", agents::EnvProof::default())).is_ok(), "sin prueba no se muta");
         // Hay prueba pero `codex` no tiene ningún bloqueo que levantar: tampoco.

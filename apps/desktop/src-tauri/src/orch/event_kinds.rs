@@ -31,6 +31,7 @@
 //! | `attempt.requested` · `attempt.started` · `attempt.completed` · `attempt.failed` · `attempt.stopped` | state | `attempt` |
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
 //! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
+//! | `attempt.continued` (LXO-134) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -67,7 +68,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -821,6 +822,31 @@ pub(super) fn attempt_requested(a: &AttemptRow, t: &TaskRow) -> Result<EventDraf
         external: a.external,
         approval_required: a.status == AttemptStatus::PendingApproval,
     };
+    attempt_draft(a, t, &p)
+}
+
+/// `attempt.continued` (LXO-134): el Attempt `n` continúa al `from_n` de su Task, con resume nativo o con un ContextPackage.
+/// Nunca lleva la referencia del proveedor ni el contenido del paquete: solo su `package_id` (un hash).
+#[derive(Serialize)]
+pub(super) struct AttemptContinued {
+    task: String,
+    n: i64,
+    from_n: i64,
+    strategy: ContinuityStrategy,
+    reason: ContinuationReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+}
+
+impl EventPayload for AttemptContinued {
+    const KIND: &'static str = "attempt.continued";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_continued(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = AttemptContinued { task: a.task_id.clone(), n: a.n, from_n: c.from_n, strategy: c.strategy, reason: c.reason, package_id: c.package_id.clone() };
     attempt_draft(a, t, &p)
 }
 

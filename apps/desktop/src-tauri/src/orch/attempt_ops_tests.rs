@@ -438,8 +438,9 @@ fn produccion(dir: &Path) -> Vec<(String, Vec<(usize, String)>)> {
 #[test]
 fn solo_attempt_ops_construye_los_hechos_del_attempt_y_solo_store_attempts_escribe_su_tabla() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let orch: [(&str, &[&str]); 9] = [
+    let orch: [(&str, &[&str]); 10] = [
         ("attempt_requested(", &["event_kinds.rs", "attempt_ops.rs"]),
+        ("attempt_continued(", &["event_kinds.rs", "attempt_ops.rs"]),
         ("attempt_approved(", &["event_kinds.rs", "attempt_ops.rs"]),
         ("attempt_rejected(", &["event_kinds.rs", "attempt_ops.rs"]),
         ("attempt_started(", &["event_kinds.rs", "attempt_ops.rs"]),

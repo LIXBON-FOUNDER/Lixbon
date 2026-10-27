@@ -39,7 +39,7 @@ use super::event_kinds::{self, FailureCode, StopCause};
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
-use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, NewAttempt, Store, StoreError, StoreResult};
+use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, Store, StoreError, StoreResult, TaskRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -50,7 +50,7 @@ fn is_system(ctx: &MutationContext) -> bool {
 }
 
 /// Una persona, o el agente que coordina `task` (ella misma o un antecesor).
-fn person_or_manager(st: &Store, ctx: &MutationContext, task: &str) -> StoreResult<bool> {
+pub(super) fn person_or_manager(st: &Store, ctx: &MutationContext, task: &str) -> StoreResult<bool> {
     Ok(match &ctx.actor {
         Actor::Person | Actor::PersonId(_) => ctx.is_person(),
         Actor::Agent(own) => manages(st, own, task)?,
@@ -70,6 +70,26 @@ pub(super) fn create(st: &mut Store, ctx: &MutationContext, task_id: &str, new: 
     }
     let at = now_ms() as i64;
     st.attempt_create_recorded(task_id, new, at, |a, t| finalize_single(event_kinds::attempt_requested(a, t), ctx, at))
+}
+
+/// Los hechos de una continuidad (LXO-134), construidos aquí para que `continuity` no importe el catálogo de eventos. Los
+/// tres se confirman en la transacción del almacén con la hora de quien llama.
+pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_requested(a, t), ctx, at)
+}
+
+pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_continued(a, c, t), ctx, at)
+}
+
+/// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.
+pub(super) fn fail_launch(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    fail(st, ctx, id, FailureCode::LaunchFailed, "")
+}
+
+/// Nada llegó a ejecutarse (capability ausente, entorno bloqueado, cancelación): `attempt.stopped`, nunca `failed`.
+pub(super) fn stop_unlaunched(st: &mut Store, ctx: &MutationContext, id: &str) -> StoreResult<ChangeOutcome> {
+    cancel(st, ctx, id, StopCause::Cancelled)
 }
 
 /// Lee el Attempt para autorizar sobre su Task. `None`: no existe (el almacén devolverá `Missing`).

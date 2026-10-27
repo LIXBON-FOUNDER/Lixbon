@@ -45,6 +45,7 @@ mod migrate;
 mod private;
 mod projects;
 mod attempts;
+mod continuity;
 mod sessions;
 mod worktrees;
 mod cut;
@@ -68,6 +69,8 @@ mod attempts_tests;
 mod attempt_runtime_tests;
 #[cfg(test)]
 mod sessions_tests;
+#[cfg(test)]
+mod continuity_tests;
 #[cfg(test)]
 mod worktrees_tests;
 #[cfg(test)]
@@ -113,9 +116,10 @@ pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus,
 #[allow(unused_imports)]
 pub(crate) use attempts::{attempt_phase_append_in, attempt_runtime_update_in};
 #[allow(unused_imports)]
-pub(crate) use sessions::{env_block_set_in, thread_message_append_in, thread_messages_mark_read_in, NewThreadMessage};
+pub(crate) use sessions::{env_block_set_in, looks_secret, thread_message_append_in, thread_messages_mark_read_in, NewThreadMessage};
 // ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
 #[allow(unused_imports)]
+pub use continuity::{Continued, ContinuationRow, NewContinuation, Reason as ContinuationReason, Strategy as ContinuityStrategy, MAX_REQUEST_ID_CHARS};
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]

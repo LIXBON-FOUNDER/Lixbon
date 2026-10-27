@@ -176,6 +176,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
     required: { task: 'string', n: 'integer', provider: 'string', external: 'boolean', approval_required: 'boolean' },
     optional: { model: 'string', effort: 'string', role: 'string', profile: 'string' },
   }],
+  ['activity.attempt.continued', { required: { task: 'string', n: 'integer', from_n: 'integer', strategy: 'string', reason: 'string' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
   ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
   ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],

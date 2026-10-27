@@ -63,6 +63,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.task.discarded',
   'activity.task.restored',
   'activity.attempt.requested',
+  'activity.attempt.continued',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -117,6 +118,7 @@ const ENVIRONMENT_CODES = {
   cli_missing: 'falta la CLI',
   cli_flags_unsupported: 'la CLI no admite estas opciones',
   windows_sandbox_elevated: 'el entorno de Windows requiere elevación',
+  windows_sandbox_setup: 'el sandbox de Windows no está listo o está en uso',
 };
 const ATTENTION_CATEGORIES = {
   question: 'pregunta',
@@ -148,6 +150,13 @@ const ATTEMPT_FAILURES = {
   agent_reported: 'el agente informó el fallo',
 };
 const SESSION_BINDINGS = { stream_json: 'por stream-json', session_id: 'por su id de sesión' };
+const CONTINUITY_REASONS = {
+  requested: 'pedido',
+  provider_changed: 'cambió el proveedor',
+  resume_unsupported: 'el proveedor no puede reanudar',
+  session_unavailable: 'no había una sesión que reanudar',
+  session_expired: 'la sesión caducó',
+};
 const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
 const WORKTREE_REMOVAL = { integrated: 'integrado', discarded: 'descartado', gone: 'ya no existía' };
 const ARTIFACT_KINDS = {
@@ -422,6 +431,18 @@ const FORMATTERS = {
   },
   'activity.task.discarded': () => 'Se descartó la tarea.',
   'activity.task.restored': () => 'Se recuperó la tarea descartada.',
+  'activity.attempt.continued': (args) => {
+    const attempt = attemptOf(args);
+    const fromN = requiredNumber(args, 'from_n');
+    const strategy = requiredCode(args, 'strategy', new Set(['native_resume', 'context_package']));
+    if (!requiredArguments(attempt, fromN, strategy)) return null;
+    if (strategy === 'native_resume') {
+      if (requiredCode(args, 'reason', new Set(['preferred'])) === null) return null;
+      return `El ${attempt} continúa el intento ${fromN} reanudando la sesión del proveedor.`;
+    }
+    const reason = requiredCode(args, 'reason', new Set(Object.keys(CONTINUITY_REASONS)));
+    return reason ? `El ${attempt} continúa el intento ${fromN} con un paquete de contexto (${CONTINUITY_REASONS[reason]}).` : null;
+  },
   'activity.attempt.requested': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');
