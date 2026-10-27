@@ -132,7 +132,23 @@ def test_texto_de_pagina_sin_menus_ni_pies():
 
 
 def test_enriquecer_deja_el_snippet_del_buscador_primero(monkeypatch):
-    monkeypatch.setattr(websearch, "_fetch_page_text", lambda url: "texto largo de la página " * 10)
+    monkeypatch.setattr(websearch, "_fetch_page", lambda url: ("texto largo de la página " * 10, ""))
     resultados = [{"url": "u", "title": "t", "snippet": "1 USD = 3.194 COP"}]
     websearch._enrich_sync(resultados, 1)
     assert resultados[0]["snippet"].startswith("1 USD = 3.194 COP\ntexto largo")
+    assert "image" not in resultados[0]
+
+
+def test_la_imagen_de_portada_llega_al_contexto(monkeypatch):
+    monkeypatch.setattr(websearch, "_fetch_page", lambda url: ("texto", "https://cdn.ejemplo.com/foto.jpg"))
+    resultados = [{"url": "https://ejemplo.com/a", "title": "t", "snippet": "s"}]
+    websearch._enrich_sync(resultados, 1)
+    assert resultados[0]["image"] == "https://cdn.ejemplo.com/foto.jpg"
+    assert "Imagen: https://cdn.ejemplo.com/foto.jpg" in websearch.build_context("q", resultados)
+
+
+def test_og_image_relativa_se_resuelve_y_solo_https():
+    html = '<head><meta property="og:image" content="/img/portada.png?a=1&amp;b=2"></head>'
+    assert websearch._og_image(html, "https://ejemplo.com/nota") == "https://ejemplo.com/img/portada.png?a=1&b=2"
+    assert websearch._og_image('<meta name="twitter:image" content="http://x.com/a.png">', "http://x.com") == ""
+    assert websearch._og_image("<p>sin imagen</p>", "https://x.com") == ""

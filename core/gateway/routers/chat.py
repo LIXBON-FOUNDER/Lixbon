@@ -169,8 +169,11 @@ def _primer_paso(messages: list[dict]) -> bool:
 
 
 def _con_fecha(messages: list[dict]) -> list[dict]:
-    """Sin la fecha real el modelo da por buena la de su corte («hoy es 2024»)."""
-    nota = f"Hoy es {date.today().strftime('%d/%m/%Y')}."
+    """Sin la fecha real el modelo da por buena la de su corte («hoy es 2024»).
+    Va como contexto interno: los modelos pequeños, si no se les dice, abren la
+    respuesta recitando la fecha."""
+    nota = (f"[Contexto interno] Hoy es {date.today().strftime('%d/%m/%Y')}. Úsalo solo si la respuesta "
+            "depende de la fecha; no lo menciones ni lo repitas si el usuario no lo pregunta.")
     if messages and messages[0].get("role") == "system":
         return [{**messages[0], "content": f"{messages[0].get('content') or ''}\n\n{nota}"}, *messages[1:]]
     return [{"role": "system", "content": nota}, *messages]

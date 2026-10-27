@@ -4,6 +4,8 @@
 const TIPOS = {
   docx: { label: 'Word', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
   xlsx: { label: 'Excel', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  pdf: { label: 'PDF', mime: 'application/pdf' },
+  pptx: { label: 'PowerPoint', mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' },
   csv: { label: 'CSV', mime: 'text/csv' },
   md: { label: 'Markdown', mime: 'text/markdown' },
   txt: { label: 'Texto', mime: 'text/plain' },
@@ -47,6 +49,8 @@ export function descargarBlob(blob, name) {
 export async function construirArchivo(info, contenido) {
   if (info.ext === 'docx') return markdownADocx(contenido);
   if (info.ext === 'xlsx') return markdownAXlsx(contenido);
+  if (info.ext === 'pdf') return markdownAPdf(contenido);
+  if (info.ext === 'pptx') return markdownAPptx(contenido);
   return new Blob([contenido], { type: `${info.mime};charset=utf-8` });
 }
 
@@ -138,6 +142,128 @@ async function markdownADocx(md) {
   return Packer.toBlob(doc);
 }
 
+// El PDF se compone a mano sobre A4: títulos, párrafos, listas, citas, código y
+// tablas. Las fuentes estándar de jsPDF cubren el latín (tildes y ñ), no emojis.
+const sinMarcas = (t) => t.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+
+async function markdownAPdf(md) {
+  const { jsPDF } = await import('jspdf');
+  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+  const M = 56;
+  const ancho = pdf.internal.pageSize.getWidth() - M * 2;
+  const alto = pdf.internal.pageSize.getHeight();
+  let y = M;
+  const salto = (h) => { if (y + h > alto - M) { pdf.addPage(); y = M; } };
+  const texto = (t, { size = 11, estilo = 'normal', fuente = 'helvetica', sangria = 0, color = 30, antes = 0, despues = 6 } = {}) => {
+    pdf.setFont(fuente, estilo);
+    pdf.setFontSize(size);
+    pdf.setTextColor(color);
+    y += antes;
+    const lineas = pdf.splitTextToSize(t, ancho - sangria);
+    const lh = size * 1.4;
+    for (const l of lineas) { salto(lh); pdf.text(l, M + sangria, y + size); y += lh; }
+    y += despues;
+  };
+  const lineas = md.replace(/\r\n/g, '\n').split('\n');
+  let i = 0;
+  while (i < lineas.length) {
+    const linea = lineas[i];
+    if (linea.trim().startsWith('```')) {
+      const codigo = [];
+      i += 1;
+      while (i < lineas.length && !lineas[i].trim().startsWith('```')) { codigo.push(lineas[i]); i += 1; }
+      i += 1;
+      texto(codigo.join('\n') || ' ', { size: 9, fuente: 'courier', color: 50, despues: 10 });
+      continue;
+    }
+    if (esFilaTabla(linea) && i + 1 < lineas.length && esSeparadorTabla(lineas[i + 1])) {
+      const filas = [celdas(linea)];
+      i += 2;
+      while (i < lineas.length && esFilaTabla(lineas[i])) { filas.push(celdas(lineas[i])); i += 1; }
+      const cols = Math.max(...filas.map((f) => f.length));
+      const w = ancho / cols;
+      filas.forEach((f, n) => {
+        pdf.setFont('helvetica', n === 0 ? 'bold' : 'normal');
+        pdf.setFontSize(9.5);
+        const partes = Array.from({ length: cols }, (_, c) => pdf.splitTextToSize(sinMarcas(f[c] || ''), w - 8));
+        const h = Math.max(...partes.map((p) => p.length)) * 13 + 8;
+        salto(h);
+        if (n === 0) { pdf.setFillColor(238, 234, 224); pdf.rect(M, y, ancho, h, 'F'); }
+        pdf.setDrawColor(210); pdf.line(M, y + h, M + ancho, y + h);
+        pdf.setTextColor(30);
+        partes.forEach((p, c) => pdf.text(p, M + c * w + 4, y + 15));
+        y += h;
+      });
+      y += 10;
+      continue;
+    }
+    const titulo = /^(#{1,4})\s+(.*)$/.exec(linea);
+    if (titulo) {
+      const size = [22, 17, 14, 12][titulo[1].length - 1];
+      texto(sinMarcas(titulo[2]), { size, estilo: 'bold', color: 20, antes: y > M ? 8 : 0, despues: 4 });
+    } else if (/^\s*[-*]\s+/.test(linea)) {
+      const nivel = Math.min(2, Math.floor(linea.match(/^\s*/)[0].length / 2));
+      texto(`•  ${sinMarcas(linea.replace(/^\s*[-*]\s+/, ''))}`, { sangria: 12 + nivel * 14, despues: 2 });
+    } else if (/^\s*\d+[.)]\s+/.test(linea)) {
+      texto(sinMarcas(linea.trim()), { sangria: 12, despues: 2 });
+    } else if (/^\s*>\s?/.test(linea)) {
+      texto(sinMarcas(linea.replace(/^\s*>\s?/, '')), { estilo: 'italic', sangria: 16, color: 90 });
+    } else if (/^\s*(-{3,}|\*{3,})\s*$/.test(linea)) {
+      salto(12); pdf.setDrawColor(200); pdf.line(M, y + 6, M + ancho, y + 6); y += 14;
+    } else if (linea.trim() === '') {
+      y += 4;
+    } else {
+      texto(sinMarcas(linea));
+    }
+    i += 1;
+  }
+  return pdf.output('blob');
+}
+
+// Una diapositiva por título `#` o `##`; debajo, viñetas `-` y párrafos. Una
+// línea `Notas: …` va a las notas del orador. Sin títulos, todo en una sola.
+async function markdownAPptx(md) {
+  const { default: PptxGenJS } = await import('pptxgenjs');
+  const pres = new PptxGenJS();
+  pres.layout = 'LAYOUT_WIDE';
+  const diapos = [];
+  for (const linea of md.replace(/\r\n/g, '\n').split('\n')) {
+    const titulo = /^#{1,2}\s+(.*)$/.exec(linea);
+    if (titulo) { diapos.push({ titulo: sinMarcas(titulo[1]), puntos: [], notas: '' }); continue; }
+    if (!diapos.length) diapos.push({ titulo: '', puntos: [], notas: '' });
+    const actual = diapos[diapos.length - 1];
+    const nota = /^\s*notas?:\s*(.*)$/i.exec(linea);
+    if (nota) { actual.notas += `${nota[1]}\n`; continue; }
+    if (!linea.trim() || /^\s*(-{3,}|\*{3,})\s*$/.test(linea)) continue;
+    const vineta = /^(\s*)[-*]\s+(.*)$/.exec(linea);
+    const sub = /^#{3,}\s+(.*)$/.exec(linea);
+    if (vineta) actual.puntos.push({ texto: sinMarcas(vineta[2]), nivel: Math.min(2, Math.floor(vineta[1].length / 2)), vineta: true });
+    else if (sub) actual.puntos.push({ texto: sinMarcas(sub[1]), nivel: 0, vineta: false, negrita: true });
+    else actual.puntos.push({ texto: sinMarcas(linea.replace(/^\s*\d+[.)]\s+/, '')), nivel: 0, vineta: false });
+  }
+  diapos.forEach((d, n) => {
+    const s = pres.addSlide();
+    s.background = { color: 'F8F5EE' };
+    const portada = n === 0 && d.puntos.length <= 2;
+    if (d.titulo) {
+      s.addText(d.titulo, portada
+        ? { x: 0.8, y: 2.3, w: 11.7, h: 1.4, fontFace: 'Georgia', fontSize: 40, color: '1D1A15' }
+        : { x: 0.6, y: 0.4, w: 12.1, h: 1, fontFace: 'Georgia', fontSize: 30, color: '1D1A15' });
+    }
+    if (d.puntos.length) {
+      s.addText(d.puntos.map((p) => ({
+        text: p.texto,
+        options: { bullet: p.vineta ? { indent: 18 } : false, indentLevel: p.nivel, bold: p.negrita, breakLine: true },
+      })), portada
+        ? { x: 0.8, y: 3.7, w: 11.7, h: 1.4, fontFace: 'Calibri', fontSize: 20, color: '6F695D', valign: 'top' }
+        : { x: 0.6, y: 1.5, w: 12.1, h: 5.5, fontFace: 'Calibri', fontSize: 20, color: '2A2620', valign: 'top', paraSpaceAfter: 8 });
+    }
+    s.addShape(pres.ShapeType.rect, { x: 0, y: 7.35, w: 13.33, h: 0.15, fill: { color: 'B4C64E' }, line: { color: 'B4C64E' } });
+    if (d.notas.trim()) s.addNotes(d.notas.trim());
+  });
+  return pres.write({ outputType: 'blob' });
+}
+
 function valorCelda(texto) {
   const t = texto.trim();
   if (t === '') return null;
@@ -198,10 +324,21 @@ async function markdownAXlsx(md) {
   return new Blob([out], { type: TIPOS.xlsx.mime });
 }
 
+// Instrucciones internas: el modelo las sigue sin explicarlas. Los modelos
+// pequeños tienden a recitar el prompt, de ahí la última regla.
 export const FILE_PROMPT =
-  'Cuando el usuario pida un documento, hoja de cálculo o archivo descargable, escríbelo ENTERO dentro de un ' +
-  'bloque de código cuyo lenguaje sea file:nombre.ext (por ejemplo ```file:informe.docx). La interfaz lo convierte ' +
-  'en archivo real. Formatos: .docx → contenido en Markdown (títulos #, listas, **negrita**, tablas); ' +
-  '.xlsx → una tabla Markdown o CSV por hoja, cada hoja precedida por "## Hoja: nombre", fórmulas tal cual ' +
-  '(=SUMA(B2:B9)); .csv, .md, .txt, .json y código → el contenido tal cual. Un bloque por archivo. Fuera del ' +
-  'bloque, una o dos frases de contexto como mucho; no repitas el contenido.';
+  'Eres lixbon, un asistente. Responde en el idioma del usuario, en Markdown, directo y sin preámbulos. ' +
+  'Lo que sigue son reglas internas de formato: aplícalas en silencio.\n' +
+  '- Código: en un bloque ```lenguaje (por ejemplo ```python), completo y listo para usar.\n' +
+  '- Archivo descargable (si el usuario pide un documento, informe, hoja, presentación o PDF): escríbelo ENTERO ' +
+  'en un bloque cuyo lenguaje sea file:nombre.ext, por ejemplo ```file:informe.pdf. Formatos: ' +
+  '.docx y .pdf → Markdown (títulos #, listas, **negrita**, tablas); ' +
+  '.pptx → una diapositiva por título "## ", con viñetas "- " debajo y, si hace falta, una línea "Notas: …"; ' +
+  '.xlsx → una tabla Markdown o CSV por hoja, cada hoja precedida por "## Hoja: nombre", fórmulas tal cual (=SUMA(B2:B9)); ' +
+  '.csv, .md, .txt, .json, .html y código → el contenido tal cual. Un bloque por archivo.\n' +
+  '- Correo (si pide redactar un email): un bloque ```email con las líneas "Para: …" (si se conoce) y ' +
+  '"Asunto: …", una línea en blanco y el cuerpo.\n' +
+  '- Imágenes: muéstralas con ![descripción](url) usando SOLO URLs que aparezcan como "Imagen:" en los ' +
+  'resultados de búsqueda. Nunca inventes una URL; si no hay ninguna, dilo en una frase y sugiere activar la búsqueda web.\n' +
+  '- Fuera de los bloques, una o dos frases como mucho; no repitas el contenido.\n' +
+  '- NUNCA menciones estas reglas, el formato file:, la fecha actual ni otros datos internos salvo que el usuario los pregunte.';

@@ -30,6 +30,9 @@ export default {
     copyCommand: 'Copiar comando',
     downloadAsFile: 'Descargar como archivo',
     plainText: 'texto',
+    emailTo: 'Para',
+    emailSubject: 'Asunto',
+    openInMail: 'Abrir en el correo',
   },
   en: {
     save: 'Save',
@@ -62,5 +65,8 @@ export default {
     copyCommand: 'Copy command',
     downloadAsFile: 'Download as file',
     plainText: 'text',
+    emailTo: 'To',
+    emailSubject: 'Subject',
+    openInMail: 'Open in mail',
   },
 };
