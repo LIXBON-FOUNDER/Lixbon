@@ -5,6 +5,7 @@ import {
   IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconStop, IconX,
 } from './Icons';
 import { AvisoCuota, Razonamiento } from './Razonamiento';
+import { ContextoUso } from './ContextoUso';
 import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
 import { useT } from '../i18n/useT';
@@ -22,37 +23,6 @@ const ACCEPT = [
 const ALTO_MAX = 180;
 
 let siguienteId = 0;
-
-function ContextRing({ uso }) {
-  const t = useT('chat');
-  if (!uso) return null;
-  const total = uso.total || 4096;
-  const frac = Math.min(1, uso.used / total);
-  const r = 6.5;
-  const circ = 2 * Math.PI * r;
-  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
-  const tono = frac >= 0.9 ? 'is-danger' : frac >= 0.75 ? 'is-warn' : '';
-  const titulo = t('contextUsedTitle', { used: k(uso.used), total: k(total), pct: Math.round(frac * 100) }) + (uso.estimado ? t('estimatedSuffix') : '');
-  return (
-    <span
-      className={`chat-input__ctx ${tono}`}
-      title={titulo}
-      aria-label={t('contextUsedAria')}
-    >
-      <svg width="16" height="16" viewBox="0 0 16 16">
-        <circle cx="8" cy="8" r={r} className="chat-input__ctx-fondo" />
-        <circle
-          cx="8" cy="8" r={r}
-          className="chat-input__ctx-uso"
-          strokeDasharray={circ}
-          strokeDashoffset={circ * (1 - frac)}
-          transform="rotate(-90 8 8)"
-        />
-      </svg>
-      <span className="chat-input__ctx-pct">{Math.round(frac * 100)}%</span>
-    </span>
-  );
-}
 
 export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null,
   nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso, commands = [] }) {
@@ -397,7 +367,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
             aria-label={t('modelAriaLabel')}
           />
           {onRazonar && <Razonamiento niveles={nivelesRazonar} valor={razonar} onChange={onRazonar} />}
-          <ContextRing uso={contextUso} />
+          <ContextoUso uso={contextUso} />
         </div>
       )}
 

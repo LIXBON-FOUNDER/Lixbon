@@ -1916,3 +1916,87 @@
   .colibri__ideas { flex-wrap: nowrap; justify-content: flex-start; width: 100%; overflow-x: auto; scrollbar-width: none; margin-top: -4px; }
   .colibri__ideas::-webkit-scrollbar { display: none; }
 }
+
+/* Barra del cuadro de mensaje: adjuntar, dictar, web, modelo, razonamiento y
+   contexto comparten alto, radio y fondo, para que se lean como una fila. */
+.chat-input__bar { --ctl-h: 34px; gap: 6px; }
+.chat-input__tools { gap: 6px; margin-left: 0; }
+.chat-input__meta { gap: 6px; }
+.chat-input__tools .icon-btn,
+.chat-input__model,
+.razonar__btn,
+.chat-input__ctx {
+  height: var(--ctl-h); border: 0; border-radius: 10px;
+  background: var(--surface-3); color: var(--ink-soft);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.chat-input__tools .icon-btn { width: var(--ctl-h); padding: 0; }
+.chat-input__model { align-self: center; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; }
+.razonar__btn { gap: 6px; padding: 0 12px; }
+.chat-input__ctx { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.chat-input__tools .icon-btn:hover:not(:disabled),
+.chat-input__model:hover, .chat-input__model.is-open,
+.razonar__btn:hover, .razonar__btn.is-open,
+.chat-input__ctx:hover, .chat-input__ctx.is-open { background: var(--surface-5); color: var(--ink); }
+.chat-input__tools .icon-btn.is-active { background: var(--accent-soft); color: var(--accent); }
+.razonar__btn.is-on { color: var(--accent); }
+.chat-input__send { width: calc(var(--ctl-h) + 2px); height: calc(var(--ctl-h) + 2px); border-radius: 10px; }
+.colibri .chat-input__box .chat-input__tools .icon-btn:not(.is-active):not(:hover),
+.colibri .chat-input__box .chat-input__model:not(:hover):not(.is-open),
+.colibri .chat-input__box .razonar__btn:not(:hover):not(.is-open),
+.colibri .chat-input__box .chat-input__ctx:not(:hover):not(.is-open) { background: var(--surface-2); }
+
+@media (max-width: 640px) {
+  .chat-input__bar { --ctl-h: 40px; }
+  .chat-input__tools .icon-btn, .chat-input__send { width: var(--ctl-h); height: var(--ctl-h); }
+}
+@media (max-width: 400px) {
+  .chat-input__bar { --ctl-h: 38px; gap: 4px; }
+  .chat-input__tools, .chat-input__meta { gap: 4px; }
+}
+
+/* Detalle de contexto y cupo: se abre sobre el anillo, en el propio chat. */
+.ctx-uso { position: relative; }
+.ctx-pop {
+  position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 90;
+  width: 280px; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px;
+  border-radius: var(--radius); background: var(--surface-3); box-shadow: var(--sombra-menu);
+  animation: select-in 0.14s ease;
+}
+.ctx-pop__cab { display: flex; justify-content: space-between; gap: 12px; font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-soft); }
+.ctx-pop__valor { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctx-pop__barra { height: 6px; margin-top: 8px; border-radius: 999px; background: var(--surface-5); overflow: hidden; }
+.ctx-pop__barra span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.4s ease; }
+.ctx-pop__barra.is-warn span { background: var(--warn); }
+.ctx-pop__barra.is-danger span { background: var(--danger); }
+.ctx-pop__pie { margin: 6px 0 0; font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-muted); }
+@media (max-width: 640px) {
+  .ctx-pop { position: fixed; left: 16px; right: 16px; bottom: calc(120px + var(--safe-b)); width: auto; }
+}
+
+/* Deslizador del razonamiento: pista fina con el tramo recorrido en oliva y
+   un tirador redondo con aro del color del panel. */
+.razonar__rango {
+  -webkit-appearance: none; appearance: none; height: 18px; margin: 12px 0 6px; background: transparent; cursor: pointer;
+  --pista: linear-gradient(to right, var(--accent) 0 var(--p, 0%), var(--surface-5) var(--p, 0%) 100%);
+}
+.razonar__rango:focus { outline: none; }
+.razonar__rango::-webkit-slider-runnable-track { height: 6px; border-radius: 999px; background: var(--pista); }
+.razonar__rango::-moz-range-track { height: 6px; border-radius: 999px; background: var(--surface-5); }
+.razonar__rango::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+.razonar__rango::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 3px var(--surface-3); transition: box-shadow 0.15s ease;
+}
+.razonar__rango::-moz-range-thumb {
+  width: 18px; height: 18px; border: 0; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 3px var(--surface-3); transition: box-shadow 0.15s ease;
+}
+.razonar__rango:hover::-webkit-slider-thumb,
+.razonar__rango:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--surface-3), 0 0 0 7px var(--accent-soft); }
+.razonar__rango:hover::-moz-range-thumb,
+.razonar__rango:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--surface-3), 0 0 0 7px var(--accent-soft); }
+.razonar__pop { box-shadow: var(--sombra-menu); }
+.razonar__marcas button { border: 0; background: transparent; font-family: var(--font-ui); cursor: pointer; }
+.razonar__marcas button:hover { color: var(--ink-soft); }
