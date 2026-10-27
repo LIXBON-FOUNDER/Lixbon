@@ -162,15 +162,31 @@ fn tipos_de_eventos(s: &Store) -> Vec<String> {
     s.read(|c| Ok(c.prepare("SELECT kind FROM events ORDER BY rowid")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)).unwrap()
 }
 
-fn conflicto<T: std::fmt::Debug>(r: StoreResult<T>, contiene: &str) {
+/// Cómo salió un resultado, SIN volcar su contenido: las filas llevan ids de sesión y de paquete y no deben acabar en un log.
+fn resumen<T>(r: &StoreResult<T>) -> String {
     match r {
-        Err(StoreError::AttemptConflict(m)) | Err(StoreError::SessionConflict(m)) => assert!(m.contains(contiene), "«{m}» no menciona «{contiene}»"),
-        otro => panic!("se esperaba un conflicto ({contiene}): {otro:?}"),
+        Ok(_) => "Ok(..)".into(),
+        Err(e) => format!("Err({e})"),
     }
 }
 
-fn invalido<T: std::fmt::Debug>(r: StoreResult<T>) {
-    assert!(matches!(r, Err(StoreError::InvalidAttempt(_))), "se esperaba InvalidAttempt: {r:?}");
+fn variante(c: &StoreResult<Continued>) -> &'static str {
+    match c {
+        Ok(Continued::Created { .. }) => "Created",
+        Ok(Continued::Replayed { .. }) => "Replayed",
+        Err(_) => "Err",
+    }
+}
+
+fn conflicto<T>(r: StoreResult<T>, contiene: &str) {
+    match r {
+        Err(StoreError::AttemptConflict(m)) | Err(StoreError::SessionConflict(m)) => assert!(m.contains(contiene), "«{m}» no menciona «{contiene}»"),
+        otro => panic!("se esperaba un conflicto ({contiene}): {}", resumen(&otro)),
+    }
+}
+
+fn invalido<T>(r: StoreResult<T>) {
+    assert!(matches!(r, Err(StoreError::InvalidAttempt(_))), "se esperaba InvalidAttempt: {}", resumen(&r));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -218,7 +234,7 @@ fn antes_del_corte_nada_escribe_ni_por_el_almacen_ni_por_sql() {
         |_, _, _| unreachable!(),
         |_, _, _| unreachable!(),
     );
-    assert!(matches!(r, Err(StoreError::AgenticModelInactive)), "{r:?}");
+    assert!(matches!(r, Err(StoreError::AgenticModelInactive)), "{}", resumen(&r));
     let q = format!("INSERT INTO attempt_continuations (attempt_id, task_id, request_id, strategy, reason, from_attempt_id, package_id, created_at) VALUES ('a', 't', 'r', 'context_package', 'requested', 'b', '{PKG}', 1)");
     assert!(sql(&mut w.s, &q).unwrap_err().to_string().contains("inerte"));
     assert_eq!(foto(&w.s), antes);
@@ -279,9 +295,10 @@ fn el_request_id_es_de_la_task() {
     let (hija, otra) = (w.hija.clone(), w.otra.clone());
     let a = sin_sesion(&mut w, &hija, "claude");
     let b = sin_sesion(&mut w, &otra, "claude");
-    let x = continua(&mut w, &hija, "claude", &paquete("misma", &a, Reason::Requested), 200).unwrap();
-    let y = continua(&mut w, &otra, "claude", &paquete("misma", &b, Reason::Requested), 210).unwrap();
-    assert!(matches!((&x, &y), (Continued::Created { .. }, Continued::Created { .. })), "{x:?} {y:?}");
+    let x = continua(&mut w, &hija, "claude", &paquete("misma", &a, Reason::Requested), 200);
+    let y = continua(&mut w, &otra, "claude", &paquete("misma", &b, Reason::Requested), 210);
+    assert_eq!((variante(&x), variante(&y)), ("Created", "Created"));
+    let (x, y) = (x.unwrap(), y.unwrap());
     assert_ne!(x.attempt().id, y.attempt().id);
 }
 
