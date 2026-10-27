@@ -103,6 +103,10 @@ jobs:
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_tasks_person_real_store -- --ignored --exact --nocapture
         env:
           LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
+      - name: Ejecutar E2E de lxo attempts y lxo attempt show contra un Core cortado (Credential Manager real)
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::model_read_tests::lxo_bin_e2e_attempts_person_real_store -- --ignored --exact --nocapture
+        env:
+          LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
       - name: Ejecutar E2E de lxo summary como persona (Credential Manager real)
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::projects_overview_tests::lxo_bin_e2e_summary_person_real_store -- --ignored --exact --nocapture
         env:

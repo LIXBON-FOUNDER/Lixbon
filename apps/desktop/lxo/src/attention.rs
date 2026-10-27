@@ -23,6 +23,8 @@ Filtros (se combinan con AND):
   --category question|approval|review_ready|conflict|failed|environment_blocked|risk
   --severity critical|high|medium|low
   --task ID          atajo de --target-kind task --target-id ID
+  --attempt ID       atajo de --target-kind attempt --target-id ID (tras el corte
+                     Task/Attempt, la Attention de ejecución apunta al intento)
   --target-kind K    --target-id ID
 
 Paginación:
@@ -49,11 +51,12 @@ const PAGE: u64 = 500;
 const MAX_PAGES: usize = 200;
 const CONTRACT: u64 = 1;
 
-const LIST_FLAGS: [&str; 10] = [
+const LIST_FLAGS: [&str; 11] = [
     "project",
     "category",
     "severity",
     "task",
+    "attempt",
     "target-kind",
     "target-id",
     "limit",
@@ -171,14 +174,16 @@ fn parse_list(a: &Args) -> Result<ListOptions, Failure> {
             filters.insert(param.into(), Value::String(value));
         }
     }
-    if let Some(task) = text_flag(a, "task")? {
-        if filters.contains_key("target_kind") || filters.contains_key("target_id") {
-            return Err(usage(
-                "--task ya fija --target-kind task y --target-id: no se combina con ellos.",
-            ));
+    for kind in ["task", "attempt"] {
+        if let Some(id) = text_flag(a, kind)? {
+            if filters.contains_key("target_kind") || filters.contains_key("target_id") {
+                return Err(usage(format!(
+                    "--{kind} ya fija --target-kind {kind} y --target-id: no se combina con ellos ni con --task/--attempt."
+                )));
+            }
+            filters.insert("target_kind".into(), json!(kind));
+            filters.insert("target_id".into(), Value::String(id));
         }
-        filters.insert("target_kind".into(), json!("task"));
-        filters.insert("target_id".into(), Value::String(task));
     }
     let limit = match text_flag(a, "limit")? {
         None => None,
@@ -752,5 +757,18 @@ mod tests {
         );
         assert!(line.contains("task:t?falso"), "{line}");
         assert!(detail_text(&raro, NOW).contains("no conoce la categoría"));
+    }
+
+    /// LXO-125 · `--attempt` es el atajo de la Attention de un intento; no se combina con --task ni --target-*.
+    #[test]
+    fn attempt_es_el_atajo_del_target_attempt() {
+        let opts = list(&["attention", "--attempt", "t3-a2"]).unwrap();
+        assert_eq!(Value::Object(opts.filters), json!({ "target_kind": "attempt", "target_id": "t3-a2" }));
+        for raw in [
+            &["attention", "--attempt", "t3-a2", "--task", "t3"][..],
+            &["attention", "--attempt", "t3-a2", "--target-kind", "task"],
+        ] {
+            assert!(matches!(list(raw), Err(Failure::Usage(_))), "{raw:?}");
+        }
     }
 }
