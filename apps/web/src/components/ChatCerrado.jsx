@@ -5,8 +5,7 @@ import { IconCorazon, IconGrid, IconLayers, IconTerminal } from './Icons';
 
 // Mientras no haya equipos para ejecutar los modelos en la web, el chat queda en
 // pausa: sin caja de mensaje, con el historial a la vista y los atajos al resto
-// de lixbon. Para reabrirlo basta con poner esto a false.
-export const CHAT_CERRADO = true;
+// de lixbon. Se abre y se cierra desde Admin › Chat web (lib/chatWeb.js).
 
 const ANCHOS = [960, 1440, 1774];
 const srcSet = (ext) => ANCHOS.map((a) => `/laminas/puerto-tranquilo-${a}.${ext} ${a}w`).join(', ');

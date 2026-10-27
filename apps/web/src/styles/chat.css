@@ -1869,3 +1869,51 @@
   .chat-cerrado__lamina img { object-position: 62% center; } /* el barco y la grúa no se cortan */
   .chat-cerrado__texto { font-size: 16.5px; }
 }
+
+/* Chat vacío con el colibrí (Colibri.jsx): el dibujo ASCII ocupa todo el hueco
+   y el saludo, el titular y el cuadro quedan centrados encima. Las --cb-* son
+   la paleta del colibrí, la heliconia y la cordillera; el lienzo las lee. */
+.colibri {
+  --cb-fg: #ece6d6; --cb-muted: #9a9384; --cb-amber: #f2b24c;
+  --cb-ridge1: #22241c; --cb-ridge2: #313628; --cb-ridge3: #445034;
+  --cb-hi: #b2e066; --cb-mid: #65a142; --cb-lo: #2f5022; --cb-belly: #e6dbbe; --cb-gorget: #ec5592; --cb-wing: #8d8571; --cb-beak: #a39a84;
+  --cb-heli-red: #e0553a; --cb-heli-yel: #f2bf3c; --cb-heli-grn: #7ea145; --cb-leaf: #4a6e2e; --cb-leaf-hi: #8fb85a;
+  position: relative; overflow: hidden; justify-content: center; gap: 0; padding: 0 32px 12vh;
+}
+:root[data-theme="light"] .colibri {
+  --cb-fg: #1d1a15; --cb-muted: #6f695d; --cb-amber: #d9932f;
+  --cb-ridge1: #cfc8b2; --cb-ridge2: #aeae90; --cb-ridge3: #7f8a5f;
+  --cb-hi: #93c452; --cb-mid: #4f8236; --cb-lo: #2c4a20; --cb-belly: #d3c8a9; --cb-gorget: #c2376c; --cb-wing: #6b6455; --cb-beak: #1d1a15;
+  --cb-heli-red: #c4412a; --cb-heli-yel: #e2ab2a; --cb-heli-grn: #6b8c37; --cb-leaf: #4f7531; --cb-leaf-hi: #8db359;
+}
+.colibri__lienzo { position: absolute; inset: 0; display: block; pointer-events: none; }
+.colibri__centro {
+  position: relative; z-index: 1; width: 100%; max-width: 720px;
+  display: flex; flex-direction: column; align-items: center; gap: 26px; text-align: center;
+}
+.colibri .chat-hero__cabeza { align-items: center; gap: 16px; max-width: 640px; }
+.colibri .chat-hero__title { text-align: center; font-size: clamp(40px, 4.6vw, 60px); line-height: 1.04; }
+.colibri .chat-hero__title--invitado { font-size: clamp(28px, 3.2vw, 42px); }
+.colibri .chat-hero__input { width: 100%; max-width: none; text-align: left; }
+.colibri .chat-input__box { background: var(--card-elevada); box-shadow: var(--sombra-elevada); }
+.colibri__ideas {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 8px;
+  margin-top: -8px; animation: fade-up 0.4s ease 0.14s backwards;
+}
+.colibri__idea {
+  height: 36px; padding: 0 16px; border: 0; border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent); color: var(--ink-muted);
+  font-family: var(--font-ui); font-size: 13.5px; white-space: nowrap; cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.colibri__idea:hover { color: var(--ink); background: var(--surface-3); }
+
+/* En móvil el colibrí vuela arriba y el cuadro baja hasta el pulgar. */
+@media (max-width: 860px) {
+  .colibri { justify-content: flex-end; padding: 0 16px calc(18px + var(--safe-b)); }
+  .colibri__centro { gap: 18px; }
+  .colibri .chat-hero__title { font-size: clamp(30px, 8vw, 40px); }
+  .colibri .chat-hero__title--invitado { font-size: clamp(22px, 5.6vw, 28px); }
+  .colibri__ideas { flex-wrap: nowrap; justify-content: flex-start; width: 100%; overflow-x: auto; scrollbar-width: none; margin-top: -4px; }
+  .colibri__ideas::-webkit-scrollbar { display: none; }
+}

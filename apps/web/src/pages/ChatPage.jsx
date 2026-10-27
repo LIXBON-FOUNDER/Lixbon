@@ -20,7 +20,9 @@ import { VerifyBanner } from '../components/VerifyBanner';
 import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu } from '../components/Icons';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import { MascotaChat } from '../components/Mascota';
-import { AvisoChatCerrado, CHAT_CERRADO, ChatCerrado } from '../components/ChatCerrado';
+import { AvisoChatCerrado, ChatCerrado } from '../components/ChatCerrado';
+import { ColibriHero } from '../components/Colibri';
+import { useChatWebAbierto } from '../lib/chatWeb';
 import { ChatVisualPanel, VISUAL_CHAT_PROMPT, VisualChip, sinBloquesVisuales } from '../components/ChatVisualPanel';
 import { FILE_PROMPT } from '../lib/archivos';
 import { tieneVisuals } from '../lib/planes';
@@ -48,6 +50,14 @@ function fechaSaludo(t, nombre) {
   const fecha = new Intl.DateTimeFormat(t('dateLocale'), { weekday: 'long', day: 'numeric', month: 'long' }).format(ahora);
   return `${fecha} · ${nombre ? `${saludo}, ${nombre}` : saludo}`;
 }
+
+// Atajos bajo el cuadro del chat vacío: rellenan el mensaje sin enviarlo.
+const SUGERENCIAS = [
+  { clave: 'ideaCodigo' },
+  { clave: 'ideaPlan' },
+  { clave: 'ideaPr' },
+  { clave: 'ideaVisual', visual: true },
+];
 
 // La última palabra del titular va en cursiva oliva, como en founder.
 function UltimaEnCursiva({ texto }) {
@@ -116,6 +126,9 @@ export default function ChatPage() {
   const [paginasVisual, setPaginasVisual] = useState([]);
   const [panelVisual, setPanelVisual] = useState(false);
   const [errorVisual, setErrorVisual] = useState('');
+  // null mientras se pregunta al gateway si el chat web está abierto.
+  const chatAbierto = useChatWebAbierto();
+  const [sugerida, setSugerida] = useState('');
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null);
@@ -571,15 +584,18 @@ export default function ChatPage() {
               <ThreadSkeleton />
             </div>
             <div className="chat-composer">
-              {CHAT_CERRADO ? <AvisoChatCerrado /> : (
+              {chatAbierto === false && <AvisoChatCerrado />}
+              {chatAbierto && (
                 <ChatInput onSend={send} busy models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision} />
               )}
             </div>
           </>
-        ) : empty && CHAT_CERRADO ? (
+        ) : empty && chatAbierto === null ? (
+          <div className="chat-hero" />
+        ) : empty && !chatAbierto ? (
           <ChatCerrado />
         ) : empty ? (
-          <div className="chat-hero">
+          <ColibriHero>
             <div className="chat-hero__cabeza">
               {user && <p className="chat-hero__fecha">{fechaSaludo(t, user.first_name)}</p>}
               <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
@@ -587,13 +603,22 @@ export default function ChatPage() {
               </h2>
             </div>
             <div className="chat-hero__input">
-              {user && <MascotaChat ocupado={busy} escribiendo={escribiendo} />}
-              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
+              {/* Al enviar se olvida el atajo: el próximo chat vacío no debe traerlo relleno. */}
+              <ChatInput onSend={(...args) => { setSugerida(''); return send(...args); }} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
                 nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
+                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos}
+                initialText={sugerida} />
             </div>
-          </div>
+            <div className="colibri__ideas">
+              {SUGERENCIAS.filter((s) => !s.visual || comandos.length > 0).map((s) => (
+                <button key={s.clave} type="button" className="colibri__idea"
+                  onClick={() => setSugerida(s.visual ? '/visual ' : `${t(s.clave)}: `)}>
+                  {t(s.clave)}
+                </button>
+              ))}
+            </div>
+          </ColibriHero>
         ) : (
           <>
             <div className="chat-scroll" ref={scrollRef} onScroll={handleScroll}>
@@ -650,7 +675,8 @@ export default function ChatPage() {
                   <IconArrowDown size={16} />
                 </button>
               )}
-              {CHAT_CERRADO ? <AvisoChatCerrado /> : (
+              {chatAbierto === false && <AvisoChatCerrado />}
+              {chatAbierto && (
                 <>
                   <MascotaChat ocupado={busy} escribiendo={escribiendo} />
                   <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}

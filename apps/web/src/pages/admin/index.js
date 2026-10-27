@@ -16,3 +16,4 @@ export { default as AdminPasarela } from './Pasarela';
 export { default as AdminDonaciones } from './Donaciones';
 export { default as AdminSkills } from './Skills';
 export { default as AdminCorreos } from './Correos';
+export { default as AdminChatWeb } from './ChatWeb';
