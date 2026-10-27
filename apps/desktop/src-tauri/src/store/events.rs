@@ -218,6 +218,10 @@ pub struct EventQuery {
     /// Incompatible con `kind`. Coincidencia exacta de prefijo, sensible a mayúsculas.
     pub kind_prefix: Option<String>,
     pub class: Option<EventClass>,
+    /// Todos los hechos de UN Attempt (LXO-119): los que lo tienen como entidad, los que lo nombran en el payload
+    /// (`attempt`: sesión, Worktree, Artifact, revisión…) y los de la sesión y el Worktree vinculados a ese Attempt que
+    /// no nombran a ninguno (`provider_session.bound`, `worktree.missing`…). Incompatible con `entity_kind`.
+    pub attempt_id: Option<String>,
 }
 
 /// Una página de eventos.
@@ -413,6 +417,7 @@ impl Store {
             ("entity_id", &q.entity_id),
             ("kind", &q.kind),
             ("kind_prefix", &q.kind_prefix),
+            ("attempt_id", &q.attempt_id),
         ] {
             if v.as_deref() == Some("") {
                 return bad(format!("el filtro `{name}` no puede estar vacío"));
@@ -423,6 +428,9 @@ impl Store {
         }
         if q.kind.is_some() && q.kind_prefix.is_some() {
             return bad("`kind` y `kind_prefix` son incompatibles".into());
+        }
+        if q.attempt_id.is_some() && q.entity_kind.is_some() {
+            return bad("`attempt_id` y `entity_kind` son incompatibles".into());
         }
 
         let mut conds = vec!["(?1 IS NULL OR seq > ?1)".to_string(), "(?2 IS NULL OR seq < ?2)".to_string()];
@@ -446,6 +454,16 @@ impl Store {
         if let Some(c) = q.class {
             binds.push(Value::Text(c.as_str().into()));
             conds.push(format!("class = ?{}", binds.len()));
+        }
+        if let Some(a) = &q.attempt_id {
+            binds.push(Value::Text(a.clone()));
+            let n = binds.len();
+            conds.push(format!(
+                "((entity_kind = 'attempt' AND entity_id = ?{n}) OR json_extract(payload, '$.attempt') = ?{n} \
+                 OR (json_extract(payload, '$.attempt') IS NULL AND ( \
+                   (entity_kind = 'worktree' AND entity_id = (SELECT worktree_id FROM attempts WHERE id = ?{n})) \
+                   OR (entity_kind = 'provider_session' AND entity_id = (SELECT provider_session_id FROM attempts WHERE id = ?{n})))))"
+            ));
         }
         binds.push(Value::Integer((limit + 1) as i64));
         let order = if q.newest_first { "DESC" } else { "ASC" };

@@ -222,7 +222,61 @@ function ghMock(command) {
   return ok('');
 }
 
+// ADE (orch_query): Core simulado en el navegador. `?coremodel=v1` sirve el modelo Task/Attempt
+// (LXO-119) con 0, 1 y 3 intentos; sin él, `core_model` dice `legacy` y las lecturas vNext
+// responden `core_model_inactive`, como un Core real antes del corte (LXO-234).
+const ADE_T0 = 1792000000000;
+const adeBrief = (task, n, status, over = {}) => ({
+  created_at: ADE_T0 + n * 60000, ended_at: ['done', 'failed', 'stopped', 'exited'].includes(status) ? ADE_T0 + n * 60000 + 45000 : null,
+  external: false, id: `${task}-a${n}`, model: n === 3 ? 'gpt-6.1-sol' : null, n, provider: n === 3 ? 'codex' : 'claude',
+  role: null, started_at: ADE_T0 + n * 60000 + 2000, status, ...over,
+});
+const ADE_ATTEMPTS = {
+  'demo-t0': [],
+  'demo-t1': [adeBrief('demo-t1', 1, 'done')],
+  'demo-t3': [adeBrief('demo-t3', 1, 'failed'), adeBrief('demo-t3', 2, 'stopped'), adeBrief('demo-t3', 3, 'running')],
+};
+const ADE_ZERO = { question: 0, approval: 0, review_ready: 0, conflict: 0, failed: 0, environment_blocked: 0, risk: 0 };
+const adeF2Task = (id, title, status, created) => ({
+  id, run_id: 'demo-r1', parent_id: null, root_id: id, status, title, provider: 'claude', model: null,
+  branch: null, worktree: null, external: false, created_at: created, updated_at: created,
+});
+const ADE_TASKS = [adeF2Task('demo-t0', 'Sin intentos', 'starting', ADE_T0 + 3), adeF2Task('demo-t1', 'Un intento', 'done', ADE_T0 + 2), adeF2Task('demo-t3', 'Tres intentos', 'running', ADE_T0 + 1)];
+function adeQuery(query, args) {
+  const vNext = qs.get('coremodel') === 'v1';
+  const inactive = () => { throw new Error('core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail'); };
+  switch (query) {
+    case 'core_model':
+      return vNext
+        ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }
+        : { compat: [], core_model: 'legacy', queries: [] };
+    case 'projects_overview':
+      return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [{ id: 'demo-p1', name: 'Demo', state: 'active', status: 'active', locations: [], counts: { tasks: 3, active: 2, failed: 0, attention: { total: 0, by_category: ADE_ZERO } } }], unassigned: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: ADE_ZERO } } };
+    case 'tasks_by_project':
+      return { v: 1, project_id: args.project_id, filters: { status: args.status }, limit: args.limit, tasks: ADE_TASKS, has_more: false, next_cursor: null };
+    case 'task_list_v2':
+      if (!vNext) return inactive();
+      return { v: 2, core_model: 'task_attempt_v1', project_id: args.project_id, next_cursor: null, items: ADE_TASKS.map((t) => {
+        const attempts = ADE_ATTEMPTS[t.id];
+        return { attempt_count: attempts.length, created_at: t.created_at, current_attempt: attempts.at(-1) ?? null, depth: 0, id: t.id, intent: 'open', origin: 'core', parent_task_id: null, project_id: args.project_id, run_id: 'demo-r1', state: attempts.length ? 'in_progress' : 'open', title: t.title, updated_at: t.updated_at };
+      }) };
+    case 'attempts_by_task':
+      if (!vNext) return inactive();
+      return { v: 1, core_model: 'task_attempt_v1', task_id: args.task_id, items: ADE_ATTEMPTS[args.task_id] ?? [] };
+    case 'attempt_detail': {
+      if (!vNext) return inactive();
+      const task = args.attempt_id.replace(/-a\d+$/, '');
+      const brief = (ADE_ATTEMPTS[task] ?? []).find((a) => a.id === args.attempt_id);
+      if (!brief) throw new Error(`model_not_found: no existe el Attempt ${args.attempt_id}`);
+      return { v: 1, core_model: 'task_attempt_v1', attempt: { ...brief, task_id: task, effort: null, profile: null, failure_reason: brief.status === 'failed' ? 'exit_code' : null, summary: '', integrated: false, provider_session: null, worktree: null, artifacts: [], review: null } };
+    }
+    default:
+      throw new Error(`Comando desconocido: ${query}`);
+  }
+}
+
 const handlers = {
+  orch_query: ({ query, args }) => adeQuery(query, args ?? {}),
   'plugin:store|load': () => 1,
   'plugin:store|get': ({ key }) => [store.get(key) ?? null, store.has(key)],
   'plugin:store|set': ({ key, value }) => { store.set(key, value); },

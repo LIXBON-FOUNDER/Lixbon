@@ -160,6 +160,8 @@ pub(super) struct Slot {
     pub(super) store: Option<Store>,
     lock: Option<InstanceLock>,
     status: StorageStatus,
+    /// LXO-234: por qué el arranque no pudo usar la base, consultable en `core_model.storage` (`code`, `message`).
+    rejection: Option<(String, String)>,
     /// Las migraciones del binario. En producción son las embebidas; las pruebas pueden
     /// añadir una migración ficticia para ejercitar el protocolo (ver `set_catalog`).
     catalog: Vec<Migration>,
@@ -170,7 +172,7 @@ pub(super) struct CoreStorage(Arc<Mutex<Slot>>);
 
 impl Default for CoreStorage {
     fn default() -> Self {
-        CoreStorage(Arc::new(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened, catalog: store::embedded() })))
+        CoreStorage(Arc::new(Mutex::new(Slot { store: None, lock: None, status: StorageStatus::NotOpened, rejection: None, catalog: store::embedded() })))
     }
 }
 
@@ -264,6 +266,29 @@ impl CoreStorage {
         let mut slot = self.slot();
         slot.store = None;
         slot.status = StorageStatus::Degraded(reason);
+    }
+
+    /// El arranque no pudo usar la base (LXO-234): deja el motivo consultable. No cambia `status`.
+    pub(super) fn reject(&self, code: String, message: String) {
+        self.slot().rejection = Some((code, message));
+    }
+
+    /// `(code, message)` si el arranque no pudo usar la base.
+    pub(super) fn rejection(&self) -> Option<(String, String)> {
+        self.slot().rejection.clone()
+    }
+
+    /// Nombre corto del estado del almacén para `core_model.storage.status`.
+    pub(super) fn status_name(&self) -> &'static str {
+        let slot = self.slot();
+        if slot.rejection.is_some() {
+            return "rejected";
+        }
+        match &slot.status {
+            StorageStatus::NotOpened => "not_opened",
+            StorageStatus::Ready(_) => "ready",
+            StorageStatus::Degraded(_) => "degraded",
+        }
     }
 
     /// Fija el estado `Ready` tras un arranque autoritativo.

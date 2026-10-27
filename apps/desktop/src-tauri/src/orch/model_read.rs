@@ -73,14 +73,27 @@ fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, St
 }
 
 /// `core_model`: qué modelo sirve el Core y qué compatibilidad ofrece. Funciona antes y después del corte.
+///
+/// `storage` (LXO-234) dice si el almacén está abierto: `{status, code, message}` con `status` en `ready` · `degraded`
+/// · `not_opened` · `rejected`. Con `rejected` el arranque no abrió la base (`code` estable, p. ej.
+/// `core_cut_legacy_numbering`, y su mensaje): entonces `core_model` responde también sin identidad autenticada (sin
+/// base no hay registro de clientes) a la persona local, para que Desktop muestre el aviso en lugar de quedarse en blanco.
 pub(super) fn core_model(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    if let Some((code, message)) = core.storage.rejection() {
+        if !matches!(caller, Caller::User) {
+            return Err("model_auth_required: solo una Person autenticada puede leer el modelo Task/Attempt".into());
+        }
+        args_of(args, &[], &Map::new())?;
+        return Ok(json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [], "storage": { "status": "rejected", "code": code, "message": message } }));
+    }
     require_person(caller, context)?;
     args_of(args, &[], &Map::new())?;
     let active = core.storage.read_store(|s| s.agentic_model_active()).unwrap_or(Ok(false)).map_err(store_err)?;
+    let storage = json!({ "status": core.storage.status_name(), "code": null, "message": null });
     Ok(if active {
-        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"] })
+        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"], "storage": storage })
     } else {
-        json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [] })
+        json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [], "storage": storage })
     })
 }
 
@@ -98,9 +111,24 @@ fn derived_state(s: &Store, t: &TaskRow, current: Option<&AttemptRow>) -> StoreR
     })
 }
 
-fn attempt_brief(a: &AttemptRow) -> Value {
-    json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
-            "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at })
+/// Resumen de resultado en el brief: como mucho estos caracteres (el completo está en `attempt_detail.summary`).
+const BRIEF_SUMMARY_CHARS: usize = 280;
+
+/// `attempt_brief`: identidad, selección, fechas y, para no pedir el detalle de cada fila, dónde corrió (Worktree y
+/// rama) y su resultado corto. `origin = legacy` marca un Attempt migrado: el legado no registraba el fin de un
+/// intento, así que su `ended_at` puede ser `null` aunque sea final. Los del runtime (`core`) lo traen siempre al
+/// terminar (CHECK de la 008).
+fn attempt_brief(s: &Store, a: &AttemptRow) -> StoreResult<Value> {
+    let wt = match &a.worktree_id {
+        Some(_) => s.worktree_of_attempt(&a.id)?,
+        None => None,
+    };
+    let summary: String = a.summary.chars().take(BRIEF_SUMMARY_CHARS).collect();
+    Ok(json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
+            "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at, "origin": a.origin,
+            "ended_at_known": a.ended_at.is_some() || !a.status.is_final(),
+            "worktree": wt.map(|w| json!({ "id": w.id, "branch": w.branch, "state": w.state })),
+            "result": { "summary": summary, "truncated": a.summary.chars().count() > BRIEF_SUMMARY_CHARS, "failure_reason": a.failure_reason } }))
 }
 
 fn task_item(s: &Store, t: &TaskRow) -> StoreResult<Value> {
@@ -109,12 +137,59 @@ fn task_item(s: &Store, t: &TaskRow) -> StoreResult<Value> {
     Ok(json!({
         "id": t.id, "run_id": t.run_id, "parent_task_id": t.parent_task_id, "depth": t.depth, "project_id": t.project_id, "title": t.title,
         "intent": t.intent, "state": derived_state(s, t, current)?, "origin": t.origin, "created_at": t.created_at, "updated_at": t.updated_at,
-        "attempt_count": attempts.len(), "current_attempt": current.map(attempt_brief),
+        "attempt_count": attempts.len(), "current_attempt": current.map(|a| attempt_brief(s, a)).transpose()?,
     }))
 }
 
-/// `task_list_v2 {project_id, include_discarded?, limit?, cursor?}`: las Tasks del Project por creación, con su estado
-/// derivado y su Attempt actual. El cursor es opaco.
+fn parse_limit(map: &Map<String, Value>) -> Result<usize, String> {
+    match map.get("limit") {
+        None | Some(Value::Null) => Ok(DEFAULT_LIMIT),
+        Some(v) => Ok(v.as_u64().filter(|n| (1..=MAX_LIMIT as u64).contains(n)).ok_or_else(|| invalid(format!("`limit` va de 1 a {MAX_LIMIT}")))? as usize),
+    }
+}
+
+fn optional_id(map: &Map<String, Value>, name: &str) -> Result<Option<String>, String> {
+    match map.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => required_id(map, name).map(Some),
+    }
+}
+
+/// Cursor de `task_list_v2`: `t3:<created_at>:<task_id>`, la clave del orden (keyset). Sigue valiendo aunque la Task
+/// del cursor se descarte o cambie la lista entre páginas: nunca salta ni repite filas como un desplazamiento.
+fn task_cursor(t: &TaskRow) -> String {
+    format!("t3:{}:{}", t.created_at, t.id)
+}
+
+fn stale(m: &str) -> String {
+    format!("model_cursor_stale: {m}")
+}
+
+/// Un cursor de `task_list_v2` ya leído: la clave (`t3:`) o, en la ventana de `core_model.compat`, el formato anterior
+/// (`t2:<task_id>`), que se traduce a su clave al leer la Task.
+enum TaskCursor {
+    Key(i64, String),
+    Legacy(String),
+}
+
+fn parse_task_cursor(c: &str) -> Result<TaskCursor, String> {
+    if let Some(id) = c.strip_prefix("t2:") {
+        if id.is_empty() || id.chars().count() > MAX_ID_CHARS {
+            return Err(stale("cursor con formato no reconocido"));
+        }
+        return Ok(TaskCursor::Legacy(id.to_string()));
+    }
+    let rest = c.strip_prefix("t3:").ok_or_else(|| stale("cursor con formato no reconocido"))?;
+    let (at, id) = rest.split_once(':').ok_or_else(|| stale("cursor con formato no reconocido"))?;
+    let at = at.parse::<i64>().map_err(|_| stale("cursor con formato no reconocido"))?;
+    if id.is_empty() || id.chars().count() > MAX_ID_CHARS {
+        return Err(stale("cursor con formato no reconocido"));
+    }
+    Ok(TaskCursor::Key(at, id.to_string()))
+}
+
+/// `task_list_v2 {project_id, include_discarded?, limit?, cursor?}`: las Tasks del Project por (creación, id), con su
+/// estado derivado y su Attempt actual. Cursor opaco por clave (keyset).
 pub(super) fn task_list(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
     let empty = Map::new();
@@ -125,27 +200,39 @@ pub(super) fn task_list(core: &Core, caller: &Caller, context: Option<&MutationC
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(invalid("`include_discarded` debe ser booleano")),
     };
-    let limit = match map.get("limit") {
-        None | Some(Value::Null) => DEFAULT_LIMIT,
-        Some(v) => v.as_u64().filter(|n| (1..=MAX_LIMIT as u64).contains(n)).ok_or_else(|| invalid(format!("`limit` va de 1 a {MAX_LIMIT}")))? as usize,
-    };
+    let limit = parse_limit(map)?;
     let after = match map.get("cursor") {
         None | Some(Value::Null) => None,
-        Some(Value::String(c)) => Some(c.strip_prefix("t2:").map(String::from).ok_or_else(|| invalid("cursor desconocido"))?),
+        Some(Value::String(c)) => Some(parse_task_cursor(c)?),
         Some(_) => return Err(invalid("`cursor` debe ser texto")),
     };
     with_model(core, |s| {
-        let tasks = s.tasks_of_project(&project, discarded)?;
-        let start = match &after {
-            Some(id) => match tasks.iter().position(|t| &t.id == id) {
-                Some(i) => i + 1,
-                None => return Ok(Err(invalid("el cursor no es de esta lista"))),
+        // El cursor es de ESTE Project: su Task existe, es del Project y la clave coincide. Un `t2:` (ventana de
+        // compatibilidad) toma la clave de su Task y la respuesta ya devuelve `t3:`.
+        let after: Option<(i64, String)> = match &after {
+            None => None,
+            Some(TaskCursor::Key(at, id)) => match s.task_row(id)? {
+                Some(t) if t.project_id.as_deref() == Some(project.as_str()) && t.created_at == *at => Some((*at, id.clone())),
+                _ => return Ok(Err(invalid("el cursor no es de esta lista"))),
             },
-            None => 0,
+            Some(TaskCursor::Legacy(id)) => match s.task_row(id)? {
+                Some(t) if t.project_id.as_deref() == Some(project.as_str()) => {
+                    eprintln!("task_list_v2: cursor `t2:` (formato anterior) aceptado por compatibilidad; la respuesta usa `t3:`");
+                    Some((t.created_at, t.id))
+                }
+                _ => return Ok(Err(invalid("el cursor no es de esta lista"))),
+            },
         };
-        let page: Vec<&TaskRow> = tasks.iter().skip(start).take(limit).collect();
-        let next = (start + page.len() < tasks.len()).then(|| page.last().map(|t| format!("t2:{}", t.id))).flatten();
-        let items = page.into_iter().map(|t| task_item(s, t)).collect::<StoreResult<Vec<_>>>()?;
+        let ids = s.task_ids_after(&project, discarded, after.as_ref().map(|(at, id)| (*at, id.as_str())), limit + 1)?;
+        let more = ids.len() > limit;
+        let mut page = Vec::with_capacity(limit);
+        for id in ids.iter().take(limit) {
+            if let Some(t) = s.task_row(id)? {
+                page.push(t);
+            }
+        }
+        let next = if more { page.last().map(task_cursor) } else { None };
+        let items = page.iter().map(|t| task_item(s, t)).collect::<StoreResult<Vec<_>>>()?;
         Ok(Ok(json!({ "v": TASK_API, "core_model": AGENTIC_MODEL, "project_id": project, "items": items, "next_cursor": next })))
     })
 }
@@ -155,29 +242,59 @@ pub(super) fn task_list(core: &Core, caller: &Caller, context: Option<&MutationC
 pub(super) fn task_detail(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
     let empty = Map::new();
-    let id = required_id(args_of(args, &["task_id"], &empty)?, "task_id")?;
+    let map = args_of(args, &["task_id", "project_id"], &empty)?;
+    let id = required_id(map, "task_id")?;
+    let project = optional_id(map, "project_id")?;
     with_model(core, |s| {
         let Some(t) = s.task_row(&id)? else { return Ok(Err(format!("model_not_found: no existe la Task {id}"))) };
+        if project.as_deref().is_some_and(|p| t.project_id.as_deref() != Some(p)) {
+            return Ok(Err(format!("model_not_found: la Task {id} no es de ese Project")));
+        }
         let mut v = task_item(s, &t)?;
         v["spec"] = json!(t.spec);
         v["children"] = json!(s.task_children(&id)?.iter().map(|c| c.id.clone()).collect::<Vec<_>>());
-        v["attempts"] = json!(s.attempts_of_task(&id)?.iter().map(attempt_brief).collect::<Vec<_>>());
+        v["attempts"] = json!(s.attempts_of_task(&id)?.iter().map(|a| attempt_brief(s, a)).collect::<StoreResult<Vec<_>>>()?);
         v["thread"] = json!(s.thread_of_task(&id)?.map(|th| json!({ "id": th.id, "has_summary": th.summary.is_some() })));
         Ok(Ok(json!({ "v": TASK_API, "core_model": AGENTIC_MODEL, "task": v })))
     })
 }
 
-/// `attempts_by_task {task_id}`: los Attempts de la Task, del primero al último.
+/// `attempts_by_task {task_id, project_id?, limit?, cursor?}`: los Attempts de la Task por `n`, paginados por clave
+/// (`a1:<n>`). Con `project_id`, la Task tiene que ser de ese Project.
 pub(super) fn attempts_by_task(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
     let empty = Map::new();
-    let id = required_id(args_of(args, &["task_id"], &empty)?, "task_id")?;
+    let map = args_of(args, &["task_id", "project_id", "limit", "cursor"], &empty)?;
+    let id = required_id(map, "task_id")?;
+    let project = optional_id(map, "project_id")?;
+    let limit = parse_limit(map)?;
+    let after = match map.get("cursor") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(c)) => Some(c.strip_prefix("a1:").and_then(|n| n.parse::<i64>().ok()).filter(|n| *n >= 1).ok_or_else(|| stale("cursor con formato no reconocido"))?),
+        Some(_) => return Err(invalid("`cursor` debe ser texto")),
+    };
     with_model(core, |s| {
-        if s.task_row(&id)?.is_none() {
-            return Ok(Err(format!("model_not_found: no existe la Task {id}")));
+        let Some(t) = s.task_row(&id)? else { return Ok(Err(format!("model_not_found: no existe la Task {id}"))) };
+        if project.as_deref().is_some_and(|p| t.project_id.as_deref() != Some(p)) {
+            return Ok(Err(format!("model_not_found: la Task {id} no es de ese Project")));
         }
-        let items: Vec<Value> = s.attempts_of_task(&id)?.iter().map(attempt_brief).collect();
-        Ok(Ok(json!({ "v": ATTEMPT_API, "core_model": AGENTIC_MODEL, "task_id": id, "items": items })))
+        if let Some(n) = after {
+            if s.attempt_row(&format!("{id}-a{n}"))?.is_none() {
+                return Ok(Err(invalid("el cursor no es de esta lista")));
+            }
+        }
+        let ns = s.attempt_ns_after(&id, after.unwrap_or(0), limit + 1)?;
+        let more = ns.len() > limit;
+        let mut items = Vec::with_capacity(limit);
+        let mut last = None;
+        for n in ns.iter().take(limit) {
+            if let Some(a) = s.attempt_row(&format!("{id}-a{n}"))? {
+                items.push(attempt_brief(s, &a)?);
+                last = Some(a.n);
+            }
+        }
+        let next = if more { last.map(|n| format!("a1:{n}")) } else { None };
+        Ok(Ok(json!({ "v": ATTEMPT_API, "core_model": AGENTIC_MODEL, "task_id": id, "items": items, "next_cursor": next })))
     })
 }
 
@@ -186,16 +303,36 @@ pub(super) fn attempts_by_task(core: &Core, caller: &Caller, context: Option<&Mu
 pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
     let empty = Map::new();
-    let id = required_id(args_of(args, &["attempt_id"], &empty)?, "attempt_id")?;
+    let map = args_of(args, &["attempt_id", "task_id", "project_id"], &empty)?;
+    let id = required_id(map, "attempt_id")?;
+    let task = optional_id(map, "task_id")?;
+    let project = optional_id(map, "project_id")?;
     with_model(core, |s| {
         let Some(a) = s.attempt_row(&id)? else { return Ok(Err(format!("model_not_found: no existe el Attempt {id}"))) };
-        let mut v = attempt_brief(&a);
+        if task.as_ref().is_some_and(|t| t != &a.task_id) {
+            return Ok(Err(format!("model_not_found: el Attempt {id} no es de esa Task")));
+        }
+        if let Some(p) = &project {
+            if s.task_row(&a.task_id)?.and_then(|t| t.project_id) != Some(p.clone()) {
+                return Ok(Err(format!("model_not_found: el Attempt {id} no es de ese Project")));
+            }
+        }
+        let mut v = attempt_brief(s, &a)?;
         v["task_id"] = json!(a.task_id);
         v["effort"] = json!(a.effort);
         v["profile"] = json!(a.profile);
         v["summary"] = json!(a.summary);
         v["failure_reason"] = json!(a.failure_reason);
-        v["integrated"] = json!(s.attempt_integrated(&a.id)?);
+        let integrated = s.attempt_integrated(&a.id)?;
+        v["integrated"] = json!(integrated);
+        // Hora del hecho `attempt.integrated` si el runtime lo registró; los integrados del corte no la tienen.
+        let integrated_at: Option<i64> = if integrated {
+            s.attempt_integrated_at(&a.id)?
+        } else {
+            None
+        };
+        v["integrated_at"] = json!(integrated_at);
+        let current_n = s.attempt_current(&a.task_id)?.map(|c| c.n);
         v["provider_session"] = json!(s.provider_session_of_attempt(&id)?.map(|ps| json!({
             "id": ps.id, "status": ps.status, "resumable": ps.resumable, "binding": ps.binding, "bound": ps.external_ref.is_some(),
             "opened_by_attempt_id": ps.opened_by_attempt_id,
@@ -205,7 +342,14 @@ pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&Muta
             "branch_kept": w.branch_kept, "registered_by_attempt_id": w.attempt_id,
         })));
         v["artifacts"] = json!(s.artifacts_of_attempt(&id)?.iter().map(|x| json!({ "id": x.id, "kind": x.kind, "uri": x.uri, "sha256": x.sha256, "bytes": x.bytes })).collect::<Vec<_>>());
-        v["review"] = json!(s.reviews_of_attempt(&id)?.pop().map(|r| json!({ "decision_id": r.decision_id, "verdict": r.verdict, "head_commit": r.head_commit, "base_commit": r.base_commit, "status": r.status })));
+        // La última revisión con su vigencia: cuándo se hizo y se cerró, el HEAD que invalidó una `stale`, si es la
+        // activa, si el Attempt sigue siendo el actual de su Task (D8) y si ya se integró.
+        v["review"] = json!(s.reviews_of_attempt(&id)?.pop().map(|r| {
+            let active = r.status == crate::store::ReviewStatus::Active;
+            json!({ "decision_id": r.decision_id, "verdict": r.verdict, "head_commit": r.head_commit, "base_commit": r.base_commit, "status": r.status,
+                    "at": r.at, "closed_at": r.closed_at, "observed_head": r.observed_head,
+                    "validity": { "active": active, "attempt_is_current": current_n == Some(a.n), "integrated": integrated, "integrated_at": integrated_at } })
+        }));
         Ok(Ok(json!({ "v": ATTEMPT_API, "core_model": AGENTIC_MODEL, "attempt": v })))
     })
 }

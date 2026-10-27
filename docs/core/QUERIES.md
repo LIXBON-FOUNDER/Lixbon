@@ -522,11 +522,35 @@ cortada. Una prueba falla si cambian: cambiar una forma publicada exige subir su
 
 | Query | Parámetros | Devuelve | Versión |
 |---|---|---|---|
-| `core_model` | — | `core_model` (`legacy` · `task_attempt_v1`), `compat` (`["legacy_task_v1"]` tras el corte) y `queries` disponibles. Funciona siempre | [`core_model.v1.json`](fixtures/api/core_model.v1.json) |
-| `task_list_v2` | `project_id`, `include_discarded?`, `limit?` (1–100, 50), `cursor?` | Tasks del Project por creación: intención, **estado derivado**, origen, `attempt_count` y `current_attempt`. `next_cursor` opaco | `v: 2` · [`task_list_v2.json`](fixtures/api/task_list_v2.json) |
-| `task_detail_v2` | `task_id` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
-| `attempts_by_task` | `task_id` | los Attempts de la Task por `n` | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
-| `attempt_detail` | `attempt_id` | la ejecución: selección, fechas, resultado, `integrated`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts` y su última `review` | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
+| `core_model` | — | `core_model` (`legacy` · `task_attempt_v1`), `compat` (`["legacy_task_v1"]` tras el corte) y `queries` disponibles; `storage {status, code, message}` (LXO-234: `rejected` si el arranque no pudo usar la base, ver [CORTE_EJECUCION.md](CORTE_EJECUCION.md)). Funciona siempre | [`core_model.v1.json`](fixtures/api/core_model.v1.json) |
+| `task_list_v2` | `project_id`, `include_discarded?`, `limit?` (1–100, 50), `cursor?` | Tasks del Project por (creación, id): intención, **estado derivado**, origen, `attempt_count` y `current_attempt`. `next_cursor` opaco **por clave** (keyset), ligado al Project | `v: 2` · [`task_list_v2.json`](fixtures/api/task_list_v2.json) |
+| `task_detail_v2` | `task_id`, `project_id?` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
+| `attempts_by_task` | `task_id`, `project_id?`, `limit?` (1–100, 50), `cursor?` | los Attempts de la Task por `n`, paginados por clave; `next_cursor` (`null` al terminar) | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
+| `attempt_detail` | `attempt_id`, `task_id?`, `project_id?` | la ejecución: selección, fechas, resultado, `integrated`, `integrated_at`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts` y su última `review` con su vigencia | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
+
+**Corrección de consultas (LXO-119, cambio compatible).** Solo se **añaden** campos y parámetros opcionales; las
+versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y los validadores de Desktop
+(`coreModelContract.js`) aceptan claves de más.
+
+* **Cursores por clave**: `task_list_v2` usa `t3:<created_at>:<task_id>` y `attempts_by_task` `a1:<n>`. Nunca un
+  desplazamiento: si la lista cambia entre páginas no se salta ni repite ninguna fila. Un cursor de otra lista (otro
+  Project, otra Task o un Attempt que no existe) es `model_invalid_request`.
+* **Compatibilidad `t2:`**: mientras `core_model.compat` anuncie `legacy_task_v1`, `task_list_v2` sigue aceptando el
+  cursor anterior `t2:<task_id>`: lo traduce a la clave de esa Task (debe ser del Project pedido), deja un aviso en el
+  log del Core y devuelve `next_cursor` ya en `t3:`. Un cursor con formato no reconocido es `model_cursor_stale`: el
+  cliente descarta el cursor y vuelve a la primera página.
+* **Pertenencia**: con `project_id` / `task_id` opcionales, si la Task o el Attempt no es de ese Project/Task la respuesta
+  es `model_not_found` (no se filtra información de otro Project).
+* **`attempt_brief`** añade `origin` (`core` · `legacy`), `ended_at_known`, `worktree` (`id`, `branch`, `state` o `null`)
+  y `result` (`summary` cortado a 280 caracteres, `truncated`, `failure_reason`). Un Attempt del runtime (`core`) final
+  trae siempre `ended_at` (CHECK de la 008); uno migrado (`legacy`) puede traer `null`: el legado no registraba el fin, y
+  `ended_at_known = false` lo marca. La ruta del Worktree sigue solo en `attempt_detail` (rutas locales: decide Security).
+* **`review`** añade `at`, `closed_at`, `observed_head` (HEAD que la dejó `stale`) y `validity` (`active`,
+  `attempt_is_current`, `integrated`, `integrated_at`). `integrated_at` es la hora del hecho `attempt.integrated` cuando el
+  runtime lo registra; los integrados por el corte no tienen hora y dan `null`. El HEAD vivo del Worktree no se lee aquí
+  (no hay git en una lectura): lo compara quien invalida la revisión.
+* **Activity por Attempt**: `activity_list {attempt_id}` devuelve todos sus hechos, también los de su sesión y su
+  Worktree ([ACTIVITY.md](ACTIVITY.md)).
 
 **Estado derivado de la Task** (ADR D17, `contracts/status-vocabulary.json` `task_derived_state`):
 
@@ -545,7 +569,7 @@ payload). Activity filtra por `target_kind = attempt`; Attention de ejecución a
 ([ATTENTION.md](ATTENTION.md)).
 
 **Errores**: `model_auth_required` (no es una Person), `model_invalid_request` (parámetro desconocido o fuera de
-rango, cursor ajeno), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
+rango, cursor ajeno), `model_cursor_stale` (cursor con formato no reconocido), `core_model_inactive` (antes del corte), `model_not_found` y `model_unavailable` (almacén cerrado
 o fallo de lectura).
 
 ### Cliente de terminal: `lxo attempts` y `lxo attempt show` (LXO-124)

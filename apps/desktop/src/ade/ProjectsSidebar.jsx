@@ -1,7 +1,41 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ATTENTION_CATEGORIES, TASK_PAGE_LIMIT, listAdeTasks } from './coreQueries';
 import { useCoreQuery } from './useCoreQuery';
+import { ProjectTasks } from './ProjectTasks';
+import { useTreeNavigation } from './useTreeNavigation';
+import { UNKNOWN_CORE_MODEL } from './useCoreModel';
+import { coreErrorCode, isLegacyModelCode } from './coreModelContract';
+import { COPY } from './adeLabels';
+import { AttemptTreeContext, attemptKey, taskKeyOfAttemptKey } from './SidebarAttempts';
+import {
+  ALL_TASKS_VIEW,
+  EMPTY_PROJECT_IDS,
+  Feedback,
+  PROJECT_STATUS_LABELS,
+  TASK_STATUS_VIEWS,
+  attentionSummary,
+  countValue,
+  metaValue,
+  primaryLocation,
+  projectIdOfTaskKey,
+  projectKey,
+  selectedProjectQueryState,
+  taskKey,
+  toProjectSummary,
+  toProjectViewSummary,
+  toTaskSummary,
+} from './projectsSidebarModel';
 import './ProjectsSidebar.css';
+
+export {
+  TASK_STATUS_LABELS,
+  PROJECT_STATUS_LABELS,
+  TASK_STATUS_VIEWS,
+  ATTENTION_CATEGORY_LABELS,
+  NOT_REPORTED,
+  byCoreTaskOrder,
+  toProjectSummary,
+  toTaskSummary,
+} from './projectsSidebarModel';
 
 /**
  * Sidebar F2 de Projects → Tasks (LXO-97), solo lectura y aislada del shell: consulta únicamente
@@ -19,324 +53,6 @@ import './ProjectsSidebar.css';
  * - Las actualizaciones en segundo plano no roban el foco ni cambian la selección ni la expansión.
  * - Solo lee: no crea, no reintenta Tasks, no muta, no pagina por offset y no marca nada como leído.
  */
-
-/**
- * Etiquetas de los ocho estados reales de Task (LXO-91). El Core no devuelve textos ni tiene un
- * estado `review`: la revisión se representa aparte como Attention `review_ready`, nunca como status.
- */
-export const TASK_STATUS_LABELS = Object.freeze({
-  starting: 'Iniciando',
-  running: 'En ejecución',
-  waiting: 'Esperando',
-  awaiting_terminal_approval: 'Esperando aprobación de terminal',
-  done: 'Terminada',
-  failed: 'Fallida',
-  stopped: 'Detenida',
-  exited: 'Cerrada',
-});
-
-/** Estados finales del contrato (LXO-91): nunca se presentan como activos. */
-const FINAL_TASK_STATUSES = new Set(['done', 'failed', 'stopped', 'exited']);
-
-/**
- * Tono visual de cada estado real. No agrupa estados ni sustituye la etiqueta: solo elige el color
- * del badge para que `active`, `waiting`, `failed` y `final` se distingan de un vistazo.
- */
-const TASK_STATUS_TONES = Object.freeze({
-  starting: 'active',
-  running: 'active',
-  waiting: 'waiting',
-  awaiting_terminal_approval: 'waiting',
-  done: 'done',
-  failed: 'failed',
-  stopped: 'stopped',
-  exited: 'exited',
-});
-
-/** `status` agregado de un Project en `projects_overview` (LXO-90), distinto de la Attention. */
-export const PROJECT_STATUS_LABELS = Object.freeze({
-  failed: 'Con fallos',
-  attention: 'Con Attention',
-  active: 'Activo',
-  idle: 'Inactivo',
-});
-
-/** Vistas explícitas del filtro de estado de Tasks: ningún «solo activas» fijo. */
-export const TASK_STATUS_VIEWS = Object.freeze([
-  { code: 'active', label: 'Activas', empty: 'Este Project no tiene Tasks activas.' },
-  { code: 'final', label: 'Finalizadas', empty: 'Este Project no tiene Tasks finalizadas.' },
-  { code: 'all', label: 'Todas', empty: 'Este Project no tiene Tasks registradas.' },
-]);
-const ALL_TASKS_VIEW = TASK_STATUS_VIEWS.find((view) => view.code === 'all');
-
-/** Etiquetas de las siete categorías de Attention del contrato (LXO-87/89). */
-export const ATTENTION_CATEGORY_LABELS = Object.freeze({
-  question: 'Pregunta',
-  approval: 'Aprobación',
-  review_ready: 'Revisión lista',
-  conflict: 'Conflicto',
-  failed: 'Fallida',
-  environment_blocked: 'Entorno bloqueado',
-  risk: 'Riesgo',
-});
-
-export const NOT_REPORTED = 'No informado';
-
-const asText = (value) => (typeof value === 'string' && value.trim() ? value.trim() : null);
-const metaValue = (value) => asText(value) ?? NOT_REPORTED;
-const countValue = (value) => (Number.isFinite(value) ? String(value) : NOT_REPORTED);
-
-const projectKey = (projectId) => `p:${projectId}`;
-const taskKey = (projectId, taskId) => `t:${projectId}\u0000${taskId}`;
-const projectIdOfTaskKey = (key) => key.slice(2).split('\u0000')[0];
-
-/**
- * Orden del Core para `tasks_by_project` (docs/core/QUERIES.md): `created_at` descendente y, a
- * igualdad, `id` ascendente. Es el mismo orden del cursor por clave, así que las páginas acumuladas
- * quedan en el orden en que el Core las entrega.
- */
-export const byCoreTaskOrder = (a, b) => (b.created_at - a.created_at)
-  || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-
-const EMPTY_PAGE = Object.freeze({
-  items: [], nextCursor: null, hasMore: false, pageCount: 0, loading: false, stale: false, preserved: false, error: null, notice: null,
-});
-const EMPTY_PROJECT_IDS = Object.freeze([]);
-const emptyPageState = (key) => ({ ...EMPTY_PAGE, key });
-const uniqueTasksById = (tasks) => {
-  const seen = new Map();
-  for (const task of tasks) {
-    if (!seen.has(task.id)) seen.set(task.id, task);
-  }
-  return [...seen.values()];
-};
-
-function describeCoreError(error) {
-  if (/(_unavailable|degraded|almac[eé]n.*no disponible)/i.test(error)) return 'Core no tiene un almacén autoritativo disponible.';
-  if (/(_auth_required|authentication|unauthorized)/i.test(error)) return 'Core no pudo autenticar esta lectura.';
-  if (/(_invalid_cursor)/i.test(error)) return 'El cursor de paginación ya no es válido para este Core.';
-  if (/(_invalid_request)/i.test(error)) return 'Core rechazó los parámetros de esta consulta.';
-  if (/(_project_not_found)/i.test(error)) return 'El Project ya no existe en el registro del Core.';
-  if (/(_not_found)/i.test(error)) return 'El Project o la Task ya no está disponible con ese ID.';
-  if (/(_read_failed|_internal)/i.test(error)) return 'Core no pudo leer este dato.';
-  if (/(disconnected|connection|transport|timeout|ipc.*closed)/i.test(error)) return 'No se pudo completar la conexión con Core.';
-  return 'Core devolvió un error al leer este dato.';
-}
-
-const errorTitle = (status) => (status === 'disconnected' ? 'Core desconectado' : status === 'degraded' ? 'Core degradado' : 'Error de Core');
-
-const failureStatuses = new Set(['stale', 'disconnected', 'degraded', 'error']);
-
-/** Resumen de la Attention que publica el Core para un Project; `total` es el dato autoritativo. */
-function attentionSummary(attention) {
-  if (!attention || !Number.isFinite(attention.total)) return { total: null, detail: null };
-  const entries = ATTENTION_CATEGORIES
-    .map((category) => [category, attention.by_category?.[category]])
-    .filter(([, count]) => Number.isFinite(count) && count > 0);
-  return {
-    total: attention.total,
-    detail: entries.length ? entries.map(([category, count]) => `${ATTENTION_CATEGORY_LABELS[category] || category} ${count}`).join(' · ') : null,
-  };
-}
-
-/** Ubicación primaria del Project: metadato de provenance, nunca la identidad. */
-function primaryLocation(project) {
-  const locations = Array.isArray(project?.locations) ? project.locations : [];
-  return locations.find((location) => location?.primary) ?? locations[0] ?? null;
-}
-
-/**
- * @typedef {object} ProjectSummary
- * @property {string} projectId ID durable del Project; es la identidad.
- * @property {string} name Nombre visible (o el ID si el Core no lo informa).
- * @property {'active'|'archived'|null} state Estado del registro, no el estado del trabajo.
- * @property {'failed'|'attention'|'active'|'idle'|null} status Estado agregado de `projects_overview`.
- * @property {{tasks: number|null, active: number|null, failed: number|null}} taskCounts Contadores del Core; `null` si faltan.
- * @property {number|null} attentionTotal Solo `counts.attention.total`; `null` si el Core no lo informa.
- * @property {string|null} host `locations[].machine` de la ubicación primaria; metadato.
- * @property {string|null} origin `locations[].path` de la ubicación primaria; metadato.
- */
-
-/** Payload estable de selección de Project que recibe `onSelectProject`. */
-export function toProjectSummary(project) {
-  const location = primaryLocation(project);
-  const counts = project?.counts ?? {};
-  const attention = attentionSummary(counts.attention);
-  return {
-    projectId: project.id,
-    name: project.name || project.id,
-    state: project.state ?? null,
-    status: project.status ?? null,
-    taskCounts: {
-      tasks: Number.isFinite(counts.tasks) ? counts.tasks : null,
-      active: Number.isFinite(counts.active) ? counts.active : null,
-      failed: Number.isFinite(counts.failed) ? counts.failed : null,
-    },
-    attentionTotal: attention.total,
-    host: asText(location?.machine),
-    origin: asText(location?.path),
-  };
-}
-
-function toProjectViewSummary(project) {
-  if (!project) return null;
-  const summary = { id: project.id, projectId: project.id };
-  for (const field of ['name', 'state', 'status', 'counts', 'locations']) {
-    if (Object.hasOwn(project, field)) summary[field] = project[field];
-  }
-  return summary;
-}
-
-function selectedProjectQueryState(overview, project, projectId) {
-  // `idle` es una consulta sin habilitar (sección inactiva), no una carga pendiente: no se disfraza de `loading`.
-  if (overview.status === 'idle') return 'idle';
-  if (overview.status === 'loading') return 'loading';
-  if (overview.status === 'refreshing') return 'refreshing';
-  if (overview.status === 'stale') return 'stale';
-  if (['error', 'disconnected', 'degraded'].includes(overview.status)) return overview.status;
-  if (overview.status === 'empty') return projectId ? 'missing' : 'empty';
-  if (overview.status === 'ready') {
-    return project && project.id === projectId ? 'ready' : projectId ? 'missing' : 'unknown';
-  }
-  return 'unknown';
-}
-
-/** @typedef {{id: string, projectId: string, name?: string, state?: string, status?: string, counts?: object, locations?: object[]}} ProjectViewSummary */
-
-/**
- * @typedef {object} TaskSummary
- * @property {string} taskId ID durable de la Task; es la identidad.
- * @property {string} projectId ID durable del Project al que pertenece.
- * @property {string} status Uno de los ocho estados reales de `Task.status`; nunca se infiere.
- * @property {string} title Título visible (o el ID si el Core no lo informa).
- * @property {string|null} provider `Task.provider`; metadato.
- * @property {string|null} model `Task.model`; metadato.
- * @property {string|null} runId `Task.run_id`; metadato.
- * @property {string|null} parentId `Task.parent_id`; metadato.
- * @property {string|null} rootId `Task.root_id`; metadato.
- * @property {number|null} createdAt `Task.created_at` (ms epoch).
- * @property {number|null} updatedAt `Task.updated_at` (ms epoch).
- * @property {string|null} branch `Task.branch`; metadato, normalmente `null` en la lista.
- * @property {string|null} worktree `Task.worktree`; metadato, normalmente `null` en la lista.
- */
-
-/** Payload estable de selección de Task que recibe `onSelectTask`. */
-export function toTaskSummary(task, projectId) {
-  return {
-    taskId: task.id,
-    projectId,
-    status: task.status,
-    title: task.title || task.id,
-    provider: asText(task.provider),
-    model: asText(task.model),
-    runId: asText(task.run_id),
-    parentId: asText(task.parent_id),
-    rootId: asText(task.root_id),
-    createdAt: Number.isFinite(task.created_at) ? task.created_at : null,
-    updatedAt: Number.isFinite(task.updated_at) ? task.updated_at : null,
-    branch: asText(task.branch),
-    worktree: asText(task.worktree),
-  };
-}
-
-function Feedback({ state, subject, onRetry }) {
-  const retry = (event) => {
-    onRetry?.(event);
-    state.retry();
-  };
-  if (state.status === 'idle' || state.status === 'ready' || state.status === 'refreshing') return null;
-  if (state.status === 'loading') return <div className="ps__state" role="status">Conectando con Core para cargar {subject}…</div>;
-  if (state.status === 'empty') return null;
-  if (state.status === 'stale') {
-    return (
-      <div className="ps__state ps__state--stale" role="status">
-        <span>Datos desactualizados ({state.reason === 'disconnected' ? 'Core desconectado' : state.reason === 'degraded' ? 'Core degradado' : 'Core con error'}). Se conserva la última respuesta. {describeCoreError(state.error)}</span>
-        <code>{state.error}</code>
-        <button
-          type="button"
-          className="lk"
-          onClick={retry}
-          aria-label={`Reintentar lectura de ${subject}`}
-        >Reintentar lectura</button>
-      </div>
-    );
-  }
-  return (
-    <div className="ps__state ps__state--error" role="alert">
-      <strong>{errorTitle(state.status)}</strong>
-      <span>{describeCoreError(state.error)}</span>
-      <code>{state.error}</code>
-      <button
-        type="button"
-        className="lk"
-        onClick={retry}
-        aria-label={`Reintentar lectura de ${subject}`}
-      >Reintentar lectura</button>
-    </div>
-  );
-}
-
-function TaskRow({ project, task, selected, stale, position, setSize, isActiveKey, registerRef, onKeyDown, onFocus, onActivate }) {
-  const metaId = useId();
-  const key = taskKey(project.id, task.id);
-  const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
-  const isFinal = FINAL_TASK_STATUSES.has(task.status);
-  const tone = TASK_STATUS_TONES[task.status] || 'unknown';
-  return (
-    <li
-      role="treeitem"
-      aria-level={2}
-      aria-posinset={position}
-      aria-setsize={setSize}
-      aria-selected={selected}
-      aria-label={`${stale ? 'Datos desactualizados. ' : ''}${task.title || task.id}. ${statusLabel}`}
-      aria-describedby={metaId}
-      data-task-id={task.id}
-      data-project-id={project.id}
-      data-status={task.status}
-      data-final={isFinal ? 'true' : 'false'}
-      tabIndex={isActiveKey ? 0 : -1}
-      ref={registerRef(key)}
-      className={`ps__item ps__item--task${selected ? ' is-selected' : ''}${isFinal ? ' is-final' : ''}${stale ? ' is-stale' : ''}`}
-      onFocus={(event) => {
-        if (event.target === event.currentTarget) onFocus();
-      }}
-      onKeyDown={(event) => {
-        // El teclado de un control anidado es suyo; solo la fila enfocada navega el árbol.
-        if (event.target !== event.currentTarget) return;
-        event.stopPropagation();
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onActivate(project, task);
-          return;
-        }
-        onKeyDown(event, key);
-      }}
-      onClick={(event) => {
-        event.stopPropagation();
-        onActivate(project, task);
-      }}
-    >
-      <span className="ps__line">
-        <span
-          className={`ps__badge ps__badge--task ps__badge--${tone}${isFinal ? ' ps__badge--final' : ''}`}
-          data-status={task.status}
-        >
-          {statusLabel}
-        </span>
-        {stale && <span className="ps__badge ps__badge--stale">Datos previos</span>}
-        <span className="ps__name">{task.title || task.id}</span>
-        <span className="ps__id mono">{task.id}</span>
-      </span>
-      <span className="ps__meta" id={metaId}>
-        <span>Proveedor {metaValue(task.provider)}</span>
-        <span>Modelo {metaValue(task.model)}</span>
-        <span>Rama {asText(task.branch) ?? 'Solo en detalle'}</span>
-        <span>Worktree {asText(task.worktree) ?? 'Solo en detalle'}</span>
-      </span>
-    </li>
-  );
-}
 
 function ProjectRow({ project, expanded, selected, context, position, setSize, isActiveKey, registerRef, onKeyDown, onFocus, onActivate, children }) {
   const metaId = useId();
@@ -423,642 +139,6 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
   );
 }
 
-/**
- * Página de Tasks de un Project expandido. Monta su propia query `tasks_by_project` (lazy: solo
- * existe mientras el Project está expandido) y acumula páginas por `next_cursor` opaco.
- */
-function ProjectTasks({
-  project,
-  statusView,
-  active,
-  pollMs,
-  onVisibleTasks,
-  registerRef,
-  effectiveActiveKey,
-  selectedTaskId,
-  selectedTaskProjectId,
-  pendingTaskId,
-  confirmedMissingTaskId,
-  onTaskLookupComplete,
-  onKeyDown,
-  onFocusKey,
-  focusItem,
-  onActivateTask,
-}) {
-  const projectId = project.id;
-  const projectName = project.name || projectId;
-  const pageKey = `${projectId}\u0000${statusView.code}`;
-  const head = useCoreQuery('tasks_by_project', {
-    project_id: projectId,
-    status: statusView.code,
-    limit: TASK_PAGE_LIMIT,
-  }, { enabled: active, pollMs });
-  // Oculto, `useCoreQuery` devuelve `data: null`. La última cabecera leída se conserva aquí para que las
-  // filas, el cursor y el scroll sigan en su sitio sin consultar Core; al volver, `head.data` la reemplaza.
-  const preservedHeadRef = useRef(null);
-  if (head.data) preservedHeadRef.current = { key: pageKey, data: head.data };
-  const preservedHead = preservedHeadRef.current?.key === pageKey ? preservedHeadRef.current.data : null;
-  const headData = head.data ?? preservedHead;
-  const [pages, setPages] = useState(() => emptyPageState(pageKey));
-  const pageRequestRef = useRef(null);
-  const pageRequestSequence = useRef(0);
-  const inFlightPageReadsRef = useRef(new Map());
-  const pageKeyRef = useRef(pageKey);
-  const activeRef = useRef(active);
-  pageKeyRef.current = pageKey;
-  activeRef.current = active;
-  const pagingFocusRef = useRef(false);
-  const pageRetryFocusRef = useRef(false);
-  const pagingRequestActiveRef = useRef(false);
-  const loadMoreButtonRef = useRef(null);
-  const pageRetryButtonRef = useRef(null);
-  const pendingTaskIdRef = useRef(pendingTaskId);
-  const previousPendingTaskIdRef = useRef(pendingTaskId);
-  pendingTaskIdRef.current = pendingTaskId;
-  const headFailed = failureStatuses.has(head.status);
-  const headFailedRef = useRef(headFailed);
-  headFailedRef.current = headFailed;
-  const [headResumePending, setHeadResumePending] = useState(false);
-  const headDataStale = Boolean(headData)
-    && active
-    && (headResumePending || headFailed);
-  const latestHeadUpdatedAtRef = useRef(head.updatedAt);
-  latestHeadUpdatedAtRef.current = head.updatedAt;
-
-  useEffect(() => {
-    const clearPagingFocusOnOtherTarget = (event) => {
-      if (
-        event.target !== loadMoreButtonRef.current
-        && event.target !== pageRetryButtonRef.current
-        && event.target !== document.body
-      ) {
-        pagingFocusRef.current = false;
-        pageRetryFocusRef.current = false;
-      }
-    };
-    document.addEventListener('focusin', clearPagingFocusOnOtherTarget);
-    return () => document.removeEventListener('focusin', clearPagingFocusOnOtherTarget);
-  }, []);
-
-  // Un filtro de estado nuevo empieza en la primera página: los cursores son de una sola consulta.
-  useEffect(() => {
-    pageRequestRef.current = null;
-    setPages(emptyPageState(pageKey));
-    return () => {
-      if (pageRequestRef.current?.key === pageKey) pageRequestRef.current = null;
-    };
-  }, [pageKey]);
-
-  // Selection-driven paging belongs to the selected durable ID. A new target or a manual filter
-  // change must stop the old lookup even if its Core read is already in flight.
-  useEffect(() => {
-    if (previousPendingTaskIdRef.current === pendingTaskId) return;
-    previousPendingTaskIdRef.current = pendingTaskId;
-    const request = pageRequestRef.current;
-    if (request?.kind !== 'auto') return;
-    pageRequestRef.current = null;
-    setPages((current) => (current.key !== request.key || !current.loading
-      ? current
-      : { ...current, loading: false }));
-  }, [pendingTaskId]);
-
-  // Si la cabecera falla, no se encadenan sus cursores; conserva las páginas ya cargadas como stale.
-  useEffect(() => {
-    if (!headFailed) return;
-    pageRequestRef.current = null;
-    setPages((current) => {
-      if (current.key !== pageKey) return current;
-      if (current.items.length === 0 && current.pageCount === 0) {
-        return current.loading ? { ...current, loading: false } : current;
-      }
-      return { ...current, loading: false, stale: true };
-    });
-  }, [headFailed, pageKey]);
-
-  // Nunca se leen páginas de otro filtro; las de la última cabecera siguen visibles como stale.
-  const currentPages = pages.key === pageKey ? pages : EMPTY_PAGE;
-  const headTasks = headData?.tasks ?? [];
-  const headTaskIds = useMemo(() => new Set(headTasks.map((task) => task.id)), [headTasks]);
-  const tasks = useMemo(() => {
-    return uniqueTasksById([...headTasks, ...currentPages.items]).sort(byCoreTaskOrder);
-  }, [headTasks, currentPages.items]);
-  const staleTaskIds = useMemo(() => {
-    const ids = (currentPages.stale || headFailed)
-      ? currentPages.items.filter((task) => !headTaskIds.has(task.id)).map((task) => task.id)
-      : [];
-    if (headDataStale) ids.push(...headTasks.map((task) => task.id));
-    return new Set(ids);
-  }, [currentPages.items, currentPages.stale, headDataStale, headFailed, headTaskIds, headTasks]);
-
-  const taskIdSignature = tasks.map((task) => task.id).join('\u0000');
-  // Una lectura fallida sin datos no demuestra la ausencia de la Task: no cuenta como asentada.
-  const tasksSettled = Boolean(headData) && active && !headDataStale;
-  useEffect(() => {
-    onVisibleTasks(projectId, taskIdSignature ? taskIdSignature.split('\u0000') : [], tasksSettled, statusView.code);
-    return () => onVisibleTasks(projectId, [], false, statusView.code);
-  }, [projectId, taskIdSignature, tasksSettled, onVisibleTasks, statusView.code]);
-
-  const headCursor = headData?.has_more ? headData.next_cursor : null;
-  const moreCursor = currentPages.pageCount > 0 ? currentPages.nextCursor : headCursor;
-  // Una lectura invalidada por ocultar/cambiar identidad sigue viva en Core. Si la misma página
-  // se solicita de nuevo al reanudar, se comparte la promesa en vez de duplicarla.
-  const readTaskPage = useCallback(async (request, cursor, isCurrentRequest) => {
-    if (!isCurrentRequest()) return null;
-    const flightKey = JSON.stringify([request.key, cursor]);
-    const flights = inFlightPageReadsRef.current.get(flightKey) ?? [];
-    const reusableFlight = flights.find((flight) => (
-      request.headUpdatedAt != null
-      && flight.reusable
-      && flight.headUpdatedAt === request.headUpdatedAt
-    ));
-    if (reusableFlight) return reusableFlight.promise;
-
-    if (!isCurrentRequest()) return null;
-    const flight = { headUpdatedAt: request.headUpdatedAt, promise: null, reusable: false, request };
-    const promise = listAdeTasks(projectId, { status: statusView.code, cursor });
-    flight.promise = Promise.resolve(promise);
-    const currentFlights = inFlightPageReadsRef.current.get(flightKey) ?? [];
-    currentFlights.push(flight);
-    inFlightPageReadsRef.current.set(flightKey, currentFlights);
-    request.inFlightPageReads ??= new Set();
-    request.inFlightPageReads.add(flight);
-    try {
-      return await flight.promise;
-    } finally {
-      const remainingFlights = (inFlightPageReadsRef.current.get(flightKey) ?? []).filter((entry) => entry !== flight);
-      if (remainingFlights.length > 0) {
-        inFlightPageReadsRef.current.set(flightKey, remainingFlights);
-      } else {
-        inFlightPageReadsRef.current.delete(flightKey);
-      }
-      request.inFlightPageReads.delete(flight);
-    }
-  }, [projectId, statusView.code]);
-  // Una página extra se leyó por separado; tras refrescar la cabecera, se vuelve a leer cada cursor
-  // ya cargado desde el cursor nuevo. Core no publica una instantánea común para ambas consultas.
-  const reconcileLoadedPages = useCallback(async (loadedPageCount, expectedHeadUpdatedAt = head.updatedAt) => {
-    if (loadedPageCount <= 0 || headFailedRef.current || !head.data || expectedHeadUpdatedAt == null) return;
-    const requestedKey = pageKey;
-    const request = {
-      id: ++pageRequestSequence.current,
-      key: requestedKey,
-      headUpdatedAt: expectedHeadUpdatedAt,
-      kind: 'reconcile',
-    };
-    pageRequestRef.current = request;
-    pagingRequestActiveRef.current = true;
-    setPages((current) => (current.key !== requestedKey ? current : {
-      ...current,
-      loading: true,
-      stale: true,
-      error: null,
-      notice: null,
-    }));
-
-    let cursor = head.data.has_more ? head.data.next_cursor : null;
-    let items = [];
-    let pagesLoaded = 0;
-    let nextCursor = null;
-    let hasMore = false;
-    const isCurrentRequest = () => pageRequestRef.current === request
-      && activeRef.current
-      && pageKeyRef.current === request.key
-      && !headFailedRef.current
-      && latestHeadUpdatedAtRef.current === request.headUpdatedAt;
-
-    try {
-      while (cursor && pagesLoaded < loadedPageCount) {
-        const page = await readTaskPage(request, cursor, isCurrentRequest);
-        if (!page || !isCurrentRequest()) return;
-        items = uniqueTasksById([...items, ...page.tasks]);
-        pagesLoaded += 1;
-        nextCursor = page.next_cursor;
-        hasMore = page.has_more;
-        cursor = page.has_more ? page.next_cursor : null;
-      }
-      if (!isCurrentRequest()) return;
-      setPages((current) => (current.key !== requestedKey ? current : {
-        ...current,
-        items,
-        pageCount: pagesLoaded,
-        nextCursor,
-        hasMore,
-        loading: false,
-        stale: false,
-        preserved: false,
-        error: null,
-        notice: null,
-      }));
-    } catch (error) {
-      if (!isCurrentRequest()) return;
-      const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
-      if (/tasks_invalid_cursor/.test(message)) head.retry();
-      setPages((current) => (current.key !== requestedKey ? current : {
-        ...current,
-        loading: false,
-        stale: true,
-        error: message,
-      }));
-    } finally {
-      if (pageRequestRef.current === request) {
-        pageRequestRef.current = null;
-        setPages((current) => (current.key !== requestedKey || !current.loading
-          ? current
-          : { ...current, loading: false }));
-      }
-    }
-  }, [head.data, head.retry, head.updatedAt, pageKey, projectId, readTaskPage, statusView.code]);
-
-  // Si la cabecera cambia, las páginas ya cargadas se marcan desactualizadas de inmediato y se
-  // reconcilian recorriendo de nuevo el mismo número de páginas desde el cursor recién publicado.
-  const headVersionObservedRef = useRef({ key: pageKey, updatedAt: head.updatedAt ?? null });
-  useLayoutEffect(() => {
-    if (headFailed || head.updatedAt == null) return;
-    const previous = headVersionObservedRef.current;
-    headVersionObservedRef.current = { key: pageKey, updatedAt: head.updatedAt };
-    if (previous.key !== pageKey || previous.updatedAt == null || previous.updatedAt === head.updatedAt) return;
-
-    if (pageRequestRef.current?.key === pageKey) pageRequestRef.current = null;
-    const loadedPageCount = pages.key === pageKey ? pages.pageCount : 0;
-    if (loadedPageCount > 0) {
-      void reconcileLoadedPages(loadedPageCount, head.updatedAt);
-      return;
-    }
-    setPages((current) => (current.key !== pageKey || !current.loading
-      ? current
-      : { ...current, loading: false, error: null }));
-  }, [head.updatedAt, headFailed, pageKey, pages.key, pages.pageCount, reconcileLoadedPages]);
-
-  // Al ocultarse el modo, las páginas ya cargadas (y su cursor) se conservan pero dejan de ser vigentes:
-  // se marcan como previas. Al reactivarse, la primera lectura autoritativa de la cabecera (`readEpoch`
-  // mayor que el visto al volver) las vuelve a leer aunque la cabecera no haya cambiado.
-  const wasActiveRef = useRef(active);
-  const resumeEpochRef = useRef(null);
-  const previousPageKeyRef = useRef(pageKey);
-  const headReadEpochRef = useRef(head.readEpoch);
-  headReadEpochRef.current = head.readEpoch;
-  useLayoutEffect(() => {
-    const wasActive = wasActiveRef.current;
-    const pageChanged = previousPageKeyRef.current !== pageKey;
-    wasActiveRef.current = active;
-    previousPageKeyRef.current = pageKey;
-    if (active === wasActive) {
-      if (active && pageChanged && resumeEpochRef.current != null) {
-        resumeEpochRef.current = headReadEpochRef.current ?? 0;
-      }
-      return;
-    }
-    if (!active) {
-      resumeEpochRef.current = null;
-      setHeadResumePending(false);
-      // Una lectura en vuelo al ocultarse se descarta: no debe sellar como vigentes páginas que Core no confirmó.
-      for (const flights of inFlightPageReadsRef.current.values()) {
-        for (const flight of flights) {
-          if (flight.request?.key === pageKey) flight.reusable = true;
-        }
-      }
-      pageRequestRef.current = null;
-      pagingRequestActiveRef.current = false;
-      pagingFocusRef.current = false;
-      pageRetryFocusRef.current = false;
-      setPages((current) => (current.key !== pageKey
-        ? current
-        : {
-          ...current,
-          loading: false,
-          ...(current.pageCount > 0 ? { stale: true, preserved: true } : {}),
-          ...(current.loading ? { error: null } : {}),
-        }));
-      return;
-    }
-    resumeEpochRef.current = headReadEpochRef.current ?? 0;
-    setHeadResumePending(true);
-  }, [active, pageKey]);
-
-  useEffect(() => {
-    const resumeEpoch = resumeEpochRef.current;
-    if (!active || resumeEpoch == null || headFailed || !head.data || head.readEpoch <= resumeEpoch) return;
-    resumeEpochRef.current = null;
-    setHeadResumePending(false);
-    // Si la cabecera cambió, el efecto de versión ya está reconciliando.
-    if (pageRequestRef.current || pages.key !== pageKey || pages.pageCount === 0) return;
-    void reconcileLoadedPages(pages.pageCount, head.updatedAt);
-  }, [active, head.data, head.readEpoch, head.updatedAt, headFailed, pageKey, pages.key, pages.pageCount, reconcileLoadedPages]);
-
-  // Con una cabecera stale/desconectada no se encadenan cursores de otra versión del Core.
-  const canLoadMore = !headFailed
-    && !headDataStale
-    && !currentPages.stale
-    && (currentPages.pageCount > 0 ? currentPages.hasMore : Boolean(headCursor));
-
-  const hasData = Boolean(headData);
-  const hasMoreTasks = currentPages.pageCount > 0
-    ? currentPages.hasMore
-    : Boolean(headData?.has_more);
-  const taskSetSize = (headFailed || headDataStale || currentPages.stale || hasMoreTasks) ? -1 : tasks.length;
-  const allStatusReadComplete = statusView.code === 'all'
-    && active
-    && hasData
-    && !headDataStale
-    && !headFailed
-    && head.status !== 'refreshing'
-    && !currentPages.stale
-    && !currentPages.loading
-    && !currentPages.error
-    && !hasMoreTasks;
-
-  const loadMore = useCallback(async ({ automatic = false, retry = false } = {}) => {
-    if (pageRequestRef.current || !moreCursor || currentPages.stale || headDataStale
-      || (activeRef.current && resumeEpochRef.current != null)) return;
-    if (automatic && !pendingTaskId) return;
-    if (retry && document.activeElement === pageRetryButtonRef.current) {
-      pageRetryFocusRef.current = true;
-      pagingFocusRef.current = true;
-    } else if (!automatic && (document.activeElement === loadMoreButtonRef.current || document.activeElement === pageRetryButtonRef.current)) {
-      pagingFocusRef.current = true;
-    }
-    const requestedKey = pageKey;
-    const request = {
-      id: ++pageRequestSequence.current,
-      key: requestedKey,
-      headUpdatedAt: head.updatedAt,
-      kind: automatic ? 'auto' : retry ? 'retry' : 'more',
-      pendingTaskId: automatic ? pendingTaskId : null,
-    };
-    pageRequestRef.current = request;
-    pagingRequestActiveRef.current = true;
-    setPages((current) => ({ ...current, loading: true, error: null, notice: null }));
-    const isCurrentRequest = () => pageRequestRef.current === request
-      && activeRef.current
-      && pageKeyRef.current === request.key
-      && !headFailedRef.current
-      && latestHeadUpdatedAtRef.current === request.headUpdatedAt
-      && (!automatic || pendingTaskIdRef.current === request.pendingTaskId);
-    try {
-      const page = await readTaskPage(request, moreCursor, isCurrentRequest);
-      if (!isCurrentRequest()) return;
-      setPages((current) => (current.key !== requestedKey ? current : {
-        ...current,
-        items: uniqueTasksById([...current.items, ...page.tasks]),
-        pageCount: current.pageCount + 1,
-        nextCursor: page.next_cursor,
-        hasMore: page.has_more,
-        loading: false,
-        stale: false,
-        preserved: false,
-        error: null,
-      }));
-    } catch (error) {
-      if (!isCurrentRequest()) return;
-      const message = error instanceof Error ? error.message : String(error ?? 'Error desconocido del Core');
-      if (/tasks_invalid_cursor/.test(message)) {
-        // El Core rotó su clave (reinicio): se vuelve a la primera página, sin duplicar.
-        setPages((current) => (current.key !== requestedKey ? current : {
-          ...emptyPageState(requestedKey),
-          notice: 'El Core se reinició y el cursor caducó: se volvió a la primera página.',
-        }));
-        head.retry();
-      } else {
-        setPages((current) => (current.key !== requestedKey ? current : { ...current, loading: false, error: message }));
-      }
-    } finally {
-      if (pageRequestRef.current === request) {
-        pageRequestRef.current = null;
-        setPages((current) => (current.key !== requestedKey || !current.loading
-          ? current
-          : { ...current, loading: false }));
-      }
-    }
-  }, [currentPages.stale, head.retry, head.updatedAt, headDataStale, moreCursor, pageKey, pendingTaskId, projectId, readTaskPage, statusView.code]);
-
-  useEffect(() => {
-    if (
-      !active
-      || resumeEpochRef.current != null
-      || !pendingTaskId
-      || statusView.code !== 'all'
-      || tasks.some((task) => task.id === pendingTaskId)
-      || !canLoadMore
-      || currentPages.loading
-      || currentPages.stale
-      || currentPages.error
-      || head.status === 'refreshing'
-    ) return;
-    void loadMore({ automatic: true });
-  }, [
-    active,
-    canLoadMore,
-    currentPages.error,
-    currentPages.loading,
-    currentPages.stale,
-    head.status,
-    loadMore,
-    pendingTaskId,
-    statusView.code,
-    tasks,
-  ]);
-
-  useEffect(() => {
-    if (!pendingTaskId || tasks.some((task) => task.id === pendingTaskId) || !allStatusReadComplete) return;
-    onTaskLookupComplete(projectId, pendingTaskId);
-  }, [allStatusReadComplete, onTaskLookupComplete, pendingTaskId, projectId, tasks]);
-
-  useLayoutEffect(() => {
-    if (currentPages.loading) return;
-    if (!pagingFocusRef.current) {
-      pagingRequestActiveRef.current = false;
-      return;
-    }
-
-    if (pageRetryFocusRef.current) {
-      pageRetryFocusRef.current = false;
-      pagingRequestActiveRef.current = false;
-      if (currentPages.error && pageRetryButtonRef.current?.isConnected) {
-        pageRetryButtonRef.current.focus();
-        return;
-      }
-      pagingFocusRef.current = false;
-      const lastTask = tasks.at(-1);
-      const fallbackKey = lastTask ? taskKey(projectId, lastTask.id) : projectKey(projectId);
-      onFocusKey(fallbackKey);
-      focusItem(fallbackKey);
-      return;
-    }
-
-    const button = loadMoreButtonRef.current;
-    const activeElement = document.activeElement;
-    const focusIsVacant = activeElement === document.body || !activeElement?.isConnected;
-    if (button?.isConnected && !button.disabled) {
-      if (focusIsVacant) button.focus();
-      else if (activeElement !== button) pagingFocusRef.current = false;
-      pagingRequestActiveRef.current = false;
-      return;
-    }
-    if (!focusIsVacant) {
-      pagingFocusRef.current = false;
-      pagingRequestActiveRef.current = false;
-      return;
-    }
-
-    pagingFocusRef.current = false;
-    pagingRequestActiveRef.current = false;
-    const lastTask = tasks.at(-1);
-    const fallbackKey = lastTask ? taskKey(projectId, lastTask.id) : projectKey(projectId);
-    onFocusKey(fallbackKey);
-    focusItem(fallbackKey);
-  }, [canLoadMore, currentPages.loading, focusItem, onFocusKey, projectId, taskIdSignature]);
-
-  const isActiveKey = (key) => key === effectiveActiveKey;
-
-  return (
-    <>
-      <Feedback
-        state={head}
-        subject={`las Tasks de ${projectName}`}
-        onRetry={(event) => {
-          if (event.currentTarget === document.activeElement) focusItem(projectKey(projectId));
-        }}
-      />
-
-      {headDataStale && (
-        <div className="ps__state ps__state--stale" role="status" data-testid={`stale-task-head-${projectId}`}>
-          {headFailed
-            ? `Core no pudo confirmar la cabecera de Tasks de ${projectName}. Se conserva la última lectura correcta y puede estar desactualizada.`
-            : `Se conserva la cabecera anterior de Tasks de ${projectName} mientras Core confirma la lectura actual.`}
-        </div>
-      )}
-
-      {currentPages.stale && (
-        <div className="ps__state ps__state--stale" role="status" data-testid={`stale-task-pages-${projectId}`}>
-          <span>
-            {currentPages.preserved
-              ? `Se conservan las Tasks cargadas de ${projectName} de la última lectura de Core; se vuelven a leer al confirmar los datos y pueden estar desactualizadas.`
-              : headFailed
-              ? `Core no confirmó la cabecera de Tasks de ${projectName}. Se conservan las páginas adicionales de la última lectura correcta y pueden estar desactualizadas.`
-              : `La primera página de ${projectName} se actualizó. Las páginas adicionales provienen de lecturas independientes anteriores y pueden tener estados o títulos desactualizados.`}
-          </span>
-          {currentPages.loading && <span>Actualizando las páginas cargadas de {projectName}…</span>}
-          {currentPages.error && (
-            <>
-              <span>No se pudieron actualizar las páginas adicionales. {describeCoreError(currentPages.error)}</span>
-              <code>{currentPages.error}</code>
-            </>
-          )}
-        </div>
-      )}
-
-      {tasks.length > 0 && (
-        <ul
-          className="ps__tasks"
-          role="group"
-          aria-label={`Tasks de ${project.name || projectId} · ${statusView.label}`}
-          aria-busy={currentPages.loading || head.inFlight}
-        >
-          {tasks.map((task, index) => {
-            const key = taskKey(projectId, task.id);
-            return (
-              <TaskRow
-                key={task.id}
-                project={project}
-                task={task}
-                selected={task.id === selectedTaskId && selectedTaskProjectId === projectId}
-                stale={staleTaskIds.has(task.id)}
-                position={index + 1}
-                setSize={taskSetSize}
-                isActiveKey={isActiveKey(key)}
-                registerRef={registerRef}
-                onKeyDown={onKeyDown}
-                onFocus={() => onFocusKey(key)}
-                onActivate={onActivateTask}
-              />
-            );
-          })}
-        </ul>
-      )}
-
-      {hasData && tasks.length === 0 && (
-        <div className="ps__empty" role="status">
-          {statusView.empty}
-          {statusView.code !== 'all' && ' Cambia el filtro para descubrir otras Tasks de este Project.'}
-        </div>
-      )}
-
-      {confirmedMissingTaskId && (
-        <div className="ps__state ps__state--muted" role="status" data-testid="selected-task-missing">
-          La Task seleccionada ({confirmedMissingTaskId}) no aparece en ninguna página de este Project según la lectura completa de Tasks del Core.
-        </div>
-      )}
-
-      {(canLoadMore || (currentPages.stale && !headFailed)) && (
-        <button
-          ref={loadMoreButtonRef}
-          type="button"
-          className="lk ps__more"
-          onFocus={() => { pagingFocusRef.current = true; }}
-          onBlur={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (
-              nextTarget
-              && nextTarget !== document.body
-              && nextTarget !== loadMoreButtonRef.current
-              && nextTarget !== pageRetryButtonRef.current
-            ) {
-              pagingFocusRef.current = false;
-            } else if (!pagingRequestActiveRef.current) {
-              pagingFocusRef.current = false;
-            }
-          }}
-          onClick={currentPages.stale
-            ? () => reconcileLoadedPages(currentPages.pageCount, head.updatedAt)
-            : () => loadMore()}
-          disabled={currentPages.loading || headDataStale}
-          aria-busy={currentPages.loading}
-          aria-label={currentPages.stale
-            ? (currentPages.loading || headDataStale
-              ? `Actualizando páginas de Tasks de ${projectName}`
-              : `Reintentar actualización de páginas de Tasks de ${projectName}`)
-            : (currentPages.loading
-              ? `Cargando Tasks de ${projectName}`
-              : `Cargar más Tasks de ${projectName}`)}
-        >
-          {currentPages.stale
-            ? (currentPages.loading || headDataStale ? 'Actualizando páginas…' : 'Reintentar actualización')
-            : (currentPages.loading ? 'Cargando…' : `Cargar más Tasks de ${projectName}`)}
-        </button>
-      )}
-
-      {currentPages.notice && <div className="ps__state ps__state--muted" role="status">{currentPages.notice}</div>}
-
-      {currentPages.error && !currentPages.stale && (
-        <div className="ps__state ps__state--error" role="alert">
-          <span>No se pudo cargar la siguiente página de Tasks. {describeCoreError(currentPages.error)}</span>
-          <code>{currentPages.error}</code>
-          <button
-            ref={pageRetryButtonRef}
-            type="button"
-            className="lk"
-            onFocus={() => { pagingFocusRef.current = true; }}
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (
-                nextTarget
-                && nextTarget !== document.body
-                && nextTarget !== loadMoreButtonRef.current
-                && nextTarget !== pageRetryButtonRef.current
-              ) {
-                pagingFocusRef.current = false;
-              } else if (!pagingRequestActiveRef.current) {
-                pagingFocusRef.current = false;
-              }
-            }}
-            onClick={() => loadMore({ retry: true })}
-            aria-label={`Reintentar carga de Tasks de ${projectName}`}
-          >Reintentar lectura</button>
-        </div>
-      )}
-    </>
-  );
-}
 
 /**
  * API pública (LXO-97). Componente aislado, solo lectura y sin dependencias del shell; el host lo
@@ -1094,6 +174,8 @@ export function ProjectsSidebar({
   onExpandedChange,
   onSelectProject,
   onSelectTask,
+  onSelectAttempt,
+  coreModel: coreModelProp,
   onProjectSnapshot,
   onProjectsSnapshot,
 }) {
@@ -1119,6 +201,15 @@ export function ProjectsSidebar({
   const [automaticFilterNotice, setAutomaticFilterNotice] = useState(null);
   const [selectionAnnouncement, setSelectionAnnouncement] = useState('');
   const [activeKey, setActiveKey] = useState(null);
+  // LXO-120 · Task → Attempt. Todo esto es estado de presentación: no lee ni escribe el Core.
+  // La decisión legacy / task_attempt_v1 la toma `useCoreModel` en el host (AdeShell) y llega aquí.
+  const coreModel = coreModelProp ?? UNKNOWN_CORE_MODEL;
+  const [vNextRejected, setVNextRejected] = useState(null);
+  const vNext = coreModel.vNext && vNextRejected !== coreModel.modelKey;
+  const [taskExpandOverrides, setTaskExpandOverrides] = useState(() => new Map());
+  const [expandableTaskKeys, setExpandableTaskKeys] = useState(() => new Set());
+  const [attemptIdsByTaskKey, setAttemptIdsByTaskKey] = useState({});
+  const selectedAttemptId = selectedTaskId && typeof selection?.attemptId === 'string' ? selection.attemptId : null;
   const itemRefs = useRef(new Map());
   const previousSelectionRef = useRef(null);
   const pendingSelectionAnnouncementRef = useRef(null);
@@ -1176,16 +267,34 @@ export function ProjectsSidebar({
     setMissingTaskSelection({ projectId, taskId });
   }, []);
 
-  const visibleKeys = useMemo(() => {
-    const keys = [];
+  // Nodos visibles del árbol, en orden, como `{kind, id}` (más su clave de fila). El teclado y el
+  // roving tabindex trabajan sobre esta lista (`useTreeNavigation`).
+  const treeNodes = useMemo(() => {
+    const nodes = [];
     for (const project of treeProjects) {
-      keys.push(projectKey(project.id));
-      if (expanded.has(project.id)) {
-        for (const taskId of taskIdsByProject[project.id] ?? []) keys.push(taskKey(project.id, taskId));
+      const pKey = projectKey(project.id);
+      const taskIds = expanded.has(project.id) ? taskIdsByProject[project.id] ?? [] : [];
+      nodes.push({
+        key: pKey, kind: 'project', id: project.id, parentKey: null, expandable: true,
+        expanded: expanded.has(project.id), firstChildKey: taskIds[0] ? taskKey(project.id, taskIds[0]) : null,
+      });
+      for (const taskId of taskIds) {
+        const tKey = taskKey(project.id, taskId);
+        const expandable = vNext && expandableTaskKeys.has(tKey);
+        const isOpen = expandable && (taskExpandOverrides.get(tKey) ?? true);
+        const attemptIds = isOpen ? attemptIdsByTaskKey[tKey] ?? [] : [];
+        nodes.push({
+          key: tKey, kind: 'task', id: taskId, projectId: project.id, parentKey: pKey, expandable, expanded: isOpen,
+          firstChildKey: attemptIds[0] ? attemptKey(project.id, taskId, attemptIds[0]) : null,
+        });
+        for (const attemptId of attemptIds) {
+          nodes.push({ key: attemptKey(project.id, taskId, attemptId), kind: 'attempt', id: attemptId, parentKey: tKey, expandable: false, expanded: false, firstChildKey: null });
+        }
       }
     }
-    return keys;
-  }, [treeProjects, expanded, taskIdsByProject]);
+    return nodes;
+  }, [treeProjects, expanded, taskIdsByProject, vNext, expandableTaskKeys, taskExpandOverrides, attemptIdsByTaskKey]);
+  const visibleKeys = useMemo(() => treeNodes.map((node) => node.key), [treeNodes]);
 
   // Solo una modificación de IDs controlados inicia scroll. La solicitud de Task sigue pendiente
   // hasta que aparece la fila o una lectura completa de todas las Tasks confirma su ausencia.
@@ -1285,7 +394,11 @@ export function ProjectsSidebar({
   // cercana sin llamar a `focus()`: una actualización en segundo plano nunca mueve el foco.
   const effectiveActiveKey = useMemo(() => {
     if (activeKey && visibleKeys.includes(activeKey)) return activeKey;
-    if (activeKey?.startsWith('t:')) {
+    if (activeKey?.startsWith('a:')) {
+      const parentTaskKey = taskKeyOfAttemptKey(activeKey);
+      if (visibleKeys.includes(parentTaskKey)) return parentTaskKey;
+    }
+    if (activeKey?.startsWith('t:') || activeKey?.startsWith('a:')) {
       const parentKey = projectKey(projectIdOfTaskKey(activeKey));
       if (visibleKeys.includes(parentKey)) return parentKey;
     }
@@ -1331,52 +444,61 @@ export function ProjectsSidebar({
     if (node) node.focus();
   }, []);
 
-  const onTreeKeyDown = (event, key) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    const index = visibleKeys.indexOf(key);
-    if (index < 0) return;
-    const isProjectRow = key.startsWith('p:');
-    const projectId = isProjectRow ? key.slice(2) : projectIdOfTaskKey(key);
-    let nextKey = null;
-    let handled = true;
-    switch (event.key) {
-      case 'ArrowDown':
-        nextKey = visibleKeys[index + 1] ?? null;
-        break;
-      case 'ArrowUp':
-        nextKey = visibleKeys[index - 1] ?? null;
-        break;
-      case 'Home':
-        nextKey = visibleKeys[0] ?? null;
-        break;
-      case 'End':
-        nextKey = visibleKeys[visibleKeys.length - 1] ?? null;
-        break;
-      case 'ArrowRight':
-        if (isProjectRow) {
-          if (!expanded.has(projectId)) setExpandedTo(projectId, true);
-          else {
-            const firstTaskId = (taskIdsByProject[projectId] ?? [])[0];
-            if (firstTaskId) nextKey = taskKey(projectId, firstTaskId);
-          }
-        }
-        break;
-      case 'ArrowLeft':
-        if (isProjectRow) {
-          if (expanded.has(projectId)) setExpandedTo(projectId, false);
-        } else {
-          nextKey = projectKey(projectId);
-        }
-        break;
-      default:
-        handled = false;
-    }
-    if (!handled) return;
-    event.preventDefault();
-    if (nextKey) {
-      setActiveKey(nextKey);
-      focusItem(nextKey);
-    }
+  const onTreeKeyDown = useTreeNavigation({
+    nodes: treeNodes,
+    focusKey: (key) => {
+      setActiveKey(key);
+      focusItem(key);
+    },
+    setExpanded: (node, next) => {
+      if (node.kind === 'project') setExpandedTo(node.id, next);
+      if (node.kind === 'task') setTaskExpanded(node.key, next);
+    },
+  });
+
+  const setTaskExpanded = (key, next) => {
+    setTaskExpandOverrides((current) => {
+      if (current.get(key) === next) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
+  };
+  const onTaskExpandable = useCallback((key, expandable) => {
+    setExpandableTaskKeys((current) => {
+      if (current.has(key) === expandable) return current;
+      const updated = new Set(current);
+      if (expandable) updated.add(key); else updated.delete(key);
+      return updated;
+    });
+  }, []);
+  const onAttemptIds = useCallback((key, ids) => {
+    setAttemptIdsByTaskKey((current) => {
+      const previous = current[key];
+      if (ids === null) {
+        if (!previous) return current;
+        const { [key]: _removed, ...rest } = current;
+        return rest;
+      }
+      if (previous && previous.length === ids.length && previous.every((id, index) => id === ids[index])) return current;
+      return { ...current, [key]: ids };
+    });
+  }, []);
+  // Si una lectura vNext dice que el modelo no está activo, el sidebar vuelve a F2 para ese modelo.
+  const modelKey = coreModel.modelKey;
+  const onModelCode = useCallback((error) => {
+    if (isLegacyModelCode(coreErrorCode(error))) setVNextRejected(modelKey);
+  }, [modelKey]);
+  const activateAttempt = ({ projectId, taskId, attemptId }) => {
+    setActiveKey(attemptKey(projectId, taskId, attemptId));
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (selected.projectId !== projectId && project) onSelectProject?.(toProjectSummary(project));
+    if (!selectionControlled) setUncontrolledSelection({ projectId, taskId, taskProjectId: projectId });
+    onSelectAttempt?.({ projectId, taskId, attemptId });
+  };
+  const backToProject = (projectId) => {
+    const project = projects.find((candidate) => candidate.id === projectId);
+    if (project) selectProject(project);
   };
 
   const selectedProject = projects.find((project) => project.id === selected.projectId);
@@ -1430,7 +552,27 @@ export function ProjectsSidebar({
     ? `Filtro cambiado automáticamente a Todas para buscar la Task seleccionada (${automaticFilterNotice.taskId}).`
     : '';
 
+  const attemptTree = {
+    active,
+    pollMs,
+    vNext,
+    modelKey: vNext ? modelKey : 'legacy',
+    selection: { projectId: selected.projectId, taskId: selected.taskId, attemptId: selectedAttemptId },
+    isTaskExpanded: (key) => taskExpandOverrides.get(key) ?? true,
+    setTaskExpanded,
+    onTaskExpandable,
+    isActiveKey: (key) => key === effectiveActiveKey,
+    registerRef: registerItem,
+    onFocusKey,
+    onKeyDown: onTreeKeyDown,
+    onAttemptIds,
+    onModelCode,
+    onActivateAttempt: activateAttempt,
+    onBackToProject: backToProject,
+  };
+
   return (
+    <AttemptTreeContext.Provider value={attemptTree}>
     <section
       className={`ps${active ? '' : ' is-hidden'}`}
       aria-labelledby={headingId}
@@ -1562,9 +704,13 @@ export function ProjectsSidebar({
       )}
 
       <p className="ps__note">
-        Solo lectura: sin Attempts, sin crear ni reintentar Tasks, sin arrastrar y sin marcar como leído.
+        Solo lectura: sin crear, reintentar ni lanzar Tasks o intentos, sin arrastrar y sin marcar como leído.
         La identidad de cada fila es su ID durable; host, origen, rama y worktree son metadato.
       </p>
+      {coreModel.mode === 'legacy' && (
+        <p className="ps__note ps__note--info" role="status" data-testid="core-model-legacy">{COPY.modelInactive}</p>
+      )}
     </section>
+    </AttemptTreeContext.Provider>
   );
 }
