@@ -185,7 +185,7 @@ fn la_query_es_de_una_persona_y_de_solo_lectura() {
 
     let r = rpc(&core, &me, "provider_capabilities", json!({})).unwrap();
     assert_eq!(r["version"], 1);
-    assert!(r["status"] == "probing" || r["status"] == "ready", "{r}");
+    assert!(r["status"] == "probing" || r["status"] == "ready", "estado inesperado: {}", r["status"]);
     core.provider_registry.wait_idle();
     let r = rpc(&core, &me, "provider_capabilities", json!({})).unwrap();
     assert_eq!(r["status"], "ready");

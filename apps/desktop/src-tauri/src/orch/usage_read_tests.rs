@@ -294,12 +294,12 @@ fn la_query_es_de_una_persona_de_solo_lectura_y_valida_sus_argumentos() {
 
     // Primera lectura: el registro todavía sondea; cuando termina, ambos proveedores falsos (sin uso) constan como `unsupported`.
     let v = rpc(&core, &me, "usage_report", json!({})).unwrap();
-    assert!(v["status"] == "loading" || v["status"] == "ready", "{v}");
+    assert!(v["status"] == "loading" || v["status"] == "ready", "estado inesperado: {}", v["status"]);
     core.provider_registry.wait_idle();
     rpc(&core, &me, "usage_report", Value::Null).unwrap();
     core.usage_live.wait_idle();
     let v = rpc(&core, &me, "usage_report", json!({})).unwrap();
-    assert_eq!(v["status"], "ready", "{v}");
+    assert_eq!(v["status"], "ready", "estado inesperado: {}", v["status"]);
     let ids: Vec<&str> = v["report"]["providers"].as_array().unwrap().iter().map(|p| p["provider"].as_str().unwrap()).collect();
     assert_eq!(ids, ["claude", "codex"]);
     assert!(v["report"]["providers"].as_array().unwrap().iter().all(|p| p["status"] == "unsupported"));
@@ -341,7 +341,7 @@ fn real_uso_con_las_cli_instaladas() {
         v = LiveUsage::snapshot(&live, false);
     }
     println!("consulta real en {:?}", t.elapsed());
-    assert_eq!(v["status"], "ready", "{v}");
+    assert_eq!(v["status"], "ready", "estado inesperado: {}", v["status"]);
     for p in v["report"]["providers"].as_array().unwrap() {
         let resumen: Vec<String> = p["snapshot"]["windows"].as_array().map(|w| w.iter().map(|x| format!("{}={}", x["id"], x.get("used_percent").map_or("sin dato".to_string(), |u| u.to_string()))).collect()).unwrap_or_default();
         println!("{} · {} · {:?} · ventanas {:?} · error {}", p["provider"], p["status"], p["snapshot"]["provenance"], resumen, p["error"]["kind"]);
