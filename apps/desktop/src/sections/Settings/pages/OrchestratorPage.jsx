@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useOrchStore } from '../../../store/orchStore';
 import { Switch } from '../../../components/Switch';
+import { usePreviewSource, PREVIEW_DEV_BUILD } from '../../../ade/preview/previewSource';
 import { IconNodes } from '../../../components/Icons';
 import { PageHead, SectionHead } from '../SettingsParts';
 import { RolesSettings, useProviders } from '../../../orch/providers/RolesSettings';
@@ -74,6 +75,25 @@ function Team({ enabled, team }) {
   );
 }
 
+/** La vista previa del ADE: maqueta con datos simulados dentro de Orquestar. En desarrollo siempre está. */
+function PreviewRow() {
+  const available = usePreviewSource((st) => st.available);
+  const setAvailable = usePreviewSource((st) => st.setAvailable);
+  const dev = PREVIEW_DEV_BUILD();
+  return (
+    <div className="srow">
+      <div className="srow__text">
+        <span className="srow__label">Vista previa del ADE</span>
+        <span className="srow__hint">
+          Maqueta con datos simulados de lo que el Core aún no da (Comparar, Proof Pack, Revisión, Hosts, Uso). No lee ni escribe nada real.
+          {dev ? ' En desarrollo siempre está disponible.' : ' Al activarla aparece el selector «Core / Vista previa» en Orquestar.'}
+        </span>
+      </div>
+      <Switch checked={available} disabled={dev} onChange={setAvailable} label="Vista previa del ADE" />
+    </div>
+  );
+}
+
 export function OrchestratorPage() {
   const { snap, saveWarnings, agents, init, loadAgents, saveSettings, installSkill, uninstallSkill } = useOrchStore();
   const settings = snap?.settings;
@@ -117,6 +137,7 @@ export function OrchestratorPage() {
             </div>
             <Switch checked={!!settings.enabled} onChange={async (v) => { await saveSettings({ enabled: v }); loadAgents(); }} label="Activar el orquestador" />
           </div>
+          <PreviewRow />
         </div>
       </section>
 
