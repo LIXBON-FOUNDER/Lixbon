@@ -8,6 +8,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Ver src/test/setup.js: los topes por defecto no aguantan la suite entera en paralelo.
+  test: {
+    setupFiles: ["./src/test/setup.js"],
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+  },
+
   // Tres documentos: el IDE, la ventana de Lixbon Team (src-tauri/src/team.rs)
   // y el aviso flotante de la mascota (src-tauri/src/mascota.rs).
   build: {
