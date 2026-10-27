@@ -19,6 +19,7 @@ from core.persistence.queries import (
     get_daily_metrics,
     get_service_usage,
     get_donation_settings,
+    get_web_chat_settings,
     get_plan_for_user,
     get_user_by_id,
     get_user_settings,
@@ -60,6 +61,13 @@ async def api_donations():
     """Si las donaciones sustituyen ahora a las suscripciones y cuánto se ha
     donado. Público: lo leen /plans y Ajustes › Facturación."""
     return {"donations": {**get_donation_settings(), "paypal_business": PAYPAL_DONATION_BUSINESS}}
+
+
+@router.get("/api/web-chat")
+async def api_web_chat():
+    """Si el chat de lixbon.com está abierto o en pausa. Público: lo lee /chat
+    antes de pintar la caja de mensaje."""
+    return {"web_chat": get_web_chat_settings()}
 
 
 @router.get("/api/pricing")

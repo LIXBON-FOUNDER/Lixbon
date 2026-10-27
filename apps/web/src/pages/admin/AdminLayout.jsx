@@ -43,6 +43,7 @@ const AREAS = [
     ],
   },
   { to: '/admin/usuarios', icon: IconUsers, label: 'Usuarios' },
+  { to: '/admin/chat', icon: IconChat, label: 'Chat web' },
   { to: '/admin/correos', icon: IconCorreo, label: 'Correos' },
   { to: '/admin/releases', icon: IconDownload, label: 'Releases' },
   { to: '/admin/skills', icon: IconTerminal, label: 'Skills' },

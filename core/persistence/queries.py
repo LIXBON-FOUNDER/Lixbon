@@ -46,6 +46,7 @@ from core.persistence.models import (
     UsageCreditWindow,
     UsagePolicy,
     DonationSettings,
+    WebChatSettings,
     UsageQuota,
     User,
 )
@@ -1148,6 +1149,32 @@ def update_donation_settings(fields: dict[str, Any]) -> dict[str, Any]:
         row.updated_at = ts
         s.flush()
         return _donation_settings_to_dict(row)
+
+
+def _web_chat_settings_to_dict(row: WebChatSettings | None) -> dict[str, Any]:
+    if not row:
+        return {"enabled": False, "updated_at": None}
+    return {"enabled": bool(row.enabled), "updated_at": row.updated_at}
+
+
+def get_web_chat_settings() -> dict[str, Any]:
+    """Fila única del chat web. Sin fila, el chat está en pausa."""
+    with get_session() as s:
+        return _web_chat_settings_to_dict(s.get(WebChatSettings, 1))
+
+
+def update_web_chat_settings(enabled: bool) -> dict[str, Any]:
+    """Abre o pone en pausa el chat de lixbon.com. Admin-only."""
+    ts = now_iso()
+    with get_session() as s:
+        row = s.get(WebChatSettings, 1)
+        if not row:
+            row = WebChatSettings(id=1, enabled=0, updated_at=ts)
+            s.add(row)
+        row.enabled = 1 if enabled else 0
+        row.updated_at = ts
+        s.flush()
+        return _web_chat_settings_to_dict(row)
 
 
 def _model_weight_to_dict(w: ModelWeight) -> dict[str, Any]:

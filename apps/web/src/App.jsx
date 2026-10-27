@@ -46,6 +46,7 @@ const AdminPasarela = perezosa(admin, 'AdminPasarela');
 const AdminDonaciones = perezosa(admin, 'AdminDonaciones');
 const AdminSkills = perezosa(admin, 'AdminSkills');
 const AdminCorreos = perezosa(admin, 'AdminCorreos');
+const AdminChatWeb = perezosa(admin, 'AdminChatWeb');
 const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminDonaciones, AdminSkills, AdminCorreos];
 
 const POR_SECCION = {
@@ -99,6 +100,7 @@ function LocalizedRoutes() {
         <Route path="pagos/donaciones" element={<AdminDonaciones />} />
         <Route path="pagos/pasarela" element={<AdminPasarela />} />
         <Route path="usuarios" element={<AdminUsuarios />} />
+        <Route path="chat" element={<AdminChatWeb />} />
         <Route path="releases" element={<AdminReleases />} />
         <Route path="skills" element={<AdminSkills />} />
         <Route path="correos" element={<AdminCorreos />} />

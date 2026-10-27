@@ -37,6 +37,7 @@ from core.persistence.queries import (
     get_plan_for_user,
     get_donation_settings,
     get_usage_policy,
+    get_web_chat_settings,
     get_user_by_email,
     get_user_by_id,
     list_audit_events,
@@ -58,6 +59,7 @@ from core.persistence.queries import (
     update_plan,
     update_donation_settings,
     update_usage_policy,
+    update_web_chat_settings,
     upsert_model_alias,
     upsert_model_role,
 )
@@ -239,6 +241,25 @@ async def api_admin_update_donations(
     donations = update_donation_settings(fields)
     log_audit_event("donation_settings_updated", user_id=admin["id"], fields=sorted(fields))
     return {"donations": donations}
+
+
+class WebChatSettingsPayload(BaseModel):
+    enabled: bool
+
+
+@router.get("/web-chat")
+async def api_admin_get_web_chat(_admin: dict[str, Any] = Depends(admin_required)):
+    return {"web_chat": get_web_chat_settings()}
+
+
+@router.patch("/web-chat")
+async def api_admin_update_web_chat(
+    payload: WebChatSettingsPayload,
+    admin: dict[str, Any] = Depends(admin_required),
+):
+    web_chat = update_web_chat_settings(payload.enabled)
+    log_audit_event("web_chat_settings_updated", user_id=admin["id"], enabled=payload.enabled)
+    return {"web_chat": web_chat}
 
 
 class ModelWeightCreatePayload(BaseModel):

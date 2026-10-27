@@ -353,6 +353,17 @@ class DonationSettings(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class WebChatSettings(Base):
+    """Fila única (id=1). Con `enabled` a 0 el chat de lixbon.com queda en pausa
+    (lámina «Puerto tranquilo», sin caja de mensaje). Sin fila, en pausa: es como
+    estaba la web antes de existir el interruptor."""
+    __tablename__ = "web_chat_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    enabled: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class ModelWeight(Base):
     """Peso en créditos por millón de tokens, por modelo (longest-prefix match,
     '*' es el default). Separada de `model_pricing` a propósito: esa tabla es
