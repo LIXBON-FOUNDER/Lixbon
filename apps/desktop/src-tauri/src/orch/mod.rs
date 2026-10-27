@@ -80,6 +80,9 @@ mod attempt_ops_tests;
 #[cfg(test)]
 mod attempt_runtime_ops_tests;
 mod continuity;
+mod provider_registry;
+#[cfg(test)]
+mod provider_registry_tests;
 mod session_ops;
 #[cfg(test)]
 mod session_ops_tests;
@@ -234,6 +237,8 @@ pub struct Core {
     /// Cómo se resuelve la política efectiva (las pruebas no consultan CLIs reales).
     resolver: Resolver,
     ttl_ms: u64,
+    /// Qué ofrece cada proveedor AHORA (LXO-135): se sondea en segundo plano y la lectura nunca espera a una CLI.
+    provider_registry: Arc<provider_registry::LiveRegistry>,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -273,6 +278,7 @@ impl Default for Orch {
             env_gate: Mutex::new(()),
             resolver: resolve_real,
             ttl_ms: spawn_approval::ttl_ms(),
+            provider_registry: provider_registry::LiveRegistry::production(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

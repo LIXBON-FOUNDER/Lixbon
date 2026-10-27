@@ -14,6 +14,7 @@ import { ProjectView } from './ProjectView';
 import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
+import { ProviderInspector } from './ProviderInspector';
 import { useCoreModel } from './useCoreModel';
 import { StartupCutNotice } from './StartupCutNotice';
 import { migratePersistedSelection, resolveNavTarget } from './cutoverNavigation';
@@ -985,6 +986,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
                   />
+                  {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
+                  <ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
                 </div>
               )}
               {selectedTaskId && (

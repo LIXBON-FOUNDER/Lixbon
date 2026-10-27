@@ -624,3 +624,63 @@ modelo nuevo y un cliente nuevo no debe leerlos.
 vNext, con una prueba de contrato que falla si leen un campo deprecated; al menos una release completa en C2 sin
 rollback; y la decisión explícita de cerrar la ventana de rollback. `core_model.compat` deja de anunciar
 `legacy_task_v1` una release **antes** de retirar los datos.
+
+## `provider_capabilities` (LXO-135)
+
+Qué ofrece cada proveedor **ahora**: la matriz de capabilities del registro de adapters ([ADAPTERS.md](ADAPTERS.md)). Es lo único
+por lo que un cliente decide qué acciones ofrecer: **nunca por el nombre ni por la versión del proveedor**. No depende del
+corte (responde igual antes y después). Solo lectura, sin acciones. Código: `orch/provider_registry.rs`. Cliente de Desktop:
+`apps/desktop/src/ade/providerCapabilitiesContract.js`.
+
+### Petición
+
+`{ refresh?: bool }`. Solo una **Person autenticada** (`provider_capabilities_auth_required` si no lo es: es una pantalla de la
+persona, no de un agente). Un parámetro desconocido o un `refresh` que no es booleano es `provider_capabilities_invalid_request`.
+`refresh: true` pide un sondeo nuevo; el Core lo concede como mucho una vez cada 5 s.
+
+### Respuesta
+
+```json
+{
+  "version": 1,
+  "generation": 3,
+  "status": "ready",
+  "refreshing": false,
+  "checked_at_ms": 1792000000000,
+  "providers": [
+    { "id": "claude", "cli_version": "2.1.296", "environment": { "state": "ready" },
+      "matrix": { "version": 1, "capabilities": { "start": { "state": "available" }, "steer": { "state": "unsupported" } } } }
+  ]
+}
+```
+
+`version`, `generation` y `providers` son el snapshot del registro (fixture [`provider_capabilities.v1.json`](fixtures/api/provider_capabilities.v1.json));
+`status`, `refreshing` y `checked_at_ms` son de la lectura viva.
+
+* `providers`, ordenados por `id`. Cada uno trae `cli_version` (o `null`), `environment` (`ready` o `blocked` con sus `blocks`),
+  `transport` (si el adapter tiene más de un canal) y la `matrix` con **las seis capabilities siempre** (`start`, `events`,
+  `answer`, `interrupt`, `steer`, `resume`). Lo que el proveedor no ofrece consta como `unsupported`: no hay huecos.
+* Estados de una capability: `available` · `unsupported` (el proveedor no la tiene) · `unavailable` + `reason` (la tiene, ahora no)
+  · `environment_blocked` + `block` (el entorno lo impide: no es un Attempt fallido).
+* `generation` **sube solo si algo cambió** (un proveedor nuevo, una matriz, un entorno o una versión). Un cliente que la ve
+  distinta sabe que debe repintar, sin reiniciar la app.
+* `status`: `probing` mientras el Core hace el primer sondeo (todavía sin proveedores ni hora: `checked_at_ms: null`) y `ready`
+  después. `refreshing` dice que hay un sondeo en curso.
+
+### Por qué la lectura es viva y no espera
+
+Sondear un proveedor es lanzar su CLI (`--version`, `--help`, el preflight del sandbox…): tarda y puede colgarse. Por eso la
+query **nunca sondea**: devuelve al instante lo último que se supo y, si está viejo (60 s), falta o se fuerza, lanza el sondeo en un
+hilo aparte. Solo hay un sondeo a la vez y no se retiene el registro mientras una CLI contesta, así que un proveedor colgado no
+frena a los demás lectores. Un cliente repite la lectura (Desktop: cada 3 s mientras `probing`, cada 30 s después).
+
+### Qué NO trae
+
+Ninguna ruta, credencial, token ni identificador de cuenta (lo comprueba `provider_registry_tests`). El uso y la cuota son
+otra lectura (LXO-206); los paquetes de contexto, otra (LXO-136).
+
+### Pruebas
+
+`orch/provider_registry_tests.rs` (6): primera lectura sin esperar a una CLI colgada, matriz de cada proveedor con los cuatro
+estados, `generation` y tope del refresco forzado, cambio visible sin reiniciar, adapter repetido o inválido y query de persona.
+Cliente: `providerCapabilitiesContract.test.js`, `capabilityModel.test.js` y `ProviderInspector.test.jsx`.

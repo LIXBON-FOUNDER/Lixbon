@@ -246,6 +246,25 @@ function adeQuery(query, args) {
   const vNext = qs.get('coremodel') === 'v1';
   const inactive = () => { throw new Error('core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail'); };
   switch (query) {
+    // LXO-135: qué ofrece cada proveedor. `?caps=bloqueado` simula un entorno bloqueado y `?caps=sondeando` el primer sondeo del Core.
+    case 'provider_capabilities': {
+      const ALL = ['start', 'events', 'answer', 'interrupt', 'steer', 'resume'];
+      const caps = (changes = {}) => Object.fromEntries(ALL.map((c) => [c, changes[c] ?? { state: 'available' }]));
+      const mode = qs.get('caps');
+      if (mode === 'sondeando') return { version: 1, generation: 0, providers: [], status: 'probing', refreshing: true, checked_at_ms: null };
+      const providers = [
+        { id: 'claude', cli_version: '2.1.296', environment: { state: 'ready' }, matrix: { version: 1, capabilities: caps({ steer: { state: 'unsupported' } }) } },
+        { id: 'codex', cli_version: '0.164.0', environment: { state: 'ready' }, transport: 'app_server', matrix: { version: 1, capabilities: caps() } },
+      ];
+      if (mode === 'bloqueado') {
+        const blockedState = { state: 'environment_blocked', block: 'windows_sandbox_setup' };
+        providers[1] = {
+          id: 'codex', cli_version: '0.164.0', environment: { state: 'blocked', blocks: ['windows_sandbox_setup'] }, transport: 'app_server',
+          matrix: { version: 1, capabilities: caps(Object.fromEntries(ALL.map((c) => [c, blockedState]))) },
+        };
+      }
+      return { version: 1, generation: 1, providers, status: 'ready', refreshing: false, checked_at_ms: Date.now() };
+    }
     case 'core_model':
       return vNext
         ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }
