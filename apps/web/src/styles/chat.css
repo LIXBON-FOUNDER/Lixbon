@@ -741,57 +741,37 @@
   font-size: 14px;
 }
 
-.msg-sources {
-  margin-bottom: 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: var(--bg-card);
+/* Fuentes de la búsqueda: una línea de acción como «Pensando…», sin caja ni
+   borde. Qué se buscó a la izquierda, los iconos de las webs al final. */
+.msg-fuentes { margin-bottom: 12px; font-size: 13.5px; }
+.msg-fuentes__linea {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  color: var(--ink-muted); cursor: pointer; list-style: none;
+  transition: color 0.15s ease;
 }
-
-.msg-sources__title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--ink-label);
+.msg-fuentes__linea::-webkit-details-marker { display: none; }
+.msg-fuentes__linea:hover, .msg-fuentes[open] .msg-fuentes__linea { color: var(--ink-soft); }
+.msg-fuentes__linea > svg { flex-shrink: 0; }
+.msg-fuentes__frase { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-fuentes__pila { display: inline-flex; align-items: center; flex-shrink: 0; }
+.msg-fuentes__icono {
+  display: grid; place-items: center; width: 20px; height: 20px; margin-left: -6px; border-radius: 50%;
+  overflow: hidden; background: var(--surface-4); box-shadow: 0 0 0 2px var(--bg);
+  font-family: var(--font-ui); font-size: 10px; font-weight: 600; color: var(--ink-soft);
 }
-
-.msg-sources__queries {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin: 8px 0 0;
-  font-size: 12.5px;
-  color: var(--ink-label);
+.msg-fuentes__icono:first-child { margin-left: 0; }
+.msg-fuentes__icono img { width: 14px; height: 14px; object-fit: contain; }
+.msg-fuentes__cuenta { margin-left: 8px; font-size: 12.5px; color: var(--ink-label); white-space: nowrap; }
+.msg-fuentes__lista {
+  margin: 8px 0 0; padding: 0 0 0 22px; list-style: none;
+  display: flex; flex-direction: column; gap: 4px;
 }
-
-.msg-sources__query {
-  padding: 2px 8px;
-  border-radius: var(--radius-round);
-  background: var(--surface-3);
-  color: var(--ink-soft);
+.msg-fuentes__lista a {
+  display: flex; gap: 8px; min-width: 0; font-size: 13px; color: var(--ink-soft); text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-
-.msg-sources__list {
-  margin: 6px 0 0;
-  padding-left: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.msg-sources__list a {
-  font-size: 13px;
-  color: var(--ink-soft);
-  text-decoration: none;
-}
-
-.msg-sources__list a:hover {
-  color: var(--accent);
-}
+.msg-fuentes__lista a:hover { color: var(--accent); }
+.msg-fuentes__host { flex-shrink: 0; color: var(--ink-label); }
 
 @keyframes pulse {
   50% { opacity: 0.4; }
@@ -897,6 +877,25 @@
 .md-code__btn:hover { background: var(--bg-hover); color: var(--ink); }
 
 .md .md-code pre { margin: 0; border-radius: 0; }
+
+/* Correo redactado (```email): asunto y destinatario arriba, cuerpo como carta. */
+.md-correo { margin: 12px 0; border-radius: var(--radius); background: var(--bg-card); overflow: hidden; }
+.md-correo__head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid rgba(var(--ink-rgb), 0.06); }
+.md-correo__icono { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); flex-shrink: 0; }
+.md-correo__meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.md-correo__asunto { color: var(--ink-title); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-correo__para { font-size: 12.5px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-correo__abrir {
+  height: 30px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 8px; flex-shrink: 0;
+  background: var(--primary); color: var(--on-primary); font-family: var(--font-ui); font-size: 12.5px; font-weight: 600; text-decoration: none;
+}
+.md-correo__abrir:hover { background: var(--primary-hover); }
+.md-correo__cuerpo { padding: 14px 16px 16px; white-space: pre-wrap; line-height: 1.6; color: var(--ink-body); }
+
+/* Imágenes de la web (solo https, de las fuentes): se ven enteras y abren el original. */
+.md-img { display: inline-flex; flex-direction: column; gap: 6px; margin: 8px 8px 8px 0; max-width: min(100%, 520px); text-decoration: none; vertical-align: top; }
+.md-img img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; border-radius: var(--radius); background: var(--surface-2); }
+.md-img__pie { font-size: 12.5px; color: var(--ink-muted); }
 
 .filecard {
   margin: 12px 0;

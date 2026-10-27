@@ -206,14 +206,40 @@ def _is_public_url(url: str) -> bool:
         return False
 
 
+_OG_IMAGE_RE = re.compile(
+    r"""<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)(?::src)?["'][^>]*>""", re.IGNORECASE)
+_CONTENT_RE = re.compile(r"""content=["']([^"']+)["']""", re.IGNORECASE)
+
+
+def _og_image(html: str, base: str) -> str:
+    """La imagen de portada que declara la página (og:image / twitter:image),
+    absoluta y en https: es la que el chat puede mostrar sin inventar URLs."""
+    import httpx
+
+    m = _OG_IMAGE_RE.search(html[:200_000])
+    c = _CONTENT_RE.search(m.group(0)) if m else None
+    if not c:
+        return ""
+    try:
+        url = str(httpx.URL(base).join(c.group(1).strip().replace("&amp;", "&")))
+    except Exception:
+        return ""
+    return url if url.startswith("https://") and len(url) <= 500 else ""
+
+
 def _fetch_page_text(url: str) -> str:
+    return _fetch_page(url)[0]
+
+
+def _fetch_page(url: str) -> tuple[str, str]:
+    """Texto de la página y su imagen de portada ("" si no hay)."""
     import httpx
     try:
         # Redirecciones a mano (máx. 3): follow_redirects=True validaría solo
         # la URL inicial y un redirect podría saltar a una IP interna.
         for _ in range(3):
             if not _is_public_url(url):
-                return ""
+                return "", ""
             resp = httpx.get(
                 url,
                 timeout=8,
@@ -223,24 +249,26 @@ def _fetch_page_text(url: str) -> str:
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("location")
                 if not location:
-                    return ""
+                    return "", ""
                 url = str(httpx.URL(url).join(location))
                 continue
             ctype = resp.headers.get("content-type", "")
             if "html" not in ctype and "text" not in ctype:
-                return ""
-            return _html_to_text(resp.text)[:FETCH_CHARS]
-        return ""  # demasiadas redirecciones
+                return "", ""
+            return _html_to_text(resp.text)[:FETCH_CHARS], _og_image(resp.text, url)
+        return "", ""  # demasiadas redirecciones
     except Exception as exc:
         logger.debug(f"No se pudo descargar {url}: {exc}")
-        return ""
+        return "", ""
 
 
 def _enrich_sync(results: list[dict], n: int) -> None:
     # El snippet del buscador va primero: es lo que responde a la consulta y
     # build_context recorta el texto por el final.
     for r in results[:n]:
-        page = _fetch_page_text(r.get("url", ""))
+        page, image = _fetch_page(r.get("url", ""))
+        if image:
+            r["image"] = image
         snippet = (r.get("snippet") or "").strip()
         if page and len(page) > len(snippet):
             r["snippet"] = f"{snippet}\n{page}" if snippet else page
@@ -407,10 +435,14 @@ def build_context(query: str, results: list[dict], queries: list[str] | None = N
         "- Escribe la respuesta con tus palabras: NUNCA copies el texto de los resultados "
         "(menús, publicidad, listas de enlaces o de países).",
         "- Cita las fuentes relevantes con su número [n].",
+        "- Si el usuario pide imágenes, muestra las de las líneas «Imagen:» con ![descripción](url); "
+        "nunca inventes URLs de imágenes.",
+        "- No digas la fecha de hoy salvo que la pregunta dependa de ella.",
         "",
         "=== RESULTADOS ===",
     ]
     for i, r in enumerate(results, 1):
         snippet = (r.get("snippet") or "").strip()[:900]
-        lines.append(f"[{i}] {r.get('title')}\nURL: {r.get('url')}\n{snippet}")
+        imagen = f"\nImagen: {r['image']}" if r.get("image") else ""
+        lines.append(f"[{i}] {r.get('title')}\nURL: {r.get('url')}{imagen}\n{snippet}")
     return "\n\n".join(lines)

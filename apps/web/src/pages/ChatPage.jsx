@@ -66,25 +66,57 @@ function UltimaEnCursiva({ texto }) {
   return <>{m[1]}<em>{m[2]}</em>{m[3]}</>;
 }
 
+const hostDe = (url) => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+
+// El icono de la web, pedido a la propia web; si no tiene, su inicial.
+function IconoFuente({ host }) {
+  const [roto, setRoto] = useState(false);
+  return (
+    <span className="msg-fuentes__icono" title={host}>
+      {roto || !host
+        ? (host[0] || '?').toUpperCase()
+        : <img src={`https://${host}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setRoto(true)} />}
+    </span>
+  );
+}
+
+// La búsqueda se cuenta como «Pensando…»: una línea de acción, sin caja. A la
+// izquierda qué se buscó; al final, los iconos de las fuentes. Al pulsarla se
+// despliega la lista.
 function Sources({ sources, queries }) {
   const t = useT('chat');
+  const hosts = [...new Set(sources.map((s) => hostDe(s.url)).filter(Boolean))];
+  const cuenta = sources.length === 1 ? t('sourceOne') : t('sourcesCount', { n: sources.length });
+  const frase = queries?.length
+    ? t('searchedFor', { queries: queries.map((q) => `«${q}»`).join(', ') })
+    : t('searchedWeb');
   return (
-    <div className="msg-sources">
-      <span className="msg-sources__title"><IconGlobe size={13} /> {t('sourcesTitle')}</span>
-      {queries?.length > 0 && (
-        <p className="msg-sources__queries">
-          {t('searchedLabel')} {queries.map((q, i) => <span key={i} className="msg-sources__query">{q}</span>)}
-        </p>
+    <details className="msg-fuentes">
+      <summary className="msg-fuentes__linea">
+        <IconGlobe size={14} />
+        <span className="msg-fuentes__frase">{frase}</span>
+        {sources.length === 0 ? (
+          <span className="msg-fuentes__cuenta">{t('noResults')}</span>
+        ) : (
+          <span className="msg-fuentes__pila" aria-label={cuenta}>
+            {hosts.slice(0, 4).map((h) => <IconoFuente key={h} host={h} />)}
+            <span className="msg-fuentes__cuenta">{cuenta}</span>
+          </span>
+        )}
+      </summary>
+      {sources.length > 0 && (
+        <ol className="msg-fuentes__lista">
+          {sources.map((s, i) => (
+            <li key={i}>
+              <a href={s.url} target="_blank" rel="noreferrer" title={s.snippet}>
+                <span className="msg-fuentes__host">{hostDe(s.url)}</span>
+                {s.title || s.url}
+              </a>
+            </li>
+          ))}
+        </ol>
       )}
-      {sources.length === 0 && <p className="msg-sources__queries">{t('noResults')}</p>}
-      <ol className="msg-sources__list">
-        {sources.map((s, i) => (
-          <li key={i}>
-            <a href={s.url} target="_blank" rel="noreferrer" title={s.snippet}>{s.title || s.url}</a>
-          </li>
-        ))}
-      </ol>
-    </div>
+    </details>
   );
 }
 
