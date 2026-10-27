@@ -1,0 +1,51 @@
+/* LXO-206 · uso de los proveedores. Ningún estado de uso usa el tono de peligro: un fallo de uso no es un fallo del proveedor. Lo que
+   distingue un estado de otro es el texto y el glifo; el color solo acompaña. */
+.usage { display: flex; flex-direction: column; gap: 8px; }
+.usage__bar { display: flex; align-items: center; gap: 12px; }
+.usage__h { margin: 0; font-size: 13px; color: var(--ink, #f2f2ee); flex: 1; }
+.usage__refresh:disabled { opacity: 0.6; cursor: progress; }
+.usage-note { margin: 0; padding: 6px 8px; border-radius: 6px; background: var(--surface-2, #161616); color: var(--ink-soft, #9a9a94); font-size: 12px; }
+.usage-note--warn { background: var(--warn-soft, rgba(232, 200, 114, 0.14)); color: var(--warn, #e8c872); }
+.usage-note--info { background: rgba(142, 197, 255, 0.1); color: var(--info, #8ec5ff); }
+.usage-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.usage-sub { color: var(--ink-soft, #9a9a94); font-size: 11px; }
+
+.usage-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.usage-filter { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--ink-50, #85857f); }
+.usage-filter select { background: var(--surface-3, #1c1c1c); color: var(--ink-body, #dcdcd6); border: 1px solid var(--ink-faint, #44443f); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
+
+.usage-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.usage-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2, #161616); border-left: 3px solid var(--ink-faint, #44443f); font-size: 12px; color: var(--ink-body, #dcdcd6); }
+.usage-card--good { border-left-color: var(--good, #86d694); }
+.usage-card--warn { border-left-color: var(--warn, #e8c872); }
+.usage-card--info { border-left-color: var(--info, #8ec5ff); }
+.usage-card--muted, .usage-card--unknown { border-left-style: dashed; }
+.usage-card__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.usage-card__name { margin: 0; font-size: 13px; color: var(--ink, #f2f2ee); }
+.usage-badge { padding: 0 8px; border-radius: var(--radius-pill, 999px); border: 1px solid var(--ink-faint, #44443f); font-size: 11px; line-height: 18px; color: var(--ink-70, #b5b5af); }
+.usage-badge--good { border-color: var(--good, #86d694); color: var(--good, #86d694); }
+.usage-badge--warn { border-style: dotted; border-width: 2px; border-color: var(--warn, #e8c872); color: var(--warn, #e8c872); }
+.usage-badge--info { border-style: double; border-width: 3px; border-color: var(--info, #8ec5ff); color: var(--info, #8ec5ff); }
+.usage-badge--muted, .usage-badge--unknown { border-style: dashed; color: var(--ink-soft, #9a9a94); }
+.usage-fresh { margin: 0; color: var(--ink-soft, #9a9a94); }
+
+.usage-windows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.usage-window { display: flex; flex-direction: column; gap: 3px; }
+.usage-window__head { display: flex; justify-content: space-between; gap: 8px; }
+.usage-window__name { color: var(--ink, #f2f2ee); }
+.usage-window__pct { color: var(--ink-70, #b5b5af); }
+.usage-window__reset { color: var(--ink-soft, #9a9a94); font-size: 11px; }
+.usage-high { color: var(--warn, #e8c872); }
+.usage-bar { height: 6px; border-radius: 3px; background: var(--surface-4, #222); overflow: hidden; }
+.usage-bar__fill { height: 100%; background: var(--accent, #7aa2ff); }
+.usage-bar__fill--high { background: var(--warn, #e8c872); }
+/* Sin dato: una barra rayada y vacía, NUNCA una barra a cero que parezca «0 % usado». */
+.usage-bar--unknown { background: repeating-linear-gradient(135deg, var(--surface-4, #222) 0 4px, transparent 4px 8px); border: 1px dashed var(--ink-faint, #44443f); }
+.usage-credits { margin: 0; }
+
+.usage-models { border-collapse: collapse; width: 100%; font-size: 11px; }
+.usage-models th, .usage-models td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--surface-4, #222); }
+.usage-models th[scope="col"], .usage-models th[scope="row"] { text-align: left; font-weight: 500; color: var(--ink-70, #b5b5af); }
+.usage-support summary { cursor: pointer; color: var(--ink-soft, #9a9a94); }
+.usage-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; color: var(--ink-soft, #9a9a94); }
+@media (prefers-contrast: more) { .usage-badge { border-width: 2px; } }

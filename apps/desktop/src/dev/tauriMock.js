@@ -271,6 +271,16 @@ function adeQuery(query, args) {
       try { JSON.parse(args.package); } catch { return { v: 1, status: 'invalid', error: { code: 'invalid_json', message: 'invalid_json: no es JSON' }, serialized_bytes: String(args.package ?? '').length }; }
       return { v: 1, status: 'valid', package_id: `sha256:${'ab'.repeat(32)}`, verification: { identity: 'verified', secrets: 'none_found', attachments: 'not_checked' }, package: { schema_version: 1, package_id: `sha256:${'ab'.repeat(32)}`, created_at_ms: ADE_T0, source: { project_id: 'demo', task_id: 'demo-t3', attempt_id: 'demo-t3-a1', provider: 'claude', host: 'fp:00000000' }, objective: 'Paquete de ejemplo (simulado).', decisions: [], constraints: [], revision: null, revision_absent_reason: 'ejemplo del navegador', redactions: 0 }, summary: { serialized_bytes: 400, completeness: 'partial', notes: ['revision_absent'], counts: { decisions: 0, constraints: 0, files: 0, untracked: 0, artifacts: 0, attachments: 0, attachments_omitted: 0, attachments_not_scanned: 0, attachments_bytes: 0, redactions: 0, truncated_fields: 0 } } };
     }
+    // LXO-206 (SIMULADO): informe de ejemplo. `?usage=sondeando` simula el primer sondeo del Core.
+    case 'usage_report': {
+      if (qs.get('usage') === 'sondeando') return { v: 1, status: 'loading', refreshing: true, report: null };
+      const F = (state) => ({ fields: Object.fromEntries(['windows', 'tokens', 'credits', 'plan', 'cost'].map((f) => [f, { state }])) });
+      const now = Date.now();
+      return { v: 1, status: 'ready', refreshing: false, report: { version: 1, generated_at_ms: now, providers: [
+        { provider: 'claude', status: 'fresh', support: { fields: { ...F('unsupported').fields, windows: { state: 'available' } } }, age_ms: 60000, snapshot: { provider: 'claude', observed_at_ms: now - 60000, provenance: 'run_observation', windows: [{ id: 'five_hour', resets_at: Math.floor(now / 1000) + 5400 }] } },
+        { provider: 'codex', status: 'fresh', support: F('available'), age_ms: 0, snapshot: { provider: 'codex', observed_at_ms: now, provenance: 'provider_query', account: 'e7cbf1f7', plan: 'plus', windows: [{ id: 'primary', minutes: 300, used_percent: 42, resets_at: Math.floor(now / 1000) + 3600 }, { id: 'secondary', minutes: 10080, used_percent: 8.5, resets_at: Math.floor(now / 1000) + 86400 * 4 }] } },
+      ] } };
+    }
     case 'core_model':
       return vNext
         ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }

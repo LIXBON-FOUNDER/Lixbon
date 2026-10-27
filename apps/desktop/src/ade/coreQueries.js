@@ -12,6 +12,7 @@ import {
 import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
 import { CONTEXT_PREVIEW_QUERY_SPECS } from './contextPreviewContract';
 import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContract';
+import { USAGE_QUERY_SPECS } from './usageContract';
 
 
 /** Categorías del conjunto cerrado de Attention (LXO-87/89). No se amplían desde el cliente. */
@@ -642,6 +643,8 @@ const QUERY_SPECS = Object.freeze({
   ...PROVIDER_CAPABILITIES_QUERY_SPECS,
   // Revisar un ContextPackage antes de cualquier transferencia (LXO-136): el Core lo verifica; el cliente solo lo muestra.
   ...CONTEXT_PREVIEW_QUERY_SPECS,
+  // El uso y los límites de cada proveedor (LXO-206): el Core lo consulta; la interfaz no llama a ningún proveedor.
+  ...USAGE_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

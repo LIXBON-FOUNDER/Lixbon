@@ -748,3 +748,49 @@ commit) y [`context_package_preview_invalid.v1.json`](fixtures/api/context_packa
 rechaza como dice su manifiesto, el paquete se ve tal cual, completo / parcial / truncado / redactado, un paquete alterado hace
 visible la diferencia de identidad, ninguna respuesta lleva algo con forma de credencial, permisos y argumentos, y un paquete en el
 tope de tamaño (500 archivos, 100 sin seguimiento) se previsualiza sin coste desproporcionado.
+
+## `usage_report` (LXO-206)
+
+El uso y los límites de cada proveedor: lo que lee la vista de Usage de Desktop. Es el informe del contrato de LXO-205
+([ADAPTERS.md § Usage](ADAPTERS.md#usage-lxo-205); fixture [`usage_report.v1.json`](fixtures/api/usage_report.v1.json)) dentro de una
+lectura que **no espera a ninguna CLI**. Solo lectura. Código: `orch/usage_read.rs`. Cliente: `apps/desktop/src/ade/usageContract.js`,
+`usageModel.js` y `UsageView.jsx`.
+
+### Petición
+
+`{ refresh?: bool }`. Solo una **Person autenticada** (`usage_report_auth_required`): la cuota es de su cuenta. Un parámetro
+desconocido o un `refresh` que no es booleano es `usage_report_invalid_request`. `refresh: true` es el refresco **manual**: el servicio
+lo concede como mucho una vez cada 5 s por proveedor y, si se pide antes, atiende con el dato guardado y marca `throttled: true`.
+
+### Respuesta
+
+```json
+{ "v": 1, "status": "ready", "refreshing": false, "report": { "version": 1, "generated_at_ms": 1800000000000, "providers": [ "…" ] } }
+```
+
+* `status`: `loading` mientras todavía no hay ningún informe (`report: null`, sin inventar nada) y `ready` después. `refreshing`
+  dice que hay una consulta en curso. Un cliente repite la lectura (Desktop: cada 2 s mientras carga o consulta; cada 15 s después).
+* `report`: una entrada por proveedor, **sin totales** (sumar tokens de uno con porcentajes de otro no significa nada). Cada una trae
+  `status` (`fresh` · `stale` · `unknown` · `unsupported` · `environment_blocked`), `support` (qué campos informa: `windows`,
+  `tokens`, `credits`, `plan`, `cost`), y, si hay dato, `snapshot` con `observed_at_ms` y `provenance`
+  (`provider_query` o `run_observation`), más `age_ms`, `error` y `throttled` cuando aplican.
+* **Desconocido no es cero**: un campo que el proveedor no dio **no aparece**; el cliente lo dice «sin dato».
+* `stale` conserva el último dato y lleva el `error` de la actualización que falló (`auth_required` · `rate_limited` ·
+  `provider_unavailable` · `unsupported` · `environment_blocked` · `internal`). **Un fallo de uso no cambia el estado de ningún
+  proveedor ni Attempt.**
+* La cuenta es una **huella de 8 hex**; los textos de error pasan por la redacción. Ninguna credencial ni identificador de cuenta.
+
+### Por qué la lectura es viva y no espera
+
+`claude /usage` tarda varios segundos y Codex abre su `app-server`; el servicio bloquea hasta que contestan o vence su tope (15 s,
+30 s para Claude). Por eso la query **nunca consulta**: devuelve al instante el último informe y lanza la consulta en un hilo aparte
+(uno a la vez). La caché del servicio sigue mandando (TTL 5 min, backoff de 30 s tras un fallo): repetir la lectura no martillea a los
+proveedores. Mientras el registro de proveedores no ha terminado su primer sondeo (`provider_capabilities`), no hay nada que consultar y
+la respuesta es `loading`.
+
+### Pruebas
+
+`orch/usage_read_tests.rs` (8): una CLI colgada no bloquea la lectura, un solo vuelo y sin reconsultar con el informe reciente, el
+refresco manual seguido se atiende con la caché, sin proveedores aún no se inventa un informe, desconocido ≠ cero, sin uso o bloqueado
+no se consulta ni es un fallo, un fallo deja el dato anterior como `stale` (y sin dato es `unknown`), ningún secreto ni identificador
+de cuenta, y permisos y argumentos.

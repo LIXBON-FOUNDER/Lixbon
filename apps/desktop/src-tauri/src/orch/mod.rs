@@ -82,6 +82,9 @@ mod attempt_runtime_ops_tests;
 mod continuity;
 mod provider_registry;
 mod context_preview;
+mod usage_read;
+#[cfg(test)]
+mod usage_read_tests;
 #[cfg(test)]
 mod context_preview_tests;
 #[cfg(test)]
@@ -242,6 +245,8 @@ pub struct Core {
     ttl_ms: u64,
     /// Qué ofrece cada proveedor AHORA (LXO-135): se sondea en segundo plano y la lectura nunca espera a una CLI.
     provider_registry: Arc<provider_registry::LiveRegistry>,
+    /// El uso y los límites de cada proveedor (LXO-206): se consulta en segundo plano y la lectura no espera a ninguna CLI.
+    usage_live: Arc<usage_read::LiveUsage>,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -263,6 +268,7 @@ pub struct Orch(pub Arc<Core>);
 
 impl Default for Orch {
     fn default() -> Self {
+        let provider_registry = provider_registry::LiveRegistry::production();
         Orch(Arc::new(Core {
             host: OnceLock::new(),
             storage: store_boot::CoreStorage::default(),
@@ -281,7 +287,8 @@ impl Default for Orch {
             env_gate: Mutex::new(()),
             resolver: resolve_real,
             ttl_ms: spawn_approval::ttl_ms(),
-            provider_registry: provider_registry::LiveRegistry::production(),
+            usage_live: usage_read::LiveUsage::over(&provider_registry),
+            provider_registry,
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

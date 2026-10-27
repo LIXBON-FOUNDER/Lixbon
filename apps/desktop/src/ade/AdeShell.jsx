@@ -16,6 +16,7 @@ import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { ContextPreview } from './ContextPreview';
 import { ProviderInspector } from './ProviderInspector';
+import { UsageView } from './UsageView';
 import { useCoreModel } from './useCoreModel';
 import { StartupCutNotice } from './StartupCutNotice';
 import { migratePersistedSelection, resolveNavTarget } from './cutoverNavigation';
@@ -989,6 +990,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                   />
                   {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
                   <ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
+                  {/* Cuánta cuota le queda a la cuenta de cada proveedor (LXO-206): el Core consulta en segundo plano. */}
+                  <UsageView active={workspaceActive && workspaceView === 'workspace'} />
                   {/* Qué contexto viajaría en un ContextPackage (LXO-136): solo lectura, antes de cualquier transferencia. */}
                   <ContextPreview />
                 </div>

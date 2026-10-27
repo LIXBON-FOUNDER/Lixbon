@@ -142,6 +142,12 @@ impl LiveRegistry {
         }
     }
 
+    /// Los proveedores para el servicio de uso (LXO-206), o `None` si el primer sondeo todavía no terminó. No sondea ni espera.
+    pub(super) fn usage_targets(&self) -> Option<Vec<super::adapter::UsageTarget>> {
+        let s = self.live();
+        s.built.then(|| s.registry.usage_targets())
+    }
+
     /// Para las pruebas: espera a que no haya un sondeo en curso.
     #[cfg(test)]
     pub(super) fn wait_idle(&self) {

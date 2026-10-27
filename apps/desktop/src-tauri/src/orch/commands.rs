@@ -27,6 +27,8 @@ const ADE_READ_QUERIES: &[&str] = &[
     "provider_capabilities",
     // Revisar un ContextPackage (LXO-136). Solo lectura.
     "context_package_preview",
+    // El uso y los límites de cada proveedor (LXO-206). Solo lectura.
+    "usage_report",
 ];
 const MAX_SAFE_ACTIVITY_CURSOR: i64 = 9_007_199_254_740_991;
 
@@ -326,7 +328,7 @@ mod ade_query_tests {
         for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list", "resource_inventory"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
-        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview"] {
+        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview", "usage_report"] {
             assert!(is_ade_read_query(query), "{query} debe ser una lectura vNext permitida");
         }
         // Las mutaciones del Attempt no entran por esta superficie: el ADE F3 solo lee.
