@@ -357,9 +357,9 @@ mod falso_agente {
 
     #[test]
     fn si_el_agente_sigue_sale_de_la_espera() {
-        // Las pausas son de PowerShell, no `ping -n N 127.0.0.1`: ese ping dura N-1 s solo si el ICMP de loopback responde; con la
-        // pila de red degradada (cortafuegos, VPN, un adaptador que cambia) cada eco agota su tope y 3 s pasan a ser ~19 s, el TTL
-        // vence antes de que el agente «siga» y la prueba falla sin haber comprobado nada.
+        // Las pausas son de PowerShell, no `ping -n N 127.0.0.1`: ese ping dura N-1 s solo si el ICMP de loopback responde. Medido
+        // en una máquina de desarrollo (LXO-238) con loopback sin respuesta, `ping -n 4` tardó ~19 s: el TTL vencía antes de que el
+        // agente «siga» y la prueba fallaba sin haber comprobado nada. No se diagnosticó por qué el loopback dejó de contestar.
         let r = run(
             "sigue",
             "echo This command requires approval & powershell -NoProfile -Command Start-Sleep 3 & echo Leyendo src/main.rs y escribiendo NOTAS.md & powershell -NoProfile -Command Start-Sleep 1",
