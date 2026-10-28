@@ -357,10 +357,13 @@ mod falso_agente {
 
     #[test]
     fn si_el_agente_sigue_sale_de_la_espera() {
+        // Las pausas son de PowerShell, no `ping -n N 127.0.0.1`: ese ping dura N-1 s solo si el ICMP de loopback responde; con la
+        // pila de red degradada (cortafuegos, VPN, un adaptador que cambia) cada eco agota su tope y 3 s pasan a ser ~19 s, el TTL
+        // vence antes de que el agente «siga» y la prueba falla sin haber comprobado nada.
         let r = run(
             "sigue",
-            "echo This command requires approval & ping -n 4 127.0.0.1 >nul & echo Leyendo src/main.rs y escribiendo NOTAS.md & ping -n 2 127.0.0.1 >nul",
-            8,
+            "echo This command requires approval & powershell -NoProfile -Command Start-Sleep 3 & echo Leyendo src/main.rs y escribiendo NOTAS.md & powershell -NoProfile -Command Start-Sleep 1",
+            30,
             60,
         );
         assert!(matches!(r.changes.as_slice(), [Change::Entered(_), Change::Left]), "{:?}", r.changes);
