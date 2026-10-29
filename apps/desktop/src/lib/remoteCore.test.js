@@ -254,4 +254,23 @@ describe('core_attempts y core_attempt (LXO-126)', () => {
     expect(JSON.stringify(out)).not.toContain('SENTINEL');
     expect(slimAttempt({}).provider_session).toBeNull();
   });
+
+  it('la ficha nombra su Task, y sin ella se enseña igual (LXO-127)', async () => {
+    const call = vi.fn().mockImplementation(async (cmd) => (cmd === 'attempt_detail' ? { attempt: full(2, 'done') } : { v: 2, task }));
+    const out = await handleCoreAction('core_attempt', { rid: 'e', attempt_id: 't1-a2' }, call);
+    expect(call).toHaveBeenCalledWith('task_detail_v2', { task_id: 't1' });
+    expect(out.fields.task).toEqual({ id: 't1', title: 'API', state: 'in_progress', project_id: 'p1', current_attempt_id: 't1-a3' });
+    expect(JSON.stringify(out)).not.toContain('SENTINEL-SPEC');
+    const sinTask = await handleCoreAction('core_attempt', { rid: 'f', attempt_id: 't1-a2' }, vi.fn().mockImplementation(async (cmd) => {
+      if (cmd === 'attempt_detail') return { attempt: full(2, 'done') };
+      throw new Error('model_unavailable: x');
+    }));
+    expect(sinTask.fields).toMatchObject({ ok: true, task: null });
+  });
+
+  it('la Activity de un intento concreto (LXO-127)', () => {
+    expect(parseCoreRequest('core_activity', { rid: 'r1', attempt_id: 't1-a2' }).args).toEqual({ target_kind: 'attempt', target_id: 't1-a2', order: 'desc', cursor: 0, limit: 30 });
+    expect(parseCoreRequest('core_activity', { rid: 'r1', attempt_id: 't1-a2', task_id: 't1' }).code).toBe('invalid_request');
+    expect(parseCoreRequest('core_activity', { rid: 'r1', attempt_id: '' }).code).toBe('invalid_request');
+  });
 });

@@ -271,13 +271,16 @@ export function parseCoreRequest(action, raw = {}) {
     return { rid, args: { attempt_id: raw.attempt_id } };
   }
   if (action === 'core_activity') {
-    if (!id(raw.task_id) || !raw.task_id) return { rid, code: 'invalid_request' };
+    // De una Task (`task_id`) o de un intento concreto (`attempt_id`, LXO-127), nunca de los dos.
+    const attempt = raw.attempt_id !== undefined && raw.attempt_id !== null;
+    const target = attempt ? raw.attempt_id : raw.task_id;
+    if ((attempt && raw.task_id !== undefined && raw.task_id !== null) || !id(target) || !target) return { rid, code: 'invalid_request' };
     const cursor = raw.cursor ?? 0;
     const limit = raw.limit ?? CORE_ACTIVITY_DEFAULT_LIMIT;
     if (!Number.isSafeInteger(cursor) || cursor < 0) return { rid, code: 'invalid_cursor' };
     if (!Number.isInteger(limit) || limit < 1 || limit > CORE_ACTIVITY_MAX_LIMIT) return { rid, code: 'invalid_request' };
     // Lo último primero: `desc` con cursor exclusivo (0 = desde lo más nuevo).
-    return { rid, args: { target_kind: 'task', target_id: raw.task_id, order: 'desc', cursor, limit } };
+    return { rid, args: { target_kind: attempt ? 'attempt' : 'task', target_id: target, order: 'desc', cursor, limit } };
   }
   return { rid, code: 'invalid_request' };
 }
@@ -336,7 +339,17 @@ export async function handleCoreAction(action, raw, call) {
     }
     if (action === 'core_attempt') {
       const detail = await call('attempt_detail', req.args);
-      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, attempt: slimAttempt(detail?.attempt || {}) } };
+      const attempt = slimAttempt(detail?.attempt || {});
+      // Su Task, para nombrarla: si su lectura falla, el intento se enseña igual.
+      const task = attempt.task_id
+        ? await call('task_detail_v2', { task_id: attempt.task_id })
+            .then((d) => {
+              const t = slimTaskV2(d?.task || {});
+              return { id: t.id, title: t.title, state: t.state, project_id: t.project_id, current_attempt_id: t.current_attempt_id };
+            })
+            .catch(() => null)
+        : null;
+      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, attempt, task } };
     }
     if (action === 'core_activity') {
       const page = await call('activity_list', req.args);

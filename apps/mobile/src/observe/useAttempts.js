@@ -3,10 +3,11 @@
 // `core_model_inactive` (antes del corte) o el IDE es anterior, `mode` es 'legacy' y la pantalla sigue como en
 // LXO-110. Se vuelve a pedir cuando cambia la snapshot (llegaron Events). Sin conexión enseña lo último que vio,
 // marcado como desactualizado.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { ATTEMPTS_CAPABILITY, createAttemptsMemory } from './attempts';
 import { STATUS as BOOT } from './bootstrap';
+import { activityReducer, initialActivity } from './task';
 
 const LEGACY = /^(core_model_inactive|unsupported_action|invalid_request)$/;
 const NOT_FOUND = /^model_not_found$/;
@@ -94,12 +95,29 @@ export function useAttempt(obs, attemptId) {
   const [error, setError] = useState(null);
   const [fresh, setFresh] = useState(false);
   const att = useAttemptAttention(obs, online, { target_id: attemptId }, key);
+  // La Activity de este intento (LXO-127): `core_activity` con `attempt_id`.
+  const [activity, dispatch] = useReducer(activityReducer, initialActivity);
+  const activityRef = useRef(activity);
+  activityRef.current = activity;
+
+  const loadActivity = useCallback(
+    async (append) => {
+      if (!capability || !online) return;
+      const cursor = append ? activityRef.current.cursor : 0;
+      if (append && !cursor) return;
+      dispatch({ type: 'request' });
+      const res = await obs.request('core_activity', { attempt_id: attemptId, cursor });
+      if (res.ok) dispatch({ type: 'page', append, items: res.data.items, cursor: res.data.next_cursor, hasMore: res.data.has_more });
+      else dispatch({ type: 'fail', code: res.code || res.transport });
+    },
+    [capability, online, attemptId, obs.request],
+  );
 
   const load = useCallback(async () => {
     if (!capability || !online) return;
     const res = await obs.request('core_attempt', { attempt_id: attemptId });
     if (res.ok) {
-      const next = { attempt: res.data.attempt, at: Date.now() };
+      const next = { attempt: res.data.attempt, task: res.data.task || null, at: Date.now() };
       memory.remember(key, next);
       setEntry(next);
       setMissing(false);
@@ -116,11 +134,15 @@ export function useAttempt(obs, attemptId) {
   useEffect(() => {
     load();
     att.load();
-  }, [load, att.load, cursorKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    loadActivity(false);
+  }, [load, att.load, loadActivity, cursorKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     capability,
     attempt: entry?.attempt || null,
+    task: entry?.task || null,
+    activity,
+    more: () => loadActivity(true),
     at: entry?.at || null,
     stale: !!entry && (!online || !!error || !fresh),
     missing,
