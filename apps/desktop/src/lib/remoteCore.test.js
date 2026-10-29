@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
+import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttempt, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTEMPTS_MAX, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
 
 const event = {
   seq: 7, id: 'ev-7', ts: 1000, v: 2, kind: 'task.created', class: 'state',
@@ -186,5 +186,72 @@ describe('core_task y core_activity (LXO-110)', () => {
     expect(act.fields).toMatchObject({ rid: 'b', ok: true, next_cursor: 5, has_more: true });
     const missing = await handleCoreAction('core_task', { rid: 'c', project_id: 'p1', task_id: 'x' }, vi.fn().mockRejectedValue('tasks_not_found: no existe la Task x'));
     expect(missing.fields).toEqual({ rid: 'c', ok: false, code: 'tasks_not_found', protocol: 1 });
+  });
+});
+
+describe('core_attempts y core_attempt (LXO-126)', () => {
+  const brief = (n, status) => ({ id: `t1-a${n}`, n, status, provider: 'codex', model: 'gpt-5', role: null, external: n === 2, created_at: 1000 + n, started_at: 1100 + n, ended_at: status === 'running' ? null : 1200 + n });
+  const full = (n, status) => ({
+    ...brief(n, status), task_id: 't1', effort: 'high', profile: 'implementar', summary: n === 1 ? '' : 'Hecho', failure_reason: status === 'failed' ? 'agent_idle_timeout' : null,
+    integrated: status === 'done', provider_session: { id: 'ps-1', status: 'idle', resumable: true, binding: 'session_id', bound: true, opened_by_attempt_id: `t1-a${n}`, external_ref: 'SENTINEL-REF' },
+    worktree: { id: 'wt-1', path: 'C:/r/app-wt/t1', branch: 'lx/r1/t1', base_branch: 'main', provenance: 'created', state: 'active', machine: n === 2 ? 'portatil' : null, branch_kept: false },
+    artifacts: [{ id: 'x', kind: 'pull_request', uri: 'https://github.com/o/r/pull/1', sha256: null, bytes: null }],
+    review: { decision_id: 1, verdict: 'accepted', status: 'stale', head_commit: 'c3', base_commit: 'b0' },
+  });
+  const task = { id: 't1', project_id: 'p1', run_id: 'r1', parent_task_id: null, title: 'API', intent: 'open', state: 'in_progress', origin: 'lixbon', spec: 'SENTINEL-SPEC',
+    attempt_count: 3, current_attempt: brief(3, 'running'), attempts: [brief(1, 'failed'), brief(2, 'done'), brief(3, 'running')], created_at: 1, updated_at: 2 };
+
+  it('valida las peticiones', () => {
+    expect(parseCoreRequest('core_attempts', { rid: 'r1', task_id: 't1' }).args).toEqual({ task_id: 't1' });
+    expect(parseCoreRequest('core_attempts', { rid: 'r1' }).code).toBe('invalid_request');
+    expect(parseCoreRequest('core_attempt', { rid: 'r1', attempt_id: 't1-a2' }).args).toEqual({ attempt_id: 't1-a2' });
+    expect(parseCoreRequest('core_attempt', { rid: 'r1', attempt_id: 7 }).code).toBe('invalid_request');
+  });
+
+  it('lista los intentos con el detalle de cada uno, sin el encargo ni la referencia del proveedor', async () => {
+    const call = vi.fn().mockImplementation(async (cmd, args) => {
+      if (cmd === 'task_detail_v2') return { v: 2, core_model: 'task_attempt_v1', task };
+      if (args.attempt_id === 't1-a3') throw new Error('model_unavailable: cerrado');
+      const n = Number(args.attempt_id.slice(-1));
+      return { v: 1, attempt: full(n, n === 1 ? 'failed' : 'done') };
+    });
+    const out = await handleCoreAction('core_attempts', { rid: 'a', task_id: 't1' }, call);
+    expect(call).toHaveBeenCalledWith('task_detail_v2', { task_id: 't1' });
+    expect(out.type).toBe('orch_core_attempts');
+    expect(out.fields.task).toMatchObject({ id: 't1', state: 'in_progress', attempt_count: 3, current_attempt_id: 't1-a3' });
+    const [a1, a2, a3] = out.fields.attempts;
+    expect(a1).toMatchObject({ id: 't1-a1', status: 'failed', failure_reason: 'agent_idle_timeout', has_summary: false, host: null, origin: 'lixbon' });
+    expect(a2).toMatchObject({ id: 't1-a2', integrated: true, has_summary: true, host: 'portatil', origin: 'external' });
+    // Si el detalle de uno falla, va lo de la lista: lo demás, desconocido.
+    expect(a3).toMatchObject({ id: 't1-a3', status: 'running', integrated: null, host: null, has_summary: null });
+    expect(out.fields.truncated).toBe(false);
+    expect(JSON.stringify(out)).not.toContain('SENTINEL');
+  });
+
+  it(`detalla solo los últimos ${CORE_ATTEMPTS_MAX} y dice que hay más`, async () => {
+    const many = Array.from({ length: CORE_ATTEMPTS_MAX + 3 }, (_, i) => brief(i + 1, 'failed'));
+    const call = vi.fn().mockImplementation(async (cmd, args) => (cmd === 'task_detail_v2' ? { task: { ...task, attempts: many } } : { attempt: { id: args.attempt_id } }));
+    const out = await handleCoreAction('core_attempts', { rid: 'b', task_id: 't1' }, call);
+    expect(out.fields.attempts).toHaveLength(CORE_ATTEMPTS_MAX);
+    expect(out.fields.attempts[0].id).toBe('t1-a4');
+    expect(out.fields.truncated).toBe(true);
+  });
+
+  it('antes del corte devuelve el código del Core', async () => {
+    const out = await handleCoreAction('core_attempts', { rid: 'c', task_id: 't1' }, vi.fn().mockRejectedValue('core_model_inactive: el Core aún sirve el modelo legacy'));
+    expect(out.fields).toEqual({ rid: 'c', ok: false, code: 'core_model_inactive', protocol: 1 });
+  });
+
+  it('la ficha lleva sesión, worktree, artifacts y revisión, sin la referencia del proveedor', async () => {
+    const out = await handleCoreAction('core_attempt', { rid: 'd', attempt_id: 't1-a2' }, vi.fn().mockResolvedValue({ v: 1, attempt: full(2, 'done') }));
+    expect(out.type).toBe('orch_core_attempt');
+    const a = out.fields.attempt;
+    expect(a.provider_session).toEqual({ status: 'idle', resumable: true, bound: true, binding: 'session_id', opened_here: true });
+    expect(a.worktree).toMatchObject({ path: 'C:/r/app-wt/t1', branch: 'lx/r1/t1', provenance: 'created', machine: 'portatil' });
+    expect(a.artifacts).toEqual([{ kind: 'pull_request', uri: 'https://github.com/o/r/pull/1' }]);
+    expect(a.review).toEqual({ verdict: 'accepted', status: 'stale', head_commit: 'c3', base_commit: 'b0' });
+    expect(a.summary).toBe('Hecho');
+    expect(JSON.stringify(out)).not.toContain('SENTINEL');
+    expect(slimAttempt({}).provider_session).toBeNull();
   });
 });

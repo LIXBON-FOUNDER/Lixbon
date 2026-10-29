@@ -22,6 +22,9 @@ const ATTENTION_SEVERITIES = new Set(['critical', 'high', 'medium', 'low']);
 export const CORE_ATTENTION_MAX_LIMIT = 100;
 const CORE_ATTENTION_DEFAULT_LIMIT = 50;
 const CURSOR_CHARS = 4096;
+/** Intentos que `core_attempts` detalla (los últimos por `n`); el resto se cuenta en `attempt_count`. */
+export const CORE_ATTEMPTS_MAX = 20;
+const SUMMARY_CHARS = 400;
 const TARGET_KINDS = new Set(['project', 'task', 'run', 'spawn_request', 'attempt', 'thread', 'worktree', 'artifact', 'review', 'integration', 'agent', 'decision', 'policy']);
 export const CORE_ACTIVITY_MAX_LIMIT = 50;
 const CORE_ACTIVITY_DEFAULT_LIMIT = 30;
@@ -76,6 +79,82 @@ export function slimAttention(a) {
  * suyas siguen sin respuesta), sin el nombre de la fase (como Activity) y con la ruta como ubicación secundaria.
  * Lo que el modelo legacy no registra no se inventa: queda `null`.
  */
+// ── Task/Attempt (LXO-126) ──────────────────────────────────────────────────
+
+const bool = (v) => (typeof v === 'boolean' ? v : null);
+const originOf = (external) => (typeof external === 'boolean' ? (external ? 'external' : 'lixbon') : null);
+
+/** La Task de `task_detail_v2` sin el encargo: intención, estado derivado y cuántos intentos tiene. */
+export function slimTaskV2(t) {
+  return {
+    id: id(t?.id),
+    project_id: id(t?.project_id),
+    run_id: id(t?.run_id),
+    parent_task_id: id(t?.parent_task_id),
+    title: text(t?.title),
+    intent: text(t?.intent, 40),
+    state: text(t?.state, 40),
+    origin: text(t?.origin, 40),
+    attempt_count: int(t?.attempt_count),
+    current_attempt_id: id(t?.current_attempt?.id),
+    created_at: int(t?.created_at),
+    updated_at: int(t?.updated_at),
+  };
+}
+
+/** Un intento para la lista compacta del móvil: estado, proveedor, fechas, resultado y su host. */
+export function slimAttemptBrief(a) {
+  return {
+    id: id(a?.id),
+    task_id: id(a?.task_id),
+    n: int(a?.n),
+    status: text(a?.status, 40),
+    provider: text(a?.provider, 60),
+    model: text(a?.model, 120),
+    role: text(a?.role, 60),
+    origin: originOf(a?.external),
+    created_at: int(a?.created_at),
+    started_at: int(a?.started_at),
+    ended_at: int(a?.ended_at),
+    failure_reason: text(a?.failure_reason, 60),
+    integrated: bool(a?.integrated),
+    has_summary: typeof a?.summary === 'string' ? a.summary.length > 0 : null,
+    // El equipo donde corrió, si el Core lo registra en su Worktree; si no, desconocido (nunca se deduce).
+    host: text(a?.worktree?.machine, 120),
+  };
+}
+
+/** La ficha de un intento (`attempt_detail`): sin la referencia del proveedor ni ids internos de la sesión. */
+export function slimAttempt(a) {
+  const ps = a?.provider_session;
+  const wt = a?.worktree;
+  const rv = a?.review;
+  return {
+    ...slimAttemptBrief(a),
+    effort: text(a?.effort, 40),
+    profile: text(a?.profile, 60),
+    summary: text(a?.summary, SUMMARY_CHARS),
+    provider_session: ps && typeof ps === 'object'
+      ? { status: text(ps.status, 40), resumable: bool(ps.resumable), bound: bool(ps.bound), binding: text(ps.binding, 40), opened_here: ps.opened_by_attempt_id === a?.id }
+      : null,
+    worktree: wt && typeof wt === 'object'
+      ? {
+          path: text(wt.path, PATH_CHARS),
+          branch: text(wt.branch),
+          base_branch: text(wt.base_branch),
+          provenance: text(wt.provenance, 40),
+          state: text(wt.state, 40),
+          machine: text(wt.machine, 120),
+          branch_kept: bool(wt.branch_kept),
+        }
+      : null,
+    artifacts: (Array.isArray(a?.artifacts) ? a.artifacts : []).slice(0, 20).map((x) => ({ kind: text(x?.kind, 40), uri: text(x?.uri, PATH_CHARS) })),
+    review: rv && typeof rv === 'object'
+      ? { verdict: text(rv.verdict, 40), status: text(rv.status, 40), head_commit: text(rv.head_commit, 64), base_commit: text(rv.base_commit, 64) }
+      : null,
+  };
+}
+
 export function slimTaskDetail(t) {
   const messages = Array.isArray(t?.messages) ? t.messages : [];
   const answered = new Set(messages.map((m) => m?.reply_to).filter((x) => x !== null && x !== undefined));
@@ -183,6 +262,14 @@ export function parseCoreRequest(action, raw = {}) {
     if (!id(raw.project_id) || !raw.project_id || !id(raw.task_id) || !raw.task_id) return { rid, code: 'invalid_request' };
     return { rid, args: { project_id: raw.project_id, task_id: raw.task_id } };
   }
+  if (action === 'core_attempts') {
+    if (!id(raw.task_id) || !raw.task_id) return { rid, code: 'invalid_request' };
+    return { rid, args: { task_id: raw.task_id } };
+  }
+  if (action === 'core_attempt') {
+    if (!id(raw.attempt_id) || !raw.attempt_id) return { rid, code: 'invalid_request' };
+    return { rid, args: { attempt_id: raw.attempt_id } };
+  }
   if (action === 'core_activity') {
     if (!id(raw.task_id) || !raw.task_id) return { rid, code: 'invalid_request' };
     const cursor = raw.cursor ?? 0;
@@ -201,7 +288,14 @@ export function parseCoreRequest(action, raw = {}) {
  */
 export async function handleCoreAction(action, raw, call) {
   const type =
-    { core_events: 'orch_core_events', core_attention: 'orch_core_attention', core_task: 'orch_core_task', core_activity: 'orch_core_activity' }[action] ||
+    {
+      core_events: 'orch_core_events',
+      core_attention: 'orch_core_attention',
+      core_task: 'orch_core_task',
+      core_activity: 'orch_core_activity',
+      core_attempts: 'orch_core_attempts',
+      core_attempt: 'orch_core_attempt',
+    }[action] ||
     'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
@@ -213,6 +307,36 @@ export async function handleCoreAction(action, raw, call) {
     if (action === 'core_task') {
       const detail = await call('task_detail', req.args);
       return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, task: slimTaskDetail(detail?.task || {}) } };
+    }
+    if (action === 'core_attempts') {
+      // Antes del corte, `task_detail_v2` responde `core_model_inactive` y el móvil sigue con `core_task`.
+      const detail = await call('task_detail_v2', req.args);
+      const task = detail?.task || {};
+      const all = (Array.isArray(task.attempts) ? task.attempts : []).filter((a) => id(a?.id));
+      const recent = all.slice(-CORE_ATTEMPTS_MAX);
+      // El detalle de cada intento da su resultado y su host; si uno falla, va lo de la lista.
+      const attempts = await Promise.all(
+        recent.map((a) =>
+          call('attempt_detail', { attempt_id: a.id })
+            .then((d) => d?.attempt || a)
+            .catch(() => a),
+        ),
+      );
+      return {
+        type,
+        fields: {
+          rid: req.rid,
+          ok: true,
+          protocol: CORE_RELAY_PROTOCOL,
+          task: slimTaskV2(task),
+          attempts: attempts.map(slimAttemptBrief),
+          truncated: all.length > recent.length,
+        },
+      };
+    }
+    if (action === 'core_attempt') {
+      const detail = await call('attempt_detail', req.args);
+      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, attempt: slimAttempt(detail?.attempt || {}) } };
     }
     if (action === 'core_activity') {
       const page = await call('activity_list', req.args);

@@ -2,7 +2,8 @@
 //
 // Identidad (Project + Task), estado real con sus señales (pregunta, revisión, integración), proveedor y modelo
 // conocidos, ubicación resumida (rama, worktree o checkout compartido, host y origen), Activity reciente
-// paginable y la Attention de esta Task. Sin editor, terminal, respuestas ni Attempts (F3). Lo que habría que
+// paginable y la Attention de esta Task. Con el Core en el modelo Task/Attempt, también sus intentos (LXO-126): la
+// ficha de arriba es la del intento actual. Sin editor, terminal ni respuestas. Lo que habría que
 // hacer (responder, aprobar, revisar, reintentar, abrir en Desktop) sale deshabilitado y con su razón (LXO-46).
 import React from 'react';
 import { Text, View } from 'react-native';
@@ -13,8 +14,10 @@ import { ageText, projectNames } from '../../observe/attention';
 import { hostName } from '../../observe/hosts';
 import { activityLine, taskActions, taskNotice } from '../../observe/task';
 import { Body, Dot, Mono, Notice, StateText, Title, toneColor } from '../../observe/ui';
+import { useAttempts } from '../../observe/useAttempts';
 import { useTask } from '../../observe/useTask';
 import { FONTS, RADIUS } from '../../theme';
+import AttemptsSection from './AttemptsSection';
 import { AttentionRow } from './AttentionScreen';
 
 function Field({ label, children, mono = false, secondary = false }) {
@@ -43,6 +46,10 @@ export default function TaskScreen({ obs, route }) {
   const actions = taskActions(m, t.related, obs.view);
   const names = projectNames(obs.core?.snapshot);
   const notice = taskNotice(m, { online: t.online, error: t.error });
+  const attempts = useAttempts(obs, route.taskId);
+  const vnext = attempts.mode === 'v2' && !!attempts.data;
+  const current = vnext ? attempts.data.attempts.find((a) => a.id === attempts.data.task?.current_attempt_id) : null;
+  const openAttempt = (item) => obs.push({ name: 'attempt', attemptId: item.id, taskTitle: m.title, projectId: m.projectId, from: 'task' });
 
   return (
     <View style={{ gap: 18 }}>
@@ -62,6 +69,10 @@ export default function TaskScreen({ obs, route }) {
             ))}
           </View>
 
+          {attempts.data && attempts.mode !== 'legacy' ? <AttemptsSection attempts={attempts} now={obs.now} onOpen={openAttempt} /> : null}
+
+          {/* Invariante 1: con intentos, esta ficha es la de la ejecución actual, no la de la Task. */}
+          {vnext ? <Eyebrow>{current ? `Ejecución actual · intento ${current.n}` : 'Ejecución actual'}</Eyebrow> : null}
           <View style={{ gap: 4, padding: 12, borderRadius: RADIUS, backgroundColor: c.surface2 }}>
             <Field label="Agente">{m.provider || unknown}</Field>
             <Field label="Modelo">{m.model || (m.source === 'detail' ? 'por defecto' : unknown)}</Field>
