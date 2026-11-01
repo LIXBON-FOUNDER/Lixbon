@@ -283,6 +283,31 @@ fn casos() -> Vec<Caso> {
         ("attempt.exited", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "from": "running" }), "activity.attempt.exited", "error"),
         ("attempt.integrated", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.integrated", "success"),
         (
+            "attempt.queued",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "queue_id": "t-7-a2-q3", "position": 3, "attachments": 1 }),
+            "activity.attempt.queued",
+            "info",
+        ),
+        (
+            "attempt.queue_delivered",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "queue_id": "t-7-a2-q3", "confirmed_by": "adapter_event" }),
+            "activity.attempt.queue_delivered",
+            "success",
+        ),
+        ("attempt.queue_cancelled", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "queue_id": "t-7-a2-q3" }), "activity.attempt.queue_cancelled", "warning"),
+        (
+            "attempt.queue_failed",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "queue_id": "t-7-a2-q3", "reason": "adapter_unavailable" }),
+            "activity.attempt.queue_failed",
+            "error",
+        ),
+        (
             "provider_session.opened",
             State,
             ("provider_session", "ps-t-7-a2"),
@@ -648,7 +673,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 89] = [
+const CLAVES: [&str; 93] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
@@ -657,6 +682,10 @@ const CLAVES: [&str; 89] = [
     "activity.attempt.exited",
     "activity.attempt.failed",
     "activity.attempt.integrated",
+    "activity.attempt.queue_cancelled",
+    "activity.attempt.queue_delivered",
+    "activity.attempt.queue_failed",
+    "activity.attempt.queued",
     "activity.attempt.rejected",
     "activity.attempt.requested",
     "activity.attempt.resumed",

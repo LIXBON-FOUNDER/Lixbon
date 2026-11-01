@@ -26,8 +26,7 @@
 //! | cancelar (`attempt.stopped` · `attempt.rejected` si estaba pendiente) | sí | el que la coordina | sí (cierre de Run, apagado) |
 //! | esperar una respuesta · volver de una espera (`attempt.waiting` · `attempt.resumed`) | no | el de ESA Task | sí |
 //! | esperar la aprobación en la terminal (`attempt.waiting`) | no | no | sí (el host la detecta) |
-//! | salir (`attempt.exited`) · marcar integrado (`attempt.integrated`) | no | no | sí |
-//!
+//! | salir (`attempt.exited`) · marcar integrado (`attempt.integrated`) | no | no | sí |//!
 //! Aprobar o rechazar una ejecución es una decisión de una persona; el resto del ciclo lo conduce el Core o el agente.
 //!
 //! **Inerte hasta el corte**: nada de esto está conectado al RPC todavía y el almacén rechaza escribir antes de
@@ -40,6 +39,8 @@ use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
 use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, Store, StoreError, StoreResult, TaskRow};
+
+use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -80,6 +81,24 @@ pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext,
 
 pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_continued(a, c, t), ctx, at)
+}
+
+/// Los hechos de la Pending Queue (LXO-143), construidos aquí para que `queue_commands` no importe el catálogo de eventos.
+/// Cada uno se confirma en la transacción del almacén (`store::queue`) con la hora de quien llama.
+pub(super) fn queued_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, position: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queued(a, t, item, position), ctx, at)
+}
+
+pub(super) fn queue_delivered_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, confirmed_by: QueueConfirmation, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_delivered(a, t, item, confirmed_by), ctx, at)
+}
+
+pub(super) fn queue_cancelled_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_cancelled(a, t, item), ctx, at)
+}
+
+pub(super) fn queue_failed_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_failed(a, t, item, reason), ctx, at)
 }
 
 /// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.

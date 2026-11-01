@@ -37,6 +37,19 @@
       ]
     },
 
+    "queue_state": {
+      "estado": "reservado",
+      "origen": "store/queue.rs::QueueStatus (migracion 018, LXO-143; docs/core/COLA.md): estados de un item de la Pending Queue de un Attempt. Los ultimos tres son finales.",
+      "ids": ["queued", "delivering", "delivered", "cancelled", "failed"],
+      "final": ["delivered", "cancelled", "failed"]
+    },
+
+    "queue_failure": {
+      "estado": "reservado",
+      "origen": "store/queue.rs::QueueFailure (migracion 018, LXO-143): motivo cerrado de un item `failed` de la cola (campo `reason` de attempt.queue_failed)",
+      "ids": ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"]
+    },
+
     "pending_spawn_state": {
       "estado": "vigente",
       "origen": "orch/spawn_approval.rs::PendState (campo `status` de spawn_status y de orch-spawn-resolved). `launching` es interno y se informa como `pending`.",
@@ -123,6 +136,7 @@
           "project.registered", "project.archived", "project.relocated",
           "task.created", "task.updated", "task.closed",
           "attempt.requested", "attempt.continued", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
+          "attempt.queued", "attempt.queue_delivered", "attempt.queue_cancelled", "attempt.queue_failed",
           "provider_session.opened", "provider_session.bound", "provider_session.resumed", "provider_session.detached", "provider_session.closed",
           "thread.created", "thread.summarized", "worktree.created", "worktree.adopted", "worktree.attached", "worktree.missing", "worktree.found", "worktree.removed", "artifact.created",
           "review.requested", "review.completed", "review.invalidated",

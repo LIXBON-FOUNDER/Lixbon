@@ -32,6 +32,7 @@
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
 //! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
+//! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -1031,6 +1032,97 @@ impl EventPayload for AttemptIntegrated {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptIntegrated { task: a.task_id.clone(), n: a.n })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pending Queue de un Attempt (LXO-143): instrucciones enviadas mientras estaba ocupado. Los construye `attempt_ops`; los pide `queue_commands`.
+// ---------------------------------------------------------------------------------------------
+//
+// Entidad `attempt`. NUNCA llevan el texto de la instrucción ni los ids de sus adjuntos: solo el id del item, su posición
+// y cuántos adjuntos tiene. El cuerpo es de quien lo escribió y vive en `attempt_queue`.
+
+use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
+
+/// `attempt.queued` (LXO-143): se encoló una instrucción para el Attempt. `position`: pendientes delante, contándola (1 = la
+/// siguiente en entregarse).
+#[derive(Serialize)]
+pub(super) struct AttemptQueued {
+    task: String,
+    n: i64,
+    queue_id: String,
+    position: i64,
+    attachments: i64,
+}
+
+impl EventPayload for AttemptQueued {
+    const KIND: &'static str = "attempt.queued";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queued(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, position: i64) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueued { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), position, attachments: item.attachments.len() as i64 })
+}
+
+/// `attempt.queue_delivered` (LXO-143): el ADAPTER confirmó la entrega (`confirmed_by`); escribir en el proceso no cuenta.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueDelivered {
+    task: String,
+    n: i64,
+    queue_id: String,
+    confirmed_by: QueueConfirmation,
+}
+
+impl EventPayload for AttemptQueueDelivered {
+    const KIND: &'static str = "attempt.queue_delivered";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_delivered(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, confirmed_by: QueueConfirmation) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueDelivered { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), confirmed_by })
+}
+
+/// `attempt.queue_cancelled` (LXO-143): se canceló antes de entregarse. Ese item no se entrega jamás.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueCancelled {
+    task: String,
+    n: i64,
+    queue_id: String,
+}
+
+impl EventPayload for AttemptQueueCancelled {
+    const KIND: &'static str = "attempt.queue_cancelled";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_cancelled(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueCancelled { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone() })
+}
+
+/// `attempt.queue_failed` (LXO-143): no se entregó (o no se sabe). Con un `reason` distinto de `attempt_ended` levanta
+/// Attention sobre el Attempt.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueFailed {
+    task: String,
+    n: i64,
+    queue_id: String,
+    reason: QueueFailure,
+}
+
+impl EventPayload for AttemptQueueFailed {
+    const KIND: &'static str = "attempt.queue_failed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_failed(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueFailed { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), reason })
 }
 
 // ---------------------------------------------------------------------------------------------

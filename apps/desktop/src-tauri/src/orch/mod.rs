@@ -97,6 +97,11 @@ mod continuity_tests;
 mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;
+// Pending Queue de un Attempt (LXO-143): instrucciones enviadas mientras está ocupado.
+mod queue_commands;
+mod queue_rules;
+#[cfg(test)]
+mod queue_commands_tests;
 mod agentic_cut;
 mod startup_cut;
 #[cfg(test)]

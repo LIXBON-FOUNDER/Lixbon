@@ -33,6 +33,7 @@
 //! | `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta `approval` | medium | attempt · `terminal` |
 //! | `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `approval` (`acted`) | | attempt · `terminal` |
 //! | `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `approval` (`condition_cleared`) | | attempt · `terminal` |
+//! | `attempt.queue_failed` (≠ `attempt_ended`) · el final del Attempt (LXO-143) | levanta / resuelve `failed` | high | attempt · `queue` (reglas en `queue_rules.rs`) |
 //!
 //! Los hechos de EJECUCIÓN del modelo Task/Attempt apuntan al Attempt, no a la Task: dos Attempts de una Task tienen
 //! su propia Attention. Solo existen tras el corte (los `task.*` históricos siguen con sus reglas; ADR D10).
@@ -91,6 +92,7 @@ pub(super) fn derive(e: &EventRow) -> Derived {
     let mut d = Derived::default();
     let Ok(p) = serde_json::from_str::<Value>(&e.payload) else { return d };
     let (kind, id) = (e.entity_kind.as_str(), e.entity_id.as_str());
+    super::queue_rules::derive_into(e, &p, &mut d); // Pending Queue (LXO-143): suma sus propias intenciones
     match (e.kind.as_str(), kind) {
         ("task.question", "task") => {
             if let Some(message) = p["message_id"].as_u64() {
