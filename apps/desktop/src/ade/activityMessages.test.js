@@ -78,6 +78,10 @@ const EXPECTED_V1_KEYS = [
   'activity.attempt.resumed',
   'activity.attempt.exited',
   'activity.attempt.integrated',
+  'activity.attempt.queued',
+  'activity.attempt.queue_delivered',
+  'activity.attempt.queue_cancelled',
+  'activity.attempt.queue_failed',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -118,6 +122,10 @@ const MODEL_ARGS = {
   'activity.attempt.resumed': { task: 'task-1', n: 1, from: 'waiting' },
   'activity.attempt.exited': { task: 'task-1', n: 1, from: 'running' },
   'activity.attempt.integrated': { task: 'task-1', n: 1 },
+  'activity.attempt.queued': { task: 'task-1', n: 1, position: 2, attachments: 0 },
+  'activity.attempt.queue_delivered': { task: 'task-1', n: 1 },
+  'activity.attempt.queue_cancelled': { task: 'task-1', n: 1 },
+  'activity.attempt.queue_failed': { task: 'task-1', n: 1, reason: 'adapter_unavailable' },
   'activity.provider_session.opened': { task: 'task-1', n: 1, provider: 'claude', resumable: true, bound: true },
   'activity.provider_session.bound': { task: 'task-1', binding: 'stream_json' },
   'activity.provider_session.resumed': { task: 'task-1', n: 2 },
@@ -279,6 +287,22 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.task.updated', { changed: ['otro'] })).toBeNull();
     expect(translate('activity.worktree.created', { task: 'task-1', n: 1, branch: ['x'] })).toBeNull();
     expect(translate('activity.attempt.integrated', { task: 'task-1', n: 3 })).toBe('Se integró el trabajo del intento 3 de la tarea task-1.');
+  });
+
+  it('la Pending Queue (LXO-143) cuenta el hecho sin la instrucción y rechaza códigos fuera de su lista', () => {
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 3, attachments: 0 }))
+      .toBe('Se encoló una instrucción para el intento 2 de la tarea task-1 (posición 3).');
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 2 }))
+      .toBe('Se encoló una instrucción para el intento 2 de la tarea task-1 (posición 1; 2 adjuntos).');
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 1 })).toContain('1 adjunto)');
+    expect(translate('activity.attempt.queue_delivered', { task: 'task-1', n: 2 })).toBe('Se entregó al intento 2 de la tarea task-1 la instrucción encolada.');
+    expect(translate('activity.attempt.queue_cancelled', { task: 'task-1', n: 2 })).toBe('Se canceló una instrucción encolada para el intento 2 de la tarea task-1.');
+    for (const reason of ['unsupported', 'environment_blocked', 'adapter_unavailable', 'adapter_error', 'attempt_ended', 'interrupted']) {
+      expect(translate('activity.attempt.queue_failed', { task: 'task-1', n: 2, reason })).toMatch(/^No se pudo entregar una instrucción encolada al intento 2 de la tarea task-1: .+\.$/);
+    }
+    expect(translate('activity.attempt.queue_failed', { task: 'task-1', n: 2, reason: 'otra' })).toBeNull();
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 'x', attachments: 0 })).toBeNull();
+    expect(translate('activity.attempt.queue_delivered', { task: 'task-1' })).toBeNull();
   });
 
   it('formatea estados y argumentos booleanos desde la clave y argumentos contractuales', () => {

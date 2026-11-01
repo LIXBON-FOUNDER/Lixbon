@@ -89,6 +89,10 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.resumed` | `activity.attempt.resumed` | `task`, `n`, `from` | info |
 | `attempt.exited` | `activity.attempt.exited` | `task`, `n`, `from` | error |
 | `attempt.integrated` | `activity.attempt.integrated` | `task`, `n` | success |
+| `attempt.queued` (LXO-143) | `activity.attempt.queued` | `task`, `n`, `position` (1 = la siguiente), `attachments` (cuántos) | info |
+| `attempt.queue_delivered` (LXO-143) | `activity.attempt.queue_delivered` | `task`, `n` | success |
+| `attempt.queue_cancelled` (LXO-143) | `activity.attempt.queue_cancelled` | `task`, `n` | warning |
+| `attempt.queue_failed` (LXO-143) | `activity.attempt.queue_failed` | `task`, `n`, `reason` ∈ `unsupported` `environment_blocked` `adapter_unavailable` `adapter_error` `attempt_ended` `interrupted` | error |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
 | `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |
