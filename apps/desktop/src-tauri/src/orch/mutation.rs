@@ -161,6 +161,12 @@ impl DerefMut for Tx {
 }
 
 impl Tx {
+    /// ¿El contexto de esta mutación es una Person autenticada (con `client_id`)? Solo ella decide una aprobación.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn is_authenticated_person(&self) -> bool {
+        self.ctx.is_person() && self.ctx.client_id.as_deref().is_some_and(|id| !id.is_empty())
+    }
+
     /// Mensajes nuevos que, confirmada la mutación, pueden generar notificación.
     pub(super) fn notify(&mut self, ids: &[u64]) {
         self.notify.extend_from_slice(ids);
@@ -282,6 +288,20 @@ impl Tx {
     #[cfg(test)]
     pub(super) fn detached(state: State) -> Tx {
         Tx { state, notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None, ctx: MutationContext::core(), active_effect: None, attempt_model: false, attempt_requests: Vec::new() }
+    }
+
+    /// Prueba: como [`Tx::detached`] con el runtime de Attempts activo (la persistencia sobre las tablas).
+    #[cfg(test)]
+    pub(super) fn detached_with_attempts(state: State) -> Tx {
+        let mut tx = Tx::detached(state);
+        tx.attempt_model = true;
+        tx
+    }
+
+    /// Prueba: los hechos materializados que `Core::mutate` entregaría a la persistencia.
+    #[cfg(test)]
+    pub(super) fn finalized_events(&mut self) -> Result<Vec<NewEvent>, String> {
+        self.finalize_events()
     }
 
     /// Prueba: devuelve el estado del `Tx` detached.

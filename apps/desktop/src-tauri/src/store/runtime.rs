@@ -54,6 +54,284 @@ fn mapping(m: impl Into<String>) -> StoreError {
     StoreError::RuntimeMapping(m.into())
 }
 
+/// Approval timeout is accepted only as one coherent pending -> stopped mutation.
+pub(super) fn validate_approval_timeout_events(c: &Connection, prev: &RuntimeDoc, next: &RuntimeDoc, events: &[NewEvent], now: i64) -> StoreResult<()> {
+    let candidates: Vec<_> = events.iter().filter(|e| e.kind == "attempt.rejected" && serde_json::from_str::<Value>(&e.payload).ok().and_then(|p| p.get("cause").and_then(Value::as_str).map(str::to_owned)).as_deref() == Some("approval_timeout")).collect();
+    if candidates.is_empty() { return Ok(()); }
+    if candidates.len() != 1 || events.iter().any(|e| e.kind == "attempt.rejected" && !candidates.iter().any(|c| c.id == e.id)) {
+        return Err(StoreError::InvalidEvent("approval_timeout requiere exactamente un rechazo y ningún otro rejection".into()));
+    }
+    let e = candidates[0];
+    let payload: Value = serde_json::from_str(&e.payload).map_err(|x| StoreError::InvalidEvent(format!("attempt.rejected: {x}")))?;
+    let task_id = payload.get("task").and_then(Value::as_str).unwrap_or_default();
+    let n = payload.get("n").and_then(Value::as_i64);
+    let before = prev.tasks.get(task_id);
+    let after = next.tasks.get(task_id);
+    let durable: Option<(String, i64, String, Option<i64>, String)> = c.query_row("SELECT a.id,a.n,a.status,a.initial_approval_deadline,t.run_id FROM attempts a JOIN tasks t ON t.id=a.task_id WHERE a.task_id=?1 ORDER BY a.n DESC LIMIT 1", [task_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+    if let Some(key) = &e.idem_key {
+        let exists: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE kind=?1 AND idem_key=?2)", rusqlite::params![e.kind, key], |r| r.get(0))?;
+        if exists { return Err(StoreError::InvalidEvent("approval_timeout idem_key ya está usado".into())); }
+    }
+    match (before, after, durable) {
+        (Some(p), Some(t), Some((id, dn, status, Some(deadline), durable_run))) if e.entity_kind == "attempt" && e.entity_id == id && e.actor_kind == super::events::ActorKind::System && e.actor_id.is_none() && e.run_id.as_deref() == Some(durable_run.as_str()) && p.run == durable_run && t.run == durable_run && p.status == "pending_approval" && t.status == "stopped" && n == Some(dn) && dn > 0 && status == "pending_approval" && deadline <= now && e.at >= deadline && e.at <= now => Ok(()),
+        _ => Err(StoreError::TaskConflict("approval_timeout no corresponde al Attempt pendiente actual o su deadline no venció".into())),
+    }
+}
+
+/// Human initial decisions are valid only while the durable Attempt is pending and
+/// strictly before its server-owned deadline. This runs under the same IMMEDIATE
+/// transaction as the Task/Attempt projection, Event and Attention writes.
+pub(super) fn validate_initial_approval_decisions(
+    c: &Connection,
+    prev: &RuntimeDoc,
+    next: &RuntimeDoc,
+    events: &[NewEvent],
+    now: i64,
+) -> StoreResult<()> {
+    let mut decisions = Vec::new();
+    for event in events {
+        let payload: Value = match serde_json::from_str(&event.payload) {
+            Ok(payload) => payload,
+            Err(_) => continue,
+        };
+        let human_approval = event.kind == "attempt.approved";
+        let human_rejection = event.kind == "attempt.rejected"
+            && payload.get("cause").and_then(Value::as_str) == Some("cancelled");
+        if human_approval || human_rejection {
+            decisions.push((event, payload, human_approval));
+        }
+    }
+    if decisions.is_empty() {
+        return Ok(());
+    }
+    if decisions.len() != 1 {
+        return Err(mapping(
+            "una mutación no puede registrar varias decisiones de aprobación inicial",
+        ));
+    }
+
+    let (event, payload, approved) = &decisions[0];
+    let task_id = payload.get("task").and_then(Value::as_str).unwrap_or_default();
+    let n = payload.get("n").and_then(Value::as_i64);
+    let attempt_id = n
+        .filter(|n| *n > 0)
+        .map(|n| format!("{task_id}-a{n}"))
+        .unwrap_or_default();
+    let before = prev.tasks.get(task_id);
+    let after = next.tasks.get(task_id);
+    let expected_status = if *approved { "starting" } else { "stopped" };
+    let deadline: Option<i64> = c
+        .query_row(
+            "SELECT initial_approval_deadline FROM attempts
+             WHERE id=?1 AND task_id=?2 AND n=?3 AND status='pending_approval'",
+            rusqlite::params![attempt_id, task_id, n],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let identity_ok = event.kind == if *approved {
+        "attempt.approved"
+    } else {
+        "attempt.rejected"
+    } && event.class == super::events::EventClass::Decision
+        && event.entity_kind == "attempt"
+        && event.entity_id == attempt_id
+        && event.actor_kind == super::events::ActorKind::Person
+        && super::initial_approval::has_authenticated_person_identity(
+            c,
+            event.actor_id.as_deref(),
+            event.client_id.as_deref(),
+            event.channel.as_deref(),
+            event.at,
+        )?;
+    let projection_ok = before.is_some_and(|task| {
+        task.status == "pending_approval"
+            && event.run_id.as_deref() == Some(task.run.as_str())
+            && event.project_id == task.project_id
+    }) && after.is_some_and(|task| task.status == expected_status);
+
+    match (identity_ok, projection_ok, deadline) {
+        (true, true, Some(deadline))
+            if now > 0
+                && now < deadline
+                && event.at > 0
+                && event.at <= now
+                && event.at < deadline =>
+        {
+            Ok(())
+        }
+        _ => Err(mapping(format!(
+            "la decisión humana del Attempt {attempt_id} no coincide con una aprobación pendiente y vigente"
+        ))),
+    }
+}
+
+fn authorized_run_close_actor(event: &NewEvent, root_task: &str) -> bool {
+    match event.actor_kind {
+        super::events::ActorKind::Person => {
+            matches!(event.channel.as_deref(), Some("ui" | "lxo"))
+                && event.actor_id.as_deref().is_none_or(|id| !id.is_empty())
+        }
+        super::events::ActorKind::Agent => {
+            event.channel.as_deref() == Some("lxo")
+                && event.actor_id.as_deref() == Some(root_task)
+        }
+        super::events::ActorKind::System => {
+            event.channel.as_deref() == Some("core") && event.actor_id.is_none()
+        }
+    }
+}
+
+/// A pending rejection caused by closing its Run is not a human decision. It is
+/// accepted only alongside the forced close event, with the same authenticated
+/// actor and a durable coordinator identity for Agent callers.
+pub(super) fn validate_run_closed_initial_rejections(
+    c: &Connection,
+    prev: &RuntimeDoc,
+    next: &RuntimeDoc,
+    events: &[NewEvent],
+) -> StoreResult<()> {
+    let candidates: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            event.kind == "attempt.rejected"
+                && serde_json::from_str::<Value>(&event.payload)
+                    .ok()
+                    .and_then(|payload| {
+                        payload
+                            .get("cause")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .as_deref()
+                    == Some("run_closed")
+        })
+        .collect();
+
+    for event in candidates {
+        let payload: Value = serde_json::from_str(&event.payload)
+            .map_err(|error| StoreError::InvalidEvent(format!("attempt.rejected: {error}")))?;
+        let task_id = payload.get("task").and_then(Value::as_str).unwrap_or_default();
+        let n = payload.get("n").and_then(Value::as_i64);
+        let Some(run_id) = event.run_id.as_deref() else {
+            return Err(mapping("attempt.rejected run_closed requiere run_id"));
+        };
+        let before = prev.tasks.get(task_id);
+        let after = next.tasks.get(task_id);
+        let before_run = prev.runs.get(run_id);
+        let after_run = next.runs.get(run_id);
+        let durable: Option<(
+            String,
+            i64,
+            String,
+            String,
+            String,
+            i64,
+            Option<String>,
+            Option<String>,
+        )> = c
+            .query_row(
+                "SELECT a.id, a.n, a.status, t.run_id, r.root_task_id, r.closed,
+                        t.project_id, root.project_id
+                 FROM attempts a
+                 JOIN tasks t ON t.id = a.task_id
+                 JOIN runs r ON r.id = t.run_id
+                 JOIN tasks root ON root.id = r.root_task_id
+                 WHERE t.id = ?1
+                 ORDER BY a.n DESC LIMIT 1",
+                [task_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((
+            attempt_id,
+            durable_n,
+            status,
+            durable_run,
+            root_task,
+            run_closed,
+            project,
+            root_project,
+        )) = durable else {
+            return Err(StoreError::TaskConflict(
+                "run_closed no corresponde a un Attempt pendiente durable".into(),
+            ));
+        };
+        let closed_events: Vec<_> = events
+            .iter()
+            .filter(|candidate| {
+                candidate.kind == "run.closed"
+                    && candidate.entity_kind == "run"
+                    && candidate.entity_id == durable_run
+            })
+            .collect();
+        if closed_events.len() != 1 {
+            return Err(mapping(
+                "attempt.rejected run_closed requiere un único run.closed en la misma mutación",
+            ));
+        }
+        let run_event = closed_events[0];
+        let run_payload: Value = serde_json::from_str(&run_event.payload)
+            .map_err(|error| StoreError::InvalidEvent(format!("run.closed: {error}")))?;
+        let actor_matches = event.actor_kind == run_event.actor_kind
+            && event.actor_id == run_event.actor_id
+            && event.channel == run_event.channel
+            && event.client_id == run_event.client_id;
+        let projection_matches = before.is_some_and(|task| {
+            task.run == durable_run
+                && task.status == "pending_approval"
+                && task.project_id == project
+        }) && after.is_some_and(|task| {
+            task.run == durable_run && task.status == "stopped" && task.project_id == project
+        }) && before_run.is_some_and(|run| !run.closed && run.root == root_task)
+            && after_run.is_some_and(|run| run.closed && run.root == root_task)
+            && prev.tasks.get(&root_task).is_some_and(|task| task.project_id == root_project);
+        let event_matches = event.class == super::events::EventClass::Decision
+            && event.entity_kind == "attempt"
+            && event.entity_id == attempt_id
+            && event.run_id.as_deref() == Some(durable_run.as_str())
+            && event.project_id == project
+            && event.at > 0
+            && event.at == run_event.at
+            && n == Some(durable_n)
+            && durable_n > 0
+            && attempt_id == format!("{task_id}-a{durable_n}");
+        let run_event_matches = run_event.class == super::events::EventClass::State
+            && run_event.run_id.as_deref() == Some(durable_run.as_str())
+            && run_event.project_id == root_project
+            && run_event.at > 0
+            && run_event.at == event.at
+            && run_payload.get("forced").and_then(Value::as_bool) == Some(true);
+
+        if run_closed != 0
+            || status != "pending_approval"
+            || task_id == root_task
+            || !projection_matches
+            || !event_matches
+            || !run_event_matches
+            || !actor_matches
+            || !authorized_run_close_actor(event, &root_task)
+        {
+            return Err(mapping(format!(
+                "el rechazo run_closed del Attempt {attempt_id} no corresponde a un cierre forzado autorizado"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // El documento legacy, tal como lo ve el almacén
 // ---------------------------------------------------------------------------------------------------------------------
@@ -323,6 +601,9 @@ impl Store {
         let projector = self.projector.clone();
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_active(&tx)?;
+        validate_initial_approval_decisions(&tx, prev, next, events, super::now_ms())?;
+        validate_run_closed_initial_rejections(&tx, prev, next, events)?;
+        validate_approval_timeout_events(&tx, prev, next, events, super::now_ms())?;
         let changes = apply(&tx, prev, next)?;
         let rev = rev_in(&tx)? + 1;
         tx.execute(
@@ -377,6 +658,9 @@ impl Store {
             validate_task_create_result_events(&tx, &ids, &project_id)?;
             return Ok(RuntimeCommitOutcome::Replayed(ids));
         }
+        validate_initial_approval_decisions(&tx, prev, next, events, super::now_ms())?;
+        validate_run_closed_initial_rejections(&tx, prev, next, events)?;
+        validate_approval_timeout_events(&tx, prev, next, events, super::now_ms())?;
         let changes = apply(&tx, prev, next)?;
         let project_id = validate_new_runtime_result(&tx, &changes, next, result_ids)?;
         let rev = rev_in(&tx)?.checked_add(1).filter(|r| *r > 0)
@@ -761,6 +1045,9 @@ fn sync_attempt(c: &Connection, p: Option<&DocTask>, t: &DocTask, cur: &mut Cur,
 /// y reutiliza el Worktree activo de la Task (D7).
 fn insert_attempt(c: &Connection, t: &DocTask, n: i64, instruction: Option<&str>, at: i64) -> StoreResult<Cur> {
     let id = format!("{}-a{n}", t.id);
+    // Nace pending_approval solo si la Task lo está; en cualquier otro caso nace starting y se lleva por pasos hasta su
+    // estado (el Run y su raíz se crean y arrancan en la misma mutación).
+    let initial = if status_of(t)? == AttemptStatus::PendingApproval { AttemptStatus::PendingApproval } else { AttemptStatus::Starting };
     let worktree = worktree_of(c, &t.id)?.filter(|w| w.state == "active").map(|w| w.id);
     let label = |s: &Option<String>| s.as_deref().filter(|v| !v.trim().is_empty()).map(str::to_string);
     let (model, effort, role, profile) = (label(&t.model), label(&t.effort), label(&t.role), label(&t.profile));
@@ -770,6 +1057,7 @@ fn insert_attempt(c: &Connection, t: &DocTask, n: i64, instruction: Option<&str>
             id: &id,
             task_id: &t.id,
             n,
+            status: initial,
             external: t.external,
             provider: &t.agent,
             model: model.as_deref(),
@@ -783,7 +1071,7 @@ fn insert_attempt(c: &Connection, t: &DocTask, n: i64, instruction: Option<&str>
         },
     )
     .map_err(|e| mapping(format!("{}: no nace el Attempt {n} ({e})", t.id)))?;
-    Ok(Cur { id, n, status: AttemptStatus::Starting, core: true, created_at: at, started_at: None, provider_session_id: None })
+    Ok(Cur { id, n, status: initial, core: true, created_at: at, started_at: None, provider_session_id: None })
 }
 
 fn project_known(c: &Connection, id: &Option<String>) -> StoreResult<bool> {
@@ -1011,6 +1299,11 @@ fn apply_task(c: &Connection, p: Option<&DocTask>, t: &DocTask) -> StoreResult<(
             }
         }
         (None, Some(_)) => return Err(mapping(format!("{}: la Task ya existe en las tablas", t.id))),
+        (Some(p), None) if p.status == "not_started" && matches!(t.status.as_str(), "pending_approval" | "starting") => {
+            // El primer Attempt se materializa al abandonar el estado de intención; las comprobaciones de transición y de
+            // consistencia siguen aplicando a partir de aquí.
+            (insert_attempt(c, t, 1, None, at)?, true)
+        }
         (Some(_), None) => return Err(mapping(format!("{}: la Task no tiene Attempt", t.id))),
     };
     if !fresh && p.is_some_and(|p| attempt_view(p) == attempt_view(t)) {

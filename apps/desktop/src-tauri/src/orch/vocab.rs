@@ -23,8 +23,9 @@
 use super::state::Status;
 
 /// Ids de `Task.status`, en el orden del enum.
-pub const TASK_STATUS: [&str; 9] = [
+pub const TASK_STATUS: [&str; 10] = [
     "not_started",
+    "pending_approval",
     "starting",
     "running",
     "waiting",
@@ -37,8 +38,9 @@ pub const TASK_STATUS: [&str; 9] = [
 
 /// Todos los estados de la tarea. `task_status_id` los recorre con un `match`
 /// exhaustivo: añadir una variante a `Status` no compila hasta decidir su id aquí.
-pub const TASK_STATUS_ALL: [Status; 9] = [
+pub const TASK_STATUS_ALL: [Status; 10] = [
     Status::NotStarted,
+    Status::PendingApproval,
     Status::Starting,
     Status::Running,
     Status::Waiting,
@@ -53,6 +55,7 @@ pub const TASK_STATUS_ALL: [Status; 9] = [
 pub const fn task_status_id(s: Status) -> &'static str {
     match s {
         Status::NotStarted => "not_started",
+        Status::PendingApproval => "pending_approval",
         Status::Starting => "starting",
         Status::Running => "running",
         Status::Waiting => "waiting",
@@ -246,12 +249,11 @@ mod tests {
         assert!(EPHEMERAL_EVENT.iter().all(|e| !DURABLE_EVENT.contains(e)));
         let attempt = ids_de(&json, "attempt_state");
         assert_eq!(attempt, ATTEMPT_STATE.map(String::from).to_vec());
-        // El intento reutiliza los ids de ejecución de la tarea; no incluye `not_started` (sin Attempt) y
-        // solo `pending_approval` es nuevo.
-        for id in ATTEMPT_STATE.iter().filter(|i| **i != "pending_approval") {
+        // El intento reutiliza los ids de la tarea salvo `not_started`, que expresa la ausencia de Attempt.
+        for id in ATTEMPT_STATE.iter() {
             assert!(TASK_STATUS.contains(id), "el estado de intento {id} no existe como estado de tarea");
         }
-        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len());
+        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len() - 1);
         for item in json["domain"]["task_status"]["items"].as_array().unwrap() {
             match item["attempt_state"].as_str() {
                 Some(id) => assert!(ATTEMPT_STATE.contains(&id)),

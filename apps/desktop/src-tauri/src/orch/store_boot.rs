@@ -509,6 +509,22 @@ fn acquire(core_dir: &Path) -> Result<InstanceLock, OpenStoreError> {
 }
 
 impl Core {
+    /// Ids de los Attempts con aprobación inicial pendiente cuyo plazo durable ya venció (a lo sumo `limit`).
+    ///
+    /// `None`: no hay SQLite autoritativa, así que no existe un plazo durable que expirar. Solo entrega candidatos: cada
+    /// cambio pasa por `Core::mutate`, donde el commit vuelve a validar el plazo bajo la transacción.
+    pub(super) fn initial_approval_expiry_candidates(&self, now: i64, limit: usize) -> Option<crate::store::StoreResult<Vec<String>>> {
+        self.storage.with_store(|store| {
+            store.runtime_on_tables().and_then(|active| {
+                if active {
+                    store.attempt_initial_approval_expiry_candidates(now, limit)
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+        })
+    }
+
     /// Primer paso de `init`: adquirir `core.lock` ANTES de leer o reescribir
     /// `state.json`, para que un segundo Core no llegue a tocarlo. Todo fallo aquí
     /// es bloqueante: sin el bloqueo no hay garantía de un único escritor.

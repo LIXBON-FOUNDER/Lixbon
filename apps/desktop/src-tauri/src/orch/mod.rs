@@ -74,6 +74,9 @@ mod hardening_tests;
 mod projects;
 mod project_ops;
 mod task_ops;
+mod approval_expiry;
+#[cfg(test)]
+mod initial_approval_tests;
 mod task_create_api;
 #[cfg(test)]
 mod task_create_rpc_tests;

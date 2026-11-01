@@ -137,7 +137,7 @@ impl Core {
         let weak = Arc::downgrade(self);
         std::thread::spawn(move || {
             while let Some(core) = weak.upgrade() {
-                core.close_idle_runs();
+                core.periodic_sweep();
                 drop(core);
                 std::thread::sleep(SWEEP_EVERY);
             }
@@ -234,6 +234,13 @@ impl Core {
             host.notify("Lixbon no puede iniciar", &msg);
         }
         msg
+    }
+
+    /// Un ciclo de las tareas periódicas del Core (cada `SWEEP_EVERY`): cierra los Runs inactivos y expira las aprobaciones
+    /// iniciales cuyo plazo durable venció. Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
+    pub(super) fn periodic_sweep(&self) {
+        self.close_idle_runs();
+        self.sweep_initial_approvals();
     }
 
     pub(super) fn close_idle_runs(&self) {

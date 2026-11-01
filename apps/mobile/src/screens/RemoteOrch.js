@@ -18,7 +18,7 @@ import { coreStatusLabel } from '../observe/status';
 const FINAL = ['done', 'failed', 'stopped', 'exited'];
 const isFinal = (st) => FINAL.includes(st);
 const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador' };
-const STATUS = { not_started: 'sin iniciar', starting: 'arrancando', running: 'trabajando', waiting: 'esperando', done: 'entregó', failed: 'falló', stopped: 'detenida', exited: 'cerrada' };
+const STATUS = { not_started: 'sin iniciar', pending_approval: 'pendiente de aprobación', starting: 'arrancando', running: 'trabajando', waiting: 'esperando', done: 'entregó', failed: 'falló', stopped: 'detenida', exited: 'cerrada' };
 const ROLE = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
 const KIND = { phase: 'Fase', done: 'Entregó su informe', question: 'Preguntó', reply: 'Respuesta', note: 'Nota', exited: 'Se cerró' };
 const EFFORT = { low: 'Bajo', medium: 'Medio', high: 'Alto', xhigh: 'Muy alto', max: 'Máximo' };

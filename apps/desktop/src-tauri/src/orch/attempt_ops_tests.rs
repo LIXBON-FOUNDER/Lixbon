@@ -48,6 +48,21 @@ fn persona() -> MutationContext {
     MutationContext { actor: super::events::Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) }
 }
 
+/// Registra a la Person de `persona()` con el cliente que firma sus decisiones. Aprobar un Attempt exige una credencial
+/// Person registrada y vigente en el instante del evento: un actor «con forma de Person» no basta.
+fn registra_persona(s: &mut Store) {
+    s.write(|tx| {
+        tx.execute("INSERT INTO clients (client_id, surface, installation_id, created_at) VALUES ('cli-desktop', 'desktop', 'attempt-ops-test', 1)", [])?;
+        tx.execute(
+            "INSERT INTO client_credentials (credential_id, client_id, principal_kind, principal_id, token_hash, created_at)
+             VALUES ('cred-ana', 'cli-desktop', 'person', 'ana', ?1, 1)",
+            ["a".repeat(64)],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
 fn agente(task: &str) -> MutationContext {
     MutationContext::agent(task, Channel::Lxo)
 }
@@ -66,10 +81,11 @@ struct Mundo {
 }
 
 fn mundo(dir: &Path) -> Mundo {
-    let mut s = Store::open_with(dir, &embedded(), "t").unwrap();
+    let mut s = Store::open_with(dir, &crate::store::embedded_post_cut(), "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
     s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
+    registra_persona(&mut s);
     let intencion = |t: &str| NewTaskIntent { title: t.into(), spec: String::new(), repo: "c:/app".into() };
     let (_, raiz) = create_run(&mut s, &persona(), &NewRun { objective: "login".into(), project_id: project.clone(), root: intencion("coordinar") }).unwrap();
     let hija = create_child(&mut s, &persona(), &raiz.id, &intencion("api")).unwrap();
@@ -389,7 +405,7 @@ fn activity_pinta_cada_hecho_del_attempt_sin_respaldo() {
 #[test]
 fn antes_del_corte_attempt_ops_no_escribe_nada() {
     let t = Tmp::new();
-    let mut s = Store::open_with(t.path(), &embedded(), "t").unwrap();
+    let mut s = Store::open_with(t.path(), &crate::store::embedded_post_cut(), "t").unwrap();
     let r = create(&mut s, &persona(), "t1", &nuevo(false));
     assert!(matches!(r, Err(StoreError::AgenticModelInactive)), "{r:?}");
     assert!(eventos(&s).is_empty());
