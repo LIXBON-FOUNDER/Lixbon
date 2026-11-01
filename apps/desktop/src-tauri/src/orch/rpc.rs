@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
+use super::mutation::IdempotentMutation;
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
 
@@ -119,6 +120,46 @@ impl Core {
             return Err(why.into());
         }
         match cmd {
+            "task_create" => {
+                let context = authenticated_context.as_ref()
+                    .ok_or("task.create requiere una identidad Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("task.create solo está permitido a una Person autenticada".into());
+                }
+                let input: super::task_create_api::CreateTaskInput = serde_json::from_value(args.clone())
+                    .map_err(|_| "Solicitud task.create inválida".to_string())?;
+                let authorized = input.authorize_context(context)?;
+                let hash = authorized.payload_sha256().map_err(|_| "Solicitud task.create inválida".to_string())?;
+                let scope = authorized.identity_scope.clone();
+                let request_id = authorized.request_id.clone();
+                let result = |status: &str, ids: crate::store::RuntimeResultIds| {
+                    json!({"status": status, "run_id": ids.run_id, "task_id": ids.task_id, "attempt_id": ids.attempt_id})
+                };
+                // Un replay no depende del estado actual del Project ni toma el lock del estado.
+                if let Some(ids) = self.idempotent_replay(&scope, &request_id, &hash).map_err(|e| e.to_string())? {
+                    return Ok(result("Replayed", ids));
+                }
+                // La comprobación del Project lee disco y escribe marcas: va ANTES de tomar el lock del estado, para
+                // que una ruta lenta no bloquee al resto de RPC. El almacén vuelve a exigir que el Project exista.
+                self.check_project_launchable_id(&authorized.project_id)?;
+                let outcome = self.mutate_idempotent_recorded(&scope, &request_id, &hash, |tx| {
+                    tx.set_context(context.clone());
+                    let root = NewTask {
+                        // Sin Attempt no hay selección de ejecución: la raíz se proyecta con agente vacío.
+                        agent: String::new(), model: None, effort: None, role: None,
+                        title: authorized.title.clone(), spec: authorized.spec.clone(), repo: authorized.repo.clone(),
+                        cwd: authorized.repo.clone(), branch: None, base: None, worktree: None, external: false,
+                    };
+                    let (run, task) = tx.create_run_intent(&authorized.objective, root);
+                    let row = tx.tasks.get_mut(&task).ok_or("No se pudo crear la Task")?;
+                    row.project_id = Some(authorized.project_id.clone());
+                    Ok(((), crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id: None }))
+                }).map_err(|e| e.to_string())?;
+                match outcome {
+                    IdempotentMutation::Committed { ids, .. } => Ok(result("Committed", ids)),
+                    IdempotentMutation::Replayed(ids) => Ok(result("Replayed", ids)),
+                }
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -499,6 +540,9 @@ fn rpc_action(cmd: &str) -> ClientAction {
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
+        // Person CLI is global in the current authority model; RPC dispatch still requires an authenticated
+        // Person and rejects Agent before mutation.
+        "task_create" => ClientAction::AgentOrDesktopCommand,
         "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
             ClientAction::AgentCommand
@@ -535,6 +579,7 @@ mod tests {
             "events" => ClientAction::EventLogRead,
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
             | "remove_run" => ClientAction::UiCommand,
+            "task_create" => ClientAction::AgentOrDesktopCommand,
             "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
             | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
                 ClientAction::AgentCommand

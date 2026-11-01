@@ -686,6 +686,19 @@ pub(super) fn task_intent_created(t: &TaskRow) -> Result<EventDraft, EventError>
     task_draft(t, &TaskIntentCreated { parent: t.parent_task_id.clone(), depth: t.depth, title: clip(&t.title, 120) })
 }
 
+/// `task.created` v2 para una raíz todavía representada en el estado legacy. Se usa solo en
+/// `task_create`: conserva la atribución de Project diferida hasta finalizar la mutación.
+pub(super) fn task_intent_created_from_state(t: &Task) -> Result<EventDraft, EventError> {
+    let p = TaskIntentCreated {
+        parent: t.parent.clone(),
+        depth: i64::from(t.depth),
+        title: clip(&t.title, 120),
+    };
+    Ok(EventDraft::new(EntityKind::Task, t.id.as_str(), &p)?
+        .run(Some(t.run.clone()))
+        .project_from_task(t.id.as_str()))
+}
+
 /// Qué cambió de la intención. `title` solo si cambió (recortado); el encargo nunca viaja.
 #[derive(Serialize)]
 pub(super) struct TaskUpdated {
@@ -1044,8 +1057,10 @@ fn runtime_attempt<P: EventPayload>(task: &str, run: &str, n: u32, p: &P) -> Res
     Ok(EventDraft::new(EntityKind::Attempt, format!("{task}-a{n}"), p)?.run(Some(run.into())).project_from_task(task))
 }
 
-fn attempt_status(s: Status) -> AttemptStatus {
-    match s {
+/// El estado de Attempt equivalente al de la Task; `None` si la Task todavía no ha solicitado un Attempt.
+fn attempt_status(s: Status) -> Option<AttemptStatus> {
+    Some(match s {
+        Status::NotStarted => return None,
         Status::Starting => AttemptStatus::Starting,
         Status::Running => AttemptStatus::Running,
         Status::Waiting => AttemptStatus::Waiting,
@@ -1054,7 +1069,7 @@ fn attempt_status(s: Status) -> AttemptStatus {
         Status::Failed => AttemptStatus::Failed,
         Status::Stopped => AttemptStatus::Stopped,
         Status::Exited => AttemptStatus::Exited,
-    }
+    })
 }
 
 /// `attempt.requested` del Attempt `n` de una Task del runtime: nace sin aprobación pendiente (la pide `spawn`).
@@ -1077,7 +1092,10 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
 /// Los hechos del paso de `from` a `to` del Attempt `n`, en el orden del ciclo de vida (de una espera a otra se pasa
 /// por `running`, como en las tablas). `cause` es la del mutador (`run_closed` al cerrar un Run).
 pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Status, cause: Option<&str>) -> Vec<Result<EventDraft, EventError>> {
-    let (from, to) = (attempt_status(from), attempt_status(to));
+    // Sin Attempt (una Task `not_started`) no hay hechos de ejecución que emitir.
+    let (Some(from), Some(to)) = (attempt_status(from), attempt_status(to)) else {
+        return vec![];
+    };
     let steps = if from == to {
         vec![]
     } else if crate::store::transition_allowed(from, to) {

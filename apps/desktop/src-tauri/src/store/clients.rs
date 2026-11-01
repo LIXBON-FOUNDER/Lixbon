@@ -471,7 +471,7 @@ impl From<StoreError> for ClientStoreError {
     }
 }
 
-fn validate_identifier(value: &str) -> Result<(), ClientIdentityError> {
+pub(super) fn validate_identifier(value: &str) -> Result<(), ClientIdentityError> {
     if value.trim().is_empty()
         || value != value.trim()
         || value.len() > 200

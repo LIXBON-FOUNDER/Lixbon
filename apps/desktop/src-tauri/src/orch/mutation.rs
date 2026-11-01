@@ -317,6 +317,13 @@ pub(super) enum MutateError {
     ReadOnly(String),
 }
 
+/// Resultado explícito de una mutación idempotente: un replay jamás contiene el valor calculado sobre el candidato.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum IdempotentMutation<R> {
+    Committed { value: R, rev: i64, ids: crate::store::RuntimeResultIds },
+    Replayed(crate::store::RuntimeResultIds),
+}
+
 impl std::fmt::Display for MutateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -368,6 +375,19 @@ pub(super) trait Persistence: Send + Sync {
     /// materializados. Si falla, la memoria NO cambia y no queda ningún evento. En cada reintento
     /// llegan exactamente los mismos `events`.
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError>;
+
+    /// Consulta inmutable del ledger de `task.create`. Los backends sin soporte fallan cerrados: no pueden afirmar replay.
+    fn lookup_idempotent(&self, _identity_scope: &str, _request_id: &str, _payload_sha256: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        Err(PersistError::rejected("persistencia sin soporte idempotente"))
+    }
+
+    /// Persistencia idempotente de `task.create`. Un backend sin soporte nunca se interpreta como éxito.
+    fn persist_idempotent(&self, _state: &State, _events: &[NewEvent], _identity_scope: &str,
+        _request_id: &str, _payload_sha256: &str, _result_ids: &crate::store::RuntimeResultIds)
+        -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        Err(PersistError::rejected("persistencia sin soporte idempotente"))
+    }
 
     /// ¿Esta persistencia guarda el Event Log? Solo SQLite: en `state.json` (arranque legacy o
     /// degradado) no hay Event Log. Los borradores se finalizan y validan SIEMPRE (la semántica de una
@@ -527,6 +547,21 @@ impl Persister {
         self.with_retries(|| backend.persist(state, events))
     }
 
+    /// Consulta del ledger con la misma política de reintentos que el resto de lecturas/escrituras del Core.
+    fn lookup_idempotent(&self, scope: &str, request: &str, hash: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        let backend = lock(&self.backend).clone();
+        self.with_retries(|| backend.lookup_idempotent(scope, request, hash))
+    }
+
+    /// Como [`Persister::persist`] para `task.create`: un error transitorio (SQLITE_BUSY, un antivirus, un indexador)
+    /// se reintenta igual que en cualquier otra mutación en vez de dejar el Core en solo lectura.
+    fn persist_idempotent(&self, state: &State, events: &[NewEvent], scope: &str, request: &str, hash: &str,
+        ids: &crate::store::RuntimeResultIds) -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        let backend = lock(&self.backend).clone();
+        self.with_retries(|| backend.persist_idempotent(state, events, scope, request, hash, ids))
+    }
+
     /// Como [`Persister::persist`], para hechos que no modifican `legacy_state`: misma política de reintentos,
     /// mismos `NewEvent` en cada intento.
     fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
@@ -534,12 +569,12 @@ impl Persister {
         self.with_retries(|| backend.append(events))
     }
 
-    fn with_retries(&self, mut op: impl FnMut() -> Result<(), PersistError>) -> Result<(), PersistError> {
+    fn with_retries<T>(&self, mut op: impl FnMut() -> Result<T, PersistError>) -> Result<T, PersistError> {
         let retry = lock(&self.retry).clone();
         let mut attempt = 0;
         loop {
             match op() {
-                Ok(()) => return Ok(()),
+                Ok(value) => return Ok(value),
                 Err(e) => match retry.delay_for(&e, attempt) {
                     Some(wait) => {
                         std::thread::sleep(wait);
@@ -617,6 +652,66 @@ impl Core {
     pub(super) fn mutate<R>(&self, f: impl FnOnce(&mut Tx) -> Result<R, String>) -> Result<R, MutateError> {
         let mut guard = self.lock();
         self.mutate_locked(&mut guard, f)
+    }
+
+    /// ¿Ya existe un resultado para esta petición de `task.create`? No toma el lock del estado ni modifica nada: el
+    /// llamador valida lo que no debe ocurrir bajo ese lock (E/S de disco del Project) solo si NO es un replay.
+    pub(super) fn idempotent_replay(&self, identity_scope: &str, request_id: &str, payload_sha256: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, MutateError> {
+        if let Health::DegradedReadOnly(reason) = self.persister.health() {
+            return Err(MutateError::ReadOnly(reason));
+        }
+        self.persister.lookup_idempotent(identity_scope, request_id, payload_sha256).map_err(|e| {
+            // Una lectura que falla no degrada el Core: solo se informa.
+            if e.rejected { MutateError::Rejected(e.message) } else { MutateError::Persist(e.message) }
+        })
+    }
+
+    /// Commit idempotente de `task.create` a través de la misma frontera transaccional que [`Core::mutate`]. Un replay no
+    /// sustituye la memoria, no publica ni aumenta la revisión.
+    pub(super) fn mutate_idempotent_recorded<R>(
+        &self, identity_scope: &str, request_id: &str, payload_sha256: &str,
+        f: impl FnOnce(&mut Tx) -> Result<(R, crate::store::RuntimeResultIds), String>,
+    ) -> Result<IdempotentMutation<R>, MutateError> {
+        let mut st = self.lock();
+        if let Health::DegradedReadOnly(reason) = self.persister.health() {
+            return Err(MutateError::ReadOnly(reason));
+        }
+        // La consulta se hace bajo el mismo lock del Core y ANTES de ejecutar lógica candidata. La transacción final
+        // vuelve a comprobar el ledger bajo BEGIN IMMEDIATE para cubrir a escritores concurrentes.
+        if let Some(ids) = self.idempotent_replay(identity_scope, request_id, payload_sha256)? {
+            return Ok(IdempotentMutation::Replayed(ids));
+        }
+        let mut tx = Tx {
+            state: (*st.0).clone(), notify: Vec::new(), unchanged: false, events: Vec::new(), event_error: None,
+            ctx: MutationContext::core(), active_effect: None,
+            attempt_model: self.persister.attempt_model(), attempt_requests: Vec::new(),
+        };
+        // Los identificadores salen del mismo candidato que se persistirá y bajo el lock del estado; no se aceptan ids
+        // predichos por el llamador.
+        let (value, result_ids) = f(&mut tx).map_err(MutateError::Rejected)?;
+        if tx.unchanged {
+            return Err(MutateError::Rejected("task.create no puede ser no-op".into()));
+        }
+        let finalized = tx.finalize_events().map_err(MutateError::Rejected)?;
+        let events = if self.persister.records_events() { finalized } else { Vec::new() };
+        let outcome = self.persister
+            .persist_idempotent(&tx.state, &events, identity_scope, request_id, payload_sha256, &result_ids)
+            .map_err(|e| {
+                if e.rejected {
+                    return MutateError::Rejected(e.message);
+                }
+                self.enter_read_only(&e.message);
+                MutateError::Persist(e.message)
+            })?;
+        let (rev, ids) = match outcome {
+            crate::store::RuntimeCommitOutcome::Replayed(ids) => return Ok(IdempotentMutation::Replayed(ids)),
+            crate::store::RuntimeCommitOutcome::Committed { rev, ids } => (rev, ids),
+        };
+        let Tx { state, notify, .. } = tx;
+        *st.0 = state;
+        self.publish(&st.0, &notify);
+        Ok(IdempotentMutation::Committed { value, rev, ids })
     }
 
     /// Como [`Core::mutate`], con el contexto EXPLÍCITO de quien actúa (actor + canal).

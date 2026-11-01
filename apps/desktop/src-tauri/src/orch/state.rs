@@ -15,6 +15,8 @@ pub fn now_ms() -> u64 {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    /// Intención de trabajo ya creada que todavía no ha solicitado un Attempt (`task.create` sin Attempt).
+    NotStarted,
     Starting,
     Running,
     Waiting,
@@ -29,6 +31,12 @@ pub enum Status {
 impl Status {
     pub fn is_final(self) -> bool {
         matches!(self, Status::Done | Status::Failed | Status::Stopped | Status::Exited)
+    }
+
+    /// Solo hay trabajo de ejecución desde que se solicita un Attempt. `NotStarted` es una intención
+    /// abierta, pero no cuenta como trabajo en marcha ni como proceso huérfano.
+    pub fn has_attempt(self) -> bool {
+        self != Status::NotStarted
     }
 }
 
@@ -380,6 +388,9 @@ impl State {
 
     pub fn check_child(&self, parent: &str, max_depth: u32) -> Result<u32, String> {
         let p = self.task(parent)?;
+        if !p.status.has_attempt() {
+            return Err(format!("La tarea {parent} no ha solicitado un Attempt: no puede repartir tareas"));
+        }
         if p.status.is_final() {
             return Err(format!("La tarea {parent} ya terminó: no puede crear hijos"));
         }
@@ -480,6 +491,9 @@ impl State {
     /// o un PTY que muere después no deben pisar el resultado.
     fn ensure_open(&self, id: &str) -> Result<(), String> {
         let t = self.task(id)?;
+        if !t.status.has_attempt() {
+            return Err(format!("La tarea {id} aún no tiene Attempt"));
+        }
         if t.status.is_final() {
             return Err(format!("La tarea {id} ya terminó ({:?})", t.status).to_lowercase());
         }
@@ -546,7 +560,7 @@ Informe: {r}"),
         if self.messages.iter().any(|m| m.reply_to == Some(question)) {
             return Err(format!("La pregunta {question} ya tiene respuesta"));
         }
-        if !self.task(&q.from)?.status.is_final() {
+        if self.task(&q.from)?.status.has_attempt() && !self.task(&q.from)?.status.is_final() {
             self.touch(&q.from, Some(Status::Running))?;
         }
         self.post(from, &q.from, Kind::Reply, answer, Some(question))
@@ -578,7 +592,7 @@ Seguimiento:
     }
 
     pub fn close(&mut self, id: &str, status: Status, why: &str) -> Result<Option<u64>, String> {
-        if self.task(id)?.status.is_final() {
+        if !self.task(id)?.status.has_attempt() || self.task(id)?.status.is_final() {
             return Ok(None);
         }
         self.touch(id, Some(status))?;
@@ -595,7 +609,7 @@ Seguimiento:
     /// La CLI quedó esperando aprobación en su terminal hasta `deadline` (ms epoch).
     pub fn await_terminal_approval(&mut self, id: &str, deadline: u64) -> Result<bool, String> {
         let t = self.task(id)?;
-        if t.status.is_final() {
+        if !t.status.has_attempt() || t.status.is_final() {
             return Ok(false);
         }
         let t = self.task_mut(id)?;
@@ -616,7 +630,7 @@ Seguimiento:
 
     /// Cierra la tarea Failed con un motivo máquina (`failure_reason`) y otro legible.
     pub fn fail_with(&mut self, id: &str, reason: &str, why: &str) -> Result<Option<u64>, String> {
-        if self.task(id)?.status.is_final() {
+        if !self.task(id)?.status.has_attempt() || self.task(id)?.status.is_final() {
             return Ok(None);
         }
         let t = self.task_mut(id)?;
@@ -690,7 +704,7 @@ Seguimiento:
 
     pub fn run_open_tasks(&self, run: &str) -> Vec<String> {
         let root = self.runs.get(run).map(|r| r.root.as_str());
-        self.tasks.values().filter(|t| t.run == run && Some(t.id.as_str()) != root && !t.status.is_final()).map(|t| t.id.clone()).collect()
+        self.tasks.values().filter(|t| t.run == run && Some(t.id.as_str()) != root && t.status.has_attempt() && !t.status.is_final()).map(|t| t.id.clone()).collect()
     }
 
     pub fn touch_run(&mut self, task: &str) {
@@ -719,6 +733,8 @@ Seguimiento:
             .filter(|r| !r.closed)
             .filter(|r| now.saturating_sub(self.run_last_activity(r)) >= idle_ms)
             .filter(|r| self.run_open_tasks(&r.id).is_empty() && !self.has_unanswered_question(&r.id))
+            // Una intención sin iniciar (`task.create` sin Attempt) no es inactividad: el Run espera su primer Attempt.
+            .filter(|r| !self.tasks.values().any(|t| t.run == r.id && !t.status.has_attempt()))
             .filter(|r| !live.iter().any(|id| self.tasks.get(id).is_some_and(|t| t.run == r.id)))
             .map(|r| r.id.clone())
             .collect()
@@ -729,7 +745,7 @@ Seguimiento:
         let root = self.runs.get(run).map(|r| r.root.as_str());
         self.tasks.values()
             .filter(|t| t.run == run && Some(t.id.as_str()) != root)
-            .all(|t| t.status.is_final() && (t.branch.is_none() || t.merged))
+            .all(|t| (!t.status.has_attempt() || t.status.is_final()) && (t.branch.is_none() || t.merged))
     }
 
     /// Cierra el run: sin `force` rechaza si quedan hijas en marcha; con `force` las
@@ -751,7 +767,7 @@ Seguimiento:
         for id in &open {
             msgs.extend(self.close(id, Status::Stopped, "detenida al cerrar el run")?);
         }
-        if !self.task(&root)?.status.is_final() {
+        if self.task(&root)?.status.has_attempt() && !self.task(&root)?.status.is_final() {
             self.touch(&root, Some(Status::Done))?;
         }
         if let Some(r) = self.runs.get_mut(run) {
@@ -808,6 +824,59 @@ mod tests {
             agent: "claude".into(), model: None, effort: None, role: None, title: title.into(), spec: String::new(), repo: "/r".into(), cwd: "/r".into(),
             branch: None, base: None, worktree: None, external: false,
         }
+    }
+
+    #[test]
+    fn estado_not_started_se_serializa_sin_confundirse_con_starting() {
+        assert_eq!(serde_json::to_value(Status::NotStarted).unwrap(), serde_json::json!("not_started"));
+        assert!(!Status::NotStarted.is_final());
+        assert!(!Status::NotStarted.has_attempt());
+        assert!(Status::Starting.has_attempt());
+        assert_ne!(Status::NotStarted, Status::Starting);
+    }
+
+    #[test]
+    fn una_task_not_started_no_es_trabajo_huerfano_ni_bloquea_cerrar_run() {
+        let mut s = State::default();
+        let (run, root) = s.create_run("obj", nt("raíz"));
+        let child = s.add_child(&root, 1, nt("hija sin Attempt")).unwrap();
+        s.task_mut(&root).unwrap().status = Status::NotStarted;
+        s.task_mut(&child).unwrap().status = Status::NotStarted;
+
+        assert!(s.run_open_tasks(&run).is_empty());
+        assert!(s.run_wrapped_up(&run));
+        assert!(s.close_run(&run, false).unwrap().0.is_empty());
+        assert_eq!(s.task(&root).unwrap().status, Status::NotStarted);
+        assert_eq!(s.task(&child).unwrap().status, Status::NotStarted);
+
+        s.orphan_all();
+        assert_eq!(s.task(&root).unwrap().status, Status::NotStarted, "sin proceso no hay huérfano que cerrar");
+        assert_eq!(s.task(&child).unwrap().status, Status::NotStarted);
+    }
+
+    #[test]
+    fn una_task_not_started_no_se_trata_como_si_ejecutara() {
+        let mut s = State::default();
+        let (_, root) = s.create_run("obj", nt("raíz"));
+        s.task_mut(&root).unwrap().status = Status::NotStarted;
+        assert!(s.check_child(&root, 3).unwrap_err().contains("no ha solicitado un Attempt"));
+        assert_eq!(s.close(&root, Status::Done, "x").unwrap(), None, "no hay ejecución que cerrar");
+        assert_eq!(s.fail_with(&root, "agent_idle_timeout", "x").unwrap(), None);
+        assert!(!s.await_terminal_approval(&root, 1).unwrap());
+        assert_eq!(s.task(&root).unwrap().status, Status::NotStarted);
+    }
+
+    #[test]
+    fn un_run_con_una_intencion_sin_iniciar_no_se_cierra_por_inactividad() {
+        let far_future = u64::MAX / 2;
+        let mut s = State::default();
+        let (idle_run, _) = s.create_run("ejecutaba", nt("raíz con Attempt"));
+        let (intent_run, intent_root) = s.create_run("solo intención", nt("raíz sin Attempt"));
+        s.task_mut(&intent_root).unwrap().status = Status::NotStarted;
+
+        let idle = s.idle_runs(far_future, 1, &[]);
+        assert!(idle.contains(&idle_run), "control: un Run realmente inactivo sí se cierra");
+        assert!(!idle.contains(&intent_run), "el Run espera su primer Attempt: no es inactividad");
     }
 
     #[test]
