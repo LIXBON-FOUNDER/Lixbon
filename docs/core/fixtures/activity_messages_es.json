@@ -659,6 +659,28 @@
       "text": "El intento 4 de la tarea t-3 continúa el intento 3 con un paquete de contexto (cambió el proveedor)."
     },
     {
+      "key": "activity.attempt.retried",
+      "args": {
+        "task": "t-3",
+        "n": 4,
+        "from_n": 3
+      },
+      "text": "El intento 4 de la tarea t-3 reintenta el intento 3."
+    },
+    {
+      "key": "activity.attempt.retried",
+      "args": {
+        "task": "t-3",
+        "n": 5,
+        "from_n": 4,
+        "overrides": [
+          "model",
+          "effort"
+        ]
+      },
+      "text": "El intento 5 de la tarea t-3 reintenta el intento 4 (otro modelo; otro esfuerzo)."
+    },
+    {
       "key": "activity.attempt.approved",
       "args": {
         "task": "t-3",

@@ -26,7 +26,7 @@
 //!
 //! **Inerte hasta el corte**, como `attempt_ops`: sin conexión al RPC; el almacén rechaza escribir antes de `meta.agentic_model`.
 
-#![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conectará el comando de reintento (F5, LXO-142)
+#![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conecta `attempt_commands` (F5, LXO-142), que aún no está en el RPC
 
 use std::path::Path;
 
@@ -73,6 +73,9 @@ pub struct ContinueRequest<'a> {
     pub profile: Option<&'a str>,
     pub model: Option<&'a str>,
     pub effort: Option<&'a str>,
+    /// Solo con `Intent::Auto`: el motivo del fallback que el cliente VIO y confirmó (`ContinuityError` con
+    /// `fallback_available`). Si ahora el motivo es otro, no se aplica: hay que volver a preguntar (`fallback_changed`).
+    pub confirmed_reason: Option<Reason>,
 }
 
 /// Parámetros de la política. Por defecto, ninguno: no se inventa un plazo de caducidad que ningún proveedor ha confirmado.
@@ -136,11 +139,11 @@ pub struct ContinuityError {
 }
 
 impl ContinuityError {
-    fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>) -> ContinuityError {
+    pub(super) fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>) -> ContinuityError {
         ContinuityError { kind, code, message: message.into(), fallback_available: false, attempt_id: None }
     }
 
-    fn invalid(code: &'static str, message: impl Into<String>) -> ContinuityError {
+    pub(super) fn invalid(code: &'static str, message: impl Into<String>) -> ContinuityError {
         ContinuityError::new(ErrorKind::Invalid, code, message)
     }
 
@@ -149,7 +152,7 @@ impl ContinuityError {
         self
     }
 
-    fn for_attempt(mut self, id: &str) -> ContinuityError {
+    pub(super) fn for_attempt(mut self, id: &str) -> ContinuityError {
         self.attempt_id = Some(id.to_string());
         self
     }
@@ -163,7 +166,7 @@ impl std::fmt::Display for ContinuityError {
 
 impl std::error::Error for ContinuityError {}
 
-fn from_store(e: StoreError) -> ContinuityError {
+pub(super) fn from_store(e: StoreError) -> ContinuityError {
     match e {
         StoreError::AttemptConflict(m) | StoreError::SessionConflict(m) => ContinuityError::invalid("conflict", m),
         StoreError::InvalidAttempt(m) | StoreError::InvalidSession(m) => ContinuityError::invalid("invalid_request", m),
@@ -173,7 +176,7 @@ fn from_store(e: StoreError) -> ContinuityError {
     }
 }
 
-fn from_adapter(e: &AdapterError) -> ContinuityError {
+pub(super) fn from_adapter(e: &AdapterError) -> ContinuityError {
     match e.code {
         ErrorCode::SessionNotFound => ContinuityError::new(ErrorKind::Expired, "session_expired", "el proveedor ya no tiene la sesión").with_fallback(),
         ErrorCode::EnvironmentBlocked => ContinuityError::new(ErrorKind::EnvironmentBlocked, "environment_blocked", e.message.clone()),
@@ -266,9 +269,31 @@ pub(super) fn decide(intent: &Intent<'_>, blocker: Option<Blocker>, has_package:
 
 // ── Comando ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-fn check_text(what: &str, v: &str, max: usize) -> Result<(), ContinuityError> {
+pub(super) fn check_text(what: &str, v: &str, max: usize) -> Result<(), ContinuityError> {
     if v.trim().is_empty() || v.chars().count() > max || v.chars().any(char::is_control) {
         return Err(ContinuityError::invalid("invalid_request", format!("{what}: texto no vacío, sin caracteres de control y de hasta {max} caracteres")));
+    }
+    Ok(())
+}
+
+/// Máximo de caracteres del mensaje con que se continúa o se reintenta.
+pub(super) const MAX_PROMPT_CHARS: usize = 200_000;
+
+/// Quién puede continuar o reintentar: una persona, el agente que coordina la Task, o el Core.
+pub(super) fn authorize(st: &Store, ctx: &MutationContext, task_id: &str) -> Result<(), ContinuityError> {
+    let allowed = ctx.actor == Actor::System || attempt_ops::person_or_manager(st, ctx, task_id).map_err(from_store)?;
+    if allowed {
+        Ok(())
+    } else {
+        Err(ContinuityError::invalid("not_allowed", format!("no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel)))
+    }
+}
+
+/// La clave de idempotencia: texto corto de letras, dígitos, `_`, `.` y `-`.
+pub(super) fn check_request_key(request_id: &str) -> Result<(), ContinuityError> {
+    check_text("request_id", request_id, MAX_REQUEST_ID_CHARS)?;
+    if !request_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')) {
+        return Err(ContinuityError::invalid("invalid_request", "request_id: solo letras, dígitos, `_`, `.` y `-`"));
     }
     Ok(())
 }
@@ -338,15 +363,9 @@ pub(super) fn continue_attempt_at(
     now: i64,
 ) -> Result<Outcome, ContinuityError> {
     // 1. Autorizar y validar, antes de leer nada más.
-    let allowed = ctx.actor == Actor::System || attempt_ops::person_or_manager(st, ctx, req.task_id).map_err(from_store)?;
-    if !allowed {
-        return Err(ContinuityError::invalid("not_allowed", format!("no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel)));
-    }
-    check_text("request_id", req.request_id, MAX_REQUEST_ID_CHARS)?;
-    if !req.request_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')) {
-        return Err(ContinuityError::invalid("invalid_request", "request_id: solo letras, dígitos, `_`, `.` y `-`"));
-    }
-    check_text("el mensaje", req.prompt, 200_000)?;
+    authorize(st, ctx, req.task_id)?;
+    check_request_key(req.request_id)?;
+    check_text("el mensaje", req.prompt, MAX_PROMPT_CHARS)?;
 
     // 2. El paquete se valida SIEMPRE que llega, se vaya a usar o no: un paquete inválido no inicia ningún Attempt.
     let package_json = match req.intent {
@@ -359,7 +378,10 @@ pub(super) fn continue_attempt_at(
         return Err(ContinuityError::invalid("package_missing", "falta el ContextPackage"));
     }
 
-    // 3. ¿Ya se atendió? Es la misma petición, o una clave reutilizada para otra cosa.
+    // 3. ¿Ya se atendió? Es la misma petición, o una clave reutilizada para otra cosa (también si fue un reintento).
+    if let Some(retry) = st.retry_by_request(req.task_id, req.request_id).map_err(from_store)? {
+        return Err(ContinuityError::invalid("request_conflict", "ese request_id ya se usó para un reintento").for_attempt(&retry.attempt_id));
+    }
     if let Some(existing) = st.continuation_by_request(req.task_id, req.request_id).map_err(from_store)? {
         same_request(st, &existing, req, package.as_ref())?;
         let attempt = st.attempt_row(&existing.attempt_id).map_err(from_store)?.ok_or_else(|| ContinuityError::invalid("store", "el Attempt de la continuidad no existe"))?;
@@ -373,6 +395,9 @@ pub(super) fn continue_attempt_at(
     }
     if !from.status.is_final() {
         return Err(ContinuityError::invalid("source_not_final", "el Attempt anterior sigue activo: no se continúa a la vez que corre"));
+    }
+    if let Some(active) = st.attempt_active(req.task_id).map_err(from_store)? {
+        return Err(ContinuityError::invalid("attempt_active", format!("la Task ya tiene el Attempt activo {}: no se continúa a la vez que corre", active.id)));
     }
     if let Some(p) = &package {
         let s = p.source();
@@ -393,6 +418,16 @@ pub(super) fn continue_attempt_at(
 
     // 6. La política.
     let choice = decide(&req.intent, native_blocker(same_provider, resume_state, &session_facts), package.is_some())?;
+    // El cliente confirmó un fallback por UN motivo: si ahora es otro, la persona no lo ha visto y no se aplica.
+    if let (Intent::Auto { .. }, Strategy::ContextPackage, Some(seen)) = (&req.intent, choice.strategy, req.confirmed_reason) {
+        if seen != choice.reason {
+            return Err(ContinuityError::invalid(
+                "fallback_changed",
+                format!("el fallback confirmado era por `{}` y ahora es por `{}`: hay que volver a confirmarlo", seen.as_str(), choice.reason.as_str()),
+            )
+            .with_fallback());
+        }
+    }
     if choice.strategy == Strategy::ContextPackage {
         match start_state {
             CapabilityState::Available => {}

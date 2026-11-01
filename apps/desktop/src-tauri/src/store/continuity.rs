@@ -173,11 +173,11 @@ fn finish((mut c, strategy, reason): Raw) -> StoreResult<ContinuationRow> {
     Ok(c)
 }
 
-fn continuation_where(c: &Connection, filter: &str, args: &[&dyn rusqlite::ToSql]) -> StoreResult<Option<ContinuationRow>> {
+pub(super) fn continuation_where(c: &Connection, filter: &str, args: &[&dyn rusqlite::ToSql]) -> StoreResult<Option<ContinuationRow>> {
     c.query_row(&format!("SELECT {COLS} FROM attempt_continuations WHERE {filter}"), args, from_row).optional()?.map(finish).transpose()
 }
 
-fn check_request_id(id: &str) -> StoreResult<()> {
+pub(super) fn check_request_id(id: &str) -> StoreResult<()> {
     let ok = !id.is_empty() && id.chars().count() <= MAX_REQUEST_ID_CHARS && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
     if ok {
         Ok(())
