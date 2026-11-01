@@ -51,6 +51,7 @@ mod worktrees;
 mod cut;
 mod reviews;
 mod runtime;
+mod dispatch_evidence;
 mod initial_approval;
 mod task_create;
 #[cfg(test)]
@@ -59,6 +60,8 @@ mod runtime_idempotency_tests;
 mod attempt_initial_approval_tests;
 #[cfg(test)]
 mod approval_timeout_tests;
+#[cfg(test)]
+mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
 #[cfg(test)]

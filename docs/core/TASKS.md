@@ -182,6 +182,28 @@ Esta fase es **inerte**: `task_create` sigue rechazando todo `attempt` y los RPC
 primer Attempt, decidirlo y lanzarlo se conecta en la fase siguiente (`Tx::request_initial_attempt`, la resolución de la
 decisión y el despacho). Hoy solo ejecutan este código las pruebas y el barrido de expiración.
 
+### Claim de despacho (fase 2b, inerte)
+
+Antes de cualquier efecto externo, el despacho de un Attempt reserva un **claim durable de un solo uso**
+(`attempts.dispatch_claim`, migración 020). El orden del protocolo es: reservar → registrar `attempt.started` → marcar el
+claim `started` → llamar al proveedor. Los estados son `none → reserved → started → settled`, con `ambiguous` cuando el
+Core reinicia sin poder probar el desenlace; el trigger de la base impide reiniciar un claim o saltarse pasos.
+
+* **Reservar (`attempt_dispatch_reserve`):** solo si el Attempt es del Core y está `starting`, su Task sigue abierta en un Run
+  abierto y un Project activo y, para el primer Attempt de una Task de `task.create`, existe un spec no vacío y la
+  aprobación canónica de una Person autenticada con plazo durable. Devuelve `false` si ya hay claim: nunca se repite.
+* **Asentar (`settled`):** solo con evidencia canónica de un Attempt final (`store/dispatch_evidence.rs`): exactamente un
+  `attempt.started` seguido de exactamente un evento terminal, ambos como los emitiría el Core. Un fallo posterior al
+  arranque con resultado desconocido no es un terminal conocido: el claim queda `ambiguous` y lo resuelve una persona.
+* **Termina sin `attempt.started`:** como `attempt.started` se registra *antes* de llamar al proveedor, un claim sin él
+  prueba que el proveedor nunca se llamó. Si el Attempt termina entonces con un `attempt.failed` por `launch_failed`
+  (actor System) o un `attempt.stopped` con `from = starting`, el claim se asienta directamente desde `reserved` (o
+  `ambiguous`). Antes quedaba `ambiguous` para siempre.
+* **Reconciliar al arrancar:** los claims `reserved`/`started` sin evidencia terminal pasan a `ambiguous` y se registra
+  `attempt.dispatch_ambiguous`; los que sí la tienen se asientan sin ese hecho falso.
+
+Esta fase es **inerte**: no hay dispatcher que llame a estas primitivas del almacén (llegará en 2c).
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
