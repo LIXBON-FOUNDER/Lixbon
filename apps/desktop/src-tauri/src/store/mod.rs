@@ -53,6 +53,7 @@ mod reviews;
 mod runtime;
 mod tasks;
 mod model_pages;
+mod queue;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -75,6 +76,8 @@ mod continuity_tests;
 mod worktrees_tests;
 #[cfg(test)]
 mod reviews_tests;
+#[cfg(test)]
+mod queue_tests;
 #[cfg(test)]
 mod tests;
 
@@ -132,6 +135,9 @@ pub use runtime::{RuntimeChanges, RuntimeDoc};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
+// Pending Queue de un Attempt (LXO-143): inerte hasta el corte; solo la usan `orch::queue_commands` y las pruebas.
+#[allow(unused_imports)]
+pub use queue::{queue_digest, Enqueued, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
