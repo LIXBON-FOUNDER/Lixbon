@@ -1,5 +1,6 @@
 from __future__ import annotations
 import mimetypes
+import os
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -216,6 +217,17 @@ def destino_web(path_name: str) -> tuple[str, int] | None:
     return None
 
 
+def archivo_dentro(base: Path, relativa: str) -> Path | None:
+    """Archivo regular `relativa` bajo `base`, o None si no existe o se sale de
+    `base` (`..`, ruta absoluta, enlace simbólico). `relativa` viene de la URL."""
+    raiz = os.path.realpath(base)
+    candidato = os.path.realpath(os.path.join(raiz, relativa))
+    # `raiz + os.sep`: sin el separador, `dist-evil` pasaría por estar "dentro" de `dist`.
+    if not candidato.startswith(raiz + os.sep):
+        return None
+    return Path(candidato) if os.path.isfile(candidato) else None
+
+
 class _AssetsConHash(StaticFiles):
     """Vite pone el hash del contenido en el nombre, así que un asset nunca
     cambia: se puede cachear para siempre."""
@@ -236,9 +248,9 @@ if WEB_DIST_DIR.exists():
         # /docs y /openapi.json ahora viven bajo /api/*, así que /docs es la SPA
         if path_name.startswith(("api/", "v1/", "ws/", "_prerender/")):
             raise HTTPException(status_code=404, detail="Not Found")
-        candidate = (WEB_DIST_DIR / path_name).resolve()
-        if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):
-            return FileResponse(str(candidate))
+        archivo = archivo_dentro(WEB_DIST_DIR, path_name)
+        if archivo:
+            return FileResponse(str(archivo))
         destino = destino_web(path_name)
         if destino:
             url, codigo = destino
@@ -250,8 +262,8 @@ if WEB_DIST_DIR.exists():
         # Con sesión se sirve el shell de la SPA: las páginas públicas cambian
         # sus botones según el usuario y no conviene un primer pintado a ciegas.
         if auth.SESSION_COOKIE not in request.cookies:
-            estatica = (_prerender_dir / path_name.strip("/") / "index.html").resolve()
-            if estatica.is_file() and estatica.is_relative_to(_prerender_dir):
+            estatica = archivo_dentro(_prerender_dir, os.path.join(path_name.strip("/"), "index.html"))
+            if estatica:
                 return FileResponse(str(estatica), headers={"Cache-Control": "no-cache"})
         # El index es lo único que nombra los assets del despliegue actual. Sin
         # esto el navegador se queda con el de la versión anterior y pide unos
