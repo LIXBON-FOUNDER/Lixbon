@@ -526,6 +526,18 @@ impl Core {
         })
     }
 
+    /// Estado, plazo durable y decisión canónica de la aprobación inicial de un Attempt. `None`: no existe.
+    pub(super) fn initial_approval_snapshot(&self, attempt_id: &str) -> Result<Option<crate::store::InitialApprovalSnapshot>, String> {
+        self.storage
+            .read_store(|store| {
+                if !store.runtime_on_tables().map_err(|e| e.to_string())? {
+                    return Err("el runtime Task/Attempt no está activo".to_string());
+                }
+                store.attempt_initial_approval_snapshot(attempt_id).map_err(|e| e.to_string())
+            })
+            .ok_or_else(|| "el almacén del Core no está abierto".to_string())?
+    }
+
     /// Lo que el despachador lee de un Attempt: sus filas durables y su claim. `None`: el Attempt no existe.
     pub(super) fn dispatch_snapshot(&self, attempt_id: &str) -> Result<Option<DispatchSnapshot>, String> {
         let read = self
