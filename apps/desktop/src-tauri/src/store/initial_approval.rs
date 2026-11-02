@@ -430,6 +430,14 @@ pub(super) fn canonical_initial_approval_write(
     )
 }
 
+/// ¿Tiene `attempts` esa columna? Las migraciones 019 y 020 quedan detrás de la barrera del corte: un Core recién cortado
+/// puede llevar un rato (hasta aplicarlas) sin ellas. Las lecturas periódicas lo tratan como «no hay nada que hacer», no
+/// como un error que se repite cada minuto.
+pub(super) fn attempts_has_column(conn: &Connection, column: &str) -> StoreResult<bool> {
+    let mut stmt = conn.prepare("SELECT 1 FROM pragma_table_info('attempts') WHERE name = ?1")?;
+    Ok(stmt.exists([column])?)
+}
+
 impl Store {
     /// Lee candidatos vencidos para que el Core los procese bajo su lock.
     /// Esta consulta es deliberadamente solo una sugerencia: la transición de expiración
@@ -444,6 +452,9 @@ impl Store {
         }
         self.read(|conn| {
             require_active(conn)?;
+            if !attempts_has_column(conn, "initial_approval_deadline")? {
+                return Ok(Vec::new());
+            }
             let mut stmt = conn.prepare(
                 "SELECT id FROM attempts
                  WHERE status = 'pending_approval'

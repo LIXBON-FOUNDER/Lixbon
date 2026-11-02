@@ -1171,6 +1171,11 @@ impl Store {
         }
         self.read(|conn| {
             require_active(conn)?;
+            if !super::initial_approval::attempts_has_column(conn, "initial_approval_deadline")?
+                || !super::initial_approval::attempts_has_column(conn, "dispatch_claim")?
+            {
+                return Ok(Vec::new());
+            }
             let mut stmt = conn.prepare(
                 "SELECT a.id, a.task_id, a.n, a.initial_approval_deadline FROM attempts a
                  JOIN tasks t ON t.id=a.task_id

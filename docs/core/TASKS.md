@@ -204,6 +204,29 @@ Core reinicia sin poder probar el desenlace; el trigger de la base impide reinic
 
 Esta fase es **inerte**: no hay dispatcher que llame a estas primitivas del almacén (llegará en 2c).
 
+### Despachador del primer Attempt (fase 2c-1a, inerte)
+
+`orch/dispatch.rs` lleva un Attempt aprobado (`starting`) a «lanzado» respetando el claim de despacho. Reconstruye todo de
+filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real detrás de un `Launcher` inyectable:
+
+1. Lee las filas durables y resuelve la **ubicación verificada del Project** en esta máquina (`Core::project_launch_location`:
+   la de esta máquina, no `missing`, que exista como carpeta). `Task.repo` no se usa: lo dice quien crea la Task.
+2. Reserva el claim (revalida aprobación canónica, Run abierto, Project activo).
+3. `Launcher::prepare` (worktree, capability, entorno): sin ningún efecto del proveedor. Si falla, el Attempt se cierra
+   **desde `starting`** (`failed(launch_failed)` si falló algo esperado; `stopped` si no había nada que lanzar) y el claim se
+   asienta sin `attempt.started`.
+4. `attempt.started` por `Core::mutate`, **antes** de llamar al proveedor; después el claim pasa a `started`.
+5. `PreparedLaunch::start`: `Running` (queda `running`), `NotSpawned` (`failed(launch_failed)` y claim asentado) o `Unknown`
+   (el claim se queda `started` y el Attempt `running`: ni se da por fallido ni se relanza).
+
+Un Attempt con claim nunca se despacha otra vez, tampoco tras un reintento del cliente o una nueva pasada
+(`Core::dispatch_approved`).
+
+**Fuera de esta fase:** el `Launcher` real (crear el worktree y lanzar por adapter), la conversión de los eventos del
+proveedor en `attempt.completed`/`failed`, `attempt.dispatch_ambiguous` (hecho en Attention) y la reconciliación de los
+claims en vuelo al arrancar. Hasta entonces un desenlace desconocido o una caída entre pasos deja el claim `reserved`/`started`,
+que ya impide relanzar pero no es visible. Nada en producción llama al despachador.
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
