@@ -9,6 +9,9 @@ on:
     branches:
       - 'e2e/**'
 
+permissions:
+  contents: read
+
 env:
   EXPO_NO_TELEMETRY: '1'
   EXPO_PUBLIC_API_BASE: http://10.0.2.2:8765
