@@ -207,7 +207,9 @@ def destino_web(path_name: str) -> tuple[str, int] | None:
     # a su destino final, para no encadenar redirecciones).
     if partes[0] == "en":
         sin_prefijo = "/".join(partes[1:])
-        return destino_web(sin_prefijo) or (f"/{sin_prefijo}", 301)
+        # lstrip: `/en//evil.com` daría `//evil.com` (o `/\evil.com`), que el navegador
+        # toma por otro dominio: open redirect. Siempre un único "/" inicial.
+        return destino_web(sin_prefijo) or ("/" + sin_prefijo.lstrip("/\\"), 301)
     es = partes[0] == "es"
     resto = partes[1:] if es else partes
     if not resto or resto == [""]:

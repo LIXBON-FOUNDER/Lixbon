@@ -255,8 +255,15 @@ export function splitCommandLine(line) {
   return out;
 }
 
-export const joinCommandLine = (spec) => [spec.command, ...(spec.args || [])]
-  .map((a) => (/[\s"]/.test(a) || a === '' ? `"${a.replace(/"/g, '\\"')}"` : a)).join(' ');
+// Inverso de splitCommandLine, que NO tiene escapes con "\": entre comillas todo es literal
+// hasta la comilla del mismo tipo. Por eso un argumento con `"` se entrecomilla con `'`
+// (y cada `'` interna se escribe como '"'"', que el parser concatena).
+const quoteArg = (a) => {
+  if (a !== '' && !/[\s"']/.test(a)) return a;
+  return a.includes('"') ? `'${a.replace(/'/g, `'"'"'`)}'` : `"${a}"`;
+};
+
+export const joinCommandLine = (spec) => [spec.command, ...(spec.args || [])].map(quoteArg).join(' ');
 
 // El cliente de Lixbon habla MCP por stdio; los servidores remotos (HTTP/SSE)
 // se conectan con el puente mcp-remote, que además resuelve su OAuth.
