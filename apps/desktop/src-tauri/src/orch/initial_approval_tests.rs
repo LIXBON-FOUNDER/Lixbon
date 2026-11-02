@@ -204,9 +204,9 @@ pub(super) mod e2e {
     use super::super::{Core, Orch};
     use crate::store::{ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, Fingerprint, NewLocation};
 
-    /// Un Core persistente con el corte aplicado, una Person registrada y un Attempt inicial pendiente de aprobación.
-    /// Devuelve el Core, el contexto de la Person y los ids de la Task y del Attempt.
-    pub(in crate::orch) fn core_with_pending_attempt() -> (Arc<Core>, MutationContext, String, String) {
+    /// Un Core persistente con el corte aplicado, un Project y una Person registrada (Desktop), sin ninguna Task.
+    /// Devuelve el Core, el cliente autenticado de la Person, su contexto y el id del Project.
+    pub(in crate::orch) fn core_with_project() -> (Arc<Core>, crate::store::AuthenticatedClient, MutationContext, String) {
         let (keep, data, core_dir) = dirs();
         std::mem::forget(keep); // la base queda en disco: ninguna prueba borra una base de datos
         let (core, _host, ready) = arranca(&data, &core_dir);
@@ -242,7 +242,13 @@ pub(super) mod e2e {
             .unwrap();
         let client = core.authenticate_client("e2e-person-secret-0123456789abcdef").unwrap().unwrap();
         let ctx = MutationContext::authenticated(&client, &ClientClaims::default(), Channel::Ui).unwrap();
+        (core, client, ctx, project)
+    }
 
+    /// Un Core persistente con el corte aplicado, una Person registrada y un Attempt inicial pendiente de aprobación.
+    /// Devuelve el Core, el contexto de la Person y los ids de la Task y del Attempt.
+    pub(in crate::orch) fn core_with_pending_attempt() -> (Arc<Core>, MutationContext, String, String) {
+        let (core, client, ctx, project) = core_with_project();
         // La Task nace como intención por el RPC real y después pide su primer Attempt con aprobación.
         let created = core
             .rpc_authenticated_via(

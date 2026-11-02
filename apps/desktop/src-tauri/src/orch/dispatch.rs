@@ -169,6 +169,38 @@ pub(super) fn intent_from_rows(attempt: &AttemptRow, task: &TaskRow, run: &RunRo
 }
 
 impl Core {
+    /// El lanzador instalado, si lo hay.
+    pub(super) fn launcher(&self) -> Option<std::sync::Arc<dyn Launcher>> {
+        self.launcher.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Instala el lanzador de los primeros Attempts. Hasta que exista el real (worktree + adapter) solo lo instalan las
+    /// pruebas: sin lanzador, `task_create` rechaza `attempt`.
+    pub(super) fn install_launcher(&self, launcher: std::sync::Arc<dyn Launcher>) {
+        *self.launcher.lock().unwrap_or_else(|e| e.into_inner()) = Some(launcher);
+    }
+
+    /// Despierta al despachador en segundo plano (p. ej. tras aprobar): el despacho hace E/S y no debe correr en el hilo del RPC.
+    pub(super) fn wake_dispatcher(self: &std::sync::Arc<Self>) {
+        let Some(launcher) = self.launcher() else { return };
+        let weak = std::sync::Arc::downgrade(self);
+        let spawned = std::thread::Builder::new().name("dispatcher".into()).spawn(move || {
+            if let Some(core) = weak.upgrade() {
+                core.dispatch_approved(launcher.as_ref());
+            }
+        });
+        if let Err(why) = spawned {
+            eprintln!("[core] no se pudo crear el hilo del despachador: {why}");
+        }
+    }
+
+    /// Despacha los aprobados que esperan, si hay lanzador. Lo ejecuta el barrido periódico.
+    pub(super) fn dispatch_waiting_approved(&self) {
+        if let Some(launcher) = self.launcher() {
+            self.dispatch_approved(launcher.as_ref());
+        }
+    }
+
     /// Despacha UN Attempt. Cada paso con efectos va después del claim y deja el estado coherente si el siguiente falla; un
     /// `Err` significa que el almacén no pudo confirmar un paso y el claim, si existe, queda tal cual (nunca se repite).
     pub(super) fn dispatch_attempt(&self, attempt_id: &str, launcher: &dyn Launcher) -> Result<DispatchResult, String> {

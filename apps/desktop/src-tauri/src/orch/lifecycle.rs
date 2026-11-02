@@ -236,11 +236,13 @@ impl Core {
         msg
     }
 
-    /// Un ciclo de las tareas periódicas del Core (cada `SWEEP_EVERY`): cierra los Runs inactivos y expira las aprobaciones
-    /// iniciales cuyo plazo durable venció. Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
+    /// Un ciclo de las tareas periódicas del Core (cada `SWEEP_EVERY`): cierra los Runs inactivos, expira las aprobaciones
+    /// iniciales cuyo plazo durable venció y, si hay un lanzador instalado, despacha los aprobados que quedaron esperando
+    /// (p. ej. tras un reinicio). Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
     pub(super) fn periodic_sweep(&self) {
         self.close_idle_runs();
         self.sweep_initial_approvals();
+        self.dispatch_waiting_approved();
     }
 
     pub(super) fn close_idle_runs(&self) {

@@ -3,12 +3,14 @@
 //! Identity scope is derived from an authenticated credential, never from request JSON.
 //! Runtime wiring must authenticate first and pass the resulting client here.
 //!
-//! Esta fase crea solo la intención (Run + Task raíz `not_started`). El primer Attempt (selección de
-//! provider, aprobación humana, despacho) llega con el lifecycle de lanzamiento verificado: mientras tanto una
-//! solicitud con `attempt` se rechaza de forma explícita en vez de aceptarse a medias.
+//! Sin `attempt` crea solo la intención (Run + Task raíz `not_started`). Con `attempt` pide además el primer Attempt: el
+//! cliente aporta solo la SELECCIÓN de ejecución (provider, model, effort, role, profile); la política la fija el servidor:
+//! el Attempt nace siempre `pending_approval` (ninguna selección es evidencia para saltarse la decisión humana) y `external`
+//! no lo dice el cliente. Que el Core pueda ejecutarlo (lanzador instalado, capability del proveedor) se comprueba en el RPC.
 
 use serde::Deserialize;
 
+use super::agents::Profile;
 use super::events::{Actor, MutationContext};
 use crate::store::NewAttempt;
 
@@ -30,9 +32,51 @@ pub(crate) struct CreateTaskInput {
     pub spec: String,
     #[serde(default)]
     pub repo: String,
-    /// Reservado para la fase de lanzamiento: cualquier valor distinto de `null` se rechaza.
     #[serde(default)]
-    pub attempt: Option<serde_json::Value>,
+    pub attempt: Option<CreateAttemptInput>,
+}
+
+/// La selección de ejecución del primer Attempt. Host y worktree no se aceptan: son recursos del runtime, no input del RPC.
+/// Tampoco `external` ni `requires_approval`: los fija el servidor.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CreateAttemptInput {
+    pub provider: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Perfil de permisos del Core (`explorar`, `proponer`, `delegar_con_revision`). Obligatorio: sin él no se puede lanzar.
+    pub profile: String,
+}
+
+impl CreateAttemptInput {
+    fn authorize(self) -> Result<NewAttempt, String> {
+        let invalid = || "Solicitud task.create inválida".to_string();
+        if !valid_provider(&self.provider) {
+            return Err(invalid());
+        }
+        for optional in [&self.model, &self.effort, &self.role].into_iter().flatten() {
+            if !valid_selection_text(optional) {
+                return Err(invalid());
+            }
+        }
+        // El perfil se guarda con su id canónico; uno aplazado (Autonomía amplia) no se puede usar.
+        let profile = Profile::parse(&self.profile).filter(|p| p.disabled_reason().is_none()).ok_or_else(invalid)?;
+        Ok(NewAttempt {
+            provider: self.provider,
+            model: self.model,
+            effort: self.effort,
+            role: self.role,
+            profile: Some(profile.id().to_string()),
+            // Es un proveedor gestionado por un adapter del Core (se comprueba en el preflight del RPC).
+            external: false,
+            // Ninguna selección exime de la decisión humana del primer Attempt.
+            requires_approval: true,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +93,7 @@ pub(crate) struct AuthorizedCreate {
     pub title: String,
     pub spec: String,
     pub repo: String,
+    pub attempt: Option<NewAttempt>,
     pub policy: CreatePolicy,
 }
 
@@ -74,9 +119,7 @@ impl CreateTaskInput {
         {
             return Err("Solicitud task.create inválida".into());
         }
-        if self.attempt.as_ref().is_some_and(|value| !value.is_null()) {
-            return Err(ATTEMPT_NOT_AVAILABLE.into());
-        }
+        let attempt = self.attempt.map(CreateAttemptInput::authorize).transpose()?;
         Ok(AuthorizedCreate {
             identity_scope,
             request_id: self.request_id,
@@ -85,6 +128,7 @@ impl CreateTaskInput {
             title: self.title,
             spec: self.spec,
             repo: self.repo,
+            attempt,
             policy: CreatePolicy::CreateRunWithRoot,
         })
     }
@@ -92,8 +136,8 @@ impl CreateTaskInput {
 
 impl AuthorizedCreate {
     /// Hash del payload normalizado y autorizado. No incluye request_id ni identidad: la identidad del ledger es su
-    /// propio scope + request_id. El campo `attempt` va siempre vacío en esta fase; se conserva en la forma canónica
-    /// para que los hashes ya registrados sigan valiendo cuando llegue el lanzamiento.
+    /// propio scope + request_id. De `attempt` solo entra la selección que eligió el cliente (la política es del servidor), y
+    /// una solicitud sin `attempt` conserva el hash que ya tenía.
     pub(crate) fn payload_sha256(&self) -> Result<String, ValidationError> {
         crate::store::task_create_payload_sha256(
             &self.project_id,
@@ -101,10 +145,20 @@ impl AuthorizedCreate {
             &self.title,
             &self.spec,
             &self.repo,
-            &None::<NewAttempt>,
+            &self.attempt,
         )
         .map_err(|_| ValidationError::InvalidRequest)
     }
+}
+
+/// Un id de adapter: minúsculas, dígitos y `-`, hasta 64.
+fn valid_provider(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 64 && value.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Texto de selección (modelo, esfuerzo, rol): no vacío, acotado y sin caracteres de control.
+fn valid_selection_text(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= 128 && !value.chars().any(char::is_control)
 }
 
 fn valid_key(value: &str, max: usize) -> bool {
@@ -185,15 +239,63 @@ mod tests {
         }
     }
 
+    fn with_attempt(attempt: serde_json::Value) -> CreateTaskInput {
+        input(json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t", "attempt": attempt}))
+    }
+
     #[test]
-    fn a_requested_attempt_is_rejected_explicitly_and_null_means_intent_only() {
-        let with_attempt = input(json!({
-            "request_id": "r1", "project_id": "p1", "objective": "x", "title": "t",
-            "attempt": { "provider": "codex" }
-        }));
-        assert_eq!(with_attempt.authorize_context(&person()).unwrap_err(), ATTEMPT_NOT_AVAILABLE);
+    fn la_seleccion_del_attempt_se_autoriza_con_la_politica_del_servidor() {
+        let authorized = with_attempt(json!({"provider": "codex", "model": "m", "effort": "high", "role": "worker", "profile": "Explorar"}))
+            .authorize_context(&person())
+            .unwrap();
+        let attempt = authorized.attempt.expect("hay selección");
+        assert_eq!((attempt.provider.as_str(), attempt.model.as_deref(), attempt.effort.as_deref(), attempt.role.as_deref()), ("codex", Some("m"), Some("high"), Some("worker")));
+        assert_eq!(attempt.profile.as_deref(), Some("explorar"), "el perfil se guarda con su id canónico");
+        assert!(attempt.requires_approval, "ninguna selección exime de la decisión humana");
+        assert!(!attempt.external, "external no lo dice el cliente");
         let null_attempt = input(json!({"request_id":"r1","project_id":"p1","objective":"x","title":"t","attempt":null}));
-        assert!(null_attempt.authorize_context(&person()).is_ok());
+        assert!(null_attempt.authorize_context(&person()).unwrap().attempt.is_none(), "null es solo la intención");
+    }
+
+    #[test]
+    fn una_seleccion_invalida_o_con_campos_de_politica_se_rechaza() {
+        // Campos que son política o recursos del runtime: ni siquiera se parsean.
+        for extra in ["external", "requires_approval", "host", "worktree", "approved", "deadline"] {
+            let mut attempt = json!({"provider": "codex", "profile": "explorar"});
+            attempt[extra] = json!(true);
+            let value = json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t", "attempt": attempt});
+            assert!(serde_json::from_value::<CreateTaskInput>(value).is_err(), "{extra} no es input del RPC");
+        }
+        for attempt in [
+            json!({"provider": "codex"}),
+            json!({"profile": "explorar"}),
+            json!({"provider": "", "profile": "explorar"}),
+            json!({"provider": "Codex", "profile": "explorar"}),
+            json!({"provider": "co dex", "profile": "explorar"}),
+            json!({"provider": "x".repeat(65), "profile": "explorar"}),
+            json!({"provider": "codex", "profile": "no-existe"}),
+            json!({"provider": "codex", "profile": "autonomia_amplia"}),
+            json!({"provider": "codex", "profile": "explorar", "model": "  "}),
+            json!({"provider": "codex", "profile": "explorar", "effort": "a\nb"}),
+            json!({"provider": "codex", "profile": "explorar", "role": "r".repeat(129)}),
+        ] {
+            let parsed = serde_json::from_value::<CreateTaskInput>(json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t", "attempt": attempt}));
+            if let Ok(input) = parsed {
+                assert_eq!(input.authorize_context(&person()).unwrap_err(), "Solicitud task.create inválida", "{attempt}");
+            }
+        }
+    }
+
+    #[test]
+    fn el_hash_incluye_la_seleccion_pero_no_la_politica() {
+        let hash = |attempt: serde_json::Value| with_attempt(attempt).authorize_context(&person()).unwrap().payload_sha256().unwrap();
+        let base = hash(json!({"provider": "codex", "profile": "explorar"}));
+        assert_eq!(base, hash(json!({"provider": "codex", "profile": "Explorar"})), "el perfil se canoniza antes del hash");
+        assert_ne!(base, hash(json!({"provider": "claude", "profile": "explorar"})));
+        assert_ne!(base, hash(json!({"provider": "codex", "profile": "proponer"})));
+        assert_ne!(base, hash(json!({"provider": "codex", "profile": "explorar", "model": "m"})));
+        let intent_only = input(json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t"})).authorize_context(&person()).unwrap();
+        assert_ne!(base, intent_only.payload_sha256().unwrap());
     }
 
     #[test]
@@ -206,6 +308,7 @@ mod tests {
             title: "title".into(),
             spec: "spec".into(),
             repo: "repo".into(),
+            attempt: None,
             policy: CreatePolicy::CreateRunWithRoot,
         };
         let actual = authorized.payload_sha256().unwrap();

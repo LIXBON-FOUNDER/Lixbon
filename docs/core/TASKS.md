@@ -125,12 +125,12 @@ resultados en [`TASKS_MUTACION.md`](TASKS_MUTACION.md).
 
 ## LXO-141: crear una intención con `task_create`
 
-`task_create` crea un **Run con su Task raíz en `not_started`** dentro de un Project explícito. No crea Attempt, no
-elige provider, no pide aprobación ni lanza ningún proceso: es solo la intención durable. Una solicitud con `attempt`
-se rechaza **antes** de tocar el ledger, los eventos o la memoria
-(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). La selección de provider, la aprobación
-humana inicial, el plazo de 30 minutos y el despacho llegan con el lifecycle de lanzamiento, en una fase posterior de
-LXO-141.
+`task_create` crea un **Run con su Task raíz en `not_started`** dentro de un Project explícito. Sin `attempt` no crea
+Attempt, no elige provider, no pide aprobación ni lanza ningún proceso: es solo la intención durable. Con `attempt` pide
+además el primer Attempt (ver [§ Primer Attempt con `task_create`](#primer-attempt-con-task_create-fase-2c-3)); mientras el
+Core no tenga un lanzador instalado, esa solicitud se rechaza **antes** de tocar el ledger, los eventos o la memoria
+(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). Producción no instala ninguno hasta que exista
+el `Launcher` real (worktree + adapter), así que hoy `attempt` sigue rechazado.
 
 * **Quién:** solo una Person autenticada (CLI global o Desktop). Un Agent se rechaza en el handler, antes de mutar. La
   identidad sale de la credencial, nunca del JSON: los campos `identity_scope`, `actor` o `client_id` en la solicitud son
@@ -140,8 +140,7 @@ LXO-141.
   que el Project exista dentro de la transacción.
 * **Idempotencia:** la clave es `(identity_scope, 'task.create', request_id)`, con `identity_scope = user:<person>`.
   La huella es el SHA-256 de la forma canónica del payload (`project_id`, `objective`, `title`, `spec`, `repo` y `attempt`,
-  este último siempre vacío en esta fase; se conserva en la forma canónica para que las huellas ya registradas sigan
-  valiendo). Mismo scope, id y huella devuelve los ids originales como `Replayed`, **sin escribir, sin publicar y sin subir
+  del que solo entra la selección que eligió el cliente; sin `attempt` el hash es el de siempre). Mismo scope, id y huella devuelve los ids originales como `Replayed`, **sin escribir, sin publicar y sin subir
   la revisión**; el mismo id con otro payload es un conflicto. Un replay no depende del estado actual del Project.
 * **Orden:** consulta del ledger sin el lock del estado → comprobación del Project → `Core::mutate_idempotent_recorded`, que
   repite la consulta bajo el lock y la transacción final la repite bajo `BEGIN IMMEDIATE` (escritores concurrentes). La
@@ -150,8 +149,7 @@ LXO-141.
 * **Hechos:** `run.created` (v1) y `task.created` (v2, solo `parent`, `depth` y `title`), atribuidos al contexto
   autenticado (actor Person, canal, `client_id`, Project y Run) y en la misma revisión. Las rutas legacy `create_run` y
   `add_child` conservan `task.created` v1.
-* **Ledger (017):** `task_create_requests` guarda scope, método, `request_id`, huella, Run y Task (y un Attempt opcional
-  que esta fase no usa). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
+* **Ledger (017):** `task_create_requests` guarda scope, método, `request_id`, huella, Run y Task (y el Attempt, si lo hay). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
   y no se borran, y una Task nace de una sola petición (`UNIQUE(task_id)`).
 
 ### Aprobación inicial (fase 2a, inerte)
@@ -244,6 +242,30 @@ del runtime revalida el plazo durable y la evidencia canónica bajo la transacci
 **Aprobar no lanza nada:** deja el Attempt en `starting`, y es el despachador (`dispatch.rs`) el que lo toma de la cola de
 aprobados. Mientras `task_create` rechace `attempt` (fase 2c-3) no puede existir un Attempt pendiente creado por el RPC, así que
 estos comandos son inertes en la práctica.
+
+### Primer Attempt con `task_create` (fase 2c-3)
+
+`attempt` · `{ provider, model?, effort?, role?, profile }`. El cliente aporta solo la **selección** de ejecución; la política es
+del servidor y no se acepta como input (`deny_unknown_fields`: `external`, `requires_approval`, host, worktree, `approved`,
+plazos… son un error).
+
+* **Perfil:** obligatorio, uno de `explorar`, `proponer`, `delegar_con_revision` (se guarda con su id canónico; Autonomía amplia
+  está aplazada y se rechaza). `provider`: un id de adapter (minúsculas, dígitos y `-`); `model`, `effort` y `role` son texto
+  corto sin controles.
+* **Aprobación:** el Attempt nace **siempre `pending_approval`**: ninguna selección es evidencia para saltarse la decisión
+  humana del primer Attempt (plazo durable de 30 min). `external` lo fija el servidor (`false`: el proveedor lo gestiona un
+  adapter del Core, que es lo que comprueba el preflight).
+* **Preflight, antes de escribir nada:** el proveedor tiene que estar en el registro vivo del Core y su capability `start`
+  disponible. Motivos: `provider_probing` (aún se sondea: reintentar), `provider_unknown`, `provider_start_unsupported`,
+  `provider_start_unavailable`, `provider_environment_blocked`. Como la comprobación del Project, depende del estado actual:
+  un replay ya se atendió antes y no la repite.
+* **Respuesta:** `{ status: Committed | Replayed, run_id, task_id, attempt_id }`, con `attempt_id = <task>-a1`; el ledger
+  guarda el Attempt y un replay lo devuelve.
+* **Lanzador:** el Core tiene una ranura de lanzador (`Core::install_launcher`). Sin uno instalado, `task_create` rechaza
+  `attempt`: nada podría ejecutarlo y un Attempt aprobado se quedaría `starting` para siempre. Producción no instala ninguno
+  todavía. Con uno, aprobar (`attempt_approve`) despierta al despachador en segundo plano, y el barrido periódico despacha
+  los aprobados que quedaron esperando (p. ej. tras un reinicio). El claim garantiza un único lanzamiento aunque ambos
+  coincidan.
 
 ### `not_started`
 

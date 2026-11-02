@@ -56,21 +56,12 @@ mod tests {
     }
 
     #[test]
-    fn any_requested_attempt_is_rejected_at_authorization_not_accepted_halfway() {
-        let context = super::super::events::MutationContext {
-            actor: super::super::events::Actor::PersonId("p".into()),
-            channel: super::super::events::Channel::Ui,
-            client_id: Some("c".into()),
-        };
-        for attempt in [json!({ "provider": "codex" }), json!({ "provider": "codex", "worktree": "x" }), json!(42)] {
+    fn a_malformed_attempt_is_rejected_at_parsing_not_accepted_halfway() {
+        // Sin perfil, con un campo que es política o recurso del runtime, o con otra forma: ni se parsea.
+        for attempt in [json!({ "provider": "codex" }), json!({ "provider": "codex", "profile": "explorar", "worktree": "x" }), json!(42)] {
             let mut with_attempt = request();
             with_attempt["attempt"] = attempt;
-            let parsed = parse(with_attempt).unwrap();
-            assert!(parsed.attempt.is_some());
-            assert_eq!(
-                parsed.authorize_context(&context).unwrap_err(),
-                super::super::task_create_api::ATTEMPT_NOT_AVAILABLE
-            );
+            assert!(parse(with_attempt).is_err());
         }
     }
 
@@ -250,12 +241,18 @@ mod tests {
         missing["project_id"] = json!("no-such-project");
         let error = rpc(&core, &client, missing).unwrap_err();
         assert!(error.to_lowercase().contains("no existe"), "unexpected rejection: {error}");
-        for (request_id, client_external) in [("req-attempt-managed", false), ("req-attempt-external", true)] {
+        // Sin lanzador instalado (este Core no tiene ninguno) una selección válida se rechaza antes de escribir; el bit
+        // `external` ya no es input del cliente.
+        for (request_id, attempt_value, expected) in [
+            ("req-attempt-managed", json!({"provider":"codex", "profile":"explorar"}), "lifecycle de lanzamiento verificado"),
+            ("req-attempt-external", json!({"provider":"codex", "profile":"explorar", "external":true}), "inválida"),
+        ] {
             let mut attempt = request();
             attempt["request_id"] = json!(request_id);
             attempt["project_id"] = json!(project);
-            attempt["attempt"] = json!({"provider":"codex", "external":client_external});
-            assert!(rpc(&core, &client, attempt).unwrap_err().contains("lifecycle de lanzamiento verificado"));
+            attempt["attempt"] = attempt_value;
+            let error = rpc(&core, &client, attempt).unwrap_err();
+            assert!(error.contains(expected), "{request_id}: {error}");
         }
         assert_eq!(core.storage.with_store(|store| store.events_head().unwrap()).unwrap(), head);
         let ledger = core.storage.with_store(|store| store.read(|conn| Ok(conn.query_row("SELECT COUNT(*) FROM task_create_requests", [], |r| r.get::<_, i64>(0))?))).unwrap().unwrap();

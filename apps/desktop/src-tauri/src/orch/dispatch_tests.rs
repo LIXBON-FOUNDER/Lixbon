@@ -9,16 +9,16 @@ use super::state::Status;
 use super::Core;
 
 /// Lo que el `Launcher` falso registra: el orden de las llamadas.
-type Calls = Arc<Mutex<Vec<String>>>;
+pub(in crate::orch) type Calls = Arc<Mutex<Vec<String>>>;
 
-struct FakeLauncher {
+pub(in crate::orch) struct FakeLauncher {
     prepare: Result<(), PrepareError>,
     start: StartOutcome,
     calls: Calls,
     /// Se ejecuta DENTRO de `prepare` (p. ej. para cambiar el mundo entre el claim y `attempt.started`).
     during_prepare: Option<Box<dyn Fn() + Send + Sync>>,
     /// Las intenciones que recibió `prepare`.
-    intents: Arc<Mutex<Vec<DispatchIntent>>>,
+    pub(in crate::orch) intents: Arc<Mutex<Vec<DispatchIntent>>>,
 }
 
 struct FakePrepared {
@@ -47,17 +47,17 @@ impl Launcher for FakeLauncher {
     }
 }
 
-fn launcher(prepare: Result<(), PrepareError>, start: StartOutcome) -> (FakeLauncher, Calls) {
+pub(in crate::orch) fn launcher(prepare: Result<(), PrepareError>, start: StartOutcome) -> (FakeLauncher, Calls) {
     let calls: Calls = Arc::new(Mutex::new(Vec::new()));
     (FakeLauncher { prepare, start, calls: calls.clone(), during_prepare: None, intents: Arc::new(Mutex::new(Vec::new())) }, calls)
 }
 
-fn calls(calls: &Calls) -> Vec<String> {
+pub(in crate::orch) fn calls(calls: &Calls) -> Vec<String> {
     calls.lock().unwrap().clone()
 }
 
 /// (estado, claim, motivo del fallo) del Attempt en SQLite.
-fn row(core: &Core, attempt: &str) -> (String, String, Option<String>) {
+pub(in crate::orch) fn row(core: &Core, attempt: &str) -> (String, String, Option<String>) {
     core.storage
         .with_store(|store| {
             store.read(|c| {
@@ -68,7 +68,7 @@ fn row(core: &Core, attempt: &str) -> (String, String, Option<String>) {
         .unwrap()
 }
 
-fn event_count(core: &Core, attempt: &str, kind: &str) -> i64 {
+pub(in crate::orch) fn event_count(core: &Core, attempt: &str, kind: &str) -> i64 {
     core.storage
         .with_store(|store| store.read(|c| Ok(c.query_row("SELECT count(*) FROM events WHERE kind = ?1 AND entity_id = ?2", [kind, attempt], |r| r.get(0))?)))
         .unwrap()
