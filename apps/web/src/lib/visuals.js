@@ -142,7 +142,7 @@ export function extraerArchivos(texto) {
       const lineas = code.split('\n');
       for (let i = 0; i < Math.min(2, lineas.length); i += 1) {
         const l = lineas[i];
-        const dentro = NOMBRE.exec(` ${l}`) || NOMBRE_SUELTO.exec(l.replace(/^\s*(<!--|\/\/|#)\s*|\s*-->\s*$/g, ''));
+        const dentro = NOMBRE.exec(` ${l}`) || NOMBRE_SUELTO.exec(l.replace(/^\s*(<!--|\/\/|#)\s*|\s*--!?>\s*$/g, ''));
         if (dentro) { name = dentro[1]; lineas.splice(i, 1); code = lineas.join('\n'); break; }
         if (l.trim()) break;
       }
