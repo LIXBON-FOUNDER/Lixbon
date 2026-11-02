@@ -60,7 +60,7 @@ fn evento(kind: &str, entity_kind: &str, entity_id: &str, t: &TaskRow) -> NewEve
 }
 
 fn base(dir: &Path, activo: bool) -> Mundo {
-    let mut s = Store::open_with(dir, &embedded(), "t").unwrap();
+    let mut s = Store::open_with(dir, &embedded_post_cut(), "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
     s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();

@@ -131,6 +131,9 @@ fn tras_el_corte_las_lecturas_responden_con_su_version_y_cuadran_con_las_fixture
 fn dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity() {
     let (_l, data, core_dir, core) = con_fixture();
     corta(&core, &core_dir, &data);
+    // Un Attempt que espera aprobación lleva su plazo durable (019), una migración posterior al corte: en producción la aplica
+    // el arranque siguiente; aquí se aplica sin reiniciar.
+    core.storage.with_store(|s| s.migrate_authoritative(&crate::store::embedded(), "t")).unwrap().unwrap();
     let me = yo(&core);
     let ana = MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) };
     let (a1, a2, task) = core

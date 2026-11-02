@@ -20,6 +20,7 @@ Fuente de datos: [`contracts/status-vocabulary.json`](../contracts/status-vocabu
 | id (`state.rs::Status`) | ¿final? | Grupo visual | Desktop | Móvil | `lxo list` | Estado de Attempt equivalente (reservado) |
 |---|---|---|---|---|---|---|
 | `not_started` | no | neutral | Sin iniciar | sin iniciar | `[not_started]` | *(no existe: todavía no hay Attempt)* |
+| `pending_approval` | no | needs_person | Pendiente de aprobación | pendiente de aprobación | `[pending_approval]` | `pending_approval` |
 | `starting` | no | active | Arrancando | arrancando | `[starting]` | `starting` |
 | `running` | no | active | Trabajando | trabajando | `[running]` | `running` |
 | `waiting` | no | waiting | Esperando respuesta | esperando | `[waiting]` | `waiting` |

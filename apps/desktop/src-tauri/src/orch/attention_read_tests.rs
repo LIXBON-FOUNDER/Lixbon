@@ -547,6 +547,8 @@ fn tras_reiniciar_core_se_reanuda_desde_primera_pagina_y_rechaza_cursor_anterior
     let old_cursor = page1["next_cursor"].as_str().unwrap().to_string();
     drop(client1);
     drop(core1);
+    // El hilo de fondo del Core puede estar barriendo con su propia referencia: el `core.lock` se libera cuando termina.
+    espera_lock_libre(&core_dir);
 
     let (core2, _host2, ready2) = arranca(&data, &core_dir);
     ready2.unwrap();

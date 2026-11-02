@@ -17,6 +17,8 @@ pub fn now_ms() -> u64 {
 pub enum Status {
     /// Intención de trabajo ya creada que todavía no ha solicitado un Attempt (`task.create` sin Attempt).
     NotStarted,
+    /// Attempt solicitado que espera la decisión de una Person autenticada (no es la aprobación de la terminal).
+    PendingApproval,
     Starting,
     Running,
     Waiting,
@@ -478,7 +480,7 @@ impl State {
         Ok(id)
     }
 
-    fn touch(&mut self, id: &str, status: Option<Status>) -> Result<(), String> {
+    pub(super) fn touch(&mut self, id: &str, status: Option<Status>) -> Result<(), String> {
         let t = self.task_mut(id)?;
         if let Some(s) = status {
             t.status = s;
@@ -735,6 +737,8 @@ Seguimiento:
             .filter(|r| self.run_open_tasks(&r.id).is_empty() && !self.has_unanswered_question(&r.id))
             // Una intención sin iniciar (`task.create` sin Attempt) no es inactividad: el Run espera su primer Attempt.
             .filter(|r| !self.tasks.values().any(|t| t.run == r.id && !t.status.has_attempt()))
+            // Esperar la decisión de una Person tampoco es inactividad: el plazo de la aprobación lo vigila su propio barrido.
+            .filter(|r| !self.tasks.values().any(|t| t.run == r.id && t.status == Status::PendingApproval))
             .filter(|r| !live.iter().any(|id| self.tasks.get(id).is_some_and(|t| t.run == r.id)))
             .map(|r| r.id.clone())
             .collect()
@@ -759,6 +763,9 @@ Seguimiento:
             }
             r.root.clone()
         };
+        if self.task(&root)?.status == Status::PendingApproval {
+            return Err(format!("El run {run} espera la decisión de una persona sobre el Attempt de su raíz: apruébalo o recházalo antes de cerrarlo"));
+        }
         let open = self.run_open_tasks(run);
         if !open.is_empty() && !force {
             return Err(format!("El run {run} tiene hijas en marcha ({}): espera a que terminen, páralas con lxo stop o usa lxo run close --force", open.join(", ")));
@@ -864,6 +871,22 @@ mod tests {
         assert_eq!(s.fail_with(&root, "agent_idle_timeout", "x").unwrap(), None);
         assert!(!s.await_terminal_approval(&root, 1).unwrap());
         assert_eq!(s.task(&root).unwrap().status, Status::NotStarted);
+    }
+
+    #[test]
+    fn un_run_que_espera_la_decision_de_una_persona_no_se_cierra_ni_por_inactividad_ni_a_la_fuerza() {
+        let far_future = u64::MAX / 2;
+        let mut s = State::default();
+        let (run, root) = s.create_run("espera aprobación", nt("raíz pendiente"));
+        s.task_mut(&root).unwrap().status = Status::PendingApproval;
+
+        assert!(!s.idle_runs(far_future, 1, &[]).contains(&run), "esperar a una persona no es inactividad");
+        for force in [false, true] {
+            let error = s.close_run(&run, force).unwrap_err();
+            assert!(error.contains("espera la decisión de una persona"), "{error}");
+        }
+        assert_eq!(s.task(&root).unwrap().status, Status::PendingApproval, "el cierre fallido no toca la raíz");
+        assert!(!s.runs[&run].closed);
     }
 
     #[test]

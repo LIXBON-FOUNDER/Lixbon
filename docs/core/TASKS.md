@@ -154,6 +154,34 @@ LXO-141.
   que esta fase no usa). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
   y no se borran, y una Task nace de una sola petición (`UNIQUE(task_id)`).
 
+### Aprobación inicial (fase 2a, inerte)
+
+Un Attempt puede nacer `pending_approval`: espera la decisión de una **Person autenticada** hasta un plazo **durable** de
+30 minutos (`attempts.initial_approval_deadline`, migración 019), fijado por el servidor al crearlo. La Task raíz lo refleja
+con el estado `pending_approval` (distinto de `awaiting_terminal_approval`, que es la aprobación de una terminal).
+
+* **Quién decide:** solo una Person autenticada con `client_id` (`Tx::approve_attempt` / `Tx::reject_attempt`). Un Agent, el
+  Core o una Person sin `client_id` no cambian nada ni dejan hechos.
+* **Qué cuenta como decisión:** el almacén exige la **evidencia canónica**: el evento `attempt.approved` o `attempt.rejected`
+  tiene que ser el que el Core habría emitido (actor Person con credencial registrada y vigente en el instante del evento,
+  canal, Project, Run, plazo vigente) y ningún hecho posterior lo contradice. Aprobar con el plazo vencido se rechaza.
+* **Expiración:** el hilo periódico del Core (`Core::periodic_sweep`, cada 60 s, junto al cierre de Runs inactivos) busca los
+  Attempts pendientes con el plazo vencido y cada uno se expira por `Core::mutate`: la Task pasa a `stopped` y se emite
+  `attempt.rejected` con causa `approval_timeout` (actor System, canal Core). El commit revalida el plazo bajo la
+  transacción: el candidato que entrega SQLite no autoriza nada por sí solo. Si el almacén no está disponible o el Core está en
+  solo lectura, no se expira nada.
+* **Tareas periódicas:** un Run que espera una decisión no es «inactivo» y no se cierra por inactividad; cerrarlo a mano
+  mientras su raíz espera se rechaza con un mensaje claro (hay que aprobar o rechazar antes).
+* **Barrera del corte:** la columna del plazo solo la escribe y lee un Attempt que nace `pending_approval`. El resto del
+  almacén no depende de la migración 019, que queda detrás de la barrera (014).
+* **Guard del ledger (018):** `INSERT OR REPLACE` sobre `task_create_requests` sustituye la fila sin disparar el trigger de
+  borrado mientras `recursive_triggers` esté OFF, y la huella original se perdería. La migración 018 lo aborta con un trigger
+  local; no se cambia ningún PRAGMA de la base.
+
+Esta fase es **inerte**: `task_create` sigue rechazando todo `attempt` y los RPC de decisión no existen todavía. Pedir el
+primer Attempt, decidirlo y lanzarlo se conecta en la fase siguiente (`Tx::request_initial_attempt`, la resolución de la
+decisión y el despacho). Hoy solo ejecutan este código las pruebas y el barrido de expiración.
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente

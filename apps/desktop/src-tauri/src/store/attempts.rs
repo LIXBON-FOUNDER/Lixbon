@@ -343,11 +343,24 @@ pub(super) fn attempt_insert_in(tx: &Connection, task_id: &str, new: &NewAttempt
     let n: i64 = tx.query_row("SELECT COALESCE(MAX(n), 0) + 1 FROM attempts WHERE task_id = ?1", [task_id], |r| r.get(0))?;
     let status = if new.requires_approval { AttemptStatus::PendingApproval } else { AttemptStatus::Starting };
     let id = format!("{task_id}-a{n}");
-    tx.execute(
-        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, created_at, updated_at, origin)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'core')",
-        params![id, task_id, n, status.as_str(), new.external as i64, new.provider, new.model, new.effort, new.role, new.profile, at],
-    )?;
+    if status == AttemptStatus::PendingApproval {
+        // El plazo lo fija el servidor y es durable. Solo un Attempt que espera aprobación toca esta columna (migración
+        // 019): el resto del almacén no depende de ella.
+        let deadline = at
+            .checked_add(super::initial_approval::INITIAL_APPROVAL_TTL_MS)
+            .ok_or_else(|| StoreError::InvalidAttempt("overflow calculando el plazo de la aprobación".into()))?;
+        tx.execute(
+            "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, created_at, updated_at, origin, initial_approval_deadline)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'core', ?12)",
+            params![id, task_id, n, status.as_str(), new.external as i64, new.provider, new.model, new.effort, new.role, new.profile, at, deadline],
+        )?;
+    } else {
+        tx.execute(
+            "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, created_at, updated_at, origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 'core')",
+            params![id, task_id, n, status.as_str(), new.external as i64, new.provider, new.model, new.effort, new.role, new.profile, at],
+        )?;
+    }
     let attempt = attempt_in(tx, &id)?.ok_or_else(|| StoreError::AttemptConflict(format!("el Attempt recién creado {id} no existe")))?;
     Ok((attempt, task))
 }
@@ -527,6 +540,20 @@ impl Store {
             if !action.step().from_states().contains(&current.status) {
                 return Err(StoreError::AttemptTransition { id: id.into(), from: current.status.as_str().into(), to: target.as_str().into() });
             }
+            // Aprobar exige que el plazo durable siga vigente; se comprueba aquí, en la transacción que escribe el cambio.
+            let approval_deadline = if matches!(action, AttemptAction::Approve) {
+                let deadline: Option<i64> = tx.query_row(
+                    "SELECT initial_approval_deadline FROM attempts WHERE id = ?1 AND status = 'pending_approval'",
+                    [id],
+                    |r| r.get(0),
+                )?;
+                if deadline.is_some_and(|deadline| at >= deadline) {
+                    return Err(StoreError::AttemptConflict(format!("la aprobación inicial de {id} expiró")));
+                }
+                deadline
+            } else {
+                None
+            };
             let stamp = at.max(current.updated_at);
             let changed = match action {
                 AttemptAction::Approve => tx.execute("UPDATE attempts SET status = ?2, updated_at = ?3 WHERE id = ?1", params![id, target.as_str(), stamp])?,
@@ -557,6 +584,14 @@ impl Store {
             let task = task_of(tx, &attempt)?;
             let e = event(&attempt, current.status, &task)?;
             check_attempt_event(&attempt, &task, &e)?;
+            if matches!(action, AttemptAction::Approve)
+                && e.kind == "attempt.approved"
+                && !super::initial_approval::canonical_initial_approval_write(tx, &e, &attempt, &task, approval_deadline, at)?
+            {
+                return Err(StoreError::InvalidEvent(
+                    "attempt.approved requiere una credencial Person registrada y vigente en el evento, un client_id y un plazo vigente".into(),
+                ));
+            }
             insert_event(tx, &e, projector.as_deref())?;
             Ok(ChangeOutcome::Changed)
         })
@@ -638,6 +673,8 @@ pub(crate) struct RuntimeAttempt<'a> {
     pub id: &'a str,
     pub task_id: &'a str,
     pub n: i64,
+    /// Estado con el que nace: `pending_approval` (espera a una Person) o `starting`. Cualquier otro se alcanza por pasos.
+    pub status: AttemptStatus,
     pub external: bool,
     pub provider: &'a str,
     pub model: Option<&'a str>,
@@ -651,15 +688,37 @@ pub(crate) struct RuntimeAttempt<'a> {
     pub at: i64,
 }
 
-/// Nace `starting` con el `n` que le toca (lo comprueba el trigger `attempts_core_create`).
+/// Nace en el estado pedido con el `n` que le toca (lo comprueba el trigger `attempts_core_create`).
 pub(crate) fn runtime_attempt_insert_in(c: &Connection, a: &RuntimeAttempt<'_>) -> StoreResult<()> {
     require_active(c)?;
-    c.execute(
-        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, instruction, cwd,
-                               created_at, updated_at, origin)
-         VALUES (?1, ?2, ?3, 'starting', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, 'core')",
-        params![a.id, a.task_id, a.n, a.external as i64, a.provider, a.model, a.effort, a.role, a.profile, a.worktree_id, a.instruction, a.cwd, a.at],
-    )?;
+    match a.status {
+        AttemptStatus::Starting => {
+            c.execute(
+                "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, instruction, cwd,
+                                       created_at, updated_at, origin)
+                 VALUES (?1, ?2, ?3, 'starting', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, 'core')",
+                params![a.id, a.task_id, a.n, a.external as i64, a.provider, a.model, a.effort, a.role, a.profile, a.worktree_id, a.instruction, a.cwd, a.at],
+            )?;
+        }
+        AttemptStatus::PendingApproval => {
+            let deadline = a
+                .at
+                .checked_add(super::initial_approval::INITIAL_APPROVAL_TTL_MS)
+                .ok_or_else(|| StoreError::AttemptConflict("overflow calculando el plazo de la aprobación".into()))?;
+            c.execute(
+                "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, instruction, cwd,
+                                       created_at, updated_at, origin, initial_approval_deadline)
+                 VALUES (?1, ?2, ?3, 'pending_approval', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, 'core', ?14)",
+                params![a.id, a.task_id, a.n, a.external as i64, a.provider, a.model, a.effort, a.role, a.profile, a.worktree_id, a.instruction, a.cwd, a.at, deadline],
+            )?;
+        }
+        otro => {
+            return Err(StoreError::AttemptConflict(format!(
+                "un Attempt inicial solo puede nacer pending_approval o starting, no {}",
+                otro.as_str()
+            )))
+        }
+    }
     Ok(())
 }
 

@@ -765,6 +765,8 @@ pub(super) enum StopCause {
     Cancelled,
     /// Se cerró el Run al que pertenece.
     RunClosed,
+    /// La aprobación inicial superó su plazo durable (30 minutos).
+    ApprovalTimeout,
 }
 
 /// Motivo máquina del fallo de un Attempt. Cerrado: nunca texto libre.
@@ -1061,6 +1063,7 @@ fn runtime_attempt<P: EventPayload>(task: &str, run: &str, n: u32, p: &P) -> Res
 fn attempt_status(s: Status) -> Option<AttemptStatus> {
     Some(match s {
         Status::NotStarted => return None,
+        Status::PendingApproval => AttemptStatus::PendingApproval,
         Status::Starting => AttemptStatus::Starting,
         Status::Running => AttemptStatus::Running,
         Status::Waiting => AttemptStatus::Waiting,
@@ -1084,8 +1087,26 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
         role: label(&t.role),
         profile: label(&t.profile),
         external: t.external,
-        approval_required: false,
+        approval_required: t.status == Status::PendingApproval,
     };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
+pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptApproved { task: t.id.clone(), n: n as i64 };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` de un Attempt inicial pendiente: rechazo de una Person o cierre del Run (`cause`).
+pub(super) fn runtime_attempt_rejected(t: &Task, n: u32, cause: StopCause) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` por vencimiento del plazo de la aprobación inicial (actor System/Core).
+pub(super) fn runtime_attempt_expired(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause: StopCause::ApprovalTimeout };
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
@@ -1106,6 +1127,14 @@ pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Sta
         vec![]
     };
     let (task, n64) = (t.id.clone(), n as i64);
+    // La decisión sobre una aprobación inicial no es un paso de ejecución: `attempt.approved` / `attempt.rejected`.
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Starting {
+        return vec![runtime_attempt_approved(t, n)];
+    }
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Stopped {
+        let cause = if cause == Some("run_closed") { StopCause::RunClosed } else { StopCause::Cancelled };
+        return vec![runtime_attempt_rejected(t, n, cause)];
+    }
     let mut prev = from;
     let mut out = vec![];
     for s in steps {

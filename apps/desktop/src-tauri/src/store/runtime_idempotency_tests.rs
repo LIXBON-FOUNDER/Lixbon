@@ -194,3 +194,38 @@ fn el_ledger_acota_claves_metodo_huella_y_una_sola_peticion_por_task() {
     assert!(ledger_row(&conn, "user:u1", "task.create", "req2", &hash, "t1").is_err(), "una Task nace de una sola petición");
     assert!(ledger_row(&conn, "user:u2", "task.create", "req1", &hash, "t3").is_ok(), "otro scope puede reutilizar el request_id");
 }
+
+#[test]
+fn insert_or_replace_no_puede_reescribir_una_fila_del_ledger() {
+    let dir = Dir::new();
+    let conn = ledger_conn(&dir);
+    conn.execute("INSERT INTO meta (key, value) VALUES ('agentic_model', '1')", []).unwrap();
+    let original = "a".repeat(64);
+    ledger_row(&conn, "user:u1", "task.create", "req1", &original, "t1").unwrap();
+
+    let replace = |scope: &str, request: &str, hash: &str, task: &str| {
+        conn.execute(
+            "INSERT OR REPLACE INTO task_create_requests(identity_scope, method, request_id, payload_sha256, run_id, task_id, attempt_id, created_at)
+             VALUES (?1, 'task.create', ?2, ?3, 'r1', ?4, NULL, 1)",
+            rusqlite::params![scope, request, hash, task],
+        )
+    };
+    // Sin la 018, SQLite borraría la fila existente sin disparar el trigger de borrado (recursive_triggers está OFF) y la
+    // huella original se perdería: la idempotencia quedaría rota para ese request_id.
+    let same_key = replace("user:u1", "req1", &"b".repeat(64), "t2").unwrap_err().to_string();
+    assert!(same_key.contains("no_replace"), "{same_key}");
+    let same_task = replace("user:u1", "req2", &"b".repeat(64), "t1").unwrap_err().to_string();
+    assert!(same_task.contains("no_replace"), "{same_task}");
+
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT request_id, payload_sha256 FROM task_create_requests")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows, vec![("req1".to_string(), original)], "el ledger conserva la fila original, intacta");
+
+    // Un REPLACE sobre claves libres es un insert normal: la guarda no bloquea el uso legítimo.
+    assert_eq!(replace("user:u1", "req3", &"c".repeat(64), "t3").unwrap(), 1);
+}

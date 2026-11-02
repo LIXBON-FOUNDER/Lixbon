@@ -14,7 +14,7 @@ export const AGENT_LABELS = {
 export const ROLE_LABELS = { explorador: 'Explorador', implementador: 'Implementador', revisor: 'Revisor', escalado: 'Escalado' };
 
 export const STATUS_LABELS = {
-  not_started: 'Sin iniciar', starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', [TERMINAL_APPROVAL.status]: TERMINAL_APPROVAL_TEXT.waiting, done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
+  not_started: 'Sin iniciar', pending_approval: 'Pendiente de aprobación', starting: 'Arrancando', running: 'Trabajando', waiting: 'Esperando respuesta', [TERMINAL_APPROVAL.status]: TERMINAL_APPROVAL_TEXT.waiting, done: 'Terminada', failed: 'Fallida', stopped: 'Detenida', exited: 'Cerrada',
 };
 
 export const isFinal = (status) => ['done', 'failed', 'stopped', 'exited'].includes(status);
