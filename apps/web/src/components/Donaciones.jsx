@@ -4,7 +4,7 @@ import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
 import { urlFounder } from '../lib/founder';
 import { MONTOS, urlPaypal } from '../lib/donaciones';
-import { IconCheck, IconCorazon } from './Icons';
+import { IconCheck } from './Icons';
 import { Enfasis } from './Enfasis';
 
 function dolares(cents) {
@@ -59,7 +59,7 @@ function SelectorDonativo({ cuenta }) {
       )}
       {url ? (
         <a className="pill pill--oliva" href={url} target="_blank" rel="noopener noreferrer">
-          <IconCorazon size={17} />{t('donWithPaypal', { amount: final ? `$${final}` : '' })}
+          {t('donWithPaypal', { amount: final ? `$${final}` : '' })}
         </a>
       ) : (
         <button type="button" className="pill pill--oliva" disabled>{t('donUnavailable')}</button>
@@ -114,7 +114,7 @@ export function TarjetaAportes() {
       <p className="donaciones__frase"><Enfasis texto={t('donCardTitle')} /></p>
       <p className="donaciones__texto">{t('donSettingsText')}</p>
       <div className="set-aportes__botones">
-        <Link to="/plans" className="pill pill--oliva"><IconCorazon size={16} />{t('donButton')}</Link>
+        <Link to="/plans" className="pill pill--oliva">{t('donButton')}</Link>
         <a href={urlFounder('/donate', locale)} className="donaciones__enlace">{t('donWhere')} →</a>
       </div>
     </div>

@@ -8,7 +8,7 @@ import { useT } from '../i18n/useT';
 import { useLocale } from '../i18n/LocaleContext';
 import { urlFounder } from '../lib/founder';
 import { Logo } from './Logo';
-import { IconChevron, IconCorazon, IconMenu, IconX } from './Icons';
+import { IconChevron, IconMenu, IconX } from './Icons';
 import { LanguageSwitch } from './LanguageSwitch';
 import { useDonaciones } from '../lib/donaciones';
 
@@ -137,7 +137,7 @@ export function PublicNav() {
         <div className="pubnav__actions">
           <LanguageSwitch className="pubnav__icono pubnav__idioma" conCodigo />
           <Link to="/chat" className="pill pill--tinta pubnav__cta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
-          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva pubnav__donar"><IconCorazon size={16} />{t('donate')}</a>}
+          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva pubnav__donar">{t('donate')}</a>}
 
           <button
             className="icon-btn pubnav__toggle"
@@ -164,7 +164,7 @@ export function PublicNav() {
         )))}
         <div className="pubnav__menu-botones">
           <Link to="/chat" className="pill pill--tinta">{user ? tc('goToChat') : tc('tryLixbon')}</Link>
-          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva"><IconCorazon size={16} />{t('donate')}</a>}
+          {donar && <a href={urlFounder('/donate', locale)} className="pill pill--oliva">{t('donate')}</a>}
         </div>
       </div>
     </header>

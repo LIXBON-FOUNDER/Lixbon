@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IconCopy, IconCheck } from './Icons';
+import { IconCopiar } from './Icons';
 import { useT } from '../i18n/useT';
 
 export function CodeBlock({ code, label }) {
@@ -24,7 +24,7 @@ export function CodeBlock({ code, label }) {
       <div className="codeblock__row">
         <code className="codeblock__code">{code}</code>
         <button className="codeblock__copy" onClick={copy} aria-label={t('copyCommand')}>
-          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+          <IconCopiar hecho={copied} size={14} />
           <span>{copied ? t('copied') : t('copy')}</span>
         </button>
       </div>

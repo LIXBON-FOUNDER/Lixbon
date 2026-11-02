@@ -7,17 +7,49 @@ import { useNavigate, Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
 import { guardarIdioma, otherLocalePath } from '../i18n/paths';
 import { useT } from '../i18n/useT';
-import { LogoLixbon } from './Logo';
+import { tonoUso, fraccionDe } from './ContextoUso';
+import { api } from '../lib/api';
+import { ShimmerText } from './ShimmerText';
+import { LogoLixbon, LogoMark } from './Logo';
 import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
 import { Desplegable } from './Desplegable';
 import {
-  IconPlus, IconSearch, IconPanel, IconChat, IconGrid, IconDots,
-  IconChevron, IconGear, IconPencil, IconTrash, IconLogout, IconX, IconSun, IconMoon,
-  IconBook, IconBolt, IconGlobe, IconUser, IconLayers, IconCorazon, IconTerminal,
+  IconDots, IconPencil, IconTrash, IconX, IconUser, IconUpDown, IconCli, IconIde,
+  NavNuevo, NavBuscar, NavPanel, NavChat, NavVisuals, NavSkills, NavApps, NavRemoto, NavDocs,
+  NavAjustes, NavUso, NavPlanes, NavIdioma, NavSalir, NavAdmin, NavDonar, TemaClaro, TemaOscuro, TemaSistema,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
+
+// El historial se agrupa por la última actividad: hoy, ayer, la semana, el mes
+// y lo anterior. Las conversaciones ya llegan ordenadas de la más reciente.
+const GRUPOS = [['today', 0], ['yesterday', 1], ['last7', 7], ['last30', 30], ['older', Infinity]];
+
+const diasDesde = (c) => {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const t = Date.parse(c.updated_at || c.created_at || '');
+  return Number.isNaN(t) ? Infinity : Math.max(0, Math.ceil((hoy - t) / 86400000));
+};
+
+function agruparPorFecha(convs) {
+  const grupos = [];
+  for (const c of convs) {
+    const dias = diasDesde(c);
+    const [clave] = GRUPOS.find(([, max]) => dias <= max);
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo?.clave === clave) ultimo.items.push(c);
+    else grupos.push({ clave, items: [c] });
+  }
+  return grupos;
+}
+
+const iniciales = (user) => {
+  const n = [user.first_name, user.last_name].filter(Boolean);
+  if (n.length) return n.map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  return (user.username || '?')[0].toUpperCase();
+};
 
 function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c' }) {
   const t = useT('sidebar');
@@ -80,13 +112,14 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
     );
   }
 
+  const titulo = conv.title || t('untitled');
   return (
     <div className={`sb-item ${active ? 'is-active' : ''}`} ref={rootRef}>
       <button
         className="sb-item__title"
         onClick={() => { navigate(`${base}/${conv.id}`); onNavigate?.(); }}
       >
-        {conv.title || t('untitled')}
+        <span className="sb-item__texto">{titulo}</span>
       </button>
       <button
         ref={btnRef}
@@ -109,34 +142,79 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
   );
 }
 
+// Cupo semanal, sobre el perfil: «Uso semanal · 42 %», con la barra en verde,
+// ámbar o rojo según lo gastado.
+function UsoSemanal({ user, refresco, onAbrir }) {
+  const t = useT('sidebar');
+  const [bucket, setBucket] = useState(null);
+  useEffect(() => {
+    if (!user) return undefined;
+    let vivo = true;
+    api.get('/api/account/usage')
+      .then((res) => { if (vivo) setBucket(res.data.buckets?.week || null); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [user, refresco]);
+  if (!bucket || bucket.unlimited) return null;
+  const frac = fraccionDe(bucket);
+  const pct = Math.round(frac * 100);
+  return (
+    <button type="button" className="sb-uso" onClick={onAbrir}>
+      <span className="sb-uso__cab"><span>{t('weekUsage')}</span><span className="sb-uso__valor">{pct} %</span></span>
+      <span className={`sb-uso__barra ${tonoUso(frac)}`}><span style={{ width: `${pct}%` }} /></span>
+    </button>
+  );
+}
+
+// ES / EN: cambia la ruta al otro idioma y lo recuerda.
+function SelectorIdioma() {
+  const tn = useT('nav');
+  const locale = useLocale();
+  const { pathname } = useLocation();
+  const rawNavigate = useRawNavigate();
+  return (
+    <span className="sb-seg sb-seg--texto" role="group" aria-label={tn('language')}>
+      {[{ code: 'es', label: 'ES' }, { code: 'en', label: 'EN' }].map((o) => (
+        <button
+          key={o.code}
+          type="button"
+          className={locale === o.code ? 'is-on' : ''}
+          aria-pressed={locale === o.code}
+          onClick={() => {
+            if (locale === o.code) return;
+            guardarIdioma(o.code);
+            rawNavigate(otherLocalePath(pathname));
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 export function Sidebar({
   user, conversations, loadingConversations, activeId, collapsed, onToggleCollapse,
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
   hasMoreConversations = false, onLoadMore, onSearch,
-  historyBase = '/c', newPath = '/chat', seccion = 'chat',
+  historyBase = '/c', newPath = '/chat', seccion = 'chat', remotas = [], remotaActiva = null,
 }) {
   const t = useT('sidebar');
   const tc = useT('common');
   const tn = useT('nav');
-  const locale = useLocale();
   const donaciones = useDonaciones();
-  const { pathname } = useLocation();
-  const [historyOpen, setHistoryOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [profileMenu, setProfileMenu] = useState(false);
-  const { tema, alternar: alternarTema } = useTema();
+  const { preferencia: temaPref, fijar: fijarTema } = useTema();
   const searchRef = useRef(null);
   const profileRef = useRef(null);
   const closeBtnRef = useRef(null);
   const navigate = useNavigate();
-  const rawNavigate = useRawNavigate();
 
   const closeProfile = useCallback(() => setProfileMenu(false), []);
   useDismiss(profileMenu, profileRef, closeProfile);
 
-  // preventScroll: el campo vive en una casilla con overflow oculto que aún se
-  // está ensanchando, y el navegador la desplazaría para mostrar el cursor.
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus({ preventScroll: true });
   }, [searchOpen]);
@@ -165,6 +243,11 @@ export function Sidebar({
     if (compact) onClose?.();
   };
 
+  const abrirBusqueda = () => {
+    if (collapsed && !compact) onToggleCollapse?.();
+    setSearchOpen(true);
+  };
+
   // Con onSearch la búsqueda la resuelve el servidor (el historial llega por
   // páginas); mientras responde, se filtra lo que ya está cargado.
   const [found, setFound] = useState(null);
@@ -179,14 +262,15 @@ export function Sidebar({
     return () => { vigente = false; clearTimeout(timer); };
   }, [query, onSearch]);
 
-  const local = query
-    ? conversations.filter((c) => (c.title || '').toLowerCase().includes(query.toLowerCase()))
+  const q = query.trim();
+  const local = q
+    ? conversations.filter((c) => (c.title || '').toLowerCase().includes(q.toLowerCase()))
     : conversations;
-  const visible = query && found?.q === query.trim() ? found.items : local;
+  const visible = q && found?.q === q ? found.items : local;
 
   // Al acercarse al final de la lista se pide la página siguiente.
   const moreRef = useRef(null);
-  const wantsMore = !query && hasMoreConversations && Boolean(onLoadMore);
+  const wantsMore = !q && hasMoreConversations && Boolean(onLoadMore);
   useEffect(() => {
     const el = moreRef.current;
     if (!wantsMore || !el || typeof IntersectionObserver === 'undefined') return undefined;
@@ -198,41 +282,96 @@ export function Sidebar({
   }, [wantsMore, onLoadMore, conversations.length]);
 
   const drawerHidden = compact && !open;
-  const nuevoLabel = seccion === 'visuals' ? t('newDesign') : t('newConversation');
+  const railVisible = collapsed && !compact;
+  // «Nuevo chat» en todas las secciones: la barra es la misma en Chat, Visuals y Remoto.
+  const nuevoLabel = seccion === 'remote' ? t('connectSession') : t('newConversation');
+  const esGratis = user && (!user.plan_id || user.plan_id === 'free');
+
+  // Dos modos, como Chat y Code: la barra entera cambia. En Remoto la lista
+  // es la de sesiones (activas arriba y las inactivas para verlas luego).
+  const modo = seccion === 'remote' ? 'remote' : 'chat';
+  const activo = modo === 'remote' ? null : seccion;
+  const NAV = modo === 'remote' ? [
+    { id: 'apps', to: '/apps', Icon: NavApps, label: t('apps') },
+    { id: 'docs', to: '/docs/remote', Icon: NavDocs, label: t('docs') },
+  ] : [
+    { id: 'chat', to: '/chat', Icon: NavChat, label: t('conversations') },
+    { id: 'visuals', to: '/visuals', Icon: NavVisuals, label: t('visuals'), pro: !tieneVisuals(user) },
+    { id: 'integraciones', to: '/integraciones', Icon: NavSkills, label: t('integrations') },
+    { id: 'apps', to: '/apps', Icon: NavApps, label: t('apps') },
+    { id: 'docs', to: '/docs', Icon: NavDocs, label: t('docs') },
+  ];
+  const qr = query.trim().toLowerCase();
+  const remotasVisibles = qr ? remotas.filter((r) => `${r.title || ''} ${r.machine || ''}`.toLowerCase().includes(qr)) : remotas;
+  const gruposRemotos = [
+    { clave: 'activeSessions', items: remotasVisibles.filter((r) => r.status === 'online') },
+    { clave: 'recentSessions', items: remotasVisibles.filter((r) => r.status !== 'online') },
+  ].filter((g) => g.items.length);
+  const numConvs = conversations.length > 0 && `${conversations.length}${hasMoreConversations ? '+' : ''}`;
 
   return (
     <aside
-      className={`sidebar ${collapsed && !compact ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}
+      className={`sidebar ${railVisible ? 'is-collapsed' : ''} ${open ? 'is-open' : ''}`}
       id="sidebar-drawer"
       aria-label={t('conversationsPanel')}
       aria-hidden={drawerHidden || undefined}
       inert={drawerHidden || undefined}
     >
-      <div className="sidebar__rail" aria-hidden={!collapsed}>
-        <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('openPanel')} tabIndex={collapsed ? 0 : -1}>
-          <IconPanel />
+      {/* Colapsada: solo iconos, con su nombre en un globo al pasar el cursor. */}
+      <nav className="sidebar__rail" aria-label={t('spaces')} aria-hidden={!railVisible} inert={!railVisible || undefined}>
+        <button className="sb-rail__btn sb-rail__logo" onClick={onToggleCollapse} data-tip={t('openPanel')} aria-label={t('openPanel')}>
+          <LogoMark size={20} />
+          <NavPanel />
         </button>
-        <button className="icon-btn" onClick={() => navigate(newPath)} aria-label={t('newConversation')} tabIndex={collapsed ? 0 : -1}>
-          <IconPlus />
+        <button className="sb-rail__btn sb-rail__btn--nuevo" onClick={() => navigate(newPath)} data-tip={nuevoLabel} aria-label={nuevoLabel}>
+          <NavNuevo />
         </button>
-      </div>
+        <button className="sb-rail__btn" onClick={abrirBusqueda} data-tip={t('searchConversations')} aria-label={t('searchConversations')}>
+          <NavBuscar />
+        </button>
+        <button className="sb-rail__btn" onClick={() => navigate(modo === 'remote' ? '/chat' : '/remote')}
+          data-tip={modo === 'remote' ? t('chatMode') : t('remoteMode')} aria-label={modo === 'remote' ? t('chatMode') : t('remoteMode')}>
+          {modo === 'remote' ? <NavChat /> : <NavRemoto />}
+        </button>
+        <span className="sb-rail__hueco" />
+        {NAV.map(({ id, to, Icon, label }) => (
+          <button key={id} className={`sb-rail__btn ${activo === id ? 'is-active' : ''}`} onClick={() => navigate(to)} data-tip={label} aria-label={label}>
+            <Icon relleno={activo === id} />
+          </button>
+        ))}
+        {user && (
+          <button className="sb-rail__btn sb-rail__avatar" onClick={() => { onToggleCollapse?.(); setProfileMenu(true); }} data-tip={tc('settings')} aria-label={tc('settings')}>
+            {user.avatar_url
+              ? <img className="sidebar__avatar sidebar__avatar--img" src={user.avatar_url} alt="" />
+              : <span className="sidebar__avatar">{iniciales(user)}</span>}
+          </button>
+        )}
+      </nav>
 
-      <div className="sidebar__body" aria-hidden={collapsed && !compact}>
+      <div className="sidebar__body" aria-hidden={railVisible} inert={railVisible || undefined}>
         <div className="sidebar__header">
           <Link to="/chat" className="sidebar__logo" onClick={compact ? onClose : undefined}>
             <LogoLixbon />
           </Link>
-          <div className="sidebar__header-actions">
-            {compact ? (
-              <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label={t('closePanel')}>
-                <IconX />
-              </button>
-            ) : (
-              <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('collapsePanel')}>
-                <IconPanel />
-              </button>
-            )}
-          </div>
+          <span className="sb-modo" role="group" aria-label={t('mode')}>
+            <button type="button" className={modo === 'chat' ? 'is-on' : ''} aria-pressed={modo === 'chat'}
+              onClick={() => modo !== 'chat' && go('/chat')} title={t('chatMode')} aria-label={t('chatMode')}>
+              <NavChat size={16} relleno={modo === 'chat'} />
+            </button>
+            <button type="button" className={modo === 'remote' ? 'is-on' : ''} aria-pressed={modo === 'remote'}
+              onClick={() => modo !== 'remote' && go('/remote')} title={t('remoteMode')} aria-label={t('remoteMode')}>
+              <NavRemoto size={16} relleno={modo === 'remote'} />
+            </button>
+          </span>
+          {compact ? (
+            <button ref={closeBtnRef} className="icon-btn" onClick={onClose} aria-label={t('closePanel')}>
+              <IconX />
+            </button>
+          ) : (
+            <button className="icon-btn" onClick={onToggleCollapse} aria-label={t('collapsePanel')} title={t('collapsePanel')}>
+              <NavPanel />
+            </button>
+          )}
         </div>
 
         {/* Buscar y crear comparten la bandeja: la casilla ancha es la acción
@@ -241,10 +380,10 @@ export function Sidebar({
           <div className={`sb-bandeja__casilla sb-bandeja__casilla--nuevo ${searchOpen ? 'is-estrecha' : ''}`}>
             <button
               className="sb-bandeja__btn"
-              onClick={() => (searchOpen ? cerrarBusqueda() : go(newPath))}
+              onClick={() => (searchOpen ? cerrarBusqueda() : go(modo === 'remote' ? '/remote' : newPath))}
               aria-label={nuevoLabel}
             >
-              <IconPlus size={16} />
+              <NavNuevo />
               <span className="sb-bandeja__txt" aria-hidden="true">{nuevoLabel}</span>
             </button>
           </div>
@@ -255,14 +394,14 @@ export function Sidebar({
               aria-label={t('searchConversations')}
               aria-expanded={searchOpen}
             >
-              <IconSearch size={16} />
+              <NavBuscar />
             </button>
             <input
               ref={searchRef}
               type="search"
               className="sb-bandeja__campo"
-              placeholder={t('searchHistory')}
-              aria-label={t('searchHistory')}
+              placeholder={seccion === 'remote' ? t('searchSessions') : t('searchHistory')}
+              aria-label={seccion === 'remote' ? t('searchSessions') : t('searchHistory')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -276,165 +415,158 @@ export function Sidebar({
         </div>
 
         <nav className="sidebar__nav" aria-label={t('spaces')}>
-          <span className="sidebar__label">{t('spaces')}</span>
-          <button className={`sb-nav ${seccion === 'chat' ? 'is-active' : ''}`} onClick={() => (seccion === 'chat' ? setHistoryOpen(true) : go('/chat'))}>
-            <IconChat /> <span>{t('conversations')}</span>
-            {seccion === 'chat' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}{hasMoreConversations ? '+' : ''}</span>}
-          </button>
-          <button className={`sb-nav ${seccion === 'visuals' ? 'is-active' : ''}`} onClick={() => (seccion === 'visuals' ? setHistoryOpen(true) : go('/visuals'))}>
-            <IconLayers /> <span>{t('visuals')}</span>
-            {seccion === 'visuals' && conversations.length > 0 && <span className="sb-nav__num">{conversations.length}{hasMoreConversations ? '+' : ''}</span>}
-            {!tieneVisuals(user) && <span className="sb-menu__tag">Pro</span>}
-          </button>
-          <button className="sb-nav" onClick={() => go('/apps')}>
-            <IconGrid /> <span>{t('apps')}</span>
-          </button>
-          {/* Las sesiones del CLI y del IDE que el usuario abre en remoto. */}
-          <button className="sb-nav" onClick={() => go('/remote')}>
-            <IconTerminal /> <span>{t('remote')}</span>
-          </button>
+          {NAV.map(({ id, to, Icon, label, pro }) => (
+            <button key={id} className={`sb-nav ${activo === id ? 'is-active' : ''}`} onClick={() => go(to)} aria-current={activo === id ? 'page' : undefined}>
+              <Icon relleno={activo === id} /> <span>{label}</span>
+              {id === 'chat' && activo === 'chat' && numConvs && <span className="sb-nav__num">{numConvs}</span>}
+              {pro && <span className="sb-nav__pro">Pro</span>}
+            </button>
+          ))}
         </nav>
 
-        <div className="sidebar__history">
-          <button className="sidebar__history-head" onClick={() => setHistoryOpen((v) => !v)}>
-            <span>{t('history')}</span>
-            <IconChevron size={14} open={historyOpen} />
-          </button>
-          <div className={`reveal ${historyOpen ? 'is-open' : ''}`}>
-            <div className="reveal__inner">
-              <div className="sidebar__history-list">
-                {user && loadingConversations ? (
-                  <HistorySkeleton />
-                ) : (
-                  <>
-                    {visible.map((c) => (
-                      <HistoryItem
-                        key={c.id}
-                        conv={c}
-                        active={c.id === activeId}
-                        onRename={onRename}
-                        onDelete={onDelete}
-                        onNavigate={compact ? onClose : undefined}
-                        base={historyBase}
-                      />
-                    ))}
-                    {wantsMore && <div ref={moreRef} className="sidebar__more" aria-hidden="true" />}
-                    {visible.length === 0 && (
-                      <p className="sidebar__empty">
-                        {user ? t('noConversations') : t('logInToSaveHistory')}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+        <div className="sidebar__history" role="region" aria-label={t('history')}>
+          {modo === 'remote' ? (
+            <>
+              {gruposRemotos.map((g) => (
+                <div key={g.clave} className="sidebar__grupo">
+                  <span className="sidebar__label">{t(g.clave)}</span>
+                  {g.items.map((r) => {
+                    const sinNada = r.status === 'ended' && !(r.transcript_events > 0);
+                    const estado = r.status === 'online' ? 'online' : r.status === 'ended' ? 'ended' : 'offline';
+                    return (
+                      <button key={r.id} type="button" disabled={sinNada}
+                        className={`sb-item sb-sesion ${r.id === remotaActiva ? 'is-active' : ''}`}
+                        onClick={() => go(`/remote?s=${r.id}`)} aria-current={r.id === remotaActiva ? 'page' : undefined}
+                        title={`${r.machine || ''}${r.machine ? ' · ' : ''}${t(`remote_${estado}`)}`}>
+                        <span className={`sb-sesion__titulo is-${estado}`}>
+                          {estado === 'online' ? <ShimmerText text={r.title || t('remoteSession')} /> : (r.title || t('remoteSession'))}
+                        </span>
+                        {r.source === 'ide' || r.source === 'cli' ? (
+                          <span className="sb-sesion__origen" title={r.source.toUpperCase()} aria-label={r.source.toUpperCase()}>
+                            {r.source === 'ide' ? <IconIde size={16} /> : <IconCli size={16} />}
+                          </span>
+                        ) : <span className="sb-sesion__origen sb-sesion__origen--texto">{r.source}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {gruposRemotos.length === 0 && (
+                <p className="sidebar__empty">{qr ? t('noResults') : user ? t('noRemoteSessions') : t('logInToSaveHistory')}</p>
+              )}
+            </>
+          ) : user && loadingConversations ? (
+            <HistorySkeleton />
+          ) : (
+            <>
+              {q ? (
+                <div className="sidebar__grupo sidebar__grupo--busqueda">
+                  {visible.map((c) => (
+                    <HistoryItem key={c.id} conv={c} active={c.id === activeId} onRename={onRename} onDelete={onDelete}
+                      onNavigate={compact ? onClose : undefined} base={historyBase} />
+                  ))}
+                  {visible.length === 0 && <p className="sidebar__empty">{t('noResults')}</p>}
+                </div>
+              ) : agruparPorFecha(visible).map((g) => (
+                <div key={g.clave} className="sidebar__grupo">
+                  <span className="sidebar__label">{t(g.clave)}</span>
+                  {g.items.map((c) => (
+                    <HistoryItem key={c.id} conv={c} active={c.id === activeId} onRename={onRename} onDelete={onDelete}
+                      onNavigate={compact ? onClose : undefined} base={historyBase} />
+                  ))}
+                </div>
+              ))}
+              {wantsMore && <div ref={moreRef} className="sidebar__more" aria-hidden="true" />}
+              {visible.length === 0 && !q && (
+                <p className="sidebar__empty">
+                  {user ? t('noConversations') : t('logInToSaveHistory')}
+                </p>
+              )}
+            </>
+          )}
         </div>
 
-        {/* Con las donaciones activas, «Donar» lo ve todo el mundo; si no, solo
-            la cuenta gratuita ve el atajo a los planes. */}
-        {donaciones?.enabled ? (
-          <button className="sidebar__upgrade sidebar__upgrade--donar" onClick={() => go('/plans')}>
-            <IconCorazon size={16} /> <span>{t('donate')}</span>
-          </button>
-        ) : user && (!user.plan_id || user.plan_id === 'free') && (
-          <button className="sidebar__upgrade" onClick={() => go('/plans')}>
-            <IconBolt size={16} /> <span>{tc('upgrade')}</span>
-          </button>
-        )}
-
         <div className="sidebar__foot">
-        <div className="sidebar__profile" ref={profileRef}>
-          {user ? (
-            <>
-              {user.avatar_url ? (
-                <img className="sidebar__avatar sidebar__avatar--img" src={user.avatar_url} alt="" />
-              ) : (
-                <span className="sidebar__avatar">
-                  {(user.first_name || user.username || '?')[0].toUpperCase()}
-                </span>
-              )}
-              <div className="sidebar__profile-info">
-                <span className="sidebar__profile-name">
-                  {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
-                </span>
-                <Link
-                  to="/plans"
-                  className="sidebar__plan"
-                  onClick={compact ? onClose : undefined}
+          {/* Con las donaciones activas, «Donar» lo ve todo el mundo. */}
+          {donaciones?.enabled && (
+            <button className="sidebar__upgrade sidebar__upgrade--donar" onClick={() => go('/plans')}>
+              <NavDonar /> <span>{t('donate')}</span>
+            </button>
+          )}
+          <UsoSemanal user={user} refresco={conversations.length} onAbrir={() => go('/account/usage')} />
+
+          <div className="sidebar__profile" ref={profileRef}>
+            {user ? (
+              <>
+                <button
+                  type="button"
+                  className={`sidebar__profile-btn ${profileMenu ? 'is-open' : ''}`}
+                  onClick={() => setProfileMenu((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={profileMenu}
                 >
-                  {user.plan_name || t('freePlan')}
-                </Link>
-              </div>
-              <button
-                className="icon-btn"
-                onClick={() => setProfileMenu((v) => !v)}
-                aria-label={tc('settings')}
-                aria-expanded={profileMenu}
-              >
-                <IconGear />
-              </button>
-                <Desplegable abierto={profileMenu} className="sb-menu sb-menu--profile" role="menu">
-                  <button onClick={() => { setProfileMenu(false); go('/plans'); }}>
-                    <IconBolt size={14} /> {tn('plans')}
+                  {user.avatar_url
+                    ? <img className="sidebar__avatar sidebar__avatar--img" src={user.avatar_url} alt="" />
+                    : <span className="sidebar__avatar">{iniciales(user)}</span>}
+                  <span className="sidebar__profile-info">
+                    <span className="sidebar__profile-name">
+                      {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}
+                    </span>
+                    <span className="sidebar__plan">{user.plan_name || t('freePlan')}</span>
+                  </span>
+                  <IconUpDown size={14} />
+                </button>
+                <Desplegable abierto={profileMenu} className="sb-cuenta" role="menu">
+                  <div className="sb-cuenta__quien">
+                    <span className="sb-cuenta__nombre">{[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}</span>
+                    {user.email && <span className="sb-cuenta__correo">{user.email}</span>}
+                  </div>
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); go('/account'); }}>
+                    <NavAjustes /> {tc('settings')}
                   </button>
-                  <button onClick={alternarTema}>
-                    {tema === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />} {tema === 'dark' ? t('lightTheme') : t('darkTheme')}
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); go('/account/usage'); }}>
+                    <NavUso /> {t('usage')}
                   </button>
-                  <div className="sb-menu__lang">
-                    <span className="sb-menu__lang-label"><IconGlobe size={14} /> {tn('language')}</span>
-                    <span className="sb-menu__lang-opts" role="listbox" aria-label={tn('language')}>
-                      {[{ code: 'es', label: 'ES' }, { code: 'en', label: 'EN' }].map((o) => (
-                        <button
-                          key={o.code}
-                          type="button"
-                          role="option"
-                          aria-selected={locale === o.code}
-                          className={locale === o.code ? 'is-active' : ''}
-                          onClick={() => {
-                            setProfileMenu(false);
-                            if (locale === o.code) return;
-                            guardarIdioma(o.code);
-                            rawNavigate(otherLocalePath(pathname));
-                          }}
-                        >
-                          {o.label}
+                  <button role="menuitem" className={esGratis ? 'sb-cuenta__mejorar' : ''} onClick={() => { setProfileMenu(false); go('/plans'); }}>
+                    <NavPlanes /> {esGratis ? t('upgradePro') : tn('plans')}
+                  </button>
+                  <div className="sb-cuenta__fila">
+                    <span>{t('theme')}</span>
+                    <span className="sb-seg" role="group" aria-label={t('theme')}>
+                      {[['light', TemaClaro, t('lightTheme')], ['dark', TemaOscuro, t('darkTheme')], ['system', TemaSistema, t('systemTheme')]].map(([valor, Icono, nombre]) => (
+                        <button key={valor} type="button" className={temaPref === valor ? 'is-on' : ''} aria-pressed={temaPref === valor} aria-label={nombre} title={nombre} onClick={() => fijarTema(valor)}>
+                          <Icono size={16} relleno={temaPref === valor} />
                         </button>
                       ))}
                     </span>
                   </div>
-                  <button onClick={() => { setProfileMenu(false); go('/account'); }}>
-                    <IconGear size={14} /> {tc('settings')}
-                  </button>
-                  <button onClick={() => { setProfileMenu(false); go('/docs'); }}>
-                    <IconBook size={14} /> {t('docs')}
-                  </button>
+                  <div className="sb-cuenta__fila">
+                    <span className="sb-cuenta__etiqueta"><NavIdioma /> {tn('language')}</span>
+                    <SelectorIdioma />
+                  </div>
                   {user.role === 'admin' && (
-                    <button onClick={() => { setProfileMenu(false); go('/admin'); }}>
-                      <IconGrid size={14} /> {t('adminPanel')}
+                    <button role="menuitem" onClick={() => { setProfileMenu(false); go('/admin'); }}>
+                      <NavAdmin /> {t('adminPanel')}
                     </button>
                   )}
-                  <button onClick={() => { setProfileMenu(false); onLogout(); }}>
-                    <IconLogout size={14} /> {tc('logOut')}
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); onLogout(); }}>
+                    <NavSalir /> {tc('logOut')}
                   </button>
                 </Desplegable>
-            </>
-          ) : (
-            <>
-              <span className="sidebar__avatar sidebar__avatar--guest">
-                <IconUser size={17} />
-              </span>
-              <div className="sidebar__profile-info">
-                <Link to="/auth" className="sidebar__profile-name" onClick={compact ? onClose : undefined}>
-                  {tc('logIn')}
-                </Link>
-                <Link to="/plans" className="sidebar__plan-link" onClick={compact ? onClose : undefined}>
-                  {donaciones?.enabled ? t('donate') : t('seePlans')}
-                </Link>
+              </>
+            ) : (
+              <div className="sidebar__invitado">
+              <Link to="/auth" className="sidebar__profile-btn" onClick={compact ? onClose : undefined}>
+                <span className="sidebar__avatar sidebar__avatar--guest"><IconUser size={15} /></span>
+                <span className="sidebar__profile-info">
+                  <span className="sidebar__profile-name">{tc('logIn')}</span>
+                  <span className="sidebar__plan">{t('logInToSaveHistory')}</span>
+                </span>
+              </Link>
+              <SelectorIdioma />
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
         </div>
       </div>
     </aside>

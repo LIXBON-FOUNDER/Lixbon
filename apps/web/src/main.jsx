@@ -1,6 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { precargarRuta } from './App.jsx';
+import { instalarPulsos } from '@lixbon/icons';
+import '@lixbon/fonts/sans.css';
+import '@lixbon/fonts/serif-variable.css';
 
 import './styles/base.css';
 import './styles/auth.css';
@@ -17,8 +20,11 @@ import './styles/web.css';
 import './styles/remote.css';
 import './styles/mascota.css';
 import './styles/titulares.css';
+import '@lixbon/icons/css';
 // El último: solo añade movimiento a lo anterior (ver motion.css).
 import './styles/motion.css';
+
+instalarPulsos();
 
 precargarRuta(window.location.pathname).then(() => {
   createRoot(document.getElementById('root')).render(

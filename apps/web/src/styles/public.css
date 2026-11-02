@@ -402,7 +402,7 @@
   left: 24px;
   width: 78px;
   height: 11px;
-  border-radius: 12px 12px 0 0;
+  border-radius: 8px 8px 0 0;
   background: var(--modal-bg);
 }
 
@@ -655,7 +655,6 @@
   min-width: 0;
   max-width: 760px;
   padding: 12px 32px 0;
-  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .docs__eyebrow {

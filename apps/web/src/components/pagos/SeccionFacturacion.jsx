@@ -5,7 +5,7 @@ import { useT } from '../../i18n/useT';
 import { api } from '../../lib/api';
 import { planBadge } from '../../lib/planColors';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { IconBolt, IconPlus, IconTrash } from '../Icons';
+import { IconPlus, IconTrash } from '../Icons';
 import { DialogoTarjeta } from './DialogoTarjeta';
 import { PagoCreditos } from './PagoCreditos';
 import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
@@ -180,7 +180,7 @@ export function SeccionFacturacion({ plan }) {
           )}
         </div>
         <Link to="/plans" className="pill-btn pill-btn--primary set-btn">
-          <IconBolt size={15} /> {pagado ? t('billing.changePlan') : t('billing.upgradePlan')}
+          {pagado ? t('billing.changePlan') : t('billing.upgradePlan')}
         </Link>
       </div>
       )}

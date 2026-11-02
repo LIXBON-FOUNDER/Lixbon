@@ -8,7 +8,7 @@ import { PublicFooter } from '../components/PublicFooter';
 import { CodeBlock } from '../components/CodeBlock';
 import { Enfasis } from '../components/Enfasis';
 import { useRevelar } from '../hooks/useRevelar';
-import { IconDownload, IconCheck, IconChevron } from '../components/Icons';
+import { IconCheck, IconChevron } from '../components/Icons';
 
 const MAX_VERSIONES = 2;
 
@@ -189,7 +189,7 @@ function SelectorVersion({ versiones, producto, requisitos, t }) {
         </label>
         {sel && (
           <a href={url} className="pill-btn pill-btn--primary dl-card__cta">
-            <IconDownload size={16} /> {t('download')}
+            {t('download')}
           </a>
         )}
       </div>

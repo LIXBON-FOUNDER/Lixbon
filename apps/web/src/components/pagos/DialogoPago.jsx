@@ -8,7 +8,7 @@ import { useCierreAnimado } from '../../hooks/useCierreAnimado';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useT } from '../../i18n/useT';
 import { LogoMark } from '../Logo';
-import { IconAlert, IconCheck, IconDownload, IconPlus, IconShield, IconX } from '../Icons';
+import { IconAlert, IconCheck, IconPlus, IconShield, IconX } from '../Icons';
 import { Tarjeta, errMsg, fmtDia, fmtUSD } from './comunes';
 
 function Cuerpo({
@@ -173,7 +173,7 @@ function Aprobado({ resultado, concepto, onCerrar }) {
         <button className="pago__cta" onClick={onCerrar}>{t('billing.payDialog.backToLixbon')}</button>
         {resultado.receipt_url && (
           <a className="pago__btn" href={resultado.receipt_url} target="_blank" rel="noreferrer">
-            <IconDownload size={15} /> {t('billing.payDialog.downloadReceipt')}
+            {t('billing.payDialog.downloadReceipt')}
           </a>
         )}
       </div>
