@@ -220,7 +220,7 @@ filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real 
 Un Attempt con claim nunca se despacha otra vez, tampoco tras un reintento del cliente o una nueva pasada
 (`Core::dispatch_approved`).
 
-**Fuera de esta fase:** el `Launcher` real (crear el worktree y lanzar por adapter), la conversión de los eventos del
+**Fuera de esta fase:** el `Launcher` real (hecho después: ver [§ Launcher real](#launcher-real-lxo-246-pr-b)), la conversión de los eventos del
 proveedor en `attempt.completed`/`failed`, `attempt.dispatch_ambiguous` (hecho en Attention) y la reconciliación de los
 claims en vuelo al arrancar. Hasta entonces un desenlace desconocido o una caída entre pasos deja el claim `reserved`/`started`,
 que ya impide relanzar pero no es visible. Nada en producción llama al despachador.
@@ -293,6 +293,29 @@ la del Project, `shared`, queda para otra fase).
   aprobó para una hija y el primer Attempt no tiene una aprobación equivalente.
 
 Inerte: nada en producción lo llama todavía.
+
+### Launcher real (LXO-246, PR B)
+
+`orch/adapter_launcher.rs` implementa el `Launcher` del despachador sobre el registro de proveedores y el worktree del PR A.
+
+* **`prepare`** (sin efectos del proveedor): toma el adapter y una **copia** de su matriz del registro vivo (no se retiene el
+  registro: una ejecución dura minutos), vuelve a comprobar que `start` y `events` están disponibles **ahora** (pudieron cambiar
+  desde `task_create`) y crea el worktree. Si algo falla, el Attempt se cierra desde `starting` sin `attempt.started`.
+* **`start`** (tras `attempt.started`): `Gated::start`. `Ok(handle)` es `Running` y la ejecución queda en `take_started` para el
+  bombeo de eventos (PR C). `Err(e)` prueba que **no se lanzó**: el contrato del adapter es que un `Err` es «la operación no se
+  pudo atender» y los dos adapters reales matan o cierran el proceso antes de devolverlo; se libera el worktree y se clasifica.
+  Un **pánico** del adapter es `Unknown`: pudo haber arrancado, así que no se libera nada y el claim queda `started`.
+* **`abandon`:** no se llegó a llamar al proveedor; se libera el worktree.
+
+| Código del adapter | Desenlace |
+|---|---|
+| `environment_blocked`, `unsupported_capability`, `capability_unavailable`, `unknown_capability`, `cancelled` | **Nada que lanzar**: `attempt.stopped`, nunca `failed` (un entorno bloqueado no es un fallo del agente) |
+| `invalid_request`, `unknown_provider`, `unknown_run`, `session_not_found`, `provider`, `internal` | **No se pudo lanzar**: `attempt.failed(launch_failed)` |
+
+La clasificación es un `match` sin comodín: un código nuevo obliga a decidir. Del error solo viajan el código y el mensaje ya
+redactado; nunca el diagnóstico crudo del proveedor.
+
+Inerte: ni se instala en producción ni nada lo llama todavía (PR D).
 
 ### `not_started`
 

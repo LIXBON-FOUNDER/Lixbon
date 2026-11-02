@@ -231,3 +231,16 @@ fn sin_una_ubicacion_del_project_en_esta_maquina_no_se_reclama_ni_se_prepara_nad
     assert!(calls(&log).is_empty());
     assert_eq!(row(&core, &attempt), ("starting".into(), "none".into(), None), "sin claim: se podrá despachar cuando haya ubicación");
 }
+
+#[test]
+fn si_el_adapter_prueba_que_no_habia_nada_que_lanzar_el_attempt_se_detiene_y_el_claim_se_asienta() {
+    let (core, _task, attempt) = approved();
+    let (launcher, log) = launcher(Ok(()), StartOutcome::Unavailable("environment_blocked: la CLI no está".into()));
+
+    assert_eq!(core.dispatch_attempt(&attempt, &launcher).unwrap(), DispatchResult::Unavailable);
+    assert_eq!(calls(&log), vec![format!("prepare:{attempt}"), "start".to_string()]);
+    assert_eq!(row(&core, &attempt), ("stopped".into(), "settled".into(), None));
+    assert_eq!(event_count(&core, &attempt, "attempt.started"), 1);
+    assert_eq!(event_count(&core, &attempt, "attempt.stopped"), 1);
+    assert_eq!(event_count(&core, &attempt, "attempt.failed"), 0, "un entorno bloqueado no es un fallo del agente");
+}

@@ -118,7 +118,7 @@ impl Core {
             return Err("el Core no está en estado normal: no se borra nada que no se pueda registrar".into());
         }
         let dir = wt.dir.to_string_lossy().into_owned();
-        git::remove_worktree(&wt.repo_root, &dir, true)?;
+        git::remove_worktree(&wt.repo_root, &dir, true).inspect_err(|e| eprintln!("[core] git no pudo quitar un worktree: {e}"))?;
         let branch_deleted = git::delete_branch(&wt.repo_root, &wt.branch).is_ok();
         let effect = Effect::new("spawn_cleanup", "git_worktree_removed").task(&wt.task).repo(&wt.repo_root)
             .expected(json!({ "record": "worktree del Attempt retirado" }))

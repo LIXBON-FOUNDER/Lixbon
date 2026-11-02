@@ -49,6 +49,14 @@ pub(super) struct LiveRegistry {
     cell: Mutex<Live>,
 }
 
+/// El adapter de un proveedor y una copia de su matriz, para lanzarlo sin retener el registro.
+pub(super) enum AdapterLookup {
+    /// El primer sondeo todavía no terminó.
+    Probing,
+    Unknown,
+    Found(Arc<dyn ProviderAdapter>, super::adapter::CapabilityMatrix),
+}
+
 /// Lo que el registro sabe de un proveedor.
 pub(super) enum ProviderLookup {
     /// El primer sondeo todavía no terminó.
@@ -184,6 +192,19 @@ impl LiveRegistry {
         match s.registry.snapshot().providers.into_iter().find(|p| p.id == id) {
             Some(entry) => ProviderLookup::Found(Box::new(entry)),
             None => ProviderLookup::Unknown,
+        }
+    }
+
+    /// El adapter de `id` y su matriz AHORA, sin esperar a ninguna CLI (como [`LiveRegistry::lookup`]).
+    pub(super) fn adapter_for(this: &Arc<LiveRegistry>, id: &str) -> AdapterLookup {
+        let _ = LiveRegistry::snapshot(this, false);
+        let s = this.live();
+        if !s.built {
+            return AdapterLookup::Probing;
+        }
+        match s.registry.lookup(id) {
+            Some((adapter, matrix)) => AdapterLookup::Found(adapter, matrix),
+            None => AdapterLookup::Unknown,
         }
     }
 
