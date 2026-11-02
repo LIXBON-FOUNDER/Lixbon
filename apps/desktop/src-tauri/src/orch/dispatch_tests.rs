@@ -207,8 +207,8 @@ fn la_pasada_de_aprobados_despacha_cada_attempt_una_vez() {
 #[test]
 fn la_intencion_usa_la_ubicacion_verificada_del_project_y_no_el_repo_que_dijo_quien_creo_la_task() {
     let (core, task, attempt) = approved();
-    // La Task se creó con `repo` vacío (lo aporta quien la crea); aun así hay desde dónde lanzar.
-    assert_eq!(core.lock().tasks[&task].repo, "");
+    // El `repo` de la Task es la ubicación verificada del Project (no lo que mande el cliente): el Worktree se registra con él.
+    assert_eq!(core.lock().tasks[&task].repo, ".");
     let (launcher, _log) = launcher(Ok(()), StartOutcome::Running);
 
     assert_eq!(core.dispatch_attempt(&attempt, &launcher).unwrap(), DispatchResult::Launched);

@@ -207,6 +207,11 @@ pub(super) mod e2e {
     /// Un Core persistente con el corte aplicado, un Project y una Person registrada (Desktop), sin ninguna Task.
     /// Devuelve el Core, el cliente autenticado de la Person, su contexto y el id del Project.
     pub(in crate::orch) fn core_with_project() -> (Arc<Core>, crate::store::AuthenticatedClient, MutationContext, String) {
+        core_with_project_at(".")
+    }
+
+    /// Lo mismo, con el Project ubicado en `location` (una carpeta que existe en esta máquina).
+    pub(in crate::orch) fn core_with_project_at(location: &str) -> (Arc<Core>, crate::store::AuthenticatedClient, MutationContext, String) {
         let (keep, data, core_dir) = dirs();
         std::mem::forget(keep); // la base queda en disco: ninguna prueba borra una base de datos
         let (core, _host, ready) = arranca(&data, &core_dir);
@@ -220,7 +225,7 @@ pub(super) mod e2e {
                     .project_create(
                         "initial-approval-e2e",
                         &Fingerprint::default(),
-                        &NewLocation { machine: "e2e-machine".into(), path: ".".into(), display_path: ".".into(), primary: true },
+                        &NewLocation { machine: "e2e-machine".into(), path: location.into(), display_path: location.into(), primary: true },
                     )
                     .unwrap()
                     .id
@@ -248,7 +253,12 @@ pub(super) mod e2e {
     /// Un Core persistente con el corte aplicado, una Person registrada y un Attempt inicial pendiente de aprobación.
     /// Devuelve el Core, el contexto de la Person y los ids de la Task y del Attempt.
     pub(in crate::orch) fn core_with_pending_attempt() -> (Arc<Core>, MutationContext, String, String) {
-        let (core, client, ctx, project) = core_with_project();
+        core_with_pending_attempt_at(".")
+    }
+
+    /// Lo mismo, con el Project ubicado en `location`.
+    pub(in crate::orch) fn core_with_pending_attempt_at(location: &str) -> (Arc<Core>, MutationContext, String, String) {
+        let (core, client, ctx, project) = core_with_project_at(location);
         // La Task nace como intención por el RPC real y después pide su primer Attempt con aprobación.
         let created = core
             .rpc_authenticated_via(
@@ -257,7 +267,7 @@ pub(super) mod e2e {
                 Channel::Ui,
                 "",
                 "task_create",
-                &json!({"request_id": "e2e-1", "project_id": project, "objective": "o", "title": "t", "spec": "haz algo"}),
+                &json!({"request_id": "e2e-1", "project_id": project, "objective": "o", "title": "t", "spec": "haz algo", "repo": location}),
             )
             .unwrap();
         let task = created["task_id"].as_str().unwrap().to_string();
