@@ -455,7 +455,7 @@ const GATEWAY = {
   }),
   'POST /api/keys': (body) => {
     keys.unshift({ id: nextId++, name: body.name, masked_key: 'lixbon_sk_…new0', created_at: new Date().toISOString(), last_accessed: null, is_active: true });
-    return { api_key: `lixbon_sk_${Math.random().toString(36).slice(2)}` };
+    return { api_key: `lixbon_sk_${crypto.randomUUID().replace(/-/g, '')}` };
   },
   'PATCH /api/account/profile': (body) => ({ user: { ...store.get('user'), ...body } }),
   'PATCH /api/account/settings': (body) => { console.info('[tauriMock] ajustes', body); return { settings: { mascot_ide: body.mascot_ide } }; },
