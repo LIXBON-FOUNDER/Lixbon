@@ -149,10 +149,10 @@ impl AdapterPrepared {
         match self.core.upgrade() {
             Some(core) => {
                 if let Err(why) = core.release_worktree(&self.worktree) {
-                    eprintln!("[core] no se pudo liberar el worktree de {}: {why}", self.request.attempt_id);
+                    eprintln!("[core] no se pudo liberar el worktree de un Attempt no lanzado: {why}");
                 }
             }
-            None => eprintln!("[core] el Core ya no existe: el worktree de {} queda para la reconciliación de arranque", self.request.attempt_id),
+            None => eprintln!("[core] el Core ya no existe: el worktree de un Attempt no lanzado queda para la reconciliación de arranque"),
         }
     }
 }
