@@ -77,6 +77,7 @@ mod task_ops;
 mod approval_expiry;
 mod dispatch;
 mod worktree_provision;
+mod adapter_launcher;
 mod initial_approval_rpc;
 #[cfg(test)]
 mod initial_approval_tests;
@@ -84,6 +85,8 @@ mod initial_approval_tests;
 mod dispatch_tests;
 #[cfg(test)]
 mod worktree_provision_tests;
+#[cfg(test)]
+mod adapter_launcher_tests;
 #[cfg(test)]
 mod initial_approval_rpc_tests;
 #[cfg(test)]

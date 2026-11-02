@@ -10,7 +10,8 @@
 //!   4. Core::mutate: mark_running                                  <- `attempt.started` (Core), ANTES de llamar al proveedor
 //!   5. claim `reserved -> started`
 //!   6. prepared.start()                                            <- la llamada al proveedor
-//!        Running -> lanzado · NotSpawned -> failed(launch_failed) y asentar · Unknown -> el claim se queda `started`
+//!        Running -> lanzado · NotSpawned -> failed(launch_failed) y asentar · Unavailable -> stopped y asentar
+//!        Unknown -> el claim se queda `started`
 //! ```
 //!
 //! Como `attempt.started` se registra antes de llamar al proveedor, un claim sin él prueba que el proveedor nunca se llamó
@@ -89,6 +90,9 @@ pub(super) enum StartOutcome {
     Running,
     /// El adapter prueba que el proveedor nunca se lanzó.
     NotSpawned(String),
+    /// El adapter prueba que no se lanzó porque no había nada que lanzar (entorno bloqueado, capability ausente, cancelación):
+    /// `attempt.stopped`, nunca `failed` (un entorno bloqueado no es un fallo del agente).
+    Unavailable(String),
     /// No se sabe si el proveedor llegó a lanzarse. Nunca se reintenta solo.
     Unknown(String),
 }
@@ -120,6 +124,8 @@ pub(super) enum DispatchResult {
     Launched,
     /// El adapter probó que el proveedor no se lanzó: el Attempt `failed(launch_failed)` y el claim asentado.
     NotSpawned,
+    /// El adapter probó que no se lanzó porque no había nada que lanzar: el Attempt `stopped` y el claim asentado.
+    Unavailable,
     /// No se sabe si el proveedor se lanzó: el claim queda `started` y el Attempt `running`. No se relanza.
     OutcomeUnknown,
 }
@@ -255,6 +261,11 @@ impl Core {
                 self.mutate_as(&MutationContext::core(), |tx| tx.fail_with(&intent.task_id, "launch_failed", &why).map(|_| ()))?;
                 self.settle_after_close(attempt_id)?;
                 Ok(DispatchResult::NotSpawned)
+            }
+            StartOutcome::Unavailable(why) => {
+                self.mutate_as(&MutationContext::core(), |tx| tx.close(&intent.task_id, Status::Stopped, &why).map(|_| ())).map_err(|e| e.to_string())?;
+                self.settle_after_close(attempt_id)?;
+                Ok(DispatchResult::Unavailable)
             }
             StartOutcome::Unknown(why) => {
                 eprintln!("[core] el despacho de {attempt_id} tiene un desenlace desconocido ({why}): el claim queda started y no se relanza");
