@@ -83,6 +83,8 @@ mod initial_approval_tests;
 mod dispatch_tests;
 #[cfg(test)]
 mod initial_approval_rpc_tests;
+#[cfg(test)]
+mod task_create_attempt_tests;
 mod task_create_api;
 #[cfg(test)]
 mod task_create_rpc_tests;
@@ -259,6 +261,9 @@ pub struct Core {
     provider_registry: Arc<provider_registry::LiveRegistry>,
     /// El uso y los límites de cada proveedor (LXO-206): se consulta en segundo plano y la lectura no espera a ninguna CLI.
     usage_live: Arc<usage_read::LiveUsage>,
+    /// El lanzador de los primeros Attempts (LXO-141). Sin uno instalado, `task_create` no acepta `attempt`: nada podría
+    /// ejecutarlo. Producción no instala ninguno hasta que exista el `Launcher` real (worktree + adapter).
+    launcher: Mutex<Option<Arc<dyn dispatch::Launcher>>>,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -301,6 +306,7 @@ impl Default for Orch {
             ttl_ms: spawn_approval::ttl_ms(),
             usage_live: usage_read::LiveUsage::over(&provider_registry),
             provider_registry,
+            launcher: Mutex::new(None),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

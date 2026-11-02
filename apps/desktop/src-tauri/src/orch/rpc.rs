@@ -129,6 +129,11 @@ impl Core {
                 let input: super::task_create_api::CreateTaskInput = serde_json::from_value(args.clone())
                     .map_err(|_| "Solicitud task.create inválida".to_string())?;
                 let authorized = input.authorize_context(context)?;
+                // Sin lanzador instalado nada podría ejecutar el Attempt: se rechaza antes de tocar el ledger, los eventos o
+                // la memoria, en vez de crear un Attempt que nadie lanzaría.
+                if authorized.attempt.is_some() && self.launcher().is_none() {
+                    return Err(super::task_create_api::ATTEMPT_NOT_AVAILABLE.into());
+                }
                 let hash = authorized.payload_sha256().map_err(|_| "Solicitud task.create inválida".to_string())?;
                 let scope = authorized.identity_scope.clone();
                 let request_id = authorized.request_id.clone();
@@ -142,18 +147,36 @@ impl Core {
                 // La comprobación del Project lee disco y escribe marcas: va ANTES de tomar el lock del estado, para
                 // que una ruta lenta no bloquee al resto de RPC. El almacén vuelve a exigir que el Project exista.
                 self.check_project_launchable_id(&authorized.project_id)?;
+                // Capability del proveedor ANTES de escribir nada. Como el Project, depende del estado actual: un replay ya
+                // se atendió arriba sin comprobarla.
+                if let Some(attempt) = &authorized.attempt {
+                    self.provider_start_preflight(&attempt.provider)?;
+                }
                 let outcome = self.mutate_idempotent_recorded(&scope, &request_id, &hash, |tx| {
                     tx.set_context(context.clone());
+                    let attempt = authorized.attempt.as_ref();
                     let root = NewTask {
-                        // Sin Attempt no hay selección de ejecución: la raíz se proyecta con agente vacío.
-                        agent: String::new(), model: None, effort: None, role: None,
+                        // La selección de ejecución es dato del Attempt: una Task sin Attempt se proyecta con agente vacío.
+                        agent: attempt.map(|a| a.provider.clone()).unwrap_or_default(),
+                        model: attempt.and_then(|a| a.model.clone()),
+                        effort: attempt.and_then(|a| a.effort.clone()),
+                        role: attempt.and_then(|a| a.role.clone()),
                         title: authorized.title.clone(), spec: authorized.spec.clone(), repo: authorized.repo.clone(),
-                        cwd: authorized.repo.clone(), branch: None, base: None, worktree: None, external: false,
+                        cwd: authorized.repo.clone(), branch: None, base: None, worktree: None,
+                        external: attempt.is_some_and(|a| a.external),
                     };
                     let (run, task) = tx.create_run_intent(&authorized.objective, root);
                     let row = tx.tasks.get_mut(&task).ok_or("No se pudo crear la Task")?;
                     row.project_id = Some(authorized.project_id.clone());
-                    Ok(((), crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id: None }))
+                    if let Some(attempt) = attempt {
+                        // El perfil vive con la selección de ejecución en el documento; el proyector del runtime lo
+                        // materializa en attempts.profile. Ninguna selección exime de la decisión humana.
+                        row.profile = attempt.profile.clone();
+                        row.status = super::state::Status::PendingApproval;
+                        tx.request_initial_attempt(&task)?;
+                    }
+                    let attempt_id = attempt.map(|_| format!("{task}-a1"));
+                    Ok(((), crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id }))
                 }).map_err(|e| e.to_string())?;
                 match outcome {
                     IdempotentMutation::Committed { ids, .. } => Ok(result("Committed", ids)),
@@ -169,7 +192,11 @@ impl Core {
                     serde_json::from_value(args.clone()).map_err(|_| "Solicitud de aprobación inicial inválida".to_string())?;
                 use super::initial_approval_rpc::InitialApprovalResult as R;
                 let (status, decision) = match super::initial_approval_rpc::decide(self, context, &input.attempt_id, cmd == "attempt_approve")? {
-                    R::Approved => ("Approved", None),
+                    R::Approved => {
+                        // Aprobar no lanza nada por sí mismo: despierta al despachador, que toma el Attempt de su cola.
+                        self.wake_dispatcher();
+                        ("Approved", None)
+                    }
                     R::Rejected => ("Rejected", None),
                     R::Expired => ("Expired", None),
                     R::ReplayedApproved => ("Replayed", Some("approved")),
