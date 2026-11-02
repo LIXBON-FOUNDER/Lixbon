@@ -1023,3 +1023,36 @@ fn the_database_only_lets_a_reserved_claim_settle_once_the_attempt_is_final() {
     })
     .expect("con el Attempt final la base admite reserved -> settled");
 }
+
+#[test]
+fn an_attempt_started_stamped_by_the_runtime_with_the_core_client_still_counts_as_the_core() {
+    let tmp = Scratch::new();
+    let (mut s, id) = starting_store(tmp.path());
+    assert!(s.attempt_dispatch_reserve(&id).unwrap());
+    s.attempt_transition_recorded(&id, &AttemptAction::Start, 25, |attempt, _, task| {
+        let mut event = attempt_event("attempt.started", attempt, task, serde_json::json!({ "task": attempt.task_id, "n": attempt.n }));
+        event.client_id = Some(CORE_CLIENT_ID.into());
+        Ok(event)
+    })
+    .unwrap();
+    assert!(s.attempt_dispatch_started(&id).unwrap(), "el commit del runtime firma con core-system");
+    assert_eq!(claim(&s, &id), "started");
+}
+
+#[test]
+fn an_attempt_started_stamped_by_another_client_does_not_advance_the_claim() {
+    let tmp = Scratch::new();
+    let (mut s, id) = starting_store(tmp.path());
+    let registration = ClientRegistration::new(ClientSurface::Desktop, DeviceIdentity::new("otro-cliente", None).unwrap()).unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Person("person-1".into()), "otro-cliente-secret-0123456789abcdef").unwrap();
+    let other = s.register_client(&registration, &credential, 15).unwrap().identity().client_id().to_string();
+    assert!(s.attempt_dispatch_reserve(&id).unwrap());
+    s.attempt_transition_recorded(&id, &AttemptAction::Start, 25, |attempt, _, task| {
+        let mut event = attempt_event("attempt.started", attempt, task, serde_json::json!({ "task": attempt.task_id, "n": attempt.n }));
+        event.client_id = Some(other.clone());
+        Ok(event)
+    })
+    .unwrap();
+    assert!(!s.attempt_dispatch_started(&id).unwrap(), "un arranque firmado por otro cliente no es del Core");
+    assert_eq!(claim(&s, &id), "reserved");
+}

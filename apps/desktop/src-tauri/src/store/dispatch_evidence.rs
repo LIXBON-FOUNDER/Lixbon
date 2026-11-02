@@ -11,6 +11,7 @@
 use rusqlite::Connection;
 
 use super::attempts::{AttemptRow, AttemptStatus};
+use super::clients::CORE_CLIENT_ID;
 use super::error::StoreResult;
 use super::initial_approval::valid_person_actor_id;
 use super::tasks::{TaskOrigin, TaskRow};
@@ -258,6 +259,12 @@ pub(super) fn has_canonical_dispatch_terminal_evidence(
     })
 }
 
+/// El Core firma sus hechos sin cliente (escritura directa del almacén) o con el cliente de sistema `core-system` (el commit
+/// del runtime). Cualquier otro cliente no es el Core.
+fn core_client(client_id: Option<&str>) -> bool {
+    client_id.is_none_or(|id| id == CORE_CLIENT_ID)
+}
+
 /// El claim solo cruza `reserved -> started` si el `attempt.started` canónico ya es durable y la fila está `running`:
 /// `starting` por sí solo no prueba que el despacho llegó a la frontera del traspaso.
 pub(super) fn has_canonical_dispatch_started_event(tx: &Connection, attempt: &AttemptRow, task: &TaskRow) -> StoreResult<bool> {
@@ -266,7 +273,7 @@ pub(super) fn has_canonical_dispatch_started_event(tx: &Connection, attempt: &At
     }
     let events = dispatch_lifecycle_events(tx, &attempt.id, true)?;
     Ok(events.len() == 1
-        && events[0].client_id.is_none()
+        && core_client(events[0].client_id.as_deref())
         && events[0].correlation_id.is_none()
         && canonical_dispatch_event(&events[0], "attempt.started", attempt, task))
 }
