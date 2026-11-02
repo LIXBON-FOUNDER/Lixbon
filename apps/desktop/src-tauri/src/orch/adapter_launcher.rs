@@ -148,8 +148,10 @@ impl AdapterPrepared {
     fn release(&self) {
         match self.core.upgrade() {
             Some(core) => {
-                if let Err(why) = core.release_worktree(&self.worktree) {
-                    eprintln!("[core] no se pudo liberar el worktree de un Attempt no lanzado: {why}");
+                // El motivo no se imprime aquí: un fallo del registro lleva la identidad del efecto, y un fallo de git ya lo
+                // dice `release_worktree`. Si no se pudo liberar, queda anotado como efecto sin registrar.
+                if core.release_worktree(&self.worktree).is_err() {
+                    eprintln!("[core] no se pudo liberar el worktree de un Attempt no lanzado: queda para la reconciliación de arranque");
                 }
             }
             None => eprintln!("[core] el Core ya no existe: el worktree de un Attempt no lanzado queda para la reconciliación de arranque"),
