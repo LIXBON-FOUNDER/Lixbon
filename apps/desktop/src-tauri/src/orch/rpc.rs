@@ -160,6 +160,23 @@ impl Core {
                     IdempotentMutation::Replayed(ids) => Ok(result("Replayed", ids)),
                 }
             }
+            "attempt_approve" | "attempt_reject" => {
+                let context = authenticated_context.as_ref().ok_or("resolver una aprobación inicial requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("resolver una aprobación inicial solo está permitido a una Person autenticada".into());
+                }
+                let input: super::initial_approval_rpc::InitialApprovalInput =
+                    serde_json::from_value(args.clone()).map_err(|_| "Solicitud de aprobación inicial inválida".to_string())?;
+                use super::initial_approval_rpc::InitialApprovalResult as R;
+                let (status, decision) = match super::initial_approval_rpc::decide(self, context, &input.attempt_id, cmd == "attempt_approve")? {
+                    R::Approved => ("Approved", None),
+                    R::Rejected => ("Rejected", None),
+                    R::Expired => ("Expired", None),
+                    R::ReplayedApproved => ("Replayed", Some("approved")),
+                    R::ReplayedRejected => ("Replayed", Some("rejected")),
+                };
+                Ok(json!({"status": status, "decision": decision, "attempt_id": input.attempt_id}))
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -549,7 +566,8 @@ fn rpc_action(cmd: &str) -> ClientAction {
         }
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
-        "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
+        // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

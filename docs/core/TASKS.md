@@ -227,6 +227,24 @@ proveedor en `attempt.completed`/`failed`, `attempt.dispatch_ambiguous` (hecho e
 claims en vuelo al arrancar. Hasta entonces un desenlace desconocido o una caída entre pasos deja el claim `reserved`/`started`,
 que ya impide relanzar pero no es visible. Nada en producción llama al despachador.
 
+### RPC de la aprobación inicial (fase 2c-2)
+
+`attempt_approve` y `attempt_reject` · `{ attempt_id }` (nada más: `deny_unknown_fields`, el cliente nunca aporta el plazo). Se
+clasifican como `HumanDecision`: **solo una Person en Desktop**; ni la Person del CLI ni un agente. El módulo es
+`orch/initial_approval_rpc.rs`; la decisión pasa por `Core::mutate` (`Tx::approve_attempt` / `Tx::reject_attempt`) y el commit
+del runtime revalida el plazo durable y la evidencia canónica bajo la transacción.
+
+| caso | respuesta |
+|---|---|
+| decisión en plazo sobre un Attempt pendiente | `{ "status": "Approved" \| "Rejected", "decision": null, "attempt_id" }` |
+| la misma decisión ya estaba tomada | `{ "status": "Replayed", "decision": "approved" \| "rejected", … }`, sin escribir ni subir la revisión |
+| el plazo ya venció | `{ "status": "Expired", … }`: el Attempt queda detenido (`attempt.rejected`, causa `approval_timeout`, actor System); una aprobación tardía **nunca** aprueba |
+| la decisión contraria ya estaba tomada, no está pendiente, no existe o el id es inválido | error, sin cambios |
+
+**Aprobar no lanza nada:** deja el Attempt en `starting`, y es el despachador (`dispatch.rs`) el que lo toma de la cola de
+aprobados. Mientras `task_create` rechace `attempt` (fase 2c-3) no puede existir un Attempt pendiente creado por el RPC, así que
+estos comandos son inertes en la práctica.
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente

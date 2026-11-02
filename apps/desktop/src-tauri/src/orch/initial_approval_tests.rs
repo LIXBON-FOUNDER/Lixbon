@@ -279,7 +279,7 @@ pub(super) mod e2e {
     }
 
     /// Adelanta el vencimiento: el plazo es inmutable por diseño, así que la prueba retira el trigger solo en su base.
-    fn make_deadline_due(core: &Core, attempt: &str) {
+    pub(in crate::orch) fn make_deadline_due(core: &Core, attempt: &str) {
         core.storage
             .with_store(|store| {
                 store.write(|tx| {

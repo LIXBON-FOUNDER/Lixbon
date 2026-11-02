@@ -76,10 +76,13 @@ mod project_ops;
 mod task_ops;
 mod approval_expiry;
 mod dispatch;
+mod initial_approval_rpc;
 #[cfg(test)]
 mod initial_approval_tests;
 #[cfg(test)]
 mod dispatch_tests;
+#[cfg(test)]
+mod initial_approval_rpc_tests;
 mod task_create_api;
 #[cfg(test)]
 mod task_create_rpc_tests;
