@@ -207,9 +207,11 @@ impl Core {
         let term = self.kill_registered_term(id);
         // Un proceso de este `id` sin terminal (su construcción falló y no se pudo matar) también es nuestro.
         let custody = pty::resolve_custody(&self.custody_key(id));
-        match (term, custody) {
-            (None, None) => None,
-            (Some(Err(e)), _) | (_, Some(Err(e))) => Some(Err(e)),
+        // Una ejecución por adapter (LXO-246): se cancela y se espera a que su proceso muera.
+        let adapter = self.cancel_adapter_run(id);
+        match (term, custody, adapter) {
+            (None, None, None) => None,
+            (Some(Err(e)), _, _) | (_, Some(Err(e)), _) | (_, _, Some(Err(e))) => Some(Err(e)),
             _ => Some(Ok(())),
         }
     }
@@ -272,6 +274,11 @@ impl Core {
                 ids.push(owner);
             }
         }
+        for task in self.adapter_run_ids() {
+            if !ids.contains(&task) {
+                ids.push(task);
+            }
+        }
         ids
     }
 
@@ -280,6 +287,8 @@ impl Core {
     /// solo quien se comprobó muerto; una terminación que otro hilo ya tiene en curso no se interrumpe ni se descarta, y
     /// se espera (acotado) a que acabe antes de salir de la aplicación.
     pub(super) fn kill_all_terms(&self) {
+        // Las ejecuciones por adapter (LXO-246) también se cancelan al apagar.
+        self.cancel_all_adapter_runs();
         let mut leased = Vec::new();
         let mut busy = Vec::new();
         for (id, t) in self.terms.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
@@ -348,7 +357,7 @@ impl Core {
     /// ¿Hay un proceso bajo la custodia del Core para `id`? Un terminal con una terminación en curso cuenta (sigue en
     /// el mapa), igual que un proceso sin dueño de un lanzamiento fallido.
     pub(super) fn has_term(&self, id: &str) -> bool {
-        self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id) || pty::in_custody(&self.custody_key(id))
+        self.terms.lock().unwrap_or_else(|e| e.into_inner()).contains_key(id) || pty::in_custody(&self.custody_key(id)) || self.has_adapter_run(id)
     }
 }
 

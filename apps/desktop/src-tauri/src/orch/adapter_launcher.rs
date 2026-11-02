@@ -30,6 +30,7 @@
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use super::adapter::{AdapterError, CancelToken, Capability, CapabilityMatrix, ErrorCode, Gated, ProviderAdapter, RunHandle, StartRequest};
 use super::dispatch::{DispatchIntent, Launcher, PrepareError, PreparedLaunch, StartOutcome};
@@ -39,6 +40,7 @@ use super::Core;
 
 /// Una ejecución que el proveedor aceptó, a la espera del bombeo de eventos (PR C).
 pub(super) struct StartedRun {
+    pub(super) task_id: String,
     pub(super) adapter: Arc<dyn ProviderAdapter>,
     pub(super) matrix: CapabilityMatrix,
     pub(super) handle: RunHandle,
@@ -53,6 +55,8 @@ pub(super) struct AdapterLauncher {
     core: Weak<Core>,
     registry: Arc<LiveRegistry>,
     started: Started,
+    /// Cuánto se espera una respuesta humana a una petición del proveedor antes de cancelar la ejecución.
+    approval_ttl: Duration,
 }
 
 /// Lo que el adapter no pudo hacer, por tipo: la decisión es de este `match`, sin comodín.
@@ -92,7 +96,14 @@ fn start_outcome(e: &AdapterError) -> StartOutcome {
 
 impl AdapterLauncher {
     pub(super) fn new(core: &Arc<Core>, registry: Arc<LiveRegistry>) -> AdapterLauncher {
-        AdapterLauncher { core: Arc::downgrade(core), registry, started: Arc::new(Mutex::new(HashMap::new())) }
+        AdapterLauncher { core: Arc::downgrade(core), registry, started: Arc::new(Mutex::new(HashMap::new())), approval_ttl: super::approval::ttl_from_env(super::approval::APPROVAL_TTL_ENV, super::approval::DEFAULT_APPROVAL_TTL) }
+    }
+
+    /// Con otro plazo para las peticiones del proveedor (las pruebas no esperan minutos).
+    #[cfg(test)]
+    pub(super) fn with_approval_ttl(mut self, ttl: Duration) -> AdapterLauncher {
+        self.approval_ttl = ttl;
+        self
     }
 
     /// El registro de proveedores del lanzador, para que una prueba lo vuelva a sondear.
@@ -129,12 +140,25 @@ impl Launcher for AdapterLauncher {
             model: intent.model.clone(),
             effort: intent.effort.clone(),
         };
-        Ok(Box::new(AdapterPrepared { core: self.core.clone(), adapter, matrix, request, cancel: CancelToken::new(), worktree, started: Arc::clone(&self.started) }))
+        Ok(Box::new(AdapterPrepared { core: self.core.clone(), task_id: intent.task_id.clone(), adapter, matrix, request, cancel: CancelToken::new(), worktree, started: Arc::clone(&self.started) }))
+    }
+
+    /// El proveedor aceptó la ejecución: se toma y se escucha en su propio hilo.
+    fn started(&self, attempt_id: &str) {
+        let Some(run) = self.take_started(attempt_id) else { return };
+        match self.core.upgrade() {
+            Some(core) => super::run_pump::spawn_pump(&core, run, self.approval_ttl),
+            None => {
+                eprintln!("[core] el Core ya no existe: una ejecución aceptada queda sin escuchar");
+                run.cancel.cancel();
+            }
+        }
     }
 }
 
 struct AdapterPrepared {
     core: Weak<Core>,
+    task_id: String,
     adapter: Arc<dyn ProviderAdapter>,
     matrix: CapabilityMatrix,
     request: StartRequest,
@@ -166,8 +190,8 @@ impl PreparedLaunch for AdapterPrepared {
         match called {
             Ok(Ok(handle)) => {
                 let attempt_id = self.request.attempt_id.clone();
-                let AdapterPrepared { adapter, matrix, cancel, worktree, started, .. } = *self;
-                started.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt_id, StartedRun { adapter, matrix, handle, cancel, worktree });
+                let AdapterPrepared { task_id, adapter, matrix, cancel, worktree, started, .. } = *self;
+                started.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt_id, StartedRun { task_id, adapter, matrix, handle, cancel, worktree });
                 StartOutcome::Running
             }
             Ok(Err(error)) => {

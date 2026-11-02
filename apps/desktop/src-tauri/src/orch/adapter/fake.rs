@@ -15,6 +15,10 @@ use super::{
 #[derive(Clone, Debug)]
 pub enum Step {
     Bind(&'static str),
+    /// El modelo efectivo con el que corre.
+    Model(&'static str),
+    /// El proveedor pide permiso para usar una herramienta.
+    Permission { id: &'static str, tool: &'static str },
     Output(String),
     Question { id: &'static str, text: String },
     /// Espera a que llegue una cancelación o una interrupción (con tope, para que una prueba rota no cuelgue).
@@ -135,6 +139,8 @@ impl ProviderAdapter for FakeAdapter {
             }
             match step {
                 Step::Bind(r) => sink.push(AdapterEvent::SessionBound { provider_ref: ProviderRef::new(r)? }),
+                Step::Model(model) => sink.push(AdapterEvent::Model { model: model.to_string() }),
+                Step::Permission { id, tool } => sink.push(AdapterEvent::Permission { request_id: id.to_string(), tool: tool.to_string(), summary: format!("usar {tool}") }),
                 Step::Output(text) => sink.push(AdapterEvent::Output { text }),
                 Step::Question { id, text } => sink.push(AdapterEvent::Question { question_id: id.to_string(), text }),
                 Step::Wait => {

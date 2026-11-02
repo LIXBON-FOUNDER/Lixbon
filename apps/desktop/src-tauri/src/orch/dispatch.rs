@@ -109,6 +109,10 @@ pub(super) trait PreparedLaunch: Send {
 pub(super) trait Launcher: Send + Sync {
     /// Prepara el lanzamiento (worktree, capability, entorno) sin ningún efecto del proveedor.
     fn prepare(&self, intent: &DispatchIntent) -> Result<Box<dyn PreparedLaunch>, PrepareError>;
+
+    /// El proveedor aceptó la ejecución del Attempt (`StartOutcome::Running`): ya es de quien la escucha. Por defecto no hace
+    /// nada; el lanzador real arranca aquí el bombeo de eventos.
+    fn started(&self, _attempt_id: &str) {}
 }
 
 /// Desenlace de [`Core::dispatch_attempt`].
@@ -256,7 +260,10 @@ impl Core {
         }
 
         match prepared.start() {
-            StartOutcome::Running => Ok(DispatchResult::Launched),
+            StartOutcome::Running => {
+                launcher.started(attempt_id);
+                Ok(DispatchResult::Launched)
+            }
             StartOutcome::NotSpawned(why) => {
                 self.mutate_as(&MutationContext::core(), |tx| tx.fail_with(&intent.task_id, "launch_failed", &why).map(|_| ()))?;
                 self.settle_after_close(attempt_id)?;
