@@ -211,7 +211,8 @@ impl Core {
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
     fn close_orphans(&self) {
         let r = self.mutate(|tx| {
-            if !tx.tasks.values().any(|t| !t.status.is_final() && !t.external) {
+            // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
+            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external) {
                 tx.no_change();
                 return Ok(());
             }

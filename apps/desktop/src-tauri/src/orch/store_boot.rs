@@ -419,6 +419,55 @@ impl Persistence for TablesPersistence {
         true
     }
 
+    fn lookup_idempotent(&self, identity_scope: &str, request_id: &str, payload_sha256: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        let slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_ref() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        store.runtime_lookup_idempotent_recorded(identity_scope, request_id, payload_sha256).map_err(|e| match e {
+            // Reutilizar el request_id con otro payload o un ledger incoherente no es un fallo de disco.
+            StoreError::TaskConflict(_) | StoreError::InvalidTask(_) => PersistError::rejected(e.to_string()),
+            e => PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false },
+        })
+    }
+
+    fn persist_idempotent(
+        &self,
+        state: &State,
+        events: &[NewEvent],
+        identity_scope: &str,
+        request_id: &str,
+        payload_sha256: &str,
+        result_ids: &crate::store::RuntimeResultIds,
+    ) -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        let next = serde_json::to_value(state)
+            .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
+            .and_then(|v| RuntimeDoc::from_value(v).map_err(|e| PersistError::structural(e.to_string())))?;
+        let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        match store.runtime_commit_idempotent_recorded(
+            &committed, &next, events, identity_scope, request_id, payload_sha256, result_ids,
+            |view, changes| super::agentic_cut::verify_runtime_view(view, changes, state),
+        ) {
+            Ok(outcome) => {
+                if matches!(outcome, crate::store::RuntimeCommitOutcome::Committed { .. }) {
+                    *committed = next;
+                }
+                Ok(outcome)
+            }
+            // Lo que las tablas no representan, o un conflicto del ledger, se rechaza sin degradar el Core: la
+            // transacción se deshizo entera.
+            Err(e @ (StoreError::RuntimeMapping(_) | StoreError::TaskConflict(_) | StoreError::InvalidTask(_))) => {
+                Err(PersistError::rejected(e.to_string()))
+            }
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false }),
+        }
+    }
+
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let next = serde_json::to_value(state)
             .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))

@@ -31,6 +31,7 @@ use super::attempts::{
     attempt_phase_append_in, link_provider_session_in, link_worktree_in, runtime_attempt_insert_in, runtime_attempt_set_in, runtime_attempt_step_in,
     runtime_attempt_stop_in, transition_allowed, RuntimeAttempt,
 };
+use super::clients::validate_identifier;
 use super::cut::{is_cut, CutView};
 use super::error::{StoreError, StoreResult};
 use super::events::{insert_events_projected, NewEvent};
@@ -278,6 +279,13 @@ fn load_in(c: &Connection) -> StoreResult<RuntimeLoad> {
 }
 
 impl Store {
+    /// Read-only lookup for task.create. The final writer still rechecks under BEGIN IMMEDIATE.
+    pub(crate) fn runtime_lookup_idempotent_recorded(
+        &self, identity_scope: &str, request_id: &str, payload_sha256: &str,
+    ) -> StoreResult<Option<RuntimeResultIds>> {
+        self.read(|conn| runtime_lookup_idempotent_in(conn, identity_scope, request_id, payload_sha256))
+    }
+
     /// ¿Persiste el runtime en las tablas? Sí desde el corte Task/Attempt.
     pub fn runtime_on_tables(&self) -> StoreResult<bool> {
         self.read(is_cut)
@@ -328,6 +336,221 @@ impl Store {
         tx.commit()?;
         Ok(rev)
     }
+
+    /// Variante idempotente para comandos runtime. La clave y el payload se consultan
+    /// bajo el mismo BEGIN IMMEDIATE que la aplicación, evitando la carrera entre
+    /// comprobar la identidad y escribir el cambio.
+    pub(crate) fn runtime_commit_idempotent_recorded(
+        &mut self,
+        prev: &RuntimeDoc,
+        next: &RuntimeDoc,
+        events: &[NewEvent],
+        identity_scope: &str,
+        request_id: &str,
+        payload_sha256: &str,
+        result_ids: &RuntimeResultIds,
+        verify: impl FnOnce(&CutView<'_>, &RuntimeChanges) -> StoreResult<()>,
+    ) -> StoreResult<RuntimeCommitOutcome> {
+        for e in events { e.check()?; }
+        // El hash lo calcula el llamador sobre la representación canónica del payload; esta API
+        // crate-private no acepta solicitudes RPC y exige SHA-256 hexadecimal.
+        if !valid_create_scope(identity_scope)
+            || request_id.is_empty() || request_id.len() > 64
+            || !request_id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+            || payload_sha256.len() != 64 || !payload_sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(StoreError::InvalidTask("identity_scope, request_id o payload_sha256 inválido".into()));
+        }
+        let projector = self.projector.clone();
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_active(&tx)?;
+        let old: Option<(String, String, String, Option<String>)> = tx.query_row(
+            "SELECT payload_sha256, run_id, task_id, attempt_id FROM task_create_requests WHERE identity_scope=?1 AND method='task.create' AND request_id=?2",
+            params![identity_scope, request_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).optional()?;
+        if let Some((hash, run_id, task_id, attempt_id)) = old {
+            if hash != payload_sha256 {
+                return Err(StoreError::TaskConflict("request_id ya usado con otro payload".into()));
+            }
+            let ids = RuntimeResultIds { run_id, task_id, attempt_id };
+            let project_id = validate_runtime_result_refs(&tx, &ids)?;
+            validate_task_create_result_events(&tx, &ids, &project_id)?;
+            return Ok(RuntimeCommitOutcome::Replayed(ids));
+        }
+        let changes = apply(&tx, prev, next)?;
+        let project_id = validate_new_runtime_result(&tx, &changes, next, result_ids)?;
+        let rev = rev_in(&tx)?.checked_add(1).filter(|r| *r > 0)
+            .ok_or(StoreError::RevOutOfRange { rev: rev_in(&tx)? })?;
+        tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value", params![RUNTIME_REV_KEY, rev.to_string()])?;
+        super::crash_point("runtime_in_tx");
+        insert_events_projected(&tx, events, Some(rev), projector.as_deref())?;
+        super::crash_point("runtime_events_in_tx");
+        validate_task_create_result_events(&tx, result_ids, &project_id)?;
+        verify(&CutView::new(&tx), &changes)?;
+        tx.execute("INSERT INTO task_create_requests(identity_scope,method,request_id,payload_sha256,run_id,task_id,attempt_id,created_at) VALUES(?1,'task.create',?2,?3,?4,?5,?6,?7)", params![identity_scope, request_id, payload_sha256, result_ids.run_id, result_ids.task_id, result_ids.attempt_id, super::now_ms()])?;
+        tx.commit()?;
+        Ok(RuntimeCommitOutcome::Committed { rev, ids: result_ids.clone() })
+    }
+}
+
+pub(super) fn runtime_lookup_idempotent_in(
+    conn: &Connection, identity_scope: &str, request_id: &str, payload_sha256: &str,
+) -> StoreResult<Option<RuntimeResultIds>> {
+        if !valid_create_scope(identity_scope)
+        || request_id.is_empty() || request_id.len() > 64
+        || !request_id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
+        || payload_sha256.len() != 64
+        || !payload_sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(StoreError::InvalidTask("identity_scope, request_id o payload_sha256 inválido".into()));
+    }
+    require_active(conn)?;
+    let old: Option<(String, String, String, Option<String>)> = conn.query_row(
+        "SELECT payload_sha256, run_id, task_id, attempt_id FROM task_create_requests WHERE identity_scope=?1 AND method='task.create' AND request_id=?2",
+        params![identity_scope, request_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    ).optional()?;
+    let Some((old_hash, run_id, task_id, attempt_id)) = old else { return Ok(None); };
+    if old_hash != payload_sha256 {
+        return Err(StoreError::TaskConflict("request_id ya usado con otro payload".into()));
+    }
+    let ids = RuntimeResultIds { run_id, task_id, attempt_id };
+    let project_id = validate_runtime_result_refs(conn, &ids)?;
+    validate_task_create_result_events(conn, &ids, &project_id)?;
+    Ok(Some(ids))
+}
+
+/// El scope usa un prefijo de tipo y conserva el ID con las reglas de ClientPrincipal.
+fn valid_create_scope(scope: &str) -> bool {
+    scope
+        .strip_prefix("user:")
+        .or_else(|| scope.strip_prefix("agent:"))
+        .is_some_and(|id| validate_identifier(id).is_ok())
+}
+
+pub(super) fn validate_runtime_result_refs(
+    c: &Connection,
+    ids: &RuntimeResultIds,
+) -> StoreResult<String> {
+    let relation: Option<(String, String, Option<String>, Option<String>, i64, bool)> = c
+        .query_row(
+            "SELECT t.run_id, r.root_task_id, t.project_id, t.parent_task_id, t.depth,
+                    EXISTS(SELECT 1 FROM projects p WHERE p.id=t.project_id)
+             FROM tasks t JOIN runs r ON r.id=?1 WHERE t.id=?2",
+            params![ids.run_id, ids.task_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        task_run,
+        root_task,
+        project_id,
+        parent_task,
+        depth,
+        project_exists,
+    )) = relation
+    else {
+        return Err(StoreError::TaskConflict(
+            "ledger runtime incoherente: Run/Task inexistentes o no relacionados".into(),
+        ));
+    };
+    if task_run != ids.run_id
+        || root_task != ids.task_id
+        || parent_task.is_some()
+        || depth != 0
+    {
+        return Err(StoreError::TaskConflict(
+            "ledger runtime incoherente: Task no es la raíz del Run referenciado".into(),
+        ));
+    }
+    let Some(project_id) = project_id.filter(|_| project_exists) else {
+        return Err(StoreError::TaskConflict(
+            "ledger runtime incoherente: Project inexistente o sin relación con la Task".into(),
+        ));
+    };
+    let attempt_task: Option<String> = match &ids.attempt_id {
+        Some(id) => c
+            .query_row("SELECT task_id FROM attempts WHERE id=?1", [id], |r| r.get(0))
+            .optional()?,
+        None => None,
+    };
+    if ids.attempt_id.is_some() && attempt_task.as_deref() != Some(ids.task_id.as_str()) {
+        return Err(StoreError::TaskConflict(
+            "ledger runtime incoherente: Attempt inexistente o de otra Task".into(),
+        ));
+    }
+    Ok(project_id)
+}
+
+/// El ledger no duplica Project: el vínculo histórico de las dos entidades
+/// creadas sirve para detectar cambios/corrupción del Project tras la creación.
+pub(super) fn validate_task_create_result_events(
+    c: &Connection,
+    ids: &RuntimeResultIds,
+    project_id: &str,
+) -> StoreResult<()> {
+    for (kind, entity_kind, entity_id) in [
+        ("run.created", "run", ids.run_id.as_str()),
+        ("task.created", "task", ids.task_id.as_str()),
+    ] {
+        let mut q = c.prepare(
+            "SELECT project_id, run_id FROM events
+             WHERE kind=?1 AND entity_kind=?2 AND entity_id=?3 LIMIT 2",
+        )?;
+        let links = q
+            .query_map(params![kind, entity_kind, entity_id], |r| {
+                Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if links.len() != 1
+            || links[0].0.as_deref() != Some(project_id)
+            || links[0].1.as_deref() != Some(ids.run_id.as_str())
+        {
+            return Err(StoreError::TaskConflict(format!(
+                "ledger runtime incoherente: el evento {kind} no acredita el vínculo Project/Task/Run"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_new_runtime_result(
+    c: &Connection,
+    changes: &RuntimeChanges,
+    next: &RuntimeDoc,
+    ids: &RuntimeResultIds,
+) -> StoreResult<String> {
+    if !changes.runs.contains(&ids.run_id) || !changes.tasks.contains(&ids.task_id)
+        || next.tasks.get(&ids.task_id).map(|t| t.run.as_str()) != Some(ids.run_id.as_str()) {
+        return Err(StoreError::TaskConflict("result_ids deben identificar Run y Task recién creados y relacionados en next".into()));
+    }
+    match (&ids.attempt_id, c.query_row("SELECT id FROM attempts WHERE task_id=?1 ORDER BY n DESC LIMIT 1", [&ids.task_id], |r| r.get::<_, String>(0)).optional()?) {
+        (Some(want), Some(actual)) if want == &actual => {},
+        (None, None) => {},
+        _ => return Err(StoreError::TaskConflict("result_ids debe incluir exactamente el Attempt creado (si lo hay)".into())),
+    }
+    validate_runtime_result_refs(c, ids)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeResultIds {
+    pub run_id: String,
+    pub task_id: String,
+    pub attempt_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RuntimeCommitOutcome {
+    Committed { rev: i64, ids: RuntimeResultIds },
+    Replayed(RuntimeResultIds),
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -768,7 +991,13 @@ fn apply_task(c: &Connection, p: Option<&DocTask>, t: &DocTask) -> StoreResult<(
         }
     }
     let selection = |x: &DocTask| (x.agent.clone(), x.model.clone(), x.effort.clone(), x.role.clone(), x.profile.clone(), x.external);
-    let (mut cur, fresh) = match (p, current(c, &t.id)?) {
+    let existing_attempt = current(c, &t.id)?;
+    // Task creada sin ejecución (`task.create` sin Attempt, estado `not_started`): las mutaciones de intención persisten en
+    // la fila de la Task sin fabricar un Attempt.
+    if t.status == "not_started" && existing_attempt.is_none() {
+        return Ok(());
+    }
+    let (mut cur, fresh) = match (p, existing_attempt) {
         (None, None) => (insert_attempt(c, t, 1, None, t.created)?, true),
         (Some(p), Some(cur)) => {
             if status_of(p)?.is_final() && !status_of(t)?.is_final() {

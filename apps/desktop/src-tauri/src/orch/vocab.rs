@@ -5,9 +5,10 @@
 //!   que ve la persona (Desktop, móvil, CLI) son presentación y viven en
 //!   `contracts/status-vocabulary.json` (sección `presentation`), que el Core no
 //!   carga.
-//! - **No cambia nada**: no hay enums nuevos ni se toca `Status`/`Kind`; no
-//!   cambia el formato de `state.json` ni de HTTP. Son constantes con pruebas
-//!   que fallan si el código y `contracts/status-vocabulary.json` se desvían.
+//! - El formato incluye `not_started` (LXO-141): Task creada con `task.create` que todavía no ha
+//!   solicitado un Attempt. No es `starting`, que pertenece a una ejecución iniciada, ni tiene un
+//!   estado de Attempt equivalente. Son constantes con pruebas que fallan si el código y
+//!   `contracts/status-vocabulary.json` se desvían.
 //! - Los ids «reservados» (intento, estado derivado de la tarea, kinds de
 //!   Attention, eventos durables) son nombres acordados en el modelo del runtime,
 //!   **sin consumidores todavía**: no son API pública hasta el corte
@@ -22,7 +23,8 @@
 use super::state::Status;
 
 /// Ids de `Task.status`, en el orden del enum.
-pub const TASK_STATUS: [&str; 8] = [
+pub const TASK_STATUS: [&str; 9] = [
+    "not_started",
     "starting",
     "running",
     "waiting",
@@ -35,7 +37,8 @@ pub const TASK_STATUS: [&str; 8] = [
 
 /// Todos los estados de la tarea. `task_status_id` los recorre con un `match`
 /// exhaustivo: añadir una variante a `Status` no compila hasta decidir su id aquí.
-pub const TASK_STATUS_ALL: [Status; 8] = [
+pub const TASK_STATUS_ALL: [Status; 9] = [
+    Status::NotStarted,
     Status::Starting,
     Status::Running,
     Status::Waiting,
@@ -49,6 +52,7 @@ pub const TASK_STATUS_ALL: [Status; 8] = [
 /// Id de máquina de un estado; es el mismo texto que serializa serde.
 pub const fn task_status_id(s: Status) -> &'static str {
     match s {
+        Status::NotStarted => "not_started",
         Status::Starting => "starting",
         Status::Running => "running",
         Status::Waiting => "waiting",
@@ -242,13 +246,17 @@ mod tests {
         assert!(EPHEMERAL_EVENT.iter().all(|e| !DURABLE_EVENT.contains(e)));
         let attempt = ids_de(&json, "attempt_state");
         assert_eq!(attempt, ATTEMPT_STATE.map(String::from).to_vec());
-        // El intento reutiliza los ids de la tarea; solo `pending_approval` es nuevo.
+        // El intento reutiliza los ids de ejecución de la tarea; no incluye `not_started` (sin Attempt) y
+        // solo `pending_approval` es nuevo.
         for id in ATTEMPT_STATE.iter().filter(|i| **i != "pending_approval") {
             assert!(TASK_STATUS.contains(id), "el estado de intento {id} no existe como estado de tarea");
         }
-        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len() + 1);
+        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len());
         for item in json["domain"]["task_status"]["items"].as_array().unwrap() {
-            assert!(ATTEMPT_STATE.contains(&item["attempt_state"].as_str().unwrap()));
+            match item["attempt_state"].as_str() {
+                Some(id) => assert!(ATTEMPT_STATE.contains(&id)),
+                None => assert_eq!(item["id"], "not_started"),
+            }
         }
         let finales: Vec<&str> = json["domain"]["attempt_state"]["final"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         let finales_tarea: Vec<&str> = TASK_STATUS_ALL.iter().filter(|s| s.is_final()).map(|s| task_status_id(*s)).collect();

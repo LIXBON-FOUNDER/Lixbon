@@ -74,6 +74,9 @@ mod hardening_tests;
 mod projects;
 mod project_ops;
 mod task_ops;
+mod task_create_api;
+#[cfg(test)]
+mod task_create_rpc_tests;
 mod attempt_ops;
 #[cfg(test)]
 mod attempt_ops_tests;

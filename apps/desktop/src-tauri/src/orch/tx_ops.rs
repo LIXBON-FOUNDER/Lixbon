@@ -199,6 +199,20 @@ impl Tx {
         (run, task)
     }
 
+    /// Crea solo la intención durable y emite `task.created` v2. A diferencia de `create_run`, no
+    /// solicita Attempt ni produce `attempt.requested`; las demás rutas legacy conservan v1.
+    pub(super) fn create_run_intent(&mut self, objective: &str, root: NewTask) -> (String, String) {
+        let (run, task) = self.state_mut().create_run(objective, root);
+        if let Some(t) = self.tasks.get_mut(&task) {
+            t.status = Status::NotStarted;
+        }
+        self.try_push_event(ev::run_created(&run, &task));
+        if let Some(t) = self.tasks.get(&task).cloned() {
+            self.try_push_event(ev::task_intent_created_from_state(&t));
+        }
+        (run, task)
+    }
+
     /// `task.created`. Las hijas producen únicamente éste. En producción las hijas nacen de una solicitud de
     /// lanzamiento ([`Tx::add_child_for_spawn`]); ésta sin correlación queda para el modelo y las pruebas.
     #[cfg_attr(not(test), allow(dead_code))]

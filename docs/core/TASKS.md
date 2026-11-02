@@ -7,6 +7,9 @@ Run; la ejecución (proceso, terminal, worktree, sesión del proveedor, informe)
 * Migración: [`007_tasks.sql`](../../apps/desktop/src-tauri/src/store/migrations/007_tasks.sql).
 * Almacén: `store/tasks.rs` (filas, restricciones, atomicidad). Pruebas: `store/tasks_tests.rs`.
 * Hechos y permisos: `orch/task_ops.rs` (el único que construye sus eventos). Pruebas: `orch/task_ops_tests.rs`.
+* LXO-141 (RPC `task_create`): migración [`017_task_create_idempotency.sql`](../../apps/desktop/src-tauri/src/store/migrations/017_task_create_idempotency.sql),
+  parser `orch/task_create_api.rs`, commit idempotente `store/runtime.rs::runtime_commit_idempotent_recorded` y
+  `Tx::create_run_intent`. Ver [§ LXO-141](#lxo-141-crear-una-intención-con-task_create).
 
 ## Inerte hasta el corte
 
@@ -119,6 +122,59 @@ tras el corte son del Attempt. La v1 sigue siendo la que emite el runtime legacy
 Manual, como en [`ATTENTION_MUTACION.md`](ATTENTION_MUTACION.md): cada mutante se aplica uno a uno sobre el código de
 producción, se ejecutan `tasks_tests` y `task_ops_tests` y el archivo se restaura byte a byte. Inventario y
 resultados en [`TASKS_MUTACION.md`](TASKS_MUTACION.md).
+
+## LXO-141: crear una intención con `task_create`
+
+`task_create` crea un **Run con su Task raíz en `not_started`** dentro de un Project explícito. No crea Attempt, no
+elige provider, no pide aprobación ni lanza ningún proceso: es solo la intención durable. Una solicitud con `attempt`
+se rechaza **antes** de tocar el ledger, los eventos o la memoria
+(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). La selección de provider, la aprobación
+humana inicial, el plazo de 30 minutos y el despacho llegan con el lifecycle de lanzamiento, en una fase posterior de
+LXO-141.
+
+* **Quién:** solo una Person autenticada (CLI global o Desktop). Un Agent se rechaza en el handler, antes de mutar. La
+  identidad sale de la credencial, nunca del JSON: los campos `identity_scope`, `actor` o `client_id` en la solicitud son
+  un error.
+* **Project:** `project_id` es obligatorio y no se infiere por `cwd`. Se comprueba (`check_project_launchable_id`) **fuera**
+  del lock del estado, porque lee disco y escribe marcas, y solo si la petición no es un replay; el almacén vuelve a exigir
+  que el Project exista dentro de la transacción.
+* **Idempotencia:** la clave es `(identity_scope, 'task.create', request_id)`, con `identity_scope = user:<person>`.
+  La huella es el SHA-256 de la forma canónica del payload (`project_id`, `objective`, `title`, `spec`, `repo` y `attempt`,
+  este último siempre vacío en esta fase; se conserva en la forma canónica para que las huellas ya registradas sigan
+  valiendo). Mismo scope, id y huella devuelve los ids originales como `Replayed`, **sin escribir, sin publicar y sin subir
+  la revisión**; el mismo id con otro payload es un conflicto. Un replay no depende del estado actual del Project.
+* **Orden:** consulta del ledger sin el lock del estado → comprobación del Project → `Core::mutate_idempotent_recorded`, que
+  repite la consulta bajo el lock y la transacción final la repite bajo `BEGIN IMMEDIATE` (escritores concurrentes). La
+  persistencia usa la misma política de reintentos que el resto de mutaciones: un error transitorio de SQLite se reintenta
+  y **no** deja el Core en solo lectura; una lectura del ledger que falla no lo degrada.
+* **Hechos:** `run.created` (v1) y `task.created` (v2, solo `parent`, `depth` y `title`), atribuidos al contexto
+  autenticado (actor Person, canal, `client_id`, Project y Run) y en la misma revisión. Las rutas legacy `create_run` y
+  `add_child` conservan `task.created` v1.
+* **Ledger (017):** `task_create_requests` guarda scope, método, `request_id`, huella, Run y Task (y un Attempt opcional
+  que esta fase no usa). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
+  y no se borran, y una Task nace de una sola petición (`UNIQUE(task_id)`).
+
+### `not_started`
+
+Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
+sin ejecución solicitada»: no es `starting`, no es final (`is_final() == false`) y no cuenta como actividad. Concretamente:
+
+* no es una tarea huérfana: el arranque no la cierra ni escribe una revisión por ella;
+* no bloquea ni cuenta en `run_open_tasks`, y el barrido de Runs inactivos **no** cierra un Run que espera su primer
+  Attempt;
+* no puede repartir tareas, cerrarse como si ejecutara, fallar con motivo máquina ni esperar una aprobación de terminal;
+* la vista legacy reconstruida desde las tablas la devuelve sin fila en `attempts` (agente vacío, `cwd` = repo, sin rama ni
+  worktree) y no se fabrica un Attempt al reconstruir ni al reiniciar.
+
+Es un concepto distinto de `StartDisposition::NotStarted`, el resultado tipado de un adapter que prueba que un despacho
+concreto falló antes del spawn.
+
+### Prueba
+
+`orch/task_create_rpc_tests.rs` (RPC sobre un Core con el corte aplicado: commit, replay, replay tras reiniciar, conflicto,
+mutación posterior con la Task presente, reinicio sin revisiones nuevas, barrido de inactividad y rechazo de Attempt),
+`orch/mutation_tests.rs` (reintentos del commit idempotente), `store/runtime_idempotency_tests.rs` (ledger y referencias) y
+`orch/state.rs` (semántica de `not_started`).
 
 ## Fuera de este slice
 

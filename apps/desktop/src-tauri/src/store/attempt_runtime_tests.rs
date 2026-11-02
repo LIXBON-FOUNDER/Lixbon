@@ -313,7 +313,9 @@ fn la_migracion_015_conserva_las_filas_admite_la_causa_nueva_y_mantiene_los_trig
     assert!(conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'windows_sandbox_setup')", []).is_err(), "antes de la 015 la causa no existe");
 
     let r = super::migrate::migrate_capped(&mut conn, &todas, i64::MAX, "t", t.path()).unwrap();
-    assert_eq!((r.from_version, r.applied.clone()), (14, vec![15, 16]));
+    // Las migraciones posteriores (017 en adelante) no son asunto de esta prueba: solo importa que la 015 y la 016 van primero.
+    assert_eq!(r.from_version, 14);
+    assert_eq!(&r.applied[..2], &[15, 16]);
     let filas: Vec<(String, String)> = conn.prepare("SELECT scope, cause FROM env_blocks ORDER BY scope").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
     assert_eq!(
         filas,
