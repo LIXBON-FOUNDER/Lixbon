@@ -8,6 +8,7 @@ import { useNavigate, Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { useLocale } from '../i18n/LocaleContext';
 import { useAuth } from '../hooks/useAuth';
+import { useShell } from '../components/AppShell';
 import { tieneVisuals } from '../lib/planes';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { useDismiss } from '../hooks/useDismiss';
@@ -28,7 +29,7 @@ import {
   actualizarVisual, aplicarRespuesta, cargarPaginas, compactarHistorial, contextoArchivos, crearVisual, etiquetaDePedido,
   guardarRespuesta, listarVersiones, listarVisuals, nombreVersion,
 } from '../lib/visualStudio';
-import { Logo, LogoLixbon } from '../components/Logo';
+import { Logo } from '../components/Logo';
 import { ChatInput } from '../components/ChatInput';
 import { Markdown } from '../components/Markdown';
 import { VerifyBanner } from '../components/VerifyBanner';
@@ -37,9 +38,9 @@ import { PiezaEditor, PiezaVista } from '../components/PiezaEditor';
 import { Desplegable } from '../components/Desplegable';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
 import {
-  IconArrowLeft, IconCheck, IconChevron, IconCode, IconCopy, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
+  IconArrowLeft, IconCheck, IconChevron, IconCode, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
   IconGrid, IconImage, IconLayers, IconPanel, IconPencil, IconPhone, IconPointer, IconRedo, IconRows, IconSearch, IconShare, IconTablet, IconTrash, IconUndo, IconWindow, IconX,
-} from '../components/Icons';
+  IconMenu, IconCopiar } from '../components/Icons';
 
 const CONTEXT_WINDOW = 30;
 const esVideo = (p) => /\.(mp4|webm)$/i.test(p || '');
@@ -82,10 +83,24 @@ export default function VisualsPage() {
 
 function Cargando() {
   return (
-    <div className="app-loading">
-      <span className="app-loading__logo"><Logo size={19} /></span>
-      <span className="app-loading__bar"><span /></span>
-    </div>
+    <section className="chat-main">
+      <div className="app-loading">
+        <span className="app-loading__logo"><Logo size={19} /></span>
+        <span className="app-loading__bar"><span /></span>
+      </div>
+    </section>
+  );
+}
+
+// Botón del cajón en móvil: la barra lateral la pone el marco (AppShell).
+function BotonCajon() {
+  const t = useT('chat');
+  const { openDrawer, drawerOpen } = useShell();
+  return (
+    <button className="icon-btn chat-header__menu" onClick={openDrawer} aria-label={t('openConversationsPanel')}
+      aria-controls="sidebar-drawer" aria-expanded={drawerOpen}>
+      <IconMenu />
+    </button>
   );
 }
 
@@ -143,19 +158,11 @@ function Inicio() {
 
   if (loading) return <Cargando />;
   return (
-    <div className="vis-page vis-inicio">
-      <header className="vis-top">
-        <Link to="/chat" className="vis-top__logo" aria-label={t('backToChat')}><LogoLixbon /></Link>
-        <span className="vis-top__div" aria-hidden="true" />
-        <span className="vis-top__seccion">Visuals</span>
-        <div className="vis-top__right">
-          <Link to="/chat" className="vis-top__volver"><IconArrowLeft size={14} />{t('backToChat')}</Link>
-          <TemaBoton />
-          {user ? <Link to="/account" className="vis-avatar" title={user.name || user.email}>
-            {user.avatar_url ? <img src={user.avatar_url} alt="" /> : (user.name || user.email || '?')[0].toUpperCase()}
-          </Link>
-            : <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>}
-        </div>
+    <section className="chat-main vis-page vis-inicio">
+      <header className="chat-header">
+        <BotonCajon />
+        <span className="chat-header__seccion">Visuals</span>
+        {!user && <Link to="/auth" className="pill-btn pill-btn--primary chat-header__share">{tc('logIn')}</Link>}
       </header>
       <VerifyBanner />
       <div className="vis-galeria">
@@ -219,7 +226,7 @@ function Inicio() {
         </section>
         {user && <Galeria t={t} tc={tc} />}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -912,10 +919,10 @@ function Estudio({ id }) {
   if (loading || (!manifest && !error)) return <Cargando />;
   if (error) {
     return (
-      <div className="vis-page">
-        <header className="vis-top"><Link to="/visuals" className="icon-btn" title={t('allDesigns')}><IconArrowLeft size={17} /></Link></header>
+      <section className="chat-main vis-page">
+        <header className="vis-top"><BotonCajon /><Link to="/visuals" className="icon-btn" title={t('allDesigns')}><IconArrowLeft size={17} /></Link></header>
         <div className="vis-stage__empty" role="alert">{error}</div>
-      </div>
+      </section>
     );
   }
   const puedeEditar = tieneVisuals(user);
@@ -929,8 +936,9 @@ function Estudio({ id }) {
   const hayAlgo = paginas.length || pieces.length || docs.length;
 
   return (
-    <div className="vis-page vis-editor">
+    <section className="chat-main vis-page vis-editor">
       <header className="vis-top">
+        <BotonCajon />
         <Link to="/visuals" className="icon-btn" title={t('allDesigns')}><IconArrowLeft size={17} /></Link>
         <button className={`icon-btn vis-top__panel ${chatAbierto ? 'is-active' : ''}`} onClick={() => setChatAbierto((v) => !v)} title={chatAbierto ? t('hideChat') : t('showChat')} aria-pressed={chatAbierto}>
           <IconPanel size={17} />
@@ -1008,7 +1016,7 @@ function Estudio({ id }) {
                 {enlace && (
                   <div className="vis-field">
                     <span className="vis-field__valor">{enlace.replace(/^https?:\/\//, '')}</span>
-                    <button className="vis-field__btn" onClick={() => copiarTexto(enlace, 'enlace')}><IconCopy size={13} /> {copiado === 'enlace' ? t('copied') : t('copy')}</button>
+                    <button className="vis-field__btn" onClick={() => copiarTexto(enlace, 'enlace')}><IconCopiar hecho={copiado === 'enlace'} size={13} /> {copiado === 'enlace' ? t('copied') : t('copy')}</button>
                   </div>
                 )}
               </div>
@@ -1017,7 +1025,7 @@ function Estudio({ id }) {
                 <p className="vis-share__hint">{t('cliHint')}</p>
                 <div className="vis-field">
                   <span className="vis-field__valor mono">/visual codigo {id}</span>
-                  <button className="vis-field__btn" onClick={() => copiarTexto(`/visual codigo ${id}`, 'cli')}><IconCopy size={13} /> {copiado === 'cli' ? t('copied') : t('copy')}</button>
+                  <button className="vis-field__btn" onClick={() => copiarTexto(`/visual codigo ${id}`, 'cli')}><IconCopiar hecho={copiado === 'cli'} size={13} /> {copiado === 'cli' ? t('copied') : t('copy')}</button>
                 </div>
               </div>
               <div className="vis-share__sec">
@@ -1288,7 +1296,7 @@ function Estudio({ id }) {
           </>)}
         </section>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1300,7 +1308,7 @@ function CodigoVista({ nombre, codigo, retoques, copiado, onCopiar, t }) {
         <IconFile size={13} />
         <span className="vis-code__nombre">{nombre}</span>
         <span className="vis-code__meta">{t('linesCount', { n: lineas.length })}{retoques ? ` · ${t('includesManualEdits')}` : ''}</span>
-        <button className="vis-field__btn" onClick={onCopiar}>{copiado ? <IconCheck size={13} /> : <IconCopy size={13} />} {copiado ? t('copied') : t('copy')}</button>
+        <button className="vis-field__btn" onClick={onCopiar}><IconCopiar hecho={copiado} size={13} /> {copiado ? t('copied') : t('copy')}</button>
       </div>
       <pre className="vis-code__cuerpo"><code>{lineas.map((l, i) => <span key={i} className="vis-code__l">{l || ' '}{'\n'}</span>)}</code></pre>
     </div>

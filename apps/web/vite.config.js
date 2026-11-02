@@ -34,7 +34,11 @@ function sitemap() {
 
 export default defineConfig({
   plugins: [react(), sitemap()],
+  // Fuentes e iconos viven en shared/ (enlazados con file:): una sola copia de React
+  // y permiso para servir esa carpeta en desarrollo.
+  resolve: { dedupe: ['react', 'react-dom'] },
   server: {
+    fs: { allow: ['.', '../../shared'] },
     proxy: {
       // Mismo origen vía proxy para que la cookie de sesión funcione sin CORS.
       '/api': 'http://localhost:8000',

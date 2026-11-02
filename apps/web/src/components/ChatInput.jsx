@@ -2,7 +2,8 @@
 // valen con cualquier modelo. El audio no se acepta: el gateway no transcribe.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  IconClip, IconFile, IconGlobe, IconImage, IconMic, IconSend, IconStop, IconX,
+  IconClip, IconFile, IconGlobe, IconImage, IconPlus, IconSend, IconStop, IconX,
+  Interruptor,
 } from './Icons';
 import { AvisoCuota, Razonamiento } from './Razonamiento';
 import { ContextoUso } from './ContextoUso';
@@ -325,40 +326,32 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           style={{ display: 'none' }}
         />
         <button
-          className="icon-btn"
+          className="chat-chip chat-chip--icono"
           type="button"
           title={t('attachTitle')}
+          aria-label={t('attachTitle')}
           onClick={() => fileRef.current?.click()}
         >
-          <IconClip size={19} />
+          <IconPlus size={16} />
         </button>
-        {dictado.soportado && (
-          <button
-            className={dictado.escuchando ? 'icon-btn is-recording' : 'icon-btn'}
-            type="button"
-            title={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
-            onClick={dictado.alternar}
-            aria-pressed={dictado.escuchando}
-          >
-            <IconMic size={19} />
-          </button>
-        )}
         <button
-          className={webSearch ? 'icon-btn is-active' : 'icon-btn'}
+          className={webSearch ? 'chat-chip is-active' : 'chat-chip'}
           type="button"
           title={onToggleWeb ? (webSearch ? t('webSearchOnTitle') : t('webSearchOffTitle')) : t('webSearchSoonTitle')}
           onClick={onToggleWeb}
           disabled={!onToggleWeb}
           aria-pressed={webSearch}
         >
-          <IconGlobe size={19} />
+          <IconGlobe size={14} /> {t('webSearch')}
         </button>
         {tools && <span className="chat-input__sep" />}
         {tools}
       </div>
 
+      <div className="chat-input__meta">
       {models.length > 0 && (
-        <div className="chat-input__meta">
+        <>
+          <ContextoUso uso={contextUso} />
           <Select
             className="chat-input__model"
             value={model}
@@ -367,9 +360,21 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
             aria-label={t('modelAriaLabel')}
           />
           {onRazonar && <Razonamiento niveles={nivelesRazonar} valor={razonar} onChange={onRazonar} />}
-          <ContextoUso uso={contextUso} />
-        </div>
+        </>
       )}
+        {dictado.soportado && (
+          <button
+            className={dictado.escuchando ? 'chat-chip chat-chip--icono chat-chip--ghost is-recording' : 'chat-chip chat-chip--icono chat-chip--ghost'}
+            type="button"
+            title={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
+            aria-label={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
+            onClick={dictado.alternar}
+            aria-pressed={dictado.escuchando}
+          >
+            <Interruptor tipo="microfono" on={dictado.escuchando} size={16} />
+          </button>
+        )}
+      </div>
 
       {busy && onStop ? (
         <button
@@ -379,7 +384,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           aria-label={t('stopResponse')}
           title={t('stopResponse')}
         >
-          <IconStop size={19} />
+          <IconStop size={14} />
         </button>
       ) : (
         <button
@@ -389,7 +394,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           disabled={busy || leyendo}
           aria-label={t('sendAriaLabel')}
         >
-          <IconSend size={19} />
+          <IconSend size={16} />
         </button>
       )}
       </div>

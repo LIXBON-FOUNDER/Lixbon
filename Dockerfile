@@ -1,6 +1,9 @@
 # ── Stage 1: build de la web (React + Vite) ─────────────────────────────────
 FROM node:20-alpine AS web-build
-WORKDIR /build
+# Misma estructura que el repo: la web depende de shared/ (fuentes e iconos)
+# con rutas file:../../shared, así que shared/ va antes de npm ci.
+WORKDIR /build/apps/web
+COPY shared/ /build/shared/
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 COPY apps/web/ ./
@@ -17,7 +20,7 @@ COPY core/ core/
 COPY db/ db/
 COPY infra/node/ infra/node/
 COPY alembic.ini ./
-COPY --from=web-build /build/dist apps/web/dist
+COPY --from=web-build /build/apps/web/dist apps/web/dist
 
 # Railway inyecta PORT; 8000 como default para ejecución local del contenedor
 ENV PORT=8000

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '../i18n/link';
 import { documentoPreview, resolverPagina, rotuloDe } from '../lib/visuals';
-import { IconExternal, IconFile, IconLayers, IconTrash, IconX } from './Icons';
+import { IconFile, IconLayers, IconTrash, IconX } from './Icons';
 
 export const VISUAL_CHAT_PROMPT = '\n\nVISUALS: si el usuario pide VER algo visual (una página web, landing, interfaz, dashboard, '
   + 'componente, prototipo, logo o icono SVG), entrégalo como diseño: el HTML completo en un bloque ```file:index.html '
@@ -59,7 +59,7 @@ export function ChatVisualPanel({ visual, paginas, vivo, error, onClose, onDisca
         </div>
         {visual && (
           <>
-            <Link to={`/visuals/${visual.id}`} className="pill-btn chat-visual__btn"><IconExternal size={14} /> {t('openInVisuals')}</Link>
+            <Link to={`/visuals/${visual.id}`} className="pill-btn chat-visual__btn">{t('openInVisuals')}</Link>
             <button type="button" className="icon-btn" onClick={onDiscard} title={t('discardVisual')} aria-label={t('discardVisual')} disabled={!!vivo}><IconTrash size={15} /></button>
           </>
         )}

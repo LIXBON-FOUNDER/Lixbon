@@ -18,7 +18,7 @@ import { planBadge } from '../lib/planColors';
 import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
   IconGear, IconUser, IconShield, IconCard, IconChart,
-  IconPlus, IconTrash, IconX, IconChevron, IconLogout,
+  IconTrash, IconX, IconChevron, 
   IconCheck, IconCamera, IconMascota, IconApps,
 } from '../components/Icons';
 import { Select } from '../components/Select';
@@ -435,7 +435,7 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
             {t('profile.activeKeysOf', { active: activeKeys.length, max: unlimited(plan.max_api_keys) ? t('profile.unlimitedKeys') : plan.max_api_keys })}
           </span>
           <button className="pill-btn pill-btn--primary set-btn" onClick={createKey} disabled={busy}>
-            <IconPlus size={14} /> {t('profile.newKey')}
+            {t('profile.newKey')}
           </button>
         </div>
 
@@ -476,7 +476,7 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
         <h2 className="set-title">{t('profile.sessionTitle')}</h2>
         <Row label={t('profile.logOut')} hint={t('profile.logOutHint')}>
           <button className="pill-btn pill-btn--outline set-btn" onClick={onPedirLogout}>
-            <IconLogout size={14} /> {t('profile.logOut')}
+            {t('profile.logOut')}
           </button>
         </Row>
         <Row label={t('profile.deleteAccount')} hint={t('profile.deleteAccountHint')}>
