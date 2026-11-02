@@ -221,7 +221,10 @@ def archivo_dentro(base: Path, relativa: str) -> Path | None:
     """Archivo regular `relativa` bajo `base`, o None si no existe o se sale de
     `base` (`..`, ruta absoluta, enlace simbólico). `relativa` viene de la URL."""
     raiz = os.path.realpath(base)
-    candidato = os.path.realpath(os.path.join(raiz, relativa))
+    try:
+        candidato = os.path.realpath(os.path.join(raiz, relativa))
+    except ValueError:  # byte nulo (%00): en Linux realpath lo rechaza en vez de ignorarlo
+        return None
     # `raiz + os.sep`: sin el separador, `dist-evil` pasaría por estar "dentro" de `dist`.
     if not candidato.startswith(raiz + os.sep):
         return None
