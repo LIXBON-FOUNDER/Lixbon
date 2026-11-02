@@ -24,7 +24,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use super::error::{StoreError, StoreResult};
+use super::dispatch_evidence::{has_canonical_dispatch_started_event, has_canonical_dispatch_terminal_evidence};
 use super::events::NewEvent;
+use super::initial_approval::has_canonical_initial_person_decision;
 use super::projects::ChangeOutcome;
 use super::tasks::{insert_all, require_active, run_in, task_in, TaskIntent, TaskOrigin, TaskRow};
 use super::Store;
@@ -753,4 +755,459 @@ pub(crate) fn runtime_attempt_stop_in(c: &Connection, id: &str, ended_at: i64) -
         params![id, ended_at],
     )?;
     Ok(())
+}
+
+/// Asienta un claim cuya fila es terminal y tiene evidencia canónica (`from` es el claim actual: `reserved`, `started` o
+/// `ambiguous`). Un claim sin evidencia, o con un resultado desconocido, no se convierte en un despacho reutilizable.
+fn settle_dispatch_claim_if_terminal(tx: &Connection, id: &str, from: &str) -> StoreResult<bool> {
+    if !matches!(from, "reserved" | "started" | "ambiguous") {
+        return Ok(false);
+    }
+    let Some(attempt) = attempt_in(tx, id)? else {
+        return Ok(false);
+    };
+    if !attempt.status.is_final() {
+        return Ok(false);
+    }
+    let task = task_of(tx, &attempt)?;
+    if !has_canonical_dispatch_terminal_evidence(tx, &attempt, &task, from)? {
+        return Ok(false);
+    }
+    let changed = tx.execute(
+        "UPDATE attempts SET dispatch_claim='settled'
+         WHERE id=?1 AND dispatch_claim=?2 AND status IN ('done','failed','stopped','exited')",
+        params![id, from],
+    )?;
+    Ok(changed == 1)
+}
+
+impl Store {
+    /// Reserva el despacho UNA sola vez. La reserva durable se confirma antes de cualquier efecto externo de arranque.
+    /// La elegibilidad se revalida bajo el mismo `BEGIN IMMEDIATE`: el Attempt es del Core y está `starting`, la Task sigue
+    /// abierta en un Run abierto y un Project activo y, si es el primer Attempt de una Task de `task.create`, tiene un spec
+    /// no vacío y su aprobación canónica de una Person autenticada con plazo durable. Las continuaciones (n > 1) no
+    /// heredan esa política.
+    /// Devuelve `false` solo si el Attempt no existe o ya tiene claim; una fila obsoleta o no elegible se rechaza, no se
+    /// presenta como un replay.
+    pub fn attempt_dispatch_reserve(&mut self, id: &str) -> StoreResult<bool> {
+        self.write(|tx| {
+            require_active(tx)?;
+
+            // Read the complete durable launch scope inside the writer transaction.
+            // Core's state lock prevents normal in-process mutations from racing this
+            // boundary; `BEGIN IMMEDIATE` also serializes Store writers and makes the
+            // following checks inseparable from the claim update.
+            let durable: Option<(
+                String,
+                String,
+                String,
+                i64,
+                String,
+                i64,
+                Option<i64>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<i64>,
+                Option<String>,
+            )> = tx
+                .query_row(
+                    "SELECT a.status, a.dispatch_claim, a.task_id, a.n, a.origin,
+                            a.external, a.initial_approval_deadline, t.intent,
+                            t.project_id, t.spec, r.closed, p.state
+                     FROM attempts AS a
+                     LEFT JOIN tasks AS t ON t.id = a.task_id
+                     LEFT JOIN runs AS r ON r.id = t.run_id
+                     LEFT JOIN projects AS p ON p.id = t.project_id
+                     WHERE a.id = ?1",
+                    [id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                            row.get(8)?,
+                            row.get(9)?,
+                            row.get(10)?,
+                            row.get(11)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((
+                status,
+                claim,
+                task_id,
+                n,
+                attempt_origin,
+                external,
+                approval_deadline,
+                task_intent,
+                project_id,
+                task_spec,
+                run_closed,
+                project_state,
+            )) = durable
+            else {
+                return Ok(false);
+            };
+
+            // An existing claim is the only replay case. Do not reinterpret it by
+            // rechecking current Task/Run state; claims are one-shot and never reset.
+            if claim != "none" {
+                return Ok(false);
+            }
+            let conflict = |reason: &str| {
+                StoreError::AttemptConflict(format!(
+                    "el Attempt {id} no puede reservarse para despacho: {reason}"
+                ))
+            };
+            if status != "starting" {
+                return Err(conflict("no está starting"));
+            }
+            if attempt_origin != "core" {
+                return Err(conflict("el Attempt no tiene origin core"));
+            }
+            if task_intent.as_deref() != Some("open") {
+                return Err(conflict("la Task no está vigente"));
+            }
+            let Some(_project_id) = project_id else {
+                return Err(conflict("la Task no tiene Project"));
+            };
+            if run_closed != Some(0) {
+                return Err(conflict("el Run está cerrado o no existe"));
+            }
+            if project_state.as_deref() != Some("active") {
+                return Err(conflict("el Project está archivado o no existe"));
+            }
+
+            // `task.create` may create a Task without an Attempt and a later Core
+            // mutation can then create its first one. The immutable request ledger
+            // is the durable provenance fence for that first execution; continuations
+            // (n > 1) deliberately do not inherit this policy.
+            let task_create_first_attempt = n == 1
+                && tx.query_row(
+                    "SELECT EXISTS (
+                       SELECT 1 FROM task_create_requests AS request
+                       JOIN tasks AS task ON task.id = request.task_id
+                       WHERE request.method = 'task.create'
+                         AND request.task_id = ?1
+                         AND request.run_id = task.run_id
+                    )",
+                    [&task_id],
+                    |row| row.get::<_, bool>(0),
+                )?;
+
+            if task_create_first_attempt
+                && task_spec
+                    .as_deref()
+                    .is_none_or(|spec| spec.trim().is_empty())
+            {
+                return Err(conflict("la Task de task.create no tiene un spec no vacío"));
+            }
+
+            // `external` always requires approval. For local Attempts, the durable
+            // deadline records the server-side policy bit. A first Attempt on a
+            // task.create Task requires that same durable gate even if a malformed
+            // row has neither `external` nor a deadline. Never infer approval from
+            // status `starting` alone.
+            if task_create_first_attempt || external != 0 || approval_deadline.is_some() {
+                let Some(deadline) = approval_deadline else {
+                    return Err(conflict("falta el deadline de la aprobación inicial"));
+                };
+                let approval_events: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM events
+                     WHERE kind = 'attempt.approved' AND entity_kind = 'attempt' AND entity_id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                let rejected_events: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM events
+                     WHERE kind = 'attempt.rejected' AND entity_kind = 'attempt' AND entity_id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )?;
+                if approval_events != 1
+                    || rejected_events != 0
+                    || !has_canonical_initial_person_decision(
+                        tx,
+                        id,
+                        &task_id,
+                        n,
+                        "attempt.approved",
+                        None,
+                        Some(deadline),
+                    )?
+                {
+                    return Err(conflict("no tiene una aprobación inicial canónica vigente"));
+                }
+            }
+
+            let changed = tx.execute(
+                "UPDATE attempts SET dispatch_claim='reserved'
+                 WHERE id=?1 AND status='starting' AND dispatch_claim='none' AND origin='core'
+                   AND EXISTS (
+                     SELECT 1
+                     FROM tasks AS t
+                     JOIN runs AS r ON r.id = t.run_id
+                     JOIN projects AS p ON p.id = t.project_id
+                     WHERE t.id = attempts.task_id
+                       AND t.intent = 'open'
+                       AND t.project_id IS NOT NULL
+                       AND r.closed = 0 AND p.state = 'active'
+                   )",
+                [id],
+            )?;
+            if changed == 1 {
+                return Ok(true);
+            }
+
+            // This should only be reachable if a durable condition was changed by
+            // a trigger or a future schema rule. It is not safe to turn it into a
+            // replay unless another transaction actually won the one-shot claim.
+            let latest_claim: Option<String> = tx
+                .query_row(
+                    "SELECT dispatch_claim FROM attempts WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if latest_claim.as_deref().is_some_and(|latest| latest != "none") {
+                return Ok(false);
+            }
+            Err(conflict("la elegibilidad durable cambió antes de confirmar el claim"))
+        })
+    }
+
+    /// Registra el traspaso del despacho tras `attempt.started` y antes de llamar al proveedor. No prueba que un proceso
+    /// del proveedor se lanzara ni aceptara la petición.
+    pub fn attempt_dispatch_started(&mut self, id: &str) -> StoreResult<bool> {
+        self.write(|tx| {
+            require_active(tx)?;
+            let Some(attempt) = attempt_in(tx, id)? else {
+                return Ok(false);
+            };
+            let task = task_of(tx, &attempt)?;
+            if !has_canonical_dispatch_started_event(tx, &attempt, &task)? {
+                return Ok(false);
+            }
+            let changed = tx.execute(
+                "UPDATE attempts SET dispatch_claim='started'
+                 WHERE id=?1 AND status='running' AND started_at IS NOT NULL AND dispatch_claim='reserved'",
+                [id],
+            )?;
+            Ok(changed == 1)
+        })
+    }
+
+    /// Recuperación que falla cerrada para un claim cuyo arranque no se puede probar. La evidencia terminal canónica lo
+    /// asienta; si no, `ambiguous` no vuelve a despacharse solo y requiere una reconciliación humana.
+    pub fn attempt_dispatch_mark_ambiguous(&mut self, id: &str) -> StoreResult<bool> {
+        self.write(|tx| {
+            require_active(tx)?;
+            let from: Option<String> = tx
+                .query_row(
+                    "SELECT dispatch_claim FROM attempts WHERE id=?1 AND dispatch_claim IN ('reserved','started')",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(from) = from else { return Ok(false) };
+            if settle_dispatch_claim_if_terminal(tx, id, &from)? {
+                return Ok(true);
+            }
+            let changed = tx.execute(
+                "UPDATE attempts SET dispatch_claim='ambiguous' WHERE id=?1 AND dispatch_claim=?2",
+                params![id, from],
+            )?;
+            Ok(changed == 1)
+        })
+    }
+
+    /// Reconcilia un claim en vuelo atómicamente con su evidencia. Si el ciclo terminal canónico ya es durable, lo asienta
+    /// sin un falso hecho de ambigüedad; si no, registra `ambiguous` y su proyección de Attention. Un replay no hace nada
+    /// y ninguno de los dos desenlaces autoriza otro arranque.
+    pub fn attempt_dispatch_mark_ambiguous_recorded(
+        &mut self,
+        id: &str,
+        event: impl FnOnce(&AttemptRow, &TaskRow, &str) -> StoreResult<NewEvent>,
+    ) -> StoreResult<bool> {
+        let projector = self.projector.clone();
+        self.write(|tx| {
+            require_active(tx)?;
+            let from: Option<String> = tx
+                .query_row(
+                    "SELECT dispatch_claim FROM attempts WHERE id=?1 AND dispatch_claim IN ('reserved','started')",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(from) = from else { return Ok(false) };
+            if settle_dispatch_claim_if_terminal(tx, id, &from)? {
+                return Ok(true);
+            }
+            let Some(attempt) = attempt_in(tx, id)? else { return Ok(false) };
+            let task = task_of(tx, &attempt)?;
+            let e = event(&attempt, &task, &from)?;
+            check_attempt_event(&attempt, &task, &e)?;
+            let changed = tx.execute(
+                "UPDATE attempts SET dispatch_claim='ambiguous' WHERE id=?1 AND dispatch_claim=?2",
+                params![id, from],
+            )?;
+            if changed == 0 { return Ok(false) }
+            insert_event(tx, &e, projector.as_deref())?;
+            Ok(true)
+        })
+    }
+
+    /// Reconcilia los claims que quedaron en vuelo tras reiniciar el Core. Es una primitiva solo del almacén: quien la
+    /// llama sostiene el lock de despacho y no infiere que el arranque del proveedor ocurriera (o no). Sin evidencia
+    /// terminal canónica pasan a `ambiguous`; repetirla no hace nada.
+    pub fn attempt_dispatch_reconcile_ambiguous(
+        &mut self,
+        ids: &[String],
+    ) -> StoreResult<usize> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.write(|tx| {
+            require_active(tx)?;
+            let mut changed = 0;
+            for id in ids {
+                let from: Option<String> = tx
+                    .query_row(
+                        "SELECT dispatch_claim FROM attempts WHERE id=?1 AND dispatch_claim IN ('reserved','started')",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(from) = from else { continue };
+                if settle_dispatch_claim_if_terminal(tx, id, &from)? {
+                    changed += 1;
+                    continue;
+                }
+                changed += tx.execute(
+                    "UPDATE attempts SET dispatch_claim='ambiguous' WHERE id=?1 AND dispatch_claim=?2",
+                    params![id, from],
+                )?;
+            }
+            Ok(changed)
+        })
+    }
+
+    /// Recuperación al arrancar: reconcilia en UNA transacción todo claim `reserved` o `started`. Un ciclo terminal
+    /// canónico lo asienta; si no, pasa a `ambiguous` y quien llama registra ese hecho. No se infiere el estado de ningún
+    /// proceso y el estado del Attempt no se toca.
+    pub fn attempt_dispatch_reconcile_ambiguous_recorded(
+        &mut self,
+        event: impl FnMut(&AttemptRow, &TaskRow, &str) -> StoreResult<NewEvent>,
+    ) -> StoreResult<usize> {
+        let projector = self.projector.clone();
+        self.write(|tx| {
+            require_active(tx)?;
+            let candidates = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, dispatch_claim FROM attempts WHERE dispatch_claim IN ('reserved','started') ORDER BY id",
+                )?;
+                let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            };
+            let mut changed = 0;
+            let mut make_event = event;
+            for (id, from) in candidates {
+                if settle_dispatch_claim_if_terminal(tx, &id, &from)? {
+                    changed += 1;
+                    continue;
+                }
+                let Some(attempt) = attempt_in(tx, &id)? else { continue };
+                let task = task_of(tx, &attempt)?;
+                let e = make_event(&attempt, &task, &from)?;
+                check_attempt_event(&attempt, &task, &e)?;
+                let n = tx.execute(
+                    "UPDATE attempts SET dispatch_claim='ambiguous' WHERE id=?1 AND dispatch_claim=?2",
+                    params![id, from],
+                )?;
+                if n == 1 {
+                    insert_event(tx, &e, projector.as_deref())?;
+                    changed += 1;
+                }
+            }
+            Ok(changed)
+        })
+    }
+
+    /// Asienta el claim cuando ya es durable un ciclo terminal canónico (ver
+    /// `dispatch_evidence::has_canonical_dispatch_terminal_evidence`). Una fila final sin sus eventos no basta. Admite
+    /// también un claim `reserved` que terminó sin `attempt.started` (el proveedor nunca se llamó).
+    pub fn attempt_dispatch_settled(&mut self, id: &str) -> StoreResult<bool> {
+        self.write(|tx| {
+            require_active(tx)?;
+            let from: Option<String> = tx
+                .query_row(
+                    "SELECT dispatch_claim FROM attempts WHERE id=?1 AND dispatch_claim IN ('reserved','started','ambiguous')",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(from) = from else { return Ok(false) };
+            settle_dispatch_claim_if_terminal(tx, id, &from)
+        })
+    }
+
+    /// Cola de recuperación durable de las aprobaciones del Core interrumpidas antes de reservar el claim. Las filas
+    /// legacy se conservan pero no son candidatas. Quien la lee comprueba la custodia del host y revalida cada Attempt
+    /// antes de cualquier efecto del proveedor. Solo lista: reservar el claim es la única puerta del despacho.
+    pub fn attempt_approved_dispatch_candidates(
+        &self,
+        limit: usize,
+    ) -> StoreResult<Vec<String>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.read(|conn| {
+            require_active(conn)?;
+            let mut stmt = conn.prepare(
+                "SELECT a.id, a.task_id, a.n, a.initial_approval_deadline FROM attempts a
+                 JOIN tasks t ON t.id=a.task_id
+                 JOIN runs r ON r.id=t.run_id
+                 JOIN projects p ON p.id=t.project_id
+                 WHERE a.origin='core' AND a.status='starting' AND a.dispatch_claim='none'
+                   AND a.initial_approval_deadline IS NOT NULL
+                   AND t.intent='open' AND r.closed=0 AND p.state='active'
+                 ORDER BY a.created_at, a.id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?;
+            let candidates = rows.collect::<Result<Vec<_>, _>>()?;
+            let mut approved = Vec::new();
+            for (id, task_id, n, deadline) in candidates {
+                if has_canonical_initial_person_decision(
+                    conn,
+                    &id,
+                    &task_id,
+                    n,
+                    "attempt.approved",
+                    None,
+                    Some(deadline),
+                )? {
+                    approved.push(id);
+                    if approved.len() == limit {
+                        break;
+                    }
+                }
+            }
+            Ok(approved)
+        })
+    }
 }

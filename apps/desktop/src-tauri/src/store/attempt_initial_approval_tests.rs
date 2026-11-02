@@ -330,3 +330,202 @@ fn run_closed_snapshot_ignores_rejection_without_canonical_forced_close_commit()
         "a payload fragment without a forced run.closed fact in the same runtime commit is not historical evidence"
     );
 }
+
+#[test]
+fn approved_decision_survives_reopen_and_is_the_only_recovery_dispatch_permission() {
+    let scratch = Scratch::new();
+    let mut store = Store::open_with(&scratch.0, &post_cut_migrations(), "lxo-141-initial-approval-test").unwrap();
+    let project = store
+        .project_create(
+            "initial-approval-test",
+            &Fingerprint::default(),
+            &NewLocation {
+                machine: "initial-approval-test".into(),
+                path: "C:/lxo-initial-approval".into(),
+                display_path: "C:/lxo-initial-approval".into(),
+                primary: true,
+            },
+        )
+        .unwrap()
+        .id;
+    store.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
+    let person_id = "person-approval-test";
+    let registration = ClientRegistration::new(
+        ClientSurface::Desktop,
+        DeviceIdentity::new("initial-approval-test-desktop", None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(
+        ClientPrincipal::Person(person_id.into()),
+        "initial-approval-test-secret-0123456789abcdef",
+    )
+    .unwrap();
+    let client = store.register_client(&registration, &credential, 15).unwrap();
+
+    let (run, approved_task) = create_task(&mut store, &project, "approved", 10);
+    let approved = store
+        .attempt_create_recorded(
+            &approved_task,
+            &NewAttempt {
+                provider: "fake".into(),
+                model: None,
+                effort: None,
+                role: None,
+                profile: Some("explorar".into()),
+                external: false,
+                requires_approval: true,
+            },
+            20,
+            |attempt, task| {
+                Ok(event(
+                    "attempt.requested",
+                    EventClass::State,
+                    ActorKind::System,
+                    None,
+                    "core",
+                    "attempt",
+                    &attempt.id,
+                    &run,
+                    task.project_id.as_deref().unwrap_or_default(),
+                    "{}",
+                    20,
+                ))
+            },
+        )
+        .unwrap();
+    store
+        .attempt_transition_recorded(&approved.id, &AttemptAction::Approve, 30, |attempt, _, task| {
+            let mut approved = event(
+                "attempt.approved",
+                EventClass::Decision,
+                ActorKind::Person,
+                Some(person_id),
+                "ui",
+                "attempt",
+                &attempt.id,
+                &run,
+                task.project_id.as_deref().unwrap_or_default(),
+                &format!(r#"{{"task":"{}","n":{}}}"#, attempt.task_id, attempt.n),
+                30,
+            );
+            approved.client_id = Some(client.identity().client_id().to_string());
+            Ok(approved)
+        })
+        .unwrap();
+
+    let (unapproved_run, unapproved_task) = create_task(&mut store, &project, "starting", 40);
+    let unapproved = store
+        .attempt_create_recorded(
+            &unapproved_task,
+            &NewAttempt {
+                provider: "fake".into(),
+                model: None,
+                effort: None,
+                role: None,
+                profile: Some("explorar".into()),
+                external: false,
+                requires_approval: false,
+            },
+            50,
+            |attempt, task| {
+                Ok(event(
+                    "attempt.requested",
+                    EventClass::State,
+                    ActorKind::System,
+                    None,
+                    "core",
+                    "attempt",
+                    &attempt.id,
+                    &unapproved_run,
+                    task.project_id.as_deref().unwrap_or_default(),
+                    "{}",
+                    50,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(unapproved.status, AttemptStatus::Starting);
+
+    // Model a pre-Core row on an isolated fixture. Its valid authenticated
+    // approval remains visible in the snapshot but must not enter the Core's
+    // dispatch recovery queue.
+    let (legacy_run, legacy_task) = create_task(&mut store, &project, "legacy-approved", 60);
+    let legacy_id = format!("{legacy_task}-a1");
+    store
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO attempts (id, task_id, n, status, provider, created_at, updated_at, origin, initial_approval_deadline)
+                 VALUES (?1, ?2, 1, 'starting', 'fake', 70, 70, 'legacy', 1800070)",
+                [legacy_id.as_str(), legacy_task.as_str()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let mut legacy_approval = event(
+        "attempt.approved",
+        EventClass::Decision,
+        ActorKind::Person,
+        Some(person_id),
+        "ui",
+        "attempt",
+        &legacy_id,
+        &legacy_run,
+        &project,
+        &format!(r#"{{"task":"{legacy_task}","n":1}}"#),
+        80,
+    );
+    legacy_approval.client_id = Some(client.identity().client_id().to_string());
+    store.append_events(&[legacy_approval]).unwrap();
+    let legacy_row_before = store.attempt_row(&legacy_id).unwrap().unwrap();
+    assert_eq!(
+        store
+            .attempt_initial_approval_snapshot(&legacy_id)
+            .unwrap()
+            .unwrap()
+            .decision,
+        Some(InitialApprovalDecision::Approved),
+        "la aprobación histórica sigue siendo visible sin volverla dispatchable"
+    );
+    assert_eq!(store.attempt_approved_dispatch_candidates(128).unwrap(), vec![approved.id.clone()]);
+    assert_eq!(store.attempt_row(&legacy_id).unwrap().unwrap(), legacy_row_before);
+    let legacy_claim: String = store
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT dispatch_claim FROM attempts WHERE id=?1",
+                [&legacy_id],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(legacy_claim, "none", "consultar la cola no reserva ni modifica el claim legacy");
+
+    drop(store);
+    let mut reopened = Store::open_with(&scratch.0, &post_cut_migrations(), "lxo-141-initial-approval-reopen").unwrap();
+    let snapshot = reopened
+        .attempt_initial_approval_snapshot(&approved.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(snapshot.status, AttemptStatus::Starting);
+    assert_eq!(snapshot.decision, Some(InitialApprovalDecision::Approved));
+    assert_eq!(
+        reopened
+            .attempt_initial_approval_snapshot(&legacy_id)
+            .unwrap()
+            .unwrap()
+            .decision,
+        Some(InitialApprovalDecision::Approved),
+    );
+    assert_eq!(reopened.attempt_approved_dispatch_candidates(128).unwrap(), vec![approved.id.clone()]);
+    assert_eq!(reopened.attempt_row(&legacy_id).unwrap().unwrap(), legacy_row_before);
+
+    // Claim reservation is the only dispatch gate; this test intentionally stops
+    // before any adapter/provider call.
+    assert!(reopened.attempt_dispatch_reserve(&approved.id).unwrap());
+    assert!(reopened.attempt_approved_dispatch_candidates(128).unwrap().is_empty());
+    let unapproved_snapshot = reopened
+        .attempt_initial_approval_snapshot(&unapproved.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unapproved_snapshot.decision, None);
+    assert_eq!(unapproved_snapshot.deadline_ms, None);
+}
