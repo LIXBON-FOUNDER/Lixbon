@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
+use super::mutation::IdempotentMutation;
 use super::state::{Kind, NewTask, Status, Task};
 use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
 
@@ -119,6 +120,99 @@ impl Core {
             return Err(why.into());
         }
         match cmd {
+            "task_create" => {
+                let context = authenticated_context.as_ref()
+                    .ok_or("task.create requiere una identidad Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("task.create solo está permitido a una Person autenticada".into());
+                }
+                let input: super::task_create_api::CreateTaskInput = serde_json::from_value(args.clone())
+                    .map_err(|_| "Solicitud task.create inválida".to_string())?;
+                let authorized = input.authorize_context(context)?;
+                // Sin lanzador instalado nada podría ejecutar el Attempt: se rechaza antes de tocar el ledger, los eventos o
+                // la memoria, en vez de crear un Attempt que nadie lanzaría.
+                if authorized.attempt.is_some() && self.launcher().is_none() {
+                    return Err(super::task_create_api::ATTEMPT_NOT_AVAILABLE.into());
+                }
+                let hash = authorized.payload_sha256().map_err(|_| "Solicitud task.create inválida".to_string())?;
+                let scope = authorized.identity_scope.clone();
+                let request_id = authorized.request_id.clone();
+                let result = |status: &str, ids: crate::store::RuntimeResultIds| {
+                    json!({"status": status, "run_id": ids.run_id, "task_id": ids.task_id, "attempt_id": ids.attempt_id})
+                };
+                // Un replay no depende del estado actual del Project ni toma el lock del estado.
+                if let Some(ids) = self.idempotent_replay(&scope, &request_id, &hash).map_err(|e| e.to_string())? {
+                    return Ok(result("Replayed", ids));
+                }
+                // La comprobación del Project lee disco y escribe marcas: va ANTES de tomar el lock del estado, para
+                // que una ruta lenta no bloquee al resto de RPC. El almacén vuelve a exigir que el Project exista.
+                // Con `attempt`, el `repo` de la Task es la ubicación VERIFICADA del Project en esta máquina, no lo que diga el
+                // cliente (que puede dejarlo vacío): el Worktree del Attempt se registra con ese `repo` y la Task no lo
+                // cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente.
+                let repo = match &authorized.attempt {
+                    Some(_) => self.project_launch_location(&authorized.project_id)?.to_string_lossy().into_owned(),
+                    None => {
+                        self.check_project_launchable_id(&authorized.project_id)?;
+                        authorized.repo.clone()
+                    }
+                };
+                // Capability del proveedor ANTES de escribir nada. Como el Project, depende del estado actual: un replay ya
+                // se atendió arriba sin comprobarla.
+                if let Some(attempt) = &authorized.attempt {
+                    self.provider_start_preflight(&attempt.provider)?;
+                }
+                let outcome = self.mutate_idempotent_recorded(&scope, &request_id, &hash, |tx| {
+                    tx.set_context(context.clone());
+                    let attempt = authorized.attempt.as_ref();
+                    let root = NewTask {
+                        // La selección de ejecución es dato del Attempt: una Task sin Attempt se proyecta con agente vacío.
+                        agent: attempt.map(|a| a.provider.clone()).unwrap_or_default(),
+                        model: attempt.and_then(|a| a.model.clone()),
+                        effort: attempt.and_then(|a| a.effort.clone()),
+                        role: attempt.and_then(|a| a.role.clone()),
+                        title: authorized.title.clone(), spec: authorized.spec.clone(), repo: repo.clone(),
+                        cwd: repo.clone(), branch: None, base: None, worktree: None,
+                        external: attempt.is_some_and(|a| a.external),
+                    };
+                    let (run, task) = tx.create_run_intent(&authorized.objective, root);
+                    let row = tx.tasks.get_mut(&task).ok_or("No se pudo crear la Task")?;
+                    row.project_id = Some(authorized.project_id.clone());
+                    if let Some(attempt) = attempt {
+                        // El perfil vive con la selección de ejecución en el documento; el proyector del runtime lo
+                        // materializa en attempts.profile. Ninguna selección exime de la decisión humana.
+                        row.profile = attempt.profile.clone();
+                        row.status = super::state::Status::PendingApproval;
+                        tx.request_initial_attempt(&task)?;
+                    }
+                    let attempt_id = attempt.map(|_| format!("{task}-a1"));
+                    Ok(((), crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id }))
+                }).map_err(|e| e.to_string())?;
+                match outcome {
+                    IdempotentMutation::Committed { ids, .. } => Ok(result("Committed", ids)),
+                    IdempotentMutation::Replayed(ids) => Ok(result("Replayed", ids)),
+                }
+            }
+            "attempt_approve" | "attempt_reject" => {
+                let context = authenticated_context.as_ref().ok_or("resolver una aprobación inicial requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("resolver una aprobación inicial solo está permitido a una Person autenticada".into());
+                }
+                let input: super::initial_approval_rpc::InitialApprovalInput =
+                    serde_json::from_value(args.clone()).map_err(|_| "Solicitud de aprobación inicial inválida".to_string())?;
+                use super::initial_approval_rpc::InitialApprovalResult as R;
+                let (status, decision) = match super::initial_approval_rpc::decide(self, context, &input.attempt_id, cmd == "attempt_approve")? {
+                    R::Approved => {
+                        // Aprobar no lanza nada por sí mismo: despierta al despachador, que toma el Attempt de su cola.
+                        self.wake_dispatcher();
+                        ("Approved", None)
+                    }
+                    R::Rejected => ("Rejected", None),
+                    R::Expired => ("Expired", None),
+                    R::ReplayedApproved => ("Replayed", Some("approved")),
+                    R::ReplayedRejected => ("Replayed", Some("rejected")),
+                };
+                Ok(json!({"status": status, "decision": decision, "attempt_id": input.attempt_id}))
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -499,13 +593,17 @@ fn rpc_action(cmd: &str) -> ClientAction {
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
+        // Person CLI is global in the current authority model; RPC dispatch still requires an authenticated
+        // Person and rejects Agent before mutation.
+        "task_create" => ClientAction::AgentOrDesktopCommand,
         "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
             ClientAction::AgentCommand
         }
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
-        "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
+        // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
@@ -535,6 +633,7 @@ mod tests {
             "events" => ClientAction::EventLogRead,
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
             | "remove_run" => ClientAction::UiCommand,
+            "task_create" => ClientAction::AgentOrDesktopCommand,
             "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
             | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
                 ClientAction::AgentCommand

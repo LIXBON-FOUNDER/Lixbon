@@ -21,6 +21,8 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt pytest
       - run: python infra/ci/gateway_tests.py
+      # El agente de nodo no está en core/gateway; sin este paso sus tests no corren en ningún sitio.
+      - run: python -m pytest core/node_agent -q -p no:cacheprovider
 
   cli-go:
     name: CLI Go · ${{ matrix.os }}

@@ -52,6 +52,17 @@ mod worktrees;
 mod cut;
 mod reviews;
 mod runtime;
+mod dispatch_evidence;
+mod initial_approval;
+mod task_create;
+#[cfg(test)]
+mod runtime_idempotency_tests;
+#[cfg(test)]
+mod attempt_initial_approval_tests;
+#[cfg(test)]
+mod approval_timeout_tests;
+#[cfg(test)]
+mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
 #[cfg(test)]
@@ -135,6 +146,11 @@ pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewA
 pub use cut::{cut_migration, inspect_copy, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
 // Runtime sobre las tablas Task/Attempt (LXO-232): lo usa la persistencia del Core tras el corte.
 pub use runtime::{RuntimeChanges, RuntimeDoc};
+pub(crate) use runtime::{RuntimeCommitOutcome, RuntimeResultIds};
+pub(crate) use task_create::task_create_payload_sha256;
+// Sin consumidor fuera del almacén hasta el RPC de decisión del primer Attempt (LXO-141, fase 2c).
+#[allow(unused_imports)]
+pub use initial_approval::{InitialApprovalDecision, InitialApprovalSnapshot, INITIAL_APPROVAL_TTL_MS};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
@@ -143,6 +159,8 @@ pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
+#[cfg(test)]
+pub(crate) use migrate::embedded_post_cut;
 use migrate::now_ms;
 
 const LOCK_FILE: &str = "core.lock";

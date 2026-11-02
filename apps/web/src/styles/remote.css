@@ -230,7 +230,7 @@
 .remote__extra { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 5px; background: var(--surface-5); font-size: 11.5px; color: var(--ink-soft); }
 .remote__notice { padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2); font-size: 13px; color: var(--ink-soft); }
 
-.actline-group { display: flex; flex-direction: column; animation: remote-rise 0.3s ease both; }
+.actline-group { display: flex; flex-direction: column; }
 .actline {
   display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%;
   min-height: 30px; padding: 4px 10px 4px 6px; margin-left: -6px; border-radius: var(--radius);
@@ -279,7 +279,7 @@
 .rseg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius); background: var(--surface-3); }
 .rseg button {
   position: relative; display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 12px; border-radius: 12px; font-size: 13px; color: var(--ink-muted);
+  height: 28px; padding: 0 12px; border-radius: 8px; font-size: 13px; color: var(--ink-muted);
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 .rseg button:hover { color: var(--ink); }
@@ -384,7 +384,7 @@
 .rorch-spec-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 13.5px; line-height: 1.55; color: var(--ink-body); }
 .rorch-spec-list li::marker { color: var(--ink-faint); }
 .rorch-spec-code {
-  margin: 0; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); overflow-x: auto;
+  margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); overflow-x: auto;
   font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: var(--ink-soft); white-space: pre;
 }
 @media (max-width: 640px) {
@@ -406,7 +406,7 @@
 .rdv-chev.is-open { transform: none; }
 .rdv-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; }
 .rdv-dir { color: var(--ink-muted); }
-.rdv-tag { padding: 1px 7px; border-radius: 12px; background: var(--surface-3); font-size: 11px; color: var(--ink-soft); }
+.rdv-tag { padding: 1px 7px; border-radius: 8px; background: var(--surface-3); font-size: 11px; color: var(--ink-soft); }
 .rdv-body { border-top: 1px solid var(--surface-3); max-height: 70vh; overflow: auto; scrollbar-width: thin; }
 .rdv-meta { padding: 8px 14px; font-size: 12.5px; color: var(--ink-muted); }
 .rdv-grid { width: max-content; min-width: 100%; padding: 4px 0 8px; font-family: var(--font-mono); font-size: 12px; line-height: 20px; }
@@ -500,3 +500,59 @@
 .remote__shown { margin: 8px 0; display: flex; flex-direction: column; gap: 6px; max-width: 640px; }
 .remote__shown .remote__img { width: 100%; }
 .remote__shown figcaption { font-size: 12.5px; color: var(--ink-muted); }
+
+/* Remoto dentro del marco de la app: el panel ocupa su sitio y la sesión
+   abierta llena el alto disponible. */
+.remote-main { min-height: 0; }
+.remote-main .remote__center, .remote-main .remote__list { flex: 1; min-height: 0; overflow-y: auto; }
+.remote-main.remote-page--session { height: auto; }
+.remote-main .remote__session { flex: 1; min-height: 0; }
+.chat-header__seccion { font: 500 14px var(--font-ui); color: var(--ink); }
+
+/* Lista de sesiones en el panel: filas a todo el ancho separadas por líneas,
+   sin tarjetas; el origen va como etiqueta de texto, no como píldora. */
+.remote-main .remote__list { width: auto; margin: 0; padding: 8px 32px 32px; gap: 0; justify-content: flex-start; }
+.remote-main .remote__card {
+  width: 100%; padding: 14px 4px; border-radius: 0 !important; background: transparent;
+  box-shadow: inset 0 1px 0 var(--linea);
+}
+.remote-main .remote__card:last-child { box-shadow: inset 0 1px 0 var(--linea), inset 0 -1px 0 var(--linea); }
+.remote-main .remote__card:hover:not(:disabled) { background: var(--surface-2); }
+.remote-main .remote__card-body strong { font-size: 14.5px; font-weight: 500; color: var(--ink); }
+.remote-main .remote__badge { padding: 0; background: none; color: var(--ink-faint); font: 500 11.5px var(--font-mono); letter-spacing: 0; }
+
+/* Remoto sin sesión elegida: el colibrí y, debajo del titular, cómo conectar
+   una sesión en filas con líneas. */
+.remote-main .chat-hero.colibri { flex: 1; min-height: 0; }
+/* Caja compacta, como un selector: contorno fino, filas con icono, una línea
+   entre las formas de conectar y la guía, y el isotipo posado en el borde. */
+.remote-inicio {
+  position: relative; width: min(400px, 100%); display: flex; flex-direction: column; margin-top: 14px; padding: 4px;
+  border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--linea); text-align: left;
+}
+.remote-inicio__mascota { position: absolute; top: -17px; right: 18px; color: var(--ink); }
+.remote-inicio__fila {
+  display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 10px; border-radius: 6px;
+  color: var(--ink-muted);
+}
+.remote-inicio__fila > svg { flex: none; }
+.remote-inicio__nombre { font: 500 14px var(--font-ui); color: var(--ink); }
+.remote-inicio__como { margin-left: auto; font: 400 12.5px var(--font-ui); color: var(--ink-muted); white-space: nowrap; }
+.remote-inicio__como code { padding: 1px 6px; border-radius: 4px; background: var(--surface-3); color: var(--ink); font: 500 12px var(--font-mono); }
+.remote-inicio__div { height: 1px; margin: 4px 6px; background: var(--linea); }
+.remote-inicio__enlace { text-decoration: none; }
+.remote-inicio__enlace .remote-inicio__nombre { color: var(--ink-soft); font-weight: 400; }
+.remote-inicio__enlace:hover { background: var(--surface-2); }
+.remote-inicio__enlace:hover .remote-inicio__nombre { color: var(--ink); }
+.remote-inicio__flecha { margin-left: auto; color: var(--ink-faint); }
+/* Sesión todavía vacía: el colibrí ocupa el hilo. */
+.remote__thread > .chat-hero.colibri { min-height: 100%; }
+.remote__vacia-titulo { font-size: clamp(30px, 3.2vw, 44px) !important; }
+.remote__title .shimmer { font: inherit; }
+
+/* La sesión ocupa todo el panel; la cabecera, el hilo y el cuadro de abajo
+   se quedan en la columna de lectura. Vacía, el colibrí llena el panel. */
+.remote-main .remote__session { width: 100%; margin: 0; padding: 18px 0 22px; }
+.remote-main .remote__head, .remote-main .remote__dock { width: min(760px, 100% - 32px); margin-inline: auto; }
+.remote-main .remote__thread { padding-inline: max(16px, calc((100% - 760px) / 2)); }
+.remote-main .remote__thread:has(> .chat-hero.colibri) { padding: 0; }

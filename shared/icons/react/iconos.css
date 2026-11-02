@@ -1,0 +1,373 @@
+/* Iconos de Lixbon: trazo 2 sobre 24, uniones redondas, relleno para lo activo.
+   El relleno toma --lx-relleno: #FFFFFF en oscuro y #000000 en claro. */
+:root { --lx-relleno: #FFFFFF; }
+:root[data-theme="light"] { --lx-relleno: #000000; }
+.ico{display:block;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.ico .f{fill:currentColor;stroke:none}
+.ico .mk *{stroke:#000;fill:none}
+.ico .mk .s,.ico .mk .f{fill:#000}
+.ico .mk .f{stroke:none}
+.ico .mk .mw{fill:#fff;stroke:none}
+.ico .mk .tc{stroke-width:6}
+.ico .sol * { stroke: var(--lx-relleno); }
+.ico .sol .s { fill: var(--lx-relleno); }
+/* Animaciones al pulsar */
+.ia .pt,.ia .pt-all,.ia .pt-tacha{transform-box:view-box}
+.ia .v-off{display:flex;align-items:center}
+.ia .v-on{display:none;align-items:center}
+.ia.on .v-on{display:flex}
+.ia.on .v-off{display:none}
+@keyframes campana-ptcuerpo-0-1{0%{transform:rotate(0)}22%{transform:rotate(9deg)}50%{transform:rotate(-6deg)}78%{transform:rotate(3deg)}100%{transform:rotate(0)}}@keyframes campana-ptcuerpo-0-2{0%{transform:rotate(0)}22%{transform:rotate(9deg)}50%{transform:rotate(-6deg)}78%{transform:rotate(3deg)}100%{transform:rotate(0)}}
+.ia-campana .pt-cuerpo{transform-origin:12px 3px}
+.ia-campana.p1 .pt-cuerpo{animation:campana-ptcuerpo-0-1 800ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-campana.p2 .pt-cuerpo{animation:campana-ptcuerpo-0-2 800ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes campana-ptbadajo-1-1{0%{transform:translateX(0)}28%{transform:translateX(-1.1px)}56%{transform:translateX(.8px)}84%{transform:translateX(-.3px)}100%{transform:translateX(0)}}@keyframes campana-ptbadajo-1-2{0%{transform:translateX(0)}28%{transform:translateX(-1.1px)}56%{transform:translateX(.8px)}84%{transform:translateX(-.3px)}100%{transform:translateX(0)}}
+.ia-campana .pt-badajo{transform-origin:12px 21px}
+.ia-campana.p1 .pt-badajo{animation:campana-ptbadajo-1-1 800ms cubic-bezier(.37,0,.63,1) 60ms both}
+.ia-campana.p2 .pt-badajo{animation:campana-ptbadajo-1-2 800ms cubic-bezier(.37,0,.63,1) 60ms both}
+@keyframes ajustes-ptall-2-1{0%{transform:rotate(0)}100%{transform:rotate(60deg)}}@keyframes ajustes-ptall-2-2{0%{transform:rotate(0)}100%{transform:rotate(60deg)}}
+.ia-ajustes .pt-all{transform-origin:12px 12px}
+.ia-ajustes.p1 .pt-all{animation:ajustes-ptall-2-1 600ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-ajustes.p2 .pt-all{animation:ajustes-ptall-2-2 600ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes refrescar-ptall-3-1{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}@keyframes refrescar-ptall-3-2{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.ia-refrescar .pt-all{transform-origin:12px 12px}
+.ia-refrescar.p1 .pt-all{animation:refrescar-ptall-3-1 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-refrescar.p2 .pt-all{animation:refrescar-ptall-3-2 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes historial-ptall-4-1{0%{transform:rotate(0)}100%{transform:rotate(-360deg)}}@keyframes historial-ptall-4-2{0%{transform:rotate(0)}100%{transform:rotate(-360deg)}}
+.ia-historial .pt-all{transform-origin:12px 12px}
+.ia-historial.p1 .pt-all{animation:historial-ptall-4-1 750ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-historial.p2 .pt-all{animation:historial-ptall-4-2 750ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes descargar-ptflecha-5-1{0%{transform:none}50%{transform:translate(0px,2.5px)}100%{transform:none}}@keyframes descargar-ptflecha-5-2{0%{transform:none}50%{transform:translate(0px,2.5px)}100%{transform:none}}
+.ia-descargar .pt-flecha{transform-origin:12px 12px}
+.ia-descargar.p1 .pt-flecha{animation:descargar-ptflecha-5-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-descargar.p2 .pt-flecha{animation:descargar-ptflecha-5-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes descargar-ptbandeja-6-1{0%{transform:none}50%{transform:translate(0px,0.6px)}100%{transform:none}}@keyframes descargar-ptbandeja-6-2{0%{transform:none}50%{transform:translate(0px,0.6px)}100%{transform:none}}
+.ia-descargar .pt-bandeja{transform-origin:12px 12px}
+.ia-descargar.p1 .pt-bandeja{animation:descargar-ptbandeja-6-1 520ms cubic-bezier(.37,0,.63,1) 80ms both}
+.ia-descargar.p2 .pt-bandeja{animation:descargar-ptbandeja-6-2 520ms cubic-bezier(.37,0,.63,1) 80ms both}
+@keyframes subir-ptflecha-7-1{0%{transform:none}50%{transform:translate(0px,-2.5px)}100%{transform:none}}@keyframes subir-ptflecha-7-2{0%{transform:none}50%{transform:translate(0px,-2.5px)}100%{transform:none}}
+.ia-subir .pt-flecha{transform-origin:12px 12px}
+.ia-subir.p1 .pt-flecha{animation:subir-ptflecha-7-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-subir.p2 .pt-flecha{animation:subir-ptflecha-7-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes compartir-ptflecha-8-1{0%{transform:none}50%{transform:translate(0px,-2.2px)}100%{transform:none}}@keyframes compartir-ptflecha-8-2{0%{transform:none}50%{transform:translate(0px,-2.2px)}100%{transform:none}}
+.ia-compartir .pt-flecha{transform-origin:12px 12px}
+.ia-compartir.p1 .pt-flecha{animation:compartir-ptflecha-8-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-compartir.p2 .pt-flecha{animation:compartir-ptflecha-8-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes enviar-ptall-9-1{0%{transform:translateY(0);opacity:1}45%{transform:translateY(-5px);opacity:0}55%{transform:translateY(3px);opacity:0}100%{transform:translateY(0);opacity:1}}@keyframes enviar-ptall-9-2{0%{transform:translateY(0);opacity:1}45%{transform:translateY(-5px);opacity:0}55%{transform:translateY(3px);opacity:0}100%{transform:translateY(0);opacity:1}}
+.ia-enviar .pt-all{transform-origin:12px 12px}
+.ia-enviar.p1 .pt-all{animation:enviar-ptall-9-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-enviar.p2 .pt-all{animation:enviar-ptall-9-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes borrar-pttapa-10-1{0%{transform:none}50%{transform:rotate(-11deg)}100%{transform:none}}@keyframes borrar-pttapa-10-2{0%{transform:none}50%{transform:rotate(-11deg)}100%{transform:none}}
+.ia-borrar .pt-tapa{transform-origin:4px 7px}
+.ia-borrar.p1 .pt-tapa{animation:borrar-pttapa-10-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-borrar.p2 .pt-tapa{animation:borrar-pttapa-10-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes editar-ptall-11-1{0%{transform:rotate(0)}22%{transform:rotate(-7deg)}50%{transform:rotate(-4deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}@keyframes editar-ptall-11-2{0%{transform:rotate(0)}22%{transform:rotate(-7deg)}50%{transform:rotate(-4deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}
+.ia-editar .pt-all{transform-origin:4.5px 19.5px}
+.ia-editar.p1 .pt-all{animation:editar-ptall-11-1 650ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-editar.p2 .pt-all{animation:editar-ptall-11-2 650ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes mas-ptall-12-1{0%{transform:rotate(0)}100%{transform:rotate(90deg)}}@keyframes mas-ptall-12-2{0%{transform:rotate(0)}100%{transform:rotate(90deg)}}
+.ia-mas .pt-all{transform-origin:12px 12px}
+.ia-mas.p1 .pt-all{animation:mas-ptall-12-1 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-mas.p2 .pt-all{animation:mas-ptall-12-2 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes cerrar-ptall-13-1{0%{transform:rotate(0)}100%{transform:rotate(90deg)}}@keyframes cerrar-ptall-13-2{0%{transform:rotate(0)}100%{transform:rotate(90deg)}}
+.ia-cerrar .pt-all{transform-origin:12px 12px}
+.ia-cerrar.p1 .pt-all{animation:cerrar-ptall-13-1 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-cerrar.p2 .pt-all{animation:cerrar-ptall-13-2 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes opciones-ptd1-14-1{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}@keyframes opciones-ptd1-14-2{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}
+.ia-opciones .pt-d1{transform-origin:12px 12px}
+.ia-opciones.p1 .pt-d1{animation:opciones-ptd1-14-1 400ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-opciones.p2 .pt-d1{animation:opciones-ptd1-14-2 400ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes opciones-ptd2-15-1{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}@keyframes opciones-ptd2-15-2{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}
+.ia-opciones .pt-d2{transform-origin:12px 12px}
+.ia-opciones.p1 .pt-d2{animation:opciones-ptd2-15-1 400ms cubic-bezier(.37,0,.63,1) 70ms both}
+.ia-opciones.p2 .pt-d2{animation:opciones-ptd2-15-2 400ms cubic-bezier(.37,0,.63,1) 70ms both}
+@keyframes opciones-ptd3-16-1{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}@keyframes opciones-ptd3-16-2{0%{transform:none}50%{transform:translate(0px,-1.8px)}100%{transform:none}}
+.ia-opciones .pt-d3{transform-origin:12px 12px}
+.ia-opciones.p1 .pt-d3{animation:opciones-ptd3-16-1 400ms cubic-bezier(.37,0,.63,1) 140ms both}
+.ia-opciones.p2 .pt-d3{animation:opciones-ptd3-16-2 400ms cubic-bezier(.37,0,.63,1) 140ms both}
+@keyframes enlace-pta-17-1{0%{transform:none}50%{transform:translate(1.1px,-1.1px)}100%{transform:none}}@keyframes enlace-pta-17-2{0%{transform:none}50%{transform:translate(1.1px,-1.1px)}100%{transform:none}}
+.ia-enlace .pt-a{transform-origin:12px 12px}
+.ia-enlace.p1 .pt-a{animation:enlace-pta-17-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-enlace.p2 .pt-a{animation:enlace-pta-17-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes enlace-ptb-18-1{0%{transform:none}50%{transform:translate(-1.1px,1.1px)}100%{transform:none}}@keyframes enlace-ptb-18-2{0%{transform:none}50%{transform:translate(-1.1px,1.1px)}100%{transform:none}}
+.ia-enlace .pt-b{transform-origin:12px 12px}
+.ia-enlace.p1 .pt-b{animation:enlace-ptb-18-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-enlace.p2 .pt-b{animation:enlace-ptb-18-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes externo-ptflecha-19-1{0%{transform:none}50%{transform:translate(1.8px,-1.8px)}100%{transform:none}}@keyframes externo-ptflecha-19-2{0%{transform:none}50%{transform:translate(1.8px,-1.8px)}100%{transform:none}}
+.ia-externo .pt-flecha{transform-origin:12px 12px}
+.ia-externo.p1 .pt-flecha{animation:externo-ptflecha-19-1 500ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-externo.p2 .pt-flecha{animation:externo-ptflecha-19-2 500ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes deshacer-ptall-20-1{0%{transform:none}50%{transform:rotate(-18deg)}100%{transform:none}}@keyframes deshacer-ptall-20-2{0%{transform:none}50%{transform:rotate(-18deg)}100%{transform:none}}
+.ia-deshacer .pt-all{transform-origin:12px 12px}
+.ia-deshacer.p1 .pt-all{animation:deshacer-ptall-20-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-deshacer.p2 .pt-all{animation:deshacer-ptall-20-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes rehacer-ptall-21-1{0%{transform:none}50%{transform:rotate(18deg)}100%{transform:none}}@keyframes rehacer-ptall-21-2{0%{transform:none}50%{transform:rotate(18deg)}100%{transform:none}}
+.ia-rehacer .pt-all{transform-origin:12px 12px}
+.ia-rehacer.p1 .pt-all{animation:rehacer-ptall-21-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-rehacer.p2 .pt-all{animation:rehacer-ptall-21-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes salir-ptflecha-22-1{0%{transform:none}50%{transform:translate(2.2px,0px)}100%{transform:none}}@keyframes salir-ptflecha-22-2{0%{transform:none}50%{transform:translate(2.2px,0px)}100%{transform:none}}
+.ia-salir .pt-flecha{transform-origin:12px 12px}
+.ia-salir.p1 .pt-flecha{animation:salir-ptflecha-22-1 500ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-salir.p2 .pt-flecha{animation:salir-ptflecha-22-2 500ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes buscar-ptall-23-1{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-5deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}@keyframes buscar-ptall-23-2{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-5deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}
+.ia-buscar .pt-all{transform-origin:20px 20px}
+.ia-buscar.p1 .pt-all{animation:buscar-ptall-23-1 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-buscar.p2 .pt-all{animation:buscar-ptall-23-2 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes clip-ptall-24-1{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-5deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}@keyframes clip-ptall-24-2{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-5deg)}78%{transform:rotate(-2deg)}100%{transform:rotate(0)}}
+.ia-clip .pt-all{transform-origin:12px 12px}
+.ia-clip.p1 .pt-all{animation:clip-ptall-24-1 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-clip.p2 .pt-all{animation:clip-ptall-24-2 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes alerta-ptall-25-1{0%{transform:translateX(0)}25%{transform:translateX(-1.2px)}50%{transform:translateX(1px)}75%{transform:translateX(-.5px)}100%{transform:translateX(0)}}@keyframes alerta-ptall-25-2{0%{transform:translateX(0)}25%{transform:translateX(-1.2px)}50%{transform:translateX(1px)}75%{transform:translateX(-.5px)}100%{transform:translateX(0)}}
+.ia-alerta .pt-all{transform-origin:12px 12px}
+.ia-alerta.p1 .pt-all{animation:alerta-ptall-25-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-alerta.p2 .pt-all{animation:alerta-ptall-25-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes camara-ptlente-26-1{0%{transform:none}50%{transform:scale(0.72)}100%{transform:none}}@keyframes camara-ptlente-26-2{0%{transform:none}50%{transform:scale(0.72)}100%{transform:none}}
+.ia-camara .pt-lente{transform-origin:12px 13px}
+.ia-camara.p1 .pt-lente{animation:camara-ptlente-26-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-camara.p2 .pt-lente{animation:camara-ptlente-26-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes camara-ptcuerpo-27-1{0%{opacity:1}50%{opacity:0.7}100%{opacity:1}}@keyframes camara-ptcuerpo-27-2{0%{opacity:1}50%{opacity:0.7}100%{opacity:1}}
+.ia-camara .pt-cuerpo{transform-origin:12px 12px}
+.ia-camara.p1 .pt-cuerpo{animation:camara-ptcuerpo-27-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-camara.p2 .pt-cuerpo{animation:camara-ptcuerpo-27-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes cambiar_camara-ptflechas-28-1{0%{transform:rotate(0)}100%{transform:rotate(180deg)}}@keyframes cambiar_camara-ptflechas-28-2{0%{transform:rotate(0)}100%{transform:rotate(180deg)}}
+.ia-cambiar-camara .pt-flechas{transform-origin:12px 13px}
+.ia-cambiar-camara.p1 .pt-flechas{animation:cambiar_camara-ptflechas-28-1 650ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-cambiar-camara.p2 .pt-flechas{animation:cambiar_camara-ptflechas-28-2 650ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes visuals-ptpincel-29-1{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-3deg)}78%{transform:rotate(-1deg)}100%{transform:rotate(0)}}@keyframes visuals-ptpincel-29-2{0%{transform:rotate(0)}22%{transform:rotate(-8deg)}50%{transform:rotate(-3deg)}78%{transform:rotate(-1deg)}100%{transform:rotate(0)}}
+.ia-visuals .pt-pincel{transform-origin:19px 6.5px}
+.ia-visuals.p1 .pt-pincel{animation:visuals-ptpincel-29-1 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-visuals.p2 .pt-pincel{animation:visuals-ptpincel-29-2 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes visuals-ptchispa-30-1{0%{transform:scale(1) rotate(0)}50%{transform:scale(.8) rotate(45deg)}100%{transform:scale(1) rotate(90deg)}}@keyframes visuals-ptchispa-30-2{0%{transform:scale(1) rotate(0)}50%{transform:scale(.8) rotate(45deg)}100%{transform:scale(1) rotate(90deg)}}
+.ia-visuals .pt-chispa{transform-origin:6.5px 6.5px}
+.ia-visuals.p1 .pt-chispa{animation:visuals-ptchispa-30-1 700ms cubic-bezier(.37,0,.63,1) 60ms both}
+.ia-visuals.p2 .pt-chispa{animation:visuals-ptchispa-30-2 700ms cubic-bezier(.37,0,.63,1) 60ms both}
+@keyframes agente-ptchispa-31-1{0%{transform:scale(1) rotate(0)}50%{transform:scale(.85) rotate(45deg)}100%{transform:scale(1) rotate(90deg)}}@keyframes agente-ptchispa-31-2{0%{transform:scale(1) rotate(0)}50%{transform:scale(.85) rotate(45deg)}100%{transform:scale(1) rotate(90deg)}}
+.ia-agente .pt-chispa{transform-origin:12px 11.5px}
+.ia-agente.p1 .pt-chispa{animation:agente-ptchispa-31-1 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-agente.p2 .pt-chispa{animation:agente-ptchispa-31-2 700ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes chat-ptall-32-1{0%{transform:none}50%{transform:scale(0.92)}100%{transform:none}}@keyframes chat-ptall-32-2{0%{transform:none}50%{transform:scale(0.92)}100%{transform:none}}
+.ia-chat .pt-all{transform-origin:5px 19.5px}
+.ia-chat.p1 .pt-all{animation:chat-ptall-32-1 480ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-chat.p2 .pt-all{animation:chat-ptall-32-2 480ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes remoto-ptcursor-33-1{0%{opacity:1}25%{opacity:0.15}50%{opacity:1}75%{opacity:0.15}100%{opacity:1}}@keyframes remoto-ptcursor-33-2{0%{opacity:1}25%{opacity:0.15}50%{opacity:1}75%{opacity:0.15}100%{opacity:1}}
+.ia-remoto .pt-cursor{transform-origin:12px 12px}
+.ia-remoto.p1 .pt-cursor{animation:remoto-ptcursor-33-1 900ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-remoto.p2 .pt-cursor{animation:remoto-ptcursor-33-2 900ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes remoto-ptprompt-34-1{0%{transform:none}50%{transform:translate(0.8px,0px)}100%{transform:none}}@keyframes remoto-ptprompt-34-2{0%{transform:none}50%{transform:translate(0.8px,0px)}100%{transform:none}}
+.ia-remoto .pt-prompt{transform-origin:12px 12px}
+.ia-remoto.p1 .pt-prompt{animation:remoto-ptprompt-34-1 450ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-remoto.p2 .pt-prompt{animation:remoto-ptprompt-34-2 450ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes docs-ptl1-35-1{0%{stroke-dashoffset:8}100%{stroke-dashoffset:0}}@keyframes docs-ptl1-35-2{0%{stroke-dashoffset:8}100%{stroke-dashoffset:0}}
+.ia-docs .pt-l1{transform-origin:12px 12px}
+.ia-docs.p1 .pt-l1{stroke-dasharray:8;animation:docs-ptl1-35-1 400ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-docs.p2 .pt-l1{stroke-dasharray:8;animation:docs-ptl1-35-2 400ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes docs-ptl2-36-1{0%{stroke-dashoffset:8}100%{stroke-dashoffset:0}}@keyframes docs-ptl2-36-2{0%{stroke-dashoffset:8}100%{stroke-dashoffset:0}}
+.ia-docs .pt-l2{transform-origin:12px 12px}
+.ia-docs.p1 .pt-l2{stroke-dasharray:8;animation:docs-ptl2-36-1 400ms cubic-bezier(.25,1,.5,1) 160ms both}
+.ia-docs.p2 .pt-l2{stroke-dasharray:8;animation:docs-ptl2-36-2 400ms cubic-bezier(.25,1,.5,1) 160ms both}
+@keyframes skills-ptall-37-1{0%{transform:none}50%{transform:translate(1.4px,-1.4px)}100%{transform:none}}@keyframes skills-ptall-37-2{0%{transform:none}50%{transform:translate(1.4px,-1.4px)}100%{transform:none}}
+.ia-skills .pt-all{transform-origin:12px 12px}
+.ia-skills.p1 .pt-all{animation:skills-ptall-37-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-skills.p2 .pt-all{animation:skills-ptall-37-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes apps-ptfront-38-1{0%{transform:none}50%{transform:translate(0px,-1.4px)}100%{transform:none}}@keyframes apps-ptfront-38-2{0%{transform:none}50%{transform:translate(0px,-1.4px)}100%{transform:none}}
+.ia-apps .pt-front{transform-origin:12px 12px}
+.ia-apps.p1 .pt-front{animation:apps-ptfront-38-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-apps.p2 .pt-front{animation:apps-ptfront-38-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes orquestador-ptc1-39-1{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}@keyframes orquestador-ptc1-39-2{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}
+.ia-orquestador .pt-c1{transform-origin:5px 18.5px}
+.ia-orquestador.p1 .pt-c1{animation:orquestador-ptc1-39-1 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-orquestador.p2 .pt-c1{animation:orquestador-ptc1-39-2 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes orquestador-ptc2-40-1{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}@keyframes orquestador-ptc2-40-2{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}
+.ia-orquestador .pt-c2{transform-origin:12px 18.5px}
+.ia-orquestador.p1 .pt-c2{animation:orquestador-ptc2-40-1 420ms cubic-bezier(.37,0,.63,1) 100ms both}
+.ia-orquestador.p2 .pt-c2{animation:orquestador-ptc2-40-2 420ms cubic-bezier(.37,0,.63,1) 100ms both}
+@keyframes orquestador-ptc3-41-1{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}@keyframes orquestador-ptc3-41-2{0%{transform:none}50%{transform:scale(0.75)}100%{transform:none}}
+.ia-orquestador .pt-c3{transform-origin:19px 18.5px}
+.ia-orquestador.p1 .pt-c3{animation:orquestador-ptc3-41-1 420ms cubic-bezier(.37,0,.63,1) 200ms both}
+.ia-orquestador.p2 .pt-c3{animation:orquestador-ptc3-41-2 420ms cubic-bezier(.37,0,.63,1) 200ms both}
+@keyframes git-ptrama-42-1{0%{stroke-dashoffset:17}100%{stroke-dashoffset:0}}@keyframes git-ptrama-42-2{0%{stroke-dashoffset:17}100%{stroke-dashoffset:0}}
+.ia-git .pt-rama{transform-origin:12px 12px}
+.ia-git.p1 .pt-rama{stroke-dasharray:17;animation:git-ptrama-42-1 480ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-git.p2 .pt-rama{stroke-dasharray:17;animation:git-ptrama-42-2 480ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes git-ptpunta-43-1{0%{transform:none}50%{transform:scale(0.8)}100%{transform:none}}@keyframes git-ptpunta-43-2{0%{transform:none}50%{transform:scale(0.8)}100%{transform:none}}
+.ia-git .pt-punta{transform-origin:18px 5.5px}
+.ia-git.p1 .pt-punta{animation:git-ptpunta-43-1 420ms cubic-bezier(.37,0,.63,1) 180ms both}
+.ia-git.p2 .pt-punta{animation:git-ptpunta-43-2 420ms cubic-bezier(.37,0,.63,1) 180ms both}
+@keyframes terminal-ptcursor-44-1{0%{opacity:1}25%{opacity:0.15}50%{opacity:1}75%{opacity:0.15}100%{opacity:1}}@keyframes terminal-ptcursor-44-2{0%{opacity:1}25%{opacity:0.15}50%{opacity:1}75%{opacity:0.15}100%{opacity:1}}
+.ia-terminal .pt-cursor{transform-origin:12px 12px}
+.ia-terminal.p1 .pt-cursor{animation:terminal-ptcursor-44-1 900ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-terminal.p2 .pt-cursor{animation:terminal-ptcursor-44-2 900ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes terminal-ptprompt-45-1{0%{transform:none}50%{transform:translate(0.8px,0px)}100%{transform:none}}@keyframes terminal-ptprompt-45-2{0%{transform:none}50%{transform:translate(0.8px,0px)}100%{transform:none}}
+.ia-terminal .pt-prompt{transform-origin:12px 12px}
+.ia-terminal.p1 .pt-prompt{animation:terminal-ptprompt-45-1 450ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-terminal.p2 .pt-prompt{animation:terminal-ptprompt-45-2 450ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes idioma-ptmeridiano-46-1{0%{transform:none}50%{transform:scaleX(.15)}100%{transform:none}}@keyframes idioma-ptmeridiano-46-2{0%{transform:none}50%{transform:scaleX(.15)}100%{transform:none}}
+.ia-idioma .pt-meridiano{transform-origin:12px 12px}
+.ia-idioma.p1 .pt-meridiano{animation:idioma-ptmeridiano-46-1 800ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-idioma.p2 .pt-meridiano{animation:idioma-ptmeridiano-46-2 800ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes hecho-ptall-47-1{0%{stroke-dashoffset:21}100%{stroke-dashoffset:0}}@keyframes hecho-ptall-47-2{0%{stroke-dashoffset:21}100%{stroke-dashoffset:0}}
+.ia-hecho .pt-all{transform-origin:12px 12px}
+.ia-hecho.p1 .pt-all{stroke-dasharray:21;animation:hecho-ptall-47-1 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-hecho.p2 .pt-all{stroke-dasharray:21;animation:hecho-ptall-47-2 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes rayo-ptall-48-1{0%{opacity:1}50%{opacity:0.35}100%{opacity:1}}@keyframes rayo-ptall-48-2{0%{opacity:1}50%{opacity:0.35}100%{opacity:1}}
+.ia-rayo .pt-all{transform-origin:12px 12px}
+.ia-rayo.p1 .pt-all{animation:rayo-ptall-48-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-rayo.p2 .pt-all{animation:rayo-ptall-48-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes selector-ptarriba-49-1{0%{transform:none}50%{transform:translate(0px,-1.3px)}100%{transform:none}}@keyframes selector-ptarriba-49-2{0%{transform:none}50%{transform:translate(0px,-1.3px)}100%{transform:none}}
+.ia-selector .pt-arriba{transform-origin:12px 12px}
+.ia-selector.p1 .pt-arriba{animation:selector-ptarriba-49-1 440ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-selector.p2 .pt-arriba{animation:selector-ptarriba-49-2 440ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes selector-ptabajo-50-1{0%{transform:none}50%{transform:translate(0px,1.3px)}100%{transform:none}}@keyframes selector-ptabajo-50-2{0%{transform:none}50%{transform:translate(0px,1.3px)}100%{transform:none}}
+.ia-selector .pt-abajo{transform-origin:12px 12px}
+.ia-selector.p1 .pt-abajo{animation:selector-ptabajo-50-1 440ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-selector.p2 .pt-abajo{animation:selector-ptabajo-50-2 440ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes volver-ptall-51-1{0%{transform:none}50%{transform:translate(-1.8px,0px)}100%{transform:none}}@keyframes volver-ptall-51-2{0%{transform:none}50%{transform:translate(-1.8px,0px)}100%{transform:none}}
+.ia-volver .pt-all{transform-origin:12px 12px}
+.ia-volver.p1 .pt-all{animation:volver-ptall-51-1 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-volver.p2 .pt-all{animation:volver-ptall-51-2 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes siguiente-ptall-52-1{0%{transform:none}50%{transform:translate(1.8px,0px)}100%{transform:none}}@keyframes siguiente-ptall-52-2{0%{transform:none}50%{transform:translate(1.8px,0px)}100%{transform:none}}
+.ia-siguiente .pt-all{transform-origin:12px 12px}
+.ia-siguiente.p1 .pt-all{animation:siguiente-ptall-52-1 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-siguiente.p2 .pt-all{animation:siguiente-ptall-52-2 420ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes inicio-ptall-53-1{0%{transform:none}50%{transform:translate(0px,-1.4px)}100%{transform:none}}@keyframes inicio-ptall-53-2{0%{transform:none}50%{transform:translate(0px,-1.4px)}100%{transform:none}}
+.ia-inicio .pt-all{transform-origin:12px 12px}
+.ia-inicio.p1 .pt-all{animation:inicio-ptall-53-1 480ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-inicio.p2 .pt-all{animation:inicio-ptall-53-2 480ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes mascota-ptantena-54-1{0%{transform:rotate(0)}22%{transform:rotate(-12deg)}50%{transform:rotate(-7deg)}78%{transform:rotate(-3deg)}100%{transform:rotate(0)}}@keyframes mascota-ptantena-54-2{0%{transform:rotate(0)}22%{transform:rotate(-12deg)}50%{transform:rotate(-7deg)}78%{transform:rotate(-3deg)}100%{transform:rotate(0)}}
+.ia-mascota .pt-antena{transform-origin:12px 6.5px}
+.ia-mascota.p1 .pt-antena{animation:mascota-ptantena-54-1 620ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-mascota.p2 .pt-antena{animation:mascota-ptantena-54-2 620ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes mascota-pto1-55-1{0%{transform:none}50%{transform:scaleY(.15)}100%{transform:none}}@keyframes mascota-pto1-55-2{0%{transform:none}50%{transform:scaleY(.15)}100%{transform:none}}
+.ia-mascota .pt-o1{transform-origin:9px 12.5px}
+.ia-mascota.p1 .pt-o1{animation:mascota-pto1-55-1 360ms cubic-bezier(.37,0,.63,1) 80ms both}
+.ia-mascota.p2 .pt-o1{animation:mascota-pto1-55-2 360ms cubic-bezier(.37,0,.63,1) 80ms both}
+@keyframes mascota-pto2-56-1{0%{transform:none}50%{transform:scaleY(.15)}100%{transform:none}}@keyframes mascota-pto2-56-2{0%{transform:none}50%{transform:scaleY(.15)}100%{transform:none}}
+.ia-mascota .pt-o2{transform-origin:15px 12.5px}
+.ia-mascota.p1 .pt-o2{animation:mascota-pto2-56-1 360ms cubic-bezier(.37,0,.63,1) 80ms both}
+.ia-mascota.p2 .pt-o2{animation:mascota-pto2-56-2 360ms cubic-bezier(.37,0,.63,1) 80ms both}
+@keyframes capas-ptc2-57-1{0%{transform:none}50%{transform:translate(0px,1px)}100%{transform:none}}@keyframes capas-ptc2-57-2{0%{transform:none}50%{transform:translate(0px,1px)}100%{transform:none}}
+.ia-capas .pt-c2{transform-origin:12px 12px}
+.ia-capas.p1 .pt-c2{animation:capas-ptc2-57-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-capas.p2 .pt-c2{animation:capas-ptc2-57-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes capas-ptc3-58-1{0%{transform:none}50%{transform:translate(0px,2px)}100%{transform:none}}@keyframes capas-ptc3-58-2{0%{transform:none}50%{transform:translate(0px,2px)}100%{transform:none}}
+.ia-capas .pt-c3{transform-origin:12px 12px}
+.ia-capas.p1 .pt-c3{animation:capas-ptc3-58-1 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-capas.p2 .pt-c3{animation:capas-ptc3-58-2 560ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes diana-ptcentro-59-1{0%{transform:none}50%{transform:scale(1.5)}100%{transform:none}}@keyframes diana-ptcentro-59-2{0%{transform:none}50%{transform:scale(1.5)}100%{transform:none}}
+.ia-diana .pt-centro{transform-origin:12px 12px}
+.ia-diana.p1 .pt-centro{animation:diana-ptcentro-59-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-diana.p2 .pt-centro{animation:diana-ptcentro-59-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes diana-ptanillo-60-1{0%{transform:none}50%{transform:scale(0.92)}100%{transform:none}}@keyframes diana-ptanillo-60-2{0%{transform:none}50%{transform:scale(0.92)}100%{transform:none}}
+.ia-diana .pt-anillo{transform-origin:12px 12px}
+.ia-diana.p1 .pt-anillo{animation:diana-ptanillo-60-1 520ms cubic-bezier(.37,0,.63,1) 60ms both}
+.ia-diana.p2 .pt-anillo{animation:diana-ptanillo-60-2 520ms cubic-bezier(.37,0,.63,1) 60ms both}
+@keyframes construir-ptall-61-1{0%{transform:rotate(0)}22%{transform:rotate(-14deg)}50%{transform:rotate(-4deg)}78%{transform:rotate(-1deg)}100%{transform:rotate(0)}}@keyframes construir-ptall-61-2{0%{transform:rotate(0)}22%{transform:rotate(-14deg)}50%{transform:rotate(-4deg)}78%{transform:rotate(-1deg)}100%{transform:rotate(0)}}
+.ia-construir .pt-all{transform-origin:4.5px 19.5px}
+.ia-construir.p1 .pt-all{animation:construir-ptall-61-1 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-construir.p2 .pt-all{animation:construir-ptall-61-2 600ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes tendencia-ptlinea-62-1{0%{stroke-dashoffset:26}100%{stroke-dashoffset:0}}@keyframes tendencia-ptlinea-62-2{0%{stroke-dashoffset:26}100%{stroke-dashoffset:0}}
+.ia-tendencia .pt-linea{transform-origin:12px 12px}
+.ia-tendencia.p1 .pt-linea{stroke-dasharray:26;animation:tendencia-ptlinea-62-1 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-tendencia.p2 .pt-linea{stroke-dasharray:26;animation:tendencia-ptlinea-62-2 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes tendencia-ptpunta-63-1{0%{transform:none}50%{transform:translate(1.1px,-1.1px)}100%{transform:none}}@keyframes tendencia-ptpunta-63-2{0%{transform:none}50%{transform:translate(1.1px,-1.1px)}100%{transform:none}}
+.ia-tendencia .pt-punta{transform-origin:12px 12px}
+.ia-tendencia.p1 .pt-punta{animation:tendencia-ptpunta-63-1 420ms cubic-bezier(.37,0,.63,1) 200ms both}
+.ia-tendencia.p2 .pt-punta{animation:tendencia-ptpunta-63-2 420ms cubic-bezier(.37,0,.63,1) 200ms both}
+@keyframes flash-ptall-64-1{0%{opacity:0;transform:scale(.9)}100%{opacity:1;transform:scale(1)}}@keyframes flash-ptall-64-2{0%{opacity:0;transform:scale(.9)}100%{opacity:1;transform:scale(1)}}
+.ia-flash .pt-all{transform-origin:12px 12px}
+.ia-flash.on.p1 .v-on .pt-all{animation:flash-ptall-64-1 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-flash.on.p2 .v-on .pt-all{animation:flash-ptall-64-2 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes flash-pttacha-65-1{0%{stroke-dashoffset:23}100%{stroke-dashoffset:0}}@keyframes flash-pttacha-65-2{0%{stroke-dashoffset:23}100%{stroke-dashoffset:0}}
+.ia-flash .pt-tacha{transform-origin:12px 12px}
+.ia-flash:not(.on).p1 .v-off .pt-tacha{stroke-dasharray:23;animation:flash-pttacha-65-1 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-flash:not(.on).p2 .v-off .pt-tacha{stroke-dasharray:23;animation:flash-pttacha-65-2 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes ojo-ptall-66-1{0%{transform:none}50%{transform:scaleY(.2)}100%{transform:none}}@keyframes ojo-ptall-66-2{0%{transform:none}50%{transform:scaleY(.2)}100%{transform:none}}
+.ia-ojo .pt-all{transform-origin:12px 12px}
+.ia-ojo.on.p1 .v-on .pt-all{animation:ojo-ptall-66-1 380ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-ojo.on.p2 .v-on .pt-all{animation:ojo-ptall-66-2 380ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes ojo-pttacha-67-1{0%{stroke-dashoffset:23}100%{stroke-dashoffset:0}}@keyframes ojo-pttacha-67-2{0%{stroke-dashoffset:23}100%{stroke-dashoffset:0}}
+.ia-ojo .pt-tacha{transform-origin:12px 12px}
+.ia-ojo.on.p1 .v-on .pt-tacha{stroke-dasharray:23;animation:ojo-pttacha-67-1 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-ojo.on.p2 .v-on .pt-tacha{stroke-dasharray:23;animation:ojo-pttacha-67-2 380ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes ojo-ptall-68-1{0%{transform:none}50%{transform:scaleY(.2)}100%{transform:none}}@keyframes ojo-ptall-68-2{0%{transform:none}50%{transform:scaleY(.2)}100%{transform:none}}
+.ia-ojo .pt-all{transform-origin:12px 12px}
+.ia-ojo:not(.on).p1 .v-off .pt-all{animation:ojo-ptall-68-1 380ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-ojo:not(.on).p2 .v-off .pt-all{animation:ojo-ptall-68-2 380ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes estrella-ptall-69-1{0%{transform:scale(.8) rotate(-36deg);opacity:0}100%{transform:scale(1) rotate(0);opacity:1}}@keyframes estrella-ptall-69-2{0%{transform:scale(.8) rotate(-36deg);opacity:0}100%{transform:scale(1) rotate(0);opacity:1}}
+.ia-estrella .pt-all{transform-origin:12px 12.6px}
+.ia-estrella.on.p1 .v-on .pt-all{animation:estrella-ptall-69-1 480ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-estrella.on.p2 .v-on .pt-all{animation:estrella-ptall-69-2 480ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes estrella-ptall-70-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes estrella-ptall-70-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-estrella .pt-all{transform-origin:12px 12.6px}
+.ia-estrella:not(.on).p1 .v-off .pt-all{animation:estrella-ptall-70-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-estrella:not(.on).p2 .v-off .pt-all{animation:estrella-ptall-70-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes corazon-ptall-71-1{0%{transform:scale(.85);opacity:0}60%{transform:scale(1.04);opacity:1}100%{transform:scale(1);opacity:1}}@keyframes corazon-ptall-71-2{0%{transform:scale(.85);opacity:0}60%{transform:scale(1.04);opacity:1}100%{transform:scale(1);opacity:1}}
+.ia-corazon .pt-all{transform-origin:12px 13px}
+.ia-corazon.on.p1 .v-on .pt-all{animation:corazon-ptall-71-1 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-corazon.on.p2 .v-on .pt-all{animation:corazon-ptall-71-2 520ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes corazon-ptall-72-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes corazon-ptall-72-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-corazon .pt-all{transform-origin:12px 13px}
+.ia-corazon:not(.on).p1 .v-off .pt-all{animation:corazon-ptall-72-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-corazon:not(.on).p2 .v-off .pt-all{animation:corazon-ptall-72-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes fijar-ptall-73-1{0%{transform:translateY(-2px);opacity:0}100%{transform:translateY(0);opacity:1}}@keyframes fijar-ptall-73-2{0%{transform:translateY(-2px);opacity:0}100%{transform:translateY(0);opacity:1}}
+.ia-fijar .pt-all{transform-origin:12px 12px}
+.ia-fijar.on.p1 .v-on .pt-all{animation:fijar-ptall-73-1 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-fijar.on.p2 .v-on .pt-all{animation:fijar-ptall-73-2 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes fijar-ptall-74-1{0%{transform:none}50%{transform:translate(0px,-1.5px)}100%{transform:none}}@keyframes fijar-ptall-74-2{0%{transform:none}50%{transform:translate(0px,-1.5px)}100%{transform:none}}
+.ia-fijar .pt-all{transform-origin:12px 12px}
+.ia-fijar:not(.on).p1 .v-off .pt-all{animation:fijar-ptall-74-1 460ms cubic-bezier(.37,0,.63,1) 0ms both}
+.ia-fijar:not(.on).p2 .v-off .pt-all{animation:fijar-ptall-74-2 460ms cubic-bezier(.37,0,.63,1) 0ms both}
+@keyframes microfono-ptall-75-1{0%{transform:scale(.9);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes microfono-ptall-75-2{0%{transform:scale(.9);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-microfono .pt-all{transform-origin:12px 8px}
+.ia-microfono.on.p1 .v-on .pt-all{animation:microfono-ptall-75-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-microfono.on.p2 .v-on .pt-all{animation:microfono-ptall-75-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes microfono-ptonda-76-1{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.55}}@keyframes microfono-ptonda-76-2{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.55}}
+.ia-microfono .pt-onda{transform-origin:12px 11px}
+.ia-microfono.on.p1 .v-on .pt-onda{animation:microfono-ptonda-76-1 1800ms cubic-bezier(.37,0,.63,1) 320ms infinite}
+.ia-microfono.on.p2 .v-on .pt-onda{animation:microfono-ptonda-76-2 1800ms cubic-bezier(.37,0,.63,1) 320ms infinite}
+@keyframes microfono-ptall-77-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes microfono-ptall-77-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-microfono .pt-all{transform-origin:12px 8px}
+.ia-microfono:not(.on).p1 .v-off .pt-all{animation:microfono-ptall-77-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-microfono:not(.on).p2 .v-off .pt-all{animation:microfono-ptall-77-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes candado-ptarco-78-1{0%{transform:translateY(1.5px)}100%{transform:translateY(0)}}@keyframes candado-ptarco-78-2{0%{transform:translateY(1.5px)}100%{transform:translateY(0)}}
+.ia-candado .pt-arco{transform-origin:12px 12px}
+.ia-candado.on.p1 .v-on .pt-arco{animation:candado-ptarco-78-1 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-candado.on.p2 .v-on .pt-arco{animation:candado-ptarco-78-2 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes candado-ptarco-79-1{0%{transform:translateY(-1.5px)}100%{transform:translateY(0)}}@keyframes candado-ptarco-79-2{0%{transform:translateY(-1.5px)}100%{transform:translateY(0)}}
+.ia-candado .pt-arco{transform-origin:12px 12px}
+.ia-candado:not(.on).p1 .v-off .pt-arco{animation:candado-ptarco-79-1 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-candado:not(.on).p2 .v-off .pt-arco{animation:candado-ptarco-79-2 460ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes tema-ptall-80-1{0%{transform:rotate(30deg) scale(.8);opacity:0}100%{transform:rotate(0) scale(1);opacity:1}}@keyframes tema-ptall-80-2{0%{transform:rotate(30deg) scale(.8);opacity:0}100%{transform:rotate(0) scale(1);opacity:1}}
+.ia-tema .pt-all{transform-origin:12px 12px}
+.ia-tema.on.p1 .v-on .pt-all{animation:tema-ptall-80-1 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-tema.on.p2 .v-on .pt-all{animation:tema-ptall-80-2 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes tema-ptall-81-1{0%{transform:rotate(-60deg) scale(.8);opacity:0}100%{transform:rotate(0) scale(1);opacity:1}}@keyframes tema-ptall-81-2{0%{transform:rotate(-60deg) scale(.8);opacity:0}100%{transform:rotate(0) scale(1);opacity:1}}
+.ia-tema .pt-all{transform-origin:12px 12px}
+.ia-tema:not(.on).p1 .v-off .pt-all{animation:tema-ptall-81-1 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-tema:not(.on).p2 .v-off .pt-all{animation:tema-ptall-81-2 520ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes reproducir-ptall-82-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes reproducir-ptall-82-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-reproducir .pt-all{transform-origin:12px 12px}
+.ia-reproducir.on.p1 .v-on .pt-all{animation:reproducir-ptall-82-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-reproducir.on.p2 .v-on .pt-all{animation:reproducir-ptall-82-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes reproducir-ptall-83-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes reproducir-ptall-83-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-reproducir .pt-all{transform-origin:12px 12px}
+.ia-reproducir:not(.on).p1 .v-off .pt-all{animation:reproducir-ptall-83-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-reproducir:not(.on).p2 .v-off .pt-all{animation:reproducir-ptall-83-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes copiar-ptall-84-1{0%{stroke-dashoffset:21}100%{stroke-dashoffset:0}}@keyframes copiar-ptall-84-2{0%{stroke-dashoffset:21}100%{stroke-dashoffset:0}}
+.ia-copiar .pt-all{transform-origin:12px 12px}
+.ia-copiar.on.p1 .v-on .pt-all{stroke-dasharray:21;animation:copiar-ptall-84-1 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-copiar.on.p2 .v-on .pt-all{stroke-dasharray:21;animation:copiar-ptall-84-2 420ms cubic-bezier(.25,1,.5,1) 0ms both}
+@keyframes copiar-ptall-85-1{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}@keyframes copiar-ptall-85-2{0%{transform:scale(.88);opacity:0}100%{transform:scale(1);opacity:1}}
+.ia-copiar .pt-all{transform-origin:12px 12px}
+.ia-copiar:not(.on).p1 .v-off .pt-all{animation:copiar-ptall-85-1 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-copiar:not(.on).p2 .v-off .pt-all{animation:copiar-ptall-85-2 320ms cubic-bezier(.25,1,.5,1) 0ms both}
+.ia-menu .pt{transform-origin:12px 12px;transition:transform 340ms cubic-bezier(.25,1,.5,1),opacity 220ms cubic-bezier(.25,1,.5,1)}
+.ia-menu.on .l1{transform:rotate(45deg) translateY(5px)}
+.ia-menu.on .l2{transform:scaleX(.2);opacity:0}
+.ia-menu.on .l3{transform:rotate(-45deg) translateY(-5px)}
+.ia-abajo .pt-all{transform-origin:12px 12px;transition:transform 300ms cubic-bezier(.25,1,.5,1)}.ia-abajo.on .pt-all{transform:rotate(180deg)}
+.ia-panel .pt-relleno{transform-origin:3px 12px;transform:scaleX(0);transition:transform 320ms cubic-bezier(.25,1,.5,1)}.ia-panel.on .pt-relleno{transform:scaleX(1)}
+.ia-panel-der .pt-relleno{transform-origin:21px 12px;transform:scaleX(0);transition:transform 320ms cubic-bezier(.25,1,.5,1)}.ia-panel-der.on .pt-relleno{transform:scaleX(1)}
+.ia-panel-inf .pt-relleno{transform-origin:12px 20px;transform:scaleY(0);transition:transform 320ms cubic-bezier(.25,1,.5,1)}.ia-panel-inf.on .pt-relleno{transform:scaleY(1)}
+
+@media (prefers-reduced-motion: reduce){.ia *{animation:none !important;transition:none !important}}

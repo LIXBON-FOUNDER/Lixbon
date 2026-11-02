@@ -1,4 +1,4 @@
--- 017 · Reintento de un Attempt: de dónde sale el Attempt nuevo (LXO-142). Contrato: docs/core/REINTENTO.md.
+-- 021 · Reintento de un Attempt: de dónde sale el Attempt nuevo (LXO-142). Contrato: docs/core/REINTENTO.md.
 --
 -- Un reintento NUNCA reabre el Attempt anterior (008, invariante 1 y 3): crea otro, limpio, con el `n` siguiente. Esta
 -- tabla guarda su procedencia `from_attempt_id -> attempt_id` y qué parámetros se cambiaron a propósito (`overrides`, una

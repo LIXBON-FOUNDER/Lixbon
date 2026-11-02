@@ -40,6 +40,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::dispatch::{DispatchSnapshot, ReserveOutcome};
 use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
@@ -419,6 +420,55 @@ impl Persistence for TablesPersistence {
         true
     }
 
+    fn lookup_idempotent(&self, identity_scope: &str, request_id: &str, payload_sha256: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        let slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_ref() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        store.runtime_lookup_idempotent_recorded(identity_scope, request_id, payload_sha256).map_err(|e| match e {
+            // Reutilizar el request_id con otro payload o un ledger incoherente no es un fallo de disco.
+            StoreError::TaskConflict(_) | StoreError::InvalidTask(_) => PersistError::rejected(e.to_string()),
+            e => PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false },
+        })
+    }
+
+    fn persist_idempotent(
+        &self,
+        state: &State,
+        events: &[NewEvent],
+        identity_scope: &str,
+        request_id: &str,
+        payload_sha256: &str,
+        result_ids: &crate::store::RuntimeResultIds,
+    ) -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        let next = serde_json::to_value(state)
+            .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
+            .and_then(|v| RuntimeDoc::from_value(v).map_err(|e| PersistError::structural(e.to_string())))?;
+        let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        match store.runtime_commit_idempotent_recorded(
+            &committed, &next, events, identity_scope, request_id, payload_sha256, result_ids,
+            |view, changes| super::agentic_cut::verify_runtime_view(view, changes, state),
+        ) {
+            Ok(outcome) => {
+                if matches!(outcome, crate::store::RuntimeCommitOutcome::Committed { .. }) {
+                    *committed = next;
+                }
+                Ok(outcome)
+            }
+            // Lo que las tablas no representan, o un conflicto del ledger, se rechaza sin degradar el Core: la
+            // transacción se deshizo entera.
+            Err(e @ (StoreError::RuntimeMapping(_) | StoreError::TaskConflict(_) | StoreError::InvalidTask(_))) => {
+                Err(PersistError::rejected(e.to_string()))
+            }
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false }),
+        }
+    }
+
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let next = serde_json::to_value(state)
             .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
@@ -460,6 +510,84 @@ fn acquire(core_dir: &Path) -> Result<InstanceLock, OpenStoreError> {
 }
 
 impl Core {
+    /// Ids de los Attempts con aprobación inicial pendiente cuyo plazo durable ya venció (a lo sumo `limit`).
+    ///
+    /// `None`: no hay SQLite autoritativa, así que no existe un plazo durable que expirar. Solo entrega candidatos: cada
+    /// cambio pasa por `Core::mutate`, donde el commit vuelve a validar el plazo bajo la transacción.
+    pub(super) fn initial_approval_expiry_candidates(&self, now: i64, limit: usize) -> Option<crate::store::StoreResult<Vec<String>>> {
+        self.storage.with_store(|store| {
+            store.runtime_on_tables().and_then(|active| {
+                if active {
+                    store.attempt_initial_approval_expiry_candidates(now, limit)
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+        })
+    }
+
+    /// Estado, plazo durable y decisión canónica de la aprobación inicial de un Attempt. `None`: no existe.
+    pub(super) fn initial_approval_snapshot(&self, attempt_id: &str) -> Result<Option<crate::store::InitialApprovalSnapshot>, String> {
+        self.storage
+            .read_store(|store| {
+                if !store.runtime_on_tables().map_err(|e| e.to_string())? {
+                    return Err("el runtime Task/Attempt no está activo".to_string());
+                }
+                store.attempt_initial_approval_snapshot(attempt_id).map_err(|e| e.to_string())
+            })
+            .ok_or_else(|| "el almacén del Core no está abierto".to_string())?
+    }
+
+    /// Lo que el despachador lee de un Attempt: sus filas durables y su claim. `None`: el Attempt no existe.
+    pub(super) fn dispatch_snapshot(&self, attempt_id: &str) -> Result<Option<DispatchSnapshot>, String> {
+        let read = self
+            .storage
+            .with_store(|store| -> crate::store::StoreResult<Option<DispatchSnapshot>> {
+                let Some(attempt) = store.attempt_row(attempt_id)? else { return Ok(None) };
+                let Some(task) = store.task_row(&attempt.task_id)? else { return Ok(None) };
+                let Some(run) = store.run_row(&task.run_id)? else { return Ok(None) };
+                let claim = store.read(|c| Ok(c.query_row("SELECT dispatch_claim FROM attempts WHERE id = ?1", [attempt_id], |r| r.get::<_, String>(0))?))?;
+                Ok(Some(DispatchSnapshot { attempt, task, run, claim }))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// Reserva el claim de despacho (un solo uso). Una elegibilidad que cambió es `Ineligible`, no un error del almacén.
+    pub(super) fn dispatch_reserve(&self, attempt_id: &str) -> Result<ReserveOutcome, String> {
+        let result = self.storage.with_store(|store| store.attempt_dispatch_reserve(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?;
+        match result {
+            Ok(true) => Ok(ReserveOutcome::Reserved),
+            Ok(false) => Ok(ReserveOutcome::AlreadyClaimed),
+            Err(crate::store::StoreError::AttemptConflict(why)) => Ok(ReserveOutcome::Ineligible(why)),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// `reserved -> started`, solo si el `attempt.started` canónico ya es durable.
+    pub(super) fn dispatch_mark_started(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_started(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Asienta el claim de un Attempt terminal con evidencia canónica (también uno que terminó sin `attempt.started`).
+    pub(super) fn dispatch_settle(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_settled(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Attempts aprobados que esperan despacho (cola de recuperación). Solo lista: reservar el claim es la única puerta.
+    pub(super) fn approved_dispatch_candidates(&self, limit: usize) -> Result<Vec<String>, String> {
+        self.storage
+            .with_store(|store| store.runtime_on_tables().and_then(|active| if active { store.attempt_approved_dispatch_candidates(limit) } else { Ok(Vec::new()) }))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
     /// Primer paso de `init`: adquirir `core.lock` ANTES de leer o reescribir
     /// `state.json`, para que un segundo Core no llegue a tocarlo. Todo fallo aquí
     /// es bloqueante: sin el bloqueo no hay garantía de un único escritor.

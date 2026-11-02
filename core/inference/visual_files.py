@@ -54,7 +54,7 @@ def extract_files(texto: str) -> list[dict]:
             lineas = code.split("\n")
             for i in range(min(2, len(lineas))):
                 l = lineas[i]
-                sin_marcas = re.sub(r"^\s*(<!--|//|#)\s*|\s*-->\s*$", "", l)
+                sin_marcas = re.sub(r"^\s*(<!--|//|#)\s*|\s*--!?>\s*$", "", l)
                 d = NOMBRE.search(f" {l}") or NOMBRE_SUELTO.match(sin_marcas)
                 if d:
                     name = d.group(1)

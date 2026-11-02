@@ -7,6 +7,9 @@ Run; la ejecución (proceso, terminal, worktree, sesión del proveedor, informe)
 * Migración: [`007_tasks.sql`](../../apps/desktop/src-tauri/src/store/migrations/007_tasks.sql).
 * Almacén: `store/tasks.rs` (filas, restricciones, atomicidad). Pruebas: `store/tasks_tests.rs`.
 * Hechos y permisos: `orch/task_ops.rs` (el único que construye sus eventos). Pruebas: `orch/task_ops_tests.rs`.
+* LXO-141 (RPC `task_create`): migración [`017_task_create_idempotency.sql`](../../apps/desktop/src-tauri/src/store/migrations/017_task_create_idempotency.sql),
+  parser `orch/task_create_api.rs`, commit idempotente `store/runtime.rs::runtime_commit_idempotent_recorded` y
+  `Tx::create_run_intent`. Ver [§ LXO-141](#lxo-141-crear-una-intención-con-task_create).
 
 ## Inerte hasta el corte
 
@@ -119,6 +122,222 @@ tras el corte son del Attempt. La v1 sigue siendo la que emite el runtime legacy
 Manual, como en [`ATTENTION_MUTACION.md`](ATTENTION_MUTACION.md): cada mutante se aplica uno a uno sobre el código de
 producción, se ejecutan `tasks_tests` y `task_ops_tests` y el archivo se restaura byte a byte. Inventario y
 resultados en [`TASKS_MUTACION.md`](TASKS_MUTACION.md).
+
+## LXO-141: crear una intención con `task_create`
+
+`task_create` crea un **Run con su Task raíz en `not_started`** dentro de un Project explícito. Sin `attempt` no crea
+Attempt, no elige provider, no pide aprobación ni lanza ningún proceso: es solo la intención durable. Con `attempt` pide
+además el primer Attempt (ver [§ Primer Attempt con `task_create`](#primer-attempt-con-task_create-fase-2c-3)); mientras el
+Core no tenga un lanzador instalado, esa solicitud se rechaza **antes** de tocar el ledger, los eventos o la memoria
+(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). Producción no instala ninguno hasta que exista
+el `Launcher` real (worktree + adapter), así que hoy `attempt` sigue rechazado.
+
+* **Quién:** solo una Person autenticada (CLI global o Desktop). Un Agent se rechaza en el handler, antes de mutar. La
+  identidad sale de la credencial, nunca del JSON: los campos `identity_scope`, `actor` o `client_id` en la solicitud son
+  un error.
+* **Project:** `project_id` es obligatorio y no se infiere por `cwd`. Se comprueba (`check_project_launchable_id`) **fuera**
+  del lock del estado, porque lee disco y escribe marcas, y solo si la petición no es un replay; el almacén vuelve a exigir
+  que el Project exista dentro de la transacción.
+* **Idempotencia:** la clave es `(identity_scope, 'task.create', request_id)`, con `identity_scope = user:<person>`.
+  La huella es el SHA-256 de la forma canónica del payload (`project_id`, `objective`, `title`, `spec`, `repo` y `attempt`,
+  del que solo entra la selección que eligió el cliente; sin `attempt` el hash es el de siempre). Mismo scope, id y huella devuelve los ids originales como `Replayed`, **sin escribir, sin publicar y sin subir
+  la revisión**; el mismo id con otro payload es un conflicto. Un replay no depende del estado actual del Project.
+* **Orden:** consulta del ledger sin el lock del estado → comprobación del Project → `Core::mutate_idempotent_recorded`, que
+  repite la consulta bajo el lock y la transacción final la repite bajo `BEGIN IMMEDIATE` (escritores concurrentes). La
+  persistencia usa la misma política de reintentos que el resto de mutaciones: un error transitorio de SQLite se reintenta
+  y **no** deja el Core en solo lectura; una lectura del ledger que falla no lo degrada.
+* **Hechos:** `run.created` (v1) y `task.created` (v2, solo `parent`, `depth` y `title`), atribuidos al contexto
+  autenticado (actor Person, canal, `client_id`, Project y Run) y en la misma revisión. Las rutas legacy `create_run` y
+  `add_child` conservan `task.created` v1.
+* **Ledger (017):** `task_create_requests` guarda scope, método, `request_id`, huella, Run y Task (y el Attempt, si lo hay). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
+  y no se borran, y una Task nace de una sola petición (`UNIQUE(task_id)`).
+
+### Aprobación inicial (fase 2a, inerte)
+
+Un Attempt puede nacer `pending_approval`: espera la decisión de una **Person autenticada** hasta un plazo **durable** de
+30 minutos (`attempts.initial_approval_deadline`, migración 019), fijado por el servidor al crearlo. La Task raíz lo refleja
+con el estado `pending_approval` (distinto de `awaiting_terminal_approval`, que es la aprobación de una terminal).
+
+* **Quién decide:** solo una Person autenticada con `client_id` (`Tx::approve_attempt` / `Tx::reject_attempt`). Un Agent, el
+  Core o una Person sin `client_id` no cambian nada ni dejan hechos.
+* **Qué cuenta como decisión:** el almacén exige la **evidencia canónica**: el evento `attempt.approved` o `attempt.rejected`
+  tiene que ser el que el Core habría emitido (actor Person con credencial registrada y vigente en el instante del evento,
+  canal, Project, Run, plazo vigente) y ningún hecho posterior lo contradice. Aprobar con el plazo vencido se rechaza.
+* **Expiración:** el hilo periódico del Core (`Core::periodic_sweep`, cada 60 s, junto al cierre de Runs inactivos) busca los
+  Attempts pendientes con el plazo vencido y cada uno se expira por `Core::mutate`: la Task pasa a `stopped` y se emite
+  `attempt.rejected` con causa `approval_timeout` (actor System, canal Core). El commit revalida el plazo bajo la
+  transacción: el candidato que entrega SQLite no autoriza nada por sí solo. Si el almacén no está disponible o el Core está en
+  solo lectura, no se expira nada.
+* **Tareas periódicas:** un Run que espera una decisión no es «inactivo» y no se cierra por inactividad; cerrarlo a mano
+  mientras su raíz espera se rechaza con un mensaje claro (hay que aprobar o rechazar antes).
+* **Barrera del corte:** la columna del plazo solo la escribe y lee un Attempt que nace `pending_approval`. El resto del
+  almacén no depende de la migración 019, que queda detrás de la barrera (014).
+* **Guard del ledger (018):** `INSERT OR REPLACE` sobre `task_create_requests` sustituye la fila sin disparar el trigger de
+  borrado mientras `recursive_triggers` esté OFF, y la huella original se perdería. La migración 018 lo aborta con un trigger
+  local; no se cambia ningún PRAGMA de la base.
+
+Esta fase es **inerte**: `task_create` sigue rechazando todo `attempt` y los RPC de decisión no existen todavía. Pedir el
+primer Attempt, decidirlo y lanzarlo se conecta en la fase siguiente (`Tx::request_initial_attempt`, la resolución de la
+decisión y el despacho). Hoy solo ejecutan este código las pruebas y el barrido de expiración.
+
+### Claim de despacho (fase 2b, inerte)
+
+Antes de cualquier efecto externo, el despacho de un Attempt reserva un **claim durable de un solo uso**
+(`attempts.dispatch_claim`, migración 020). El orden del protocolo es: reservar → registrar `attempt.started` → marcar el
+claim `started` → llamar al proveedor. Los estados son `none → reserved → started → settled`, con `ambiguous` cuando el
+Core reinicia sin poder probar el desenlace; el trigger de la base impide reiniciar un claim o saltarse pasos.
+
+* **Reservar (`attempt_dispatch_reserve`):** solo si el Attempt es del Core y está `starting`, su Task sigue abierta en un Run
+  abierto y un Project activo y, para el primer Attempt de una Task de `task.create`, existe un spec no vacío y la
+  aprobación canónica de una Person autenticada con plazo durable. Devuelve `false` si ya hay claim: nunca se repite.
+* **Asentar (`settled`):** solo con evidencia canónica de un Attempt final (`store/dispatch_evidence.rs`): exactamente un
+  `attempt.started` seguido de exactamente un evento terminal, ambos como los emitiría el Core. Un fallo posterior al
+  arranque con resultado desconocido no es un terminal conocido: el claim queda `ambiguous` y lo resuelve una persona.
+* **Termina sin `attempt.started`:** como `attempt.started` se registra *antes* de llamar al proveedor, un claim sin él
+  prueba que el proveedor nunca se llamó. Si el Attempt termina entonces con un `attempt.failed` por `launch_failed`
+  (actor System) o un `attempt.stopped` con `from = starting`, el claim se asienta directamente desde `reserved` (o
+  `ambiguous`). Antes quedaba `ambiguous` para siempre.
+* **Reconciliar al arrancar:** los claims `reserved`/`started` sin evidencia terminal pasan a `ambiguous` y se registra
+  `attempt.dispatch_ambiguous`; los que sí la tienen se asientan sin ese hecho falso.
+
+Esta fase es **inerte**: no hay dispatcher que llame a estas primitivas del almacén (llegará en 2c).
+
+### Despachador del primer Attempt (fase 2c-1a, inerte)
+
+`orch/dispatch.rs` lleva un Attempt aprobado (`starting`) a «lanzado» respetando el claim de despacho. Reconstruye todo de
+filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real detrás de un `Launcher` inyectable:
+
+1. Lee las filas durables y resuelve la **ubicación verificada del Project** en esta máquina (`Core::project_launch_location`:
+   la de esta máquina, no `missing`, que exista como carpeta). `Task.repo` no se usa: lo dice quien crea la Task.
+2. Reserva el claim (revalida aprobación canónica, Run abierto, Project activo).
+3. `Launcher::prepare` (worktree, capability, entorno): sin ningún efecto del proveedor. Si falla, el Attempt se cierra
+   **desde `starting`** (`failed(launch_failed)` si falló algo esperado; `stopped` si no había nada que lanzar) y el claim se
+   asienta sin `attempt.started`.
+4. `attempt.started` por `Core::mutate`, **antes** de llamar al proveedor; después el claim pasa a `started`.
+5. `PreparedLaunch::start`: `Running` (queda `running`), `NotSpawned` (`failed(launch_failed)` y claim asentado) o `Unknown`
+   (el claim se queda `started` y el Attempt `running`: ni se da por fallido ni se relanza).
+
+Un Attempt con claim nunca se despacha otra vez, tampoco tras un reintento del cliente o una nueva pasada
+(`Core::dispatch_approved`).
+
+**Fuera de esta fase:** el `Launcher` real (hecho después: ver [§ Launcher real](#launcher-real-lxo-246-pr-b)), la conversión de los eventos del
+proveedor en `attempt.completed`/`failed`, `attempt.dispatch_ambiguous` (hecho en Attention) y la reconciliación de los
+claims en vuelo al arrancar. Hasta entonces un desenlace desconocido o una caída entre pasos deja el claim `reserved`/`started`,
+que ya impide relanzar pero no es visible. Nada en producción llama al despachador.
+
+### RPC de la aprobación inicial (fase 2c-2)
+
+`attempt_approve` y `attempt_reject` · `{ attempt_id }` (nada más: `deny_unknown_fields`, el cliente nunca aporta el plazo). Se
+clasifican como `HumanDecision`: **solo una Person en Desktop**; ni la Person del CLI ni un agente. El módulo es
+`orch/initial_approval_rpc.rs`; la decisión pasa por `Core::mutate` (`Tx::approve_attempt` / `Tx::reject_attempt`) y el commit
+del runtime revalida el plazo durable y la evidencia canónica bajo la transacción.
+
+| caso | respuesta |
+|---|---|
+| decisión en plazo sobre un Attempt pendiente | `{ "status": "Approved" \| "Rejected", "decision": null, "attempt_id" }` |
+| la misma decisión ya estaba tomada | `{ "status": "Replayed", "decision": "approved" \| "rejected", … }`, sin escribir ni subir la revisión |
+| el plazo ya venció | `{ "status": "Expired", … }`: el Attempt queda detenido (`attempt.rejected`, causa `approval_timeout`, actor System); una aprobación tardía **nunca** aprueba |
+| la decisión contraria ya estaba tomada, no está pendiente, no existe o el id es inválido | error, sin cambios |
+
+**Aprobar no lanza nada:** deja el Attempt en `starting`, y es el despachador (`dispatch.rs`) el que lo toma de la cola de
+aprobados. Mientras `task_create` rechace `attempt` (fase 2c-3) no puede existir un Attempt pendiente creado por el RPC, así que
+estos comandos son inertes en la práctica.
+
+### Primer Attempt con `task_create` (fase 2c-3)
+
+`attempt` · `{ provider, model?, effort?, role?, profile }`. El cliente aporta solo la **selección** de ejecución; la política es
+del servidor y no se acepta como input (`deny_unknown_fields`: `external`, `requires_approval`, host, worktree, `approved`,
+plazos… son un error).
+
+* **Perfil:** obligatorio, uno de `explorar`, `proponer`, `delegar_con_revision` (se guarda con su id canónico; Autonomía amplia
+  está aplazada y se rechaza). `provider`: un id de adapter (minúsculas, dígitos y `-`); `model`, `effort` y `role` son texto
+  corto sin controles.
+* **Aprobación:** el Attempt nace **siempre `pending_approval`**: ninguna selección es evidencia para saltarse la decisión
+  humana del primer Attempt (plazo durable de 30 min). `external` lo fija el servidor (`false`: el proveedor lo gestiona un
+  adapter del Core, que es lo que comprueba el preflight).
+* **Preflight, antes de escribir nada:** el proveedor tiene que estar en el registro vivo del Core y su capability `start`
+  disponible. Motivos: `provider_probing` (aún se sondea: reintentar), `provider_unknown`, `provider_start_unsupported`,
+  `provider_start_unavailable`, `provider_environment_blocked`. Como la comprobación del Project, depende del estado actual:
+  un replay ya se atendió antes y no la repite.
+* **`repo` de la Task:** con `attempt`, la Task guarda la **ubicación verificada del Project** en esta máquina
+  (`Core::project_launch_location`), no el `repo` que mande el cliente: el Worktree del Attempt se registra con el `repo` de la
+  Task (no puede estar vacío) y la Task no lo cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente. Si el
+  Project no tiene en esta máquina una ubicación que exista como carpeta, la solicitud se rechaza antes de escribir.
+* **Respuesta:** `{ status: Committed | Replayed, run_id, task_id, attempt_id }`, con `attempt_id = <task>-a1`; el ledger
+  guarda el Attempt y un replay lo devuelve.
+* **Lanzador:** el Core tiene una ranura de lanzador (`Core::install_launcher`). Sin uno instalado, `task_create` rechaza
+  `attempt`: nada podría ejecutarlo y un Attempt aprobado se quedaría `starting` para siempre. Producción no instala ninguno
+  todavía. Con uno, aprobar (`attempt_approve`) despierta al despachador en segundo plano, y el barrido periódico despacha
+  los aprobados que quedaron esperando (p. ej. tras un reinicio). El claim garantiza un único lanzamiento aunque ambos
+  coincidan.
+
+### Worktree del Attempt (LXO-246, PR A)
+
+`orch/worktree_provision.rs` crea, registra y deshace el worktree de un Attempt **sin tocar a ningún proveedor**; lo usará el
+`Launcher` real en `prepare`, antes de `attempt.started`. Estrategia **`new`**: cada Attempt tiene su carpeta y su rama (compartir
+la del Project, `shared`, queda para otra fase).
+
+* **Nombres deterministas:** rama `lx/<run>/<attempt>` y carpeta `<repo>.lixbon-wt/<attempt>`, al lado del repositorio. Un id con
+  separadores, `..`, controles o sufijo `.lock` se rechaza antes de llamar a git.
+* **Creación:** `git worktree add -b` desde la rama actual del repositorio (o `HEAD` si está desacoplado). Sin repositorio git o sin
+  ningún commit no hay nada que lanzar (`Unavailable`); cualquier fallo de git es `Failed`.
+* **Registro:** una mutación con efecto (`effect.observed`, `git_worktree`, operación `spawn`) fija `Task.worktree`, `cwd`, `branch`,
+  `base` y `base_commit`; el commit del runtime lo materializa en la tabla `worktrees`, vinculado al Attempt. Si el registro falla,
+  se deshace lo que esa llamada acaba de crear y solo eso.
+* **Solo se borra lo creado:** una carpeta o una rama que ya existían hacen fallar la creación y quedan intactas (los restos de una
+  caída los limpia la reconciliación de arranque, no esta llamada).
+* **Liberar:** `git worktree remove --force`, `git branch -d` (**nunca** `-D`: una rama con trabajo sin integrar se conserva y el
+  Worktree quitado sigue conservándola) y el registro (`git_worktree_removed`, operación `spawn_cleanup`), que devuelve el `cwd` de
+  la Task al que tenía. Con el Core en solo lectura no se crea ni se borra nada: no se podría registrar.
+* **Sin plan de entorno:** no se aplica `worktree_env` (enlaces de `node_modules`, copias de `.env`): ese plan es lo que una persona
+  aprobó para una hija y el primer Attempt no tiene una aprobación equivalente.
+
+Inerte: nada en producción lo llama todavía.
+
+### Launcher real (LXO-246, PR B)
+
+`orch/adapter_launcher.rs` implementa el `Launcher` del despachador sobre el registro de proveedores y el worktree del PR A.
+
+* **`prepare`** (sin efectos del proveedor): toma el adapter y una **copia** de su matriz del registro vivo (no se retiene el
+  registro: una ejecución dura minutos), vuelve a comprobar que `start` y `events` están disponibles **ahora** (pudieron cambiar
+  desde `task_create`) y crea el worktree. Si algo falla, el Attempt se cierra desde `starting` sin `attempt.started`.
+* **`start`** (tras `attempt.started`): `Gated::start`. `Ok(handle)` es `Running` y la ejecución queda en `take_started` para el
+  bombeo de eventos (PR C). `Err(e)` prueba que **no se lanzó**: el contrato del adapter es que un `Err` es «la operación no se
+  pudo atender» y los dos adapters reales matan o cierran el proceso antes de devolverlo; se libera el worktree y se clasifica.
+  Un **pánico** del adapter es `Unknown`: pudo haber arrancado, así que no se libera nada y el claim queda `started`.
+* **`abandon`:** no se llegó a llamar al proveedor; se libera el worktree.
+
+| Código del adapter | Desenlace |
+|---|---|
+| `environment_blocked`, `unsupported_capability`, `capability_unavailable`, `unknown_capability`, `cancelled` | **Nada que lanzar**: `attempt.stopped`, nunca `failed` (un entorno bloqueado no es un fallo del agente) |
+| `invalid_request`, `unknown_provider`, `unknown_run`, `session_not_found`, `provider`, `internal` | **No se pudo lanzar**: `attempt.failed(launch_failed)` |
+
+La clasificación es un `match` sin comodín: un código nuevo obliga a decidir. Del error solo viajan el código y el mensaje ya
+redactado; nunca el diagnóstico crudo del proveedor.
+
+Inerte: ni se instala en producción ni nada lo llama todavía (PR D).
+
+### `not_started`
+
+Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
+sin ejecución solicitada»: no es `starting`, no es final (`is_final() == false`) y no cuenta como actividad. Concretamente:
+
+* no es una tarea huérfana: el arranque no la cierra ni escribe una revisión por ella;
+* no bloquea ni cuenta en `run_open_tasks`, y el barrido de Runs inactivos **no** cierra un Run que espera su primer
+  Attempt;
+* no puede repartir tareas, cerrarse como si ejecutara, fallar con motivo máquina ni esperar una aprobación de terminal;
+* la vista legacy reconstruida desde las tablas la devuelve sin fila en `attempts` (agente vacío, `cwd` = repo, sin rama ni
+  worktree) y no se fabrica un Attempt al reconstruir ni al reiniciar.
+
+Es un concepto distinto de `StartDisposition::NotStarted`, el resultado tipado de un adapter que prueba que un despacho
+concreto falló antes del spawn.
+
+### Prueba
+
+`orch/task_create_rpc_tests.rs` (RPC sobre un Core con el corte aplicado: commit, replay, replay tras reiniciar, conflicto,
+mutación posterior con la Task presente, reinicio sin revisiones nuevas, barrido de inactividad y rechazo de Attempt),
+`orch/mutation_tests.rs` (reintentos del commit idempotente), `store/runtime_idempotency_tests.rs` (ledger y referencias) y
+`orch/state.rs` (semántica de `not_started`).
 
 ## Fuera de este slice
 

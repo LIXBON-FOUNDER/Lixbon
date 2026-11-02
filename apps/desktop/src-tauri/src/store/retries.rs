@@ -1,6 +1,6 @@
 //! Reintento de un Attempt (LXO-142, épica F5): lado del **almacén**. Contrato: `docs/core/REINTENTO.md`.
 //!
-//! Guarda `attempt_retries` (migración `017`): de qué Attempt sale el reintento y qué parámetros se cambiaron a propósito.
+//! Guarda `attempt_retries` (migración `021`): de qué Attempt sale el reintento y qué parámetros se cambiaron a propósito.
 //! Los eventos llegan de `orch::attempt_commands`; la dirección sigue siendo `orch -> store`.
 //!
 //! # Garantías

@@ -1,4 +1,4 @@
-//! Pruebas del reintento de un Attempt en el almacén (migración 017, LXO-142).
+//! Pruebas del reintento de un Attempt en el almacén (migración 021, LXO-142).
 //!
 //! Cubren `docs/core/REINTENTO.md`: Attempt nuevo con su procedencia, idempotencia por `request_id`, todo-o-nada, el Attempt
 //! anterior intacto y las reglas que repiten los triggers. Los eventos se construyen a mano: su contrato se prueba en
@@ -60,7 +60,7 @@ fn evento(kind: &str, entity_kind: &str, entity_id: &str, t: &TaskRow) -> NewEve
 }
 
 /// Las migraciones del binario con el CORTE sustituido por una migración vacía (el migrador general no aplica la 014 ni
-/// nada posterior): la 017 se prueba aislada, sin la maquinaria del corte.
+/// nada posterior): la 021 se prueba aislada, sin la maquinaria del corte.
 fn con_el_corte_neutro() -> Vec<Migration> {
     embedded().into_iter().map(|m| if m.name == super::cut::CUT_NAME { Migration::new(m.version, "corte_neutro_de_prueba", "SELECT 1;") } else { m }).collect()
 }
@@ -170,12 +170,12 @@ fn creado(r: StoreResult<Retried>) -> (AttemptRow, RetryRow) {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn la_017_es_una_migracion_hacia_adelante_sin_cascadas() {
-    let m = embedded().into_iter().find(|m| m.version == 17).expect("hay migración 017");
+fn la_021_es_una_migracion_hacia_adelante_sin_cascadas() {
+    let m = embedded().into_iter().find(|m| m.version == 21).expect("hay migración 021");
     assert_eq!(m.name, "attempt_retries");
     let sin_comentarios: String = m.sql.lines().filter(|l| !l.trim_start().starts_with("--")).collect::<Vec<_>>().join("\n").to_uppercase();
     for prohibido in ["DROP ", "ALTER TABLE", "ON DELETE", "CASCADE", "BEGIN TRANSACTION", "COMMIT", "ROLLBACK"] {
-        assert!(!sin_comentarios.contains(prohibido), "la 017 no puede llevar «{prohibido}»");
+        assert!(!sin_comentarios.contains(prohibido), "la 021 no puede llevar «{prohibido}»");
     }
     let t = Tmp::new();
     let w = mundo(t.path());
@@ -188,11 +188,11 @@ fn la_017_es_una_migracion_hacia_adelante_sin_cascadas() {
     assert_eq!(columnas, ["attempt_id", "task_id", "request_id", "from_attempt_id", "overrides", "created_at"], "ni mensaje, ni referencias del proveedor, ni rutas");
 }
 
-/// La 017 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).
+/// La 021 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).
 #[test]
-fn la_migracion_017_tiene_el_checksum_congelado() {
-    let m = embedded().into_iter().find(|m| m.version == 17).expect("existe la 017");
-    assert_eq!(m.checksum(), "227107951bb3cf27f4036189daaa7ac8ef6183c83b677f0f0b4ef77b39fcc819", "una migración publicada no se edita");
+fn la_migracion_021_tiene_el_checksum_congelado() {
+    let m = embedded().into_iter().find(|m| m.version == 21).expect("existe la 021");
+    assert_eq!(m.checksum(), "943676bd9b3dc1971d0de0d514af594f5562a38883f44aed8cf56943630850f5", "una migración publicada no se edita");
 }
 
 #[test]

@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { PublicNav } from '../components/PublicNav';
 import { PublicFooter } from '../components/PublicFooter';
 import { Markdown } from '../components/Markdown';
-import { IconArrowLeft, IconDownload } from '../components/Icons';
+import { IconArrowLeft } from '../components/Icons';
 import { downloadSkill, fmtPeso, getSkill, listSkills, rateSkill } from '../lib/skillsApi';
 
 const fecha = (iso, loc) => (iso
@@ -130,7 +130,7 @@ function Ficha({ slug, t }) {
         <div className="sk-install">
           {user ? (
             <button type="button" className="pill-btn pill-btn--primary" onClick={descargar} disabled={bajando}>
-              <IconDownload size={16} /> {bajando ? t('downloading') : t('download')}
+              {bajando ? t('downloading') : t('download')}
             </button>
           ) : (
             <Link to="/auth" className="pill-btn pill-btn--primary">{t('loginToDownload')}</Link>

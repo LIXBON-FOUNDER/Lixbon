@@ -11,7 +11,7 @@ Estado: **implementado en el Core, inerte hasta el corte y todavía sin RPC, `lx
 Ninguno reabre un Attempt: un final es final ([ATTEMPTS.md](ATTEMPTS.md), invariante 3). Los dos crean el `n + 1`, con la
 procedencia `origen → nuevo` guardada en una tabla inmutable, y los dos son idempotentes por `request_id`.
 
-* Migración [`017_attempt_retries.sql`](../../apps/desktop/src-tauri/src/store/migrations/017_attempt_retries.sql).
+* Migración [`021_attempt_retries.sql`](../../apps/desktop/src-tauri/src/store/migrations/021_attempt_retries.sql).
 * Almacén: `store/retries.rs`. Pruebas: `store/retries_tests.rs`.
 * Comandos: `orch/attempt_commands.rs`. Pruebas con adapters falsos: `orch/attempt_commands_tests.rs`.
 
@@ -120,7 +120,7 @@ referencia del proveedor ni el contenido de un paquete. Activity: `activity.atte
 reanudar es actuar sobre el fallo. Si el Attempt nuevo falla levanta **su** `failed`, sobre sí mismo; el del anterior no se
 reabre ([ATTENTION.md](ATTENTION.md)).
 
-## Esquema (`017_attempt_retries.sql`)
+## Esquema (`021_attempt_retries.sql`)
 
 `attempt_retries`: una fila por Attempt que reintenta a otro. `attempt_id` (PK), `task_id`, `request_id` (único por Task),
 `from_attempt_id`, `overrides` (lista JSON de nombres cerrados) y `created_at`.

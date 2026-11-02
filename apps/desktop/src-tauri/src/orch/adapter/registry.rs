@@ -114,6 +114,12 @@ impl AdapterRegistry {
         ids.iter().fold(false, |any, id| self.refresh(id).unwrap_or(false) || any)
     }
 
+    /// El adapter y una COPIA de su matriz, para llamarlo sin retener el registro (una ejecución dura minutos). Quien lo usa
+    /// construye un [`Gated`] con ambos, que es lo único que debe usar el Core.
+    pub fn lookup(&self, id: &str) -> Option<(Arc<dyn ProviderAdapter>, CapabilityMatrix)> {
+        self.entries.get(id).map(|e| (Arc::clone(&e.adapter), e.probe.matrix.clone()))
+    }
+
     /// El adapter a través de su matriz: lo único que debe usar el Core para llamarlo.
     pub fn gated(&self, id: &str) -> Result<Gated<'_>, AdapterError> {
         let e = self.entries.get(id).ok_or_else(|| AdapterError::unknown_provider(id))?;

@@ -137,7 +137,7 @@ impl Core {
         let weak = Arc::downgrade(self);
         std::thread::spawn(move || {
             while let Some(core) = weak.upgrade() {
-                core.close_idle_runs();
+                core.periodic_sweep();
                 drop(core);
                 std::thread::sleep(SWEEP_EVERY);
             }
@@ -211,7 +211,8 @@ impl Core {
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
     fn close_orphans(&self) {
         let r = self.mutate(|tx| {
-            if !tx.tasks.values().any(|t| !t.status.is_final() && !t.external) {
+            // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
+            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external) {
                 tx.no_change();
                 return Ok(());
             }
@@ -233,6 +234,15 @@ impl Core {
             host.notify("Lixbon no puede iniciar", &msg);
         }
         msg
+    }
+
+    /// Un ciclo de las tareas periódicas del Core (cada `SWEEP_EVERY`): cierra los Runs inactivos, expira las aprobaciones
+    /// iniciales cuyo plazo durable venció y, si hay un lanzador instalado, despacha los aprobados que quedaron esperando
+    /// (p. ej. tras un reinicio). Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
+    pub(super) fn periodic_sweep(&self) {
+        self.close_idle_runs();
+        self.sweep_initial_approvals();
+        self.dispatch_waiting_approved();
     }
 
     pub(super) fn close_idle_runs(&self) {

@@ -1,0 +1,9 @@
+/* Lixbon Brand Serif (variable). Generado por source/package.py: no editar a mano. */
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif[wght].woff2') format('woff2-variations'),
+       url('../fonts/serif/LixbonBrandSerif[wght].woff2') format('woff2');
+}
