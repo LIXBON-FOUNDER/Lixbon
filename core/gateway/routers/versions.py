@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import time
@@ -31,6 +32,26 @@ router = APIRouter()
 
 VERSIONS_JSON_PATH = Path(__file__).resolve().parent.parent / "versions.json"
 _LOCAL_RELEASES_DIR = Path(__file__).resolve().parent.parent / "static" / "releases"
+_SUFIJO_SEGURO = re.compile(r"\.[A-Za-z0-9]{1,10}")
+
+
+def _sufijo_release(nombre: str) -> str:
+    """Extensión del instalador subido. El nombre lo manda el cliente, así que solo
+    se acepta una extensión simple; cualquier otra cosa queda como `.bin`."""
+    if nombre.endswith(".tar.gz"):
+        return ".tar.gz"
+    ext = Path(nombre).suffix
+    return ext if _SUFIJO_SEGURO.fullmatch(ext) else ".bin"
+
+
+def _ruta_release_local(filename: str) -> Path:
+    """Ruta de `filename` dentro de la carpeta local de releases; 400 si se sale."""
+    raiz = os.path.realpath(_LOCAL_RELEASES_DIR)
+    ruta = os.path.realpath(os.path.join(raiz, filename))
+    # `raiz + os.sep`: sin el separador, `releases-x` pasaría por estar "dentro" de `releases`.
+    if not ruta.startswith(raiz + os.sep):
+        raise HTTPException(status_code=400, detail="Nombre de archivo inválido")
+    return Path(ruta)
 
 
 def sync_versions_to_db():
@@ -299,7 +320,7 @@ async def api_upload_version(
         changelog_list = [changelog]
 
     nombre = file.filename or ""
-    suffix = ".tar.gz" if nombre.endswith(".tar.gz") else (Path(nombre).suffix or ".bin")
+    suffix = _sufijo_release(nombre)
     # El nombre histórico del desktop no cambia (hay URLs de R2 ya registradas
     # con ese patrón); los demás productos llevan el suyo en el nombre.
     if product == "desktop":
@@ -319,7 +340,7 @@ async def api_upload_version(
     else:
         # Dev sin R2: disco local (efímero en Railway — solo para pruebas)
         _LOCAL_RELEASES_DIR.mkdir(parents=True, exist_ok=True)
-        file_path = _LOCAL_RELEASES_DIR / filename
+        file_path = _ruta_release_local(filename)
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         download_url = f"/static/releases/{filename}"
