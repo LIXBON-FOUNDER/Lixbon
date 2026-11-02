@@ -494,7 +494,7 @@ function RunDetail({ id, onBack }) {
 
 export function ActionsView({ runId, onRunChange }) {
   const { remoteUrl } = useGitStore();
-  const slug = remoteUrl && remoteUrl.includes('github.com') ? githubSlug(remoteUrl) : '';
+  const slug = githubSlug(remoteUrl);
   const [status, setStatus] = useState(null);
   const [workflows, setWorkflows] = useState(null);
   const [wfId, setWfId] = useState(null);
