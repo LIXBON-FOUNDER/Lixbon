@@ -146,7 +146,16 @@ impl Core {
                 }
                 // La comprobación del Project lee disco y escribe marcas: va ANTES de tomar el lock del estado, para
                 // que una ruta lenta no bloquee al resto de RPC. El almacén vuelve a exigir que el Project exista.
-                self.check_project_launchable_id(&authorized.project_id)?;
+                // Con `attempt`, el `repo` de la Task es la ubicación VERIFICADA del Project en esta máquina, no lo que diga el
+                // cliente (que puede dejarlo vacío): el Worktree del Attempt se registra con ese `repo` y la Task no lo
+                // cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente.
+                let repo = match &authorized.attempt {
+                    Some(_) => self.project_launch_location(&authorized.project_id)?.to_string_lossy().into_owned(),
+                    None => {
+                        self.check_project_launchable_id(&authorized.project_id)?;
+                        authorized.repo.clone()
+                    }
+                };
                 // Capability del proveedor ANTES de escribir nada. Como el Project, depende del estado actual: un replay ya
                 // se atendió arriba sin comprobarla.
                 if let Some(attempt) = &authorized.attempt {
@@ -161,8 +170,8 @@ impl Core {
                         model: attempt.and_then(|a| a.model.clone()),
                         effort: attempt.and_then(|a| a.effort.clone()),
                         role: attempt.and_then(|a| a.role.clone()),
-                        title: authorized.title.clone(), spec: authorized.spec.clone(), repo: authorized.repo.clone(),
-                        cwd: authorized.repo.clone(), branch: None, base: None, worktree: None,
+                        title: authorized.title.clone(), spec: authorized.spec.clone(), repo: repo.clone(),
+                        cwd: repo.clone(), branch: None, base: None, worktree: None,
                         external: attempt.is_some_and(|a| a.external),
                     };
                     let (run, task) = tx.create_run_intent(&authorized.objective, root);

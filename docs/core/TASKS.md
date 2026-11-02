@@ -259,6 +259,10 @@ plazos… son un error).
   disponible. Motivos: `provider_probing` (aún se sondea: reintentar), `provider_unknown`, `provider_start_unsupported`,
   `provider_start_unavailable`, `provider_environment_blocked`. Como la comprobación del Project, depende del estado actual:
   un replay ya se atendió antes y no la repite.
+* **`repo` de la Task:** con `attempt`, la Task guarda la **ubicación verificada del Project** en esta máquina
+  (`Core::project_launch_location`), no el `repo` que mande el cliente: el Worktree del Attempt se registra con el `repo` de la
+  Task (no puede estar vacío) y la Task no lo cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente. Si el
+  Project no tiene en esta máquina una ubicación que exista como carpeta, la solicitud se rechaza antes de escribir.
 * **Respuesta:** `{ status: Committed | Replayed, run_id, task_id, attempt_id }`, con `attempt_id = <task>-a1`; el ledger
   guarda el Attempt y un replay lo devuelve.
 * **Lanzador:** el Core tiene una ranura de lanzador (`Core::install_launcher`). Sin uno instalado, `task_create` rechaza
@@ -266,6 +270,29 @@ plazos… son un error).
   todavía. Con uno, aprobar (`attempt_approve`) despierta al despachador en segundo plano, y el barrido periódico despacha
   los aprobados que quedaron esperando (p. ej. tras un reinicio). El claim garantiza un único lanzamiento aunque ambos
   coincidan.
+
+### Worktree del Attempt (LXO-246, PR A)
+
+`orch/worktree_provision.rs` crea, registra y deshace el worktree de un Attempt **sin tocar a ningún proveedor**; lo usará el
+`Launcher` real en `prepare`, antes de `attempt.started`. Estrategia **`new`**: cada Attempt tiene su carpeta y su rama (compartir
+la del Project, `shared`, queda para otra fase).
+
+* **Nombres deterministas:** rama `lx/<run>/<attempt>` y carpeta `<repo>.lixbon-wt/<attempt>`, al lado del repositorio. Un id con
+  separadores, `..`, controles o sufijo `.lock` se rechaza antes de llamar a git.
+* **Creación:** `git worktree add -b` desde la rama actual del repositorio (o `HEAD` si está desacoplado). Sin repositorio git o sin
+  ningún commit no hay nada que lanzar (`Unavailable`); cualquier fallo de git es `Failed`.
+* **Registro:** una mutación con efecto (`effect.observed`, `git_worktree`, operación `spawn`) fija `Task.worktree`, `cwd`, `branch`,
+  `base` y `base_commit`; el commit del runtime lo materializa en la tabla `worktrees`, vinculado al Attempt. Si el registro falla,
+  se deshace lo que esa llamada acaba de crear y solo eso.
+* **Solo se borra lo creado:** una carpeta o una rama que ya existían hacen fallar la creación y quedan intactas (los restos de una
+  caída los limpia la reconciliación de arranque, no esta llamada).
+* **Liberar:** `git worktree remove --force`, `git branch -d` (**nunca** `-D`: una rama con trabajo sin integrar se conserva y el
+  Worktree quitado sigue conservándola) y el registro (`git_worktree_removed`, operación `spawn_cleanup`), que devuelve el `cwd` de
+  la Task al que tenía. Con el Core en solo lectura no se crea ni se borra nada: no se podría registrar.
+* **Sin plan de entorno:** no se aplica `worktree_env` (enlaces de `node_modules`, copias de `.env`): ese plan es lo que una persona
+  aprobó para una hija y el primer Attempt no tiene una aprobación equivalente.
+
+Inerte: nada en producción lo llama todavía.
 
 ### `not_started`
 

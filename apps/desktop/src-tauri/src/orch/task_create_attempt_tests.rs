@@ -84,6 +84,9 @@ fn con_lanzador_se_crea_la_task_con_su_primer_attempt_pendiente_de_aprobacion() 
     assert_eq!(attempt, format!("{task}-a1"));
 
     assert_eq!(core.lock().tasks[&task].status, Status::PendingApproval);
+    // El cliente no mandó `repo`: la Task guarda la ubicación VERIFICADA del Project (con un `repo` vacío no se podría
+    // registrar el Worktree del Attempt, y la Task no lo cambia después).
+    assert_eq!(core.lock().tasks[&task].repo, ".");
     let (status, claim, failure) = row(&core, &attempt);
     assert_eq!((status.as_str(), claim.as_str(), failure), ("pending_approval", "none", None));
     let (provider, model, effort, profile, external, deadline): (String, Option<String>, Option<String>, Option<String>, i64, Option<i64>) = core
@@ -220,4 +223,20 @@ fn un_aprobado_que_quedo_esperando_se_despacha_en_el_barrido_periodico() {
     wait_until("se llama al proveedor", || calls(&log).iter().any(|c| c == "start"));
     assert_eq!(row(&core, &attempt), ("running".into(), "started".into(), None));
     assert_eq!(calls(&log).iter().filter(|c| *c == "start").count(), 1, "un único ganador del claim");
+}
+
+#[test]
+fn con_attempt_el_repo_de_la_task_es_la_ubicacion_del_project_y_no_lo_que_mande_el_cliente() {
+    let (core, client, _ctx, project) = core_with_project();
+    let (_fake, _log) = with_launcher(&core, StartOutcome::Running);
+    let args = json!({"request_id": "repo-ajeno", "project_id": project, "objective": "o", "title": "t", "spec": "haz algo", "repo": "/otra/ruta", "attempt": selection()});
+    let created = core.rpc_authenticated_via(&client, &ClientClaims::default(), Channel::Ui, "", "task_create", &args).unwrap();
+    let task = created["task_id"].as_str().unwrap();
+    assert_eq!(core.lock().tasks[task].repo, ".", "la ubicación del registro de proyectos, no la del cliente");
+    assert_eq!(core.lock().tasks[task].cwd, ".");
+
+    // Sin `attempt` la Task conserva lo que mandó el cliente.
+    let intent = json!({"request_id": "repo-cliente", "project_id": project, "objective": "o", "title": "t", "repo": "/otra/ruta"});
+    let created = core.rpc_authenticated_via(&client, &ClientClaims::default(), Channel::Ui, "", "task_create", &intent).unwrap();
+    assert_eq!(core.lock().tasks[created["task_id"].as_str().unwrap()].repo, "/otra/ruta");
 }
