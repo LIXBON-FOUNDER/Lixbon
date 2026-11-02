@@ -529,3 +529,14 @@ fn approved_decision_survives_reopen_and_is_the_only_recovery_dispatch_permissio
     assert_eq!(unapproved_snapshot.decision, None);
     assert_eq!(unapproved_snapshot.deadline_ms, None);
 }
+
+#[test]
+fn las_lecturas_periodicas_sin_las_columnas_de_las_migraciones_019_y_020_no_dan_error_ni_candidatos() {
+    // Un Core recién cortado aún puede no haber aplicado las migraciones posteriores a la barrera del corte.
+    let scratch = Scratch::new();
+    let migrations: Vec<Migration> = post_cut_migrations().into_iter().filter(|m| m.version < 19).collect();
+    let mut store = Store::open_with(&scratch.0, &migrations, "lxo-141-sin-019").unwrap();
+    store.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
+    assert_eq!(store.attempt_initial_approval_expiry_candidates(i64::MAX, 8).unwrap(), Vec::<String>::new());
+    assert_eq!(store.attempt_approved_dispatch_candidates(8).unwrap(), Vec::<String>::new());
+}

@@ -191,7 +191,7 @@ fn decidir_fuera_de_pendiente_o_sobre_otro_attempt_se_rechaza_sin_tocar_el_estad
 // Extremo a extremo: el barrido periódico expira un Attempt cuyo plazo durable venció
 // ---------------------------------------------------------------------------------------------------------------------
 
-mod e2e {
+pub(super) mod e2e {
     use std::sync::Arc;
 
     use serde_json::json;
@@ -206,7 +206,7 @@ mod e2e {
 
     /// Un Core persistente con el corte aplicado, una Person registrada y un Attempt inicial pendiente de aprobación.
     /// Devuelve el Core, el contexto de la Person y los ids de la Task y del Attempt.
-    fn core_with_pending_attempt() -> (Arc<Core>, MutationContext, String, String) {
+    pub(in crate::orch) fn core_with_pending_attempt() -> (Arc<Core>, MutationContext, String, String) {
         let (keep, data, core_dir) = dirs();
         std::mem::forget(keep); // la base queda en disco: ninguna prueba borra una base de datos
         let (core, _host, ready) = arranca(&data, &core_dir);
@@ -214,6 +214,8 @@ mod e2e {
         let project = core
             .storage
             .with_store(|store| {
+                // La ubicación del Project es de ESTA máquina: sin ello el despachador no tiene desde dónde lanzar.
+                store.meta_set("machine_id", "e2e-machine").unwrap();
                 store
                     .project_create(
                         "initial-approval-e2e",
@@ -249,7 +251,7 @@ mod e2e {
                 Channel::Ui,
                 "",
                 "task_create",
-                &json!({"request_id": "e2e-1", "project_id": project, "objective": "o", "title": "t"}),
+                &json!({"request_id": "e2e-1", "project_id": project, "objective": "o", "title": "t", "spec": "haz algo"}),
             )
             .unwrap();
         let task = created["task_id"].as_str().unwrap().to_string();
@@ -257,6 +259,7 @@ mod e2e {
             let row = tx.tasks.get_mut(&task).ok_or("la Task no existe")?;
             row.status = Status::PendingApproval;
             row.agent = "fake".into();
+            row.profile = Some("explorar".into());
             tx.request_initial_attempt(&task)
         })
         .unwrap();

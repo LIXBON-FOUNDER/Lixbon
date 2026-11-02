@@ -703,4 +703,28 @@ impl Core {
         }
         Ok(())
     }
+
+    /// La ubicación del Project en ESTA máquina, verificada ahora, desde la que se puede lanzar trabajo (LXO-141).
+    ///
+    /// `Task.repo` NO sirve para esto: es la ruta que dijo quien creó la Task («no identifica nada», ADR D18). La única
+    /// ubicación fiable es la del registro de proyectos: la de esta máquina, no `missing` y que existe como carpeta. Antes de
+    /// elegirla pasa por [`Core::check_project_launchable_id`] (Project archivado, ubicación desaparecida). Con varias, la
+    /// primaria y, si no, la vista más recientemente. Va FUERA del lock del estado: lee disco.
+    pub(super) fn project_launch_location(&self, pid: &str) -> Result<std::path::PathBuf, String> {
+        self.check_project_launchable_id(pid)?;
+        let fallo = |why: String| format!("No se pudo resolver la ubicación del proyecto {pid}: {why}.");
+        let locs = self
+            .registry_read(|st| {
+                let Some(machine) = machine_id_read(st)? else { return Ok(vec![]) };
+                Ok(st.project_locations(Some(pid))?.into_iter().filter(|l| l.machine == machine && !l.missing).collect::<Vec<_>>())
+            })
+            .map_err(fallo)?;
+        let mut candidates: Vec<&LocationRow> = locs.iter().collect();
+        candidates.sort_by(|a, b| b.primary.cmp(&a.primary).then(b.last_seen.cmp(&a.last_seen)));
+        candidates
+            .into_iter()
+            .map(|l| std::path::PathBuf::from(&l.display_path))
+            .find(|p| p.is_dir())
+            .ok_or_else(|| format!("El proyecto {pid} no tiene en esta máquina una ubicación que exista como carpeta: indica dónde está con project_locate antes de lanzar."))
+    }
 }

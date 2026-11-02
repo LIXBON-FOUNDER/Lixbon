@@ -40,6 +40,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::dispatch::{DispatchSnapshot, ReserveOutcome};
 use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
@@ -523,6 +524,56 @@ impl Core {
                 }
             })
         })
+    }
+
+    /// Lo que el despachador lee de un Attempt: sus filas durables y su claim. `None`: el Attempt no existe.
+    pub(super) fn dispatch_snapshot(&self, attempt_id: &str) -> Result<Option<DispatchSnapshot>, String> {
+        let read = self
+            .storage
+            .with_store(|store| -> crate::store::StoreResult<Option<DispatchSnapshot>> {
+                let Some(attempt) = store.attempt_row(attempt_id)? else { return Ok(None) };
+                let Some(task) = store.task_row(&attempt.task_id)? else { return Ok(None) };
+                let Some(run) = store.run_row(&task.run_id)? else { return Ok(None) };
+                let claim = store.read(|c| Ok(c.query_row("SELECT dispatch_claim FROM attempts WHERE id = ?1", [attempt_id], |r| r.get::<_, String>(0))?))?;
+                Ok(Some(DispatchSnapshot { attempt, task, run, claim }))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// Reserva el claim de despacho (un solo uso). Una elegibilidad que cambió es `Ineligible`, no un error del almacén.
+    pub(super) fn dispatch_reserve(&self, attempt_id: &str) -> Result<ReserveOutcome, String> {
+        let result = self.storage.with_store(|store| store.attempt_dispatch_reserve(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?;
+        match result {
+            Ok(true) => Ok(ReserveOutcome::Reserved),
+            Ok(false) => Ok(ReserveOutcome::AlreadyClaimed),
+            Err(crate::store::StoreError::AttemptConflict(why)) => Ok(ReserveOutcome::Ineligible(why)),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// `reserved -> started`, solo si el `attempt.started` canónico ya es durable.
+    pub(super) fn dispatch_mark_started(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_started(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Asienta el claim de un Attempt terminal con evidencia canónica (también uno que terminó sin `attempt.started`).
+    pub(super) fn dispatch_settle(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_settled(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Attempts aprobados que esperan despacho (cola de recuperación). Solo lista: reservar el claim es la única puerta.
+    pub(super) fn approved_dispatch_candidates(&self, limit: usize) -> Result<Vec<String>, String> {
+        self.storage
+            .with_store(|store| store.runtime_on_tables().and_then(|active| if active { store.attempt_approved_dispatch_candidates(limit) } else { Ok(Vec::new()) }))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
     }
 
     /// Primer paso de `init`: adquirir `core.lock` ANTES de leer o reescribir
