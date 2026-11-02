@@ -82,7 +82,9 @@ fn se_crea_el_worktree_se_registra_y_al_liberarlo_no_queda_nada() {
     let expected_branch = format!("lx/{}/{}", intent.run_id, intent.attempt_id);
     let expected_dir = repo.parent().unwrap().join("repo.lixbon-wt").join(&intent.attempt_id);
     assert_eq!((wt.branch.as_str(), wt.base.as_str()), (expected_branch.as_str(), "main"));
-    assert_eq!(wt.dir, expected_dir);
+    // git informa la ruta real (macOS: /private/var frente a /var; Windows: nombres 8.3): se compara la ruta canónica.
+    let same = |a: &Path, b: &Path| std::fs::canonicalize(a).unwrap() == std::fs::canonicalize(b).unwrap();
+    assert!(same(&wt.dir, &expected_dir), "{:?} frente a {:?}", wt.dir, expected_dir);
 
     // Disco: la carpeta existe, es un worktree del repo y está en la rama del Attempt, sobre el commit base.
     assert!(wt.dir.is_dir());
@@ -95,9 +97,10 @@ fn se_crea_el_worktree_se_registra_y_al_liberarlo_no_queda_nada() {
     assert_eq!(row.0, "active");
     assert_eq!(row.2.as_deref(), Some(expected_branch.as_str()));
     assert_eq!((row.3, row.4.as_deref(), row.5.as_deref(), row.6.as_str()), (0, Some("main"), Some(head.as_str()), intent.attempt_id.as_str()));
-    assert_eq!(Path::new(row.1.as_deref().unwrap()), expected_dir.as_path());
+    assert!(same(Path::new(row.1.as_deref().unwrap()), &expected_dir));
     let task = core.lock().tasks[&intent.task_id].clone();
-    assert_eq!((task.worktree.as_deref().map(Path::new), task.cwd.as_str()), (Some(expected_dir.as_path()), text(&expected_dir).as_str()));
+    assert!(same(Path::new(task.worktree.as_deref().unwrap()), &expected_dir));
+    assert!(same(Path::new(&task.cwd), &expected_dir), "el cwd de la Task es el del worktree");
     let observed: i64 = core
         .storage
         .with_store(|s| s.read(|c| Ok(c.query_row("SELECT count(*) FROM events WHERE kind = 'effect.observed'", [], |r| r.get(0))?)))
