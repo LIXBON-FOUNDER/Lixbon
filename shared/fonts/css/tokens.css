@@ -1,0 +1,5 @@
+/* Lixbon Brand tokens. Generado por source/package.py: no editar a mano. */
+:root {
+  --lixbon-font-sans: 'Lixbon Brand Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --lixbon-font-serif: 'Lixbon Brand Serif', 'Iowan Old Style', Georgia, serif;
+}
