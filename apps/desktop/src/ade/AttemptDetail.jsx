@@ -2,6 +2,7 @@ import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
 import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
+import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
 import { AttemptStop } from './AttemptStop';
 import { attemptDuration, formatUtc } from './attemptFormat';
@@ -118,7 +119,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           </ul>
         ) : <p className="ade-missing">{COPY.noArtifacts}</p>}
 
-        <h4 className="ssec__label">Revisión</h4>
+        <h4 className="ssec__label">Cambios y revisión</h4>
+        <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">
             <Row label="Veredicto">{text(review.verdict)}</Row>
