@@ -23,7 +23,7 @@ legacy sigue siendo la autoridad de las tareas.
 | # | Invariante | Mecanismo | Prueba |
 |---|---|---|---|
 | 1 | El Attempt es inmutable como identidad histórica | trigger `attempts_identity_immutable`: `id`, `task_id`, `n`, `provider`, `model`, `effort`, `role`, `profile`, `external`, `origin` y `created_at` no cambian; el vínculo a Worktree/ProviderSession se fija una sola vez | `la_identidad_no_cambia_y_el_vinculo_se_fija_una_sola_vez` |
-| 2 | Retry crea un ID nuevo | `attempt_create_recorded` inserta `n + 1` (`<task>-a<n>`, `UNIQUE (task_id, n)`); nada reabre ni reescribe uno anterior | `varios_attempts_por_task_y_el_retry_conserva_la_historia` |
+| 2 | Retry crea un ID nuevo | `attempt_create_recorded` inserta `n + 1` (`<task>-a<n>`, `UNIQUE (task_id, n)`); nada reabre ni reescribe uno anterior. El comando de reintento y su procedencia: [REINTENTO.md](REINTENTO.md) | `varios_attempts_por_task_y_el_retry_conserva_la_historia` |
 | 3 | Un Attempt final no vuelve a `running` | trigger `attempts_final_is_final` (ningún `UPDATE` sobre un final) + ciclo de vida cerrado | `un_final_no_vuelve_a_running_ni_cambia_de_final` |
 | 4 | Una Task puede existir sin Attempt activo | `attempts` es independiente de la Task; `attempt_active` devuelve `None` | `un_attempt_nace_con_su_identidad_y_su_evento`, `el_ciclo_de_vida_feliz_fija_las_marcas_de_tiempo` |
 | 5 | Estado + Events atómicos | cada mutador es UNA transacción con su fila, su evento y la proyección de Attention | `sin_su_hecho_no_hay_cambio`, `un_evento_que_no_se_refiere_al_attempt_o_repetido_deshace_el_cambio`, `si_la_proyeccion_falla_no_queda_ni_el_attempt_ni_su_evento` |

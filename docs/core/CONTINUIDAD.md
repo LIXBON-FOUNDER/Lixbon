@@ -95,8 +95,20 @@ las otras. `attempt_id` nombra el Attempt nuevo que el fallo dejó cerrado, si l
 
 Códigos de `invalid`: `not_allowed` · `invalid_request` · `package_invalid` (con el código de `PackageErrorCode` en el
 mensaje) · `package_missing` · `package_source_mismatch` (el paquete no sale del Attempt al que se continúa) ·
-`request_conflict` (la clave se usó para otra continuidad) · `source_missing` · `source_not_in_task` · `source_not_final` ·
+`request_conflict` (la clave se usó para otra continuidad) · `source_missing` · `source_not_in_task` · `source_not_final` · `attempt_active` (la Task ya tiene otro Attempt activo) · `fallback_changed` (ver «Fallback confirmado») ·
 `session_not_owned` · `profile_missing` · `provider_mismatch` · `conflict` · `model_inactive` · `store`.
+
+## Fallback confirmado (LXO-142)
+
+`ContinueRequest.confirmed_reason` es el motivo del fallback que el cliente VIO (el `reason` del error con
+`fallback_available`) y confirmó al aportar el paquete con `Intent::Auto`. Si ahora el motivo es otro (la sesión no
+caducó: el proveedor dejó de ofrecer `resume`), no se aplica y devuelve `invalid/fallback_changed` con
+`fallback_available`: la persona no ha visto ESE fallback. Si el resume nativo vuelve a ser posible, se reanuda de forma
+nativa (lo mejor posible; la estrategia queda en el resultado y en `attempt.continued`). `None` mantiene el
+comportamiento de LXO-134.
+
+Antes de crear nada se comprueba también que la Task **no tiene otro Attempt activo** (`attempt_active`), y la clave
+`request_id` no puede ser a la vez de un reintento ([REINTENTO.md](REINTENTO.md)).
 
 ## Cuando falla el lanzamiento
 
@@ -177,7 +189,7 @@ caducada, atender una clave reutilizada) rompen al menos una prueba cada uno.
 
 ## Fuera de este slice
 
-El comando de reintento y resume del Attempt que lo expone al RPC y a `lxo` (F5, LXO-142), leer el flujo de eventos del
+El comando de reintento y resume del Attempt (`attempt.retry` y `attempt.resume`, LXO-142: [REINTENTO.md](REINTENTO.md)) ya existe en el Core, pero sigue sin estar en el RPC ni en `lxo`; leer el flujo de eventos del
 proveedor tras lanzar (el runtime), construir el paquete (`lxo context`, LXO-138), la UI (LXO-135/136), la aprobación previa
 de un seguimiento (`requires_approval` es siempre `false` aquí) y el handoff entre Tasks (F6, LXO-172).
 

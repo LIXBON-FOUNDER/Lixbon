@@ -30,6 +30,7 @@
 //! | `attempt.requested` con `approval_required` (LXO-119) | levanta `approval` | medium | attempt · `launch` |
 //! | `attempt.approved` · `attempt.rejected` | resuelve `approval` (`acted`) | | attempt · `launch` |
 //! | `attempt.failed` | levanta `failed` | high | attempt |
+//! | `attempt.retried` · `attempt.continued` (LXO-142) | resuelve el `failed` del Attempt reintentado o continuado (`acted`) | | attempt (el anterior) |
 //! | `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta `approval` | medium | attempt · `terminal` |
 //! | `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `approval` (`acted`) | | attempt · `terminal` |
 //! | `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `approval` (`condition_cleared`) | | attempt · `terminal` |
@@ -186,6 +187,13 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             if let (Some(task), Some(_)) = (p["task"].as_str(), p["n"].as_u64().filter(|n| *n > 1)) {
                 d.resolve(C::Failed, TargetKind::Task, task, None, Resolution::ConditionCleared);
                 d.resolve(C::ReviewReady, TargetKind::Task, task, None, Resolution::ConditionCleared);
+            }
+        }
+        // Reintentar o reanudar es la respuesta a un fallo: el `failed` del Attempt anterior queda atendido. Si el nuevo
+        // vuelve a fallar, levantará el suyo, sobre su propio Attempt.
+        ("attempt.retried" | "attempt.continued", "attempt") => {
+            if let (Some(task), Some(from_n)) = (p["task"].as_str(), p["from_n"].as_u64()) {
+                d.resolve(C::Failed, TargetKind::Attempt, &format!("{task}-a{from_n}"), None, Resolution::Acted);
             }
         }
         ("attempt.approved" | "attempt.rejected", "attempt") => d.resolve(C::Approval, TargetKind::Attempt, id, Some(LAUNCH.into()), Resolution::Acted),

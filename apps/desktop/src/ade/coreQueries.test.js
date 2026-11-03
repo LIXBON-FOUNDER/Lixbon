@@ -111,6 +111,7 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.task.restored', {}],
   ['activity.attempt.requested', { task: 'task-1', n: 1, provider: 'codex', external: false, approval_required: true }, { model: 'gpt', effort: 'high', role: 'worker', profile: 'implementar' }],
   ['activity.attempt.continued', { task: 'task-1', n: 2, from_n: 1, strategy: 'context_package', reason: 'session_expired' }],
+  ['activity.attempt.retried', { task: 'task-1', n: 2, from_n: 1 }, { overrides: ['model', 'effort'] }],
   ...['approved', 'started', 'integrated'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
   ['activity.attempt.rejected', { task: 'task-1', n: 1, cause: 'cancelled' }],
   ['activity.attempt.completed', { task: 'task-1', n: 1, has_summary: true }],

@@ -39,7 +39,7 @@ use super::event_kinds::{self, FailureCode, StopCause};
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
-use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, Store, StoreError, StoreResult, TaskRow};
+use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, RetryRow, Store, StoreError, StoreResult, TaskRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -80,6 +80,10 @@ pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext,
 
 pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_continued(a, c, t), ctx, at)
+}
+
+pub(super) fn retried_fact(a: &AttemptRow, r: &RetryRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_retried(a, r, t), ctx, at)
 }
 
 /// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.
