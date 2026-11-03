@@ -13,8 +13,9 @@ use super::adapter::{AdapterError, Capability, CapabilityMatrix, CapabilityState
 use super::adapter_launcher::AdapterLauncher;
 use super::adapter_launcher_tests::{registry_of, repo_with_commit, worktree_state};
 use super::dispatch_tests::{event_count, row};
-use super::events::Channel;
+use super::events::{Channel, MutationContext};
 use super::initial_approval_tests::e2e::core_with_project_at;
+use super::tx_ops::RetrySelection;
 use super::{Caller, Core};
 
 struct World {
@@ -200,6 +201,111 @@ fn detener_una_ejecucion_viva_la_deja_stopped_y_sin_attention_de_fallo() {
     assert_eq!(row(&w.core, &attempt), ("stopped".into(), "settled".into(), None));
     assert_eq!(event_count(&w.core, &attempt, "attempt.failed"), 0);
     assert!(!attention(&w.core, &attempt).iter().any(|(c, s)| c == "failed" && s == "active"));
+}
+
+/// Puente del reintento (proyecto LXO-142, PR 1): `Tx::request_attempt_retry` pone la Task final de vuelta en `starting` y nace
+/// el Attempt n+1 con el claim `none`; el despachador de siempre lo lanza SIN aprobación (las continuaciones n > 1 no la piden).
+#[test]
+fn reintentar_un_attempt_fallido_crea_el_n_mas_1_y_el_despachador_lo_lanza_sin_aprobacion() {
+    let w = world("claude", Some(vec![Step::Output("empiezo".into()), Step::Fail(AdapterError::provider("el proveedor se cayó"))]));
+    let a1 = w.create("claude", "e2e-claude-retry");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+
+    // La segunda ejecución sí completa.
+    w.adapter.set_script(vec![Step::Output("ahora sí".into()), Step::Complete(Some("hecho".into()))]);
+    let person = w.core.desktop_mutation_context().unwrap();
+    w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &RetrySelection::default())).expect("la petición de reintento");
+
+    // El Attempt nuevo existe, espera a ser despachado y no pide aprobación; el anterior no se tocó.
+    assert_eq!(row(&w.core, &a2), ("starting".into(), "none".into(), None));
+    assert_eq!(row(&w.core, &a1), ("failed".into(), "settled".into(), Some("agent_reported".into())));
+    assert_eq!(event_count(&w.core, &a2, "attempt.requested"), 1);
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0, "un reintento no pide aprobación: la petición es la decisión");
+    assert_eq!(attempt_provider(&w.core, &a2), "claude");
+    assert_eq!(w.adapter.starts().len(), 1, "pedirlo no lanza nada");
+
+    let launcher = w.core.launcher().expect("lanzador instalado");
+    assert_eq!(w.core.dispatch_attempt(&a2, launcher.as_ref()).unwrap(), super::dispatch::DispatchResult::Launched);
+    w.settled(&a2, "done");
+
+    assert_eq!(row(&w.core, &a2), ("done".into(), "settled".into(), None));
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.started", "attempt.completed"]);
+    assert_eq!(w.adapter.starts().len(), 2, "el proveedor se lanzó una vez por Attempt");
+    // El reintento trabaja en el Worktree de la Task (el proyector admite uno por Task): se adjunta a él, no crea otro.
+    let linked = |attempt: &str| -> Option<String> {
+        w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT worktree_id FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, Option<String>>(0))?))).unwrap().unwrap()
+    };
+    assert_eq!(linked(&a2), linked(&a1), "los dos Attempts trabajan en el mismo Worktree");
+    let worktrees: i64 = w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM worktrees WHERE task_id = ?1", [&task], |r| r.get(0))?))).unwrap().unwrap();
+    assert_eq!(worktrees, 1, "no se creó otro Worktree");
+    assert_eq!(worktree_state(&w.core, &a1).as_deref(), Some("active"), "el Worktree sigue activo");
+    // Despachar otra vez no relanza: el claim es de un solo uso.
+    assert_eq!(w.core.dispatch_attempt(&a2, launcher.as_ref()).unwrap(), super::dispatch::DispatchResult::AlreadyClaimed);
+    assert_eq!(w.adapter.starts().len(), 2);
+}
+
+/// Sin carpeta donde reintentar (el Worktree de la Task ya no está en disco) el Attempt nuevo se cierra `stopped`, nunca `failed`:
+/// no es un fallo del agente y no se crea otro Worktree (el proyector no lo admitiría).
+#[test]
+fn reintentar_sin_el_worktree_de_la_task_deja_el_attempt_nuevo_stopped_y_no_crea_otro() {
+    let w = world("claude", Some(vec![Step::Fail(AdapterError::provider("el proveedor se cayó"))]));
+    let a1 = w.create("claude", "e2e-claude-retry-sin-worktree");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    let dir: String = w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT path FROM worktrees WHERE attempt_id = ?1", [&a1], |r| r.get(0))?))).unwrap().unwrap();
+    // La carpeta desaparece (una limpieza, el usuario): el registro de la Task sigue, sin su carpeta.
+    std::fs::remove_dir_all(&dir).expect("quitar la carpeta del Worktree");
+
+    let person = w.core.desktop_mutation_context().unwrap();
+    w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &RetrySelection::default())).expect("la petición se acepta");
+    let launcher = w.core.launcher().expect("lanzador instalado");
+    assert_eq!(w.core.dispatch_attempt(&a2, launcher.as_ref()).unwrap(), super::dispatch::DispatchResult::NotLaunched { stopped: true });
+
+    assert_eq!(row(&w.core, &a2), ("stopped".into(), "settled".into(), None));
+    assert_eq!(event_count(&w.core, &a2, "attempt.failed"), 0);
+    assert_eq!(w.adapter.starts().len(), 1, "el proveedor no se lanzó otra vez");
+    let worktrees: i64 = w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM worktrees WHERE task_id = ?1", [&task], |r| r.get(0))?))).unwrap().unwrap();
+    assert_eq!(worktrees, 1, "no se creó otro Worktree");
+}
+
+/// Solo una Person pide el reintento y solo de un Attempt que terminó mal; cambiar de proveedor no arrastra su modelo.
+#[test]
+fn reintentar_solo_lo_pide_una_person_y_solo_de_un_attempt_que_termino_mal() {
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("claude", "e2e-claude-retry-rules");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let person = w.core.desktop_mutation_context().unwrap();
+
+    // En marcha no se reintenta.
+    let err = w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &RetrySelection::default())).unwrap_err().to_string();
+    assert!(err.contains("terminó mal"), "{err}");
+    // Detenido sí, pero no por quien no es una Person autenticada.
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+    w.settled(&a1, "stopped");
+    let err = w.core.mutate_as(&MutationContext::core(), |tx| tx.request_attempt_retry(&task, &RetrySelection::default())).unwrap_err().to_string();
+    assert!(err.contains("Person autenticada"), "{err}");
+    assert_eq!(event_count(&w.core, &format!("{task}-a2"), "attempt.requested"), 0, "una petición rechazada no crea nada");
+
+    // Con otro proveedor, el modelo y el esfuerzo del anterior no se heredan; el perfil sí.
+    let selection = RetrySelection { provider: Some("codex".into()), ..RetrySelection::default() };
+    w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &selection)).expect("reintento con otro proveedor");
+    let a2 = format!("{task}-a2");
+    assert_eq!(attempt_provider(&w.core, &a2), "codex");
+    let (model, profile): (Option<String>, Option<String>) = w
+        .core
+        .storage
+        .with_store(|s| s.read(|c| Ok(c.query_row("SELECT model, profile FROM attempts WHERE id = ?1", [&a2], |r| Ok((r.get(0)?, r.get(1)?)))?)))
+        .unwrap()
+        .unwrap();
+    assert_eq!((model, profile.as_deref()), (None, Some("explorar")));
 }
 
 /// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
