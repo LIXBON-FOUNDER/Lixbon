@@ -100,6 +100,9 @@ mod attempt_ops_tests;
 #[cfg(test)]
 mod attempt_runtime_ops_tests;
 mod continuity;
+mod attempt_commands;
+#[cfg(test)]
+mod attempt_commands_tests;
 mod provider_registry;
 mod context_preview;
 mod usage_read;

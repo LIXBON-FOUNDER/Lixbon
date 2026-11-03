@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 94] = [
+pub(crate) const MESSAGE_KEYS: [&str; 95] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -73,6 +73,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 94] = [
     "activity.task.restored",
     "activity.attempt.requested",
     "activity.attempt.continued",
+    "activity.attempt.retried",
     "activity.attempt.approved",
     "activity.attempt.rejected",
     "activity.attempt.started",
@@ -229,6 +230,16 @@ fn continuity_reason(code: &str) -> Option<&'static str> {
         "resume_unsupported" => "el proveedor no puede reanudar",
         "session_unavailable" => "no había una sesión que reanudar",
         "session_expired" => "la sesión caducó",
+        _ => return None,
+    })
+}
+
+fn retry_override(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "provider" => "otro proveedor",
+        "model" => "otro modelo",
+        "effort" => "otro esfuerzo",
+        "profile" => "otro perfil de permisos",
         _ => return None,
     })
 }
@@ -662,6 +673,23 @@ fn format(key: &str, a: &A) -> Option<String> {
                 }
                 _ => format!("El {at} continúa el intento {from_n} con un paquete de contexto ({}).", a.code_in("reason", continuity_reason)?),
             })
+        }
+        "activity.attempt.retried" => {
+            let at = attempt_of(a)?;
+            let from_n = a.number("from_n")?;
+            // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+            let overrides = match a.get("overrides") {
+                Value::Null => Vec::new(),
+                list => {
+                    let names = list.as_array()?.iter().map(|o| o.as_str().and_then(retry_override)).collect::<Option<Vec<_>>>()?;
+                    if names.is_empty() {
+                        return None;
+                    }
+                    names
+                }
+            };
+            let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
+            Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
         }
         "activity.attempt.requested" => {
             let at = attempt_of(a)?;

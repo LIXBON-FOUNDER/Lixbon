@@ -32,6 +32,7 @@
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
 //! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
+//! | `attempt.retried` (LXO-142) | state | `attempt` |
 //! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
@@ -69,7 +70,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RetryOverride, RetryRow, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -863,6 +864,29 @@ impl EventPayload for AttemptContinued {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_continued(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     let p = AttemptContinued { task: a.task_id.clone(), n: a.n, from_n: c.from_n, strategy: c.strategy, reason: c.reason, package_id: c.package_id.clone() };
+    attempt_draft(a, t, &p)
+}
+
+/// `attempt.retried` (LXO-142): el Attempt `n` reintenta al `from_n` de su Task, limpio. `overrides` nombra los parámetros que
+/// se pidieron a propósito (lista cerrada, ausente si no se cambió ninguno); el resto se heredó. Nunca lleva el mensaje del reintento.
+#[derive(Serialize)]
+pub(super) struct AttemptRetried {
+    task: String,
+    n: i64,
+    from_n: i64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    overrides: Vec<RetryOverride>,
+}
+
+impl EventPayload for AttemptRetried {
+    const KIND: &'static str = "attempt.retried";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_retried(a: &AttemptRow, r: &RetryRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = AttemptRetried { task: a.task_id.clone(), n: a.n, from_n: r.from_n, overrides: r.overrides.clone() };
     attempt_draft(a, t, &p)
 }
 

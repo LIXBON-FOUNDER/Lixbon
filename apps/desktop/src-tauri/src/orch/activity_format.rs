@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 60] = [
+pub(super) const KINDS: [&str; 61] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -47,6 +47,7 @@ pub(super) const KINDS: [&str; 60] = [
     "task.restored",
     "attempt.requested",
     "attempt.continued",
+    "attempt.retried",
     "attempt.approved",
     "attempt.rejected",
     "attempt.started",
@@ -113,6 +114,8 @@ const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_ter
 /// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
 const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
+/// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
+const RETRY_OVERRIDES: [&str; 4] = ["provider", "model", "effort", "profile"];
 const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
 /// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`).
 const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"];
@@ -461,6 +464,28 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("reason", closed(p, "reason", &CONTINUITY_REASONS)),
             ],
         ),
+        "attempt.retried" => {
+            // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+            let overrides = match p.get("overrides").filter(|v| !v.is_null()) {
+                None => None,
+                Some(list) => {
+                    let names = list
+                        .as_array()?
+                        .iter()
+                        .map(|v| v.as_str().filter(|s| RETRY_OVERRIDES.contains(s)).map(|s| json!(s)))
+                        .collect::<Option<Vec<Value>>>()?;
+                    if names.is_empty() {
+                        return None;
+                    }
+                    Some(json!(names))
+                }
+            };
+            rendered(
+                "activity.attempt.retried",
+                Visual::Info,
+                vec![("task", id(p, "task")), ("n", number(p, "n")), ("from_n", number(p, "from_n")), ("overrides?", overrides)],
+            )
+        }
         "attempt.requested" => rendered(
             "activity.attempt.requested",
             Visual::Info,

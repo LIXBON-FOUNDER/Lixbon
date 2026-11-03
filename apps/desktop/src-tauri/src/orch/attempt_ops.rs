@@ -38,7 +38,7 @@ use super::event_kinds::{self, FailureCode, StopCause};
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
-use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, Store, StoreError, StoreResult, TaskRow};
+use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, RetryRow, Store, StoreError, StoreResult, TaskRow};
 
 use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
 
@@ -81,6 +81,10 @@ pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext,
 
 pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_continued(a, c, t), ctx, at)
+}
+
+pub(super) fn retried_fact(a: &AttemptRow, r: &RetryRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_retried(a, r, t), ctx, at)
 }
 
 /// Los hechos de la Pending Queue (LXO-143), construidos aquí para que `queue_commands` no importe el catálogo de eventos.

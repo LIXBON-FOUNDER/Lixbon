@@ -184,6 +184,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.queue_cancelled', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_delivered', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
+  ['activity.attempt.retried', { required: { task: 'string', n: 'integer', from_n: 'integer' }, optional: { overrides: 'stringList' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
   ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
   ['activity.attempt.failed', { required: { task: 'string', n: 'integer', reason: 'string', has_summary: 'boolean' } }],

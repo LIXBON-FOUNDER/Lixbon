@@ -878,6 +878,7 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 |---|---|---|---|---|
 | `attempt.requested` | 1 | state | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | persona · agente que coordina la Task |
 | `attempt.continued` (LXO-134) | 1 | state | `task`, `n`, `from_n`, `strategy` ∈ `native_resume` · `context_package`, `reason` ∈ `preferred` · `requested` · `provider_changed` · `resume_unsupported` · `session_unavailable` · `session_expired`, `package_id?` (solo con paquete; un hash). Nunca la referencia del proveedor ni el contenido del paquete. Va después de `attempt.requested` en la misma transacción | persona · agente que coordina · Core |
+| `attempt.retried` (LXO-142) | 1 | state | `task`, `n`, `from_n`, `overrides?` (lista no vacía de `provider` · `model` · `effort` · `profile`; ausente si se heredó todo). Nunca el mensaje del reintento. Va después de `attempt.requested` en la misma transacción | persona · agente que coordina · Core |
 | `attempt.approved` | 1 | decision | `task`, `n` | persona |
 | `attempt.rejected` | 1 | decision | `task`, `n`, `cause` ∈ `cancelled` · `run_closed` | persona · agente que coordina · Core |
 | `attempt.started` | 1 | state | `task`, `n` | Core |

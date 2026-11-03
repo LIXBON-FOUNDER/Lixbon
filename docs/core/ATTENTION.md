@@ -283,6 +283,7 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `attempt.requested` con `approval_required` (LXO-119) | levanta | `approval` · medium | `attempt` · `launch` |
 | `attempt.approved` / `attempt.rejected` | resuelve `acted` | `approval` | `attempt` · `launch` |
 | `attempt.failed` (el motivo va en `facts.failure_reason`) | levanta | `failed` · high | `attempt` |
+| `attempt.retried` · `attempt.continued` (LXO-142) | resuelve `acted` | `failed` del Attempt anterior (`<task>-a<from_n>`) | `attempt` |
 | `attempt.waiting` con `state = awaiting_terminal_approval` (LXO-231) | levanta | `approval` · medium | `attempt` · `terminal` |
 | `attempt.resumed` desde `awaiting_terminal_approval` | resuelve `acted` | `approval` | `attempt` · `terminal` |
 | `attempt.completed` · `failed` · `stopped` · `exited` | resuelve `condition_cleared` | `approval` | `attempt` · `terminal` |

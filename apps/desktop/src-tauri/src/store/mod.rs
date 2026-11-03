@@ -46,6 +46,7 @@ mod private;
 mod projects;
 mod attempts;
 mod continuity;
+mod retries;
 mod sessions;
 mod worktrees;
 mod cut;
@@ -83,6 +84,8 @@ mod attempt_runtime_tests;
 mod sessions_tests;
 #[cfg(test)]
 mod continuity_tests;
+#[cfg(test)]
+mod retries_tests;
 #[cfg(test)]
 mod worktrees_tests;
 #[cfg(test)]
@@ -134,6 +137,9 @@ pub(crate) use sessions::{env_block_set_in, looks_secret, thread_message_append_
 // ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use continuity::{Continued, ContinuationRow, NewContinuation, Reason as ContinuationReason, Strategy as ContinuityStrategy, MAX_REQUEST_ID_CHARS};
+// Reintento de un Attempt (LXO-142): inerte hasta el corte; solo lo usan `orch::attempt_commands` y las pruebas.
+#[allow(unused_imports)]
+pub use retries::{retryable, NewRetry, Override as RetryOverride, Retried, RetryRow};
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]

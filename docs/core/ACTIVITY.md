@@ -78,6 +78,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `task.discarded` · `task.restored` | `activity.task.discarded` / `.restored` | — | warning / info |
 | `attempt.requested` (LXO-114) | `activity.attempt.requested` | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | info |
 | `attempt.continued` (LXO-134) | `activity.attempt.continued` | `task`, `n`, `from_n`, `strategy` ∈ `native_resume` `context_package`, `reason` ∈ `preferred` `requested` `provider_changed` `resume_unsupported` `session_unavailable` `session_expired` | info |
+| `attempt.retried` (LXO-142) | `activity.attempt.retried` | `task`, `n`, `from_n`, `overrides?` ⊆ `provider` `model` `effort` `profile` | info |
 | `attempt.approved` | `activity.attempt.approved` | `task`, `n` | success |
 | `attempt.rejected` | `activity.attempt.rejected` | `task`, `n`, `cause` ∈ `cancelled` `run_closed` | warning |
 | `attempt.started` | `activity.attempt.started` | `task`, `n` | info |

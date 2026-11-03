@@ -64,6 +64,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.task.restored',
   'activity.attempt.requested',
   'activity.attempt.continued',
+  'activity.attempt.retried',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -169,6 +170,7 @@ const QUEUE_FAILURES = {
   attempt_ended: 'el intento ya había terminado',
   interrupted: 'la entrega se interrumpió y no se sabe si llegó',
 };
+const RETRY_OVERRIDES = { provider: 'otro proveedor', model: 'otro modelo', effort: 'otro esfuerzo', profile: 'otro perfil de permisos' };
 const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
 const WORKTREE_REMOVAL = { integrated: 'integrado', discarded: 'descartado', gone: 'ya no existía' };
 const ARTIFACT_KINDS = {
@@ -454,6 +456,16 @@ const FORMATTERS = {
     }
     const reason = requiredCode(args, 'reason', new Set(Object.keys(CONTINUITY_REASONS)));
     return reason ? `El ${attempt} continúa el intento ${fromN} con un paquete de contexto (${CONTINUITY_REASONS[reason]}).` : null;
+  },
+  'activity.attempt.retried': (args) => {
+    const attempt = attemptOf(args);
+    const fromN = requiredNumber(args, 'from_n');
+    if (!requiredArguments(attempt, fromN)) return null;
+    // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+    const overrides = args.overrides;
+    if (overrides != null && (!Array.isArray(overrides) || !overrides.length
+      || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
+    return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
   },
   'activity.attempt.requested': (args) => {
     const attempt = attemptOf(args);
