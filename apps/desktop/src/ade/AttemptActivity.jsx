@@ -1,5 +1,6 @@
-import { COPY, attemptActivityLabel, isKnownAttemptActivity } from './adeLabels';
-import { formatUtc } from './attemptFormat';
+import { ATTEMPT_GROUP_LABELS, COPY, attemptActivityLabel, attemptRunLabel, isKnownAttemptActivity } from './adeLabels';
+import { formatDurationMs, formatUtc } from './attemptFormat';
+import { groupAttemptActivity } from './attemptTimeline';
 import { CoreModelNotice } from './CoreModelNotice';
 import { ATTEMPT_ACTIVITY_LIMIT } from './attemptActivityLimit';
 import { useCoreQuery } from './useCoreQuery';
@@ -25,24 +26,37 @@ export function AttemptActivity({ attemptId, coreModel, active = true }) {
     <div className="ade-attempt-activity" data-testid="attempt-activity">
       <h4 className="ssec__label">{COPY.attemptActivity}</h4>
       <p className="ade-attempts__hint ade-attempts__state--neutral">{COPY.activityPerAttemptPartial}</p>
+      {items && items.length > 0 && <p className="ade-attempts__hint ade-attempts__state--neutral" data-testid="attempt-activity-grouping">{COPY.activityGroupedByRun}</p>}
       {items ? (
         items.length === 0 ? (
           <p className="ade-attempts__state ade-attempts__state--neutral">{COPY.noAttemptActivity}</p>
         ) : (
-          <ol className="ade-attempt-activity__list">
-            {items.map((item) => {
-              const time = formatUtc(item.ts);
-              return (
-                <li key={item.event_id} data-event-id={item.event_id}>
-                  {time ? <time dateTime={time.iso}>{time.label}</time> : <span className="ade-missing">{COPY.notAvailable}</span>}
-                  {' · '}{attemptActivityLabel(item.message_key)}
-                  {!isKnownAttemptActivity(item.message_key) && (
-                    <details className="ade-status__raw"><summary>{COPY.technicalDetail}</summary><code>{String(item.message_key ?? '')}</code></details>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+          groupAttemptActivity(items).map((group) => (
+            <section key={group.id} className="ade-attempt-activity__group" data-group-kind={group.kind} data-testid="attempt-activity-group">
+              <h5 className="ade-attempt-activity__group-head">
+                <span>{group.kind === 'run' ? attemptRunLabel(group.n) : ATTEMPT_GROUP_LABELS[group.kind]}</span>
+                {group.kind === 'run' && (
+                  <span className="ade-attempt-activity__group-meta">
+                    {group.durationMs !== null ? `${formatDurationMs(group.durationMs)} · ${attemptActivityLabel(group.endKey)}` : group.open ? COPY.runInProgress : null}
+                  </span>
+                )}
+              </h5>
+              <ol className="ade-attempt-activity__list">
+                {group.items.map((item) => {
+                  const time = formatUtc(item.ts);
+                  return (
+                    <li key={item.event_id} data-event-id={item.event_id}>
+                      {time ? <time dateTime={time.iso}>{time.label}</time> : <span className="ade-missing">{COPY.notAvailable}</span>}
+                      {' · '}{attemptActivityLabel(item.message_key)}
+                      {!isKnownAttemptActivity(item.message_key) && (
+                        <details className="ade-status__raw"><summary>{COPY.technicalDetail}</summary><code>{String(item.message_key ?? '')}</code></details>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ))
         )
       ) : state.error ? (
         <CoreModelNotice error={state.error} onRetry={state.retry} />
