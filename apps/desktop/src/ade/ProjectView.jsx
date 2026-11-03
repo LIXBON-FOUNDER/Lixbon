@@ -74,14 +74,16 @@ export const TASK_FILTERS = Object.freeze([
 ]);
 
 /**
- * Estados legacy de Task (docs/VOCABULARIO.md §2). «Activas» = no finales, incluidos los que
- * esperan a una persona (`waiting`, `awaiting_terminal_approval`). Lo que no esté en ninguna
- * lista es «desconocido»: solo entra en «Todas».
+ * Estados de Task (docs/VOCABULARIO.md §2). «Activas» = no finales, como las entrega el Core: incluye las que
+ * esperan a una persona (`pending_approval`, `waiting`, `awaiting_terminal_approval`) y la intención aún
+ * sin ejecución (`not_started`). Lo que no esté en ninguna lista es «desconocido»: solo entra en «Todas».
  */
-export const ACTIVE_TASK_STATUSES = Object.freeze(['starting', 'running', 'waiting', 'awaiting_terminal_approval']);
+export const ACTIVE_TASK_STATUSES = Object.freeze(['not_started', 'pending_approval', 'starting', 'running', 'waiting', 'awaiting_terminal_approval']);
 export const FINAL_TASK_STATUSES = Object.freeze(['done', 'failed', 'exited', 'stopped']);
 
 const STATUS_LABEL = {
+  not_started: 'Sin iniciar',
+  pending_approval: 'Pendiente de aprobación',
   starting: 'Arrancando',
   running: 'En curso',
   waiting: 'Esperando respuesta',
@@ -486,6 +488,7 @@ export function ProjectView({
   tasks, filter, defaultFilter = 'active', onFilterChange,
   onLoadMoreTasks,
   attention, activity, resources, resourceInventory, resourceInventoryStatus, onRetryResourceInventory,
+  actions,
   onOpenTask, onOpenAttempt, onOpenAttention, onOpenResource,
 }) {
   const uid = useId();
@@ -508,6 +511,8 @@ export function ProjectView({
           ? <code className="pv__id pv__id--project" data-testid="project-id">{projectId}</code>
           : <span className="pv__notice pv__notice--unknown" role="status" data-testid="project-id-missing">Sin project_id duradero: no se puede navegar desde esta vista.</span>}
       </header>
+
+      {actions && <div className="pv__actions" data-testid="project-actions">{actions}</div>}
 
       <Summary summary={summary} headingId={`${uid}-summary`} />
       <Locations slice={locSlice} headingId={`${uid}-locations`} />

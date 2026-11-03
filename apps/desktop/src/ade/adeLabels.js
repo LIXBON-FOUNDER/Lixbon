@@ -7,6 +7,8 @@
 
 /** Estados de ejecución de una Task F2 (LXO-91). */
 export const TASK_STATUS_LABELS = Object.freeze({
+  not_started: 'Sin iniciar',
+  pending_approval: 'Pendiente de aprobación',
   starting: 'Iniciando',
   running: 'En ejecución',
   waiting: 'Esperando',

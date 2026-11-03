@@ -224,6 +224,30 @@ describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
   });
 });
 
+describe('AdeShell · estructura y textos (hallazgos de la prueba manual)', () => {
+  it('el layout en fila va dentro de un marco en columna: un aviso del shell no puede aplastar los paneles', async () => {
+    core(detailOf());
+    render(shell());
+    await screen.findByRole('tree', { name: 'Projects y Tasks del Core' });
+    const frame = screen.getByTestId('ade-composition');
+    expect(frame.classList.contains('ade__frame')).toBe(true);
+    const layout = frame.querySelector(':scope > .ade__layout');
+    expect(layout, 'los paneles viven en .ade__layout, hijo directo del marco').toBeTruthy();
+    expect(layout.querySelector('.ade__nav')).toBeTruthy();
+    expect(layout.querySelector('.ade-notice')).toBeNull();
+    // La regla que apila los avisos encima de los paneles.
+    expect(orchStyles).toMatch(/\.ade__frame\s*\{[^}]*flex-direction:\s*column/);
+  });
+
+  it('el pie de la barra lateral ya no dice que no se pueden crear intentos', async () => {
+    core(detailOf());
+    render(shell());
+    const sidebar = await screen.findByTestId('projects-sidebar');
+    expect(sidebar.textContent).not.toMatch(/sin crear/i);
+    expect(sidebar.textContent).toMatch(/se crea desde el Project y se aprueba en el detalle del intento/);
+  });
+});
+
 describe('AdeShell · ProjectsSidebar (LXO-97)', () => {
   it('renderiza el árbol y navega por Tasks activas, finalizadas y todas', { timeout: 20_000 }, async () => {
     core(detailOf());

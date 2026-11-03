@@ -149,6 +149,34 @@ describe('ProjectView · Task status, Attention y Activity son ejes distintos', 
   });
 });
 
+describe('ProjectView · estados que esperan y ranura de acciones (hallazgos de la prueba manual)', () => {
+  it('pending_approval y not_started son Tasks activas (el Core las entrega con status=active) y tienen etiqueta', () => {
+    for (const s of ['pending_approval', 'not_started']) {
+      expect(ACTIVE_TASK_STATUSES).toContain(s);
+      expect(taskMatchesFilter(s, 'active')).toBe(true);
+      expect(taskMatchesFilter(s, 'final')).toBe(false);
+    }
+    render(<ProjectView projectId={PID} projectName="Synthetic" tasks={ready([task('t-wait', 'pending_approval')])} filter="active" onOpenTask={() => {}} />);
+    expect(screen.getByText('Pendiente de aprobación')).toBeTruthy();
+    expect(screen.queryByText(/estado desconocido/i)).toBeNull();
+  });
+
+  it('las acciones del Project (Nuevo intento) van bajo la cabecera, antes del resumen', () => {
+    render(<ProjectView projectId={PID} projectName="Synthetic" actions={<button type="button">Nuevo intento</button>} onOpenTask={() => {}} />);
+    const actions = screen.getByTestId('project-actions');
+    expect(within(actions).getByRole('button', { name: 'Nuevo intento' })).toBeTruthy();
+    const view = screen.getByTestId('project-view');
+    const head = view.querySelector('.pv__head');
+    expect(head.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.compareDocumentPosition(view.querySelector('.pv__section')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('sin acciones no se pinta el contenedor', () => {
+    render(<ProjectView projectId={PID} projectName="Synthetic" onOpenTask={() => {}} />);
+    expect(screen.queryByTestId('project-actions')).toBeNull();
+  });
+});
+
 describe('ProjectView · filtros active/final/all', () => {
   it('semántica de taskMatchesFilter: los desconocidos solo entran en all', () => {
     for (const s of ACTIVE_TASK_STATUSES) {
