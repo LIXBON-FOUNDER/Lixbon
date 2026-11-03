@@ -889,6 +889,10 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | `attempt.resumed` | 1 | state | `task`, `n`, `from` ∈ `waiting` · `awaiting_terminal_approval` | agente de esa Task · Core |
 | `attempt.exited` | 1 | state | `task`, `n`, `from` ∈ `starting` · `running` · `waiting` · `awaiting_terminal_approval` | Core |
 | `attempt.integrated` | 1 | state | `task`, `n` | Core |
+| `attempt.queued` (LXO-143) | 1 | state | `task`, `n`, `queue_id` (`<attempt>-q<seq>`), `position` (pendientes delante, contándola), `attachments` (cuántos). **Nunca** el texto de la instrucción ni los ids de sus adjuntos | persona · agente que coordina la Task |
+| `attempt.queue_delivered` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `confirmed_by` ∈ `adapter_event` · `adapter_result` (lo que el ADAPTER informó; escribir en el proceso no confirma) | Core |
+| `attempt.queue_cancelled` (LXO-143) | 1 | state | `task`, `n`, `queue_id` | persona · agente que coordina la Task |
+| `attempt.queue_failed` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `reason` ∈ `unsupported` · `environment_blocked` · `adapter_unavailable` · `adapter_error` · `attempt_ended` · `interrupted`. Levanta Attention salvo con `attempt_ended` | Core |
 
 * La entidad es el **Attempt** (`entity_kind = attempt`, `entity_id = <task>-a<n>`); `run_id` y `project_id` salen de la
   fila de su Task confirmada (no hay `State` que leer). `entity_kind=attempt` ya se puede usar como filtro de `events`.

@@ -789,6 +789,60 @@
       "text": "Se integró el trabajo del intento 1 de la tarea t-3."
     },
     {
+      "key": "activity.attempt.queued",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "position": 3,
+        "attachments": 0
+      },
+      "text": "Se encoló una instrucción para el intento 2 de la tarea t-3 (posición 3)."
+    },
+    {
+      "key": "activity.attempt.queued",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "position": 1,
+        "attachments": 2
+      },
+      "text": "Se encoló una instrucción para el intento 2 de la tarea t-3 (posición 1; 2 adjuntos)."
+    },
+    {
+      "key": "activity.attempt.queue_delivered",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Se entregó al intento 2 de la tarea t-3 la instrucción encolada."
+    },
+    {
+      "key": "activity.attempt.queue_cancelled",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Se canceló una instrucción encolada para el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.queue_failed",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "reason": "adapter_unavailable"
+      },
+      "text": "No se pudo entregar una instrucción encolada al intento 2 de la tarea t-3: el proveedor no estaba disponible."
+    },
+    {
+      "key": "activity.attempt.queue_failed",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "reason": "otro"
+      },
+      "text": null
+    },
+    {
       "key": "activity.provider_session.opened",
       "args": {
         "task": "t-3",

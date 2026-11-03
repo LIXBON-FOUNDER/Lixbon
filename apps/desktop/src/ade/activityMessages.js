@@ -76,6 +76,10 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.resumed',
   'activity.attempt.exited',
   'activity.attempt.integrated',
+  'activity.attempt.queued',
+  'activity.attempt.queue_delivered',
+  'activity.attempt.queue_cancelled',
+  'activity.attempt.queue_failed',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -157,6 +161,14 @@ const CONTINUITY_REASONS = {
   resume_unsupported: 'el proveedor no puede reanudar',
   session_unavailable: 'no había una sesión que reanudar',
   session_expired: 'la sesión caducó',
+};
+const QUEUE_FAILURES = {
+  unsupported: 'el proveedor no admite entregarla',
+  environment_blocked: 'el entorno del proveedor está bloqueado',
+  adapter_unavailable: 'el proveedor no estaba disponible',
+  adapter_error: 'el proveedor devolvió un error',
+  attempt_ended: 'el intento ya había terminado',
+  interrupted: 'la entrega se interrumpió y no se sabe si llegó',
 };
 const RETRY_OVERRIDES = { provider: 'otro proveedor', model: 'otro modelo', effort: 'otro esfuerzo', profile: 'otro perfil de permisos' };
 const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
@@ -484,6 +496,30 @@ const FORMATTERS = {
   'activity.attempt.resumed': formatAttempt,
   'activity.attempt.exited': formatAttempt,
   'activity.attempt.integrated': formatAttempt,
+  // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
+  'activity.attempt.queued': (args) => {
+    const attempt = attemptOf(args);
+    const position = requiredNumber(args, 'position');
+    const attachments = requiredNumber(args, 'attachments');
+    if (!requiredArguments(attempt, position, attachments)) return null;
+    return `Se encoló una instrucción para el ${attempt}${optionalDetails([
+      `posición ${position}`,
+      attachments > 0 ? plural(attachments, 'adjunto', 'adjuntos') : null,
+    ])}.`;
+  },
+  'activity.attempt.queue_delivered': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se entregó al ${attempt} la instrucción encolada.` : null;
+  },
+  'activity.attempt.queue_cancelled': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se canceló una instrucción encolada para el ${attempt}.` : null;
+  },
+  'activity.attempt.queue_failed': (args) => {
+    const attempt = attemptOf(args);
+    const reason = requiredCode(args, 'reason', new Set(Object.keys(QUEUE_FAILURES)));
+    return requiredArguments(attempt, reason) ? `No se pudo entregar una instrucción encolada al ${attempt}: ${QUEUE_FAILURES[reason]}.` : null;
+  },
   'activity.provider_session.opened': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');

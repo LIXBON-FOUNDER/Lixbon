@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 91] = [
+pub(crate) const MESSAGE_KEYS: [&str; 95] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -85,6 +85,10 @@ pub(crate) const MESSAGE_KEYS: [&str; 91] = [
     "activity.attempt.resumed",
     "activity.attempt.exited",
     "activity.attempt.integrated",
+    "activity.attempt.queued",
+    "activity.attempt.queue_delivered",
+    "activity.attempt.queue_cancelled",
+    "activity.attempt.queue_failed",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
     "activity.provider_session.resumed",
@@ -186,6 +190,19 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
         "terminal_approval_timeout" => "nadie aprobó en la terminal a tiempo",
         "agent_idle_timeout" => "el agente dejó de dar señales",
         "agent_reported" => "el agente informó el fallo",
+        _ => return None,
+    })
+}
+
+/// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`, LXO-143).
+fn queue_failure(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "unsupported" => "el proveedor no admite entregarla",
+        "environment_blocked" => "el entorno del proveedor está bloqueado",
+        "adapter_unavailable" => "el proveedor no estaba disponible",
+        "adapter_error" => "el proveedor devolvió un error",
+        "attempt_ended" => "el intento ya había terminado",
+        "interrupted" => "la entrega se interrumpió y no se sabe si llegó",
         _ => return None,
     })
 }
@@ -471,6 +488,15 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         "activity.attempt.approved" => format!("Se aprobó el {at}."),
         "activity.attempt.started" => format!("Empezó el {at}."),
         "activity.attempt.integrated" => format!("Se integró el trabajo del {at}."),
+        // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
+        "activity.attempt.queued" => {
+            let position = a.number("position")?;
+            let attachments = a.number("attachments")?;
+            format!("Se encoló una instrucción para el {at}{}.", details(&[Some(format!("posición {position}")), (attachments > 0).then(|| plural(attachments, "adjunto", "adjuntos"))]))
+        }
+        "activity.attempt.queue_delivered" => format!("Se entregó al {at} la instrucción encolada."),
+        "activity.attempt.queue_cancelled" => format!("Se canceló una instrucción encolada para el {at}."),
+        "activity.attempt.queue_failed" => format!("No se pudo entregar una instrucción encolada al {at}: {}.", a.code_in("reason", queue_failure)?),
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
@@ -696,7 +722,11 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.awaiting_terminal_approval"
         | "activity.attempt.resumed"
         | "activity.attempt.exited"
-        | "activity.attempt.integrated" => attempt(key, a),
+        | "activity.attempt.integrated"
+        | "activity.attempt.queued"
+        | "activity.attempt.queue_delivered"
+        | "activity.attempt.queue_cancelled"
+        | "activity.attempt.queue_failed" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;
             let provider = a.text("provider")?;

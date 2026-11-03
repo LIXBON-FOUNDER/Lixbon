@@ -147,6 +147,8 @@ fn la_aprobacion_en_la_terminal_es_attention_del_attempt_y_se_resuelve_al_volver
             // La espera levantada sobre la Task antes del corte se resuelve igual (D10, LXO-233).
             "attempt.resumed:resolve approval task terminal",
             "attempt.waiting:raise approval attempt terminal",
+            // El final del Attempt también cierra lo que su Pending Queue hubiera levantado (LXO-143).
+            "attempt.exited:resolve failed attempt queue",
             "attempt.exited:resolve approval attempt terminal",
             "attempt.exited:resolve approval task terminal",
         ]

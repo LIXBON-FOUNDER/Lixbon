@@ -121,7 +121,7 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | `answer` | flag `--permission-prompt-tool` en `--help` y versión verificada | con `--permission-prompt-tool stdio`, Claude emite `control_request {subtype: "can_use_tool"}` y acepta `{behavior: "allow", updatedInput}` / `{behavior: "deny", message}`. **Sin ese flag, deniega solo** (`system/permission_denied`) y no pregunta |
 | `interrupt` | versión verificada, y además la sesión debe declarar `interrupt_*` en su `init` | `control_request {subtype: "interrupt"}` → `control_response` → `result` con `is_error` |
 | `resume` | flag `--resume` en `--help` | solo por `--help`; **no capturado** contra la CLI real |
-| `steer` | siempre `unsupported` | observado: un mensaje enviado en mitad de un turno **se encola** y se procesa después (la ejecución de 150 líneas terminó completa antes de "FIN"). Es una cola (LXO-143), no un steer; "Stop & Send" es `interrupt` + mensaje nuevo, lo compone el Core |
+| `steer` | siempre `unsupported` | observado: un mensaje enviado en mitad de un turno **se encola** y se procesa después (la ejecución de 150 líneas terminó completa antes de "FIN"). Es una cola (LXO-143), no un steer; "Stop & Send" es `interrupt` + mensaje nuevo, lo compone el Core. La cola de verdad es la **Pending Queue del Core** ([COLA.md](COLA.md)): no depende de esta cola del proveedor |
 
 En una versión de Claude **sin verificar**, `answer` e `interrupt` quedan `unavailable` con el motivo; `start`/`events`
 siguen disponibles si están los flags. Tipos de mensaje que se ignoran a propósito: `hook_*`, `thinking_tokens`,

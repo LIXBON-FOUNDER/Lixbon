@@ -290,6 +290,8 @@ e ids (`event_seq` siempre, el `seq` del último Event que tocó el hecho).
 | `attempt.resumed` desde la terminal · `attempt.completed` · `failed` · `stopped` · `exited` (LXO-233, D10) | resuelve como arriba | `approval` levantada **sobre la Task** antes del corte | `task` · `terminal` |
 | `attempt.requested` con `n > 1` (un seguimiento, LXO-233) | resuelve `condition_cleared` | `review_ready` y el `failed` levantado sobre la Task antes del corte | `task` |
 | `task.removed` con `attempt` (LXO-233) | resuelve `condition_cleared` | `failed` y `approval`(terminal) de ese Attempt | `attempt` |
+| `attempt.queue_failed` con `reason` ≠ `attempt_ended` (LXO-143; `facts`: `task`, `queue_id`, `failure_reason`) | levanta (o actualiza `facts` de la activa) | `failed` · high | `attempt` · `queue` |
+| `attempt.completed` · `failed` · `stopped` · `exited` (LXO-143) | resuelve `condition_cleared` | `failed` de la cola | `attempt` · `queue` |
 
 Los hechos de **ejecución** del modelo Task/Attempt apuntan al **Attempt**: dos Attempts de una Task tienen su propia
 Attention (`model_read_tests::dos_attempts_de_una_task_tienen_su_propia_attention_y_su_propia_activity`). Solo existen

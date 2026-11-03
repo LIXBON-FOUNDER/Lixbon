@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 57] = [
+pub(super) const KINDS: [&str; 61] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -58,6 +58,10 @@ pub(super) const KINDS: [&str; 57] = [
     "attempt.resumed",
     "attempt.exited",
     "attempt.integrated",
+    "attempt.queued",
+    "attempt.queue_delivered",
+    "attempt.queue_cancelled",
+    "attempt.queue_failed",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -113,6 +117,8 @@ const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
 /// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
 const RETRY_OVERRIDES: [&str; 4] = ["provider", "model", "effort", "profile"];
 const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
+/// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`).
+const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Procedencia de un Worktree que ya existía (`worktree.adopted`).
@@ -538,6 +544,19 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         "attempt.resumed" => rendered("activity.attempt.resumed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.exited" => rendered("activity.attempt.exited", Visual::Error, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.integrated" => rendered("activity.attempt.integrated", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        // Pending Queue (LXO-143). Nunca el texto de la instrucción ni el id del item: solo el hecho.
+        "attempt.queued" => rendered(
+            "activity.attempt.queued",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("position", number(p, "position")), ("attachments", number(p, "attachments"))],
+        ),
+        "attempt.queue_delivered" => rendered("activity.attempt.queue_delivered", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.queue_cancelled" => rendered("activity.attempt.queue_cancelled", Visual::Warning, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.queue_failed" => rendered(
+            "activity.attempt.queue_failed",
+            Visual::Error,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("reason", closed(p, "reason", &QUEUE_FAILURES))],
+        ),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",
             Visual::Info,
