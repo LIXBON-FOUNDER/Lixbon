@@ -9,6 +9,8 @@
       "estado": "vigente",
       "origen": "apps/desktop/src-tauri/src/orch/state.rs::Status (serde snake_case); campo `status` de Task en state.json",
       "items": [
+        { "id": "not_started", "final": false, "attempt_state": null },
+        { "id": "pending_approval", "final": false, "attempt_state": "pending_approval" },
         { "id": "starting", "final": false, "attempt_state": "starting" },
         { "id": "running", "final": false, "attempt_state": "running" },
         { "id": "waiting", "final": false, "attempt_state": "waiting" },
@@ -28,7 +30,7 @@
 
     "attempt_state": {
       "estado": "reservado",
-      "origen": "LIXBON-modelo-runtime.md seccion 4. Hoy el intento es la propia Task (un solo intento por tarea): sus estados son los de task_status mas `pending_approval`, que hoy vive fuera de la Task como pending_spawn_state `pending`. Los ids vigentes se reutilizan tal cual para que state.json no cambie al hacer el corte.",
+      "origen": "LIXBON-modelo-runtime.md seccion 4. Hoy el intento es la propia Task (un solo intento por tarea): sus estados son los de task_status salvo `not_started`, que no tiene Attempt. `pending_approval` es tambien un estado de la Task (el Attempt inicial espera la decision de una Person); las hijas que piden lanzamiento siguen usando pending_spawn_state `pending`. Los ids vigentes se reutilizan tal cual para que state.json no cambie al hacer el corte.",
       "ids": ["pending_approval", "starting", "running", "waiting", "awaiting_terminal_approval", "done", "failed", "stopped", "exited"],
       "final": ["done", "failed", "stopped", "exited"],
       "pendiente_de_decidir": [
@@ -158,8 +160,10 @@
 
     "visual_group": {
       "_comment": "Grupo semantico comun (que forma/color corresponde); cada cliente lo dibuja a su manera.",
-      "groups": ["active", "waiting", "needs_person", "ok", "error", "halted"],
+      "groups": ["active", "waiting", "needs_person", "ok", "error", "halted", "neutral"],
       "of_task_status": {
+        "not_started": "neutral",
+        "pending_approval": "needs_person",
         "starting": "active",
         "running": "active",
         "waiting": "waiting",
@@ -174,6 +178,8 @@
     "desktop": {
       "origen": "apps/desktop/src/store/orchStore.js::STATUS_LABELS y src/orch/terminalApprovalContract.js",
       "task_status_label": {
+        "not_started": "Sin iniciar",
+        "pending_approval": "Pendiente de aprobación",
         "starting": "Arrancando",
         "running": "Trabajando",
         "waiting": "Esperando respuesta",
@@ -188,6 +194,8 @@
     "mobile": {
       "origen": "apps/mobile/src/screens/RemoteOrch.js::STATUS (minuscula, tras «Agente · »)",
       "task_status_label": {
+        "not_started": "sin iniciar",
+        "pending_approval": "pendiente de aprobación",
         "starting": "arrancando",
         "running": "trabajando",
         "waiting": "esperando",

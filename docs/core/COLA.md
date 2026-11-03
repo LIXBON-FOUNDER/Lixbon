@@ -10,7 +10,7 @@ depende de cómo cada proveedor interprete un mensaje concurrente (Claude lo enc
 
 Código: `orch/queue_commands.rs` (comando, entrega, recuperación, query), `orch/queue_rules.rs` (Attention),
 `store/queue.rs` (filas y transacciones), migración
-[`018_attempt_queue.sql`](../../apps/desktop/src-tauri/src/store/migrations/018_attempt_queue.sql). Pruebas:
+[`022_attempt_queue.sql`](../../apps/desktop/src-tauri/src/store/migrations/022_attempt_queue.sql). Pruebas:
 `orch/queue_commands_tests.rs`, `store/queue_tests.rs`.
 
 ## Qué NO es

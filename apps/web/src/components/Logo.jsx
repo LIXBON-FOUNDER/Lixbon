@@ -1,21 +1,30 @@
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
 import { cargarFuente } from './LogoFounder';
 
-export function LogoMark({ size = 26 }) {
+// Isotipo: rombo de esquinas suaves con la chispa de 4 puntas calada abajo a la
+// derecha. Una sola tinta (currentColor) y sin fondo.
+const ROMBO = 'M15 3Q16 2 17 3L29 15Q30 16 29 17L17 29Q16 30 15 29L3 17Q2 16 3 15Z';
+const CHISPA = 'M19.5 15.2Q20.25 18.75 23.8 19.5Q20.25 20.25 19.5 23.8Q18.75 20.25 15.2 19.5Q18.75 18.75 19.5 15.2Z';
+
+export function LogoMark({ size = 26, className = '' }) {
   return (
-    <svg className="logo__mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <rect className="logo__fondo" x="0" y="0" width="32" height="32" rx="9" ry="9" fill="#1B1A17" />
-      <polygon className="logo__p logo__p--1" points="16,3.2 3.2,16 16,16" fill="#DCD6BC" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
-      <polygon className="logo__p logo__p--2" points="16,3.2 28.8,16 16,16" fill="#C7BE9F" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
-      <polygon className="logo__p logo__p--3" points="3.2,16 16,28.8 16,16" fill="#4B5327" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
-      <polygon className="logo__p logo__p--4" points="28.8,16 16,28.8 16,16" fill="#333A1C" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
-      <g className="logo__chispa">
-        <path
-          d="M19.8 16C20.956 18.244 20.956 18.244 23.2 19.4C20.956 20.556 20.956 20.556 19.8 22.8C18.644 20.556 18.644 20.556 16.4 19.4C18.644 18.244 18.644 18.244 19.8 16Z"
-          fill="#FCFAEF"
-        />
-        <circle cx="23.4" cy="22.6" r="1.1" fill="#FCFAEF" />
-      </g>
+    <svg className={`logo__mark ${className}`} width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path className="logo__rombo" fill="currentColor" fillRule="evenodd" d={`${ROMBO}${CHISPA}`} />
+    </svg>
+  );
+}
+
+// El isotipo mientras el agente trabaja: la chispa gira dentro del rombo. La
+// chispa recorta con una máscara, así sirve sobre cualquier fondo.
+export function LogoTrabajando({ size = 18 }) {
+  const id = useId();
+  return (
+    <svg className="logo-trabajo" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <mask id={id}>
+        <path d={ROMBO} fill="#fff" />
+        <path className="logo-trabajo__chispa" d={CHISPA} fill="#000" />
+      </mask>
+      <path d={ROMBO} fill="currentColor" mask={`url(#${id})`} />
     </svg>
   );
 }
@@ -25,7 +34,7 @@ export function LogoMark({ size = 26 }) {
 export function Logo({ size = 15, mark = true, animado = false, className = '' }) {
   return (
     <span className={`logo ${animado ? 'logo--animado' : ''} ${className}`}>
-      {mark && <LogoMark size={Math.round((size || 15) * 1.73)} />}
+      {mark && <LogoMark size={Math.round((size || 15) * 1.5)} />}
       <span className="brand" style={size ? { fontSize: Math.round(size * 1.9) } : undefined}>
         {[...'lixbon'].map((l, i) => (
           <span key={i} className={`logo__letra ${i === 0 ? 'logo__letra--clave' : ''}`} style={animado ? { '--i': i } : undefined}>{l}</span>
@@ -35,7 +44,7 @@ export function Logo({ size = 15, mark = true, animado = false, className = '' }
   );
 }
 
-export function LogoLixbon({ size = 26 }) {
+export function LogoLixbon({ size = 20 }) {
   useEffect(() => { cargarFuente().catch(() => {}); }, []);
   return (
     <span className="logo">

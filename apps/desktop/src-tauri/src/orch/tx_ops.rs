@@ -82,7 +82,132 @@ pub(super) fn effect_observed_is_valid(
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
 type Snapshot = BTreeMap<String, (Status, String)>;
 
+#[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+fn current_attempt_task(tx: &Tx, attempt_id: &str) -> Result<String, String> {
+    let (task_id, n) = match attempt_id.rsplit_once("-a") {
+        Some((task_id, raw_n)) => {
+            let n = raw_n
+                .parse::<u32>()
+                .ok()
+                .filter(|n| *n > 0 && format!("{task_id}-a{n}") == attempt_id)
+                .ok_or_else(|| format!("id de Attempt inválido: {attempt_id}"))?;
+            (task_id, n)
+        }
+        // The old in-module transaction helpers accepted a Task id. Keep that
+        // narrow compatibility for existing Core lifecycle callers; RPC always
+        // supplies and validates the full Attempt id.
+        None => (
+            attempt_id,
+            *tx.attempt_n
+                .get(attempt_id)
+                .ok_or_else(|| format!("la Task {attempt_id} no tiene Attempt actual"))?,
+        ),
+    };
+    if task_id.is_empty()
+        || tx.attempt_n.get(task_id) != Some(&n)
+        || !tx.tasks.contains_key(task_id)
+    {
+        return Err(format!("el Attempt {attempt_id} ya no es el actual de su Task"));
+    }
+    Ok(task_id.to_owned())
+}
+
 impl Tx {
+    /// Expira una aprobación inicial identificada por el id durable del Attempt.
+    /// El plazo solo lo sugiere el Store: `runtime_commit_recorded` lo revalida
+    /// junto al estado pendiente y el evento antes de confirmar el cambio.
+    pub(super) fn expire_pending_initial(&mut self, attempt_id: &str) -> Result<bool, String> {
+        let context = self.context();
+        if context.actor != Actor::System || context.channel != Channel::Core {
+            return Err("expirar una aprobación inicial requiere System/Core".into());
+        }
+
+        let Some((task_id, n)) = attempt_id
+            .rsplit_once("-a")
+            .and_then(|(task, n)| n.parse::<u32>().ok().map(|n| (task, n)))
+            .filter(|(task, n)| !task.is_empty() && *n > 0 && format!("{task}-a{n}") == attempt_id)
+        else {
+            self.no_change();
+            return Ok(false);
+        };
+        let Some(task) = self.tasks.get(task_id).cloned() else {
+            self.no_change();
+            return Ok(false);
+        };
+        if self.attempt_n.get(task_id) != Some(&n) || task.status != Status::PendingApproval {
+            self.no_change();
+            return Ok(false);
+        }
+        if super::state::now_ms() == 0 {
+            self.no_change();
+            return Ok(false);
+        }
+
+        // No usar `close`: una expiración no es una salida de un agente ni debe
+        // crear el mensaje legacy de cierre a la tarea coordinadora.
+        self.state_mut().touch(task_id, Some(Status::Stopped))?;
+        self.try_push_event(ev::runtime_attempt_expired(&task, n));
+        Ok(true)
+    }
+
+    /// Registra el primer Attempt solicitado durante task.create sin pasar por el runner.
+    /// La política y el estado inicial los resuelve el servidor antes de entrar aquí;
+    /// estado, contador, proyección y evento se conservan juntos en la mutación.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn request_initial_attempt(&mut self, task_id: &str) -> Result<(), String> {
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or("No se pudo crear la Task")?;
+        if self.attempt_n.contains_key(task_id) {
+            return Err("La Task ya tiene un Attempt".into());
+        }
+        if !matches!(task.status, Status::PendingApproval | Status::Starting) {
+            return Err("El primer Attempt requiere estado inicial pending_approval o starting".into());
+        }
+        self.state_mut().attempt_n.insert(task_id.to_owned(), 1);
+        self.try_push_event(ev::runtime_new_attempt(&task, 1));
+        self.mark_attempt_request(task_id, 1);
+        Ok(())
+    }
+
+    /// Approve the exact current pending Attempt. The Store validates its durable deadline
+    /// again inside the transaction that persists this candidate and its event.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn approve_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("aprobar un Attempt requiere una Person autenticada".into());
+        }
+        let task_id = current_attempt_task(self, attempt_id)?;
+        if self.tasks.get(&task_id).is_none_or(|t| t.status != Status::PendingApproval) {
+            return Err("Attempt no pendiente de aprobación".into());
+        }
+        let before = self.snapshot_run_of(&task_id);
+        self.state_mut().touch(&task_id, Some(Status::Starting))?;
+        self.push_status_changes(before, None);
+        Ok(())
+    }
+
+    /// Reject the exact current pending Attempt; the lifecycle event is `attempt.rejected`.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn reject_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("rechazar un Attempt requiere una Person autenticada".into());
+        }
+        let task_id = current_attempt_task(self, attempt_id)?;
+        if self.tasks.get(&task_id).is_none_or(|t| t.status != Status::PendingApproval) {
+            return Err("Attempt no pendiente de aprobación".into());
+        }
+        let before = self.snapshot_run_of(&task_id);
+        self.state_mut().touch(&task_id, Some(Status::Stopped))?;
+        self.push_status_changes(before, None);
+        Ok(())
+    }
+
     fn state_mut(&mut self) -> &mut State {
         &mut *self
     }
@@ -196,6 +321,20 @@ impl Tx {
             self.try_push_event(ev::task_created(&t));
         }
         self.push_attempt_created(&task);
+        (run, task)
+    }
+
+    /// Crea solo la intención durable y emite `task.created` v2. A diferencia de `create_run`, no
+    /// solicita Attempt ni produce `attempt.requested`; las demás rutas legacy conservan v1.
+    pub(super) fn create_run_intent(&mut self, objective: &str, root: NewTask) -> (String, String) {
+        let (run, task) = self.state_mut().create_run(objective, root);
+        if let Some(t) = self.tasks.get_mut(&task) {
+            t.status = Status::NotStarted;
+        }
+        self.try_push_event(ev::run_created(&run, &task));
+        if let Some(t) = self.tasks.get(&task).cloned() {
+            self.try_push_event(ev::task_intent_created_from_state(&t));
+        }
         (run, task)
     }
 

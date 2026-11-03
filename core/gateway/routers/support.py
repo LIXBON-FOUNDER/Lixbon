@@ -39,7 +39,8 @@ MAX_ENVIOS = 5
 VENTANA_S = 3600
 _envios: dict[str, list[float]] = {}
 _candado = threading.Lock()
-_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Mismo patrón que _EMAIL_RE de auth.py (sin "." dentro de las etiquetas, para evitar ReDoS).
+_CORREO = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 
 class CasoSoporte(BaseModel):

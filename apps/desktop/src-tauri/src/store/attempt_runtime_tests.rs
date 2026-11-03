@@ -60,7 +60,7 @@ fn evento(kind: &str, entity_kind: &str, entity_id: &str, t: &TaskRow) -> NewEve
 }
 
 fn base(dir: &Path, activo: bool) -> Mundo {
-    let mut s = Store::open_with(dir, &embedded(), "t").unwrap();
+    let mut s = Store::open_with(dir, &embedded_post_cut(), "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
     s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
@@ -313,7 +313,9 @@ fn la_migracion_015_conserva_las_filas_admite_la_causa_nueva_y_mantiene_los_trig
     assert!(conn.execute("INSERT INTO env_blocks (scope, cause) VALUES ('codex/explorar', 'windows_sandbox_setup')", []).is_err(), "antes de la 015 la causa no existe");
 
     let r = super::migrate::migrate_capped(&mut conn, &todas, i64::MAX, "t", t.path()).unwrap();
-    assert_eq!((r.from_version, r.applied.clone()), (14, vec![15, 16, 18]));
+    // Las migraciones posteriores (017 en adelante) no son asunto de esta prueba: solo importa que la 015 y la 016 van primero.
+    assert_eq!(r.from_version, 14);
+    assert_eq!(&r.applied[..2], &[15, 16]);
     let filas: Vec<(String, String)> = conn.prepare("SELECT scope, cause FROM env_blocks ORDER BY scope").unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap();
     assert_eq!(
         filas,

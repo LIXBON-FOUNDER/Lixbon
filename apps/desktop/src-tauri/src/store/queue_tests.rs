@@ -1,4 +1,4 @@
-//! Pruebas de la Pending Queue de un Attempt en el almacén (migración 018, LXO-143).
+//! Pruebas de la Pending Queue de un Attempt en el almacén (migración 022, LXO-143).
 //!
 //! Cubren `docs/core/COLA.md`: el item durable con su id y su orden FIFO, la idempotencia por `request_id`, el ciclo de vida
 //! cerrado (también contra el SQL directo: los triggers), que un item cancelado no se entrega jamás, todo-o-nada con su
@@ -62,7 +62,7 @@ fn evento(kind: &str, entity_kind: &str, entity_id: &str, t: &TaskRow) -> NewEve
 }
 
 /// Las migraciones del binario con el CORTE sustituido por una migración vacía: el migrador general no aplica la 014 ni nada
-/// posterior (es una barrera), así que la 018 se prueba aislada, sin la maquinaria del corte.
+/// posterior (es una barrera), así que la 022 se prueba aislada, sin la maquinaria del corte.
 fn con_el_corte_neutro() -> Vec<Migration> {
     embedded().into_iter().map(|m| if m.name == super::cut::CUT_NAME { Migration::new(m.version, "corte_neutro_de_prueba", "SELECT 1;") } else { m }).collect()
 }
@@ -197,12 +197,12 @@ fn admite(s: &mut Store, q: &str) -> bool {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-fn la_018_es_una_migracion_hacia_adelante_sin_cascadas() {
-    let m = embedded().into_iter().find(|m| m.version == 18).expect("hay migración 018");
+fn la_022_es_una_migracion_hacia_adelante_sin_cascadas() {
+    let m = embedded().into_iter().find(|m| m.version == 22).expect("hay migración 022");
     assert_eq!(m.name, "attempt_queue");
     let sin_comentarios: String = m.sql.lines().filter(|l| !l.trim_start().starts_with("--")).collect::<Vec<_>>().join("\n").to_uppercase();
     for prohibido in ["DROP ", "ALTER TABLE", "ON DELETE", "CASCADE", "BEGIN TRANSACTION", "COMMIT", "ROLLBACK"] {
-        assert!(!sin_comentarios.contains(prohibido), "la 018 no puede llevar «{prohibido}»");
+        assert!(!sin_comentarios.contains(prohibido), "la 022 no puede llevar «{prohibido}»");
     }
     let t = Tmp::new();
     let w = mundo(t.path());
@@ -223,11 +223,11 @@ fn la_018_es_una_migracion_hacia_adelante_sin_cascadas() {
     );
 }
 
-/// La 018 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).
+/// La 022 queda congelada en cuanto se publique (ver `docs/core/MIGRACIONES.md`).
 #[test]
-fn la_migracion_018_tiene_el_checksum_congelado() {
-    let m = embedded().into_iter().find(|m| m.version == 18).expect("existe la 018");
-    assert_eq!(m.checksum(), "4fedbfa43515901393457df95a8ccda1ed805c52ec4a57c5301c2d68ebf395c6", "una migración publicada no se edita");
+fn la_migracion_022_tiene_el_checksum_congelado() {
+    let m = embedded().into_iter().find(|m| m.version == 22).expect("existe la 022");
+    assert_eq!(m.checksum(), "d896db67e96fadac3dc9c761ed7a4c6ac122ec22f488280fdf45cf4a212de337", "una migración publicada no se edita");
 }
 
 #[test]
@@ -731,7 +731,7 @@ fn los_vocabularios_de_estado_motivo_y_confirmacion_son_los_del_contrato() {
     assert_eq!(ids("queue_state", "final"), QueueStatus::ALL.iter().filter(|s| s.is_final()).map(|s| s.as_str().to_string()).collect::<Vec<_>>());
     assert_eq!(ids("queue_failure", "ids"), QueueFailure::ALL.map(|s| s.as_str().to_string()).to_vec());
     // Y los de la migración: el CHECK de la tabla acepta exactamente esos ids.
-    let sql = embedded().into_iter().find(|m| m.version == 18).unwrap().sql;
+    let sql = embedded().into_iter().find(|m| m.version == 22).unwrap().sql;
     for s in QueueStatus::ALL {
         assert!(sql.contains(&format!("'{}'", s.as_str())), "{}", s.as_str());
     }

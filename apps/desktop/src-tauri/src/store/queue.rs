@@ -1,6 +1,6 @@
 //! Pending Queue de un Attempt (LXO-143, épica F5): lado del **almacén**. Contrato y decisiones: `docs/core/COLA.md`.
 //!
-//! Guarda `attempt_queue` (migración `018`): las instrucciones que se enviaron a un Attempt mientras estaba ocupado, en el
+//! Guarda `attempt_queue` (migración `022`): las instrucciones que se enviaron a un Attempt mientras estaba ocupado, en el
 //! orden en que llegaron. Los eventos llegan de `orch::queue_commands`; la dirección sigue siendo `orch -> store`.
 //!
 //! # Garantías

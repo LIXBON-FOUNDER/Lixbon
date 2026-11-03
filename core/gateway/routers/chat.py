@@ -984,8 +984,10 @@ async def delegate_request(
                                          keep_alive=route_role.keep_alive)
             response_text = resp.get("message", {}).get("content", "")
             success = True
-        except Exception as exc:
-            response_text = f"Error al ejecutar el modelo: {exc}"
+        except Exception:
+            # El detalle (hosts, rutas, trazas del nodo) va al log, no al cliente.
+            logger.exception("[chat] fallo al ejecutar el modelo %s", routing["model"])
+            response_text = "Error al ejecutar el modelo. Inténtalo de nuevo en unos minutos."
 
     execution_ms = int((time.perf_counter() - started_at) * 1000)
     save_task_embedding(

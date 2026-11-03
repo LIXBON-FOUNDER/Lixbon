@@ -539,7 +539,7 @@ function TablaPorModelo({
           </label>
           <div className="adm-alta__acciones">
             <button type="submit" className="adm-btn adm-btn--primary" disabled={alta.busy || !nuevo.model_prefix.trim()}>
-              <IconPlus size={15} /> {alta.etiqueta}
+              {alta.etiqueta}
             </button>
             <Boton aria-label="Cancelar" onClick={() => alta.setAbierta(false)}>
               <IconX size={15} />

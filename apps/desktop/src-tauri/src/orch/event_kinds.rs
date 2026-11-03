@@ -687,6 +687,19 @@ pub(super) fn task_intent_created(t: &TaskRow) -> Result<EventDraft, EventError>
     task_draft(t, &TaskIntentCreated { parent: t.parent_task_id.clone(), depth: t.depth, title: clip(&t.title, 120) })
 }
 
+/// `task.created` v2 para una raíz todavía representada en el estado legacy. Se usa solo en
+/// `task_create`: conserva la atribución de Project diferida hasta finalizar la mutación.
+pub(super) fn task_intent_created_from_state(t: &Task) -> Result<EventDraft, EventError> {
+    let p = TaskIntentCreated {
+        parent: t.parent.clone(),
+        depth: i64::from(t.depth),
+        title: clip(&t.title, 120),
+    };
+    Ok(EventDraft::new(EntityKind::Task, t.id.as_str(), &p)?
+        .run(Some(t.run.clone()))
+        .project_from_task(t.id.as_str()))
+}
+
 /// Qué cambió de la intención. `title` solo si cambió (recortado); el encargo nunca viaja.
 #[derive(Serialize)]
 pub(super) struct TaskUpdated {
@@ -753,6 +766,8 @@ pub(super) enum StopCause {
     Cancelled,
     /// Se cerró el Run al que pertenece.
     RunClosed,
+    /// La aprobación inicial superó su plazo durable (30 minutos).
+    ApprovalTimeout,
 }
 
 /// Motivo máquina del fallo de un Attempt. Cerrado: nunca texto libre.
@@ -1136,8 +1151,11 @@ fn runtime_attempt<P: EventPayload>(task: &str, run: &str, n: u32, p: &P) -> Res
     Ok(EventDraft::new(EntityKind::Attempt, format!("{task}-a{n}"), p)?.run(Some(run.into())).project_from_task(task))
 }
 
-fn attempt_status(s: Status) -> AttemptStatus {
-    match s {
+/// El estado de Attempt equivalente al de la Task; `None` si la Task todavía no ha solicitado un Attempt.
+fn attempt_status(s: Status) -> Option<AttemptStatus> {
+    Some(match s {
+        Status::NotStarted => return None,
+        Status::PendingApproval => AttemptStatus::PendingApproval,
         Status::Starting => AttemptStatus::Starting,
         Status::Running => AttemptStatus::Running,
         Status::Waiting => AttemptStatus::Waiting,
@@ -1146,7 +1164,7 @@ fn attempt_status(s: Status) -> AttemptStatus {
         Status::Failed => AttemptStatus::Failed,
         Status::Stopped => AttemptStatus::Stopped,
         Status::Exited => AttemptStatus::Exited,
-    }
+    })
 }
 
 /// `attempt.requested` del Attempt `n` de una Task del runtime: nace sin aprobación pendiente (la pide `spawn`).
@@ -1161,15 +1179,36 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
         role: label(&t.role),
         profile: label(&t.profile),
         external: t.external,
-        approval_required: false,
+        approval_required: t.status == Status::PendingApproval,
     };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
+pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptApproved { task: t.id.clone(), n: n as i64 };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` de un Attempt inicial pendiente: rechazo de una Person o cierre del Run (`cause`).
+pub(super) fn runtime_attempt_rejected(t: &Task, n: u32, cause: StopCause) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` por vencimiento del plazo de la aprobación inicial (actor System/Core).
+pub(super) fn runtime_attempt_expired(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause: StopCause::ApprovalTimeout };
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
 /// Los hechos del paso de `from` a `to` del Attempt `n`, en el orden del ciclo de vida (de una espera a otra se pasa
 /// por `running`, como en las tablas). `cause` es la del mutador (`run_closed` al cerrar un Run).
 pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Status, cause: Option<&str>) -> Vec<Result<EventDraft, EventError>> {
-    let (from, to) = (attempt_status(from), attempt_status(to));
+    // Sin Attempt (una Task `not_started`) no hay hechos de ejecución que emitir.
+    let (Some(from), Some(to)) = (attempt_status(from), attempt_status(to)) else {
+        return vec![];
+    };
     let steps = if from == to {
         vec![]
     } else if crate::store::transition_allowed(from, to) {
@@ -1180,6 +1219,14 @@ pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Sta
         vec![]
     };
     let (task, n64) = (t.id.clone(), n as i64);
+    // La decisión sobre una aprobación inicial no es un paso de ejecución: `attempt.approved` / `attempt.rejected`.
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Starting {
+        return vec![runtime_attempt_approved(t, n)];
+    }
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Stopped {
+        let cause = if cause == Some("run_closed") { StopCause::RunClosed } else { StopCause::Cancelled };
+        return vec![runtime_attempt_rejected(t, n, cause)];
+    }
     let mut prev = from;
     let mut out = vec![];
     for s in steps {

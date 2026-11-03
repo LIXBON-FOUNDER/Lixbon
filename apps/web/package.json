@@ -11,6 +11,8 @@
     "build:spa": "vite build"
   },
   "dependencies": {
+    "@lixbon/fonts": "file:../../shared/fonts",
+    "@lixbon/icons": "file:../../shared/icons",
     "@stripe/react-stripe-js": "^6.9.0",
     "@stripe/stripe-js": "^9.15.0",
     "axios": "^1.20.0",

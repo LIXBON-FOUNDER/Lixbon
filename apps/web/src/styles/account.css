@@ -36,7 +36,6 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  animation: page-in 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .page__body--wide {
@@ -192,7 +191,6 @@
   background: var(--accent-soft);
   color: var(--ink-body);
   font-size: 13px;
-  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .key-reveal code {
@@ -528,7 +526,6 @@
 
 .settings__content {
   min-width: 0;
-  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .settings__pane {
@@ -1080,7 +1077,7 @@
 .mcp-steps li + li { margin-top: 4px; }
 
 /* Piel de founder en Ajustes: menú en píldoras y títulos en Fraunces. */
-.settings__nav-link { min-height: 38px; border-radius: 12px; font-family: var(--font-ui); font-size: 15px; color: var(--ink-soft); }
+.settings__nav-link { min-height: 38px; border-radius: 8px; font-family: var(--font-ui); font-size: 15px; color: var(--ink-soft); }
 .settings__nav-link:hover { background: var(--surface-3); }
 .settings__nav-link.is-active { background: var(--surface-4); font-weight: 600; }
 .set-title { font-family: var(--font-display); font-size: 24px; font-weight: 400; letter-spacing: -0.015em; }
@@ -1200,3 +1197,10 @@
 .comb__detail { padding-left: 22px; font-size: 12.5px; color: var(--ink-muted); }
 .comb__rule { height: 1px; background: var(--surface-4); }
 .comb__note { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-muted); }
+
+/* Ajustes sin tarjetas: cada grupo es un título y sus filas separadas por
+   líneas finas, a todo el ancho de la columna. */
+.set-card { padding: 0 0 28px; border-radius: 0; background: transparent; box-shadow: none; }
+.set-card > .set-title { padding-bottom: 4px; }
+.set-card .set-row { padding: 14px 0; border-radius: 0; background: transparent; box-shadow: inset 0 1px 0 var(--linea); }
+.set-card .set-row:last-child { box-shadow: inset 0 1px 0 var(--linea), inset 0 -1px 0 var(--linea); }

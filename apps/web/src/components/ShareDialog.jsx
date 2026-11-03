@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { IconX, IconCopy, IconCheck, IconTrash } from './Icons';
+import { IconX, IconTrash, IconCopiar } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';
 import { useT } from '../i18n/useT';
 
@@ -74,7 +74,7 @@ export function ShareDialog({ conversationId, onClose }) {
             <div className="share-link">
               <input className="share-link__input" value={link} readOnly onFocus={(e) => e.target.select()} />
               <button className="pill-btn pill-btn--primary share-link__copy" onClick={copy}>
-                {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
+                <IconCopiar hecho={copied} size={15} />
                 {copied ? tc('copied') : tc('copy')}
               </button>
             </div>

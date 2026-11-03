@@ -1,4 +1,4 @@
--- 018 · Pending Queue de un Attempt: instrucciones enviadas mientras está ocupado (LXO-143). Contrato:
+-- 022 · Pending Queue de un Attempt: instrucciones enviadas mientras está ocupado (LXO-143). Contrato:
 -- docs/core/COLA.md.
 --
 -- Queue es una semántica del Core, no del proveedor: la instrucción se guarda en una cola DURABLE por Attempt y se entrega

@@ -43,7 +43,7 @@ struct Mundo {
 }
 
 fn mundo(dir: &Path) -> Mundo {
-    let mut s = Store::open_with(dir, &embedded(), "t").unwrap();
+    let mut s = Store::open_with(dir, &super::migrate::embedded_post_cut(), "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
     s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
@@ -210,7 +210,7 @@ fn el_juego_de_estados_de_la_base_es_el_de_rust() {
 #[test]
 fn antes_del_corte_ningun_mutador_escribe_y_la_base_tampoco() {
     let t = Tmp::new();
-    let mut s = Store::open_with(t.path(), &embedded(), "t").unwrap();
+    let mut s = Store::open_with(t.path(), &super::migrate::embedded_post_cut(), "t").unwrap();
     assert!(!s.agentic_model_active().unwrap());
     let antes = (cuenta(&s, "attempts"), cuenta(&s, "events"));
     let inactivo = |r: StoreResult<_>| assert!(matches!(r, Err(StoreError::AgenticModelInactive)), "{r:?}");

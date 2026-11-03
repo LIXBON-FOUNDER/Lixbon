@@ -23,7 +23,7 @@ export function useGithubPr(remoteUrl, branch) {
   const [pr, setPr] = useState(null);
   const [checks, setChecks] = useState(null);
   const [loaded, setLoaded] = useState(false);
-  const slug = remoteUrl && remoteUrl.includes('github.com') ? githubSlug(remoteUrl) : '';
+  const slug = githubSlug(remoteUrl);
 
   useEffect(() => {
     setPr(null);
@@ -304,7 +304,7 @@ function PublicView() {
 
 export function GitHubView({ onOpenRun }) {
   const { remoteUrl, branch } = useGitStore();
-  const slug = remoteUrl && remoteUrl.includes('github.com') ? githubSlug(remoteUrl) : '';
+  const slug = githubSlug(remoteUrl);
   const [status, setStatus] = useState(null);
   const [filter, setFilter] = useState('open');
   const [prs, setPrs] = useState(null);

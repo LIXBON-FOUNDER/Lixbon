@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useConfirmar } from '../../hooks/useConfirmar';
 import {
-  IconCheck, IconCopy, IconPlus, IconRefresh, IconTrash, IconX,
+  IconCopiar, IconPlus, IconRefresh, IconTrash, IconX,
 } from '../../components/Icons';
 import {
   Aviso, Boton, Cabecera, Cargando, Chip, Medida, Nota, ResumenCluster, Tarjeta, Vacio,
@@ -32,7 +32,7 @@ function BotonCopiar({ texto }) {
   };
   return (
     <Boton sm onClick={copiar}>
-      {ok ? <><IconCheck size={13} /> Copiado</> : <><IconCopy size={13} /> Copiar</>}
+      <IconCopiar hecho={ok} size={13} /> {ok ? 'Copiado' : 'Copiar'}
     </Boton>
   );
 }
@@ -202,7 +202,7 @@ function PanelEnrolar({ onCerrar, onCreado }) {
       <div className="adm-card__pie">
         <Boton onClick={onCerrar}>Cancelar</Boton>
         <button className="adm-btn adm-btn--primary" type="submit" disabled={busy}>
-          <IconCheck size={15} /> Generar token
+          Generar token
         </button>
       </div>
     </form>
@@ -421,7 +421,7 @@ export default function Nodos() {
             <div className="adm-card__pie">
               <Boton onClick={() => setForm(null)}>Cancelar</Boton>
               <button className="adm-btn adm-btn--primary" type="submit" disabled={busy}>
-                <IconCheck size={15} /> Guardar nodo
+                Guardar nodo
               </button>
             </div>
           </form>
