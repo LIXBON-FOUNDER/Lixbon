@@ -303,13 +303,19 @@ def test_cada_usuario_usa_su_token(monkeypatch):
 
 # ── redirecciones ─────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("malo", ["https://evil.com", "//evil.com", "/\\evil.com", "integraciones", ""])
+@pytest.mark.parametrize("malo", [
+    "https://evil.com", "//evil.com", "/\\evil.com", "integraciones", "", "/",
+    # El navegador quita tabuladores y saltos de línea: llegarían como «//evil.com».
+    "/\t/evil.com", "/\n/evil.com", "/\r/evil.com",
+    "/integraciones?x=//evil.com", "/../evil", "/a/../../b", "/%2F/evil.com", "/@evil.com",
+])
 def test_destino_solo_rutas_propias(malo):
     assert rc._destino(malo) == rc.DESTINO_POR_DEFECTO
 
 
-def test_destino_valido():
-    assert rc._destino("/en/integraciones") == "/en/integraciones"
+@pytest.mark.parametrize("bueno", ["/integraciones", "/en/integraciones", "/chat/4f2a-b9_c", "/espacios/12/"])
+def test_destino_valido(bueno):
+    assert rc._destino(bueno) == bueno
 
 
 def test_callback_de_otra_sesion_no_conecta(monkeypatch):

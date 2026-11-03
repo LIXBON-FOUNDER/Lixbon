@@ -17,6 +17,7 @@ Flujo de conexión (navegador, con la cookie de sesión de la web):
 """
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from typing import Any
@@ -37,10 +38,17 @@ router = APIRouter(tags=["connectors"])
 DESTINO_POR_DEFECTO = "/integraciones"
 
 
+# Una ruta de la web: segmentos de letras, cifras, «-», «_» y «.», sin query ni
+# fragmento. Lista de permitidos y no de prohibidos: el navegador quita
+# tabuladores y saltos de línea de las URLs, así que «/\t/evil.com» llegaría
+# como «//evil.com» y saldría de lixbon.com.
+_RUTA_WEB = re.compile(r"(?:/[A-Za-z0-9._-]+)+/?")
+
+
 def _destino(next_path: str | None) -> str:
     """Solo rutas de la propia web: el callback no puede ser un open redirect."""
     p = (next_path or "").strip()
-    if not p.startswith("/") or p.startswith("//") or "\\" in p or len(p) > 200:
+    if len(p) > 200 or not _RUTA_WEB.fullmatch(p) or "/../" in f"{p}/":
         return DESTINO_POR_DEFECTO
     return p
 
