@@ -367,6 +367,27 @@ rechaza y no se lanza nada nuevo; **desactivarlo no interrumpe las ejecuciones v
 * **Límite conocido:** un proveedor que siga vivo tras reiniciar Lixbon (su proceso no murió con la aplicación) no se vuelve a
   adoptar: el Attempt queda cerrado como huérfano y el proceso sin dueño es asunto de la custodia de procesos (LXO-242).
 
+### Crear y aprobar desde Desktop (LXO-141, interfaz)
+
+El ADE no tiene un comando propio: usa `orch_call`, que en Desktop llega al Core por `rpc_via(Ui, User)` con la identidad
+autenticada de la Person (`desktop_client()`), la misma que exigen `task_create` y `attempt_approve`/`attempt_reject` (estos
+dos son `HumanDecision`: ni un agente ni el CLI). El cliente (`src/ade/attemptCommands.js`) solo manda la **selección**
+(`provider`, `profile`, y opcionalmente `model`/`effort`) y la clave de idempotencia; la política (`pending_approval`, plazo,
+worktree) la fija el Core.
+
+* **Nuevo intento** (`NewAttemptForm`, en la vista del Project): título → `title`/`objective`, instrucciones → `spec` (es el
+  prompt que se lanza). Solo ofrece los proveedores con `start` disponible en `provider_capabilities`; los perfiles son los tres
+  utilizables (`explorar`, `proponer`, `delegar_con_revision`). Reintentar tras un fallo reutiliza la misma clave, así que no
+  duplica la Task. Con el Orquestador desactivado el Core rechaza `attempt` y el formulario lo dice en llano (el texto original
+  queda como detalle técnico). Al crear, el ADE abre el detalle del intento.
+* **Aprobar / rechazar** (`AttemptApproval`, en el detalle del Attempt): solo aparece mientras el Attempt está
+  `pending_approval`. Aprobar no lanza nada por sí mismo (despierta al despachador). Un plazo vencido no aprueba: el Core deja el
+  intento detenido y la interfaz lo dice. Tras decidir, el detalle vuelve a leer.
+
+Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
+`codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud; comprueba estado, claim, Events en orden
+y Attention. Las pruebas de la interfaz son `attemptCommands.test.js`, `NewAttemptForm.test.jsx` y `AttemptApproval.test.jsx`.
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
@@ -391,6 +412,6 @@ mutación posterior con la Task presente, reinicio sin revisiones nuevas, barrid
 
 ## Fuera de este slice
 
-Migrar datos del legado (lo hace el corte), Attempt y su runtime, conectar los mutadores al RPC o a `lxo`, UI,
+Migrar datos del legado (lo hace el corte), Attempt y su runtime, conectar los mutadores al RPC o a `lxo`,
 reglas de Attention propias de la intención (`task.discarded` no resuelve nada todavía; `task.removed` ya resuelve lo
 de su Task, como en el legacy) y mutadores de Run (cerrar, borrar).

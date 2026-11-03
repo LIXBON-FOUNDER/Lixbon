@@ -15,6 +15,7 @@ import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { ContextPreview } from './ContextPreview';
+import { NewAttemptForm } from './NewAttemptForm';
 import { ProviderInspector } from './ProviderInspector';
 import { UsageView } from './UsageView';
 import { useCoreModel } from './useCoreModel';
@@ -987,6 +988,13 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onRetryResourceInventory={projectInventory.retry}
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
+                  />
+                  {/* LXO-141: crear una Task con su primer Attempt; queda pendiente de la aprobación de la persona. */}
+                  <NewAttemptForm
+                    projectId={selectedProjectId}
+                    coreModel={coreModel}
+                    active={workspaceActive && workspaceView === 'workspace'}
+                    onCreated={({ projectId, taskId, attemptId }) => selectAttempt({ projectId, taskId, attemptId })}
                   />
                   {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
                   <ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
