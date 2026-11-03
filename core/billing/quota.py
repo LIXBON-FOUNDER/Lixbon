@@ -24,7 +24,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from core.config import SESSION_QUOTA_ENFORCE
+from core.config import CACHED_INPUT_FACTOR, SESSION_QUOTA_ENFORCE
 from core.persistence.queries import (
     bump_credit_window,
     bump_usage_quota,
@@ -178,10 +178,18 @@ def resolve_model_weight(model: str | None) -> dict[str, Any]:
     }
 
 
-def compute_credit_cost(weight: dict[str, Any], tokens_in: int, tokens_out: int) -> int:
-    """Costo entero en créditos: tokens × peso / 1M, sin floats."""
+def compute_credit_cost(weight: dict[str, Any], tokens_in: int, tokens_out: int,
+                        tokens_cached: int = 0) -> int:
+    """Costo entero en créditos: tokens × peso / 1M. `tokens_in` es la entrada
+    completa; la parte `tokens_cached` (ya estaba en la caché KV) se cobra a
+    CACHED_INPUT_FACTOR del precio de entrada."""
+    tokens_in = max(0, tokens_in)
+    cached = min(max(0, tokens_cached), tokens_in)
+    precio_in = int(weight["input_credits_per_mtok"])
+    precio_cache = int(round(precio_in * CACHED_INPUT_FACTOR))
     return (
-        max(0, tokens_in) * int(weight["input_credits_per_mtok"])
+        (tokens_in - cached) * precio_in
+        + cached * precio_cache
         + max(0, tokens_out) * int(weight["output_credits_per_mtok"])
     ) // 1_000_000
 
@@ -273,14 +281,14 @@ def ensure_session_week_credits(user_id: int, plan: dict[str, Any]) -> None:
 
 
 def record_session_week_tokens(user_id: int, model: str | None,
-                               tokens_in: int, tokens_out: int) -> None:
+                               tokens_in: int, tokens_out: int, tokens_cached: int = 0) -> None:
     """Registra el costo ponderado real de una inferencia en AMBOS buckets, al
     terminar. Nunca lanza — un fallo aquí no debe tumbar una respuesta ya
     servida (mismo contrato que record_tokens)."""
     if tokens_in <= 0 and tokens_out <= 0:
         return
     try:
-        cost = compute_credit_cost(resolve_model_weight(model), tokens_in, tokens_out)
+        cost = compute_credit_cost(resolve_model_weight(model), tokens_in, tokens_out, tokens_cached)
         if cost <= 0:
             return
         policy = get_usage_policy()
@@ -326,6 +334,7 @@ def credit_buckets_snapshot(user_id: int, plan: dict[str, Any]) -> dict[str, Any
 
 
 AVISO_CERCA_PCT = 80.0
+AVISO_SEMANA_PCT = (75.0, 90.0)
 _NOMBRE_BUCKET = {"session": "de tu sesión actual", "week": "semanal"}
 
 
@@ -347,13 +356,16 @@ def quota_notice(user_id: int, plan: dict[str, Any]) -> dict[str, Any] | None:
     except Exception as exc:
         logger.warning(f"No se pudo leer el cupo para avisar ({exc})")
         return None
-    peor = max(
-        ((scope, b) for scope, b in snap.items() if not b["unlimited"]),
-        key=lambda x: x[1]["percent"], default=None,
-    )
-    if peor is None or peor[1]["percent"] < AVISO_CERCA_PCT:
+    limitados = [(scope, b) for scope, b in snap.items() if not b["unlimited"]]
+    agotados = [x for x in limitados if x[1]["percent"] >= 100]
+    # Cerca: la semana avisa antes (75 % y 90 %) que la sesión (80 %), porque
+    # quedarse sin cupo semanal es esperar días, no horas.
+    cerca = [x for x in limitados
+             if x[1]["percent"] >= (AVISO_SEMANA_PCT[0] if x[0] == "week" else AVISO_CERCA_PCT)]
+    candidatos = agotados or cerca
+    if not candidatos:
         return None
-    scope, b = peor
+    scope, b = max(candidatos, key=lambda x: (x[0] == "week", x[1]["percent"]))
     agotado = b["percent"] >= 100
     reset = datetime.fromisoformat(b["reset_at"]) if b["reset_at"] else None
     espera = f" Se reinicia en {_human_wait(reset)}." if reset else ""
@@ -361,8 +373,12 @@ def quota_notice(user_id: int, plan: dict[str, Any]) -> dict[str, Any] | None:
         f"Agotaste el cupo {_NOMBRE_BUCKET[scope]} del plan {plan['name']}.{espera}" if agotado
         else f"Llevas el {round(b['percent'])} % del cupo {_NOMBRE_BUCKET[scope]} del plan {plan['name']}.{espera}"
     )
+    # Escalón alcanzado: el cliente recuerda qué avisos cerró el usuario y no
+    # le repite el mismo escalón en cada mensaje, solo el siguiente.
+    escalones = AVISO_SEMANA_PCT if scope == "week" else (AVISO_CERCA_PCT,)
+    nivel = 100 if agotado else max(e for e in escalones if b["percent"] >= e)
     return {"state": "exhausted" if agotado else "near", "scope": scope, "percent": b["percent"],
-            "reset_at": b["reset_at"], "message": message}
+            "level": nivel, "reset_at": b["reset_at"], "message": message}
 
 
 def ensure_can_chat(user_id: int, plan: dict[str, Any], model: str | None = None) -> None:

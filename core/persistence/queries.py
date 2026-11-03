@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from core.persistence.database import get_session, init_db  # noqa: F401 — init_db se re-exporta
+from core.storage import chat_images
 from core.persistence.models import (
     ApiKey,
     AppVersion,
@@ -1576,6 +1577,7 @@ def save_message(
     completion_tokens: int = 0,
     latency_ms: int = 0,
     record_usage: bool = True,
+    images: str | None = None,
 ) -> int:
     """Guarda un mensaje y devuelve su id. `record_usage=False` para un
     borrador que se completará con `update_message` (el uso se registra entonces)."""
@@ -1592,6 +1594,7 @@ def save_message(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             latency_ms=latency_ms,
+            images=images,
             created_at=ts,
         )
         s.add(msg)
@@ -2248,6 +2251,7 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
         # Las legacy (NULL) son de la web, igual que en el filtro de listado.
         "source": c.source or "web",
         "archived": bool(c.archived),
+        "espacio_id": c.espacio_id,
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
@@ -2342,6 +2346,7 @@ def list_messages(conversation_id: str, user_id: int) -> list[dict[str, Any]] | 
                 "model": m.model,
                 "prompt_tokens": m.prompt_tokens,
                 "completion_tokens": m.completion_tokens,
+                "images": chat_images.urls(conversation_id, m.images),
                 "created_at": m.created_at,
             }
             for m in s.scalars(stmt).all()

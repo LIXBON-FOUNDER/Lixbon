@@ -15,5 +15,8 @@ pypdf
 python-docx
 ddgs
 PyJWT[crypto]
+cryptography  # Fernet: cifrado de los tokens de los conectores (core/security/cifrado.py)
 segno
 PyYAML
+# Zonas horarias de los agentes programados (la imagen slim no trae /usr/share/zoneinfo)
+tzdata>=2024.1

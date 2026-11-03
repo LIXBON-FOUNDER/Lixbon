@@ -1,14 +1,18 @@
 import { useSeo } from '../lib/seo';
-import { ShimmerText } from '../components/ShimmerText';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useParams } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { api } from '../lib/api';
-import { streamChatCompletion } from '../lib/stream';
-import { Logo, LogoTrabajando } from '../components/Logo';
+import { streamChatCompletion, usoDeRespuesta } from '../lib/stream';
+import { ConfirmacionGithub, GithubComposer, useTextoHerramienta } from '../components/GithubChat';
+import { estadoGithub, guardarModo, guardarRepo, leerModo, leerRepo } from '../lib/github';
+import { MenuEspacio } from '../components/EspacioChat';
+import { listarEspacios } from '../lib/espacios';
+import { CupoAgotado, avisoCerrado, recordarAvisoCerrado } from '../components/CupoAviso';
+import { Logo, LogoMark } from '../components/Logo';
 import { useShell } from '../components/AppShell';
 import { ChatInput } from '../components/ChatInput';
 import { guardarRazonar, leerRazonar, nivelesDe, thinkDe } from '../lib/razonamiento';
@@ -16,12 +20,15 @@ import { Markdown } from '../components/Markdown';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
 import { VerifyBanner } from '../components/VerifyBanner';
-import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu, IconPencil, IconFile, IconSearch, IconCode, IconChevron, IconTrash, IconCopiar } from '../components/Icons';
+import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu, IconPencil, IconChevron, IconTrash, IconCopiar, IconAlert } from '../components/Icons';
 import { Desplegable } from '../components/Desplegable';
 import { AbrirArchivo } from '../components/FileCard';
 import { PanelArchivo } from '../components/PanelArchivo';
 import { useDismiss } from '../hooks/useDismiss';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
+import { LineaTrabajo, ResumenTrabajo, fichasDe } from '../components/LineaTrabajo';
+import { estaTrabajando, marcarTrabajando } from '../lib/trabajando';
+import { MapaMensajes } from '../components/MapaMensajes';
 import { MascotaChat } from '../components/Mascota';
 import { AvisoChatCerrado, ChatCerrado } from '../components/ChatCerrado';
 import { HeroInicio } from '../components/Cielo';
@@ -50,15 +57,6 @@ function saludo(t, nombre) {
   const s = t(hora < 12 ? 'greetMorning' : hora < 20 ? 'greetAfternoon' : 'greetNight');
   return nombre ? `${s}, ${nombre}` : s;
 }
-
-// Tarjetas bajo el cuadro del chat vacío: rellenan el mensaje sin enviarlo;
-// «Investigar» además enciende la búsqueda web.
-const ATAJOS = [
-  { clave: 'qaWrite', Icono: IconPencil },
-  { clave: 'qaCreate', Icono: IconFile },
-  { clave: 'qaResearch', Icono: IconSearch, web: true },
-  { clave: 'qaCode', Icono: IconCode },
-];
 
 // Debajo de cada respuesta terminada: copiar el texto.
 function AccionesRespuesta({ texto }) {
@@ -192,7 +190,7 @@ export default function ChatPage() {
 
   // El historial, el cajón y la barra lateral viven en el marco (AppShell).
   const {
-    conversations, loadConversations, renameConversation: renombrarEnMarco,
+    conversations, setConversations, loadConversations, renameConversation: renombrarEnMarco,
     deleteConversation: borrarEnMarco, openDrawer, drawerOpen, aviso,
   } = useShell();
   const [messages, setMessages] = useState([]);
@@ -221,13 +219,43 @@ export default function ChatPage() {
   const cerrarArchivo = useCallback(() => setArchivoAbierto(null), []);
   useEffect(() => { if (panelVisual) setArchivoAbierto(null); }, [panelVisual]);
   useEffect(() => { setArchivoAbierto(null); }, [routeConvId]);
+  useEffect(() => { setGithubRepo(leerRepo(routeConvId)); }, [routeConvId]);
   const [errorVisual, setErrorVisual] = useState('');
   // null mientras se pregunta al gateway si el chat web está abierto.
   const chatAbierto = useChatWebAbierto();
-  const [sugerida, setSugerida] = useState('');
+  // GitHub: el repo solo llega al modelo si el usuario lo adjunta aquí.
+  const [githubRepo, setGithubRepo] = useState(null);
+  const [githubModo, setGithubModo] = useState(leerModo);
+  const textoHerramienta = useTextoHerramienta();
+  // Espacio del chat: llega al empezar desde un espacio (state de la ruta),
+  // se elige en el pie antes del primer mensaje o viene de la conversación.
+  const location = useLocation();
+  const [espacio, setEspacio] = useState(location.state?.espacio || null);
+  const autoEnviadoRef = useRef(false);
+  // Un espacio con repo vinculado fija el repo del chat: no se elige otro.
+  // Al quitar el espacio, el repo que venía de él también se va.
+  const repoEspacio = espacio?.repo || null;
+  useEffect(() => {
+    if (!repoEspacio) {
+      setGithubRepo((r) => (r?.deEspacio ? null : r));
+      return undefined;
+    }
+    // Sin GitHub conectado el repo no se adjunta (el turno fallaría); el
+    // espacio sigue mencionándolo en su contexto.
+    let vivo = true;
+    estadoGithub().then((e) => {
+      if (vivo) setGithubRepo(e?.connected ? { full_name: repoEspacio, deEspacio: true } : null);
+    }).catch(() => {});
+    return () => { vivo = false; };
+  }, [repoEspacio]);
 
   const scrollRef = useRef(null);
   const loadedConvRef = useRef(null);
+  // Cada carga de conversación cambia este número: una respuesta en curso
+  // solo pinta en la vista donde empezó (si el usuario se va a otro chat,
+  // sigue en segundo plano y no escribe en el que abrió).
+  const cargaRef = useRef(0);
+  const [recarga, setRecarga] = useState(0);
   const stickToBottomRef = useRef(true);
   const toastTimers = useRef([]);
 
@@ -272,8 +300,14 @@ export default function ChatPage() {
   }, [conversations, routeConvId]);
 
   useEffect(() => {
+    if (!routeConvId) setEspacio(location.state?.espacio || null);
+  }, [routeConvId, location.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!routeConvId) {
       loadedConvRef.current = null;
+      cargaRef.current += 1;
+      setBusy(false);
       setMessages([]);
       setTitle(null);
       setContextUso(null);
@@ -290,14 +324,29 @@ export default function ChatPage() {
     setErrorVisual('');
     visualDeConversacion(routeConvId).then((v) => { if (v) cargarVisual(v.id); }).catch(() => {});
     loadedConvRef.current = routeConvId;
+    cargaRef.current += 1;
+    // Si esta conversación sigue respondiendo en segundo plano, el cuadro
+    // queda ocupado (y «Detener» la corta: abortRef es la suya).
+    setBusy(estaTrabajando(routeConvId));
     setMsgsLoading(true);
     api.get(`/api/conversations/${routeConvId}/messages`)
       .then((res) => {
         const cargados = res.data.messages.map((m) => ({
           role: m.role, content: m.content, prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens,
+          // Las imágenes guardadas llegan como URL: se pintan, pero no se
+          // reenvían al modelo (solo las del mensaje nuevo viajan en base64).
+          ...(m.images?.length ? { imageUrls: m.images.map((u) => (u.startsWith('/') ? `${import.meta.env.VITE_API_URL || ''}${u}` : u)) } : {}),
         }));
         setMessages(cargados);
         setTitle(res.data.conversation?.title || null);
+        const espacioId = res.data.conversation?.espacio_id;
+        setEspacio(null);
+        if (espacioId) {
+          listarEspacios().then((lista) => {
+            const e = lista.find((x) => x.id === espacioId);
+            if (e && loadedConvRef.current === routeConvId) setEspacio({ id: e.id, nombre: e.nombre, repo: e.repo || null });
+          }).catch(() => {});
+        }
         const ultimo = [...cargados].reverse().find((m) => m.role === 'assistant' && m.prompt_tokens);
         setContextUso(ultimo
           ? { used: ultimo.prompt_tokens + ultimo.completion_tokens, total: null }
@@ -305,7 +354,7 @@ export default function ChatPage() {
       })
       .catch(() => navigate('/', { replace: true }))
       .finally(() => setMsgsLoading(false));
-  }, [routeConvId, user, navigate]);
+  }, [routeConvId, user, navigate, recarga]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -411,21 +460,37 @@ export default function ChatPage() {
     const conVisuals = tieneVisuals(user) && (pedido.visual || (panelVisual && paginasVisual.length > 0));
     const base = { visual, paginas: paginasVisual };
 
+    // Antes de navegar: al cambiar la ruta el repo se relee de la conversación.
+    if (githubRepo) guardarRepo(convId, githubRepo);
     if (!routeConvId && saveHistory) {
       loadedConvRef.current = convId;
       navigate(`/c/${convId}`, { replace: true });
     }
 
     stickToBottomRef.current = true;
-    setMessages([...history, { role: 'assistant', content: '' }]);
-    setContextUso((prev) => ({ used: Math.max(prev?.used || 0, estimarTokens(history)), total: null, estimado: true }));
+    const carga = cargaRef.current;
+    const aqui = () => cargaRef.current === carga;
+    const setAqui = (fn) => { if (aqui()) setMessages(fn); };
+    if (saveHistory) {
+      marcarTrabajando(convId, true);
+      // Un chat nuevo aparece en la barra al momento (con su brillo), sin
+      // esperar a que termine la respuesta.
+      if (isFirstExchange) {
+        const ahora = new Date().toISOString();
+        setConversations((prev) => (prev.some((c) => c.id === convId)
+          ? prev
+          : [{ id: convId, title: null, created_at: ahora, updated_at: ahora }, ...prev]));
+      }
+    }
+    setMessages([...history, { role: 'assistant', content: '', inicio: Date.now() }]);
+    setContextUso((prev) => ({ ...prev, used: Math.max(prev?.used || 0, estimarTokens(history)), total: null, estimado: true }));
     setBusy(true);
     setAvisoCuota(null);
-    if (webSearch) setSearching(true);
+    if (webSearch && !githubRepo) setSearching(true);
     const abort = new AbortController();
     abortRef.current = abort;
 
-    const patchLast = (fn) => setMessages((prev) => {
+    const patchLast = (fn) => setAqui((prev) => {
       const next = prev.slice();
       next[next.length - 1] = fn(next[next.length - 1]);
       return next;
@@ -440,11 +505,13 @@ export default function ChatPage() {
         system: conVisuals ? FILE_PROMPT + VISUAL_CHAT_PROMPT + contextoArchivos(base.paginas, base.visual?.version || 0) : FILE_PROMPT,
         webSearch,
         think: thinkDe(razonar, nivelesDe(modelInfo[chosenModel])),
-        onQuota: setAvisoCuota,
+        onQuota: mostrarAvisoCuota,
         signal: abort.signal,
+        espacioId: espacio?.id,
+        ...eventosGithub(patchLast, githubRepo ? { repo: githubRepo.full_name, mode: githubModo } : undefined),
         onSources: (sources, queries) => {
           setSearching(false);
-          setMessages((prev) => {
+          setAqui((prev) => {
             const next = prev.slice();
             const last = next[next.length - 1];
             next[next.length - 1] = { ...last, sources, queries };
@@ -461,16 +528,13 @@ export default function ChatPage() {
           setSearching(false);
           patchLast((last) => ({ ...last, reasoning: (last.reasoning || '') + delta }));
         },
+        onUsage: (usage, ctx) => { if (aqui()) setContextUso(usoDeRespuesta(usage, ctx)); },
         onFinish: (reason, chunk) => {
           const event = chunk?.lixbon_event;
-          if (chunk?.usage) {
-            setContextUso({
-              used: (chunk.usage.prompt_tokens || 0) + (chunk.usage.completion_tokens || 0),
-              total: chunk.lixbon_context?.num_ctx || null,
-            });
-          }
           if (event?.type === 'empty') {
             patchLast((last) => ({ ...last, content: t('emptyResponseNotice'), error: true }));
+          } else if (event?.type === 'interrupted') {
+            patchLast(conAvisoCorte);
           } else if (reason === 'length' && !chunk?.lixbon_quota) {
             patchLast((last) => ({ ...last, aviso: t('cutResponseNotice') }));
           }
@@ -478,13 +542,13 @@ export default function ChatPage() {
       });
       // Stream cerrado sin contenido ni aviso (p. ej. el gateway se reinició a
       // mitad): que no quede "Pensando…" con el botón de enviar activo.
-      patchLast((last) => (last.content ? last : { ...last, content: t('emptyResponseNotice'), error: true }));
+      patchLast((last) => (last.content || last.confirmacion ? last : { ...last, content: t('emptyResponseNotice'), error: true }));
       if (conVisuals && tieneVisual(respuesta)) await guardarVisual(respuesta, convId, base, patchLast, text);
 
       if (isFirstExchange && saveHistory) {
         try {
           const res = await api.post(`/api/conversations/${convId}/generate-title`);
-          setTitle(res.data.title);
+          if (aqui()) setTitle(res.data.title);
         } catch { /* el título puede quedar vacío */ }
       }
       if (saveHistory) loadConversations();
@@ -492,7 +556,7 @@ export default function ChatPage() {
       // Detenido por el usuario: lo generado hasta ahí se queda tal cual
       // (el gateway también lo persiste al cortarse el stream).
       if (err.name === 'AbortError') {
-        setMessages((prev) => {
+        setAqui((prev) => {
           const next = prev.slice();
           const last = next[next.length - 1];
           if (!last.content) next.pop();
@@ -500,8 +564,19 @@ export default function ChatPage() {
         });
         return;
       }
+      // Cupo agotado antes de empezar: en el hilo va la tarjeta del cupo (con
+      // cuándo vuelve y los planes), no un error rojo, y sin repetirlo arriba.
+      if (err.quota?.state === 'exhausted') {
+        setAqui((prev) => {
+          const next = prev.slice();
+          const last = next[next.length - 1];
+          next[next.length - 1] = last.content ? { ...last, aviso: err.message } : { ...last, cuota: err.quota };
+          return next;
+        });
+        return;
+      }
       if (err.quota) setAvisoCuota(err.quota);
-      setMessages((prev) => {
+      setAqui((prev) => {
         const next = prev.slice();
         const last = next[next.length - 1];
         next[next.length - 1] = {
@@ -512,13 +587,144 @@ export default function ChatPage() {
         return next;
       });
     } finally {
-      abortRef.current = null;
-      setSearching(false);
-      setBusy(false);
+      patchLast((last) => (last?.role === 'assistant' && last.inicio && !last.fin ? { ...last, fin: Date.now() } : last));
+      if (abortRef.current === abort) abortRef.current = null;
+      if (saveHistory) marcarTrabajando(convId, false);
+      if (aqui()) {
+        setSearching(false);
+        setBusy(false);
+      } else if (saveHistory && loadedConvRef.current === convId) {
+        // Terminó mientras el usuario miraba esta conversación recargada:
+        // se vuelve a leer para enseñar la respuesta completa.
+        loadedConvRef.current = null;
+        setRecarga((n) => n + 1);
+      }
     }
   };
 
   const stop = () => abortRef.current?.abort();
+
+  // Para el mapa del hilo: solo la pregunta (sin el texto de los adjuntos).
+  const mensajesUsuario = useMemo(() => messages.flatMap((m, i) => {
+    if (m.role !== 'user') return [];
+    const corte = (m.content || '').lastIndexOf(SEPARADOR_ADJUNTOS);
+    const texto = corte >= 0 ? m.content.slice(corte + SEPARADOR_ADJUNTOS.length) : m.content;
+    return [{ indice: i, texto: texto || (m.images?.length || m.imageUrls?.length ? '🖼' : '') }];
+  }), [messages]);
+
+  // «Cerca del límite»: un escalón que el usuario ya cerró no vuelve a salir
+  // en cada mensaje; el siguiente escalón (o el agotado) sí.
+  function mostrarAvisoCuota(aviso) {
+    setAvisoCuota(avisoCerrado(aviso) ? null : aviso);
+  }
+
+  const cerrarAvisoCuota = () => {
+    recordarAvisoCerrado(avisoCuota);
+    setAvisoCuota(null);
+  };
+
+  // El agente se cortó a mitad: lo dicho hasta ahí se queda y debajo va el
+  // aviso (con icono, no como un párrafo más); sin nada dicho, es el error.
+  const conAvisoCorte = (last) => (last.content
+    ? { ...last, aviso: t('interruptedNotice'), avisoError: true }
+    : { ...last, content: t('interruptedNotice'), error: true });
+
+  // Eventos del agente de GitHub sobre el mensaje en curso: la herramienta
+  // que corre (línea de progreso) y la acción que espera al usuario.
+  function eventosGithub(patch, github) {
+    if (!github) return {};
+    return {
+      github,
+      // Cada herramienta que arranca queda en `pasos`: de ahí salen las fichas
+      // de la línea de trabajo y el resumen plegado al terminar.
+      onTool: (ev) => patch((last) => {
+        if (ev.status !== 'running') return { ...last, herramienta: null };
+        // «thinking» es el respiro entre pasos, no una herramienta: no cuenta.
+        if (ev.name === 'thinking') return { ...last, herramienta: ev };
+        const pasos = last.pasos || [];
+        const repetido = pasos.some((p) => p.name === ev.name && (p.target || '') === (ev.target || ''));
+        return { ...last, herramienta: ev, pasos: repetido ? pasos : [...pasos, { name: ev.name, target: ev.target || '' }] };
+      }),
+      onConfirm: (accion) => patch((last) => ({ ...last, herramienta: null, confirmacion: accion })),
+    };
+  }
+
+  // Modo manual: el usuario acepta o rechaza y el agente sigue en el mismo mensaje.
+  const resolverAccion = async (indice, aprobar) => {
+    const msg = messages[indice];
+    const repo = githubRepo || leerRepo(routeConvId);
+    if (!msg?.confirmacion || busy || !repo || !model) return;
+    const patch = (fn) => setMessages((prev) => {
+      const next = prev.slice();
+      next[indice] = fn(next[indice]);
+      return next;
+    });
+    patch((m) => ({ ...m, confirmacionEstado: 'enviando' }));
+    setBusy(true);
+    const abort = new AbortController();
+    abortRef.current = abort;
+    let empezado = false;
+    try {
+      await streamChatCompletion({
+        model,
+        messages: [],
+        conversationId: routeConvId || undefined,
+        signal: abort.signal,
+        onQuota: mostrarAvisoCuota,
+        ...eventosGithub(patch, {
+          repo: repo.full_name, mode: githubModo, resolve: { id: msg.confirmacion.id, approve: aprobar },
+        }),
+        onDelta: (delta) => {
+          patch((m) => {
+            // Lo nuevo va en párrafo aparte de lo que el agente dijo antes de pausar.
+            const sep = !empezado && m.content && !m.content.endsWith('\n\n') ? '\n\n' : '';
+            empezado = true;
+            return { ...m, content: m.content + sep + delta };
+          });
+        },
+        onReasoning: (delta) => patch((m) => ({ ...m, reasoning: (m.reasoning || '') + delta })),
+        onFinish: (reason, chunk) => { if (chunk?.lixbon_event?.type === 'interrupted') patch(conAvisoCorte); },
+      });
+      patch((m) => ({ ...m, confirmacionEstado: aprobar ? 'aceptada' : 'rechazada',
+        // Si el agente volvió a pausar, la nueva acción sustituye a la anterior.
+        ...(m.confirmacion?.id !== msg.confirmacion.id ? { confirmacionEstado: undefined } : {}) }));
+      if (user?.settings?.save_history !== false) loadConversations();
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      patch((m) => ({ ...m, confirmacionEstado: undefined }));
+      showToast(err.message);
+    } finally {
+      patch((m) => (m?.inicio ? { ...m, fin: Date.now() } : m));
+      abortRef.current = null;
+      setBusy(false);
+    }
+  };
+
+  const elegirModo = (modo) => {
+    setGithubModo(modo);
+    guardarModo(modo);
+  };
+
+  const elegirRepo = (repo) => {
+    setGithubRepo(repo);
+    if (routeConvId) guardarRepo(routeConvId, repo);
+  };
+
+  const composerGithub = user ? (
+    <>
+      <MenuEspacio espacio={espacio} onChange={setEspacio} fijo={messages.length > 0} />
+      <GithubComposer repo={githubRepo} onRepo={elegirRepo} modo={githubModo} onModo={elegirModo}
+        fijo={repoEspacio ? espacio.nombre : null} />
+    </>
+  ) : null;
+
+  // «Empieza un chat en este espacio»: el mensaje llega con la ruta y se envía solo.
+  useEffect(() => {
+    const mensaje = location.state?.mensaje;
+    if (routeConvId || !mensaje || !user || autoEnviadoRef.current) return;
+    autoEnviadoRef.current = true;
+    send(mensaje);
+  }, [routeConvId, user, location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const elegirRazonar = (valor) => {
     setRazonar(valor);
@@ -611,38 +817,27 @@ export default function ChatPage() {
         ) : empty ? (
           <HeroInicio cielo>
             <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
-              {user ? <>{saludo(t, user.first_name)}<br /><em>{t('emptyTitleUser')}</em></> : t('emptyTitleGuest')}
+              {user ? <><LogoMark size={34} className="chat-hero__marca" /><span>{saludo(t, user.first_name)}</span></> : t('emptyTitleGuest')}
             </h2>
             <div className="chat-hero__input">
-              {/* Al enviar se olvida el atajo: el próximo chat vacío no debe traerlo relleno. */}
-              <ChatInput onSend={(...args) => { setSugerida(''); return send(...args); }} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
+              <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
                 nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos}
-                initialText={sugerida} />
+                avisoCuota={avisoCuota} onCerrarAviso={cerrarAvisoCuota} commands={comandos} tools={composerGithub} />
             </div>
-            <div className="chat-atajos">
-              {ATAJOS.map(({ clave, Icono, web }) => (
-                <button key={clave} type="button" className="chat-atajo"
-                  onClick={() => { if (web) setWebSearch(true); setSugerida(t(`${clave}Prompt`)); }}>
-                  <span className="chat-atajo__icono"><Icono size={18} /></span>
-                  <span className="chat-atajo__titulo">{t(clave)}</span>
-                  <span className="chat-atajo__texto">{t(`${clave}Sub`)}</span>
-                </button>
-              ))}
-            </div>
-            <p className="chat-disclaimer chat-disclaimer--hero">{t('privacyNote')}</p>
           </HeroInicio>
         ) : (
           <>
+            <MapaMensajes scrollRef={scrollRef} mensajes={mensajesUsuario} />
             <div className="chat-scroll" ref={scrollRef} onScroll={handleScroll}>
               <div className="chat-thread">
                 {messages.map((m, i) => (
                   m.role === 'user' ? (
-                    <div key={i} className="msg msg--user">
-                      {m.images?.length > 0 && (
+                    <div key={i} className="msg msg--user" data-msg-usuario={i}>
+                      {(m.images?.length > 0 || m.imageUrls?.length > 0) && (
                         <div className="msg__images">
-                          {m.images.map((img, j) => <img key={j} src={`data:image/jpeg;base64,${img}`} alt="" />)}
+                          {(m.images || []).map((img, j) => <img key={`b${j}`} src={`data:image/jpeg;base64,${img}`} alt="" />)}
+                          {(m.imageUrls || []).map((url) => <img key={url} src={url} alt="" loading="lazy" />)}
                         </div>
                       )}
                       {m.content}
@@ -653,16 +848,18 @@ export default function ChatPage() {
                         <Sources sources={m.sources || []} queries={m.queries} />
                       )}
                       {searching && i === messages.length - 1 && !m.content && (
-                        <span className="msg__trabajo" role="status">
-                          <LogoTrabajando /> <ShimmerText text={t('searchingWeb')} />
-                        </span>
+                        <LineaTrabajo texto={t('searchingWeb')} inicio={m.inicio} />
+                      )}
+                      {!(busy && i === messages.length - 1) && (
+                        <ResumenTrabajo inicio={m.inicio} fin={m.fin} pasos={m.pasos} textoPaso={textoHerramienta} />
                       )}
                       {m.reasoning && (
                         <Razonamiento texto={m.reasoning} activo={busy && i === messages.length - 1 && !m.content} />
                       )}
                       {(() => {
+                        if (m.cuota) return <CupoAgotado aviso={m.cuota} />;
                         if (m.error) return <MensajeError>{m.content}</MensajeError>;
-                        if (!m.content) return !searching && !m.reasoning && <span className="msg__trabajo" role="status"><LogoTrabajando /><ShimmerText text={t('thinking')} /></span>;
+                        if (!m.content) return !searching && !m.reasoning && !m.herramienta && !m.confirmacion && <LineaTrabajo texto={t('thinking')} inicio={m.inicio} fichas={fichasDe(m.pasos)} />;
                         const activo = busy && i === messages.length - 1;
                         if (!tieneVisual(m.content)) return <Markdown streaming={activo}>{m.content}</Markdown>;
                         const r = aplicarRespuesta([], m.content, { enCurso: true, estricto: true });
@@ -677,7 +874,20 @@ export default function ChatPage() {
                           </>
                         );
                       })()}
-                      {m.aviso && <p className="msg__aviso">{m.aviso}</p>}
+                      {m.herramienta && busy && i === messages.length - 1 && (
+                        <LineaTrabajo texto={textoHerramienta(m.herramienta)} inicio={m.inicio} fichas={fichasDe(m.pasos)} />
+                      )}
+                      {m.confirmacion && (
+                        <ConfirmacionGithub accion={m.confirmacion} estado={m.confirmacionEstado}
+                          deshabilitada={busy && m.confirmacionEstado !== 'enviando'}
+                          onResolver={(aprobar) => resolverAccion(i, aprobar)} />
+                      )}
+                      {m.aviso && (
+                        <p className={`msg__aviso ${m.avisoError ? 'is-error' : ''}`} role="status">
+                          <IconAlert size={15} />
+                          <span>{m.aviso}</span>
+                        </p>
+                      )}
                       {m.content && !m.error && !(busy && i === messages.length - 1) && <AccionesRespuesta texto={sinBloquesVisuales(m.content)} />}
                     </div>
                   )
@@ -697,7 +907,7 @@ export default function ChatPage() {
                   <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                     placeholder={t('replyPlaceholder')} webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
                     nivelesRazonar={nivelesDe(modelInfo[model])} razonar={razonar} onRazonar={elegirRazonar}
-                    avisoCuota={avisoCuota} onCerrarAviso={() => setAvisoCuota(null)} commands={comandos} />
+                    avisoCuota={avisoCuota} onCerrarAviso={cerrarAvisoCuota} commands={comandos} tools={composerGithub} />
                   <p className="chat-disclaimer">
                     {t('disclaimer')}
                   </p>

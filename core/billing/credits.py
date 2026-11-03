@@ -22,6 +22,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from core.config import CACHED_INPUT_FACTOR
 from core.persistence.queries import (
     debit_credit_usage,
     get_credit_balance,
@@ -89,10 +90,14 @@ def resolve_pricing(model: str | None) -> dict[str, Any]:
 
 
 def compute_cost_microusd(pricing: dict[str, Any], prompt_tokens: int,
-                          completion_tokens: int) -> int:
-    """Costo entero en µ$: tokens × tarifa / 1M, sin floats."""
+                          completion_tokens: int, cached_tokens: int = 0) -> int:
+    """Costo entero en µ$: tokens × tarifa / 1M. La parte de la entrada que
+    salió de la caché KV (`cached_tokens`) va a CACHED_INPUT_FACTOR."""
+    cached = min(max(0, cached_tokens), max(0, prompt_tokens))
+    precio_in = int(pricing["input_microusd_per_mtok"])
     return (
-        prompt_tokens * int(pricing["input_microusd_per_mtok"])
+        (prompt_tokens - cached) * precio_in
+        + cached * int(round(precio_in * CACHED_INPUT_FACTOR))
         + completion_tokens * int(pricing["output_microusd_per_mtok"])
     ) // MTOK
 
@@ -159,14 +164,14 @@ def ensure_can_use_api(user_id: int, plan: dict[str, Any], model: str | None = N
 
 
 def debit_usage(user_id: int, model: str | None, prompt_tokens: int,
-                completion_tokens: int) -> None:
+                completion_tokens: int, cached_tokens: int = 0) -> None:
     """Descuenta el costo real al terminar la inferencia. Nunca tumba la
     respuesta ya emitida: un fallo queda en el log para reconciliar."""
     if prompt_tokens <= 0 and completion_tokens <= 0:
         return
     try:
         pricing = resolve_pricing(model)
-        cost = compute_cost_microusd(pricing, prompt_tokens, completion_tokens)
+        cost = compute_cost_microusd(pricing, prompt_tokens, completion_tokens, cached_tokens)
         balance = debit_credit_usage(user_id, cost, model, prompt_tokens, completion_tokens)
         logger.info(
             f"[credits] user={user_id} model={model} tokens={prompt_tokens}+{completion_tokens} "

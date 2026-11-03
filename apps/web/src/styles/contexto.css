@@ -1,0 +1,73 @@
+/* Detalle del anillo: contexto por tramos, tokens de la última respuesta y
+   cupos. Afina lo que define chat.css (.ctx-pop) sin tocarlo. */
+.ctx-uso .ctx-pop {
+  width: 340px; gap: 6px; padding: 6px; border-radius: 12px;
+  --ctx-system: #A98BF2;
+  --ctx-tools: #4FC59A;
+  --ctx-messages: #6B9BF2;
+  --ctx-summary: #E8B65A;
+}
+:root[data-theme="light"] .ctx-uso .ctx-pop {
+  --ctx-system: #7C55D9;
+  --ctx-tools: #22936A;
+  --ctx-messages: #3F72D6;
+  --ctx-summary: #A87A12;
+}
+.ctx-pop__cab b.ctx-pop__valor { margin-left: 4px; }
+.ctx-pop__dato { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+
+/* Barra por tramos: cada parte crece según sus tokens, el resto es libre. */
+.ctx-tramos { display: flex; gap: 2px; height: 8px; margin-top: 10px; }
+.ctx-tramos span { min-width: 0; border-radius: 2px; transition: flex-grow 0.4s ease; }
+.ctx-tramos span:first-child { border-radius: 999px 2px 2px 999px; }
+.ctx-tramos span:last-child { border-radius: 2px 999px 999px 2px; }
+.ctx-tramos span:only-child { border-radius: 999px; }
+
+.ctx-tramos .is-system, .ctx-leyenda i.is-system { background: var(--ctx-system); }
+.ctx-tramos .is-tools, .ctx-leyenda i.is-tools { background: var(--ctx-tools); }
+.ctx-tramos .is-messages, .ctx-leyenda i.is-messages { background: var(--ctx-messages); }
+.ctx-tramos .is-summary, .ctx-leyenda i.is-summary { background: var(--ctx-summary); }
+.ctx-tramos .is-free, .ctx-leyenda i.is-free { background: var(--surface-5); }
+
+.ctx-leyenda { margin: 12px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-family: var(--font-ui); font-size: 13px; }
+.ctx-leyenda > div { display: flex; justify-content: space-between; gap: 8px; }
+.ctx-leyenda dt { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-soft); }
+.ctx-leyenda i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ctx-leyenda dd, .ctx-tokens dd { margin: 0; color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Secciones del detalle (referencias de paneles en oscuro): la cabecera va
+   sobre el tono del menú y cada parte en un bloque de otro tono, separado
+   por hueco y sin rayas. */
+.ctx-pop__resumen { padding: 10px 10px 8px; }
+.ctx-pop__etq { margin: 0; font: 500 12px var(--font-ui); color: var(--ink-muted); }
+.ctx-pop__grande { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 2px; font-family: var(--font-ui); font-size: 13px; }
+.ctx-pop__grande strong { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ctx-pop__bloque { padding: 12px 12px 12px; border-radius: 9px; background: var(--surface-2); }
+:root[data-theme="light"] .ctx-pop__bloque { background: var(--surface-1); }
+.ctx-pop__bloque .ctx-pop__etq { margin-bottom: 8px; }
+
+/* Tokens: concepto a la izquierda, cifra a la derecha; una línea fina antes
+   del total. */
+.ctx-tokens { margin: 0; display: flex; flex-direction: column; gap: 6px; font-family: var(--font-ui); font-size: 13px; }
+.ctx-tokens > div { display: flex; justify-content: space-between; gap: 12px; }
+.ctx-tokens dt { color: var(--ink-soft); }
+.ctx-tokens dd { font-weight: 500; }
+.ctx-tokens .is-total { margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--linea); }
+.ctx-tokens .is-total dt { color: var(--ink); }
+.ctx-tokens .is-total dd { font-weight: 500; }
+
+/* Muescas del cupo: rayitas de 2px con hueco, encendidas en el color del
+   tramo (verde, ámbar, rojo). Se encienden en cascada al abrir. */
+.ctx-muescas { display: flex; gap: 2px; height: 14px; margin-top: 10px; }
+.ctx-muescas span { flex: 1; min-width: 0; border-radius: 1px; background: var(--surface-5); }
+.ctx-muescas.is-ok span.is-on { background: var(--ok); }
+.ctx-muescas.is-warn span.is-on { background: var(--warn); }
+.ctx-muescas.is-danger span.is-on { background: var(--danger); }
+.ctx-muescas span.is-on { animation: muesca-on 0.3s ease both; }
+.ctx-muescas span:nth-child(n) { animation-delay: calc(var(--i, 0) * 1ms); }
+@keyframes muesca-on { from { opacity: 0.25; } }
+.ctx-pop__ritmo { margin: 8px 0 0; font: 13px var(--font-ui); }
+.ctx-pop__ritmo.is-ok { color: var(--ok); }
+.ctx-pop__ritmo.is-warn { color: var(--warn); }
+.ctx-pop__ritmo.is-danger { color: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .ctx-muescas span.is-on { animation: none; } }

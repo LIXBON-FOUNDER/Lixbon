@@ -403,7 +403,7 @@ function Runs({ state, send, onOpen, t }) {
                       {phase && !isFinal(x.status) ? ` · ${phase.name}` : ''}
                     </span>
                   </span>
-                  {asking.has(x.id) && <span className="rorch-pill is-ask" title={t('orch.hasQuestion')}>?</span>}
+                  {asking.has(x.id) && <span className="rorch-pill is-ask" title={t('orch.hasQuestion')}>{t('orch.needsYou')}</span>}
                   {x.merged && <span className="rorch-pill is-ok">{t('orch.merged')}</span>}
                   <span className="rorch-time">{elapsed(x, now)}</span>
                 </button>

@@ -12,7 +12,7 @@ import { api } from '../lib/api';
 import { Sidebar } from './Sidebar';
 import { Logo } from './Logo';
 
-const CONV_PAGE = 30; // conversaciones por página del historial
+const CONV_PAGE = 10; // conversaciones por página: las 10 recientes y otras 10 con «Cargar más»
 const REMOTAS_CADA = 10000; // las sesiones remotas se refrescan cada 10 s
 
 const ShellContext = createContext(null);
@@ -25,11 +25,17 @@ function seccionDe(pathname) {
   if (partes[0] === 'visuals') return 'visuals';
   if (partes[0] === 'remote') return 'remote';
   if (partes[0] === 'integraciones') return 'integraciones';
+  if (partes[0] === 'espacios' || partes[0] === 'agentes') return 'espacios';
   return 'chat';
 }
 
 function convDe(pathname) {
   const m = pathname.match(/\/c\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+function visualDe(pathname) {
+  const m = pathname.match(/\/visuals\/([^/?#]+)/);
   return m ? m[1] : null;
 }
 
@@ -43,6 +49,21 @@ export default function AppShell() {
   const [params] = useSearchParams();
   const seccion = seccionDe(pathname);
   const activeId = convDe(pathname);
+  const visualId = visualDe(pathname);
+
+  // «Chat» y «Visuals» vuelven a donde estabas: la última conversación o el
+  // último visual abierto (o el lienzo vacío si lo último fue uno nuevo).
+  // «Nuevo chat» es lo único que empieza de cero.
+  const [ultimas, setUltimas] = useState({ chat: '/chat', visuals: '/visuals' });
+  useEffect(() => {
+    if (seccion === 'chat') {
+      const ruta = activeId ? `/c/${activeId}` : '/chat';
+      setUltimas((u) => (u.chat === ruta ? u : { ...u, chat: ruta }));
+    } else if (seccion === 'visuals') {
+      const ruta = visualId ? `/visuals/${visualId}` : '/visuals';
+      setUltimas((u) => (u.visuals === ruta ? u : { ...u, visuals: ruta }));
+    }
+  }, [seccion, activeId, visualId]);
 
   const [conversations, setConversations] = useState([]);
   const [convsLoading, setConvsLoading] = useState(true);
@@ -68,8 +89,16 @@ export default function AppShell() {
   const loadConversations = useCallback(async () => {
     try {
       const res = await api.get(`/api/conversations?limit=${CONV_PAGE}`);
-      setConversations(res.data.conversations);
-      setConvsMore(res.data.conversations.length === CONV_PAGE);
+      const page = res.data.conversations;
+      // Refrescar solo renueva la primera página: lo que ya trajo «Cargar
+      // más» se conserva, para que la lista no se encoja tras cada mensaje.
+      const extra = conversationsRef.current.length > CONV_PAGE;
+      setConversations((prev) => {
+        if (prev.length <= CONV_PAGE) return page;
+        const seen = new Set(page.map((c) => c.id));
+        return [...page, ...prev.filter((c) => !seen.has(c.id))];
+      });
+      if (!extra) setConvsMore(page.length === CONV_PAGE);
     } catch { /* sin sesión o error transitorio */ } finally {
       setConvsLoading(false);
     }
@@ -138,6 +167,7 @@ export default function AppShell() {
     });
     if (!ok) return false;
     setConversations((prev) => prev.filter((c) => c.id !== id));
+    setUltimas((u) => (u.chat === `/c/${id}` ? { ...u, chat: '/chat' } : u));
     if (id === activeId) navigate('/chat');
     try {
       await api.delete(`/api/conversations/${id}`);
@@ -160,6 +190,7 @@ export default function AppShell() {
     setConversations([]);
     setConvsMore(false);
     setRemotas([]);
+    setUltimas({ chat: '/chat', visuals: '/visuals' });
     navigate('/chat');
   }, [confirmar, logout, navigate, t, tc]);
 
@@ -198,6 +229,7 @@ export default function AppShell() {
           onClose={closeDrawer}
           seccion={seccion}
           remotas={remotas}
+          ultimas={ultimas}
           remotaActiva={seccion === 'remote' ? params.get('s') : null}
         />
         {compact && drawerOpen && (

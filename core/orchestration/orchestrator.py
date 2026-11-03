@@ -44,6 +44,16 @@ PESO_GPU = 0.40
 # Ventana del contador de peticiones del panel admin (segundos)
 VENTANA_PETICIONES = 3600
 
+# Afinidad de conversación: los mensajes de una misma conversación vuelven al
+# nodo que la atendió, porque ahí está su contexto en la caché KV de Ollama
+# (otro nodo lo procesaría entero desde cero: más lento y más caro). Dura lo
+# que el modelo sigue cargado (keep_alive del chat, 30 min por defecto). Solo
+# se abandona si el nodo cae, ya no tiene el modelo o va mucho peor que el
+# mejor (MARGEN_AFINIDAD puntos de score).
+AFINIDAD_TTL = 30 * 60
+MARGEN_AFINIDAD = 30.0
+AFINIDAD_MAX = 50_000
+
 
 class ModelUnavailable(RuntimeError):
     """El modelo pedido no está en ningún nodo online.
@@ -87,6 +97,10 @@ class NodeOrchestrator:
         # Marcas de tiempo de las peticiones enrutadas en la última hora, para
         # «peticiones por minuto» en el panel. Solo vive en memoria del proceso.
         self._peticiones: deque[float] = deque()
+        # (clave de conversación, modelo) → (node id, última vez). En memoria:
+        # con una sola réplica del gateway basta; perderla solo cuesta una
+        # caché fría, nunca un error.
+        self._afinidad: dict[tuple[str, str], tuple[str, float]] = {}
 
     # Carga de nodos (desde BD)
     # ──────────────────────────────────────────
@@ -305,7 +319,8 @@ class NodeOrchestrator:
             self._rr_index = (self._rr_index + 1) % max(len(empatados), 1)
             return ganador["config"]
 
-    def best_node_for_model(self, model: str, strict: bool = True) -> dict | None:
+    def best_node_for_model(self, model: str, strict: bool = True,
+                            afinidad: str | None = None) -> dict | None:
         """Nodo online con mayor score que tenga el modelo.
 
         `strict=True` (default) devuelve None si ningún nodo online lo tiene, en
@@ -327,7 +342,30 @@ class NodeOrchestrator:
                 if strict:
                     return None
                 con_modelo = online
-            return max(con_modelo, key=lambda e: e["score"])["config"]
+            mejor = max(con_modelo, key=lambda e: e["score"])
+            if not afinidad:
+                return mejor["config"]
+            ahora = time.time()
+            clave = (afinidad, objetivo)
+            previo = self._afinidad.get(clave)
+            elegido = mejor
+            if previo and ahora - previo[1] < AFINIDAD_TTL:
+                fijo = next((e for e in con_modelo if e["config"]["id"] == previo[0]), None)
+                if fijo is not None and fijo["score"] >= mejor["score"] - MARGEN_AFINIDAD:
+                    elegido = fijo
+            self._recordar_afinidad(clave, elegido["config"]["id"], ahora)
+            return elegido["config"]
+
+    def _recordar_afinidad(self, clave: tuple[str, str], nid: str, ahora: float) -> None:
+        """Con el lock tomado."""
+        self._afinidad[clave] = (nid, ahora)
+        if len(self._afinidad) > AFINIDAD_MAX:
+            caducadas = [k for k, (_, t) in self._afinidad.items() if ahora - t >= AFINIDAD_TTL]
+            for k in caducadas:
+                del self._afinidad[k]
+            if len(self._afinidad) > AFINIDAD_MAX:  # todas vigentes: fuera las más viejas
+                for k, _ in sorted(self._afinidad.items(), key=lambda kv: kv[1][1])[: len(self._afinidad) // 10]:
+                    del self._afinidad[k]
 
     def nodos_online(self) -> list[str]:
         with self._lock:
@@ -382,7 +420,8 @@ class NodeOrchestrator:
             "requests_per_minute_avg": round(ultima_hora / (VENTANA_PETICIONES / 60), 1),
         }
 
-    def ollama_target(self, model: str | None = None, strict: bool = False) -> tuple[str, dict, str]:
+    def ollama_target(self, model: str | None = None, strict: bool = False,
+                      afinidad: str | None = None) -> tuple[str, dict, str]:
         """
         Resuelve el destino de inferencia: (base_url_ollama, headers, origen).
         - Con nodo online: el proxy del node_agent ({agent_url}/ollama) autenticado.
@@ -392,9 +431,12 @@ class NodeOrchestrator:
         levanta ModelUnavailable en vez de mandar la petición a un nodo que no
         lo tiene. El caso "sin nodos online" sigue cayendo al Ollama local: es
         el camino legítimo de desarrollo.
+
+        `afinidad`: clave de la conversación; sus peticiones vuelven al mismo
+        nodo mientras siga siendo razonable (ver AFINIDAD_TTL).
         """
         if model:
-            nodo = self.best_node_for_model(model, strict=strict)
+            nodo = self.best_node_for_model(model, strict=strict, afinidad=afinidad)
             if nodo is None and strict:
                 online = self.nodos_online()
                 if online:

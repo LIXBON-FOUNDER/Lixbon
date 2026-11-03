@@ -88,7 +88,9 @@ const NUBES = [
   { x: 0.3, y: 0.46, w: 0.09 }, { x: 0.58, y: 0.3, w: 0.08 },
 ];
 
-function pintar(cv, h, centro) {
+// `ap` (0..1): cuánto del dibujo se ha formado. Al cargar la portada las
+// celdas aparecen de abajo arriba y salteadas, como píxeles que se encienden.
+function pintar(cv, h, centro, ap = 1) {
   const W = cv.clientWidth;
   const H = cv.clientHeight;
   if (!W || !H) return;
@@ -237,7 +239,10 @@ function pintar(cv, h, centro) {
   const filaCordillera = Math.floor((H - rh) / CELL);
   for (let cy = 0; cy < ROWS; cy += 1) {
     for (let cx = 0; cx < COLS; cx += 1) {
-      const i = cy * COLS + cx, o = i * 4, A = d[o + 3] / 255, m = mask[i], x = cx * CELL, y = cy * CELL, hs = hash[i];
+      const i = cy * COLS + cx, o = i * 4, A = d[o + 3] / 255, x = cx * CELL, y = cy * CELL, hs = hash[i];
+      const f = ap >= 1 ? 1 : Math.min(1, Math.max(0, (ap * 1.45 - (hs * 0.55 + (1 - cy / ROWS) * 0.45)) / 0.45));
+      if (f <= 0) continue;
+      const m = mask[i] * f;
       if (A < 0.08) {
         // Estrellas de noche (fijas), por encima de la cordillera.
         if (noche && cy < filaCordillera && hs > 0.991) {
@@ -263,19 +268,40 @@ function pintar(cv, h, centro) {
   }
 }
 
+let formado = false;
+
 function Cielo() {
   const ref = useRef(null);
   useEffect(() => {
     const cv = ref.current;
-    const dibujar = () => pintar(cv, horaActual(), cv.parentElement?.querySelector('.colibri__centro'));
-    dibujar();
+    const centro = () => cv.parentElement?.querySelector('.colibri__centro');
+    let animando = false;
+    const dibujar = () => { if (!animando) pintar(cv, horaActual(), centro()); };
+    // Solo la primera vez que se carga la página: el dibujo se forma en ~1,4 s.
+    // Al volver a la portada (o con «menos movimiento») sale entero.
+    let marco = 0;
+    if (!formado && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      animando = true;
+      let t0 = null;
+      const paso = (t) => {
+        t0 ??= t;
+        const p = Math.min(1, (t - t0) / 1400);
+        pintar(cv, horaActual(), centro(), 1 - (1 - p) ** 2);
+        if (p < 1) marco = requestAnimationFrame(paso);
+        else { animando = false; formado = true; }
+      };
+      marco = requestAnimationFrame(paso);
+    } else {
+      formado = true;
+      dibujar();
+    }
     const reloj = setInterval(dibujar, 60_000);
     const tam = new ResizeObserver(dibujar);
     tam.observe(cv);
     const tema = new MutationObserver(dibujar);
     tema.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     document.fonts?.ready.then(dibujar).catch(() => {});
-    return () => { clearInterval(reloj); tam.disconnect(); tema.disconnect(); };
+    return () => { cancelAnimationFrame(marco); clearInterval(reloj); tam.disconnect(); tema.disconnect(); };
   }, []);
   return <canvas className="cielo" ref={ref} aria-hidden="true" />;
 }

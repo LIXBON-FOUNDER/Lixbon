@@ -4,7 +4,7 @@ export default {
     backToChat: 'Volver al chat',
     title: 'Ajustes',
     unlimited: 'Ilimitado',
-    sections: { general: 'General', profile: 'Perfil', privacy: 'Privacidad', billing: 'Facturación', usage: 'Uso' },
+    sections: { account: 'Cuenta', preferences: 'Preferencias', security: 'Seguridad', privacy: 'Privacidad', billing: 'Plan y facturación', usage: 'Uso' },
     loadError: 'No se pudo cargar tu cuenta. Intenta de nuevo.',
     logoutConfirm: { title: '¿Cerrar sesión?', text: 'Se cerrará tu sesión en este navegador.', label: 'Cerrar sesión' },
 
@@ -27,9 +27,15 @@ export default {
       preferencesTitle: 'Preferencias',
       language: 'Idioma',
       languageHint: 'Idioma de la interfaz',
+      theme: 'Tema',
+      themeHint: 'Sistema sigue el de tu ordenador',
+      themeLight: 'Claro',
+      themeDark: 'Oscuro',
+      themeSystem: 'Sistema',
     },
 
     profile: {
+      loginTitle: 'Inicio de sesión',
       title: 'Cuenta',
       email: 'Correo',
       emailHintVerified: 'Nadie más puede reclamar esta dirección',
@@ -87,6 +93,7 @@ export default {
 
     privacy: {
       title: 'Privacidad',
+      dangerTitle: 'Zona de peligro',
       lead: 'En lixbon tus conversaciones son tuyas. Los modelos corren en GPUs propias o alquiladas que operamos nosotros, y no enviamos tus datos a proveedores externos de modelos de IA.',
       anonymousUsage: 'Datos de uso anónimos',
       anonymousUsageHint: 'Métricas agregadas para mejorar el servicio',
@@ -115,12 +122,12 @@ export default {
     usage: {
       periodTitle: 'Cupo de la cuenta',
       plan: 'Plan {{name}}',
-      paidDesc: 'Tu chat se mide en dos relojes independientes: una sesión que se reinicia cada 4 horas y un cupo semanal. Cualquiera de los dos que se agote corta el chat hasta que se reinicie — es el mismo cupo sin importar si usas la web, el escritorio, el CLI o el móvil.',
-      freeDesc: 'Tu plan gratuito tiene el cupo más bajo de sesión (4h) y semana. Se reinicia solo, sin que tengas que hacer nada.',
+      paidDesc: 'Dos relojes: una sesión de 4 horas y un cupo semanal. El mismo en la web, el escritorio, el CLI y el móvil.',
+      freeDesc: 'Una sesión de 4 horas y un cupo semanal. Se reinician solos.',
       sessionTitle: 'Sesión actual',
-      sessionHint: 'Se abre con tu primer mensaje y dura 4 horas exactas',
+      sessionHint: 'Empieza con tu primer mensaje y dura 4 horas.',
       weekTitle: 'Esta semana',
-      weekHint: 'Se reinicia una vez por semana, a una hora fija de tu cuenta',
+      weekHint: 'Una vez por semana, a una hora fija.',
       resetsAt: 'Se reinicia {{date}}',
       notStarted: 'Empieza con tu próximo mensaje.',
       tokensThisMonth: 'Tokens este mes',
@@ -307,7 +314,7 @@ export default {
     backToChat: 'Back to chat',
     title: 'Settings',
     unlimited: 'Unlimited',
-    sections: { general: 'General', profile: 'Profile', privacy: 'Privacy', billing: 'Billing', usage: 'Usage' },
+    sections: { account: 'Account', preferences: 'Preferences', security: 'Security', privacy: 'Privacy', billing: 'Plan & billing', usage: 'Usage' },
     loadError: 'Couldn’t load your account. Please try again.',
     logoutConfirm: { title: 'Log out?', text: 'You’ll be logged out on this browser.', label: 'Log out' },
 
@@ -330,9 +337,15 @@ export default {
       preferencesTitle: 'Preferences',
       language: 'Language',
       languageHint: 'Interface language',
+      theme: 'Theme',
+      themeHint: 'System follows your computer',
+      themeLight: 'Light',
+      themeDark: 'Dark',
+      themeSystem: 'System',
     },
 
     profile: {
+      loginTitle: 'Sign-in',
       title: 'Account',
       email: 'Email',
       emailHintVerified: 'No one else can claim this address',
@@ -390,6 +403,7 @@ export default {
 
     privacy: {
       title: 'Privacy',
+      dangerTitle: 'Danger zone',
       lead: 'At lixbon, your conversations are yours. The models run on owned or rented GPUs that we operate, and we don’t send your data to external AI model providers.',
       anonymousUsage: 'Anonymous usage data',
       anonymousUsageHint: 'Aggregated metrics to improve the service',
@@ -418,12 +432,12 @@ export default {
     usage: {
       periodTitle: 'Account quota',
       plan: '{{name}} plan',
-      paidDesc: 'Your chat is measured by two independent clocks: a session that resets every 4 hours, and a weekly quota. Either one running out pauses chat until it resets — the same quota whether you use the web, desktop, CLI, or mobile.',
-      freeDesc: 'Your free plan has the lowest session (4h) and weekly quota. It resets on its own, nothing to do on your end.',
+      paidDesc: 'Two clocks: a 4-hour session and a weekly quota. The same on the web, desktop, CLI and mobile.',
+      freeDesc: 'A 4-hour session and a weekly quota. They reset on their own.',
       sessionTitle: 'Current session',
-      sessionHint: 'Opens with your first message and lasts exactly 4 hours',
+      sessionHint: 'Starts with your first message and lasts 4 hours.',
       weekTitle: 'This week',
-      weekHint: 'Resets once a week, at a fixed time for your account',
+      weekHint: 'Once a week, at a fixed time.',
       resetsAt: 'Resets {{date}}',
       notStarted: 'Starts with your next message.',
       tokensThisMonth: 'Tokens this month',

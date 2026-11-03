@@ -1,0 +1,14 @@
+/* Cupo del chat. La tarjeta va dentro del hilo (sin sombra ni rayas: no
+   flota) y sustituye al error rojo de antes. */
+.cupo-tarjeta {
+  display: flex; flex-direction: column; gap: 8px; max-width: 560px; padding: 14px 16px;
+  border-radius: var(--radius-box, var(--radius)); background: var(--surface-2);
+}
+.cupo-tarjeta__cab { display: flex; align-items: center; gap: 8px; color: var(--warn); }
+.cupo-tarjeta__cab strong { font: 500 14px var(--font-ui); color: var(--ink); }
+.cupo-tarjeta__texto { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
+.cupo-tarjeta__acciones { display: flex; gap: 8px; margin-top: 2px; }
+
+/* Aviso «cerca del límite» encima del cuadro de mensaje: en tono de aviso,
+   no de error (el agotado sigue en rojo). */
+.aviso-cuota:not(.is-agotado) { background: var(--warn-soft); color: var(--ink); }

@@ -149,23 +149,27 @@ def resolve_num_ctx(
     catalog: Iterable[Any] | None,
     model: str | None,
 ) -> int | None:
-    """num_ctx efectivo: petición > rol (panel) > MODEL_NUM_CTX global > default de Ollama.
-    El global se recorta a la ventana máxima del modelo cuando se conoce."""
+    """Ventana FIJA de cada modelo: rol (panel) > MODEL_NUM_CTX global >
+    MODEL_NUM_CTX_DEFAULT, recortada a la máxima del modelo cuando se conoce.
+
+    Es siempre la misma para un modelo dado, venga de donde venga la petición:
+    si a Ollama le llega otro num_ctx, recarga el modelo (7-8 s medidos) y
+    tira la caché KV de TODAS las conversaciones de ese nodo. Por eso el
+    num_ctx que pida el cliente (`explicit`) ya no manda: se ignora. El
+    cliente lo sigue pudiendo usar para su propio presupuesto, y /v1/models
+    le anuncia esta misma ventana."""
     from core import config
-    if explicit:
-        return int(explicit)
-    if role_num_ctx:
-        return int(role_num_ctx)
-    cfg = config.MODEL_NUM_CTX
-    if not cfg:
-        return None
+    del explicit  # ver docstring
     maximo = context_length_of(catalog, model)
-    if cfg == "max":
+    if role_num_ctx:
+        pedido = int(role_num_ctx)
+    elif config.MODEL_NUM_CTX == "max":
         return maximo
-    try:
-        pedido = int(cfg)
-    except ValueError:
-        return None
+    else:
+        try:
+            pedido = int(config.MODEL_NUM_CTX or config.MODEL_NUM_CTX_DEFAULT)
+        except ValueError:
+            pedido = int(config.MODEL_NUM_CTX_DEFAULT)
     return min(pedido, maximo) if maximo else pedido
 
 

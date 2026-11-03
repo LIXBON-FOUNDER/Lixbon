@@ -42,7 +42,7 @@
   padding: 7px 10px;
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
   text-wrap: pretty;
   pointer-events: none;
@@ -119,7 +119,7 @@
   animation: mascota-zzz 2.4s linear infinite;
 }
 
-.mascota-zzz i:nth-child(1) { font-size: 11px; }
+.mascota-zzz i:nth-child(1) { font-size: 12px; }
 .mascota-zzz i:nth-child(2) { font-size: 14px; animation-delay: 0.8s; }
 .mascota-zzz i:nth-child(3) { font-size: 17px; animation-delay: 1.6s; }
 
@@ -146,7 +146,7 @@
 }
 
 .mascota-chat__boton:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 1.5px solid var(--anillo-foco);
   outline-offset: 2px;
 }
 
@@ -206,7 +206,7 @@
 
 .mascota-guia__boton:focus-visible,
 .mascota-volver:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 1.5px solid var(--anillo-foco);
   outline-offset: 2px;
 }
 
@@ -295,7 +295,7 @@
 
 .mascota-elegir__op:hover:not(:disabled) { background: var(--bg-hover); }
 .mascota-elegir__op.is-activa,
-.mascota-elegir__op.is-activa:hover:not(:disabled) { background: var(--primary); color: var(--on-primary); }
+.mascota-elegir__op.is-activa:hover:not(:disabled) { background: var(--surface-4); color: var(--ink); }
 .mascota-elegir__op:disabled { cursor: default; }
 
 .mascota-elegir__retrato {
@@ -305,7 +305,7 @@
 
 .mascota-elegir__retrato .mascota-sprite + .mascota-sprite { margin-left: -16px; }
 
-.mascota-elegir__nombre { font-size: 13.5px; font-weight: 500; }
+.mascota-elegir__nombre { font-size: 13px; font-weight: 500; }
 .mascota-elegir__sub { font-size: 12px; opacity: 0.72; }
 
 .mascota-segmentos {
@@ -319,7 +319,7 @@
   padding: 0 12px;
   border-radius: var(--radius-chip);
   background: var(--bg-secondary);
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-soft);
 }
 
@@ -334,3 +334,7 @@
   .mascota-elegir__retrato { margin-bottom: 0; }
   .mascota-elegir__sub { margin-left: auto; }
 }
+
+/* El personaje elegido, como lo elegido en los menús: fondo y check. */
+.mascota-elegir__nombre { display: inline-flex; align-items: center; gap: 6px; }
+.mascota-elegir__check { color: var(--ink); }

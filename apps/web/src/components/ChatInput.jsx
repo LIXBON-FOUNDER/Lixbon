@@ -2,12 +2,12 @@
 // valen con cualquier modelo. El audio no se acepta: el gateway no transcribe.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  IconClip, IconFile, IconGlobe, IconImage, IconPlus, IconSend, IconStop, IconX,
-  Interruptor,
+  IconClip, IconFile, IconImage, IconMic, IconSearch, IconSend, IconStop, IconX,
 } from './Icons';
-import { AvisoCuota, Razonamiento } from './Razonamiento';
+import { OndaVoz, TiempoGrabado } from './OndaVoz';
+import { ShimmerText } from './ShimmerText';
+import { AvisoCuota, ModeloMenu } from './Razonamiento';
 import { ContextoUso } from './ContextoUso';
-import { Select } from './Select';
 import { useDictado } from '../hooks/useDictado';
 import { useT } from '../i18n/useT';
 import {
@@ -242,7 +242,15 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     anadirArchivos(archivos);
   };
 
-  const aviso = error || dictado.error;
+  const ERRORES_DICTADO = {
+    'not-allowed': 'dictateErrDenied',
+    'service-not-allowed': 'dictateErrService',
+    network: 'dictateErrNetwork',
+    'audio-capture': 'dictateErrNoMic',
+    'language-not-supported': 'dictateErrLang',
+    local: 'dictateErrLocal',
+  };
+  const aviso = error || (dictado.error && t(ERRORES_DICTADO[dictado.error] || 'dictateErrGeneric', { code: dictado.error }));
 
   return (
     <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
@@ -290,6 +298,11 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         </div>
       )}
       {aviso && <div className="chat-input__error">{aviso}</div>}
+      {dictado.estado === 'cargando' && (
+        <div className="chat-input__estado" role="status">
+          {t('dictateLoading', { pct: dictado.progreso ?? 0 })}
+        </div>
+      )}
 
       {sugerencias.length > 0 && (
         <ul className="chat-cmds" role="listbox" aria-label={t('commandsAria')}>
@@ -315,6 +328,35 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
         aria-label={t('messageAriaLabel')}
       />
 
+      {/* Grabando: la barra entera pasa a ser la grabación (descartar, tiempo,
+          onda en vivo y «Detener»); al soltar, el aviso de transcripción. */}
+      {dictado.escuchando || dictado.estado === 'transcribiendo' ? (
+        <div className="chat-input__bar dictado" role="group" aria-label={t('dictateRecording')}>
+          {dictado.escuchando ? (
+            <>
+              <button
+                className="chat-chip chat-chip--icono chat-chip--ghost"
+                type="button"
+                onClick={dictado.cancelar}
+                title={t('dictateCancel')}
+                aria-label={t('dictateCancel')}
+              >
+                <IconX size={18} />
+              </button>
+              <span className="dictado__punto" aria-hidden="true" />
+              <TiempoGrabado desde={dictado.desde} />
+              <OndaVoz stream={dictado.stream} />
+              <button className="dictado__detener" type="button" onClick={dictado.detener}>
+                <IconStop size={14} /> {t('dictateStopBtn')}
+              </button>
+            </>
+          ) : (
+            <span className="dictado__transcribiendo" role="status">
+              <ShimmerText text={t('dictateTranscribing')} />
+            </span>
+          )}
+        </div>
+      ) : (
       <div className="chat-input__bar">
       <div className="chat-input__tools">
         <input
@@ -326,79 +368,87 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           style={{ display: 'none' }}
         />
         <button
-          className="chat-chip chat-chip--icono"
+          className="chat-chip chat-chip--icono chat-chip--ghost"
           type="button"
           title={t('attachTitle')}
           aria-label={t('attachTitle')}
           onClick={() => fileRef.current?.click()}
         >
-          <IconPlus size={16} />
+          <IconClip size={20} />
         </button>
-        <button
-          className={webSearch ? 'chat-chip is-active' : 'chat-chip'}
-          type="button"
-          title={onToggleWeb ? (webSearch ? t('webSearchOnTitle') : t('webSearchOffTitle')) : t('webSearchSoonTitle')}
-          onClick={onToggleWeb}
-          disabled={!onToggleWeb}
-          aria-pressed={webSearch}
-        >
-          <IconGlobe size={14} /> {t('webSearch')}
-        </button>
-        {tools && <span className="chat-input__sep" />}
-        {tools}
-      </div>
-
-      <div className="chat-input__meta">
-      {models.length > 0 && (
-        <>
-          <ContextoUso uso={contextUso} />
-          <Select
-            className="chat-input__model"
-            value={model}
-            options={models.map((m) => ({ value: m, label: modelInfo[m]?.name || m }))}
-            onChange={onModelChange}
-            aria-label={t('modelAriaLabel')}
-          />
-          {onRazonar && <Razonamiento niveles={nivelesRazonar} valor={razonar} onChange={onRazonar} />}
-        </>
-      )}
         {dictado.soportado && (
           <button
-            className={dictado.escuchando ? 'chat-chip chat-chip--icono chat-chip--ghost is-recording' : 'chat-chip chat-chip--icono chat-chip--ghost'}
+            className="chat-chip chat-chip--icono chat-chip--ghost"
             type="button"
-            title={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
-            aria-label={dictado.escuchando ? t('dictateStop') : t('dictateStart')}
-            onClick={dictado.alternar}
-            aria-pressed={dictado.escuchando}
+            title={t('dictateStart')}
+            aria-label={t('dictateStart')}
+            onClick={dictado.empezar}
           >
-            <Interruptor tipo="microfono" on={dictado.escuchando} size={16} />
+            <IconMic size={20} />
+          </button>
+        )}
+        {onToggleWeb && (
+          <button
+            className={webSearch ? 'chat-chip chat-chip--investigar is-active' : 'chat-chip chat-chip--investigar'}
+            type="button"
+            title={webSearch ? t('webSearchOnTitle') : t('webSearchOffTitle')}
+            aria-label={t('webSearch')}
+            onClick={onToggleWeb}
+            aria-pressed={webSearch}
+          >
+            <IconSearch size={18} /> <span>{t('webSearch')}</span>
           </button>
         )}
       </div>
 
-      {busy && onStop ? (
-        <button
-          className="chat-input__send is-stop"
-          type="button"
-          onClick={onStop}
-          aria-label={t('stopResponse')}
-          title={t('stopResponse')}
-        >
-          <IconStop size={14} />
-        </button>
-      ) : (
-        <button
-          className="chat-input__send"
-          type="button"
-          onClick={send}
-          disabled={busy || leyendo}
-          aria-label={t('sendAriaLabel')}
-        >
-          <IconSend size={16} />
-        </button>
+      <div className="chat-input__meta">
+        {/* El anillo va en todo cuadro de mensaje, también vacío y en Visuals:
+            es el único sitio donde se ve el cupo semanal. */}
+        <ContextoUso uso={contextUso} />
+        {busy && onStop ? (
+          <button
+            className="chat-input__send is-stop"
+            type="button"
+            onClick={onStop}
+            aria-label={t('stopResponse')}
+            title={t('stopResponse')}
+          >
+            <IconStop size={16} />
+          </button>
+        ) : (
+          <button
+            className="chat-input__send"
+            type="button"
+            onClick={send}
+            disabled={busy || leyendo}
+            aria-label={t('sendAriaLabel')}
+          >
+            <IconSend size={18} />
+          </button>
+        )}
+      </div>
+      </div>
       )}
       </div>
-      </div>
+
+      {/* Pie: lo que no es del mensaje en sí (el modelo, su razonamiento y
+          las opciones de la página, como el sistema de diseño de Visuals). */}
+      {(tools || models.length > 0) && (
+        <div className="chat-input__pie">
+          <div className="chat-input__pie-izq">{tools}</div>
+          {models.length > 0 && (
+            <ModeloMenu
+              models={models}
+              modelInfo={modelInfo}
+              model={model}
+              onModelChange={onModelChange}
+              niveles={nivelesRazonar}
+              razonar={razonar}
+              onRazonar={onRazonar}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

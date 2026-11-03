@@ -118,6 +118,8 @@ class Conversation(Base):
     share_token: Mapped[str | None] = mapped_column(Text, unique=True)
     # 1 = el usuario la archivó: la limpieza por inactividad no la toca.
     archived: Mapped[int] = mapped_column(nullable=False, default=0)
+    # Espacio al que pertenece (sus instrucciones, archivos y memoria van en cada turno).
+    espacio_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -137,6 +139,8 @@ class Message(Base):
     completion_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     total_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(nullable=False, default=0)
+    # Imágenes que mandó el usuario (JSON: tokens de R2 o data URLs sin R2).
+    images: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -1137,3 +1141,162 @@ class SkillInstall(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     client: Mapped[str | None] = mapped_column(Text)                    # ide | web | cli
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class UserConnector(Base):
+    """La cuenta de un servicio externo (GitHub…) que un usuario conectó a la
+    suya de Lixbon. Una por usuario y proveedor: cada usuario autoriza SU
+    cuenta, y nadie más la usa.
+
+    Los tokens van cifrados (core/security/cifrado.py), nunca en claro: el
+    gateway los necesita para llamar a la API, así que no basta un hash."""
+    __tablename__ = "user_connectors"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_connectors_user_provider"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)           # github
+    account_id: Mapped[str | None] = mapped_column(Text)                  # id numérico en el proveedor
+    account_login: Mapped[str | None] = mapped_column(Text)               # @login
+    account_avatar: Mapped[str | None] = mapped_column(Text)
+    access_token_enc: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text)
+    access_expires_at: Mapped[str | None] = mapped_column(Text)           # ISO; NULL = no caduca
+    refresh_expires_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ConnectorPendingAction(Base):
+    """Acción del agente que espera la confirmación del usuario (modo manual).
+
+    Guarda el turno del agente congelado (`transcript_json`: los mensajes del
+    bucle de herramientas hasta ese punto, y `calls_json`: las llamadas que
+    faltan, la primera es la que se confirma). Al aprobar o rechazar se borra
+    la fila (un solo uso) y el bucle sigue desde ahí. En BD y no en memoria
+    para que un redeploy no se lleve la conversación a medias."""
+    __tablename__ = "connector_pending_actions"
+    __table_args__ = (
+        Index("idx_connector_pending_user", "user_id"),
+        Index("idx_connector_pending_exp", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)               # token aleatorio
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[str] = mapped_column(Text, nullable=False)       # repo, ref, modo
+    transcript_json: Mapped[str] = mapped_column(Text, nullable=False)
+    calls_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ConversationCompaction(Base):
+    """Resumen de la parte antigua de una conversación (core/inference/compaction.py).
+
+    Cuando la conversación ya no cabe en la ventana, en vez de recortar los
+    mensajes más antiguos en cada petición (lo que cambia el principio del
+    prompt y tira la caché KV del nodo), se resumen UNA vez: el principio
+    queda fijo hasta la siguiente compactación. `upto` = cuántos mensajes
+    (sin contar los `system` iniciales) cubre el resumen; `digest` = huella de
+    los mensajes del usuario de ese tramo, para no aplicarlo si el cliente
+    manda otra historia (edición de un mensaje antiguo, otra rama).
+    Sin FK a conversations: borrar una conversación no debe depender de esta
+    tabla, y una fila huérfana no se aplica nunca a otra."""
+    __tablename__ = "conversation_compactions"
+
+    conversation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[int] = mapped_column(nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    upto: Mapped[int] = mapped_column(nullable=False)
+    digest: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Espacio(Base):
+    """Un espacio del usuario: instrucciones, archivos, memoria y repo opcional
+    que usan sus chats y sus agentes programados (core/persistence/espacios.py)."""
+    __tablename__ = "espacios"
+    __table_args__ = (Index("idx_espacios_user", "user_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # esp_<12 hex>
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    descripcion: Mapped[str | None] = mapped_column(Text)
+    instrucciones: Mapped[str | None] = mapped_column(Text)
+    repo: Mapped[str | None] = mapped_column(Text)                   # owner/nombre (GitHub)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EspacioArchivo(Base):
+    """Archivo de texto del espacio: lo leen sus chats y sus agentes."""
+    __tablename__ = "espacio_archivos"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # arc_<12 hex>
+    espacio_id: Mapped[str] = mapped_column(
+        ForeignKey("espacios.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    mime: Mapped[str] = mapped_column(Text, nullable=False)
+    size: Mapped[int] = mapped_column(nullable=False)
+    contenido: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EspacioMemoria(Base):
+    """Algo que el espacio debe recordar. Lo escribe el usuario o lo propone un
+    agente; lo propuesto no se usa hasta que el usuario lo guarda."""
+    __tablename__ = "espacio_memoria"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # mem_<12 hex>
+    espacio_id: Mapped[str] = mapped_column(
+        ForeignKey("espacios.id", ondelete="CASCADE"), nullable=False, index=True)
+    texto: Mapped[str] = mapped_column(Text, nullable=False)
+    origen: Mapped[str] = mapped_column(Text, nullable=False)         # usuario | agente
+    aprobada: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EspacioAgente(Base):
+    """Agente programado de un espacio: una tarea que se ejecuta sola en un
+    horario y deja un resumen. `proxima_at` (UTC) la calcula el servidor."""
+    __tablename__ = "espacio_agentes"
+    __table_args__ = (Index("idx_espacio_agentes_proxima", "pausado", "proxima_at"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # age_<12 hex>
+    espacio_id: Mapped[str] = mapped_column(
+        ForeignKey("espacios.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    tarea: Mapped[str] = mapped_column(Text, nullable=False)
+    dias: Mapped[str] = mapped_column(Text, nullable=False)           # "0,2,4" (0 = lunes)
+    hora: Mapped[str] = mapped_column(Text, nullable=False)           # "10:00"
+    zona: Mapped[str] = mapped_column(Text, nullable=False)           # America/Bogota
+    internet: Mapped[int] = mapped_column(nullable=False, default=0)
+    pausado: Mapped[int] = mapped_column(nullable=False, default=0)
+    proxima_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class EspacioEjecucion(Base):
+    """Una ejecución de un agente, con su resultado y su resumen."""
+    __tablename__ = "espacio_ejecuciones"
+    __table_args__ = (Index("idx_espacio_ejecuciones_agente", "agente_id", "inicio"),)
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)          # eje_<12 hex>
+    agente_id: Mapped[str] = mapped_column(
+        ForeignKey("espacio_agentes.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(nullable=False)
+    estado: Mapped[str] = mapped_column(Text, nullable=False)         # curso | hecho | espera | error
+    origen: Mapped[str] = mapped_column(Text, nullable=False)         # horario | manual
+    resultado: Mapped[str | None] = mapped_column(Text)
+    resumen_json: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    modelo: Mapped[str | None] = mapped_column(Text)
+    tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    inicio: Mapped[str] = mapped_column(Text, nullable=False)
+    fin: Mapped[str | None] = mapped_column(Text)

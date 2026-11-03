@@ -6,6 +6,14 @@ import { FILE_PROMPT } from './archivos';
 export async function streamChatCompletion({
   model, messages, conversationId, signal, onDelta, onReasoning, onSources, onFinish, onQuota, webSearch = false,
   system = FILE_PROMPT, source = undefined, think = undefined,
+  // Conector de GitHub: {repo, mode, resolve?}. Eventos propios del agente:
+  // onTool (línea de progreso) y onConfirm (acción que espera al usuario).
+  github = undefined, onTool, onConfirm,
+  // Uso real al terminar: (usage, lixbon_context). Con herramientas llega en
+  // un chunk propio con el total del turno.
+  onUsage,
+  // Espacio de la conversación: el backend añade su contexto en cada turno.
+  espacioId = undefined,
 }) {
   // El chat web no manda system prompt propio; el de archivos es la única
   // instrucción fija (no se persiste: viaja en cada petición). Visuals pasa el suyo.
@@ -22,6 +30,8 @@ export async function streamChatCompletion({
       web_search: webSearch === 'off' ? false : (webSearch ? true : 'auto'),
       ...(source ? { source } : {}),
       ...(think !== undefined && think !== null ? { think } : {}),
+      ...(github ? { github, web_search: false } : {}),
+      ...(espacioId ? { espacio_id: espacioId } : {}),
     }),
     signal,
   });
@@ -61,7 +71,10 @@ export async function streamChatCompletion({
       try {
         const chunk = JSON.parse(data);
         if (chunk.lixbon_sources && onSources) { onSources(chunk.lixbon_sources, chunk.lixbon_queries || []); continue; }
+        if (chunk.lixbon_tool) { onTool?.(chunk.lixbon_tool); continue; }
+        if (chunk.lixbon_github_confirm) { onConfirm?.(chunk.lixbon_github_confirm); continue; }
         if (chunk.lixbon_quota && onQuota) onQuota(chunk.lixbon_quota);
+        if (chunk.usage && onUsage) onUsage(chunk.usage, chunk.lixbon_context || null);
         const choice = chunk.choices?.[0];
         const delta = choice?.delta?.content;
         if (delta) onDelta(delta);
@@ -71,4 +84,17 @@ export async function streamChatCompletion({
       } catch { /* chunk malformado: se ignora */ }
     }
   }
+}
+
+/** Lo que enseña el anillo tras una respuesta: contexto ocupado (del último
+ *  paso, si hubo herramientas), su reparto y los tokens del turno. */
+export function usoDeRespuesta(usage, ctx) {
+  const input = usage?.prompt_tokens || 0;
+  const output = usage?.completion_tokens || 0;
+  return {
+    used: ctx?.used ?? input + output,
+    total: ctx?.num_ctx || null,
+    breakdown: ctx?.breakdown || null,
+    turno: { input, output, cached: usage?.prompt_tokens_details?.cached_tokens || 0, steps: ctx?.steps || 1 },
+  };
 }

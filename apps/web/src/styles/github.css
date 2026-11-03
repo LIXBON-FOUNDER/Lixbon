@@ -1,0 +1,101 @@
+/* GitHub en el chat. Los desplegables reutilizan .modelo-menu__* (chat.css);
+   aquí solo lo propio: el panel se abre hacia la izquierda del pie y la
+   tarjeta de confirmación del modo manual (sin rayas ni sombra: va dentro
+   del mensaje, no flota). */
+
+.gh-menu .modelo-menu__btn { gap: 6px; padding: 0 8px 0 10px; }
+.gh-menu .modelo-menu__btn.is-on { color: var(--ink); }
+/* Repo de un espacio: informa, no se pulsa. */
+.gh-menu .modelo-menu__btn.is-fijo, .gh-menu .modelo-menu__btn.is-fijo:hover { cursor: default; background: none; }
+.gh-menu .modelo-menu__btn svg:first-child { flex: none; }
+.gh-menu__panel { right: auto; left: 0; width: 300px; }
+.gh-menu__dos { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.gh-menu__dos small { color: var(--ink-muted); font-size: 13px; line-height: 1.35; white-space: normal; }
+.gh-menu__nota { margin: 0; padding: 10px; color: var(--ink-muted); font-size: 13px; }
+.gh-menu__buscar {
+  display: flex; align-items: center; gap: 8px; margin: 2px 2px 6px; padding: 0 10px; height: 34px;
+  border-radius: var(--radius); background: var(--surface-4); color: var(--ink-muted);
+}
+.gh-menu__buscar input {
+  flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: 14px var(--font-ui); outline: none;
+}
+a.modelo-menu__opt { text-decoration: none; }
+
+@media (max-width: 640px) {
+  .gh-menu__panel { width: min(300px, calc(100vw - 32px)); }
+  .gh-menu .modelo-menu__btn { max-width: 160px; }
+}
+
+/* Tarjeta «Aceptar / Rechazar»: petición de Lixbon con forma de commit. */
+.gh-confirma {
+  display: flex; flex-direction: column; gap: 12px; max-width: 560px; margin: 14px 0 4px; padding: 16px;
+  border-radius: var(--radius-box, var(--radius)); background: var(--surface-2);
+}
+.gh-confirma__cab { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.gh-confirma__icono {
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px;
+  border-radius: var(--radius); background: var(--surface-4); color: var(--ink);
+}
+.gh-confirma__titulos { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.gh-confirma__titulos strong { font: 500 15px var(--font-ui); color: var(--ink); }
+.gh-confirma__titulos > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink-muted); font-size: 13px; }
+.gh-confirma__rama { font: 13px var(--font-mono); color: var(--ink-soft); }
+.gh-confirma__commit {
+  margin: 0; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-3);
+  color: var(--ink); font-size: 14px; line-height: 1.45;
+}
+.gh-confirma__archivos { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none;
+  max-height: 220px; overflow-y: auto; }
+.gh-confirma__archivos li {
+  display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 10px;
+  border-radius: var(--radius); font-size: 13px;
+}
+.gh-confirma__archivos li:hover { background: var(--surface-3); }
+.gh-confirma__signo { flex: none; width: 12px; font: 500 14px var(--font-mono); text-align: center; }
+.gh-confirma__archivos li.is-escribir .gh-confirma__signo { color: var(--ok); }
+.gh-confirma__archivos li.is-borrar .gh-confirma__signo,
+.gh-confirma__archivos li.is-borrar code { color: var(--danger-ink, var(--danger)); }
+.gh-confirma__archivos code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: 13px var(--font-mono); color: var(--ink); }
+.gh-confirma__lineas { flex: none; margin-left: auto; color: var(--ink-muted); font-size: 13px; }
+.gh-confirma__riesgo {
+  margin: 0; padding: 8px 12px; border-radius: var(--radius); background: var(--warn-soft); color: var(--ink);
+  font-size: 13px;
+}
+.gh-confirma__acciones { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Ya respondida: una línea, sin tarjeta. */
+.gh-confirma-hecha {
+  display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; color: var(--ink-muted); font-size: 13px;
+}
+.gh-confirma-hecha code { font: 13px var(--font-mono); color: var(--ink-soft); }
+.gh-confirma-hecha.is-rechazada span:not(.gh-confirma-hecha__estado) { text-decoration: line-through; }
+
+/* Integraciones */
+.int-acciones { display: inline-flex; align-items: center; gap: 6px; }
+.int-aviso {
+  margin: 0 0 16px; padding: 10px 14px; border-radius: var(--radius); background: var(--surface-2);
+  color: var(--ink-soft); font: 14px var(--font-ui);
+}
+
+/* Ventana antes de ir a GitHub (ConectarGithub.jsx): logos unidos, qué
+   permite, pasos numerados, botón ancho y «Cancelar» como texto. */
+.gh-conectar { width: min(400px, 100%); padding: 28px 24px 16px; text-align: center; }
+.gh-conectar::before { display: none; }
+.gh-conectar__x { position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; border-radius: 8px; }
+.gh-conectar__logos { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 18px; }
+.gh-conectar__logo { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: rgba(var(--ink-rgb), 0.07); color: var(--ink); }
+.gh-conectar__union { width: 28px; height: 2px; border-radius: 1px; background: repeating-linear-gradient(to right, rgba(var(--ink-rgb), 0.35) 0 4px, transparent 4px 8px); background-size: 16px 2px; animation: gh-union 0.9s linear infinite; }
+@keyframes gh-union { to { background-position: 16px 0; } }
+.gh-conectar__titulo { margin: 0 0 6px; }
+.gh-conectar__desc { margin: 0 auto 18px; max-width: 40ch; }
+.gh-conectar__pasos { display: flex; flex-direction: column; gap: 2px; margin: 0 0 18px; padding: 6px; list-style: none; border-radius: 10px; background: rgba(var(--ink-rgb), 0.05); text-align: left; }
+.gh-conectar__pasos li { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 8px; font: 14px var(--font-ui); color: var(--ink-soft); }
+.gh-conectar__num { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 6px; background: rgba(var(--ink-rgb), 0.08); font: 500 12px var(--font-ui); color: var(--ink); font-variant-numeric: tabular-nums; }
+.gh-conectar__seguir { width: 100%; height: 40px; }
+.gh-conectar__cancelar { display: block; margin: 8px auto 0; padding: 8px 12px; border: 0; background: none; font: 500 14px var(--font-ui); color: var(--ink-muted); cursor: pointer; }
+.gh-conectar__cancelar:hover { color: var(--ink); }
+:root[data-theme="light"] .gh-conectar__logo, :root[data-theme="light"] .gh-conectar__num { color: #141414; }
+:root[data-theme="light"] .gh-conectar__pasos li { color: #3A3A38; }
+@media (prefers-reduced-motion: reduce) { .gh-conectar__union { animation: none; } }

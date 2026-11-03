@@ -1,0 +1,55 @@
+/* Markdown del chat: bloques de código con colores de sintaxis, tablas GFM.
+   Va después de chat.css (lo importa Markdown.jsx) y solo afina lo suyo. */
+
+/* ── Bloque de código ────────────────────────────────────────────────────
+   Una sola superficie: la cabecera ya no lleva raya debajo (las tarjetas
+   van sin rayas) y el lenguaje se lee como etiqueta, no como título. */
+.md .md-code { margin: 14px 0; border-radius: var(--radius-box, var(--radius)); background: var(--code-bg); }
+.md .md-code__head {
+  padding: 8px 8px 0 16px; border-bottom: 0;
+  font: 500 12px var(--font-ui); letter-spacing: 0.01em; color: var(--ink-muted); text-transform: lowercase;
+}
+.md .md-code pre {
+  margin: 0; padding: 10px 16px 14px; background: none;
+  font-size: 13px; line-height: 1.65; tab-size: 2;
+}
+.md .md-code pre code { font-size: 1em; line-height: inherit; color: var(--code-ink); }
+
+/* ── Tablas ──────────────────────────────────────────────────────────── */
+.md-tabla { margin: 14px 0; overflow-x: auto; border-radius: var(--radius-box, var(--radius)); background: var(--bg-card); }
+.md-tabla table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; }
+.md-tabla th, .md-tabla td { padding: 9px 14px; text-align: left; vertical-align: top; }
+.md-tabla th { background: rgba(var(--ink-rgb), 0.05); color: var(--ink); font-weight: 600; white-space: nowrap; }
+.md-tabla td { color: var(--ink-body); }
+.md-tabla tbody tr + tr td { border-top: 1px solid rgba(var(--ink-rgb), 0.06); }
+.md-tabla td code { white-space: nowrap; }
+.md input[type="checkbox"] { margin: 0 6px 0 0; vertical-align: -1px; accent-color: var(--accent); }
+.md del { color: var(--ink-muted); }
+
+/* ── Colores de sintaxis (highlight.js) ───────────────────────────────── */
+.md {
+  --hl-keyword: #C8A2F5;
+  --hl-string: #A8D49B;
+  --hl-number: #F2B67C;
+  --hl-title: #8DB7F7;
+  --hl-attr: #E8C77A;
+  --hl-tag: #F0928A;
+  --hl-comment: var(--ink-muted);
+}
+:root[data-theme="light"] .md {
+  --hl-keyword: #7A3FC0;
+  --hl-string: #3B7A2A;
+  --hl-number: #A65A12;
+  --hl-title: #2458B3;
+  --hl-attr: #8A6A00;
+  --hl-tag: #B23A2E;
+}
+.md .hljs-keyword, .md .hljs-selector-tag, .md .hljs-built_in, .md .hljs-type, .md .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
+.md .hljs-string, .md .hljs-regexp, .md .hljs-template-string, .md .hljs-addition { color: var(--hl-string); }
+.md .hljs-number, .md .hljs-literal, .md .hljs-symbol, .md .hljs-bullet { color: var(--hl-number); }
+.md .hljs-title, .md .hljs-title.function_, .md .hljs-section { color: var(--hl-title); }
+.md .hljs-attr, .md .hljs-attribute, .md .hljs-property, .md .hljs-variable, .md .hljs-params { color: var(--hl-attr); }
+.md .hljs-name, .md .hljs-tag, .md .hljs-selector-class, .md .hljs-selector-id, .md .hljs-deletion { color: var(--hl-tag); }
+.md .hljs-comment, .md .hljs-quote, .md .hljs-meta { color: var(--hl-comment); font-style: italic; }
+.md .hljs-emphasis { font-style: italic; }
+.md .hljs-strong { font-weight: 600; }

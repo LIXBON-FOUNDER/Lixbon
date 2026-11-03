@@ -5,45 +5,25 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useLocation, useNavigate as useRawNavigate } from 'react-router-dom';
 import { useNavigate, Link } from '../i18n/link';
 import { useLocale } from '../i18n/LocaleContext';
-import { guardarIdioma, otherLocalePath } from '../i18n/paths';
+import { guardarIdioma, otherLocalePath, withLocale } from '../i18n/paths';
 import { useT } from '../i18n/useT';
-import { tonoUso, fraccionDe } from './ContextoUso';
-import { api } from '../lib/api';
 import { ShimmerText } from './ShimmerText';
+import { useTrabajando } from '../lib/trabajando';
 import { LogoLixbon, LogoMark } from './Logo';
 import { useDismiss } from '../hooks/useDismiss';
 import { HistorySkeleton } from './Skeleton';
 import { Desplegable } from './Desplegable';
 import {
-  IconDots, IconPencil, IconTrash, IconX, IconUser, IconUpDown, IconCli, IconIde,
-  NavNuevo, NavBuscar, NavPanel, NavChat, NavVisuals, NavSkills, NavApps, NavRemoto, NavDocs,
+  IconChevron, IconDots, IconPencil, IconTrash, IconX, IconUser, IconUpDown, IconCli, IconIde,
+  NavNuevo, NavBuscar, NavPanel, NavChat, NavVisuals, NavEspacios, NavSkills, NavApps, NavRemoto, NavDocs,
   NavAjustes, NavUso, NavPlanes, NavIdioma, NavSalir, NavAdmin, NavDonar, TemaClaro, TemaOscuro, TemaSistema,
 } from './Icons';
 
 const MENU_W = 170; // ancho mínimo de .sb-menu, para no salirse por la derecha
 
-// El historial se agrupa por la última actividad: hoy, ayer, la semana, el mes
-// y lo anterior. Las conversaciones ya llegan ordenadas de la más reciente.
-const GRUPOS = [['today', 0], ['yesterday', 1], ['last7', 7], ['last30', 30], ['older', Infinity]];
-
-const diasDesde = (c) => {
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const t = Date.parse(c.updated_at || c.created_at || '');
-  return Number.isNaN(t) ? Infinity : Math.max(0, Math.ceil((hoy - t) / 86400000));
-};
-
-function agruparPorFecha(convs) {
-  const grupos = [];
-  for (const c of convs) {
-    const dias = diasDesde(c);
-    const [clave] = GRUPOS.find(([, max]) => dias <= max);
-    const ultimo = grupos[grupos.length - 1];
-    if (ultimo?.clave === clave) ultimo.items.push(c);
-    else grupos.push({ clave, items: [c] });
-  }
-  return grupos;
-}
+// «Recientes» se puede plegar; se recuerda entre visitas.
+const RECIENTES_KEY = 'lixbon.sidebar.recientes';
+const leerRecientes = () => { try { return localStorage.getItem(RECIENTES_KEY) !== '0'; } catch { return true; } };
 
 const iniciales = (user) => {
   const n = [user.first_name, user.last_name].filter(Boolean);
@@ -53,6 +33,7 @@ const iniciales = (user) => {
 
 function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c' }) {
   const t = useT('sidebar');
+  const estaTrabajando = useTrabajando();
   const tc = useT('common');
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
@@ -113,13 +94,17 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
   }
 
   const titulo = conv.title || t('untitled');
+  // Con una respuesta en curso, el título lleva el brillo de «Pensando».
+  const trabajando = estaTrabajando(conv.id);
   return (
     <div className={`sb-item ${active ? 'is-active' : ''}`} ref={rootRef}>
       <button
         className="sb-item__title"
         onClick={() => { navigate(`${base}/${conv.id}`); onNavigate?.(); }}
       >
-        <span className="sb-item__texto">{titulo}</span>
+        {trabajando
+          ? <ShimmerText text={titulo} className="sb-item__texto" />
+          : <span className="sb-item__texto">{titulo}</span>}
       </button>
       <button
         ref={btnRef}
@@ -139,30 +124,6 @@ function HistoryItem({ conv, active, onRename, onDelete, onNavigate, base = '/c'
         </Desplegable>
       )}
     </div>
-  );
-}
-
-// Cupo semanal, sobre el perfil: «Uso semanal · 42 %», con la barra en verde,
-// ámbar o rojo según lo gastado.
-function UsoSemanal({ user, refresco, onAbrir }) {
-  const t = useT('sidebar');
-  const [bucket, setBucket] = useState(null);
-  useEffect(() => {
-    if (!user) return undefined;
-    let vivo = true;
-    api.get('/api/account/usage')
-      .then((res) => { if (vivo) setBucket(res.data.buckets?.week || null); })
-      .catch(() => {});
-    return () => { vivo = false; };
-  }, [user, refresco]);
-  if (!bucket || bucket.unlimited) return null;
-  const frac = fraccionDe(bucket);
-  const pct = Math.round(frac * 100);
-  return (
-    <button type="button" className="sb-uso" onClick={onAbrir}>
-      <span className="sb-uso__cab"><span>{t('weekUsage')}</span><span className="sb-uso__valor">{pct} %</span></span>
-      <span className={`sb-uso__barra ${tonoUso(frac)}`}><span style={{ width: `${pct}%` }} /></span>
-    </button>
   );
 }
 
@@ -198,6 +159,7 @@ export function Sidebar({
   onRename, onDelete, onLogout, compact = false, open = false, onClose,
   hasMoreConversations = false, onLoadMore, onSearch,
   historyBase = '/c', newPath = '/chat', seccion = 'chat', remotas = [], remotaActiva = null,
+  ultimas = { chat: '/chat', visuals: '/visuals' },
 }) {
   const t = useT('sidebar');
   const tc = useT('common');
@@ -242,6 +204,15 @@ export function Sidebar({
     navigate(path);
     if (compact) onClose?.();
   };
+  // Ajustes se abre encima de lo que hay: sin transición de página y
+  // recordando el fondo para volver a él al cerrar.
+  const rawNav = useRawNavigate();
+  const locationActual = useLocation();
+  const localeSb = useLocale();
+  const abrirAjustes = (seccion = '') => {
+    rawNav(withLocale(`/account${seccion ? `/${seccion}` : ''}`, localeSb), { state: { fondo: locationActual } });
+    if (compact) onClose?.();
+  };
 
   const abrirBusqueda = () => {
     if (collapsed && !compact) onToggleCollapse?.();
@@ -268,18 +239,21 @@ export function Sidebar({
     : conversations;
   const visible = q && found?.q === q ? found.items : local;
 
-  // Al acercarse al final de la lista se pide la página siguiente.
-  const moreRef = useRef(null);
+  // Solo llegan las 10 más recientes; las siguientes se piden a mano con
+  // «Cargar más» al final de la lista, nunca solas al hacer scroll.
   const wantsMore = !q && hasMoreConversations && Boolean(onLoadMore);
-  useEffect(() => {
-    const el = moreRef.current;
-    if (!wantsMore || !el || typeof IntersectionObserver === 'undefined') return undefined;
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) onLoadMore();
-    }, { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [wantsMore, onLoadMore, conversations.length]);
+  const [cargandoMas, setCargandoMas] = useState(false);
+  const cargarMas = async () => {
+    if (cargandoMas) return;
+    setCargandoMas(true);
+    try { await onLoadMore(); } finally { setCargandoMas(false); }
+  };
+
+  const [recientesAbierto, setRecientesAbierto] = useState(leerRecientes);
+  const alternarRecientes = () => setRecientesAbierto((v) => {
+    try { localStorage.setItem(RECIENTES_KEY, v ? '0' : '1'); } catch { /* sin almacenamiento */ }
+    return !v;
+  });
 
   const drawerHidden = compact && !open;
   const railVisible = collapsed && !compact;
@@ -295,8 +269,9 @@ export function Sidebar({
     { id: 'apps', to: '/apps', Icon: NavApps, label: t('apps') },
     { id: 'docs', to: '/docs/remote', Icon: NavDocs, label: t('docs') },
   ] : [
-    { id: 'chat', to: '/chat', Icon: NavChat, label: t('conversations') },
-    { id: 'visuals', to: '/visuals', Icon: NavVisuals, label: t('visuals'), pro: !tieneVisuals(user) },
+    { id: 'chat', to: ultimas.chat, Icon: NavChat, label: t('conversations') },
+    { id: 'visuals', to: ultimas.visuals, Icon: NavVisuals, label: t('visuals'), pro: !tieneVisuals(user) },
+    { id: 'espacios', to: '/espacios', Icon: NavEspacios, label: t('spaces') },
     { id: 'integraciones', to: '/integraciones', Icon: NavSkills, label: t('integrations') },
     { id: 'apps', to: '/apps', Icon: NavApps, label: t('apps') },
     { id: 'docs', to: '/docs', Icon: NavDocs, label: t('docs') },
@@ -307,7 +282,6 @@ export function Sidebar({
     { clave: 'activeSessions', items: remotasVisibles.filter((r) => r.status === 'online') },
     { clave: 'recentSessions', items: remotasVisibles.filter((r) => r.status !== 'online') },
   ].filter((g) => g.items.length);
-  const numConvs = conversations.length > 0 && `${conversations.length}${hasMoreConversations ? '+' : ''}`;
 
   return (
     <aside
@@ -329,7 +303,7 @@ export function Sidebar({
         <button className="sb-rail__btn" onClick={abrirBusqueda} data-tip={t('searchConversations')} aria-label={t('searchConversations')}>
           <NavBuscar />
         </button>
-        <button className="sb-rail__btn" onClick={() => navigate(modo === 'remote' ? '/chat' : '/remote')}
+        <button className="sb-rail__btn" onClick={() => navigate(modo === 'remote' ? ultimas.chat : '/remote')}
           data-tip={modo === 'remote' ? t('chatMode') : t('remoteMode')} aria-label={modo === 'remote' ? t('chatMode') : t('remoteMode')}>
           {modo === 'remote' ? <NavChat /> : <NavRemoto />}
         </button>
@@ -355,7 +329,7 @@ export function Sidebar({
           </Link>
           <span className="sb-modo" role="group" aria-label={t('mode')}>
             <button type="button" className={modo === 'chat' ? 'is-on' : ''} aria-pressed={modo === 'chat'}
-              onClick={() => modo !== 'chat' && go('/chat')} title={t('chatMode')} aria-label={t('chatMode')}>
+              onClick={() => modo !== 'chat' && go(ultimas.chat)} title={t('chatMode')} aria-label={t('chatMode')}>
               <NavChat size={16} relleno={modo === 'chat'} />
             </button>
             <button type="button" className={modo === 'remote' ? 'is-on' : ''} aria-pressed={modo === 'remote'}
@@ -418,7 +392,6 @@ export function Sidebar({
           {NAV.map(({ id, to, Icon, label, pro }) => (
             <button key={id} className={`sb-nav ${activo === id ? 'is-active' : ''}`} onClick={() => go(to)} aria-current={activo === id ? 'page' : undefined}>
               <Icon relleno={activo === id} /> <span>{label}</span>
-              {id === 'chat' && activo === 'chat' && numConvs && <span className="sb-nav__num">{numConvs}</span>}
               {pro && <span className="sb-nav__pro">Pro</span>}
             </button>
           ))}
@@ -467,16 +440,28 @@ export function Sidebar({
                   ))}
                   {visible.length === 0 && <p className="sidebar__empty">{t('noResults')}</p>}
                 </div>
-              ) : agruparPorFecha(visible).map((g) => (
-                <div key={g.clave} className="sidebar__grupo">
-                  <span className="sidebar__label">{t(g.clave)}</span>
-                  {g.items.map((c) => (
-                    <HistoryItem key={c.id} conv={c} active={c.id === activeId} onRename={onRename} onDelete={onDelete}
-                      onNavigate={compact ? onClose : undefined} base={historyBase} />
-                  ))}
+              ) : visible.length > 0 && (
+                <div className="sidebar__grupo">
+                  <button type="button" className="sidebar__label sidebar__label--plegable" onClick={alternarRecientes}
+                    aria-expanded={recientesAbierto} aria-controls="sb-recientes">
+                    <span>{t('recentChats')}</span>
+                    <IconChevron size={14} open={recientesAbierto} />
+                  </button>
+                  {recientesAbierto && (
+                    <div id="sb-recientes" className="sidebar__grupo">
+                      {visible.map((c) => (
+                        <HistoryItem key={c.id} conv={c} active={c.id === activeId} onRename={onRename} onDelete={onDelete}
+                          onNavigate={compact ? onClose : undefined} base={historyBase} />
+                      ))}
+                      {wantsMore && (
+                        <button type="button" className="sidebar__more" onClick={cargarMas} disabled={cargandoMas}>
+                          {cargandoMas ? t('loadingMore') : t('loadMore')}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
-              {wantsMore && <div ref={moreRef} className="sidebar__more" aria-hidden="true" />}
+              )}
               {visible.length === 0 && !q && (
                 <p className="sidebar__empty">
                   {user ? t('noConversations') : t('logInToSaveHistory')}
@@ -493,7 +478,6 @@ export function Sidebar({
               <NavDonar /> <span>{t('donate')}</span>
             </button>
           )}
-          <UsoSemanal user={user} refresco={conversations.length} onAbrir={() => go('/account/usage')} />
 
           <div className="sidebar__profile" ref={profileRef}>
             {user ? (
@@ -521,10 +505,10 @@ export function Sidebar({
                     <span className="sb-cuenta__nombre">{[user.first_name, user.last_name].filter(Boolean).join(' ') || user.username}</span>
                     {user.email && <span className="sb-cuenta__correo">{user.email}</span>}
                   </div>
-                  <button role="menuitem" onClick={() => { setProfileMenu(false); go('/account'); }}>
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); abrirAjustes(); }}>
                     <NavAjustes /> {tc('settings')}
                   </button>
-                  <button role="menuitem" onClick={() => { setProfileMenu(false); go('/account/usage'); }}>
+                  <button role="menuitem" onClick={() => { setProfileMenu(false); abrirAjustes('usage'); }}>
                     <NavUso /> {t('usage')}
                   </button>
                   <button role="menuitem" className={esGratis ? 'sb-cuenta__mejorar' : ''} onClick={() => { setProfileMenu(false); go('/plans'); }}>

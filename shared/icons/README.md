@@ -1,6 +1,6 @@
 # @lixbon/icons
 
-145 iconos para la web, el IDE y la app móvil. Usan una rejilla de 24 con trazo 2, uniones y extremos redondos, y dejan al menos 2 px de aire entre trazos. 35 tienen una gemela rellena para el ítem activo.
+152 iconos para la web, el IDE y la app móvil. Usan una rejilla de 24 con trazo 2, uniones y extremos redondos, y dejan al menos 2 px de aire entre trazos. 35 tienen una gemela rellena para el ítem activo.
 
 ```
 shared/icons/
