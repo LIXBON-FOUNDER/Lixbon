@@ -10,3 +10,11 @@
 .nat__note, .nat__hint { margin: 0; font-size: 11px; color: var(--ink-50); }
 .nat__note { color: var(--warn); }
 .nat__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.nat-stop { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0; }
+.nat-approval { margin: 8px 0; }
+.ade-attempt__context { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0 0 10px; font-size: 12px; color: var(--ink-70); }
+.ade-attempt__ctx-item { min-width: 0; overflow-wrap: anywhere; }
+.ade-attempt__ctx-item + .ade-attempt__ctx-item::before { content: '·'; margin: 0 8px; color: var(--ink-50); }
+
+.ade-attempt__changes { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 0 0 10px; }
+.ade-attempt__changes .tdv { align-self: stretch; padding: 0; }

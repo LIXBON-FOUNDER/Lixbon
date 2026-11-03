@@ -34,7 +34,7 @@ describe('AttemptDetail (LXO-122)', () => {
     expect(calls[0]).toEqual({ query: 'attempt_detail', args: { attempt_id: 't3-a1' } });
     expect(within(root).getByText('t3-a1')).toBeTruthy();
     expect(within(root).getByText('Terminado', { selector: '.ade-status' })).toBeTruthy();
-    expect(within(root).getByText('codex · gpt-6.1-sol')).toBeTruthy();
+    expect(within(root).getByText('Proveedor').nextSibling.textContent).toBe('codex · gpt-6.1-sol');
     expect(within(root).getByText('implementador / implementar / high')).toBeTruthy();
     // ended_at nulo (Attempts migrados en el cutover): sin hora de fin ni duración inventada.
     expect(within(root).getByText('duración no disponible')).toBeTruthy();

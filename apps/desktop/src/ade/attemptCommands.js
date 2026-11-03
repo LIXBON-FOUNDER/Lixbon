@@ -76,3 +76,9 @@ export const rejectAttempt = (attemptId) => call('attempt_reject', { attempt_id:
 
 /** Responde la pregunta abierta de un agente (`reply`). Lo manda la persona en nombre del destinatario de la pregunta. */
 export const answerQuestion = (questionId, answer) => call('reply', { question: questionId, answer });
+
+/**
+ * Detiene la Task en marcha (`stop`): el Core corta el proceso del proveedor y cierra el Attempt como `stopped`. Si el
+ * proceso no se pudo matar NO la declara detenida y devuelve el error. Devuelve `{ task, status: 'stopped' }`.
+ */
+export const stopTask = (taskId) => call('stop', { task: taskId });

@@ -1,3 +1,4 @@
+import { InboxLaunchApproval } from './InboxLaunchApproval';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ATTENTION_CATEGORIES,
@@ -173,12 +174,17 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
     'data-severity': item.severity,
   };
   const accessibleName = `${severity}: ${category}. ${target}`;
+  // La aprobación de un Attempt se decide aquí mismo (fuera del botón de la fila: no se anidan botones).
+  const decision = item.category === 'approval' && item.target_kind === 'attempt' && item.status === 'active'
+    ? <div className="attention-inbox__actions" data-testid="attention-launch-actions"><InboxLaunchApproval attemptId={item.target_id} /></div>
+    : null;
   if (!interactive) {
     return (
       <li className="attention-inbox__row">
         <div {...shared} role="group" aria-label={accessibleName} aria-describedby={metaId}>
           {content}
         </div>
+        {decision}
       </li>
     );
   }
@@ -198,6 +204,7 @@ function AttentionItem({ item, interactive, tabIndex, itemRef, onFocus, onBlur, 
       >
         {content}
       </button>
+      {decision}
     </li>
   );
 }
@@ -570,7 +577,7 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
       <header className="attention-inbox__head">
         <div className="attention-inbox__heading">
           <h2 id={titleId} className="attention-inbox__title">Attention</h2>
-          <p className="attention-inbox__subtitle">Lo que necesita de ti ahora, según el Core. Solo lectura.</p>
+          <p className="attention-inbox__subtitle">Lo que necesita de ti ahora, según el Core. Solo lectura, salvo aprobar o rechazar un intento nuevo.</p>
         </div>
         <div
           className="attention-inbox__total"
@@ -760,8 +767,8 @@ export function AttentionInbox({ active = true, pollMs, onOpenTarget, target = n
       )}
 
       <p className="attention-inbox__note">
-        Solo lectura: las filas se resuelven con el Command de su dominio (responder, aprobar, revisar…).
-        Esta vista no resuelve, no pospone y no marca como leído.
+        Las filas se resuelven con el Command de su dominio (responder, aprobar, revisar…). Esta vista solo permite
+        aprobar o rechazar el primer intento; no resuelve nada más, no pospone y no marca como leído.
       </p>
       <span className="attention-inbox__sr" role="status" aria-live="polite">
         {target

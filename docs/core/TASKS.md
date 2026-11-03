@@ -390,9 +390,24 @@ worktree) la fija el Core.
   el detalle se vuelve a leer. Una petición del proveedor (permiso, pregunta de la herramienta) es otra cosa y sigue sin
   responderse: vence o se detiene. Desde la bandeja de Attention no se responde: `attention_list` no expone la pregunta.
 
+* **Aprobar desde la bandeja de Attention** (`InboxLaunchApproval`): una Attention `approval` de un Attempt puede ser la de
+  lanzamiento o la de una petición de terminal, y `attention_list` no dice cuál. La fila lee el estado del Attempt y solo ofrece
+  Aprobar / Rechazar (los mismos de `AttemptApproval`) mientras está `pending_approval`.
+* **Detener** (`AttemptStop`, en el detalle del Attempt): con el Attempt en `starting`, `running`, `waiting` o
+  `awaiting_terminal_approval` llama al RPC `stop` con su Task, tras una confirmación (corta el proceso del proveedor; lo escrito
+  se conserva en el worktree). Si el Core no pudo matar el proceso no declara detenido el Attempt y la interfaz dice por qué.
+* **Línea de contexto** (`AttemptContextLine`): agente · modelo, perfil, `rama ← base` y host (8 primeros caracteres, el
+  completo en el título), todo de `attempt_detail`; lo que el Core no informa se dice («sin worktree», «host no informado»).
+* **Cambios y revisión** (`AttemptChanges`, en el detalle del Attempt): «Ver cambios» monta la vista de revisión del orquestador
+  (`TaskDiffView`, comandos de la interfaz `orch_task_diff` / `orch_review_task`) sobre la rama de la Task. Aceptar o rechazar se
+  registra sobre el `head_commit` que se vio; si la rama se movió el Core no registra nada (`head_moved`) y la vista pide
+  recargar. Se ofrece con una rama que revisar (no con el lanzamiento pendiente ni con el worktree retirado sin rama
+  conservada): el diff se lee de la rama, no del directorio. Tras decidir, el detalle se vuelve a leer y «Revisión» refleja el
+  veredicto. No integra: Integrar sigue siendo otra decisión.
+
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
-`codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud; comprueba estado, claim, Events en orden
-y Attention. Las pruebas de la interfaz son `attemptCommands.test.js`, `NewAttemptForm.test.jsx` y `AttemptApproval.test.jsx`.
+`codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden
+y Attention. Las pruebas de la interfaz son `attemptCommands.test.js`, `NewAttemptForm.test.jsx`, `AttemptApproval.test.jsx`, `AttemptActions.test.jsx` y `AttemptChanges.test.jsx`.
 
 ### `not_started`
 
