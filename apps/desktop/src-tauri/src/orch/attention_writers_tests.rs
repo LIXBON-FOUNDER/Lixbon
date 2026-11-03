@@ -84,6 +84,28 @@ fn el_writer_de_mutaciones_proyecta_en_la_transaccion_del_event() {
     assert!(kinds(&desde(&e.core, antes)).contains(&"attention.resolved"));
 }
 
+/// La persona responde desde el ADE con `orch_call` (`rpc_via(Ui, User)`, que firma con la identidad autenticada de Desktop):
+/// el RPC `reply` ya acepta a una Person de Desktop, así que responder una pregunta no necesita ningún comando nuevo.
+#[test]
+fn desktop_responde_la_pregunta_de_un_agente_por_su_entrada_autenticada() {
+    let e = setup_con("wr-answer-desktop", fake);
+    let pid = e.spawn(true);
+    e.aprobar(&pid);
+    let hija = e.hijas().pop().unwrap();
+    let q = e.core.rpc(Caller::Agent(Some(hija.clone())), "", "ask", &json!({ "question": "¿rama?" })).unwrap()["question"].as_u64().unwrap();
+    assert_eq!(en_el_core(&e, |s| categorias_activas(s)), vec!["question"]);
+    assert!(e.core.desktop_client().unwrap().is_some(), "la entrada de Desktop va autenticada como Person");
+
+    let antes = head(&e.core);
+    let out = e.core.rpc_via(Channel::Ui, Caller::User, "", "reply", &json!({ "question": q, "answer": "main" })).expect("Desktop responde");
+    assert!(out["reply"].as_u64().is_some());
+    assert!(en_el_core(&e, |s| categorias_activas(s)).is_empty(), "responder resuelve la Attention de la pregunta");
+    assert!(kinds(&desde(&e.core, antes)).contains(&"attention.resolved"));
+    // Una pregunta ya respondida no se responde dos veces, ni una que no existe.
+    assert!(e.core.rpc_via(Channel::Ui, Caller::User, "", "reply", &json!({ "question": q, "answer": "otra" })).is_err());
+    assert!(e.core.rpc_via(Channel::Ui, Caller::User, "", "reply", &json!({ "question": 9999, "answer": "x" })).is_err());
+}
+
 #[test]
 fn el_writer_de_hechos_sin_estado_proyecta_el_risk_y_el_approval_de_spawn() {
     let e = setup_con("wr-append", fake);
