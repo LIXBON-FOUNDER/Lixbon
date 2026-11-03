@@ -383,6 +383,12 @@ worktree) la fija el Core.
 * **Aprobar / rechazar** (`AttemptApproval`, en el detalle del Attempt): solo aparece mientras el Attempt está
   `pending_approval`. Aprobar no lanza nada por sí mismo (despierta al despachador). Un plazo vencido no aprueba: el Core deja el
   intento detenido y la interfaz lo dice. Tras decidir, el detalle vuelve a leer.
+* **Responder una pregunta** (`AnswerQuestion`, en «Preguntas» del detalle de la Task): cada pregunta abierta ofrece «Responder».
+  Solo una hija pregunta (a su padre), así que la persona responde **en nombre del destinatario** y la interfaz lo dice antes de
+  enviar. Va por el RPC `reply` con la identidad autenticada de Desktop (no hace falta ningún comando nuevo: la política ya admite
+  a una Person de Desktop en `reply`, y el Core vuelve a comprobar que la pregunta existe y no tiene ya respuesta). Tras enviar,
+  el detalle se vuelve a leer. Una petición del proveedor (permiso, pregunta de la herramienta) es otra cosa y sigue sin
+  responderse: vence o se detiene. Desde la bandeja de Attention no se responde: `attention_list` no expone la pregunta.
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud; comprueba estado, claim, Events en orden

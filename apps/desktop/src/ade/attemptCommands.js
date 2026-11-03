@@ -27,6 +27,8 @@ const KNOWN_ERRORS = [
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
   [/no pendiente de aprobaci/i, 'Este intento ya no espera aprobación.'],
+  [/ya tiene respuesta/i, 'Esta pregunta ya tiene respuesta.'],
+  [/No existe la pregunta/i, 'Esta pregunta ya no existe.'],
 ];
 
 /** Texto para la persona de un error del Core (el original queda como detalle técnico). */
@@ -71,3 +73,6 @@ export const approveAttempt = (attemptId) => call('attempt_approve', { attempt_i
 
 /** Rechaza el primer Attempt. `status`: `Rejected` · `Replayed` · `Expired`. */
 export const rejectAttempt = (attemptId) => call('attempt_reject', { attempt_id: attemptId });
+
+/** Responde la pregunta abierta de un agente (`reply`). Lo manda la persona en nombre del destinatario de la pregunta. */
+export const answerQuestion = (questionId, answer) => call('reply', { question: questionId, answer });

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { useCoreQuery } from './useCoreQuery';
 import { TASK_STATUS_LABELS } from './adeLabels';
+import { AnswerQuestion } from './AnswerQuestion';
 import './TaskWorkspace.css';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
@@ -150,7 +151,7 @@ function questionSummary(messages) {
   return { missing: false, total: questions.length, open: questions.filter((question) => !answered.has(question.id)) };
 }
 
-function QuestionsValue({ messages }) {
+function QuestionsValue({ messages, onAnswered }) {
   const summary = questionSummary(messages);
   if (summary.missing) return <Missing />;
   if (summary.total === 0) return <Missing>Sin preguntas registradas</Missing>;
@@ -165,6 +166,7 @@ function QuestionsValue({ messages }) {
               <code className="twk__mono">#{String(question.id)}</code>{' '}
               <span>{text(question.from) ?? MISSING} → {text(question.to) ?? MISSING}</span>
               {text(question.body) && <q className="twk__quote">{question.body}</q>}
+              <AnswerQuestion question={question} onAnswered={onAnswered} />
             </li>
           ))}
         </ul>
@@ -413,7 +415,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
             <Row label="Grupo"><span>{GROUP_LABELS[info.group]}</span></Row>
             <Row label="Lectura de Core">{health ?? <Missing />}</Row>
             <Row label="Fase"><PhaseValue phase={visible.phase} /></Row>
-            <Row label="Preguntas"><QuestionsValue messages={visible.messages} /></Row>
+            <Row label="Preguntas"><QuestionsValue messages={visible.messages} onAnswered={state.retry} /></Row>
             <Row label="Revisión"><ReviewValue review={visible.review} /></Row>
             <Row label="Integración"><IntegrationValue integration={visible.integration} /></Row>
             {visible.status === 'failed' && (
@@ -466,7 +468,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
             <Row label="Última lectura"><Time value={state.updatedAt} /></Row>
           </Section>
 
-          <p className="twk__hint twk__verified">Target verificado: la respuesta coincide con el Project ID y Task ID seleccionados. Solo lectura.</p>
+          <p className="twk__hint twk__verified">Target verificado: la respuesta coincide con el Project ID y Task ID seleccionados. Solo lectura, salvo responder las preguntas abiertas.</p>
         </div>
       )}
     </section>
