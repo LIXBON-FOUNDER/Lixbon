@@ -71,11 +71,12 @@ fn run_real(prompt: &str, approval_ttl: Duration) -> (String, String, Option<Str
     )
     .expect("task_create");
     let attempt = created["attempt_id"].as_str().unwrap().to_string();
-    eprintln!("== creado: {created}");
+    // Las respuestas del RPC no se imprimen: salen de la frontera autenticada y CodeQL las trata como datos sensibles.
+    eprintln!("== Task y Attempt creados");
     assert_eq!(row(&core, &attempt).0, "pending_approval");
 
-    let approved = rpc("attempt_approve", json!({"attempt_id": attempt})).expect("attempt_approve");
-    eprintln!("== aprobado: {approved}");
+    rpc("attempt_approve", json!({"attempt_id": attempt})).expect("attempt_approve");
+    eprintln!("== Attempt aprobado");
 
     // Espera (con límite) a un estado final, mostrando cada cambio de estado.
     let end = Instant::now() + Duration::from_secs(180);
