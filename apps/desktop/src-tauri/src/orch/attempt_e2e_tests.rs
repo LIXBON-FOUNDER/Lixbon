@@ -202,6 +202,60 @@ fn detener_una_ejecucion_viva_la_deja_stopped_y_sin_attention_de_fallo() {
     assert!(!attention(&w.core, &attempt).iter().any(|(c, s)| c == "failed" && s == "active"));
 }
 
+/// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
+#[test]
+fn detener_por_el_rpc_de_desktop_deja_el_attempt_stopped_y_el_claim_asentado() {
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let attempt = w.create("claude", "e2e-claude-rpc-stop");
+    w.approve(&attempt);
+    wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
+    let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+
+    let stopped = w.desktop("stop", json!({"task": task})).expect("stop");
+    assert_eq!(stopped["status"], "stopped");
+    w.settled(&attempt, "stopped");
+
+    assert_eq!(row(&w.core, &attempt), ("stopped".into(), "settled".into(), None));
+    assert_eq!(event_count(&w.core, &attempt, "attempt.failed"), 0);
+    assert!(!w.core.has_term(&task), "el proceso del proveedor ya no está");
+    assert!(!attention(&w.core, &attempt).iter().any(|(c, s)| c == "failed" && s == "active"));
+    // Detenerla otra vez no inventa un segundo cierre.
+    assert_eq!(event_count(&w.core, &attempt, "attempt.stopped"), 1);
+}
+
+/// A5/A6 · ¿El diff y la revisión de la interfaz (comandos `orch_task_diff` / `orch_review_task`) alcanzan a una Task creada
+/// por `task_create`? Con el trabajo ya confirmado en su rama, el diff lo ve y la revisión queda sobre ese commit.
+#[test]
+fn el_diff_y_la_revision_de_desktop_alcanzan_la_task_creada_por_task_create() {
+    let w = world("claude", Some(vec![Step::Wait]));
+    let attempt = w.create("claude", "e2e-claude-diff");
+    w.approve(&attempt);
+    wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
+    let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    let (path, branch): (String, String) = w
+        .core
+        .storage
+        .with_store(|s| s.read(|c| Ok(c.query_row("SELECT path, branch FROM worktrees WHERE attempt_id = ?1", [&attempt], |r| Ok((r.get(0)?, r.get(1)?))).unwrap())))
+        .unwrap()
+        .unwrap();
+    let dir = std::path::Path::new(&path);
+    std::fs::write(dir.join("nuevo.txt"), "hola
+").unwrap();
+    for args in [vec!["add", "."], vec!["-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-qm", "trabajo"]] {
+        assert!(std::process::Command::new("git").args(&args).current_dir(dir).output().unwrap().status.success());
+    }
+
+    let diff = w.core.task_diff_from_ui(&task).expect("el diff de la Task");
+    assert_eq!(diff["branch"], branch.as_str());
+    assert_eq!(diff["files"][0]["path"], "nuevo.txt");
+    let head = diff["head_commit"].as_str().unwrap().to_string();
+
+    let reviewed = w.core.review_from_ui(&task, "accepted", &head, None, true).expect("la revisión");
+    assert_eq!(reviewed["outcome"], "recorded");
+    assert_eq!(reviewed["head_commit"], head.as_str());
+}
+
 #[test]
 fn repetir_la_misma_solicitud_no_duplica_la_task_ni_el_lanzamiento() {
     let w = world("claude", None);

@@ -71,3 +71,9 @@ export const approveAttempt = (attemptId) => call('attempt_approve', { attempt_i
 
 /** Rechaza el primer Attempt. `status`: `Rejected` · `Replayed` · `Expired`. */
 export const rejectAttempt = (attemptId) => call('attempt_reject', { attempt_id: attemptId });
+
+/**
+ * Detiene la Task en marcha (`stop`): el Core corta el proceso del proveedor y cierra el Attempt como `stopped`. Si el
+ * proceso no se pudo matar NO la declara detenida y devuelve el error. Devuelve `{ task, status: 'stopped' }`.
+ */
+export const stopTask = (taskId) => call('stop', { task: taskId });
