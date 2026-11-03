@@ -3,7 +3,6 @@ import { Link } from '../../i18n/link';
 import { useLocale } from '../../i18n/LocaleContext';
 import { useT } from '../../i18n/useT';
 import { api } from '../../lib/api';
-import { planBadge } from '../../lib/planColors';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { IconPlus, IconTrash } from '../Icons';
 import { DialogoTarjeta } from './DialogoTarjeta';
@@ -158,12 +157,7 @@ export function SeccionFacturacion({ plan }) {
       <div className="set-card set-plan">
         <h2 className="set-title">{t('billing.planTitle')}</h2>
         <div className="set-plan__info">
-          <span
-            className="plan-pill"
-            style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}
-          >
-            {t('usage.plan', { name: plan.name })}
-          </span>
+          <span className="estado set-plan-estado">{t('usage.plan', { name: plan.name })}</span>
           <p className="card__muted">{plan.description}</p>
           <span className="set-plan__price">{precio}</span>
           {pagado && billing.current_period_end && (
@@ -290,7 +284,7 @@ export function SeccionFacturacion({ plan }) {
         </div>
 
         <div className="set-card pago-saldo">
-          <span className="eyebrow">{t('billing.creditsBalance')}</span>
+          <h2 className="pago-saldo__etq">{t('billing.creditsBalance')}</h2>
           <span className="pago-saldo__cifra">
             {credits ? fmtUSD(credits.balance_usd) : '…'}
           </span>

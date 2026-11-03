@@ -52,6 +52,12 @@ from core.inference.ollama import (
     stream_chat_openai,
 )
 from core.inference import websearch
+from core.connectors import github as gh
+from core.connectors import github_tools as gt
+from core.connectors.agente import Agente
+from core.persistence import connectors as store_conectores
+from core.persistence import espacios as store_espacios
+from core.storage import chat_images
 from core.security.acceso import servicio_de
 from core.security.auth import (
     api_key_required,
@@ -63,7 +69,9 @@ from core.gateway.utils import fetch_models
 from core.gateway.model_router import model_for_request, target_or_503
 from core.inference.aliases import public_catalog, to_public
 from core.orchestration.orchestrator import ModelUnavailable
-from core.inference.context import fit_messages
+from core.inference import compaction
+from core.inference.context import DEFAULT_NUM_CTX, fit_messages
+from core.persistence import compaction as store_compactacion
 from core.inference.esfuerzo import nivel_de_razonamiento, pide_datos_actuales, podria_necesitar_internet
 from core.inference.roles import REQUIRED_CAPABILITY, capabilities_of, resolve_all, resolve_num_ctx
 
@@ -90,7 +98,7 @@ class ChatMessage(BaseModel):
     role: str
     content: str = ""  # los mensajes 'assistant' con solo tool_calls van sin content
     # Imágenes en base64 (passthrough a Ollama para modelos multimodales).
-    # No se persisten en el historial: solo viajan al modelo.
+    # Las del último mensaje del usuario se guardan en R2 con el mensaje.
     images: list[str] | None = None
     # Tool-calling nativo (round-trip): el assistant devuelve tool_calls y el
     # cliente responde con role="tool". Passthrough a Ollama; no se persisten.
@@ -101,6 +109,22 @@ class ChatMessage(BaseModel):
     # gpt-oss) lo esperan de vuelta dentro del mismo turno; sin él repiten la
     # llamada que acaban de hacer. Passthrough a Ollama; no se persiste.
     thinking: str | None = None
+
+
+class GithubResolve(BaseModel):
+    """Respuesta del usuario a una acción que esperaba confirmación (modo manual)."""
+    id: str = Field(..., min_length=8, max_length=64)
+    approve: bool
+
+
+class GithubContext(BaseModel):
+    """Repo de GitHub que el usuario adjuntó EXPLÍCITAMENTE. Sin esto el
+    modelo no recibe herramientas ni contexto de GitHub, aunque la cuenta
+    esté conectada."""
+    repo: str = Field(..., max_length=200, pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+    ref: str | None = Field(None, max_length=250)
+    mode: Literal["auto", "ask", "manual", "plan"] = "manual"
+    resolve: GithubResolve | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -132,6 +156,11 @@ class ChatCompletionRequest(BaseModel):
     # Petición efímera (edición inline Ctrl+K del IDE): no crea conversación ni
     # guarda contenido, pero el uso se contabiliza/cobra igual. La web no lo envía.
     no_persist: bool = False
+    # Conector de GitHub (solo la web por ahora): repo adjunto y modo del agente.
+    github: GithubContext | None = None
+    # Espacio de la conversación (solo la web): sus instrucciones, memoria y
+    # archivos van en cada turno. En una conversación ya asignada no hace falta.
+    espacio_id: str | None = None
 
 
 def _normalize_for_ollama(messages: list[dict]) -> list[dict]:
@@ -238,7 +267,7 @@ def _persist_assistant(conv_id: str, model: str, text: str,
                        prompt_tokens: int, completion_tokens: int, latency_ms: int,
                        user_id: int | None = None, save_history: bool = True,
                        bill_credits: bool = False, message_id: int | None = None,
-                       service: str | None = None) -> None:
+                       service: str | None = None, cached_tokens: int = 0) -> None:
     if save_history:
         if message_id is not None:
             update_message(message_id, text, prompt_tokens, completion_tokens, latency_ms, record_usage=True)
@@ -258,11 +287,66 @@ def _persist_assistant(conv_id: str, model: str, text: str,
         record_service_usage(user_id, service, prompt_tokens + completion_tokens)
         if bill_credits:
             # Tráfico de API key externa: se cobra del saldo prepago, no del pool de plan
-            credits.debit_usage(user_id, model, prompt_tokens, completion_tokens)
+            credits.debit_usage(user_id, model, prompt_tokens, completion_tokens, cached_tokens)
         else:
             # Sesión web o app de primera parte: cuenta contra el pool de la cuenta
             record_tokens(user_id, prompt_tokens + completion_tokens)  # F5 legacy (stats + credits.py)
-            record_session_week_tokens(user_id, model, prompt_tokens, completion_tokens)  # F8: gate real
+            record_session_week_tokens(user_id, model, prompt_tokens, completion_tokens, cached_tokens)  # F8: gate real
+
+
+async def _compactar_conversacion(messages: list[dict], *, uid: int, conv_id: str, model: str, base: str,
+                                  headers: dict | None, num_ctx: int | None, keep_alive: Any,
+                                  bill_credits: bool) -> tuple[list[dict], int]:
+    """Resumen de la parte antigua en vez de recortarla en cada petición
+    (core/inference/compaction.py). Devuelve los mensajes a enviar y cuántos
+    se acaban de resumir (0 si no hizo falta). El resumen se cobra como
+    cualquier inferencia: lo pide la conversación del usuario."""
+    ventana = int(num_ctx or DEFAULT_NUM_CTX)
+    guardado = await run_in_threadpool(store_compactacion.get_compaction, conv_id, uid)
+
+    async def _resumir(previo: str | None, tramo: list[dict]) -> tuple[str, dict[str, int]]:
+        resp = await ollama_chat(base, model, compaction.prompt_resumen(previo, tramo), headers=headers,
+                                 client=deps.http_client_chat, num_ctx=num_ctx, keep_alive=keep_alive, think=False)
+        return ((resp.get("message") or {}).get("content") or "", {
+            "prompt_tokens": int(resp.get("prompt_eval_count") or 0),
+            "completion_tokens": int(resp.get("eval_count") or 0),
+            "cached_tokens": int(resp.get("prompt_eval_cached_count") or 0),
+        })
+
+    res = await compaction.compactar(messages, ventana, guardado, _resumir)
+    uso = res.uso
+    if uso.get("prompt_tokens") or uso.get("completion_tokens"):
+        def _cobrar() -> None:
+            if bill_credits:
+                credits.debit_usage(uid, model, uso["prompt_tokens"], uso["completion_tokens"], uso["cached_tokens"])
+            else:
+                record_session_week_tokens(uid, model, uso["prompt_tokens"], uso["completion_tokens"],
+                                           uso["cached_tokens"])
+        await run_in_threadpool(_cobrar)
+    if res.guardar:
+        await run_in_threadpool(store_compactacion.save_compaction, conv_id, uid, **res.guardar)
+    return res.messages, res.compactados
+
+
+def _sin_razonamiento(chunk: str) -> str | None:
+    """El chunk sin `reasoning_content`, o None si no le queda nada que
+    enviar. La web solo enseña «Pensando» mientras el modelo razona: mandarle
+    el texto del razonamiento era tráfico que nadie veía."""
+    if not chunk.startswith("data: {") or '"reasoning_content"' not in chunk:
+        return chunk
+    try:
+        data = json.loads(chunk[6:])
+    except ValueError:
+        return chunk
+    choices = data.get("choices") or []
+    if not choices:
+        return chunk
+    delta = choices[0].get("delta") or {}
+    delta.pop("reasoning_content", None)
+    if not delta.get("content") and not delta.get("tool_calls") and choices[0].get("finish_reason") is None \
+            and not any(k.startswith("lixbon_") for k in data) and "usage" not in data:
+        return None
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _caracteres_emitidos(chunk: str) -> int:
@@ -369,7 +453,8 @@ async def api_chat(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       service=servicio_de(user_data))
+                       service=servicio_de(user_data),
+                       cached_tokens=int(ollama_resp.get("prompt_eval_cached_count") or 0))
 
     return {
         "conversation_id": conv_id if save_history else None,
@@ -385,6 +470,132 @@ async def api_chat(
     }
 
 
+async def _contexto_espacio(payload: ChatCompletionRequest, user_data: dict[str, Any],
+                            conv_id: str, save_history: bool) -> str | None:
+    """Contexto del espacio de la conversación (o del que pide la web al
+    empezarla). Un espacio ajeno o borrado se ignora sin romper el chat."""
+    if user_data.get("client") != "web":
+        return None
+    uid = user_data["id"]
+    espacio_id = payload.espacio_id
+    try:
+        if espacio_id and save_history:
+            await run_in_threadpool(store_espacios.asignar_conversacion, uid, conv_id, espacio_id)
+        if not espacio_id and payload.conversation_id:
+            espacio_id = await run_in_threadpool(store_espacios.espacio_de_conversacion, uid, conv_id)
+        if not espacio_id:
+            return None
+        return await run_in_threadpool(store_espacios.contexto_de, uid, espacio_id)
+    except store_espacios.ErrorEspacio:
+        return None
+
+
+GITHUB_MIN_CTX = 32768
+
+
+async def _contexto_github(user_id: int, gh_ctx: GithubContext) -> gt.Contexto:
+    """Comprueba con el token del usuario que el repo existe y que la App y el
+    usuario tienen acceso; de paso trae la rama principal y el permiso push."""
+    try:
+        info = await gh.Cliente(user_id)("GET", f"/repos/{gh_ctx.repo}")
+    except gh.NoConectado as exc:
+        raise HTTPException(status_code=409, detail={"code": "github_not_connected", "message": str(exc)})
+    except gh.GitHubError as exc:
+        if exc.status == 404:
+            raise HTTPException(status_code=404, detail={
+                "code": "github_repo_not_found",
+                "message": f"Lixbon no tiene acceso a {gh_ctx.repo}. Añádelo a la instalación de la App en GitHub.",
+            })
+        raise HTTPException(status_code=exc.status if exc.status == 503 else 502, detail=str(exc))
+    principal = info.get("default_branch") or "main"
+    return gt.Contexto(
+        repo=info.get("full_name") or gh_ctx.repo,
+        ref=(gh_ctx.ref or "").strip() or principal,
+        rama_principal=principal,
+        puede_escribir=bool((info.get("permissions") or {}).get("push")),
+        modo=gh_ctx.mode,
+    )
+
+
+async def _chat_github(payload: ChatCompletionRequest, user_data: dict[str, Any], *, model: str,
+                       keep_alive: Any, base: str, headers: dict | None, num_ctx: int | None, think: Any,
+                       conv_id: str, messages: list[dict], save_history: bool, bill_credits: bool,
+                       is_api: bool, plan: dict[str, Any]) -> StreamingResponse:
+    """Turno del agente de GitHub: bucle de herramientas en el servidor con el
+    token del usuario (core/connectors/agente.py)."""
+    uid = user_data["id"]
+    gh_ctx = payload.github
+    # Las definiciones de las herramientas y los archivos leídos piden una
+    # ventana grande. Se usa la ventana fija del modelo (resolve_num_ctx):
+    # subirla solo para el agente haría que Ollama recargara el modelo y
+    # perdiera la caché de todas las conversaciones del nodo.
+    num_ctx = num_ctx or GITHUB_MIN_CTX
+    if num_ctx < GITHUB_MIN_CTX:
+        logger.warning(f"[chat] github con num_ctx={num_ctx} (< {GITHUB_MIN_CTX}): "
+                       "el agente puede quedarse sin sitio para leer archivos")
+    pendiente = None
+    if gh_ctx.resolve:
+        pendiente = await run_in_threadpool(store_conectores.take_pending_action, gh_ctx.resolve.id, uid)
+        if not pendiente or (pendiente["conversation_id"] and pendiente["conversation_id"] != conv_id):
+            raise HTTPException(status_code=410, detail={
+                "code": "github_action_expired",
+                "message": "Esa acción ya no está pendiente. Vuelve a pedírselo al agente.",
+            })
+        ctx = gt.Contexto.from_dict(pendiente["context"])
+    else:
+        ctx = await _contexto_github(uid, gh_ctx)
+
+    def _paso(msgs: list[dict], tools: list[dict] | None, collector: dict):
+        return stream_chat_openai(base, model, fit_messages(list(msgs), num_ctx), headers=headers,
+                                  collector=collector, tools=tools, num_ctx=num_ctx,
+                                  keep_alive=keep_alive, think=think)
+
+    agente = Agente(user_id=uid, conversation_id=conv_id if save_history else None, ctx=ctx, model=model,
+                    paso=_paso, ip=user_data.get("ip"), num_ctx=num_ctx)
+    started_at = time.perf_counter()
+    logger.info(f"[chat] github repo={ctx.repo} mode={ctx.modo} resume={bool(pendiente)} model='{model}'")
+
+    async def _stream():
+        persistido = False
+
+        def _persistir() -> None:
+            nonlocal persistido
+            if persistido:
+                return
+            persistido = True
+            t = agente.turno
+            if not t.texto and not t.prompt_tokens:
+                return
+            _persist_assistant(
+                conv_id, model, t.texto, t.prompt_tokens, t.completion_tokens,
+                int((time.perf_counter() - started_at) * 1000), user_id=uid,
+                save_history=save_history and bool(t.texto), bill_credits=bill_credits,
+                service=servicio_de(user_data), cached_tokens=t.cached_tokens,
+            )
+
+        try:
+            gen = agente.retomar(pendiente, gh_ctx.resolve.approve) if pendiente else agente.iniciar(messages)
+            try:
+                async for chunk in gen:
+                    yield chunk
+            except Exception as exc:
+                logger.error(f"[chat] github: el agente falló ({exc})")
+                # Aviso aparte, no dentro de la respuesta: en el texto se leía
+                # como si lo hubiera escrito el modelo. La web lo pinta como aviso.
+                fin = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                       "lixbon_event": {"type": "interrupted"}}
+                yield f"data: {json.dumps(fin, ensure_ascii=False)}\n\n"
+            await run_in_threadpool(_persistir)
+            aviso_cupo = None if is_api else await run_in_threadpool(quota_notice, uid, plan)
+            if aviso_cupo:
+                yield f"data: {json.dumps({'choices': [], 'lixbon_quota': aviso_cupo}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            _persistir()
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(
     payload: ChatCompletionRequest,
@@ -394,6 +605,13 @@ async def chat_completions(
     `model` es opcional: sin él se usa el del rol `chat` del gateway."""
     model, role = await model_for_request(payload.model, "chat", user_data)
     validate_model_access(user_data, model)
+    if payload.github:
+        # Antes de guardar nada: una petición que no puede seguir no deja un
+        # mensaje suelto en el historial.
+        if user_data.get("client") != "web":
+            raise HTTPException(status_code=403, detail="El conector de GitHub solo está disponible en la web")
+        if not payload.stream or payload.tools:
+            raise HTTPException(status_code=400, detail="El conector de GitHub exige stream y no admite tools propias")
     plan = get_plan_for_user(user_data["id"])
     is_api = _is_external_api(user_data, plan)
     bill_credits = False
@@ -412,17 +630,35 @@ async def chat_completions(
     conv_id = payload.conversation_id or str(uuid.uuid4())
     # Origen: lo declara el cliente; si no, se infiere (web = sesión, resto = api)
     source = payload.source or ("web" if user_data.get("client") == "web" else "api")
+    # El chat de la web no enseña el razonamiento (solo «Pensando»): no se le
+    # envía. El IDE y el CLI sí lo muestran y lo siguen recibiendo.
+    ocultar_razonamiento = source == "web"
     if save_history:
         if not ensure_conversation(conv_id, user_data["id"], payload.title, payload.client_id, source=source):
             raise HTTPException(status_code=404, detail="Conversación no encontrada")
         if payload.messages and payload.messages[-1].role == "user":
-            save_message(conv_id, "user", payload.messages[-1].content, model=model)
+            ultimo = payload.messages[-1]
+            # Las imágenes se guardan con el mensaje (R2): sin esto desaparecían
+            # al recargar y en cada despliegue.
+            imagenes = await run_in_threadpool(chat_images.guardar, user_data["id"], conv_id, ultimo.images) \
+                if ultimo.images else None
+            save_message(conv_id, "user", ultimo.content, model=model, images=imagenes)
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
     if payload.tools:
         messages = _normalize_for_ollama(messages)
+    contexto_espacio = await _contexto_espacio(payload, user_data, conv_id, save_history)
+    if contexto_espacio:
+        # Detrás de los system del cliente: el principio del prompt no cambia
+        # entre turnos y la caché del nodo se aprovecha.
+        n = 0
+        while n < len(messages) and messages[n].get("role") == "system":
+            n += 1
+        messages.insert(n, {"role": "system", "content": contexto_espacio})
 
-    base, headers, origen = target_or_503(model)
+    # Misma conversación → mismo nodo: ahí está su contexto en caché.
+    afinidad = f"conv:{payload.conversation_id}" if payload.conversation_id else f"user:{user_data['id']}"
+    base, headers, origen = target_or_503(model, afinidad=afinidad)
     catalog = await fetch_models()
     num_ctx = resolve_num_ctx(payload.num_ctx, role.num_ctx, catalog, model)
     nivel = nivel_de_razonamiento(messages)
@@ -440,12 +676,31 @@ async def chat_completions(
     if payload.source == "visuals" and think is False and "gpt-oss" in model.lower():
         think = "medium"
 
+    if payload.github:
+        return await _chat_github(
+            payload, user_data, model=model, keep_alive=role.keep_alive, base=base, headers=headers,
+            num_ctx=num_ctx, think=think, conv_id=conv_id, messages=messages, save_history=save_history,
+            bill_credits=bill_credits, is_api=is_api, plan=plan,
+        )
+
+    # Conversación larga: la parte antigua va resumida (una vez) en vez de
+    # recortarse en cada petición, que tiraba la caché del nodo. Solo con
+    # historial guardado y sin tools propias (los agentes del IDE y el CLI
+    # gestionan su propio contexto).
+    compactados = 0
+    if save_history and payload.conversation_id and not payload.tools:
+        messages, compactados = await _compactar_conversacion(
+            messages, uid=user_data["id"], conv_id=conv_id, model=model, base=base, headers=headers,
+            num_ctx=num_ctx, keep_alive=role.keep_alive, bill_credits=bill_credits)
+
     # "Modo investigar": el modelo decide qué buscar, se busca y se inyecta el
     # contexto antes de responder.
     web_sources: list[dict] = []
     web_queries: list[str] = []
     web_mode = payload.web_search
-    datos_actuales = web_mode == "auto" and pide_datos_actuales(messages)
+    # En un espacio, «precio» o «hoy» suelen estar en sus archivos: el
+    # planificador decide si busca, no se le obliga.
+    datos_actuales = web_mode == "auto" and not contexto_espacio and pide_datos_actuales(messages)
     if web_mode == "auto" and payload.tools and not (datos_actuales and _primer_paso(messages)):
         # Con herramientas (agente) el modelo ya tiene `web_search` como tool
         # y decide él; el planificador solo duplicaría la búsqueda. Excepción:
@@ -455,21 +710,22 @@ async def chat_completions(
     if web_mode == "auto" and not podria_necesitar_internet(messages):
         web_mode = False
     if web_mode and messages and messages[-1]["role"] == "user":
-        p_model, p_base, p_headers, p_alive = model, base, headers, role.keep_alive
+        p_model, p_base, p_headers, p_alive, p_ctx = model, base, headers, role.keep_alive, num_ctx
         # Solo si el admin fija el rol `route`: un modelo autodetectado distinto
         # del del chat podría desalojarlo de la VRAM y salir más caro.
         ruta = resolve_all(catalog)["route"]
         if ruta.model and ruta.model != model and ruta.source in ("db", "env"):
             try:
-                p_base, p_headers, _ = target_or_503(ruta.model)
+                p_base, p_headers, _ = target_or_503(ruta.model, afinidad=afinidad)
                 p_model, p_alive = ruta.model, ruta.keep_alive
+                p_ctx = resolve_num_ctx(None, ruta.num_ctx, catalog, ruta.model)
             except HTTPException:
                 pass
 
         async def _preguntar(planner_messages: list[dict]) -> str:
             resp = await ollama_chat(p_base, p_model, planner_messages, headers=p_headers,
                                      client=deps.http_client_chat, keep_alive=p_alive,
-                                     format="json", think=False)
+                                     format="json", think=False, num_ctx=p_ctx)
             return (resp.get("message") or {}).get("content", "")
 
         web_queries = await websearch.plan_queries(
@@ -536,8 +792,11 @@ async def chat_completions(
                         if chunk.startswith("data: [DONE]"):
                             continue
                         streamed_something = True
-                        salida += _caracteres_emitidos(chunk)
-                        yield chunk
+                        salida += _caracteres_emitidos(chunk)  # el razonamiento cuenta para el cupo
+                        if ocultar_razonamiento:
+                            chunk = _sin_razonamiento(chunk)
+                        if chunk:
+                            yield chunk
                         await _checkpoint()
                         if restante is not None and compute_credit_cost(peso, prompt_est, salida // 4) >= restante:
                             sin_cupo = True
@@ -566,8 +825,11 @@ async def chat_completions(
                     bill_credits=bill_credits,
                     message_id=message_id,
                     service=servicio_de(user_data),
+                    cached_tokens=collector.get("cached_tokens") or 0,
                 )
 
+            if compactados:
+                yield f"data: {json.dumps({'choices': [], 'lixbon_compacted': {'messages': compactados}})}\n\n"
             # Primero, las fuentes (si hubo búsqueda) para que el UI las muestre.
             if web_queries:
                 yield f"data: {json.dumps({'lixbon_sources': web_sources, 'lixbon_queries': web_queries})}\n\n"
@@ -613,7 +875,8 @@ async def chat_completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=bill_credits, service=servicio_de(user_data))
+                       bill_credits=bill_credits, service=servicio_de(user_data),
+                       cached_tokens=int(ollama_resp.get("prompt_eval_cached_count") or 0))
 
     return JSONResponse({
         "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
@@ -669,7 +932,8 @@ async def completions(
     completion_tokens = int(ollama_resp.get("eval_count") or 0)
     _persist_assistant(conv_id, model, assistant_text, prompt_tokens, completion_tokens,
                        latency_ms, user_id=user_data["id"], save_history=save_history,
-                       bill_credits=bill_credits, service=servicio_de(user_data))
+                       bill_credits=bill_credits, service=servicio_de(user_data),
+                       cached_tokens=int(ollama_resp.get("prompt_eval_cached_count") or 0))
 
     return JSONResponse({
         "id": f"cmpl-{uuid.uuid4().hex[:16]}",
@@ -824,7 +1088,8 @@ async def fim_complete(
     if payload.stop:
         options["stop"] = payload.stop
 
-    base, headers, origen = target_or_503(model)
+    # El autocompletado repite casi todo el prefijo del archivo en cada tecla.
+    base, headers, origen = target_or_503(model, afinidad=f"fim:{user_data['id']}")
     started_at = time.perf_counter()
     try:
         resp = await ollama_generate(base, model, payload.prefix, payload.suffix,

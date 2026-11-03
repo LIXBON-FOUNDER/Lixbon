@@ -39,9 +39,13 @@ CHAT_THINK: bool | None = None if _think in ("", "auto") else _think in ("1", "t
 # Ventana de contexto (num_ctx) para TODOS los roles y nodos. Ollama usa 4096
 # si no se le dice nada. "max" = la máxima que declara cada modelo (cuidado:
 # qwen3.5 declara 262144 y la caché KV no cabe en una GPU pequeña); un número
-# = ese valor, recortado a la máxima del modelo. Vacío = default de Ollama.
+# = ese valor, recortado a la máxima del modelo. Vacío = MODEL_NUM_CTX_DEFAULT.
 # El num_ctx de un rol en el panel (tabla model_roles) tiene prioridad.
 MODEL_NUM_CTX: str = os.getenv("MODEL_NUM_CTX", "").strip().lower()
+# Sin MODEL_NUM_CTX ni num_ctx en el rol: la misma ventana que los nodos
+# arrancan por defecto (OLLAMA_CONTEXT_LENGTH en infra/node/install-node.sh).
+# Mandar siempre un valor fijo evita que Ollama recargue el modelo.
+MODEL_NUM_CTX_DEFAULT: int = int(os.getenv("MODEL_NUM_CTX_DEFAULT", "32768"))
 MODEL_ROLE_FIM: str = os.getenv("MODEL_ROLE_FIM", "")
 MODEL_ROLE_VISION: str = os.getenv("MODEL_ROLE_VISION", "moondream")
 MODEL_ROLE_EMBED: str = os.getenv("MODEL_ROLE_EMBED", "nomic-embed-text")
@@ -64,6 +68,14 @@ MODEL_ROLES_TTL_S: int = int(os.getenv("MODEL_ROLES_TTL_S", "60"))
 # Segundos de caché del catálogo de modelos. Protege /api/tags de /api/fim,
 # que dispara una petición por pulsación de tecla.
 MODELS_CACHE_TTL_S: int = int(os.getenv("MODELS_CACHE_TTL_S", "10"))
+
+# Precio de la entrada en caché frente a la entrada nueva (créditos del plan y
+# saldo de la API). Ollama no vuelve a procesar el principio del prompt que
+# coincide con la petición anterior (prompt_eval_cached_count): en una prueba
+# local, 4546 de 4565 tokens salieron de la caché y el prompt tardó 0,19 s en
+# vez de 3,6 s. Cobrarlos como nuevos multiplicaba el coste de cada paso del
+# agente. 0.1 = 10 % del precio de entrada, como las APIs de OpenAI y Anthropic.
+CACHED_INPUT_FACTOR: float = float(os.getenv("CACHED_INPUT_FACTOR", "0.1"))
 
 # postgresql://user:pass@host:port/db  (Railway la provee; en local apunta a lixbon-staging)
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")

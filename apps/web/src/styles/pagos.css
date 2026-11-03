@@ -52,7 +52,7 @@
 
 .pago__nombre {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
 }
 
@@ -92,20 +92,20 @@
 
 .pago__resumen-precio {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--ink);
   white-space: nowrap;
 }
 
 .pago__resumen-nota {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-label);
   text-wrap: pretty;
 }
 
 .pago__sub {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-muted);
   text-wrap: pretty;
 }
@@ -144,7 +144,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: 13px;
   transition: background 0.16s ease, color 0.16s ease;
 }
 
@@ -197,7 +197,7 @@
 
 .pago-tarjeta__num {
   font-family: var(--font-mono);
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -206,7 +206,7 @@
   border-radius: var(--radius-chip);
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .pago-tarjeta__chip.is-mala {
@@ -236,7 +236,7 @@
 }
 
 .pago__cargando {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -282,7 +282,7 @@
 }
 
 .pago__guardar input:focus-visible ~ .pago__tick {
-  outline: 2px solid var(--accent);
+  outline: 1.5px solid var(--anillo-foco);
   outline-offset: 2px;
 }
 
@@ -295,8 +295,8 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 0.16s ease;
 }
@@ -316,7 +316,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-body);
-  font-size: 13.5px;
+  font-size: 13px;
   text-decoration: none;
   cursor: pointer;
   transition: background 0.16s ease;
@@ -341,7 +341,7 @@
   border-radius: var(--radius);
   background: var(--field-error);
   color: var(--danger-ink);
-  font-size: 12.5px;
+  font-size: 13px;
   text-wrap: pretty;
 }
 
@@ -351,7 +351,7 @@
   justify-content: center;
   gap: 8px;
   color: var(--ink-faint);
-  font-size: 11.5px;
+  font-size: 12px;
   text-align: center;
   text-wrap: pretty;
 }
@@ -377,7 +377,7 @@
   border-radius: var(--radius);
 }
 
-.pago__icono.is-ok { background: var(--accent-soft); color: var(--accent); }
+.pago__icono.is-ok { background: var(--ok-soft); color: var(--ok); }
 .pago__icono.is-bad { background: var(--danger-soft); color: var(--danger-ink); }
 .pago__icono.is-espera { background: var(--surface-4); color: var(--ink-soft); }
 
@@ -389,7 +389,7 @@
 
 .pago__titular {
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
 }
 
@@ -477,14 +477,14 @@
 }
 
 .pago-pack__precio {
-  font-size: 19px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
 
 .pago-pack__nota {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-label);
 }
 
@@ -501,13 +501,13 @@
 
 .pago-saldo__cifra {
   font-size: 30px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--ink);
 }
 
 .pago-saldo__enlace {
-  font-size: 12.5px;
+  font-size: 13px;
   text-decoration: none;
 }
 

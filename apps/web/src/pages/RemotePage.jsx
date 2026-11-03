@@ -15,7 +15,7 @@ import { WaveText } from '../components/WaveText';
 import { RemoteOrch } from '../components/RemoteOrch';
 import { Select } from '../components/Select';
 import { IconBook, IconChevron, IconCli, IconClip, IconFile, IconIde, IconImage, IconMenu, IconNext, IconSend, IconStop, IconX } from '../components/Icons';
-import { LogoMark } from '../components/Logo';
+import { LogoMark, LogoTrabajando } from '../components/Logo';
 import { useLocale } from '../i18n/LocaleContext';
 import { describeRemoteTool, shownCommand, summarizeRemoteTools } from '../lib/toolText';
 import {
@@ -113,6 +113,8 @@ function RemoteInicio({ t, hayActivas }) {
   return (
     <HeroInicio>
       <h2 className="chat-hero__title">{t('homeTitle')}<br /><em>{t('homeTitleEm')}</em></h2>
+      {/* Las dos formas de conectar en una tarjeta de un solo tono (sin rayas),
+          con el isotipo posado en el borde; la guía va debajo como enlace. */}
       <div className="remote-inicio">
         <LogoMark size={22} className="remote-inicio__mascota" />
         <div className="remote-inicio__fila">
@@ -125,14 +127,13 @@ function RemoteInicio({ t, hayActivas }) {
           <span className="remote-inicio__nombre">{t('homeCli')}</span>
           <span className="remote-inicio__como">{t('homeCliHow')} <code>/remote</code></span>
         </div>
-        <span className="remote-inicio__div" aria-hidden="true" />
-        <Link to="/docs/remote" className="remote-inicio__fila remote-inicio__enlace">
-          <IconBook size={16} />
-          <span className="remote-inicio__nombre">{t('homeDocs')}</span>
-          <IconNext size={14} className="remote-inicio__flecha" />
-        </Link>
       </div>
-      <p className="chat-privacidad">{hayActivas ? t('homePickActive') : t('homePick')}</p>
+      <Link to="/docs/remote" className="remote-inicio__enlace">
+        <IconBook size={15} />
+        <span>{t('homeDocs')}</span>
+        <IconNext size={14} />
+      </Link>
+      <p className="remote-inicio__nota">{hayActivas ? t('homePickActive') : t('homePick')}</p>
     </HeroInicio>
   );
 }
@@ -154,7 +155,7 @@ function ToolLine({ items, t, locale }) {
         title={open ? t('hideDetail') : t('showDetail')}
       >
         <span className="actline__icon" aria-hidden="true">
-          {current ? <span className="actline__pulse" /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
+          {current ? <LogoTrabajando size={16} /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
         </span>
         {current ? <WaveText key={text} text={text} className="actline__text" /> : <span className="actline__text">{text}</span>}
         <span className="actline__meta">

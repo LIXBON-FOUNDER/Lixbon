@@ -21,6 +21,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from core.inference.context import desglose
 from core.inference.node_transport import new_client
 
 logger = logging.getLogger("lixbon.inference")
@@ -455,9 +456,16 @@ async def _stream_chat_openai(
         if done:
             prompt_tokens = int(data.get("prompt_eval_count") or 0)
             completion_tokens = int(data.get("eval_count") or 0)
+            # Parte del prompt que Ollama no volvió a procesar: el principio
+            # coincidía con la petición anterior y estaba en su caché KV.
+            # prompt_tokens la incluye (es el tamaño real del contexto).
+            cached_tokens = min(prompt_tokens, int(data.get("prompt_eval_cached_count") or 0))
+            breakdown = desglose(payload.get("messages") or [], payload.get("tools"), prompt_tokens)
             if collector is not None:
                 collector["prompt_tokens"] = prompt_tokens
                 collector["completion_tokens"] = completion_tokens
+                collector["cached_tokens"] = cached_tokens
+                collector["breakdown"] = breakdown
             # Ventana desbordada: Ollama no da error, descarta el
             # principio del prompt (system prompt y tools incluidos) y el
             # modelo responde vacío tras un rato largo de prompt-eval.
@@ -484,11 +492,16 @@ async def _stream_chat_openai(
                     "reasoned": thinking_seen,
                 }
             # Ventana efectiva: con `usage` la web calcula cuánto contexto queda.
-            openai_chunk["lixbon_context"] = {"num_ctx": int(num_ctx) if num_ctx else 4096}
+            openai_chunk["lixbon_context"] = {
+                "num_ctx": int(num_ctx) if num_ctx else 4096,
+                "used": prompt_tokens + completion_tokens,
+                "breakdown": breakdown,
+            }
             openai_chunk["usage"] = {
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
+                "prompt_tokens_details": {"cached_tokens": cached_tokens},
             }
         yield f"data: {json.dumps(openai_chunk)}\n\n"
 

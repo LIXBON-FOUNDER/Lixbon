@@ -28,7 +28,7 @@
   border-radius: var(--radius-chip);
   background: var(--surface-3);
   color: var(--ink-muted);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -163,7 +163,7 @@
 }
 
 .adm__name {
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -177,8 +177,8 @@
   border-radius: var(--radius-chip);
   background: #ce7f25;
   color: var(--surface-0);
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .adm__main {
@@ -206,7 +206,7 @@
 
 .adm__title {
   margin: 0;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 500;
   letter-spacing: -0.012em;
   color: var(--ink);
@@ -282,7 +282,7 @@
 .adm-btn--sm {
   height: 30px;
   padding: 0 12px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .adm-btn.is-danger {
@@ -325,7 +325,7 @@
 
 .adm-card__nota {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--ink-label);
   text-wrap: pretty;
@@ -353,7 +353,7 @@
 }
 
 .adm-stat__label {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -380,7 +380,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 11.5px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -453,7 +453,7 @@ a.adm-btn {
 }
 
 .adm-tabla__th {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -478,7 +478,7 @@ a.adm-btn {
 
 .adm-tabla__td {
   min-width: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ink-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -488,7 +488,7 @@ a.adm-btn {
 .adm-tabla__td--num {
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -576,7 +576,7 @@ a.adm-btn {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 13.5px;
+  font-size: 13px;
   outline: none;
 }
 
@@ -661,7 +661,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: var(--field);
   color: var(--ink-soft);
-  font-size: 12.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -682,7 +682,7 @@ a.adm-btn {
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-label);
 }
 
@@ -701,13 +701,13 @@ a.adm-btn {
 }
 
 .adm-medida__label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-label);
 }
 
 .adm-medida__valor {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-muted);
 }
 
@@ -735,7 +735,7 @@ a.adm-btn {
 }
 
 .adm-medida--gruesa .adm-medida__valor {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink);
 }
 
@@ -768,12 +768,12 @@ a.adm-btn {
 }
 
 .adm-aviso__titulo {
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--danger-ink);
 }
 
 .adm-aviso__sub {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -823,7 +823,7 @@ a.adm-btn {
   background: var(--surface-0);
   color: var(--code-inline);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   word-break: break-all;
   white-space: pre-wrap;
 }
@@ -831,7 +831,7 @@ a.adm-btn {
 .adm-vacio {
   padding: 18px 16px;
   color: var(--ink-muted);
-  font-size: 13.5px;
+  font-size: 13px;
   text-align: center;
 }
 
@@ -840,7 +840,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: var(--field-error);
   color: var(--danger-ink);
-  font-size: 13.5px;
+  font-size: 13px;
 }
 
 .adm-ok {
@@ -848,7 +848,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: rgba(110, 158, 62, 0.1);
   color: var(--ok);
-  font-size: 13.5px;
+  font-size: 13px;
 }
 
 .adm-pie {
@@ -860,7 +860,7 @@ a.adm-btn {
 }
 
 .adm-pie__cuenta {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-label);
 }
 
@@ -876,7 +876,7 @@ a.adm-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-muted);
 }
 
@@ -972,7 +972,7 @@ a.adm-btn {
 
 .adm-columnas__cifra {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ink-muted);
 }
 
@@ -1071,7 +1071,7 @@ a.adm-btn {
 }
 
 .adm-nodo__score-label {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -1150,7 +1150,7 @@ a.adm-btn {
 }
 
 .adm-dato__label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-label);
 }
 
@@ -1176,7 +1176,7 @@ a.adm-btn {
 }
 
 .adm-ajuste__titulo {
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ink-title);
 }
 
@@ -1348,7 +1348,7 @@ a.adm-btn {
 
 .adm-lista__label {
   flex-shrink: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -1357,7 +1357,7 @@ a.adm-btn {
 .adm-lista__valor {
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ink-body);
   text-align: right;
   overflow-wrap: anywhere;
@@ -1371,7 +1371,7 @@ a.adm-btn {
 }
 
 .adm-bloque__label {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -1538,7 +1538,7 @@ a.adm-btn {
 .adm-input--sm {
   height: 32px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .adm-fila-campo {
@@ -1655,7 +1655,7 @@ a.adm-btn {
 .adm__brand-tag { background: #222222; color: #B4C64E; }
 .adm-link { border-radius: 8px; font-family: var(--font-ui); color: #D4D4D4; }
 .adm-link:hover { background: #222222; color: #FFFFFF; }
-.adm-link.is-active { background: #222222; color: #FFFFFF; font-weight: 600; }
+.adm-link.is-active { background: #222222; color: #FFFFFF; font-weight: 500; }
 .adm-sublink { border-radius: 8px; font-family: var(--font-ui); color: #9A907C; }
 .adm-sublink:hover { color: #FFFFFF; }
 .adm-sublink.is-active { background: #222222; color: #B4C64E; }

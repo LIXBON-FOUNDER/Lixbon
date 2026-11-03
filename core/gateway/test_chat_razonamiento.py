@@ -83,7 +83,7 @@ def llamadas(monkeypatch):
     monkeypatch.setattr(chat_mod, "ollama_chat", fake_chat)
     monkeypatch.setattr(chat_mod, "fetch_models", fake_models)
     monkeypatch.setattr(model_router, "fetch_models", fake_models)
-    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True: ("http://fake", {}, "fake"))
+    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True, afinidad=None: ("http://fake", {}, "fake"))
     monkeypatch.setattr(chat_mod, "CHAT_THINK", None)
     return registro
 

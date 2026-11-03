@@ -315,7 +315,7 @@ function Cli({ base }) {
       <p>
         Ejecuta <code>lixbon</code>: la primera vez se abre el inicio de sesión
         interactivo, con tu correo y contraseña o pegando una API key{' '}
-        <code>lixbon_sk_…</code> (la generas en <Link to="/account/profile">Ajustes → Cuenta</Link>).
+        <code>lixbon_sk_…</code> (la generas en <Link to="/account/security">Ajustes → Seguridad</Link>).
         Después eliges el modelo y ya estás chateando. Escribe <code>/</code> para ver
         todos los comandos.
       </p>
@@ -510,7 +510,7 @@ function ApiDocs({ base }) {
 
       <h2>Autenticación</h2>
       <p>
-        Genera una API key en <Link to="/account/profile">Ajustes → Cuenta</Link>. Se muestra
+        Genera una API key en <Link to="/account/security">Ajustes → Seguridad</Link>. Se muestra
         una única vez al crearla; guárdala. Envíala en la cabecera <code>Authorization</code>:
       </p>
       <CodeBlock code={`Authorization: Bearer lixbon_sk_tu_clave`} />
@@ -588,7 +588,7 @@ function UsarApiKey({ base }) {
 
       <h2>1. Crea tu key</h2>
       <p>
-        Ve a <Link to="/account/profile">Ajustes → Cuenta → API keys</Link> y pulsa
+        Ve a <Link to="/account/security">Ajustes → Seguridad → API keys</Link> y pulsa
         «Nueva key». Se muestra <strong>una sola vez</strong>; guárdala en un gestor de
         secretos. Si la pierdes, desactívala y crea otra. El número de keys depende de
         tu <Link to="/docs/plans">plan</Link>.

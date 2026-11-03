@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
-import { IconChevron, IconExternal, IconMonitor, IconPhone, IconSearch, IconTablet, IconX } from './Icons';
+import { IconCheck, IconChevron, IconExternal, IconMonitor, IconPhone, IconSearch, IconTablet, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
 import { Desplegable } from './Desplegable';
 import { useT } from '../i18n/useT';
@@ -32,16 +32,19 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
       <Desplegable abierto={abierto} className="vis-ds__menu">
           {!editando ? (
             <>
+              <p className="vis-ds__etq">{t('designSystemTitle')}</p>
               {DESIGN_SYSTEMS.map((ds) => (
                 <button key={ds.id} className={`vis-ds__item ${value?.id === ds.id ? 'is-active' : ''}`} onClick={() => elegir(ds)}>
                   <span className="vis-ds__swatch" style={{ background: swatchDe(ds) }} />
                   <span className="vis-ds__item-text"><strong>{ds.label[locale]}</strong><small>{ds.desc[locale]}</small></span>
+                  {value?.id === ds.id && <IconCheck size={15} className="vis-ds__check" />}
                 </button>
               ))}
               {value?.custom && (
                 <button className="vis-ds__item is-active" onClick={() => setEditando(true)}>
                   <span className="vis-ds__swatch" style={{ background: value.form.primario }} />
                   <span className="vis-ds__item-text"><strong>{value.label[locale]}</strong><small>{t('ownEdit')}</small></span>
+                  <IconCheck size={15} className="vis-ds__check" />
                 </button>
               )}
               <button className="vis-ds__item vis-ds__item--nuevo" onClick={() => setEditando(true)}>{t('defineMine')}</button>

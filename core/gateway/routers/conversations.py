@@ -4,6 +4,8 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from core.gateway.routers.chat import _routed_chat
@@ -24,6 +26,7 @@ from core.persistence.queries import (
     set_conversation_share,
 )
 from core.security.auth import web_or_api_key_auth, session_or_api_key
+from core.storage import chat_images
 
 logger = logging.getLogger("lixbon.conversations")
 router = APIRouter()
@@ -138,7 +141,23 @@ async def api_delete_conversation(
 ):
     if not delete_conversation(conversation_id, user_data["id"]):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    await run_in_threadpool(chat_images.borrar, user_data["id"], conversation_id)
     return {"deleted": conversation_id}
+
+
+@router.get("/api/chat-images/{conversation_id}/{token}")
+async def api_chat_image(
+    conversation_id: str,
+    token: str,
+    user_data: dict[str, Any] = Depends(session_or_api_key),
+):
+    """Una imagen que el usuario mandó al chat. Solo las suyas: su id va en la
+    clave de R2, así que con otra sesión la misma URL no encuentra nada."""
+    hallada = await run_in_threadpool(chat_images.leer, user_data["id"], conversation_id, token)
+    if not hallada:
+        raise HTTPException(status_code=404, detail="No encontrada")
+    datos, tipo = hallada
+    return Response(content=datos, media_type=tipo, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.post("/api/conversations/{conversation_id}/archive")

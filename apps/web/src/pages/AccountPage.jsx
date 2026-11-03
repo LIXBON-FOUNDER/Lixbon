@@ -1,8 +1,12 @@
-import { TemaBoton } from '../components/TemaBoton';
+import { useTema } from '../hooks/useTema';
 import { useSeo } from '../lib/seo';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Link, Navigate, useNavigate } from '../i18n/link';
+import { createPortal } from 'react-dom';
+import { useLocation, useNavigate as useRawNavigate } from 'react-router-dom';
+import { useNavigate } from '../i18n/link';
+import { guardarIdioma, otherLocalePath, stripLocale, withLocale } from '../i18n/paths';
+import { useCierreAnimado } from '../hooks/useCierreAnimado';
+import { Muescas, ritmoSemana } from '../components/ContextoUso';
 import { useLocale } from '../i18n/LocaleContext';
 import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
@@ -11,16 +15,16 @@ import { AVATAR_ACCEPT, validateAvatar, initialOf } from '../lib/avatar';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { useReenvioVerificacion } from '../components/VerifyBanner';
-import { Logo } from '../components/Logo';
 import { ServiceComb } from '../components/ServiceComb';
 import { SeccionFacturacion } from '../components/pagos/SeccionFacturacion';
-import { planBadge } from '../lib/planColors';
 import { LEGACY_ACCOUNT_SECTIONS } from '../i18n/paths';
 import {
-  IconGear, IconUser, IconShield, IconCard, IconChart,
-  IconTrash, IconX, IconChevron, 
+  IconUser, IconShield, IconCard, IconChart, IconSliders, Icono,
+  IconTrash, IconX, IconChevron,
   IconCheck, IconCamera, IconMascota, IconApps,
 } from '../components/Icons';
+
+const IconLlave = (p) => <Icono nombre="llave" size={16} {...p} />;
 import { Select } from '../components/Select';
 import { McpSection } from '../components/McpSection';
 import { SpriteMascota } from '../components/Mascota';
@@ -32,8 +36,9 @@ function useSections() {
   const t = useT('account');
   const tm = useT('mascota');
   return [
-    { id: 'general', label: t('sections.general'), Icon: IconUser },
-    { id: 'profile', label: t('sections.profile'), Icon: IconGear },
+    { id: 'general', label: t('sections.account'), Icon: IconUser },
+    { id: 'preferences', label: t('sections.preferences'), Icon: IconSliders },
+    { id: 'security', label: t('sections.security'), Icon: IconLlave },
     { id: 'privacy', label: t('sections.privacy'), Icon: IconShield },
     { id: 'billing', label: t('sections.billing'), Icon: IconCard },
     { id: 'usage', label: t('sections.usage'), Icon: IconChart },
@@ -42,25 +47,26 @@ function useSections() {
   ];
 }
 
-function QuotaBar({ label, used, limit, resetHint, unlimitedLabel, showPercent }) {
-  const pct = unlimited(limit) ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
-  const full = !unlimited(limit) && used >= limit;
+// Cupo con las mismas muescas que el anillo del chat y, en la semana, el ritmo.
+function QuotaBar({ label, bucket, resetHint, unlimitedLabel, ritmo }) {
+  const tu = useT('cupo');
+  const ilimitado = bucket.unlimited;
+  const frac = ilimitado ? 0 : Math.min(1, (bucket.percent ?? (bucket.used / Math.max(1, bucket.limit)) * 100) / 100);
   return (
     <div className="quota">
       <div className="quota__head">
         <span>{label}</span>
-        <span className={full ? 'quota__count is-full' : 'quota__count'}>
-          {unlimited(limit)
-            ? unlimitedLabel
-            : showPercent ? `${Math.round(pct)}%` : `${used.toLocaleString()} / ${limit.toLocaleString()}`}
+        <span className={frac >= 1 ? 'quota__count is-full' : 'quota__count'}>
+          {ilimitado ? unlimitedLabel : `${Math.round(frac * 100)}%`}
         </span>
       </div>
-      {!unlimited(limit) && (
-        <div className="quota__track">
-          <div className={`quota__fill ${full ? 'is-full' : ''}`} style={{ width: `${pct}%` }} />
-        </div>
-      )}
+      {!ilimitado && <Muescas frac={frac} />}
       <span className="quota__reset">{resetHint}</span>
+      {ritmo != null && (
+        <span className={`quota__ritmo ${ritmo >= 1 ? 'is-danger' : ritmo >= 0.8 ? 'is-warn' : 'is-ok'}`}>
+          {ritmo >= 1 ? tu('paceOver') : tu('paceAt', { pct: Math.round(ritmo * 100) })}
+        </span>
+      )}
     </div>
   );
 }
@@ -75,11 +81,6 @@ function Row({ label, hint, children }) {
       <div className="set-row__control">{children}</div>
     </div>
   );
-}
-
-function SoonTag() {
-  const tc = useT('common');
-  return <span className="set-soon">{tc('comingSoon')}</span>;
 }
 
 function Toggle({ checked, onChange, disabled, label }) {
@@ -181,12 +182,14 @@ function AvatarField({ user, onSaved }) {
   );
 }
 
-function GeneralSection({ user, onSaved }) {
+function CuentaSection({ user, onSaved }) {
   const t = useT('account');
   const [first, setFirst] = useState(user.first_name || '');
   const [last, setLast] = useState(user.last_name || '');
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState(false);
+  const [pwSent, setPwSent] = useState(false);
+  const { estado: verifyState, reenviar: resendVerify } = useReenvioVerificacion();
 
   const dirty = first.trim() !== (user.first_name || '') || last.trim() !== (user.last_name || '');
 
@@ -203,6 +206,13 @@ function GeneralSection({ user, onSaved }) {
     }
   };
 
+  const sendReset = async () => {
+    try {
+      await api.post('/api/auth/request-password-reset', { email: user.email || user.username });
+      setPwSent(true);
+    } catch { setPwSent(true); }
+  };
+
   return (
     <>
       <div className="set-card">
@@ -216,22 +226,87 @@ function GeneralSection({ user, onSaved }) {
         <Row label={t('general.lastName')}>
           <input className="set-input" value={last} onChange={(e) => setLast(e.target.value)} />
         </Row>
-        <Row label={t('general.email')} hint={t('general.emailHint')}>
-          <span className="set-static">{user.email || user.username}</span>
-        </Row>
-      </div>
-      <div className="set-actions">
-        {ok && <span className="set-ok"><IconCheck size={13} /> {t('general.saved')}</span>}
-        <button className="pill-btn pill-btn--primary" disabled={!dirty || busy} onClick={save}>
-          {busy ? t('general.saving') : t('general.save')}
-        </button>
+        <div className="set-actions">
+          {ok && <span className="set-ok"><IconCheck size={13} /> {t('general.saved')}</span>}
+          <button className="pill-btn pill-btn--primary" disabled={!dirty || busy} onClick={save}>
+            {busy ? t('general.saving') : t('general.save')}
+          </button>
+        </div>
       </div>
 
       <div className="set-card">
-        <h2 className="set-title">{t('general.preferencesTitle')}</h2>
-        <Row label={t('general.language')} hint={t('general.languageHint')}><SoonTag /></Row>
+        <h2 className="set-title">{t('profile.loginTitle')}</h2>
+        <Row
+          label={t('profile.email')}
+          hint={user.email_verified
+            ? t('profile.emailHintVerified')
+            : verifyState === 'enviado'
+              ? t('profile.emailHintSent')
+              : verifyState === 'error'
+                ? t('profile.emailHintError')
+                : t('profile.emailHintUnverified')}
+        >
+          <span className="set-static">{user.email || user.username}</span>
+          <span className={`estado ${user.email_verified ? 'estado--hecho' : 'estado--espera'}`}>
+            {user.email_verified ? t('profile.verified') : t('profile.unverified')}
+          </span>
+          {!user.email_verified && user.email && verifyState !== 'enviado' && (
+            <button
+              className="pill-btn pill-btn--outline set-btn"
+              onClick={resendVerify}
+              disabled={verifyState === 'enviando'}
+            >
+              {verifyState === 'enviando' ? t('profile.sending') : t('profile.resendVerification')}
+            </button>
+          )}
+        </Row>
+        <Row label={t('profile.password')} hint={t('profile.passwordHint')}>
+          {pwSent
+            ? <span className="set-ok"><IconCheck size={13} /> {t('profile.linkSent')}</span>
+            : <button className="pill-btn pill-btn--outline set-btn" onClick={sendReset}>{t('profile.changePassword')}</button>}
+        </Row>
       </div>
     </>
+  );
+}
+
+// Preferencias: el idioma (el mismo cambio ES/EN del menú de la cuenta) y el
+// tema. Pista hundida con el elegido en una píldora, como el razonamiento.
+function Segmentos({ opciones, valor, onChange, label }) {
+  return (
+    <span className="set-seg" role="group" aria-label={label}>
+      {opciones.map((o) => (
+        <button key={o.id} type="button" className={o.id === valor ? 'is-on' : ''} aria-pressed={o.id === valor} onClick={() => onChange(o.id)}>
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+function PreferenciasSection() {
+  const t = useT('account');
+  const locale = useLocale();
+  const { pathname } = useLocation();
+  const rawNavigate = useRawNavigate();
+  const { preferencia, fijar } = useTema();
+  const cambiarIdioma = (code) => {
+    if (code === locale) return;
+    guardarIdioma(code);
+    rawNavigate(otherLocalePath(pathname));
+  };
+  return (
+    <div className="set-card">
+      <h2 className="set-title">{t('general.preferencesTitle')}</h2>
+      <Row label={t('general.language')} hint={t('general.languageHint')}>
+        <Segmentos label={t('general.language')} valor={locale} onChange={cambiarIdioma}
+          opciones={[{ id: 'es', label: 'Español' }, { id: 'en', label: 'English' }]} />
+      </Row>
+      <Row label={t('general.theme')} hint={t('general.themeHint')}>
+        <Segmentos label={t('general.theme')} valor={preferencia} onChange={fijar}
+          opciones={[{ id: 'light', label: t('general.themeLight') }, { id: 'dark', label: t('general.themeDark') }, { id: 'system', label: t('general.themeSystem') }]} />
+      </Row>
+    </div>
   );
 }
 
@@ -304,10 +379,10 @@ function SessionsCard() {
                 <span className="keys__name">
                   {cliente}{s.legacy && ` · ${t('profile.legacyTag')}`}
                 </span>
-                <span className="keys__masked">{describirSesion(s)}</span>
+                <span className="keys__masked keys__masked--texto">{describirSesion(s)}</span>
               </div>
               {s.current
-                ? <span className="verify-chip is-ok">{t('profile.thisSession')}</span>
+                ? <span className="estado estado--hecho">{t('profile.thisSession')}</span>
                 : <span className="keys__meta">{t('profile.lastUsed', { date: new Date(s.last_used_at).toLocaleDateString() })}</span>}
               {!s.current && (
                 <button
@@ -326,30 +401,12 @@ function SessionsCard() {
   );
 }
 
-function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogout }) {
+function SeguridadSection({ plan, keys, onReloadKeys, onPedirLogout }) {
   const t = useT('account');
   const [newKey, setNewKey] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pwSent, setPwSent] = useState(false);
-  const { estado: verifyState, reenviar: resendVerify } = useReenvioVerificacion();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [delBusy, setDelBusy] = useState(false);
-  const [delError, setDelError] = useState('');
   const confirmar = useConfirmar();
-
-  const deleteAccount = async (password) => {
-    setDelBusy(true);
-    setDelError('');
-    try {
-      await api.delete('/api/account', { data: { password } });
-      await onLogout();
-    } catch (err) {
-      const d = err.response?.data?.detail;
-      setDelError(typeof d === 'string' ? d : t('profile.deleteAccountError'));
-      setDelBusy(false);
-    }
-  };
 
   const manualKeys = keys.filter((k) => (k.origin ?? 'manual') === 'manual');
   const activeKeys = manualKeys.filter((k) => k.is_active);
@@ -384,48 +441,8 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
     }
   };
 
-  const sendReset = async () => {
-    try {
-      await api.post('/api/auth/request-password-reset', { email: user.email || user.username });
-      setPwSent(true);
-    } catch { setPwSent(true); }
-  };
-
   return (
     <>
-      <div className="set-card">
-        <h2 className="set-title">{t('profile.title')}</h2>
-        <Row
-          label={t('profile.email')}
-          hint={user.email_verified
-            ? t('profile.emailHintVerified')
-            : verifyState === 'enviado'
-              ? t('profile.emailHintSent')
-              : verifyState === 'error'
-                ? t('profile.emailHintError')
-                : t('profile.emailHintUnverified')}
-        >
-          <span className="set-static">{user.email || user.username}</span>
-          <span className={user.email_verified ? 'verify-chip is-ok' : 'verify-chip'}>
-            {user.email_verified ? t('profile.verified') : t('profile.unverified')}
-          </span>
-          {!user.email_verified && user.email && verifyState !== 'enviado' && (
-            <button
-              className="pill-btn pill-btn--outline set-btn"
-              onClick={resendVerify}
-              disabled={verifyState === 'enviando'}
-            >
-              {verifyState === 'enviando' ? t('profile.sending') : t('profile.resendVerification')}
-            </button>
-          )}
-        </Row>
-        <Row label={t('profile.password')} hint={t('profile.passwordHint')}>
-          {pwSent
-            ? <span className="set-ok"><IconCheck size={13} /> {t('profile.linkSent')}</span>
-            : <button className="pill-btn pill-btn--outline set-btn" onClick={sendReset}>{t('profile.changePassword')}</button>}
-        </Row>
-      </div>
-
       <div className="set-card">
         <h2 className="set-title">{t('profile.apiKeysTitle')}</h2>
         <p className="card__muted">{t('profile.apiKeysHint')}</p>
@@ -479,32 +496,12 @@ function ProfileSection({ user, plan, keys, onReloadKeys, onLogout, onPedirLogou
             {t('profile.logOut')}
           </button>
         </Row>
-        <Row label={t('profile.deleteAccount')} hint={t('profile.deleteAccountHint')}>
-          <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmDelete(true)}>
-            {t('profile.deleteAccount')}
-          </button>
-        </Row>
       </div>
-
-      {confirmDelete && (
-        <ConfirmDialog
-          title={t('profile.deleteAccountConfirm.title')}
-          confirmLabel={t('profile.deleteAccountConfirm.confirmLabel')}
-          busyLabel={t('profile.deleteAccountConfirm.busyLabel')}
-          requirePassword
-          busy={delBusy}
-          error={delError}
-          onClose={() => setConfirmDelete(false)}
-          onConfirm={deleteAccount}
-        >
-          {t('profile.deleteAccountConfirm.body')}
-        </ConfirmDialog>
-      )}
     </>
   );
 }
 
-function PrivacySection({ user, onUserChange }) {
+function PrivacySection({ user, onUserChange, onLogout }) {
   const t = useT('account');
   const [settings, setSettings] = useState(user.settings || null);
   const [busyKey, setBusyKey] = useState(null);
@@ -514,6 +511,22 @@ function PrivacySection({ user, onUserChange }) {
   const [clearBusy, setClearBusy] = useState(false);
   const [clearError, setClearError] = useState('');
   const [cleared, setCleared] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState('');
+
+  const deleteAccount = async (password) => {
+    setDelBusy(true);
+    setDelError('');
+    try {
+      await api.delete('/api/account', { data: { password } });
+      await onLogout();
+    } catch (err) {
+      const d = err.response?.data?.detail;
+      setDelError(typeof d === 'string' ? d : t('profile.deleteAccountError'));
+      setDelBusy(false);
+    }
+  };
 
   const exportData = async () => {
     setError('');
@@ -605,16 +618,43 @@ function PrivacySection({ user, onUserChange }) {
             {exporting ? t('privacy.preparing') : t('privacy.export')}
           </button>
         </Row>
-        <Row label={t('privacy.clearHistory')} hint={t('privacy.clearHistoryHint')}>
+      </div>
+
+      {/* Zona de peligro: lo que no se deshace, aparte y tintado de rojo. */}
+      <div className="set-peligro">
+        <h2 className="set-peligro__titulo">{t('privacy.dangerTitle')}</h2>
+        <div className="set-peligro__fila">
+          <div className="set-row__label">
+            <span>{t('privacy.clearHistory')}</span>
+            <span className="set-row__hint">{t('privacy.clearHistoryHint')}</span>
+          </div>
           {cleared
             ? <span className="set-ok"><IconCheck size={13} /> {t('privacy.historyCleared')}</span>
-            : (
-              <button className="pill-btn pill-btn--outline set-btn is-danger" onClick={() => setConfirmClear(true)}>
-                {t('privacy.clearHistory')}
-              </button>
-            )}
-        </Row>
+            : <button className="pill-btn set-btn set-peligro__btn" onClick={() => setConfirmClear(true)}>{t('privacy.clearHistory')}</button>}
+        </div>
+        <div className="set-peligro__fila">
+          <div className="set-row__label">
+            <span>{t('profile.deleteAccount')}</span>
+            <span className="set-row__hint">{t('profile.deleteAccountHint')}</span>
+          </div>
+          <button className="pill-btn set-btn set-peligro__btn" onClick={() => setConfirmDelete(true)}>{t('profile.deleteAccount')}</button>
+        </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={t('profile.deleteAccountConfirm.title')}
+          confirmLabel={t('profile.deleteAccountConfirm.confirmLabel')}
+          busyLabel={t('profile.deleteAccountConfirm.busyLabel')}
+          requirePassword
+          busy={delBusy}
+          error={delError}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={deleteAccount}
+        >
+          {t('profile.deleteAccountConfirm.body')}
+        </ConfirmDialog>
+      )}
 
       {confirmClear && (
         <ConfirmDialog
@@ -652,25 +692,22 @@ function UsageSection({ usage, buckets, services, plan }) {
   return (
     <>
       <div className="set-card">
-        <h2 className="set-title">{t('usage.periodTitle')} <span className="set-plan-tag" style={{ background: planBadge(plan.id).bg, color: planBadge(plan.id).ink }}>{t('usage.plan', { name: plan.name })}</span></h2>
+        <h2 className="set-title">{t('usage.periodTitle')} <span className="estado set-plan-estado">{t('usage.plan', { name: plan.name })}</span></h2>
         <p className="card__muted">
           {paid ? t('usage.paidDesc') : t('usage.freeDesc')}
         </p>
         <QuotaBar
-          showPercent
           label={t('usage.sessionTitle')}
-          used={buckets.session.used}
-          limit={buckets.session.unlimited ? -1 : buckets.session.limit}
+          bucket={buckets.session}
           unlimitedLabel={t('unlimited')}
           resetHint={`${t('usage.sessionHint')} ${buckets.session.reset_at
             ? t('usage.resetsAt', { date: new Date(buckets.session.reset_at).toLocaleString(locale) })
             : t('usage.notStarted')}`}
         />
         <QuotaBar
-          showPercent
           label={t('usage.weekTitle')}
-          used={buckets.week.used}
-          limit={buckets.week.unlimited ? -1 : buckets.week.limit}
+          bucket={buckets.week}
+          ritmo={ritmoSemana(buckets.week)}
           unlimitedLabel={t('unlimited')}
           resetHint={`${t('usage.weekHint')} ${t('usage.resetsAt', { date: new Date(buckets.week.reset_at).toLocaleString(locale) })}`}
         />
@@ -788,7 +825,7 @@ function MascotSection() {
                   ? <SpriteMascota personaje={p.sprite} estado="idle" tam={48} quieta />
                   : <><SpriteMascota personaje="gael" estado="idle" tam={48} quieta /><SpriteMascota personaje="leya" estado="idle" tam={48} quieta /></>}
               </span>
-              <span className="mascota-elegir__nombre">{p.nombre}</span>
+              <span className="mascota-elegir__nombre">{p.nombre}{m.personaje === p.id && <IconCheck size={14} className="mascota-elegir__check" />}</span>
               <span className="mascota-elegir__sub">{p.sub}</span>
             </button>
           ))}
@@ -816,13 +853,34 @@ function MascotSection() {
   );
 }
 
-export default function AccountPage() {
+// Ajustes es una ventana grande encima de la interfaz: lo que había detrás
+// (`fondo`, la página desde la que se abrió; si se entra directo, el chat)
+// sigue pintado debajo. Cambiar de sección no cambia el fondo.
+export default function AccountPage({ fondo }) {
   const t = useT('account');
+  const tc = useT('common');
   const SECTIONS = useSections();
+  // El título de la pestaña vuelve al de la página de fondo al cerrar.
+  const [tituloFondo] = useState(() => document.title);
+  useEffect(() => () => { document.title = tituloFondo; }, [tituloFondo]);
   useSeo({ title: t('seoTitle'), noindex: true });
   const { user, setUser, loading, logout } = useAuth();
   const navigate = useNavigate();
-  const { section } = useParams();
+  const rawNavigate = useRawNavigate();
+  const locale = useLocale();
+  const { pathname } = useLocation();
+  const section = stripLocale(pathname).split('/').filter(Boolean)[1];
+  const irA = (id, opciones = {}) => rawNavigate(withLocale(`/account/${id}`, locale), { replace: true, state: { fondo }, ...opciones });
+  const volver = useCallback(() => {
+    rawNavigate(fondo ? `${fondo.pathname}${fondo.search || ''}${fondo.hash || ''}` : withLocale('/chat', locale));
+  }, [rawNavigate, fondo, locale]);
+  // Esc cierra, salvo que haya un diálogo de confirmación abierto encima.
+  const { cerrando, cerrar } = useCierreAnimado(volver, { bloqueado: true });
+  useEffect(() => {
+    const alPulsar = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal-overlay')) cerrar(); };
+    window.addEventListener('keydown', alPulsar);
+    return () => window.removeEventListener('keydown', alPulsar);
+  }, [cerrar]);
   const [account, setAccount] = useState(null);
   const [keys, setKeys] = useState([]);
   const [error, setError] = useState('');
@@ -870,29 +928,14 @@ export default function AccountPage() {
 
   const plan = account?.plan;
 
-  if (legacyTarget) {
-    return <Navigate to={`/account/${legacyTarget}`} replace />;
-  }
+  useEffect(() => { if (legacyTarget) irA(legacyTarget); }); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading || (!account && !error)) {
-    return (
-      <div className="app-loading">
-        <span className="app-loading__logo"><Logo size={19} /></span>
-        <span className="app-loading__bar"><span /></span>
-      </div>
-    );
-  }
+  const cargando = loading || (!account && !error);
 
-  return (
-    <div className="page">
-      <header className="page__bar">
-        <Link to="/chat" className="page__logo"><Logo /></Link>
-        <TemaBoton />
-        <Link to="/chat" className="pill-btn pill-btn--outline page__back">{t('backToChat')}</Link>
-      </header>
-
-      <h1 className="page__title settings__title">{t('title')}</h1>
-
+  return createPortal(
+    <div className={`ajustes-capa ${cerrando ? 'is-closing' : ''}`} onClick={cerrar}>
+      <div className="ajustes set-page" role="dialog" aria-modal="true" aria-labelledby="ajustes-titulo" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="icon-btn ajustes__x" onClick={cerrar} aria-label={tc('close')}><IconX /></button>
       <div className="settings">
         <button
           className="docs__menu-toggle"
@@ -904,11 +947,12 @@ export default function AccountPage() {
         </button>
 
         <aside id="settings-nav" className={`settings__nav ${menuOpen ? 'is-open' : ''}`}>
+          <h1 id="ajustes-titulo" className="ajustes__titulo">{t('title')}</h1>
           {SECTIONS.map((s) => (
             <button
               key={s.id}
               className={`settings__nav-link ${s.id === current.id ? 'is-active' : ''}`}
-              onClick={() => navigate(`/account/${s.id}`)}
+              onClick={() => irA(s.id)}
             >
               <s.Icon size={16} /> {s.label}
             </button>
@@ -917,20 +961,15 @@ export default function AccountPage() {
 
         <main className="settings__content">
           {error && <p className="page__error" role="alert">{error}</p>}
+          {cargando && <div className="set-cargando"><span className="app-loading__bar"><span /></span></div>}
           {account && user && (
             <div className="settings__pane" key={current.id}>
-              {current.id === 'general' && <GeneralSection user={user} onSaved={setUser} />}
-              {current.id === 'profile' && (
-                <ProfileSection
-                  user={user}
-                  plan={plan}
-                  keys={keys}
-                  onReloadKeys={loadKeys}
-                  onLogout={doLogout}
-                  onPedirLogout={pedirLogout}
-                />
+              {current.id === 'general' && <CuentaSection user={user} onSaved={setUser} />}
+              {current.id === 'preferences' && <PreferenciasSection />}
+              {current.id === 'security' && (
+                <SeguridadSection plan={plan} keys={keys} onReloadKeys={loadKeys} onPedirLogout={pedirLogout} />
               )}
-              {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} />}
+              {current.id === 'privacy' && <PrivacySection user={user} onUserChange={setUser} onLogout={doLogout} />}
               {current.id === 'billing' && <SeccionFacturacion plan={plan} />}
               {current.id === 'mascot' && <MascotSection />}
               {current.id === 'mcp' && <McpSection onKeysChanged={loadKeys} />}
@@ -939,6 +978,8 @@ export default function AccountPage() {
           )}
         </main>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

@@ -44,7 +44,8 @@ CATALOGO = [{"id": "qwen3.5:4b", "context_length": 262144}, {"id": "phi:latest"}
 
 def test_prioridad_peticion_rol_global(monkeypatch):
     monkeypatch.setattr(config, "MODEL_NUM_CTX", "16384")
-    assert resolve_num_ctx(2048, 8192, CATALOGO, "qwen3.5:4b") == 2048
+    # El num_ctx del cliente no manda: cambiarlo recargaría el modelo.
+    assert resolve_num_ctx(2048, 8192, CATALOGO, "qwen3.5:4b") == 8192
     assert resolve_num_ctx(None, 8192, CATALOGO, "qwen3.5:4b") == 8192
     assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == 16384
 
@@ -60,6 +61,20 @@ def test_global_max_y_vacio(monkeypatch):
     assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == 262144
     assert resolve_num_ctx(None, None, CATALOGO, "phi") is None
     monkeypatch.setattr(config, "MODEL_NUM_CTX", "")
-    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") is None
+    # Sin configurar: la ventana por defecto de los nodos, siempre explícita.
+    assert resolve_num_ctx(None, None, CATALOGO, "qwen3.5:4b") == config.MODEL_NUM_CTX_DEFAULT
+    assert resolve_num_ctx(None, None, CATALOGO, "phi") == config.MODEL_NUM_CTX_DEFAULT
     assert context_length_of(CATALOGO, "phi") is None
     assert context_length_of([{"id": "m:latest", "context_length": 8192}], "m") == 8192
+
+
+def test_desglose_suma_el_total_real():
+    from core.inference.context import desglose
+    msgs = [{"role": "system", "content": "s" * 300}, {"role": "user", "content": "u" * 600}]
+    tools = [{"type": "function", "function": {"name": "x", "description": "d" * 200}}]
+    d = desglose(msgs, tools, 1000)
+    assert sum(d.values()) == 1000
+    assert d["messages"] > d["system"] > 0 and d["tools"] > 0
+    assert desglose(msgs, None, 500)["tools"] == 0
+    # Sin total real (corte antes del final): estimación por caracteres.
+    assert desglose(msgs, None, 0)["messages"] > 0

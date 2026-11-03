@@ -5,25 +5,51 @@ import { Link } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { useShell } from '../components/AppShell';
-import { Icono, IconMenu, IconSearch, IconDownload, IconNext, IconX } from '../components/Icons';
+import { Icono, IconMenu, IconSearch, IconDownload, IconNext, IconX, IconExternal } from '../components/Icons';
 import { downloadSkill, listSkills } from '../lib/skillsApi';
 import { LogoMarca } from '../components/LogosMarcas';
+import { useConfirmar } from '../hooks/useConfirmar';
+import { desconectarGithub, estadoGithub, estadoGithubConocido } from '../lib/github';
+import { ConectarGithub } from '../components/ConectarGithub';
+import '../styles/github.css';
+
+const AVISOS_GITHUB = ['connected', 'installed', 'requested', 'cancelled', 'error', 'session', 'expired'];
 
 // Conectores: los incluidos ya funcionan en el chat; los «pronto» aún no tienen
-// backend y se muestran sin acción.
+// backend y se muestran sin acción. GitHub pasa a «disponible» cuando el
+// servidor tiene la App configurada.
+// Se listan por categoría; dentro de cada una, lo que ya funciona va primero
+// y lo que llegará («Pronto») al final y atenuado.
+const CATEGORIAS = ['lixbon', 'desarrollo', 'google', 'microsoft', 'redes', 'comunicacion', 'productividad', 'comercio'];
 const CONECTORES = [
-  { id: 'web', icono: 'globo', estado: 'incluido' },
-  { id: 'visuals', icono: 'visuals', estado: 'incluido', to: '/visuals' },
-  { id: 'docs', icono: 'archivo', estado: 'incluido' },
-  { id: 'vision', icono: 'imagen', estado: 'incluido' },
-  { id: 'mcp', icono: 'nodos', estado: 'disponible', to: '/account/mcp' },
-  { id: 'github', marca: true, estado: 'pronto' },
-  { id: 'gmail', marca: true, estado: 'pronto' },
-  { id: 'drive', marca: true, estado: 'pronto' },
-  { id: 'notion', marca: true, estado: 'pronto' },
-  { id: 'slack', marca: true, estado: 'pronto' },
-  { id: 'calendar', marca: true, estado: 'pronto' },
+  { id: 'web', icono: 'globo', estado: 'incluido', cat: 'lixbon' },
+  { id: 'visuals', icono: 'visuals', estado: 'incluido', to: '/visuals', cat: 'lixbon' },
+  { id: 'docs', icono: 'archivo', estado: 'incluido', cat: 'lixbon' },
+  { id: 'vision', icono: 'imagen', estado: 'incluido', cat: 'lixbon' },
+  { id: 'github', marca: true, estado: 'pronto', cat: 'desarrollo' },
+  { id: 'mcp', icono: 'nodos', estado: 'disponible', to: '/account/mcp', cat: 'desarrollo' },
+  // Nuevos «Pronto» (investigados el 2026-11-03): API pública con OAuth o bot y
+  // términos que permiten a un tercero actuar por el usuario. Fuera por ahora:
+  // WhatsApp (programa Tech Provider + verificación de empresa) y TikTok (sin
+  // auditoría solo publica en privado).
+  { id: 'linear', marca: true, estado: 'pronto', cat: 'desarrollo' },
+  { id: 'jira', marca: true, estado: 'pronto', cat: 'desarrollo' },
+  { id: 'confluence', marca: true, estado: 'pronto', cat: 'desarrollo' },
+  { id: 'outlook', marca: true, estado: 'pronto', cat: 'microsoft' },
+  { id: 'onedrive', marca: true, estado: 'pronto', cat: 'microsoft' },
+  { id: 'instagram', marca: true, estado: 'pronto', cat: 'redes' },
+  { id: 'linkedin', marca: true, estado: 'pronto', cat: 'redes' },
+  { id: 'x', marca: true, estado: 'pronto', cat: 'redes' },
+  { id: 'discord', marca: true, estado: 'pronto', cat: 'comunicacion' },
+  { id: 'telegram', marca: true, estado: 'pronto', cat: 'comunicacion' },
+  { id: 'shopify', marca: true, estado: 'pronto', cat: 'comercio' },
+  { id: 'gmail', marca: true, estado: 'pronto', cat: 'google' },
+  { id: 'drive', marca: true, estado: 'pronto', cat: 'google' },
+  { id: 'calendar', marca: true, estado: 'pronto', cat: 'google' },
+  { id: 'slack', marca: true, estado: 'pronto', cat: 'comunicacion' },
+  { id: 'notion', marca: true, estado: 'pronto', cat: 'productividad' },
 ];
+const ORDEN_ESTADO = { incluido: 0, disponible: 0, pronto: 1 };
 
 const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
@@ -36,10 +62,15 @@ function Grupo({ titulo, children }) {
   );
 }
 
-function Fila({ marca, nombre, texto, accion, apagada }) {
+// `activa`: conectada, incluida o instalada. Lleva un sello verde en el logo
+// para distinguirla de un vistazo de lo que aún no tiene.
+function Fila({ marca, nombre, texto, accion, apagada, activa = false, etiquetaActiva = '' }) {
   return (
-    <div className={`int-fila ${apagada ? 'is-apagada' : ''}`}>
-      <span className="int-fila__marca">{marca}</span>
+    <div className={`int-fila ${apagada ? 'is-apagada' : ''} ${activa ? 'is-activa' : ''}`}>
+      <span className="int-fila__marca">
+        {marca}
+        {activa && <span className="int-fila__sello" role="img" aria-label={etiquetaActiva} title={etiquetaActiva}><Icono nombre="hecho" size={10} /></span>}
+      </span>
       <span className="int-fila__texto">
         <strong>{nombre}</strong>
         <span>{texto}</span>
@@ -49,25 +80,69 @@ function Fila({ marca, nombre, texto, accion, apagada }) {
   );
 }
 
-function Conectores({ t, q }) {
-  const lista = CONECTORES.filter((c) => !q || norm(`${t(`c_${c.id}`)} ${t(`c_${c.id}_d`)}`).includes(q));
+// Cada usuario conecta SU cuenta de GitHub; desde aquí la administra o la quita.
+function AccionGithub({ estado, onCambio }) {
+  const tg = useT('github');
+  const confirmar = useConfirmar();
+  const [ocupado, setOcupado] = useState(false);
+  const [conectar, setConectar] = useState(false);
+  if (!estado.connected) {
+    return (
+      <>
+        <button type="button" className="pill-btn pill-btn--primary" onClick={() => setConectar(true)}>
+          {tg('connect')}
+        </button>
+        {conectar && <ConectarGithub onClose={() => setConectar(false)} />}
+      </>
+    );
+  }
+  const quitar = async () => {
+    const ok = await confirmar({ titulo: tg('disconnectTitle'), texto: tg('disconnectText'), etiqueta: tg('disconnect') });
+    if (!ok) return;
+    setOcupado(true);
+    try {
+      await desconectarGithub();
+      onCambio();
+    } finally { setOcupado(false); }
+  };
+  return (
+    <span className="int-acciones">
+      {estado.manage_url && (
+        <a className="icon-btn" href={estado.manage_url} target="_blank" rel="noreferrer"
+          aria-label={tg('manage')} title={tg('manage')}><IconExternal size={16} /></a>
+      )}
+      <button type="button" className="pill-btn" onClick={quitar} disabled={ocupado}>{tg('disconnect')}</button>
+    </span>
+  );
+}
+
+function Conectores({ t, q, github, onGithub }) {
+  const tg = useT('github');
+  // Mientras llega el estado, GitHub va en «Disponibles» (lo normal con el
+  // conector configurado): antes saltaba de «Próximamente» a «Disponibles».
+  const catalogo = CONECTORES.map((c) => (c.id === 'github' && (github === undefined || github?.configured)
+    ? { ...c, estado: 'disponible' } : c));
+  const lista = catalogo.filter((c) => !q || norm(`${t(`c_${c.id}`)} ${t(`c_${c.id}_d`)}`).includes(q));
   if (!lista.length) return <p className="int-vacio">{t('noResults')}</p>;
-  const grupos = [['incluido', t('included')], ['disponible', t('available')], ['pronto', t('soon')]];
-  return grupos.map(([estado, titulo]) => {
-    const items = lista.filter((c) => c.estado === estado);
+  return CATEGORIAS.map((cat) => {
+    const items = lista.filter((c) => c.cat === cat)
+      .sort((a, b) => ORDEN_ESTADO[a.estado] - ORDEN_ESTADO[b.estado]);
     if (!items.length) return null;
     return (
-      <Grupo key={estado} titulo={titulo}>
+      <Grupo key={cat} titulo={t(`cat_${cat}`)}>
         {items.map((c) => (
           <Fila
             key={c.id}
             apagada={c.estado === 'pronto'}
+            activa={c.estado === 'incluido' || (c.id === 'github' && !!github?.connected)}
+            etiquetaActiva={c.estado === 'incluido' ? t('activeIncluded') : t('activeConnected')}
             marca={c.icono ? <Icono nombre={c.icono} size={18} /> : <LogoMarca id={c.id} size={20} />}
             nombre={t(`c_${c.id}`)}
-            texto={t(`c_${c.id}_d`)}
+            texto={c.id === 'github' && github?.connected ? tg('connected', { login: github.login }) : t(`c_${c.id}_d`)}
             accion={c.estado === 'pronto' ? <span className="int-etiqueta">{t('soonTag')}</span>
+              : c.id === 'github' ? (github ? <AccionGithub estado={github} onCambio={onGithub} /> : null)
               : c.to ? <Link to={c.to} className="icon-btn" aria-label={c.estado === 'incluido' ? t('open') : t('configure')} title={c.estado === 'incluido' ? t('open') : t('configure')}><IconNext size={16} /></Link>
-                : <span className="int-etiqueta">{t('includedTag')}</span>}
+                : null}
           />
         ))}
       </Grupo>
@@ -103,6 +178,8 @@ function Habilidades({ t, q, user }) {
   const fila = (s) => (
     <Fila
       key={s.slug}
+      activa={!!s.installed_by_me}
+      etiquetaActiva={t('activeInstalled')}
       marca={<Icono nombre="skills" size={18} />}
       nombre={<>{s.title} <code className="int-cmd">{s.command}</code></>}
       texto={error === s.slug ? t('downloadError') : s.summary}
@@ -140,12 +217,23 @@ export default function IntegracionesPage() {
   const t = useT('integraciones');
   const tch = useT('chat');
   useSeo({ title: t('seoTitle'), noindex: true });
-  const { user } = useAuth();
+  const { user, loading: cargandoSesion } = useAuth();
   const { openDrawer, drawerOpen } = useShell();
   const [params, setParams] = useSearchParams();
   const tab = params.get('tab') === 'skills' ? 'skills' : 'connectors';
   const [busca, setBusca] = useState('');
   const q = norm(busca.trim());
+  const tg = useT('github');
+  // undefined = aún no se sabe (se pinta en «Disponibles» sin acción); null = sin sesión o error.
+  const [github, setGithub] = useState(estadoGithubConocido);
+  // Vuelta de GitHub tras conectar o instalar: ?github=connected|installed|cancelled|…
+  const avisoGithub = params.get('github');
+  const cargarGithub = () => {
+    if (cargandoSesion) return; // sin esto, «sin sesión» un instante lo mandaba a Próximamente
+    if (!user) { setGithub(null); return; }
+    estadoGithub({ fresco: true }).then(setGithub).catch(() => setGithub(null));
+  };
+  useEffect(cargarGithub, [user, cargandoSesion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cambiar = (nuevo) => {
     setBusca('');
@@ -179,7 +267,10 @@ export default function IntegracionesPage() {
               aria-label={tab === 'skills' ? t('searchSkills') : t('searchConnectors')} />
             {busca && <button type="button" className="int-buscar__x" onClick={() => setBusca('')} aria-label="×"><IconX size={14} /></button>}
           </label>
-          {tab === 'skills' ? <Habilidades t={t} q={q} user={user} /> : <Conectores t={t} q={q} />}
+          {AVISOS_GITHUB.includes(avisoGithub) && tab !== 'skills' && (
+            <p className="int-aviso" role="status">{tg(`status_${avisoGithub}`)}</p>
+          )}
+          {tab === 'skills' ? <Habilidades t={t} q={q} user={user} /> : <Conectores t={t} q={q} github={github} onGithub={cargarGithub} />}
         </div>
       </div>
     </section>
