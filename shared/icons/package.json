@@ -1,7 +1,7 @@
 {
   "name": "@lixbon/icons",
   "version": "0.1.0",
-  "description": "Iconos de Lixbon (145, rejilla 24, trazo 2) para la web, el IDE y la app móvil.",
+  "description": "Iconos de Lixbon (152, rejilla 24, trazo 2) para la web, el IDE y la app móvil.",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",
   "type": "module",
