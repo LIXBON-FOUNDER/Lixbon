@@ -77,6 +77,7 @@ export function EffortSlider({ levels, value, onChange }) {
         className={`effort is-${current} ${open ? 'is-open' : ''}`}
         onClick={() => { if (open) commit(); setOpen((v) => !v); }}
         title="Effort: cuánto razona Claude antes de responder"
+        aria-label={`Effort: ${info.label}`}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
