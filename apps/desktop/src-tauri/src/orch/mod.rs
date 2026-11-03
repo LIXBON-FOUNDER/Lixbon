@@ -93,6 +93,8 @@ mod run_pump_tests;
 #[cfg(test)]
 mod dispatch_boot_tests;
 #[cfg(test)]
+mod real_provider_tests;
+#[cfg(test)]
 mod initial_approval_rpc_tests;
 #[cfg(test)]
 mod task_create_attempt_tests;
