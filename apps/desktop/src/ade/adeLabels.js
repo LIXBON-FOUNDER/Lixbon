@@ -95,6 +95,8 @@ export const COPY = Object.freeze({
   noWorktree: 'Sin worktree registrado',
   attemptActivity: 'Actividad del intento',
   activityPerAttemptPartial: 'Actividad parcial: no incluye eventos de sesión ni worktree',
+  activityGroupedByRun: 'Agrupada por tramos de ejecución. El Core no registra los mensajes ni las herramientas del agente, solo el ciclo de vida del intento.',
+  runInProgress: 'en curso',
   noAttemptActivity: 'Sin eventos del intento todavía',
   loadingAttemptActivity: 'Cargando actividad del intento.',
   attemptActivityTruncated: (limit) => `Mostrando los ${limit} eventos más recientes`,
@@ -169,10 +171,35 @@ export const ATTEMPT_ACTIVITY_LABELS = Object.freeze({
   'activity.attempt.stopped': 'Detenido',
 });
 
+/**
+ * Resto de los eventos `activity.attempt.*` que el catálogo del Core ya valida (ACTIVITY_V1_MESSAGE_KEYS). Van aparte de
+ * ATTEMPT_ACTIVITY_LABELS porque el transporte valida esas claves por su cuenta: esta tabla solo pone texto corto.
+ */
+export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
+  'activity.attempt.waiting': 'Esperando una respuesta',
+  'activity.attempt.awaiting_terminal_approval': 'Esperando aprobación de terminal',
+  'activity.attempt.resumed': 'Siguió en ejecución',
+  'activity.attempt.exited': 'Salió sin cerrarse',
+  'activity.attempt.integrated': 'Integrado',
+  'activity.attempt.continued': 'Continuado',
+  'activity.attempt.retried': 'Reintentado',
+  'activity.attempt.queued': 'Instrucción en cola',
+  'activity.attempt.queue_delivered': 'Instrucción de la cola entregada',
+  'activity.attempt.queue_cancelled': 'Instrucción de la cola cancelada',
+  'activity.attempt.queue_failed': 'No se pudo entregar la instrucción de la cola',
+  'activity.attempt.dispatch_ambiguous': 'No se sabe si llegó a lanzarse',
+});
+
+/** Título de cada grupo de la actividad del intento (ver attemptTimeline.js). */
+export const ATTEMPT_GROUP_LABELS = Object.freeze({ before: 'Solicitud y aprobación', closing: 'Cierre', after: 'Después' });
+export const attemptRunLabel = (n) => `Ejecución ${n}`;
+
 export function attemptActivityLabel(messageKey) {
-  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey) ? ATTEMPT_ACTIVITY_LABELS[messageKey] : COPY.unknownEvent;
+  if (Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey)) return ATTEMPT_ACTIVITY_LABELS[messageKey];
+  if (Object.hasOwn(ATTEMPT_ACTIVITY_MORE_LABELS, messageKey)) return ATTEMPT_ACTIVITY_MORE_LABELS[messageKey];
+  return COPY.unknownEvent;
 }
 
 export function isKnownAttemptActivity(messageKey) {
-  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey);
+  return Object.hasOwn(ATTEMPT_ACTIVITY_LABELS, messageKey) || Object.hasOwn(ATTEMPT_ACTIVITY_MORE_LABELS, messageKey);
 }

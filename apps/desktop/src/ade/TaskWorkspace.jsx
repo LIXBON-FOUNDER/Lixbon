@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react';
 import { useCoreQuery } from './useCoreQuery';
 import { TASK_STATUS_LABELS } from './adeLabels';
 import { AnswerQuestion } from './AnswerQuestion';
+import { StatusMark } from './StatusMark';
 import './TaskWorkspace.css';
 
 // Task Workspace / Inspector de solo lectura (LXO-98).
@@ -350,7 +351,7 @@ export function TaskWorkspaceView({ projectId, taskId, detail, project = null, o
       <header className="twk__head">
         <h2 id={headingId} ref={headingRef} tabIndex={-1} className="twk__title">{visible ? (text(visible.title) ?? 'Task sin título') : 'Task'}</h2>
         {visible && (
-          <span className={`twk__status twk__status--${info.group}`} data-status={info.raw ?? ''}>{info.label}</span>
+          <span className={`twk__status twk__status--${info.group}`} data-status={info.raw ?? ''}><StatusMark info={{ raw: info.raw, known: info.group !== 'unknown' }} />{info.label}</span>
         )}
         {refreshable && <button type="button" className="twk__action" onClick={state.retry}>Actualizar</button>}
       </header>

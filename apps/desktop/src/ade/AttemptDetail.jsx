@@ -125,7 +125,7 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           <dl data-testid="attempt-review">
             <Row label="Veredicto">{text(review.verdict)}</Row>
             <Row label="Commits"><span className="mono">{text(review.base_commit)}</span> → <span className="mono">{text(review.head_commit)}</span></Row>
-            <Row label="Frescura"><StatusText info={reviewFreshnessInfo(review)} /></Row>
+            <Row label="Frescura"><StatusText info={reviewFreshnessInfo(review)} mark={false} /></Row>
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
 

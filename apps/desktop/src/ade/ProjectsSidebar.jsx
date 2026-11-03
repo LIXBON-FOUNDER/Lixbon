@@ -5,6 +5,7 @@ import { useTreeNavigation } from './useTreeNavigation';
 import { UNKNOWN_CORE_MODEL } from './useCoreModel';
 import { coreErrorCode, isLegacyModelCode } from './coreModelContract';
 import { COPY } from './adeLabels';
+import { AttentionMark } from './StatusMark';
 import { AttemptTreeContext, attemptKey, taskKeyOfAttemptKey } from './SidebarAttempts';
 import {
   ALL_TASKS_VIEW,
@@ -125,7 +126,7 @@ function ProjectRow({ project, expanded, selected, context, position, setSize, i
             data-attention-total={attention.total}
             title={attention.detail ? `Attention activa del Core: ${attention.detail}` : 'Attention activa del Core'}
           >
-            Attention {attention.total}
+            <AttentionMark />Attention {attention.total}
           </span>
         )}
         <span>Tasks {countValue(counts.tasks)}</span>

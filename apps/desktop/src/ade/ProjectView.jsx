@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { ResourcesInventory } from './ResourcesInventory';
+import { StatusMark } from './StatusMark';
 import './ProjectView.css';
 
 /**
@@ -335,6 +336,7 @@ function Tasks({ slice, projectId, filter, onFilter, onOpenTask, onLoadMore, hea
                       <span className="pv__title">{t?.title || t?.task_id || 'Task sin ID duradero'}</span>
                     </Target>
                     <span className={`pv__status ${known ? `pv__status--${t.status}` : 'pv__status--unknown'}`} data-testid="task-status" data-status={known ? t.status : 'unknown'}>
+                      <StatusMark info={{ raw: t?.status, known }} />
                       {known ? STATUS_LABEL[t.status] : `Estado desconocido${isId(t?.status) ? ` («${t.status}»)` : ''}`}
                     </span>
                   </li>

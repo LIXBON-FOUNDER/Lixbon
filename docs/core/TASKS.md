@@ -404,6 +404,18 @@ worktree) la fija el Core.
   recargar. Se ofrece con una rama que revisar (no con el lanzamiento pendiente ni con el worktree retirado sin rama
   conservada): el diff se lee de la rama, no del directorio. Tras decidir, el detalle se vuelve a leer y «Revisión» refleja el
   veredicto. No integra: Integrar sigue siendo otra decisión.
+* **Marcas de estado por forma** (`StatusMark`, dentro de `StatusText` y en las píldoras de la Task): cada estado de un Attempt o
+  de una Task tiene su forma (arco = trabajando, reloj = esperando, terminal = espera de terminal, anillo discontinuo = pendiente,
+  ✓ = terminado, ✕ = fallido, cuadrado = detenido, tachado = cerrado) y el color solo la refuerza. Es `aria-hidden`: el estado
+  sigue escrito al lado. Un valor que el cliente no reconoce es un punto neutro. Attention es otro eje: su marca (`AttentionMark`,
+  triángulo ámbar con «!») solo acompaña a «Attention N» en el sidebar. La frescura de la revisión no es un estado de ejecución y no
+  lleva marca.
+* **Actividad del intento por tramos de ejecución** (`attemptTimeline.js`): un tramo empieza en `started`/`resumed` y acaba en el
+  primer evento que lo para (espera, cierre, fallo, detención), con su duración; antes van «Solicitud y aprobación», un cierre tras
+  una espera es «Cierre» y lo posterior (integración, cola) «Después». El Core no guarda los mensajes ni las llamadas a
+  herramientas del agente, así que **no hay «turnos»**: agrupar por turno (como en la maqueta) necesita que el Core registre eso.
+  Los eventos `waiting`, `resumed`, `exited`, `integrated`, `continued`, `retried` y los de la cola, que el Core ya emite, tienen
+  texto propio en lugar de «Evento desconocido».
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden
