@@ -88,7 +88,7 @@ def modelo_falso(monkeypatch):
     monkeypatch.setattr(chat_mod, "stream_chat_openai", fake_stream)
     monkeypatch.setattr(chat_mod, "fetch_models", fake_models)
     monkeypatch.setattr(model_router, "fetch_models", fake_models)
-    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True: ("http://fake", {}, "fake"))
+    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True, afinidad=None: ("http://fake", {}, "fake"))
     monkeypatch.setattr(chat_mod, "CHECKPOINT_SECONDS", 0.0)
 
 
@@ -129,3 +129,48 @@ def test_si_el_cliente_se_corta_a_mitad_queda_lo_parcial(cliente, cabeceras, mod
     rol, contenido, _ = filas[1]
     assert rol == "assistant"
     assert contenido.startswith("Hola, ") and len(contenido) <= len("".join(CHUNKS))
+
+
+def test_conversacion_larga_se_compacta_una_vez_y_el_principio_queda_fijo(cliente, cabeceras, modelo_falso, monkeypatch):
+    from core.persistence import compaction as store
+    enviados, resumenes = [], []
+    real = chat_mod.stream_chat_openai
+
+    async def espia(base, model, messages, **kw):
+        enviados.append(messages)
+        async for chunk in real(base, model, messages, **kw):
+            yield chunk
+
+    async def fake_chat(base, model, messages, **kw):
+        resumenes.append(messages)
+        return {"message": {"content": "- El usuario prueba la compactación."},
+                "prompt_eval_count": 50, "eval_count": 10}
+
+    monkeypatch.setattr(chat_mod, "stream_chat_openai", espia)
+    monkeypatch.setattr(chat_mod, "ollama_chat", fake_chat)
+    monkeypatch.setattr(chat_mod, "resolve_num_ctx", lambda *a, **k: 4096)
+    conv = "conv-persist-compacta"
+    historia = []
+    for i in range(12):
+        historia += [{"role": "user", "content": f"pregunta {i} " + "u" * 600},
+                     {"role": "assistant", "content": f"respuesta {i} " + "a" * 600}]
+
+    def pedir(msgs):
+        with cliente.stream("POST", "/v1/chat/completions", headers=cabeceras, json={
+            "model": "fake:1b", "stream": True, "conversation_id": conv, "messages": msgs}) as r:
+            assert r.status_code == 200
+            return "".join(r.iter_text())
+
+    cuerpo = pedir(historia + [{"role": "user", "content": "sigue"}])
+    assert "lixbon_compacted" in cuerpo and resumenes   # por tramos si no cabe de una vez
+    llamadas = len(resumenes)
+    uid = q.get_user_by_email("persist@lixbon.test")["id"]
+    assert store.get_compaction(conv, uid)["upto"] > 0
+
+    pedir(historia + [{"role": "user", "content": "sigue"}, {"role": "assistant", "content": "vale"},
+                      {"role": "user", "content": "otra"}])
+    assert len(resumenes) == llamadas               # no se volvió a resumir
+    primero, segundo = enviados[-2], enviados[-1]
+    assert primero[0]["content"].startswith("[Contexto interno]") or primero[0]["role"] == "system"
+    assert primero[:2] == segundo[:2]               # mismo principio → la caché del nodo sirve
+    assert segundo[-1]["content"] == "otra"

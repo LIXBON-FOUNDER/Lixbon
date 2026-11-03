@@ -117,6 +117,8 @@ def init_db() -> None:
         "ALTER TABLE credit_accounts ADD COLUMN IF NOT EXISTS autoreload_last_error TEXT",
         # Nodos por conexión inversa: sin agent_url, se identifican al conectar
         "ALTER TABLE nodes ALTER COLUMN agent_url DROP NOT NULL",
+        # Espacios: los chats de un espacio usan su contexto
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS espacio_id TEXT",
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS provider TEXT",
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS hostname TEXT",
         "ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_seen_at TEXT",
@@ -143,6 +145,7 @@ def init_db() -> None:
         "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS rotated_at TEXT",
         "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at TEXT",
         "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS legacy INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE messages ADD COLUMN IF NOT EXISTS images TEXT",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_refresh ON sessions (refresh_hash)",
         "CREATE INDEX IF NOT EXISTS idx_sessions_prev_refresh ON sessions (prev_refresh_hash)",
         # Origen de cada API key. Las que tienen evento api_key_created son manuales

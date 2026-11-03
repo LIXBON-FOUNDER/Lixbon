@@ -30,6 +30,7 @@ from core.persistence.queries import (
     update_user_settings,
 )
 from core.security.auth import record_failed_auth, session_or_api_key, session_required
+from core.storage import chat_images
 
 router = APIRouter()
 
@@ -148,6 +149,7 @@ async def api_export_data(user_data: dict[str, Any] = Depends(session_required))
 async def api_clear_history(user_data: dict[str, Any] = Depends(session_required)):
     """Borra TODAS las conversaciones del usuario (el uso agregado se conserva)."""
     deleted = delete_all_conversations(user_data["id"])
+    chat_images.borrar(user_data["id"])
     log_audit_event("history_cleared", user_id=user_data["id"], deleted=deleted)
     return {"deleted": deleted}
 
@@ -174,6 +176,7 @@ async def api_delete_account(
     email = user_data.get("email") or user_data.get("username") or ""
     if not delete_user_account(user_id):
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    chat_images.borrar(user_id)
 
     # Rastro sin PII: hash del correo por si hace falta atender una reclamación
     log_audit_event(

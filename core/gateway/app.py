@@ -24,7 +24,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills
+from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, connectors, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills, espacios
 
 FOUNDER_URL = "https://founder.lixbon.com"
 
@@ -64,8 +64,15 @@ async def lifespan(app: FastAPI):
         from core.render.worker import start_inline
         render_stop = start_inline(lambda ev: _bus.publish(ev["visual_id"], ev))
 
+    programador = None
+    if _os.getenv("AGENTES_PROGRAMADOS", "1") != "0":
+        from core.gateway.agentes import iniciar_programador
+        programador = iniciar_programador()
+
     yield
 
+    if programador is not None:
+        programador.cancel()
     if render_stop is not None:
         render_stop.set()
 
@@ -109,6 +116,7 @@ app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
 app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
 app.include_router(team_issues.router)  # /api/team/* de las issues propias
 app.include_router(oauth.router)
+app.include_router(connectors.router)  # /api/connectors/*: cuentas externas por usuario (GitHub)
 app.include_router(keys.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
@@ -132,6 +140,7 @@ app.include_router(images.router)     # /api/images/* (nodos con modelo de difus
 app.include_router(visuals.router)    # /api/visuals/* (diseños y piezas con versiones)
 app.include_router(mcp.router)        # /mcp: servidor MCP remoto (Visuals para agentes)
 app.include_router(skills.router)     # /api/skills/*: catálogo de skills oficiales
+app.include_router(espacios.router)   # /api/espacios/*, /api/agentes/*: espacios y agentes programados
 app.include_router(admin.router)
 
 

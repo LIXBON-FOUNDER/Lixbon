@@ -8,6 +8,7 @@ token, que en español y en código queda por encima de lo real.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger("lixbon.context")
@@ -18,6 +19,9 @@ TOKENS_PER_MESSAGE = 6
 # Fracción de la ventana que se deja libre para razonar + responder.
 RESERVE_RATIO = 0.4
 RESERVE_MIN = 1024
+# Prefijo del mensaje con el resumen de una conversación compactada
+# (core/inference/compaction.py); el desglose lo cuenta aparte.
+PREFIJO_RESUMEN = "[Resumen de la conversación anterior]"
 
 
 def estimate_tokens(messages: list[dict]) -> int:
@@ -28,6 +32,40 @@ def estimate_tokens(messages: list[dict]) -> int:
             contenido = " ".join(str(p.get("text", "")) for p in contenido if isinstance(p, dict))
         total += len(str(contenido or "")) // CHARS_PER_TOKEN + TOKENS_PER_MESSAGE
     return total
+
+
+def _texto(m: dict) -> str:
+    contenido = m.get("content")
+    if isinstance(contenido, list):
+        contenido = " ".join(str(p.get("text", "")) for p in contenido if isinstance(p, dict))
+    extra = ""
+    if m.get("tool_calls"):
+        extra = json.dumps(m["tool_calls"], ensure_ascii=False, default=str)
+    return str(contenido or "") + str(m.get("thinking") or "") + extra
+
+
+def desglose(messages: list[dict], tools: list[dict] | None, prompt_tokens: int) -> dict[str, int]:
+    """Reparto del prompt por categoría: instrucciones del sistema, definición
+    de las herramientas, resumen de lo compactado y conversación (mensajes y
+    resultados de herramientas).
+    Ollama solo da el total real; el reparto se estima por caracteres y se
+    escala a ese total, así las partes suman exactamente lo que se contó."""
+    def es_resumen(m: dict) -> bool:
+        return m.get("role") == "system" and str(m.get("content") or "").startswith(PREFIJO_RESUMEN)
+
+    crudo = {
+        "system": sum(len(_texto(m)) + 12 for m in messages if m.get("role") == "system" and not es_resumen(m)),
+        "tools": len(json.dumps(tools, ensure_ascii=False)) if tools else 0,
+        "summary": sum(len(_texto(m)) + 12 for m in messages if es_resumen(m)),
+        "messages": sum(len(_texto(m)) + 12 for m in messages if m.get("role") != "system"),
+    }
+    total = sum(crudo.values())
+    if prompt_tokens <= 0 or total <= 0:
+        return {k: v // CHARS_PER_TOKEN for k, v in crudo.items()}
+    partes = {k: prompt_tokens * v // total for k, v in crudo.items()}
+    # Lo que se pierde al redondear va a la conversación.
+    partes["messages"] += prompt_tokens - sum(partes.values())
+    return partes
 
 
 def fit_messages(messages: list[dict], num_ctx: int | None) -> list[dict]:
