@@ -25,7 +25,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 }
 
 /// Un repositorio con un commit, en una carpeta propia y exclusiva. Nunca se borra.
-fn repo_with_commit() -> PathBuf {
+pub(in crate::orch) fn repo_with_commit() -> PathBuf {
     let tick = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
     let repo = std::env::temp_dir().join(format!("lxo-246b-{}-{tick}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))).join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -38,29 +38,38 @@ fn repo_with_commit() -> PathBuf {
     repo
 }
 
-fn registry_of(adapter: Arc<dyn ProviderAdapter>) -> Arc<LiveRegistry> {
+pub(in crate::orch) fn registry_of(adapter: Arc<dyn ProviderAdapter>) -> Arc<LiveRegistry> {
     let registry = LiveRegistry::with_builder(Box::new(move || vec![Arc::clone(&adapter)]), Duration::from_secs(60));
     registry.probe_all();
     registry
 }
 
 /// Un Core con un repositorio real, su primer Attempt aprobado (provider `fake`, el de la fixture) y un lanzador real sobre `adapter`.
-struct Fixture {
-    core: Arc<Core>,
-    attempt: String,
-    repo: PathBuf,
-    launcher: Arc<AdapterLauncher>,
+pub(in crate::orch) struct Fixture {
+    pub(in crate::orch) core: Arc<Core>,
+    pub(in crate::orch) task: String,
+    pub(in crate::orch) attempt: String,
+    pub(in crate::orch) repo: PathBuf,
+    pub(in crate::orch) launcher: Arc<AdapterLauncher>,
 }
 
-fn fixture(adapter: Arc<dyn ProviderAdapter>) -> Fixture {
+pub(in crate::orch) fn fixture(adapter: Arc<dyn ProviderAdapter>) -> Fixture {
+    fixture_with_ttl(adapter, None)
+}
+
+/// Lo mismo, con otro plazo para las peticiones del proveedor (las pruebas no esperan minutos).
+pub(in crate::orch) fn fixture_with_ttl(adapter: Arc<dyn ProviderAdapter>, ttl: Option<Duration>) -> Fixture {
     let repo = repo_with_commit();
-    let (core, ctx, _task, attempt) = core_with_pending_attempt_at(&repo.to_string_lossy());
+    let (core, ctx, task, attempt) = core_with_pending_attempt_at(&repo.to_string_lossy());
     core.mutate_as(&ctx, |tx| tx.approve_attempt(&attempt)).unwrap();
-    let launcher = Arc::new(AdapterLauncher::new(&core, registry_of(adapter)));
-    Fixture { core, attempt, repo, launcher }
+    let mut launcher = AdapterLauncher::new(&core, registry_of(adapter));
+    if let Some(ttl) = ttl {
+        launcher = launcher.with_approval_ttl(ttl);
+    }
+    Fixture { core, task, attempt, repo, launcher: Arc::new(launcher) }
 }
 
-fn worktree_dir(f: &Fixture) -> PathBuf {
+pub(in crate::orch) fn worktree_dir(f: &Fixture) -> PathBuf {
     f.repo.parent().unwrap().join("repo.lixbon-wt").join(&f.attempt)
 }
 
@@ -73,7 +82,7 @@ fn branches(repo: &Path) -> Vec<String> {
     git(repo, &["branch", "--format=%(refname:short)"]).lines().map(str::to_owned).collect()
 }
 
-fn worktree_state(core: &Core, attempt: &str) -> Option<String> {
+pub(in crate::orch) fn worktree_state(core: &Core, attempt: &str) -> Option<String> {
     core.storage
         .with_store(|s| s.read(|c| Ok(c.query_row("SELECT state FROM worktrees WHERE attempt_id = ?1", [attempt], |r| r.get::<_, String>(0)).ok())))
         .unwrap()
@@ -83,6 +92,8 @@ fn worktree_state(core: &Core, attempt: &str) -> Option<String> {
 #[test]
 fn un_attempt_aprobado_se_lanza_por_el_adapter_con_su_worktree() {
     let fake = Arc::new(FakeAdapter::full("fake"));
+    // La ejecución se queda viva: el bombeo la escucha en su hilo (PR C) y esta prueba mira el estado mientras corre.
+    fake.set_script(vec![super::adapter::fake::Step::Wait]);
     let f = fixture(fake.clone());
 
     assert_eq!(f.core.dispatch_attempt(&f.attempt, f.launcher.as_ref()).unwrap(), DispatchResult::Launched);
@@ -101,15 +112,15 @@ fn un_attempt_aprobado_se_lanza_por_el_adapter_con_su_worktree() {
     assert_eq!(event_count(&f.core, &f.attempt, "attempt.started"), 1);
     assert_eq!(worktree_state(&f.core, &f.attempt).as_deref(), Some("active"));
 
-    // La ejecución aceptada queda a disposición del bombeo, una sola vez.
-    let run = f.launcher.take_started(&f.attempt).expect("la ejecución aceptada espera al bombeo");
-    assert_eq!(run.handle.attempt_id, f.attempt);
-    assert!(!run.cancel.is_cancelled());
+    // La ejecución aceptada ya es de quien la escucha: sale de `started` y consta como proceso vivo del Core.
     assert!(f.launcher.take_started(&f.attempt).is_none());
+    assert!(f.core.has_term(&f.task));
 
     // Un Attempt con claim no se lanza otra vez.
     assert_eq!(f.core.dispatch_attempt(&f.attempt, f.launcher.as_ref()).unwrap(), DispatchResult::AlreadyClaimed);
     assert_eq!(fake.starts().len(), 1);
+    // Se cancela para que el hilo no espere al tope del guion.
+    assert_eq!(f.core.kill_term(&f.task), Ok(true));
 }
 
 #[test]

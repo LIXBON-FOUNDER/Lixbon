@@ -77,6 +77,7 @@ mod task_ops;
 mod approval_expiry;
 mod dispatch;
 mod worktree_provision;
+mod run_pump;
 mod adapter_launcher;
 mod initial_approval_rpc;
 #[cfg(test)]
@@ -87,6 +88,8 @@ mod dispatch_tests;
 mod worktree_provision_tests;
 #[cfg(test)]
 mod adapter_launcher_tests;
+#[cfg(test)]
+mod run_pump_tests;
 #[cfg(test)]
 mod initial_approval_rpc_tests;
 #[cfg(test)]
@@ -278,6 +281,8 @@ pub struct Core {
     /// El lanzador de los primeros Attempts (LXO-141). Sin uno instalado, `task_create` no acepta `attempt`: nada podría
     /// ejecutarlo. Producción no instala ninguno hasta que exista el `Launcher` real (worktree + adapter).
     launcher: Mutex<Option<Arc<dyn dispatch::Launcher>>>,
+    /// Las ejecuciones por adapter que están vivas, por Task (LXO-246): cómo cancelarlas y saber que su proceso murió.
+    adapter_runs: Mutex<HashMap<String, run_pump::RunControl>>,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -321,6 +326,7 @@ impl Default for Orch {
             usage_live: usage_read::LiveUsage::over(&provider_registry),
             provider_registry,
             launcher: Mutex::new(None),
+            adapter_runs: Mutex::new(HashMap::new()),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

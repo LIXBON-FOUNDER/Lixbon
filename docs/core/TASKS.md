@@ -317,6 +317,35 @@ redactado; nunca el diagnóstico crudo del proveedor.
 
 Inerte: ni se instala en producción ni nada lo llama todavía (PR D).
 
+### Bombeo de eventos (LXO-246, PR C)
+
+`orch/run_pump.rs` convierte lo que el proveedor emite en el ciclo de vida durable del Attempt y deja que el Core cancele la
+ejecución. Al aceptar el proveedor la ejecución (`StartOutcome::Running`) el despachador llama a `Launcher::started` y el
+lanzador real arranca un hilo que bloquea en `Gated::events`, con un sink que llama a `Core::mutate`.
+
+| Evento del proveedor | Efecto |
+|---|---|
+| `SessionBound` | `Task.session_ref` y `session_match = session_id` (una vez): el runtime crea la `provider_session` |
+| `Model` | `model_effective` y `model_source = session_declared` |
+| `Permission`, `Question` | el Attempt pasa a `awaiting_terminal_approval` con un plazo (Attention `approval`); **no se responde** |
+| `Output`, `ToolUse`, `Retry`, `Transport`, `Usage` | ninguno: no son hechos durables del Attempt |
+
+* **Peticiones sin respuesta.** Todavía no hay RPC para responder a un permiso o una pregunta del proveedor, así que el Attempt
+  espera con Attention y, vencido el plazo (`LIXBON_TERMINAL_APPROVAL_TTL_SECS`, 300 s por defecto), un vigilante cancela la
+  ejecución y el Attempt acaba `failed(terminal_approval_timeout)`. Sin él el proveedor esperaría para siempre. Detenerla antes
+  la deja `stopped`, no `failed`.
+* **Desenlace** (función pura, sin comodín): `Completed` → `completed` (resumen redactado y acotado); `Failed` o `Err` →
+  `failed(agent_reported)`; `Interrupted` → `exited`; `Cancelled` → `stopped`; plazo vencido → `failed(terminal_approval_timeout)`.
+  Después se asienta el claim de despacho (`started → settled`). El worktree se conserva: es el trabajo que se revisa.
+* **Cancelación.** Cada ejecución viva consta en un registro del Core por Task. `kill_term_checked` (el camino de `stop`, del
+  cierre de un Run y de `release`), `has_term`, `live_ids` y el apagado (`kill_all_terms`) la consultan: cancelan su
+  `CancelToken` y **esperan (hasta 10 s) a que el proceso muera** antes de devolver, de modo que nadie borra un worktree bajo un
+  proceso vivo. Si no muere a tiempo es un `Err` («no hay control fiable») y se conserva todo.
+* **Un pánico del bombeo** no inventa un desenlace: la ejecución sale del registro y el Attempt queda `running` para la
+  reconciliación de arranque.
+
+Inerte: producción no instala el lanzador todavía (PR D).
+
 ### `not_started`
 
 Una Task abierta sin ninguna fila de Attempt se representa como `not_started`. Significa únicamente «intención existente
