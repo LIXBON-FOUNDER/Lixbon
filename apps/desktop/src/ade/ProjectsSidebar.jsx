@@ -704,7 +704,7 @@ export function ProjectsSidebar({
       )}
 
       <p className="ps__note">
-        Solo lectura: sin crear, reintentar ni lanzar Tasks o intentos, sin arrastrar y sin marcar como leído.
+        Este navegador solo lee: sin arrastrar y sin marcar como leído. Un intento nuevo se crea desde el Project y se aprueba en el detalle del intento.
         La identidad de cada fila es su ID durable; host, origen, rama y worktree son metadato.
       </p>
       {coreModel.mode === 'legacy' && (

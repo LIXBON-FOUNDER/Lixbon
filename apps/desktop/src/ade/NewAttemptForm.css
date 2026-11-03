@@ -1,6 +1,6 @@
 /* Nuevo intento (LXO-141). Prefijo `nat` exclusivo de este formulario. */
 
-.nat { padding: 0 20px 12px; color: var(--ink-70); font-size: 12px; line-height: 1.5; }
+.nat { padding: 0; color: var(--ink-70); font-size: 12px; line-height: 1.5; }
 .nat__form { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: var(--radius); background: var(--surface-3); }
 .nat__row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
 .nat__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

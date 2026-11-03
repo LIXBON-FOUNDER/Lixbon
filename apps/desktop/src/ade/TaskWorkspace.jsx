@@ -13,7 +13,7 @@ const MISSING = 'No informado';
 
 // Etiquetas compartidas con el sidebar en `adeLabels.js` (módulo único de textos).
 export { TASK_STATUS_LABELS };
-const ACTIVE_STATUSES = new Set(['starting', 'running', 'waiting', 'awaiting_terminal_approval']);
+const ACTIVE_STATUSES = new Set(['not_started', 'pending_approval', 'starting', 'running', 'waiting', 'awaiting_terminal_approval']);
 const FINAL_STATUSES = new Set(['done', 'failed', 'stopped', 'exited']);
 
 const REVIEW_LABELS = { accepted: 'Aceptada', rejected: 'Rechazada' };

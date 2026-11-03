@@ -17,6 +17,7 @@ export const FINAL_TASK_STATUSES = new Set(['done', 'failed', 'stopped', 'exited
  * del badge para que `active`, `waiting`, `failed` y `final` se distingan de un vistazo.
  */
 export const TASK_STATUS_TONES = Object.freeze({
+  pending_approval: 'waiting',
   starting: 'active',
   running: 'active',
   waiting: 'waiting',
