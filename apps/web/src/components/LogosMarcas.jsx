@@ -1,4 +1,9 @@
-import { SiGithub, SiGooglecalendar, SiNotion } from 'react-icons/si';
+import {
+  SiConfluence, SiDiscord, SiGithub, SiGooglecalendar, SiInstagram, SiJira, SiLinear, SiNotion, SiShopify, SiTelegram, SiX,
+} from 'react-icons/si';
+import { FaLinkedin } from 'react-icons/fa6';
+import { PiMicrosoftOutlookLogoFill } from 'react-icons/pi';
+import { TbBrandOnedrive } from 'react-icons/tb';
 
 // Logos de las apps que se conectan (Integraciones). Gmail, Drive y Slack a
 // color; GitHub y Notion en la tinta del tema; Calendar en su azul.
@@ -39,6 +44,18 @@ const LOGOS = {
   github: ({ size }) => <SiGithub size={size} color="currentColor" aria-hidden="true" />,
   notion: ({ size }) => <SiNotion size={size} color="currentColor" aria-hidden="true" />,
   calendar: ({ size }) => <SiGooglecalendar size={size} color="#4285F4" aria-hidden="true" />,
+  // Cada marca en su color; X en la tinta del tema, como GitHub y Notion.
+  linear: ({ size }) => <SiLinear size={size} color="#5E6AD2" aria-hidden="true" />,
+  jira: ({ size }) => <SiJira size={size} color="#2684FF" aria-hidden="true" />,
+  confluence: ({ size }) => <SiConfluence size={size} color="#2684FF" aria-hidden="true" />,
+  outlook: ({ size }) => <PiMicrosoftOutlookLogoFill size={size} color="#0F78D4" aria-hidden="true" />,
+  onedrive: ({ size }) => <TbBrandOnedrive size={size} color="#0F78D4" aria-hidden="true" />,
+  instagram: ({ size }) => <SiInstagram size={size} color="#E4405F" aria-hidden="true" />,
+  linkedin: ({ size }) => <FaLinkedin size={size} color="#0A66C2" aria-hidden="true" />,
+  x: ({ size }) => <SiX size={size} color="currentColor" aria-hidden="true" />,
+  discord: ({ size }) => <SiDiscord size={size} color="#5865F2" aria-hidden="true" />,
+  telegram: ({ size }) => <SiTelegram size={size} color="#26A5E4" aria-hidden="true" />,
+  shopify: ({ size }) => <SiShopify size={size} color="#7AB55C" aria-hidden="true" />,
 };
 
 export function LogoMarca({ id, size = 20 }) {

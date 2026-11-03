@@ -100,6 +100,7 @@ export const NavPanel = de('panel');
 export const NavChat = de('chat');
 export const NavVisuals = de('visuals');
 export const NavSkills = de('skills');
+export const NavEspacios = de('carpeta');
 export const NavApps = de('apps');
 export const NavRemoto = de('remoto');
 export const NavDocs = de('docs');

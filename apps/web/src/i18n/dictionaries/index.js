@@ -19,6 +19,9 @@ import visual from './visual';
 import skills from './skills';
 import mcp from './mcp';
 import integraciones from './integraciones';
+import github from './github';
+import cupo from './cupo';
+import espacios from './espacios';
 
 export const DICTIONARIES = {
   common,
@@ -42,4 +45,7 @@ export const DICTIONARIES = {
   skills,
   mcp,
   integraciones,
+  github,
+  cupo,
+  espacios,
 };

@@ -231,7 +231,7 @@ button:not(:disabled):not([role="switch"]):hover,
   line-height: 1;
 }
 .pill, .pill-btn, .btn-negro { height: 36px; min-height: 0; padding: 0 14px; font-size: 14px; gap: 8px; }
-.pubnav .pill, .pubnav__btn, .set-btn, .pill-btn.set-btn { height: 32px; padding: 0 12px; font-size: 13.5px; }
+.pubnav .pill, .pubnav__btn, .set-btn, .pill-btn.set-btn { height: 32px; padding: 0 12px; font-size: 13px; }
 .btn-negro.landing__btn, .btn-grupo--grande .btn-grupo__item { height: 44px; padding: 0 20px; font-size: 15px; }
 .pill--oliva { background: var(--accent); color: var(--on-accent); }
 .pill--oliva:hover { background: var(--accent-deep); }

@@ -64,8 +64,8 @@
   color: var(--on-primary);
 }
 
-.btn-grupo__item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.btn-negro:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.btn-grupo__item:focus-visible { outline: 1.5px solid var(--anillo-foco); outline-offset: 1px; }
+.btn-negro:focus-visible { outline: 1.5px solid var(--anillo-foco); outline-offset: -2px; }
 
 .btn-negro { border-radius: var(--radius); background: var(--primary); }
 .btn-negro:hover { background: var(--primary-hover); }
@@ -400,7 +400,7 @@
 .apps__desc { margin: 0; max-width: 560px; font-family: var(--font-text); font-size: 17px; line-height: 1.55; color: var(--ink-soft); text-wrap: pretty; }
 .apps__rasgos { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .apps__rasgos li { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; font-family: var(--font-ui); font-size: 15px; color: var(--ink); }
-.apps__rasgos svg { color: var(--accent); }
+.apps__rasgos svg { color: var(--ink-muted); }
 .apps__accion { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; margin-top: auto; }
 .apps__pronto { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; font-family: var(--font-ui); font-size: 14px; color: var(--ink-soft); }
 .apps__pronto::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
@@ -422,7 +422,7 @@
 .apps .os-tab { height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: none; font-family: var(--font-ui); font-size: 13.5px; color: var(--ink-soft); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
 .apps .os-tab:hover { color: var(--ink); }
 .apps .os-tab.is-active { background: var(--card-elevada); color: var(--ink); }
-.apps .os-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.apps .os-tab:focus-visible { outline: 1.5px solid var(--anillo-foco); outline-offset: 1px; }
 
 .apps .dl-picker { align-self: stretch; flex-wrap: wrap; }
 .apps .dl-picker__select { flex: 0 1 280px; }
@@ -466,7 +466,7 @@
 .web .sk-card:hover .sk-card__title { color: var(--accent); }
 .web .sk-card__summary { font-size: 15px; line-height: 1.55; }
 .web .sk-chip,
-.web .sk-ver { padding: 0; background: none; font-size: 12.5px; }
+.web .sk-ver { padding: 0; background: none; font-size: 13px; }
 
 .web .sk-detail { max-width: none; margin: 40px 0 0; }
 .web .sk-detail__head {
@@ -790,7 +790,7 @@
 .donaciones__precio span { font-family: var(--font-text); font-size: 20px; font-style: italic; letter-spacing: 0; color: var(--ink-soft); }
 .donaciones__cuenta ul { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 18px 0 0; border-top: 1px solid var(--surface-5); list-style: none; }
 .donaciones__cuenta li { display: flex; gap: 10px; font-family: var(--font-ui); font-size: 15px; line-height: 1.4; }
-.donaciones__cuenta li svg { flex: 0 0 auto; margin-top: 1px; color: var(--accent); }
+.donaciones__cuenta li svg { flex: 0 0 auto; margin-top: 1px; color: var(--ink-muted); }
 .donaciones__cuenta .pill { align-self: flex-start; margin-top: auto; }
 .donaciones__donar { background: #1F1B14; color: #CFC6B3; }
 .donaciones__donar .donaciones__eyebrow { color: #B4C64E; }

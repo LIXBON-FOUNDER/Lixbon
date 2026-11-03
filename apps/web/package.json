@@ -11,6 +11,7 @@
     "build:spa": "vite build"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@lixbon/fonts": "file:../../shared/fonts",
     "@lixbon/icons": "file:../../shared/icons",
     "@stripe/react-stripe-js": "^6.9.0",
@@ -24,6 +25,8 @@
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {

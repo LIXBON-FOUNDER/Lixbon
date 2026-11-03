@@ -7,7 +7,7 @@ import { useViewportHeight } from './hooks/useViewportHeight';
 import { RouteFade } from './components/RouteFade';
 import { ScrollArriba } from './components/ScrollArriba';
 import { LocaleProvider } from './i18n/LocaleContext';
-import { idiomaGuardado, localeDePath, sinPrefijoLegacyEn, withLocale } from './i18n/paths';
+import { idiomaGuardado, localeDePath, sinPrefijoLegacyEn, stripLocale, withLocale } from './i18n/paths';
 import { IrAFounder, Navigate as NavigateLocal } from './i18n/link';
 import { MascotaSync } from './components/Mascota';
 import { perezosa } from './lib/perezosa';
@@ -28,6 +28,8 @@ const RemotePage = perezosa(() => import('./pages/RemotePage'));
 const StatusPage = perezosa(() => import('./pages/StatusPage'));
 const SkillsPage = perezosa(() => import('./pages/SkillsPage'));
 const IntegracionesPage = perezosa(() => import('./pages/IntegracionesPage'));
+const EspaciosPage = perezosa(() => import('./pages/EspaciosPage'));
+const AgentePage = perezosa(() => import('./pages/AgentePage'));
 
 const admin = () => import('./pages/admin');
 const AdminLayout = perezosa(admin, 'AdminLayout');
@@ -52,7 +54,7 @@ const AdminChatWeb = perezosa(admin, 'AdminChatWeb');
 const ADMIN = [AdminLayout, AdminInicio, AdminUsuarios, AdminModelos, AdminRoles, AdminAlias, AdminTarifas, AdminProveedores, AdminNodos, AdminIngresos, AdminReleases, AdminAuditoria, AdminTransacciones, AdminLiquidaciones, AdminPasarela, AdminDonaciones, AdminSkills, AdminCorreos];
 
 const POR_SECCION = {
-  chat: [AppShell, ChatPage], c: [AppShell, ChatPage], guides: [GuiasPage], visuals: [AppShell, VisualsPage], integraciones: [AppShell, IntegracionesPage], auth: [AuthPage],
+  chat: [AppShell, ChatPage], c: [AppShell, ChatPage], guides: [GuiasPage], visuals: [AppShell, VisualsPage], integraciones: [AppShell, IntegracionesPage], espacios: [AppShell, EspaciosPage], agentes: [AppShell, AgentePage], auth: [AuthPage],
   'reset-password': [ResetPasswordPage], account: [AccountPage], plans: [PlansPage], admin: ADMIN,
   skills: [SkillsPage], apps: [DownloadsPage], status: [StatusPage], docs: [DocsPage], remote: [AppShell, RemotePage], s: [SharedPage, SharedVisualPage],
 };
@@ -71,8 +73,17 @@ export function precargarTodo() {
 
 // Se monta en / (inglés) y en /es: el slug es el mismo en los dos idiomas.
 function LocalizedRoutes() {
+  // Ajustes (/account/…) no es una página: es una ventana encima de la que
+  // había. Las rutas pintan ese fondo (o el chat si se entró directo) y la
+  // ventana va aparte.
+  const location = useLocation();
+  const enAjustes = /^\/account(\/|$)/.test(stripLocale(location.pathname));
+  const fondo = enAjustes
+    ? (location.state?.fondo || { pathname: withLocale('/chat', localeDePath(location.pathname)), search: '', hash: '' })
+    : null;
   return (
-    <Routes>
+    <>
+    <Routes location={fondo || location}>
       <Route path="/" element={<NavigateLocal to="/chat" replace />} />
       {/* Chat, Visuals y Remoto comparten el marco: la barra lateral se monta
           una vez y cada sección se pinta dentro con su propia ruta. */}
@@ -82,6 +93,9 @@ function LocalizedRoutes() {
         <Route path="/visuals" element={<VisualsPage />} />
         <Route path="/visuals/:id" element={<VisualsPage />} />
         <Route path="/integraciones" element={<IntegracionesPage />} />
+        <Route path="/espacios" element={<EspaciosPage />} />
+        <Route path="/espacios/:id" element={<EspaciosPage />} />
+        <Route path="/agentes/:id" element={<AgentePage />} />
         <Route path="/remote" element={<RemotePage />} />
         <Route path="/remote/:token" element={<RemotePage />} />
       </Route>
@@ -90,8 +104,6 @@ function LocalizedRoutes() {
       <Route path="/s/v/:token" element={<SharedVisualPage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/account" element={<AccountPage />} />
-      <Route path="/account/:section" element={<AccountPage />} />
       <Route path="/plans" element={<PlansPage />} />
       <Route path="/admin" element={<AdminLayout />}>
         <Route index element={<AdminInicio />} />
@@ -127,6 +139,8 @@ function LocalizedRoutes() {
       ))}
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    {enAjustes && <Suspense fallback={null}><AccountPage fondo={fondo} /></Suspense>}
+    </>
   );
 }
 
