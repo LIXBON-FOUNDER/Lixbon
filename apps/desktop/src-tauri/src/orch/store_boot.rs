@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::attempt_ops;
+use super::worktree_ops::attach as attempt_worktree_attach;
 use super::dispatch::{DispatchSnapshot, ReserveOutcome};
 use super::attempt_ops::DispatchAmbiguityCause;
 use super::events::MutationContext;
@@ -554,6 +555,31 @@ impl Core {
             })
             .ok_or_else(|| "el almacén no está abierto".to_string())?;
         read.map_err(|e| e.to_string())
+    }
+
+    /// `(id, estado)` del Worktree que la Task ya tiene registrado, si lo hay (lo registró un Attempt anterior). `None`: es su
+    /// primer Attempt. Lo usa el lanzador para decidir entre crear el Worktree o adjuntarse al de la Task.
+    pub(super) fn task_worktree_record(&self, task_id: &str) -> Result<Option<(String, String)>, String> {
+        let read = self
+            .storage
+            .with_store(|store| {
+                store.read(|c| {
+                    let mut stmt = c.prepare("SELECT id, state FROM worktrees WHERE task_id = ?1 ORDER BY rowid LIMIT 1")?;
+                    let rows = stmt.query_map([task_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                    Ok(rows.collect::<Result<Vec<_>, _>>()?.into_iter().next())
+                })
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// Enlaza el Attempt al Worktree de su Task (un reintento trabaja en él). Si el proyector ya lo enlazó no cambia nada.
+    pub(super) fn attach_attempt_to_worktree(&self, worktree_id: &str, attempt_id: &str) -> Result<(), String> {
+        let attached = self
+            .storage
+            .with_store(|store| attempt_worktree_attach(store, &MutationContext::core(), worktree_id, attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        attached.map(|_| ()).map_err(|e| e.to_string())
     }
 
     /// Reserva el claim de despacho (un solo uso). Una elegibilidad que cambió es `Ineligible`, no un error del almacén.

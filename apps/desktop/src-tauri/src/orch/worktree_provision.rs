@@ -47,6 +47,9 @@ pub(super) struct ProvisionedWorktree {
     task: String,
     /// El `cwd` que tenía la Task antes de registrar el Worktree: al quitarlo, vuelve a él.
     previous_cwd: String,
+    /// `true`: el Attempt se adjuntó al Worktree que la Task ya tenía (un reintento). No lo creó esta llamada, así que
+    /// tampoco lo deshace: es de la Task y de su Attempt anterior.
+    pub(super) reused: bool,
 }
 
 /// Un componente seguro para una rama o una carpeta: ids del Core, sin separadores ni `..`.
@@ -68,10 +71,44 @@ pub(super) fn names(intent: &DispatchIntent) -> Result<(String, String), Prepare
 }
 
 impl Core {
-    /// Crea el worktree del Attempt y lo registra. Un `Err` no deja nada creado por esta llamada.
+    /// El Worktree de la Task, si ya tiene uno (un Attempt anterior lo registró): `Ok(None)` si es el primero. Un
+    /// Worktree retirado no vuelve (el proyector no deja que un Worktree quitado cambie), así que no hay dónde reintentar.
+    fn task_worktree(&self, intent: &DispatchIntent) -> Result<Option<String>, PrepareError> {
+        match self.task_worktree_record(&intent.task_id).map_err(|e| PrepareError::Failed(format!("no se pudo leer el worktree de la Task: {e}")))? {
+            None => Ok(None),
+            Some((id, state)) if state == "active" => Ok(Some(id)),
+            Some((_, state)) => Err(PrepareError::Unavailable(format!("el worktree de la Task ya no está activo ({state}): no hay dónde reintentar"))),
+        }
+    }
+
+    /// Un reintento trabaja en el Worktree de la Task: se comprueba que sigue en disco y el Attempt se adjunta a él. Nada se
+    /// crea ni se registra de nuevo. El proyector suele haber enlazado ya al Attempt nuevo al nacer: entonces `attach` no
+    /// cambia nada (`Unchanged`, sin evento); si no, lo enlaza y deja `worktree.attached`.
+    fn attach_to_task_worktree(&self, intent: &DispatchIntent, worktree_id: &str) -> Result<ProvisionedWorktree, PrepareError> {
+        let (dir, branch, base, repo, cwd) = {
+            let st = self.lock();
+            let t = st.tasks.get(&intent.task_id).ok_or_else(|| PrepareError::Failed(format!("la Task {} no existe en el estado", intent.task_id)))?;
+            match (&t.worktree, &t.branch, &t.base) {
+                (Some(dir), Some(branch), Some(base)) => (dir.clone(), branch.clone(), base.clone(), t.repo.clone(), t.cwd.clone()),
+                _ => return Err(PrepareError::Failed(format!("la Task {} no tiene su worktree completo en el estado", intent.task_id))),
+            }
+        };
+        if !std::path::Path::new(&dir).is_dir() {
+            return Err(PrepareError::Unavailable(format!("el worktree de la Task ya no está en disco ({dir}): no hay dónde reintentar")));
+        }
+        self.attach_attempt_to_worktree(worktree_id, &intent.attempt_id).map_err(|e| PrepareError::Failed(format!("no se pudo adjuntar el Attempt a su worktree: {e}")))?;
+        let repo_root = git::main_root(&repo).or_else(|| git::toplevel(&repo)).unwrap_or(repo);
+        Ok(ProvisionedWorktree { dir: PathBuf::from(dir), branch, base, repo_root, task: intent.task_id.clone(), previous_cwd: cwd, reused: true })
+    }
+
+    /// Crea el worktree del Attempt y lo registra. Un `Err` no deja nada creado por esta llamada. Un reintento no crea
+    /// ninguno: se adjunta al de la Task (ver [`Core::attach_to_task_worktree`]).
     pub(super) fn provision_worktree(&self, intent: &DispatchIntent) -> Result<ProvisionedWorktree, PrepareError> {
         if !matches!(self.health(), Health::Normal) {
             return Err(PrepareError::Unavailable("el Core no está en estado normal: no se puede registrar un worktree".into()));
+        }
+        if let Some(worktree_id) = self.task_worktree(intent)? {
+            return self.attach_to_task_worktree(intent, &worktree_id);
         }
         let (branch, name) = names(intent)?;
         let given = intent.repo.to_string_lossy().into_owned();
@@ -86,7 +123,7 @@ impl Core {
         // A partir de aquí esta llamada es dueña del worktree y de la rama (y solo de ellos). Si `add_worktree` falla
         // —p. ej. «ya existe la carpeta»— no da propiedad sobre esa ruta, que nunca se borra.
         git::add_worktree(&repo_root, &dir, &branch, &base).map_err(PrepareError::Failed)?;
-        let owned = ProvisionedWorktree { dir: dir.clone(), branch: branch.clone(), base: base.clone(), repo_root: repo_root.clone(), task: intent.task_id.clone(), previous_cwd };
+        let owned = ProvisionedWorktree { dir: dir.clone(), branch: branch.clone(), base: base.clone(), repo_root: repo_root.clone(), task: intent.task_id.clone(), previous_cwd, reused: false };
 
         let dir_text = dir.to_string_lossy().into_owned();
         let effect = Effect::new("spawn", "git_worktree").task(&intent.task_id).repo(&repo_root)
@@ -114,6 +151,10 @@ impl Core {
     /// Deshace el worktree creado por [`Core::provision_worktree`]: quita la carpeta, intenta `branch -d` y lo registra. Si no se
     /// puede quitar la carpeta (o registrar), se conserva todo y es un `Err`: el estado no afirma lo que ya no existe.
     pub(super) fn release_worktree(&self, wt: &ProvisionedWorktree) -> Result<(), String> {
+        if wt.reused {
+            // No lo creó esta llamada: es el de la Task y su Attempt anterior, y lo único que se pierde es el enlace.
+            return Ok(());
+        }
         if !matches!(self.health(), Health::Normal) {
             return Err("el Core no está en estado normal: no se borra nada que no se pueda registrar".into());
         }

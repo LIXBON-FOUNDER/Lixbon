@@ -112,6 +112,15 @@ fn current_attempt_task(tx: &Tx, attempt_id: &str) -> Result<String, String> {
     Ok(task_id.to_owned())
 }
 
+/// Lo que una petición de reintento cambia a propósito respecto del Attempt anterior (`None`: se hereda).
+#[derive(Clone, Debug, Default)]
+pub(super) struct RetrySelection {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: Option<String>,
+}
+
 impl Tx {
     /// Expira una aprobación inicial identificada por el id durable del Attempt.
     /// El plazo solo lo sugiere el Store: `runtime_commit_recorded` lo revalida
@@ -204,6 +213,61 @@ impl Tx {
         }
         let before = self.snapshot_run_of(&task_id);
         self.state_mut().touch(&task_id, Some(Status::Stopped))?;
+        self.push_status_changes(before, None);
+        Ok(())
+    }
+
+    /// Pide un Attempt LIMPIO para una Task cuyo último Attempt terminó mal (`failed`, `stopped` o `exited`): la Task vuelve
+    /// a `starting` y, como en cualquier paso de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la
+    /// selección de ejecución que se pida. Nada se reabre: el Attempt anterior sigue siendo final y no se toca.
+    ///
+    /// Es el puente entre la petición de la persona y el despachador: el Attempt nuevo queda `starting` con el claim
+    /// `none`, y lo lanza el mismo camino que al primero (reserva del claim, worktree, `attempt.started`, adapter). A
+    /// diferencia del primero, no pide aprobación: la decisión de la persona es la propia petición de reintentar.
+    ///
+    /// Heredado del Attempt anterior salvo lo que se pida: el modelo y el esfuerzo solo dentro del mismo proveedor (son
+    /// del proveedor), el rol y el perfil siempre. Sin consumidor hasta el RPC de reintento.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_retry`
+    pub(super) fn request_attempt_retry(&mut self, task_id: &str, selection: &RetrySelection) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("reintentar un Attempt requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if !self.attempt_n.contains_key(task_id) {
+            return Err("la Task no tiene ningún Attempt que reintentar".into());
+        }
+        if !matches!(task.status, Status::Failed | Status::Stopped | Status::Exited) {
+            return Err("solo se reintenta un Attempt que terminó mal (failed, stopped o exited)".into());
+        }
+        let provider = selection.provider.clone().unwrap_or_else(|| task.agent.clone());
+        let same_provider = provider == task.agent;
+        let profile = selection.profile.clone().or_else(|| task.profile.clone());
+        if profile.as_deref().is_none_or(|p| p.trim().is_empty()) {
+            return Err("ni la petición ni el Attempt anterior tienen un perfil de permisos".into());
+        }
+        let before = self.snapshot_run_of(task_id);
+        {
+            let t = self.state_mut().task_mut(task_id)?;
+            t.model = selection.model.clone().or_else(|| if same_provider { t.model.clone() } else { None });
+            t.effort = selection.effort.clone().or_else(|| if same_provider { t.effort.clone() } else { None });
+            t.agent = provider;
+            t.profile = profile;
+            // Lo del Attempt anterior no se arrastra al nuevo (como en `State::reopen`).
+            t.summary.clear();
+            t.report = None;
+            t.delivery_channel = None;
+            t.failure_reason = None;
+            t.session_ref = None;
+            t.model_source = None;
+            t.session_match = None;
+            t.approval_deadline = None;
+            t.merged = false;
+            t.status = Status::Starting;
+            t.updated = super::state::now_ms();
+        }
         self.push_status_changes(before, None);
         Ok(())
     }

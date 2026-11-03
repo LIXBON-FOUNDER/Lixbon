@@ -185,25 +185,59 @@ fn con_el_core_en_solo_lectura_no_se_crea_ni_se_borra_nada() {
     assert!(branches(&repo).contains(&wt.branch));
 }
 
+/// Intención del Attempt 2 de la Task: con el 1 ya final (se cerró) y la petición de reintento hecha por la Person.
+fn retry_intent(core: &Arc<Core>, ctx: &crate::orch::events::MutationContext, first: &DispatchIntent, repo: &Path) -> DispatchIntent {
+    let task = first.task_id.clone();
+    core.mutate_as(&crate::orch::events::MutationContext::core(), |tx| tx.close(&task, crate::orch::state::Status::Stopped, "prueba").map(|_| ())).unwrap();
+    core.mutate_as(ctx, |tx| tx.request_attempt_retry(&task, &crate::orch::tx_ops::RetrySelection::default())).unwrap();
+    let snapshot = core.dispatch_snapshot(&format!("{task}-a2")).unwrap().unwrap();
+    intent_from_rows(&snapshot.attempt, &snapshot.task, &snapshot.run, repo.to_path_buf()).unwrap()
+}
+
+/// Un segundo Attempt de la MISMA Task (un reintento) no crea otro Worktree: se adjunta al de la Task. El proyector admite uno
+/// por Task, y crearlo en disco para que el registro lo rechazara después sería trabajo perdido.
 #[test]
-fn si_falla_el_registro_se_deshace_lo_creado_por_esta_llamada_y_solo_eso() {
+fn un_segundo_attempt_de_la_misma_task_reutiliza_su_worktree_y_no_crea_otro() {
     let repo = repo_with_commit("registro");
-    let (core, intent) = core_with_intent(&repo);
+    let (core, ctx, task, attempt) = core_with_pending_attempt_at(&text(&repo));
+    core.mutate_as(&ctx, |tx| tx.approve_attempt(&attempt)).unwrap();
+    let snapshot = core.dispatch_snapshot(&attempt).unwrap().unwrap();
+    let intent = intent_from_rows(&snapshot.attempt, &snapshot.task, &snapshot.run, repo.clone()).unwrap();
+    assert_eq!(intent.task_id, task);
     let first = core.provision_worktree(&intent).unwrap();
+    assert!(!first.reused);
 
-    // Otro Attempt de la MISMA Task: git lo crea, pero el registro rechaza un segundo Worktree activo para la Task.
-    let mut second = intent.clone();
-    second.attempt_id = format!("{}-b", intent.attempt_id);
-    let error = core.provision_worktree(&second).unwrap_err();
-    assert!(matches!(&error, PrepareError::Failed(why) if why.contains("no se pudo registrar el worktree")), "{error:?}");
+    let second = retry_intent(&core, &ctx, &intent, &repo);
+    let again = core.provision_worktree(&second).expect("el segundo Attempt reutiliza el Worktree de la Task");
+    assert!(again.reused);
+    assert_eq!((again.dir.as_path(), again.branch.as_str()), (first.dir.as_path(), first.branch.as_str()));
     let second_dir = repo.parent().unwrap().join("repo.lixbon-wt").join(&second.attempt_id);
-    assert!(!second_dir.exists(), "lo que esta llamada creó se deshizo");
-    assert!(!branches(&repo).contains(&format!("lx/{}/{}", second.run_id, second.attempt_id)));
+    assert!(!second_dir.exists(), "no se creó una carpeta nueva");
+    assert!(!branches(&repo).contains(&format!("lx/{}/{}", second.run_id, second.attempt_id)), "ni una rama nueva");
 
-    // El primero, intacto y todavía registrado.
+    // Liberar el reutilizado no borra nada: es de la Task y de su Attempt anterior.
+    core.release_worktree(&again).unwrap();
     assert!(first.dir.is_dir());
     assert!(branches(&repo).contains(&first.branch));
     assert_eq!(worktree_row(&core, &intent.task_id).unwrap().0, "active");
+}
+
+/// Con el Worktree de la Task ya quitado no hay dónde reintentar: `Unavailable` (el Attempt se cierra `stopped`) y NADA se crea.
+#[test]
+fn con_el_worktree_de_la_task_retirado_no_se_crea_otro_y_se_dice() {
+    let repo = repo_with_commit("retirado");
+    let (core, ctx, _task, attempt) = core_with_pending_attempt_at(&text(&repo));
+    core.mutate_as(&ctx, |tx| tx.approve_attempt(&attempt)).unwrap();
+    let snapshot = core.dispatch_snapshot(&attempt).unwrap().unwrap();
+    let intent = intent_from_rows(&snapshot.attempt, &snapshot.task, &snapshot.run, repo.clone()).unwrap();
+    let first = core.provision_worktree(&intent).unwrap();
+    core.release_worktree(&first).unwrap();
+    assert_eq!(worktree_row(&core, &intent.task_id).unwrap().0, "removed");
+
+    let second = retry_intent(&core, &ctx, &intent, &repo);
+    let error = core.provision_worktree(&second).unwrap_err();
+    assert!(matches!(&error, PrepareError::Unavailable(why) if why.contains("no hay dónde reintentar")), "{error:?}");
+    assert!(!repo.parent().unwrap().join("repo.lixbon-wt").join(&second.attempt_id).exists());
 }
 
 #[test]

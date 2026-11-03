@@ -164,3 +164,40 @@ de Attention rompen al menos una prueba cada una.
 El RPC y `lxo` (`lxo attempt retry` / `resume`), la UI, la política de reintento automático, la carrera/Fork entre Attempts
 (F6) y construir el ContextPackage (`lxo context`, LXO-138: lo aporta quien llama). Tampoco se ha probado una reanudación
 real de una sesión existente: las pruebas usan adapters falsos, como en [CONTINUIDAD.md](CONTINUIDAD.md#sin-validar-con-la-cli-real).
+
+## Puente al despachador (proyecto de tres PR)
+
+`attempt.retry` y `attempt.resume` de arriba trabajan **directamente sobre el almacén** y lanzan ellos mismos. El camino que de
+verdad lanza hoy es otro: el estado en memoria cambia, sus Events se proyectan a las tablas y el despachador (`dispatch.rs`)
+reserva el claim, el lanzador (`adapter_launcher.rs`) crea el worktree y llama al adapter. Un reintento por la vía del almacén
+correría fuera del claim, sin bombeo de eventos y con el estado en memoria desfasado. El puente hace que un reintento use el
+**mismo camino** que el primer Attempt:
+
+| PR | Qué | Estado |
+|---|---|---|
+| 1 | `Tx::request_attempt_retry` (estado en memoria) + el lanzador reutiliza el Worktree de la Task | **hecho** |
+| 2 | procedencia (`attempt_retries`) y `attempt.retried` en la misma mutación; `resume` (elige `start` o `resume` al lanzar) | pendiente |
+| 3 | RPC `attempt_retry` / `attempt_resume` (solo una Person de Desktop) y los botones Reintentar / Continuar | pendiente |
+
+### PR 1 · lo que hace
+
+* `Tx::request_attempt_retry(task, RetrySelection)` pasa la Task de `failed`/`stopped`/`exited` a `starting`. Como en cualquier paso
+  de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la selección que se pida; el anterior sigue final.
+  Exige una Person autenticada. El modelo y el esfuerzo se heredan solo dentro del mismo proveedor; el rol y el perfil, siempre.
+* El Attempt nuevo queda `starting` con el claim `none`. **No pide aprobación**: la petición de la persona es la decisión, y la
+  reserva del claim ya distingue las continuaciones (`n > 1`) del primer Attempt de `task.create`.
+* El barrido periódico (`approved_dispatch_candidates`) solo recoge Attempts con plazo de aprobación, así que **no** lanza un
+  reintento por su cuenta: se despacha por `dispatch_attempt`, que llamará el RPC del PR 3 tras despertar al despachador.
+
+### Decisiones
+
+| # | Decisión | Descartada |
+|---|---|---|
+| D58 | **Un reintento trabaja en el Worktree de la Task** (se adjunta a él; no crea otro) | un Worktree por Attempt: el proyector admite uno por Task («la ruta, la rama y la base no cambian», «un Worktree quitado no vuelve»); cambiarlo es una migración y un cambio de modelo aparte |
+| D59 | **Con el Worktree retirado o ausente en disco no se reintenta**: el Attempt nuevo se cierra `stopped` («no hay dónde reintentar»), nunca `failed` | crear uno nuevo: el proyector lo rechazaría después de crearlo en disco |
+| D60 | **El prompt de un reintento es el `spec` de la Task** (como el del primer Attempt) | un `prompt` propio por petición: necesita guardarlo en el Attempt, y entra con `resume` en el PR 2 |
+
+Límite conocido: el reintento arranca con el **proveedor limpio pero sobre los mismos archivos**: lo que dejó a medias el Attempt
+fallido sigue en el Worktree. Es consecuencia de D58.
+
+Pruebas: `orch/attempt_e2e_tests.rs` (`reintentar_…`), con adapters falsos, por la misma entrada que usará el RPC.
