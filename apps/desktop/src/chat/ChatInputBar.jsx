@@ -20,6 +20,7 @@ import { useDraftStore, EMPTY_DRAFT, setDraftText, setDraftImages, setDraftMenti
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
 import { EffortSlider } from './EffortSlider';
+import { ComposerQuota } from './ComposerQuota';
 import { ProgressRing } from '../components/Ring';
 import {
   IconStop, IconX, IconFileCode, IconHammer, IconClip, IconChevronDown, IconAt, IconArrowUp,
@@ -453,7 +454,7 @@ export function ChatInputBar() {
       <div className="chat-inputbar__row">
         {isClaude && (
           <span className="chat-inputbar__engine" title="Estás hablando con Claude Code">
-            <ClaudeMark size={12} />Claude Code
+            <ClaudeMark size={12} /><span className="chat-inputbar__engine-lbl">Claude Code</span>
           </span>
         )}
         <div className="agentmenu-wrap">
@@ -461,10 +462,11 @@ export function ChatInputBar() {
             ref={agentBtnRef}
             className={`chat-inputbar__mode ${agentActive ? `is-on mode--${mode.tone || mode.id}` : ''}`}
             onClick={() => setAgentMenuOpen((v) => !v)}
+            aria-label={`Modo del chat: ${agentActive ? mode.label : 'Chat'}`}
             title={workspaceRoot ? 'Modo del chat (Shift+Tab para alternar)' : 'Abre una carpeta de trabajo para usar el agente'}
           >
             {agentActive && <span className="modedot" />}
-            {agentActive ? mode.label : 'Chat'}
+            <span className="chat-inputbar__mode-lbl">{agentActive ? mode.label : 'Chat'}</span>
             <IconChevronDown size={12} className={`chev ${agentMenuOpen ? 'is-flipped' : ''}`} />
           </button>
 
@@ -524,10 +526,12 @@ export function ChatInputBar() {
           <IconClip size={15} />
         </button>
         {workspaceRoot && (
-          <button className="ic" onClick={insertAt} title="Mencionar un archivo (@)">
+          <button className="ic chat-inputbar__at" onClick={insertAt} title="Mencionar un archivo (@)">
             <IconAt size={15} />
           </button>
         )}
+
+        {isClaude && <ComposerQuota />}
 
         <span className="tipw chat-inputbar__ctx">
           <ProgressRing value={contextPct} size={20} />
