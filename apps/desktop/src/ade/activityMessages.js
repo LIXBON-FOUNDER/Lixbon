@@ -80,6 +80,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.queue_delivered',
   'activity.attempt.queue_cancelled',
   'activity.attempt.queue_failed',
+  'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -514,6 +515,10 @@ const FORMATTERS = {
   'activity.attempt.queue_cancelled': (args) => {
     const attempt = attemptOf(args);
     return attempt ? `Se canceló una instrucción encolada para el ${attempt}.` : null;
+  },
+  'activity.attempt.dispatch_ambiguous': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `No se sabe si el proveedor llegó a lanzarse para el ${attempt}: no se relanzará.` : null;
   },
   'activity.attempt.queue_failed': (args) => {
     const attempt = attemptOf(args);

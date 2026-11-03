@@ -29,6 +29,7 @@
 
 use std::path::PathBuf;
 
+use super::attempt_ops::DispatchAmbiguityCause;
 use super::events::MutationContext;
 use super::mutation::Health;
 use super::state::Status;
@@ -130,7 +131,7 @@ pub(super) enum DispatchResult {
     NotSpawned,
     /// El adapter probó que no se lanzó porque no había nada que lanzar: el Attempt `stopped` y el claim asentado.
     Unavailable,
-    /// No se sabe si el proveedor se lanzó: el claim queda `started` y el Attempt `running`. No se relanza.
+    /// No se sabe si el proveedor se lanzó: el claim pasa a `ambiguous` (con su hecho) y el Attempt sigue `running`. No se relanza.
     OutcomeUnknown,
 }
 
@@ -182,6 +183,29 @@ impl Core {
     /// El lanzador instalado, si lo hay.
     pub(super) fn launcher(&self) -> Option<std::sync::Arc<dyn Launcher>> {
         self.launcher.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Alinea el lanzador con el ajuste del Orquestador (LXO-246): activado, el Core lanza los Attempts aprobados por los
+    /// adapters reales; desactivado, `task_create` rechaza `attempt` y el despachador no corre. Se llama al arrancar y cada
+    /// vez que cambian los ajustes. Desactivarlo no interrumpe las ejecuciones vivas: solo no se lanzan más.
+    pub(super) fn sync_launcher(self: &std::sync::Arc<Self>) {
+        let enabled = self.settings().enabled;
+        let mut slot = self.launcher.lock().unwrap_or_else(|e| e.into_inner());
+        match (enabled, slot.is_some()) {
+            (true, false) => *slot = Some(std::sync::Arc::new(super::adapter_launcher::AdapterLauncher::new(self, self.provider_registry.clone()))),
+            (false, true) => *slot = None,
+            _ => {}
+        }
+    }
+
+    /// Arranque: concilia los claims que quedaron en vuelo. Va DESPUÉS de cerrar las tareas huérfanas: un claim cuyo Attempt
+    /// acabó con evidencia canónica se asienta; el resto pasa a `ambiguous` y no se relanza. Un fallo se dice y no impide arrancar.
+    pub(super) fn reconcile_dispatch_claims_at_boot(&self) {
+        match self.dispatch_reconcile_in_flight() {
+            Ok(0) => {}
+            Ok(changed) => eprintln!("[core] se conciliaron {changed} claim(s) de despacho que quedaron en vuelo"),
+            Err(why) => eprintln!("[core] no se pudieron conciliar los claims de despacho al arrancar: {why}"),
+        }
     }
 
     /// Instala el lanzador de los primeros Attempts. Hasta que exista el real (worktree + adapter) solo lo instalan las
@@ -275,7 +299,11 @@ impl Core {
                 Ok(DispatchResult::Unavailable)
             }
             StartOutcome::Unknown(why) => {
-                eprintln!("[core] el despacho de {attempt_id} tiene un desenlace desconocido ({why}): el claim queda started y no se relanza");
+                eprintln!("[core] el despacho de {attempt_id} tiene un desenlace desconocido ({why}): no se relanza");
+                // El claim pasa a `ambiguous` con su hecho: queda a la vista y nunca se vuelve a despachar solo.
+                if let Err(why) = self.dispatch_mark_ambiguous(attempt_id, DispatchAmbiguityCause::StartOutcomeUnknown) {
+                    eprintln!("[core] no se pudo registrar la ambigüedad del despacho: {why}");
+                }
                 Ok(DispatchResult::OutcomeUnknown)
             }
         }

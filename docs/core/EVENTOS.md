@@ -892,6 +892,7 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | `attempt.queued` (LXO-143) | 1 | state | `task`, `n`, `queue_id` (`<attempt>-q<seq>`), `position` (pendientes delante, contándola), `attachments` (cuántos). **Nunca** el texto de la instrucción ni los ids de sus adjuntos | persona · agente que coordina la Task |
 | `attempt.queue_delivered` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `confirmed_by` ∈ `adapter_event` · `adapter_result` (lo que el ADAPTER informó; escribir en el proceso no confirma) | Core |
 | `attempt.queue_cancelled` (LXO-143) | 1 | state | `task`, `n`, `queue_id` | persona · agente que coordina la Task |
+| `attempt.dispatch_ambiguous` (LXO-246) | 1 | state | `task`, `n`, `from` ∈ `reserved` · `started` (de qué claim venía), `cause` ∈ `core_restart` · `start_outcome_unknown`. No hay prueba de si el proveedor llegó a lanzarse: el claim queda `ambiguous` y no se vuelve a despachar solo. Nunca dice cómo acabó la ejecución | Core |
 | `attempt.queue_failed` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `reason` ∈ `unsupported` · `environment_blocked` · `adapter_unavailable` · `adapter_error` · `attempt_ended` · `interrupted`. Levanta Attention salvo con `attempt_ended` | Core |
 
 * La entidad es el **Attempt** (`entity_kind = attempt`, `entity_id = <task>-a<n>`); `run_id` y `project_id` salen de la

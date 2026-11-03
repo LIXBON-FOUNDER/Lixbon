@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 95] = [
+pub(crate) const MESSAGE_KEYS: [&str; 96] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -89,6 +89,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 95] = [
     "activity.attempt.queue_delivered",
     "activity.attempt.queue_cancelled",
     "activity.attempt.queue_failed",
+    "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
     "activity.provider_session.resumed",
@@ -496,6 +497,7 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         }
         "activity.attempt.queue_delivered" => format!("Se entregó al {at} la instrucción encolada."),
         "activity.attempt.queue_cancelled" => format!("Se canceló una instrucción encolada para el {at}."),
+        "activity.attempt.dispatch_ambiguous" => format!("No se sabe si el proveedor llegó a lanzarse para el {at}: no se relanzará."),
         "activity.attempt.queue_failed" => format!("No se pudo entregar una instrucción encolada al {at}: {}.", a.code_in("reason", queue_failure)?),
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
@@ -726,7 +728,8 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.queued"
         | "activity.attempt.queue_delivered"
         | "activity.attempt.queue_cancelled"
-        | "activity.attempt.queue_failed" => attempt(key, a),
+        | "activity.attempt.queue_failed"
+        | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;
             let provider = a.text("provider")?;

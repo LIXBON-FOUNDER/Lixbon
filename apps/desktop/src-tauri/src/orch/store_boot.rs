@@ -40,7 +40,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::attempt_ops;
 use super::dispatch::{DispatchSnapshot, ReserveOutcome};
+use super::attempt_ops::DispatchAmbiguityCause;
+use super::events::MutationContext;
 use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
@@ -562,6 +565,33 @@ impl Core {
             Err(crate::store::StoreError::AttemptConflict(why)) => Ok(ReserveOutcome::Ineligible(why)),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// Marca el claim `ambiguous` y deja constancia (`attempt.dispatch_ambiguous`) en la misma transacción. Si el Attempt ya
+    /// tiene evidencia terminal canónica se asienta en su lugar, sin un falso hecho de ambigüedad. `false`: no había claim en vuelo.
+    pub(super) fn dispatch_mark_ambiguous(&self, attempt_id: &str, cause: DispatchAmbiguityCause) -> Result<bool, String> {
+        let ctx = MutationContext::core();
+        let at = super::state::now_ms() as i64;
+        self.storage
+            .with_store(|store| store.attempt_dispatch_mark_ambiguous_recorded(attempt_id, |a, t, from| attempt_ops::dispatch_ambiguous_fact(a, t, from, cause, &ctx, at)))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Arranque: reconcilia en UNA transacción todo claim `reserved` o `started` que quedó en vuelo. Con evidencia terminal
+    /// canónica se asienta; sin ella pasa a `ambiguous` con su hecho. Devuelve cuántos cambió.
+    pub(super) fn dispatch_reconcile_in_flight(&self) -> Result<usize, String> {
+        let ctx = MutationContext::core();
+        let at = super::state::now_ms() as i64;
+        self.storage
+            .with_store(|store| {
+                if !store.runtime_on_tables()? {
+                    return Ok(0);
+                }
+                store.attempt_dispatch_reconcile_ambiguous_recorded(|a, t, from| attempt_ops::dispatch_ambiguous_fact(a, t, from, DispatchAmbiguityCause::CoreRestart, &ctx, at))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
     }
 
     /// `reserved -> started`, solo si el `attempt.started` canónico ya es durable.
