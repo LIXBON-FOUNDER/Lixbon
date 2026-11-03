@@ -1,5 +1,6 @@
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
@@ -69,6 +70,9 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           {attempt.failure_reason && <Row label="Motivo del fallo">{attempt.failure_reason}</Row>}
           <Row label="Resumen">{text(attempt.summary)}</Row>
         </dl>
+
+        {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
+        {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (
