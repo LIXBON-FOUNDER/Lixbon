@@ -69,6 +69,10 @@ pub(in crate::orch) fn fixture_with_ttl(adapter: Arc<dyn ProviderAdapter>, ttl: 
     Fixture { core, task, attempt, repo, launcher: Arc::new(launcher) }
 }
 
+pub(in crate::orch) fn worktree_dir_of(repo: &Path, attempt: &str) -> PathBuf {
+    repo.parent().unwrap().join("repo.lixbon-wt").join(attempt)
+}
+
 pub(in crate::orch) fn worktree_dir(f: &Fixture) -> PathBuf {
     f.repo.parent().unwrap().join("repo.lixbon-wt").join(&f.attempt)
 }
