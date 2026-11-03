@@ -384,6 +384,15 @@ worktree) la fija el Core.
   `pending_approval`. Aprobar no lanza nada por sí mismo (despierta al despachador). Un plazo vencido no aprueba: el Core deja el
   intento detenido y la interfaz lo dice. Tras decidir, el detalle vuelve a leer.
 
+* **Aprobar desde la bandeja de Attention** (`InboxLaunchApproval`): una Attention `approval` de un Attempt puede ser la de
+  lanzamiento o la de una petición de terminal, y `attention_list` no dice cuál. La fila lee el estado del Attempt y solo ofrece
+  Aprobar / Rechazar (los mismos de `AttemptApproval`) mientras está `pending_approval`.
+* **Detener** (`AttemptStop`, en el detalle del Attempt): con el Attempt en `starting`, `running`, `waiting` o
+  `awaiting_terminal_approval` llama al RPC `stop` con su Task, tras una confirmación (corta el proceso del proveedor; lo escrito
+  se conserva en el worktree). Si el Core no pudo matar el proceso no declara detenido el Attempt y la interfaz dice por qué.
+* **Línea de contexto** (`AttemptContextLine`): agente · modelo, perfil, `rama ← base` y host (8 primeros caracteres, el
+  completo en el título), todo de `attempt_detail`; lo que el Core no informa se dice («sin worktree», «host no informado»).
+
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud; comprueba estado, claim, Events en orden
 y Attention. Las pruebas de la interfaz son `attemptCommands.test.js`, `NewAttemptForm.test.jsx` y `AttemptApproval.test.jsx`.

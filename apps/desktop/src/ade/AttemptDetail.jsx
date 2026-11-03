@@ -2,6 +2,8 @@ import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
 import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
+import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptStop } from './AttemptStop';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
@@ -54,6 +56,7 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
+        <AttemptContextLine attempt={attempt} />
         <dl>
           <Row label="Intento"><span className="mono">{attempt.id}</span> · #{attempt.n}</Row>
           <Row label="Task">
@@ -73,6 +76,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
 
         {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
         {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
+        {/* Detener la ejecución en marcha (el Core no declara detenido a un Attempt cuyo proceso no pudo matar). */}
+        <AttemptStop taskId={attempt.task_id} status={attempt.status} onStopped={state.retry} />
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (

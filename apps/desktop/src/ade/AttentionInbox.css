@@ -153,6 +153,7 @@
 }
 
 .attention-inbox__row { margin: 0; }
+.attention-inbox__actions { padding: 4px 10px 6px 28px; min-width: 0; }
 
 .attention-inbox__item {
   display: flex;

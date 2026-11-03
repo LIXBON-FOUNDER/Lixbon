@@ -202,6 +202,28 @@ fn detener_una_ejecucion_viva_la_deja_stopped_y_sin_attention_de_fallo() {
     assert!(!attention(&w.core, &attempt).iter().any(|(c, s)| c == "failed" && s == "active"));
 }
 
+/// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
+#[test]
+fn detener_por_el_rpc_de_desktop_deja_el_attempt_stopped_y_el_claim_asentado() {
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let attempt = w.create("claude", "e2e-claude-rpc-stop");
+    w.approve(&attempt);
+    wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
+    let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+
+    let stopped = w.desktop("stop", json!({"task": task})).expect("stop");
+    assert_eq!(stopped["status"], "stopped");
+    w.settled(&attempt, "stopped");
+
+    assert_eq!(row(&w.core, &attempt), ("stopped".into(), "settled".into(), None));
+    assert_eq!(event_count(&w.core, &attempt, "attempt.failed"), 0);
+    assert!(!w.core.has_term(&task), "el proceso del proveedor ya no está");
+    assert!(!attention(&w.core, &attempt).iter().any(|(c, s)| c == "failed" && s == "active"));
+    // Detenerla otra vez no inventa un segundo cierre.
+    assert_eq!(event_count(&w.core, &attempt, "attempt.stopped"), 1);
+}
+
 #[test]
 fn repetir_la_misma_solicitud_no_duplica_la_task_ni_el_lanzamiento() {
     let w = world("claude", None);
