@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 61] = [
+pub(super) const KINDS: [&str; 62] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -62,6 +62,7 @@ pub(super) const KINDS: [&str; 61] = [
     "attempt.queue_delivered",
     "attempt.queue_cancelled",
     "attempt.queue_failed",
+    "attempt.dispatch_ambiguous",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -552,6 +553,7 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         ),
         "attempt.queue_delivered" => rendered("activity.attempt.queue_delivered", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
         "attempt.queue_cancelled" => rendered("activity.attempt.queue_cancelled", Visual::Warning, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.dispatch_ambiguous" => rendered("activity.attempt.dispatch_ambiguous", Visual::Warning, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
         "attempt.queue_failed" => rendered(
             "activity.attempt.queue_failed",
             Visual::Error,

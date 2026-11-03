@@ -129,8 +129,9 @@ resultados en [`TASKS_MUTACION.md`](TASKS_MUTACION.md).
 Attempt, no elige provider, no pide aprobación ni lanza ningún proceso: es solo la intención durable. Con `attempt` pide
 además el primer Attempt (ver [§ Primer Attempt con `task_create`](#primer-attempt-con-task_create-fase-2c-3)); mientras el
 Core no tenga un lanzador instalado, esa solicitud se rechaza **antes** de tocar el ledger, los eventos o la memoria
-(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). Producción no instala ninguno hasta que exista
-el `Launcher` real (worktree + adapter), así que hoy `attempt` sigue rechazado.
+(`task.create con Attempt requiere el lifecycle de lanzamiento verificado`). El lanzador real se instala **solo con el
+Orquestador activado** (ver [§ Encender el lanzador](#encender-el-lanzador-lxo-246-pr-d)); con el ajuste desactivado, `attempt`
+sigue rechazado.
 
 * **Quién:** solo una Person autenticada (CLI global o Desktop). Un Agent se rechaza en el handler, antes de mutar. La
   identidad sale de la credencial, nunca del JSON: los campos `identity_scope`, `actor` o `client_id` en la solicitud son
@@ -220,10 +221,9 @@ filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real 
 Un Attempt con claim nunca se despacha otra vez, tampoco tras un reintento del cliente o una nueva pasada
 (`Core::dispatch_approved`).
 
-**Fuera de esta fase:** el `Launcher` real (hecho después: ver [§ Launcher real](#launcher-real-lxo-246-pr-b)), la conversión de los eventos del
-proveedor en `attempt.completed`/`failed`, `attempt.dispatch_ambiguous` (hecho en Attention) y la reconciliación de los
-claims en vuelo al arrancar. Hasta entonces un desenlace desconocido o una caída entre pasos deja el claim `reserved`/`started`,
-que ya impide relanzar pero no es visible. Nada en producción llama al despachador.
+**Fuera de esta fase** (hecho después): el `Launcher` real ([§ Launcher real](#launcher-real-lxo-246-pr-b)), la conversión de los
+eventos del proveedor ([§ Bombeo de eventos](#bombeo-de-eventos-lxo-246-pr-c)) y `attempt.dispatch_ambiguous` con la reconciliación
+de los claims en vuelo al arrancar ([§ Encender el lanzador](#encender-el-lanzador-lxo-246-pr-d)).
 
 ### RPC de la aprobación inicial (fase 2c-2)
 
@@ -266,8 +266,8 @@ plazos… son un error).
 * **Respuesta:** `{ status: Committed | Replayed, run_id, task_id, attempt_id }`, con `attempt_id = <task>-a1`; el ledger
   guarda el Attempt y un replay lo devuelve.
 * **Lanzador:** el Core tiene una ranura de lanzador (`Core::install_launcher`). Sin uno instalado, `task_create` rechaza
-  `attempt`: nada podría ejecutarlo y un Attempt aprobado se quedaría `starting` para siempre. Producción no instala ninguno
-  todavía. Con uno, aprobar (`attempt_approve`) despierta al despachador en segundo plano, y el barrido periódico despacha
+  `attempt`: nada podría ejecutarlo y un Attempt aprobado se quedaría `starting` para siempre. Producción lo instala solo con el
+  Orquestador activado. Con uno, aprobar (`attempt_approve`) despierta al despachador en segundo plano, y el barrido periódico despacha
   los aprobados que quedaron esperando (p. ej. tras un reinicio). El claim garantiza un único lanzamiento aunque ambos
   coincidan.
 
@@ -315,7 +315,7 @@ Inerte: nada en producción lo llama todavía.
 La clasificación es un `match` sin comodín: un código nuevo obliga a decidir. Del error solo viajan el código y el mensaje ya
 redactado; nunca el diagnóstico crudo del proveedor.
 
-Inerte: ni se instala en producción ni nada lo llama todavía (PR D).
+Se instala en producción solo con el Orquestador activado (PR D).
 
 ### Bombeo de eventos (LXO-246, PR C)
 
@@ -344,7 +344,28 @@ lanzador real arranca un hilo que bloquea en `Gated::events`, con un sink que ll
 * **Un pánico del bombeo** no inventa un desenlace: la ejecución sale del registro y el Attempt queda `running` para la
   reconciliación de arranque.
 
-Inerte: producción no instala el lanzador todavía (PR D).
+Se activa con el Orquestador (PR D).
+
+### Encender el lanzador (LXO-246, PR D)
+
+El lanzador real (`AdapterLauncher`, sobre los adapters de Claude y Codex del registro de proveedores) se instala **solo con el
+Orquestador activado** (Ajustes → Orquestador, `Settings.enabled`). `Core::sync_launcher` alinea la ranura con el ajuste: se
+llama al arrancar (tras leer los ajustes) y cada vez que cambian (`orch_settings_set`). Activado, `task_create` acepta `attempt`,
+`attempt_approve` despierta al despachador y el barrido periódico despacha los aprobados que esperan. Desactivado, `attempt` se
+rechaza y no se lanza nada nuevo; **desactivarlo no interrumpe las ejecuciones vivas** (se detienen con `stop` o al apagar).
+
+* **`attempt.dispatch_ambiguous`** (`task`, `n`, `from` ∈ `reserved` · `started`, `cause` ∈ `core_restart` · `start_outcome_unknown`):
+  no se puede probar si el proveedor llegó a lanzarse. El claim pasa a `ambiguous` y **nunca se vuelve a despachar solo**. En la
+  Activity consta como un aviso (`activity.attempt.dispatch_ambiguous`). No levanta Attention: al arrancar, el Attempt ya se cerró
+  como huérfano y una Attention nacería después del evento final que la habría cerrado.
+* **Desenlace desconocido al lanzar** (el adapter entró en pánico): el claim pasa a `ambiguous` en el momento, con su hecho. El
+  Attempt sigue `running` y el worktree no se toca; lo cierra la reconciliación del siguiente arranque.
+* **Conciliación al arrancar** (`Core::reconcile_dispatch_claims_at_boot`, DESPUÉS de cerrar las tareas huérfanas): todo claim
+  `reserved` o `started` que quedó en vuelo se asienta si su Attempt acabó con evidencia terminal canónica (`started` y un
+  terminal del Core), sin una ambigüedad falsa; si no, pasa a `ambiguous` (`cause = core_restart`). Se hace en UNA transacción y
+  repetirla no cambia nada.
+* **Límite conocido:** un proveedor que siga vivo tras reiniciar Lixbon (su proceso no murió con la aplicación) no se vuelve a
+  adoptar: el Attempt queda cerrado como huérfano y el proceso sin dueño es asunto de la custodia de procesos (LXO-242).
 
 ### `not_started`
 

@@ -34,6 +34,7 @@
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
 //! | `attempt.retried` (LXO-142) | state | `attempt` |
 //! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
+//! | `attempt.dispatch_ambiguous` (LXO-246) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -1141,6 +1142,56 @@ impl EventPayload for AttemptQueueCancelled {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_queue_cancelled(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptQueueCancelled { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone() })
+}
+
+/// De dónde venía el claim de despacho cuando no se pudo probar su desenlace.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DispatchClaimSource {
+    /// Reservado, sin `attempt.started`.
+    Reserved,
+    /// Pasó a `started`: el proveedor pudo haberse llamado.
+    Started,
+}
+
+impl DispatchClaimSource {
+    pub(super) fn parse(claim: &str) -> Option<DispatchClaimSource> {
+        match claim {
+            "reserved" => Some(DispatchClaimSource::Reserved),
+            "started" => Some(DispatchClaimSource::Started),
+            _ => None,
+        }
+    }
+}
+
+/// Por qué no se sabe si el proveedor llegó a lanzarse. Cerrado: nunca texto libre.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DispatchAmbiguityCause {
+    /// El Core reinició con el claim en vuelo y sin evidencia terminal canónica.
+    CoreRestart,
+    /// El adapter no permitió saber si arrancó (p. ej. un pánico al lanzar).
+    StartOutcomeUnknown,
+}
+
+/// `attempt.dispatch_ambiguous` (LXO-246): no se puede probar si el proveedor llegó a lanzarse. El claim pasa a `ambiguous`:
+/// no se vuelve a despachar solo y queda para una reconciliación humana. Nunca dice cómo acabó la ejecución.
+#[derive(Serialize)]
+pub(super) struct AttemptDispatchAmbiguous {
+    task: String,
+    n: i64,
+    from: DispatchClaimSource,
+    cause: DispatchAmbiguityCause,
+}
+
+impl EventPayload for AttemptDispatchAmbiguous {
+    const KIND: &'static str = "attempt.dispatch_ambiguous";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_dispatch_ambiguous(a: &AttemptRow, t: &TaskRow, from: DispatchClaimSource, cause: DispatchAmbiguityCause) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptDispatchAmbiguous { task: a.task_id.clone(), n: a.n, from, cause })
 }
 
 /// `attempt.queue_failed` (LXO-143): no se entregó (o no se sabe). Con un `reason` distinto de `attempt_ended` levanta

@@ -164,12 +164,13 @@ fn si_el_adapter_prueba_que_no_lanzo_el_attempt_falla_y_el_claim_se_asienta() {
 }
 
 #[test]
-fn un_desenlace_desconocido_deja_el_claim_started_y_no_se_relanza() {
+fn un_desenlace_desconocido_deja_el_claim_ambiguo_y_no_se_relanza() {
     let (core, task, attempt) = approved();
     let (launcher, log) = launcher(Ok(()), StartOutcome::Unknown("el adapter se cayó tras lanzar".into()));
 
     assert_eq!(core.dispatch_attempt(&attempt, &launcher).unwrap(), DispatchResult::OutcomeUnknown);
-    assert_eq!(row(&core, &attempt), ("running".into(), "started".into(), None), "ni se da por fallido ni se asienta: no se sabe");
+    assert_eq!(row(&core, &attempt), ("running".into(), "ambiguous".into(), None), "ni se da por fallido ni se asienta: no se sabe");
+    assert_eq!(event_count(&core, &attempt, "attempt.dispatch_ambiguous"), 1);
     assert_eq!(core.lock().tasks[&task].status, Status::Running);
 
     assert_eq!(core.dispatch_attempt(&attempt, &launcher).unwrap(), DispatchResult::AlreadyClaimed);

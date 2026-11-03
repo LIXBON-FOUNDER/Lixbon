@@ -825,6 +825,14 @@
       "text": "Se canceló una instrucción encolada para el intento 2 de la tarea t-3."
     },
     {
+      "key": "activity.attempt.dispatch_ambiguous",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "No se sabe si el proveedor llegó a lanzarse para el intento 2 de la tarea t-3: no se relanzará."
+    },
+    {
       "key": "activity.attempt.queue_failed",
       "args": {
         "task": "t-3",

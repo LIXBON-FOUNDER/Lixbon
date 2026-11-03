@@ -124,6 +124,8 @@ pub fn orch_settings_set(orch: TauriState<'_, Orch>, settings: Settings) -> Resu
     if let Ok(mut s) = core.settings.lock() {
         *s = settings;
     }
+    // El lanzador de los Attempts sigue al ajuste del Orquestador (LXO-246).
+    core.sync_launcher();
     if enabled { core.start_server()? } else { core.stop_server() }
     core.emit_changed();
     Ok(roles::save_response(&warnings, core.snapshot()))

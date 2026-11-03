@@ -192,7 +192,8 @@ fn decidir_fuera_de_pendiente_o_sobre_otro_attempt_se_rechaza_sin_tocar_el_estad
 // ---------------------------------------------------------------------------------------------------------------------
 
 pub(super) mod e2e {
-    use std::sync::Arc;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     use serde_json::json;
 
@@ -203,6 +204,28 @@ pub(super) mod e2e {
     use super::super::state::Status;
     use super::super::{Core, Orch};
     use crate::store::{ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, Fingerprint, NewLocation};
+
+    /// Las carpetas (datos y Core) de cada Core de la fixture, por dirección: lo que hace falta para reiniciarlo.
+    static FIXTURE_DIRS: Mutex<Vec<(usize, PathBuf, PathBuf)>> = Mutex::new(Vec::new());
+
+    /// Reinicia el Core de la fixture sobre sus mismas carpetas: lo suelta (esperando a que libere `core.lock`) y arranca otro.
+    /// Es un reinicio limpio de proceso, no un apagado ordenado de las tareas: el estado queda como estaba.
+    pub(in crate::orch) fn restart_fixture_core(core: Arc<Core>) -> Arc<Core> {
+        let key = Arc::as_ptr(&core) as usize;
+        let (data, core_dir) = FIXTURE_DIRS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(k, _, _)| *k == key)
+            .map(|(_, d, c)| (d.clone(), c.clone()))
+            .expect("el Core no viene de la fixture");
+        core.shutdown();
+        suelta(core, &core_dir);
+        let core = Orch::default().0;
+        core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
+        FIXTURE_DIRS.lock().unwrap_or_else(|e| e.into_inner()).push((Arc::as_ptr(&core) as usize, data, core_dir));
+        core
+    }
 
     /// Un Core persistente con el corte aplicado, un Project y una Person registrada (Desktop), sin ninguna Task.
     /// Devuelve el Core, el cliente autenticado de la Person, su contexto y el id del Project.
@@ -237,6 +260,7 @@ pub(super) mod e2e {
         suelta(core, &core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
+        FIXTURE_DIRS.lock().unwrap_or_else(|e| e.into_inner()).push((Arc::as_ptr(&core) as usize, data.clone(), core_dir.clone()));
 
         core.storage
             .with_store(|store| {

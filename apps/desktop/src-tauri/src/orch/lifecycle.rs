@@ -127,6 +127,8 @@ impl Core {
         if let Ok(mut s) = self.settings.lock() {
             *s = settings;
         }
+        // El lanzador de los Attempts va detrás del ajuste del Orquestador (LXO-246).
+        self.sync_launcher();
         if enabled {
             let _ = self.start_server();
             skill::refresh_outdated(&lxo_path().to_string_lossy());
@@ -195,6 +197,10 @@ impl Core {
         if needs_orphan {
             self.close_orphans();
         }
+        // Tras cerrar las huérfanas: cada claim en vuelo se asienta (con su evidencia) o queda `ambiguous` (LXO-246).
+        if on_tables {
+            self.reconcile_dispatch_claims_at_boot();
+        }
         // `close_orphans` puede haber avanzado la fila: el informe lleva la revisión
         // realmente confirmada al terminar el arranque, no la que se cargó.
         let rev = match self.storage.confirmed_rev() {
@@ -209,7 +215,7 @@ impl Core {
 
     /// Cierra las tareas que quedaron abiertas al apagarse el Core anterior. Pasa por
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
-    fn close_orphans(&self) {
+    pub(super) fn close_orphans(&self) {
         let r = self.mutate(|tx| {
             // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
             if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external) {

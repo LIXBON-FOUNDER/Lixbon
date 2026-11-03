@@ -34,7 +34,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conectará el runtime de Attempt
 
-use super::event_kinds::{self, FailureCode, StopCause};
+use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
+// Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
+pub(super) use super::event_kinds::DispatchAmbiguityCause;
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
@@ -71,6 +73,13 @@ pub(super) fn create(st: &mut Store, ctx: &MutationContext, task_id: &str, new: 
     }
     let at = now_ms() as i64;
     st.attempt_create_recorded(task_id, new, at, |a, t| finalize_single(event_kinds::attempt_requested(a, t), ctx, at))
+}
+
+/// No se puede probar si el proveedor llegó a lanzarse (LXO-246): `attempt.dispatch_ambiguous`. Solo el Core. `from` es el claim
+/// que tenía el Attempt (`reserved` o `started`; cualquier otro no admite ambigüedad).
+pub(super) fn dispatch_ambiguous_fact(a: &AttemptRow, t: &TaskRow, from: &str, cause: DispatchAmbiguityCause, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    let source = DispatchClaimSource::parse(from).ok_or_else(|| StoreError::AttemptConflict(format!("un claim {from} no admite ambigüedad de despacho")))?;
+    finalize_single(event_kinds::attempt_dispatch_ambiguous(a, t, source, cause), ctx, at)
 }
 
 /// Los hechos de una continuidad (LXO-134), construidos aquí para que `continuity` no importe el catálogo de eventos. Los

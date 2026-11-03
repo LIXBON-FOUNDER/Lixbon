@@ -196,7 +196,7 @@ fn si_falla_el_worktree_el_attempt_falla_desde_starting_sin_llamar_al_proveedor(
 }
 
 /// Un adapter que entra en pánico al lanzar: pudo haber creado el proceso.
-struct PanicAdapter;
+pub(in crate::orch) struct PanicAdapter;
 
 impl ProviderAdapter for PanicAdapter {
     fn id(&self) -> &str {
@@ -218,8 +218,9 @@ fn un_panico_al_lanzar_es_un_desenlace_desconocido_y_no_se_libera_nada() {
     let f = fixture(Arc::new(PanicAdapter));
 
     assert_eq!(f.core.dispatch_attempt(&f.attempt, f.launcher.as_ref()).unwrap(), DispatchResult::OutcomeUnknown);
-    // Ni se da por fallido ni se asienta, y el worktree (que el proceso puede estar usando) sigue ahí.
-    assert_eq!(row(&f.core, &f.attempt), ("running".into(), "started".into(), None));
+    // Ni se da por fallido ni se asienta, y el worktree (que el proceso puede estar usando) sigue ahí. El claim queda
+    // `ambiguous` con su hecho: a la vista y sin relanzar.
+    assert_eq!(row(&f.core, &f.attempt), ("running".into(), "ambiguous".into(), None));
     assert!(worktree_dir(&f).is_dir());
     assert_eq!(worktree_state(&f.core, &f.attempt).as_deref(), Some("active"));
     assert!(f.launcher.take_started(&f.attempt).is_none(), "no hay una ejecución confirmada que bombear");

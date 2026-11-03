@@ -83,6 +83,7 @@ const EXPECTED_V1_KEYS = [
   'activity.attempt.queue_delivered',
   'activity.attempt.queue_cancelled',
   'activity.attempt.queue_failed',
+  'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -127,6 +128,7 @@ const MODEL_ARGS = {
   'activity.attempt.queued': { task: 'task-1', n: 1, position: 2, attachments: 0 },
   'activity.attempt.queue_delivered': { task: 'task-1', n: 1 },
   'activity.attempt.queue_cancelled': { task: 'task-1', n: 1 },
+  'activity.attempt.dispatch_ambiguous': { task: 'task-1', n: 1 },
   'activity.attempt.queue_failed': { task: 'task-1', n: 1, reason: 'adapter_unavailable' },
   'activity.provider_session.opened': { task: 'task-1', n: 1, provider: 'claude', resumable: true, bound: true },
   'activity.provider_session.bound': { task: 'task-1', binding: 'stream_json' },
@@ -299,6 +301,7 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 1 })).toContain('1 adjunto)');
     expect(translate('activity.attempt.queue_delivered', { task: 'task-1', n: 2 })).toBe('Se entregó al intento 2 de la tarea task-1 la instrucción encolada.');
     expect(translate('activity.attempt.queue_cancelled', { task: 'task-1', n: 2 })).toBe('Se canceló una instrucción encolada para el intento 2 de la tarea task-1.');
+    expect(translate('activity.attempt.dispatch_ambiguous', { task: 'task-1', n: 2 })).toBe('No se sabe si el proveedor llegó a lanzarse para el intento 2 de la tarea task-1: no se relanzará.');
     for (const reason of ['unsupported', 'environment_blocked', 'adapter_unavailable', 'adapter_error', 'attempt_ended', 'interrupted']) {
       expect(translate('activity.attempt.queue_failed', { task: 'task-1', n: 2, reason })).toMatch(/^No se pudo entregar una instrucción encolada al intento 2 de la tarea task-1: .+\.$/);
     }
