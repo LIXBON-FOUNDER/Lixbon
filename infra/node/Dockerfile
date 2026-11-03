@@ -16,8 +16,9 @@ COPY infra/node/entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh
 
 # Flash attention + caché KV en 8 bits: la mitad de VRAM por token de contexto,
-# imprescindible para ventanas grandes. El num_ctx efectivo lo manda el gateway
-# (MODEL_NUM_CTX); OLLAMA_CONTEXT_LENGTH es solo el default si no lo manda.
+# imprescindible para ventanas grandes. El gateway manda SIEMPRE el mismo
+# num_ctx por modelo (MODEL_NUM_CTX_DEFAULT = 32768, igual que aquí): otro
+# valor recargaría el modelo y vaciaría la caché de prompts del nodo.
 # NUM_PARALLEL: peticiones simultáneas por modelo en la GPU; cada slot reserva
 # su caché KV. 4 es prudente para 24 GB; en 80 GB súbelo desde la plantilla.
 # MAX_LOADED_MODELS=3: chat + embed + vision residentes, sin recargas.

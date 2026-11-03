@@ -63,8 +63,16 @@ EOF
 $SUDO chmod 600 "$ENV_FILE"
 
 # Flash attention + KV q8_0: la mitad de VRAM por token de contexto (ventanas grandes).
+# Caché de prompts: el gateway manda siempre el mismo num_ctx por modelo
+# (MODEL_NUM_CTX_DEFAULT = 32768, igual que OLLAMA_CONTEXT_LENGTH aquí); otro
+# valor haría recargar el modelo y vaciar la caché KV de todas las
+# conversaciones. Cada petición en paralelo (OLLAMA_NUM_PARALLEL) tiene su
+# hueco de caché: 4 = hasta 4 conversaciones calientes por modelo y nodo, a
+# cambio de 4× la VRAM del contexto. OLLAMA_KEEP_ALIVE cubre las peticiones
+# que no mandan keep_alive: descargar el modelo también tira su caché.
 export OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-32768}"
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-4}" OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-3}"
+export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] && $SUDO systemctl list-unit-files ollama.service >/dev/null 2>&1; then
   $SUDO mkdir -p /etc/systemd/system/ollama.service.d
   $SUDO tee /etc/systemd/system/ollama.service.d/lixbon.conf >/dev/null <<EOF
@@ -74,6 +82,7 @@ Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
 Environment="OLLAMA_CONTEXT_LENGTH=$OLLAMA_CONTEXT_LENGTH"
 Environment="OLLAMA_NUM_PARALLEL=$OLLAMA_NUM_PARALLEL"
 Environment="OLLAMA_MAX_LOADED_MODELS=$OLLAMA_MAX_LOADED_MODELS"
+Environment="OLLAMA_KEEP_ALIVE=$OLLAMA_KEEP_ALIVE"
 EOF
   $SUDO systemctl daemon-reload
   $SUDO systemctl enable ollama >/dev/null 2>&1 || true
