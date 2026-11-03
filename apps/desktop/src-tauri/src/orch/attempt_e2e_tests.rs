@@ -192,6 +192,8 @@ fn detener_una_ejecucion_viva_la_deja_stopped_y_sin_attention_de_fallo() {
     wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
 
     let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    // `running` se registra antes que la ejecución viva: se espera a que exista para poder detenerla.
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
     assert_eq!(w.core.kill_term(&task), Ok(true));
     w.settled(&attempt, "stopped");
 
