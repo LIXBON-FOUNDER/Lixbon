@@ -51,6 +51,28 @@ impl Override {
     }
 }
 
+/// Con qué contexto arranca un Fork (LXO-145). Conjunto CERRADO: lo que un cliente muestra y lo que `attempt.forked` registra.
+/// No hay una tercera vía «reanudar la sesión del origen»: ningún adapter ofrece `fork` y una sesión no se comparte entre Attempts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForkStrategy {
+    /// Solo el encargo de la Task: el Attempt nuevo no hereda nada de lo que hizo el origen.
+    Clean,
+    /// El encargo más un ContextPackage del Attempt origen, verificado antes de crear nada.
+    ContextPackage,
+}
+
+impl ForkStrategy {
+    pub const ALL: [ForkStrategy; 2] = [ForkStrategy::Clean, ForkStrategy::ContextPackage];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ForkStrategy::Clean => "clean",
+            ForkStrategy::ContextPackage => "context_package",
+        }
+    }
+}
+
 /// La procedencia de un Attempt que reintenta a otro.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RetryRow {

@@ -259,6 +259,22 @@ impl Core {
                     _ => super::queue_rpc::pending(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
                 }
             }
+            "attempt_lineage" => {
+                let context = authenticated_context.as_ref().ok_or("ver la procedencia de un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("ver la procedencia de un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::fork_runtime::LineageInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de procedencia inválida".to_string())?;
+                super::fork_runtime::lineage(self, context, &input)
+            }
+            "attempt_fork" => {
+                let context = authenticated_context.as_ref().ok_or("hacer un Fork requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("hacer un Fork solo está permitido a una Person autenticada".into());
+                }
+                let input: super::fork_runtime::ForkInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de Fork inválida".to_string())?;
+                super::fork_runtime::fork(self, context, &input)
+            }
             "attempt_steer" | "attempt_stop_and_send" => {
                 let context = authenticated_context.as_ref().ok_or("instruir a un Attempt requiere una Person autenticada")?;
                 if !matches!(caller, Caller::User) || !context.is_person() {
@@ -658,7 +674,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

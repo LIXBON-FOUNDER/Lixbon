@@ -13,6 +13,7 @@ import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
 import { CONTEXT_PREVIEW_QUERY_SPECS } from './contextPreviewContract';
 import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContract';
 import { USAGE_QUERY_SPECS } from './usageContract';
+import { FORK_QUERY_SPECS } from './forkContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
@@ -188,6 +189,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
   ['activity.attempt.instruction_requested', { required: { task: 'string', n: 'integer', mode: 'string' } }],
   ['activity.attempt.instruction_result', { required: { task: 'string', n: 'integer', mode: 'string', outcome: 'string' }, optional: { reason: 'string' } }],
+  ['activity.attempt.forked', { required: { task: 'string', n: 'integer', source_task: 'string', source_n: 'integer', strategy: 'string' } }],
   ['activity.attempt.retried', { required: { task: 'string', n: 'integer', from_n: 'integer' }, optional: { overrides: 'stringList' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
   ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
@@ -656,6 +658,8 @@ const QUERY_SPECS = Object.freeze({
   ...USAGE_QUERY_SPECS,
   // La cola de instrucciones de un Attempt (LXO-143/152): lo pendiente y lo terminado, tal como lo dice el Core.
   ...QUEUE_QUERY_SPECS,
+  // De dónde salió un Attempt y qué Forks nacieron de él (LXO-145/153): lo que se registró al bifurcar.
+  ...FORK_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

@@ -183,6 +183,7 @@ export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
   'activity.attempt.integrated': 'Integrado',
   'activity.attempt.continued': 'Continuado',
   'activity.attempt.retried': 'Reintentado',
+  'activity.attempt.forked': 'Bifurcado',
   'activity.attempt.queued': 'Instrucción en cola',
   'activity.attempt.queue_delivered': 'Instrucción de la cola entregada',
   'activity.attempt.queue_cancelled': 'Instrucción de la cola cancelada',

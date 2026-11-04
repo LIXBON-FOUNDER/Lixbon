@@ -258,6 +258,14 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.retried",
             "info",
         ),
+        (
+            "attempt.forked",
+            State,
+            ("attempt", "t-9-a1"),
+            json!({ "task": "t-9", "n": 1, "source": "t-7-a2", "source_task": "t-7", "source_n": 2, "strategy": "context_package", "package_id": format!("sha256:{}", "a".repeat(64)), "overrides": ["provider"] }),
+            "activity.attempt.forked",
+            "info",
+        ),
         ("attempt.approved", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.approved", "success"),
         ("attempt.rejected", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "cause": "cancelled" }), "activity.attempt.rejected", "warning"),
         ("attempt.started", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.started", "info"),
@@ -706,7 +714,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 97] = [
+const CLAVES: [&str; 98] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
@@ -715,6 +723,7 @@ const CLAVES: [&str; 97] = [
     "activity.attempt.dispatch_ambiguous",
     "activity.attempt.exited",
     "activity.attempt.failed",
+    "activity.attempt.forked",
     "activity.attempt.instruction_requested",
     "activity.attempt.instruction_result",
     "activity.attempt.integrated",

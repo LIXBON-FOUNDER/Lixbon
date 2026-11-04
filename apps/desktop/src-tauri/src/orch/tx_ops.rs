@@ -33,7 +33,7 @@ use super::events::{Actor, Channel, EventDraft, MutationContext};
 use super::mutation::{Effect, Tx};
 use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
-use crate::store::RetryOverride;
+use crate::store::{ForkStrategy, RetryOverride};
 
 /// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
 /// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
@@ -122,7 +122,70 @@ pub(super) struct RetrySelection {
     pub profile: Option<String>,
 }
 
+/// Lo que `attempt.fork` le pide a la mutación (LXO-145). Todo viene ya validado y resuelto por `fork_runtime`: aquí solo se escribe.
+pub(super) struct ForkRequest {
+    pub source_attempt: String,
+    pub source_task: String,
+    pub source_n: u32,
+    pub project_id: String,
+    pub objective: String,
+    pub title: String,
+    pub spec: String,
+    pub repo: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub role: Option<String>,
+    pub profile: String,
+    pub strategy: ForkStrategy,
+    pub package_id: Option<String>,
+    pub overrides: Vec<RetryOverride>,
+}
+
 impl Tx {
+    /// Fork (LXO-145): una Task NUEVA con su primer Attempt, que nace de otro Attempt sin tocarlo. Es el camino de `task.create` con un
+    /// Attempt (nace `pending_approval`: ninguna selección exime de la decisión humana) más `attempt.forked` con la procedencia.
+    /// Devuelve los ids de lo que nació. La Task tiene su Run, su rama y su worktree propios: la fuente no cambia.
+    pub(super) fn request_attempt_fork(&mut self, req: &ForkRequest) -> Result<crate::store::RuntimeResultIds, String> {
+        if !self.is_authenticated_person() {
+            return Err("hacer un Fork requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        if !self.tasks.contains_key(&req.source_task) {
+            return Err(format!("no existe la Task {}", req.source_task));
+        }
+        let root = NewTask {
+            agent: req.provider.clone(),
+            model: req.model.clone(),
+            effort: req.effort.clone(),
+            role: req.role.clone(),
+            title: req.title.clone(),
+            spec: req.spec.clone(),
+            repo: req.repo.clone(),
+            cwd: req.repo.clone(),
+            branch: None,
+            base: None,
+            worktree: None,
+            external: false,
+        };
+        let (run, task) = self.create_run_intent(&req.objective, root);
+        {
+            let row = self.tasks.get_mut(&task).ok_or("No se pudo crear la Task")?;
+            row.project_id = Some(req.project_id.clone());
+            row.profile = Some(req.profile.clone());
+            row.status = Status::PendingApproval;
+        }
+        self.request_initial_attempt(&task)?;
+        let forked = self.tasks.get(&task).cloned().map(|t| ev::runtime_attempt_forked(&t, &req.source_attempt, &req.source_task, req.source_n, req.strategy, req.package_id.clone(), req.overrides.clone()));
+        if let Some(forked) = forked {
+            self.try_push_event(forked);
+        }
+        let attempt_id = format!("{task}-a1");
+        Ok(crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id: Some(attempt_id) })
+    }
+
     /// Expira una aprobación inicial identificada por el id durable del Attempt.
     /// El plazo solo lo sugiere el Store: `runtime_commit_recorded` lo revalida
     /// junto al estado pendiente y el evento antes de confirmar el cambio.

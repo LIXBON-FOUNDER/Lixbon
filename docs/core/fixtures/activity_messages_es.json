@@ -681,6 +681,21 @@
       "text": "El intento 5 de la tarea t-3 reintenta el intento 4 (otro modelo; otro esfuerzo)."
     },
     {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "clean" },
+      "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "context_package" },
+      "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3 con un paquete de contexto."
+    },
+    {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "otra" },
+      "text": null
+    },
+    {
       "key": "activity.attempt.approved",
       "args": {
         "task": "t-3",

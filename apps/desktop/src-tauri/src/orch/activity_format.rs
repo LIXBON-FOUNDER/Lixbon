@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 64] = [
+pub(super) const KINDS: [&str; 65] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -48,6 +48,7 @@ pub(super) const KINDS: [&str; 64] = [
     "attempt.requested",
     "attempt.continued",
     "attempt.retried",
+    "attempt.forked",
     "attempt.approved",
     "attempt.rejected",
     "attempt.started",
@@ -117,6 +118,8 @@ const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_ter
 /// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
 const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
+/// Con qué contexto arrancó un Fork (`attempt.forked`).
+const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
 const RETRY_OVERRIDES: [&str; 4] = ["provider", "model", "effort", "profile"];
 const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
@@ -492,6 +495,18 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 vec![("task", id(p, "task")), ("n", number(p, "n")), ("from_n", number(p, "from_n")), ("overrides?", overrides)],
             )
         }
+        // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
+        "attempt.forked" => rendered(
+            "activity.attempt.forked",
+            Visual::Info,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("source_task", id(p, "source_task")),
+                ("source_n", number(p, "source_n")),
+                ("strategy", closed(p, "strategy", &FORK_STRATEGIES)),
+            ],
+        ),
         "attempt.requested" => rendered(
             "activity.attempt.requested",
             Visual::Info,

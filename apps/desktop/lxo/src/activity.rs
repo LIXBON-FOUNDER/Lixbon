@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 98] = [
+pub(crate) const MESSAGE_KEYS: [&str; 99] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -74,6 +74,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 98] = [
     "activity.attempt.requested",
     "activity.attempt.continued",
     "activity.attempt.retried",
+    "activity.attempt.forked",
     "activity.attempt.approved",
     "activity.attempt.rejected",
     "activity.attempt.started",
@@ -197,6 +198,8 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
     })
 }
 
+/// Con qué contexto arrancó un Fork (`attempt.forked`, LXO-145).
+const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
@@ -720,6 +723,13 @@ fn format(key: &str, a: &A) -> Option<String> {
             };
             let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
             Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
+        }
+        "activity.attempt.forked" => {
+            let at = attempt_of(a)?;
+            let source_task = a.text("source_task")?;
+            let source_n = a.number("source_n")?;
+            let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
+            Some(format!("El {at} se bifurcó del intento {source_n} de la tarea {source_task}{}.", if with_package { " con un paquete de contexto" } else { "" }))
         }
         "activity.attempt.requested" => {
             let at = attempt_of(a)?;

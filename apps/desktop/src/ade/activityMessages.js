@@ -65,6 +65,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.requested',
   'activity.attempt.continued',
   'activity.attempt.retried',
+  'activity.attempt.forked',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -165,6 +166,7 @@ const CONTINUITY_REASONS = {
   session_unavailable: 'no había una sesión que reanudar',
   session_expired: 'la sesión caducó',
 };
+const FORK_STRATEGIES = new Set(['clean', 'context_package']);
 const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
 const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
 const QUEUE_FAILURES = {
@@ -471,6 +473,15 @@ const FORMATTERS = {
     if (overrides != null && (!Array.isArray(overrides) || !overrides.length
       || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
     return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
+  },
+  // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
+  'activity.attempt.forked': (args) => {
+    const attempt = attemptOf(args);
+    const sourceTask = requiredText(args, 'source_task');
+    const sourceN = requiredNumber(args, 'source_n');
+    const strategy = requiredCode(args, 'strategy', FORK_STRATEGIES);
+    if (!requiredArguments(attempt, sourceTask, sourceN, strategy)) return null;
+    return `El ${attempt} se bifurcó del intento ${sourceN} de la tarea ${sourceTask}${strategy === 'context_package' ? ' con un paquete de contexto' : ''}.`;
   },
   'activity.attempt.requested': (args) => {
     const attempt = attemptOf(args);

@@ -52,6 +52,21 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
+/// Lo que el log dice de la procedencia de un Attempt (LXO-145): el payload de su `attempt.forked` y los Forks que nacieron de él.
+pub(super) struct ForkLineageRows {
+    pub origin: Option<String>,
+    pub forks: Vec<ForkChildRow>,
+}
+
+pub(super) struct ForkChildRow {
+    pub attempt_id: String,
+    pub payload: String,
+    pub status: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub at: i64,
+}
+
 use crate::store::{self, InstructionMode, InstructionOutcome, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
@@ -586,6 +601,31 @@ impl Core {
     /// Lo que ya NO está pendiente (`delivered`, `cancelled`, `failed`), en el orden en que se encoló, como mucho los últimos.
     pub(super) fn queue_finished(&self, ctx: &MutationContext, attempt_id: &str, limit: usize) -> Result<Vec<crate::store::QueueItemRow>, QueueError> {
         self.queue_store(|st| queue_commands::finished(st, ctx, attempt_id, limit))
+    }
+
+    // ── Fork (LXO-145): la procedencia de un Attempt sale del log, y solo se lee desde aquí ────────────────────────────────────
+
+    /// Lo que el log dice de la procedencia de un Attempt: su `attempt.forked` (si nació de otro) y los Forks que nacieron de él, con
+    /// el estado y el proveedor que tienen AHORA. Solo lectura.
+    pub(super) fn fork_lineage_rows(&self, attempt_id: &str) -> Result<ForkLineageRows, String> {
+        self.storage
+            .with_store(|store| {
+                store.read(|c| {
+                    let mut first = c.prepare("SELECT payload FROM events WHERE kind = 'attempt.forked' AND entity_id = ?1 ORDER BY seq LIMIT 1")?;
+                    let origin = first.query_map([attempt_id], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?.into_iter().next();
+                    let mut stmt = c.prepare(
+                        "SELECT e.entity_id, e.payload, a.status, a.provider, a.model, e.at FROM events e JOIN attempts a ON a.id = e.entity_id                          WHERE e.kind = 'attempt.forked' AND json_extract(e.payload, '$.source') = ?1 ORDER BY e.seq",
+                    )?;
+                    let forks = stmt
+                        .query_map([attempt_id], |r| {
+                            Ok(ForkChildRow { attempt_id: r.get(0)?, payload: r.get(1)?, status: r.get(2)?, provider: r.get(3)?, model: r.get(4)?, at: r.get(5)? })
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ForkLineageRows { origin, forks })
+                })
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
     }
 
     // ── Steer y Stop & Send (LXO-144): el almacén solo se toca desde aquí ────────────────────────────────────────────────────

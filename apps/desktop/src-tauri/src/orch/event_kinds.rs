@@ -33,6 +33,7 @@
 //! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
 //! | `attempt.retried` (LXO-142) | state | `attempt` |
+//! | `attempt.forked` (LXO-145) | state | `attempt` |
 //! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
 //! | `attempt.dispatch_ambiguous` (LXO-246) | state | `attempt` |
 //!
@@ -71,7 +72,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RetryOverride, RetryRow, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, ForkStrategy, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RetryOverride, RetryRow, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -891,6 +892,29 @@ pub(super) fn attempt_retried(a: &AttemptRow, r: &RetryRow, t: &TaskRow) -> Resu
     attempt_draft(a, t, &p)
 }
 
+/// `attempt.forked` (LXO-145): el Attempt `n` nació de otro (`source`, de otra Task) y no lo reabre ni lo toca. `strategy` dice con qué
+/// contexto arrancó; `package_id` es la identidad del ContextPackage si lo hubo (verificable contra su `source`); `overrides` nombra lo que
+/// se pidió distinto del origen (lista cerrada, ausente si nada). Nunca lleva el encargo ni el contenido del paquete.
+#[derive(Serialize)]
+pub(super) struct AttemptForked {
+    task: String,
+    n: i64,
+    source: String,
+    source_task: String,
+    source_n: i64,
+    strategy: ForkStrategy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    overrides: Vec<RetryOverride>,
+}
+
+impl EventPayload for AttemptForked {
+    const KIND: &'static str = "attempt.forked";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
 macro_rules! attempt_ref_payload {
     ($name:ident, $kind:literal, $class:expr) => {
         #[derive(Serialize)]
@@ -1314,6 +1338,13 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
 pub(super) fn runtime_attempt_retried(t: &Task, n: u32, overrides: Vec<RetryOverride>) -> Result<EventDraft, EventError> {
     let p = AttemptRetried { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, overrides };
     runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.forked` del primer Attempt de una Task del runtime que nace de otro Attempt (`source`, de la Task `source_task`).
+/// Lo emite la misma mutación que crea la Task y su Attempt, justo después de `attempt.requested`.
+pub(super) fn runtime_attempt_forked(t: &Task, source: &str, source_task: &str, source_n: u32, strategy: ForkStrategy, package_id: Option<String>, overrides: Vec<RetryOverride>) -> Result<EventDraft, EventError> {
+    let p = AttemptForked { task: t.id.clone(), n: 1, source: clip(source, 80), source_task: clip(source_task, 80), source_n: source_n as i64, strategy, package_id, overrides };
+    runtime_attempt(&t.id, &t.run, 1, &p)
 }
 
 /// `attempt.continued` del Attempt `n` de una Task del runtime: continúa la ProviderSession del `n - 1` (reanudación nativa; el

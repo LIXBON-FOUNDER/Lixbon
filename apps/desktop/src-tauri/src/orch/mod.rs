@@ -81,6 +81,7 @@ mod run_pump;
 mod adapter_launcher;
 mod initial_approval_rpc;
 mod attempt_retry_rpc;
+mod fork_runtime;
 mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
@@ -103,6 +104,8 @@ mod dispatch_boot_tests;
 mod attempt_e2e_tests;
 #[cfg(test)]
 mod steer_e2e_tests;
+#[cfg(test)]
+mod fork_e2e_tests;
 #[cfg(test)]
 mod real_provider_tests;
 #[cfg(test)]
