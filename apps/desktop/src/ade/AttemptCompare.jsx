@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { attemptStatusInfo } from './adeLabels';
 import { formatDurationMs } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
+import { Mark, PROVENANCE_VIEW } from './ProvenanceMark';
 import { useCoreQuery } from './useCoreQuery';
 import './AttemptCompare.css';
 
@@ -13,27 +14,6 @@ import './AttemptCompare.css';
  * La procedencia de CADA dato se ve con glifo, texto y forma de borde (no solo color): `✓ Verificado` (lo comprobó el Core), `⚠ Lo dice el
  * agente` (declarado, sin comprobar) y `? Sin dato` (con su motivo; nunca un cero).
  */
-const PROVENANCE_VIEW = Object.freeze({
-  verified: { glyph: '✓', label: 'Verificado por el Core' },
-  agent_reported: { glyph: '⚠', label: 'Lo dice el agente' },
-  unknown: { glyph: '?', label: 'Sin dato' },
-});
-
-const REASONS = Object.freeze({
-  no_worktree: 'aún no tiene worktree',
-  not_current_attempt: 'ya no es el intento actual de su tarea: la rama es la del actual',
-  branch_unavailable: 'la rama ya no existe',
-  no_base: 'no hay commit base',
-  repo_unavailable: 'el repositorio no está disponible',
-  git_unavailable: 'git no pudo calcularlo',
-  truncated: 'la lista se recortó: las sumas no valen',
-  binary_files: 'hay archivos binarios sin cuentas de líneas',
-  not_reviewed: 'no se ha revisado',
-  no_summary: 'el agente no dejó resumen',
-  none_recorded: 'no hay artefactos registrados',
-  not_collected: 'el Core aún no recoge resultados de pruebas',
-});
-
 const RELATION_TEXT = Object.freeze({
   same_task: 'Intentos de la misma tarea.',
   fork_family: 'Un intento y las bifurcaciones que nacieron de él.',
@@ -41,16 +21,6 @@ const RELATION_TEXT = Object.freeze({
 
 const SOURCE_TEXT = Object.freeze({ review: 'de la revisión', live_branch: 'HEAD actual de la rama', live_branch_merge_base: 'HEAD actual, base por merge-base' });
 const short = (commit) => (typeof commit === 'string' ? commit.slice(0, 12) : '');
-
-function Mark({ provenance, reason }) {
-  const view = PROVENANCE_VIEW[provenance];
-  return (
-    <span className={`cmp-prov cmp-prov--${provenance}`} data-testid="cmp-prov">
-      <span aria-hidden="true">{view.glyph}</span> {view.label}
-      {provenance === 'unknown' && reason && <span className="cmp-prov__reason"> — {REASONS[reason] ?? reason}</span>}
-    </span>
-  );
-}
 
 /** Una celda: la marca de procedencia y, si hay dato, su contenido. */
 function Cell({ evidence, render, id }) {

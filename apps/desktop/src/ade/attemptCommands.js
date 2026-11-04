@@ -47,6 +47,9 @@ const KNOWN_ERRORS = [
   [/in_progress/i, 'Esa petición ya se está atendiendo.'],
   [/context_package_source_mismatch/i, 'El paquete de contexto no sale de este intento (o de este proyecto): revisa que sea el correcto.'],
   [/context_package_invalid/i, 'El paquete de contexto no pasa la verificación del Core: no se puede usar.'],
+  [/review_not_current/i, 'Solo se revisa el intento actual de la tarea: la rama es la suya.'],
+  [/review_not_final/i, 'El intento todavía no terminó: espera a que acabe para aceptar un HEAD que ya no cambie.'],
+  [/confirmación explícita/i, 'Hay que confirmar la decisión.'],
   [/provider_unknown/i, 'Ese proveedor no está registrado en este Core.'],
   [/provider_start_(unsupported|unavailable)/i, 'Ese proveedor no puede arrancar un intento ahora mismo.'],
   [/provider_environment_blocked/i, 'El entorno impide lanzar con ese proveedor.'],
@@ -170,3 +173,16 @@ export async function forkAttempt({ requestId, sourceAttemptId, provider, model,
   }
   return response;
 }
+
+/**
+ * La decisión de la persona sobre la revisión EXACTA que vio (`attempt_review`): `headCommit` es el HEAD que mostró el Proof Pack. Si la
+ * rama se movió, el Core no registra nada y responde `outcome: 'head_moved'`. Aceptar no integra ni abre un PR; rechazar no borra nada.
+ * `decision`: `accepted` · `rejected`. Devuelve `{ outcome: 'recorded' | 'head_moved', attempt_id, … }`.
+ */
+export const reviewAttempt = ({ attemptId, decision, headCommit, comment }) => call('attempt_review', {
+  attempt_id: attemptId,
+  decision,
+  head_commit: headCommit,
+  confirm: true,
+  ...(typeof comment === 'string' && comment.trim() ? { comment: comment.trim() } : {}),
+});

@@ -6,6 +6,7 @@ import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
 import { AttemptLineage } from './AttemptLineage';
+import { AttemptProofPack } from './AttemptProofPack';
 import { AttemptQueue } from './AttemptQueue';
 import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
@@ -141,6 +142,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
         ) : <p className="ade-missing">{COPY.noArtifacts}</p>}
 
         <h4 className="ssec__label">Cambios y revisión</h4>
+        {/* LXO-155: la evidencia antes del diff, con su procedencia, y aceptar/rechazar sobre el HEAD exacto que se ve. */}
+        <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active} />
         <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">

@@ -28,3 +28,9 @@
 
 @media (prefers-reduced-motion: reduce) { .cmp * { transition: none !important; animation: none !important; } }
 @media (prefers-contrast: more) { .cmp-prov { border-width: 2px; } }
+
+/* Proof Pack (LXO-155): la misma procedencia que Compare, en lista. */
+.pp__list { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 6px 14px; margin: 0; }
+.pp__list dt { font-weight: 600; color: var(--ink-50); }
+.pp__list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .pp__list { grid-template-columns: 1fr; } }

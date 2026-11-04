@@ -463,6 +463,11 @@ worktree) la fija el Core.
   modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
   salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
   El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
+* **Proof Pack** (`AttemptProofPack`, en «Cambios y revisión»; LXO-147/155, [PROOF_PACK.md](PROOF_PACK.md)): la evidencia antes del diff, con la procedencia de cada dato
+  (la misma de Compare): estado, objetivo, revisión (base → HEAD), archivos cambiados, resumen del agente (se ve como suyo), artefactos y pruebas (sin dato: el Core aún no las
+  recoge). Dice si la evidencia es completa o parcial y qué falta. **Aceptar/Rechazar** piden confirmación y mandan EXACTAMENTE el HEAD mostrado; si la rama se movió, el Core no
+  registra nada, la vista lo avisa, recarga y no deja decidir hasta ver el HEAD nuevo. Una aceptación de otro HEAD se ve como vieja. Revisar no integra y rechazar no borra nada; el
+  comentario del rechazo no se guarda en el log de eventos. El diff completo sigue en «Ver cambios».
 * **Comparar** (`AttemptCompare`; LXO-146/154, [COMPARE.md](COMPARE.md)): de 2 a 4 intentos en una tabla accesible (pie, columnas por intento, filas con nombre; la región tiene foco de
   teclado y se desplaza en horizontal con pantallas estrechas). Se llega desde el historial (casillas por intento y «Comparar») o desde la procedencia («Comparar con el origen» /
   «con sus bifurcaciones»). Cada dato lleva su procedencia con glifo, texto y forma de borde distintos —`✓ Verificado por el Core`, `⚠ Lo dice el agente`, `? Sin dato` con su
