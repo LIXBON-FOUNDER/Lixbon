@@ -83,6 +83,7 @@ mod initial_approval_rpc;
 mod attempt_retry_rpc;
 mod fork_runtime;
 mod compare_read;
+mod proof_pack;
 mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
@@ -109,6 +110,8 @@ mod steer_e2e_tests;
 mod fork_e2e_tests;
 #[cfg(test)]
 mod compare_e2e_tests;
+#[cfg(test)]
+mod proof_pack_e2e_tests;
 #[cfg(test)]
 mod real_provider_tests;
 #[cfg(test)]

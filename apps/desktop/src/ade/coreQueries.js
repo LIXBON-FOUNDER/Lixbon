@@ -15,6 +15,7 @@ import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContrac
 import { USAGE_QUERY_SPECS } from './usageContract';
 import { COMPARE_QUERY_SPECS } from './compareContract';
 import { FORK_QUERY_SPECS } from './forkContract';
+import { PROOF_PACK_QUERY_SPECS } from './proofPackContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
@@ -663,6 +664,8 @@ const QUERY_SPECS = Object.freeze({
   ...FORK_QUERY_SPECS,
   // Comparar 2–4 Attempts con la procedencia de cada dato (LXO-146/154): el cliente no recalcula nada.
   ...COMPARE_QUERY_SPECS,
+  // La evidencia de un Attempt antes del diff, con la procedencia de cada dato (LXO-147/155).
+  ...PROOF_PACK_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

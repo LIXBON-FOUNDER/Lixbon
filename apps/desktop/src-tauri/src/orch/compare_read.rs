@@ -44,26 +44,26 @@ pub(super) const MAX_OVERLAPS: usize = 100;
 const API: u8 = 1;
 
 /// Todo lo que sale del almacén de un Attempt, ya en memoria: el almacén se suelta antes de ejecutar git.
-struct Loaded {
-    attempt: AttemptRow,
-    project_id: Option<String>,
-    is_current: bool,
-    worktree: Option<WorktreeRow>,
-    artifacts: Vec<ArtifactRow>,
-    review: Option<ReviewRow>,
-    fork_source: Option<String>,
+pub(super) struct Loaded {
+    pub(super) attempt: AttemptRow,
+    pub(super) project_id: Option<String>,
+    pub(super) is_current: bool,
+    pub(super) worktree: Option<WorktreeRow>,
+    pub(super) artifacts: Vec<ArtifactRow>,
+    pub(super) review: Option<ReviewRow>,
+    pub(super) fork_source: Option<String>,
 }
 
-fn evidence(value: Value, provenance: &str) -> Value {
+pub(super) fn evidence(value: Value, provenance: &str) -> Value {
     json!({ "value": value, "provenance": provenance })
 }
 
-fn unknown(reason: &str) -> Value {
+pub(super) fn unknown(reason: &str) -> Value {
     json!({ "value": null, "provenance": "unknown", "reason": reason })
 }
 
 /// Un dato opcional del Core: `verified` si está, `unknown` (con su motivo) si no.
-fn recorded(value: Option<Value>, reason: &str) -> Value {
+pub(super) fn recorded(value: Option<Value>, reason: &str) -> Value {
     match value {
         Some(v) => evidence(v, "verified"),
         None => unknown(reason),
@@ -106,13 +106,13 @@ fn relation(items: &[Loaded]) -> Option<(&'static str, String)> {
 }
 
 /// Qué commits se miran y de dónde salen: el de la revisión (`review`, inmutable) o el HEAD vivo del Attempt actual (`live_branch`).
-struct Range {
-    base: Option<String>,
-    head: String,
-    source: &'static str,
+pub(super) struct Range {
+    pub(super) base: Option<String>,
+    pub(super) head: String,
+    pub(super) source: &'static str,
 }
 
-fn range_of(core: &Core, context: &MutationContext, item: &Loaded) -> Result<Range, &'static str> {
+pub(super) fn range_of(core: &Core, context: &MutationContext, item: &Loaded) -> Result<Range, &'static str> {
     if let Some(r) = &item.review {
         return Ok(Range { base: r.base_commit.clone(), head: r.head_commit.clone(), source: "review" });
     }
@@ -129,16 +129,16 @@ fn range_of(core: &Core, context: &MutationContext, item: &Loaded) -> Result<Ran
     }
 }
 
-type Files = Vec<(String, Option<u64>, Option<u64>)>;
+pub(super) type Files = Vec<(String, Option<u64>, Option<u64>)>;
 
 /// Los archivos cambiados de un Attempt (o por qué no se sabe). `Ok((archivos, total))`.
-fn changed_files(core: &Core, range: &Range, task_id: &str) -> Result<(Files, usize), &'static str> {
+pub(super) fn changed_files(core: &Core, range: &Range, task_id: &str) -> Result<(Files, usize), &'static str> {
     let base = range.base.as_deref().ok_or("no_base")?;
     let repo = core.lock().tasks.get(task_id).map(|t| t.repo.clone()).filter(|r| !r.is_empty()).ok_or("repo_unavailable")?;
     review::numstat_between(&repo, base, &range.head, MAX_FILES).map_err(|_| "git_unavailable")
 }
 
-fn sum(files: &Files, pick: impl Fn(&(String, Option<u64>, Option<u64>)) -> Option<u64>) -> Option<u64> {
+pub(super) fn sum(files: &Files, pick: impl Fn(&(String, Option<u64>, Option<u64>)) -> Option<u64>) -> Option<u64> {
     // Un archivo binario no tiene cuentas: la suma de lo que sí se sabe sería una cifra falsa, así que no se da.
     files.iter().map(pick).sum::<Option<u64>>()
 }
@@ -249,6 +249,22 @@ fn overlaps(per_attempt: &[(String, Option<Files>, bool)]) -> Value {
     })
 }
 
+/// Lo que el almacén sabe de un Attempt, en memoria: el almacén se suelta antes de ejecutar git. Lo comparten Compare y el Proof Pack.
+pub(super) fn load_one(s: &crate::store::Store, id: &str, fork_source: Option<String>) -> crate::store::StoreResult<Result<Loaded, String>> {
+    let Some(attempt) = s.attempt_row(id)? else { return Ok(Err(format!("model_not_found: no existe el Attempt {id}"))) };
+    let project_id = s.task_row(&attempt.task_id)?.and_then(|t| t.project_id);
+    let is_current = s.attempt_current(&attempt.task_id)?.map(|c| c.n) == Some(attempt.n);
+    Ok(Ok(Loaded {
+        worktree: s.worktree_of_attempt(id)?,
+        artifacts: s.artifacts_of_attempt(id)?,
+        review: s.reviews_of_attempt(id)?.pop(),
+        fork_source,
+        attempt,
+        project_id,
+        is_current,
+    }))
+}
+
 /// `attempt_compare` · `{ attempt_ids: [2–4 ids] }`. Solo lectura, solo una Person de Desktop.
 pub(super) fn compare(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
@@ -261,18 +277,10 @@ pub(super) fn compare(core: &Core, caller: &Caller, context: Option<&MutationCon
         let sources = s.fork_sources(&ids)?;
         let mut items = Vec::with_capacity(ids.len());
         for id in &ids {
-            let Some(attempt) = s.attempt_row(id)? else { return Ok(Err(format!("model_not_found: no existe el Attempt {id}"))) };
-            let project_id = s.task_row(&attempt.task_id)?.and_then(|t| t.project_id);
-            let is_current = s.attempt_current(&attempt.task_id)?.map(|c| c.n) == Some(attempt.n);
-            items.push(Loaded {
-                worktree: s.worktree_of_attempt(id)?,
-                artifacts: s.artifacts_of_attempt(id)?,
-                review: s.reviews_of_attempt(id)?.pop(),
-                fork_source: sources.get(id).cloned().flatten(),
-                attempt,
-                project_id,
-                is_current,
-            });
+            match load_one(s, id, sources.get(id).cloned().flatten())? {
+                Ok(item) => items.push(item),
+                Err(e) => return Ok(Err(e)),
+            }
         }
         Ok(Ok(items))
     })?;

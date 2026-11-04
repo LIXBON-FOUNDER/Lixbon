@@ -13,24 +13,24 @@ use super::attempt_e2e_tests::{world, World};
 use super::dispatch_tests::row;
 use super::{Caller, Core};
 
-fn git(dir: &Path, args: &[&str]) -> String {
+pub(super) fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git").args(args).current_dir(dir).output().unwrap();
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-fn task_of(attempt: &str) -> String {
+pub(super) fn task_of(attempt: &str) -> String {
     attempt.rsplit_once("-a").unwrap().0.to_string()
 }
 
 /// La carpeta del worktree que el Core creó para el Attempt.
-fn worktree(core: &Core, attempt: &str) -> PathBuf {
+pub(super) fn worktree(core: &Core, attempt: &str) -> PathBuf {
     let path: String = core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT path FROM worktrees WHERE attempt_id = ?1", [attempt], |r| r.get(0))?))).unwrap().unwrap();
     PathBuf::from(path)
 }
 
 /// Un commit en la rama del Attempt con estos archivos (ruta → contenido).
-fn commit(core: &Core, attempt: &str, files: &[(&str, &str)]) {
+pub(super) fn commit(core: &Core, attempt: &str, files: &[(&str, &str)]) {
     let dir = worktree(core, attempt);
     for (path, content) in files {
         std::fs::write(dir.join(path), content).unwrap();
@@ -39,7 +39,7 @@ fn commit(core: &Core, attempt: &str, files: &[(&str, &str)]) {
     git(&dir, &["commit", "-qm", "trabajo"]);
 }
 
-fn event_total(core: &Core) -> i64 {
+pub(super) fn event_total(core: &Core) -> i64 {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?))).unwrap().unwrap()
 }
 
