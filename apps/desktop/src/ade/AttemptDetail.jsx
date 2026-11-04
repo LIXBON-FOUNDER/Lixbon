@@ -5,6 +5,7 @@ import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptIntegration } from './AttemptIntegration';
 import { AttemptLineage } from './AttemptLineage';
 import { AttemptProofPack } from './AttemptProofPack';
 import { AttemptQueue } from './AttemptQueue';
@@ -144,6 +145,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
         <h4 className="ssec__label">Cambios y revisión</h4>
         {/* LXO-155: la evidencia antes del diff, con su procedencia, y aceptar/rechazar sobre el HEAD exacto que se ve. */}
         <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active} />
+        {/* LXO-156: integrar la revisión aceptada (fusionar o publicar un PR), con el destino a la vista. */}
+        <AttemptIntegration attempt={attempt} onDone={state.retry} active={active} />
         <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">

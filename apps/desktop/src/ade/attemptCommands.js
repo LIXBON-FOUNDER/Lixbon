@@ -50,6 +50,9 @@ const KNOWN_ERRORS = [
   [/review_not_current/i, 'Solo se revisa el intento actual de la tarea: la rama es la suya.'],
   [/review_not_final/i, 'El intento todavía no terminó: espera a que acabe para aceptar un HEAD que ya no cambie.'],
   [/confirmación explícita/i, 'Hay que confirmar la decisión.'],
+  [/integration_not_current/i, 'Solo se integra el intento actual de la tarea: la rama es la suya.'],
+  [/integration_not_final/i, 'El intento todavía no terminó: espera a que acabe para integrar un HEAD que ya no cambie.'],
+  [/integration_no_branch/i, 'Este intento no tiene una rama que integrar.'],
   [/provider_unknown/i, 'Ese proveedor no está registrado en este Core.'],
   [/provider_start_(unsupported|unavailable)/i, 'Ese proveedor no puede arrancar un intento ahora mismo.'],
   [/provider_environment_blocked/i, 'El entorno impide lanzar con ese proveedor.'],
@@ -185,4 +188,19 @@ export const reviewAttempt = ({ attemptId, decision, headCommit, comment }) => c
   head_commit: headCommit,
   confirm: true,
   ...(typeof comment === 'string' && comment.trim() ? { comment: comment.trim() } : {}),
+});
+
+/**
+ * Integra un Attempt revisado (`attempt_integrate`): `action` es `merge` o `publish_pr`, y `headCommit` el HEAD que la persona vio (el único que se
+ * integra). Los resultados son los del efecto: `merged` · `conflict` · `error` · `target_moved` · `target_branch_mismatch` · `already_merged` (merge);
+ * `created` · `already_exists` · `error` (PR); y, sin efecto, `head_moved` · `review_required`. Repetir no duplica. No limpia el worktree.
+ * `acceptMovedTarget` es el commit del destino que la persona vio y acepta tras un `target_moved`.
+ */
+export const integrateAttempt = ({ attemptId, action, headCommit, squash = false, acceptMovedTarget }) => call('attempt_integrate', {
+  attempt_id: attemptId,
+  action,
+  head_commit: headCommit,
+  confirm: true,
+  ...(action === 'merge' && squash ? { squash: true } : {}),
+  ...(action === 'merge' && typeof acceptMovedTarget === 'string' && acceptMovedTarget ? { accept_moved_target: acceptMovedTarget } : {}),
 });

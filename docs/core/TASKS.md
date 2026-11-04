@@ -463,6 +463,11 @@ worktree) la fija el Core.
   modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
   salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
   El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
+* **Integración** (`AttemptIntegration`, tras el Proof Pack; LXO-148/156, [INTEGRACION.md](INTEGRACION.md)): para un intento terminado, muestra la revisión (el HEAD aceptado), el
+  destino (rama y HEAD del proyecto, y si se movió fuera de Lixbon o tiene cambios sin commit) y el estado (integrado / PR). «Fusionar en <rama>» y «Publicar PR» salen
+  desactivados con su motivo en llano si el Core no los deja, piden confirmación mostrando el destino y mandan EXACTAMENTE el HEAD visto; un destino movido exige aceptar el
+  commit que se ve. Los resultados son los del efecto: fusionado, conflicto (con los archivos; no se perdió nada), error (con detalle técnico), destino movido, rama equivocada,
+  HEAD movido, PR creado o ya existente. No limpia el worktree.
 * **Proof Pack** (`AttemptProofPack`, en «Cambios y revisión»; LXO-147/155, [PROOF_PACK.md](PROOF_PACK.md)): la evidencia antes del diff, con la procedencia de cada dato
   (la misma de Compare): estado, objetivo, revisión (base → HEAD), archivos cambiados, resumen del agente (se ve como suyo), artefactos y pruebas (sin dato: el Core aún no las
   recoge). Dice si la evidencia es completa o parcial y qué falta. **Aceptar/Rechazar** piden confirmación y mandan EXACTAMENTE el HEAD mostrado; si la rama se movió, el Core no

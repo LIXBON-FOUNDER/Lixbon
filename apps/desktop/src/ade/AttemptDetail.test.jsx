@@ -66,7 +66,7 @@ describe('AttemptDetail (LXO-122)', () => {
     expect(within(activity).getByRole('listitem').textContent).toContain('Completado');
     // Además de las dos lecturas del Attempt, el bloque de capacidades lee lo que ofrece el proveedor (LXO-135) y, con una sesión que se
     // puede reanudar, «Continuar» lee el historial de la Task para saber si este es el último intento, la cola de instrucciones lee la suya y la procedencia (Forks, LXO-145/153) lee `attempt_lineage` y el Proof Pack (LXO-147/155) lee `attempt_proof_pack`.
-    expect(calls.map((call) => call.query).filter((query) => !['provider_capabilities', 'attempts_by_task', 'pending_queue', 'attempt_lineage', 'attempt_proof_pack'].includes(query))).toEqual(['attempt_detail', 'activity_list']);
+    expect(calls.map((call) => call.query).filter((query) => !['provider_capabilities', 'attempts_by_task', 'pending_queue', 'attempt_lineage', 'attempt_proof_pack', 'attempt_integration_preview'].includes(query))).toEqual(['attempt_detail', 'activity_list']);
     expect(calls.filter((call) => call.query === 'provider_capabilities').every((call) => Object.keys(call.args).length === 0)).toBe(true);
     expect(calls.find((call) => call.query === 'activity_list').args).toMatchObject({ target_kind: 'attempt', target_id: 't3-a1' });
   });
