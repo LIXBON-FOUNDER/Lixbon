@@ -35,6 +35,16 @@ const KNOWN_ERRORS = [
   [/queue_full/i, 'La cola está llena (50 instrucciones pendientes): espera a que se entregue alguna.'],
   [/not_cancellable/i, 'Esa instrucción ya no se puede cancelar: se está entregando, se entregó o falló.'],
   [/request_conflict/i, 'Esa clave ya se usó con otra instrucción: vuelve a enviarla.'],
+  [/steer_unsupported/i, 'Este proveedor no permite inyectar una instrucción en el turno en curso (Steer).'],
+  [/stop_send_unsupported/i, 'Este proveedor no permite detener el turno y enviar una instrucción: necesita interrumpir y reanudar.'],
+  [/steer_failed/i, 'El proveedor no aceptó la instrucción para el turno en curso. Puedes volver a enviarla.'],
+  [/stop_timeout/i, 'El proveedor no confirmó a tiempo que se detuviera el turno: no se envió la instrucción y el intento sigue.'],
+  [/stop_in_progress/i, 'Ya hay un «detener y enviar» esperando a que se confirme la parada.'],
+  [/stop_failed/i, 'No se pudo detener el turno: no se envió la instrucción.'],
+  [/send_failed/i, 'Se detuvo el turno pero la instrucción no llegó al proveedor. Continúa la sesión con ella si hace falta.'],
+  [/session_missing/i, 'El proveedor aún no ha declarado su sesión: no se puede detener y enviar todavía.'],
+  [/busy\/not_running/i, 'El intento no está en marcha ahora (espera una respuesta o no ha arrancado): no admite esta instrucción.'],
+  [/in_progress/i, 'Esa petición ya se está atendiendo.'],
   [/venci/i, 'La aprobación venció: el intento se detuvo sin ejecutarse. Crea uno nuevo.'],
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
@@ -118,3 +128,17 @@ export const queueInstruction = (attemptId, requestId, body) => call('attempt_qu
 
 /** Cancela una instrucción aún no entregada (`attempt_queue_cancel`). `status`: `Cancelled` · `AlreadyCancelled`. */
 export const cancelQueued = (queueId) => call('attempt_queue_cancel', { queue_id: queueId });
+
+/**
+ * Inyecta una instrucción en el turno EN CURSO (`attempt_steer`). Solo si el proveedor ofrece `steer`: nunca se convierte en cola ni en
+ * parada. `requestId` es la clave de idempotencia (repetirla devuelve el mismo resultado, `Replayed`, sin volver a llamar al proveedor).
+ * Devuelve `{ status, mode: 'steer', attempt_id, request_id }`.
+ */
+export const steerAttempt = (attemptId, requestId, body) => call('attempt_steer', { attempt_id: attemptId, request_id: requestId, body });
+
+/**
+ * Detiene el turno en curso y envía la instrucción como turno nuevo (`attempt_stop_and_send`). Necesita `interrupt` y `resume`. El Core
+ * no envía nada hasta que el proveedor confirma la parada (puede tardar hasta 15 s); si no se confirma, no se envía y el intento
+ * sigue. Devuelve `{ status, mode: 'stop_and_send', attempt_id, request_id }`.
+ */
+export const stopAndSend = (attemptId, requestId, body) => call('attempt_stop_and_send', { attempt_id: attemptId, request_id: requestId, body });

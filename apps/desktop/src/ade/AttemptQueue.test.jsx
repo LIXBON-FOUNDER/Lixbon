@@ -6,7 +6,7 @@ import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
 import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
-import { live } from './testFixtures/providerCapabilitiesFixtures';
+import { live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
 
 // LXO-151 / LXO-152 · compositor de un intento ocupado (Queue explícito) y Pending Queue Dock.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -27,16 +27,16 @@ const pendingQueue = ({ items = [], finished = [] } = {}) => ({
 });
 
 /** Un Core de pruebas. `queue` es la respuesta (o una función) de `pending_queue`; `decide` responde a las órdenes. */
-function mountCore({ status = 'running', provider = 'fake-completo', queue = pendingQueue(), decide = () => ({ status: 'Queued', attempt_id: 't3-a1', queue_id: 't3-a1-q1', position: 1 }) } = {}) {
+function mountCore({ status = 'running', provider: attemptProvider = 'fake-completo', caps = live(), queue = pendingQueue(), decide = () => ({ status: 'Queued', attempt_id: 't3-a1', queue_id: 't3-a1-q1', position: 1 }) } = {}) {
   const calls = [];
   invoke.mockImplementation(async (command, payload) => {
     calls.push({ command, payload });
     if (command === 'orch_call') return decide(payload);
-    if (payload.query === 'provider_capabilities') return live();
+    if (payload.query === 'provider_capabilities') return caps;
     if (payload.query === 'activity_list') return attemptActivityPage([]);
     if (payload.query === 'attempts_by_task') return { ...CANONICAL['attempts_by_task.v1.json'], task_id: 't3', items: [] };
     if (payload.query === 'pending_queue') return typeof queue === 'function' ? queue() : queue;
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider });
+    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider: attemptProvider });
   });
   return calls;
 }
@@ -63,19 +63,18 @@ describe('Compositor de un intento ocupado (LXO-151)', () => {
     }
   });
 
-  it('dice qué hace Enter: Queue activo y Steer / Detener y enviar desactivados con su razón, sin caer a encolar', async () => {
+  it('dice qué hace Enter: Encolar activo por defecto y Steer / Detener y enviar disponibles solo si el proveedor los ofrece', async () => {
     const calls = mountCore();
     mount();
     await flush();
     expect(screen.getByTestId('aq-mode-queue').checked).toBe(true);
     for (const id of ['aq-mode-steer', 'aq-mode-stop-send']) {
       const radio = screen.getByTestId(id);
-      expect(radio.disabled, id).toBe(true);
+      expect(radio.disabled, id).toBe(false);
       expect(radio.checked, id).toBe(false);
     }
-    expect(screen.getByTestId('attempt-queue').textContent).toMatch(/Steer.*todavía no existe en el Core/);
-    expect(screen.getByTestId('attempt-queue').textContent).toMatch(/Detener y enviar.*todavía no existe en el Core/);
     expect(screen.getByTestId('aq-enter-hint').textContent).toMatch(/Enter encola.*Shift\+Enter inserta un salto de línea.*nunca en mitad de él/);
+    expect(screen.getByTestId('aq-send').textContent).toBe('Encolar');
     expect(sent(calls)).toEqual([]);
   });
 
@@ -146,14 +145,125 @@ describe('Compositor de un intento ocupado (LXO-151)', () => {
     expect(screen.getByTestId('aq-sent').textContent).toBe('Esta instrucción ya estaba en la cola.');
   });
 
-  it('con un proveedor que no puede reanudar no se puede encolar y se dice por qué', async () => {
+  it('con un proveedor que no ofrece nada de esto no se puede enviar y se dice por qué', async () => {
     const calls = mountCore({ provider: 'fake-parcial' });
     mount();
     await flush();
-    expect(screen.getByTestId('aq-blocked').textContent).toMatch(/fake-parcial no puede entregar instrucciones entre turnos/);
+    expect(screen.getByTestId('aq-blocked').textContent).toMatch(/fake-parcial no puede recibir instrucciones con un intento en marcha/);
+    for (const id of ['aq-mode-queue', 'aq-mode-steer', 'aq-mode-stop-send']) expect(screen.getByTestId(id).disabled, id).toBe(true);
     expect(screen.getByTestId('aq-text').disabled).toBe(true);
     expect(screen.getByTestId('aq-send').disabled).toBe(true);
     expect(sent(calls)).toEqual([]);
+  });
+
+  it('un modo que el proveedor no ofrece sale desactivado con la razón del Core y NUNCA cae a otro: Enter sigue encolando', async () => {
+    const calls = mountCore({ provider: 'sin-steer', caps: liveWith([provider('sin-steer', { steer: 'unsupported' })]) });
+    mount();
+    await flush();
+    const steer = screen.getByTestId('aq-mode-steer');
+    expect(steer.disabled).toBe(true);
+    expect(screen.getByTestId('attempt-queue').textContent).toMatch(/sin-steer no ofrece «Dirigir en curso»/);
+    expect(screen.getByTestId('aq-mode-queue').checked).toBe(true);
+    expect(screen.getByTestId('aq-mode-stop-send').disabled).toBe(false);
+    write('sigue');
+    enter();
+    await flush();
+    expect(sent(calls).map((c) => c.cmd)).toEqual(['attempt_queue']);
+  });
+
+  it('si el modo elegido deja de estar disponible se pasa al primero que sí lo está y el botón lo dice', async () => {
+    mountCore({ provider: 'solo-steer', caps: liveWith([provider('solo-steer', { resume: 'unsupported' })]) });
+    mount();
+    await flush();
+    expect(screen.getByTestId('aq-mode-queue').disabled).toBe(true);
+    expect(screen.getByTestId('aq-mode-stop-send').disabled).toBe(true);
+    expect(screen.getByTestId('aq-mode-steer').checked).toBe(true);
+    expect(screen.getByTestId('aq-send').textContent).toBe('Steer');
+    expect(screen.queryByTestId('aq-blocked')).toBeNull();
+  });
+
+  it('Steer: elegirlo cambia lo que hace Enter y manda attempt_steer, no la cola, con una clave de idempotencia', async () => {
+    const calls = mountCore({ decide: () => ({ status: 'Delivered', mode: 'steer', attempt_id: 't3-a1', request_id: 'x' }) });
+    mount();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-mode-steer'));
+    expect(screen.getByTestId('aq-enter-hint').textContent).toMatch(/Enter inyecta la instrucción en el turno en curso.*No pasa por la cola/);
+    write('  usa la rama develop  ');
+    enter();
+    await flush();
+    const [call] = sent(calls);
+    expect(call.cmd).toBe('attempt_steer');
+    expect(call.args).toMatchObject({ attempt_id: 't3-a1', body: 'usa la rama develop' });
+    expect(call.args.request_id).toMatch(/^[A-Za-z0-9_.-]{1,64}$/);
+    expect(sent(calls).length).toBe(1);
+    expect(screen.getByTestId('aq-sent').textContent).toBe('Instrucción inyectada en el turno en curso.');
+    expect(screen.getByTestId('aq-text').value).toBe('');
+  });
+
+  it('Detener y enviar interrumpe el turno: pide confirmación y no manda nada hasta confirmarla', async () => {
+    const calls = mountCore({ decide: () => ({ status: 'Delivered', mode: 'stop_and_send', attempt_id: 't3-a1', request_id: 'x' }) });
+    mount();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-mode-stop-send'));
+    write('para y rehaz el informe');
+    enter();
+    await flush();
+    expect(screen.getByTestId('aq-confirm').textContent).toMatch(/interrumpe el turno en curso.*solo enviará la instrucción cuando el proveedor confirme la parada/);
+    expect(sent(calls)).toEqual([]);
+    // Cancelar la confirmación no envía nada y conserva el borrador.
+    fireEvent.click(screen.getByTestId('aq-confirm-no'));
+    expect(screen.queryByTestId('aq-confirm')).toBeNull();
+    expect(screen.getByTestId('aq-text').value).toBe('para y rehaz el informe');
+    expect(sent(calls)).toEqual([]);
+    enter();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-confirm-yes'));
+    await flush();
+    expect(sent(calls).map((c) => c.cmd)).toEqual(['attempt_stop_and_send']);
+    expect(sent(calls)[0].args).toMatchObject({ attempt_id: 't3-a1', body: 'para y rehaz el informe' });
+    expect(screen.getByTestId('aq-sent').textContent).toBe('Turno detenido e instrucción enviada como turno nuevo.');
+    expect(screen.queryByTestId('aq-confirm')).toBeNull();
+  });
+
+  it('un stop que no se confirma se dice como lo que es: no se envió nada y el borrador se conserva', async () => {
+    mountCore({ decide: () => { throw new Error('failed/stop_timeout: el proveedor no confirmó el stop a tiempo: no se envió nada'); } });
+    mount();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-mode-stop-send'));
+    write('rehaz');
+    enter();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-confirm-yes'));
+    await flush();
+    expect(screen.getByTestId('aq-error').textContent).toContain('no se envió la instrucción y el intento sigue');
+    expect(screen.queryByTestId('aq-sent')).toBeNull();
+    expect(screen.getByTestId('aq-text').value).toBe('rehaz');
+  });
+
+  it('un fallo que el Core da por resuelto lleva clave nueva en el siguiente envío; una repetición se dice como tal', async () => {
+    let step = 0;
+    const calls = mountCore({
+      decide: () => {
+        step += 1;
+        if (step === 1) throw new Error('failed/steer_failed: el proveedor no pudo recibirlo');
+        return { status: step === 2 ? 'Delivered' : 'Replayed', mode: 'steer' };
+      },
+    });
+    mount();
+    await flush();
+    fireEvent.click(screen.getByTestId('aq-mode-steer'));
+    write('inténtalo');
+    enter();
+    await flush();
+    expect(screen.getByTestId('aq-error').textContent).toContain('no aceptó la instrucción');
+    enter();
+    await flush();
+    const keys = sent(calls).map((c) => c.args.request_id);
+    expect(keys[0]).not.toBe(keys[1]);
+    write('otra vez');
+    enter();
+    await flush();
+    expect(screen.getByTestId('aq-sent').textContent).toBe('Esta instrucción ya se había enviado.');
   });
 });
 

@@ -41,3 +41,6 @@
 .aq__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; }
 .aq__item--failed .aq__state { color: var(--error, #d14343); }
 .aq__item--delivered .aq__state { color: var(--success, #2f9e44); }
+.aq .ade-notice { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: var(--radius, 6px); font-size: 12px; line-height: 1.5; color: var(--ink-70); background: var(--surface-3); overflow-wrap: anywhere; }
+.aq .ade-notice--error { color: var(--danger); background: var(--danger-soft); }
+.aq .ade-notice--warn { color: var(--warn); background: var(--warn-soft); }

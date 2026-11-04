@@ -184,7 +184,8 @@ Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y
 * **`resume` se llama con el almacén tomado** (lo hace `deliver_next` dentro de su transacción de claim): arrancar la CLI bloquea las demás
   escrituras mientras dura. Con una CLI real son milisegundos, pero es un acoplamiento a vigilar.
 * `pending_queue` está en la lista de lecturas del ADE (`ADE_READ_QUERIES`) y el ADE la pinta en `AttemptQueue.jsx` (compositor, dock de pendientes con
-  «Cancelar» e historial). Steer y «Detener y enviar» salen desactivados con su razón hasta LXO-144; nunca caen a encolar en silencio.
+  «Cancelar» e historial). El mismo compositor ofrece Steer y «Detener y enviar» (LXO-144, [STEER.md](STEER.md)) cuando el proveedor los ofrece; los que no,
+  salen desactivados con su razón y nunca caen a encolar en silencio.
 * La recuperación al arrancar está cableada pero solo probada a nivel de `recover` (`queue_commands_tests.rs`), no con un reinicio real del Core.
 * Sin adjuntos (D11) y sin `lxo` (LXO-159).
 

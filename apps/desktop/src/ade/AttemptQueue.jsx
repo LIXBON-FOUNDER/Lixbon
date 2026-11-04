@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { cancelQueued, describeCommandError, newRequestId, queueInstruction } from './attemptCommands';
+import { cancelQueued, describeCommandError, newRequestId, queueInstruction, steerAttempt, stopAndSend } from './attemptCommands';
 import { formatUtc } from './attemptFormat';
 import { describeCapability, providerOf } from './capabilityModel';
 import { useCoreQuery } from './useCoreQuery';
@@ -21,8 +21,52 @@ const FAILURE_TEXT = {
   attempt_ended: 'El intento terminó antes de entregarla. Si sigue haciendo falta, continúa la sesión con ella.',
   interrupted: 'Se interrumpió en vuelo: no se sabe si llegó y no se reintenta. Reenvíala solo si hace falta.',
 };
-const STEER_WHY = 'Steer (inyectar en el turno en curso) todavía no existe en el Core (LXO-144).';
-const STOP_SEND_WHY = 'Detener y enviar todavía no existe en el Core (LXO-144). Para parar el intento usa «Detener».';
+
+/**
+ * Las tres formas de hablar con un intento ocupado (LXO-144). Son comandos DISTINTOS del Core y ninguno cae a otro: cada modo exige sus
+ * capabilities y, si el proveedor no las ofrece, se muestra desactivado con la razón que da el Core.
+ */
+const MODES = {
+  queue: {
+    id: 'queue',
+    testid: 'aq-mode-queue',
+    label: 'Encolar',
+    why: 'para el siguiente turno',
+    needs: ['resume'],
+    action: 'Encolar',
+    working: 'Encolando…',
+    hint: 'Enter encola la instrucción; Shift+Enter inserta un salto de línea. Se entrega cuando el turno en curso termine, nunca en mitad de él.',
+  },
+  steer: {
+    id: 'steer',
+    testid: 'aq-mode-steer',
+    label: 'Steer',
+    why: 'dentro del turno en curso',
+    needs: ['steer'],
+    action: 'Steer',
+    working: 'Inyectando…',
+    hint: 'Enter inyecta la instrucción en el turno en curso, ya; Shift+Enter inserta un salto de línea. No pasa por la cola.',
+  },
+  stop_send: {
+    id: 'stop_send',
+    testid: 'aq-mode-stop-send',
+    label: 'Detener y enviar',
+    why: 'interrumpe el turno y envía como turno nuevo',
+    needs: ['interrupt', 'resume'],
+    action: 'Detener y enviar',
+    working: 'Deteniendo…',
+    hint: 'Enter pide detener el turno en curso y enviar la instrucción como turno nuevo (antes pide confirmación); Shift+Enter inserta un salto de línea.',
+  },
+};
+const MODE_ORDER = ['queue', 'steer', 'stop_send'];
+
+const COMMAND = { queue: queueInstruction, steer: steerAttempt, stop_send: stopAndSend };
+const DONE_TEXT = {
+  steer: 'Instrucción inyectada en el turno en curso.',
+  stop_send: 'Turno detenido e instrucción enviada como turno nuevo.',
+};
+/** Errores que el Core da por RESUELTOS: repetir la misma clave repetiría el mismo fallo, así que el siguiente envío lleva clave nueva. */
+const SETTLED_FAILURE = /steer_failed|stop_failed|stop_timeout|send_failed/;
 
 const preview = (body) => (body.length > PREVIEW_CHARS ? `${body.slice(0, PREVIEW_CHARS)}…` : body);
 
@@ -42,14 +86,30 @@ function ItemMeta({ item, position }) {
   );
 }
 
+/** Qué modos puede usar este intento ahora, con la razón del primero que falta. Sin el dato del Core no se habilita nada. */
+function availability(caps, attempt) {
+  if (caps.unsupported) return { reason: 'Este Core no informa de lo que ofrece cada proveedor: no se puede enviar nada.', modes: {} };
+  if (!caps.snapshot) return { reason: caps.status === 'error' ? 'No se pudo comprobar lo que ofrece el proveedor: no se puede enviar nada.' : 'Comprobando lo que ofrece el proveedor…', modes: {} };
+  const provider = providerOf(caps.snapshot, attempt.provider);
+  const modes = {};
+  for (const id of MODE_ORDER) {
+    const missing = MODES[id].needs.map((need) => describeCapability(provider, need, attempt.provider)).find((info) => !info.enabled);
+    modes[id] = missing ? { enabled: false, reason: missing.reason } : { enabled: true, reason: null };
+  }
+  return { reason: null, modes };
+}
+
 /**
- * Enviar instrucciones a un intento OCUPADO y ver su cola (LXO-151/152). Lo que hace Enter se dice siempre: **encolar**, para el
- * siguiente turno (nunca en mitad del turno en curso). Steer y Detener y enviar se muestran desactivados con su razón (el Core aún no
- * los ofrece) y NUNCA caen a encolar en silencio. El borrador se conserva si el Core rechaza el envío y la clave de idempotencia se
- * reutiliza mientras el texto no cambie. El dock muestra lo que el Core dice: nada se da por entregado hasta que el Core lo confirma.
+ * Enviar instrucciones a un intento OCUPADO y ver su cola (LXO-151/152). El modo elegido se dice siempre y es explícito: **encolar**
+ * (siguiente turno), **steer** (dentro del turno en curso) o **detener y enviar** (interrumpe y envía como turno nuevo). Un modo que el
+ * proveedor no ofrece se muestra desactivado con su razón y NUNCA cae a otro en silencio. Detener y enviar pide confirmación. El
+ * borrador se conserva si el Core rechaza el envío y la clave de idempotencia se reutiliza mientras el texto y el modo no cambien. El
+ * dock muestra lo que el Core dice: nada se da por entregado hasta que el Core lo confirma.
  */
 export function AttemptQueue({ attempt }) {
   const [draft, setDraft] = useState('');
+  const [chosen, setChosen] = useState('queue');
+  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(null);
   const [error, setError] = useState(null);
@@ -71,36 +131,51 @@ export function AttemptQueue({ attempt }) {
   const finished = data?.finished ?? [];
   if (!running && items.length === 0 && finished.length === 0) return null;
 
-  // «Encolar» necesita que el proveedor pueda reanudar la sesión (así entrega el Core el siguiente turno).
-  let blocked = null;
-  if (running) {
-    if (caps.unsupported) blocked = 'Este Core no informa de lo que ofrece cada proveedor: no se puede encolar.';
-    else if (!caps.snapshot) blocked = caps.status === 'error' ? 'No se pudo comprobar lo que ofrece el proveedor: no se puede encolar.' : 'Comprobando lo que ofrece el proveedor…';
-    else {
-      const info = describeCapability(providerOf(caps.snapshot, attempt.provider), 'resume', attempt.provider);
-      if (!info.enabled) blocked = `${attempt.provider} no puede entregar instrucciones entre turnos (no ofrece reanudar sesiones): ${info.reason}`;
-    }
-  }
+  // El modo en uso: el elegido si el proveedor lo ofrece; si no, el primero que sí (nunca uno que no se eligió y se haga en silencio
+  // distinto: el modo activo se ve marcado y el botón lleva su nombre).
+  const { reason: unknownReason, modes } = running ? availability(caps, attempt) : { reason: null, modes: {} };
+  const firstEnabled = MODE_ORDER.find((id) => modes[id]?.enabled);
+  const mode = modes[chosen]?.enabled ? chosen : firstEnabled ?? chosen;
+  const blocked = running && !firstEnabled
+    ? unknownReason ?? `${attempt.provider} no puede recibir instrucciones con un intento en marcha: ${modes.queue?.reason ?? ''}`.trim()
+    : null;
+  const spec = MODES[mode];
 
   const body = draft.trim();
-  const send = async () => {
-    if (!body || busy || blocked) return;
-    // Misma instrucción tras un error: misma clave (el Core devuelve el mismo item, no duplica). Texto distinto: clave nueva.
-    if (!pending.current || pending.current.body !== body) pending.current = { key: newRequestId(), body };
+  const reset = () => { setConfirming(false); setSent(null); };
+  const choose = (id) => { setChosen(id); reset(); };
+
+  const doSend = async () => {
+    if (!body || busy || blocked || !modes[mode]?.enabled) return;
+    // Misma instrucción y mismo modo tras un error: misma clave (el Core devuelve el mismo resultado, no duplica). Otro texto u otro
+    // modo: clave nueva.
+    if (!pending.current || pending.current.body !== body || pending.current.mode !== mode) pending.current = { key: newRequestId(), body, mode };
     setBusy(true);
+    setConfirming(false);
     setError(null);
     try {
-      const result = await queueInstruction(attempt.id, pending.current.key, body);
-      setSent(result?.status === 'Replayed' ? 'Esta instrucción ya estaba en la cola.' : `Encolada${Number.isInteger(result?.position) ? ` (posición ${result.position})` : ''}: se entregará en el siguiente turno.`);
+      const result = await COMMAND[mode](attempt.id, pending.current.key, body);
+      if (result?.status === 'Replayed') setSent(mode === 'queue' ? 'Esta instrucción ya estaba en la cola.' : 'Esta instrucción ya se había enviado.');
+      else if (mode === 'queue') setSent(`Encolada${Number.isInteger(result?.position) ? ` (posición ${result.position})` : ''}: se entregará en el siguiente turno.`);
+      else setSent(DONE_TEXT[mode]);
       setDraft('');
       pending.current = null;
       queue.retry?.();
     } catch (failure) {
       // El borrador se conserva: el usuario no pierde lo que escribió.
-      setError(describeCommandError(failure));
+      const described = describeCommandError(failure);
+      setError(described);
+      if (SETTLED_FAILURE.test(described.detail)) pending.current = null;
     } finally {
       setBusy(false);
     }
+  };
+
+  // Detener y enviar interrumpe el turno en curso: antes de hacerlo se pide confirmación explícita.
+  const send = () => {
+    if (!body || busy || blocked) return;
+    if (mode === 'stop_send' && !confirming) { setConfirming(true); return; }
+    doSend();
   };
 
   const cancel = async (queueId) => {
@@ -117,7 +192,7 @@ export function AttemptQueue({ attempt }) {
   };
 
   const onKeyDown = (event) => {
-    // Enter encola; Shift+Enter inserta un salto de línea. No se actúa mientras se compone con un IME.
+    // Enter envía en el modo activo; Shift+Enter inserta un salto de línea. No se actúa mientras se compone con un IME.
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent?.isComposing) {
       event.preventDefault();
       send();
@@ -134,25 +209,49 @@ export function AttemptQueue({ attempt }) {
       {running && (
         <div className="aq__composer" data-testid="aq-composer">
           <div className="aq__modes" role="radiogroup" aria-label="Qué hace enviar">
-            <label className="aq__mode"><input type="radio" name={`aq-mode-${attempt.id}`} checked readOnly data-testid="aq-mode-queue" />Encolar <span className="aq__why">para el siguiente turno</span></label>
-            <label className="aq__mode aq__mode--off" title={STEER_WHY}><input type="radio" name={`aq-mode-${attempt.id}`} disabled aria-describedby={`aq-steer-${attempt.id}`} data-testid="aq-mode-steer" />Steer <span className="aq__why" id={`aq-steer-${attempt.id}`}>{STEER_WHY}</span></label>
-            <label className="aq__mode aq__mode--off" title={STOP_SEND_WHY}><input type="radio" name={`aq-mode-${attempt.id}`} disabled aria-describedby={`aq-stop-${attempt.id}`} data-testid="aq-mode-stop-send" />Detener y enviar <span className="aq__why" id={`aq-stop-${attempt.id}`}>{STOP_SEND_WHY}</span></label>
+            {MODE_ORDER.map((id) => {
+              const info = modes[id];
+              const enabled = Boolean(info?.enabled);
+              return (
+                <label key={id} className={`aq__mode${enabled ? '' : ' aq__mode--off'}`} title={enabled ? undefined : info?.reason ?? unknownReason ?? undefined}>
+                  <input
+                    type="radio"
+                    name={`aq-mode-${attempt.id}`}
+                    checked={mode === id}
+                    disabled={!enabled || busy}
+                    onChange={() => choose(id)}
+                    aria-describedby={enabled ? undefined : `aq-why-${id}-${attempt.id}`}
+                    data-testid={MODES[id].testid}
+                  />
+                  {MODES[id].label} <span className="aq__why" id={enabled ? undefined : `aq-why-${id}-${attempt.id}`}>{enabled ? MODES[id].why : info?.reason ?? unknownReason}</span>
+                </label>
+              );
+            })}
           </div>
           <textarea
             className="aq__text"
-            aria-label="Instrucción para el siguiente turno"
+            aria-label="Instrucción para el intento"
             rows={3}
             maxLength={MAX_QUEUE_CHARS}
             value={draft}
             disabled={busy || Boolean(blocked)}
-            onChange={(event) => { setDraft(event.target.value); setSent(null); }}
+            onChange={(event) => { setDraft(event.target.value); reset(); }}
             onKeyDown={onKeyDown}
             data-testid="aq-text"
           />
-          <p className="aq__hint" data-testid="aq-enter-hint">Enter encola la instrucción; Shift+Enter inserta un salto de línea. Se entrega cuando el turno en curso termine, nunca en mitad de él.</p>
+          <p className="aq__hint" data-testid="aq-enter-hint">{spec.hint}</p>
           {blocked && <p className="cap-note cap-note--warn" role="status" data-testid="aq-blocked">{blocked}</p>}
+          {confirming && (
+            <div className="ade-notice ade-notice--warn" role="alertdialog" aria-label="Confirmar detener y enviar" data-testid="aq-confirm">
+              <span>Esto interrumpe el turno en curso. El Core solo enviará la instrucción cuando el proveedor confirme la parada; si no la confirma, no se envía nada y el intento sigue.</span>
+              <div className="nat__actions">
+                <button type="button" className="btn btn--primary btn--sm" onClick={doSend} data-testid="aq-confirm-yes">Detener y enviar</button>
+                <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirming(false)} data-testid="aq-confirm-no">Cancelar</button>
+              </div>
+            </div>
+          )}
           <div className="nat__actions">
-            <button type="button" className="btn btn--primary btn--sm" disabled={busy || !body || Boolean(blocked)} onClick={send} data-testid="aq-send">{busy ? 'Encolando…' : 'Encolar'}</button>
+            <button type="button" className="btn btn--primary btn--sm" disabled={busy || !body || Boolean(blocked) || confirming} onClick={send} data-testid="aq-send">{busy ? spec.working : spec.action}</button>
           </div>
           {sent && <p role="status" data-testid="aq-sent">{sent}</p>}
           {error && (
