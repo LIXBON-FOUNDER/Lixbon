@@ -582,6 +582,11 @@ impl Core {
         self.queue_store(|st| queue_commands::pending(st, ctx, attempt_id))
     }
 
+    /// Lo que ya NO está pendiente (`delivered`, `cancelled`, `failed`), en el orden en que se encoló, como mucho los últimos.
+    pub(super) fn queue_finished(&self, ctx: &MutationContext, attempt_id: &str, limit: usize) -> Result<Vec<crate::store::QueueItemRow>, QueueError> {
+        self.queue_store(|st| queue_commands::finished(st, ctx, attempt_id, limit))
+    }
+
     /// Entrega el siguiente item si el run está en un límite de turno (lo llama el bombeo).
     pub(super) fn queue_deliver_next(&self, port: &dyn QueuePort, cancel: &CancelToken, attempt_id: &str) -> Result<DeliveryResult, QueueError> {
         self.queue_store(|st| queue_commands::deliver_next(st, port, cancel, attempt_id))

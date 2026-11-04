@@ -602,7 +602,16 @@ fn la_cola_entrega_en_fifo_reanudando_la_sesion_y_el_attempt_termina_al_vaciarse
     assert_eq!((event_count(&w.core, &a1, "attempt.queued"), event_count(&w.core, &a1, "attempt.queue_delivered"), event_count(&w.core, &a1, "attempt.queue_cancelled")), (3, 2, 1));
     assert_eq!(attempt_summary(&w.core, &a1), "tres");
     assert_eq!(w.core.lock().tasks.len(), 1, "no nació ningún Attempt ni Task nueva");
-    assert_eq!(w.desktop("pending_queue", json!({"attempt_id": a1})).unwrap()["items"].as_array().unwrap().len(), 0);
+    let after = w.desktop("pending_queue", json!({"attempt_id": a1})).unwrap();
+    assert_eq!(after["items"].as_array().unwrap().len(), 0);
+    // Lo ya resuelto se ve en `finished`, en el orden en que se encoló, con lo que dijo el Core: entregada (confirmada por el adapter),
+    // entregada y cancelada. Y de un item la interfaz nunca recibe la clave de idempotencia, su digest ni la instalación que lo envió.
+    let finished = after["finished"].as_array().unwrap();
+    assert_eq!(finished.iter().map(|i| (i["status"].as_str().unwrap(), i["confirmed_by"].as_str())).collect::<Vec<_>>(), [("delivered", Some("adapter_result")), ("delivered", Some("adapter_result")), ("cancelled", None)]);
+    assert_eq!(finished.iter().map(|i| i["body"].as_str().unwrap()).collect::<Vec<_>>(), ["segunda instrucción", "tercera instrucción", "cuarta (se cancela)"]);
+    for hidden in ["request_id", "request_digest", "client_id", "author_id", "attachments"] {
+        assert!(finished.iter().chain(items.iter()).all(|i| i.get(hidden).is_none()), "{hidden} no sale en pending_queue");
+    }
     // Terminado, no admite instrucciones.
     assert!(queue("r9", "tarde").unwrap_err().contains("attempt_final"));
     let _ = task;

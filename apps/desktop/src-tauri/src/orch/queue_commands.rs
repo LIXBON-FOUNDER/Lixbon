@@ -146,6 +146,20 @@ pub struct PendingItem {
     pub item: QueueItemRow,
 }
 
+/// Lo que ya no está pendiente de un Attempt (`delivered`, `cancelled`, `failed`), en el orden en que se encoló y acotado a los últimos
+/// `limit`: la historia completa de los finales sigue estando en los Events. Una persona, el que coordina la Task o el Core.
+pub(super) fn finished(st: &Store, ctx: &MutationContext, attempt_id: &str, limit: usize) -> Result<Vec<QueueItemRow>, QueueError> {
+    let attempt = attempt_of(st, attempt_id)?;
+    if !may_read(st, ctx, &attempt.task_id)? {
+        return Err(not_allowed(&format!("ver la cola de {attempt_id}"), ctx));
+    }
+    let mut done: Vec<QueueItemRow> = st.queue_of_attempt(attempt_id).map_err(from_store)?.into_iter().filter(|i| !matches!(i.status, QueueStatus::Queued | QueueStatus::Delivering)).collect();
+    if done.len() > limit {
+        done.drain(..done.len() - limit);
+    }
+    Ok(done)
+}
+
 /// Lo que dejó una recuperación.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Recovery {

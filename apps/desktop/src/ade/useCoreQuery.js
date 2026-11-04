@@ -54,6 +54,7 @@ function coreArgs(query, args) {
   if (query === 'task_list_v2') return { projectId: args.project_id, cursor: args.cursor ?? null };
   if (query === 'task_detail_v2' || query === 'attempts_by_task') return { taskId: args.task_id };
   if (query === 'attempt_detail') return { attemptId: args.attempt_id };
+  if (query === 'pending_queue') return { attemptId: args.attempt_id };
   if (query === 'task_detail') return { projectId: args.project_id, taskId: args.task_id };
   // Sin caída silenciosa: una query sin traducción explícita es un error, no un `task_detail`.
   throw new Error(`ade_query_forbidden: ${query} no es una query read-only del ADE`);
