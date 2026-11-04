@@ -5,6 +5,7 @@ import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptLineage } from './AttemptLineage';
 import { AttemptQueue } from './AttemptQueue';
 import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
@@ -34,7 +35,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -97,6 +98,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
         <AttemptResume attempt={attempt} onResumed={state.retry} />
         {/* Instrucciones para un intento ocupado (Queue explícito) y la cola pendiente, tal como la dice el Core. */}
         <AttemptQueue attempt={attempt} />
+        {/* De dónde salió el intento, los Forks que nacieron de él y la acción de bifurcar (abrir uno es siempre una elección explícita). */}
+        <AttemptLineage attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (

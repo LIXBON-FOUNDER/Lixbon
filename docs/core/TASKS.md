@@ -458,6 +458,11 @@ worktree) la fija el Core.
   sesión **resumible y en espera**, «Continuar la sesión» pide un mensaje, avisa de que conserva la conversación, el worktree y los permisos, y
   manda `attempt_resume`. Dice cuál es el intento nuevo y vuelve a leer el detalle; conserva el mensaje escrito si el Core lo rechaza. No ofrece cambiar
   proveedor ni perfil. Comparte con «Reintentar» la comprobación de «es el último» (`useLatestAttempt`): añade una lectura de `attempts_by_task` al detalle.
+* **Fork** (`AttemptFork` y `AttemptLineage`, en el detalle del Attempt; LXO-145/153, [FORK.md](FORK.md)): «Bifurcar…» crea un intento **nuevo** a partir del actual
+  (una Task nueva, con su rama y su worktree; el original no se toca y puede seguir corriendo). Antes de confirmar dice el proveedor (solo los que pueden arrancar), qué
+  modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
+  salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
+  El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
 * **Instrucciones en cola** (`AttemptQueue`, en el detalle del Attempt; LXO-151/152): con el intento `running`, un compositor con tres modos explícitos: **Encolar**
   (por defecto; Enter encola, Shift+Enter salta de línea; se entrega en el siguiente turno, nunca en mitad del actual; exige `resume`), **Steer** (inyecta en el turno
   en curso; exige `steer`) y **Detener y enviar** (interrumpe el turno y envía como turno nuevo; exige `interrupt` y `resume`, y pide confirmación). El modo activo

@@ -45,6 +45,12 @@ const KNOWN_ERRORS = [
   [/session_missing/i, 'El proveedor aún no ha declarado su sesión: no se puede detener y enviar todavía.'],
   [/busy\/not_running/i, 'El intento no está en marcha ahora (espera una respuesta o no ha arrancado): no admite esta instrucción.'],
   [/in_progress/i, 'Esa petición ya se está atendiendo.'],
+  [/context_package_source_mismatch/i, 'El paquete de contexto no sale de este intento (o de este proyecto): revisa que sea el correcto.'],
+  [/context_package_invalid/i, 'El paquete de contexto no pasa la verificación del Core: no se puede usar.'],
+  [/provider_unknown/i, 'Ese proveedor no está registrado en este Core.'],
+  [/provider_start_(unsupported|unavailable)/i, 'Ese proveedor no puede arrancar un intento ahora mismo.'],
+  [/provider_environment_blocked/i, 'El entorno impide lanzar con ese proveedor.'],
+  [/no tiene Project/i, 'La tarea de este intento no tiene proyecto: no hay desde dónde lanzar.'],
   [/venci/i, 'La aprobación venció: el intento se detuvo sin ejecutarse. Crea uno nuevo.'],
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
@@ -142,3 +148,25 @@ export const steerAttempt = (attemptId, requestId, body) => call('attempt_steer'
  * sigue. Devuelve `{ status, mode: 'stop_and_send', attempt_id, request_id }`.
  */
 export const stopAndSend = (attemptId, requestId, body) => call('attempt_stop_and_send', { attempt_id: attemptId, request_id: requestId, body });
+
+/**
+ * Bifurca un intento (`attempt_fork`): el Core crea una Task NUEVA con su primer Attempt, con la procedencia del origen, que nace
+ * pendiente de la aprobación de la persona. El origen no se toca. `requestId` es la clave de idempotencia: repetir la petición devuelve el
+ * mismo Fork (`Replayed`) en vez de abrir otro. No acepta perfil, worktree ni host: el perfil se hereda y el worktree es siempre nuevo.
+ * Los campos vacíos se omiten (se heredan). `package` es el texto exacto del ContextPackage que la persona revisó.
+ * Devuelve `{ status, source_attempt_id, run_id, task_id, attempt_id, strategy, package_id }`.
+ */
+export async function forkAttempt({ requestId, sourceAttemptId, provider, model, effort, title, package: contextPackage }) {
+  const args = { request_id: requestId, source_attempt_id: sourceAttemptId };
+  const optional = { provider, model, effort, title };
+  for (const [key, value] of Object.entries(optional)) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (text) args[key] = text;
+  }
+  if (typeof contextPackage === 'string' && contextPackage.trim()) args.package = contextPackage;
+  const response = await call('attempt_fork', args);
+  if (!response || typeof response.task_id !== 'string' || typeof response.attempt_id !== 'string') {
+    throw new Error('ade_command_invalid_response: attempt_fork no devolvió la Task y el Attempt');
+  }
+  return response;
+}
