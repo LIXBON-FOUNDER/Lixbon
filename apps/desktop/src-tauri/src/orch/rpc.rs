@@ -230,6 +230,23 @@ impl Core {
                 };
                 Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id}))
             }
+            "attempt_resume" => {
+                let context = authenticated_context.as_ref().ok_or("continuar un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("continuar un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::attempt_resume_rpc::ResumeInput =
+                    serde_json::from_value(args.clone()).map_err(|_| "Solicitud de continuación inválida".to_string())?;
+                let (status, attempt_id) = match super::attempt_resume_rpc::resume(self, context, &input)? {
+                    super::attempt_retry_rpc::RetryResult::Requested(id) => {
+                        // Pedirlo no lanza nada por sí mismo: despierta al despachador, que toma el Attempt de su cola.
+                        self.wake_dispatcher();
+                        ("Requested", id)
+                    }
+                    super::attempt_retry_rpc::RetryResult::Replayed(id) => ("Replayed", id),
+                };
+                Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id}))
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -620,7 +637,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

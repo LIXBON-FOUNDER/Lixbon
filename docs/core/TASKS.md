@@ -261,6 +261,22 @@ puede hacer. El módulo es `orch/attempt_retry_rpc.rs`; el cambio de estado es `
 además de los aprobados, los Attempts `n > 1` sin plazo de aprobación que llevan `attempt.retried` / `attempt.continued` (la prueba de que una
 persona lo pidió): es también la recuperación si Lixbon cae entre pedir el reintento y despacharlo.
 
+### RPC de la continuación (`attempt_resume`)
+
+`attempt_resume` · `{ task_id, from_attempt_id, prompt, model?, effort? }` (`deny_unknown_fields`). `HumanDecision`: **solo una Person en
+Desktop**. **No acepta `provider`** (una ProviderSession no se comparte entre proveedores) **ni `profile`** (se hereda: continuar nunca amplía
+permisos). El módulo es `orch/attempt_resume_rpc.rs`; el cambio de estado es `Tx::request_attempt_continuation`
+([REINTENTO.md](REINTENTO.md#puente-al-despachador-proyecto-de-cuatro-pr)).
+
+| caso | respuesta |
+|---|---|
+| `from_attempt_id` es el último, está terminado y su sesión se puede reanudar | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>" }` y se despierta al despachador |
+| ya existe el Attempt siguiente | `{ "status": "Replayed", … }` con ese Attempt: no reanuda de nuevo |
+| en marcha, sin sesión, sesión cerrada / no resumible / sin referencia / no en espera, proveedor sin `resume`, mensaje vacío o con controles, no es el último | error ANTES de escribir nada |
+
+**Solo reanudación nativa:** el fallback con ContextPackage no entra por aquí. El Attempt nuevo se enlaza a la MISMA sesión y el despachador lo lanza con
+`adapter.resume` (la referencia sale de la sesión durable, el mensaje del último bloque «Seguimiento» del `spec`), no con `start`.
+
 ### Primer Attempt con `task_create` (fase 2c-3)
 
 `attempt` · `{ provider, model?, effort?, role?, profile }`. El cliente aporta solo la **selección** de ejecución; la política es
@@ -438,6 +454,10 @@ worktree) la fija el Core.
   confirmación y avisa de que el intento nuevo trabaja en el **mismo worktree** (lo que dejó a medias el anterior sigue ahí). Manda
   `attempt_retry` con la Task y el intento exactos, dice cuál es el nuevo y vuelve a leer el detalle. No se ofrece sobre un intento que ya no
   es el último; hasta leer el historial no se muestra, para que no aparezca y desaparezca. No ofrece cambiar proveedor, modelo ni perfil.
+* **Continuar la sesión** (`AttemptResume`, en el detalle del Attempt): con el último Attempt terminado (`done`, `failed`, `stopped` o `exited`) y una
+  sesión **resumible y en espera**, «Continuar la sesión» pide un mensaje, avisa de que conserva la conversación, el worktree y los permisos, y
+  manda `attempt_resume`. Dice cuál es el intento nuevo y vuelve a leer el detalle; conserva el mensaje escrito si el Core lo rechaza. No ofrece cambiar
+  proveedor ni perfil. Comparte con «Reintentar» la comprobación de «es el último» (`useLatestAttempt`): añade una lectura de `attempts_by_task` al detalle.
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden

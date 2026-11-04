@@ -1267,6 +1267,13 @@ pub(super) fn runtime_attempt_retried(t: &Task, n: u32, overrides: Vec<RetryOver
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
+/// `attempt.continued` del Attempt `n` de una Task del runtime: continúa la ProviderSession del `n - 1` (reanudación nativa; el
+/// fallback con ContextPackage no entra por esta vía). Lo emite la misma mutación que crea el Attempt y resuelve el `failed` del anterior.
+pub(super) fn runtime_native_continuation(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptContinued { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, strategy: ContinuityStrategy::NativeResume, reason: ContinuationReason::Preferred, package_id: None };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
 /// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
 pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
     let p = AttemptApproved { task: t.id.clone(), n: n as i64 };

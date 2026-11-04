@@ -44,7 +44,7 @@ pub(super) enum RetryResult {
 pub(crate) const RETRY_NOT_AVAILABLE: &str = "reintentar un Attempt requiere el lifecycle de lanzamiento verificado";
 
 /// `<task>-a<n>` con `n > 0` canónico y de la Task que se dice: devuelve `n`.
-fn attempt_number(task_id: &str, attempt_id: &str) -> Result<u32, String> {
+pub(super) fn attempt_number(task_id: &str, attempt_id: &str) -> Result<u32, String> {
     let invalid = || "Falta un id de Attempt válido".to_string();
     if task_id.is_empty() || task_id.len() > 256 || attempt_id.len() > 256 || attempt_id.chars().chain(task_id.chars()).any(char::is_control) {
         return Err(invalid());
@@ -58,7 +58,7 @@ fn attempt_number(task_id: &str, attempt_id: &str) -> Result<u32, String> {
 }
 
 /// Un valor opcional de la selección: acotado, sin controles y sin espacios sobrantes. Vacío no es «sin valor»: es un error.
-fn clean(what: &str, value: &Option<String>) -> Result<Option<String>, String> {
+pub(super) fn clean(what: &str, value: &Option<String>) -> Result<Option<String>, String> {
     let Some(raw) = value else { return Ok(None) };
     let v = raw.trim();
     if v.is_empty() || v.len() > 120 || v.chars().any(char::is_control) {

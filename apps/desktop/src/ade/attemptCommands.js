@@ -25,6 +25,11 @@ const KNOWN_ERRORS = [
   [/requiere el lifecycle de lanzamiento verificado/i, 'El Orquestador está desactivado: actívalo en Ajustes → Orquestador para lanzar un intento.'],
   [/terminó mal/i, 'Solo se reintenta un intento que terminó mal (falló, se detuvo o se cerró).'],
   [/solo se reintenta el último/i, 'Hay un intento más reciente: reintenta ese.'],
+  [/no tuvo una sesión/i, 'Este intento no guardó una sesión del proveedor: no se puede continuar.'],
+  [/no es resumible|no está en espera/i, 'La sesión del proveedor ya no se puede reanudar.'],
+  [/provider_resume_unsupported/i, 'Este proveedor no permite reanudar sesiones.'],
+  [/solo se continúa un Attempt terminado/i, 'Solo se continúa un intento que ya terminó.'],
+  [/solo se continúa el último/i, 'Hay un intento más reciente: continúa ese.'],
   [/venci/i, 'La aprobación venció: el intento se detuvo sin ejecutarse. Crea uno nuevo.'],
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
@@ -91,3 +96,10 @@ export const stopTask = (taskId) => call('stop', { task: taskId });
  * (`Replayed`) en vez de abrir otro. No acepta perfil: se hereda del anterior. Devuelve `{ status, task_id, attempt_id }`.
  */
 export const retryAttempt = (taskId, fromAttemptId) => call('attempt_retry', { task_id: taskId, from_attempt_id: fromAttemptId });
+
+/**
+ * Continúa la sesión del proveedor de un intento terminado con un mensaje nuevo (`attempt_resume`): el Core crea el siguiente
+ * Attempt, enlazado a la MISMA sesión, y lo lanza reanudándola. Como `retryAttempt`, nombra el Attempt que se continúa (el último) y
+ * repetir la petición devuelve esa continuación (`Replayed`). No acepta proveedor ni perfil. Devuelve `{ status, task_id, attempt_id }`.
+ */
+export const resumeAttempt = (taskId, fromAttemptId, prompt) => call('attempt_resume', { task_id: taskId, from_attempt_id: fromAttemptId, prompt });

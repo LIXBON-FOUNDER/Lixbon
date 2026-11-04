@@ -551,7 +551,26 @@ impl Core {
                 let Some(task) = store.task_row(&attempt.task_id)? else { return Ok(None) };
                 let Some(run) = store.run_row(&task.run_id)? else { return Ok(None) };
                 let claim = store.read(|c| Ok(c.query_row("SELECT dispatch_claim FROM attempts WHERE id = ?1", [attempt_id], |r| r.get::<_, String>(0))?))?;
-                Ok(Some(DispatchSnapshot { attempt, task, run, claim }))
+                let session = match attempt.provider_session_id.as_deref() {
+                    Some(id) => store.provider_session_row(id)?,
+                    None => None,
+                };
+                Ok(Some(DispatchSnapshot { attempt, task, run, claim, session }))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
+    pub(super) fn attempt_session_record(&self, attempt_id: &str) -> Result<Option<crate::store::ProviderSessionRow>, String> {
+        let read = self
+            .storage
+            .with_store(|store| -> crate::store::StoreResult<Option<crate::store::ProviderSessionRow>> {
+                let Some(attempt) = store.attempt_row(attempt_id)? else { return Ok(None) };
+                match attempt.provider_session_id.as_deref() {
+                    Some(id) => store.provider_session_row(id),
+                    None => Ok(None),
+                }
             })
             .ok_or_else(|| "el almacén no está abierto".to_string())?;
         read.map_err(|e| e.to_string())

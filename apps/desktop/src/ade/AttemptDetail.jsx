@@ -4,6 +4,7 @@ import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
 import { attemptDuration, formatUtc } from './attemptFormat';
@@ -82,6 +83,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
         <AttemptStop taskId={attempt.task_id} status={attempt.status} onStopped={state.retry} />
         {/* Reintentar un intento que terminó mal: un Attempt nuevo y limpio, que el Core lanza por su camino de siempre. */}
         <AttemptRetry attempt={attempt} onRetried={state.retry} />
+        {/* Continuar la sesión del proveedor de un intento terminado con un mensaje nuevo (reanudación nativa). */}
+        <AttemptResume attempt={attempt} onResumed={state.retry} />
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (

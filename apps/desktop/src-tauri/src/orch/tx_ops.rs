@@ -295,6 +295,64 @@ impl Tx {
         Ok(())
     }
 
+    /// Pide un Attempt que CONTINÚA la ProviderSession del anterior (reanudación nativa): la Task vuelve a `starting` y nace el
+    /// Attempt `n + 1` con `attempt.continued`. Como `request_attempt_retry` es el puente al despachador (el Attempt nuevo queda
+    /// `starting` con el claim `none` y lo lanza el despachador), pero aquí la sesión **se conserva**: el proyector enlaza el Attempt
+    /// nuevo a la ProviderSession de la Task y el lanzador reanuda en vez de arrancar.
+    ///
+    /// Se continúa un Attempt terminado de cualquier manera (también `done`: es un seguimiento) y siempre en el mismo proveedor:
+    /// una sesión no se comparte entre proveedores. El mensaje se añade al `spec` como bloque «Seguimiento» (la convención de
+    /// `lxo continue`), y ese bloque es el mensaje con que continúa la sesión. Sin consumidor hasta el RPC `attempt_resume`.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_resume`
+    pub(super) fn request_attempt_continuation(&mut self, task_id: &str, prompt: &str, selection: &RetrySelection) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("continuar un Attempt requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return Err("falta el mensaje con que continúa la sesión".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if !self.attempt_n.contains_key(task_id) {
+            return Err("la Task no tiene ningún Attempt que continuar".into());
+        }
+        if !task.status.is_final() {
+            return Err("solo se continúa un Attempt terminado".into());
+        }
+        if task.session_ref.as_deref().is_none_or(|r| r.trim().is_empty()) {
+            return Err("el Attempt anterior no tuvo una sesión del proveedor que reanudar".into());
+        }
+        if selection.provider.as_deref().is_some_and(|p| p != task.agent) {
+            return Err("continuar una sesión no cambia de proveedor: una ProviderSession no se comparte entre proveedores".into());
+        }
+        let before = self.snapshot_run_of(task_id);
+        {
+            let t = self.state_mut().task_mut(task_id)?;
+            t.model = selection.model.clone().or_else(|| t.model.clone());
+            t.effort = selection.effort.clone().or_else(|| t.effort.clone());
+            t.spec = format!("{}{}{prompt}", t.spec, super::dispatch::FOLLOW_UP_MARKER);
+            // Lo del Attempt anterior no se arrastra al nuevo, SALVO la sesión: es lo que se reanuda.
+            t.summary.clear();
+            t.report = None;
+            t.delivery_channel = None;
+            t.failure_reason = None;
+            t.approval_deadline = None;
+            t.merged = false;
+            t.status = Status::Starting;
+            t.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        let n = self.attempt_n.get(task_id).copied().unwrap_or(1);
+        let continued = self.tasks.get(task_id).cloned().map(|t| ev::runtime_native_continuation(&t, n));
+        if let Some(continued) = continued {
+            self.try_push_event(continued);
+        }
+        Ok(())
+    }
+
     fn state_mut(&mut self) -> &mut State {
         &mut *self
     }
