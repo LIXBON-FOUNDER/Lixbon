@@ -24,3 +24,5 @@
 .ade-attempt-activity__group-meta { font-weight: 400; color: var(--ink-70); }
 
 .nat-retry { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0; }
+.nat-resume { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0; }
+.nat-resume__text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }

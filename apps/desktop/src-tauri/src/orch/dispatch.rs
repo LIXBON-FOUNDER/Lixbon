@@ -34,7 +34,7 @@ use super::events::MutationContext;
 use super::mutation::Health;
 use super::state::Status;
 use super::Core;
-use crate::store::{AttemptRow, AttemptStatus, RunRow, TaskIntent, TaskOrigin, TaskRow};
+use crate::store::{AttemptRow, AttemptStatus, ProviderSessionRow, RunRow, TaskIntent, TaskOrigin, TaskRow};
 
 /// Cuántos aprobados procesa una pasada de [`Core::dispatch_approved`].
 const DISPATCH_BATCH_LIMIT: usize = 16;
@@ -45,6 +45,9 @@ pub(super) struct DispatchSnapshot {
     pub task: TaskRow,
     pub run: RunRow,
     pub claim: String,
+    /// La ProviderSession a la que está enlazado el Attempt. Solo la tiene uno que CONTINÚA una sesión (el proyector la enlaza al
+    /// nacer); un primer Attempt o un reintento no la tienen hasta que el adapter la entrega.
+    pub session: Option<ProviderSessionRow>,
 }
 
 /// Resultado de reservar el claim.
@@ -73,6 +76,9 @@ pub(super) struct DispatchIntent {
     /// Ubicación del Project en esta máquina, verificada por el Core (`Task.repo` no se usa: lo dice quien crea la Task).
     /// El [`Launcher`] decide el worktree a partir de ella.
     pub repo: PathBuf,
+    /// Referencia de la ProviderSession que este Attempt reanuda (`attempt.continued`). `None`: arranca limpio. Sale de la sesión
+    /// durable, nunca de lo que diga quien llama; con ella, `prompt` es el mensaje de la continuación y no el `spec` entero.
+    pub resume: Option<String>,
 }
 
 /// Por qué no se pudo preparar el lanzamiento. En ningún caso se llamó al proveedor.
@@ -176,7 +182,32 @@ pub(super) fn intent_from_rows(attempt: &AttemptRow, task: &TaskRow, run: &RunRo
         profile,
         prompt: task.spec.clone(),
         repo,
+        resume: None,
     })
+}
+
+/// El bloque «Seguimiento» que añade una continuación al `spec` de la Task: el último es el mensaje con que continúa la sesión.
+pub(super) const FOLLOW_UP_MARKER: &str = "\n\n---\nSeguimiento:\n";
+
+fn follow_up_prompt(spec: &str) -> Option<String> {
+    spec.rsplit_once(FOLLOW_UP_MARKER).map(|(_, prompt)| prompt.trim().to_string()).filter(|prompt| !prompt.is_empty())
+}
+
+/// Un Attempt enlazado a una sesión la REANUDA: la referencia sale de la sesión durable y el mensaje, del último bloque
+/// «Seguimiento». Falla cerrado si la sesión no es del proveedor del Attempt, no tiene referencia o falta el mensaje.
+pub(super) fn with_resume(mut intent: DispatchIntent, session: Option<&ProviderSessionRow>, spec: &str) -> Result<DispatchIntent, String> {
+    let Some(session) = session else { return Ok(intent) };
+    let reference = session.external_ref.as_deref().filter(|r| !r.trim().is_empty());
+    let Some(reference) = reference else {
+        return Err(format!("el Attempt {} continúa una sesión sin referencia del proveedor: no se puede reanudar", intent.attempt_id));
+    };
+    if session.provider != intent.provider {
+        return Err(format!("el Attempt {} continúa una sesión de {}, no de {}", intent.attempt_id, session.provider, intent.provider));
+    }
+    let prompt = follow_up_prompt(spec).ok_or_else(|| format!("el Attempt {} continúa una sesión pero la Task no tiene el mensaje de la continuación", intent.attempt_id))?;
+    intent.resume = Some(reference.to_string());
+    intent.prompt = prompt;
+    Ok(intent)
 }
 
 impl Core {
@@ -255,7 +286,9 @@ impl Core {
             Ok(repo) => repo,
             Err(why) => return Ok(DispatchResult::Ineligible(why)),
         };
-        let intent = match intent_from_rows(&snapshot.attempt, &snapshot.task, &snapshot.run, repo) {
+        let intent = match intent_from_rows(&snapshot.attempt, &snapshot.task, &snapshot.run, repo)
+            .and_then(|intent| with_resume(intent, snapshot.session.as_ref(), &snapshot.task.spec))
+        {
             Ok(intent) => intent,
             Err(why) => return Ok(DispatchResult::Ineligible(why)),
         };
@@ -415,6 +448,52 @@ mod tests {
         assert_eq!(intent.profile, "explorar");
         assert_eq!(intent.prompt, "haz algo");
         assert_eq!(intent.repo, PathBuf::from("C:/repo"));
+    }
+
+    fn session(provider: &str, external_ref: Option<&str>) -> ProviderSessionRow {
+        ProviderSessionRow {
+            id: "ps-t-1-a1".into(),
+            task_id: "t-1".into(),
+            opened_by_attempt_id: "t-1-a1".into(),
+            provider: provider.into(),
+            external_ref: external_ref.map(str::to_string),
+            binding: None,
+            resumable: true,
+            status: crate::store::SessionStatus::Open,
+            created_at: 1,
+            updated_at: 1,
+            closed_at: None,
+            origin: TaskOrigin::Core,
+        }
+    }
+
+    #[test]
+    fn sin_sesion_enlazada_el_attempt_arranca_limpio_con_el_spec() {
+        let (a, t, r) = rows();
+        let intent = intent_from_rows(&a, &t, &r, PathBuf::from("C:/repo")).unwrap();
+        let intent = with_resume(intent, None, &t.spec).unwrap();
+        assert_eq!((intent.resume, intent.prompt.as_str()), (None, "haz algo"));
+    }
+
+    #[test]
+    fn un_attempt_enlazado_a_una_sesion_la_reanuda_con_el_ultimo_seguimiento() {
+        let (a, t, r) = rows();
+        let spec = format!("haz algo{FOLLOW_UP_MARKER}primero{FOLLOW_UP_MARKER}  ahora esto \n");
+        let intent = with_resume(intent_from_rows(&a, &t, &r, PathBuf::from("C:/repo")).unwrap(), Some(&session("fake", Some("sess-9"))), &spec).unwrap();
+        assert_eq!(intent.resume.as_deref(), Some("sess-9"));
+        assert_eq!(intent.prompt, "ahora esto", "el mensaje es el último bloque, no el spec entero");
+    }
+
+    #[test]
+    fn reanudar_falla_cerrado_sin_referencia_sin_mensaje_o_con_otro_proveedor() {
+        let (a, t, r) = rows();
+        let base = || intent_from_rows(&a, &t, &r, PathBuf::from("C:/repo")).unwrap();
+        let spec = format!("haz algo{FOLLOW_UP_MARKER}sigue");
+        assert!(with_resume(base(), Some(&session("fake", None)), &spec).unwrap_err().contains("sin referencia"));
+        assert!(with_resume(base(), Some(&session("fake", Some("  "))), &spec).unwrap_err().contains("sin referencia"));
+        assert!(with_resume(base(), Some(&session("otro", Some("sess-9"))), &spec).unwrap_err().contains("no de fake"));
+        assert!(with_resume(base(), Some(&session("fake", Some("sess-9"))), "haz algo").unwrap_err().contains("mensaje de la continuación"));
+        assert!(with_resume(base(), Some(&session("fake", Some("sess-9"))), &format!("haz algo{FOLLOW_UP_MARKER}   ")).is_err());
     }
 
     #[test]

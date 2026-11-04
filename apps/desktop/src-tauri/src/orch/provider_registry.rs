@@ -81,7 +81,27 @@ pub(super) fn start_preflight(id: &str, lookup: &ProviderLookup) -> Result<(), S
     }
 }
 
+/// ¿Se puede reanudar una sesión con este proveedor? Como [`start_preflight`], pero con `Capability::Resume`.
+pub(super) fn resume_preflight(id: &str, lookup: &ProviderLookup) -> Result<(), String> {
+    use super::adapter::{Capability, CapabilityState};
+    match lookup {
+        ProviderLookup::Probing => Err(format!("provider_probing: el proveedor {id} todavía se está sondeando; reintenta en unos segundos")),
+        ProviderLookup::Unknown => Err(format!("provider_unknown: el proveedor {id} no está registrado en este Core")),
+        ProviderLookup::Found(entry) => match entry.matrix.capabilities.get(&Capability::Resume) {
+            Some(CapabilityState::Available) => Ok(()),
+            Some(CapabilityState::Unsupported) | None => Err(format!("provider_resume_unsupported: el proveedor {id} no ofrece reanudar sesiones")),
+            Some(CapabilityState::Unavailable { reason }) => Err(format!("provider_resume_unavailable: {id} no puede reanudar ahora ({reason})")),
+            Some(CapabilityState::EnvironmentBlocked { .. }) => Err(format!("provider_environment_blocked: el entorno impide reanudar con {id}")),
+        },
+    }
+}
+
 impl Core {
+    /// Preflight de reanudación: se valida ANTES de escribir nada.
+    pub(super) fn provider_resume_preflight(&self, id: &str) -> Result<(), String> {
+        resume_preflight(id, &LiveRegistry::lookup(&self.provider_registry, id))
+    }
+
     /// Preflight de capability del primer Attempt: se valida ANTES de escribir nada.
     pub(super) fn provider_start_preflight(&self, id: &str) -> Result<(), String> {
         start_preflight(id, &LiveRegistry::lookup(&self.provider_registry, id))

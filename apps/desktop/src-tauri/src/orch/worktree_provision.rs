@@ -195,6 +195,7 @@ mod tests {
             profile: "explorar".into(),
             prompt: "haz algo".into(),
             repo: PathBuf::from("C:/repo"),
+            resume: None,
         }
     }
 

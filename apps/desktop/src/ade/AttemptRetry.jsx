@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { describeCommandError, retryAttempt } from './attemptCommands';
-import { useCoreQuery } from './useCoreQuery';
+import { useLatestAttempt } from './useLatestAttempt';
 
 /** Estados que se reintentan: los que terminaron mal (`retryable` del Core). Uno que terminó bien es un seguimiento, no un reintento. */
 export const RETRYABLE_ATTEMPT_STATUSES = Object.freeze(['failed', 'stopped', 'exited']);
@@ -21,13 +21,10 @@ export function AttemptRetry({ attempt, onRetried }) {
   const [outcome, setOutcome] = useState(null);
   const [error, setError] = useState(null);
   const retryable = RETRYABLE_ATTEMPT_STATUSES.includes(attempt?.status) && Boolean(attempt?.task_id);
-  const history = useCoreQuery('attempts_by_task', { task_id: attempt?.task_id ?? null }, { enabled: retryable });
+  const { known, isLatest } = useLatestAttempt(attempt, retryable);
   if (!retryable) return null;
-  const items = Array.isArray(history.data?.items) ? history.data.items : null;
-  // Sin el historial (ni su error) todavía no se sabe si es el último: no se muestra para que el botón no aparezca y desaparezca.
-  if (!outcome && !items && !history.error) return null;
-  const latest = items ? Math.max(attempt.n, ...items.map((item) => Number(item.n) || 0)) : attempt.n;
-  if (!outcome && latest > attempt.n) return null;
+  // Hasta saber si es el último no se muestra (el botón no aparece y desaparece); un intento que ya no es el último no se reintenta.
+  if (!outcome && (!known || !isLatest)) return null;
 
   const retry = async () => {
     setBusy(true);

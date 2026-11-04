@@ -32,7 +32,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use super::adapter::{AdapterError, CancelToken, Capability, CapabilityMatrix, ErrorCode, Gated, ProviderAdapter, RunHandle, StartRequest};
+use super::adapter::{AdapterError, CancelToken, Capability, CapabilityMatrix, ErrorCode, Gated, ProviderAdapter, ProviderRef, ResumeRequest, RunHandle, StartRequest};
 use super::dispatch::{DispatchIntent, Launcher, PrepareError, PreparedLaunch, StartOutcome};
 use super::provider_registry::{AdapterLookup, LiveRegistry};
 use super::worktree_provision::ProvisionedWorktree;
@@ -127,18 +127,33 @@ impl Launcher for AdapterLauncher {
             AdapterLookup::Found(adapter, matrix) => (adapter, matrix),
         };
         // Lo que se comprobó al crear la Task pudo cambiar (CLI desinstalada, sesión caducada): se vuelve a mirar ANTES de
-        // crear nada. Sin `events` no habría quien escuchara la ejecución.
-        for capability in [Capability::Start, Capability::Events] {
+        // crear nada. Sin `events` no habría quien escuchara la ejecución. Un Attempt que continúa una sesión la REANUDA
+        // (`resume`); cualquier otro arranca (`start`).
+        let launch = if intent.resume.is_some() { Capability::Resume } else { Capability::Start };
+        for capability in [launch, Capability::Events] {
             matrix.require(capability).map_err(|e| prepare_error(&e))?;
         }
+        // La referencia se valida ANTES de crear nada: una que el adapter no acepte no deja un worktree a medias.
+        let provider_ref = intent.resume.as_deref().map(ProviderRef::new).transpose().map_err(|e| prepare_error(&e))?;
         let worktree = core.provision_worktree(intent)?;
-        let request = StartRequest {
-            attempt_id: intent.attempt_id.clone(),
-            worktree: worktree.dir.clone(),
-            prompt: intent.prompt.clone(),
-            profile: intent.profile.clone(),
-            model: intent.model.clone(),
-            effort: intent.effort.clone(),
+        let request = match provider_ref {
+            Some(provider_ref) => LaunchRequest::Resume(ResumeRequest {
+                attempt_id: intent.attempt_id.clone(),
+                provider_ref,
+                worktree: worktree.dir.clone(),
+                prompt: Some(intent.prompt.clone()),
+                profile: intent.profile.clone(),
+                model: intent.model.clone(),
+                effort: intent.effort.clone(),
+            }),
+            None => LaunchRequest::Start(StartRequest {
+                attempt_id: intent.attempt_id.clone(),
+                worktree: worktree.dir.clone(),
+                prompt: intent.prompt.clone(),
+                profile: intent.profile.clone(),
+                model: intent.model.clone(),
+                effort: intent.effort.clone(),
+            }),
         };
         Ok(Box::new(AdapterPrepared { core: self.core.clone(), task_id: intent.task_id.clone(), adapter, matrix, request, cancel: CancelToken::new(), worktree, started: Arc::clone(&self.started) }))
     }
@@ -161,10 +176,25 @@ struct AdapterPrepared {
     task_id: String,
     adapter: Arc<dyn ProviderAdapter>,
     matrix: CapabilityMatrix,
-    request: StartRequest,
+    request: LaunchRequest,
     cancel: CancelToken,
     worktree: ProvisionedWorktree,
     started: Started,
+}
+
+/// Lo que se le pide al adapter: arrancar de cero o reanudar la sesión de un Attempt anterior.
+enum LaunchRequest {
+    Start(StartRequest),
+    Resume(ResumeRequest),
+}
+
+impl LaunchRequest {
+    fn attempt_id(&self) -> &str {
+        match self {
+            LaunchRequest::Start(r) => &r.attempt_id,
+            LaunchRequest::Resume(r) => &r.attempt_id,
+        }
+    }
 }
 
 impl AdapterPrepared {
@@ -186,10 +216,13 @@ impl AdapterPrepared {
 impl PreparedLaunch for AdapterPrepared {
     fn start(self: Box<Self>) -> StartOutcome {
         let gated = Gated::new(self.adapter.as_ref(), &self.matrix);
-        let called = catch_unwind(AssertUnwindSafe(|| gated.start(self.request.clone(), &self.cancel)));
+        let called = catch_unwind(AssertUnwindSafe(|| match &self.request {
+            LaunchRequest::Start(request) => gated.start(request.clone(), &self.cancel),
+            LaunchRequest::Resume(request) => gated.resume(request.clone(), &self.cancel),
+        }));
         match called {
             Ok(Ok(handle)) => {
-                let attempt_id = self.request.attempt_id.clone();
+                let attempt_id = self.request.attempt_id().to_string();
                 let AdapterPrepared { task_id, adapter, matrix, cancel, worktree, started, .. } = *self;
                 started.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt_id, StartedRun { task_id, adapter, matrix, handle, cancel, worktree });
                 StartOutcome::Running

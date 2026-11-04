@@ -1,6 +1,6 @@
 # Reintento y reanudación de un Attempt (LXO-142)
 
-Estado: **implementado en el Core, inerte hasta el corte y todavía sin RPC, `lxo` ni UI**. Primer comando de la épica
+Estado: **implementado en el Core; los comandos por el almacén siguen inertes, pero Desktop ya reintenta y continúa por el [puente al despachador](#puente-al-despachador-proyecto-de-cuatro-pr) (RPC `attempt_retry` / `attempt_resume` y botones en el ADE); sigue sin `lxo`**. Primer comando de la épica
 `[CORE][F5]`. Hay dos comandos explícitos, y no se parecen:
 
 | Comando | Qué hace | Qué conserva del Attempt anterior | Código |
@@ -178,7 +178,7 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 | 1 | `Tx::request_attempt_retry` (estado en memoria) + el lanzador reutiliza el Worktree de la Task | **hecho** |
 | 2 | `attempt.retried` en la misma mutación que el Attempt nuevo (resuelve el `failed` del anterior) | **hecho** |
 | 3 | RPC `attempt_retry` (solo una Person de Desktop) y el botón Reintentar | **hecho** |
-| 4 | `resume`: el lanzador elige `start` o `resume` (reutiliza la ProviderSession) + su RPC y botón | pendiente |
+| 4 | `resume`: el lanzador elige `start` o `resume` (reutiliza la ProviderSession) + su RPC y botón | **hecho** (solo reanudación nativa) |
 
 ### PR 1 · lo que hace
 
@@ -203,6 +203,16 @@ proveedor), llama a `Tx::request_attempt_retry` y despierta al despachador. El b
 consulta de candidatos añade a los aprobados los Attempts `n > 1` en `starting`, sin plazo, no externos y con `attempt.retried` o
 `attempt.continued`. La interfaz es el botón «Reintentar» del detalle del Attempt.
 
+### PR 4 · lo que hace
+
+`Tx::request_attempt_continuation` pasa la Task final a `starting` **conservando la sesión** (`session_ref`): el proyector enlaza el Attempt
+nuevo a la ProviderSession de la Task al nacer y se emite `attempt.continued` en la misma mutación (atiende el `failed` del anterior). El mensaje se
+añade al `spec` como bloque «Seguimiento» (la convención de `lxo continue`). El despachador lee la sesión enlazada del Attempt
+(`DispatchSnapshot.session`) y construye una intención que **reanuda**: `DispatchIntent.resume` lleva la referencia de la sesión durable y
+`prompt` es el último bloque «Seguimiento», no el `spec` entero. El lanzador exige `Capability::Resume` en vez de `Start` y llama a
+`adapter.resume`. El RPC `attempt_resume` ([TASKS.md](TASKS.md#rpc-de-la-continuación-attempt_resume)) valida que la sesión del Attempt anterior sirva
+(en espera, resumible, con referencia, del mismo proveedor) y que el proveedor ofrezca `resume`, todo ANTES de escribir nada.
+
 ### Decisiones
 
 | # | Decisión | Descartada |
@@ -213,8 +223,14 @@ consulta de candidatos añade a los aprobados los Attempts `n > 1` en `starting`
 | D61 | **La procedencia del reintento vive en el evento `attempt.retried`; esta vía no escribe `attempt_retries`** | duplicarla en la tabla: ningún consumidor la lee por esta vía, y escribirla en la misma transacción obligaría a generalizar el commit idempotente de `task.create` (método y validaciones fijos). La tabla queda para el comando por el almacén hasta que se retire |
 | D62 | **El barrido recoge los reintentos por la prueba de su evento**, no por el simple hecho de ser `n > 1` sin plazo | recoger cualquier `starting` sin plazo: lanzaría lo que ninguna persona pidió. La reserva del claim ya admite las continuaciones; el barrido exige además `attempt.retried` / `attempt.continued` |
 | D63 | **El RPC no acepta perfil y nombra el Attempt que se reintenta** | aceptar `profile`: un reintento ampliaría permisos sin pasar por la política de `task_create`. Sin `from_attempt_id`: «reintenta el último» no es una petición exacta y no podría ser idempotente sin la tabla de procedencia (D61) |
+| D64 | **Solo reanudación nativa**: sin sesión que sirva es un error que lo dice | caer al ContextPackage: arranca limpio con el paquete del Attempt anterior y exige que la persona vea y confirme el motivo (`fallback_available`); entra en otro PR |
+| D65 | **El mensaje de la continuación es el último bloque «Seguimiento» del `spec`** | una columna nueva en el Attempt: migración y un campo más en `AttemptRow` por un texto que el proyector ya extrae (`follow_up`) |
+| D66 | **Un Attempt enlazado a una sesión al nacer la REANUDA; la señal es el enlace durable**, no una bandera del cliente | que el RPC diga «reanuda» en el Attempt: un cliente podría pedir reanudar una sesión que no es la de la Task. El reintento limpia `session_ref`, así que nace sin enlace y arranca |
 
 Límite conocido: el reintento arranca con el **proveedor limpio pero sobre los mismos archivos**: lo que dejó a medias el Attempt
 fallido sigue en el Worktree. Es consecuencia de D58.
+
+Límites conocidos de la continuación: cada una **añade un bloque al `spec`** de la Task (como `lxo continue`); y si el proveedor devolviera otra
+referencia al reanudar, la Task conserva la primera (el `SessionBound` posterior se ignora). **No se ha probado con una CLI real**: solo con adapters falsos.
 
 Pruebas: `orch/attempt_e2e_tests.rs` (`reintentar_…`), con adapters falsos, por la misma entrada que usará el RPC.

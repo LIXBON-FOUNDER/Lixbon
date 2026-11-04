@@ -406,6 +406,123 @@ fn el_barrido_recoge_un_reintento_que_nadie_despacho() {
     assert_eq!(w.adapter.starts().len(), 2);
 }
 
+/// La ProviderSession a la que está enlazado un Attempt (`None` si no tiene).
+fn linked_session(core: &Core, attempt: &str) -> Option<String> {
+    core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT provider_session_id FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, Option<String>>(0))?))).unwrap().unwrap()
+}
+
+/// PR 4 del puente: `attempt_resume` continúa la ProviderSession de un Attempt terminado. El Attempt nuevo se enlaza a la MISMA sesión y el
+/// despachador lo lanza con `resume` (con la referencia y el mensaje), no con `start`. Repetir la petición devuelve el mismo Attempt.
+#[test]
+fn el_rpc_attempt_resume_continua_la_sesion_y_el_despachador_la_reanuda_una_sola_vez() {
+    let w = world("claude", Some(vec![Step::Bind("sess-1"), Step::Output("hecho".into()), Step::Complete(Some("hecho".into()))]));
+    let a1 = w.create("claude", "e2e-claude-rpc-resume");
+    w.approve(&a1);
+    w.settled(&a1, "done");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    w.adapter.set_script(vec![Step::Output("sigo".into()), Step::Complete(Some("seguido".into()))]);
+
+    let out = w.desktop("attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue con la parte dos"})).expect("la continuación");
+    assert_eq!((out["status"].as_str(), out["attempt_id"].as_str(), out["task_id"].as_str()), (Some("Requested"), Some(a2.as_str()), Some(task.as_str())));
+    w.settled(&a2, "done");
+
+    // Se REANUDÓ (no se arrancó de cero) con la referencia de la sesión y el mensaje nuevo, no con el spec entero.
+    let resumes = w.adapter.resumes();
+    assert_eq!(resumes.len(), 1, "el adapter recibió una reanudación");
+    assert_eq!(resumes[0].provider_ref.expose(), "sess-1");
+    assert_eq!(resumes[0].prompt.as_deref(), Some("sigue con la parte dos"));
+    assert_eq!(resumes[0].attempt_id, a2);
+    assert_eq!(w.adapter.starts().len(), 1, "solo el primer Attempt arrancó de cero");
+
+    // La procedencia, en orden y atendida en la misma mutación; sin aprobación; ambos Attempts en la misma sesión.
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.continued", "attempt.started", "attempt.completed"]);
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0, "continuar no pide aprobación: la petición es la decisión");
+    assert!(linked_session(&w.core, &a1).is_some());
+    assert_eq!(linked_session(&w.core, &a1), linked_session(&w.core, &a2), "los dos Attempts comparten la ProviderSession");
+    assert_eq!(row(&w.core, &a2), ("done".into(), "settled".into(), None));
+
+    // Repetir la petición devuelve ese mismo Attempt y no reanuda de nuevo.
+    let again = w.desktop("attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue con la parte dos"})).expect("la repetición");
+    assert_eq!((again["status"].as_str(), again["attempt_id"].as_str()), (Some("Replayed"), Some(a2.as_str())));
+    assert_eq!(w.adapter.resumes().len(), 1);
+}
+
+/// Lo que `attempt_resume` rechaza: en marcha, sin sesión, no es el último, mensaje vacío, proveedor o perfil, un agente y sin lanzador.
+#[test]
+fn el_rpc_attempt_resume_rechaza_lo_que_no_debe_y_no_crea_nada() {
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("claude", "e2e-claude-rpc-resume-rechazos");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    let resume = |args: Value| w.desktop("attempt_resume", args);
+    let args = |extra: Value| {
+        let mut base = json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue"});
+        for (k, v) in extra.as_object().unwrap() {
+            base[k] = v.clone();
+        }
+        base
+    };
+
+    // En marcha no se continúa.
+    assert!(resume(args(json!({}))).unwrap_err().contains("terminado"));
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+    w.settled(&a1, "stopped");
+
+    // Detenido pero sin sesión del proveedor (este intento nunca la entregó): no hay qué reanudar.
+    assert!(resume(args(json!({}))).unwrap_err().contains("no tuvo una sesión"));
+    // El resto, aunque hubiera sesión: no es el último, mensaje vacío, otro proveedor, un perfil, un agente.
+    assert!(resume(args(json!({"from_attempt_id": format!("{task}-a7")}))).unwrap_err().contains("último"));
+    assert!(resume(args(json!({"prompt": "   "}))).is_err());
+    assert!(resume(args(json!({"provider": "codex"}))).is_err(), "una sesión no se comparte entre proveedores");
+    assert!(resume(args(json!({"profile": "autonomia_amplia"}))).is_err(), "continuar nunca amplía los permisos");
+    assert!(w.core.rpc(Caller::Agent(Some(task.clone())), "", "attempt_resume", &args(json!({}))).is_err());
+    let launcher = w.core.launcher.lock().unwrap().take();
+    assert!(resume(args(json!({}))).unwrap_err().contains("lifecycle de lanzamiento verificado"));
+    *w.core.launcher.lock().unwrap() = launcher;
+    assert_eq!(event_count(&w.core, &a2, "attempt.requested"), 0, "ninguna petición rechazada crea un Attempt");
+    assert!(w.adapter.resumes().is_empty());
+}
+
+/// Un proveedor sin `resume` (codex) no continúa: se dice ANTES de escribir nada, y nada se crea.
+#[test]
+fn el_rpc_attempt_resume_con_un_proveedor_sin_resume_se_rechaza_antes_de_escribir() {
+    let w = world("codex", Some(vec![Step::Bind("sess-c"), Step::Complete(Some("hecho".into()))]));
+    let a1 = w.create("codex", "e2e-codex-rpc-resume");
+    w.approve(&a1);
+    w.settled(&a1, "done");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+
+    let err = w.desktop("attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue"})).unwrap_err();
+    assert!(err.contains("provider_resume_unsupported"), "{err}");
+    assert_eq!(event_count(&w.core, &format!("{task}-a2"), "attempt.requested"), 0);
+    assert_eq!(row(&w.core, &a1), ("done".into(), "settled".into(), None), "el Attempt anterior no se tocó");
+}
+
+/// Si Lixbon cae entre pedir la continuación y despacharla, el barrido la recoge (lleva `attempt.continued`) y la REANUDA.
+#[test]
+fn el_barrido_recoge_una_continuacion_que_nadie_despacho_y_la_reanuda() {
+    let w = world("claude", Some(vec![Step::Bind("sess-2"), Step::Complete(Some("hecho".into()))]));
+    let a1 = w.create("claude", "e2e-claude-barrido-resume");
+    w.approve(&a1);
+    w.settled(&a1, "done");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    w.adapter.set_script(vec![Step::Output("sigo".into()), Step::Complete(Some("seguido".into()))]);
+
+    let person = w.core.desktop_mutation_context().unwrap();
+    w.core.mutate_as(&person, |tx| tx.request_attempt_continuation(&task, "continúa", &RetrySelection::default())).unwrap();
+    assert_eq!(row(&w.core, &a2), ("starting".into(), "none".into(), None));
+
+    w.core.dispatch_waiting_approved();
+    w.settled(&a2, "done");
+    assert_eq!(w.adapter.resumes().len(), 1);
+    assert_eq!(w.adapter.resumes()[0].provider_ref.expose(), "sess-2");
+}
+
 /// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
 #[test]
 fn detener_por_el_rpc_de_desktop_deja_el_attempt_stopped_y_el_claim_asentado() {
