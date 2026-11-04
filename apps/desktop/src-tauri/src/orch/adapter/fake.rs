@@ -23,6 +23,9 @@ pub enum Step {
     Question { id: &'static str, text: String },
     /// Espera a que llegue una cancelación o una interrupción (con tope, para que una prueba rota no cuelgue).
     Wait,
+    /// Se queda en mitad del turno hasta que la prueba lo suelta con [`FakeAdapter::release_hold`] (con tope): es el «turno ocupado»
+    /// en el que se encola una instrucción. Una cancelación también lo suelta.
+    Hold,
     Complete(Option<String>),
     Fail(AdapterError),
 }
@@ -31,6 +34,10 @@ pub struct FakeAdapter {
     id: String,
     probe: Mutex<ProbeResult>,
     script: Mutex<Vec<Step>>,
+    /// Guiones por turno (LXO-143): cada `events` toma el primero; sin ninguno, repite `script`. Una cola de instrucciones es una
+    /// ejecución con varios turnos y cada uno cuenta una cosa distinta.
+    turns: Mutex<std::collections::VecDeque<Vec<Step>>>,
+    hold_open: AtomicBool,
     calls: Mutex<Vec<String>>,
     seq: AtomicU64,
     interrupted: AtomicBool,
@@ -53,6 +60,8 @@ impl FakeAdapter {
             id: id.to_string(),
             probe: Mutex::new(probe),
             script: Mutex::new(vec![Step::Output("hecho".into()), Step::Complete(Some("ok".into()))]),
+            turns: Mutex::new(std::collections::VecDeque::new()),
+            hold_open: AtomicBool::new(false),
             calls: Mutex::new(vec![]),
             seq: AtomicU64::new(0),
             interrupted: AtomicBool::new(false),
@@ -85,6 +94,16 @@ impl FakeAdapter {
 
     pub fn set_script(&self, steps: Vec<Step>) {
         *self.script.lock().unwrap() = steps;
+    }
+
+    /// El guion del PRÓXIMO turno (`events`): los turnos se consumen en el orden en que se añaden.
+    pub fn push_turn(&self, steps: Vec<Step>) {
+        self.turns.lock().unwrap().push_back(steps);
+    }
+
+    /// Suelta el turno que espera en un [`Step::Hold`].
+    pub fn release_hold(&self) {
+        self.hold_open.store(true, Ordering::SeqCst);
     }
 
     /// Llamadas que llegaron al adapter, en orden (`start`, `events`, `steer:<texto>`…).
@@ -133,7 +152,8 @@ impl ProviderAdapter for FakeAdapter {
     fn events(&self, run: &RunHandle, cancel: &CancelToken, sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
         self.note("events".into());
         self.known(run)?;
-        for step in self.script.lock().unwrap().clone() {
+        let steps = self.turns.lock().unwrap().pop_front().unwrap_or_else(|| self.script.lock().unwrap().clone());
+        for step in steps {
             if cancel.is_cancelled() {
                 return Ok(RunOutcome::Cancelled);
             }
@@ -151,6 +171,18 @@ impl ProviderAdapter for FakeAdapter {
                         }
                         if self.interrupted.load(Ordering::SeqCst) {
                             return Ok(RunOutcome::Interrupted);
+                        }
+                        if Instant::now() > until {
+                            return Err(AdapterError::new(super::ErrorCode::Internal, "el fake esperó una señal que no llegó"));
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                Step::Hold => {
+                    let until = Instant::now() + Duration::from_secs(10);
+                    while !self.hold_open.swap(false, Ordering::SeqCst) {
+                        if cancel.is_cancelled() {
+                            return Ok(RunOutcome::Cancelled);
                         }
                         if Instant::now() > until {
                             return Err(AdapterError::new(super::ErrorCode::Internal, "el fake esperó una señal que no llegó"));

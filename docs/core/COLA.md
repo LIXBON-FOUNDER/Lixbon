@@ -1,6 +1,6 @@
 # Queue con semántica explícita y Pending Queue (LXO-143)
 
-Estado: **implementado, inerte hasta el corte**. Épica `[CORE][F5]`. Contratos relacionados:
+Estado: **implementado y conectado**: la entrega por reanudación en el runtime y el RPC de Desktop están en [Conexión al runtime y al RPC](#conexión-al-runtime-y-al-rpc); la interfaz (Pending Queue Dock y composer ocupado, LXO-151/152) y `lxo` (LXO-159) siguen pendientes. Épica `[CORE][F5]`. Contratos relacionados:
 [Attempt](ATTEMPTS.md) · [adapters](ADAPTERS.md) · [Events](EVENTOS.md) · [Activity](ACTIVITY.md) · [Attention](ATTENTION.md).
 
 **Queue** es la semántica normalizada para una instrucción enviada **mientras un Attempt está ocupado**: el Core la guarda
@@ -102,6 +102,10 @@ Events y en `Store::queue_of_attempt`.
 | D5 | **La confirmación es del adapter** | `QueueConfirmation` solo tiene `adapter_event` (un evento: el turno empezó, el proveedor reconoció el mensaje) y `adapter_result` (el resultado de la llamada). **No existe un valor «se escribió en stdin»**; la base lo rechaza |
 | D6 | **Un fallo de entrega no falla el Attempt** | Solo el item (`attempt.queue_failed`) y su Attention |
 | D7 | **Recuperación al arrancar** (abajo) | La cola es durable; lo ambiguo no se reintenta |
+| D8 | **La entrega es reanudar la misma sesión en cada fin de turno, dentro del mismo Attempt** | un contrato de adapter nuevo («entregar en un límite de turno») y procesos de larga vida en los dos adapters reales: varios PR de riesgo alto. Un run ya es un turno (el adapter lo cierra en el primer `result`), así que el siguiente turno es un `resume` de la sesión que ya existe |
+| D9 | **Encolar exige que el proveedor ofrezca `resume` AHORA**; sin él es `queue_unsupported` y no se escribe nada | prometer una entrega que el adapter no puede hacer. La sesión tiene que estar vinculada al entregar: si no lo está, el item falla (`adapter_unavailable`) y el Attempt termina como siempre |
+| D10 | **El Attempt sigue `running` entre turnos**: `completed` llega solo cuando la cola se vacía | cerrar el Attempt en cada turno y abrir otro por instrucción: eso es continuar (`attempt_resume`), no encolar |
+| D11 | **Por el RPC solo una Person de Desktop, sin adjuntos**: el autor sale de la identidad autenticada | aceptar `author` o `client_id` del cliente; los adjuntos necesitan que la entrega los lleve al turno |
 
 ### Policy de recuperación (D7)
 
@@ -132,9 +136,59 @@ Cada código de error del adapter tiene su motivo cerrado en la cola (`failure_o
 → `unsupported`; `environment_blocked` → `environment_blocked`; capability no disponible, run o proveedor desconocidos,
 sesión no encontrada → `adapter_unavailable`; el resto → `adapter_error`.
 
-**Estado de la integración.** El contrato de adapters (`ProviderAdapter`) todavía **no tiene** una operación «entregar en un
-límite de turno»: es lo que el runtime de F5 tiene que añadir (probablemente como una capability nueva de la matriz) al
-implementar `QueuePort`. Hasta entonces el puerto solo lo implementan las pruebas, y nada de esto está conectado al RPC.
+**Estado de la integración.** El contrato de adapters (`ProviderAdapter`) **no tiene** una operación «entregar en un límite de
+turno» y no hace falta añadirla: `orch/queue_runtime.rs` implementa el puerto sobre `resume` (D8). Ver la sección siguiente.
+
+## Conexión al runtime y al RPC
+
+Un run es UN turno: el adapter lo cierra en el primer `result` y mata el proceso. El bombeo (`run_pump.rs`) ya no aplica el desenlace
+en ese momento: si el turno terminó bien y hay instrucciones en cola, **entrega la primera reanudando la sesión** y sigue escuchando el run
+nuevo; solo cuando no queda nada aplica el desenlace.
+
+```text
+events(run) = Completed ─► Core::queue_next_turn ─► deliver_next (TurnPort en TurnEnd)
+                              queued -> delivering -> Gated::resume(sesión de la Task, instrucción)
+                                 Ok(run)  -> delivered (confirma el adapter) y el bombeo sigue con ESE run
+                                 Err      -> failed (+ evento, + Attention) y se prueba el siguiente item
+                              nada que entregar -> el Attempt termina (completed / failed / …)
+```
+
+* **`TurnPort`** (`orch/queue_runtime.rs`) implementa `QueuePort`. Al encolar (RPC) `boundary` es siempre `Busy` y `capability` es «el proveedor
+  ofrece `resume` ahora»; en el fin de turno `boundary` es `TurnEnd` y `deliver` reanuda con la sesión, el worktree y el perfil del Attempt,
+  leídos del estado ANTES de entrar al almacén (no se toma el lock del estado con el del almacén tomado). Devuelve `adapter_result`: solo
+  si `resume` aceptó y devolvió el run.
+* **Nunca Steer:** no se llama a `steer` ni se escribe en un proceso en marcha; cada instrucción abre su propio turno.
+* **Al terminar el Attempt** (también con `stop`), lo que seguía en la cola falla con `attempt_ended` (`Core::queue_settle`, desde `finish_attempt`).
+  **Al arrancar**, `recover` va después de cerrar las huérfanas y de reconciliar los claims (`Core::queue_recover_at_boot`).
+* **El almacén solo se toca desde `store_boot.rs`** (`queue_enqueue`, `queue_cancel`, `queue_pending`, `queue_deliver_next`, `queue_settle`).
+
+### RPC (`orch/queue_rpc.rs`)
+
+Los tres son solo de una Person de Desktop (`HumanDecision`) y `deny_unknown_fields`.
+
+| comando | entrada | respuesta |
+|---|---|---|
+| `attempt_queue` | `{ attempt_id, request_id, body }` | `{ "status": "Queued" \| "Replayed", attempt_id, queue_id, position }` (`position` es `null` en un `Replayed`) |
+| `attempt_queue_cancel` | `{ queue_id }` | `{ "status": "Cancelled" \| "AlreadyCancelled", queue_id }` |
+| `pending_queue` | `{ attempt_id }` | la Pending Queue: `{ attempt_id, task_id, items: [{ position, queue_id, status, body, … }] }` |
+
+Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y la entrega la hace el bombeo en el fin de turno. Los errores son `kind/code: mensaje`
+(`queue_unsupported`, `attempt_final`, `request_conflict`, `queue_full`, `not_cancellable`…).
+
+### Límites conocidos
+
+* **Un proceso por turno**: cada instrucción arranca la CLI otra vez con `--resume`. Es más lento y caro que una conversación en un proceso vivo.
+* **El resumen del Attempt es el del último turno**; lo que dijeron los turnos intermedios solo está en el flujo del proveedor.
+* Mientras el Attempt espera una respuesta o un permiso (`waiting`, `awaiting_terminal_approval`) no hay fin de turno: lo encolado espera, y si
+  la espera vence el Attempt falla y lo pendiente falla con `attempt_ended`.
+* **`resume` se llama con el almacén tomado** (lo hace `deliver_next` dentro de su transacción de claim): arrancar la CLI bloquea las demás
+  escrituras mientras dura. Con una CLI real son milisegundos, pero es un acoplamiento a vigilar.
+* `pending_queue` aún no está en la lista de lecturas del ADE (`orch_query`): hasta la interfaz se lee con `orch_call`.
+* La recuperación al arrancar está cableada pero solo probada a nivel de `recover` (`queue_commands_tests.rs`), no con un reinicio real del Core.
+* Sin adjuntos (D11) y sin `lxo` (LXO-159).
+
+Pruebas del puente: `orch/attempt_e2e_tests.rs` (`la_cola_entrega_en_fifo…`, `si_la_entrega_falla…`, `detener_con_instrucciones_en_cola…`,
+`encolar_con_un_proveedor_sin_resume…`, `el_rpc_de_la_cola_rechaza…`), con el adapter falso (`Step::Hold` y un guion por turno).
 
 ## Events, Activity y Attention
 

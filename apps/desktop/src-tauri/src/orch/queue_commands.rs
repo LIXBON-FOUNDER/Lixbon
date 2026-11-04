@@ -39,8 +39,9 @@
 //! 7. **Recuperación** ([`recover`]): `delivering` -> `failed(interrupted)`; `queued` de un Attempt terminado ->
 //!    `failed(attempt_ended)`; `queued` de un Attempt vivo se CONSERVA y se entrega en su próximo límite de turno.
 //!
-//! **Inerte hasta el corte**, como `attempt_ops` y `continuity`: sin conexión al RPC; el almacén rechaza escribir antes de
-//! `meta.agentic_model`. El runtime (F5) implementa [`QueuePort`] sobre el adapter; hoy solo lo implementan las pruebas.
+//! Conectada al runtime y al RPC de Desktop: [`QueuePort`] lo implementa `queue_runtime.rs` (la entrega es REANUDAR la sesión en cada fin
+//! de turno, dentro del mismo Attempt) y `queue_rpc.rs` expone `attempt_queue`, `attempt_queue_cancel` y `pending_queue`. El almacén se
+//! toca solo desde los envoltorios de `store_boot.rs`; antes de `meta.agentic_model` rechaza escribir.
 
 #![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conectará el runtime de Attempt
 
@@ -194,7 +195,7 @@ pub struct QueueError {
 }
 
 impl QueueError {
-    fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>) -> QueueError {
+    pub(super) fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>) -> QueueError {
         QueueError { kind, code, message: message.into(), queue_id: None }
     }
 

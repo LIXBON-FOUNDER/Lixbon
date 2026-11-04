@@ -82,6 +82,8 @@ mod adapter_launcher;
 mod initial_approval_rpc;
 mod attempt_retry_rpc;
 mod attempt_resume_rpc;
+mod queue_runtime;
+mod queue_rpc;
 #[cfg(test)]
 mod initial_approval_tests;
 #[cfg(test)]

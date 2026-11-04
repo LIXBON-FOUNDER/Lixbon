@@ -209,6 +209,7 @@ impl Core {
         // Quien canceló (stop, cierre de Run) pudo dejarla ya cerrada: no hay nada que decir.
         if self.lock().tasks.get(task).is_some_and(|t| t.status.is_final()) {
             let _ = self.dispatch_settle(attempt);
+            self.queue_settle(attempt);
             return;
         }
         let applied = self.mutate_as(&MutationContext::core(), |tx| match &terminal {
@@ -225,6 +226,8 @@ impl Core {
         if !matches!(self.dispatch_settle(attempt), Ok(true)) {
             eprintln!("[core] el claim de una ejecución terminada no se pudo asentar");
         }
+        // Lo que seguía en la cola ya no se entregará: falla con `attempt_ended`.
+        self.queue_settle(attempt);
     }
 }
 
@@ -269,7 +272,22 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done) 
             core.apply_adapter_event(&task_id, event, approval_ttl, &state);
         }
     };
-    let result = catch_unwind(AssertUnwindSafe(|| gated.events(&handle, &cancel, &mut sink)));
+    // Un run es UN turno. Si al acabarlo hay instrucciones en cola, la siguiente se entrega reanudando la sesión y el Attempt sigue
+    // `running` con el run nuevo; solo cuando no queda nada se aplica el desenlace (LXO-143, `queue_runtime.rs`).
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let mut handle = handle;
+        loop {
+            let outcome = gated.events(&handle, &cancel, &mut sink);
+            let at_turn_end = matches!(outcome, Ok(RunOutcome::Completed { .. })) && !state.timed_out.load(Ordering::SeqCst) && !cancel.is_cancelled();
+            if !at_turn_end {
+                return outcome;
+            }
+            let Some(next) = core.upgrade().and_then(|c| c.queue_next_turn(&task_id, &attempt, &gated, &cancel)) else { return outcome };
+            // Turno nuevo: la espera de una respuesta del turno anterior ya no cuenta.
+            *state.pending_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            handle = next;
+        }
+    }));
     state.finished.store(true, Ordering::SeqCst);
 
     let Some(core) = core.upgrade() else { return };
