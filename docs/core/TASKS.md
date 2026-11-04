@@ -458,6 +458,12 @@ worktree) la fija el Core.
   sesión **resumible y en espera**, «Continuar la sesión» pide un mensaje, avisa de que conserva la conversación, el worktree y los permisos, y
   manda `attempt_resume`. Dice cuál es el intento nuevo y vuelve a leer el detalle; conserva el mensaje escrito si el Core lo rechaza. No ofrece cambiar
   proveedor ni perfil. Comparte con «Reintentar» la comprobación de «es el último» (`useLatestAttempt`): añade una lectura de `attempts_by_task` al detalle.
+* **Instrucciones en cola** (`AttemptQueue`, en el detalle del Attempt; LXO-151/152): con el intento `running`, un compositor donde **Enter encola** (Shift+Enter
+  salta de línea) y dice siempre qué hace: se entrega en el siguiente turno, nunca en mitad del actual. «Steer» y «Detener y enviar» salen desactivados con su razón
+  (LXO-144) y no caen a encolar en silencio. Solo se ofrece si el proveedor puede reanudar la sesión (capacidad `resume`). El dock lista lo pendiente con su
+  posición y «Cancelar» (no cancelable una vez `delivering`) y, aparte, un historial con las últimas resueltas y, si falló, el motivo en llano. El borrador se
+  conserva si el Core rechaza el envío, la clave de idempotencia se reutiliza mientras el texto no cambie, y la lectura (`pending_queue`) se valida contra el contrato
+  (`queueContract.js`) y se relee cada 3 s mientras el intento corre o hay algo pendiente.
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden
