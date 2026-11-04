@@ -202,8 +202,7 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 |---|---|---|
 | D58 | **Un reintento trabaja en el Worktree de la Task** (se adjunta a él; no crea otro) | un Worktree por Attempt: el proyector admite uno por Task («la ruta, la rama y la base no cambian», «un Worktree quitado no vuelve»); cambiarlo es una migración y un cambio de modelo aparte |
 | D59 | **Con el Worktree retirado o ausente en disco no se reintenta**: el Attempt nuevo se cierra `stopped` («no hay dónde reintentar»), nunca `failed` | crear uno nuevo: el proyector lo rechazaría después de crearlo en disco |
-| D60 | **El prompt de un reintento es el `spec` de la Task** (como el del primer Attempt) | un `prompt` propio por petición: necesita guardarlo en el Attempt, y entra con `resume` en el PR 2 |
-
+| D60 | **El prompt de un reintento es el `spec` de la Task** (como el del primer Attempt) | un `prompt` propio por petición: necesita guardarlo en el Attempt, y entra con `resume` en el PR 4 |
 | D61 | **La procedencia del reintento vive en el evento `attempt.retried`; esta vía no escribe `attempt_retries`** | duplicarla en la tabla: ningún consumidor la lee por esta vía, y escribirla en la misma transacción obligaría a generalizar el commit idempotente de `task.create` (método y validaciones fijos). La tabla queda para el comando por el almacén hasta que se retire |
 
 Límite conocido: el reintento arranca con el **proveedor limpio pero sobre los mismos archivos**: lo que dejó a medias el Attempt
