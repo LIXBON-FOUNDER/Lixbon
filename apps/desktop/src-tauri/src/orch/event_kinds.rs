@@ -577,7 +577,7 @@ impl EffectObserved {
                 base: opt_str(EFF, observed, "base")?,
             },
             "git_worktree_removed" => {
-                let operation = operation_of(kind, operation, &["release", "close_idle_runs", "spawn_cleanup"])?;
+                let operation = operation_of(kind, operation, &["release", "close_idle_runs", "spawn_cleanup", "resource_clean", "resource_delete_worktree"])?;
                 let worktree_removed = opt_bool(EFF, observed, "worktree_removed")?.ok_or("effect.observed: falta `worktree_removed` (booleano)")?;
                 let branch = opt_str(EFF, observed, "branch")?;
                 let branch_deleted = opt_bool(EFF, observed, "branch_deleted")?.ok_or("effect.observed: falta `branch_deleted` (booleano)")?;

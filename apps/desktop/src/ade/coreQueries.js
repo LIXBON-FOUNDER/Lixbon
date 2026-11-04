@@ -17,6 +17,7 @@ import { COMPARE_QUERY_SPECS } from './compareContract';
 import { FORK_QUERY_SPECS } from './forkContract';
 import { INTEGRATION_QUERY_SPECS } from './integrationContract';
 import { PROOF_PACK_QUERY_SPECS } from './proofPackContract';
+import { RESOURCE_QUERY_SPECS } from './resourceActionsContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
@@ -669,6 +670,8 @@ const QUERY_SPECS = Object.freeze({
   ...PROOF_PACK_QUERY_SPECS,
   // Qué hay que ver antes de integrar un Attempt (LXO-148/156).
   ...INTEGRATION_QUERY_SPECS,
+  // Estado físico y de git del worktree de una Task, y qué acciones valen ahora (LXO-149/157).
+  ...RESOURCE_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

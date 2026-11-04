@@ -53,6 +53,13 @@ const KNOWN_ERRORS = [
   [/integration_not_current/i, 'Solo se integra el intento actual de la tarea: la rama es la suya.'],
   [/integration_not_final/i, 'El intento todavía no terminó: espera a que acabe para integrar un HEAD que ya no cambie.'],
   [/integration_no_branch/i, 'Este intento no tiene una rama que integrar.'],
+  [/resource_blocked: degraded/i, 'El Core está en solo lectura: no puede registrar el cambio, así que no se borra nada.'],
+  [/resource_blocked: running/i, 'La tarea sigue en marcha o tiene un proceso vivo: páralo antes de tocar su worktree.'],
+  [/resource_blocked: unknown/i, 'No se pudo comprobar el estado del worktree o de la rama: por seguridad no se borra nada.'],
+  [/resource_blocked: dirty/i, 'El worktree tiene cambios sin commit: confírmalo aparte si quieres descartarlos.'],
+  [/resource_blocked: not_merged/i, 'El trabajo de la rama no consta integrado: no se limpia.'],
+  [/resource_git_failed/i, 'Git no pudo quitar el worktree: se conserva todo.'],
+  [/resource_not_found/i, 'Esa tarea ya no existe.'],
   [/provider_unknown/i, 'Ese proveedor no está registrado en este Core.'],
   [/provider_start_(unsupported|unavailable)/i, 'Ese proveedor no puede arrancar un intento ahora mismo.'],
   [/provider_environment_blocked/i, 'El entorno impide lanzar con ese proveedor.'],
@@ -203,4 +210,20 @@ export const integrateAttempt = ({ attemptId, action, headCommit, squash = false
   confirm: true,
   ...(action === 'merge' && squash ? { squash: true } : {}),
   ...(action === 'merge' && typeof acceptMovedTarget === 'string' && acceptMovedTarget ? { accept_moved_target: acceptMovedTarget } : {}),
+});
+
+/**
+ * Limpia lo integrado (`resource_clean`): quita el worktree LIMPIO de trabajo INTEGRADO y borra su rama con `branch -d` (nunca `-D`). Devuelve
+ * `{ outcome: 'cleaned' | 'forgotten' | 'nothing_to_do', worktree_removed, branch_deleted, branch_kept }`. Repetir no hace nada.
+ */
+export const cleanResource = (taskId) => call('resource_clean', { task_id: taskId, confirm: true });
+
+/**
+ * Quita la carpeta del worktree y CONSERVA la rama (`resource_delete_worktree`). Con cambios sin commit hace falta `discardUncommitted: true`,
+ * una decisión aparte. Devuelve `{ outcome: 'deleted' | 'forgotten' | 'nothing_to_do', worktree_removed, branch_kept, discarded_uncommitted }`.
+ */
+export const deleteWorktree = (taskId, discardUncommitted = false) => call('resource_delete_worktree', {
+  task_id: taskId,
+  confirm: true,
+  ...(discardUncommitted ? { discard_uncommitted: true } : {}),
 });

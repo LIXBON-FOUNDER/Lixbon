@@ -85,6 +85,7 @@ mod fork_runtime;
 mod compare_read;
 mod proof_pack;
 mod integration_attempt;
+mod resource_actions;
 mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
@@ -115,6 +116,8 @@ mod compare_e2e_tests;
 mod proof_pack_e2e_tests;
 #[cfg(test)]
 mod integration_attempt_e2e_tests;
+#[cfg(test)]
+mod resource_actions_e2e_tests;
 #[cfg(test)]
 mod real_provider_tests;
 #[cfg(test)]
