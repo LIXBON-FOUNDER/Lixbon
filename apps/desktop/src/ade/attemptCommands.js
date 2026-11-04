@@ -30,6 +30,11 @@ const KNOWN_ERRORS = [
   [/provider_resume_unsupported/i, 'Este proveedor no permite reanudar sesiones.'],
   [/solo se continúa un Attempt terminado/i, 'Solo se continúa un intento que ya terminó.'],
   [/solo se continúa el último/i, 'Hay un intento más reciente: continúa ese.'],
+  [/queue_unsupported/i, 'Este proveedor no puede entregar instrucciones entre turnos: no se puede encolar.'],
+  [/attempt_final/i, 'El intento ya terminó: no admite instrucciones.'],
+  [/queue_full/i, 'La cola está llena (50 instrucciones pendientes): espera a que se entregue alguna.'],
+  [/not_cancellable/i, 'Esa instrucción ya no se puede cancelar: se está entregando, se entregó o falló.'],
+  [/request_conflict/i, 'Esa clave ya se usó con otra instrucción: vuelve a enviarla.'],
   [/venci/i, 'La aprobación venció: el intento se detuvo sin ejecutarse. Crea uno nuevo.'],
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
@@ -103,3 +108,13 @@ export const retryAttempt = (taskId, fromAttemptId) => call('attempt_retry', { t
  * repetir la petición devuelve esa continuación (`Replayed`). No acepta proveedor ni perfil. Devuelve `{ status, task_id, attempt_id }`.
  */
 export const resumeAttempt = (taskId, fromAttemptId, prompt) => call('attempt_resume', { task_id: taskId, from_attempt_id: fromAttemptId, prompt });
+
+/**
+ * Encola una instrucción para un intento ocupado (`attempt_queue`): el Core la entrega como el SIGUIENTE turno (reanudando la sesión),
+ * nunca en mitad del turno en curso, y encolar no entrega nada. `requestId` es la clave de idempotencia: repetir la petición con la
+ * misma clave devuelve el mismo item (`Replayed`) en vez de duplicarlo. Devuelve `{ status, attempt_id, queue_id, position }`.
+ */
+export const queueInstruction = (attemptId, requestId, body) => call('attempt_queue', { attempt_id: attemptId, request_id: requestId, body });
+
+/** Cancela una instrucción aún no entregada (`attempt_queue_cancel`). `status`: `Cancelled` · `AlreadyCancelled`. */
+export const cancelQueued = (queueId) => call('attempt_queue_cancel', { queue_id: queueId });
