@@ -62,7 +62,8 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     let squash = bool_arg(args, "squash");
     let _one = INTEGRATING.lock().unwrap_or_else(|e| e.into_inner());
     // `Err(json)` dentro del `Ok` es una salida temprana con respuesta (ya integrada).
-    type Plan = (String, String, String, Option<String>, String);
+    // (rama, destino, título, commit esperado del destino, repo, ¿destino = checkout del Project?, rama base con que nació)
+    type Plan = (String, String, String, Option<String>, String, bool, Option<String>);
     let planned = state.read(|st| -> Result<Result<Plan, Value>, String> {
         let t = st.task(&id)?;
         let branch = t.branch.clone().ok_or_else(|| format!("{id} no tiene rama propia: no hay nada que integrar"))?;
@@ -74,13 +75,19 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
             let prev = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge" && outcome_of(d) == "merged").map(|d| d.id);
             return Ok(Err(json!({ "task": id, "outcome": "already_merged", "decision": prev, "branch": branch })));
         }
-        let parent = t.parent.as_ref().and_then(|p| st.tasks.get(p)).ok_or("La tarea raíz no se integra en nadie")?;
+        // Una hija se integra en el checkout de su padre. Una Task raíz con rama propia (la que crea `task_create`, o un Fork) se integra en
+        // el checkout de su Project, y solo si está en la rama base con que nació (se comprueba abajo, antes de tocar nada).
+        let (into, project_target) = match t.parent.as_ref().and_then(|p| st.tasks.get(p)) {
+            Some(parent) => (parent.cwd.clone(), false),
+            None if !t.repo.is_empty() => (t.repo.clone(), true),
+            None => return Err("La tarea raíz no se integra en nadie".into()),
+        };
         if !t.status.is_final() && !bool_arg(args, "force") {
             return Err(format!("{id} aún está en marcha: espera a que entregue o usa force"));
         }
-        Ok(Ok((branch, parent.cwd.clone(), t.title.clone(), expected_target(st, t, &parent.cwd), t.repo.clone())))
+        Ok(Ok((branch, into.clone(), t.title.clone(), expected_target(st, t, &into), t.repo.clone(), project_target, t.base.clone())))
     })?;
-    let (branch, into, title, expected, repo) = match planned {
+    let (branch, into, title, expected, repo, project_target, base_branch) = match planned {
         Ok(plan) => plan,
         Err(ya_integrada) => return Ok(ya_integrada),
     };
@@ -93,6 +100,16 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     if let Err(last_review) = reviewed {
         return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": head, "last_review": last_review,
             "message": "Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual." }));
+    }
+    // El checkout del Project tiene que estar en la rama base con que nació la Task: fusionar en otra sería integrar donde nadie lo pidió.
+    if project_target {
+        if let Some(expected_branch) = base_branch.as_deref() {
+            let current = git::current_branch(&into);
+            if current.as_deref() != Some(expected_branch) {
+                return Ok(json!({ "task": id, "outcome": "target_branch_mismatch", "branch": branch, "expected_branch": expected_branch, "found_branch": current,
+                    "message": "El checkout del proyecto no está en la rama base de esta tarea: cámbiala (o vuelve a ella) antes de integrar. No se integró." }));
+            }
+        }
     }
     let found = git::head(&into);
     // El destino solo puede haberse movido por orch_integrate: si no, se avisa y no
@@ -148,6 +165,45 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
         out["found_commit"] = json!(found);
     }
     Ok(out)
+}
+
+/// Lo que la persona necesita ver ANTES de integrar una Task (LXO-148): el destino, si se movió, si la rama está en su base, qué se
+/// integró ya y el PR que haya. Solo lectura y sin rutas: se habla de ramas y commits. El git corre fuera del lock del estado.
+pub fn preview(state: &impl StateAccess, id: &str) -> Result<Value, String> {
+    // (rama, destino, ¿checkout del Project?, base, esperado, integrada, resultado, PR, repo)
+    let plan = state.read(|st| -> Result<_, String> {
+        let t = st.task(id)?;
+        let (into, project_target) = match t.parent.as_ref().and_then(|p| st.tasks.get(p)) {
+            Some(parent) => (parent.cwd.clone(), false),
+            None if !t.repo.is_empty() => (t.repo.clone(), true),
+            None => (String::new(), true),
+        };
+        let merge = st.decisions.iter().rev().find(|d| d.task == id && d.kind == "merge" && outcome_of(d) == "merged");
+        let result = merge.and_then(|d| d.detail_json.as_deref()).and_then(|j| serde_json::from_str::<Value>(j).ok()).and_then(|v| v["result_commit"].as_str().map(String::from));
+        let expected = if into.is_empty() { None } else { expected_target(st, t, &into) };
+        Ok((t.branch.clone(), into, project_target, t.base.clone(), expected, t.merged || merge.is_some(), result, t.pr_url.clone(), t.repo.clone()))
+    })?;
+    let (branch, into, project_target, base, expected, merged, result, pr_url, repo) = plan;
+    let branch_head = branch.as_deref().and_then(|b| super::review::branch_head(&repo, b));
+    let known = !into.is_empty() && std::path::Path::new(&into).is_dir();
+    let current = if known { git::current_branch(&into) } else { None };
+    let head = if known { git::head(&into) } else { None };
+    let moved = expected.as_ref().zip(head.as_ref()).map(|(e, h)| e != h);
+    let branch_matches = if project_target { base.as_ref().map(|b| current.as_deref() == Some(b.as_str())) } else { None };
+    Ok(json!({
+        "branch": branch,
+        "branch_head": branch_head,
+        "merged": merged,
+        "result_commit": result,
+        "pr_url": pr_url,
+        "has_remote": git::remote_url(&repo).is_some(),
+        "target": {
+            "kind": if project_target { "project_checkout" } else { "parent_checkout" },
+            "branch": current, "expected_branch": if project_target { base.clone() } else { None }, "branch_matches": branch_matches,
+            "head": head, "expected_head": expected, "moved": moved,
+            "clean": if known { Some(git::is_clean(&into)) } else { None },
+        },
+    }))
 }
 
 fn outcome_of(d: &super::state::Decision) -> String {

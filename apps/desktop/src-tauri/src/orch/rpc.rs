@@ -336,6 +336,18 @@ impl Core {
                 let input: super::proof_pack::ProofPackInput = serde_json::from_value(args.clone()).map_err(|_| "model_invalid_request: Solicitud de Proof Pack inválida".to_string())?;
                 super::proof_pack::proof_pack(self, &caller, authenticated_context.as_ref(), &input)
             }
+            "attempt_integration_preview" => {
+                let input: super::integration_attempt::PreviewInput = serde_json::from_value(args.clone()).map_err(|_| "model_invalid_request: Solicitud de integración inválida".to_string())?;
+                super::integration_attempt::preview(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            "attempt_integrate" => {
+                let context = authenticated_context.as_ref().ok_or("integrar un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("integrar un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::integration_attempt::IntegrateInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de integración inválida".to_string())?;
+                super::integration_attempt::integrate_attempt(self, context, &input, &git::gh_pr)
+            }
             "attempt_review" => {
                 let context = authenticated_context.as_ref().ok_or("revisar un Attempt requiere una Person autenticada")?;
                 if !matches!(caller, Caller::User) || !context.is_person() {
@@ -673,7 +685,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "provider_capabilities" | "context_package_preview" | "usage_report" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "provider_capabilities" | "context_package_preview" | "usage_report" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
@@ -687,7 +699,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
