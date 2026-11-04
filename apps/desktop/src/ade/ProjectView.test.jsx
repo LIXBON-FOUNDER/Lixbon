@@ -836,11 +836,13 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
     expect(inside.getAllByTestId('resinv-row')).toHaveLength(5);
   });
 
-  it('solo lectura: sin controles de mutación, enlaces ni botones nuevos, y sin llamar a callbacks de dominio', () => {
+  it('el inventario sigue siendo de lectura: sin enlaces ni campos, solo «Gestionar…» (LXO-157) y sin llamar a callbacks de dominio', () => {
     const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn() };
     const { container } = view({ resourceInventory: INV }, cb);
     const inv = container.querySelector('[data-testid="resinv"]');
-    expect(inv.querySelectorAll('button, a, input, textarea, form, [role="button"]')).toHaveLength(0);
+    // Lo único accionable es «Gestionar…», que solo abre el panel de una Task propietaria: ninguna mutación se pide sin confirmarla ahí.
+    expect([...inv.querySelectorAll('button, [role="button"]')].map((b) => b.textContent)).toEqual([...inv.querySelectorAll('button, [role="button"]')].map(() => 'Gestionar…'));
+    expect(inv.querySelectorAll('a, input, textarea, form')).toHaveLength(0);
     expect(inv.querySelectorAll('select')).toHaveLength(4);
     const MUTATION = /(crear|lanzar|ejecutar|reintentar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|run|retry|delete|remove|clean|merge|approve|reject|save|submit)/i;
     const names = [...inv.querySelectorAll('select, option')].map((el) => el.textContent);

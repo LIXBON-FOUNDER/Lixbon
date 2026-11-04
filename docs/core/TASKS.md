@@ -463,6 +463,10 @@ worktree) la fija el Core.
   modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
   salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
   El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
+* **Acciones de recursos** (`ResourceActions`, en el inventario; LXO-149/157, [RESOURCES.md](RESOURCES.md) § Acciones): en el worktree que una Task posee, «Gestionar…» muestra el
+  estado de git (en disco / ya no está, limpio o con cambios sin commit, rama integrada o no, proceso) y ofrece «Limpiar (integrado)» y «Quitar el worktree (conserva la rama)». Lo que
+  el Core no deja sale desactivado con su motivo (solo lectura, tarea en marcha, estado desconocido, cambios sin commit, sin integrar); los cambios sin commit solo se pierden si se
+  marca descartarlos. Tras actuar se vuelve a leer del Core y se refresca el inventario. Los candidatos externos u huérfanos no tienen acciones (no hay Adopt).
 * **Integración** (`AttemptIntegration`, tras el Proof Pack; LXO-148/156, [INTEGRACION.md](INTEGRACION.md)): para un intento terminado, muestra la revisión (el HEAD aceptado), el
   destino (rama y HEAD del proyecto, y si se movió fuera de Lixbon o tiene cambios sin commit) y el estado (integrado / PR). «Fusionar en <rama>» y «Publicar PR» salen
   desactivados con su motivo en llano si el Core no los deja, piden confirmación mostrando el destino y mandan EXACTAMENTE el HEAD visto; un destino movido exige aceptar el
