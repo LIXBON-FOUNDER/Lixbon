@@ -110,6 +110,12 @@ fn attempt_provider(core: &Core, attempt: &str) -> String {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT provider FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, String>(0))?))).unwrap().unwrap()
 }
 
+/// El payload del `attempt.retried` del Attempt.
+fn retried_payload(core: &Core, attempt: &str) -> Value {
+    let text: String = core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT payload FROM events WHERE kind = 'attempt.retried' AND entity_id = ?1", [attempt], |r| r.get(0))?))).unwrap().unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 fn ordered(actual: &[String], expected: &[&str]) {
     let positions: Vec<usize> = expected.iter().map(|kind| actual.iter().position(|k| k == kind).unwrap_or_else(|| panic!("falta {kind} en {actual:?}"))).collect();
     assert!(positions.windows(2).all(|w| w[0] < w[1]), "fuera de orden: {actual:?}");
@@ -224,6 +230,13 @@ fn reintentar_un_attempt_fallido_crea_el_n_mas_1_y_el_despachador_lo_lanza_sin_a
     assert_eq!(row(&w.core, &a1), ("failed".into(), "settled".into(), Some("agent_reported".into())));
     assert_eq!(event_count(&w.core, &a2, "attempt.requested"), 1);
     assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0, "un reintento no pide aprobación: la petición es la decisión");
+    // La procedencia nace con el Attempt, en la misma mutación, y atiende el fallo del anterior.
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.retried"]);
+    let retried = retried_payload(&w.core, &a2);
+    assert_eq!((retried["task"].as_str(), retried["n"].as_i64(), retried["from_n"].as_i64()), (Some(task.as_str()), Some(2), Some(1)));
+    assert!(retried.get("overrides").is_none(), "no se pidió nada distinto: se heredó todo");
+    let anterior = attention(&w.core, &a1);
+    assert!(anterior.contains(&("failed".to_string(), "resolved".to_string())) && !anterior.contains(&("failed".to_string(), "active".to_string())), "el failed del anterior queda atendido: {anterior:?}");
     assert_eq!(attempt_provider(&w.core, &a2), "claude");
     assert_eq!(w.adapter.starts().len(), 1, "pedirlo no lanza nada");
 
@@ -299,6 +312,7 @@ fn reintentar_solo_lo_pide_una_person_y_solo_de_un_attempt_que_termino_mal() {
     w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &selection)).expect("reintento con otro proveedor");
     let a2 = format!("{task}-a2");
     assert_eq!(attempt_provider(&w.core, &a2), "codex");
+    assert_eq!(retried_payload(&w.core, &a2)["overrides"], json!(["provider"]), "solo se pidió otro proveedor");
     let (model, profile): (Option<String>, Option<String>) = w
         .core
         .storage

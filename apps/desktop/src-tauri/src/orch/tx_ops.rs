@@ -33,6 +33,7 @@ use super::events::{Actor, Channel, EventDraft, MutationContext};
 use super::mutation::{Effect, Tx};
 use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
+use crate::store::RetryOverride;
 
 /// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
 /// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
@@ -249,10 +250,26 @@ impl Tx {
             return Err("ni la petición ni el Attempt anterior tienen un perfil de permisos".into());
         }
         let before = self.snapshot_run_of(task_id);
+        // Qué se pidió distinto del Attempt anterior (pedir lo mismo no es cambiar): es lo que dice `attempt.retried`.
+        let model = selection.model.clone().or_else(|| if same_provider { task.model.clone() } else { None });
+        let effort = selection.effort.clone().or_else(|| if same_provider { task.effort.clone() } else { None });
+        let mut overrides = Vec::new();
+        if !same_provider {
+            overrides.push(RetryOverride::Provider);
+        }
+        if selection.model.is_some() && model != task.model {
+            overrides.push(RetryOverride::Model);
+        }
+        if selection.effort.is_some() && effort != task.effort {
+            overrides.push(RetryOverride::Effort);
+        }
+        if selection.profile.is_some() && profile != task.profile {
+            overrides.push(RetryOverride::Profile);
+        }
         {
             let t = self.state_mut().task_mut(task_id)?;
-            t.model = selection.model.clone().or_else(|| if same_provider { t.model.clone() } else { None });
-            t.effort = selection.effort.clone().or_else(|| if same_provider { t.effort.clone() } else { None });
+            t.model = model;
+            t.effort = effort;
             t.agent = provider;
             t.profile = profile;
             // Lo del Attempt anterior no se arrastra al nuevo (como en `State::reopen`).
@@ -269,6 +286,12 @@ impl Tx {
             t.updated = super::state::now_ms();
         }
         self.push_status_changes(before, None);
+        // La procedencia va en la MISMA mutación que el Attempt nuevo: o están los dos o ninguno. Resuelve el `failed` del anterior.
+        let n = self.attempt_n.get(task_id).copied().unwrap_or(1);
+        let retried = self.tasks.get(task_id).cloned().map(|t| ev::runtime_attempt_retried(&t, n, overrides));
+        if let Some(retried) = retried {
+            self.try_push_event(retried);
+        }
         Ok(())
     }
 

@@ -1259,6 +1259,14 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
+/// `attempt.retried` del Attempt `n` de una Task del runtime: reintenta al `n - 1`, limpio. `overrides` son los parámetros
+/// que se pidieron distintos (ausente si ninguno). Lo emite la misma mutación que crea el Attempt, y es lo que resuelve el
+/// `failed` del anterior.
+pub(super) fn runtime_attempt_retried(t: &Task, n: u32, overrides: Vec<RetryOverride>) -> Result<EventDraft, EventError> {
+    let p = AttemptRetried { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, overrides };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
 /// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
 pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
     let p = AttemptApproved { task: t.id.clone(), n: n as i64 };
