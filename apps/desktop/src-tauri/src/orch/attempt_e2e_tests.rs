@@ -640,6 +640,8 @@ fn detener_con_instrucciones_en_cola_las_deja_failed_attempt_ended_y_no_entrega_
     wait_until("la ejecución está registrada", || w.core.has_term(&task));
     w.desktop("stop", json!({"task": task})).expect("stop");
     w.settled(&a1, "stopped");
+    // El cierre de la cola es parte del cierre del Attempt: se espera explícitamente en vez de suponer que ya ocurrió.
+    wait_until("la cola del Attempt detenido se cierra", || queue_rows(&w.core, &a1).iter().all(|(_, status, _, _)| status != "queued"));
 
     assert_eq!(queue_rows(&w.core, &a1), vec![(format!("{a1}-q1"), "failed".into(), Some("attempt_ended".into()), None)]);
     assert!(w.adapter.resumes().is_empty());
