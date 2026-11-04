@@ -523,6 +523,171 @@ fn el_barrido_recoge_una_continuacion_que_nadie_despacho_y_la_reanuda() {
     assert_eq!(w.adapter.resumes()[0].provider_ref.expose(), "sess-2");
 }
 
+/// (queue_id, estado, motivo del fallo, quién confirmó) de la cola del Attempt, en orden FIFO.
+fn queue_rows(core: &Core, attempt: &str) -> Vec<(String, String, Option<String>, Option<String>)> {
+    core.storage
+        .with_store(|s| {
+            s.read(|c| {
+                let mut stmt = c.prepare("SELECT queue_id, status, failure_reason, confirmed_by FROM attempt_queue WHERE attempt_id = ?1 ORDER BY seq")?;
+                let rows = stmt.query_map([attempt], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            })
+        })
+        .unwrap()
+        .unwrap()
+}
+
+fn attempt_summary(core: &Core, attempt: &str) -> String {
+    core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT summary FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, String>(0))?))).unwrap().unwrap()
+}
+
+/// LXO-143 · la cola de instrucciones por el RPC de Desktop. Encolar no entrega nada: el Attempt está en mitad de un turno. En cada fin
+/// de turno el bombeo entrega la primera REANUDANDO la misma sesión, y el Attempt sigue `running` entre turnos: `completed` llega
+/// solo cuando la cola se vacía. FIFO, idempotente por `request_id`, lo cancelado no se entrega jamás.
+#[test]
+fn la_cola_entrega_en_fifo_reanudando_la_sesion_y_el_attempt_termina_al_vaciarse() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![Step::Bind("sess-q"), Step::Output("uno".into()), Step::Hold, Step::Complete(Some("uno".into()))]);
+    w.adapter.push_turn(vec![Step::Output("dos".into()), Step::Complete(Some("dos".into()))]);
+    w.adapter.push_turn(vec![Step::Output("tres".into()), Step::Complete(Some("tres".into()))]);
+    let a1 = w.create("claude", "e2e-queue-fifo");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let queue = |request_id: &str, body: &str| w.desktop("attempt_queue", json!({"attempt_id": a1, "request_id": request_id, "body": body}));
+
+    let q1 = queue("r1", "segunda instrucción").expect("encolar la primera");
+    assert_eq!((q1["status"].as_str(), q1["queue_id"].as_str(), q1["position"].as_i64()), (Some("Queued"), Some(format!("{a1}-q1").as_str()), Some(1)));
+    assert_eq!(queue("r2", "tercera instrucción").unwrap()["position"], 2);
+    assert_eq!(queue("r3", "cuarta (se cancela)").unwrap()["position"], 3);
+    assert!(w.adapter.resumes().is_empty(), "encolar no entrega nada: el turno sigue en curso");
+
+    // Repetir la petición devuelve el mismo item; reutilizar la clave para otra instrucción es un conflicto; nada se duplica.
+    let again = queue("r1", "segunda instrucción").unwrap();
+    assert_eq!((again["status"].as_str(), again["queue_id"].as_str()), (Some("Replayed"), Some(format!("{a1}-q1").as_str())));
+    assert!(queue("r1", "otra cosa").unwrap_err().contains("request_conflict"));
+    assert_eq!(queue_rows(&w.core, &a1).len(), 3);
+
+    // La Pending Queue: lo que sigue sin entregarse, en el orden en que se entregará.
+    let pending = w.desktop("pending_queue", json!({"attempt_id": a1})).expect("la cola pendiente");
+    let items = pending["items"].as_array().unwrap();
+    assert_eq!(items.iter().map(|i| i["body"].as_str().unwrap()).collect::<Vec<_>>(), ["segunda instrucción", "tercera instrucción", "cuarta (se cancela)"]);
+    assert_eq!(items.iter().map(|i| i["position"].as_i64().unwrap()).collect::<Vec<_>>(), [1, 2, 3]);
+
+    // Cancelar antes de la entrega; repetirlo no escribe nada.
+    let q3 = format!("{a1}-q3");
+    assert_eq!(w.desktop("attempt_queue_cancel", json!({"queue_id": q3})).unwrap()["status"], "Cancelled");
+    assert_eq!(w.desktop("attempt_queue_cancel", json!({"queue_id": q3})).unwrap()["status"], "AlreadyCancelled");
+
+    w.adapter.release_hold();
+    w.settled(&a1, "done");
+
+    // Cada instrucción abrió su turno REANUDANDO la sesión, en orden, dentro del mismo Attempt; el proveedor solo arrancó una vez.
+    let resumes = w.adapter.resumes();
+    assert_eq!(resumes.iter().map(|r| r.prompt.as_deref().unwrap()).collect::<Vec<_>>(), ["segunda instrucción", "tercera instrucción"]);
+    assert!(resumes.iter().all(|r| r.provider_ref.expose() == "sess-q" && r.attempt_id == a1));
+    assert_eq!(w.adapter.starts().len(), 1);
+    assert_eq!(
+        queue_rows(&w.core, &a1),
+        vec![
+            (format!("{a1}-q1"), "delivered".into(), None, Some("adapter_result".into())),
+            (format!("{a1}-q2"), "delivered".into(), None, Some("adapter_result".into())),
+            (format!("{a1}-q3"), "cancelled".into(), None, None),
+        ],
+        "lo cancelado no se entrega jamás"
+    );
+    // UN solo Attempt, UN solo comienzo y UN solo cierre, que llega al final de la cola (con el resumen del último turno).
+    assert_eq!(event_count(&w.core, &a1, "attempt.started"), 1);
+    assert_eq!(event_count(&w.core, &a1, "attempt.completed"), 1);
+    assert_eq!((event_count(&w.core, &a1, "attempt.queued"), event_count(&w.core, &a1, "attempt.queue_delivered"), event_count(&w.core, &a1, "attempt.queue_cancelled")), (3, 2, 1));
+    assert_eq!(attempt_summary(&w.core, &a1), "tres");
+    assert_eq!(w.core.lock().tasks.len(), 1, "no nació ningún Attempt ni Task nueva");
+    assert_eq!(w.desktop("pending_queue", json!({"attempt_id": a1})).unwrap()["items"].as_array().unwrap().len(), 0);
+    // Terminado, no admite instrucciones.
+    assert!(queue("r9", "tarde").unwrap_err().contains("attempt_final"));
+    let _ = task;
+}
+
+/// Un fallo de la entrega no falla el Attempt: solo el item (`attempt.queue_failed`), y el Attempt termina bien.
+#[test]
+fn si_la_entrega_falla_el_item_falla_con_su_motivo_y_el_attempt_termina_bien() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![Step::Bind("sess-f"), Step::Hold, Step::Complete(Some("uno".into()))]);
+    let a1 = w.create("claude", "e2e-queue-fallo");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    w.desktop("attempt_queue", json!({"attempt_id": a1, "request_id": "r1", "body": "esto no llegará"})).expect("encolar");
+    w.adapter.fail_resume_with(Some(AdapterError::provider("el proveedor se cayó al reanudar")));
+    w.adapter.release_hold();
+    w.settled(&a1, "done");
+
+    assert_eq!(queue_rows(&w.core, &a1), vec![(format!("{a1}-q1"), "failed".into(), Some("adapter_error".into()), None)]);
+    assert_eq!(event_count(&w.core, &a1, "attempt.queue_failed"), 1);
+    assert_eq!(event_count(&w.core, &a1, "attempt.queue_delivered"), 0, "sin confirmación del adapter no hay entrega");
+    assert!(w.adapter.resumes().is_empty());
+    assert_eq!(row(&w.core, &a1), ("done".into(), "settled".into(), None), "el Attempt termina bien: un fallo de entrega no lo falla");
+}
+
+/// Detener el Attempt con instrucciones en cola: lo pendiente ya no se entregará y falla con `attempt_ended` (sin Attention).
+#[test]
+fn detener_con_instrucciones_en_cola_las_deja_failed_attempt_ended_y_no_entrega_nada() {
+    let w = world("claude", Some(vec![Step::Bind("sess-s"), Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("claude", "e2e-queue-stop");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    w.desktop("attempt_queue", json!({"attempt_id": a1, "request_id": "r1", "body": "no llegará"})).expect("encolar");
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+    w.settled(&a1, "stopped");
+
+    assert_eq!(queue_rows(&w.core, &a1), vec![(format!("{a1}-q1"), "failed".into(), Some("attempt_ended".into()), None)]);
+    assert!(w.adapter.resumes().is_empty());
+    assert!(!attention(&w.core, &a1).iter().any(|(c, s)| c == "failed" && s == "active"), "attempt_ended no levanta Attention: el Attempt ya terminó");
+}
+
+/// Un proveedor sin `resume` (codex) no puede entregar en un fin de turno: encolar es un ERROR y no se escribe nada. Nunca se cae a Steer.
+#[test]
+fn encolar_con_un_proveedor_sin_resume_es_un_error_y_no_escribe_ni_cae_a_steer() {
+    let w = world("codex", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("codex", "e2e-queue-sin-resume");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+
+    let err = w.desktop("attempt_queue", json!({"attempt_id": a1, "request_id": "r1", "body": "sigue"})).unwrap_err();
+    assert!(err.contains("queue_unsupported"), "{err}");
+    assert!(queue_rows(&w.core, &a1).is_empty(), "no se escribe nada");
+    assert_eq!(event_count(&w.core, &a1, "attempt.queued"), 0);
+    assert!(!w.adapter.calls().iter().any(|c| c.starts_with("steer")), "Queue nunca se convierte en Steer");
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+}
+
+/// Lo que el RPC de la cola rechaza: un agente, un Attempt que no existe, una clave o un cuerpo inválidos, un campo que no existe.
+#[test]
+fn el_rpc_de_la_cola_rechaza_lo_que_no_debe_y_no_escribe() {
+    let w = world("claude", Some(vec![Step::Bind("sess-r"), Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("claude", "e2e-queue-rechazos");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let q = |args: Value| w.desktop("attempt_queue", args);
+
+    assert!(q(json!({"attempt_id": "nadie-a1", "request_id": "r1", "body": "x"})).unwrap_err().contains("attempt_missing"));
+    assert!(q(json!({"attempt_id": a1, "request_id": "con espacios", "body": "x"})).unwrap_err().contains("invalid_request"));
+    assert!(q(json!({"attempt_id": a1, "request_id": "r1", "body": ""})).is_err(), "una instrucción vacía no se encola");
+    assert!(q(json!({"attempt_id": a1, "request_id": "r1", "body": "x".repeat(20_001)})).is_err(), "el cuerpo está acotado");
+    assert!(q(json!({"attempt_id": a1, "request_id": "r1", "body": "x", "attachments": ["art-1"]})).is_err(), "esta entrega no admite adjuntos");
+    assert!(w.core.rpc(Caller::Agent(Some(task.clone())), "", "attempt_queue", &json!({"attempt_id": a1, "request_id": "r1", "body": "x"})).is_err(), "un agente no encola por este RPC");
+    assert!(w.desktop("attempt_queue_cancel", json!({"queue_id": "nadie-a1-q1"})).unwrap_err().contains("queue_missing"));
+    assert!(w.desktop("pending_queue", json!({"attempt_id": "nadie-a1"})).is_err());
+    assert!(queue_rows(&w.core, &a1).is_empty(), "ninguna petición rechazada escribe");
+
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+}
+
 /// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
 #[test]
 fn detener_por_el_rpc_de_desktop_deja_el_attempt_stopped_y_el_claim_asentado() {

@@ -200,6 +200,8 @@ impl Core {
         // Tras cerrar las huérfanas: cada claim en vuelo se asienta (con su evidencia) o queda `ambiguous` (LXO-246).
         if on_tables {
             self.reconcile_dispatch_claims_at_boot();
+            // Después de cerrar las huérfanas: lo pendiente de un Attempt que ya no corre falla con motivo.
+            self.queue_recover_at_boot();
         }
         // `close_orphans` puede haber avanzado la fila: el informe lleva la revisión
         // realmente confirmada al terminar el arranque, no la que se cargó.

@@ -247,6 +247,18 @@ impl Core {
                 };
                 Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id}))
             }
+            "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => {
+                let context = authenticated_context.as_ref().ok_or("la cola de instrucciones requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("la cola de instrucciones solo está permitida a una Person autenticada".into());
+                }
+                let invalid = |_| "Solicitud de la cola inválida".to_string();
+                match cmd {
+                    "attempt_queue" => super::queue_rpc::enqueue(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
+                    "attempt_queue_cancel" => super::queue_rpc::cancel(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
+                    _ => super::queue_rpc::pending(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
+                }
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -637,7 +649,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

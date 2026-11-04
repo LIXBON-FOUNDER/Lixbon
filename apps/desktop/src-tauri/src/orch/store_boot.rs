@@ -40,7 +40,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::adapter::CancelToken;
 use super::attempt_ops;
+use super::queue_commands::{self, Cancelled, DeliveryResult, ErrorKind as QueueErrorKind, PendingQueue, QueueError, QueuePort, QueueRequest, Queued};
 use super::worktree_ops::attach as attempt_worktree_attach;
 use super::dispatch::{DispatchSnapshot, ReserveOutcome};
 use super::attempt_ops::DispatchAmbiguityCause;
@@ -559,6 +561,47 @@ impl Core {
             })
             .ok_or_else(|| "el almacén no está abierto".to_string())?;
         read.map_err(|e| e.to_string())
+    }
+
+    // ── La cola de instrucciones (LXO-143): el almacén solo se toca desde aquí ───────────────────────────────────────────────
+
+    fn queue_store<R>(&self, f: impl FnOnce(&mut Store) -> Result<R, QueueError>) -> Result<R, QueueError> {
+        self.storage.with_store(f).unwrap_or_else(|| Err(QueueError::new(QueueErrorKind::Failed, "store", "el almacén del Core no está abierto")))
+    }
+
+    /// `attempt.queue`: encola y, si el run ya está en un límite de turno, entrega (nunca desde el RPC: ahí es `Busy`).
+    pub(super) fn queue_enqueue(&self, port: &dyn QueuePort, ctx: &MutationContext, cancel: &CancelToken, req: &QueueRequest<'_>) -> Result<Queued, QueueError> {
+        self.queue_store(|st| queue_commands::queue_attempt(st, port, ctx, cancel, req))
+    }
+
+    pub(super) fn queue_cancel(&self, ctx: &MutationContext, queue_id: &str) -> Result<Cancelled, QueueError> {
+        self.queue_store(|st| queue_commands::cancel_queued(st, ctx, queue_id))
+    }
+
+    pub(super) fn queue_pending(&self, ctx: &MutationContext, attempt_id: &str) -> Result<PendingQueue, QueueError> {
+        self.queue_store(|st| queue_commands::pending(st, ctx, attempt_id))
+    }
+
+    /// Entrega el siguiente item si el run está en un límite de turno (lo llama el bombeo).
+    pub(super) fn queue_deliver_next(&self, port: &dyn QueuePort, cancel: &CancelToken, attempt_id: &str) -> Result<DeliveryResult, QueueError> {
+        self.queue_store(|st| queue_commands::deliver_next(st, port, cancel, attempt_id))
+    }
+
+    /// El Attempt terminó: lo que seguía pendiente ya no se entregará (falla con `attempt_ended`).
+    pub(super) fn queue_settle(&self, attempt_id: &str) {
+        match self.queue_store(|st| queue_commands::settle_attempt_end(st, attempt_id)) {
+            Ok(_) => {}
+            Err(why) => eprintln!("[core] no se pudo cerrar la cola de {attempt_id} al terminar el Attempt: {why}"),
+        }
+    }
+
+    /// Arranque: lo `delivering` falla (`interrupted`: nunca se reintenta) y lo `queued` de un Attempt terminado también.
+    pub(super) fn queue_recover_at_boot(&self) {
+        match self.queue_store(queue_commands::recover) {
+            Ok(r) if r.interrupted + r.ended == 0 => {}
+            Ok(r) => eprintln!("[core] cola de instrucciones: {} interrumpida(s), {} de Attempts terminados; {} se conservan", r.interrupted, r.ended, r.kept),
+            Err(why) => eprintln!("[core] no se pudo recuperar la cola de instrucciones al arrancar: {why}"),
+        }
     }
 
     /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
