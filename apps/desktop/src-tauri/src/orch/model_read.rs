@@ -24,18 +24,18 @@ pub(super) const LEGACY_MODEL: &str = "legacy";
 /// Vista de compatibilidad para clientes F2 tras el corte (ADR §11.1).
 pub(super) const LEGACY_COMPAT: &str = "legacy_task_v1";
 
-fn invalid(m: impl Into<String>) -> String {
+pub(super) fn invalid(m: impl Into<String>) -> String {
     format!("model_invalid_request: {}", m.into())
 }
 
-fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<(), String> {
+pub(super) fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<(), String> {
     match (context.map(|c| &c.actor), caller) {
         (Some(Actor::PersonId(id)), Caller::User) if !id.is_empty() => Ok(()),
         _ => Err("model_auth_required: solo una Person autenticada puede leer el modelo Task/Attempt".into()),
     }
 }
 
-fn args_of<'a>(args: &'a Value, allowed: &[&str], empty: &'a Map<String, Value>) -> Result<&'a Map<String, Value>, String> {
+pub(super) fn args_of<'a>(args: &'a Value, allowed: &[&str], empty: &'a Map<String, Value>) -> Result<&'a Map<String, Value>, String> {
     let map = match args {
         Value::Null => empty,
         Value::Object(m) => m,
@@ -61,7 +61,7 @@ fn store_err(e: crate::store::StoreError) -> String {
 }
 
 /// Lee el almacén con el modelo activo; antes del corte, `core_model_inactive`.
-fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, String>>) -> Result<T, String> {
+pub(super) fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, String>>) -> Result<T, String> {
     core.storage
         .read_store(|s| {
             if !s.agentic_model_active().map_err(store_err)? {

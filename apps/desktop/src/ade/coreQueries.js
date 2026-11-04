@@ -13,6 +13,7 @@ import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
 import { CONTEXT_PREVIEW_QUERY_SPECS } from './contextPreviewContract';
 import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContract';
 import { USAGE_QUERY_SPECS } from './usageContract';
+import { COMPARE_QUERY_SPECS } from './compareContract';
 import { FORK_QUERY_SPECS } from './forkContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
@@ -660,6 +661,8 @@ const QUERY_SPECS = Object.freeze({
   ...QUEUE_QUERY_SPECS,
   // De dónde salió un Attempt y qué Forks nacieron de él (LXO-145/153): lo que se registró al bifurcar.
   ...FORK_QUERY_SPECS,
+  // Comparar 2–4 Attempts con la procedencia de cada dato (LXO-146/154): el cliente no recalcula nada.
+  ...COMPARE_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

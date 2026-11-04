@@ -147,6 +147,25 @@ pub fn retryable(status: AttemptStatus) -> bool {
 }
 
 impl Store {
+    /// De qué Attempt salió cada uno de estos, según su `attempt.forked` (LXO-145): `None` si no nació de un Fork. Solo lectura; es lo que
+    /// permite a Compare (LXO-146) saber si dos Attempts de Tasks distintas son de la misma familia de Forks. Un id sin Attempt no aparece.
+    pub fn fork_sources(&self, attempt_ids: &[String]) -> StoreResult<std::collections::BTreeMap<String, Option<String>>> {
+        let mut out = std::collections::BTreeMap::new();
+        for id in attempt_ids {
+            let exists: bool = self.conn.query_row("SELECT EXISTS (SELECT 1 FROM attempts WHERE id = ?1)", [id], |r| r.get(0))?;
+            if !exists {
+                continue;
+            }
+            let source: Option<String> = self
+                .conn
+                .query_row("SELECT json_extract(payload, '$.source') FROM events WHERE kind = 'attempt.forked' AND entity_id = ?1 ORDER BY seq LIMIT 1", [id], |r| r.get(0))
+                .optional()?
+                .flatten();
+            out.insert(id.clone(), source);
+        }
+        Ok(out)
+    }
+
     /// El reintento que creó `attempt_id`, si es un reintento.
     pub fn retry_of_attempt(&self, attempt_id: &str) -> StoreResult<Option<RetryRow>> {
         retry_where(&self.conn, "attempt_id = ?1", &[&attempt_id])

@@ -33,7 +33,7 @@ impl World {
     }
 
     /// El origen ya terminado (`done`): lo que se bifurca casi siempre.
-    fn finished(&self, request_id: &str) -> String {
+    pub(super) fn finished(&self, request_id: &str) -> String {
         let attempt = self.create("claude", request_id);
         self.approve(&attempt);
         self.settled(&attempt, "done");
