@@ -307,6 +307,30 @@ fn casos() -> Vec<Caso> {
             "success",
         ),
         ("attempt.queue_cancelled", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "queue_id": "t-7-a2-q3" }), "activity.attempt.queue_cancelled", "warning"),
+        (
+            "attempt.instruction_requested",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "request_id": "s-1", "mode": "steer", "chars": 19 }),
+            "activity.attempt.instruction_requested",
+            "info",
+        ),
+        (
+            "attempt.instruction_result",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "request_id": "s-1", "mode": "stop_and_send", "outcome": "delivered" }),
+            "activity.attempt.instruction_result",
+            "success",
+        ),
+        (
+            "attempt.instruction_result",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "request_id": "s-2", "mode": "stop_and_send", "outcome": "failed", "reason": "adapter_error" }),
+            "activity.attempt.instruction_result",
+            "error",
+        ),
         ("attempt.dispatch_ambiguous", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "from": "started", "cause": "core_restart" }), "activity.attempt.dispatch_ambiguous", "warning"),
         (
             "attempt.queue_failed",
@@ -682,7 +706,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 95] = [
+const CLAVES: [&str; 97] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
@@ -691,6 +715,8 @@ const CLAVES: [&str; 95] = [
     "activity.attempt.dispatch_ambiguous",
     "activity.attempt.exited",
     "activity.attempt.failed",
+    "activity.attempt.instruction_requested",
+    "activity.attempt.instruction_result",
     "activity.attempt.integrated",
     "activity.attempt.queue_cancelled",
     "activity.attempt.queue_delivered",

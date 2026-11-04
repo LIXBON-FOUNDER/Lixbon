@@ -80,6 +80,8 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.queue_delivered',
   'activity.attempt.queue_cancelled',
   'activity.attempt.queue_failed',
+  'activity.attempt.instruction_requested',
+  'activity.attempt.instruction_result',
   'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
@@ -163,6 +165,8 @@ const CONTINUITY_REASONS = {
   session_unavailable: 'no había una sesión que reanudar',
   session_expired: 'la sesión caducó',
 };
+const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
+const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
 const QUEUE_FAILURES = {
   unsupported: 'el proveedor no admite entregarla',
   environment_blocked: 'el entorno del proveedor está bloqueado',
@@ -515,6 +519,37 @@ const FORMATTERS = {
   'activity.attempt.queue_cancelled': (args) => {
     const attempt = attemptOf(args);
     return attempt ? `Se canceló una instrucción encolada para el ${attempt}.` : null;
+  },
+  // Steer y Stop & Send (LXO-144): nunca el texto de la instrucción, solo el hecho y cómo acabó.
+  'activity.attempt.instruction_requested': (args) => {
+    const attempt = attemptOf(args);
+    const mode = requiredCode(args, 'mode', INSTRUCTION_MODES);
+    if (!requiredArguments(attempt, mode)) return null;
+    return mode === 'steer'
+      ? `Se pidió inyectar una instrucción en el turno en curso del ${attempt}.`
+      : `Se pidió detener el turno en curso del ${attempt} y enviarle una instrucción.`;
+  },
+  'activity.attempt.instruction_result': (args) => {
+    const attempt = attemptOf(args);
+    const mode = requiredCode(args, 'mode', INSTRUCTION_MODES);
+    const outcome = requiredCode(args, 'outcome', INSTRUCTION_OUTCOMES);
+    if (!requiredArguments(attempt, mode, outcome)) return null;
+    // `reason` es opcional, pero si viene tiene que ser uno de los motivos cerrados.
+    const reason = args.reason === undefined ? null : requiredCode(args, 'reason', new Set(Object.keys(QUEUE_FAILURES)));
+    if (args.reason !== undefined && !reason) return null;
+    const detail = reason ? ` (${QUEUE_FAILURES[reason]})` : '';
+    if (outcome === 'delivered') {
+      return mode === 'steer'
+        ? `Se inyectó la instrucción en el turno en curso del ${attempt}.`
+        : `Se detuvo el turno en curso del ${attempt} y se le envió la instrucción.`;
+    }
+    if (outcome === 'failed') {
+      return mode === 'steer'
+        ? `El proveedor no aceptó la instrucción para el turno en curso del ${attempt}${detail}.`
+        : `Se detuvo el turno en curso del ${attempt}, pero la instrucción no llegó${detail}.`;
+    }
+    if (outcome === 'stop_failed') return `No se pudo detener el turno en curso del ${attempt}: no se envió la instrucción${detail}.`;
+    return `El proveedor no confirmó a tiempo que el turno en curso del ${attempt} se hubiera detenido: no se envió la instrucción.`;
   },
   'activity.attempt.dispatch_ambiguous': (args) => {
     const attempt = attemptOf(args);

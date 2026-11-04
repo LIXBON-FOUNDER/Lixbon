@@ -95,6 +95,8 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.queue_cancelled` (LXO-143) | `activity.attempt.queue_cancelled` | `task`, `n` | warning |
 | `attempt.dispatch_ambiguous` (LXO-246) | `activity.attempt.dispatch_ambiguous` | `task`, `n` | warning |
 | `attempt.queue_failed` (LXO-143) | `activity.attempt.queue_failed` | `task`, `n`, `reason` ∈ `unsupported` `environment_blocked` `adapter_unavailable` `adapter_error` `attempt_ended` `interrupted` | error |
+| `attempt.instruction_requested` (LXO-144) | `activity.attempt.instruction_requested` | `task`, `n`, `mode` ∈ `steer` `stop_and_send` | info |
+| `attempt.instruction_result` (LXO-144) | `activity.attempt.instruction_result` | `task`, `n`, `mode`, `outcome` ∈ `delivered` `failed` `stop_failed` `stop_timeout`, `reason?` (los de `queue_failed`) | success si `delivered`, error si no |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
 | `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |

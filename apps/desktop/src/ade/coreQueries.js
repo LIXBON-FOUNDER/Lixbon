@@ -186,6 +186,8 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.dispatch_ambiguous', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_delivered', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
+  ['activity.attempt.instruction_requested', { required: { task: 'string', n: 'integer', mode: 'string' } }],
+  ['activity.attempt.instruction_result', { required: { task: 'string', n: 'integer', mode: 'string', outcome: 'string' }, optional: { reason: 'string' } }],
   ['activity.attempt.retried', { required: { task: 'string', n: 'integer', from_n: 'integer' }, optional: { overrides: 'stringList' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
   ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],

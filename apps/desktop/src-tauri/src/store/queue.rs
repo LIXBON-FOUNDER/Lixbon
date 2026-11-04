@@ -83,6 +83,52 @@ impl QueueStatus {
     }
 }
 
+/// Qué se pidió a un Attempt ocupado (LXO-144): dos comandos distintos, ninguno se adapta al otro (`docs/core/STEER.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionMode {
+    /// Inyectar la instrucción en el turno en curso.
+    Steer,
+    /// Interrumpir el turno en curso y, confirmado el stop, enviar la instrucción como turno nuevo.
+    StopAndSend,
+}
+
+impl InstructionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InstructionMode::Steer => "steer",
+            InstructionMode::StopAndSend => "stop_and_send",
+        }
+    }
+}
+
+/// Cómo acabó una petición de Steer o Stop & Send. Conjunto cerrado: un cliente decide por la categoría, nunca por texto del proveedor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionOutcome {
+    /// El adapter aceptó el steer, o (Stop & Send) el stop se confirmó y el adapter aceptó el turno nuevo.
+    Delivered,
+    /// Steer rechazado por el adapter, o (Stop & Send) el stop se confirmó pero la instrucción no llegó.
+    Failed,
+    /// Stop & Send: el stop no se pudo pedir o la ejecución terminó de otra forma. No se envió nada.
+    StopFailed,
+    /// Stop & Send: el stop no se confirmó a tiempo. No se envió nada.
+    StopTimeout,
+}
+
+impl InstructionOutcome {
+    pub const ALL: [InstructionOutcome; 4] = [InstructionOutcome::Delivered, InstructionOutcome::Failed, InstructionOutcome::StopFailed, InstructionOutcome::StopTimeout];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            InstructionOutcome::Delivered => "delivered",
+            InstructionOutcome::Failed => "failed",
+            InstructionOutcome::StopFailed => "stop_failed",
+            InstructionOutcome::StopTimeout => "stop_timeout",
+        }
+    }
+}
+
 /// Por qué no se entregó un item. Conjunto CERRADO: es lo que un cliente muestra, no un texto libre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

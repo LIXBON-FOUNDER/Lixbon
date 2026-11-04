@@ -42,6 +42,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use super::adapter::CancelToken;
 use super::attempt_ops;
+use super::steer_commands;
 use super::queue_commands::{self, Cancelled, DeliveryResult, ErrorKind as QueueErrorKind, PendingQueue, QueueError, QueuePort, QueueRequest, Queued};
 use super::worktree_ops::attach as attempt_worktree_attach;
 use super::dispatch::{DispatchSnapshot, ReserveOutcome};
@@ -51,7 +52,7 @@ use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
+use crate::store::{self, InstructionMode, InstructionOutcome, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -587,6 +588,31 @@ impl Core {
         self.queue_store(|st| queue_commands::finished(st, ctx, attempt_id, limit))
     }
 
+    // ── Steer y Stop & Send (LXO-144): el almacén solo se toca desde aquí ────────────────────────────────────────────────────
+
+    /// Lee el Attempt y comprueba que `ctx` puede instruirlo.
+    pub(super) fn instruction_authorize(&self, ctx: &MutationContext, attempt_id: &str) -> Result<crate::store::AttemptRow, QueueError> {
+        self.queue_store(|st| steer_commands::authorize(st, ctx, attempt_id))
+    }
+
+    /// `attempt.instruction_requested`.
+    pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::requested_event(st, ctx, attempt_id, request_id, mode, chars)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
+    /// `attempt.instruction_result`.
+    pub(super) fn instruction_record_result(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<crate::store::QueueFailure>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::result_event(st, ctx, attempt_id, request_id, mode, outcome, reason)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// Entrega el siguiente item si el run está en un límite de turno (lo llama el bombeo).
     pub(super) fn queue_deliver_next(&self, port: &dyn QueuePort, cancel: &CancelToken, attempt_id: &str) -> Result<DeliveryResult, QueueError> {
         self.queue_store(|st| queue_commands::deliver_next(st, port, cancel, attempt_id))
@@ -607,6 +633,11 @@ impl Core {
             Ok(r) => eprintln!("[core] cola de instrucciones: {} interrumpida(s), {} de Attempts terminados; {} se conservan", r.interrupted, r.ended, r.kept),
             Err(why) => eprintln!("[core] no se pudo recuperar la cola de instrucciones al arrancar: {why}"),
         }
+    }
+
+    /// La fila del Attempt (la reanudación necesita su perfil, modelo y esfuerzo).
+    pub(super) fn attempt_row_for_resume(&self, attempt_id: &str) -> Result<Option<crate::store::AttemptRow>, String> {
+        self.storage.with_store(|store| store.attempt_row(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?.map_err(|e| e.to_string())
     }
 
     /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.

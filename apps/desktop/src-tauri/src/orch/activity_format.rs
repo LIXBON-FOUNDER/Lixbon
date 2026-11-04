@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 62] = [
+pub(super) const KINDS: [&str; 64] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -62,6 +62,8 @@ pub(super) const KINDS: [&str; 62] = [
     "attempt.queue_delivered",
     "attempt.queue_cancelled",
     "attempt.queue_failed",
+    "attempt.instruction_requested",
+    "attempt.instruction_result",
     "attempt.dispatch_ambiguous",
     "provider_session.opened",
     "provider_session.bound",
@@ -120,6 +122,9 @@ const RETRY_OVERRIDES: [&str; 4] = ["provider", "model", "effort", "profile"];
 const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
 /// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`).
 const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"];
+/// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_requested`, `attempt.instruction_result`).
+const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Procedencia de un Worktree que ya existía (`worktree.adopted`).
@@ -558,6 +563,23 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             "activity.attempt.queue_failed",
             Visual::Error,
             vec![("task", id(p, "task")), ("n", number(p, "n")), ("reason", closed(p, "reason", &QUEUE_FAILURES))],
+        ),
+        // Steer y Stop & Send (LXO-144). Nunca el texto de la instrucción: solo el hecho y cómo acabó.
+        "attempt.instruction_requested" => rendered(
+            "activity.attempt.instruction_requested",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("mode", closed(p, "mode", &INSTRUCTION_MODES))],
+        ),
+        "attempt.instruction_result" => rendered(
+            "activity.attempt.instruction_result",
+            if one_of(p, "outcome", &INSTRUCTION_OUTCOMES) == Some("delivered") { Visual::Success } else { Visual::Error },
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("mode", closed(p, "mode", &INSTRUCTION_MODES)),
+                ("outcome", closed(p, "outcome", &INSTRUCTION_OUTCOMES)),
+                ("reason?", closed(p, "reason", &QUEUE_FAILURES)),
+            ],
         ),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",

@@ -851,6 +851,56 @@
       "text": null
     },
     {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "steer" },
+      "text": "Se pidió inyectar una instrucción en el turno en curso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send" },
+      "text": "Se pidió detener el turno en curso del intento 2 de la tarea t-3 y enviarle una instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "delivered" },
+      "text": "Se inyectó la instrucción en el turno en curso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "adapter_error" },
+      "text": "El proveedor no aceptó la instrucción para el turno en curso del intento 2 de la tarea t-3 (el proveedor devolvió un error)."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "delivered" },
+      "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3 y se le envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "failed", "reason": "adapter_unavailable" },
+      "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3, pero la instrucción no llegó (el proveedor no estaba disponible)."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_failed" },
+      "text": "No se pudo detener el turno en curso del intento 2 de la tarea t-3: no se envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_timeout" },
+      "text": "El proveedor no confirmó a tiempo que el turno en curso del intento 2 de la tarea t-3 se hubiera detenido: no se envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "otro" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "otro" },
+      "text": null
+    },
+    {
       "key": "activity.provider_session.opened",
       "args": {
         "task": "t-3",

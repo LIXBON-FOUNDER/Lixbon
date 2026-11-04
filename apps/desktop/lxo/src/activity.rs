@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 96] = [
+pub(crate) const MESSAGE_KEYS: [&str; 98] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -89,6 +89,8 @@ pub(crate) const MESSAGE_KEYS: [&str; 96] = [
     "activity.attempt.queue_delivered",
     "activity.attempt.queue_cancelled",
     "activity.attempt.queue_failed",
+    "activity.attempt.instruction_requested",
+    "activity.attempt.instruction_result",
     "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
@@ -194,6 +196,10 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
+const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 
 /// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`, LXO-143).
 fn queue_failure(code: &str) -> Option<&'static str> {
@@ -499,6 +505,28 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         "activity.attempt.queue_cancelled" => format!("Se canceló una instrucción encolada para el {at}."),
         "activity.attempt.dispatch_ambiguous" => format!("No se sabe si el proveedor llegó a lanzarse para el {at}: no se relanzará."),
         "activity.attempt.queue_failed" => format!("No se pudo entregar una instrucción encolada al {at}: {}.", a.code_in("reason", queue_failure)?),
+        // Steer y Stop & Send (LXO-144): nunca el texto de la instrucción, solo el hecho y cómo acabó.
+        "activity.attempt.instruction_requested" => {
+            if a.code("mode", &INSTRUCTION_MODES)? == "steer" {
+                format!("Se pidió inyectar una instrucción en el turno en curso del {at}.")
+            } else {
+                format!("Se pidió detener el turno en curso del {at} y enviarle una instrucción.")
+            }
+        }
+        "activity.attempt.instruction_result" => {
+            let steer = a.code("mode", &INSTRUCTION_MODES)? == "steer";
+            let outcome = a.code("outcome", &INSTRUCTION_OUTCOMES)?;
+            // `reason` es opcional, pero si viene tiene que ser uno de los motivos cerrados.
+            let detail = if a.present("reason") { format!(" ({})", a.code_in("reason", queue_failure)?) } else { String::new() };
+            match (outcome, steer) {
+                ("delivered", true) => format!("Se inyectó la instrucción en el turno en curso del {at}."),
+                ("delivered", false) => format!("Se detuvo el turno en curso del {at} y se le envió la instrucción."),
+                ("failed", true) => format!("El proveedor no aceptó la instrucción para el turno en curso del {at}{detail}."),
+                ("failed", false) => format!("Se detuvo el turno en curso del {at}, pero la instrucción no llegó{detail}."),
+                ("stop_failed", _) => format!("No se pudo detener el turno en curso del {at}: no se envió la instrucción{detail}."),
+                _ => format!("El proveedor no confirmó a tiempo que el turno en curso del {at} se hubiera detenido: no se envió la instrucción."),
+            }
+        }
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
@@ -729,6 +757,8 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.queue_delivered"
         | "activity.attempt.queue_cancelled"
         | "activity.attempt.queue_failed"
+        | "activity.attempt.instruction_requested"
+        | "activity.attempt.instruction_result"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;

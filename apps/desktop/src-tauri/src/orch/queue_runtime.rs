@@ -88,29 +88,43 @@ impl QueuePort for TurnPort<'_> {
     }
 
     fn deliver(&self, attempt: &AttemptRow, request: &DeliveryRequest<'_>, cancel: &CancelToken) -> Result<QueueConfirmation, AdapterError> {
-        let gated = self.gated.ok_or_else(|| AdapterError::unavailable(Capability::Resume, "no hay un run en un fin de turno al que entregar"))?;
-        let facts = self.facts.as_ref().ok_or_else(AdapterError::session_not_found)?;
-        let session_ref = facts.session_ref.as_deref().filter(|r| !r.trim().is_empty()).ok_or_else(AdapterError::session_not_found)?;
-        let worktree = facts.worktree.as_deref().filter(|w| !w.trim().is_empty()).ok_or_else(|| AdapterError::unavailable(Capability::Resume, "la Task no tiene su worktree"))?;
-        let profile = attempt.profile.clone().or_else(|| facts.profile.clone()).ok_or_else(|| AdapterError::invalid("el Attempt no tiene un perfil de permisos"))?;
-        let handle = gated.resume(
-            ResumeRequest {
-                attempt_id: attempt.id.clone(),
-                provider_ref: ProviderRef::new(session_ref)?,
-                worktree: PathBuf::from(worktree),
-                prompt: Some(request.body.to_string()),
-                profile,
-                model: attempt.model.clone(),
-                effort: attempt.effort.clone(),
-            },
-            cancel,
-        )?;
+        let handle = self.resume_with(attempt, request.body, cancel)?;
         *self.handoff.borrow_mut() = Some(handle);
         Ok(QueueConfirmation::AdapterResult)
     }
 }
 
+impl TurnPort<'_> {
+    /// Reanuda la sesión de la Task con `body` como el turno nuevo. Lo comparten la cola (un fin de turno) y Stop & Send (tras el stop).
+    fn resume_with(&self, attempt: &AttemptRow, body: &str, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
+        let gated = self.gated.ok_or_else(|| AdapterError::unavailable(Capability::Resume, "no hay un run en un fin de turno al que entregar"))?;
+        let facts = self.facts.as_ref().ok_or_else(AdapterError::session_not_found)?;
+        let session_ref = facts.session_ref.as_deref().filter(|r| !r.trim().is_empty()).ok_or_else(AdapterError::session_not_found)?;
+        let worktree = facts.worktree.as_deref().filter(|w| !w.trim().is_empty()).ok_or_else(|| AdapterError::unavailable(Capability::Resume, "la Task no tiene su worktree"))?;
+        let profile = attempt.profile.clone().or_else(|| facts.profile.clone()).ok_or_else(|| AdapterError::invalid("el Attempt no tiene un perfil de permisos"))?;
+        gated.resume(
+            ResumeRequest {
+                attempt_id: attempt.id.clone(),
+                provider_ref: ProviderRef::new(session_ref)?,
+                worktree: PathBuf::from(worktree),
+                prompt: Some(body.to_string()),
+                profile,
+                model: attempt.model.clone(),
+                effort: attempt.effort.clone(),
+            },
+            cancel,
+        )
+    }
+}
+
 impl Core {
+    /// Stop & Send (LXO-144): el stop se confirmó; abre el turno nuevo reanudando la sesión de la Task con `instruction`. Devuelve el run
+    /// NUEVO para que el bombeo siga con él. `Err`: el adapter no la aceptó (la instrucción no llegó).
+    pub(super) fn resume_with_instruction(&self, task_id: &str, attempt_id: &str, gated: &Gated<'_>, cancel: &CancelToken, instruction: &str) -> Result<RunHandle, AdapterError> {
+        let attempt = self.attempt_row_for_resume(attempt_id).map_err(|_| AdapterError::unavailable(Capability::Resume, "no se pudo leer el Attempt"))?.ok_or_else(|| AdapterError::unavailable(Capability::Resume, "el Attempt ya no existe"))?;
+        TurnPort::at_turn_end(self, gated, task_id).resume_with(&attempt, instruction, cancel)
+    }
+
     /// El run de `attempt_id` acabó su turno: si hay instrucciones en cola, entrega la primera reanudando la sesión y devuelve el
     /// run NUEVO para que el bombeo siga con él. `None`: no había nada (o nada se pudo entregar) y el Attempt termina como siempre.
     /// Un item que falla es final y no bloquea a los demás (D3): se prueba el siguiente.

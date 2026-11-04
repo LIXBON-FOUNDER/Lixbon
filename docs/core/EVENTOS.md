@@ -894,6 +894,8 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | `attempt.queue_cancelled` (LXO-143) | 1 | state | `task`, `n`, `queue_id` | persona · agente que coordina la Task |
 | `attempt.dispatch_ambiguous` (LXO-246) | 1 | state | `task`, `n`, `from` ∈ `reserved` · `started` (de qué claim venía), `cause` ∈ `core_restart` · `start_outcome_unknown`. No hay prueba de si el proveedor llegó a lanzarse: el claim queda `ambiguous` y no se vuelve a despachar solo. Nunca dice cómo acabó la ejecución | Core |
 | `attempt.queue_failed` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `reason` ∈ `unsupported` · `environment_blocked` · `adapter_unavailable` · `adapter_error` · `attempt_ended` · `interrupted`. Levanta Attention salvo con `attempt_ended` | Core |
+| `attempt.instruction_requested` (LXO-144) | 1 | state | `task`, `n`, `request_id` (la correlación con su `attempt.instruction_result`), `mode` ∈ `steer` · `stop_and_send`, `chars` (longitud de la instrucción). **Nunca** el texto | persona · agente que coordina la Task |
+| `attempt.instruction_result` (LXO-144) | 1 | state | `task`, `n`, `request_id`, `mode`, `outcome` ∈ `delivered` · `failed` · `stop_failed` · `stop_timeout`, `reason?` ∈ los motivos cerrados de `attempt.queue_failed` (ausente si se entregó o si el stop no se confirmó). `failed` en Stop & Send = el stop se confirmó y la instrucción no llegó | persona · agente que coordina la Task |
 
 * La entidad es el **Attempt** (`entity_kind = attempt`, `entity_id = <task>-a<n>`); `run_id` y `project_id` salen de la
   fila de su Task confirmada (no hay `State` que leer). `entity_kind=attempt` ya se puede usar como filtro de `events`.

@@ -259,6 +259,15 @@ impl Core {
                     _ => super::queue_rpc::pending(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
                 }
             }
+            "attempt_steer" | "attempt_stop_and_send" => {
+                let context = authenticated_context.as_ref().ok_or("instruir a un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("instruir a un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::steer_runtime::InstructionInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de instrucción inválida".to_string())?;
+                let mode = if cmd == "attempt_steer" { crate::store::InstructionMode::Steer } else { crate::store::InstructionMode::StopAndSend };
+                super::steer_runtime::rpc(self, context, mode, &input)
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -649,7 +658,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

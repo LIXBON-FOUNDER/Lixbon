@@ -1081,7 +1081,7 @@ pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDra
 // Entidad `attempt`. NUNCA llevan el texto de la instrucción ni los ids de sus adjuntos: solo el id del item, su posición
 // y cuántos adjuntos tiene. El cuerpo es de quien lo escribió y vive en `attempt_queue`.
 
-use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
+use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
 
 /// `attempt.queued` (LXO-143): se encoló una instrucción para el Attempt. `position`: pendientes delante, contándola (1 = la
 /// siguiente en entregarse).
@@ -1142,6 +1142,55 @@ impl EventPayload for AttemptQueueCancelled {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn attempt_queue_cancelled(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptQueueCancelled { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone() })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Steer y Stop & Send (LXO-144): instrucciones a un Attempt que está ocupado, SIN pasar por la cola. Los construye `attempt_ops`;
+// los pide `steer_commands`. Entidad `attempt`. Un par `requested` -> `result` por petición, unido por `request_id` (la correlación).
+// NUNCA llevan el texto de la instrucción: solo su longitud.
+// ---------------------------------------------------------------------------------------------
+
+/// `attempt.instruction_requested` (LXO-144): el Core aceptó la petición y la va a intentar. `chars`: longitud de la instrucción.
+#[derive(Serialize)]
+pub(super) struct AttemptInstructionRequested {
+    task: String,
+    n: i64,
+    request_id: String,
+    mode: InstructionMode,
+    chars: i64,
+}
+
+impl EventPayload for AttemptInstructionRequested {
+    const KIND: &'static str = "attempt.instruction_requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_instruction_requested(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptInstructionRequested { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, chars })
+}
+
+/// `attempt.instruction_result` (LXO-144): lo que pasó con esa petición (mismo `request_id`). `reason`: por qué falló, del conjunto
+/// cerrado de la cola; ausente si se entregó o si el stop no se confirmó.
+#[derive(Serialize)]
+pub(super) struct AttemptInstructionResult {
+    task: String,
+    n: i64,
+    request_id: String,
+    mode: InstructionMode,
+    outcome: InstructionOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<QueueFailure>,
+}
+
+impl EventPayload for AttemptInstructionResult {
+    const KIND: &'static str = "attempt.instruction_result";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_instruction_result(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptInstructionResult { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, outcome, reason })
 }
 
 /// De dónde venía el claim de despacho cuando no se pudo probar su desenlace.

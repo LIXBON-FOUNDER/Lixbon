@@ -47,6 +47,9 @@ pub struct FakeAdapter {
     /// Si está, `start` / `resume` devuelven este error en lugar de lanzar.
     start_error: Mutex<Option<AdapterError>>,
     resume_error: Mutex<Option<AdapterError>>,
+    /// Si está, `interrupt` / `steer` devuelven este error (LXO-144): el stop o el steer que el proveedor rechaza.
+    interrupt_error: Mutex<Option<AdapterError>>,
+    steer_error: Mutex<Option<AdapterError>>,
 }
 
 impl FakeAdapter {
@@ -69,6 +72,8 @@ impl FakeAdapter {
             resumes: Mutex::new(vec![]),
             start_error: Mutex::new(None),
             resume_error: Mutex::new(None),
+            interrupt_error: Mutex::new(None),
+            steer_error: Mutex::new(None),
         }
     }
 
@@ -86,6 +91,14 @@ impl FakeAdapter {
 
     pub fn fail_resume_with(&self, e: Option<AdapterError>) {
         *self.resume_error.lock().unwrap() = e;
+    }
+
+    pub fn fail_interrupt_with(&self, e: Option<AdapterError>) {
+        *self.interrupt_error.lock().unwrap() = e;
+    }
+
+    pub fn fail_steer_with(&self, e: Option<AdapterError>) {
+        *self.steer_error.lock().unwrap() = e;
     }
 
     pub fn set_probe(&self, probe: ProbeResult) {
@@ -205,13 +218,20 @@ impl ProviderAdapter for FakeAdapter {
     fn interrupt(&self, run: &RunHandle) -> Result<(), AdapterError> {
         self.note("interrupt".into());
         self.known(run)?;
+        if let Some(e) = self.interrupt_error.lock().unwrap().clone() {
+            return Err(e);
+        }
         self.interrupted.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     fn steer(&self, run: &RunHandle, instruction: &str) -> Result<(), AdapterError> {
         self.note(format!("steer:{instruction}"));
-        self.known(run)
+        self.known(run)?;
+        match self.steer_error.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     fn resume(&self, req: ResumeRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
@@ -221,6 +241,7 @@ impl ProviderAdapter for FakeAdapter {
             return Err(e);
         }
         self.resumes.lock().unwrap().push(req.clone());
+        self.interrupted.store(false, Ordering::SeqCst);
         Ok(self.handle(&req.attempt_id))
     }
 }

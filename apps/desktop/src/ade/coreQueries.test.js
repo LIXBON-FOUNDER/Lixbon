@@ -115,6 +115,8 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ...['approved', 'started', 'integrated', 'queue_delivered', 'queue_cancelled', 'dispatch_ambiguous'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
   ['activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 0 }],
   ['activity.attempt.queue_failed', { task: 'task-1', n: 2, reason: 'interrupted' }],
+  ['activity.attempt.instruction_requested', { task: 'task-1', n: 2, mode: 'steer' }],
+  ['activity.attempt.instruction_result', { task: 'task-1', n: 2, mode: 'stop_and_send', outcome: 'failed' }, { reason: 'adapter_error' }],
   ['activity.attempt.rejected', { task: 'task-1', n: 1, cause: 'cancelled' }],
   ['activity.attempt.completed', { task: 'task-1', n: 1, has_summary: true }],
   ['activity.attempt.failed', { task: 'task-1', n: 1, reason: 'launch_failed', has_summary: false }],

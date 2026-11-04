@@ -44,6 +44,7 @@ use std::time::{Duration, Instant};
 use super::adapter::{redact, AdapterError, AdapterEvent, CancelToken, ErrorCode, Gated, RunOutcome};
 use super::adapter_launcher::StartedRun;
 use super::events::MutationContext;
+use super::live_run::{LiveRun, LiveSlot, SendVerdict};
 use super::mutation::Health;
 use super::state::{now_ms, Status};
 use super::Core;
@@ -60,6 +61,8 @@ type Done = Arc<(Mutex<bool>, Condvar)>;
 pub(super) struct RunControl {
     cancel: CancelToken,
     done: Done,
+    /// Lo que Steer y Stop & Send necesitan para hablar con la ejecución (LXO-144, `live_run.rs`). Vacío hasta que el bombeo arranca.
+    pub(super) live: LiveSlot,
 }
 
 /// Lo que se decide al terminar la ejecución.
@@ -99,14 +102,14 @@ struct PumpState {
 }
 
 impl Core {
-    fn adapter_runs_lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunControl>> {
+    pub(super) fn adapter_runs_lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, RunControl>> {
         self.adapter_runs.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Da de alta una ejecución viva de `task`.
     pub(super) fn register_adapter_run(&self, task: &str, cancel: CancelToken) -> Done {
         let done: Done = Arc::new((Mutex::new(false), Condvar::new()));
-        self.adapter_runs_lock().insert(task.to_string(), RunControl { cancel, done: Arc::clone(&done) });
+        self.adapter_runs_lock().insert(task.to_string(), RunControl { cancel, done: Arc::clone(&done), live: Arc::new(Mutex::new(None)) });
         done
     }
 
@@ -238,6 +241,7 @@ pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Durati
     let cancel = run.cancel.clone();
     let task = run.task_id.clone();
     let done = core.register_adapter_run(&task, cancel.clone());
+    core.set_live_run(&task, LiveRun { adapter: Arc::clone(&run.adapter), matrix: run.matrix.clone(), handle: run.handle.clone(), attempt_id: run.handle.attempt_id.clone(), pending_send: None });
     let weak = Arc::downgrade(core);
     let spawned = std::thread::Builder::new().name("adapter-run".into()).spawn(move || pump(weak, run, approval_ttl, done));
     if let Err(why) = spawned {
@@ -280,13 +284,41 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done) 
         let mut handle = handle;
         loop {
             let outcome = gated.events(&handle, &cancel, &mut sink);
-            let at_turn_end = matches!(outcome, Ok(RunOutcome::Completed { .. })) && !state.timed_out.load(Ordering::SeqCst) && !cancel.is_cancelled();
+            let alive = !state.timed_out.load(Ordering::SeqCst) && !cancel.is_cancelled();
+            // Stop & Send (LXO-144): el stop se CONFIRMA aquí, cuando `events` vuelve. Solo entonces se envía la instrucción, reanudando la
+            // sesión. Si la ejecución acabó de otra forma (falló, se canceló…) no se envía nada y se dice.
+            if let Some(core) = core.upgrade() {
+                if let Some(send) = core.take_pending_send(&task_id) {
+                    let stopped = alive && matches!(outcome, Ok(RunOutcome::Interrupted) | Ok(RunOutcome::Completed { .. }));
+                    if !stopped {
+                        send.verdict.set(SendVerdict::StopFailed);
+                        return outcome;
+                    }
+                    match core.resume_with_instruction(&task_id, &attempt, &gated, &cancel, &send.instruction) {
+                        Ok(next) => {
+                            *state.pending_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                            core.set_live_handle(&task_id, &next);
+                            handle = next;
+                            send.verdict.set(SendVerdict::Sent);
+                            continue;
+                        }
+                        Err(why) => {
+                            send.verdict.set(SendVerdict::SendFailed(super::queue_commands::failure_of(&why)));
+                            return outcome;
+                        }
+                    }
+                }
+            }
+            let at_turn_end = matches!(outcome, Ok(RunOutcome::Completed { .. })) && alive;
             if !at_turn_end {
                 return outcome;
             }
             let Some(next) = core.upgrade().and_then(|c| c.queue_next_turn(&task_id, &attempt, &gated, &cancel)) else { return outcome };
             // Turno nuevo: la espera de una respuesta del turno anterior ya no cuenta.
             *state.pending_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            if let Some(core) = core.upgrade() {
+                core.set_live_handle(&task_id, &next);
+            }
             handle = next;
         }
     }));

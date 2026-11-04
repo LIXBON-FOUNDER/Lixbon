@@ -84,6 +84,9 @@ mod attempt_retry_rpc;
 mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
+mod live_run;
+mod steer_commands;
+mod steer_runtime;
 #[cfg(test)]
 mod initial_approval_tests;
 #[cfg(test)]
@@ -98,6 +101,8 @@ mod run_pump_tests;
 mod dispatch_boot_tests;
 #[cfg(test)]
 mod attempt_e2e_tests;
+#[cfg(test)]
+mod steer_e2e_tests;
 #[cfg(test)]
 mod real_provider_tests;
 #[cfg(test)]
@@ -293,6 +298,8 @@ pub struct Core {
     launcher: Mutex<Option<Arc<dyn dispatch::Launcher>>>,
     /// Las ejecuciones por adapter que están vivas, por Task (LXO-246): cómo cancelarlas y saber que su proceso murió.
     adapter_runs: Mutex<HashMap<String, run_pump::RunControl>>,
+    /// Steer y Stop & Send (LXO-144): las peticiones ya atendidas (idempotencia) y cuánto se espera a que un stop se confirme.
+    instructions: steer_runtime::InstructionState,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -337,6 +344,7 @@ impl Default for Orch {
             provider_registry,
             launcher: Mutex::new(None),
             adapter_runs: Mutex::new(HashMap::new()),
+            instructions: steer_runtime::InstructionState::default(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

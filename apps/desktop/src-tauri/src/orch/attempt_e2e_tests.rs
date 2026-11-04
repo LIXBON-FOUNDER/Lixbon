@@ -18,14 +18,14 @@ use super::initial_approval_tests::e2e::core_with_project_at;
 use super::tx_ops::RetrySelection;
 use super::{Caller, Core};
 
-struct World {
-    core: Arc<Core>,
-    project: String,
-    adapter: Arc<FakeAdapter>,
+pub(super) struct World {
+    pub(super) core: Arc<Core>,
+    pub(super) project: String,
+    pub(super) adapter: Arc<FakeAdapter>,
 }
 
 /// Un Core persistente con un Project en un repositorio real y el lanzador real sobre UN adapter falso con guion.
-fn world(provider: &str, script: Option<Vec<Step>>) -> World {
+pub(super) fn world(provider: &str, script: Option<Vec<Step>>) -> World {
     let repo = repo_with_commit();
     let (core, _client, _ctx, project) = core_with_project_at(&repo.to_string_lossy());
     let adapter = Arc::new(if provider == "codex" {
@@ -45,11 +45,11 @@ fn world(provider: &str, script: Option<Vec<Step>>) -> World {
 
 impl World {
     /// Como Desktop: Person autenticada por el canal de la interfaz.
-    fn desktop(&self, cmd: &str, args: Value) -> Result<Value, String> {
+    pub(super) fn desktop(&self, cmd: &str, args: Value) -> Result<Value, String> {
         self.core.rpc_via(Channel::Ui, Caller::User, "", cmd, &args)
     }
 
-    fn create(&self, provider: &str, request_id: &str) -> String {
+    pub(super) fn create(&self, provider: &str, request_id: &str) -> String {
         let created = self
             .desktop(
                 "task_create",
@@ -60,17 +60,17 @@ impl World {
         created["attempt_id"].as_str().unwrap().to_string()
     }
 
-    fn approve(&self, attempt: &str) {
+    pub(super) fn approve(&self, attempt: &str) {
         assert_eq!(self.desktop("attempt_approve", json!({"attempt_id": attempt})).unwrap()["status"], "Approved");
     }
 
-    fn settled(&self, attempt: &str, status: &str) {
+    pub(super) fn settled(&self, attempt: &str, status: &str) {
         wait_until(&format!("el Attempt llega a {status}"), || row(&self.core, attempt).0 == status);
         wait_until("el claim se asienta", || row(&self.core, attempt).1 == "settled");
     }
 }
 
-fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+pub(super) fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
     let end = Instant::now() + Duration::from_secs(15);
     while !condition() {
         assert!(Instant::now() < end, "no se cumplió a tiempo: {what}");
@@ -79,7 +79,7 @@ fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
 }
 
 /// Los kinds de los Events del Attempt, en el orden en que quedaron en el log.
-fn kinds(core: &Core, attempt: &str) -> Vec<String> {
+pub(super) fn kinds(core: &Core, attempt: &str) -> Vec<String> {
     core.storage
         .with_store(|s| {
             s.read(|c| {
@@ -93,7 +93,7 @@ fn kinds(core: &Core, attempt: &str) -> Vec<String> {
 }
 
 /// (categoría, estado) de cada Attention del Attempt, en el orden en que nacieron.
-fn attention(core: &Core, attempt: &str) -> Vec<(String, String)> {
+pub(super) fn attention(core: &Core, attempt: &str) -> Vec<(String, String)> {
     core.storage
         .with_store(|s| {
             s.read(|c| {

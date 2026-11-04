@@ -42,7 +42,7 @@ use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
 use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, RetryRow, Store, StoreError, StoreResult, TaskRow};
 
-use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
+use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -112,6 +112,15 @@ pub(super) fn queue_cancelled_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItem
 
 pub(super) fn queue_failed_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_queue_failed(a, t, item, reason), ctx, at)
+}
+
+/// Los hechos de Steer y Stop & Send (LXO-144): una petición aceptada y su resultado, unidos por `request_id`.
+pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_requested(a, t, request_id, mode, chars), ctx, at)
+}
+
+pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_result(a, t, request_id, mode, outcome, reason), ctx, at)
 }
 
 /// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.
