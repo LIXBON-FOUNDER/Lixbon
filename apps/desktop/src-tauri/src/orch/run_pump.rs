@@ -208,8 +208,9 @@ impl Core {
         }
         // Quien canceló (stop, cierre de Run) pudo dejarla ya cerrada: no hay nada que decir.
         if self.lock().tasks.get(task).is_some_and(|t| t.status.is_final()) {
-            let _ = self.dispatch_settle(attempt);
+            // La cola primero: asentar el claim es lo ÚLTIMO que se hace de un Attempt, y quien lo ve asentado puede dar por cerrado todo lo demás.
             self.queue_settle(attempt);
+            let _ = self.dispatch_settle(attempt);
             return;
         }
         let applied = self.mutate_as(&MutationContext::core(), |tx| match &terminal {
@@ -222,12 +223,13 @@ impl Core {
             eprintln!("[core] no se pudo aplicar el desenlace de una ejecución: {why}");
             return;
         }
+        // Lo que seguía en la cola ya no se entregará: falla con `attempt_ended`. Va ANTES de asentar el claim: asentarlo es lo último que
+        // se hace de un Attempt, y quien lo ve asentado puede dar por cerrado todo lo demás.
+        self.queue_settle(attempt);
         // Falla cerrado: sin evidencia canónica el claim se queda como está.
         if !matches!(self.dispatch_settle(attempt), Ok(true)) {
             eprintln!("[core] el claim de una ejecución terminada no se pudo asentar");
         }
-        // Lo que seguía en la cola ya no se entregará: falla con `attempt_ended`.
-        self.queue_settle(attempt);
     }
 }
 
