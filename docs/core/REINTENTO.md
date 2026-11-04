@@ -177,7 +177,7 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 |---|---|---|
 | 1 | `Tx::request_attempt_retry` (estado en memoria) + el lanzador reutiliza el Worktree de la Task | **hecho** |
 | 2 | `attempt.retried` en la misma mutación que el Attempt nuevo (resuelve el `failed` del anterior) | **hecho** |
-| 3 | RPC `attempt_retry` (solo una Person de Desktop) y el botón Reintentar | pendiente |
+| 3 | RPC `attempt_retry` (solo una Person de Desktop) y el botón Reintentar | **hecho** |
 | 4 | `resume`: el lanzador elige `start` o `resume` (reutiliza la ProviderSession) + su RPC y botón | pendiente |
 
 ### PR 1 · lo que hace
@@ -196,6 +196,13 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 **misma mutación** que crea el Attempt: están los dos o ninguno. Es lo que resuelve la Attention `failed` del Attempt anterior
 (`acted`): sin él, tras reintentar, el fallo viejo seguiría pidiendo atención («el fallo de un Attempt anterior sigue siendo suyo»).
 
+### PR 3 · lo que hace
+
+El RPC `attempt_retry` ([TASKS.md](TASKS.md#rpc-del-reintento-attempt_retry)) valida la petición (Person de Desktop, el último Attempt, lanzador, Project y
+proveedor), llama a `Tx::request_attempt_retry` y despierta al despachador. El barrido del despachador recoge los reintentos: la
+consulta de candidatos añade a los aprobados los Attempts `n > 1` en `starting`, sin plazo, no externos y con `attempt.retried` o
+`attempt.continued`. La interfaz es el botón «Reintentar» del detalle del Attempt.
+
 ### Decisiones
 
 | # | Decisión | Descartada |
@@ -204,6 +211,8 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 | D59 | **Con el Worktree retirado o ausente en disco no se reintenta**: el Attempt nuevo se cierra `stopped` («no hay dónde reintentar»), nunca `failed` | crear uno nuevo: el proyector lo rechazaría después de crearlo en disco |
 | D60 | **El prompt de un reintento es el `spec` de la Task** (como el del primer Attempt) | un `prompt` propio por petición: necesita guardarlo en el Attempt, y entra con `resume` en el PR 4 |
 | D61 | **La procedencia del reintento vive en el evento `attempt.retried`; esta vía no escribe `attempt_retries`** | duplicarla en la tabla: ningún consumidor la lee por esta vía, y escribirla en la misma transacción obligaría a generalizar el commit idempotente de `task.create` (método y validaciones fijos). La tabla queda para el comando por el almacén hasta que se retire |
+| D62 | **El barrido recoge los reintentos por la prueba de su evento**, no por el simple hecho de ser `n > 1` sin plazo | recoger cualquier `starting` sin plazo: lanzaría lo que ninguna persona pidió. La reserva del claim ya admite las continuaciones; el barrido exige además `attempt.retried` / `attempt.continued` |
+| D63 | **El RPC no acepta perfil y nombra el Attempt que se reintenta** | aceptar `profile`: un reintento ampliaría permisos sin pasar por la política de `task_create`. Sin `from_attempt_id`: «reintenta el último» no es una petición exacta y no podría ser idempotente sin la tabla de procedencia (D61) |
 
 Límite conocido: el reintento arranca con el **proveedor limpio pero sobre los mismos archivos**: lo que dejó a medias el Attempt
 fallido sigue en el Worktree. Es consecuencia de D58.

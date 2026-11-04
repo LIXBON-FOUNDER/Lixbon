@@ -243,6 +243,24 @@ del runtime revalida el plazo durable y la evidencia canónica bajo la transacci
 aprobados. Mientras `task_create` rechace `attempt` (fase 2c-3) no puede existir un Attempt pendiente creado por el RPC, así que
 estos comandos son inertes en la práctica.
 
+### RPC del reintento (`attempt_retry`)
+
+`attempt_retry` · `{ task_id, from_attempt_id, provider?, model?, effort? }` (`deny_unknown_fields`). Es `HumanDecision`: **solo una
+Person en Desktop**. **No acepta `profile`**: el perfil se hereda del Attempt anterior, así que un reintento nunca amplía lo que el agente
+puede hacer. El módulo es `orch/attempt_retry_rpc.rs`; el cambio de estado es `Tx::request_attempt_retry`
+([REINTENTO.md](REINTENTO.md#puente-al-despachador-proyecto-de-cuatro-pr)).
+
+| caso | respuesta |
+|---|---|
+| `from_attempt_id` es el último de la Task y terminó mal (`failed`, `stopped`, `exited`) | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>" }` y se despierta al despachador |
+| ya existe el Attempt siguiente a ese | `{ "status": "Replayed", … }` con ese Attempt: repetir la petición no abre otro ni lanza de nuevo |
+| no es el último, no terminó mal, no existe, id inválido o de otra Task | error, sin cambios |
+| sin lanzador (Orquestador desactivado), sin Project o proveedor sin `start` | error ANTES de escribir nada |
+
+**Pedirlo no lanza nada:** el Attempt nuevo queda `starting` con el claim `none` y lo lanza el despachador. El barrido periódico recoge ahora,
+además de los aprobados, los Attempts `n > 1` sin plazo de aprobación que llevan `attempt.retried` / `attempt.continued` (la prueba de que una
+persona lo pidió): es también la recuperación si Lixbon cae entre pedir el reintento y despacharlo.
+
 ### Primer Attempt con `task_create` (fase 2c-3)
 
 `attempt` · `{ provider, model?, effort?, role?, profile }`. El cliente aporta solo la **selección** de ejecución; la política es
@@ -416,6 +434,10 @@ worktree) la fija el Core.
   herramientas del agente, así que **no hay «turnos»**: agrupar por turno (como en la maqueta) necesita que el Core registre eso.
   Los eventos `waiting`, `resumed`, `exited`, `integrated`, `continued`, `retried` y los de la cola, que el Core ya emite, tienen
   texto propio en lugar de «Evento desconocido».
+* **Reintentar** (`AttemptRetry`, en el detalle del Attempt): con el último Attempt en `failed`, `stopped` o `exited`, «Reintentar» pide
+  confirmación y avisa de que el intento nuevo trabaja en el **mismo worktree** (lo que dejó a medias el anterior sigue ahí). Manda
+  `attempt_retry` con la Task y el intento exactos, dice cuál es el nuevo y vuelve a leer el detalle. No se ofrece sobre un intento que ya no
+  es el último; hasta leer el historial no se muestra, para que no aparezca y desaparezca. No ofrece cambiar proveedor, modelo ni perfil.
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden
