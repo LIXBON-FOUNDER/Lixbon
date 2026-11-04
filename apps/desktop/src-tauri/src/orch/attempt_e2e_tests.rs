@@ -322,6 +322,90 @@ fn reintentar_solo_lo_pide_una_person_y_solo_de_un_attempt_que_termino_mal() {
     assert_eq!((model, profile.as_deref()), (None, Some("explorar")));
 }
 
+/// PR 3 del puente: el RPC `attempt_retry` por la entrada autenticada de Desktop. Pedirlo no lanza nada por sí mismo: despierta al
+/// despachador, que recoge el reintento en su barrido. Repetir la petición devuelve el mismo Attempt y no lanza otra vez.
+#[test]
+fn el_rpc_attempt_retry_reintenta_y_el_despachador_lo_lanza_solo_una_vez() {
+    let w = world("claude", Some(vec![Step::Output("empiezo".into()), Step::Fail(AdapterError::provider("el proveedor se cayó"))]));
+    let a1 = w.create("claude", "e2e-claude-rpc-retry");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    w.adapter.set_script(vec![Step::Output("ahora sí".into()), Step::Complete(Some("hecho".into()))]);
+
+    let out = w.desktop("attempt_retry", json!({"task_id": task, "from_attempt_id": a1})).expect("el reintento");
+    assert_eq!((out["status"].as_str(), out["attempt_id"].as_str(), out["task_id"].as_str()), (Some("Requested"), Some(a2.as_str()), Some(task.as_str())));
+    w.settled(&a2, "done");
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.retried", "attempt.started", "attempt.completed"]);
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0, "un reintento no pide aprobación");
+    assert_eq!(w.adapter.starts().len(), 2, "el proveedor se lanzó una vez por Attempt");
+
+    // Repetir la petición (doble clic, reintento de red) devuelve ese mismo Attempt y no abre otro ni lanza de nuevo.
+    let again = w.desktop("attempt_retry", json!({"task_id": task, "from_attempt_id": a1})).expect("la repetición");
+    assert_eq!((again["status"].as_str(), again["attempt_id"].as_str()), (Some("Replayed"), Some(a2.as_str())));
+    assert_eq!(event_count(&w.core, &format!("{task}-a3"), "attempt.requested"), 0);
+    assert_eq!(w.adapter.starts().len(), 2);
+}
+
+/// Lo que el RPC rechaza: no es el último, no terminó mal, un perfil, un agente, y sin lanzador. Nada de eso crea un Attempt.
+#[test]
+fn el_rpc_attempt_retry_rechaza_lo_que_no_debe_y_no_crea_nada() {
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let a1 = w.create("claude", "e2e-claude-rpc-retry-rechazos");
+    w.approve(&a1);
+    wait_until("el Attempt corre", || row(&w.core, &a1).0 == "running");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    let retry = |args: Value| w.desktop("attempt_retry", args);
+    let creados = || event_count(&w.core, &a2, "attempt.requested");
+
+    // En marcha no se reintenta.
+    let err = retry(json!({"task_id": task, "from_attempt_id": a1})).unwrap_err();
+    assert!(err.contains("terminó mal"), "{err}");
+    // Un Attempt que no es el último, uno de otra Task, un id mal formado.
+    assert!(retry(json!({"task_id": task, "from_attempt_id": format!("{task}-a7")})).unwrap_err().contains("último"));
+    assert!(retry(json!({"task_id": task, "from_attempt_id": "otra-a1"})).unwrap_err().contains("no es de la Task"));
+    assert!(retry(json!({"task_id": task, "from_attempt_id": "basura"})).is_err());
+
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    w.desktop("stop", json!({"task": task})).expect("stop");
+    w.settled(&a1, "stopped");
+    // Con el Attempt detenido, tampoco con un perfil (el perfil se hereda: un reintento nunca amplía permisos) ni con valores vacíos.
+    assert!(retry(json!({"task_id": task, "from_attempt_id": a1, "profile": "autonomia_amplia"})).is_err());
+    assert!(retry(json!({"task_id": task, "from_attempt_id": a1, "model": "  "})).is_err());
+    // Un agente no reintenta: es una decisión de la persona.
+    assert!(w.core.rpc(Caller::Agent(Some(task.clone())), "", "attempt_retry", &json!({"task_id": task, "from_attempt_id": a1})).is_err());
+    // Sin lanzador (Orquestador desactivado) se dice y no se escribe nada.
+    let launcher = w.core.launcher.lock().unwrap().take();
+    let err = retry(json!({"task_id": task, "from_attempt_id": a1})).unwrap_err();
+    assert!(err.contains("lifecycle de lanzamiento verificado"), "{err}");
+    *w.core.launcher.lock().unwrap() = launcher;
+    assert_eq!(creados(), 0, "ninguna petición rechazada crea un Attempt");
+}
+
+/// Si Lixbon cae entre pedir el reintento y despacharlo, el barrido periódico lo recoge (lleva `attempt.retried`): no se queda
+/// `starting` para siempre.
+#[test]
+fn el_barrido_recoge_un_reintento_que_nadie_despacho() {
+    let w = world("claude", Some(vec![Step::Fail(AdapterError::provider("el proveedor se cayó"))]));
+    let a1 = w.create("claude", "e2e-claude-barrido-reintento");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    w.adapter.set_script(vec![Step::Output("ahora sí".into()), Step::Complete(Some("hecho".into()))]);
+
+    // La petición confirma el Attempt y NADIE despierta al despachador.
+    let person = w.core.desktop_mutation_context().unwrap();
+    w.core.mutate_as(&person, |tx| tx.request_attempt_retry(&task, &RetrySelection::default())).unwrap();
+    assert_eq!(row(&w.core, &a2), ("starting".into(), "none".into(), None));
+
+    w.core.dispatch_waiting_approved();
+    w.settled(&a2, "done");
+    assert_eq!(w.adapter.starts().len(), 2);
+}
+
 /// El botón «Detener» del ADE llama al RPC `stop` con la Task del intento: la entrada de Desktop, no `kill_term` directo.
 #[test]
 fn detener_por_el_rpc_de_desktop_deja_el_attempt_stopped_y_el_claim_asentado() {

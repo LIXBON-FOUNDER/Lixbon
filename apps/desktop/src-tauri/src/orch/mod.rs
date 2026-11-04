@@ -80,6 +80,7 @@ mod worktree_provision;
 mod run_pump;
 mod adapter_launcher;
 mod initial_approval_rpc;
+mod attempt_retry_rpc;
 #[cfg(test)]
 mod initial_approval_tests;
 #[cfg(test)]

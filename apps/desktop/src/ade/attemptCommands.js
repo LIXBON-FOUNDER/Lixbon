@@ -22,7 +22,9 @@ export function newRequestId() {
 
 /** Mensajes del Core que la persona puede resolver, en lenguaje llano; el resto se muestra tal cual. */
 const KNOWN_ERRORS = [
-  [/requiere el lifecycle de lanzamiento verificado/i, 'El Orquestador está desactivado: actívalo en Ajustes → Orquestador para crear un intento.'],
+  [/requiere el lifecycle de lanzamiento verificado/i, 'El Orquestador está desactivado: actívalo en Ajustes → Orquestador para lanzar un intento.'],
+  [/terminó mal/i, 'Solo se reintenta un intento que terminó mal (falló, se detuvo o se cerró).'],
+  [/solo se reintenta el último/i, 'Hay un intento más reciente: reintenta ese.'],
   [/venci/i, 'La aprobación venció: el intento se detuvo sin ejecutarse. Crea uno nuevo.'],
   [/ya fue aprobado/i, 'Este intento ya fue aprobado.'],
   [/ya fue rechazado/i, 'Este intento ya fue rechazado.'],
@@ -82,3 +84,10 @@ export const answerQuestion = (questionId, answer) => call('reply', { question: 
  * proceso no se pudo matar NO la declara detenida y devuelve el error. Devuelve `{ task, status: 'stopped' }`.
  */
 export const stopTask = (taskId) => call('stop', { task: taskId });
+
+/**
+ * Pide un intento limpio para la Task (`attempt_retry`): el Core crea el siguiente Attempt y lo lanza por el mismo camino que al
+ * primero. Hay que nombrar el Attempt que se reintenta (el último): repetir la petición devuelve ese mismo reintento
+ * (`Replayed`) en vez de abrir otro. No acepta perfil: se hereda del anterior. Devuelve `{ status, task_id, attempt_id }`.
+ */
+export const retryAttempt = (taskId, fromAttemptId) => call('attempt_retry', { task_id: taskId, from_attempt_id: fromAttemptId });

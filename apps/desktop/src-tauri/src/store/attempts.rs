@@ -1212,6 +1212,31 @@ impl Store {
                     }
                 }
             }
+            // Un reintento o una continuación (`n > 1`) nace sin aprobación: la petición de la persona es la decisión, y la
+            // reserva del claim ya lo admite. Solo se recoge con el evento que prueba esa petición (`attempt.retried` /
+            // `attempt.continued`): un Attempt `starting` sin plazo y sin ese evento nunca se lanza por su cuenta.
+            // Es también la recuperación si Lixbon cayó entre pedir el reintento y despacharlo.
+            if approved.len() < limit {
+                let mut stmt = conn.prepare(
+                    "SELECT a.id FROM attempts a
+                     JOIN tasks t ON t.id=a.task_id
+                     JOIN runs r ON r.id=t.run_id
+                     JOIN projects p ON p.id=t.project_id
+                     WHERE a.origin='core' AND a.status='starting' AND a.dispatch_claim='none'
+                       AND a.n > 1 AND a.initial_approval_deadline IS NULL AND a.external = 0
+                       AND EXISTS (SELECT 1 FROM events e WHERE e.entity_kind='attempt' AND e.entity_id=a.id
+                                     AND e.kind IN ('attempt.retried', 'attempt.continued'))
+                       AND t.intent='open' AND r.closed=0 AND p.state='active'
+                     ORDER BY a.created_at, a.id",
+                )?;
+                let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+                for id in rows {
+                    approved.push(id?);
+                    if approved.len() == limit {
+                        break;
+                    }
+                }
+            }
             Ok(approved)
         })
     }
