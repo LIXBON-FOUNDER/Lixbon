@@ -463,6 +463,11 @@ worktree) la fija el Core.
   modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
   salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
   El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
+* **Comparar** (`AttemptCompare`; LXO-146/154, [COMPARE.md](COMPARE.md)): de 2 a 4 intentos en una tabla accesible (pie, columnas por intento, filas con nombre; la región tiene foco de
+  teclado y se desplaza en horizontal con pantallas estrechas). Se llega desde el historial (casillas por intento y «Comparar») o desde la procedencia («Comparar con el origen» /
+  «con sus bifurcaciones»). Cada dato lleva su procedencia con glifo, texto y forma de borde distintos —`✓ Verificado por el Core`, `⚠ Lo dice el agente`, `? Sin dato` con su
+  motivo—, y lo que falta nunca se pinta como cero ni como fallo. Muestra estado, proveedor/modelo, host, duración, commit base → resultado, archivos cambiados (con el recorte de
+  un diff grande), resumen, artefactos, pruebas, revisión y los solapes entre intentos. Es solo lectura: no puntúa, no elige ganador, no integra, y abrir un intento lleva a su detalle.
 * **Instrucciones en cola** (`AttemptQueue`, en el detalle del Attempt; LXO-151/152): con el intento `running`, un compositor con tres modos explícitos: **Encolar**
   (por defecto; Enter encola, Shift+Enter salta de línea; se entrega en el siguiente turno, nunca en mitad del actual; exige `resume`), **Steer** (inyecta en el turno
   en curso; exige `steer`) y **Detener y enviar** (interrumpe el turno y envía como turno nuevo; exige `interrupt` y `resume`, y pide confirmación). El modo activo

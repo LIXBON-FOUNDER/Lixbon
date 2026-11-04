@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { attemptStatusInfo } from './adeLabels';
+import { AttemptCompare } from './AttemptCompare';
 import { AttemptFork } from './AttemptFork';
 import { StatusText } from './CoreModelNotice';
+import { MAX_COMPARED } from './compareContract';
 import { useCoreQuery } from './useCoreQuery';
 
 /**
@@ -18,6 +21,10 @@ export function AttemptLineage({ attempt, onOpenAttempt, active = true }) {
   const origin = lineage?.forked_from ?? null;
   const forks = lineage?.forks ?? [];
   const open = (taskId, attemptId) => () => onOpenAttempt?.({ taskId, attemptId });
+  // LXO-154: comparar este intento con su origen o con sus bifurcaciones (una familia de Forks). Solo lectura.
+  const [comparing, setComparing] = useState(null);
+  const withForks = [attempt?.id, ...forks.map((f) => f.attempt_id)].slice(0, MAX_COMPARED);
+  const canCompare = Boolean(origin) || forks.length > 0;
 
   return (
     <div className="ade-lineage" data-testid="attempt-lineage">
@@ -49,6 +56,20 @@ export function AttemptLineage({ attempt, onOpenAttempt, active = true }) {
           </ul>
         </>
       )}
+      {canCompare && (
+        <div className="nat__actions">
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => setComparing(origin ? [origin.attempt_id, attempt.id] : withForks)}
+            data-testid="attempt-lineage-compare"
+          >
+            {origin ? 'Comparar con el origen' : 'Comparar con sus bifurcaciones'}
+          </button>
+          {!origin && forks.length + 1 > MAX_COMPARED && <span className="nat__hint">Se comparan este intento y las {MAX_COMPARED - 1} primeras bifurcaciones.</span>}
+        </div>
+      )}
+      {comparing && <AttemptCompare attemptIds={comparing} active={active} onClose={() => setComparing(null)} onOpenAttempt={onOpenAttempt} />}
       <AttemptFork attempt={attempt} onForked={state.retry} onOpenAttempt={onOpenAttempt} active={active} />
     </div>
   );

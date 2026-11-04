@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { COPY, attemptStatusInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AttemptCompare } from './AttemptCompare';
 import { attemptDuration, attemptTime } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
+import { MAX_COMPARED, MIN_COMPARED } from './compareContract';
 import { useCoreQuery } from './useCoreQuery';
 
 /**
@@ -13,6 +16,10 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
   const enabled = Boolean(active && taskId && coreModel?.vNext);
   const state = useCoreQuery('attempts_by_task', { task_id: taskId }, { enabled });
   const items = Array.isArray(state.data?.items) ? [...state.data.items].sort((a, b) => a.n - b.n) : null;
+  // LXO-154: comparar 2–4 intentos de la Task. Elegirlos no cambia nada: solo se piden al Core al pulsar «Comparar».
+  const [picked, setPicked] = useState([]);
+  const [comparing, setComparing] = useState(null);
+  const toggle = (id) => setPicked((now) => (now.includes(id) ? now.filter((x) => x !== id) : now.length < MAX_COMPARED ? [...now, id] : now));
   return (
     <section className="ade-attempts" aria-label={COPY.attemptHistory} data-testid="attempt-history">
       <h3 className="ssec__label">{COPY.attemptHistory}</h3>
@@ -24,6 +31,7 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
         items.length === 0 ? (
           <p className="ade-attempts__state ade-attempts__state--neutral">{COPY.noAttempts}</p>
         ) : (
+          <>
           <ol className="ade-attempts__list">
             {items.map((attempt) => {
               const time = attemptTime(attempt);
@@ -31,6 +39,17 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
               const selected = attempt.id === selectedAttemptId;
               return (
                 <li key={attempt.id} className={`ade-attempts__item${selected ? ' is-selected' : ''}`} data-attempt-id={attempt.id}>
+                  {items.length >= MIN_COMPARED && (
+                    <input
+                      type="checkbox"
+                      className="ade-attempts__pick"
+                      aria-label={`Comparar el intento #${attempt.n}`}
+                      checked={picked.includes(attempt.id)}
+                      disabled={!picked.includes(attempt.id) && picked.length >= MAX_COMPARED}
+                      onChange={() => toggle(attempt.id)}
+                      data-testid={`pick-${attempt.id}`}
+                    />
+                  )}
                   <button type="button" className="ade-attempts__open" aria-current={selected ? 'true' : undefined} onClick={() => onSelectAttempt?.(attempt.id)}>
                     <StatusText info={attemptStatusInfo(attempt.status)} prefix={`Intento #${attempt.n} · `} />
                   </button>
@@ -47,6 +66,29 @@ export function AttemptHistory({ taskId, coreModel, selectedAttemptId = null, on
               );
             })}
           </ol>
+          {items.length >= MIN_COMPARED && (
+            <div className="nat__actions" data-testid="attempt-compare-actions">
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={picked.length < MIN_COMPARED}
+                onClick={() => setComparing([...picked])}
+                data-testid="attempt-compare-open"
+              >
+                Comparar{picked.length ? ` (${picked.length})` : ''}
+              </button>
+              <span className="nat__hint">Elige de {MIN_COMPARED} a {MAX_COMPARED} intentos. Comparar no cambia nada.</span>
+            </div>
+          )}
+          {comparing && (
+            <AttemptCompare
+              attemptIds={comparing}
+              active={active}
+              onClose={() => setComparing(null)}
+              onOpenAttempt={({ attemptId }) => onSelectAttempt?.(attemptId)}
+            />
+          )}
+          </>
         )
       ) : state.error ? (
         <CoreModelNotice error={state.error} onRetry={state.retry} onBack={onBack} />
