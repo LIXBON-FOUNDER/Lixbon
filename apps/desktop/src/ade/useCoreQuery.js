@@ -60,6 +60,7 @@ function coreArgs(query, args) {
   if (query === 'attempt_proof_pack') return { attemptId: args.attempt_id };
   if (query === 'attempt_integration_preview') return { attemptId: args.attempt_id };
   if (query === 'resource_inspect') return { taskId: args.task_id };
+  if (query === 'task_race_status') return { raceId: args.race_id, sourceAttemptId: args.source_attempt_id };
   if (query === 'policy_effective') return { projectId: args.project_id, attemptId: args.attempt_id, preview: args.preview };
   if (query === 'task_detail') return { projectId: args.project_id, taskId: args.task_id };
   // Sin caída silenciosa: una query sin traducción explícita es un error, no un `task_detail`.

@@ -22,7 +22,7 @@ const OUTCOMES = {
 };
 
 /** ¿El paquete revisado sale de este intento? El Core lo vuelve a comprobar; aquí solo se evita pedir lo que se va a rechazar. */
-const packageIsFromAttempt = (response, attempt) => response?.status === 'valid'
+export const packageIsFromAttempt = (response, attempt) => response?.status === 'valid'
   && response.package?.source?.attempt_id === attempt.id
   && response.package?.source?.task_id === attempt.task_id;
 
@@ -198,7 +198,7 @@ export function AttemptFork({ attempt, onForked, onOpenAttempt, active = true })
   );
 }
 
-function PackageReview({ preview, attempt }) {
+export function PackageReview({ preview, attempt }) {
   if (preview.status === 'idle') return <p className="nat__hint" data-testid="attempt-fork-package-pending">Revisa el paquete antes de bifurcar: el Core lo verifica y comprueba que sale de este intento.</p>;
   if (preview.status === 'loading') return <p role="status">Revisando el paquete…</p>;
   if (preview.status === 'error') {

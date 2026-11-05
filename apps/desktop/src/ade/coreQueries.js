@@ -19,6 +19,7 @@ import { INTEGRATION_QUERY_SPECS } from './integrationContract';
 import { PROOF_PACK_QUERY_SPECS } from './proofPackContract';
 import { RESOURCE_QUERY_SPECS } from './resourceActionsContract';
 import { AUTONOMY_QUERY_SPECS } from './autonomyContract';
+import { RACE_QUERY_SPECS } from './raceContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
@@ -679,6 +680,8 @@ const QUERY_SPECS = Object.freeze({
   ...RESOURCE_QUERY_SPECS,
   // La policy de autonomía efectiva de quien pregunta, con el origen de cada nivel (LXO-209/210).
   ...AUTONOMY_QUERY_SPECS,
+  // El estado de un Race: sus candidatos (también los fallidos) y lo que se puede comparar y cancelar (LXO-215/216).
+  ...RACE_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

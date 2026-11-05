@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { attemptStatusInfo } from './adeLabels';
 import { AttemptCompare } from './AttemptCompare';
 import { AttemptFork } from './AttemptFork';
+import { AttemptRace } from './AttemptRace';
 import { StatusText } from './CoreModelNotice';
 import { MAX_COMPARED } from './compareContract';
 import { useCoreQuery } from './useCoreQuery';
@@ -71,6 +72,8 @@ export function AttemptLineage({ attempt, onOpenAttempt, active = true }) {
       )}
       {comparing && <AttemptCompare attemptIds={comparing} active={active} onClose={() => setComparing(null)} onOpenAttempt={onOpenAttempt} />}
       <AttemptFork attempt={attempt} onForked={state.retry} onOpenAttempt={onOpenAttempt} active={active} />
+      {/* Race (LXO-216): varios candidatos comparables a la vez; cerrado hasta que se pide. */}
+      <AttemptRace attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />
     </div>
   );
 }

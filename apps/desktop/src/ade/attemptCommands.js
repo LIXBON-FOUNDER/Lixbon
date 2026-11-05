@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { validateRace } from './raceContract';
 
 /**
  * LXO-141 · Las ÚNICAS escrituras del ADE sobre el modelo Task/Attempt: crear una Task con su primer Attempt y decidir su
@@ -22,6 +23,11 @@ export function newRequestId() {
 
 /** Mensajes del Core que la persona puede resolver, en lenguaje llano; el resto se muestra tal cual. */
 const KNOWN_ERRORS = [
+  // Race (LXO-215/216).
+  [/race_concurrency_limit/i, 'Hay demasiadas tareas sin terminar: termina o cancela alguna antes de lanzar otro candidato.'],
+  [/race_candidate_not_found/i, 'Ese intento no es un candidato lanzado de este Race.'],
+  [/race_not_found/i, 'Ese Race ya no existe.'],
+  [/race_invalid_request/i, 'El Race no es válido: lleva de 2 a 4 candidatos con datos válidos.'],
   // Policy de autonomía (LXO-209/210): los códigos son del Core; el texto, de la interfaz.
   [/policy_stale/i, 'La policy cambió mientras editabas: se recargó. Revisa y vuelve a guardar.'],
   [/policy_below_floor/i, 'Esa acción nunca baja de «pedir confirmación»: ya la exige y una policy no la exime.'],
@@ -250,3 +256,37 @@ export const changePolicy = ({ scope, category, level = null, expectedRevision, 
   expected_revision: expectedRevision,
   ...(confirm ? { confirm: true } : {}),
 });
+
+/**
+ * Lanza un Race (`task_race`): de 2 a 4 candidatos comparables que salen del mismo intento (y del mismo paquete, si lo hay). Cada candidato es un Fork
+ * real, pendiente de tu aprobación. `requestId` es la clave de idempotencia: repetir la MISMA petición no duplica a los ya creados y reintenta los
+ * fallidos. Los campos vacíos de cada candidato se omiten (se heredan). No acepta host, worktree ni perfil.
+ * Devuelve el estado del Race (`task_race_status`) más `status: 'Requested' | 'Retried'` y `replayed`.
+ */
+export async function startRace({ requestId, sourceAttemptId, candidates, package: contextPackage, confirm = false }) {
+  const list = candidates.map((c) => {
+    const out = {};
+    for (const key of ['provider', 'model', 'effort', 'role', 'title']) {
+      const text = typeof c?.[key] === 'string' ? c[key].trim() : '';
+      if (text) out[key] = text;
+    }
+    return out;
+  });
+  const args = { request_id: requestId, source_attempt_id: sourceAttemptId, candidates: list };
+  if (typeof contextPackage === 'string' && contextPackage.trim()) args.package = contextPackage;
+  if (confirm) args.confirm = true;
+  const response = await call('task_race', args);
+  validateRace(response, { allowExtra: true });
+  return response;
+}
+
+/**
+ * Cancela UN candidato o todos los que no han terminado (`task_race_cancel`). Siempre explícito: nada se cancela porque otro termine. Un candidato
+ * pendiente de aprobación se rechaza y uno en marcha se detiene. Devuelve `{ status: 'Cancelled', race_id, results, race }`.
+ */
+export async function cancelRace(raceId, attemptId = null) {
+  const response = await call('task_race_cancel', { race_id: raceId, ...(attemptId ? { attempt_id: attemptId } : {}) });
+  if (!response || !Array.isArray(response.results)) throw new Error('ade_command_invalid_response: task_race_cancel no devolvió los resultados');
+  validateRace(response.race);
+  return response;
+}
