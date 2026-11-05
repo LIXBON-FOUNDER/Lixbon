@@ -22,6 +22,16 @@ export function newRequestId() {
 
 /** Mensajes del Core que la persona puede resolver, en lenguaje llano; el resto se muestra tal cual. */
 const KNOWN_ERRORS = [
+  // Policy de autonomía (LXO-209/210): los códigos son del Core; el texto, de la interfaz.
+  [/policy_stale/i, 'La policy cambió mientras editabas: se recargó. Revisa y vuelve a guardar.'],
+  [/policy_below_floor/i, 'Esa acción nunca baja de «pedir confirmación»: ya la exige y una policy no la exime.'],
+  [/policy_cannot_loosen/i, 'Un override de proyecto o intento solo puede endurecer: para dar más autonomía cámbialo en el ámbito global.'],
+  [/policy_confirm_required/i, 'La policy pide una confirmación explícita para esto.'],
+  [/policy_out_of_band_required/i, 'La policy exige una confirmación fuera de banda que todavía no existe: no se puede hacer desde aquí.'],
+  [/policy_denied/i, 'La policy niega esta acción.'],
+  [/policy_unavailable/i, 'Core no puede leer o escribir la policy ahora: no se hace nada hasta poder comprobarla.'],
+  [/policy_forbidden/i, 'Solo una persona en Desktop puede cambiar la policy.'],
+  [/policy_not_found/i, 'El proyecto o el intento ya no existe.'],
   [/requiere el lifecycle de lanzamiento verificado/i, 'El Orquestador está desactivado: actívalo en Ajustes → Orquestador para lanzar un intento.'],
   [/terminó mal/i, 'Solo se reintenta un intento que terminó mal (falló, se detuvo o se cerró).'],
   [/solo se reintenta el último/i, 'Hay un intento más reciente: reintenta ese.'],
@@ -226,4 +236,17 @@ export const deleteWorktree = (taskId, discardUncommitted = false) => call('reso
   task_id: taskId,
   confirm: true,
   ...(discardUncommitted ? { discard_uncommitted: true } : {}),
+});
+
+/**
+ * Fija el nivel de una acción en un ámbito (`policy_set`) o vuelve a heredar (`policy_reset`, `level: null`). `expectedRevision` es la revisión que la
+ * interfaz leyó: si la policy cambió, el Core responde `policy_stale` y no pisa nada. Aflojar la restricción exige `confirm: true`.
+ * Devuelve `{ status: 'Changed' | 'Unchanged', revision }`.
+ */
+export const changePolicy = ({ scope, category, level = null, expectedRevision, confirm = false }) => call(level === null ? 'policy_reset' : 'policy_set', {
+  scope,
+  category,
+  ...(level === null ? {} : { level }),
+  expected_revision: expectedRevision,
+  ...(confirm ? { confirm: true } : {}),
 });

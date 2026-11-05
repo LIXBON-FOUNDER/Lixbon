@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AutonomyEditor } from './AutonomyEditor';
 import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
@@ -156,6 +157,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
 
+        {/* Autonomía de ESTE intento (LXO-210): cerrada hasta que se pide. */}
+        <AutonomyEditor attemptId={attempt.id} />
         <AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active} />
       </>
     );

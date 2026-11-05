@@ -446,10 +446,11 @@ describe('ProjectView · navegación solo por IDs duraderos', () => {
     expect(Object.values(cb).every((f) => f.mock.calls.length === 0)).toBe(true);
   });
 
-  it('sin callbacks no hay botones de navegación (solo el filtro)', () => {
+  it('sin callbacks no hay botones de navegación (solo el filtro y «Autonomía…», que no navega)', () => {
     view();
+    // LXO-210: «Autonomía…» abre el editor de policy; no navega a ningún sitio y no consulta nada hasta pulsarlo.
     const buttons = screen.queryAllByRole('button', { hidden: true });
-    expect(buttons.length).toBe(0);
+    expect(buttons.map((b) => b.textContent)).toEqual(['Autonomía…']);
     expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 
@@ -679,9 +680,11 @@ describe('ProjectView · solo lectura', () => {
 
   it('los únicos controles interactivos sin callbacks son los tres radios del filtro', () => {
     const { container } = view();
-    const interactive = container.querySelectorAll('button, [tabindex]');
-    expect([...interactive].every((el) => el.getAttribute('role') === 'radio')).toBe(true);
+    // LXO-210: además, el botón «Autonomía…» (abre el editor de policy; no navega).
+    const interactive = [...container.querySelectorAll('button, [tabindex]')].filter((el) => el.getAttribute('data-testid') !== 'autonomy-open');
+    expect(interactive.every((el) => el.getAttribute('role') === 'radio')).toBe(true);
     expect(interactive).toHaveLength(3);
+    expect(container.querySelectorAll('[data-testid="autonomy-open"]')).toHaveLength(1);
   });
 
   it('el filtro es estado de vista: no llama a ningún callback de dominio', () => {

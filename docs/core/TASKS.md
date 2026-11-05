@@ -467,6 +467,9 @@ worktree) la fija el Core.
   estado de git (en disco / ya no está, limpio o con cambios sin commit, rama integrada o no, proceso) y ofrece «Limpiar (integrado)» y «Quitar el worktree (conserva la rama)». Lo que
   el Core no deja sale desactivado con su motivo (solo lectura, tarea en marcha, estado desconocido, cambios sin commit, sin integrar); los cambios sin commit solo se pierden si se
   marca descartarlos. Tras actuar se vuelve a leer del Core y se refresca el inventario. Los candidatos externos u huérfanos no tienen acciones (no hay Adopt).
+* **Autonomía** (`AutonomyEditor`, en el Project y en el detalle del Attempt; LXO-209/210, [POLICY.md](POLICY.md)): «Autonomía…» muestra la policy efectiva con el ORIGEN de cada nivel (base del actor, global, proyecto, intento o mínimo de seguridad)
+  y qué sobrescribe el ámbito elegido (heredado y sobrescrito nunca se confunden). Antes de guardar se previsualiza el efecto con el Core (`policy_effective` + `preview`, sin escribir); dar MÁS autonomía es explícito y pide una confirmación aparte;
+  `proyecto` e `intento` solo endurecen (las opciones que el Core rechazaría salen desactivadas con su motivo). Una revisión vieja (`policy_stale`) no pisa nada: avisa y recarga. Quien no es una Person de Desktop solo lee. Tras guardar se vuelve a leer del Core y el cambio queda en Activity.
 * **Integración** (`AttemptIntegration`, tras el Proof Pack; LXO-148/156, [INTEGRACION.md](INTEGRACION.md)): para un intento terminado, muestra la revisión (el HEAD aceptado), el
   destino (rama y HEAD del proyecto, y si se movió fuera de Lixbon o tiene cambios sin commit) y el estado (integrado / PR). «Fusionar en <rama>» y «Publicar PR» salen
   desactivados con su motivo en llano si el Core no los deja, piden confirmación mostrando el destino y mandan EXACTAMENTE el HEAD visto; un destino movido exige aceptar el
