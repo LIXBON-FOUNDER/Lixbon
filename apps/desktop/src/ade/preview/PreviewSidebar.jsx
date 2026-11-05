@@ -10,6 +10,8 @@ import { usePreviewStore, attemptsOfTask } from './previewStore';
 import { PROJECTS } from './previewData';
 import { Mark, AttnFlag, Agent, I } from './PreviewUi';
 import { stateLabel, agentName, isRemote, hostOf, meta, attemptName } from './previewVocab';
+import { pulseOf, LINE_BUDGET } from './pulseModel';
+import { WorkspacePulse } from './WorkspacePulse';
 
 const CHIPS = [
   { id: 'attention', label: 'Espera tu decisión' },
@@ -34,13 +36,15 @@ function AttemptRow({ a, task, single, selected }) {
   const s = usePreviewStore();
   const attn = s.attention.filter((x) => x.attemptId === a.id);
   const m = meta(a);
+  // Pulse (LXO-218): resume en la segunda línea; el estado sigue primero y la Attention conserva su marcador de la primera.
+  const pulse = s.prefs.pulse ? pulseOf(a, { single: Boolean(single), budget: LINE_BUDGET - stateLabel(a).length }) : null;
   return (
     <button
       type="button"
       className={`pv-row ${single ? 'pv-row--task' : 'pv-row--att'}${selected ? ' is-sel' : ''}`}
       onClick={() => s.select(a.id)}
       aria-current={selected ? 'true' : undefined}
-      title={`${task.title} · ${attemptName(a)}\n${stateLabel(a)}\n${a.branch || 'sin worktree'} · ${hostOf(a.host).name}`}
+      title={`${task.title} · ${attemptName(a)}\n${stateLabel(a)}\n${a.branch || 'sin worktree'} · ${hostOf(a.host).name}${pulse?.label ? `\n${pulse.label}` : ''}`}
       data-attempt-id={a.id}
     >
       <span className="pv-row__lead"><Mark attempt={a} size={14} /></span>
@@ -52,10 +56,14 @@ function AttemptRow({ a, task, single, selected }) {
         </span>
         <span className="pv-row__l2">
           <span className={`pv-tone-${m.tone} pv-row__state`}>{stateLabel(a)}</span>
-          {single && <><span className="pv-sep">·</span><span>{providerName(a.provider)}</span></>}
-          {a.state === 'working' && a.minutes > 0 && <><span className="pv-sep">·</span><span>{a.minutes} min</span></>}
-          {a.origin !== 'ADE' && <><span className="pv-sep">·</span><span title={`Empezó desde ${a.origin}`}>{a.origin}</span></>}
-          {(isRemote(a) || a.state === 'offline') && <><span className="pv-sep">·</span><span>{hostOf(a.host).name}</span></>}
+          {pulse ? <WorkspacePulse pulse={pulse} /> : (
+            <>
+              {single && <><span className="pv-sep">·</span><span>{providerName(a.provider)}</span></>}
+              {a.state === 'working' && a.minutes > 0 && <><span className="pv-sep">·</span><span>{a.minutes} min</span></>}
+              {a.origin !== 'ADE' && <><span className="pv-sep">·</span><span title={`Empezó desde ${a.origin}`}>{a.origin}</span></>}
+              {(isRemote(a) || a.state === 'offline') && <><span className="pv-sep">·</span><span>{hostOf(a.host).name}</span></>}
+            </>
+          )}
         </span>
       </span>
     </button>
@@ -153,6 +161,9 @@ export function PreviewSidebar() {
             {CHIPS.map((ch) => (
               <button key={ch.id} type="button" className={`pv-chipbtn${chips.includes(ch.id) ? ' is-on' : ''}`} aria-pressed={chips.includes(ch.id)} onClick={() => s.setFilter({ chips: chips.includes(ch.id) ? chips.filter((x) => x !== ch.id) : [...chips, ch.id] })}>{ch.label}</button>
             ))}
+          </div>
+          <div className="pv-wrap">
+            <button type="button" className={`pv-chipbtn${s.prefs.pulse ? ' is-on' : ''}`} aria-pressed={Boolean(s.prefs.pulse)} onClick={() => s.setPref({ pulse: !s.prefs.pulse })} title="Resumen compacto de cada fila: duración, archivos, pruebas y procedencia">Pulse</button>
           </div>
           <div className="pv-wrap">
             {s.hosts.map((h) => (

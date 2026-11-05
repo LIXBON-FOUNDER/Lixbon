@@ -37,12 +37,13 @@
 use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
 // Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
 pub(super) use super::event_kinds::DispatchAmbiguityCause;
+pub(super) use super::event_kinds::PolicyDirection;
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
 use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, RetryRow, Store, StoreError, StoreResult, TaskRow};
 
-use crate::store::{QueueConfirmation, QueueFailure, QueueItemRow};
+use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -96,6 +97,12 @@ pub(super) fn retried_fact(a: &AttemptRow, r: &RetryRow, t: &TaskRow, ctx: &Muta
     finalize_single(event_kinds::attempt_retried(a, r, t), ctx, at)
 }
 
+/// El hecho de un cambio de policy (LXO-209). Vive aquí, con los demás hechos, para que `policy.rs` no importe el catálogo de eventos.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn policy_changed_fact(scope: &str, scope_id: Option<&str>, project_id: Option<&str>, category: &str, from: Option<&str>, to: Option<&str>, direction: PolicyDirection, revision: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::policy_changed(scope, scope_id, project_id, category, from, to, direction, revision), ctx, at)
+}
+
 /// Los hechos de la Pending Queue (LXO-143), construidos aquí para que `queue_commands` no importe el catálogo de eventos.
 /// Cada uno se confirma en la transacción del almacén (`store::queue`) con la hora de quien llama.
 pub(super) fn queued_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, position: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
@@ -112,6 +119,15 @@ pub(super) fn queue_cancelled_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItem
 
 pub(super) fn queue_failed_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_queue_failed(a, t, item, reason), ctx, at)
+}
+
+/// Los hechos de Steer y Stop & Send (LXO-144): una petición aceptada y su resultado, unidos por `request_id`.
+pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_requested(a, t, request_id, mode, chars), ctx, at)
+}
+
+pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_result(a, t, request_id, mode, outcome, reason), ctx, at)
 }
 
 /// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.

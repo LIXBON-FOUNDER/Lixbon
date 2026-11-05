@@ -170,7 +170,7 @@ Los tres son solo de una Person de Desktop (`HumanDecision`) y `deny_unknown_fie
 |---|---|---|
 | `attempt_queue` | `{ attempt_id, request_id, body }` | `{ "status": "Queued" \| "Replayed", attempt_id, queue_id, position }` (`position` es `null` en un `Replayed`) |
 | `attempt_queue_cancel` | `{ queue_id }` | `{ "status": "Cancelled" \| "AlreadyCancelled", queue_id }` |
-| `pending_queue` | `{ attempt_id }` | la Pending Queue: `{ attempt_id, task_id, items: [{ position, queue_id, status, body, … }] }` |
+| `pending_queue` | `{ attempt_id }` | `{ v: 1, attempt_id, task_id, items: [{ position, queue_id, status, body, … }], finished: [{ queue_id, seq, status, failure, confirmed_by, … }], finished_limit: 20 }`. `items` es lo pendiente (`queued`/`delivering`); `finished` son las últimas 20 ya resueltas (`delivered`/`cancelled`/`failed`) |
 
 Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y la entrega la hace el bombeo en el fin de turno. Los errores son `kind/code: mensaje`
 (`queue_unsupported`, `attempt_final`, `request_conflict`, `queue_full`, `not_cancellable`…).
@@ -183,7 +183,9 @@ Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y
   la espera vence el Attempt falla y lo pendiente falla con `attempt_ended`.
 * **`resume` se llama con el almacén tomado** (lo hace `deliver_next` dentro de su transacción de claim): arrancar la CLI bloquea las demás
   escrituras mientras dura. Con una CLI real son milisegundos, pero es un acoplamiento a vigilar.
-* `pending_queue` aún no está en la lista de lecturas del ADE (`orch_query`): hasta la interfaz se lee con `orch_call`.
+* `pending_queue` está en la lista de lecturas del ADE (`ADE_READ_QUERIES`) y el ADE la pinta en `AttemptQueue.jsx` (compositor, dock de pendientes con
+  «Cancelar» e historial). El mismo compositor ofrece Steer y «Detener y enviar» (LXO-144, [STEER.md](STEER.md)) cuando el proveedor los ofrece; los que no,
+  salen desactivados con su razón y nunca caen a encolar en silencio.
 * La recuperación al arrancar está cableada pero solo probada a nivel de `recover` (`queue_commands_tests.rs`), no con un reinicio real del Core.
 * Sin adjuntos (D11) y sin `lxo` (LXO-159).
 

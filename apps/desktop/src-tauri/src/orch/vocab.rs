@@ -114,21 +114,21 @@ pub const INTEGRATION_OUTCOME: [&str; 4] = ["merged", "conflict", "error", "targ
 pub const ATTENTION_KIND: [&str; 4] = ["approve_in_terminal", "integrate", "review", "failed"];
 
 /// RESERVADO. `events.entity_kind` (slice E) y prefijo de los eventos durables.
-pub const ENTITY_KIND: [&str; 13] = [
-    "project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention",
+pub const ENTITY_KIND: [&str; 14] = [
+    "project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "race", "attention",
 ];
 
 /// RESERVADO. Eventos de dominio durables (`entidad.verbo`), slice E.
-pub const DURABLE_EVENT: [&str; 50] = [
+pub const DURABLE_EVENT: [&str; 57] = [
     "project.registered", "project.archived", "project.relocated",
     "task.created", "task.updated", "task.closed",
-    "attempt.requested", "attempt.continued", "attempt.retried", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
-    "attempt.queued", "attempt.queue_delivered", "attempt.queue_cancelled", "attempt.queue_failed", "attempt.dispatch_ambiguous",
+    "attempt.requested", "attempt.continued", "attempt.retried", "attempt.forked", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
+    "attempt.queued", "attempt.queue_delivered", "attempt.queue_cancelled", "attempt.queue_failed", "attempt.instruction_requested", "attempt.instruction_result", "attempt.dispatch_ambiguous",
     "provider_session.opened", "provider_session.bound", "provider_session.resumed", "provider_session.detached", "provider_session.closed",
     "thread.created", "thread.summarized", "worktree.created", "worktree.adopted", "worktree.attached", "worktree.missing", "worktree.found", "worktree.removed", "artifact.created",
     "review.requested", "review.completed", "review.invalidated",
     "integration.requested", "integration.completed", "integration.conflict",
-    "agent.question", "agent.answered", "decision.created", "policy.warning",
+    "agent.question", "agent.answered", "decision.created", "policy.warning", "policy.changed", "race.requested", "race.candidate_recorded", "race.cancelled",
     "attention.created", "attention.resolved",
 ];
 

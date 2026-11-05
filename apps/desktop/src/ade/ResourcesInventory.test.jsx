@@ -633,11 +633,16 @@ describe('ResourcesInventory · sin inventario', () => {
 });
 
 describe('ResourcesInventory · solo lectura', () => {
-  it('no hay botones ni enlaces: ruta y rama son metadato, no acciones', () => {
+  it('no hay enlaces ni campos: ruta y rama son metadato, y lo único accionable es «Gestionar…» en el worktree de una Task (LXO-157)', () => {
     render(<ResourcesInventory inventory={DTO} />);
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryAllByRole('link')).toHaveLength(0);
-    expect(document.querySelectorAll('button, a, input, textarea, form, [onclick], [role="button"]')).toHaveLength(0);
+    // Las acciones destructivas no están a la vista: se piden por Task con «Gestionar…», y solo en un worktree que una Task posee.
+    const buttons = screen.queryAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(buttons.map(() => 'Gestionar…'));
+    for (const b of buttons) {
+      expect(b.closest('[data-testid="resinv-row"]').querySelector('[data-testid="resinv-owner"]').textContent).not.toBe('Sin propietario');
+    }
+    expect(document.querySelectorAll('a, input, textarea, form, [onclick]')).toHaveLength(0);
     expect(screen.getAllByRole('combobox')).toHaveLength(4);
     // La ruta se pinta como texto plano.
     expect(rowOf('/home/ana/app.lixbon-wt/wt-c').querySelector('a')).toBeNull();

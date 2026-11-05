@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { ResourcesInventory } from './ResourcesInventory';
+import { AutonomyEditor } from './AutonomyEditor';
 import { StatusMark } from './StatusMark';
 import './ProjectView.css';
 
@@ -522,6 +523,8 @@ export function ProjectView({
       <Tasks slice={normalizeSlice(tasks)} projectId={projectId} filter={activeFilter} onFilter={setFilter} onOpenTask={onOpenTask} onLoadMore={onLoadMoreTasks} headingId={`${uid}-tasks`} />
       <Activity slice={normalizeSlice(activity)} projectId={projectId} onOpenTask={onOpenTask} onOpenAttempt={onOpenAttempt} headingId={`${uid}-activity`} />
       <Resources slice={normalizeSlice(resources)} inventory={resourceInventory} inventoryStatus={resourceInventoryStatus} onRetryInventory={onRetryResourceInventory} projectId={projectId} onOpenResource={onOpenResource} headingId={`${uid}-resources`} />
+      {/* Autonomía (LXO-210): cerrada hasta que se pide; el Core es la autoridad de la policy. */}
+      {isId(projectId) && <AutonomyEditor projectId={projectId} />}
     </article>
   );
 }

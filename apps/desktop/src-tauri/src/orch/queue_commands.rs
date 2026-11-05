@@ -146,6 +146,20 @@ pub struct PendingItem {
     pub item: QueueItemRow,
 }
 
+/// Lo que ya no está pendiente de un Attempt (`delivered`, `cancelled`, `failed`), en el orden en que se encoló y acotado a los últimos
+/// `limit`: la historia completa de los finales sigue estando en los Events. Una persona, el que coordina la Task o el Core.
+pub(super) fn finished(st: &Store, ctx: &MutationContext, attempt_id: &str, limit: usize) -> Result<Vec<QueueItemRow>, QueueError> {
+    let attempt = attempt_of(st, attempt_id)?;
+    if !may_read(st, ctx, &attempt.task_id)? {
+        return Err(not_allowed(&format!("ver la cola de {attempt_id}"), ctx));
+    }
+    let mut done: Vec<QueueItemRow> = st.queue_of_attempt(attempt_id).map_err(from_store)?.into_iter().filter(|i| !matches!(i.status, QueueStatus::Queued | QueueStatus::Delivering)).collect();
+    if done.len() > limit {
+        done.drain(..done.len() - limit);
+    }
+    Ok(done)
+}
+
 /// Lo que dejó una recuperación.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Recovery {
@@ -167,6 +181,9 @@ pub enum ErrorKind {
     Unsupported,
     /// El entorno impide usar el proveedor.
     EnvironmentBlocked,
+    /// El Attempt existe pero ahora no está en un momento en que la petición valga (Steer y Stop & Send, LXO-144): no está `running`,
+    /// espera una respuesta o no tiene una ejecución viva. Reintentarlo más tarde puede valer.
+    Busy,
     /// La petición no vale: Attempt terminado, clave reutilizada, item que no se puede cancelar, cola llena…
     Invalid,
     /// No se pudo leer o escribir el estado.
@@ -178,6 +195,7 @@ impl ErrorKind {
         match self {
             ErrorKind::Unsupported => "unsupported",
             ErrorKind::EnvironmentBlocked => "environment_blocked",
+            ErrorKind::Busy => "busy",
             ErrorKind::Invalid => "invalid",
             ErrorKind::Failed => "failed",
         }
@@ -203,6 +221,12 @@ impl QueueError {
         QueueError::new(ErrorKind::Invalid, code, message)
     }
 
+    /// El mismo error con otro código estable dentro de su categoría (Steer y Stop & Send distinguen su fallo del genérico).
+    pub(super) fn with_code(mut self, code: &'static str) -> QueueError {
+        self.code = code;
+        self
+    }
+
     fn for_item(mut self, id: &str) -> QueueError {
         self.queue_id = Some(id.to_string());
         self
@@ -217,7 +241,7 @@ impl std::fmt::Display for QueueError {
 
 impl std::error::Error for QueueError {}
 
-fn from_store(e: StoreError) -> QueueError {
+pub(super) fn from_store(e: StoreError) -> QueueError {
     match e {
         StoreError::AttemptConflict(m) => QueueError::invalid("conflict", m),
         StoreError::InvalidAttempt(m) => QueueError::invalid("invalid_request", m),
@@ -228,7 +252,7 @@ fn from_store(e: StoreError) -> QueueError {
 }
 
 /// El error con que se rechaza encolar cuando el proveedor no puede entregar.
-fn capability_error(e: &AdapterError) -> QueueError {
+pub(super) fn capability_error(e: &AdapterError) -> QueueError {
     match e.code {
         ErrorCode::EnvironmentBlocked => QueueError::new(ErrorKind::EnvironmentBlocked, "environment_blocked", e.message.clone()),
         ErrorCode::UnsupportedCapability | ErrorCode::CapabilityUnavailable | ErrorCode::UnknownCapability => QueueError::new(ErrorKind::Unsupported, "queue_unsupported", e.message.clone()),
@@ -252,7 +276,7 @@ pub(super) fn failure_of(e: &AdapterError) -> QueueFailure {
 
 // ── Utilidades ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-fn check_request_id(v: &str) -> Result<(), QueueError> {
+pub(super) fn check_request_id(v: &str) -> Result<(), QueueError> {
     let ok = !v.is_empty() && v.chars().count() <= 64 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
     if ok {
         Ok(())
@@ -270,11 +294,11 @@ fn author_of(ctx: &MutationContext) -> (ActorKind, Option<String>) {
     }
 }
 
-fn not_allowed(what: &str, ctx: &MutationContext) -> QueueError {
+pub(super) fn not_allowed(what: &str, ctx: &MutationContext) -> QueueError {
     QueueError::invalid("not_allowed", format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
 }
 
-fn attempt_of(st: &Store, id: &str) -> Result<AttemptRow, QueueError> {
+pub(super) fn attempt_of(st: &Store, id: &str) -> Result<AttemptRow, QueueError> {
     st.attempt_row(id).map_err(from_store)?.ok_or_else(|| QueueError::invalid("attempt_missing", format!("no existe el Attempt {id}")))
 }
 

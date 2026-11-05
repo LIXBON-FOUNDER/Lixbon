@@ -1022,6 +1022,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                       coreModel={coreModel}
                       active={workspaceActive && workspaceView === 'workspace'}
                       onSelectTask={(taskId) => selectTask({ projectId: selectedProjectId, taskId })}
+                      onOpenAttempt={({ taskId, attemptId }) => selectAttempt({ projectId: selectedProjectId, taskId, attemptId })}
                       onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
                     />
                   )}

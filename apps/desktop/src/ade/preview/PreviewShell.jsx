@@ -48,6 +48,7 @@ function SimulateMenu() {
           <button type="button" className="menu__item" role="menuitem" onClick={pick(() => s.endTurn(s.sel.attemptId))}><span className="menu__main">Terminar el turno del Intento elegido</span></button>
           <button type="button" className="menu__item" role="menuitem" onClick={pick(() => s.raiseAttention({ kind: 'permission', attemptId: s.sel.attemptId, risk: 'medium', title: 'Instalar una dependencia', command: 'npm install better-sqlite3', riskLabel: 'Modifica las dependencias', reason: 'Almacén local de eventos', scope: 'Solo esta orden, una vez', touches: ['Red: registry.npmjs.org', 'Escribe package.json y package-lock.json'], before: ['Diseñó el almacén de eventos'] }))}><span className="menu__main">Pedir un permiso desde este Intento</span></button>
           <button type="button" className="menu__item" role="menuitem" onClick={pick(s.worstCase)}><span className="menu__main">Datos del peor caso</span></button>
+          <button type="button" className="menu__item" role="menuitem" onClick={pick(() => s.denseCase(40))}><span className="menu__main">Workspace denso (40 filas)</span></button>
           <div className="menu__sep" />
           <button type="button" className="menu__item" role="menuitem" onClick={pick(s.resetAll)}><span className="menu__main">Reiniciar la simulación</span></button>
         </div>

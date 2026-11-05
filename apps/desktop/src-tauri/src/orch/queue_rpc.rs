@@ -23,6 +23,9 @@ pub(super) struct QueueInput {
     pub attempt_id: String,
     pub request_id: String,
     pub body: String,
+    /// La confirmación explícita que pide la policy cuando el nivel es `confirm` (LXO-209). La lee la policy en `rpc`, no este Command.
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,10 +70,37 @@ pub(super) fn cancel(core: &Core, context: &MutationContext, input: &CancelInput
     Ok(json!({"status": status, "queue_id": input.queue_id}))
 }
 
+/// Cuántos items ya terminados devuelve `pending_queue` como mucho (los últimos).
+pub(super) const FINISHED_LIMIT: usize = 20;
+
+/// Lo que la interfaz necesita de un item: nunca la clave de idempotencia, su digest ni la instalación que lo envió.
+fn shown(item: &crate::store::QueueItemRow) -> Value {
+    json!({
+        "queue_id": item.queue_id,
+        "seq": item.seq,
+        "author_kind": item.author_kind,
+        "body": item.body,
+        "status": item.status,
+        "failure": item.failure,
+        "confirmed_by": item.confirmed_by,
+        "created_at": item.created_at,
+        "delivered_at": item.delivered_at,
+        "ended_at": item.ended_at,
+    })
+}
+
 pub(super) fn pending(core: &Core, context: &MutationContext, input: &PendingInput) -> Result<Value, String> {
     person(context, "ver la cola de instrucciones")?;
     let queue = core.queue_pending(context, &input.attempt_id).map_err(|e| e.to_string())?;
-    serde_json::to_value(queue).map_err(|_| "no se pudo serializar la cola".to_string())
+    let finished = core.queue_finished(context, &input.attempt_id, FINISHED_LIMIT).map_err(|e| e.to_string())?;
+    Ok(json!({
+        "v": 1,
+        "attempt_id": queue.attempt_id,
+        "task_id": queue.task_id,
+        "items": queue.items.iter().map(|p| { let mut v = shown(&p.item); v["position"] = json!(p.position); v }).collect::<Vec<_>>(),
+        "finished": finished.iter().map(shown).collect::<Vec<_>>(),
+        "finished_limit": FINISHED_LIMIT,
+    }))
 }
 
 #[cfg(test)]

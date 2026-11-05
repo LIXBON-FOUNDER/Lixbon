@@ -458,6 +458,43 @@ worktree) la fija el Core.
   sesión **resumible y en espera**, «Continuar la sesión» pide un mensaje, avisa de que conserva la conversación, el worktree y los permisos, y
   manda `attempt_resume`. Dice cuál es el intento nuevo y vuelve a leer el detalle; conserva el mensaje escrito si el Core lo rechaza. No ofrece cambiar
   proveedor ni perfil. Comparte con «Reintentar» la comprobación de «es el último» (`useLatestAttempt`): añade una lectura de `attempts_by_task` al detalle.
+* **Fork** (`AttemptFork` y `AttemptLineage`, en el detalle del Attempt; LXO-145/153, [FORK.md](FORK.md)): «Bifurcar…» crea un intento **nuevo** a partir del actual
+  (una Task nueva, con su rama y su worktree; el original no se toca y puede seguir corriendo). Antes de confirmar dice el proveedor (solo los que pueden arrancar), qué
+  modelo y esfuerzo se heredan (solo dentro del mismo proveedor), con qué contexto arranca (solo el encargo, o un ContextPackage que se revisa con el Core y que tiene que
+  salir de ese intento), que el worktree es siempre nuevo y que el Fork espera tu aprobación. Una clave de idempotencia por intención (cambia si cambia lo que se pide).
+  El intento nuevo no roba el foco: abrirlo es un botón explícito. `AttemptLineage` muestra de dónde salió un intento y los Forks que nacieron de él (`attempt_lineage`).
+* **Acciones de recursos** (`ResourceActions`, en el inventario; LXO-149/157, [RESOURCES.md](RESOURCES.md) § Acciones): en el worktree que una Task posee, «Gestionar…» muestra el
+  estado de git (en disco / ya no está, limpio o con cambios sin commit, rama integrada o no, proceso) y ofrece «Limpiar (integrado)» y «Quitar el worktree (conserva la rama)». Lo que
+  el Core no deja sale desactivado con su motivo (solo lectura, tarea en marcha, estado desconocido, cambios sin commit, sin integrar); los cambios sin commit solo se pierden si se
+  marca descartarlos. Tras actuar se vuelve a leer del Core y se refresca el inventario. Los candidatos externos u huérfanos no tienen acciones (no hay Adopt).
+* **Autonomía** (`AutonomyEditor`, en el Project y en el detalle del Attempt; LXO-209/210, [POLICY.md](POLICY.md)): «Autonomía…» muestra la policy efectiva con el ORIGEN de cada nivel (base del actor, global, proyecto, intento o mínimo de seguridad)
+  y qué sobrescribe el ámbito elegido (heredado y sobrescrito nunca se confunden). Antes de guardar se previsualiza el efecto con el Core (`policy_effective` + `preview`, sin escribir); dar MÁS autonomía es explícito y pide una confirmación aparte;
+  `proyecto` e `intento` solo endurecen (las opciones que el Core rechazaría salen desactivadas con su motivo). Una revisión vieja (`policy_stale`) no pisa nada: avisa y recarga. Quien no es una Person de Desktop solo lee. Tras guardar se vuelve a leer del Core y el cambio queda en Activity.
+* **Race** (`AttemptRace`, en la procedencia del intento; LXO-215/216, [RACE.md](RACE.md)): «Race…» configura de 2 a 4 candidatos (proveedor, modelo, esfuerzo, título; el mismo contexto para todos) y dice ANTES de confirmar lo que el Core hará:
+  worktree nuevo por candidato, pendientes de tu aprobación, sin ganador ni cancelación automática, y que el Core no estima coste. Tras lanzar, cada candidato se ve como el intento real que es (también los que fallaron, con su motivo) sin mover el foco; «Abrir Compare»
+  recibe exactamente los lanzados; cancelar un candidato o lo que queda es explícito y pide confirmación; reintentar manda la MISMA petición (no duplica). No hay elección de host ni de worktree por candidato.
+* **Integración** (`AttemptIntegration`, tras el Proof Pack; LXO-148/156, [INTEGRACION.md](INTEGRACION.md)): para un intento terminado, muestra la revisión (el HEAD aceptado), el
+  destino (rama y HEAD del proyecto, y si se movió fuera de Lixbon o tiene cambios sin commit) y el estado (integrado / PR). «Fusionar en <rama>» y «Publicar PR» salen
+  desactivados con su motivo en llano si el Core no los deja, piden confirmación mostrando el destino y mandan EXACTAMENTE el HEAD visto; un destino movido exige aceptar el
+  commit que se ve. Los resultados son los del efecto: fusionado, conflicto (con los archivos; no se perdió nada), error (con detalle técnico), destino movido, rama equivocada,
+  HEAD movido, PR creado o ya existente. No limpia el worktree.
+* **Proof Pack** (`AttemptProofPack`, en «Cambios y revisión»; LXO-147/155, [PROOF_PACK.md](PROOF_PACK.md)): la evidencia antes del diff, con la procedencia de cada dato
+  (la misma de Compare): estado, objetivo, revisión (base → HEAD), archivos cambiados, resumen del agente (se ve como suyo), artefactos y pruebas (sin dato: el Core aún no las
+  recoge). Dice si la evidencia es completa o parcial y qué falta. **Aceptar/Rechazar** piden confirmación y mandan EXACTAMENTE el HEAD mostrado; si la rama se movió, el Core no
+  registra nada, la vista lo avisa, recarga y no deja decidir hasta ver el HEAD nuevo. Una aceptación de otro HEAD se ve como vieja. Revisar no integra y rechazar no borra nada; el
+  comentario del rechazo no se guarda en el log de eventos. El diff completo sigue en «Ver cambios».
+* **Comparar** (`AttemptCompare`; LXO-146/154, [COMPARE.md](COMPARE.md)): de 2 a 4 intentos en una tabla accesible (pie, columnas por intento, filas con nombre; la región tiene foco de
+  teclado y se desplaza en horizontal con pantallas estrechas). Se llega desde el historial (casillas por intento y «Comparar») o desde la procedencia («Comparar con el origen» /
+  «con sus bifurcaciones»). Cada dato lleva su procedencia con glifo, texto y forma de borde distintos —`✓ Verificado por el Core`, `⚠ Lo dice el agente`, `? Sin dato` con su
+  motivo—, y lo que falta nunca se pinta como cero ni como fallo. Muestra estado, proveedor/modelo, host, duración, commit base → resultado, archivos cambiados (con el recorte de
+  un diff grande), resumen, artefactos, pruebas, revisión y los solapes entre intentos. Es solo lectura: no puntúa, no elige ganador, no integra, y abrir un intento lleva a su detalle.
+* **Instrucciones en cola** (`AttemptQueue`, en el detalle del Attempt; LXO-151/152): con el intento `running`, un compositor con tres modos explícitos: **Encolar**
+  (por defecto; Enter encola, Shift+Enter salta de línea; se entrega en el siguiente turno, nunca en mitad del actual; exige `resume`), **Steer** (inyecta en el turno
+  en curso; exige `steer`) y **Detener y enviar** (interrumpe el turno y envía como turno nuevo; exige `interrupt` y `resume`, y pide confirmación). El modo activo
+  se ve y lleva su nombre en el botón; uno que el proveedor no ofrece sale desactivado con la razón del Core y no cae a otro en silencio ([STEER.md](STEER.md)). El dock lista lo pendiente con su
+  posición y «Cancelar» (no cancelable una vez `delivering`) y, aparte, un historial con las últimas resueltas y, si falló, el motivo en llano. El borrador se
+  conserva si el Core rechaza el envío, la clave de idempotencia se reutiliza mientras el texto no cambie, y la lectura (`pending_queue`) se valida contra el contrato
+  (`queueContract.js`) y se relee cada 3 s mientras el intento corre o hay algo pendiente.
 
 Prueba: `orch/attempt_e2e_tests.rs` recorre crear → aprobar → lanzar → desenlace por esa misma entrada con `claude` (completo) y
 `codex` (sin `resume`): completa, falla, se detiene, se rechaza y se repite la solicitud, y el diff y la revisión de Desktop alcanzan a la Task creada; comprueba estado, claim, Events en orden

@@ -55,8 +55,12 @@
 //    Project» solo sale si Core entregó un número, y nunca junto al de «sin contador».
 //  · El acotado es por Project ID (`project_id`), nunca por ProjectLocation. Al cambiar el Project
 //    externo se restablecen los filtros locales.
-import { useMemo, useState } from 'react';
+import { createContext, useContext, useMemo, useState } from 'react';
+import { ResourceActions } from './ResourceActions';
 import './ResourcesInventory.css';
+
+/** Qué hacer tras una acción sobre un recurso: volver a leer el inventario del Core (LXO-157). */
+const ResourceChanged = createContext(null);
 
 const NONE = '__none__';
 /** Única versión del DTO de `resource_inventory` que esta vista entiende. */
@@ -437,8 +441,15 @@ function WorktreeRow({ row }) {
         <dt>Destino</dt><dd data-testid="resinv-into">{text(entry.into) ?? '—'}</dd>
         <OwnerFields owner={entry.owner} />
       </dl>
+      {isObject(entry.owner) && text(entry.owner.task_id) && ['tracked', 'missing_on_disk'].includes(row.section) && <WorktreeActions taskId={text(entry.owner.task_id)} />}
     </li>
   );
+}
+
+/** Las acciones son del worktree de UNA Task (su dueño). Un candidato externo u huérfano no se vuelve propio sin un Adopt, que no está aquí. */
+function WorktreeActions({ taskId }) {
+  const onChanged = useContext(ResourceChanged);
+  return <ResourceActions taskId={taskId} onChanged={onChanged ?? undefined} />;
 }
 
 function PreservedRow({ row }) {
@@ -596,6 +607,7 @@ export function ResourcesInventory({ inventory = null, projectId = null, status 
   const countIsThisProject = countScopeInfo.kind === 'project' && countScopeInfo.projectId === scopeId;
 
   return (
+    <ResourceChanged.Provider value={onRetry}>
     <section className="resinv" aria-label="Inventario de recursos" data-testid="resinv">
       <header className="resinv__bar">
         <h4 className="resinv__title">Inventario de recursos</h4>
@@ -676,6 +688,7 @@ export function ResourcesInventory({ inventory = null, projectId = null, status 
         </>
       )}
     </section>
+    </ResourceChanged.Provider>
   );
 }
 

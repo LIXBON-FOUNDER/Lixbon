@@ -69,7 +69,7 @@ const wt = (project, id) => `%LOCALAPPDATA%\\Lixbon\\worktrees\\${project}\\${id
 // phase (solo working): thinking | tool | writing        cause (solo waiting): approval | answer | dependency | host | rate_limit
 const A = (o) => ({ control: 'agent', origin: 'ADE', unread: false, policy: 'delegar_con_revision', files: 0, add: 0, del: 0, tests: null, cost: 0, tokens: 0, minutes: 0, latest: '', ...o });
 
-export const ATTEMPTS = [
+const RAW_ATTEMPTS = [
   A({ id: 'att_rt_a', taskId: 't_runtime', label: 'A', provider: 'claude', model: 'sonnet', effort: 'high', branch: 'feat/agent-runtime', worktree: wt('lixbon', 'att_rt_a'), host: 'desktop', state: 'working', phase: 'tool', minutes: 18, files: 9, add: 521, del: 90, tests: { pass: 141, total: 141 }, cost: 1.42, tokens: 880000, latest: 'Ejecutando las pruebas de integración', toolLabel: 'npm run test:integration', unread: true, ctx: 'v3' }),
   A({ id: 'att_rt_b', taskId: 't_runtime', label: 'B', provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium', branch: 'feat/agent-runtime-codex', worktree: wt('lixbon', 'att_rt_b'), host: 'desktop', state: 'review_ready', minutes: 26, files: 12, add: 640, del: 120, tests: { pass: 138, total: 141 }, cost: 0.96, tokens: 620000, latest: 'Terminado · 3 pruebas fallan con rutas de Windows', ctx: 'v3' }),
   A({ id: 'att_oa_a', taskId: 't_oauth', label: 'A', provider: 'claude', model: 'sonnet', effort: 'high', branch: 'feature/auth-refresh-claude', worktree: wt('lixbon', 'att_oa_a'), host: 'desktop', state: 'working', phase: 'thinking', minutes: 9, files: 9, add: 521, del: 90, tests: { pass: 141, total: 141 }, cost: 0.74, tokens: 410000, latest: 'Comparando rotación con caducidad deslizante', ctx: 'v2' }),
@@ -86,6 +86,25 @@ export const ATTEMPTS = [
   A({ id: 'att_map_a', taskId: 't_map', label: 'A', provider: 'opencode', model: 'qwen-coder-32b', effort: null, branch: 'feat/map-clustering', worktree: wt('tourism', 'att_map_a'), host: 'laptop', state: 'offline', minutes: 63, files: 5, add: 150, del: 20, cost: 0, tokens: 120000, latest: 'Host desconectado hace 2 d', ctx: 'v1' }),
   A({ id: 'att_sync_a', taskId: 't_sync', label: 'A', provider: 'claude', model: 'sonnet', effort: 'medium', branch: 'feat/offline-sync', worktree: wt('tourism', 'att_sync_a'), host: 'desktop', state: 'working', phase: 'writing', minutes: 12, files: 4, add: 133, del: 8, tests: { pass: 30, total: 30 }, cost: 0.29, tokens: 150000, latest: 'Editando sync/queue.ts', ctx: 'v1' }),
 ];
+
+// Procedencia de lo que resume el Workspace Pulse (LXO-218): `verified` lo midió el Core (git, runner estructurado),
+// `agent_reported` lo declaró el agente, `unknown` (o ausente) no hay dato y nunca se pinta como 0. Lo que no está aquí es `unknown`.
+const PULSE_EVIDENCE = {
+  att_rt_a: { files: 'verified', tests: 'verified' },
+  att_rt_b: { files: 'verified', tests: 'agent_reported' },
+  att_oa_a: { files: 'verified', tests: 'agent_reported' },
+  att_oa_b: { files: 'verified', tests: 'verified' },
+  att_mr_a: { files: 'verified', tests: 'agent_reported' },
+  att_cli_a: { files: 'verified', tests: 'verified' },
+  att_sb_a: { files: 'verified' },
+  att_pk_a: { files: 'agent_reported', tests: 'agent_reported' },
+  att_ch_a: { files: 'verified' },
+  att_inv_a: { files: 'verified', tests: 'verified' },
+  att_mig_a: { files: 'verified', tests: 'verified' },
+  att_map_a: { files: 'agent_reported' },
+  att_sync_a: { files: 'verified', tests: 'agent_reported' },
+};
+export const ATTEMPTS = RAW_ATTEMPTS.map((a) => ({ ...a, evidence: PULSE_EVIDENCE[a.id] || {} }));
 
 // risk: low | medium | high | none ; kind: permission | question | review | failed | conflict | host
 // `before`: lo que hizo el agente justo antes de pedirlo. `similar`: decisiones tuyas parecidas en este Project.

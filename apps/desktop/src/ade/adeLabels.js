@@ -183,10 +183,13 @@ export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
   'activity.attempt.integrated': 'Integrado',
   'activity.attempt.continued': 'Continuado',
   'activity.attempt.retried': 'Reintentado',
+  'activity.attempt.forked': 'Bifurcado',
   'activity.attempt.queued': 'Instrucción en cola',
   'activity.attempt.queue_delivered': 'Instrucción de la cola entregada',
   'activity.attempt.queue_cancelled': 'Instrucción de la cola cancelada',
   'activity.attempt.queue_failed': 'No se pudo entregar la instrucción de la cola',
+  'activity.attempt.instruction_requested': 'Instrucción al turno en curso pedida',
+  'activity.attempt.instruction_result': 'Resultado de la instrucción al turno en curso',
   'activity.attempt.dispatch_ambiguous': 'No se sabe si llegó a lanzarse',
 });
 

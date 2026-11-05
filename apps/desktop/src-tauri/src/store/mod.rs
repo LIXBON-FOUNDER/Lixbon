@@ -66,6 +66,7 @@ mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
 mod queue;
+mod policy;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -92,6 +93,8 @@ mod worktrees_tests;
 mod reviews_tests;
 #[cfg(test)]
 mod queue_tests;
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod tests;
 
@@ -139,7 +142,7 @@ pub(crate) use sessions::{env_block_set_in, looks_secret, thread_message_append_
 pub use continuity::{Continued, ContinuationRow, NewContinuation, Reason as ContinuationReason, Strategy as ContinuityStrategy, MAX_REQUEST_ID_CHARS};
 // Reintento de un Attempt (LXO-142): inerte hasta el corte; solo lo usan `orch::attempt_commands` y las pruebas.
 #[allow(unused_imports)]
-pub use retries::{retryable, NewRetry, Override as RetryOverride, Retried, RetryRow};
+pub use retries::{retryable, ForkStrategy, NewRetry, Override as RetryOverride, Retried, RetryRow};
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]
@@ -159,7 +162,10 @@ pub use initial_approval::{InitialApprovalDecision, InitialApprovalSnapshot, INI
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
 // Pending Queue de un Attempt (LXO-143): inerte hasta el corte; solo la usan `orch::queue_commands` y las pruebas.
 #[allow(unused_imports)]
-pub use queue::{queue_digest, Enqueued, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
+pub use queue::{queue_digest, Enqueued, InstructionMode, InstructionOutcome, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
+// Policy de autonomía (LXO-209): overrides durables por ámbito; las reglas viven en `orch::policy`.
+#[allow(unused_imports)]
+pub use policy::{PolicyChange, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};

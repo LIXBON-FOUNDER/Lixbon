@@ -13,6 +13,14 @@ import { CORE_MODEL_QUERY_SPECS } from './coreModelContract';
 import { CONTEXT_PREVIEW_QUERY_SPECS } from './contextPreviewContract';
 import { PROVIDER_CAPABILITIES_QUERY_SPECS } from './providerCapabilitiesContract';
 import { USAGE_QUERY_SPECS } from './usageContract';
+import { COMPARE_QUERY_SPECS } from './compareContract';
+import { FORK_QUERY_SPECS } from './forkContract';
+import { INTEGRATION_QUERY_SPECS } from './integrationContract';
+import { PROOF_PACK_QUERY_SPECS } from './proofPackContract';
+import { RESOURCE_QUERY_SPECS } from './resourceActionsContract';
+import { AUTONOMY_QUERY_SPECS } from './autonomyContract';
+import { RACE_QUERY_SPECS } from './raceContract';
+import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
 /** Categorías del conjunto cerrado de Attention (LXO-87/89). No se amplían desde el cliente. */
@@ -185,6 +193,13 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.dispatch_ambiguous', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_delivered', { required: { task: 'string', n: 'integer' } }],
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
+  ['activity.attempt.instruction_requested', { required: { task: 'string', n: 'integer', mode: 'string' } }],
+  ['activity.attempt.instruction_result', { required: { task: 'string', n: 'integer', mode: 'string', outcome: 'string' }, optional: { reason: 'string' } }],
+  ['activity.race.requested', { required: { race_id: 'string', source: 'string', candidates: 'integer', strategy: 'string' } }],
+  ['activity.race.candidate_recorded', { required: { index: 'integer', outcome: 'string', provider: 'string' }, optional: { attempt_id: 'string', code: 'string' } }],
+  ['activity.race.cancelled', { required: { scope: 'string', stopped: 'integer', rejected: 'integer', failed: 'integer' }, optional: { attempt_id: 'string' } }],
+  ['activity.policy.changed', { required: { scope: 'string', category: 'string', direction: 'string', revision: 'integer' }, optional: { scope_id: 'string', from: 'string', to: 'string' } }],
+  ['activity.attempt.forked', { required: { task: 'string', n: 'integer', source_task: 'string', source_n: 'integer', strategy: 'string' } }],
   ['activity.attempt.retried', { required: { task: 'string', n: 'integer', from_n: 'integer' }, optional: { overrides: 'stringList' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
   ['activity.attempt.completed', { required: { task: 'string', n: 'integer', has_summary: 'boolean' } }],
@@ -651,6 +666,22 @@ const QUERY_SPECS = Object.freeze({
   ...CONTEXT_PREVIEW_QUERY_SPECS,
   // El uso y los límites de cada proveedor (LXO-206): el Core lo consulta; la interfaz no llama a ningún proveedor.
   ...USAGE_QUERY_SPECS,
+  // La cola de instrucciones de un Attempt (LXO-143/152): lo pendiente y lo terminado, tal como lo dice el Core.
+  ...QUEUE_QUERY_SPECS,
+  // De dónde salió un Attempt y qué Forks nacieron de él (LXO-145/153): lo que se registró al bifurcar.
+  ...FORK_QUERY_SPECS,
+  // Comparar 2–4 Attempts con la procedencia de cada dato (LXO-146/154): el cliente no recalcula nada.
+  ...COMPARE_QUERY_SPECS,
+  // La evidencia de un Attempt antes del diff, con la procedencia de cada dato (LXO-147/155).
+  ...PROOF_PACK_QUERY_SPECS,
+  // Qué hay que ver antes de integrar un Attempt (LXO-148/156).
+  ...INTEGRATION_QUERY_SPECS,
+  // Estado físico y de git del worktree de una Task, y qué acciones valen ahora (LXO-149/157).
+  ...RESOURCE_QUERY_SPECS,
+  // La policy de autonomía efectiva de quien pregunta, con el origen de cada nivel (LXO-209/210).
+  ...AUTONOMY_QUERY_SPECS,
+  // El estado de un Race: sus candidatos (también los fallidos) y lo que se puede comparar y cancelar (LXO-215/216).
+  ...RACE_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

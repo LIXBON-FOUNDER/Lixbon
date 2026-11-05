@@ -1,9 +1,15 @@
+import { useEffect, useState } from 'react';
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AutonomyEditor } from './AutonomyEditor';
 import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
 import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptIntegration } from './AttemptIntegration';
+import { AttemptLineage } from './AttemptLineage';
+import { AttemptProofPack } from './AttemptProofPack';
+import { AttemptQueue } from './AttemptQueue';
 import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
@@ -17,6 +23,9 @@ import { useCoreQuery } from './useCoreQuery';
  * contrato no trae se muestra «no disponible». Rutas y URIs son texto (PathText), nunca enlaces.
  * La sesión del proveedor es opaca: solo id interno, vínculo y si se puede reanudar.
  */
+/** Estados de un intento que todavía puede cambiar solo: se sondea más a menudo. */
+const ACTIVE_ATTEMPT_STATUSES = ['starting', 'running', 'waiting', 'awaiting_terminal_approval'];
+const ACTIVE_POLL_MS = 3000;
 const yesNo = (value) => (value === true ? 'sí' : value === false ? 'no' : COPY.notAvailable);
 const text = (value) => (typeof value === 'string' && value.trim() ? value : COPY.notAvailable);
 
@@ -29,9 +38,14 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
-  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled });
+  // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
+  // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
+  const [fast, setFast] = useState(false);
+  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled, pollMs: fast ? ACTIVE_POLL_MS : undefined });
+  const liveStatus = state.data?.attempt?.status;
+  useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
 
   let body;
@@ -85,6 +99,10 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
         <AttemptRetry attempt={attempt} onRetried={state.retry} />
         {/* Continuar la sesión del proveedor de un intento terminado con un mensaje nuevo (reanudación nativa). */}
         <AttemptResume attempt={attempt} onResumed={state.retry} />
+        {/* Instrucciones para un intento ocupado (Queue explícito) y la cola pendiente, tal como la dice el Core. */}
+        <AttemptQueue attempt={attempt} />
+        {/* De dónde salió el intento, los Forks que nacieron de él y la acción de bifurcar (abrir uno es siempre una elección explícita). */}
+        <AttemptLineage attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (
@@ -126,6 +144,10 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
         ) : <p className="ade-missing">{COPY.noArtifacts}</p>}
 
         <h4 className="ssec__label">Cambios y revisión</h4>
+        {/* LXO-155: la evidencia antes del diff, con su procedencia, y aceptar/rechazar sobre el HEAD exacto que se ve. */}
+        <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active} />
+        {/* LXO-156: integrar la revisión aceptada (fusionar o publicar un PR), con el destino a la vista. */}
+        <AttemptIntegration attempt={attempt} onDone={state.retry} active={active} />
         <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">
@@ -135,6 +157,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
 
+        {/* Autonomía de ESTE intento (LXO-210): cerrada hasta que se pide. */}
+        <AutonomyEditor attemptId={attempt.id} />
         <AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active} />
       </>
     );

@@ -115,6 +115,32 @@ fn git_ok(repo: &str, args: &[&str]) -> Result<String, String> {
     if o.ok { Ok(o.stdout) } else { Err(format!("git {}: {}", args.join(" "), o.stderr)) }
 }
 
+/// Rango vivo de la rama de una Task (LXO-146): su base y su HEAD de AHORA, y de dónde salió la base (`recorded` · `merge_base`). Solo git.
+pub fn live_range(state: &impl StateAccess, id: &str) -> Result<(String, String, &'static str), String> {
+    let t = target(state, id)?;
+    let head = branch_head(&t.repo, &t.branch).ok_or_else(|| format!("La rama {} ya no existe", t.branch))?;
+    let (base, source) = resolve_base(&t)?;
+    Ok((base, head, source))
+}
+
+/// Archivos cambiados entre dos commits con sus sumas (`numstat`), ordenados por ruta y acotados a `max`. Devuelve también cuántos había en
+/// total. Las cuentas de un archivo binario son `None`: no se inventa un cero. Solo git, sobre commits que no cambian.
+pub fn numstat_between(repo: &str, base: &str, head: &str, max: usize) -> Result<(Vec<(String, Option<u64>, Option<u64>)>, usize), String> {
+    let out = git_ok(repo, &["-c", "core.quotepath=false", "diff", "--no-renames", "--numstat", base, head])?;
+    let mut files: Vec<(String, Option<u64>, Option<u64>)> = out
+        .lines()
+        .filter_map(|l| {
+            let mut p = l.splitn(3, '\t');
+            let (a, d, path) = (p.next()?, p.next()?, p.next()?);
+            Some((path.to_string(), a.parse().ok(), d.parse().ok()))
+        })
+        .collect();
+    files.sort_by(|x, y| x.0.cmp(&y.0));
+    let total = files.len();
+    files.truncate(max);
+    Ok((files, total))
+}
+
 /// Diff de la rama de la tarea contra su base, archivo por archivo. Los parches
 /// se cortan al llegar a `limit` bytes en total y se marca `truncated`.
 pub fn task_diff(state: &impl StateAccess, id: &str, limit: usize) -> Result<Value, String> {

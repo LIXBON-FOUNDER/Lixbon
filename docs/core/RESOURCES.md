@@ -265,3 +265,49 @@ consulta de git en el Core, y el Core escanea los repos uno a uno.
 `ade_query_timeout` es el código del cliente para el umbral agotado. **No** significa
 «desconectado»: significaba eso antes de LXO-101, y era falso, porque el Core puede estar
 escaneando el disco. Solo hay evidencia de desconexión cuando el transporte da esa evidencia.
+
+## Acciones (LXO-149, épica F5)
+
+El inventario sigue siendo de solo lectura. Las acciones son comandos aparte, de una **Person de Desktop** y sobre el worktree de **una Task**
+(la que lo posee): `resource_inspect` (lectura), `resource_clean` y `resource_delete_worktree`. Nunca hay limpieza automática en segundo plano.
+
+| Comando | Qué hace | Qué nunca hace |
+|---|---|---|
+| `resource_inspect { task_id }` | estado del worktree (`none` · `present` · `missing` · `unknown`, y si está sucio), de la rama (existe, base, `integrated` · `not_merged` · `unknown`), del proceso y del Core; y qué acciones valen ahora con su motivo | nada |
+| `resource_clean { task_id, confirm }` | quita el worktree **limpio** de trabajo **integrado** y borra su rama con `branch -d` | borrar trabajo sin integrar, ni usar `-D` |
+| `resource_delete_worktree { task_id, confirm, discard_uncommitted? }` | quita la carpeta del worktree y **conserva la rama** | perder cambios sin commit sin `discard_uncommitted`; borrar la rama |
+
+**Reglas.** Se rechaza con `resource_blocked: <motivo>`, antes de tocar nada:
+
+* `degraded` — el Core está degradado o en solo lectura: no podría registrar el cambio, así que no se borra nada.
+* `running` — la Task no ha terminado o tiene un proceso vivo (o en custodia). Parar y soltar es otro comando.
+* `unknown` — git no pudo decir si hay cambios, o si el trabajo está integrado, o el disco no se pudo leer. **Un estado desconocido nunca habilita lo destructivo.**
+* `dirty` — cambios sin commit (`resource_clean`; en `resource_delete_worktree` se pueden descartar, aparte y expresamente).
+* `not_merged` — el trabajo de la rama no consta integrado. Cuenta como integrado la decisión de Lixbon (también un squash) o que git diga que la rama es ancestro de la base.
+
+**Idempotencia.** Sin worktree ni rama que limpiar: `nothing_to_do`, sin efecto. Un worktree que ya no está en disco (el sistema de archivos lo afirma): `forgotten`,
+solo se anota en el estado y no se toca git; la rama con el trabajo sigue. Repetir no hace nada.
+
+**Efecto y estado.** Lo borrado se registra en UNA mutación (`mutate_after_effect`): `effect.observed` (`git_worktree_removed`, operación `resource_clean` o
+`resource_delete_worktree`, sin rutas) y el estado de la Task. Si ese registro falla, el efecto queda en el journal para reconciliar (el mismo mecanismo que `release`).
+La rama solo deja de constar si `branch -d` la borró de verdad; un squash que git no ve integrado se conserva y se dice (`branch_kept`).
+
+### Adoptar un worktree externo — no incluido
+
+`Adopt` no está en esta entrega. Hace falta decidir **qué Attempt recibe** el worktree, y el proyector del runtime no admite que una Task recupere un worktree
+quitado ni cambie el de una activa (`runtime_worktree` solo admite alta, baja y soltar la rama). Mientras tanto, un candidato externo u huérfano **sigue sin dueño**
+y sin acciones: así lo exige la invariante «un recurso externo no se vuelve propio sin un comando de adopción».
+
+### Pruebas (`resource_actions_e2e_tests.rs`, `resource_actions.rs`)
+
+| Invariante / aceptación | Prueba |
+|---|---|
+| clean merged | `limpiar_lo_integrado_quita_el_worktree_y_la_rama_…` |
+| dirty / unmerged bloqueado | `lo_sucio_o_sin_integrar_se_conserva_…` |
+| no perder trabajo sin integrar | `borrar_el_worktree_conserva_la_rama_…`, `descartar_cambios_sin_commit_es_una_decision_explicita` |
+| missing resource idempotente | `un_worktree_que_ya_no_esta_en_disco_solo_se_anota_…` |
+| Core degradado / proceso vivo | `con_el_core_degradado_o_el_intento_en_marcha_…` |
+| estado desconocido | `un_estado_desconocido_nunca_habilita_lo_destructivo` |
+| actor y entrada | `la_peticion_se_valida_y_solo_una_persona_…` |
+
+Mutaciones comprobadas a mano: quitar la guarda de `dirty`, la de `not_merged` o la de Core degradado rompe al menos una prueba cada una.

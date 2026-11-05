@@ -1,0 +1,36 @@
+/* Comparar intentos (LXO-154). Prefijo `cmp` exclusivo de esta vista. */
+
+.cmp { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; color: var(--ink-70); font-size: 12px; line-height: 1.5; }
+.cmp__head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.cmp-note { margin: 0; font-size: 11px; color: var(--ink-50); }
+.cmp-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* La procedencia nunca se distingue solo por color: glifo + texto + forma del borde (sólido · doble · punteado). */
+.cmp-prov { display: inline-block; padding: 0 8px; border-radius: var(--radius-pill, 999px); font-size: 11px; line-height: 18px; border: 1px solid var(--ink-faint, #44443f); }
+.cmp-prov--verified { border-style: solid; border-color: var(--good, #86d694); color: var(--good, #86d694); background: var(--good-soft, rgba(134, 214, 148, 0.12)); }
+.cmp-prov--agent_reported { border-style: double; border-width: 3px; border-color: var(--warn, #e8c872); color: var(--warn, #e8c872); background: var(--warn-soft, rgba(232, 200, 114, 0.14)); font-style: italic; }
+.cmp-prov--unknown { border-style: dotted; border-width: 2px; border-color: var(--ink-50, #8d8d85); color: var(--ink-50, #8d8d85); background: transparent; }
+.cmp-prov__reason { font-style: normal; }
+
+.cmp__scroll { overflow-x: auto; max-width: 100%; border-radius: var(--radius); }
+.cmp__scroll:focus-visible { outline: 2px solid var(--info, #8ec5ff); outline-offset: 2px; }
+.cmp__table { border-collapse: collapse; width: 100%; min-width: calc(var(--cmp-cols, 2) * 220px + 140px); table-layout: fixed; }
+.cmp__table caption { text-align: left; padding-bottom: 4px; }
+.cmp__table th, .cmp__table td { text-align: left; vertical-align: top; padding: 6px 8px; border-top: 1px solid var(--ink-faint, #44443f); overflow-wrap: anywhere; }
+.cmp__table thead th { border-top: 0; font-weight: 600; color: var(--ink); }
+.cmp__table tbody th { width: 140px; font-weight: 600; color: var(--ink-50); }
+.cmp__table td[data-provenance='unknown'] { background: transparent; }
+.cmp__table td[data-provenance='agent_reported'] { background: var(--warn-soft, rgba(232, 200, 114, 0.06)); }
+.cmp-value { margin-top: 4px; color: var(--ink); }
+.cmp-summary { white-space: pre-wrap; }
+.cmp-diffstat { color: var(--ink-50); }
+.cmp-files { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+
+@media (prefers-reduced-motion: reduce) { .cmp * { transition: none !important; animation: none !important; } }
+@media (prefers-contrast: more) { .cmp-prov { border-width: 2px; } }
+
+/* Proof Pack (LXO-155): la misma procedencia que Compare, en lista. */
+.pp__list { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 6px 14px; margin: 0; }
+.pp__list dt { font-weight: 600; color: var(--ink-50); }
+.pp__list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .pp__list { grid-template-columns: 1fr; } }

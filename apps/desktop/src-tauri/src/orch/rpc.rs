@@ -67,6 +67,17 @@ impl Core {
             .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
         let action = rpc_action(cmd);
         client.authorize(action).map_err(|error| format!("Acción no permitida para esta identidad: {error:?}"))?;
+        // Policy de autonomía (LXO-209): se revalida en CADA Command con la policy leída ahora, y la clase del actor sale de la credencial
+        // autenticada. Los Commands de la propia policy se atienden aquí: necesitan al cliente, no solo su contexto.
+        let class = super::policy::ActorClass::of(client);
+        super::policy::gate(self, class, cmd, args)?;
+        if let Some(result) = super::policy::dispatch(self, class, &context, cmd, args) {
+            return result;
+        }
+        // Race (LXO-215): N Forks comparables con su procedencia común. Necesita la clase del actor para volver a comprobar la policy en cada lanzamiento.
+        if let Some(result) = super::race_runtime::dispatch(self, class, &context, cmd, args) {
+            return result;
+        }
         let caller = match client.identity().principal() {
             ClientPrincipal::Person(_) => Caller::User,
             ClientPrincipal::Agent(task) => Caller::Agent(Some(task.clone())),
@@ -259,6 +270,31 @@ impl Core {
                     _ => super::queue_rpc::pending(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?),
                 }
             }
+            "attempt_lineage" => {
+                let context = authenticated_context.as_ref().ok_or("ver la procedencia de un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("ver la procedencia de un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::fork_runtime::LineageInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de procedencia inválida".to_string())?;
+                super::fork_runtime::lineage(self, context, &input)
+            }
+            "attempt_fork" => {
+                let context = authenticated_context.as_ref().ok_or("hacer un Fork requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("hacer un Fork solo está permitido a una Person autenticada".into());
+                }
+                let input: super::fork_runtime::ForkInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de Fork inválida".to_string())?;
+                super::fork_runtime::fork(self, context, &input)
+            }
+            "attempt_steer" | "attempt_stop_and_send" => {
+                let context = authenticated_context.as_ref().ok_or("instruir a un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("instruir a un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::steer_runtime::InstructionInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de instrucción inválida".to_string())?;
+                let mode = if cmd == "attempt_steer" { crate::store::InstructionMode::Steer } else { crate::store::InstructionMode::StopAndSend };
+                super::steer_runtime::rpc(self, context, mode, &input)
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -306,6 +342,47 @@ impl Core {
             "task_detail_v2" => model_read::task_detail(self, &caller, authenticated_context.as_ref(), args),
             "attempts_by_task" => model_read::attempts_by_task(self, &caller, authenticated_context.as_ref(), args),
             "attempt_detail" => model_read::attempt_detail(self, &caller, authenticated_context.as_ref(), args),
+            "attempt_compare" => super::compare_read::compare(self, &caller, authenticated_context.as_ref(), args),
+            "attempt_proof_pack" => {
+                let input: super::proof_pack::ProofPackInput = serde_json::from_value(args.clone()).map_err(|_| "model_invalid_request: Solicitud de Proof Pack inválida".to_string())?;
+                super::proof_pack::proof_pack(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            "attempt_integration_preview" => {
+                let input: super::integration_attempt::PreviewInput = serde_json::from_value(args.clone()).map_err(|_| "model_invalid_request: Solicitud de integración inválida".to_string())?;
+                super::integration_attempt::preview(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            "attempt_integrate" => {
+                let context = authenticated_context.as_ref().ok_or("integrar un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("integrar un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::integration_attempt::IntegrateInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de integración inválida".to_string())?;
+                super::integration_attempt::integrate_attempt(self, context, &input, &git::gh_pr)
+            }
+            "resource_inspect" => {
+                let input: super::resource_actions::InspectInput = serde_json::from_value(args.clone()).map_err(|_| "resource_inventory_invalid_request: Solicitud de recurso inválida".to_string())?;
+                super::resource_actions::inspect(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            "resource_clean" | "resource_delete_worktree" => {
+                let context = authenticated_context.as_ref().ok_or("limpiar recursos requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("limpiar recursos solo está permitido a una Person autenticada".into());
+                }
+                let invalid = |_| "Solicitud de recurso inválida".to_string();
+                if cmd == "resource_clean" {
+                    super::resource_actions::clean(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?)
+                } else {
+                    super::resource_actions::delete_worktree(self, context, &serde_json::from_value(args.clone()).map_err(invalid)?)
+                }
+            }
+            "attempt_review" => {
+                let context = authenticated_context.as_ref().ok_or("revisar un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("revisar un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::proof_pack::ReviewInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de revisión inválida".to_string())?;
+                super::proof_pack::review_attempt(self, context, &input)
+            }
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents" => {
                 if !matches!(caller, Caller::User) {
                     return Err("Solo desde la interfaz: la gestión de proyectos (registrar, unir, relocalizar, archivar, importar) la decide una persona; un repositorio nuevo se descubre solo al lanzar un run".into());
@@ -635,7 +712,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "provider_capabilities" | "context_package_preview" | "usage_report" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "provider_capabilities" | "context_package_preview" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
@@ -649,7 +726,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
