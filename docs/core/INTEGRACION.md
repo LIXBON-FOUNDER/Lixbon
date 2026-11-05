@@ -59,7 +59,7 @@ Cada efecto ejecutado deja `effect.observed` y su `decision.recorded` en UNA mut
 
 ## Límites conocidos
 
-* Sin policy: no hay forma de integrar sin revisión aceptada (ni se debe todavía).
+* La policy (`integrate`, LXO-209, [POLICY.md](POLICY.md)) gobierna `attempt_integrate` y su piso es `confirm`; no hay forma de integrar sin revisión aceptada. El camino legacy `orch_integrate`/`orch_publish_pr` no consulta esa policy.
 * `attempt.integrated` no se emite en este camino (el estado de «integrado» sale de la decisión `merge`); alinear ambos queda para el Resource Manager.
 * El PR usa `gh` y el remoto `origin`; no se probó contra GitHub (las pruebas usan un `gh` simulado y un remoto local).
 * Un error de `gh` no se reintenta solo; la persona repite la acción.
