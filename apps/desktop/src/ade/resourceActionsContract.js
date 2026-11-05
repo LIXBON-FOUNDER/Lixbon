@@ -47,8 +47,51 @@ export function validateResourceInspect(response, args) {
   return response;
 }
 
+/** Por qué un worktree externo no se puede adoptar (`resource_adopt_preview.adopt.code`, docs/core/RESOURCES.md § Adoptar). */
+export const ADOPT_BLOCKS = Object.freeze([
+  'adopt_unknown', 'adopt_not_a_worktree', 'adopt_main_checkout', 'adopt_missing', 'adopt_detached', 'adopt_already_owned', 'adopt_branch_taken',
+  'adopt_dirty', 'adopt_no_base', 'adopt_is_base', 'adopt_degraded', 'adopt_no_task',
+]);
+
+const adoptInvalid = (detail) => new Error(`ade_query_invalid_response: resource_adopt_preview: ${detail}`);
+
+/**
+ * `resource_adopt_preview`: qué es un worktree externo y a qué Tasks se puede adoptar. Se ofrece adoptar SOLO si el Core dice `ok` y hay a qué Task;
+ * lo demás llega con un código cerrado. Una respuesta incoherente (adoptable sin rama, sin Tasks o con el Core en solo lectura) se rechaza entera.
+ */
+export function validateResourceAdoptPreview(response, args) {
+  if (!isObject(response)) throw adoptInvalid('la respuesta no es un objeto');
+  if (response.v !== 1) throw adoptInvalid('versión de contrato desconocida');
+  if (response.project_id !== args.project_id || response.path !== args.path) throw adoptInvalid('la respuesta no corresponde al worktree solicitado');
+  if (!textOrNull(response.branch) || !textOrNull(response.base)) throw adoptInvalid('rama o base inválidas');
+  if (!isObject(response.health) || typeof response.health.writable !== 'boolean') throw adoptInvalid('health inválido');
+  if (!Array.isArray(response.tasks)) throw adoptInvalid('tasks inválidas');
+  for (const t of response.tasks) {
+    if (!isObject(t) || typeof t.task_id !== 'string' || !t.task_id || typeof t.title !== 'string') throw adoptInvalid('una Task candidata es inválida');
+  }
+  const a = response.adopt;
+  if (!isObject(a) || typeof a.ok !== 'boolean') throw adoptInvalid('adopt inválido');
+  if (a.ok) {
+    if (a.code !== undefined) throw adoptInvalid('lo posible no trae código');
+    if (response.branch === null || response.base === null) throw adoptInvalid('se ofrece adoptar sin rama ni base');
+    if (!response.health.writable) throw adoptInvalid('se ofrece adoptar con el Core en solo lectura');
+    if (response.tasks.length === 0) throw adoptInvalid('se ofrece adoptar sin una Task que lo reciba');
+  } else if (!ADOPT_BLOCKS.includes(a.code) || typeof a.message !== 'string') {
+    throw adoptInvalid(`código «${String(a.code)}» fuera del contrato`);
+  }
+  return response;
+}
+
 /** Petición y validación de la query. Se fusionan en la tabla de `coreQueries.js`. */
 export const RESOURCE_QUERY_SPECS = Object.freeze({
+  resource_adopt_preview: {
+    request: (args) => {
+      if (typeof args?.projectId !== 'string' || !args.projectId.trim()) throw new Error('ade_query_invalid_request: resource_adopt_preview exige project_id');
+      if (typeof args?.path !== 'string' || !args.path.trim()) throw new Error('ade_query_invalid_request: resource_adopt_preview exige path');
+      return { project_id: args.projectId, path: args.path };
+    },
+    validate: validateResourceAdoptPreview,
+  },
   resource_inspect: {
     request: (args) => {
       if (typeof args?.taskId !== 'string' || !args.taskId.trim()) throw new Error('ade_query_invalid_request: resource_inspect exige task_id');
