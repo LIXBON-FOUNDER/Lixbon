@@ -52,6 +52,7 @@ describe('Adoptar · contrato', () => {
   it('acepta lo del Core y rechaza ofrecer adoptar lo que el estado no permite', () => {
     expect(validateResourceAdoptPreview(preview(), args)).toBeTruthy();
     expect(validateResourceAdoptPreview(blocked('adopt_dirty', { tasks: [] }), args)).toBeTruthy();
+    expect(validateResourceAdoptPreview(blocked('adopt_no_changes', { tasks: [] }), args)).toBeTruthy();
     bad({ ...preview(), v: 2 }, 'versión');
     bad({ ...preview(), path: '/otro' }, 'otro worktree');
     bad(preview({ adopt: { ok: false, code: 'porque_si', message: 'x' } }), 'código fuera del contrato');
@@ -86,6 +87,9 @@ describe('Adoptar · vista', () => {
     fireEvent.click(byId('resadopt-go'));
     await flush();
     expect(byId('resadopt-confirm').textContent).toContain('feature/externo');
+    // Antes de decidir se avisa de lo que viene después: liberar la tarea quita la carpeta (y borra la rama solo si ya está fusionada).
+    expect(byId('resadopt-confirm').textContent).toMatch(/quitará esta carpeta/);
+    expect(byId('resadopt-confirm').textContent).toMatch(/solo si ya está fusionada/);
     expect(sent(calls)).toHaveLength(0);
     fireEvent.click(byId('resadopt-confirm-yes'));
     await flush();

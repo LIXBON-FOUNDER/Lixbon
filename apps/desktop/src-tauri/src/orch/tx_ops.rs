@@ -147,6 +147,8 @@ pub(super) struct ForkRequest {
 /// Lo que se adopta: un worktree externo, ya verificado por quien llama (existe, es del Project, está limpio, tiene rama).
 pub(super) struct AdoptRequest {
     pub worktree: String,
+    /// El repositorio del Project contra el que se verificó: la Task debe ser de ese repositorio.
+    pub repo: String,
     pub branch: String,
     pub base: String,
     pub base_commit: Option<String>,
@@ -170,6 +172,17 @@ impl Tx {
         }
         if task.worktree.is_some() || task.branch.is_some() {
             return Err("adopt_task_not_eligible: la Task ya tiene un worktree".into());
+        }
+        // Se vuelve a comprobar DENTRO de la mutación (la comprobación previa de git y de dueños se hizo fuera de ella): otra adopción pudo ganar.
+        let want = super::projects::norm_path(&req.worktree);
+        if super::projects::norm_path(&task.repo) != super::projects::norm_path(&req.repo) {
+            return Err("adopt_task_not_eligible: la Task es de otro repositorio que el worktree".into());
+        }
+        if self.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| super::projects::norm_path(w) == want)) {
+            return Err("adopt_already_owned: una Task ya posee este worktree".into());
+        }
+        if self.tasks.values().any(|t| t.branch.as_deref() == Some(req.branch.as_str())) {
+            return Err("adopt_branch_taken: otra Task ya usa esta rama".into());
         }
         {
             let row = self.tasks.get_mut(task_id).ok_or("No se pudo adoptar")?;

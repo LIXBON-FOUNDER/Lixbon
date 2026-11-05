@@ -23,6 +23,7 @@ const BLOCKS = Object.freeze({
   adopt_already_owned: 'Una tarea ya posee este worktree.',
   adopt_branch_taken: 'Otra tarea ya usa esta rama.',
   adopt_no_base: 'No se pudo determinar en qué se diferencia de la rama base: no hay nada que revisar.',
+  adopt_no_changes: 'La rama no tiene commits propios respecto a la rama base: no hay trabajo que revisar.',
   adopt_is_base: 'Está en la rama base: no tiene trabajo propio que adoptar.',
   adopt_degraded: 'El Core está en solo lectura: no puede registrar la adopción.',
   adopt_no_task: 'No hay una tarea sin ejecución en este proyecto que lo reciba: crea una primero.',
@@ -110,7 +111,7 @@ export function ResourceAdopt({ projectId, path, onChanged }) {
           )}
           {adoptable && confirming && chosenTask && (
             <div className="nat__form" data-testid="resadopt-confirm">
-              <p className="nat__hint">Vas a adoptar la rama <strong className="mono">{view.branch}</strong> como el intento 1 de <strong>{chosenTask.title}</strong>. No se toca git ni la carpeta; solo queda registrado en Lixbon.</p>
+              <p className="nat__hint">Vas a adoptar la rama <strong className="mono">{view.branch}</strong> como el intento 1 de <strong>{chosenTask.title}</strong>. Adoptar no toca git ni la carpeta; solo queda registrado en Lixbon. Pero desde ese momento es una tarea de Lixbon: si luego la liberas o cierras la ejecución, Lixbon quitará esta carpeta, y borrará la rama solo si ya está fusionada.</p>
               <div className="nat__actions">
                 <button type="button" className="btn btn--primary btn--sm" disabled={busy} onClick={run} data-testid="resadopt-confirm-yes">{busy ? 'Adoptando…' : 'Confirmar adopción'}</button>
                 <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setConfirming(false); setError(null); }}>Cancelar</button>

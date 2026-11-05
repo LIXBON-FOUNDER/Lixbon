@@ -207,8 +207,15 @@ pub(super) fn is_dirty(worktree: &str) -> Option<bool> {
     Some(
         super::worktree_env::without_links(Path::new(worktree), &out.stdout)
             .iter()
-            .any(|l| !l.contains(".lixbon")),
+            .any(|l| !is_lixbon_entry(l)),
     )
+}
+
+/// ¿Es esta línea de `git status --porcelain` la carpeta `.lixbon` de Lixbon (o algo dentro)? SOLO esa carpeta en la raíz del worktree: un archivo
+/// versionado cuyo nombre contiene `.lixbon` (`notas.lixbon.md`) es trabajo de la persona, y modificarlo es un cambio sin commit.
+fn is_lixbon_entry(line: &str) -> bool {
+    let path = line.get(3..).unwrap_or("").trim().trim_matches('"');
+    path == ".lixbon" || path.starts_with(".lixbon/")
 }
 
 /// ¿Es `branch` ancestro de `into`? `git merge-base --is-ancestor` responde 0 (sí), 1 (no) o un error (128: una
@@ -224,9 +231,30 @@ pub(super) fn is_ancestor(repo: &str, branch: &str, into: &str) -> Option<bool> 
 
 /// El commit ancestro común de `base` y `branch` (`git merge-base`); `None` si no comparten historia o una ref no existe.
 pub(super) fn merge_base(repo: &str, base: &str, branch: &str) -> Option<String> {
-    let out = run(repo, &["merge-base", base, branch]).ok()?;
+    let (base, branch) = (local_ref(repo, base), local_ref(repo, branch));
+    let out = run(repo, &["merge-base", &base, &branch]).ok()?;
     let sha = out.stdout.trim();
     (out.code == Some(0) && sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit())).then(|| sha.to_string())
+}
+
+/// El nombre de una RAMA como ref exacta (`refs/heads/x`) si existe como rama local: `git merge-base main x` con una etiqueta `x` toma la etiqueta
+/// (ref ambigua) y desvía el commit base. Si no es una rama local se deja como llegó (`origin/main`).
+fn local_ref(repo: &str, name: &str) -> String {
+    let full = format!("refs/heads/{name}");
+    match run(repo, &["rev-parse", "--verify", "--quiet", &full]) {
+        Ok(out) if out.code == Some(0) => full,
+        _ => name.to_string(),
+    }
+}
+
+/// Cuántos commits tiene `branch` que `base` no tiene (`base..branch`); `None` si no se pudo contar. 0 = no hay trabajo propio que revisar.
+pub(super) fn own_commits(repo: &str, base: &str, branch: &str) -> Option<u64> {
+    let range = format!("{}..{}", local_ref(repo, base), local_ref(repo, branch));
+    let out = run(repo, &["rev-list", "--count", &range]).ok()?;
+    if out.code != Some(0) {
+        return None;
+    }
+    out.stdout.trim().parse().ok()
 }
 
 /// Rama por defecto del repositorio (la de `origin/HEAD` o, sin remoto, la rama actual del checkout principal).

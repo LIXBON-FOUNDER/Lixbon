@@ -315,8 +315,9 @@ resource_adopt         { project_id, path, task_id, confirm }  HumanDecision: so
 | `adopt_detached` | HEAD desacoplado: no hay rama que revisar ni integrar. |
 | `adopt_already_owned` / `adopt_branch_taken` | Otra Task ya posee ese worktree o usa esa rama. |
 | `adopt_is_base` / `adopt_no_base` | La rama es la base, o no comparte historia con ella (no hay `merge-base`): no hay trabajo propio. |
+| `adopt_no_changes` | La rama no tiene ni un commit propio respecto a la base (`base..rama` vacío: recién creada, o ya dentro de la base): no hay qué revisar. |
 | `adopt_degraded` | El Core está en solo lectura. |
-| `adopt_task_not_found` / `adopt_task_not_eligible` | La Task no existe, es de otro Project, ya tiene ejecuciones o ya tiene un worktree. Solo se adopta en una Task `not_started` sin Attempt y con `repo`. |
+| `adopt_task_not_found` / `adopt_task_not_eligible` | La Task no existe, es de otro Project, ya tiene ejecuciones o ya tiene un worktree, o su `repo` no es el del Project contra el que se verificó el worktree. Solo se adopta en una Task `not_started` sin Attempt y con `repo`. |
 
 **Qué queda registrado (una sola mutación).** La Task recibe el worktree y su rama (que no cambian después: el proyector solo admite el alta), la base
 (`default_branch`) y el commit base (`merge-base` de la base con la rama). Nace el Worktree con procedencia `adopted` y, en la misma transacción, el Attempt
@@ -328,6 +329,12 @@ cambian). Un Attempt adoptado no tiene duración: `attempt_compare` da `duration
 Sí se revisa (Proof Pack con el diff de la rama contra el commit base), se compara e integra.
 
 **Repetir es idempotente.** Adoptar de nuevo el mismo worktree en la misma Task devuelve `AlreadyAdopted` sin otro Event. El mismo worktree en otra Task es `adopt_already_owned`.
+Con dos adopciones simultáneas gana una: la comprobación de dueño, rama y repositorio se repite DENTRO de la mutación, así que la otra recibe `adopt_already_owned` (o
+`AlreadyAdopted` si era la misma adopción), nunca un error de la base. «Limpio» cuenta como cambio cualquier archivo modificado o nuevo salvo la carpeta `.lixbon` de la
+raíz (un archivo versionado como `notas.lixbon.md` sí cuenta). El commit base es el `merge-base` de las RAMAS (`refs/heads/…`): una etiqueta con el mismo nombre no lo desvía.
+
+**Después de adoptar.** Es una Task de Lixbon como cualquiera: `release` (o cerrar la ejecución) **quita la carpeta del worktree** y solo borra la rama si ya está
+fusionada. Adoptar en sí no toca git ni la carpeta, y la confirmación de Desktop lo advierte antes de decidir.
 
 **Límites conocidos.** Adoptar necesita una Task sin ejecución con `repo`; la interfaz todavía no crea una Task sin Attempt (LXO-150), así que el diálogo dice
 «crea una primero» si no hay (`adopt_no_task`). Adoptar no toca git ni la carpeta.

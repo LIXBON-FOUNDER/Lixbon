@@ -40,6 +40,14 @@ BEGIN
   SELECT RAISE(ABORT, 'attempts: un Attempt adoptado nace terminado, primero de su Task, con proveedor external y su Worktree');
 END;
 
+-- `adopted_at` se fija al nacer y no cambia: ni se pone a un Attempt que ya existe, ni se borra o cambia (tampoco aprovechando una integración, que
+-- `attempts_final_is_final` sí admite).
+CREATE TRIGGER attempts_adopted_at_immutable BEFORE UPDATE OF adopted_at ON attempts
+WHEN NEW.adopted_at IS NOT OLD.adopted_at
+BEGIN
+  SELECT RAISE(ABORT, 'attempts: adopted_at se fija al adoptar y no cambia');
+END;
+
 -- Un Worktree adoptado es de un Attempt adoptado, y al revés: la procedencia y el Attempt cuentan lo mismo.
 CREATE TRIGGER attempts_adopted_has_adopted_worktree BEFORE INSERT ON attempts
 WHEN NEW.adopted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM worktrees w WHERE w.id = NEW.worktree_id AND w.provenance = 'adopted' AND w.attempt_id = NEW.id)

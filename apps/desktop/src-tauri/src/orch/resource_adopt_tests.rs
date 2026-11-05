@@ -211,3 +211,140 @@ fn reintentar_o_bifurcar_un_attempt_adoptado_falla_y_no_deja_nada() {
     assert!(fork.is_err(), "bifurcar un adoptado no debe arrancar nada: {fork:?}");
     assert_eq!((event_total(&w.core), w.adopt_attempts_total()), (events, attempts), "lo rechazado no deja rastro");
 }
+
+// ---- Revisión adversarial: lo que se intentó romper y ahora se rechaza ----
+
+/// Un archivo versionado cuyo nombre CONTIENE `.lixbon` es trabajo de la persona: modificarlo sin commit es un cambio sin guardar. Solo la carpeta
+/// `.lixbon` de la raíz (el entorno de Lixbon) no cuenta.
+#[test]
+fn un_archivo_con_lixbon_en_el_nombre_modificado_sin_commit_cuenta_como_sucio() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv-1", "t");
+    let dir = w.adopt_external_worktree("wt-lixbon-nombre", "feature/lixbon");
+    std::fs::write(dir.join("notas.lixbon.md"), "v1\n").unwrap();
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-qm", "notas"]);
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["ok"], true);
+    std::fs::write(dir.join("notas.lixbon.md"), "v2 sin commit\n").unwrap();
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["code"], "adopt_dirty");
+    assert_eq!(code_of(&w.adopt_it(&dir, &task).unwrap_err()), "adopt_dirty");
+    // La carpeta de entorno de Lixbon en la raíz sí se ignora.
+    git(&dir, &["checkout", "--", "notas.lixbon.md"]);
+    std::fs::create_dir_all(dir.join(".lixbon")).unwrap();
+    std::fs::write(dir.join(".lixbon").join("env"), "x").unwrap();
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["ok"], true);
+}
+
+/// Una etiqueta con el nombre de la rama no sustituye a la rama: el commit base es el `merge-base` REAL (antes `git merge-base main x` tomaba la etiqueta).
+#[test]
+fn una_etiqueta_con_el_nombre_de_la_rama_no_desvia_el_commit_base() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv-2", "t");
+    let repo = w.adopt_repo();
+    let c1 = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["commit", "--allow-empty", "-qm", "c2"]);
+    let c2 = git(&repo, &["rev-parse", "HEAD"]);
+    let dir = w.adopt_external_worktree("wt-amb", "feature/amb");
+    git(&repo, &["tag", "feature/amb", &c1]);
+    git(&repo, &["tag", "main", &c1]);
+    w.adopt_it(&dir, &task).expect("la adopción");
+    let base: String = w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT base_commit FROM worktrees WHERE task_id = ?1", [&task], |r| r.get(0))?))).unwrap().unwrap();
+    assert_eq!(base, c2, "el commit base es el merge-base de las RAMAS, no el de una etiqueta homónima");
+}
+
+/// Una rama sin un solo commit propio (creada y vacía, o ya dentro de la base) no tiene trabajo que revisar: no se ofrece ni se adopta.
+#[test]
+fn una_rama_sin_commits_propios_no_se_adopta() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv-3", "t");
+    let repo = w.adopt_repo();
+    let dir = repo.parent().unwrap().join("wt-vacio");
+    git(&repo, &["worktree", "add", "-q", "-b", "vacia", &dir.to_string_lossy()]);
+    let p = w.adopt_preview(&dir);
+    assert_eq!((p["adopt"]["ok"].as_bool(), p["adopt"]["code"].as_str()), (Some(false), Some("adopt_no_changes")), "{p}");
+    let attempts = w.adopt_attempts_total();
+    assert_eq!(code_of(&w.adopt_it(&dir, &task).unwrap_err()), "adopt_no_changes");
+    assert_eq!(w.adopt_attempts_total(), attempts);
+}
+
+/// La Task debe ser del repositorio contra el que se verificó el worktree: una Task con otro `repo` no se ofrece ni lo recibe (antes quedaba un
+/// Worktree con el `repo` equivocado, imposible de liberar o integrar).
+#[test]
+fn una_task_de_otro_repositorio_no_recibe_el_worktree() {
+    let w = world("claude", None);
+    let otro = std::env::temp_dir().join("lixbon-adv-otro-repo-inexistente");
+    let created = w.desktop("task_create", json!({"request_id": "adv-7", "project_id": w.project, "objective": "o", "title": "ajena", "spec": "s", "repo": otro.to_string_lossy()})).unwrap();
+    let ajena = created["task_id"].as_str().unwrap().to_string();
+    let dir = w.adopt_external_worktree("wt-ajeno", "feature/ajeno");
+    let p = w.adopt_preview(&dir);
+    assert_eq!((p["adopt"]["code"].as_str(), p["tasks"].as_array().map(Vec::len)), (Some("adopt_no_task"), Some(0)), "{p}");
+    let e = w.adopt_it(&dir, &ajena).unwrap_err();
+    assert_eq!(code_of(&e), "adopt_task_not_eligible", "{e}");
+    assert_eq!(w.adopt_attempts_total(), 0);
+}
+
+/// Dos adopciones a la vez: gana UNA, y la otra lo dice con un código estable (no con un error de SQLite), sin dejar nada a medias.
+#[test]
+fn dos_adopciones_a_la_vez_ganan_una_y_la_otra_lo_dice() {
+    let w = world("claude", None);
+    let t1 = w.adopt_bare_task("adv-5a", "uno");
+    let t2 = w.adopt_bare_task("adv-5b", "dos");
+    let dir = w.adopt_external_worktree("wt-carrera", "feature/carrera");
+    // El MISMO worktree en dos Tasks distintas.
+    for _ in 0..1 {
+        let (a, b) = std::thread::scope(|s| {
+            let h1 = s.spawn(|| w.adopt_it(&dir, &t1));
+            let h2 = s.spawn(|| w.adopt_it(&dir, &t2));
+            (h1.join().unwrap(), h2.join().unwrap())
+        });
+        let (ok, err) = if a.is_ok() { (a, b) } else { (b, a) };
+        assert_eq!(ok.expect("una gana")["status"], "Adopted");
+        let e = err.expect_err("la otra pierde");
+        assert_eq!(code_of(&e), "adopt_already_owned", "{e}");
+        assert_eq!(w.adopt_attempts_total(), 1);
+    }
+    // LA MISMA adopción dos veces a la vez: una `Adopted` y la otra `AlreadyAdopted`, nunca un error.
+    let t3 = w.adopt_bare_task("adv-5c", "tres");
+    let dir2 = w.adopt_external_worktree("wt-carrera2", "feature/carrera2");
+    let (c, d) = std::thread::scope(|s| {
+        let h1 = s.spawn(|| w.adopt_it(&dir2, &t3));
+        let h2 = s.spawn(|| w.adopt_it(&dir2, &t3));
+        (h1.join().unwrap(), h2.join().unwrap())
+    });
+    let mut estados = [c.expect("sin error")["status"].as_str().unwrap().to_string(), d.expect("sin error")["status"].as_str().unwrap().to_string()];
+    estados.sort();
+    assert_eq!(estados, ["Adopted", "AlreadyAdopted"]);
+    assert_eq!(w.adopt_attempts_total(), 2);
+}
+
+/// Lo que dice el aviso de confirmación: adoptar no toca la carpeta, pero liberar la Task después la quita como con cualquier intento (la rama solo
+/// se borra si ya está fusionada). La persona debe saberlo ANTES de confirmar.
+#[test]
+fn liberar_una_task_adoptada_quita_su_carpeta_y_conserva_la_rama_sin_fusionar() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv-6", "t");
+    let dir = w.adopt_external_worktree("wt-release", "feature/release");
+    w.adopt_it(&dir, &task).unwrap();
+    assert!(dir.exists(), "adoptar no toca la carpeta");
+    let r = w.desktop("release", json!({"task": task, "force": false})).expect("release");
+    assert_eq!((r["worktree_removed"].as_bool(), r["branch_deleted"].as_bool()), (Some(true), Some(false)), "{r}");
+    assert!(!dir.exists(), "liberar la Task quita la carpeta");
+    assert!(git(&w.adopt_repo(), &["branch", "--list", "feature/release"]).contains("feature/release"), "la rama sin fusionar se conserva");
+}
+
+/// Rutas con espacios y acentos, y (en Windows) con barras distintas o el prefijo extendido, identifican el mismo worktree.
+#[test]
+fn la_ruta_del_worktree_se_reconoce_con_espacios_acentos_y_variantes_de_windows() {
+    let w = world("claude", None);
+    w.adopt_bare_task("adv-8", "t");
+    let dir = w.adopt_external_worktree("wt ñandú externo", "feature/ñandú");
+    let base = dir.to_string_lossy().to_string();
+    let mut variantes = vec![base.clone(), base.replace('\\', "/")];
+    if cfg!(windows) {
+        variantes.push(format!(r"\\?\{base}"));
+    }
+    for v in variantes {
+        let p = w.desktop("resource_adopt_preview", json!({"project_id": w.project, "path": v})).expect("preview");
+        assert_eq!(p["adopt"]["ok"], true, "{v}: {p}");
+    }
+}

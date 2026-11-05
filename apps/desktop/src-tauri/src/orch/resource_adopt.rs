@@ -64,6 +64,8 @@ fn block(code: &'static str, message: impl Into<String>) -> Block {
 /// Lo que git dice del worktree candidato, ya comprobado.
 struct Candidate {
     path: String,
+    /// El repositorio del Project contra el que se comprobó todo; la Task que lo recibe debe ser de ESE repositorio.
+    repo: String,
     branch: String,
     base: String,
     base_commit: String,
@@ -122,16 +124,23 @@ fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candi
     let Some(base_commit) = rgit::merge_base(&repo, &base, &branch) else {
         return Ok(Err(block("adopt_no_base", "la rama no comparte historia con la base: no hay diferencia que revisar")));
     };
-    Ok(Ok(Candidate { path: found.path.clone(), branch, base, base_commit }))
+    // Una rama sin un commit propio (recién creada, o ya dentro de la base) no tiene trabajo que revisar ni integrar.
+    match rgit::own_commits(&repo, &base, &branch) {
+        Some(0) => return Ok(Err(block("adopt_no_changes", "la rama no tiene commits propios respecto a la base: no hay trabajo que revisar"))),
+        Some(_) => {}
+        None => return Ok(Err(block("adopt_unknown", "no se pudo comparar la rama con la base: no se adopta a ciegas"))),
+    }
+    Ok(Ok(Candidate { path: found.path.clone(), repo, branch, base, base_commit }))
 }
 
 /// Las Tasks del Project que pueden recibir el worktree: sin ejecución, sin worktree y con repositorio. Por título, de la más reciente a la más antigua.
-fn eligible(core: &Core, project_id: &str) -> Vec<Value> {
+fn eligible(core: &Core, project_id: &str, repo: &str) -> Vec<Value> {
+    let want = norm_path(repo);
     let st = core.lock();
     let mut tasks: Vec<_> = st
         .tasks
         .values()
-        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty())
+        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty() && norm_path(&t.repo) == want)
         .collect();
     tasks.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)));
     tasks.into_iter().map(|t| json!({ "task_id": t.id, "title": t.title })).collect()
@@ -148,7 +157,10 @@ pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationCon
     let path = id_of(&input.path, "path")?;
     let healthy = matches!(core.health(), Health::Normal);
     let candidate = examine(core, &project_id, &path)?;
-    let tasks = eligible(core, &project_id);
+    let tasks = match core.project_launch_location(&project_id) {
+        Ok(repo) => eligible(core, &project_id, &repo.to_string_lossy()),
+        Err(_) => vec![],
+    };
     let adoptable = match &candidate {
         Err(b) => blocked_json(b),
         Ok(_) if !healthy => json!({ "ok": false, "code": "adopt_degraded", "message": "el Core está en solo lectura: no puede registrar la adopción" }),
@@ -202,12 +214,26 @@ pub(super) fn adopt(core: &Core, context: &MutationContext, input: &AdoptInput) 
     };
     let request = AdoptRequest {
         worktree: candidate.path.clone(),
+        repo: candidate.repo.clone(),
         branch: candidate.branch.clone(),
         base: candidate.base.clone(),
         base_commit: Some(candidate.base_commit.clone()),
         summary: format!("Trabajo externo adoptado de la rama {}.", candidate.branch),
     };
-    let attempt_id = core.mutate_as(context, |tx| tx.adopt_worktree(&task_id, &request)).map_err(|e| e.to_string())?;
+    let attempt_id = match core.mutate_as(context, |tx| tx.adopt_worktree(&task_id, &request)) {
+        Ok(id) => id,
+        Err(e) => {
+            // Otra adopción de ESTE mismo worktree en ESTA Task pudo ganar entre la comprobación y la mutación: repetir no hace nada.
+            let already = {
+                let st = core.lock();
+                st.tasks.get(&task_id).is_some_and(|t| t.adopted && t.worktree.as_deref().is_some_and(|w| norm_path(w) == norm_path(&path)))
+            };
+            if already {
+                return Ok(json!({ "status": "AlreadyAdopted", "task_id": task_id, "attempt_id": format!("{task_id}-a1") }));
+            }
+            return Err(e.to_string());
+        }
+    };
     Ok(json!({
         "status": "Adopted",
         "task_id": task_id,
