@@ -78,6 +78,7 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.project.location_added', { primary: true, fingerprint_adopted: false }],
   ['activity.project.archived', {}],
   ['activity.project.restored', {}],
+  ['activity.policy.changed', { scope: 'project', category: 'fork', direction: 'tighten', revision: 2 }, { scope_id: 'project-1', from: 'allow', to: 'deny' }],
   ['activity.project.relocated', { fingerprint_adopted: true, confirmed_mismatch: false }],
   ['activity.spawn.requested', {
     parent_task: 'task-1', title: 'Implementar', provider: 'codex', profile: 'default',

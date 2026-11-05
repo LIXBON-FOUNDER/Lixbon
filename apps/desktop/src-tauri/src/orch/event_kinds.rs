@@ -24,6 +24,7 @@
 //! | `task.review_requested` | state | `task` |
 //! | `environment.blocked` · `environment.cleared` | state | `agent` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
+//! | `policy.changed` (LXO-209) | decision | `policy` |
 //!
 //! # Kinds del Attempt (LXO-114, inertes hasta el corte; los emite `attempt_ops`)
 //! | kind | class | entidad |
@@ -1921,6 +1922,54 @@ impl EventPayload for ProjectArchived {
 
 pub(super) fn project_archived(project_id: &str) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Project, project_id, &ProjectArchived {})?.project(Some(project_id.to_string())).run(None))
+}
+
+/// Qué hizo un cambio de policy con la restricción EFECTIVA de esa categoría en ese ámbito (lista cerrada).
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum PolicyDirection {
+    /// Más restrictivo que antes (menos autonomía).
+    Tighten,
+    /// Menos restrictivo que antes (más autonomía): la acción que la interfaz confirma aparte.
+    Loosen,
+    /// Se fijó el mismo nivel efectivo (queda fijado por ese ámbito).
+    Same,
+    /// Se borró el override: el ámbito vuelve a heredar.
+    Reset,
+}
+
+/// Una persona cambió la policy de autonomía de un ámbito (LXO-209). `scope` es `global`, `project` o `attempt`; `scope_id` el Project o
+/// el Attempt (ausente en el global). `from`/`to` son los niveles del OVERRIDE (ausente = heredaba / vuelve a heredar), no los efectivos.
+/// `revision` es la revisión global que dejó este cambio. Nunca lleva credenciales, rutas ni texto libre: solo ámbito, categoría y niveles.
+#[derive(Serialize)]
+pub(super) struct PolicyChanged {
+    scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_id: Option<String>,
+    category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+    direction: PolicyDirection,
+    revision: i64,
+}
+
+impl EventPayload for PolicyChanged {
+    const KIND: &'static str = "policy.changed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+#[allow(clippy::too_many_arguments)]
+/// `policy.changed`: la entidad es el ámbito (`global`, `project:<id>`, `attempt:<id>`); el Project (si se conoce) va explícito.
+pub(super) fn policy_changed(scope: &str, scope_id: Option<&str>, project_id: Option<&str>, category: &str, from: Option<&str>, to: Option<&str>, direction: PolicyDirection, revision: i64) -> Result<EventDraft, EventError> {
+    let entity = match scope_id {
+        Some(id) => format!("{scope}:{}", clip(id, 150)),
+        None => scope.to_string(),
+    };
+    let p = PolicyChanged { scope: scope.to_string(), scope_id: scope_id.map(|id| clip(id, 150)), category: category.to_string(), from: from.map(str::to_string), to: to.map(str::to_string), direction, revision };
+    Ok(EventDraft::new(EntityKind::Policy, &entity, &p)?.project(project_id.map(str::to_string)).run(None))
 }
 
 /// El proyecto pasó de archivado a activo.

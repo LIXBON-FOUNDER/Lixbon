@@ -80,6 +80,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.continued` (LXO-134) | `activity.attempt.continued` | `task`, `n`, `from_n`, `strategy` ∈ `native_resume` `context_package`, `reason` ∈ `preferred` `requested` `provider_changed` `resume_unsupported` `session_unavailable` `session_expired` | info |
 | `attempt.retried` (LXO-142) | `activity.attempt.retried` | `task`, `n`, `from_n`, `overrides?` ⊆ `provider` `model` `effort` `profile` | info |
 | `attempt.forked` (LXO-145) | `activity.attempt.forked` | `task`, `n`, `source_task`, `source_n`, `strategy` ∈ `clean` `context_package` | info |
+| `policy.changed` (LXO-209) | `activity.policy.changed` | `scope` ∈ `global` `project` `attempt`, `scope_id?`, `category` (las diez de `POLICY.md`), `from?` · `to?` ∈ `allow` `confirm` `elevated` `deny`, `direction` ∈ `tighten` `loosen` `same` `reset`, `revision` | info |
 | `attempt.approved` | `activity.attempt.approved` | `task`, `n` | success |
 | `attempt.rejected` | `activity.attempt.rejected` | `task`, `n`, `cause` ∈ `cancelled` `run_closed` | warning |
 | `attempt.started` | `activity.attempt.started` | `task`, `n` | info |

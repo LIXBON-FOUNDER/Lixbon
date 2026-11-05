@@ -266,6 +266,14 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.forked",
             "info",
         ),
+        (
+            "policy.changed",
+            Decision,
+            ("policy", "project:p-1"),
+            json!({ "scope": "project", "scope_id": "p-1", "category": "fork", "from": "deny", "direction": "reset", "revision": 3 }),
+            "activity.policy.changed",
+            "info",
+        ),
         ("attempt.approved", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.approved", "success"),
         ("attempt.rejected", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "cause": "cancelled" }), "activity.attempt.rejected", "warning"),
         ("attempt.started", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.started", "info"),
@@ -714,7 +722,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 98] = [
+const CLAVES: [&str; 99] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
@@ -763,6 +771,7 @@ const CLAVES: [&str; 98] = [
     "activity.effect.process.not_launched",
     "activity.environment.blocked",
     "activity.environment.cleared",
+    "activity.policy.changed",
     "activity.project.archived",
     "activity.project.location_added",
     "activity.project.registered",

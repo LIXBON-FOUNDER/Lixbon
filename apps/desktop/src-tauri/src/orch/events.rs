@@ -199,6 +199,8 @@ pub(super) enum EntityKind {
     Agent,
     /// Hechos del sistema sin Task ni Project natural.
     Core,
+    /// Un ámbito de la policy de autonomía (`global`, `project:<id>`, `attempt:<id>`) (LXO-209).
+    Policy,
 }
 
 impl EntityKind {
@@ -217,6 +219,7 @@ impl EntityKind {
             EntityKind::Attention => "attention",
             EntityKind::Agent => "agent",
             EntityKind::Core => "core",
+            EntityKind::Policy => "policy",
         }
     }
 }

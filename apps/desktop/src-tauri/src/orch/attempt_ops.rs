@@ -37,6 +37,7 @@
 use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
 // Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
 pub(super) use super::event_kinds::DispatchAmbiguityCause;
+pub(super) use super::event_kinds::PolicyDirection;
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
@@ -94,6 +95,12 @@ pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, c
 
 pub(super) fn retried_fact(a: &AttemptRow, r: &RetryRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_retried(a, r, t), ctx, at)
+}
+
+/// El hecho de un cambio de policy (LXO-209). Vive aquí, con los demás hechos, para que `policy.rs` no importe el catálogo de eventos.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn policy_changed_fact(scope: &str, scope_id: Option<&str>, project_id: Option<&str>, category: &str, from: Option<&str>, to: Option<&str>, direction: PolicyDirection, revision: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::policy_changed(scope, scope_id, project_id, category, from, to, direction, revision), ctx, at)
 }
 
 /// Los hechos de la Pending Queue (LXO-143), construidos aquí para que `queue_commands` no importe el catálogo de eventos.

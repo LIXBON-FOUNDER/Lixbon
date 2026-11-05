@@ -23,6 +23,9 @@ pub(super) struct QueueInput {
     pub attempt_id: String,
     pub request_id: String,
     pub body: String,
+    /// La confirmación explícita que pide la policy cuando el nivel es `confirm` (LXO-209). La lee la policy en `rpc`, no este Command.
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Deserialize)]

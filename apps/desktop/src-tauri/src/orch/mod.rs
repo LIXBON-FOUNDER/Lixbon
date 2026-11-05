@@ -89,6 +89,9 @@ mod resource_actions;
 mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
+mod policy;
+#[cfg(test)]
+mod policy_tests;
 mod live_run;
 mod steer_commands;
 mod steer_runtime;

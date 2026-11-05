@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 99] = [
+pub(crate) const MESSAGE_KEYS: [&str; 100] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -53,6 +53,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 99] = [
     "activity.project.location_added",
     "activity.project.archived",
     "activity.project.restored",
+    "activity.policy.changed",
     "activity.project.relocated",
     "activity.spawn.requested",
     "activity.spawn.approved",
@@ -196,6 +197,45 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
         "agent_reported" => "el agente informó el fallo",
         _ => return None,
     })
+}
+
+/// Un cambio de policy (`policy.changed`, LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
+const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
+const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
+const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
+const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
+
+fn policy_category(code: &str) -> &'static str {
+    match code {
+        "start" => "arrancar",
+        "answer" => "responder",
+        "queue" => "encolar",
+        "steer" => "corregir",
+        "stop" => "detener",
+        "fork" => "bifurcar",
+        "review" => "revisar",
+        "integrate" => "integrar",
+        "cleanup" => "limpiar",
+        _ => "permisos del proveedor",
+    }
+}
+
+fn policy_level(code: &str) -> &'static str {
+    match code {
+        "allow" => "permitir",
+        "confirm" => "confirmar",
+        "elevated" => "elevado",
+        _ => "denegar",
+    }
+}
+
+fn policy_direction(code: &str) -> &'static str {
+    match code {
+        "tighten" => "más restrictiva",
+        "loosen" => "menos restrictiva",
+        "same" => "mismo nivel efectivo",
+        _ => "vuelve a heredar",
+    }
 }
 
 /// Con qué contexto arrancó un Fork (`attempt.forked`, LXO-145).
@@ -723,6 +763,26 @@ fn format(key: &str, a: &A) -> Option<String> {
             };
             let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
             Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
+        }
+        "activity.policy.changed" => {
+            let place = match a.code("scope", &POLICY_SCOPES)? {
+                "global" => "el ámbito global".to_string(),
+                "project" => format!("el proyecto {}", a.text("scope_id")?),
+                _ => format!("el intento {}", a.text("scope_id")?),
+            };
+            let category = policy_category(a.code("category", &POLICY_CATEGORIES)?);
+            // Ausente: el ámbito heredaba (o vuelve a heredar). Presente pero fuera del contrato: sin texto.
+            let level = |key: &str| -> Option<&'static str> {
+                if a.present(key) {
+                    a.code(key, &POLICY_LEVELS).map(policy_level)
+                } else {
+                    Some("heredado")
+                }
+            };
+            let (from, to) = (level("from")?, level("to")?);
+            let direction = policy_direction(a.code("direction", &POLICY_DIRECTIONS)?);
+            a.number("revision")?;
+            Some(format!("Policy de «{category}» en {place}: de {from} a {to} ({direction})."))
         }
         "activity.attempt.forked" => {
             let at = attempt_of(a)?;

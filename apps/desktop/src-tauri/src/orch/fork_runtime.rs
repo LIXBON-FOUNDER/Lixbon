@@ -51,6 +51,9 @@ const TITLE_MAX: usize = 512;
 pub(super) struct ForkInput {
     pub request_id: String,
     pub source_attempt_id: String,
+    /// La confirmación explícita que pide la policy cuando el nivel es `confirm` (LXO-209). La lee la policy en `rpc`, no este Command.
+    #[serde(default)]
+    pub confirm: bool,
     /// Otro proveedor/modelo/esfuerzo/rol que el del origen. Sin valor: se hereda. El modelo y el esfuerzo solo se heredan dentro del
     /// mismo proveedor (son del proveedor).
     #[serde(default)]

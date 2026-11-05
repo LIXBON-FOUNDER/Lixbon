@@ -18,6 +18,7 @@ import { FORK_QUERY_SPECS } from './forkContract';
 import { INTEGRATION_QUERY_SPECS } from './integrationContract';
 import { PROOF_PACK_QUERY_SPECS } from './proofPackContract';
 import { RESOURCE_QUERY_SPECS } from './resourceActionsContract';
+import { AUTONOMY_QUERY_SPECS } from './autonomyContract';
 import { QUEUE_QUERY_SPECS } from './queueContract';
 
 
@@ -193,6 +194,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
   ['activity.attempt.instruction_requested', { required: { task: 'string', n: 'integer', mode: 'string' } }],
   ['activity.attempt.instruction_result', { required: { task: 'string', n: 'integer', mode: 'string', outcome: 'string' }, optional: { reason: 'string' } }],
+  ['activity.policy.changed', { required: { scope: 'string', category: 'string', direction: 'string', revision: 'integer' }, optional: { scope_id: 'string', from: 'string', to: 'string' } }],
   ['activity.attempt.forked', { required: { task: 'string', n: 'integer', source_task: 'string', source_n: 'integer', strategy: 'string' } }],
   ['activity.attempt.retried', { required: { task: 'string', n: 'integer', from_n: 'integer' }, optional: { overrides: 'stringList' } }],
   ['activity.attempt.rejected', { required: { task: 'string', n: 'integer', cause: 'string' } }],
@@ -672,6 +674,8 @@ const QUERY_SPECS = Object.freeze({
   ...INTEGRATION_QUERY_SPECS,
   // Estado físico y de git del worktree de una Task, y qué acciones valen ahora (LXO-149/157).
   ...RESOURCE_QUERY_SPECS,
+  // La policy de autonomía efectiva de quien pregunta, con el origen de cada nivel (LXO-209/210).
+  ...AUTONOMY_QUERY_SPECS,
 });
 
 export const ADE_QUERY_NAMES = Object.freeze(Object.keys(QUERY_SPECS));

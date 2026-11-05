@@ -119,7 +119,7 @@ pub const ENTITY_KIND: [&str; 13] = [
 ];
 
 /// RESERVADO. Eventos de dominio durables (`entidad.verbo`), slice E.
-pub const DURABLE_EVENT: [&str; 53] = [
+pub const DURABLE_EVENT: [&str; 54] = [
     "project.registered", "project.archived", "project.relocated",
     "task.created", "task.updated", "task.closed",
     "attempt.requested", "attempt.continued", "attempt.retried", "attempt.forked", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
@@ -128,7 +128,7 @@ pub const DURABLE_EVENT: [&str; 53] = [
     "thread.created", "thread.summarized", "worktree.created", "worktree.adopted", "worktree.attached", "worktree.missing", "worktree.found", "worktree.removed", "artifact.created",
     "review.requested", "review.completed", "review.invalidated",
     "integration.requested", "integration.completed", "integration.conflict",
-    "agent.question", "agent.answered", "decision.created", "policy.warning",
+    "agent.question", "agent.answered", "decision.created", "policy.warning", "policy.changed",
     "attention.created", "attention.resolved",
 ];
 

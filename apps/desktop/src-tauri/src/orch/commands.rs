@@ -41,6 +41,8 @@ const ADE_READ_QUERIES: &[&str] = &[
     "attempt_integration_preview",
     // Estado físico y de git del worktree de una Task, y qué acciones valen ahora (LXO-149/157). Solo lectura.
     "resource_inspect",
+    // La policy de autonomía efectiva de quien pregunta, con el origen de cada nivel y la previsualización de un cambio (LXO-209). Solo lectura.
+    "policy_effective",
 ];
 const MAX_SAFE_ACTIVITY_CURSOR: i64 = 9_007_199_254_740_991;
 
@@ -342,11 +344,11 @@ mod ade_query_tests {
         for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list", "resource_inventory"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
-        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview", "usage_report", "pending_queue", "attempt_lineage", "attempt_compare", "attempt_proof_pack", "attempt_integration_preview", "resource_inspect"] {
+        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview", "usage_report", "pending_queue", "attempt_lineage", "attempt_compare", "attempt_proof_pack", "attempt_integration_preview", "resource_inspect", "policy_effective"] {
             assert!(is_ade_read_query(query), "{query} debe ser una lectura vNext permitida");
         }
         // Las mutaciones del Attempt no entran por esta superficie: el ADE F3 solo lee.
-        for operation in ["attempt_request", "attempt_start", "attempt_stop", "attempt_retry", "attempt_resume", "attempt_fork", "attempt_review", "attempt_integrate", "resource_clean", "resource_delete_worktree", "attempt_queue", "attempt_queue_cancel", "task_discard"] {
+        for operation in ["attempt_request", "attempt_start", "attempt_stop", "attempt_retry", "attempt_resume", "attempt_fork", "attempt_review", "attempt_integrate", "resource_clean", "resource_delete_worktree", "attempt_queue", "attempt_queue_cancel", "task_discard", "policy_set", "policy_reset"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
         for operation in ["project_archive", "run_create", "spawn", "remove_run", "events", "unknown"] {

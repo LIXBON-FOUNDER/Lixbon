@@ -44,6 +44,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.project.location_added',
   'activity.project.archived',
   'activity.project.restored',
+  'activity.policy.changed',
   'activity.project.relocated',
   'activity.spawn.requested',
   'activity.spawn.approved',
@@ -167,6 +168,14 @@ const CONTINUITY_REASONS = {
   session_expired: 'la sesión caducó',
 };
 const FORK_STRATEGIES = new Set(['clean', 'context_package']);
+// Cambio de policy (LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
+const POLICY_SCOPES = new Set(['global', 'project', 'attempt']);
+const POLICY_CATEGORIES = {
+  start: 'arrancar', answer: 'responder', queue: 'encolar', steer: 'corregir', stop: 'detener', fork: 'bifurcar', review: 'revisar',
+  integrate: 'integrar', cleanup: 'limpiar', provider_permissions: 'permisos del proveedor',
+};
+const POLICY_LEVELS = { allow: 'permitir', confirm: 'confirmar', elevated: 'elevado', deny: 'denegar' };
+const POLICY_DIRECTIONS = { tighten: 'más restrictiva', loosen: 'menos restrictiva', same: 'mismo nivel efectivo', reset: 'vuelve a heredar' };
 const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
 const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
 const QUEUE_FAILURES = {
@@ -473,6 +482,22 @@ const FORMATTERS = {
     if (overrides != null && (!Array.isArray(overrides) || !overrides.length
       || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
     return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
+  },
+  // Cambio de policy (LXO-209). Ausente `from`/`to`: el ámbito heredaba o vuelve a heredar.
+  'activity.policy.changed': (args) => {
+    const scope = requiredCode(args, 'scope', POLICY_SCOPES);
+    const scopeId = scope === 'global' ? '' : requiredText(args, 'scope_id');
+    const category = typeof args.category === 'string' && Object.hasOwn(POLICY_CATEGORIES, args.category) ? POLICY_CATEGORIES[args.category] : null;
+    const level = (key) => {
+      if (args[key] === undefined || args[key] === null) return 'heredado';
+      return typeof args[key] === 'string' && Object.hasOwn(POLICY_LEVELS, args[key]) ? POLICY_LEVELS[args[key]] : null;
+    };
+    const [from, to] = [level('from'), level('to')];
+    const direction = typeof args.direction === 'string' && Object.hasOwn(POLICY_DIRECTIONS, args.direction) ? POLICY_DIRECTIONS[args.direction] : null;
+    const revision = requiredNumber(args, 'revision');
+    if (!requiredArguments(scope, scopeId, category, from, to, direction, revision)) return null;
+    const place = scope === 'global' ? 'el ámbito global' : `${scope === 'project' ? 'el proyecto' : 'el intento'} ${scopeId}`;
+    return `Policy de «${category}» en ${place}: de ${from} a ${to} (${direction}).`;
   },
   // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
   'activity.attempt.forked': (args) => {

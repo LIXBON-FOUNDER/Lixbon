@@ -579,6 +579,44 @@ impl Core {
         read.map_err(|e| e.to_string())
     }
 
+    // ── La policy de autonomía (LXO-209): el almacén solo se toca desde aquí ──────────────────────────────────────────────────
+
+    /// La policy guardada AHORA. Se lee en cada Command: nunca se cachea ni se confía en lo que la interfaz vio. Sin almacén abierto o con un
+    /// error de lectura devuelve `Err`: quien decide falla CERRADO.
+    pub(super) fn policy_snapshot(&self) -> Result<crate::store::PolicySnapshot, String> {
+        match self.storage.read_store(|st| st.policy_snapshot()) {
+            Some(Ok(snapshot)) => Ok(snapshot),
+            Some(Err(e)) => Err(format!("No se pudo leer la policy: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// ¿Existe el Project en el registro? (Para no crear overrides huérfanos de un id inventado.)
+    pub(super) fn project_exists(&self, project_id: &str) -> Result<bool, String> {
+        match self.storage.read_store(|st| st.project(project_id)) {
+            Some(Ok(row)) => Ok(row.is_some()),
+            Some(Err(e)) => Err(format!("No se pudo leer el registro de proyectos: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// Escribe un cambio de policy con su Event de auditoría (una transacción). `event` recibe el nivel anterior y la revisión nueva.
+    pub(super) fn policy_apply(
+        &self,
+        expected_revision: i64,
+        write: &crate::store::PolicyWrite,
+        set_by: &str,
+        at: i64,
+        event: impl FnOnce(Option<&str>, i64) -> crate::store::StoreResult<crate::store::NewEvent>,
+    ) -> Result<crate::store::PolicyChange, String> {
+        match self.storage.with_store(|st| st.policy_apply_recorded(expected_revision, write, set_by, at, event)) {
+            Some(Ok(change)) => Ok(change),
+            Some(Err(crate::store::StoreError::AgenticModelInactive)) => Err("core_model_inactive: la policy se puede editar tras el corte Task/Attempt".into()),
+            Some(Err(e)) => Err(format!("No se pudo guardar la policy: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
     // ── La cola de instrucciones (LXO-143): el almacén solo se toca desde aquí ───────────────────────────────────────────────
 
     fn queue_store<R>(&self, f: impl FnOnce(&mut Store) -> Result<R, QueueError>) -> Result<R, QueueError> {

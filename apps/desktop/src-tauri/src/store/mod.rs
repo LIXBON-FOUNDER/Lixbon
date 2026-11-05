@@ -66,6 +66,7 @@ mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
 mod queue;
+mod policy;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -92,6 +93,8 @@ mod worktrees_tests;
 mod reviews_tests;
 #[cfg(test)]
 mod queue_tests;
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod tests;
 
@@ -160,6 +163,9 @@ pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
 // Pending Queue de un Attempt (LXO-143): inerte hasta el corte; solo la usan `orch::queue_commands` y las pruebas.
 #[allow(unused_imports)]
 pub use queue::{queue_digest, Enqueued, InstructionMode, InstructionOutcome, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
+// Policy de autonomía (LXO-209): overrides durables por ámbito; las reglas viven en `orch::policy`.
+#[allow(unused_imports)]
+pub use policy::{PolicyChange, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};

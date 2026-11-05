@@ -681,6 +681,31 @@
       "text": "El intento 5 de la tarea t-3 reintenta el intento 4 (otro modelo; otro esfuerzo)."
     },
     {
+      "key": "activity.policy.changed",
+      "args": { "scope": "global", "category": "steer", "to": "confirm", "direction": "tighten", "revision": 1 },
+      "text": "Policy de «corregir» en el ámbito global: de heredado a confirmar (más restrictiva)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "project", "scope_id": "p-1", "category": "fork", "from": "deny", "direction": "reset", "revision": 3 },
+      "text": "Policy de «bifurcar» en el proyecto p-1: de denegar a heredado (vuelve a heredar)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "attempt", "scope_id": "t-3-a1", "category": "integrate", "from": "confirm", "to": "deny", "direction": "tighten", "revision": 4 },
+      "text": "Policy de «integrar» en el intento t-3-a1: de confirmar a denegar (más restrictiva)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "team", "category": "fork", "direction": "reset", "revision": 3 },
+      "text": null
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "project", "category": "fork", "direction": "reset", "revision": 3 },
+      "text": null
+    },
+    {
       "key": "activity.attempt.forked",
       "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "clean" },
       "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3."

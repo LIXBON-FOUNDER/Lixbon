@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 65] = [
+pub(super) const KINDS: [&str; 66] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -66,6 +66,7 @@ pub(super) const KINDS: [&str; 65] = [
     "attempt.instruction_requested",
     "attempt.instruction_result",
     "attempt.dispatch_ambiguous",
+    "policy.changed",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -118,6 +119,11 @@ const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_ter
 /// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
 const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
+/// Ámbitos, categorías, niveles y direcciones de un cambio de policy (`policy.changed`, LXO-209).
+const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
+const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
+const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
+const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
 /// Con qué contexto arrancó un Fork (`attempt.forked`).
 const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
@@ -323,6 +329,11 @@ fn closed(p: &Value, key: &str, allowed: &[&'static str]) -> Option<Value> {
     one_of(p, key, allowed).map(|a| json!(a))
 }
 
+/// Como [`closed`], pero ausente o `null` es «no hay» (`None`) en vez de inválido: quien lo pide lo marca opcional con `?`.
+fn opt_closed(p: &Value, key: &str, allowed: &[&'static str]) -> Option<Value> {
+    p.get(key).filter(|v| !v.is_null()).and_then(|_| closed(p, key, allowed))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tabla Event kind -> Activity
 // ---------------------------------------------------------------------------------------------
@@ -495,6 +506,20 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 vec![("task", id(p, "task")), ("n", number(p, "n")), ("from_n", number(p, "from_n")), ("overrides?", overrides)],
             )
         }
+        // Cambio de policy (LXO-209): ámbito, categoría y niveles del override. Nunca credenciales, rutas ni texto libre.
+        "policy.changed" => rendered(
+            "activity.policy.changed",
+            Visual::Info,
+            vec![
+                ("scope", closed(p, "scope", &POLICY_SCOPES)),
+                ("scope_id?", opt_text(p, "scope_id", 200)),
+                ("category", closed(p, "category", &POLICY_CATEGORIES)),
+                ("from?", opt_closed(p, "from", &POLICY_LEVELS)),
+                ("to?", opt_closed(p, "to", &POLICY_LEVELS)),
+                ("direction", closed(p, "direction", &POLICY_DIRECTIONS)),
+                ("revision", number(p, "revision")),
+            ],
+        ),
         // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
         "attempt.forked" => rendered(
             "activity.attempt.forked",
