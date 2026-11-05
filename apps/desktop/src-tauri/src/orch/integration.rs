@@ -268,6 +268,9 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
             }
         }
     };
+    // Lo que dijo `gh` no se guarda ni se devuelve tal cual: solo una URL https saneada (sin credenciales, query ni fragmento). El Artifact
+    // `pull_request` del runtime exige https, así que una URL que no lo sea ni se registra (sería una acción ejecutada que no queda anotada).
+    let url = url.and_then(|u| super::pr_url::sanitize_pr_url(&u)).filter(|u| u.starts_with("https://"));
     let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
     let register = |st: &mut Tx| -> Result<u64, String> {
         let decision = st.record_decision(&id, "pr", "human", &detail)?;

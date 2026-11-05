@@ -276,6 +276,27 @@ fn publicar_un_pr_crea_lo_reconoce_si_ya_existe_y_cuenta_el_error_sin_duplicar()
 }
 
 #[test]
+fn la_url_del_pr_solo_sale_saneada_al_cliente_y_una_insegura_sale_vacia_sin_ocultar_que_hay_pr() {
+    let (w, a1) = done_with_work();
+    with_remote(&w);
+    let head = w.accept(&a1);
+    // `gh` devolvió una URL con credenciales, query y fragmento: sale limpia.
+    let r = w.publish(&a1, &head, &|_, _, _, _, _| Ok("https://ana:secreto@github.com/lixbon/demo/pull/9?token=abc#frag".to_string())).unwrap();
+    assert_eq!((r["outcome"].as_str(), r["pr_url"].as_str()), (Some("created"), Some("https://github.com/lixbon/demo/pull/9")));
+    assert_eq!(w.preview(&a1)["pr"]["url"], "https://github.com/lixbon/demo/pull/9");
+
+    // Una URL que no es https ni se guarda ni llega al cliente (y el resultado se registra igual: no queda una acción ejecutada sin anotar).
+    for raw in ["javascript:alert(1)", "http://github.example/o/r/pull/1"] {
+        let (w, a1) = done_with_work();
+        with_remote(&w);
+        let head = w.accept(&a1);
+        let r = w.publish(&a1, &head, &|_, _, _, _, _| Ok(raw.to_string())).unwrap();
+        assert_eq!((r["outcome"].as_str(), r["pr_url"].clone()), (Some("created"), Value::Null), "{raw}");
+        assert_eq!(w.preview(&a1)["pr"]["url"], Value::Null, "{raw}");
+    }
+}
+
+#[test]
 fn un_pr_que_gh_dice_que_ya_existe_se_reconoce_con_su_url() {
     let (w, a1) = done_with_work();
     with_remote(&w);

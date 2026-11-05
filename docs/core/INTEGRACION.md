@@ -63,3 +63,7 @@ Cada efecto ejecutado deja `effect.observed` y su `decision.recorded` en UNA mut
 * `attempt.integrated` no se emite en este camino (el estado de «integrado» sale de la decisión `merge`); alinear ambos queda para el Resource Manager.
 * El PR usa `gh` y el remoto `origin`; no se probó contra GitHub (las pruebas usan un `gh` simulado y un remoto local).
 * Un error de `gh` no se reintenta solo; la persona repite la acción.
+
+## La URL del PR (revisión final)
+
+`publish_pr` guarda y devuelve **solo una URL https saneada** (`pr_url::sanitize_pr_url`: sin credenciales, query ni fragmento). Lo que dijo `gh` y no cumple eso (`javascript:`, `http://`…) ni se guarda ni llega al cliente: el PR se creó y el resultado se registra, pero Lixbon no conoce su URL. Antes se guardaba tal cual, y una URL no https hacía que el Artifact `pull_request` del runtime (que exige https) rechazara el registro: la acción ejecutada quedaba sin anotar. La vista previa y el resultado de `attempt_integrate` usan el mismo saneado.

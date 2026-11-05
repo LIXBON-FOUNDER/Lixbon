@@ -101,6 +101,12 @@ fn availability(item: &Value, review: &str, is_current: bool, is_final: bool) ->
     (merge, pr)
 }
 
+/// La URL de un PR tal como sale al cliente: siempre por el saneado del Core (solo http/https, sin credenciales, query ni fragmento). Lo que no
+/// lo pasa sale como `null`; que exista un PR se sigue sabiendo por `can_publish_pr` (`already_exists`), no por la URL.
+fn safe_pr_url(value: &Value) -> Value {
+    value.as_str().and_then(super::pr_url::sanitize_pr_url).map_or(Value::Null, Value::String)
+}
+
 /// `attempt_integration_preview`. Solo lectura, solo una Person de Desktop.
 pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationContext>, input: &PreviewInput) -> Result<Value, String> {
     require_person(caller, context)?;
@@ -127,7 +133,7 @@ pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationCon
         "revision": { "head_commit": head },
         "review": { "state": review },
         "merge": { "merged": item["merged"], "result_commit": item["result_commit"] },
-        "pr": { "url": item["pr_url"], "has_remote": item["has_remote"] },
+        "pr": { "url": safe_pr_url(&item["pr_url"]), "has_remote": item["has_remote"] },
         "target": item["target"],
         "can_merge": can_merge,
         "can_publish_pr": can_pr,
@@ -179,6 +185,8 @@ pub(super) fn integrate_attempt(core: &Core, context: &MutationContext, input: &
     } else {
         integration::publish_pr(&acting, true, &json!({ "task": task_id, "confirm": true }), create)?
     };
+    // El Task puede guardar lo que dijo `gh`: al cliente solo llega saneado.
+    out["pr_url"] = safe_pr_url(&out["pr_url"]);
     out["attempt_id"] = json!(input.attempt_id.trim());
     Ok(out)
 }
