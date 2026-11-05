@@ -136,6 +136,14 @@
 .pv-row__l2 { font-size: 11.5px; color: var(--ink-50); white-space: nowrap; overflow: hidden; }
 .pv-row__state { font-weight: 500; }
 .pv-sep { color: var(--ink-35); }
+/* Workspace Pulse (LXO-218): una línea, sin cambiar la altura de la fila. Lo que no cabe se recorta; el texto completo va en title y en el lector. */
+.pv-row__l2 > .pv-row__state { flex-shrink: 0; }
+.pv-pulse2 { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.pv-pulse2__seg { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.pv-pulse2__seg--agent_reported { text-decoration: underline dotted; text-underline-offset: 2px; }
+.pv-pulse2__seg--unknown { color: var(--ink-35); }
+.pv-pulse2__seg.is-alert { color: var(--danger); }
+.pv-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .pv-unread { width: 6px; height: 6px; border-radius: 6px; background: var(--info); flex-shrink: 0; }
 .pv-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px 12px; font-size: 12.5px; color: var(--ink-50); }
 .pv-empty b { color: var(--ink-body); }
