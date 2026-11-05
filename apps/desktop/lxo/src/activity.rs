@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 100] = [
+pub(crate) const MESSAGE_KEYS: [&str; 103] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -54,6 +54,9 @@ pub(crate) const MESSAGE_KEYS: [&str; 100] = [
     "activity.project.archived",
     "activity.project.restored",
     "activity.policy.changed",
+    "activity.race.requested",
+    "activity.race.candidate_recorded",
+    "activity.race.cancelled",
     "activity.project.relocated",
     "activity.spawn.requested",
     "activity.spawn.approved",
@@ -198,6 +201,10 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Un Race (LXO-215): con qué contexto, el desenlace de cada candidato y lo que se canceló.
+const RACE_OUTCOMES: [&str; 2] = ["launched", "failed"];
+const RACE_SCOPES: [&str; 2] = ["one", "remaining"];
 
 /// Un cambio de policy (`policy.changed`, LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
 const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
@@ -763,6 +770,28 @@ fn format(key: &str, a: &A) -> Option<String> {
             };
             let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
             Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
+        }
+        "activity.race.requested" => {
+            let candidates = a.number("candidates")?;
+            let source = a.text("source")?;
+            a.text("race_id")?;
+            let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
+            Some(format!("Se pidió un Race de {candidates} candidatos desde el intento {source}{}.", if with_package { " con un paquete de contexto" } else { "" }))
+        }
+        "activity.race.candidate_recorded" => {
+            let n = a.number("index")? + 1;
+            let provider = a.text("provider")?;
+            match a.code("outcome", &RACE_OUTCOMES)? {
+                "launched" => Some(format!("Candidato {n} del Race: se lanzó {} con {provider}.", a.text("attempt_id")?)),
+                _ => Some(format!("Candidato {n} del Race: no se pudo lanzar con {provider} ({}).", a.text("code")?)),
+            }
+        }
+        "activity.race.cancelled" => {
+            let (stopped, rejected, failed) = (a.number("stopped")?, a.number("rejected")?, a.number("failed")?);
+            match a.code("scope", &RACE_SCOPES)? {
+                "one" => Some(format!("Se canceló el candidato {} del Race.", a.text("attempt_id")?)),
+                _ => Some(format!("Se canceló lo que quedaba del Race: {stopped} detenidos, {rejected} rechazados{}.", if failed > 0 { format!(", {failed} sin poder detenerse") } else { String::new() })),
+            }
         }
         "activity.policy.changed" => {
             let place = match a.code("scope", &POLICY_SCOPES)? {

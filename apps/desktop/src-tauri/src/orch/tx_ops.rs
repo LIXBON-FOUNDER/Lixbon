@@ -140,6 +140,8 @@ pub(super) struct ForkRequest {
     pub strategy: ForkStrategy,
     pub package_id: Option<String>,
     pub overrides: Vec<RetryOverride>,
+    /// Si nace de un Race (LXO-215): su id y el índice del candidato. Va en `attempt.forked`.
+    pub race: Option<(String, u32)>,
 }
 
 impl Tx {
@@ -178,7 +180,7 @@ impl Tx {
             row.status = Status::PendingApproval;
         }
         self.request_initial_attempt(&task)?;
-        let forked = self.tasks.get(&task).cloned().map(|t| ev::runtime_attempt_forked(&t, &req.source_attempt, &req.source_task, req.source_n, req.strategy, req.package_id.clone(), req.overrides.clone()));
+        let forked = self.tasks.get(&task).cloned().map(|t| ev::runtime_attempt_forked(&t, &req.source_attempt, &req.source_task, req.source_n, req.strategy, req.package_id.clone(), req.overrides.clone(), req.race.as_ref().map(|(id, i)| (id.as_str(), *i))));
         if let Some(forked) = forked {
             self.try_push_event(forked);
         }

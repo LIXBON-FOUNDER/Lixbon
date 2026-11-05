@@ -78,6 +78,9 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.project.location_added', { primary: true, fingerprint_adopted: false }],
   ['activity.project.archived', {}],
   ['activity.project.restored', {}],
+  ['activity.race.requested', { race_id: 'rc-aaaaaaaaaaaaaaaaaaaa', source: 'task-1-a1', candidates: 3, strategy: 'clean' }],
+  ['activity.race.candidate_recorded', { index: 0, outcome: 'launched', provider: 'codex' }, { attempt_id: 'task-2-a1', code: 'race_concurrency_limit' }],
+  ['activity.race.cancelled', { scope: 'remaining', stopped: 1, rejected: 1, failed: 0 }, { attempt_id: 'task-2-a1' }],
   ['activity.policy.changed', { scope: 'project', category: 'fork', direction: 'tighten', revision: 2 }, { scope_id: 'project-1', from: 'allow', to: 'deny' }],
   ['activity.project.relocated', { fingerprint_adopted: true, confirmed_mismatch: false }],
   ['activity.spawn.requested', {

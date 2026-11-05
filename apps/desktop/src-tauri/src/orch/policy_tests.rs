@@ -408,6 +408,8 @@ fn los_commands_que_no_ejecutan_nada_o_deshacen_no_pasan_por_la_policy() {
         ("attempt_steer", "steer"),
         ("attempt_stop_and_send", "stop"),
         ("attempt_fork", "fork"),
+        ("task_race", "fork"),
+        ("task_race_cancel", "stop"),
         ("attempt_review", "review"),
         ("attempt_integrate", "integrate"),
         ("resource_clean", "cleanup"),

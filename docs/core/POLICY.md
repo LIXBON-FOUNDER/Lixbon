@@ -20,8 +20,8 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 | `start` | `task_create` **con** `attempt`, `attempt_retry`, `attempt_resume` | `confirm` |
 | `queue` | `attempt_queue` | — |
 | `steer` | `attempt_steer` | — |
-| `stop` | `attempt_stop_and_send` | — |
-| `fork` | `attempt_fork` | — |
+| `stop` | `attempt_stop_and_send`, `task_race_cancel` | — |
+| `fork` | `attempt_fork`, `task_race` (se vuelve a comprobar antes de CADA candidato) | — |
 | `review` | `attempt_review` | `confirm` |
 | `integrate` | `attempt_integrate` | `confirm` |
 | `cleanup` | `resource_clean`, `resource_delete_worktree` | `confirm` |

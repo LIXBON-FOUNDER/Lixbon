@@ -90,6 +90,7 @@ mod attempt_resume_rpc;
 mod queue_runtime;
 mod queue_rpc;
 mod policy;
+mod race_runtime;
 #[cfg(test)]
 mod policy_tests;
 mod live_run;
@@ -113,6 +114,8 @@ mod attempt_e2e_tests;
 mod steer_e2e_tests;
 #[cfg(test)]
 mod fork_e2e_tests;
+#[cfg(test)]
+mod race_e2e_tests;
 #[cfg(test)]
 mod compare_e2e_tests;
 #[cfg(test)]

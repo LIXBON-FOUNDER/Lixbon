@@ -199,6 +199,8 @@ pub(super) enum EntityKind {
     Agent,
     /// Hechos del sistema sin Task ni Project natural.
     Core,
+    /// Un Race: N Forks comparables lanzados a la vez (`race.*`, LXO-215). Id `rc-<hash>`.
+    Race,
     /// Un ámbito de la policy de autonomía (`global`, `project:<id>`, `attempt:<id>`) (LXO-209).
     Policy,
 }
@@ -220,6 +222,7 @@ impl EntityKind {
             EntityKind::Agent => "agent",
             EntityKind::Core => "core",
             EntityKind::Policy => "policy",
+            EntityKind::Race => "race",
         }
     }
 }

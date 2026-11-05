@@ -42,7 +42,7 @@ impl World {
 }
 
 /// El payload del `attempt.forked` del Attempt.
-fn forked_payload(core: &Core, attempt: &str) -> Value {
+pub(super) fn forked_payload(core: &Core, attempt: &str) -> Value {
     let text: String = core
         .storage
         .with_store(|s| s.read(|c| Ok(c.query_row("SELECT payload FROM events WHERE kind = 'attempt.forked' AND entity_id = ?1", [attempt], |r| r.get(0))?)))
@@ -55,7 +55,7 @@ fn column(core: &Core, attempt: &str, column: &str) -> Option<String> {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row(&format!("SELECT CAST({column} AS TEXT) FROM attempts WHERE id = ?1"), [attempt], |r| r.get::<_, Option<String>>(0))?))).unwrap().unwrap()
 }
 
-fn task_count(core: &Core) -> usize {
+pub(super) fn task_count(core: &Core) -> usize {
     core.lock().tasks.len()
 }
 
@@ -64,7 +64,7 @@ fn package_of(w: &World, task: &str, attempt: &str) -> String {
     package_in(&w.project, task, attempt)
 }
 
-fn package_in(project: &str, task: &str, attempt: &str) -> String {
+pub(super) fn package_in(project: &str, task: &str, attempt: &str) -> String {
     build(NewPackage {
         created_at_ms: 1,
         project_id: project.into(),
@@ -90,7 +90,7 @@ fn package_in(project: &str, task: &str, attempt: &str) -> String {
 }
 
 /// Dos proveedores completos (`claude` y `codex`) detrás del lanzador real.
-fn world_duo() -> (World, Arc<FakeAdapter>) {
+pub(super) fn world_duo() -> (World, Arc<FakeAdapter>) {
     let repo = repo_with_commit();
     let (core, _client, _ctx, project) = core_with_project_at(&repo.to_string_lossy());
     let claude = Arc::new(FakeAdapter::full("claude"));

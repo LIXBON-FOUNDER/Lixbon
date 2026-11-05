@@ -274,6 +274,10 @@ fn casos() -> Vec<Caso> {
             "activity.policy.changed",
             "info",
         ),
+        ("race.requested", Decision, ("race", "rc-aaaaaaaaaaaaaaaaaaaa"), json!({ "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-7-a2", "source_task": "t-7", "candidates": 3, "strategy": "clean", "digest": "d" }), "activity.race.requested", "info"),
+        ("race.candidate_recorded", State, ("race", "rc-aaaaaaaaaaaaaaaaaaaa"), json!({ "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "index": 0, "outcome": "launched", "provider": "codex", "task_id": "t-9", "attempt_id": "t-9-a1" }), "activity.race.candidate_recorded", "info"),
+        ("race.candidate_recorded", State, ("race", "rc-aaaaaaaaaaaaaaaaaaaa"), json!({ "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "index": 1, "outcome": "failed", "provider": "nope", "code": "race_concurrency_limit" }), "activity.race.candidate_recorded", "warning"),
+        ("race.cancelled", Decision, ("race", "rc-aaaaaaaaaaaaaaaaaaaa"), json!({ "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "scope": "remaining", "stopped": 1, "rejected": 1, "failed": 0 }), "activity.race.cancelled", "info"),
         ("attempt.approved", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.approved", "success"),
         ("attempt.rejected", Decision, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "cause": "cancelled" }), "activity.attempt.rejected", "warning"),
         ("attempt.started", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2 }), "activity.attempt.started", "info"),
@@ -722,7 +726,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 99] = [
+const CLAVES: [&str; 102] = [
     "activity.artifact.created",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
@@ -782,6 +786,9 @@ const CLAVES: [&str; 99] = [
     "activity.provider_session.detached",
     "activity.provider_session.opened",
     "activity.provider_session.resumed",
+    "activity.race.cancelled",
+    "activity.race.candidate_recorded",
+    "activity.race.requested",
     "activity.run.closed",
     "activity.run.created",
     "activity.run.removed",

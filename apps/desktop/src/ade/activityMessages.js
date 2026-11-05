@@ -45,6 +45,9 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.project.archived',
   'activity.project.restored',
   'activity.policy.changed',
+  'activity.race.requested',
+  'activity.race.candidate_recorded',
+  'activity.race.cancelled',
   'activity.project.relocated',
   'activity.spawn.requested',
   'activity.spawn.approved',
@@ -168,6 +171,9 @@ const CONTINUITY_REASONS = {
   session_expired: 'la sesión caducó',
 };
 const FORK_STRATEGIES = new Set(['clean', 'context_package']);
+// Race (LXO-215): con qué contexto, el desenlace de cada candidato y lo que se canceló.
+const RACE_OUTCOMES = new Set(['launched', 'failed']);
+const RACE_SCOPES = new Set(['one', 'remaining']);
 // Cambio de policy (LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
 const POLICY_SCOPES = new Set(['global', 'project', 'attempt']);
 const POLICY_CATEGORIES = {
@@ -482,6 +488,39 @@ const FORMATTERS = {
     if (overrides != null && (!Array.isArray(overrides) || !overrides.length
       || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
     return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
+  },
+  // Race (LXO-215). Nunca el encargo, el paquete ni texto libre.
+  'activity.race.requested': (args) => {
+    const raceId = requiredText(args, 'race_id');
+    const source = requiredText(args, 'source');
+    const candidates = requiredNumber(args, 'candidates');
+    const strategy = requiredCode(args, 'strategy', FORK_STRATEGIES);
+    if (!requiredArguments(raceId, source, candidates, strategy)) return null;
+    return `Se pidió un Race de ${candidates} candidatos desde el intento ${source}${strategy === 'context_package' ? ' con un paquete de contexto' : ''}.`;
+  },
+  'activity.race.candidate_recorded': (args) => {
+    const index = requiredNumber(args, 'index');
+    const provider = requiredText(args, 'provider');
+    const outcome = requiredCode(args, 'outcome', RACE_OUTCOMES);
+    if (!requiredArguments(index, provider, outcome)) return null;
+    if (outcome === 'launched') {
+      const attempt = requiredText(args, 'attempt_id');
+      return requiredArguments(attempt) ? `Candidato ${index + 1} del Race: se lanzó ${attempt} con ${provider}.` : null;
+    }
+    const code = requiredText(args, 'code');
+    return requiredArguments(code) ? `Candidato ${index + 1} del Race: no se pudo lanzar con ${provider} (${code}).` : null;
+  },
+  'activity.race.cancelled': (args) => {
+    const scope = requiredCode(args, 'scope', RACE_SCOPES);
+    const stopped = requiredNumber(args, 'stopped');
+    const rejected = requiredNumber(args, 'rejected');
+    const failed = requiredNumber(args, 'failed');
+    if (!requiredArguments(scope, stopped, rejected, failed)) return null;
+    if (scope === 'one') {
+      const attempt = requiredText(args, 'attempt_id');
+      return requiredArguments(attempt) ? `Se canceló el candidato ${attempt} del Race.` : null;
+    }
+    return `Se canceló lo que quedaba del Race: ${stopped} detenidos, ${rejected} rechazados${failed > 0 ? `, ${failed} sin poder detenerse` : ''}.`;
   },
   // Cambio de policy (LXO-209). Ausente `from`/`to`: el ámbito heredaba o vuelve a heredar.
   'activity.policy.changed': (args) => {

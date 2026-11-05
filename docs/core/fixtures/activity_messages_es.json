@@ -681,6 +681,51 @@
       "text": "El intento 5 de la tarea t-3 reintenta el intento 4 (otro modelo; otro esfuerzo)."
     },
     {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 3, "strategy": "clean" },
+      "text": "Se pidió un Race de 3 candidatos desde el intento t-3-a1."
+    },
+    {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "context_package" },
+      "text": "Se pidió un Race de 2 candidatos desde el intento t-3-a1 con un paquete de contexto."
+    },
+    {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "otra" },
+      "text": null
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 0, "outcome": "launched", "provider": "codex", "attempt_id": "t-9-a1" },
+      "text": "Candidato 1 del Race: se lanzó t-9-a1 con codex."
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 1, "outcome": "failed", "provider": "nope", "code": "race_concurrency_limit" },
+      "text": "Candidato 2 del Race: no se pudo lanzar con nope (race_concurrency_limit)."
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 1, "outcome": "launched", "provider": "codex" },
+      "text": null
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "one", "attempt_id": "t-9-a1", "stopped": 1, "rejected": 0, "failed": 0 },
+      "text": "Se canceló el candidato t-9-a1 del Race."
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "remaining", "stopped": 1, "rejected": 2, "failed": 1 },
+      "text": "Se canceló lo que quedaba del Race: 1 detenidos, 2 rechazados, 1 sin poder detenerse."
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "one", "stopped": 1, "rejected": 0, "failed": 0 },
+      "text": null
+    },
+    {
       "key": "activity.policy.changed",
       "args": { "scope": "global", "category": "steer", "to": "confirm", "direction": "tighten", "revision": 1 },
       "text": "Policy de «corregir» en el ámbito global: de heredado a confirmar (más restrictiva)."

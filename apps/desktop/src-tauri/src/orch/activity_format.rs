@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 66] = [
+pub(super) const KINDS: [&str; 69] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -67,6 +67,9 @@ pub(super) const KINDS: [&str; 66] = [
     "attempt.instruction_result",
     "attempt.dispatch_ambiguous",
     "policy.changed",
+    "race.requested",
+    "race.candidate_recorded",
+    "race.cancelled",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -124,6 +127,9 @@ const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
 const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
 const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
 const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
+/// Un Race (`race.requested`, `race.candidate_recorded`, `race.cancelled`, LXO-215): con qué contexto, qué pasó con cada candidato y qué se canceló.
+const RACE_OUTCOMES: [&str; 2] = ["launched", "failed"];
+const RACE_SCOPES: [&str; 2] = ["one", "remaining"];
 /// Con qué contexto arrancó un Fork (`attempt.forked`).
 const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
@@ -520,6 +526,40 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("revision", number(p, "revision")),
             ],
         ),
+        // Race (LXO-215): lo pedido, el desenlace de cada candidato y lo cancelado. Nunca el encargo, el paquete ni texto libre.
+        "race.requested" => rendered(
+            "activity.race.requested",
+            Visual::Info,
+            vec![("race_id", id(p, "race_id")), ("source", id(p, "source")), ("candidates", number(p, "candidates")), ("strategy", closed(p, "strategy", &FORK_STRATEGIES))],
+        ),
+        "race.candidate_recorded" => {
+            let outcome = one_of(p, "outcome", &RACE_OUTCOMES)?;
+            rendered(
+                "activity.race.candidate_recorded",
+                if outcome == "launched" { Visual::Info } else { Visual::Warning },
+                vec![
+                    ("index", number(p, "index")),
+                    ("outcome", Some(json!(outcome))),
+                    ("provider", text(p, "provider", 64)),
+                    ("attempt_id?", if outcome == "launched" { id(p, "attempt_id") } else { None }),
+                    ("code?", if outcome == "failed" { token(p, "code") } else { None }),
+                ],
+            )
+        }
+        "race.cancelled" => {
+            let failed = p.get("failed")?.as_u64()?;
+            rendered(
+                "activity.race.cancelled",
+                if failed > 0 { Visual::Warning } else { Visual::Info },
+                vec![
+                    ("scope", closed(p, "scope", &RACE_SCOPES)),
+                    ("attempt_id?", opt_token_id(p, "attempt_id")),
+                    ("stopped", number(p, "stopped")),
+                    ("rejected", number(p, "rejected")),
+                    ("failed", number(p, "failed")),
+                ],
+            )
+        }
         // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
         "attempt.forked" => rendered(
             "activity.attempt.forked",

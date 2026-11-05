@@ -81,6 +81,9 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.retried` (LXO-142) | `activity.attempt.retried` | `task`, `n`, `from_n`, `overrides?` ⊆ `provider` `model` `effort` `profile` | info |
 | `attempt.forked` (LXO-145) | `activity.attempt.forked` | `task`, `n`, `source_task`, `source_n`, `strategy` ∈ `clean` `context_package` | info |
 | `policy.changed` (LXO-209) | `activity.policy.changed` | `scope` ∈ `global` `project` `attempt`, `scope_id?`, `category` (las diez de `POLICY.md`), `from?` · `to?` ∈ `allow` `confirm` `elevated` `deny`, `direction` ∈ `tighten` `loosen` `same` `reset`, `revision` | info |
+| `race.requested` (LXO-215) | `activity.race.requested` | `race_id`, `source`, `candidates`, `strategy` ∈ `clean` `context_package` | info |
+| `race.candidate_recorded` (LXO-215) | `activity.race.candidate_recorded` | `index`, `outcome` ∈ `launched` `failed`, `provider`, `attempt_id?` (lanzado), `code?` (fallido) | info · warning si falló |
+| `race.cancelled` (LXO-215) | `activity.race.cancelled` | `scope` ∈ `one` `remaining`, `attempt_id?`, `stopped`, `rejected`, `failed` | info · warning si alguno no se pudo detener |
 | `attempt.approved` | `activity.attempt.approved` | `task`, `n` | success |
 | `attempt.rejected` | `activity.attempt.rejected` | `task`, `n`, `cause` ∈ `cancelled` `run_closed` | warning |
 | `attempt.started` | `activity.attempt.started` | `task`, `n` | info |

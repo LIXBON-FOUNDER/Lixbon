@@ -591,6 +591,26 @@ impl Core {
         }
     }
 
+    /// Los eventos de un Race (entidad `race`), del más antiguo al más nuevo: `(kind, payload, at)`. Solo lectura.
+    pub(super) fn race_events(&self, race_id: &str) -> Result<Vec<(String, String, i64)>, String> {
+        let q = EventQuery { entity_kind: Some("race".into()), entity_id: Some(race_id.into()), ..EventQuery::default() };
+        match self.storage.events_page(&q) {
+            Some(Ok(page)) => Ok(page.events.into_iter().map(|e| (e.kind, e.payload, e.at)).collect()),
+            Some(Err(e)) => Err(format!("No se pudo leer el Race: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// Los `race.requested` más recientes (de cualquier Race), para listar los de un Attempt. Solo lectura.
+    pub(super) fn race_requests(&self, limit: usize) -> Result<Vec<(String, String, i64)>, String> {
+        let q = EventQuery { kind: Some("race.requested".into()), newest_first: true, limit: Some(limit), ..EventQuery::default() };
+        match self.storage.events_page(&q) {
+            Some(Ok(page)) => Ok(page.events.into_iter().map(|e| (e.entity_id, e.payload, e.at)).collect()),
+            Some(Err(e)) => Err(format!("No se pudo leer los Races: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
     /// ¿Existe el Project en el registro? (Para no crear overrides huérfanos de un id inventado.)
     pub(super) fn project_exists(&self, project_id: &str) -> Result<bool, String> {
         match self.storage.read_store(|st| st.project(project_id)) {

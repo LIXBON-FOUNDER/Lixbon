@@ -121,7 +121,7 @@
     "entity_kind": {
       "estado": "reservado",
       "origen": "events.entity_kind (migracion 003, slice E; referencia blanda) y prefijo de los eventos de dominio durables",
-      "ids": ["project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention"]
+      "ids": ["project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "race", "attention"]
     },
 
     "event": {
@@ -143,7 +143,7 @@
           "thread.created", "thread.summarized", "worktree.created", "worktree.adopted", "worktree.attached", "worktree.missing", "worktree.found", "worktree.removed", "artifact.created",
           "review.requested", "review.completed", "review.invalidated",
           "integration.requested", "integration.completed", "integration.conflict",
-          "agent.question", "agent.answered", "decision.created", "policy.warning", "policy.changed",
+          "agent.question", "agent.answered", "decision.created", "policy.warning", "policy.changed", "race.requested", "race.candidate_recorded", "race.cancelled",
           "attention.created", "attention.resolved"
         ]
       },

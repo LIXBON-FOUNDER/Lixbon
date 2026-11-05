@@ -69,6 +69,9 @@ pub(super) struct ForkInput {
     /// El ContextPackage v1 (JSON, como texto) que la persona revisó. Sin él, el Fork arranca limpio con el encargo de la Task.
     #[serde(default)]
     pub package: Option<String>,
+    /// SOLO lo fija un Race (LXO-215): su id y el índice del candidato. Nunca viene del cliente (`skip`).
+    #[serde(skip)]
+    pub race: Option<(String, u32)>,
 }
 
 /// `<task>-a<n>` canónico: devuelve `(task, n)`.
@@ -104,7 +107,7 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 /// La identidad del ledger: la de la Person que pide, nunca la que diga el JSON.
-fn identity_scope(context: &MutationContext) -> Result<String, String> {
+pub(super) fn identity_scope(context: &MutationContext) -> Result<String, String> {
     match (&context.actor, context.client_id.as_deref()) {
         (Actor::PersonId(id), Some(client)) if !id.is_empty() && !client.is_empty() && context.channel != Channel::Core => Ok(format!("user:{id}")),
         _ => Err("hacer un Fork requiere una Person autenticada".into()),
@@ -123,6 +126,7 @@ fn payload_hash(input: &ForkInput, package_id: Option<&str>) -> String {
         "role": input.role,
         "title": input.title,
         "package_id": package_id,
+        "race": input.race,
     });
     Sha256::digest(canon.to_string().as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -140,7 +144,7 @@ fn result(status: &str, ids: &RuntimeResultIds, source: &str, strategy: Option<F
 }
 
 /// El ContextPackage, ya parseado y comprobado contra el origen: lo que el paquete dice de dónde sale tiene que ser ESTE Attempt.
-fn checked_package(raw: &str, source_task: &str, source_attempt: &str, project_id: &str) -> Result<ContextPackage, String> {
+pub(super) fn checked_package(raw: &str, source_task: &str, source_attempt: &str, project_id: &str) -> Result<ContextPackage, String> {
     let package = context_package::parse(raw).map_err(|e| format!("context_package_invalid: {} ({})", e.code.code(), clip(&e.message, 200)))?;
     let s = package.source();
     if s.attempt_id != source_attempt || s.task_id != source_task {
@@ -153,6 +157,12 @@ fn checked_package(raw: &str, source_task: &str, source_attempt: &str, project_i
 }
 
 pub(super) fn fork(core: &Core, context: &MutationContext, input: &ForkInput) -> Result<Value, String> {
+    fork_gated(core, context, input, &|| Ok(()))
+}
+
+/// Como [`fork`], pero con una última comprobación (`before_launch`) justo ANTES de escribir, y solo si el Fork no es un replay: la usa Race
+/// para validar límites y policy antes de CADA lanzamiento (LXO-215). Si rechaza, no se escribe nada.
+pub(super) fn fork_gated(core: &Core, context: &MutationContext, input: &ForkInput, before_launch: &dyn Fn() -> Result<(), String>) -> Result<Value, String> {
     // 1. Quién, con qué y qué pide.
     let scope = identity_scope(context)?;
     if !valid_key(&input.request_id) {
@@ -240,9 +250,11 @@ pub(super) fn fork(core: &Core, context: &MutationContext, input: &ForkInput) ->
         strategy,
         package_id: package_id.clone(),
         overrides,
+        race: input.race.clone(),
     };
 
     // 5. Una sola mutación: la Task, su Attempt y los dos hechos, o nada.
+    before_launch()?;
     let outcome = core
         .mutate_idempotent_recorded(&scope, &input.request_id, &hash, |tx| {
             tx.set_context(context.clone());

@@ -407,7 +407,9 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
         "attempt_queue" => (Category::Queue, attempt("attempt_id")),
         "attempt_steer" => (Category::Steer, attempt("attempt_id")),
         "attempt_stop_and_send" => (Category::Stop, attempt("attempt_id")),
-        "attempt_fork" => (Category::Fork, attempt("source_attempt_id")),
+        "attempt_fork" | "task_race" => (Category::Fork, attempt("source_attempt_id")),
+        // Cancelar lo que queda de un Race detiene ejecuciones: es la categoría `stop`.
+        "task_race_cancel" => (Category::Stop, Hint::default()),
         "attempt_review" => (Category::Review, attempt("attempt_id")),
         "attempt_integrate" => (Category::Integrate, attempt("attempt_id")),
         "resource_clean" | "resource_delete_worktree" => (Category::Cleanup, task()),

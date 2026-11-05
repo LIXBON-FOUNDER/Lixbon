@@ -25,6 +25,8 @@
 //! | `environment.blocked` · `environment.cleared` | state | `agent` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
 //! | `policy.changed` (LXO-209) | decision | `policy` |
+//! | `race.requested` · `race.cancelled` (LXO-215) | decision | `race` |
+//! | `race.candidate_recorded` (LXO-215) | state | `race` |
 //!
 //! # Kinds del Attempt (LXO-114, inertes hasta el corte; los emite `attempt_ops`)
 //! | kind | class | entidad |
@@ -908,6 +910,11 @@ pub(super) struct AttemptForked {
     package_id: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     overrides: Vec<RetryOverride>,
+    /// Si el Fork nació de un Race (LXO-215): el id común y el índice del candidato. Ausentes en un Fork suelto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    race_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    race_index: Option<i64>,
 }
 
 impl EventPayload for AttemptForked {
@@ -1343,8 +1350,20 @@ pub(super) fn runtime_attempt_retried(t: &Task, n: u32, overrides: Vec<RetryOver
 
 /// `attempt.forked` del primer Attempt de una Task del runtime que nace de otro Attempt (`source`, de la Task `source_task`).
 /// Lo emite la misma mutación que crea la Task y su Attempt, justo después de `attempt.requested`.
-pub(super) fn runtime_attempt_forked(t: &Task, source: &str, source_task: &str, source_n: u32, strategy: ForkStrategy, package_id: Option<String>, overrides: Vec<RetryOverride>) -> Result<EventDraft, EventError> {
-    let p = AttemptForked { task: t.id.clone(), n: 1, source: clip(source, 80), source_task: clip(source_task, 80), source_n: source_n as i64, strategy, package_id, overrides };
+#[allow(clippy::too_many_arguments)]
+pub(super) fn runtime_attempt_forked(t: &Task, source: &str, source_task: &str, source_n: u32, strategy: ForkStrategy, package_id: Option<String>, overrides: Vec<RetryOverride>, race: Option<(&str, u32)>) -> Result<EventDraft, EventError> {
+    let p = AttemptForked {
+        task: t.id.clone(),
+        n: 1,
+        source: clip(source, 80),
+        source_task: clip(source_task, 80),
+        source_n: source_n as i64,
+        strategy,
+        package_id,
+        overrides,
+        race_id: race.map(|(id, _)| clip(id, 80)),
+        race_index: race.map(|(_, i)| i as i64),
+    };
     runtime_attempt(&t.id, &t.run, 1, &p)
 }
 
@@ -1970,6 +1989,103 @@ pub(super) fn policy_changed(scope: &str, scope_id: Option<&str>, project_id: Op
     };
     let p = PolicyChanged { scope: scope.to_string(), scope_id: scope_id.map(|id| clip(id, 150)), category: category.to_string(), from: from.map(str::to_string), to: to.map(str::to_string), direction, revision };
     Ok(EventDraft::new(EntityKind::Policy, &entity, &p)?.project(project_id.map(str::to_string)).run(None))
+}
+
+/// Una persona pidió un Race (LXO-215): N candidatos comparables que salen del mismo Attempt. `candidates` es cuántos se pidieron;
+/// `digest` identifica LO PEDIDO (origen, candidatos y paquete) para distinguir un reintento de otra petición con la misma clave. Nunca el
+/// encargo, el contenido del paquete ni credenciales.
+#[derive(Serialize)]
+pub(super) struct RaceRequested {
+    race_id: String,
+    source: String,
+    source_task: String,
+    candidates: i64,
+    strategy: ForkStrategy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+    digest: String,
+}
+
+impl EventPayload for RaceRequested {
+    const KIND: &'static str = "race.requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+/// Qué pasó con un candidato (LXO-215): lanzado (con su Attempt) o fallido (con un código cerrado). Un candidato fallido no borra a los
+/// lanzados; un reintento puede dejar después `launched` para el mismo índice.
+#[derive(Serialize)]
+pub(super) struct RaceCandidateRecorded {
+    race_id: String,
+    index: i64,
+    outcome: String,
+    provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+}
+
+impl EventPayload for RaceCandidateRecorded {
+    const KIND: &'static str = "race.candidate_recorded";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Una persona canceló lo que quedaba de un Race (LXO-215). `scope`: `one` (un candidato) o `remaining` (todos los no terminados). Nunca
+/// ocurre solo porque un candidato termine.
+#[derive(Serialize)]
+pub(super) struct RaceCancelled {
+    race_id: String,
+    scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt_id: Option<String>,
+    stopped: i64,
+    rejected: i64,
+    failed: i64,
+}
+
+impl EventPayload for RaceCancelled {
+    const KIND: &'static str = "race.cancelled";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+/// Los hechos de un Race. La entidad es el id del Race; el Project va explícito.
+pub(super) fn race_requested(race_id: &str, source: &str, source_task: &str, candidates: usize, strategy: ForkStrategy, package_id: Option<&str>, digest: &str, project_id: Option<&str>) -> Result<EventDraft, EventError> {
+    let p = RaceRequested { race_id: race_id.into(), source: clip(source, 80), source_task: clip(source_task, 80), candidates: candidates as i64, strategy, package_id: package_id.map(str::to_string), digest: digest.into() };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(format!("race:{race_id}:requested")))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn race_candidate_recorded(race_id: &str, index: usize, provider: &str, model: Option<&str>, task_id: Option<&str>, attempt_id: Option<&str>, code: Option<&str>, project_id: Option<&str>) -> Result<EventDraft, EventError> {
+    let outcome = if attempt_id.is_some() { "launched" } else { "failed" };
+    let p = RaceCandidateRecorded {
+        race_id: race_id.into(),
+        index: index as i64,
+        outcome: outcome.into(),
+        provider: clip(provider, 64),
+        model: model.map(|m| clip(m, 120)),
+        task_id: task_id.map(|t| clip(t, 80)),
+        attempt_id: attempt_id.map(|a| clip(a, 80)),
+        code: code.map(|c| clip(c, 64)),
+    };
+    // Repetir el mismo desenlace de un candidato no deja otro hecho; un desenlace nuevo (p. ej. lanzado tras fallar) sí.
+    let key = match (attempt_id, code) {
+        (Some(a), _) => format!("race:{race_id}:c{index}:launched:{a}"),
+        (None, c) => format!("race:{race_id}:c{index}:failed:{}", c.unwrap_or("unknown")),
+    };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(key))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn race_cancelled(race_id: &str, attempt_id: Option<&str>, stopped: usize, rejected: usize, failed: usize, project_id: Option<&str>, key: &str) -> Result<EventDraft, EventError> {
+    let p = RaceCancelled { race_id: race_id.into(), scope: if attempt_id.is_some() { "one".into() } else { "remaining".into() }, attempt_id: attempt_id.map(|a| clip(a, 80)), stopped: stopped as i64, rejected: rejected as i64, failed: failed as i64 };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(key.to_string()))
 }
 
 /// El proyecto pasó de archivado a activo.
