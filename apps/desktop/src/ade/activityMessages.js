@@ -70,6 +70,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.continued',
   'activity.attempt.retried',
   'activity.attempt.forked',
+  'activity.attempt.adopted',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -323,6 +324,8 @@ function formatAttempt(key, args) {
       return `Empezó el ${attempt}.`;
     case 'activity.attempt.integrated':
       return `Se integró el trabajo del ${attempt}.`;
+    case 'activity.attempt.adopted':
+      return `Se adoptó trabajo externo como el ${attempt}.`;
     case 'activity.attempt.rejected': {
       const cause = requiredCode(args, 'cause', STOP_CAUSES);
       return cause ? `Se rechazó el ${attempt}${cause === 'run_closed' ? ' al cerrarse la ejecución' : ''}.` : null;
@@ -576,6 +579,7 @@ const FORMATTERS = {
   'activity.attempt.resumed': formatAttempt,
   'activity.attempt.exited': formatAttempt,
   'activity.attempt.integrated': formatAttempt,
+  'activity.attempt.adopted': formatAttempt,
   // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
   'activity.attempt.queued': (args) => {
     const attempt = attemptOf(args);

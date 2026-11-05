@@ -363,6 +363,18 @@ impl Core {
                 let input: super::resource_actions::InspectInput = serde_json::from_value(args.clone()).map_err(|_| "resource_inventory_invalid_request: Solicitud de recurso inválida".to_string())?;
                 super::resource_actions::inspect(self, &caller, authenticated_context.as_ref(), &input)
             }
+            "resource_adopt_preview" => {
+                let input: super::resource_adopt::PreviewInput = serde_json::from_value(args.clone()).map_err(|_| "resource_inventory_invalid_request: Solicitud de adopción inválida".to_string())?;
+                super::resource_adopt::preview(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            "resource_adopt" => {
+                let context = authenticated_context.as_ref().ok_or("adoptar un worktree requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("adoptar un worktree solo está permitido a una Person autenticada".into());
+                }
+                let input: super::resource_adopt::AdoptInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de adopción inválida".to_string())?;
+                super::resource_adopt::adopt(self, context, &input)
+            }
             "resource_clean" | "resource_delete_worktree" => {
                 let context = authenticated_context.as_ref().ok_or("limpiar recursos requiere una Person autenticada")?;
                 if !matches!(caller, Caller::User) || !context.is_person() {
@@ -712,7 +724,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "provider_capabilities" | "context_package_preview" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
@@ -726,7 +738,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

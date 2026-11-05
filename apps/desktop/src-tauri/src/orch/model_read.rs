@@ -119,16 +119,27 @@ const BRIEF_SUMMARY_CHARS: usize = 280;
 /// intento, así que su `ended_at` puede ser `null` aunque sea final. Los del runtime (`core`) lo traen siempre al
 /// terminar (CHECK de la 008).
 fn attempt_brief(s: &Store, a: &AttemptRow) -> StoreResult<Value> {
+    let adopted_at = s.attempt_adopted_at(&a.id)?;
     let wt = match &a.worktree_id {
         Some(_) => s.worktree_of_attempt(&a.id)?,
         None => None,
     };
     let summary: String = a.summary.chars().take(BRIEF_SUMMARY_CHARS).collect();
-    Ok(json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
-            "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at, "origin": a.origin,
-            "ended_at_known": a.ended_at.is_some() || !a.status.is_final(),
+    // Un Attempt ADOPTADO (migración 024) no se ejecutó en Lixbon: el esquema guarda `started_at`/`ended_at` = el instante de la adopción, pero NO son un
+    // arranque ni un fin reales, así que no salen (`null`) y el lector dice `adopted` en su lugar.
+    let adopted = adopted_at.is_some();
+    let (started_at, ended_at) = if adopted { (None, None) } else { (a.started_at, a.ended_at) };
+    let mut brief = json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
+            "created_at": a.created_at, "started_at": started_at, "ended_at": ended_at, "origin": a.origin,
+            "ended_at_known": adopted || a.ended_at.is_some() || !a.status.is_final(),
             "worktree": wt.map(|w| json!({ "id": w.id, "branch": w.branch, "state": w.state })),
-            "result": { "summary": summary, "truncated": a.summary.chars().count() > BRIEF_SUMMARY_CHARS, "failure_reason": a.failure_reason } }))
+            "result": { "summary": summary, "truncated": a.summary.chars().count() > BRIEF_SUMMARY_CHARS, "failure_reason": a.failure_reason } });
+    // Aditivo: solo un Attempt adoptado trae estas claves (las respuestas publicadas de los demás no cambian).
+    if let (Some(at), Some(o)) = (adopted_at, brief.as_object_mut()) {
+        o.insert("adopted".into(), json!(true));
+        o.insert("adopted_at".into(), json!(at));
+    }
+    Ok(brief)
 }
 
 fn task_item(s: &Store, t: &TaskRow) -> StoreResult<Value> {

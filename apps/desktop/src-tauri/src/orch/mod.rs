@@ -22,6 +22,7 @@ mod model_read;
 mod model_read_tests;
 #[cfg(test)]
 mod tasks_read_tests;
+mod resource_adopt;
 mod resource_git;
 mod resource_inventory;
 mod attention_action;
@@ -124,6 +125,8 @@ mod proof_pack_e2e_tests;
 mod integration_attempt_e2e_tests;
 #[cfg(test)]
 mod resource_actions_e2e_tests;
+#[cfg(test)]
+mod resource_adopt_tests;
 #[cfg(test)]
 mod real_provider_tests;
 #[cfg(test)]

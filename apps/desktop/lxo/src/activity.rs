@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 103] = [
+pub(crate) const MESSAGE_KEYS: [&str; 104] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -79,6 +79,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 103] = [
     "activity.attempt.continued",
     "activity.attempt.retried",
     "activity.attempt.forked",
+    "activity.attempt.adopted",
     "activity.attempt.approved",
     "activity.attempt.rejected",
     "activity.attempt.started",
@@ -545,6 +546,7 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         "activity.attempt.approved" => format!("Se aprobó el {at}."),
         "activity.attempt.started" => format!("Empezó el {at}."),
         "activity.attempt.integrated" => format!("Se integró el trabajo del {at}."),
+        "activity.attempt.adopted" => format!("Se adoptó trabajo externo como el {at}."),
         // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
         "activity.attempt.queued" => {
             let position = a.number("position")?;
@@ -852,6 +854,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.resumed"
         | "activity.attempt.exited"
         | "activity.attempt.integrated"
+        | "activity.attempt.adopted"
         | "activity.attempt.queued"
         | "activity.attempt.queue_delivered"
         | "activity.attempt.queue_cancelled"

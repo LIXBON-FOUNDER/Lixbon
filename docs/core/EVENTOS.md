@@ -894,6 +894,7 @@ construye solo `orch/attempt_ops.rs` (prueba de arquitectura) y viajan en la tra
 | `attempt.resumed` | 1 | state | `task`, `n`, `from` ∈ `waiting` · `awaiting_terminal_approval` | agente de esa Task · Core |
 | `attempt.exited` | 1 | state | `task`, `n`, `from` ∈ `starting` · `running` · `waiting` · `awaiting_terminal_approval` | Core |
 | `attempt.integrated` | 1 | state | `task`, `n` | Core |
+| `attempt.adopted` (LXO-149) | 1 | decision | `task`, `n` (siempre 1), `branch`, `base` (nombres, nunca rutas). Una Person adoptó un worktree externo como el primer Attempt, ya terminado; no hay `attempt.started` ni `attempt.completed` | Core |
 | `attempt.queued` (LXO-143) | 1 | state | `task`, `n`, `queue_id` (`<attempt>-q<seq>`), `position` (pendientes delante, contándola), `attachments` (cuántos). **Nunca** el texto de la instrucción ni los ids de sus adjuntos | persona · agente que coordina la Task |
 | `attempt.queue_delivered` (LXO-143) | 1 | state | `task`, `n`, `queue_id`, `confirmed_by` ∈ `adapter_event` · `adapter_result` (lo que el ADAPTER informó; escribir en el proceso no confirma) | Core |
 | `attempt.queue_cancelled` (LXO-143) | 1 | state | `task`, `n`, `queue_id` | persona · agente que coordina la Task |

@@ -222,6 +222,13 @@ pub(super) fn is_ancestor(repo: &str, branch: &str, into: &str) -> Option<bool> 
     }
 }
 
+/// El commit ancestro común de `base` y `branch` (`git merge-base`); `None` si no comparten historia o una ref no existe.
+pub(super) fn merge_base(repo: &str, base: &str, branch: &str) -> Option<String> {
+    let out = run(repo, &["merge-base", base, branch]).ok()?;
+    let sha = out.stdout.trim();
+    (out.code == Some(0) && sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit())).then(|| sha.to_string())
+}
+
 /// Rama por defecto del repositorio (la de `origin/HEAD` o, sin remoto, la rama actual del checkout principal).
 pub(super) fn default_branch(repo: &str) -> Option<String> {
     if let Ok(out) = run(

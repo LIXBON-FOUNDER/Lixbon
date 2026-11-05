@@ -145,7 +145,10 @@ pub(super) fn sum(files: &Files, pick: impl Fn(&(String, Option<u64>, Option<u64
 
 fn attempt_view(core: &Core, context: &MutationContext, item: &Loaded) -> (Value, Option<Files>) {
     let a = &item.attempt;
-    let duration = match (a.started_at, a.ended_at) {
+    // Un Attempt adoptado no tiene una duración: su `started_at`/`ended_at` es el instante de la adopción, no una ejecución.
+    let adopted = core.storage.read_store(|s| s.attempt_adopted_at(&a.id)).and_then(Result::ok).flatten().is_some();
+    let (started_at, ended_at) = if adopted { (None, None) } else { (a.started_at, a.ended_at) };
+    let duration = match (started_at, ended_at) {
         (Some(s), Some(e)) if e >= s => Some(e - s),
         _ => None,
     };
@@ -211,7 +214,7 @@ fn attempt_view(core: &Core, context: &MutationContext, item: &Loaded) -> (Value
         "forked_from": item.fork_source,
         "selection": evidence(json!({ "provider": a.provider, "model": a.model, "effort": a.effort, "role": a.role, "profile": a.profile, "external": a.external }), "verified"),
         "status": evidence(json!({ "status": a.status, "failure_reason": a.failure_reason }), "verified"),
-        "timing": evidence(json!({ "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at, "duration_ms": duration }), "verified"),
+        "timing": evidence(json!({ "created_at": a.created_at, "started_at": started_at, "ended_at": ended_at, "duration_ms": duration }), "verified"),
         "host": recorded(item.worktree.as_ref().map(|w| json!(w.machine)), "no_worktree"),
         "worktree": recorded(item.worktree.as_ref().map(|w| json!({ "id": w.id, "branch": w.branch, "base_branch": w.base_branch, "state": w.state })), "no_worktree"),
         "revision": revision,

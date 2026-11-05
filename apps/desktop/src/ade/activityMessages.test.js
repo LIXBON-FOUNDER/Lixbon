@@ -73,6 +73,7 @@ const EXPECTED_V1_KEYS = [
   'activity.attempt.continued',
   'activity.attempt.retried',
   'activity.attempt.forked',
+  'activity.attempt.adopted',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -137,6 +138,7 @@ const MODEL_ARGS = {
   'activity.attempt.resumed': { task: 'task-1', n: 1, from: 'waiting' },
   'activity.attempt.exited': { task: 'task-1', n: 1, from: 'running' },
   'activity.attempt.integrated': { task: 'task-1', n: 1 },
+  'activity.attempt.adopted': { task: 'task-1', n: 1 },
   'activity.attempt.queued': { task: 'task-1', n: 1, position: 2, attachments: 0 },
   'activity.attempt.queue_delivered': { task: 'task-1', n: 1 },
   'activity.attempt.queue_cancelled': { task: 'task-1', n: 1 },
@@ -305,6 +307,7 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.task.updated', { changed: ['otro'] })).toBeNull();
     expect(translate('activity.worktree.created', { task: 'task-1', n: 1, branch: ['x'] })).toBeNull();
     expect(translate('activity.attempt.integrated', { task: 'task-1', n: 3 })).toBe('Se integró el trabajo del intento 3 de la tarea task-1.');
+    expect(translate('activity.attempt.adopted', { task: 'task-1', n: 1 })).toBe('Se adoptó trabajo externo como el intento 1 de la tarea task-1.');
   });
 
   it('la Pending Queue (LXO-143) cuenta el hecho sin la instrucción y rechaza códigos fuera de su lista', () => {

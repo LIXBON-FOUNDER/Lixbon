@@ -96,6 +96,8 @@ mod queue_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]
+mod adopted_attempts_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::{Path, PathBuf};

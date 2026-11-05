@@ -181,6 +181,7 @@ export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
   'activity.attempt.resumed': 'Siguió en ejecución',
   'activity.attempt.exited': 'Salió sin cerrarse',
   'activity.attempt.integrated': 'Integrado',
+  'activity.attempt.adopted': 'Adoptado',
   'activity.attempt.continued': 'Continuado',
   'activity.attempt.retried': 'Reintentado',
   'activity.attempt.forked': 'Bifurcado',

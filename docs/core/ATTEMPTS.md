@@ -93,7 +93,9 @@ Tabla cerrada (14 pares). Cualquier otro par es `AttemptTransition` y **no escri
 Restricciones solo para filas `core` (el legado se importa tal cual, sin `ended_at` y a veces sin `started_at`): el
 estado final ⇔ `ended_at`, `running`/`done` ⇒ `started_at`, `pending_approval`/`starting` ⇒ sin `started_at`, relojes
 ordenados y resumen acotado. Una fila del Core **nace** `pending_approval` o `starting`, con el `n` siguiente, en una
-Task abierta de un Run abierto (trigger `attempts_core_create`).
+Task abierta de un Run abierto (trigger `attempts_core_create`). **Única excepción (migración 024, LXO-149):** un Attempt
+ADOPTADO nace `done` (con `adopted_at`, primero de su Task, proveedor `external`, con su Worktree de procedencia `adopted`; `started_at` = `ended_at` =
+`adopted_at` solo porque el esquema los exige, y los lectores los ocultan). Ver [`RESOURCES.md`](RESOURCES.md) § Adoptar.
 
 **Nada del runtime** en la 008: sus columnas llegan con la 012 ([§ Runtime](#runtime-lxo-231)). Una prueba fija
 las 19 columnas de la 008.
