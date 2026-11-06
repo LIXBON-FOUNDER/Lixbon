@@ -474,3 +474,20 @@ fn una_ruta_por_un_enlace_es_el_mismo_worktree_que_git_lista() {
     // Y repetirlo por la ruta directa es la misma adopción.
     assert_eq!(w.adopt_it(&dir, &task).unwrap()["status"], "AlreadyAdopted");
 }
+
+/// LXO-150: la interfaz crea la Task SIN `repo` (no conoce la ruta): el Core la ancla a la ubicación verificada del Project, y así puede recibir un worktree
+/// adoptado. Un `repo` explícito (la CLI) se respeta.
+#[test]
+fn una_task_creada_sin_repo_toma_la_ubicacion_verificada_del_project_y_se_puede_adoptar() {
+    let w = world("claude", None);
+    let created = w.desktop("task_create", json!({"request_id": "l150-1", "project_id": w.project, "objective": "o", "title": "desde la interfaz", "spec": ""})).expect("task_create sin repo ni attempt");
+    assert_eq!((created["status"].as_str(), created["attempt_id"].is_null()), (Some("Committed"), true), "{created}");
+    let task = created["task_id"].as_str().unwrap().to_string();
+    let dir = w.adopt_external_worktree("wt-l150", "feature/l150");
+    let p = w.adopt_preview(&dir);
+    assert_eq!(p["tasks"], json!([{"task_id": task, "title": "desde la interfaz"}]), "{p}");
+    assert_eq!(w.adopt_it(&dir, &task).expect("adoptar")["status"], "Adopted");
+    // Con repo explícito, se respeta tal cual.
+    let explicit = w.desktop("task_create", json!({"request_id": "l150-2", "project_id": w.project, "objective": "o", "title": "con repo", "spec": "", "repo": w.adopt_repo().to_string_lossy()})).unwrap();
+    assert_eq!(explicit["status"], "Committed");
+}

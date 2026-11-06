@@ -126,7 +126,7 @@ describe('Adoptar · vista', () => {
   it('sin tarea que lo reciba lo dice; con el Core en solo lectura avisa y no ofrece', async () => {
     mountCore({ views: [blocked('adopt_no_task', { tasks: [] })] });
     await open();
-    expect(byId('resadopt-block').textContent).toMatch(/crea una primero/);
+    expect(byId('resadopt-block').textContent).toMatch(/Solo la tarea/);
     cleanup();
     resetOutstandingQueries();
     mountCore({ views: [blocked('adopt_degraded', { health: { writable: false } })] });

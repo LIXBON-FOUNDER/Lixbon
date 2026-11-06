@@ -162,9 +162,15 @@ impl Core {
                 // cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente.
                 let repo = match &authorized.attempt {
                     Some(_) => self.project_launch_location(&authorized.project_id)?.to_string_lossy().into_owned(),
+                    // Sin `repo` (la interfaz no lo conoce) también es la ubicación verificada: una Task sin repositorio no podría recibir un
+                    // worktree adoptado ni un Attempt después. Un `repo` explícito (la CLI) se respeta tal cual.
                     None => {
                         self.check_project_launchable_id(&authorized.project_id)?;
-                        authorized.repo.clone()
+                        match self.project_launch_location(&authorized.project_id) {
+                            Ok(location) if authorized.repo.trim().is_empty() => location.to_string_lossy().into_owned(),
+                            // Sin ubicación verificable (el Project no está en esta máquina) la Task nace sin repositorio, como antes.
+                            _ => authorized.repo.clone(),
+                        }
                     }
                 };
                 // Capability del proveedor ANTES de escribir nada. Como el Project, depende del estado actual: un replay ya

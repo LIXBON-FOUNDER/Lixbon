@@ -990,9 +990,11 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     actions={(
                       <NewAttemptForm
                         projectId={selectedProjectId}
+                        projectName={selectedProjectName}
                         coreModel={coreModel}
                         active={workspaceActive && workspaceView === 'workspace'}
-                        onCreated={({ projectId, taskId, attemptId }) => selectAttempt({ projectId, taskId, attemptId })}
+                        // LXO-150: sin intento (solo la Task) se abre la Task; con intento, el intento.
+                        onCreated={({ projectId, taskId, attemptId }) => (attemptId ? selectAttempt({ projectId, taskId, attemptId }) : selectTask({ projectId, taskId }))}
                       />
                     )}
                   />
