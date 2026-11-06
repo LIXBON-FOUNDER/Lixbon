@@ -95,6 +95,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.resumed` | `activity.attempt.resumed` | `task`, `n`, `from` | info |
 | `attempt.exited` | `activity.attempt.exited` | `task`, `n`, `from` | error |
 | `attempt.integrated` | `activity.attempt.integrated` | `task`, `n` | success |
+| `attempt.adopted` (LXO-149) | `activity.attempt.adopted` | `task`, `n` (nunca la rama ni la base) | success |
 | `attempt.queued` (LXO-143) | `activity.attempt.queued` | `task`, `n`, `position` (1 = la siguiente), `attachments` (cuántos) | info |
 | `attempt.queue_delivered` (LXO-143) | `activity.attempt.queue_delivered` | `task`, `n` | success |
 | `attempt.queue_cancelled` (LXO-143) | `activity.attempt.queue_cancelled` | `task`, `n` | warning |

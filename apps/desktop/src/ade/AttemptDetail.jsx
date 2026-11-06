@@ -83,9 +83,15 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
           <Row label="Proveedor">{[attempt.provider, attempt.model].filter(Boolean).join(' · ') || COPY.notAvailable}{attempt.external ? ' · externo' : ''}</Row>
           <Row label="Rol / perfil / esfuerzo">{[text(attempt.role), text(attempt.profile), text(attempt.effort)].join(' / ')}</Row>
           <Row label="Creado"><When ms={attempt.created_at} /></Row>
-          <Row label="Iniciado"><When ms={attempt.started_at} /></Row>
-          <Row label="Terminado"><When ms={attempt.ended_at} /></Row>
-          <Row label="Duración">{duration === COPY.notAvailable ? COPY.durationUnavailable : duration}</Row>
+          {attempt.adopted ? (
+            <Row label="Origen"><span data-testid="attempt-adopted">Trabajo externo adoptado el <When ms={attempt.adopted_at} />. Lixbon no lo ejecutó: no hay inicio, fin ni duración.</span></Row>
+          ) : (
+            <>
+              <Row label="Iniciado"><When ms={attempt.started_at} /></Row>
+              <Row label="Terminado"><When ms={attempt.ended_at} /></Row>
+              <Row label="Duración">{duration === COPY.notAvailable ? COPY.durationUnavailable : duration}</Row>
+            </>
+          )}
           <Row label="Integrado">{yesNo(attempt.integrated)}</Row>
           {attempt.failure_reason && <Row label="Motivo del fallo">{attempt.failure_reason}</Row>}
           <Row label="Resumen">{text(attempt.summary)}</Row>

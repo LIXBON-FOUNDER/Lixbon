@@ -41,6 +41,8 @@ const ADE_READ_QUERIES: &[&str] = &[
     "attempt_integration_preview",
     // Estado físico y de git del worktree de una Task, y qué acciones valen ahora (LXO-149/157). Solo lectura.
     "resource_inspect",
+    // Qué es un worktree externo y a qué Tasks se puede adoptar, con la razón si no (LXO-149/157). Solo lectura.
+    "resource_adopt_preview",
     // La policy de autonomía efectiva de quien pregunta, con el origen de cada nivel y la previsualización de un cambio (LXO-209). Solo lectura.
     "policy_effective",
     // El estado de un Race: sus candidatos, lo lanzado, lo fallido y lo que sigue sin terminar (LXO-215). Solo lectura.
@@ -346,7 +348,7 @@ mod ade_query_tests {
         for query in ["projects_overview", "tasks_by_project", "task_detail", "attention_list", "activity_list", "resource_inventory"] {
             assert!(is_ade_read_query(query), "{query} debe ser una query F2 permitida");
         }
-        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview", "usage_report", "pending_queue", "attempt_lineage", "attempt_compare", "attempt_proof_pack", "attempt_integration_preview", "resource_inspect", "policy_effective", "task_race_status"] {
+        for query in ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "provider_capabilities", "context_package_preview", "usage_report", "pending_queue", "attempt_lineage", "attempt_compare", "attempt_proof_pack", "attempt_integration_preview", "resource_inspect", "resource_adopt_preview", "policy_effective", "task_race_status"] {
             assert!(is_ade_read_query(query), "{query} debe ser una lectura vNext permitida");
         }
         // Las mutaciones del Attempt no entran por esta superficie: el ADE F3 solo lee.

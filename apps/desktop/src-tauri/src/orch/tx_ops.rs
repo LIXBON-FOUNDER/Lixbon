@@ -144,7 +144,69 @@ pub(super) struct ForkRequest {
     pub race: Option<(String, u32)>,
 }
 
+/// Lo que se adopta: un worktree externo, ya verificado por quien llama (existe, es del Project, está limpio, tiene rama).
+pub(super) struct AdoptRequest {
+    pub worktree: String,
+    /// El repositorio del Project contra el que se verificó: la Task debe ser de ese repositorio.
+    pub repo: String,
+    pub branch: String,
+    pub base: String,
+    pub base_commit: Option<String>,
+    pub summary: String,
+}
+
 impl Tx {
+    /// Adopta un worktree externo como el primer Attempt, ya TERMINADO, de una Task sin ninguna ejecución (`not_started`) (LXO-149). Es una decisión de
+    /// una Person autenticada. La Task recibe el worktree y su rama (que ya no cambian: el proyector solo admite el alta), y nace su Attempt con proveedor
+    /// `external`, sin `attempt.started` ni `attempt.completed`: no hubo ejecución de Lixbon. Devuelve el id del Attempt.
+    pub(super) fn adopt_worktree(&mut self, task_id: &str, req: &AdoptRequest) -> Result<String, String> {
+        if !self.attempt_model() {
+            return Err("core_model_inactive: el runtime de Attempts no está activo".into());
+        }
+        if !self.is_authenticated_person() {
+            return Err("adoptar un worktree requiere una Person autenticada".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("adopt_task_not_found: no existe la Task {task_id}"))?;
+        if task.status != Status::NotStarted || self.attempt_n.contains_key(task_id) {
+            return Err("adopt_task_not_eligible: solo se adopta en una Task sin ninguna ejecución (not_started)".into());
+        }
+        if task.worktree.is_some() || task.branch.is_some() {
+            return Err("adopt_task_not_eligible: la Task ya tiene un worktree".into());
+        }
+        if !self.runs.get(&task.run).is_some_and(|r| !r.closed) {
+            return Err("adopt_task_not_eligible: el Run de la Task está cerrado".into());
+        }
+        // Se vuelve a comprobar DENTRO de la mutación (la comprobación previa de git y de dueños se hizo fuera de ella): otra adopción pudo ganar.
+        let want = super::resource_adopt::canon_path(&req.worktree);
+        if super::resource_adopt::canon_path(&task.repo) != super::resource_adopt::canon_path(&req.repo) {
+            return Err("adopt_task_not_eligible: la Task es de otro repositorio que el worktree".into());
+        }
+        if self.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| super::resource_adopt::canon_path(w) == want)) {
+            return Err("adopt_already_owned: una Task ya posee este worktree".into());
+        }
+        if self.tasks.values().any(|t| t.branch.as_deref() == Some(req.branch.as_str())) {
+            return Err("adopt_branch_taken: otra Task ya usa esta rama".into());
+        }
+        {
+            let row = self.tasks.get_mut(task_id).ok_or("No se pudo adoptar")?;
+            row.agent = "external".into();
+            row.cwd = req.worktree.clone();
+            row.worktree = Some(req.worktree.clone());
+            row.branch = Some(req.branch.clone());
+            row.base = Some(req.base.clone());
+            row.base_commit = req.base_commit.clone();
+            row.summary = req.summary.clone();
+            row.adopted = true;
+        }
+        self.state_mut().attempt_n.insert(task_id.to_owned(), 1);
+        self.state_mut().touch(task_id, Some(Status::Done))?;
+        let adopted = self.tasks.get(task_id).cloned().map(|t| ev::runtime_attempt_adopted(&t, &req.branch, &req.base));
+        if let Some(adopted) = adopted {
+            self.try_push_event(adopted);
+        }
+        Ok(format!("{task_id}-a1"))
+    }
+
     /// Fork (LXO-145): una Task NUEVA con su primer Attempt, que nace de otro Attempt sin tocarlo. Es el camino de `task.create` con un
     /// Attempt (nace `pending_approval`: ninguna selección exime de la decisión humana) más `attempt.forked` con la procedencia.
     /// Devuelve los ids de lo que nació. La Task tiene su Run, su rama y su worktree propios: la fuente no cambia.

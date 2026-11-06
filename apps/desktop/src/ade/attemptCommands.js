@@ -74,6 +74,20 @@ const KNOWN_ERRORS = [
   [/resource_blocked: unknown/i, 'No se pudo comprobar el estado del worktree o de la rama: por seguridad no se borra nada.'],
   [/resource_blocked: dirty/i, 'El worktree tiene cambios sin commit: confírmalo aparte si quieres descartarlos.'],
   [/resource_blocked: not_merged/i, 'El trabajo de la rama no consta integrado: no se limpia.'],
+  [/adopt_dirty/i, 'El worktree tiene cambios sin commit: guárdalos o descártalos antes de adoptarlo.'],
+  [/adopt_unknown/i, 'No se pudo comprobar el worktree: por seguridad no se adopta a ciegas.'],
+  [/adopt_not_a_worktree/i, 'Esa carpeta ya no es un worktree de este proyecto.'],
+  [/adopt_main_checkout/i, 'Es el checkout principal del proyecto, no un worktree adicional.'],
+  [/adopt_missing/i, 'La carpeta del worktree ya no está en disco.'],
+  [/adopt_detached/i, 'El worktree no está en una rama: no hay qué revisar ni integrar.'],
+  [/adopt_already_owned/i, 'Una tarea ya posee este worktree.'],
+  [/adopt_branch_taken/i, 'Otra tarea ya usa esta rama.'],
+  [/adopt_no_base|adopt_is_base|adopt_no_changes/i, 'La rama no tiene trabajo propio respecto a la rama base: no hay nada que adoptar.'],
+  [/adopt_locked/i, 'El worktree está bloqueado (git worktree lock): quien lo bloqueó lo quiere conservar.'],
+  [/adopt_project_unavailable/i, 'No se encuentra el proyecto en esta máquina: indica dónde está antes de adoptar.'],
+  [/adopt_degraded/i, 'El Core está en solo lectura: no puede registrar la adopción.'],
+  [/adopt_task_not_eligible/i, 'Esa tarea ya tiene ejecuciones o un worktree, o es de otro repositorio: solo se adopta en una tarea sin ejecución del mismo repositorio.'],
+  [/adopt_task_not_found/i, 'Esa tarea ya no existe.'],
   [/resource_git_failed/i, 'Git no pudo quitar el worktree: se conserva todo.'],
   [/resource_not_found/i, 'Esa tarea ya no existe.'],
   [/provider_unknown/i, 'Ese proveedor no está registrado en este Core.'],
@@ -243,6 +257,13 @@ export const deleteWorktree = (taskId, discardUncommitted = false) => call('reso
   confirm: true,
   ...(discardUncommitted ? { discard_uncommitted: true } : {}),
 });
+
+/**
+ * Adopta un worktree externo (`resource_adopt`): pasa a ser el primer Attempt, ya terminado, de una Task sin ejecución del mismo Project. El Core exige
+ * el worktree LIMPIO y vuelve a comprobarlo todo; aquí solo viaja la decisión confirmada. Devuelve `{ status: 'Adopted' | 'AlreadyAdopted', task_id,
+ * attempt_id, branch?, base? }`. Repetir no hace nada.
+ */
+export const adoptWorktree = ({ projectId, path, taskId }) => call('resource_adopt', { project_id: projectId, path, task_id: taskId, confirm: true });
 
 /**
  * Fija el nivel de una acción en un ámbito (`policy_set`) o vuelve a heredar (`policy_reset`, `level: null`). `expectedRevision` es la revisión que la

@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use super::attempts::{
-    attempt_phase_append_in, link_provider_session_in, link_worktree_in, runtime_attempt_insert_in, runtime_attempt_set_in, runtime_attempt_step_in,
+    attempt_phase_append_in, link_provider_session_in, link_worktree_in, runtime_attempt_insert_adopted_in, runtime_attempt_insert_in, runtime_attempt_set_in, runtime_attempt_step_in,
     runtime_attempt_stop_in, transition_allowed, RuntimeAttempt,
 };
 use super::clients::validate_identifier;
@@ -41,7 +41,7 @@ use super::sessions::{
     thread_messages_mark_read_in, NewThreadMessage, SessionBinding, SessionStatus,
 };
 use super::tasks::{require_active, runtime_run_insert_in, runtime_run_update_in, runtime_task_discard_in, runtime_task_insert_in, runtime_task_update_in, RuntimeTask, TaskOrigin};
-use super::worktrees::{runtime_artifact_insert_in, runtime_worktree_drop_branch_in, runtime_worktree_insert_in, runtime_worktree_insert_removed_in, runtime_worktree_remove_in, ArtifactKind, RemovalReason, RuntimeWorktree};
+use super::worktrees::{runtime_artifact_insert_in, runtime_worktree_drop_branch_in, runtime_worktree_insert_adopted_in, runtime_worktree_insert_in, runtime_worktree_insert_removed_in, runtime_worktree_remove_in, ArtifactKind, RemovalReason, RuntimeWorktree};
 use super::{new_uuid, AttemptStatus, Store};
 
 /// Revisión del estado del runtime sobre las tablas: agrupa los eventos de un mismo COMMIT (`events.state_rev`), como
@@ -422,6 +422,9 @@ pub struct DocTask {
     pub attempt_started: Option<i64>,
     pub last_message_path: Option<String>,
     pub stream_json: bool,
+    /// Task con un Attempt ADOPTADO (migración 024): trabajo externo que una persona hizo suyo; el Attempt nace terminado.
+    #[serde(default)]
+    pub adopted: bool,
     pub created: i64,
     pub updated: i64,
 }
@@ -1041,6 +1044,53 @@ fn sync_attempt(c: &Connection, p: Option<&DocTask>, t: &DocTask, cur: &mut Cur,
     Ok(())
 }
 
+/// Nace el Attempt ADOPTADO de una Task que no tenía ninguno (migración 024): su Worktree adoptado primero y luego el Attempt, ya terminado y con
+/// ese Worktree. No hay ciclo de vida que reconstruir: no hubo ejecución de Lixbon. `started_at`/`ended_at` valen el instante de la adopción.
+fn insert_adopted(c: &Connection, t: &DocTask, at: i64) -> StoreResult<Cur> {
+    let (Some(path), Some(branch)) = (t.worktree.as_deref(), t.branch.as_deref()) else {
+        return Err(mapping(format!("{}: una Task adoptada lleva su Worktree y su rama", t.id)));
+    };
+    let id = format!("{}-a1", t.id);
+    let wid = format!("wt-{id}");
+    let machine = machine(c)?;
+    let w = RuntimeWorktree {
+        id: &wid,
+        task_id: &t.id,
+        attempt_id: &id,
+        machine: &machine,
+        repo: &t.repo,
+        path,
+        branch: Some(branch),
+        base_branch: t.base.as_deref(),
+        base_commit: t.base_commit.as_deref(),
+        env_plan: None,
+        at,
+    };
+    runtime_worktree_insert_adopted_in(c, &w).map_err(|e| mapping(format!("{}: el Worktree adoptado no se puede registrar ({e})", t.id)))?;
+    runtime_attempt_insert_adopted_in(
+        c,
+        &RuntimeAttempt {
+            id: &id,
+            task_id: &t.id,
+            n: 1,
+            status: AttemptStatus::Done,
+            external: false,
+            provider: "external",
+            model: None,
+            effort: None,
+            role: None,
+            profile: None,
+            worktree_id: Some(&wid),
+            instruction: None,
+            cwd: &t.cwd,
+            at,
+        },
+        &t.summary,
+    )
+    .map_err(|e| mapping(format!("{}: no nace el Attempt adoptado ({e})", t.id)))?;
+    Ok(Cur { id, n: 1, status: AttemptStatus::Done, core: true, created_at: at, started_at: Some(at), provider_session_id: None })
+}
+
 /// Nace el Attempt `n` de la Task: `starting`, con la selección del documento. Un seguimiento (`n > 1`) lleva su encargo
 /// y reutiliza el Worktree activo de la Task (D7).
 fn insert_attempt(c: &Connection, t: &DocTask, n: i64, instruction: Option<&str>, at: i64) -> StoreResult<Cur> {
@@ -1303,6 +1353,12 @@ fn apply_task(c: &Connection, p: Option<&DocTask>, t: &DocTask) -> StoreResult<(
             // El primer Attempt se materializa al abandonar el estado de intención; las comprobaciones de transición y de
             // consistencia siguen aplicando a partir de aquí.
             (insert_attempt(c, t, 1, None, at)?, true)
+        }
+        (Some(p), None) if p.status == "not_started" && t.adopted && t.status == "done" => {
+            // Adoptar trabajo externo (migración 024): el Attempt nace terminado con su Worktree y no hay nada más que sincronizar
+            // (ni sesión, ni fases, ni Artifacts: Lixbon no lo ejecutó).
+            insert_adopted(c, t, at)?;
+            return Ok(());
         }
         (Some(_), None) => return Err(mapping(format!("{}: la Task no tiene Attempt", t.id))),
     };

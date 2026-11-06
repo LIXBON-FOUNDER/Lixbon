@@ -233,7 +233,7 @@ for (const state of ['starting', 'running', 'waiting', 'awaiting_terminal_approv
     optional: { cause: 'string' },
   });
 }
-for (const step of ['approved', 'started', 'integrated']) {
+for (const step of ['approved', 'started', 'integrated', 'adopted']) {
   ACTIVITY_ARG_SCHEMAS.set(`activity.attempt.${step}`, { required: { task: 'string', n: 'integer' } });
 }
 for (const step of ['waiting', 'awaiting_terminal_approval', 'resumed', 'exited']) {

@@ -37,6 +37,7 @@
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
 //! | `attempt.retried` (LXO-142) | state | `attempt` |
 //! | `attempt.forked` (LXO-145) | state | `attempt` |
+//! | `attempt.adopted` (LXO-149) | decision | `attempt` |
 //! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
 //! | `attempt.dispatch_ambiguous` (LXO-246) | state | `attempt` |
 //!
@@ -923,6 +924,22 @@ impl EventPayload for AttemptForked {
     const CLASS: EventClass = EventClass::State;
 }
 
+/// Una persona adoptó trabajo EXTERNO (un worktree que ya existía) como el primer Attempt de una Task (LXO-149). Nace terminado: Lixbon no lo ejecutó, así que
+/// no hay `attempt.started` ni `attempt.completed`. Lleva la rama y la base (nombres, nunca rutas) para que se vea de dónde sale.
+#[derive(Serialize)]
+pub(super) struct AttemptAdopted {
+    task: String,
+    n: i64,
+    branch: String,
+    base: String,
+}
+
+impl EventPayload for AttemptAdopted {
+    const KIND: &'static str = "attempt.adopted";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
 macro_rules! attempt_ref_payload {
     ($name:ident, $kind:literal, $class:expr) => {
         #[derive(Serialize)]
@@ -1364,6 +1381,12 @@ pub(super) fn runtime_attempt_forked(t: &Task, source: &str, source_task: &str, 
         race_id: race.map(|(id, _)| clip(id, 80)),
         race_index: race.map(|(_, i)| i as i64),
     };
+    runtime_attempt(&t.id, &t.run, 1, &p)
+}
+
+/// `attempt.adopted` del primer Attempt de una Task del runtime, nacido de un worktree externo adoptado. Lo emite la misma mutación que lo crea.
+pub(super) fn runtime_attempt_adopted(t: &Task, branch: &str, base: &str) -> Result<EventDraft, EventError> {
+    let p = AttemptAdopted { task: t.id.clone(), n: 1, branch: clip(branch, 200), base: clip(base, 200) };
     runtime_attempt(&t.id, &t.run, 1, &p)
 }
 

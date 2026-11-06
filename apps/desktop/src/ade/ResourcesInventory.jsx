@@ -30,7 +30,8 @@
 //   }
 //
 // Reglas de la vista (LXO-101):
-//  · Solo lectura: ni una operación de Git, ni un enlace, ni un botón. Ruta y rama son metadato.
+//  · El inventario en sí es de solo lectura: ni una operación de Git, ni un enlace. Ruta y rama son metadato. Las únicas acciones (LXO-157)
+//    son las de `ResourceActions` (worktree de una Task) y `ResourceAdopt` (worktree externo), siempre confirmadas y decididas por el Core.
 //  · Cada categoría de Core va a su sección y no se mezcla con otra: los seis estados de
 //    worktree, los repos con escaneo no disponible, los de otro equipo y las ramas conservadas.
 //  · «Falta» solo lo afirma el sistema de archivos (`state: missing_on_disk`): `unknown` y un
@@ -57,6 +58,7 @@
 //    externo se restablecen los filtros locales.
 import { createContext, useContext, useMemo, useState } from 'react';
 import { ResourceActions } from './ResourceActions';
+import { ResourceAdopt } from './ResourceAdopt';
 import './ResourcesInventory.css';
 
 /** Qué hacer tras una acción sobre un recurso: volver a leer el inventario del Core (LXO-157). */
@@ -442,11 +444,20 @@ function WorktreeRow({ row }) {
         <OwnerFields owner={entry.owner} />
       </dl>
       {isObject(entry.owner) && text(entry.owner.task_id) && ['tracked', 'missing_on_disk'].includes(row.section) && <WorktreeActions taskId={text(entry.owner.task_id)} />}
+      {['external', 'orphan_candidate'].includes(row.section) && !isObject(entry.owner) && entry.physical === 'present' && !prunable && git.detached !== true && row.projectId && text(target.path) && (
+        <WorktreeAdopt projectId={row.projectId} path={text(target.path)} />
+      )}
     </li>
   );
 }
 
-/** Las acciones son del worktree de UNA Task (su dueño). Un candidato externo u huérfano no se vuelve propio sin un Adopt, que no está aquí. */
+/** Adoptar un worktree externo u huérfano (LXO-157): el Core decide si se puede y a qué tarea; aquí solo se elige y se confirma. */
+function WorktreeAdopt({ projectId, path }) {
+  const onChanged = useContext(ResourceChanged);
+  return <ResourceAdopt projectId={projectId} path={path} onChanged={onChanged ?? undefined} />;
+}
+
+/** Las acciones son del worktree de UNA Task (su dueño). Un candidato externo u huérfano solo se vuelve propio con un Adopt (`ResourceAdopt`). */
 function WorktreeActions({ taskId }) {
   const onChanged = useContext(ResourceChanged);
   return <ResourceActions taskId={taskId} onChanged={onChanged ?? undefined} />;

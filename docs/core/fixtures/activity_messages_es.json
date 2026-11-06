@@ -874,6 +874,14 @@
       "text": "Se integró el trabajo del intento 1 de la tarea t-3."
     },
     {
+      "key": "activity.attempt.adopted",
+      "args": {
+        "task": "t-3",
+        "n": 1
+      },
+      "text": "Se adoptó trabajo externo como el intento 1 de la tarea t-3."
+    },
+    {
       "key": "activity.attempt.queued",
       "args": {
         "task": "t-3",

@@ -167,6 +167,9 @@ pub struct Task {
     /// Lanzada con `claude -p --output-format stream-json`: el informe es el resultado final.
     #[serde(default)]
     pub stream_json: bool,
+    /// La Task tiene un Attempt ADOPTADO: trabajo externo que una persona hizo suyo (`resource_adopt`, LXO-149). Nunca se lanzó por Lixbon.
+    #[serde(default)]
+    pub adopted: bool,
     pub created: u64,
     pub updated: u64,
 }
@@ -466,6 +469,7 @@ impl State {
             attempt_started: None,
             last_message_path: None,
             stream_json: false,
+            adopted: false,
             created: now,
             updated: now,
         });

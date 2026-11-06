@@ -724,6 +724,39 @@ pub(crate) fn runtime_attempt_insert_in(c: &Connection, a: &RuntimeAttempt<'_>) 
     Ok(())
 }
 
+/// El instante en que una persona adoptó trabajo externo como este Attempt (`None` = un Attempt normal, o una base anterior a la 024).
+/// En un Attempt adoptado `started_at` y `ended_at` valen ese instante porque el esquema los exige: NO son un arranque ni una duración reales.
+/// Va APARTE del `SELECT` de [`AttemptRow`]: la columna es posterior a la barrera del corte (como 017..023) y el corte, que lee Attempts antes
+/// de que esas migraciones se apliquen, no la tiene.
+pub(crate) fn attempt_adopted_at_in(c: &Connection, attempt_id: &str) -> StoreResult<Option<i64>> {
+    let exists: i64 = c.query_row("SELECT COUNT(*) FROM pragma_table_info('attempts') WHERE name = 'adopted_at'", [], |r| r.get(0))?;
+    if exists == 0 {
+        return Ok(None);
+    }
+    Ok(c.query_row("SELECT adopted_at FROM attempts WHERE id = ?1", [attempt_id], |r| r.get::<_, Option<i64>>(0)).optional()?.flatten())
+}
+
+impl Store {
+    /// [`attempt_adopted_at_in`] de un Attempt.
+    pub fn attempt_adopted_at(&self, attempt_id: &str) -> StoreResult<Option<i64>> {
+        self.read(|c| attempt_adopted_at_in(c, attempt_id))
+    }
+}
+
+/// Nace un Attempt ADOPTADO (migración 024): terminado, primero de su Task, con su Worktree adoptado ya registrado. `started_at` y
+/// `ended_at` valen el instante de la adopción porque el esquema los exige para un `done`; no son un arranque real.
+pub(crate) fn runtime_attempt_insert_adopted_in(c: &Connection, a: &RuntimeAttempt<'_>, summary: &str) -> StoreResult<()> {
+    require_active(c)?;
+    let worktree = a.worktree_id.ok_or_else(|| StoreError::AttemptConflict("un Attempt adoptado lleva su Worktree".into()))?;
+    c.execute(
+        "INSERT INTO attempts (id, task_id, n, status, external, provider, model, effort, role, profile, worktree_id, summary, cwd,
+                               created_at, started_at, ended_at, updated_at, origin, adopted_at)
+         VALUES (?1, ?2, ?3, 'done', 0, 'external', NULL, NULL, NULL, NULL, ?4, ?5, ?6, ?7, ?7, ?7, ?7, 'core', ?7)",
+        params![a.id, a.task_id, a.n, worktree, summary, a.cwd, a.at],
+    )?;
+    Ok(())
+}
+
 /// Un paso intermedio del ciclo de vida (de una espera a otra pasando por `running`): solo el estado y su arranque.
 pub(crate) fn runtime_attempt_step_in(c: &Connection, id: &str, status: AttemptStatus, started_at: Option<i64>, at: i64) -> StoreResult<()> {
     require_active(c)?;

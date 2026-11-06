@@ -143,9 +143,25 @@ pub(super) fn sum(files: &Files, pick: impl Fn(&(String, Option<u64>, Option<u64
     files.iter().map(pick).sum::<Option<u64>>()
 }
 
+/// Un Attempt adoptado lo dice en su `timing` (`adopted: true`) para que `null` no se lea como un dato perdido; los demás no cambian.
+fn adopted_timing(mut timing: Value, adopted: bool) -> Value {
+    if adopted {
+        timing["adopted"] = json!(true);
+    }
+    timing
+}
+
 fn attempt_view(core: &Core, context: &MutationContext, item: &Loaded) -> (Value, Option<Files>) {
     let a = &item.attempt;
-    let duration = match (a.started_at, a.ended_at) {
+    // Un Attempt adoptado no tiene una duración: su `started_at`/`ended_at` es el instante de la adopción, no una ejecución.
+    // Si no se puede leer, mejor SIN duración que una inventada: se trata como adoptado.
+    let adopted = match core.storage.read_store(|s| s.attempt_adopted_at(&a.id)) {
+        Some(Ok(at)) => at.is_some(),
+        Some(Err(_)) => true,
+        None => false,
+    };
+    let (started_at, ended_at) = if adopted { (None, None) } else { (a.started_at, a.ended_at) };
+    let duration = match (started_at, ended_at) {
         (Some(s), Some(e)) if e >= s => Some(e - s),
         _ => None,
     };
@@ -185,7 +201,8 @@ fn attempt_view(core: &Core, context: &MutationContext, item: &Loaded) -> (Value
             }
         }
     };
-    let summary = if a.summary.trim().is_empty() { unknown("no_summary") } else { evidence(json!(a.summary), "agent_reported") };
+    // El resumen de un Attempt adoptado lo escribe el Core al adoptar (no un agente): consta, no se reporta.
+    let summary = if a.summary.trim().is_empty() { unknown("no_summary") } else { evidence(json!(a.summary), if adopted { "verified" } else { "agent_reported" }) };
     // Lo que el agente registró no lo comprobó el Core: `agent_reported`. Sin ninguno no hay dato, no «cero artefactos».
     let artifacts = if item.artifacts.is_empty() {
         json!({ "provenance": "unknown", "reason": "none_recorded", "items": [] })
@@ -211,7 +228,7 @@ fn attempt_view(core: &Core, context: &MutationContext, item: &Loaded) -> (Value
         "forked_from": item.fork_source,
         "selection": evidence(json!({ "provider": a.provider, "model": a.model, "effort": a.effort, "role": a.role, "profile": a.profile, "external": a.external }), "verified"),
         "status": evidence(json!({ "status": a.status, "failure_reason": a.failure_reason }), "verified"),
-        "timing": evidence(json!({ "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at, "duration_ms": duration }), "verified"),
+        "timing": evidence(adopted_timing(json!({ "created_at": a.created_at, "started_at": started_at, "ended_at": ended_at, "duration_ms": duration }), adopted), "verified"),
         "host": recorded(item.worktree.as_ref().map(|w| json!(w.machine)), "no_worktree"),
         "worktree": recorded(item.worktree.as_ref().map(|w| json!({ "id": w.id, "branch": w.branch, "base_branch": w.base_branch, "state": w.state })), "no_worktree"),
         "revision": revision,

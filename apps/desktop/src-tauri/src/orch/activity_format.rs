@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 69] = [
+pub(super) const KINDS: [&str; 70] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -49,6 +49,7 @@ pub(super) const KINDS: [&str; 69] = [
     "attempt.continued",
     "attempt.retried",
     "attempt.forked",
+    "attempt.adopted",
     "attempt.approved",
     "attempt.rejected",
     "attempt.started",
@@ -630,6 +631,8 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         "attempt.resumed" => rendered("activity.attempt.resumed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.exited" => rendered("activity.attempt.exited", Visual::Error, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.integrated" => rendered("activity.attempt.integrated", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        // Adoptar trabajo externo (LXO-149): solo el hecho. Nunca la rama ni la base (son nombres del repositorio de la persona).
+        "attempt.adopted" => rendered("activity.attempt.adopted", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
         // Pending Queue (LXO-143). Nunca el texto de la instrucción ni el id del item: solo el hecho.
         "attempt.queued" => rendered(
             "activity.attempt.queued",

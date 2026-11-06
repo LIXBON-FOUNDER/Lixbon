@@ -662,6 +662,19 @@ pub(crate) fn runtime_worktree_insert_in(c: &Connection, w: &RuntimeWorktree<'_>
     Ok(())
 }
 
+/// Registra un Worktree ADOPTADO (migración 024): ya existía fuera de Lixbon y una persona lo hizo suyo. Nace ANTES que su Attempt (que nace
+/// terminado y lo lleva); la clave foránea diferida lo comprueba al confirmar.
+pub(crate) fn runtime_worktree_insert_adopted_in(c: &Connection, w: &RuntimeWorktree<'_>) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "INSERT INTO worktrees (id, task_id, attempt_id, provenance, machine, repo, path, branch, base_branch, base_commit, env_plan, state,
+                                created_at, updated_at, origin)
+         VALUES (?1, ?2, ?3, 'adopted', ?4, ?5, ?6, ?7, ?8, ?9, NULL, 'active', ?10, ?10, 'core')",
+        params![w.id, w.task_id, w.attempt_id, w.machine, w.repo, w.path, w.branch, w.base_branch, w.base_commit, w.at],
+    )?;
+    Ok(())
+}
+
 /// Una rama y una base sin Worktree conocido (la carpeta ya no está y el runtime no sabe dónde ni en qué máquina estuvo):
 /// la fila que el corte importa en ese caso, `legacy` y ya quitada, con la rama si se conserva.
 pub(crate) fn runtime_worktree_insert_removed_in(c: &Connection, w: &RuntimeWorktree<'_>) -> StoreResult<()> {

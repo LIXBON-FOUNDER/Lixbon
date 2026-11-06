@@ -2,8 +2,7 @@
 
 Estado: **`resource_inventory` implementado**. Es una query de **solo lectura** que cruza tres fuentes: lo que el
 Core cree (Tasks), lo que dice git (`worktree list`, ramas) y lo que hay en disco. Sirve al Resource Manager y al
-aviso «N ramas por revisar» sin que Desktop ejecute git por su cuenta. F2 solo observa: limpiar, archivar o
-adoptar es F5 y no existe en esta API.
+aviso «N ramas por revisar» sin que Desktop ejecute git por su cuenta. F2 solo observa; limpiar y adoptar son F5 y viven en comandos aparte (`resource_clean`, `resource_adopt`); archivar no existe.
 
 ## Invariantes y cómo se prueban
 
@@ -292,11 +291,60 @@ solo se anota en el estado y no se toca git; la rama con el trabajo sigue. Repet
 `resource_delete_worktree`, sin rutas) y el estado de la Task. Si ese registro falla, el efecto queda en el journal para reconciliar (el mismo mecanismo que `release`).
 La rama solo deja de constar si `branch -d` la borró de verdad; un squash que git no ve integrado se conserva y se dice (`branch_kept`).
 
-### Adoptar un worktree externo — no incluido
+### Adoptar un worktree externo (LXO-149/157, migración 024)
 
-`Adopt` no está en esta entrega. Hace falta decidir **qué Attempt recibe** el worktree, y el proyector del runtime no admite que una Task recupere un worktree
-quitado ni cambie el de una activa (`runtime_worktree` solo admite alta, baja y soltar la rama). Mientras tanto, un candidato externo u huérfano **sigue sin dueño**
-y sin acciones: así lo exige la invariante «un recurso externo no se vuelve propio sin un comando de adopción».
+Un worktree que Lixbon no creó (hecho a mano, por otra herramienta) **no tiene dueño**, y «un recurso externo no se vuelve propio sin un comando de adopción».
+Adoptarlo lo convierte en el **primer Attempt, ya terminado**, de una Task que no tenía ninguna ejecución: así se REVISA y se integra como cualquier
+otro. No se inventa historia: Lixbon no lo ejecutó, de modo que no hay `attempt.started` ni `attempt.completed`, el proveedor es `external` (no es un coordinador
+externo: `external = 0`) y el único Event es `attempt.adopted` (decisión).
+
+```text
+resource_adopt_preview { project_id, path }                    lectura (ADE): rama, base, Tasks candidatas y veredicto
+resource_adopt         { project_id, path, task_id, confirm }  HumanDecision: solo una Person autenticada de Desktop, con confirm: true
+```
+
+**Reglas (todas en el Core, antes de escribir; la interfaz solo muestra el veredicto).** Cada rechazo es un código estable y no deja ni un Event ni una fila.
+
+| Código | Cuándo |
+|---|---|
+| `adopt_dirty` | El worktree tiene cambios sin commit (también archivos nuevos). **Se exige limpio**: se adopta trabajo comprometido. |
+| `adopt_unknown` | No se pudo comprobar (git no lista o no responde, o no se sabe si está sucio): no se adopta a ciegas. |
+| `adopt_not_a_worktree` | La carpeta no es un worktree de ese Project según `git worktree list`. |
+| `adopt_main_checkout` | Es el checkout principal. |
+| `adopt_missing` | Registrado pero la carpeta ya no está (o `prunable`/`bare`). |
+| `adopt_detached` | HEAD desacoplado: no hay rama que revisar ni integrar. |
+| `adopt_already_owned` / `adopt_branch_taken` | Otra Task ya posee ese worktree o usa esa rama. |
+| `adopt_is_base` / `adopt_no_base` | La rama es la base, o no comparte historia con ella (no hay `merge-base`): no hay trabajo propio. |
+| `adopt_locked` | El worktree está bloqueado con `git worktree lock`: quien lo bloqueó lo conserva a propósito y Lixbon no podría liberarlo. |
+| `adopt_project_unavailable` | El Project no tiene una ubicación válida en esta máquina. |
+| `adopt_no_changes` | La rama no tiene ni un commit propio respecto a la base (`base..rama` vacío: recién creada, o ya dentro de la base): no hay qué revisar. |
+| `adopt_degraded` | El Core está en solo lectura. |
+| `adopt_task_not_found` / `adopt_task_not_eligible` | La Task no existe, es de otro Project, ya tiene ejecuciones o ya tiene un worktree, o su `repo` no es el del Project contra el que se verificó el worktree. Solo se adopta en una Task `not_started` sin Attempt y con `repo`. |
+
+**Qué queda registrado (una sola mutación).** La Task recibe el worktree y su rama (que no cambian después: el proyector solo admite el alta), la base
+(`default_branch`) y el commit base (`merge-base` de la base con la rama). Nace el Worktree con procedencia `adopted` y, en la misma transacción, el Attempt
+`t-a1` ya `done`. El esquema exige `started_at` y `ended_at` para un `done`, así que valen el instante de la adopción (`attempts.adopted_at`): **no son una
+ejecución real** y los lectores del Core los ocultan (`started_at`/`ended_at` salen `null` y el brief trae `adopted: true`, `adopted_at`; los Attempts normales no
+cambian). Un Attempt adoptado no tiene duración (el código de `attempt_compare` también lo trata así, aunque hoy no se puede comparar: ver abajo). Es historia como cualquier final (`attempts_final_is_final`).
+
+**Qué no se puede hacer con él.** Reintentar o bifurcar un Attempt adoptado falla con claridad: su proveedor `external` no arranca y no hay perfil de ejecución.
+Sí se revisa (Proof Pack con el diff de la rama contra el commit base) e integra. **Compararlo hoy no es posible**: `attempt_compare` exige de 2 a 4 Attempts de la misma Task o de la misma familia de Forks, y un adoptado está solo en su Task y no se reintenta ni se bifurca.
+
+**Repetir es idempotente.** Adoptar de nuevo el mismo worktree en la misma Task devuelve `AlreadyAdopted` sin otro Event. El mismo worktree en otra Task es `adopt_already_owned`.
+Con dos adopciones simultáneas gana una: la comprobación de dueño, rama y repositorio se repite DENTRO de la mutación, así que la otra recibe `adopt_already_owned` (o
+`AlreadyAdopted` si era la misma adopción), nunca un error de la base. «Limpio» cuenta como cambio cualquier archivo modificado o nuevo salvo la carpeta `.lixbon` de la
+raíz (un archivo versionado como `notas.lixbon.md` sí cuenta). El commit base es el `merge-base` de las RAMAS (`refs/heads/…`): una etiqueta con el mismo nombre no lo desvía.
+
+**Después de adoptar.** Es una Task de Lixbon como cualquiera, con una excepción: `release` (decisión explícita) **quita la carpeta del worktree** y solo borra la rama
+si ya está fusionada, pero **cerrar el Run (a mano o por inactividad) nunca libera un worktree adoptado** (`free_worktrees` lo conserva: `worktree adoptado: se libera con
+release`), porque la carpeta es de la persona y trae sus archivos ignorados. Adoptar en sí no toca git ni la carpeta, y la confirmación de Desktop lo advierte antes de
+decidir. «Limpio» se comprueba con `--untracked-files=normal --ignore-submodules=none`, así que ni `status.showUntrackedFiles` ni `diff.ignoreSubmodules` de la
+configuración de la persona lo esconden; solo se ignora lo NO versionado de `.lixbon/`. La base es la rama de `origin/HEAD` o, sin remoto, la rama actual del
+checkout principal (nombre completo, sin el prefijo `heads/` que git antepone si hay una etiqueta homónima). La previsualización la lee cualquier Person autenticada
+(como `resource_inventory`); adoptar es solo de Desktop.
+
+**Límites conocidos.** Adoptar necesita una Task sin ejecución con `repo`; la interfaz todavía no crea una Task sin Attempt (LXO-150), así que el diálogo dice
+«crea una primero» si no hay (`adopt_no_task`). Adoptar no toca git ni la carpeta.
 
 ### Pruebas (`resource_actions_e2e_tests.rs`, `resource_actions.rs`)
 

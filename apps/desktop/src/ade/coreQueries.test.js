@@ -117,7 +117,7 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.attempt.continued', { task: 'task-1', n: 2, from_n: 1, strategy: 'context_package', reason: 'session_expired' }],
   ['activity.attempt.retried', { task: 'task-1', n: 2, from_n: 1 }, { overrides: ['model', 'effort'] }],
   ['activity.attempt.forked', { task: 'task-2', n: 1, source_task: 'task-1', source_n: 2, strategy: 'clean' }],
-  ...['approved', 'started', 'integrated', 'queue_delivered', 'queue_cancelled', 'dispatch_ambiguous'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
+  ...['approved', 'started', 'integrated', 'adopted', 'queue_delivered', 'queue_cancelled', 'dispatch_ambiguous'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
   ['activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 0 }],
   ['activity.attempt.queue_failed', { task: 'task-1', n: 2, reason: 'interrupted' }],
   ['activity.attempt.instruction_requested', { task: 'task-1', n: 2, mode: 'steer' }],

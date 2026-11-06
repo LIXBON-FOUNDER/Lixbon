@@ -145,6 +145,8 @@ impl<'a> CutView<'a> {
                 let core = r.get::<_, String>(31)? == "core";
                 let started = if core { r.get::<_, Option<i64>>(32)? } else { r.get::<_, Option<i64>>(29)? };
                 o.insert("attempt_started".into(), json!(started));
+                // Un Attempt adoptado (024): el documento lo recuerda para que su reconstrucción coincida con el estado.
+                o.insert("adopted".into(), json!(super::attempts::attempt_adopted_at_in(c, &r.get::<_, String>(0)?).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?.is_some()));
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(2)?, core))
             },
         ).optional()?;
