@@ -186,8 +186,9 @@ fn el_attempt_adoptado_se_reconstruye_igual_y_se_puede_revisar_con_la_evidencia_
     let load = w.core.storage.with_store(|s| s.runtime_load()).unwrap().unwrap();
     let doc = &load.doc["tasks"][&task];
     assert_eq!((doc["adopted"].as_bool(), doc["status"].as_str(), doc["branch"].as_str(), doc["agent"].as_str()), (Some(true), Some("done"), Some("feature/pack"), Some("external")), "{doc}");
-    let slash = |p: &str| p.replace('\\', "/");
-    assert_eq!(doc["worktree"].as_str().map(slash), Some(slash(&dir.to_string_lossy())));
+    // La ruta guardada es la que git imprime (puede ser la real: `/private/var`, nombre largo en Windows): se compara como identidad, no como texto.
+    let canon = super::resource_adopt::canon_path;
+    assert_eq!(doc["worktree"].as_str().map(canon), Some(canon(&dir.to_string_lossy())));
     assert_eq!(load.attempts.get(&task), Some(&1));
 
     // La evidencia sale de git (rama contra la base), no de una ejecución que no hubo.
@@ -447,4 +448,29 @@ fn una_ruta_larga_y_un_project_inexistente_dan_codigos_claros() {
     assert_eq!(p["adopt"]["code"], "adopt_not_a_worktree", "{p}");
     let e = w.desktop("resource_adopt_preview", json!({"project_id": "nope", "path": "x"})).unwrap_err();
     assert!(e.contains("adopt_project_unavailable"), "{e}");
+}
+
+/// La ruta que escribe la persona puede llegar por un enlace (`/var` → `/private/var` en macOS, un junction en Windows) o con un nombre corto 8.3: es la
+/// MISMA carpeta que git lista con su ruta real, y se reconoce (en CI fallaba en macOS y Windows al comparar solo texto).
+#[test]
+fn una_ruta_por_un_enlace_es_el_mismo_worktree_que_git_lista() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv3-1", "t");
+    let dir = w.adopt_external_worktree("wt-enlace", "feature/enlace");
+    let parent = dir.parent().unwrap().to_path_buf();
+    let link = parent.join("enlace-al-padre");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&parent, &link).unwrap();
+    #[cfg(windows)]
+    {
+        let ok = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&parent).output().unwrap().status.success();
+        assert!(ok, "no se pudo crear el junction de la prueba");
+    }
+    let por_enlace = link.join("wt-enlace");
+    assert!(por_enlace.is_dir());
+    let p = w.adopt_preview(&por_enlace);
+    assert_eq!(p["adopt"]["ok"], true, "{p}");
+    assert_eq!(w.adopt_it(&por_enlace, &task).expect("adoptar por el enlace")["status"], "Adopted");
+    // Y repetirlo por la ruta directa es la misma adopción.
+    assert_eq!(w.adopt_it(&dir, &task).unwrap()["status"], "AlreadyAdopted");
 }

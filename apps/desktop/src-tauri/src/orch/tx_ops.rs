@@ -177,11 +177,11 @@ impl Tx {
             return Err("adopt_task_not_eligible: el Run de la Task está cerrado".into());
         }
         // Se vuelve a comprobar DENTRO de la mutación (la comprobación previa de git y de dueños se hizo fuera de ella): otra adopción pudo ganar.
-        let want = super::projects::norm_path(&req.worktree);
-        if super::projects::norm_path(&task.repo) != super::projects::norm_path(&req.repo) {
+        let want = super::resource_adopt::canon_path(&req.worktree);
+        if super::resource_adopt::canon_path(&task.repo) != super::resource_adopt::canon_path(&req.repo) {
             return Err("adopt_task_not_eligible: la Task es de otro repositorio que el worktree".into());
         }
-        if self.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| super::projects::norm_path(w) == want)) {
+        if self.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| super::resource_adopt::canon_path(w) == want)) {
             return Err("adopt_already_owned: una Task ya posee este worktree".into());
         }
         if self.tasks.values().any(|t| t.branch.as_deref() == Some(req.branch.as_str())) {

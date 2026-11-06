@@ -71,6 +71,15 @@ struct Candidate {
     base_commit: String,
 }
 
+/// La ruta como IDENTIDAD: normalizada y además resuelta en disco, porque la que escribe la persona y la que devuelve git pueden diferir sin ser otra
+/// carpeta (enlaces simbólicos: `/var` → `/private/var` en macOS; nombres cortos 8.3: `RUNNER~1` en Windows). Si no existe en disco, solo normalizada.
+pub(super) fn canon_path(p: &str) -> String {
+    match std::fs::canonicalize(p.trim()) {
+        Ok(c) => norm_path(&c.to_string_lossy()),
+        Err(_) => norm_path(p),
+    }
+}
+
 /// Una ruta: hasta 1024 caracteres (el límite de `worktrees.path`), no los 200 de un identificador.
 fn path_of(value: &str) -> Result<String, String> {
     let v = value.trim();
@@ -95,8 +104,8 @@ fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candi
         Ok(list) => list,
         Err(_) => return Ok(Err(block("adopt_unknown", "git no pudo listar los worktrees del Project: no se adopta sin poder comprobarlo"))),
     };
-    let want = norm_path(raw_path);
-    let Some((index, found)) = listed.iter().enumerate().find(|(_, w)| norm_path(&w.path) == want) else {
+    let want = canon_path(raw_path);
+    let Some((index, found)) = listed.iter().enumerate().find(|(_, w)| canon_path(&w.path) == want) else {
         return Ok(Err(block("adopt_not_a_worktree", "esa carpeta no es un worktree de este Project según git")));
     };
     if index == 0 {
@@ -114,7 +123,7 @@ fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candi
     // Otra Task ya lo posee, o ya usa esa rama.
     let owned = {
         let st = core.lock();
-        st.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| norm_path(w) == want))
+        st.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| canon_path(w) == want))
     };
     if owned {
         return Ok(Err(block("adopt_already_owned", "una Task ya posee este worktree")));
@@ -147,12 +156,12 @@ fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candi
 
 /// Las Tasks del Project que pueden recibir el worktree: sin ejecución, sin worktree y con repositorio. Por título, de la más reciente a la más antigua.
 fn eligible(core: &Core, project_id: &str, repo: &str) -> Vec<Value> {
-    let want = norm_path(repo);
+    let want = canon_path(repo);
     let st = core.lock();
     let mut tasks: Vec<_> = st
         .tasks
         .values()
-        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty() && norm_path(&t.repo) == want && st.runs.get(&t.run).is_some_and(|r| !r.closed))
+        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty() && canon_path(&t.repo) == want && st.runs.get(&t.run).is_some_and(|r| !r.closed))
         .collect();
     tasks.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)));
     tasks.into_iter().map(|t| json!({ "task_id": t.id, "title": t.title })).collect()
@@ -216,7 +225,7 @@ pub(super) fn adopt(core: &Core, context: &MutationContext, input: &AdoptInput) 
         if task.project_id.as_deref() != Some(project_id.as_str()) {
             return Err("adopt_task_not_eligible: la Task es de otro Project".into());
         }
-        if task.adopted && task.worktree.as_deref().is_some_and(|w| norm_path(w) == norm_path(&path)) {
+        if task.adopted && task.worktree.as_deref().is_some_and(|w| canon_path(w) == canon_path(&path)) {
             return Ok(json!({ "status": "AlreadyAdopted", "task_id": task_id, "attempt_id": format!("{task_id}-a1") }));
         }
     }
@@ -238,7 +247,7 @@ pub(super) fn adopt(core: &Core, context: &MutationContext, input: &AdoptInput) 
             // Otra adopción de ESTE mismo worktree en ESTA Task pudo ganar entre la comprobación y la mutación: repetir no hace nada.
             let already = {
                 let st = core.lock();
-                st.tasks.get(&task_id).is_some_and(|t| t.adopted && t.worktree.as_deref().is_some_and(|w| norm_path(w) == norm_path(&path)))
+                st.tasks.get(&task_id).is_some_and(|t| t.adopted && t.worktree.as_deref().is_some_and(|w| canon_path(w) == canon_path(&path)))
             };
             if already {
                 return Ok(json!({ "status": "AlreadyAdopted", "task_id": task_id, "attempt_id": format!("{task_id}-a1") }));
