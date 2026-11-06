@@ -166,10 +166,12 @@ impl Core {
                     // worktree adoptado ni un Attempt después. Un `repo` explícito (la CLI) se respeta tal cual.
                     None => {
                         self.check_project_launchable_id(&authorized.project_id)?;
-                        match self.project_launch_location(&authorized.project_id) {
-                            Ok(location) if authorized.repo.trim().is_empty() => location.to_string_lossy().into_owned(),
-                            // Sin ubicación verificable (el Project no está en esta máquina) la Task nace sin repositorio, como antes.
-                            _ => authorized.repo.clone(),
+                        // `Task.repo` es inmutable: una Task sin repositorio nunca podría recibir un worktree adoptado ni un Attempt, así que sin `repo` y
+                        // sin ubicación verificable (el Project no está en esta máquina) se rechaza, como con `attempt`, en vez de crear una Task muerta.
+                        if authorized.repo.trim().is_empty() {
+                            self.project_launch_location(&authorized.project_id)?.to_string_lossy().into_owned()
+                        } else {
+                            authorized.repo.clone()
                         }
                     }
                 };

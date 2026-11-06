@@ -140,8 +140,8 @@ export async function createTaskWithAttempt({ requestId, projectId, title, objec
 }
 
 /**
- * Crea SOLO la Task (sin Attempt, sin worktree, sin ejecutar nada): la intención de trabajo queda `not_started` en el Project. Después se le puede
- * adoptar un worktree externo (Adopt) o darle su primer intento. El Core fija el repositorio (la ubicación verificada del Project). Misma clave de
+ * Crea SOLO la Task (sin Attempt, sin worktree, sin ejecutar nada): la intención de trabajo queda `not_started` en el Project. Después solo se le
+ * puede adoptar un worktree externo (Adopt): todavía no hay un RPC para darle su primer intento. El Core fija el repositorio (la ubicación verificada del Project). Misma clave de
  * idempotencia que `createTaskWithAttempt`. Devuelve `{ status, run_id, task_id, attempt_id: null }`.
  */
 export async function createTaskOnly({ requestId, projectId, title, objective, spec = '' }) {

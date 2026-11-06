@@ -151,7 +151,9 @@ describe('NewAttemptForm · solo la tarea y vista previa (LXO-150)', () => {
     fireEvent.change(screen.getByTestId('new-attempt-profile'), { target: { value: 'proponer' } });
     fireEvent.change(screen.getByTestId('new-attempt-model'), { target: { value: 'haiku' } });
     const preview = screen.getByTestId('new-attempt-preview');
-    expect(preview.getAttribute('aria-live')).toBe('polite');
+    // La vista previa NO es una región viva (cada letra del título la cambiaría); lo que se anuncia es el modo.
+    expect(preview.getAttribute('aria-live')).toBeNull();
+    expect(screen.getByTestId('new-attempt-announce').textContent).toMatch(/primer intento, que esperará tu aprobación/);
     expect(screen.getByTestId('new-attempt-preview-project').textContent).toMatch(/Lixbon \(p1\)/);
     expect(screen.getByTestId('new-attempt-preview-what').textContent).toMatch(/Arreglar el login.*intento 1.*claude.*haiku/);
     expect(screen.getByTestId('new-attempt-preview-approval').textContent).toMatch(/Nada se ejecuta todavía/);
@@ -159,6 +161,9 @@ describe('NewAttemptForm · solo la tarea y vista previa (LXO-150)', () => {
     // En «solo la tarea» no hay intento ni worktree.
     fireEvent.click(screen.getByTestId('new-attempt-mode-task'));
     expect(screen.queryByTestId('new-attempt-preview-worktree')).toBeNull();
+    expect(screen.getByTestId('new-attempt-announce').textContent).toBe('Se creará solo la tarea, sin intento.');
+    // No se promete lo que el Core no tiene: no hay forma de darle el primer intento después.
+    expect(screen.getByTestId('new-attempt-modes').textContent).not.toMatch(/crearle el intento/);
     expect(screen.getByTestId('new-attempt-preview-what').textContent).toMatch(/sin intento: no hay worktree ni proveedor y no se ejecuta nada/);
   });
 
@@ -175,5 +180,62 @@ describe('NewAttemptForm · solo la tarea y vista previa (LXO-150)', () => {
     fireEvent.click(screen.getByTestId('new-attempt-mode-task'));
     expect(screen.queryByTestId('new-attempt-note')).toBeNull();
     expect(screen.getByTestId('new-attempt-submit').disabled).toBe(false);
+  });
+});
+
+describe('NewAttemptForm · idempotencia por modo (LXO-150, revisión adversarial)', () => {
+  it('cambiar de modo tras un fallo usa OTRA clave: la misma con otro payload es un conflicto en el Core', async () => {
+    let fail = true;
+    const calls = mount({ create: () => { if (fail) throw new Error('timeout de red'); return { status: 'Committed', run_id: 'r1', task_id: 't9', attempt_id: null }; } });
+    render(<NewAttemptForm projectId="p1" coreModel={V1} onCreated={vi.fn()} />);
+    await flush();
+    await openAndFill();
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    expect(screen.getByTestId('new-attempt-error').textContent).toMatch(/timeout de red/);
+    fail = false;
+    fireEvent.click(screen.getByTestId('new-attempt-mode-task'));
+    // El error de la otra intención no se queda pegado al formulario nuevo.
+    expect(screen.queryByTestId('new-attempt-error')).toBeNull();
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    const [first, second] = creates(calls).map((c) => c.payload.args);
+    expect(first).toHaveProperty('attempt');
+    expect(second).not.toHaveProperty('attempt');
+    expect(second.request_id).not.toBe(first.request_id);
+  });
+
+  it('editar un campo tras un fallo también renueva la clave; reintentar igual la conserva', async () => {
+    let fail = true;
+    const calls = mount({ create: () => { if (fail) throw new Error('fallo'); return { status: 'Committed', run_id: 'r1', task_id: 't9', attempt_id: 't9-a1' }; } });
+    render(<NewAttemptForm projectId="p1" coreModel={V1} onCreated={vi.fn()} />);
+    await flush();
+    await openAndFill();
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    fireEvent.change(screen.getByTestId('new-attempt-title'), { target: { value: 'Otro título' } });
+    fail = false;
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    const ids = creates(calls).map((c) => c.payload.args.request_id);
+    expect(ids).toHaveLength(3);
+    expect(ids[0]).toBe(ids[1]);
+    expect(ids[2]).not.toBe(ids[1]);
+  });
+
+  it('tras crear «solo la tarea» el formulario vuelve al modo habitual', async () => {
+    mount({ create: () => ({ status: 'Committed', run_id: 'r1', task_id: 't9', attempt_id: null }) });
+    render(<NewAttemptForm projectId="p1" coreModel={V1} onCreated={vi.fn()} />);
+    await flush();
+    fireEvent.click(screen.getByTestId('new-attempt-open'));
+    fireEvent.click(screen.getByTestId('new-attempt-mode-task'));
+    fireEvent.change(screen.getByTestId('new-attempt-title'), { target: { value: 'Solo tarea' } });
+    fireEvent.click(screen.getByTestId('new-attempt-submit'));
+    await flush();
+    fireEvent.click(screen.getByTestId('new-attempt-open'));
+    expect(screen.getByTestId('new-attempt-mode-attempt').checked).toBe(true);
+    expect(screen.getByTestId('new-attempt-mode-task').checked).toBe(false);
   });
 });

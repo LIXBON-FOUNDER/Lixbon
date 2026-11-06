@@ -4,7 +4,7 @@ import { useProviderCapabilities } from './useProviderCapabilities';
 import './NewAttemptForm.css';
 
 /**
- * LXO-150 · Se puede crear SOLO la Task (sin intento: queda `not_started`, para adoptarle un worktree externo o darle el intento después) o la Task
+ * LXO-150 · Se puede crear SOLO la Task (sin intento: queda `not_started`; hoy lo único que se le puede hacer es adoptarle un worktree externo: no hay RPC para darle su primer intento después) o la Task
  * con su primer intento. Antes de enviar, una vista previa dice QUÉ pasará con el botón o con Enter: en qué Project, qué se crea, que nada se ejecuta y
  * que el intento tendrá un worktree nuevo y propio. No hay selector de host (el Core tiene uno solo) ni worktree compartido (no existe): se dice, no se oculta.
  *
@@ -43,15 +43,18 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
   const submit = async (event) => {
     event.preventDefault();
     if (!ready) return;
-    requestId.current ??= newRequestId();
+    // La misma clave con OTRO payload es un conflicto en el Core: solo se reutiliza si lo que se envía es lo mismo (reintento tras un fallo de red).
+    const signature = JSON.stringify([mode, title.trim(), instructions.trim(), taskOnly ? null : [chosen, profile, model.trim(), effort.trim()]]);
+    if (!requestId.current || requestId.current.signature !== signature) requestId.current = { id: newRequestId(), signature };
     setBusy(true);
     setError(null);
     try {
-      const base = { requestId: requestId.current, projectId, title: title.trim(), objective: title.trim(), spec: instructions.trim() };
+      const base = { requestId: requestId.current.id, projectId, title: title.trim(), objective: title.trim(), spec: instructions.trim() };
       const created = taskOnly
         ? await createTaskOnly(base)
         : await createTaskWithAttempt({ ...base, attempt: { provider: chosen, profile, model, effort } });
       requestId.current = null;
+      setMode('attempt');
       setTitle('');
       setInstructions('');
       setModel('');
@@ -85,14 +88,18 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
           <fieldset className="nat__field nat__modes" data-testid="new-attempt-modes">
             <legend>¿Qué creas?</legend>
             <label>
-              <input type="radio" name={`${uid}-mode`} value="attempt" checked={!taskOnly} onChange={() => setMode('attempt')} data-testid="new-attempt-mode-attempt" />
+              <input type="radio" name={`${uid}-mode`} value="attempt" checked={!taskOnly} onChange={() => { setMode('attempt'); setError(null); }} data-testid="new-attempt-mode-attempt" />
               {' '}La tarea y su primer intento (espera tu aprobación)
             </label>
             <label>
-              <input type="radio" name={`${uid}-mode`} value="task" checked={taskOnly} onChange={() => setMode('task')} data-testid="new-attempt-mode-task" />
-              {' '}Solo la tarea, sin ejecutar (después puedes adoptarle un worktree externo o crearle el intento)
+              <input type="radio" name={`${uid}-mode`} value="task" checked={taskOnly} onChange={() => { setMode('task'); setError(null); }} data-testid="new-attempt-mode-task" />
+              {' '}Solo la tarea, sin ejecutar (después puedes adoptarle un worktree externo)
             </label>
           </fieldset>
+          {/* Se anuncia el CAMBIO DE MODO, no cada letra del título (la vista previa de abajo no es una región viva). */}
+          <p className="nat__sr" role="status" data-testid="new-attempt-announce">
+            {taskOnly ? 'Se creará solo la tarea, sin intento.' : 'Se creará la tarea y su primer intento, que esperará tu aprobación.'}
+          </p>
           {note && <p className="nat__note" role="status" data-testid="new-attempt-note">{note}</p>}
           <label className="nat__field" htmlFor={`${uid}-title`}>
             <span>Título de la tarea</span>
@@ -128,7 +135,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
             </label>
           </div>
           </>)}
-          <div className="nat__preview" role="region" aria-label="Qué ocurrirá al crear" aria-live="polite" data-testid="new-attempt-preview">
+          <div className="nat__preview" role="region" aria-label="Qué ocurrirá al crear" data-testid="new-attempt-preview">
             <strong>{taskOnly ? 'Crear (o Enter) hará esto:' : 'Crear el intento (o Enter) hará esto:'}</strong>
             <ul>
               <li data-testid="new-attempt-preview-project">Proyecto: <span className="mono">{where}</span> (el que tienes abierto; no se deduce de ninguna carpeta).</li>
@@ -153,7 +160,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
           )}
           <div className="nat__actions">
             <button type="submit" className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); }} disabled={busy}>Cancelar</button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; }} disabled={busy}>Cancelar</button>
           </div>
         </form>
       )}

@@ -27,7 +27,8 @@ mod tests {
             "request_id": "req-141",
             "project_id": "project-explicit",
             "objective": "Ship the task",
-            "title": "Create task"
+            "title": "Create task",
+            "repo": "repo-path"
         })
     }
 
@@ -115,6 +116,20 @@ mod tests {
 
     fn rpc(core: &Arc<Core>, client: &crate::store::AuthenticatedClient, args: serde_json::Value) -> Result<serde_json::Value, String> {
         core.rpc_authenticated_via(client, &crate::store::ClientClaims::default(), super::super::events::Channel::Lxo, "", "task_create", &args)
+    }
+
+    /// LXO-150: sin `repo` y sin ubicación verificable del Project en esta máquina se rechaza ANTES de escribir (como con `attempt`): `Task.repo` es
+    /// inmutable y una Task sin repositorio no podría recibir nunca un worktree adoptado ni un Attempt.
+    #[test]
+    fn a_task_only_request_without_repo_and_without_a_verified_location_is_rejected_before_writing() {
+        let (core, client, project) = fixture();
+        let mut args = request();
+        args["project_id"] = json!(project);
+        args.as_object_mut().unwrap().remove("repo");
+        let tasks_before = core.lock().tasks.len();
+        let error = rpc(&core, &client, args).unwrap_err();
+        assert!(error.contains("ubicación"), "{error}");
+        assert_eq!(core.lock().tasks.len(), tasks_before, "no nace ninguna Task");
     }
 
     #[test]
