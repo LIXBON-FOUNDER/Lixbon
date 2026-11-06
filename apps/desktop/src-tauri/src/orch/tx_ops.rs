@@ -173,6 +173,9 @@ impl Tx {
         if task.worktree.is_some() || task.branch.is_some() {
             return Err("adopt_task_not_eligible: la Task ya tiene un worktree".into());
         }
+        if !self.runs.get(&task.run).is_some_and(|r| !r.closed) {
+            return Err("adopt_task_not_eligible: el Run de la Task está cerrado".into());
+        }
         // Se vuelve a comprobar DENTRO de la mutación (la comprobación previa de git y de dueños se hizo fuera de ella): otra adopción pudo ganar.
         let want = super::projects::norm_path(&req.worktree);
         if super::projects::norm_path(&task.repo) != super::projects::norm_path(&req.repo) {

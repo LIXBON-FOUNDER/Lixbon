@@ -50,7 +50,7 @@ export function validateResourceInspect(response, args) {
 /** Por qué un worktree externo no se puede adoptar (`resource_adopt_preview.adopt.code`, docs/core/RESOURCES.md § Adoptar). */
 export const ADOPT_BLOCKS = Object.freeze([
   'adopt_unknown', 'adopt_not_a_worktree', 'adopt_main_checkout', 'adopt_missing', 'adopt_detached', 'adopt_already_owned', 'adopt_branch_taken',
-  'adopt_dirty', 'adopt_no_base', 'adopt_is_base', 'adopt_no_changes', 'adopt_degraded', 'adopt_no_task',
+  'adopt_dirty', 'adopt_no_base', 'adopt_is_base', 'adopt_no_changes', 'adopt_locked', 'adopt_degraded', 'adopt_no_task',
 ]);
 
 const adoptInvalid = (detail) => new Error(`ade_query_invalid_response: resource_adopt_preview: ${detail}`);

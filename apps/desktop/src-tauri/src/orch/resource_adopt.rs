@@ -1,7 +1,7 @@
 //! Adoptar un worktree externo (LXO-149/157, épica F5). Contrato: `docs/core/RESOURCES.md` § Adoptar.
 //!
 //! Un worktree que Lixbon no creó (hecho a mano, por otra herramienta) no tiene dueño: «un recurso externo no se vuelve propio sin un comando de
-//! adopción». Adoptarlo lo convierte en el **primer Attempt, ya terminado**, de una Task que no tenía ninguna ejecución: así se puede REVISAR, comparar
+//! adopción». Adoptarlo lo convierte en el **primer Attempt, ya terminado**, de una Task que no tenía ninguna ejecución: así se puede REVISAR
 //! e integrar como cualquier otro, sin inventar un historial que no ocurrió (no hay `attempt.started` ni `attempt.completed`; proveedor `external`; el
 //! Attempt lleva `adopted_at`: migración 024).
 //!
@@ -71,6 +71,15 @@ struct Candidate {
     base_commit: String,
 }
 
+/// Una ruta: hasta 1024 caracteres (el límite de `worktrees.path`), no los 200 de un identificador.
+fn path_of(value: &str) -> Result<String, String> {
+    let v = value.trim();
+    if v.is_empty() || v.chars().count() > 1024 {
+        return Err(invalid("`path` debe contener de 1 a 1024 caracteres"));
+    }
+    Ok(v.to_string())
+}
+
 fn id_of(value: &str, what: &str) -> Result<String, String> {
     let v = value.trim();
     if v.is_empty() || v.chars().count() > 200 {
@@ -81,7 +90,7 @@ fn id_of(value: &str, what: &str) -> Result<String, String> {
 
 /// Comprueba el worktree contra git y contra el estado del Core. Devuelve el candidato o la razón por la que no se puede adoptar.
 fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candidate, Block>, String> {
-    let repo = core.project_launch_location(project_id)?.to_string_lossy().into_owned();
+    let repo = core.project_launch_location(project_id).map_err(|e| format!("adopt_project_unavailable: {e}"))?.to_string_lossy().into_owned();
     let listed = match rgit::worktree_list(&repo) {
         Ok(list) => list,
         Err(_) => return Ok(Err(block("adopt_unknown", "git no pudo listar los worktrees del Project: no se adopta sin poder comprobarlo"))),
@@ -95,6 +104,9 @@ fn examine(core: &Core, project_id: &str, raw_path: &str) -> Result<Result<Candi
     }
     if found.bare || found.prunable || !std::path::Path::new(&found.path).is_dir() {
         return Ok(Err(block("adopt_missing", "la carpeta del worktree ya no está en disco")));
+    }
+    if found.locked {
+        return Ok(Err(block("adopt_locked", "el worktree está bloqueado (`git worktree lock`): quien lo bloqueó lo quiere conservar, y Lixbon no podría liberarlo")));
     }
     let Some(branch) = found.branch.clone().filter(|_| !found.detached) else {
         return Ok(Err(block("adopt_detached", "el worktree no tiene una rama (HEAD desacoplado): no hay qué revisar ni integrar")));
@@ -140,7 +152,7 @@ fn eligible(core: &Core, project_id: &str, repo: &str) -> Vec<Value> {
     let mut tasks: Vec<_> = st
         .tasks
         .values()
-        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty() && norm_path(&t.repo) == want)
+        .filter(|t| t.project_id.as_deref() == Some(project_id) && t.status == Status::NotStarted && !st.attempt_n.contains_key(&t.id) && t.worktree.is_none() && t.branch.is_none() && !t.repo.trim().is_empty() && norm_path(&t.repo) == want && st.runs.get(&t.run).is_some_and(|r| !r.closed))
         .collect();
     tasks.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.id.cmp(&b.id)));
     tasks.into_iter().map(|t| json!({ "task_id": t.id, "title": t.title })).collect()
@@ -150,11 +162,11 @@ fn blocked_json(b: &Block) -> Value {
     json!({ "ok": false, "code": b.code, "message": b.message })
 }
 
-/// `resource_adopt_preview`: qué es el worktree y a qué Tasks se puede adoptar. Solo lectura, solo una Person de Desktop.
+/// `resource_adopt_preview`: qué es el worktree y a qué Tasks se puede adoptar. Solo lectura, de cualquier Person autenticada (como `resource_inventory`); adoptar es solo de Desktop.
 pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationContext>, input: &PreviewInput) -> Result<Value, String> {
     require_person(caller, context)?;
     let project_id = id_of(&input.project_id, "project_id")?;
-    let path = id_of(&input.path, "path")?;
+    let path = path_of(&input.path)?;
     let healthy = matches!(core.health(), Health::Normal);
     let candidate = examine(core, &project_id, &path)?;
     let tasks = match core.project_launch_location(&project_id) {
@@ -193,7 +205,7 @@ pub(super) fn adopt(core: &Core, context: &MutationContext, input: &AdoptInput) 
     }
     let project_id = id_of(&input.project_id, "project_id")?;
     let task_id = id_of(&input.task_id, "task_id")?;
-    let path = id_of(&input.path, "path")?;
+    let path = path_of(&input.path)?;
     if let Health::DegradedReadOnly(why) = core.health() {
         return Err(format!("adopt_degraded: el Core está en solo lectura ({why}): no puede registrar la adopción"));
     }

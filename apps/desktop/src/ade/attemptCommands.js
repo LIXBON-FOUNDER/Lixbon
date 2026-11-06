@@ -83,6 +83,8 @@ const KNOWN_ERRORS = [
   [/adopt_already_owned/i, 'Una tarea ya posee este worktree.'],
   [/adopt_branch_taken/i, 'Otra tarea ya usa esta rama.'],
   [/adopt_no_base|adopt_is_base|adopt_no_changes/i, 'La rama no tiene trabajo propio respecto a la rama base: no hay nada que adoptar.'],
+  [/adopt_locked/i, 'El worktree está bloqueado (git worktree lock): quien lo bloqueó lo quiere conservar.'],
+  [/adopt_project_unavailable/i, 'No se encuentra el proyecto en esta máquina: indica dónde está antes de adoptar.'],
   [/adopt_degraded/i, 'El Core está en solo lectura: no puede registrar la adopción.'],
   [/adopt_task_not_eligible/i, 'Esa tarea ya tiene ejecuciones o un worktree, o es de otro repositorio: solo se adopta en una tarea sin ejecución del mismo repositorio.'],
   [/adopt_task_not_found/i, 'Esa tarea ya no existe.'],

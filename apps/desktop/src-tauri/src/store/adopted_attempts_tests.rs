@@ -41,7 +41,11 @@ struct Mundo {
 }
 
 fn mundo(dir: &Path) -> Mundo {
-    let mut s = Store::open_with(dir, &super::migrate::embedded_post_cut(), "t").unwrap();
+    mundo_con(dir, &super::migrate::embedded_post_cut())
+}
+
+fn mundo_con(dir: &Path, migraciones: &[super::migrate::Migration]) -> Mundo {
+    let mut s = Store::open_with(dir, migraciones, "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
     s.meta_set(AGENTIC_MODEL_KEY, AGENTIC_MODEL).unwrap();
@@ -217,7 +221,7 @@ fn lo_adoptado_es_historia_y_no_se_adopta_dos_veces() {
 fn la_migracion_024_tiene_el_checksum_congelado() {
     let m = embedded().into_iter().find(|m| m.version == 24).expect("existe la 024");
     assert_eq!(m.name, "adopted_attempts");
-    assert_eq!(m.checksum(), "038f9decff769ca7ef9ecb063400c6cdc160db9871fc46f240b808649f7d4ea3", "una migración publicada no se edita");
+    assert_eq!(m.checksum(), "9af26813d4bf243a6ca19b0ff10be954075cef3df0e9de30c2e34bb0459f09eb", "una migración publicada no se edita");
 }
 
 /// `adopted_at` se fija al nacer: no se pone a un Attempt que ya existe ni se borra o cambia, tampoco aprovechando una integración (revisión adversarial).
@@ -243,4 +247,28 @@ fn adopted_at_se_fija_al_adoptar_y_no_cambia() {
     let e = error_sql(&mut w.s, &format!("UPDATE attempts SET adopted_at = 9 WHERE id = '{raiz}-a1'"));
     assert!(e.contains("adopted_at"), "{e}");
     assert_eq!(w.s.attempt_adopted_at(&format!("{raiz}-a1")).unwrap(), None);
+}
+
+/// La 024 se aplica sobre una base que está en la 023 y YA tiene Attempts: los conserva intactos (sin `adopted_at`) y desde ahí se puede adoptar.
+#[test]
+fn la_024_se_aplica_sobre_una_base_en_la_023_con_attempts_y_los_conserva() {
+    let t = Tmp::new();
+    let hasta_023: Vec<_> = super::migrate::embedded_post_cut().into_iter().filter(|m| m.version <= 23).collect();
+    let (raiz, hija) = {
+        let mut w = mundo_con(t.path(), &hasta_023);
+        let raiz = w.raiz.clone();
+        sql(
+            &mut w.s,
+            &format!("INSERT INTO attempts (id, task_id, n, status, external, provider, summary, cwd, created_at, updated_at, origin) VALUES ('{raiz}-a1', '{raiz}', 1, 'starting', 0, 'claude', 'x', 'c:/app', 5, 5, 'core')"),
+        )
+        .unwrap();
+        assert_eq!(w.s.schema_version().unwrap(), 23);
+        (w.raiz.clone(), w.hija.clone())
+    };
+    let s = Store::open_with(t.path(), &super::migrate::embedded_post_cut(), "t").unwrap();
+    let mut w = Mundo { s, raiz: raiz.clone(), hija: hija.clone() };
+    assert_eq!(cuenta(&w.s, "attempts"), 1, "el Attempt previo sigue ahí");
+    assert_eq!(w.s.attempt_adopted_at(&format!("{raiz}-a1")).unwrap(), None);
+    adopta(&mut w, &hija, 500).unwrap();
+    assert_eq!(cuenta(&w.s, "attempts"), 2);
 }

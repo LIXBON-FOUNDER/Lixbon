@@ -200,7 +200,8 @@ pub(super) fn local_branches(repo: &str) -> Result<BTreeSet<String>, GitFail> {
 /// ¿Tiene el worktree cambios sin guardar? `None` si no se pudo comprobar. Ignora `.lixbon` y los enlaces del
 /// entorno, igual que `git::is_dirty`, pero un fallo NO cuenta como «sucio».
 pub(super) fn is_dirty(worktree: &str) -> Option<bool> {
-    let out = run(worktree, &["status", "--porcelain"]).ok()?;
+    // Explícito: ni `status.showUntrackedFiles=no` ni `diff.ignoreSubmodules=all` de la configuración de la persona pueden esconder cambios.
+    let out = run(worktree, &["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"]).ok()?;
     if out.code != Some(0) {
         return None;
     }
@@ -214,8 +215,9 @@ pub(super) fn is_dirty(worktree: &str) -> Option<bool> {
 /// ¿Es esta línea de `git status --porcelain` la carpeta `.lixbon` de Lixbon (o algo dentro)? SOLO esa carpeta en la raíz del worktree: un archivo
 /// versionado cuyo nombre contiene `.lixbon` (`notas.lixbon.md`) es trabajo de la persona, y modificarlo es un cambio sin commit.
 fn is_lixbon_entry(line: &str) -> bool {
+    // Solo lo NO versionado (`??`): un archivo de `.lixbon/` que la persona comprometió y modificó es trabajo suyo.
     let path = line.get(3..).unwrap_or("").trim().trim_matches('"');
-    path == ".lixbon" || path.starts_with(".lixbon/")
+    line.starts_with("?? ") && (path == ".lixbon" || path.starts_with(".lixbon/"))
 }
 
 /// ¿Es `branch` ancestro de `into`? `git merge-base --is-ancestor` responde 0 (sí), 1 (no) o un error (128: una
@@ -259,18 +261,16 @@ pub(super) fn own_commits(repo: &str, base: &str, branch: &str) -> Option<u64> {
 
 /// Rama por defecto del repositorio (la de `origin/HEAD` o, sin remoto, la rama actual del checkout principal).
 pub(super) fn default_branch(repo: &str) -> Option<String> {
-    if let Ok(out) = run(
-        repo,
-        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-    ) {
+    // Nombre completo (`refs/…`), no el abreviado: con una etiqueta homónima git abrevia `heads/main` y la base quedaría con ese prefijo.
+    if let Ok(out) = run(repo, &["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]) {
         if let Some(branch) = out
             .stdout
-            .strip_prefix("origin/")
+            .strip_prefix("refs/remotes/origin/")
             .filter(|b| out.code == Some(0) && !b.is_empty())
         {
             return Some(branch.to_string());
         }
     }
-    let out = run(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
-    (out.code == Some(0) && out.stdout != "HEAD" && !out.stdout.is_empty()).then_some(out.stdout)
+    let out = run(repo, &["symbolic-ref", "-q", "HEAD"]).ok()?;
+    out.stdout.strip_prefix("refs/heads/").filter(|b| out.code == Some(0) && !b.is_empty()).map(str::to_string)
 }

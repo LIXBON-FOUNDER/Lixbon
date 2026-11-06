@@ -106,11 +106,12 @@ impl Core {
     /// demás se conservan. Con `force` también se liberan los limpios sin fusionar; los
     /// worktrees con cambios sin commit se conservan siempre y nunca se borra una rama sin fusionar.
     pub(super) fn free_worktrees(&self, ctx: &MutationContext, run: &str, force: bool) -> (Vec<Value>, Vec<Value>) {
-        let (tasks, into) = {
+        let (tasks, into, root_id) = {
             let st = self.lock();
             let root = st.runs.get(run).and_then(|r| st.tasks.get(&r.root));
             let into = root.and_then(|r| git::current_branch(&r.cwd).or_else(|| r.branch.clone()));
-            (st.tasks.values().filter(|t| t.run == run && t.worktree.is_some()).cloned().collect::<Vec<_>>(), into)
+            let root_id = root.map(|r| r.id.clone());
+            (st.tasks.values().filter(|t| t.run == run && t.worktree.is_some()).cloned().collect::<Vec<_>>(), into, root_id)
         };
         let (mut released, mut kept) = (vec![], vec![]);
         // Con el Core degradado el borrado no se podría registrar: no se libera ninguno.
@@ -121,12 +122,20 @@ impl Core {
                 kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "Core en solo lectura" }));
                 continue;
             }
+            // Un worktree ADOPTADO lo creó la persona fuera de Lixbon (con sus archivos ignorados: `node_modules`, `.env`…): cerrar el Run, a mano o por
+            // inactividad, nunca lo quita ni borra su rama. Solo `release` o `resource_*`, que son decisiones explícitas.
+            if t.adopted {
+                kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "worktree adoptado: se libera con release" }));
+                continue;
+            }
             // Su proceso sigue bajo la custodia del Core (no se pudo matar): su worktree no se toca.
             if self.has_term(&t.id) {
                 kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "proceso sin detener" }));
                 continue;
             }
-            let merged = t.merged || t.branch.as_deref().zip(into.as_deref()).is_some_and(|(b, i)| git::is_merged(&t.repo, b, i));
+            // La rama de la propia raíz no puede ser su destino: «fusionada en sí misma» no es integración.
+            let own_root = root_id.as_deref() == Some(t.id.as_str());
+            let merged = t.merged || (!own_root && t.branch.as_deref().zip(into.as_deref()).is_some_and(|(b, i)| git::is_merged(&t.repo, b, i)));
             if !merged && !force {
                 kept.push(json!({ "task": t.id, "branch": t.branch, "reason": "rama sin fusionar" }));
                 continue;

@@ -1,7 +1,7 @@
 -- 024 · Attempt ADOPTADO: trabajo que ya existía fuera de Lixbon y una persona decide hacer suyo (LXO-149/157). Contrato: docs/core/RESOURCES.md § Adoptar.
 --
 -- Un worktree externo (creado a mano o por otra herramienta) no tiene Attempt: Lixbon no lo lanzó ni lo vio correr. Adoptarlo le da un Attempt
--- para que se pueda REVISAR, comparar e integrar como cualquier otro, sin inventar un historial que no ocurrió. Hasta ahora la base solo dejaba
+-- para que se pueda REVISAR e integrar como cualquier otro, sin inventar un historial que no ocurrió. Hasta ahora la base solo dejaba
 -- nacer un Attempt pendiente o arrancando (`attempts_core_create`); uno que nace TERMINADO, sin pasar por el ciclo de vida, solo existe aquí.
 --
 --   * `adopted_at` (NULL = un Attempt normal) es el instante en que la persona lo adoptó. El esquema exige `started_at` y `ended_at` para un

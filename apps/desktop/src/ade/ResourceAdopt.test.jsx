@@ -53,6 +53,7 @@ describe('Adoptar · contrato', () => {
     expect(validateResourceAdoptPreview(preview(), args)).toBeTruthy();
     expect(validateResourceAdoptPreview(blocked('adopt_dirty', { tasks: [] }), args)).toBeTruthy();
     expect(validateResourceAdoptPreview(blocked('adopt_no_changes', { tasks: [] }), args)).toBeTruthy();
+    expect(validateResourceAdoptPreview(blocked('adopt_locked', { tasks: [] }), args)).toBeTruthy();
     bad({ ...preview(), v: 2 }, 'versión');
     bad({ ...preview(), path: '/otro' }, 'otro worktree');
     bad(preview({ adopt: { ok: false, code: 'porque_si', message: 'x' } }), 'código fuera del contrato');

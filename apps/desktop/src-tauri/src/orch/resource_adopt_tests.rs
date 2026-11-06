@@ -348,3 +348,103 @@ fn la_ruta_del_worktree_se_reconoce_con_espacios_acentos_y_variantes_de_windows(
         assert_eq!(p["adopt"]["ok"], true, "{v}: {p}");
     }
 }
+
+// ---- Segunda revisión adversarial (independiente) ----
+
+/// Cerrar el Run (a mano o por inactividad: es el mismo `free_worktrees`) NUNCA quita un worktree adoptado ni borra su rama, aunque la rama esté subida
+/// a su remoto. La carpeta es de la persona y trae sus archivos ignorados. Solo `release`, que es explícito, la libera.
+#[test]
+fn cerrar_el_run_no_libera_un_worktree_adoptado_ni_borra_su_rama() {
+    for force in [false, true] {
+        let w = world("claude", None);
+        let task = w.adopt_bare_task("adv2-1", "t");
+        let repo = w.adopt_repo();
+        let remote = repo.parent().unwrap().join("remoto.git");
+        git(&repo, &["init", "--bare", "-q", &remote.to_string_lossy()]);
+        git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+        let dir = w.adopt_external_worktree("wt-cierre", "feature/cierre");
+        git(&dir, &["push", "-q", "-u", "origin", "feature/cierre"]);
+        w.adopt_it(&dir, &task).unwrap();
+        std::fs::write(dir.join("node_modules.local"), "mis archivos ignorados").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-qm", "local"]);
+
+        let closed = w.desktop("run_close", json!({"root_task": task, "force": force})).expect("run_close");
+        assert_eq!(closed["released"], json!([]), "force={force}: {closed}");
+        assert!(closed["kept"].to_string().contains("adoptado"), "force={force}: {closed}");
+        assert!(dir.join("node_modules.local").exists(), "force={force}: la carpeta de la persona sigue ahí");
+        assert!(git(&repo, &["branch", "--list", "feature/cierre"]).contains("feature/cierre"), "force={force}: la rama sigue");
+    }
+}
+
+/// Una Task cuyo Run ya se cerró no se ofrece ni recibe el worktree (antes: ofrecida y luego un error crudo de SQLite).
+#[test]
+fn una_task_de_un_run_cerrado_no_se_ofrece_ni_se_adopta() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv2-2", "t");
+    let dir = w.adopt_external_worktree("wt-run-cerrado", "feature/cerrado");
+    w.desktop("run_close", json!({"root_task": task})).expect("cerrar el Run");
+    let p = w.adopt_preview(&dir);
+    assert_eq!((p["adopt"]["code"].as_str(), p["tasks"].as_array().map(Vec::len)), (Some("adopt_no_task"), Some(0)), "{p}");
+    let attempts = w.adopt_attempts_total();
+    let e = w.adopt_it(&dir, &task).unwrap_err();
+    assert_eq!(code_of(&e), "adopt_task_not_eligible", "{e}");
+    assert_eq!(w.adopt_attempts_total(), attempts);
+}
+
+/// «Limpio» no depende de la configuración de git de la persona, y de `.lixbon/` solo se ignora lo NO versionado.
+#[test]
+fn limpio_no_depende_de_la_configuracion_de_git_ni_ignora_lo_versionado_de_lixbon() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv2-3", "t");
+    let repo = w.adopt_repo();
+    let dir = w.adopt_external_worktree("wt-config", "feature/config");
+    git(&repo, &["config", "status.showUntrackedFiles", "no"]);
+    std::fs::write(dir.join("nuevo.txt"), "sin seguimiento").unwrap();
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["code"], "adopt_dirty", "un archivo nuevo cuenta aunque la configuración lo oculte");
+    std::fs::remove_file(dir.join("nuevo.txt")).unwrap();
+    // Un archivo de `.lixbon/` que la persona comprometió y luego modificó es trabajo suyo.
+    std::fs::create_dir_all(dir.join(".lixbon")).unwrap();
+    std::fs::write(dir.join(".lixbon").join("cfg"), "v1").unwrap();
+    git(&dir, &["add", "-f", "."]);
+    git(&dir, &["commit", "-qm", "cfg"]);
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["ok"], true);
+    std::fs::write(dir.join(".lixbon").join("cfg"), "v2 sin commit").unwrap();
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["code"], "adopt_dirty");
+    assert_eq!(code_of(&w.adopt_it(&dir, &task).unwrap_err()), "adopt_dirty");
+}
+
+/// Con una etiqueta `main`, git abrevia la rama como `heads/main`: la base guardada y mostrada es `main`.
+#[test]
+fn la_base_no_lleva_el_prefijo_heads_cuando_hay_una_etiqueta_homonima() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv2-4", "t");
+    git(&w.adopt_repo(), &["tag", "main"]);
+    let dir = w.adopt_external_worktree("wt-base", "feature/base");
+    assert_eq!(w.adopt_preview(&dir)["base"], "main");
+    w.adopt_it(&dir, &task).unwrap();
+    let base: String = w.core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT base_branch FROM worktrees WHERE task_id = ?1", [&task], |r| r.get(0))?))).unwrap().unwrap();
+    assert_eq!(base, "main");
+}
+
+/// Un worktree bloqueado a propósito (`git worktree lock`) no se adopta: Lixbon no podría liberarlo.
+#[test]
+fn un_worktree_bloqueado_no_se_adopta() {
+    let w = world("claude", None);
+    let task = w.adopt_bare_task("adv2-5", "t");
+    let dir = w.adopt_external_worktree("wt-bloqueado", "feature/bloqueado");
+    git(&w.adopt_repo(), &["worktree", "lock", "--reason", "de otra herramienta", &dir.to_string_lossy()]);
+    assert_eq!(w.adopt_preview(&dir)["adopt"]["code"], "adopt_locked");
+    assert_eq!(code_of(&w.adopt_it(&dir, &task).unwrap_err()), "adopt_locked");
+}
+
+/// Una ruta larga o un Project inexistente dan un código `adopt_*`, no un error genérico.
+#[test]
+fn una_ruta_larga_y_un_project_inexistente_dan_codigos_claros() {
+    let w = world("claude", None);
+    let larga = format!("{}/{}", w.adopt_repo().to_string_lossy(), "x".repeat(300));
+    let p = w.desktop("resource_adopt_preview", json!({"project_id": w.project, "path": larga})).expect("la ruta larga se previsualiza");
+    assert_eq!(p["adopt"]["code"], "adopt_not_a_worktree", "{p}");
+    let e = w.desktop("resource_adopt_preview", json!({"project_id": "nope", "path": "x"})).unwrap_err();
+    assert!(e.contains("adopt_project_unavailable"), "{e}");
+}

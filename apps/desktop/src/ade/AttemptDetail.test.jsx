@@ -20,6 +20,22 @@ function mount(handler) {
 afterEach(() => { cleanup(); invoke.mockReset(); });
 
 describe('AttemptDetail (LXO-122)', () => {
+  it('un Attempt adoptado dice que es trabajo externo y no muestra inicio, fin ni duración (LXO-149)', async () => {
+    const base = CANONICAL['attempt_detail.v1.json'];
+    mount((payload) => {
+      if (payload.query === 'provider_capabilities') return live();
+      if (payload.query === 'activity_list') return attemptActivityPage([]);
+      return { ...base, attempt: { ...base.attempt, adopted: true, adopted_at: 1_700_000_000_000, started_at: null, ended_at: null } };
+    });
+    render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} onSelectTask={vi.fn()} />);
+    await flush();
+    const root = screen.getByTestId('attempt-detail');
+    expect(within(root).getByTestId('attempt-adopted').textContent).toMatch(/Trabajo externo adoptado/);
+    expect(within(root).getByTestId('attempt-adopted').textContent).toMatch(/no hay inicio, fin ni duración/);
+    expect(within(root).queryByText('Iniciado')).toBeNull();
+    expect(within(root).queryByText('Duración')).toBeNull();
+  });
+
   it('fixture canónica: identidad, ciclo de vida, sesión opaca, worktree, artefactos como texto y revisión', async () => {
     const calls = mount((payload) => {
       if (payload.query === 'provider_capabilities') return live();
