@@ -885,7 +885,10 @@ fn leads_group(_pid: u32) -> bool {
 #[cfg(windows)]
 mod win {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, FILETIME, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList, QueryInformationJobObject, TerminateJobObject};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, GetProcessTimes, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
     const STILL_ACTIVE: u32 = 259;
@@ -963,6 +966,21 @@ mod win {
                     return None;
                 }
                 let job = Job(job);
+                // `KILL_ON_JOB_CLOSE`: cerrar el último handle del job termina a los miembros que sigan en él. Así una
+                // caída del Core después de asignar el job no deja descendientes vivos, y soltar el `Tree` (el job vive en
+                // él) cierra el árbol. Si el sistema no acepta el límite no se adjunta: sin job el cierre sigue siendo por
+                // escaneo (como antes), nunca un job que parezca garantizar algo que no garantiza.
+                let mut limites: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                limites.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                let fijado = SetInformationJobObject(
+                    job.0,
+                    JobObjectExtendedLimitInformation,
+                    std::ptr::addr_of!(limites).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                );
+                if fijado == 0 {
+                    return None;
+                }
                 (AssignProcessToJobObject(job.0, h.0) != 0).then_some(job)
             }
         }
@@ -2192,6 +2210,35 @@ mod tests {
         assert!(Group::members(&job).is_some_and(|m| m.contains(&pid)));
         assert!(Group::terminate(&job));
         let _ = child.wait();
+    }
+
+    /// LXO-242: soltar el último handle del Job termina a sus miembros (`KILL_ON_JOB_CLOSE`). Es lo que hace que una
+    /// caída del Core después de asignar el Job no deje descendientes vivos: el sistema cierra el handle por él.
+    #[cfg(windows)]
+    #[test]
+    fn soltar_el_job_real_termina_a_sus_miembros() {
+        let mut child = std::process::Command::new("ping").args(["-n", "60", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        let start = start_time(pid).expect("identidad del proceso");
+        let job = win::Job::attach(pid, Some(start)).expect("con la identidad exacta sí");
+        assert!(Group::members(&job).is_some_and(|m| m.contains(&pid)));
+        assert!(child.try_wait().unwrap().is_none(), "antes de soltar el Job el proceso sigue vivo");
+        drop(job);
+        let limite = std::time::Instant::now() + Duration::from_secs(10);
+        let salio = loop {
+            if child.try_wait().unwrap().is_some() {
+                break true;
+            }
+            if std::time::Instant::now() > limite {
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        if !salio {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(salio, "soltar el Job tenía que terminar al miembro");
     }
 
     /// Unix, procesos de verdad: el intermedio (`( sleep 60 & )`) lanza al nieto y sale; el nieto se reparenta a init y

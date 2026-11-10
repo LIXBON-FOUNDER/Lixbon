@@ -572,7 +572,7 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
 
 | plataforma | identidad `start` | vías de descubrimiento | garantía |
 |---|---|---|---|
-| Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica |
+| Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica. El job lleva `KILL_ON_JOB_CLOSE` (LXO-242): cerrar su último handle —soltar el `Tree`, o la caída del Core— termina a los miembros que sigan dentro |
 | Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo, leída EN BYTES (el nombre del proceso no tiene por qué ser UTF-8) | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada, si se PRUEBA que el grupo es nuestro (abajo) |
 | macOS | hash normalizado de `ps lstart` (resolución de 1 s, `TZ=UTC` y `LC_ALL=C` fijados; solo igualdad) | igual, con una única instantánea de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` | igual. **No demostrado:** un falso «mismo proceso» exige reutilizar el pid y arrancar en el mismo segundo; es una suposición de caudal, no una prueba. Identidad fina (`proc_pidinfo`, µs) pendiente. Sin ejecutar en un macOS real |
 | otros Unix | como macOS | como macOS | **sin garantía** (pids aleatorios en FreeBSD/OpenBSD) |
@@ -602,6 +602,10 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
   otro grupo, daemonización) escapa a las tres vías; en Unix la identidad se comprueba justo antes de `kill -9` (dos
   llamadas, sin handle que ancle el pid; ventana de decenas de milisegundos con carga: no es una garantía); un proceso creado por la raíz antes de entrar en el
   Job (microsegundos) solo lo cubre el recorrido por `ppid`. Cubrirlos exigiría un contenedor del sistema (cgroups).
+  **Windows y `KILL_ON_JOB_CLOSE` (LXO-242):** el job se crea con el límite, y si el sistema no lo acepta no se adjunta
+  (sin job el cierre sigue siendo por escaneo, como antes). Efecto a tener presente: lo que la raíz deje en segundo plano
+  muere cuando se suelta el `Tree` (también si el Core cae), no sigue huérfano. Lo que el job aún NO cubre: la raíz
+  corre antes de entrar en él (la raíz suspendida y la regla estricta de cobertura son el incremento siguiente).
 * **Pruebas.** Mundo simulado determinista (`proctable::tests::World`, corre en Windows) para cada carrera: nacido entre
   instantáneas con la raíz zombi de ancla, raíz que sale dejando un huérfano (con y sin observación), pin roto, número
   reutilizado por un líder ajeno (vivo o muerto), zombi sin token, opacos rastreados/ajenos/hijos, identidad de la raíz.
