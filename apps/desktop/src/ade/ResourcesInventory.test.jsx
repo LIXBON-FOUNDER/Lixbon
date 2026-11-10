@@ -633,11 +633,23 @@ describe('ResourcesInventory · sin inventario', () => {
 });
 
 describe('ResourcesInventory · solo lectura', () => {
-  it('no hay botones ni enlaces: ruta y rama son metadato, no acciones', () => {
+  it('no hay enlaces ni campos: ruta y rama son metadato, y lo único accionable es «Gestionar…» en el worktree de una Task y «Adoptar…» en uno externo o huérfano sin dueño (LXO-157)', () => {
     render(<ResourcesInventory inventory={DTO} />);
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
     expect(screen.queryAllByRole('link')).toHaveLength(0);
-    expect(document.querySelectorAll('button, a, input, textarea, form, [onclick], [role="button"]')).toHaveLength(0);
+    // Las acciones no están a la vista: se piden con «Gestionar…» (solo en un worktree que una Task posee) o con «Adoptar…» (solo en uno externo u
+    // huérfano SIN dueño). Nada más tiene botón, y adoptar no abre nada hasta que se pide.
+    const buttons = screen.queryAllByRole('button');
+    expect(buttons.map((b) => b.textContent).sort()).toEqual(['Adoptar…', 'Adoptar…', 'Gestionar…', 'Gestionar…']);
+    for (const b of buttons) {
+      const row = b.closest('[data-testid="resinv-row"]');
+      const owner = row.querySelector('[data-testid="resinv-owner"]').textContent;
+      if (b.textContent === 'Gestionar…') expect(owner).not.toBe('Sin propietario');
+      else {
+        expect(owner).toBe('Sin propietario');
+        expect(['external', 'orphan_candidate']).toContain(row.querySelector('[data-testid="resinv-core-state"]').textContent);
+      }
+    }
+    expect(document.querySelectorAll('a, input, textarea, form, [onclick]')).toHaveLength(0);
     expect(screen.getAllByRole('combobox')).toHaveLength(4);
     // La ruta se pinta como texto plano.
     expect(rowOf('/home/ana/app.lixbon-wt/wt-c').querySelector('a')).toBeNull();
@@ -648,7 +660,8 @@ describe('ResourcesInventory · solo lectura', () => {
     const forbidden = /eliminar|borrar|archivar|adoptar|limpiar|reparar|delete|archive|adopt|cleanup|repair|checkout|push|prune/i;
     // «git» solo puede aparecer describiendo el dato de Core, nunca como una acción.
     const DATA_PHRASES = /Registrado en git|git lo marca como podable|git no está instalado|git agotó el tiempo|git falló|No registrado en git/g;
-    const visible = [...document.querySelectorAll('.resinv__row')].map((el) => el.textContent).join(' ');
+    // El único verbo permitido es el del botón «Adoptar…» (LXO-157), que no ejecuta nada sin confirmación.
+    const visible = [...document.querySelectorAll('.resinv__row')].map((el) => el.textContent).join(' ').replaceAll('Adoptar…', '');
     expect(visible.replace(DATA_PHRASES, '')).not.toMatch(forbidden);
     expect(visible.replace(DATA_PHRASES, '')).not.toMatch(/\bgit\b/i);
     const optionText = [...screen.getByLabelText('Estado').options].map((o) => o.textContent).join(' ');

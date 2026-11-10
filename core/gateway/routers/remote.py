@@ -66,11 +66,13 @@ CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "fi
 # validar cada acción: esto solo evita reenviar basura.
 # `core_snapshot` y `core_events` son lecturas del Core para el bootstrap de
 # Mobile (LXO-107), `core_attention` su bandeja de Attention (LXO-109) y
-# `core_task` / `core_activity` el detalle de una Task (LXO-110); el IDE
-# las hace con su propia identidad y no escriben nada.
+# `core_task` / `core_activity` el detalle de una Task (LXO-110) y
+# `core_attempts` / `core_attempt` sus intentos (LXO-126); el IDE las hace con
+# su propia identidad y no escriben nada.
 ORCH_ACTIONS = (
     "refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents",
     "core_snapshot", "core_events", "core_attention", "core_task", "core_activity",
+    "core_attempts", "core_attempt",
 )
 MAX_ORCH_ARGS = 4_000
 MAX_ATTACHMENTS = 6

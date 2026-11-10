@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DESIGN_SYSTEMS, designSystemPersonalizado } from '../lib/visuals';
-import { IconChevron, IconSearch, IconX } from './Icons';
+import { IconCheck, IconChevron, IconExternal, IconMonitor, IconPhone, IconSearch, IconTablet, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
 import { Desplegable } from './Desplegable';
 import { useT } from '../i18n/useT';
@@ -32,16 +32,19 @@ export function DesignSystemPicker({ value, onChange, compacto = false }) {
       <Desplegable abierto={abierto} className="vis-ds__menu">
           {!editando ? (
             <>
+              <p className="vis-ds__etq">{t('designSystemTitle')}</p>
               {DESIGN_SYSTEMS.map((ds) => (
                 <button key={ds.id} className={`vis-ds__item ${value?.id === ds.id ? 'is-active' : ''}`} onClick={() => elegir(ds)}>
                   <span className="vis-ds__swatch" style={{ background: swatchDe(ds) }} />
                   <span className="vis-ds__item-text"><strong>{ds.label[locale]}</strong><small>{ds.desc[locale]}</small></span>
+                  {value?.id === ds.id && <IconCheck size={15} className="vis-ds__check" />}
                 </button>
               ))}
               {value?.custom && (
                 <button className="vis-ds__item is-active" onClick={() => setEditando(true)}>
                   <span className="vis-ds__swatch" style={{ background: value.form.primario }} />
                   <span className="vis-ds__item-text"><strong>{value.label[locale]}</strong><small>{t('ownEdit')}</small></span>
+                  <IconCheck size={15} className="vis-ds__check" />
                 </button>
               )}
               <button className="vis-ds__item vis-ds__item--nuevo" onClick={() => setEditando(true)}>{t('defineMine')}</button>
@@ -541,15 +544,11 @@ export function Board({ paginas, documento, onAbrir, clave, activa }) {
             <span className="vis-board__acciones">
               {Object.keys(TABLEROS).map((k) => (
                 <button key={k} className={d === k ? 'is-on' : ''} onClick={() => cambiarTamano(f.name, k)} title={`${t(`width_${k}`)} · ${TABLEROS[k].w}px`} aria-label={t(`width_${k}`)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
-                    {k === 'escritorio' && <rect x="2.5" y="5" width="19" height="13" rx="2.5" />}
-                    {k === 'tablet' && <rect x="5" y="3" width="14" height="18" rx="2.5" />}
-                    {k === 'movil' && <rect x="7.5" y="3" width="9" height="18" rx="2.5" />}
-                  </svg>
+                  {k === 'escritorio' ? <IconMonitor size={14} /> : k === 'tablet' ? <IconTablet size={14} /> : <IconPhone size={14} />}
                 </button>
               ))}
               <button onClick={() => onAbrir(f.name)} title={t('boardOpen')} aria-label={t('boardOpen')}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></svg>
+                <IconExternal size={14} />
               </button>
             </span>
           </div>

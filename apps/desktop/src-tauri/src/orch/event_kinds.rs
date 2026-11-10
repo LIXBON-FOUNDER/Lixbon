@@ -24,6 +24,9 @@
 //! | `task.review_requested` | state | `task` |
 //! | `environment.blocked` · `environment.cleared` | state | `agent` |
 //! | `project.location_added` · `project.archived` · `project.restored` · `project.relocated` | decision | `project` |
+//! | `policy.changed` (LXO-209) | decision | `policy` |
+//! | `race.requested` · `race.cancelled` (LXO-215) | decision | `race` |
+//! | `race.candidate_recorded` (LXO-215) | state | `race` |
 //!
 //! # Kinds del Attempt (LXO-114, inertes hasta el corte; los emite `attempt_ops`)
 //! | kind | class | entidad |
@@ -32,6 +35,11 @@
 //! | `attempt.approved` · `attempt.rejected` | decision | `attempt` |
 //! | `attempt.waiting` · `attempt.resumed` · `attempt.exited` · `attempt.integrated` (LXO-231) | state | `attempt` |
 //! | `attempt.continued` (LXO-134) | state | `attempt` |
+//! | `attempt.retried` (LXO-142) | state | `attempt` |
+//! | `attempt.forked` (LXO-145) | state | `attempt` |
+//! | `attempt.adopted` (LXO-149) | decision | `attempt` |
+//! | `attempt.queued` · `attempt.queue_delivered` · `attempt.queue_cancelled` · `attempt.queue_failed` (LXO-143) | state | `attempt` |
+//! | `attempt.dispatch_ambiguous` (LXO-246) | state | `attempt` |
 //!
 //! # Kinds de ProviderSession y Thread (LXO-115, inertes hasta el corte; los emite `session_ops`)
 //! | kind | class | entidad |
@@ -68,7 +76,7 @@ use serde::Serialize;
 use super::agents;
 use super::events::{EntityKind, EventDraft, EventError, EventPayload};
 use super::state::{Status, Task};
-use crate::store::{AttemptRow, AttemptStatus, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
+use crate::store::{AttemptRow, AttemptStatus, ForkStrategy, ContinuationReason, ContinuationRow, ContinuityStrategy, EventClass, Fingerprint, IntentField, ArtifactKind, ArtifactRow, CutCounts, Provenance, ReviewRow, Verdict, ProviderSessionRow, RemovalReason, Resolution, RetryOverride, RetryRow, RunRow, SessionBinding, SessionStatus, TaskRow, ThreadRow, WorktreeRow};
 
 /// Recorta a `max` caracteres (no bytes) y marca el recorte con «…».
 pub(super) fn clip(s: &str, max: usize) -> String {
@@ -573,7 +581,7 @@ impl EffectObserved {
                 base: opt_str(EFF, observed, "base")?,
             },
             "git_worktree_removed" => {
-                let operation = operation_of(kind, operation, &["release", "close_idle_runs", "spawn_cleanup"])?;
+                let operation = operation_of(kind, operation, &["release", "close_idle_runs", "spawn_cleanup", "resource_clean", "resource_delete_worktree"])?;
                 let worktree_removed = opt_bool(EFF, observed, "worktree_removed")?.ok_or("effect.observed: falta `worktree_removed` (booleano)")?;
                 let branch = opt_str(EFF, observed, "branch")?;
                 let branch_deleted = opt_bool(EFF, observed, "branch_deleted")?.ok_or("effect.observed: falta `branch_deleted` (booleano)")?;
@@ -686,6 +694,19 @@ pub(super) fn task_intent_created(t: &TaskRow) -> Result<EventDraft, EventError>
     task_draft(t, &TaskIntentCreated { parent: t.parent_task_id.clone(), depth: t.depth, title: clip(&t.title, 120) })
 }
 
+/// `task.created` v2 para una raíz todavía representada en el estado legacy. Se usa solo en
+/// `task_create`: conserva la atribución de Project diferida hasta finalizar la mutación.
+pub(super) fn task_intent_created_from_state(t: &Task) -> Result<EventDraft, EventError> {
+    let p = TaskIntentCreated {
+        parent: t.parent.clone(),
+        depth: i64::from(t.depth),
+        title: clip(&t.title, 120),
+    };
+    Ok(EventDraft::new(EntityKind::Task, t.id.as_str(), &p)?
+        .run(Some(t.run.clone()))
+        .project_from_task(t.id.as_str()))
+}
+
 /// Qué cambió de la intención. `title` solo si cambió (recortado); el encargo nunca viaja.
 #[derive(Serialize)]
 pub(super) struct TaskUpdated {
@@ -752,6 +773,8 @@ pub(super) enum StopCause {
     Cancelled,
     /// Se cerró el Run al que pertenece.
     RunClosed,
+    /// La aprobación inicial superó su plazo durable (30 minutos).
+    ApprovalTimeout,
 }
 
 /// Motivo máquina del fallo de un Attempt. Cerrado: nunca texto libre.
@@ -848,6 +871,73 @@ impl EventPayload for AttemptContinued {
 pub(super) fn attempt_continued(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow) -> Result<EventDraft, EventError> {
     let p = AttemptContinued { task: a.task_id.clone(), n: a.n, from_n: c.from_n, strategy: c.strategy, reason: c.reason, package_id: c.package_id.clone() };
     attempt_draft(a, t, &p)
+}
+
+/// `attempt.retried` (LXO-142): el Attempt `n` reintenta al `from_n` de su Task, limpio. `overrides` nombra los parámetros que
+/// se pidieron a propósito (lista cerrada, ausente si no se cambió ninguno); el resto se heredó. Nunca lleva el mensaje del reintento.
+#[derive(Serialize)]
+pub(super) struct AttemptRetried {
+    task: String,
+    n: i64,
+    from_n: i64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    overrides: Vec<RetryOverride>,
+}
+
+impl EventPayload for AttemptRetried {
+    const KIND: &'static str = "attempt.retried";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_retried(a: &AttemptRow, r: &RetryRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    let p = AttemptRetried { task: a.task_id.clone(), n: a.n, from_n: r.from_n, overrides: r.overrides.clone() };
+    attempt_draft(a, t, &p)
+}
+
+/// `attempt.forked` (LXO-145): el Attempt `n` nació de otro (`source`, de otra Task) y no lo reabre ni lo toca. `strategy` dice con qué
+/// contexto arrancó; `package_id` es la identidad del ContextPackage si lo hubo (verificable contra su `source`); `overrides` nombra lo que
+/// se pidió distinto del origen (lista cerrada, ausente si nada). Nunca lleva el encargo ni el contenido del paquete.
+#[derive(Serialize)]
+pub(super) struct AttemptForked {
+    task: String,
+    n: i64,
+    source: String,
+    source_task: String,
+    source_n: i64,
+    strategy: ForkStrategy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    overrides: Vec<RetryOverride>,
+    /// Si el Fork nació de un Race (LXO-215): el id común y el índice del candidato. Ausentes en un Fork suelto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    race_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    race_index: Option<i64>,
+}
+
+impl EventPayload for AttemptForked {
+    const KIND: &'static str = "attempt.forked";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Una persona adoptó trabajo EXTERNO (un worktree que ya existía) como el primer Attempt de una Task (LXO-149). Nace terminado: Lixbon no lo ejecutó, así que
+/// no hay `attempt.started` ni `attempt.completed`. Lleva la rama y la base (nombres, nunca rutas) para que se vea de dónde sale.
+#[derive(Serialize)]
+pub(super) struct AttemptAdopted {
+    task: String,
+    n: i64,
+    branch: String,
+    base: String,
+}
+
+impl EventPayload for AttemptAdopted {
+    const KIND: &'static str = "attempt.adopted";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
 }
 
 macro_rules! attempt_ref_payload {
@@ -1034,6 +1124,196 @@ pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDra
 }
 
 // ---------------------------------------------------------------------------------------------
+// Pending Queue de un Attempt (LXO-143): instrucciones enviadas mientras estaba ocupado. Los construye `attempt_ops`; los pide `queue_commands`.
+// ---------------------------------------------------------------------------------------------
+//
+// Entidad `attempt`. NUNCA llevan el texto de la instrucción ni los ids de sus adjuntos: solo el id del item, su posición
+// y cuántos adjuntos tiene. El cuerpo es de quien lo escribió y vive en `attempt_queue`.
+
+use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
+
+/// `attempt.queued` (LXO-143): se encoló una instrucción para el Attempt. `position`: pendientes delante, contándola (1 = la
+/// siguiente en entregarse).
+#[derive(Serialize)]
+pub(super) struct AttemptQueued {
+    task: String,
+    n: i64,
+    queue_id: String,
+    position: i64,
+    attachments: i64,
+}
+
+impl EventPayload for AttemptQueued {
+    const KIND: &'static str = "attempt.queued";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queued(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, position: i64) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueued { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), position, attachments: item.attachments.len() as i64 })
+}
+
+/// `attempt.queue_delivered` (LXO-143): el ADAPTER confirmó la entrega (`confirmed_by`); escribir en el proceso no cuenta.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueDelivered {
+    task: String,
+    n: i64,
+    queue_id: String,
+    confirmed_by: QueueConfirmation,
+}
+
+impl EventPayload for AttemptQueueDelivered {
+    const KIND: &'static str = "attempt.queue_delivered";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_delivered(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, confirmed_by: QueueConfirmation) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueDelivered { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), confirmed_by })
+}
+
+/// `attempt.queue_cancelled` (LXO-143): se canceló antes de entregarse. Ese item no se entrega jamás.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueCancelled {
+    task: String,
+    n: i64,
+    queue_id: String,
+}
+
+impl EventPayload for AttemptQueueCancelled {
+    const KIND: &'static str = "attempt.queue_cancelled";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_cancelled(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueCancelled { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone() })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Steer y Stop & Send (LXO-144): instrucciones a un Attempt que está ocupado, SIN pasar por la cola. Los construye `attempt_ops`;
+// los pide `steer_commands`. Entidad `attempt`. Un par `requested` -> `result` por petición, unido por `request_id` (la correlación).
+// NUNCA llevan el texto de la instrucción: solo su longitud.
+// ---------------------------------------------------------------------------------------------
+
+/// `attempt.instruction_requested` (LXO-144): el Core aceptó la petición y la va a intentar. `chars`: longitud de la instrucción.
+#[derive(Serialize)]
+pub(super) struct AttemptInstructionRequested {
+    task: String,
+    n: i64,
+    request_id: String,
+    mode: InstructionMode,
+    chars: i64,
+}
+
+impl EventPayload for AttemptInstructionRequested {
+    const KIND: &'static str = "attempt.instruction_requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_instruction_requested(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptInstructionRequested { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, chars })
+}
+
+/// `attempt.instruction_result` (LXO-144): lo que pasó con esa petición (mismo `request_id`). `reason`: por qué falló, del conjunto
+/// cerrado de la cola; ausente si se entregó o si el stop no se confirmó.
+#[derive(Serialize)]
+pub(super) struct AttemptInstructionResult {
+    task: String,
+    n: i64,
+    request_id: String,
+    mode: InstructionMode,
+    outcome: InstructionOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<QueueFailure>,
+}
+
+impl EventPayload for AttemptInstructionResult {
+    const KIND: &'static str = "attempt.instruction_result";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_instruction_result(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptInstructionResult { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, outcome, reason })
+}
+
+/// De dónde venía el claim de despacho cuando no se pudo probar su desenlace.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DispatchClaimSource {
+    /// Reservado, sin `attempt.started`.
+    Reserved,
+    /// Pasó a `started`: el proveedor pudo haberse llamado.
+    Started,
+}
+
+impl DispatchClaimSource {
+    pub(super) fn parse(claim: &str) -> Option<DispatchClaimSource> {
+        match claim {
+            "reserved" => Some(DispatchClaimSource::Reserved),
+            "started" => Some(DispatchClaimSource::Started),
+            _ => None,
+        }
+    }
+}
+
+/// Por qué no se sabe si el proveedor llegó a lanzarse. Cerrado: nunca texto libre.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DispatchAmbiguityCause {
+    /// El Core reinició con el claim en vuelo y sin evidencia terminal canónica.
+    CoreRestart,
+    /// El adapter no permitió saber si arrancó (p. ej. un pánico al lanzar).
+    StartOutcomeUnknown,
+}
+
+/// `attempt.dispatch_ambiguous` (LXO-246): no se puede probar si el proveedor llegó a lanzarse. El claim pasa a `ambiguous`:
+/// no se vuelve a despachar solo y queda para una reconciliación humana. Nunca dice cómo acabó la ejecución.
+#[derive(Serialize)]
+pub(super) struct AttemptDispatchAmbiguous {
+    task: String,
+    n: i64,
+    from: DispatchClaimSource,
+    cause: DispatchAmbiguityCause,
+}
+
+impl EventPayload for AttemptDispatchAmbiguous {
+    const KIND: &'static str = "attempt.dispatch_ambiguous";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_dispatch_ambiguous(a: &AttemptRow, t: &TaskRow, from: DispatchClaimSource, cause: DispatchAmbiguityCause) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptDispatchAmbiguous { task: a.task_id.clone(), n: a.n, from, cause })
+}
+
+/// `attempt.queue_failed` (LXO-143): no se entregó (o no se sabe). Con un `reason` distinto de `attempt_ended` levanta
+/// Attention sobre el Attempt.
+#[derive(Serialize)]
+pub(super) struct AttemptQueueFailed {
+    task: String,
+    n: i64,
+    queue_id: String,
+    reason: QueueFailure,
+}
+
+impl EventPayload for AttemptQueueFailed {
+    const KIND: &'static str = "attempt.queue_failed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn attempt_queue_failed(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQueueFailed { task: a.task_id.clone(), n: a.n, queue_id: item.queue_id.clone(), reason })
+}
+
+// ---------------------------------------------------------------------------------------------
 // Runtime sobre las tablas (LXO-233): los hechos de ejecución del Attempt actual de una Task del `State`
 // ---------------------------------------------------------------------------------------------
 //
@@ -1044,8 +1324,11 @@ fn runtime_attempt<P: EventPayload>(task: &str, run: &str, n: u32, p: &P) -> Res
     Ok(EventDraft::new(EntityKind::Attempt, format!("{task}-a{n}"), p)?.run(Some(run.into())).project_from_task(task))
 }
 
-fn attempt_status(s: Status) -> AttemptStatus {
-    match s {
+/// El estado de Attempt equivalente al de la Task; `None` si la Task todavía no ha solicitado un Attempt.
+fn attempt_status(s: Status) -> Option<AttemptStatus> {
+    Some(match s {
+        Status::NotStarted => return None,
+        Status::PendingApproval => AttemptStatus::PendingApproval,
         Status::Starting => AttemptStatus::Starting,
         Status::Running => AttemptStatus::Running,
         Status::Waiting => AttemptStatus::Waiting,
@@ -1054,7 +1337,7 @@ fn attempt_status(s: Status) -> AttemptStatus {
         Status::Failed => AttemptStatus::Failed,
         Status::Stopped => AttemptStatus::Stopped,
         Status::Exited => AttemptStatus::Exited,
-    }
+    })
 }
 
 /// `attempt.requested` del Attempt `n` de una Task del runtime: nace sin aprobación pendiente (la pide `spawn`).
@@ -1069,15 +1352,76 @@ pub(super) fn runtime_new_attempt(t: &Task, n: u32) -> Result<EventDraft, EventE
         role: label(&t.role),
         profile: label(&t.profile),
         external: t.external,
-        approval_required: false,
+        approval_required: t.status == Status::PendingApproval,
     };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.retried` del Attempt `n` de una Task del runtime: reintenta al `n - 1`, limpio. `overrides` son los parámetros
+/// que se pidieron distintos (ausente si ninguno). Lo emite la misma mutación que crea el Attempt, y es lo que resuelve el
+/// `failed` del anterior.
+pub(super) fn runtime_attempt_retried(t: &Task, n: u32, overrides: Vec<RetryOverride>) -> Result<EventDraft, EventError> {
+    let p = AttemptRetried { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, overrides };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.forked` del primer Attempt de una Task del runtime que nace de otro Attempt (`source`, de la Task `source_task`).
+/// Lo emite la misma mutación que crea la Task y su Attempt, justo después de `attempt.requested`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn runtime_attempt_forked(t: &Task, source: &str, source_task: &str, source_n: u32, strategy: ForkStrategy, package_id: Option<String>, overrides: Vec<RetryOverride>, race: Option<(&str, u32)>) -> Result<EventDraft, EventError> {
+    let p = AttemptForked {
+        task: t.id.clone(),
+        n: 1,
+        source: clip(source, 80),
+        source_task: clip(source_task, 80),
+        source_n: source_n as i64,
+        strategy,
+        package_id,
+        overrides,
+        race_id: race.map(|(id, _)| clip(id, 80)),
+        race_index: race.map(|(_, i)| i as i64),
+    };
+    runtime_attempt(&t.id, &t.run, 1, &p)
+}
+
+/// `attempt.adopted` del primer Attempt de una Task del runtime, nacido de un worktree externo adoptado. Lo emite la misma mutación que lo crea.
+pub(super) fn runtime_attempt_adopted(t: &Task, branch: &str, base: &str) -> Result<EventDraft, EventError> {
+    let p = AttemptAdopted { task: t.id.clone(), n: 1, branch: clip(branch, 200), base: clip(base, 200) };
+    runtime_attempt(&t.id, &t.run, 1, &p)
+}
+
+/// `attempt.continued` del Attempt `n` de una Task del runtime: continúa la ProviderSession del `n - 1` (reanudación nativa; el
+/// fallback con ContextPackage no entra por esta vía). Lo emite la misma mutación que crea el Attempt y resuelve el `failed` del anterior.
+pub(super) fn runtime_native_continuation(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptContinued { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, strategy: ContinuityStrategy::NativeResume, reason: ContinuationReason::Preferred, package_id: None };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
+pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptApproved { task: t.id.clone(), n: n as i64 };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` de un Attempt inicial pendiente: rechazo de una Person o cierre del Run (`cause`).
+pub(super) fn runtime_attempt_rejected(t: &Task, n: u32, cause: StopCause) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.rejected` por vencimiento del plazo de la aprobación inicial (actor System/Core).
+pub(super) fn runtime_attempt_expired(t: &Task, n: u32) -> Result<EventDraft, EventError> {
+    let p = AttemptRejected { task: t.id.clone(), n: n as i64, cause: StopCause::ApprovalTimeout };
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
 /// Los hechos del paso de `from` a `to` del Attempt `n`, en el orden del ciclo de vida (de una espera a otra se pasa
 /// por `running`, como en las tablas). `cause` es la del mutador (`run_closed` al cerrar un Run).
 pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Status, cause: Option<&str>) -> Vec<Result<EventDraft, EventError>> {
-    let (from, to) = (attempt_status(from), attempt_status(to));
+    // Sin Attempt (una Task `not_started`) no hay hechos de ejecución que emitir.
+    let (Some(from), Some(to)) = (attempt_status(from), attempt_status(to)) else {
+        return vec![];
+    };
     let steps = if from == to {
         vec![]
     } else if crate::store::transition_allowed(from, to) {
@@ -1088,6 +1432,14 @@ pub(super) fn runtime_attempt_transition(t: &Task, n: u32, from: Status, to: Sta
         vec![]
     };
     let (task, n64) = (t.id.clone(), n as i64);
+    // La decisión sobre una aprobación inicial no es un paso de ejecución: `attempt.approved` / `attempt.rejected`.
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Starting {
+        return vec![runtime_attempt_approved(t, n)];
+    }
+    if from == AttemptStatus::PendingApproval && to == AttemptStatus::Stopped {
+        let cause = if cause == Some("run_closed") { StopCause::RunClosed } else { StopCause::Cancelled };
+        return vec![runtime_attempt_rejected(t, n, cause)];
+    }
     let mut prev = from;
     let mut out = vec![];
     for s in steps {
@@ -1612,6 +1964,151 @@ impl EventPayload for ProjectArchived {
 
 pub(super) fn project_archived(project_id: &str) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Project, project_id, &ProjectArchived {})?.project(Some(project_id.to_string())).run(None))
+}
+
+/// Qué hizo un cambio de policy con la restricción EFECTIVA de esa categoría en ese ámbito (lista cerrada).
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum PolicyDirection {
+    /// Más restrictivo que antes (menos autonomía).
+    Tighten,
+    /// Menos restrictivo que antes (más autonomía): la acción que la interfaz confirma aparte.
+    Loosen,
+    /// Se fijó el mismo nivel efectivo (queda fijado por ese ámbito).
+    Same,
+    /// Se borró el override: el ámbito vuelve a heredar.
+    Reset,
+}
+
+/// Una persona cambió la policy de autonomía de un ámbito (LXO-209). `scope` es `global`, `project` o `attempt`; `scope_id` el Project o
+/// el Attempt (ausente en el global). `from`/`to` son los niveles del OVERRIDE (ausente = heredaba / vuelve a heredar), no los efectivos.
+/// `revision` es la revisión global que dejó este cambio. Nunca lleva credenciales, rutas ni texto libre: solo ámbito, categoría y niveles.
+#[derive(Serialize)]
+pub(super) struct PolicyChanged {
+    scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_id: Option<String>,
+    category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+    direction: PolicyDirection,
+    revision: i64,
+}
+
+impl EventPayload for PolicyChanged {
+    const KIND: &'static str = "policy.changed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+#[allow(clippy::too_many_arguments)]
+/// `policy.changed`: la entidad es el ámbito (`global`, `project:<id>`, `attempt:<id>`); el Project (si se conoce) va explícito.
+pub(super) fn policy_changed(scope: &str, scope_id: Option<&str>, project_id: Option<&str>, category: &str, from: Option<&str>, to: Option<&str>, direction: PolicyDirection, revision: i64) -> Result<EventDraft, EventError> {
+    let entity = match scope_id {
+        Some(id) => format!("{scope}:{}", clip(id, 150)),
+        None => scope.to_string(),
+    };
+    let p = PolicyChanged { scope: scope.to_string(), scope_id: scope_id.map(|id| clip(id, 150)), category: category.to_string(), from: from.map(str::to_string), to: to.map(str::to_string), direction, revision };
+    Ok(EventDraft::new(EntityKind::Policy, &entity, &p)?.project(project_id.map(str::to_string)).run(None))
+}
+
+/// Una persona pidió un Race (LXO-215): N candidatos comparables que salen del mismo Attempt. `candidates` es cuántos se pidieron;
+/// `digest` identifica LO PEDIDO (origen, candidatos y paquete) para distinguir un reintento de otra petición con la misma clave. Nunca el
+/// encargo, el contenido del paquete ni credenciales.
+#[derive(Serialize)]
+pub(super) struct RaceRequested {
+    race_id: String,
+    source: String,
+    source_task: String,
+    candidates: i64,
+    strategy: ForkStrategy,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+    digest: String,
+}
+
+impl EventPayload for RaceRequested {
+    const KIND: &'static str = "race.requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+/// Qué pasó con un candidato (LXO-215): lanzado (con su Attempt) o fallido (con un código cerrado). Un candidato fallido no borra a los
+/// lanzados; un reintento puede dejar después `launched` para el mismo índice.
+#[derive(Serialize)]
+pub(super) struct RaceCandidateRecorded {
+    race_id: String,
+    index: i64,
+    outcome: String,
+    provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+}
+
+impl EventPayload for RaceCandidateRecorded {
+    const KIND: &'static str = "race.candidate_recorded";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+/// Una persona canceló lo que quedaba de un Race (LXO-215). `scope`: `one` (un candidato) o `remaining` (todos los no terminados). Nunca
+/// ocurre solo porque un candidato termine.
+#[derive(Serialize)]
+pub(super) struct RaceCancelled {
+    race_id: String,
+    scope: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attempt_id: Option<String>,
+    stopped: i64,
+    rejected: i64,
+    failed: i64,
+}
+
+impl EventPayload for RaceCancelled {
+    const KIND: &'static str = "race.cancelled";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+
+/// Los hechos de un Race. La entidad es el id del Race; el Project va explícito.
+pub(super) fn race_requested(race_id: &str, source: &str, source_task: &str, candidates: usize, strategy: ForkStrategy, package_id: Option<&str>, digest: &str, project_id: Option<&str>) -> Result<EventDraft, EventError> {
+    let p = RaceRequested { race_id: race_id.into(), source: clip(source, 80), source_task: clip(source_task, 80), candidates: candidates as i64, strategy, package_id: package_id.map(str::to_string), digest: digest.into() };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(format!("race:{race_id}:requested")))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn race_candidate_recorded(race_id: &str, index: usize, provider: &str, model: Option<&str>, task_id: Option<&str>, attempt_id: Option<&str>, code: Option<&str>, project_id: Option<&str>) -> Result<EventDraft, EventError> {
+    let outcome = if attempt_id.is_some() { "launched" } else { "failed" };
+    let p = RaceCandidateRecorded {
+        race_id: race_id.into(),
+        index: index as i64,
+        outcome: outcome.into(),
+        provider: clip(provider, 64),
+        model: model.map(|m| clip(m, 120)),
+        task_id: task_id.map(|t| clip(t, 80)),
+        attempt_id: attempt_id.map(|a| clip(a, 80)),
+        code: code.map(|c| clip(c, 64)),
+    };
+    // Repetir el mismo desenlace de un candidato no deja otro hecho; un desenlace nuevo (p. ej. lanzado tras fallar) sí.
+    let key = match (attempt_id, code) {
+        (Some(a), _) => format!("race:{race_id}:c{index}:launched:{a}"),
+        (None, c) => format!("race:{race_id}:c{index}:failed:{}", c.unwrap_or("unknown")),
+    };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(key))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn race_cancelled(race_id: &str, attempt_id: Option<&str>, stopped: usize, rejected: usize, failed: usize, project_id: Option<&str>, key: &str) -> Result<EventDraft, EventError> {
+    let p = RaceCancelled { race_id: race_id.into(), scope: if attempt_id.is_some() { "one".into() } else { "remaining".into() }, attempt_id: attempt_id.map(|a| clip(a, 80)), stopped: stopped as i64, rejected: rejected as i64, failed: failed as i64 };
+    Ok(EventDraft::new(EntityKind::Race, race_id, &p)?.project(project_id.map(str::to_string)).run(None).idempotent(key.to_string()))
 }
 
 /// El proyecto pasó de archivado a activo.

@@ -367,6 +367,16 @@ describe('TaskWorkspace · metadatos desconocidos o parciales', () => {
     }
   });
 
+  it('pending_approval y not_started son estados activos conocidos, no «desconocidos»', () => {
+    for (const [status, label] of [['pending_approval', 'Pendiente de aprobación'], ['not_started', 'Sin iniciar']]) {
+      cleanup();
+      renderView(taskFixture({ status }));
+      expect(field('Estado', 'Estado').textContent).toContain(label);
+      expect(field('Estado', 'Estado').textContent).not.toContain('desconocido');
+      expect(field('Estado', 'Grupo').textContent).toBe('Activa');
+    }
+  });
+
   it('status desconocido, strings vacíos y tiempos inválidos no rompen ni se inventan', () => {
     renderView(taskFixture({
       status: 'working', title: '', provider: '  ', cwd: '', created_at: 'ayer', updated_at: -1,

@@ -787,3 +787,120 @@ fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
     }
     assert!(revisados >= 20, "la prueba debe revisar los módulos del dominio, revisó {revisados}");
 }
+
+// ---------------------------------------------------------------------------
+// Commit idempotente de `task.create` (LXO-141): misma política de reintentos que el resto de mutaciones
+// ---------------------------------------------------------------------------
+
+/// Persistencia idempotente que falla `commit` y `lookup` veces (transitorias o estructurales) y luego funciona.
+struct Idempotente {
+    fallos_commit: AtomicUsize,
+    fallos_lookup: AtomicUsize,
+    transitorio: bool,
+    intentos_commit: AtomicUsize,
+}
+
+impl Idempotente {
+    fn nueva(fallos_commit: usize, fallos_lookup: usize, transitorio: bool) -> Arc<Idempotente> {
+        Arc::new(Idempotente {
+            fallos_commit: AtomicUsize::new(fallos_commit),
+            fallos_lookup: AtomicUsize::new(fallos_lookup),
+            transitorio,
+            intentos_commit: AtomicUsize::new(0),
+        })
+    }
+    fn error(&self) -> PersistError {
+        if self.transitorio { PersistError::transient("contención simulada") } else { PersistError::structural("disco simulado") }
+    }
+}
+
+impl Persistence for Idempotente {
+    fn persist(&self, _state: &State, _events: &[crate::store::NewEvent]) -> Result<(), PersistError> {
+        Ok(())
+    }
+
+    fn lookup_idempotent(&self, _scope: &str, _request: &str, _hash: &str) -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        if self.fallos_lookup.load(Ordering::SeqCst) > 0 {
+            self.fallos_lookup.fetch_sub(1, Ordering::SeqCst);
+            return Err(self.error());
+        }
+        Ok(None)
+    }
+
+    fn persist_idempotent(
+        &self,
+        _state: &State,
+        _events: &[crate::store::NewEvent],
+        _scope: &str,
+        _request: &str,
+        _hash: &str,
+        ids: &crate::store::RuntimeResultIds,
+    ) -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        self.intentos_commit.fetch_add(1, Ordering::SeqCst);
+        if self.fallos_commit.load(Ordering::SeqCst) > 0 {
+            self.fallos_commit.fetch_sub(1, Ordering::SeqCst);
+            return Err(self.error());
+        }
+        Ok(crate::store::RuntimeCommitOutcome::Committed { rev: 1, ids: ids.clone() })
+    }
+}
+
+fn crea_intencion(core: &Core) -> Result<super::mutation::IdempotentMutation<()>, MutateError> {
+    core.mutate_idempotent_recorded("user:p", "req-1", &"a".repeat(64), |tx| {
+        let (run, task) = tx.create_run_intent("obj", nt());
+        Ok(((), crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id: None }))
+    })
+}
+
+#[test]
+fn un_fallo_transitorio_del_commit_idempotente_se_reintenta_y_no_degrada_el_core() {
+    let (_l, _data, _) = carpetas();
+    let (core, host) = core_con_host();
+    let f = Idempotente::nueva(2, 0, true);
+    core.set_persistence(f.clone());
+    let out = crea_intencion(&core).expect("dos fallos transitorios y un éxito");
+    assert!(matches!(out, super::mutation::IdempotentMutation::Committed { .. }));
+    assert_eq!(f.intentos_commit.load(Ordering::SeqCst), 3, "se reintentó con la política del Core");
+    assert_eq!(core.health(), Health::Normal, "una contención puntual no deja el Core en solo lectura");
+    assert_eq!(core.lock().runs.len(), 1, "la memoria solo cambia tras confirmar");
+    assert!(host.events_named("orch:degraded").is_empty());
+}
+
+#[test]
+fn un_fallo_estructural_del_commit_idempotente_si_deja_el_core_en_solo_lectura() {
+    let (_l, _data, _) = carpetas();
+    let (core, _host) = core_con_host();
+    core.set_persistence(Idempotente::nueva(usize::MAX / 2, 0, false));
+    assert!(matches!(crea_intencion(&core), Err(MutateError::Persist(_))));
+    assert!(matches!(core.health(), Health::DegradedReadOnly(_)));
+    assert!(core.lock().runs.is_empty(), "no se publica nada que no se confirmó");
+}
+
+#[test]
+fn una_lectura_del_ledger_que_falla_se_reintenta_y_si_persiste_no_degrada_el_core() {
+    let (_l, _data, _) = carpetas();
+    let (core, _host) = core_con_host();
+    // Un fallo transitorio de lectura se reintenta y la creación sigue adelante.
+    let f = Idempotente::nueva(0, 1, true);
+    core.set_persistence(f);
+    assert!(crea_intencion(&core).is_ok());
+    assert_eq!(core.health(), Health::Normal);
+
+    // Una lectura que no se recupera es un error de la petición, no un fallo de escritura: el Core sigue operativo.
+    let (core, _host) = core_con_host();
+    core.set_persistence(Idempotente::nueva(0, usize::MAX / 2, true));
+    assert!(matches!(crea_intencion(&core), Err(MutateError::Persist(_))));
+    assert_eq!(core.health(), Health::Normal);
+    assert!(core.lock().runs.is_empty());
+}
+
+#[test]
+fn un_backend_sin_soporte_idempotente_falla_cerrado_sin_cambiar_nada() {
+    let (_l, _data, _) = carpetas();
+    let (core, _host) = core_con_host();
+    // `Falla` solo implementa `persist`: la persistencia legacy no puede afirmar un replay ni un commit idempotente.
+    core.set_persistence(Falla::nueva(0, true));
+    assert!(matches!(crea_intencion(&core), Err(MutateError::Rejected(_))));
+    assert_eq!(core.health(), Health::Normal);
+    assert!(core.lock().runs.is_empty());
+}

@@ -1,19 +1,21 @@
 // El token solo identifica la sesión: SIEMPRE exige iniciar sesión con la
 // cuenta dueña (sin sesión → /auth?next=… y vuelve).
-import { TemaBoton } from '../components/TemaBoton';
 import { useSeo } from '../lib/seo';
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Link, useNavigate } from '../i18n/link';
 import { useT } from '../i18n/useT';
 import { api } from '../lib/api';
 import { initialRemoteState, openEventStream, remoteReducer } from '../lib/remote';
-import { Logo } from '../components/Logo';
+import { useShell } from '../components/AppShell';
+import { HeroInicio } from '../components/Cielo';
+import { ShimmerText } from '../components/ShimmerText';
 import { Markdown } from '../components/Markdown';
 import { WaveText } from '../components/WaveText';
 import { RemoteOrch } from '../components/RemoteOrch';
 import { Select } from '../components/Select';
-import { IconChevron, IconClip, IconFile, IconImage, IconSend, IconStop, IconX } from '../components/Icons';
+import { IconBook, IconChevron, IconCli, IconClip, IconFile, IconIde, IconImage, IconMenu, IconNext, IconSend, IconStop, IconX } from '../components/Icons';
+import { LogoMark, LogoTrabajando } from '../components/Logo';
 import { useLocale } from '../i18n/LocaleContext';
 import { describeRemoteTool, shownCommand, summarizeRemoteTools } from '../lib/toolText';
 import {
@@ -25,19 +27,27 @@ const SOURCE_LABEL = { cli: 'CLI', ide: 'IDE' };
 export default function RemotePage() {
   const t = useT('remote');
   const tc = useT('common');
+  const tch = useT('chat');
   useSeo({ title: t('seoTitle'), noindex: true });
   const { token } = useParams();
+  const [params] = useSearchParams();
+  const elegida = params.get('s');
   const navigate = useNavigate();
+  const { remotas, loadRemotas, openDrawer, drawerOpen } = useShell();
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
   const [claiming, setClaiming] = useState(!!token);
 
+  // El token del IDE/CLI reclama la sesión y la deja abierta en su ruta
+  // (/remote?s=<id>), la misma que usan la lista y la barra lateral.
   useEffect(() => {
     if (!token) return;
     api.post('/api/remote/claim', { token })
       .then((res) => {
         setSession(res.data.session);
         setClaiming(false);
+        loadRemotas();
+        navigate(`/remote?s=${res.data.session.id}`, { replace: true });
       })
       .catch((err) => {
         if (err.response?.status === 401) {
@@ -50,15 +60,38 @@ export default function RemotePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, navigate]);
 
+  // La sesión abierta es la de la URL: se busca en las que ya trae el marco
+  // y, si no está (terminada o recién creada), se pide la lista.
+  useEffect(() => {
+    if (token) return;
+    if (!elegida) { setSession(null); return; }
+    if (session?.id === elegida) return;
+    const ya = remotas.find((x) => x.id === elegida);
+    if (ya) { setSession(ya); return; }
+    let vivo = true;
+    api.get('/api/remote/sessions')
+      .then((res) => {
+        const s = (res.data.sessions || []).find((x) => x.id === elegida);
+        if (vivo) { if (s) setSession(s); else navigate('/remote', { replace: true }); }
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elegida, token, remotas]);
+
   return (
-    <div className={`page remote-page ${session ? 'remote-page--session' : ''}`}>
-      <header className="pubnav">
-        <Link to="/" className="pubnav__logo"><Logo /></Link>
-        <span className="shared__badge">{t('badge')}</span>
-        <div className="pubnav__actions">
-          <TemaBoton />
-          <Link to="/chat" className="pill-btn pill-btn--primary pubnav__btn">{tc('goToChat')}</Link>
-        </div>
+    <section className={`chat-main remote-main ${session ? 'remote-page--session' : ''}`}>
+      <header className="chat-header">
+        <button
+          className="icon-btn chat-header__menu"
+          onClick={openDrawer}
+          aria-label={tch('openConversationsPanel')}
+          aria-controls="sidebar-drawer"
+          aria-expanded={drawerOpen}
+        >
+          <IconMenu />
+        </button>
+        <span className="chat-header__seccion">{session ? '' : t('badge')}</span>
       </header>
 
       {claiming ? (
@@ -66,77 +99,42 @@ export default function RemotePage() {
       ) : error ? (
         <main className="remote__center"><p className="page__error" role="alert">{error}</p></main>
       ) : session ? (
-        <RemoteSession session={session} onExit={() => setSession(null)} t={t} tc={tc} />
+        <RemoteSession key={session.id} session={session} t={t} tc={tc} />
       ) : (
-        <RemoteList onOpen={setSession} t={t} tc={tc} />
+        <RemoteInicio t={t} hayActivas={remotas.some((x) => x.status === 'online')} />
       )}
-    </div>
+    </section>
   );
 }
 
-function RemoteList({ onOpen, t, tc }) {
-  const [sessions, setSessions] = useState(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    let alive = true;
-    const load = () => api.get('/api/remote/sessions')
-      .then((res) => { if (alive) setSessions(res.data.sessions || []); })
-      .catch((err) => {
-        if (!alive) return;
-        if (err.response?.status === 401) setError(t('listError401'));
-        else setError(t('listErrorGeneric'));
-      });
-    load();
-    const timer = setInterval(load, 10000);
-    return () => { alive = false; clearInterval(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (error) {
-    return (
-      <main className="remote__center">
-        <p className="remote__dim">{error}</p>
-        <Link to="/auth" className="pill-btn pill-btn--primary">{tc('logIn')}</Link>
-      </main>
-    );
-  }
-  if (!sessions) return <main className="remote__center"><span className="remote__dim">{tc('loading')}</span></main>;
-  if (!sessions.length) {
-    return (
-      <main className="remote__center">
-        <h1 className="remote__empty-title">{t('emptyTitle')}</h1>
-        <p className="remote__dim">
-          {t('emptyBodyBefore')} <code>/remote</code> {t('emptyBodyAfter')}
-        </p>
-      </main>
-    );
-  }
+// Sin sesión elegida: el colibrí y cómo conectar una desde el IDE o el CLI.
+// Las sesiones se eligen en la barra lateral (modo Remoto).
+function RemoteInicio({ t, hayActivas }) {
   return (
-    <main className="remote__list">
-      {sessions.map((s) => (
-        <button
-          key={s.id}
-          className="remote__card"
-          // Una sesión terminada con transcript guardado se abre igual, en
-          // modo lectura: la conversación del IDE/CLI no se pierde al cerrar.
-          disabled={s.status === 'ended' && !(s.transcript_events > 0)}
-          onClick={() => onOpen(s)}
-        >
-          <span className={`remote__dot ${s.status === 'online' ? 'is-online' : ''}`} />
-          <span className="remote__card-body">
-            <strong>{s.title || t('defaultSessionTitle')}</strong>
-            <span className="remote__dim">
-              {s.machine || '—'} ·{' '}
-              {s.status === 'ended'
-                ? s.transcript_events > 0 ? t('endedWithTranscript') : t('ended')
-                : s.status === 'online' ? t('online') : t('offline')}
-            </span>
-          </span>
-          <span className="remote__badge">{SOURCE_LABEL[s.source] || s.source}</span>
-        </button>
-      ))}
-    </main>
+    <HeroInicio>
+      <h2 className="chat-hero__title">{t('homeTitle')}<br /><em>{t('homeTitleEm')}</em></h2>
+      {/* Las dos formas de conectar en una tarjeta de un solo tono (sin rayas),
+          con el isotipo posado en el borde; la guía va debajo como enlace. */}
+      <div className="remote-inicio">
+        <LogoMark size={22} className="remote-inicio__mascota" />
+        <div className="remote-inicio__fila">
+          <IconIde size={16} />
+          <span className="remote-inicio__nombre">{t('homeIde')}</span>
+          <span className="remote-inicio__como">{t('homeIdeHow')} <code>/remote</code></span>
+        </div>
+        <div className="remote-inicio__fila">
+          <IconCli size={16} />
+          <span className="remote-inicio__nombre">{t('homeCli')}</span>
+          <span className="remote-inicio__como">{t('homeCliHow')} <code>/remote</code></span>
+        </div>
+      </div>
+      <Link to="/docs/remote" className="remote-inicio__enlace">
+        <IconBook size={15} />
+        <span>{t('homeDocs')}</span>
+        <IconNext size={14} />
+      </Link>
+      <p className="remote-inicio__nota">{hayActivas ? t('homePickActive') : t('homePick')}</p>
+    </HeroInicio>
   );
 }
 
@@ -157,7 +155,7 @@ function ToolLine({ items, t, locale }) {
         title={open ? t('hideDetail') : t('showDetail')}
       >
         <span className="actline__icon" aria-hidden="true">
-          {current ? <span className="actline__pulse" /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
+          {current ? <LogoTrabajando size={16} /> : <span className={`actline__mark ${failed ? 'is-err' : ''}`} />}
         </span>
         {current ? <WaveText key={text} text={text} className="actline__text" /> : <span className="actline__text">{text}</span>}
         <span className="actline__meta">
@@ -601,7 +599,9 @@ function RemoteSession({ session, t, tc }) {
     <main className="remote__session">
       <div className="remote__head">
         <div className="remote__head-text">
-          <h1 className="remote__title">{title}</h1>
+          <h1 className="remote__title">
+            {state.hostConnected && !state.ended ? <ShimmerText text={title} /> : title}
+          </h1>
           <p className={`remote__dim ${state.ended ? 'remote__dim--danger' : ''}`}>
             {SOURCE_LABEL[state.meta?.source || session.source] || ''}
             {state.meta?.machine ? ` · ${state.meta.machine}` : ''}
@@ -618,7 +618,6 @@ function RemoteSession({ session, t, tc }) {
             ))}
           </div>
         )}
-        <span className={`remote__dot remote__dot--lg ${state.hostConnected && !state.ended ? 'is-online' : ''}`} />
       </div>
 
       {canOrch && tab === 'orch' ? (
@@ -674,9 +673,9 @@ function RemoteSession({ session, t, tc }) {
           </div>
         )}
         {!state.items.length && state.activity !== 'compacting' && (
-          <p className="remote__dim remote__hint">
-            {state.hostConnected ? t('hintConnected') : t('hintWaiting')}
-          </p>
+          <HeroInicio>
+            <h2 className="chat-hero__title remote__vacia-titulo">{state.hostConnected ? t('hintConnected') : t('hintWaiting')}</h2>
+          </HeroInicio>
         )}
       </div>
       )}

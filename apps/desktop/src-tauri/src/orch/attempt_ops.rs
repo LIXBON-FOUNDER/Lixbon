@@ -26,8 +26,7 @@
 //! | cancelar (`attempt.stopped` · `attempt.rejected` si estaba pendiente) | sí | el que la coordina | sí (cierre de Run, apagado) |
 //! | esperar una respuesta · volver de una espera (`attempt.waiting` · `attempt.resumed`) | no | el de ESA Task | sí |
 //! | esperar la aprobación en la terminal (`attempt.waiting`) | no | no | sí (el host la detecta) |
-//! | salir (`attempt.exited`) · marcar integrado (`attempt.integrated`) | no | no | sí |
-//!
+//! | salir (`attempt.exited`) · marcar integrado (`attempt.integrated`) | no | no | sí |//!
 //! Aprobar o rechazar una ejecución es una decisión de una persona; el resto del ciclo lo conduce el Core o el agente.
 //!
 //! **Inerte hasta el corte**: nada de esto está conectado al RPC todavía y el almacén rechaza escribir antes de
@@ -35,11 +34,16 @@
 
 #![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conectará el runtime de Attempt
 
-use super::event_kinds::{self, FailureCode, StopCause};
+use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
+// Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
+pub(super) use super::event_kinds::DispatchAmbiguityCause;
+pub(super) use super::event_kinds::PolicyDirection;
 use super::events::{Actor, MutationContext};
 use super::state::now_ms;
 use super::task_ops::{finalize_single, manages};
-use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, Store, StoreError, StoreResult, TaskRow};
+use crate::store::{AttemptAction, AttemptRow, AttemptStatus, ChangeOutcome, ContinuationRow, NewAttempt, NewEvent, RetryRow, Store, StoreError, StoreResult, TaskRow};
+
+use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
 
 fn denied(what: &str, ctx: &MutationContext) -> StoreError {
     StoreError::AttemptConflict(format!("{what}: no lo puede hacer {:?} por {:?}", ctx.actor, ctx.channel))
@@ -72,6 +76,13 @@ pub(super) fn create(st: &mut Store, ctx: &MutationContext, task_id: &str, new: 
     st.attempt_create_recorded(task_id, new, at, |a, t| finalize_single(event_kinds::attempt_requested(a, t), ctx, at))
 }
 
+/// No se puede probar si el proveedor llegó a lanzarse (LXO-246): `attempt.dispatch_ambiguous`. Solo el Core. `from` es el claim
+/// que tenía el Attempt (`reserved` o `started`; cualquier otro no admite ambigüedad).
+pub(super) fn dispatch_ambiguous_fact(a: &AttemptRow, t: &TaskRow, from: &str, cause: DispatchAmbiguityCause, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    let source = DispatchClaimSource::parse(from).ok_or_else(|| StoreError::AttemptConflict(format!("un claim {from} no admite ambigüedad de despacho")))?;
+    finalize_single(event_kinds::attempt_dispatch_ambiguous(a, t, source, cause), ctx, at)
+}
+
 /// Los hechos de una continuidad (LXO-134), construidos aquí para que `continuity` no importe el catálogo de eventos. Los
 /// tres se confirman en la transacción del almacén con la hora de quien llama.
 pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
@@ -80,6 +91,43 @@ pub(super) fn requested_fact(a: &AttemptRow, t: &TaskRow, ctx: &MutationContext,
 
 pub(super) fn continued_fact(a: &AttemptRow, c: &ContinuationRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_continued(a, c, t), ctx, at)
+}
+
+pub(super) fn retried_fact(a: &AttemptRow, r: &RetryRow, t: &TaskRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_retried(a, r, t), ctx, at)
+}
+
+/// El hecho de un cambio de policy (LXO-209). Vive aquí, con los demás hechos, para que `policy.rs` no importe el catálogo de eventos.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn policy_changed_fact(scope: &str, scope_id: Option<&str>, project_id: Option<&str>, category: &str, from: Option<&str>, to: Option<&str>, direction: PolicyDirection, revision: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::policy_changed(scope, scope_id, project_id, category, from, to, direction, revision), ctx, at)
+}
+
+/// Los hechos de la Pending Queue (LXO-143), construidos aquí para que `queue_commands` no importe el catálogo de eventos.
+/// Cada uno se confirma en la transacción del almacén (`store::queue`) con la hora de quien llama.
+pub(super) fn queued_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, position: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queued(a, t, item, position), ctx, at)
+}
+
+pub(super) fn queue_delivered_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, confirmed_by: QueueConfirmation, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_delivered(a, t, item, confirmed_by), ctx, at)
+}
+
+pub(super) fn queue_cancelled_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_cancelled(a, t, item), ctx, at)
+}
+
+pub(super) fn queue_failed_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow, reason: QueueFailure, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_queue_failed(a, t, item, reason), ctx, at)
+}
+
+/// Los hechos de Steer y Stop & Send (LXO-144): una petición aceptada y su resultado, unidos por `request_id`.
+pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_requested(a, t, request_id, mode, chars), ctx, at)
+}
+
+pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_instruction_result(a, t, request_id, mode, outcome, reason), ctx, at)
 }
 
 /// El lanzamiento de un Attempt que continúa falló por culpa del proveedor: `attempt.failed(launch_failed)`. Solo el Core.

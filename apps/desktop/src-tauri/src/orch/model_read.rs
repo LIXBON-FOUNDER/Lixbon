@@ -24,18 +24,18 @@ pub(super) const LEGACY_MODEL: &str = "legacy";
 /// Vista de compatibilidad para clientes F2 tras el corte (ADR §11.1).
 pub(super) const LEGACY_COMPAT: &str = "legacy_task_v1";
 
-fn invalid(m: impl Into<String>) -> String {
+pub(super) fn invalid(m: impl Into<String>) -> String {
     format!("model_invalid_request: {}", m.into())
 }
 
-fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<(), String> {
+pub(super) fn require_person(caller: &Caller, context: Option<&MutationContext>) -> Result<(), String> {
     match (context.map(|c| &c.actor), caller) {
         (Some(Actor::PersonId(id)), Caller::User) if !id.is_empty() => Ok(()),
         _ => Err("model_auth_required: solo una Person autenticada puede leer el modelo Task/Attempt".into()),
     }
 }
 
-fn args_of<'a>(args: &'a Value, allowed: &[&str], empty: &'a Map<String, Value>) -> Result<&'a Map<String, Value>, String> {
+pub(super) fn args_of<'a>(args: &'a Value, allowed: &[&str], empty: &'a Map<String, Value>) -> Result<&'a Map<String, Value>, String> {
     let map = match args {
         Value::Null => empty,
         Value::Object(m) => m,
@@ -61,7 +61,7 @@ fn store_err(e: crate::store::StoreError) -> String {
 }
 
 /// Lee el almacén con el modelo activo; antes del corte, `core_model_inactive`.
-fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, String>>) -> Result<T, String> {
+pub(super) fn with_model<T>(core: &Core, f: impl FnOnce(&Store) -> StoreResult<Result<T, String>>) -> Result<T, String> {
     core.storage
         .read_store(|s| {
             if !s.agentic_model_active().map_err(store_err)? {
@@ -119,16 +119,27 @@ const BRIEF_SUMMARY_CHARS: usize = 280;
 /// intento, así que su `ended_at` puede ser `null` aunque sea final. Los del runtime (`core`) lo traen siempre al
 /// terminar (CHECK de la 008).
 fn attempt_brief(s: &Store, a: &AttemptRow) -> StoreResult<Value> {
+    let adopted_at = s.attempt_adopted_at(&a.id)?;
     let wt = match &a.worktree_id {
         Some(_) => s.worktree_of_attempt(&a.id)?,
         None => None,
     };
     let summary: String = a.summary.chars().take(BRIEF_SUMMARY_CHARS).collect();
-    Ok(json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
-            "created_at": a.created_at, "started_at": a.started_at, "ended_at": a.ended_at, "origin": a.origin,
-            "ended_at_known": a.ended_at.is_some() || !a.status.is_final(),
+    // Un Attempt ADOPTADO (migración 024) no se ejecutó en Lixbon: el esquema guarda `started_at`/`ended_at` = el instante de la adopción, pero NO son un
+    // arranque ni un fin reales, así que no salen (`null`) y el lector dice `adopted` en su lugar.
+    let adopted = adopted_at.is_some();
+    let (started_at, ended_at) = if adopted { (None, None) } else { (a.started_at, a.ended_at) };
+    let mut brief = json!({ "id": a.id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "role": a.role, "external": a.external,
+            "created_at": a.created_at, "started_at": started_at, "ended_at": ended_at, "origin": a.origin,
+            "ended_at_known": adopted || a.ended_at.is_some() || !a.status.is_final(),
             "worktree": wt.map(|w| json!({ "id": w.id, "branch": w.branch, "state": w.state })),
-            "result": { "summary": summary, "truncated": a.summary.chars().count() > BRIEF_SUMMARY_CHARS, "failure_reason": a.failure_reason } }))
+            "result": { "summary": summary, "truncated": a.summary.chars().count() > BRIEF_SUMMARY_CHARS, "failure_reason": a.failure_reason } });
+    // Aditivo: solo un Attempt adoptado trae estas claves (las respuestas publicadas de los demás no cambian).
+    if let (Some(at), Some(o)) = (adopted_at, brief.as_object_mut()) {
+        o.insert("adopted".into(), json!(true));
+        o.insert("adopted_at".into(), json!(at));
+    }
+    Ok(brief)
 }
 
 fn task_item(s: &Store, t: &TaskRow) -> StoreResult<Value> {

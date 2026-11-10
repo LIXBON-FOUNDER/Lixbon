@@ -1,5 +1,6 @@
 import { COPY, errorCopy } from './adeLabels';
 import { coreErrorCode } from './coreModelContract';
+import { StatusMark } from './StatusMark';
 
 /**
  * Aviso de una lectura vNext que no dio datos, por código estructurado (adeLabels.js). El texto
@@ -23,10 +24,11 @@ export function CoreModelNotice({ error, onRetry, onBack, className = 'ade-notic
 }
 
 /** Estado como texto (el tono solo acompaña). El valor crudo, si no se reconoce, va al detalle. */
-export function StatusText({ info, className = 'ade-status', prefix = '' }) {
+/** `mark={false}` para lo que no es un estado de ejecución (p. ej. la frescura de una revisión): no tiene forma propia. */
+export function StatusText({ info, className = 'ade-status', prefix = '', mark = true }) {
   return (
     <span className={`${className} ${className}--${info.tone}`} data-status={info.raw ?? ''} data-known={info.known ? 'true' : 'false'}>
-      {prefix}{info.label}
+      {mark && <StatusMark info={info} />}{prefix}{info.label}
       {!info.known && info.raw !== null && (
         <details className="ade-status__raw"><summary>{COPY.technicalDetail}</summary><code>{String(info.raw)}</code></details>
       )}

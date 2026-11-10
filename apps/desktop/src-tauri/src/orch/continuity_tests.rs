@@ -24,16 +24,16 @@ use crate::store::{
 
 static N: AtomicU64 = AtomicU64::new(0);
 
-struct Tmp(PathBuf);
+pub(super) struct Tmp(PathBuf);
 
 impl Tmp {
-    fn new() -> Tmp {
+    pub(super) fn new() -> Tmp {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let dir = std::env::temp_dir().join(format!("lixbon-continuity-ops-test-{}-{}-{nanos}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         Tmp(dir)
     }
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -45,31 +45,31 @@ impl Drop for Tmp {
 }
 
 /// Referencia opaca de la sesión del proveedor: no puede aparecer en ningún Event ni en ningún error.
-const REF: &str = "REF-OPACA-6f1c2a9e-0b7d-4d1e";
-const PERFIL: &str = "proponer";
+pub(super) const REF: &str = "REF-OPACA-6f1c2a9e-0b7d-4d1e";
+pub(super) const PERFIL: &str = "proponer";
 
-fn persona() -> MutationContext {
+pub(super) fn persona() -> MutationContext {
     MutationContext { actor: Actor::PersonId("ana".into()), channel: Channel::Ui, client_id: Some("cli-desktop".into()) }
 }
 
-fn core() -> MutationContext {
+pub(super) fn core() -> MutationContext {
     MutationContext::core()
 }
 
-fn corte_neutro() -> Vec<Migration> {
+pub(super) fn corte_neutro() -> Vec<Migration> {
     embedded().into_iter().map(|m| if m.name == crate::store::CUT_NAME { Migration::new(m.version, "corte_neutro_de_prueba", "SELECT 1;") } else { m }).collect()
 }
 
-struct Mundo {
-    s: Store,
-    hija: String,
-    otra: String,
-    claude: Arc<FakeAdapter>,
-    codex: Arc<FakeAdapter>,
-    reg: AdapterRegistry,
+pub(super) struct Mundo {
+    pub(super) s: Store,
+    pub(super) hija: String,
+    pub(super) otra: String,
+    pub(super) claude: Arc<FakeAdapter>,
+    pub(super) codex: Arc<FakeAdapter>,
+    pub(super) reg: AdapterRegistry,
 }
 
-fn registro(adapters: &[&Arc<FakeAdapter>]) -> AdapterRegistry {
+pub(super) fn registro(adapters: &[&Arc<FakeAdapter>]) -> AdapterRegistry {
     let mut r = AdapterRegistry::new();
     for a in adapters {
         r.register((*a).clone() as Arc<dyn ProviderAdapter>).unwrap();
@@ -77,11 +77,11 @@ fn registro(adapters: &[&Arc<FakeAdapter>]) -> AdapterRegistry {
     r
 }
 
-fn sin_resume() -> ProbeResult {
+pub(super) fn sin_resume() -> ProbeResult {
     ProbeResult::ready(Some("0.0.0-fake"), CapabilityMatrix::all_available().with(Capability::Resume, CapabilityState::Unsupported))
 }
 
-fn mundo(dir: &Path) -> Mundo {
+pub(super) fn mundo(dir: &Path) -> Mundo {
     let mut s = Store::open_with(dir, &corte_neutro(), "t").unwrap();
     let loc = NewLocation { machine: "m1".into(), path: "c:/app".into(), display_path: "C:/app".into(), primary: true };
     let project = s.project_create("app", &Fingerprint::default(), &loc).unwrap().id;
@@ -97,7 +97,7 @@ fn mundo(dir: &Path) -> Mundo {
 }
 
 /// Un Attempt terminado, con su sesión (si `referencia`) ya en espera.
-fn terminado(w: &mut Mundo, task: &str, provider: &str, referencia: Option<&str>) -> (AttemptRow, Option<String>) {
+pub(super) fn terminado(w: &mut Mundo, task: &str, provider: &str, referencia: Option<&str>) -> (AttemptRow, Option<String>) {
     let new = NewAttempt { provider: provider.into(), model: Some("modelo-x".into()), effort: None, role: Some("implementador".into()), profile: Some(PERFIL.into()), external: false, requires_approval: false };
     let a = attempt_ops::create(&mut w.s, &persona(), task, &new).unwrap();
     attempt_ops::start(&mut w.s, &core(), &a.id).unwrap();
@@ -112,7 +112,7 @@ fn terminado(w: &mut Mundo, task: &str, provider: &str, referencia: Option<&str>
     (w.s.attempt_row(&a.id).unwrap().unwrap(), ps)
 }
 
-fn paquete_de(task: &str, attempt: &str, provider: &str) -> String {
+pub(super) fn paquete_de(task: &str, attempt: &str, provider: &str) -> String {
     build(NewPackage {
         created_at_ms: 1,
         project_id: "p-1".into(),
@@ -150,31 +150,31 @@ fn datos<'a>(id: &'a str, task: &'a str, from: &'a str, provider: &'a str) -> Da
 }
 
 fn pide<'a>(d: &'a Datos<'a>, intent: Intent<'a>) -> ContinueRequest<'a> {
-    ContinueRequest { request_id: d.id, task_id: d.task, from_attempt_id: d.from, provider: d.provider, intent, prompt: "sigue con el login", worktree: &d.wt, profile: None, model: None, effort: None }
+    ContinueRequest { request_id: d.id, task_id: d.task, from_attempt_id: d.from, provider: d.provider, intent, prompt: "sigue con el login", worktree: &d.wt, profile: None, model: None, effort: None, confirmed_reason: None }
 }
 
 fn continua(w: &mut Mundo, ctx: &MutationContext, req: &ContinueRequest<'_>) -> Result<Outcome, ContinuityError> {
     continue_attempt(&mut w.s, &w.reg, ctx, &CancelToken::new(), &Settings::default(), req)
 }
 
-fn todos(s: &Store) -> Vec<EventRow> {
+pub(super) fn todos(s: &Store) -> Vec<EventRow> {
     s.events_page(&EventQuery { limit: Some(1000), ..Default::default() }).unwrap().events
 }
 
-fn tipos(s: &Store) -> Vec<String> {
+pub(super) fn tipos(s: &Store) -> Vec<String> {
     todos(s).into_iter().map(|e| e.kind).collect()
 }
 
 /// Todo lo que deja rastro.
-fn foto(w: &Mundo) -> Vec<i64> {
+pub(super) fn foto(w: &Mundo) -> Vec<i64> {
     ["attempts", "attempt_continuations", "provider_sessions", "events"].iter().map(|t| w.s.read(|c| Ok(c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))?)).unwrap()).collect()
 }
 
-fn estado(w: &Mundo, id: &str) -> AttemptStatus {
+pub(super) fn estado(w: &Mundo, id: &str) -> AttemptStatus {
     w.s.attempt_row(id).unwrap().unwrap().status
 }
 
-fn sesion(w: &Mundo, id: &str) -> SessionStatus {
+pub(super) fn sesion(w: &Mundo, id: &str) -> SessionStatus {
     w.s.provider_session_row(id).unwrap().unwrap().status
 }
 

@@ -515,11 +515,16 @@ def _leer_identidad() -> dict | None:
 
 def _guardar_identidad(datos: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(datos, indent=2), encoding="utf-8")
+    # Se crea ya con 0o600 y se restringe ANTES de escribir el secreto: con
+    # write_text + chmod, el secreto quedaba legible con los permisos por defecto
+    # hasta el chmod (y para siempre si el archivo ya existía más abierto).
+    fd = os.open(STATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.chmod(STATE_FILE, 0o600)
     except OSError:
         pass
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2)
 
 
 async def _enrolar(gateway: str, enroll_token: str) -> dict:

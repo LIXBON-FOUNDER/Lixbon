@@ -321,7 +321,7 @@ function Cli({ base }) {
         Run <code>lixbon</code>: the first time, it opens interactive sign-in,
         with your email and password or by pasting an API key{' '}
         <code>lixbon_sk_…</code> (create one in{' '}
-        <Link to="/account/profile">Settings → Account</Link>). Then pick a model
+        <Link to="/account/security">Settings → Security</Link>). Then pick a model
         and you&apos;re chatting. Type <code>/</code> to see every command.
       </p>
       <CodeBlock code={`lixbon`} />
@@ -515,7 +515,7 @@ function ApiDocs({ base }) {
 
       <h2>Authentication</h2>
       <p>
-        Create an API key in <Link to="/account/profile">Settings → Account</Link>.
+        Create an API key in <Link to="/account/security">Settings → Security</Link>.
         It&apos;s shown once when you create it; save it. Send it in the{' '}
         <code>Authorization</code> header:
       </p>
@@ -595,7 +595,7 @@ function UsingApiKey({ base }) {
 
       <h2>1. Create your key</h2>
       <p>
-        Go to <Link to="/account/profile">Settings → Account → API keys</Link>{' '}
+        Go to <Link to="/account/security">Settings → Security → API keys</Link>{' '}
         and click &ldquo;New key&rdquo;. It&apos;s shown <strong>only once</strong>; save
         it in a secrets manager. If you lose it, revoke it and create another. How
         many keys you can have depends on your{' '}

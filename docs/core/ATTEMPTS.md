@@ -23,7 +23,7 @@ legacy sigue siendo la autoridad de las tareas.
 | # | Invariante | Mecanismo | Prueba |
 |---|---|---|---|
 | 1 | El Attempt es inmutable como identidad histórica | trigger `attempts_identity_immutable`: `id`, `task_id`, `n`, `provider`, `model`, `effort`, `role`, `profile`, `external`, `origin` y `created_at` no cambian; el vínculo a Worktree/ProviderSession se fija una sola vez | `la_identidad_no_cambia_y_el_vinculo_se_fija_una_sola_vez` |
-| 2 | Retry crea un ID nuevo | `attempt_create_recorded` inserta `n + 1` (`<task>-a<n>`, `UNIQUE (task_id, n)`); nada reabre ni reescribe uno anterior | `varios_attempts_por_task_y_el_retry_conserva_la_historia` |
+| 2 | Retry crea un ID nuevo | `attempt_create_recorded` inserta `n + 1` (`<task>-a<n>`, `UNIQUE (task_id, n)`); nada reabre ni reescribe uno anterior. El comando de reintento y su procedencia: [REINTENTO.md](REINTENTO.md) | `varios_attempts_por_task_y_el_retry_conserva_la_historia` |
 | 3 | Un Attempt final no vuelve a `running` | trigger `attempts_final_is_final` (ningún `UPDATE` sobre un final) + ciclo de vida cerrado | `un_final_no_vuelve_a_running_ni_cambia_de_final` |
 | 4 | Una Task puede existir sin Attempt activo | `attempts` es independiente de la Task; `attempt_active` devuelve `None` | `un_attempt_nace_con_su_identidad_y_su_evento`, `el_ciclo_de_vida_feliz_fija_las_marcas_de_tiempo` |
 | 5 | Estado + Events atómicos | cada mutador es UNA transacción con su fila, su evento y la proyección de Attention | `sin_su_hecho_no_hay_cambio`, `un_evento_que_no_se_refiere_al_attempt_o_repetido_deshace_el_cambio`, `si_la_proyeccion_falla_no_queda_ni_el_attempt_ni_su_evento` |
@@ -93,7 +93,9 @@ Tabla cerrada (14 pares). Cualquier otro par es `AttemptTransition` y **no escri
 Restricciones solo para filas `core` (el legado se importa tal cual, sin `ended_at` y a veces sin `started_at`): el
 estado final ⇔ `ended_at`, `running`/`done` ⇒ `started_at`, `pending_approval`/`starting` ⇒ sin `started_at`, relojes
 ordenados y resumen acotado. Una fila del Core **nace** `pending_approval` o `starting`, con el `n` siguiente, en una
-Task abierta de un Run abierto (trigger `attempts_core_create`).
+Task abierta de un Run abierto (trigger `attempts_core_create`). **Única excepción (migración 024, LXO-149):** un Attempt
+ADOPTADO nace `done` (con `adopted_at`, primero de su Task, proveedor `external`, con su Worktree de procedencia `adopted`; `started_at` = `ended_at` =
+`adopted_at` solo porque el esquema los exige, y los lectores los ocultan). Ver [`RESOURCES.md`](RESOURCES.md) § Adoptar.
 
 **Nada del runtime** en la 008: sus columnas llegan con la 012 ([§ Runtime](#runtime-lxo-231)). Una prueba fija
 las 19 columnas de la 008.

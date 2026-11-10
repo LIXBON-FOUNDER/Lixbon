@@ -22,6 +22,8 @@ export const statusOf = (code) => STATUS[code] || { label: String(code || 'desco
 export const isFinal = (code) => FINAL.has(code);
 
 const PROVIDER = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', cursor: 'Cursor', gemini: 'Gemini', lixbon: 'Lixbon', coordinador: 'Coordinador' };
+/** Nombre legible del proveedor; `null` si no se sabe. */
+export const providerName = (code) => (code ? PROVIDER[code] || code : null);
 const REVIEW = { accepted: 'Revisión aceptada', rejected: 'Revisión rechazada' };
 const INTEGRATION = { merged: 'Integrada', conflict: 'Integración con conflictos', error: 'La integración falló', target_moved: 'El destino se movió' };
 
@@ -63,7 +65,7 @@ export function taskModel({ taskId, detail, snapItem, snapshot, missing = false,
     parentId: d?.parent_id ?? s?.parent_id ?? null,
     isRoot: (d?.parent_id ?? s?.parent_id ?? null) === null,
     children: d ? d.child_ids.length : null,
-    provider: providerCode ? PROVIDER[providerCode] || providerCode : null,
+    provider: providerName(providerCode),
     model: d ? d.model : null,
     branch: d ? d.branch : null,
     location: d ? d.location : null,

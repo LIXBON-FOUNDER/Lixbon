@@ -46,3 +46,7 @@
 .twk__context { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .twk__unavailable { display: flex; flex-direction: column; gap: 2px; color: var(--ink-50); }
 .twk__unavailable strong { font-weight: 500; }
+
+.twk__answer { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 6px 0 2px; }
+.twk__answer-text { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
+.twk__answer-actions { display: flex; gap: 8px; }

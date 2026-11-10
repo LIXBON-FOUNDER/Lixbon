@@ -1,5 +1,6 @@
 from __future__ import annotations
 import mimetypes
+import os
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -23,7 +24,7 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills
+from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, connectors, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills, espacios
 
 FOUNDER_URL = "https://founder.lixbon.com"
 
@@ -63,8 +64,15 @@ async def lifespan(app: FastAPI):
         from core.render.worker import start_inline
         render_stop = start_inline(lambda ev: _bus.publish(ev["visual_id"], ev))
 
+    programador = None
+    if _os.getenv("AGENTES_PROGRAMADOS", "1") != "0":
+        from core.gateway.agentes import iniciar_programador
+        programador = iniciar_programador()
+
     yield
 
+    if programador is not None:
+        programador.cancel()
     if render_stop is not None:
         render_stop.set()
 
@@ -108,6 +116,7 @@ app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
 app.include_router(team.router)       # /api/team/* + /ws/team (Lixbon Team)
 app.include_router(team_issues.router)  # /api/team/* de las issues propias
 app.include_router(oauth.router)
+app.include_router(connectors.router)  # /api/connectors/*: cuentas externas por usuario (GitHub)
 app.include_router(keys.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
@@ -131,6 +140,7 @@ app.include_router(images.router)     # /api/images/* (nodos con modelo de difus
 app.include_router(visuals.router)    # /api/visuals/* (diseños y piezas con versiones)
 app.include_router(mcp.router)        # /mcp: servidor MCP remoto (Visuals para agentes)
 app.include_router(skills.router)     # /api/skills/*: catálogo de skills oficiales
+app.include_router(espacios.router)   # /api/espacios/*, /api/agentes/*: espacios y agentes programados
 app.include_router(admin.router)
 
 
@@ -206,7 +216,9 @@ def destino_web(path_name: str) -> tuple[str, int] | None:
     # a su destino final, para no encadenar redirecciones).
     if partes[0] == "en":
         sin_prefijo = "/".join(partes[1:])
-        return destino_web(sin_prefijo) or (f"/{sin_prefijo}", 301)
+        # lstrip: `/en//evil.com` daría `//evil.com` (o `/\evil.com`), que el navegador
+        # toma por otro dominio: open redirect. Siempre un único "/" inicial.
+        return destino_web(sin_prefijo) or ("/" + sin_prefijo.lstrip("/\\"), 301)
     es = partes[0] == "es"
     resto = partes[1:] if es else partes
     if not resto or resto == [""]:
@@ -214,6 +226,20 @@ def destino_web(path_name: str) -> tuple[str, int] | None:
     if resto[0] in _RUTAS_FOUNDER:
         return f"{FOUNDER_URL}/{ruta}", 301
     return None
+
+
+def archivo_dentro(base: Path, relativa: str) -> Path | None:
+    """Archivo regular `relativa` bajo `base`, o None si no existe o se sale de
+    `base` (`..`, ruta absoluta, enlace simbólico). `relativa` viene de la URL."""
+    raiz = os.path.realpath(base)
+    try:
+        candidato = os.path.realpath(os.path.join(raiz, relativa))
+    except ValueError:  # byte nulo (%00): en Linux realpath lo rechaza en vez de ignorarlo
+        return None
+    # `raiz + os.sep`: sin el separador, `dist-evil` pasaría por estar "dentro" de `dist`.
+    if not candidato.startswith(raiz + os.sep):
+        return None
+    return Path(candidato) if os.path.isfile(candidato) else None
 
 
 class _AssetsConHash(StaticFiles):
@@ -236,9 +262,9 @@ if WEB_DIST_DIR.exists():
         # /docs y /openapi.json ahora viven bajo /api/*, así que /docs es la SPA
         if path_name.startswith(("api/", "v1/", "ws/", "_prerender/")):
             raise HTTPException(status_code=404, detail="Not Found")
-        candidate = (WEB_DIST_DIR / path_name).resolve()
-        if path_name and candidate.is_file() and candidate.is_relative_to(WEB_DIST_DIR):
-            return FileResponse(str(candidate))
+        archivo = archivo_dentro(WEB_DIST_DIR, path_name)
+        if archivo:
+            return FileResponse(str(archivo))
         destino = destino_web(path_name)
         if destino:
             url, codigo = destino
@@ -250,8 +276,8 @@ if WEB_DIST_DIR.exists():
         # Con sesión se sirve el shell de la SPA: las páginas públicas cambian
         # sus botones según el usuario y no conviene un primer pintado a ciegas.
         if auth.SESSION_COOKIE not in request.cookies:
-            estatica = (_prerender_dir / path_name.strip("/") / "index.html").resolve()
-            if estatica.is_file() and estatica.is_relative_to(_prerender_dir):
+            estatica = archivo_dentro(_prerender_dir, os.path.join(path_name.strip("/"), "index.html"))
+            if estatica:
                 return FileResponse(str(estatica), headers={"Cache-Control": "no-cache"})
         # El index es lo único que nombra los assets del despliegue actual. Sin
         # esto el navegador se queda con el de la versión anterior y pide unos

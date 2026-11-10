@@ -1,0 +1,23 @@
+/* Marcas de estado por forma (StatusMark). El color viene del tono del estado y solo refuerza la forma. */
+.ade-mark, .ade-attn-mark { display: inline-block; flex: none; vertical-align: -2px; margin-right: 5px; }
+.ade-mark svg, .ade-attn-mark svg { display: block; }
+.ade-mark__track, .ade-mark__ring { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.ade-mark__track { opacity: .28; }
+.ade-mark__arc { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; transform-origin: 8px 8px; animation: ade-mark-spin 1.1s linear infinite; }
+.ade-mark__dash { stroke-dasharray: 2.6 2.4; }
+.ade-mark__glyph { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ade-mark__fill { fill: currentColor; }
+.ade-mark__inv { stroke: var(--bg, #fff); }
+.ade-mark__inv-fill { fill: var(--bg, #fff); }
+
+.ade-status--active, .ade-status--waiting { color: var(--accent, #3b82f6); }
+.ade-status--done, .ade-status--ok { color: var(--success, #2f9e44); }
+.ade-status--failed { color: var(--error, #d14343); }
+.ade-status--stopped, .ade-status--exited, .ade-status--neutral { color: inherit; }
+.ade-status--warn { color: var(--ps-text-warning, #b7791f); }
+
+.ade-attn-mark__shape { fill: var(--ps-text-warning, #b7791f); stroke: var(--ps-text-warning, #b7791f); stroke-width: 1.2; stroke-linejoin: round; }
+.ade-attn-mark__bang { fill: none; stroke: var(--bg, #fff); stroke-width: 1.7; stroke-linecap: round; }
+
+@keyframes ade-mark-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ade-mark__arc { animation: none; } }

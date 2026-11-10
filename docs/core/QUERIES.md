@@ -545,6 +545,8 @@ versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y l
   y `result` (`summary` cortado a 280 caracteres, `truncated`, `failure_reason`). Un Attempt del runtime (`core`) final
   trae siempre `ended_at` (CHECK de la 008); uno migrado (`legacy`) puede traer `null`: el legado no registraba el fin, y
   `ended_at_known = false` lo marca. La ruta del Worktree sigue solo en `attempt_detail` (rutas locales: decide Security).
+  Un Attempt **adoptado** (LXO-149, `RESOURCES.md` § Adoptar) añade `adopted: true` y `adopted_at`, y sus `started_at`/`ended_at` salen `null` (el
+  esquema los guarda con el instante de la adopción, pero no son una ejecución). Solo ellos traen esas claves: la respuesta de los demás no cambia.
 * **`review`** añade `at`, `closed_at`, `observed_head` (HEAD que la dejó `stale`) y `validity` (`active`,
   `attempt_is_current`, `integrated`, `integrated_at`). `integrated_at` es la hora del hecho `attempt.integrated` cuando el
   runtime lo registra; los integrados por el corte no tienen hora y dan `null`. El HEAD vivo del Worktree no se lee aquí

@@ -49,6 +49,65 @@ pub(super) struct LiveRegistry {
     cell: Mutex<Live>,
 }
 
+/// El adapter de un proveedor y una copia de su matriz, para lanzarlo sin retener el registro.
+pub(super) enum AdapterLookup {
+    /// El primer sondeo todavía no terminó.
+    Probing,
+    Unknown,
+    Found(Arc<dyn ProviderAdapter>, super::adapter::CapabilityMatrix),
+}
+
+/// Lo que el registro sabe de un proveedor.
+pub(super) enum ProviderLookup {
+    /// El primer sondeo todavía no terminó.
+    Probing,
+    Unknown,
+    Found(Box<super::adapter::ProviderEntry>),
+}
+
+/// ¿Se puede lanzar un Attempt con este proveedor? El motivo, redactado para quien creó la Task, si no. Es la comprobación
+/// de capability previa a cualquier efecto: `Capability::Start` tiene que estar disponible.
+pub(super) fn start_preflight(id: &str, lookup: &ProviderLookup) -> Result<(), String> {
+    use super::adapter::{Capability, CapabilityState};
+    match lookup {
+        ProviderLookup::Probing => Err(format!("provider_probing: el proveedor {id} todavía se está sondeando; reintenta en unos segundos")),
+        ProviderLookup::Unknown => Err(format!("provider_unknown: el proveedor {id} no está registrado en este Core")),
+        ProviderLookup::Found(entry) => match entry.matrix.capabilities.get(&Capability::Start) {
+            Some(CapabilityState::Available) => Ok(()),
+            Some(CapabilityState::Unsupported) | None => Err(format!("provider_start_unsupported: el proveedor {id} no ofrece lanzar Attempts")),
+            Some(CapabilityState::Unavailable { reason }) => Err(format!("provider_start_unavailable: {id} no puede lanzar ahora ({reason})")),
+            Some(CapabilityState::EnvironmentBlocked { .. }) => Err(format!("provider_environment_blocked: el entorno impide lanzar con {id}")),
+        },
+    }
+}
+
+/// ¿Se puede reanudar una sesión con este proveedor? Como [`start_preflight`], pero con `Capability::Resume`.
+pub(super) fn resume_preflight(id: &str, lookup: &ProviderLookup) -> Result<(), String> {
+    use super::adapter::{Capability, CapabilityState};
+    match lookup {
+        ProviderLookup::Probing => Err(format!("provider_probing: el proveedor {id} todavía se está sondeando; reintenta en unos segundos")),
+        ProviderLookup::Unknown => Err(format!("provider_unknown: el proveedor {id} no está registrado en este Core")),
+        ProviderLookup::Found(entry) => match entry.matrix.capabilities.get(&Capability::Resume) {
+            Some(CapabilityState::Available) => Ok(()),
+            Some(CapabilityState::Unsupported) | None => Err(format!("provider_resume_unsupported: el proveedor {id} no ofrece reanudar sesiones")),
+            Some(CapabilityState::Unavailable { reason }) => Err(format!("provider_resume_unavailable: {id} no puede reanudar ahora ({reason})")),
+            Some(CapabilityState::EnvironmentBlocked { .. }) => Err(format!("provider_environment_blocked: el entorno impide reanudar con {id}")),
+        },
+    }
+}
+
+impl Core {
+    /// Preflight de reanudación: se valida ANTES de escribir nada.
+    pub(super) fn provider_resume_preflight(&self, id: &str) -> Result<(), String> {
+        resume_preflight(id, &LiveRegistry::lookup(&self.provider_registry, id))
+    }
+
+    /// Preflight de capability del primer Attempt: se valida ANTES de escribir nada.
+    pub(super) fn provider_start_preflight(&self, id: &str) -> Result<(), String> {
+        start_preflight(id, &LiveRegistry::lookup(&self.provider_registry, id))
+    }
+}
+
 /// Los proveedores del producto, con su configuración por defecto.
 #[cfg(not(test))]
 fn production_adapters() -> Vec<Arc<dyn ProviderAdapter>> {
@@ -139,6 +198,33 @@ impl LiveRegistry {
         let mut s = self.live();
         for (id, probe) in probed {
             let _ = s.registry.apply_probe(&id, probe);
+        }
+    }
+
+    /// Qué hay registrado para `id` AHORA, sin esperar a ninguna CLI. Si todavía no hubo un primer sondeo lo lanza en segundo
+    /// plano y lo dice: quien llama reintenta.
+    pub(super) fn lookup(this: &Arc<LiveRegistry>, id: &str) -> ProviderLookup {
+        let _ = LiveRegistry::snapshot(this, false);
+        let s = this.live();
+        if !s.built {
+            return ProviderLookup::Probing;
+        }
+        match s.registry.snapshot().providers.into_iter().find(|p| p.id == id) {
+            Some(entry) => ProviderLookup::Found(Box::new(entry)),
+            None => ProviderLookup::Unknown,
+        }
+    }
+
+    /// El adapter de `id` y su matriz AHORA, sin esperar a ninguna CLI (como [`LiveRegistry::lookup`]).
+    pub(super) fn adapter_for(this: &Arc<LiveRegistry>, id: &str) -> AdapterLookup {
+        let _ = LiveRegistry::snapshot(this, false);
+        let s = this.live();
+        if !s.built {
+            return AdapterLookup::Probing;
+        }
+        match s.registry.lookup(id) {
+            Some((adapter, matrix)) => AdapterLookup::Found(adapter, matrix),
+            None => AdapterLookup::Unknown,
         }
     }
 

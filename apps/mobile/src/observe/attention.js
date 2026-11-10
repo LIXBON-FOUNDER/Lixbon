@@ -48,6 +48,10 @@ export function attentionTarget(item) {
   if (kind === 'task' && item.target_id) {
     return { navigable: true, label: TARGET.task, route: { name: 'task', taskId: item.target_id, projectId: item.project_id || null } };
   }
+  // LXO-126: la Attention de ejecución apunta al intento exacto, y se abre ese intento (no «el último» de su tarea).
+  if (kind === 'attempt' && item.target_id) {
+    return { navigable: true, label: TARGET.attempt, route: { name: 'attempt', attemptId: item.target_id, projectId: item.project_id || null } };
+  }
   return { navigable: false, label: TARGET[kind] || 'Destino', route: null };
 }
 

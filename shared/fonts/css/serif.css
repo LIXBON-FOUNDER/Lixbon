@@ -1,0 +1,41 @@
+/* Lixbon Brand Serif (estáticas). Generado por source/package.py: no editar a mano. */
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif-Light.woff2') format('woff2'),
+       url('../fonts/serif/LixbonBrandSerif-Light.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif-Regular.woff2') format('woff2'),
+       url('../fonts/serif/LixbonBrandSerif-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif-Medium.woff2') format('woff2'),
+       url('../fonts/serif/LixbonBrandSerif-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif-SemiBold.woff2') format('woff2'),
+       url('../fonts/serif/LixbonBrandSerif-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Serif';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/serif/LixbonBrandSerif-Bold.woff2') format('woff2'),
+       url('../fonts/serif/LixbonBrandSerif-Bold.ttf') format('truetype');
+}

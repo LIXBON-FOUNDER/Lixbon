@@ -59,7 +59,9 @@ _NOMBRE_DE_APP = {"desktop": "lixbon Desktop", "cli": "lixbon CLI", "mobile": "L
 AppClient = Literal["desktop", "cli", "mobile"]
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"   # "1" en Railway (HTTPS)
 SESSION_MAX_AGE = int(os.getenv("SESSION_EXPIRY_HOURS", "168")) * 3600
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Las etiquetas del dominio no contienen "." (`[^@\s.]`): con `[^@\s]+\.[^@\s]+` el "."
+# cabía en las dos partes y una cadena larga que fallaba al final daba backtracking cuadrático.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 
 class RegisterRequest(BaseModel):

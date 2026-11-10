@@ -290,6 +290,72 @@
 .chat-inputbar--claude .chat-inputbar__mode { margin-left: 0; }
 .chat-inputbar--claude .chat-inputbar__ctx { margin: 0 4px; }
 
+/* ── Compositor responsivo ───────────────────────────────────────────────
+   La barra de controles se adapta al ancho DEL COMPOSITOR (no de la ventana): el panel del chat puede ser un dock de
+   ~340 px. Lo esencial —modelo, effort, adjuntar, cuota y enviar— no se recorta nunca: primero pierden el texto
+   el motor y el modo (queda el icono / el punto), después el botón «@» (se sigue escribiendo @) y, solo como último
+   recurso, la barra pasa a una segunda línea en vez de salirse. */
+.chat-inputbar { container: chatbar / inline-size; }
+.chat-inputbar__row { flex-wrap: wrap; row-gap: 4px; min-width: 0; }
+.chat-inputbar__send, .chat-inputbar .ic, .chat-inputbar__quota, .chat-inputbar__ctx { flex-shrink: 0; }
+.chat-inputbar .modelpicker { min-width: 0; flex: 0 1 auto; }
+.chat-inputbar__quota {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  color: var(--ink-70);
+  white-space: nowrap;
+}
+.chat-inputbar__quota:hover { background: rgba(var(--ink-rgb), 0.05); color: var(--ink); }
+.chat-inputbar__quota:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 1px; }
+
+/* Tramos medidos con la fila REAL de Claude Code (completa: ~660 px con el compositor sin relleno): cada tramo ahorra lo
+   que dice y el siguiente empieza cuando lo que queda ya no cabe. Solo la variante de Claude los necesita; la del motor
+   propio tiene menos controles y cede mucho más tarde (al final). */
+@container chatbar (max-width: 660px) { /* −78 px: el motor queda en su icono */
+  .chat-inputbar--claude .chat-inputbar__engine { padding: 0 6px; margin-right: 0; }
+  .chat-inputbar--claude .chat-inputbar__engine-lbl { display: none; }
+}
+@container chatbar (max-width: 585px) { /* −80 px: el modo queda en su punto de color (con aria-label y título) */
+  .chat-inputbar--claude .chat-inputbar__mode-lbl { display: none; }
+  .chat-inputbar--claude .chat-inputbar__mode { margin-left: 0; padding: 0 6px; }
+}
+@container chatbar (max-width: 505px) { /* −50 px: el modelo se acorta con puntos suspensivos */
+  .chat-inputbar--claude .modelpicker--claude .select__btn { max-width: 120px; }
+}
+@container chatbar (max-width: 455px) { /* −16 px: la cuota queda en su anillo (el % sigue en el título) */
+  .chat-inputbar--claude .chat-inputbar__quota-pct { display: none; }
+  .chat-inputbar--claude .chat-inputbar__quota { padding: 0 4px; }
+}
+@container chatbar (max-width: 440px) { /* −36 px: «@» se sigue escribiendo a mano */
+  .chat-inputbar--claude .chat-inputbar__at { display: none; }
+}
+@container chatbar (max-width: 400px) { /* −32 px */
+  .chat-inputbar--claude .modelpicker--claude .select__btn { max-width: 88px; }
+}
+@container chatbar (max-width: 370px) { /* −24 px: el anillo de contexto es lo menos esencial */
+  .chat-inputbar--claude .chat-inputbar__ctx { display: none; }
+}
+@container chatbar (max-width: 350px) { /* −28 px: el panel ya dice con qué motor hablas */
+  .chat-inputbar--claude .chat-inputbar__engine { display: none; }
+}
+@container chatbar (max-width: 335px) { /* −36 px: el effort queda en su onda (el nivel sigue en el nombre accesible y el título) */
+  .chat-inputbar--claude .effort__value { display: none; }
+}
+/* Motor propio de Lixbon (hueco de 10 px entre controles): modo + modelo + adjuntar + «@» + contexto + enviar. */
+@container chatbar (max-width: 400px) {
+  .chat-inputbar:not(.chat-inputbar--claude) .chat-inputbar__mode-lbl { display: none; }
+}
+@container chatbar (max-width: 330px) {
+  .chat-inputbar:not(.chat-inputbar--claude) .chat-inputbar__at { display: none; }
+}
+}
+}
+
 .agentmenu { width: 280px; padding: 14px; border-radius: var(--radius); background: var(--surface-5); animation: lx-pop 0.2s var(--ease) both; }
 .agentmenu__row { gap: 16px; font-size: 12.5px; }
 .agentmenu__hint { color: var(--ink-50); }

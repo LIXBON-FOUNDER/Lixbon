@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 90] = [
+pub(crate) const MESSAGE_KEYS: [&str; 104] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -53,6 +53,10 @@ pub(crate) const MESSAGE_KEYS: [&str; 90] = [
     "activity.project.location_added",
     "activity.project.archived",
     "activity.project.restored",
+    "activity.policy.changed",
+    "activity.race.requested",
+    "activity.race.candidate_recorded",
+    "activity.race.cancelled",
     "activity.project.relocated",
     "activity.spawn.requested",
     "activity.spawn.approved",
@@ -73,6 +77,9 @@ pub(crate) const MESSAGE_KEYS: [&str; 90] = [
     "activity.task.restored",
     "activity.attempt.requested",
     "activity.attempt.continued",
+    "activity.attempt.retried",
+    "activity.attempt.forked",
+    "activity.attempt.adopted",
     "activity.attempt.approved",
     "activity.attempt.rejected",
     "activity.attempt.started",
@@ -84,6 +91,13 @@ pub(crate) const MESSAGE_KEYS: [&str; 90] = [
     "activity.attempt.resumed",
     "activity.attempt.exited",
     "activity.attempt.integrated",
+    "activity.attempt.queued",
+    "activity.attempt.queue_delivered",
+    "activity.attempt.queue_cancelled",
+    "activity.attempt.queue_failed",
+    "activity.attempt.instruction_requested",
+    "activity.attempt.instruction_result",
+    "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
     "activity.provider_session.resumed",
@@ -189,6 +203,68 @@ fn attempt_failure(code: &str) -> Option<&'static str> {
     })
 }
 
+/// Un Race (LXO-215): con qué contexto, el desenlace de cada candidato y lo que se canceló.
+const RACE_OUTCOMES: [&str; 2] = ["launched", "failed"];
+const RACE_SCOPES: [&str; 2] = ["one", "remaining"];
+
+/// Un cambio de policy (`policy.changed`, LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
+const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
+const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
+const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
+const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
+
+fn policy_category(code: &str) -> &'static str {
+    match code {
+        "start" => "arrancar",
+        "answer" => "responder",
+        "queue" => "encolar",
+        "steer" => "corregir",
+        "stop" => "detener",
+        "fork" => "bifurcar",
+        "review" => "revisar",
+        "integrate" => "integrar",
+        "cleanup" => "limpiar",
+        _ => "permisos del proveedor",
+    }
+}
+
+fn policy_level(code: &str) -> &'static str {
+    match code {
+        "allow" => "permitir",
+        "confirm" => "confirmar",
+        "elevated" => "elevado",
+        _ => "denegar",
+    }
+}
+
+fn policy_direction(code: &str) -> &'static str {
+    match code {
+        "tighten" => "más restrictiva",
+        "loosen" => "menos restrictiva",
+        "same" => "mismo nivel efectivo",
+        _ => "vuelve a heredar",
+    }
+}
+
+/// Con qué contexto arrancó un Fork (`attempt.forked`, LXO-145).
+const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
+/// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
+const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
+
+/// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`, LXO-143).
+fn queue_failure(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "unsupported" => "el proveedor no admite entregarla",
+        "environment_blocked" => "el entorno del proveedor está bloqueado",
+        "adapter_unavailable" => "el proveedor no estaba disponible",
+        "adapter_error" => "el proveedor devolvió un error",
+        "attempt_ended" => "el intento ya había terminado",
+        "interrupted" => "la entrega se interrumpió y no se sabe si llegó",
+        _ => return None,
+    })
+}
+
 fn session_binding(code: &str) -> Option<&'static str> {
     Some(match code {
         "stream_json" => "por stream-json",
@@ -212,6 +288,16 @@ fn continuity_reason(code: &str) -> Option<&'static str> {
         "resume_unsupported" => "el proveedor no puede reanudar",
         "session_unavailable" => "no había una sesión que reanudar",
         "session_expired" => "la sesión caducó",
+        _ => return None,
+    })
+}
+
+fn retry_override(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "provider" => "otro proveedor",
+        "model" => "otro modelo",
+        "effort" => "otro esfuerzo",
+        "profile" => "otro perfil de permisos",
         _ => return None,
     })
 }
@@ -460,6 +546,39 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         "activity.attempt.approved" => format!("Se aprobó el {at}."),
         "activity.attempt.started" => format!("Empezó el {at}."),
         "activity.attempt.integrated" => format!("Se integró el trabajo del {at}."),
+        "activity.attempt.adopted" => format!("Se adoptó trabajo externo como el {at}."),
+        // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
+        "activity.attempt.queued" => {
+            let position = a.number("position")?;
+            let attachments = a.number("attachments")?;
+            format!("Se encoló una instrucción para el {at}{}.", details(&[Some(format!("posición {position}")), (attachments > 0).then(|| plural(attachments, "adjunto", "adjuntos"))]))
+        }
+        "activity.attempt.queue_delivered" => format!("Se entregó al {at} la instrucción encolada."),
+        "activity.attempt.queue_cancelled" => format!("Se canceló una instrucción encolada para el {at}."),
+        "activity.attempt.dispatch_ambiguous" => format!("No se sabe si el proveedor llegó a lanzarse para el {at}: no se relanzará."),
+        "activity.attempt.queue_failed" => format!("No se pudo entregar una instrucción encolada al {at}: {}.", a.code_in("reason", queue_failure)?),
+        // Steer y Stop & Send (LXO-144): nunca el texto de la instrucción, solo el hecho y cómo acabó.
+        "activity.attempt.instruction_requested" => {
+            if a.code("mode", &INSTRUCTION_MODES)? == "steer" {
+                format!("Se pidió inyectar una instrucción en el turno en curso del {at}.")
+            } else {
+                format!("Se pidió detener el turno en curso del {at} y enviarle una instrucción.")
+            }
+        }
+        "activity.attempt.instruction_result" => {
+            let steer = a.code("mode", &INSTRUCTION_MODES)? == "steer";
+            let outcome = a.code("outcome", &INSTRUCTION_OUTCOMES)?;
+            // `reason` es opcional, pero si viene tiene que ser uno de los motivos cerrados.
+            let detail = if a.present("reason") { format!(" ({})", a.code_in("reason", queue_failure)?) } else { String::new() };
+            match (outcome, steer) {
+                ("delivered", true) => format!("Se inyectó la instrucción en el turno en curso del {at}."),
+                ("delivered", false) => format!("Se detuvo el turno en curso del {at} y se le envió la instrucción."),
+                ("failed", true) => format!("El proveedor no aceptó la instrucción para el turno en curso del {at}{detail}."),
+                ("failed", false) => format!("Se detuvo el turno en curso del {at}, pero la instrucción no llegó{detail}."),
+                ("stop_failed", _) => format!("No se pudo detener el turno en curso del {at}: no se envió la instrucción{detail}."),
+                _ => format!("El proveedor no confirmó a tiempo que el turno en curso del {at} se hubiera detenido: no se envió la instrucción."),
+            }
+        }
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
@@ -637,6 +756,72 @@ fn format(key: &str, a: &A) -> Option<String> {
                 _ => format!("El {at} continúa el intento {from_n} con un paquete de contexto ({}).", a.code_in("reason", continuity_reason)?),
             })
         }
+        "activity.attempt.retried" => {
+            let at = attempt_of(a)?;
+            let from_n = a.number("from_n")?;
+            // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+            let overrides = match a.get("overrides") {
+                Value::Null => Vec::new(),
+                list => {
+                    let names = list.as_array()?.iter().map(|o| o.as_str().and_then(retry_override)).collect::<Option<Vec<_>>>()?;
+                    if names.is_empty() {
+                        return None;
+                    }
+                    names
+                }
+            };
+            let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
+            Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
+        }
+        "activity.race.requested" => {
+            let candidates = a.number("candidates")?;
+            let source = a.text("source")?;
+            a.text("race_id")?;
+            let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
+            Some(format!("Se pidió un Race de {candidates} candidatos desde el intento {source}{}.", if with_package { " con un paquete de contexto" } else { "" }))
+        }
+        "activity.race.candidate_recorded" => {
+            let n = a.number("index")? + 1;
+            let provider = a.text("provider")?;
+            match a.code("outcome", &RACE_OUTCOMES)? {
+                "launched" => Some(format!("Candidato {n} del Race: se lanzó {} con {provider}.", a.text("attempt_id")?)),
+                _ => Some(format!("Candidato {n} del Race: no se pudo lanzar con {provider} ({}).", a.text("code")?)),
+            }
+        }
+        "activity.race.cancelled" => {
+            let (stopped, rejected, failed) = (a.number("stopped")?, a.number("rejected")?, a.number("failed")?);
+            match a.code("scope", &RACE_SCOPES)? {
+                "one" => Some(format!("Se canceló el candidato {} del Race.", a.text("attempt_id")?)),
+                _ => Some(format!("Se canceló lo que quedaba del Race: {stopped} detenidos, {rejected} rechazados{}.", if failed > 0 { format!(", {failed} sin poder detenerse") } else { String::new() })),
+            }
+        }
+        "activity.policy.changed" => {
+            let place = match a.code("scope", &POLICY_SCOPES)? {
+                "global" => "el ámbito global".to_string(),
+                "project" => format!("el proyecto {}", a.text("scope_id")?),
+                _ => format!("el intento {}", a.text("scope_id")?),
+            };
+            let category = policy_category(a.code("category", &POLICY_CATEGORIES)?);
+            // Ausente: el ámbito heredaba (o vuelve a heredar). Presente pero fuera del contrato: sin texto.
+            let level = |key: &str| -> Option<&'static str> {
+                if a.present(key) {
+                    a.code(key, &POLICY_LEVELS).map(policy_level)
+                } else {
+                    Some("heredado")
+                }
+            };
+            let (from, to) = (level("from")?, level("to")?);
+            let direction = policy_direction(a.code("direction", &POLICY_DIRECTIONS)?);
+            a.number("revision")?;
+            Some(format!("Policy de «{category}» en {place}: de {from} a {to} ({direction})."))
+        }
+        "activity.attempt.forked" => {
+            let at = attempt_of(a)?;
+            let source_task = a.text("source_task")?;
+            let source_n = a.number("source_n")?;
+            let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
+            Some(format!("El {at} se bifurcó del intento {source_n} de la tarea {source_task}{}.", if with_package { " con un paquete de contexto" } else { "" }))
+        }
         "activity.attempt.requested" => {
             let at = attempt_of(a)?;
             let provider = a.text("provider")?;
@@ -668,7 +853,15 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.awaiting_terminal_approval"
         | "activity.attempt.resumed"
         | "activity.attempt.exited"
-        | "activity.attempt.integrated" => attempt(key, a),
+        | "activity.attempt.integrated"
+        | "activity.attempt.adopted"
+        | "activity.attempt.queued"
+        | "activity.attempt.queue_delivered"
+        | "activity.attempt.queue_cancelled"
+        | "activity.attempt.queue_failed"
+        | "activity.attempt.instruction_requested"
+        | "activity.attempt.instruction_result"
+        | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;
             let provider = a.text("provider")?;

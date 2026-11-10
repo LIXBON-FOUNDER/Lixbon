@@ -33,6 +33,7 @@ use super::events::{Actor, Channel, EventDraft, MutationContext};
 use super::mutation::{Effect, Tx};
 use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
+use crate::store::{ForkStrategy, RetryOverride};
 
 /// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
 /// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
@@ -82,7 +83,403 @@ pub(super) fn effect_observed_is_valid(
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
 type Snapshot = BTreeMap<String, (Status, String)>;
 
+#[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+fn current_attempt_task(tx: &Tx, attempt_id: &str) -> Result<String, String> {
+    let (task_id, n) = match attempt_id.rsplit_once("-a") {
+        Some((task_id, raw_n)) => {
+            let n = raw_n
+                .parse::<u32>()
+                .ok()
+                .filter(|n| *n > 0 && format!("{task_id}-a{n}") == attempt_id)
+                .ok_or_else(|| format!("id de Attempt inválido: {attempt_id}"))?;
+            (task_id, n)
+        }
+        // The old in-module transaction helpers accepted a Task id. Keep that
+        // narrow compatibility for existing Core lifecycle callers; RPC always
+        // supplies and validates the full Attempt id.
+        None => (
+            attempt_id,
+            *tx.attempt_n
+                .get(attempt_id)
+                .ok_or_else(|| format!("la Task {attempt_id} no tiene Attempt actual"))?,
+        ),
+    };
+    if task_id.is_empty()
+        || tx.attempt_n.get(task_id) != Some(&n)
+        || !tx.tasks.contains_key(task_id)
+    {
+        return Err(format!("el Attempt {attempt_id} ya no es el actual de su Task"));
+    }
+    Ok(task_id.to_owned())
+}
+
+/// Lo que una petición de reintento cambia a propósito respecto del Attempt anterior (`None`: se hereda).
+#[derive(Clone, Debug, Default)]
+pub(super) struct RetrySelection {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: Option<String>,
+}
+
+/// Lo que `attempt.fork` le pide a la mutación (LXO-145). Todo viene ya validado y resuelto por `fork_runtime`: aquí solo se escribe.
+pub(super) struct ForkRequest {
+    pub source_attempt: String,
+    pub source_task: String,
+    pub source_n: u32,
+    pub project_id: String,
+    pub objective: String,
+    pub title: String,
+    pub spec: String,
+    pub repo: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub role: Option<String>,
+    pub profile: String,
+    pub strategy: ForkStrategy,
+    pub package_id: Option<String>,
+    pub overrides: Vec<RetryOverride>,
+    /// Si nace de un Race (LXO-215): su id y el índice del candidato. Va en `attempt.forked`.
+    pub race: Option<(String, u32)>,
+}
+
+/// Lo que se adopta: un worktree externo, ya verificado por quien llama (existe, es del Project, está limpio, tiene rama).
+pub(super) struct AdoptRequest {
+    pub worktree: String,
+    /// El repositorio del Project contra el que se verificó: la Task debe ser de ese repositorio.
+    pub repo: String,
+    pub branch: String,
+    pub base: String,
+    pub base_commit: Option<String>,
+    pub summary: String,
+}
+
 impl Tx {
+    /// Adopta un worktree externo como el primer Attempt, ya TERMINADO, de una Task sin ninguna ejecución (`not_started`) (LXO-149). Es una decisión de
+    /// una Person autenticada. La Task recibe el worktree y su rama (que ya no cambian: el proyector solo admite el alta), y nace su Attempt con proveedor
+    /// `external`, sin `attempt.started` ni `attempt.completed`: no hubo ejecución de Lixbon. Devuelve el id del Attempt.
+    pub(super) fn adopt_worktree(&mut self, task_id: &str, req: &AdoptRequest) -> Result<String, String> {
+        if !self.attempt_model() {
+            return Err("core_model_inactive: el runtime de Attempts no está activo".into());
+        }
+        if !self.is_authenticated_person() {
+            return Err("adoptar un worktree requiere una Person autenticada".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("adopt_task_not_found: no existe la Task {task_id}"))?;
+        if task.status != Status::NotStarted || self.attempt_n.contains_key(task_id) {
+            return Err("adopt_task_not_eligible: solo se adopta en una Task sin ninguna ejecución (not_started)".into());
+        }
+        if task.worktree.is_some() || task.branch.is_some() {
+            return Err("adopt_task_not_eligible: la Task ya tiene un worktree".into());
+        }
+        if !self.runs.get(&task.run).is_some_and(|r| !r.closed) {
+            return Err("adopt_task_not_eligible: el Run de la Task está cerrado".into());
+        }
+        // Se vuelve a comprobar DENTRO de la mutación (la comprobación previa de git y de dueños se hizo fuera de ella): otra adopción pudo ganar.
+        let want = super::resource_adopt::canon_path(&req.worktree);
+        if super::resource_adopt::canon_path(&task.repo) != super::resource_adopt::canon_path(&req.repo) {
+            return Err("adopt_task_not_eligible: la Task es de otro repositorio que el worktree".into());
+        }
+        if self.tasks.values().any(|t| t.worktree.as_deref().is_some_and(|w| super::resource_adopt::canon_path(w) == want)) {
+            return Err("adopt_already_owned: una Task ya posee este worktree".into());
+        }
+        if self.tasks.values().any(|t| t.branch.as_deref() == Some(req.branch.as_str())) {
+            return Err("adopt_branch_taken: otra Task ya usa esta rama".into());
+        }
+        {
+            let row = self.tasks.get_mut(task_id).ok_or("No se pudo adoptar")?;
+            row.agent = "external".into();
+            row.cwd = req.worktree.clone();
+            row.worktree = Some(req.worktree.clone());
+            row.branch = Some(req.branch.clone());
+            row.base = Some(req.base.clone());
+            row.base_commit = req.base_commit.clone();
+            row.summary = req.summary.clone();
+            row.adopted = true;
+        }
+        self.state_mut().attempt_n.insert(task_id.to_owned(), 1);
+        self.state_mut().touch(task_id, Some(Status::Done))?;
+        let adopted = self.tasks.get(task_id).cloned().map(|t| ev::runtime_attempt_adopted(&t, &req.branch, &req.base));
+        if let Some(adopted) = adopted {
+            self.try_push_event(adopted);
+        }
+        Ok(format!("{task_id}-a1"))
+    }
+
+    /// Fork (LXO-145): una Task NUEVA con su primer Attempt, que nace de otro Attempt sin tocarlo. Es el camino de `task.create` con un
+    /// Attempt (nace `pending_approval`: ninguna selección exime de la decisión humana) más `attempt.forked` con la procedencia.
+    /// Devuelve los ids de lo que nació. La Task tiene su Run, su rama y su worktree propios: la fuente no cambia.
+    pub(super) fn request_attempt_fork(&mut self, req: &ForkRequest) -> Result<crate::store::RuntimeResultIds, String> {
+        if !self.is_authenticated_person() {
+            return Err("hacer un Fork requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        if !self.tasks.contains_key(&req.source_task) {
+            return Err(format!("no existe la Task {}", req.source_task));
+        }
+        let root = NewTask {
+            agent: req.provider.clone(),
+            model: req.model.clone(),
+            effort: req.effort.clone(),
+            role: req.role.clone(),
+            title: req.title.clone(),
+            spec: req.spec.clone(),
+            repo: req.repo.clone(),
+            cwd: req.repo.clone(),
+            branch: None,
+            base: None,
+            worktree: None,
+            external: false,
+        };
+        let (run, task) = self.create_run_intent(&req.objective, root);
+        {
+            let row = self.tasks.get_mut(&task).ok_or("No se pudo crear la Task")?;
+            row.project_id = Some(req.project_id.clone());
+            row.profile = Some(req.profile.clone());
+            row.status = Status::PendingApproval;
+        }
+        self.request_initial_attempt(&task)?;
+        let forked = self.tasks.get(&task).cloned().map(|t| ev::runtime_attempt_forked(&t, &req.source_attempt, &req.source_task, req.source_n, req.strategy, req.package_id.clone(), req.overrides.clone(), req.race.as_ref().map(|(id, i)| (id.as_str(), *i))));
+        if let Some(forked) = forked {
+            self.try_push_event(forked);
+        }
+        let attempt_id = format!("{task}-a1");
+        Ok(crate::store::RuntimeResultIds { run_id: run, task_id: task, attempt_id: Some(attempt_id) })
+    }
+
+    /// Expira una aprobación inicial identificada por el id durable del Attempt.
+    /// El plazo solo lo sugiere el Store: `runtime_commit_recorded` lo revalida
+    /// junto al estado pendiente y el evento antes de confirmar el cambio.
+    pub(super) fn expire_pending_initial(&mut self, attempt_id: &str) -> Result<bool, String> {
+        let context = self.context();
+        if context.actor != Actor::System || context.channel != Channel::Core {
+            return Err("expirar una aprobación inicial requiere System/Core".into());
+        }
+
+        let Some((task_id, n)) = attempt_id
+            .rsplit_once("-a")
+            .and_then(|(task, n)| n.parse::<u32>().ok().map(|n| (task, n)))
+            .filter(|(task, n)| !task.is_empty() && *n > 0 && format!("{task}-a{n}") == attempt_id)
+        else {
+            self.no_change();
+            return Ok(false);
+        };
+        let Some(task) = self.tasks.get(task_id).cloned() else {
+            self.no_change();
+            return Ok(false);
+        };
+        if self.attempt_n.get(task_id) != Some(&n) || task.status != Status::PendingApproval {
+            self.no_change();
+            return Ok(false);
+        }
+        if super::state::now_ms() == 0 {
+            self.no_change();
+            return Ok(false);
+        }
+
+        // No usar `close`: una expiración no es una salida de un agente ni debe
+        // crear el mensaje legacy de cierre a la tarea coordinadora.
+        self.state_mut().touch(task_id, Some(Status::Stopped))?;
+        self.try_push_event(ev::runtime_attempt_expired(&task, n));
+        Ok(true)
+    }
+
+    /// Registra el primer Attempt solicitado durante task.create sin pasar por el runner.
+    /// La política y el estado inicial los resuelve el servidor antes de entrar aquí;
+    /// estado, contador, proyección y evento se conservan juntos en la mutación.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn request_initial_attempt(&mut self, task_id: &str) -> Result<(), String> {
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or("No se pudo crear la Task")?;
+        if self.attempt_n.contains_key(task_id) {
+            return Err("La Task ya tiene un Attempt".into());
+        }
+        if !matches!(task.status, Status::PendingApproval | Status::Starting) {
+            return Err("El primer Attempt requiere estado inicial pending_approval o starting".into());
+        }
+        self.state_mut().attempt_n.insert(task_id.to_owned(), 1);
+        self.try_push_event(ev::runtime_new_attempt(&task, 1));
+        self.mark_attempt_request(task_id, 1);
+        Ok(())
+    }
+
+    /// Approve the exact current pending Attempt. The Store validates its durable deadline
+    /// again inside the transaction that persists this candidate and its event.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn approve_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("aprobar un Attempt requiere una Person autenticada".into());
+        }
+        let task_id = current_attempt_task(self, attempt_id)?;
+        if self.tasks.get(&task_id).is_none_or(|t| t.status != Status::PendingApproval) {
+            return Err("Attempt no pendiente de aprobación".into());
+        }
+        let before = self.snapshot_run_of(&task_id);
+        self.state_mut().touch(&task_id, Some(Status::Starting))?;
+        self.push_status_changes(before, None);
+        Ok(())
+    }
+
+    /// Reject the exact current pending Attempt; the lifecycle event is `attempt.rejected`.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
+    pub(super) fn reject_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("rechazar un Attempt requiere una Person autenticada".into());
+        }
+        let task_id = current_attempt_task(self, attempt_id)?;
+        if self.tasks.get(&task_id).is_none_or(|t| t.status != Status::PendingApproval) {
+            return Err("Attempt no pendiente de aprobación".into());
+        }
+        let before = self.snapshot_run_of(&task_id);
+        self.state_mut().touch(&task_id, Some(Status::Stopped))?;
+        self.push_status_changes(before, None);
+        Ok(())
+    }
+
+    /// Pide un Attempt LIMPIO para una Task cuyo último Attempt terminó mal (`failed`, `stopped` o `exited`): la Task vuelve
+    /// a `starting` y, como en cualquier paso de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la
+    /// selección de ejecución que se pida. Nada se reabre: el Attempt anterior sigue siendo final y no se toca.
+    ///
+    /// Es el puente entre la petición de la persona y el despachador: el Attempt nuevo queda `starting` con el claim
+    /// `none`, y lo lanza el mismo camino que al primero (reserva del claim, worktree, `attempt.started`, adapter). A
+    /// diferencia del primero, no pide aprobación: la decisión de la persona es la propia petición de reintentar.
+    ///
+    /// Heredado del Attempt anterior salvo lo que se pida: el modelo y el esfuerzo solo dentro del mismo proveedor (son
+    /// del proveedor), el rol y el perfil siempre. Sin consumidor hasta el RPC de reintento.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_retry`
+    pub(super) fn request_attempt_retry(&mut self, task_id: &str, selection: &RetrySelection) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("reintentar un Attempt requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if !self.attempt_n.contains_key(task_id) {
+            return Err("la Task no tiene ningún Attempt que reintentar".into());
+        }
+        if !matches!(task.status, Status::Failed | Status::Stopped | Status::Exited) {
+            return Err("solo se reintenta un Attempt que terminó mal (failed, stopped o exited)".into());
+        }
+        let provider = selection.provider.clone().unwrap_or_else(|| task.agent.clone());
+        let same_provider = provider == task.agent;
+        let profile = selection.profile.clone().or_else(|| task.profile.clone());
+        if profile.as_deref().is_none_or(|p| p.trim().is_empty()) {
+            return Err("ni la petición ni el Attempt anterior tienen un perfil de permisos".into());
+        }
+        let before = self.snapshot_run_of(task_id);
+        // Qué se pidió distinto del Attempt anterior (pedir lo mismo no es cambiar): es lo que dice `attempt.retried`.
+        let model = selection.model.clone().or_else(|| if same_provider { task.model.clone() } else { None });
+        let effort = selection.effort.clone().or_else(|| if same_provider { task.effort.clone() } else { None });
+        let mut overrides = Vec::new();
+        if !same_provider {
+            overrides.push(RetryOverride::Provider);
+        }
+        if selection.model.is_some() && model != task.model {
+            overrides.push(RetryOverride::Model);
+        }
+        if selection.effort.is_some() && effort != task.effort {
+            overrides.push(RetryOverride::Effort);
+        }
+        if selection.profile.is_some() && profile != task.profile {
+            overrides.push(RetryOverride::Profile);
+        }
+        {
+            let t = self.state_mut().task_mut(task_id)?;
+            t.model = model;
+            t.effort = effort;
+            t.agent = provider;
+            t.profile = profile;
+            // Lo del Attempt anterior no se arrastra al nuevo (como en `State::reopen`).
+            t.summary.clear();
+            t.report = None;
+            t.delivery_channel = None;
+            t.failure_reason = None;
+            t.session_ref = None;
+            t.model_source = None;
+            t.session_match = None;
+            t.approval_deadline = None;
+            t.merged = false;
+            t.status = Status::Starting;
+            t.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        // La procedencia va en la MISMA mutación que el Attempt nuevo: o están los dos o ninguno. Resuelve el `failed` del anterior.
+        let n = self.attempt_n.get(task_id).copied().unwrap_or(1);
+        let retried = self.tasks.get(task_id).cloned().map(|t| ev::runtime_attempt_retried(&t, n, overrides));
+        if let Some(retried) = retried {
+            self.try_push_event(retried);
+        }
+        Ok(())
+    }
+
+    /// Pide un Attempt que CONTINÚA la ProviderSession del anterior (reanudación nativa): la Task vuelve a `starting` y nace el
+    /// Attempt `n + 1` con `attempt.continued`. Como `request_attempt_retry` es el puente al despachador (el Attempt nuevo queda
+    /// `starting` con el claim `none` y lo lanza el despachador), pero aquí la sesión **se conserva**: el proyector enlaza el Attempt
+    /// nuevo a la ProviderSession de la Task y el lanzador reanuda en vez de arrancar.
+    ///
+    /// Se continúa un Attempt terminado de cualquier manera (también `done`: es un seguimiento) y siempre en el mismo proveedor:
+    /// una sesión no se comparte entre proveedores. El mensaje se añade al `spec` como bloque «Seguimiento» (la convención de
+    /// `lxo continue`), y ese bloque es el mensaje con que continúa la sesión. Sin consumidor hasta el RPC `attempt_resume`.
+    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_resume`
+    pub(super) fn request_attempt_continuation(&mut self, task_id: &str, prompt: &str, selection: &RetrySelection) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("continuar un Attempt requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let prompt = prompt.trim();
+        if prompt.is_empty() {
+            return Err("falta el mensaje con que continúa la sesión".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if !self.attempt_n.contains_key(task_id) {
+            return Err("la Task no tiene ningún Attempt que continuar".into());
+        }
+        if !task.status.is_final() {
+            return Err("solo se continúa un Attempt terminado".into());
+        }
+        if task.session_ref.as_deref().is_none_or(|r| r.trim().is_empty()) {
+            return Err("el Attempt anterior no tuvo una sesión del proveedor que reanudar".into());
+        }
+        if selection.provider.as_deref().is_some_and(|p| p != task.agent) {
+            return Err("continuar una sesión no cambia de proveedor: una ProviderSession no se comparte entre proveedores".into());
+        }
+        let before = self.snapshot_run_of(task_id);
+        {
+            let t = self.state_mut().task_mut(task_id)?;
+            t.model = selection.model.clone().or_else(|| t.model.clone());
+            t.effort = selection.effort.clone().or_else(|| t.effort.clone());
+            t.spec = format!("{}{}{prompt}", t.spec, super::dispatch::FOLLOW_UP_MARKER);
+            // Lo del Attempt anterior no se arrastra al nuevo, SALVO la sesión: es lo que se reanuda.
+            t.summary.clear();
+            t.report = None;
+            t.delivery_channel = None;
+            t.failure_reason = None;
+            t.approval_deadline = None;
+            t.merged = false;
+            t.status = Status::Starting;
+            t.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        let n = self.attempt_n.get(task_id).copied().unwrap_or(1);
+        let continued = self.tasks.get(task_id).cloned().map(|t| ev::runtime_native_continuation(&t, n));
+        if let Some(continued) = continued {
+            self.try_push_event(continued);
+        }
+        Ok(())
+    }
+
     fn state_mut(&mut self) -> &mut State {
         &mut *self
     }
@@ -196,6 +593,20 @@ impl Tx {
             self.try_push_event(ev::task_created(&t));
         }
         self.push_attempt_created(&task);
+        (run, task)
+    }
+
+    /// Crea solo la intención durable y emite `task.created` v2. A diferencia de `create_run`, no
+    /// solicita Attempt ni produce `attempt.requested`; las demás rutas legacy conservan v1.
+    pub(super) fn create_run_intent(&mut self, objective: &str, root: NewTask) -> (String, String) {
+        let (run, task) = self.state_mut().create_run(objective, root);
+        if let Some(t) = self.tasks.get_mut(&task) {
+            t.status = Status::NotStarted;
+        }
+        self.try_push_event(ev::run_created(&run, &task));
+        if let Some(t) = self.tasks.get(&task).cloned() {
+            self.try_push_event(ev::task_intent_created_from_state(&t));
+        }
         (run, task)
     }
 

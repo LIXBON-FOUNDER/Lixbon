@@ -11,12 +11,12 @@ import {
 const ENRUTADO = [
   {
     titulo: 'Balanceo por carga del nodo',
-    sub: 'Elige el mejor nodo según CPU, RAM y GPU antes de cada petición.',
+    sub: 'Elige el mejor nodo según CPU, RAM y GPU antes de cada petición',
     activo: true,
   },
   {
     titulo: 'Circuit breaker',
-    sub: 'Aísla un nodo caído con backoff exponencial y lo reintegra al recuperarse.',
+    sub: 'Aísla un nodo caído con backoff exponencial y lo reintegra al recuperarse',
     activo: true,
   },
   {

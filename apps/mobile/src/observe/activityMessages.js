@@ -69,6 +69,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.task.restored',
   'activity.attempt.requested',
   'activity.attempt.continued',
+  'activity.attempt.retried',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -80,6 +81,11 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.resumed',
   'activity.attempt.exited',
   'activity.attempt.integrated',
+  'activity.attempt.queued',
+  'activity.attempt.queue_delivered',
+  'activity.attempt.queue_cancelled',
+  'activity.attempt.queue_failed',
+  'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -162,6 +168,15 @@ const CONTINUITY_REASONS = {
   session_unavailable: 'no había una sesión que reanudar',
   session_expired: 'la sesión caducó',
 };
+const QUEUE_FAILURES = {
+  unsupported: 'el proveedor no admite entregarla',
+  environment_blocked: 'el entorno del proveedor está bloqueado',
+  adapter_unavailable: 'el proveedor no estaba disponible',
+  adapter_error: 'el proveedor devolvió un error',
+  attempt_ended: 'el intento ya había terminado',
+  interrupted: 'la entrega se interrumpió y no se sabe si llegó',
+};
+const RETRY_OVERRIDES = { provider: 'otro proveedor', model: 'otro modelo', effort: 'otro esfuerzo', profile: 'otro perfil de permisos' };
 const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
 const WORKTREE_REMOVAL = { integrated: 'integrado', discarded: 'descartado', gone: 'ya no existía' };
 const ARTIFACT_KINDS = {
@@ -448,6 +463,16 @@ const FORMATTERS = {
     const reason = requiredCode(args, 'reason', new Set(Object.keys(CONTINUITY_REASONS)));
     return reason ? `El ${attempt} continúa el intento ${fromN} con un paquete de contexto (${CONTINUITY_REASONS[reason]}).` : null;
   },
+  'activity.attempt.retried': (args) => {
+    const attempt = attemptOf(args);
+    const fromN = requiredNumber(args, 'from_n');
+    if (!requiredArguments(attempt, fromN)) return null;
+    // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+    const overrides = args.overrides;
+    if (overrides != null && (!Array.isArray(overrides) || !overrides.length
+      || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
+    return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
+  },
   'activity.attempt.requested': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');
@@ -477,6 +502,34 @@ const FORMATTERS = {
   'activity.attempt.resumed': formatAttempt,
   'activity.attempt.exited': formatAttempt,
   'activity.attempt.integrated': formatAttempt,
+  // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
+  'activity.attempt.queued': (args) => {
+    const attempt = attemptOf(args);
+    const position = requiredNumber(args, 'position');
+    const attachments = requiredNumber(args, 'attachments');
+    if (!requiredArguments(attempt, position, attachments)) return null;
+    return `Se encoló una instrucción para el ${attempt}${optionalDetails([
+      `posición ${position}`,
+      attachments > 0 ? plural(attachments, 'adjunto', 'adjuntos') : null,
+    ])}.`;
+  },
+  'activity.attempt.queue_delivered': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se entregó al ${attempt} la instrucción encolada.` : null;
+  },
+  'activity.attempt.queue_cancelled': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se canceló una instrucción encolada para el ${attempt}.` : null;
+  },
+  'activity.attempt.dispatch_ambiguous': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `No se sabe si el proveedor llegó a lanzarse para el ${attempt}: no se relanzará.` : null;
+  },
+  'activity.attempt.queue_failed': (args) => {
+    const attempt = attemptOf(args);
+    const reason = requiredCode(args, 'reason', new Set(Object.keys(QUEUE_FAILURES)));
+    return requiredArguments(attempt, reason) ? `No se pudo entregar una instrucción encolada al ${attempt}: ${QUEUE_FAILURES[reason]}.` : null;
+  },
   'activity.provider_session.opened': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');

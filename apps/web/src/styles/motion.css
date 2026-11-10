@@ -11,28 +11,6 @@
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);  /* rebote corto: knobs */
 }
 
-/* Solo opacidad: un transform aquí convertiría este contenedor en el marco de
-   referencia de todo lo `position: fixed` que hay dentro (el cajón lateral, el
-   aviso flotante del chat), y se descolocarían mientras durase la animación. */
-
-.route-fade {
-  height: 100%;
-}
-
-.route-fade.is-entering {
-  animation: route-in var(--dur-3) var(--ease-out);
-}
-
-@keyframes route-in {
-  from { opacity: 0; }
-}
-
-/* El desplazamiento del contenido no se pone aquí: las páginas que lo llevan
-   (`.page__body`, `.settings__content`, `.docs__content`) ya entran con
-   `page-in` al montarse, y repetirlo sería animar dos veces lo mismo. Este
-   fundido es para el corte entre una página y la siguiente, que no tenía nada.
-   Las páginas sin animación propia —el chat, Remote— se quedan con él. */
-
 .pill-btn,
 .set-btn,
 .pubnav__btn,
@@ -56,8 +34,7 @@
 }
 
 .docs__nav-group svg,
-.adm-link__caret,
-.sidebar__history-head svg {
+.adm-link__caret {
   transition: transform var(--dur-2) var(--ease-out);
 }
 
@@ -156,68 +133,10 @@
   to { opacity: 0; transform: scale(0.97) translateY(4px); }
 }
 
-/* Cambio de sección en Ajustes: el contenedor no se remonta (la columna se
-   queda), así que la entrada la hace el panel de dentro. */
-/* Sin display propio a propósito: sus hijos se apilaban en flujo normal y un
-   contenedor flex les cambiaría el espaciado (en flex los márgenes ya no
-   colapsan). Aquí solo hace falta que anime. */
-.settings__pane {
-  animation: pane-in var(--dur-2) var(--ease-out);
-}
-
-@keyframes pane-in {
-  from { opacity: 0; transform: translateY(8px); }
-}
-
-.verify-bar,
-.auth__error,
-.page__error,
-.page__ok,
-.chat-input__error,
-.set-ok,
-.adm-ok,
-.adm-error {
-  animation: soft-in var(--dur-3) var(--ease-out);
-}
-
-@keyframes soft-in {
-  from { opacity: 0; transform: translateY(-6px); }
-}
-
-.plans .plan-card,
-.adm-stats .adm-stat {
-  animation: card-in var(--dur-3) var(--ease-out) backwards;
-}
-
-.plans .plan-card:nth-child(2),
-.adm-stats .adm-stat:nth-child(2) { animation-delay: 60ms; }
-
-.plans .plan-card:nth-child(3),
-.adm-stats .adm-stat:nth-child(3) { animation-delay: 120ms; }
-
-.plans .plan-card:nth-child(n + 4),
-.adm-stats .adm-stat:nth-child(n + 4) { animation-delay: 180ms; }
-
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(12px); }
-}
-
-.notfound__numeral {
-  animation: card-in var(--dur-3) var(--ease-out) 300ms backwards;
-}
-
-.notfound__row {
-  animation: card-in var(--dur-3) var(--ease-out) 900ms backwards;
-}
-
 /* base.css ya neutraliza duraciones globalmente; aquí se apagan además los
    recorridos propios de este archivo, que son los que más se notan. */
 
 @media (prefers-reduced-motion: reduce) {
-  .route-fade.is-entering,
-  .plans .plan-card,
-  .adm-stats .adm-stat,
-  .verify-bar,
   .modal-overlay.is-closing,
   .modal-overlay.is-closing .modal,
   .pago-overlay.is-closing,
@@ -234,9 +153,7 @@
   .caido__nodos,
   .caido__aisladas,
   .caido__roto,
-  .caido__viaje,
-  .notfound__numeral,
-  .notfound__row {
+  .caido__viaje {
     animation: none !important;
   }
 
@@ -255,12 +172,12 @@
    ganar a las reglas de cada pantalla. */
 button:not([role="switch"]):not([role="tab"]),
 .pill, .pill-btn, .btn-negro, .btn-grupo, .btn-grupo__item, .adm-btn, .set-btn,
-.sb-bandeja__casilla, .chat-input__send, .sidebar__upgrade, .pubnav__icono,
+.chat-input__send, .sidebar__upgrade, .pubnav__icono,
 .donaciones__monto, .vis-bandeja, .vis-bandeja__op {
-  border-radius: 8px !important;
+  border-radius: var(--radius-btn) !important;
   border: 0 !important;
 }
-.pill-btn--outline, .pill--borde, .sb-bandeja__casilla.is-estrecha,
+.pill-btn--outline, .pill--borde,
 .chat-input__tools .icon-btn {
   background: var(--surface-3);
 }
@@ -293,19 +210,38 @@ button:not(:disabled):not([role="switch"]):hover,
   filter: brightness(1.18);
 }
 
-/* Cambio de sección (chat → Visuals, Ajustes, admin…): fundido cruzado con la
-   API de View Transitions; lo dispara i18n/link.jsx. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: var(--dur-3);
-  animation-timing-function: var(--ease-out);
-}
-::view-transition-new(root) { animation-name: vt-entra; }
-::view-transition-old(root) { animation-name: vt-sale; }
-@keyframes vt-entra { from { opacity: 0; transform: translateY(6px); } }
-@keyframes vt-sale { to { opacity: 0; } }
-
 @media (prefers-reduced-motion: reduce) {
   button:active, .pill:active, .pill-btn:active { transform: none; }
-  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
 }
+
+/* Animación solo para desplegar, colapsar, cargar y pulsar: las secciones,
+   páginas y contenedores aparecen sin más, para no recargar la web. */
+.route-fade { height: 100%; }
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; }
+
+/* Botones (2026-11): una sola voz. Lixbon Brand Sans 500 a 14px, sin negrita ni
+   mayúsculas; alto 36 (32 en barras y ajustes, 44 en portadas); radio 6; el
+   icono solo cuando la acción lo necesita (copiar, borrar, cerrar). */
+.pill, .pill-btn, .btn-negro, .btn-grupo__item, .set-btn, .adm-btn, .pubnav__btn, .chat-chip,
+.panel-archivo__descargar, .filecard__abrir, .verify-bar__btn {
+  font-family: var(--font-ui) !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.005em;
+  line-height: 1;
+}
+.pill, .pill-btn, .btn-negro { height: 36px; min-height: 0; padding: 0 14px; font-size: 14px; gap: 8px; }
+.pubnav .pill, .pubnav__btn, .set-btn, .pill-btn.set-btn { height: 32px; padding: 0 12px; font-size: 13px; }
+.btn-negro.landing__btn, .btn-grupo--grande .btn-grupo__item { height: 44px; padding: 0 20px; font-size: 15px; }
+.pill--oliva { background: var(--accent); color: var(--on-accent); }
+.pill--oliva:hover { background: var(--accent-deep); }
+:root[data-theme="dark"] .pill--oliva:hover { background: #C2D35C; }
+.pill-btn--outline, .web .pill-btn--outline { background: var(--surface-3); color: var(--ink); }
+.pill-btn--outline:hover:not(:disabled), .web .pill-btn--outline:hover:not(:disabled) { background: var(--surface-4); color: var(--ink); }
+/* El hover lo dice el color de cada botón, no un filtro de brillo encima. */
+button:not(:disabled):not([role="switch"]):hover,
+.pill:hover, .pill-btn:not(:disabled):hover, .btn-negro:hover, .adm-btn:not(:disabled):hover, .set-btn:not(:disabled):hover,
+:root[data-theme="dark"] button:not(:disabled):not([role="switch"]):hover,
+:root[data-theme="dark"] .pill:hover, :root[data-theme="dark"] .pill-btn:not(:disabled):hover,
+:root[data-theme="dark"] .btn-negro:hover, :root[data-theme="dark"] .adm-btn:not(:disabled):hover,
+:root[data-theme="dark"] .set-btn:not(:disabled):hover { filter: none; }

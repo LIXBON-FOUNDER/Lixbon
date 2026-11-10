@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useT } from '../i18n/useT';
 import { api } from '../lib/api';
-import { IconCheck, IconCopy, IconExternal, IconPlus } from './Icons';
+import { IconCopiar } from './Icons';
 
 const NOMBRE = 'lixbon';
 const SIN_CLAVE = 'lixbon_sk_TU_CLAVE';
@@ -77,7 +77,7 @@ function Copiable({ codigo, ruta, t }) {
       <div className="mcp-code__head">
         <span className="mono">{ruta || t('command')}</span>
         <button type="button" className="mcp-code__copy" onClick={copiar}>
-          {copiado ? <IconCheck size={13} /> : <IconCopy size={13} />} {copiado ? t('copied') : t('copy')}
+          <IconCopiar hecho={copiado} size={13} /> {copiado ? t('copied') : t('copy')}
         </button>
       </div>
       <pre className="mcp-code__body"><code>{codigo}</code></pre>
@@ -131,7 +131,7 @@ export function McpSection({ onKeysChanged }) {
           ) : (
             <>
               <button className="pill-btn pill-btn--primary set-btn" onClick={crearClave} disabled={busy}>
-                <IconPlus size={14} /> {busy ? t('creating') : t('createKey')}
+                {busy ? t('creating') : t('createKey')}
               </button>
               <span className="card__muted">{t('or')}</span>
               <input className="mcp-key__input mono" value={pegada} onChange={(e) => setPegada(e.target.value)}
@@ -157,7 +157,7 @@ export function McpSection({ onKeysChanged }) {
           {cliente.accion && (
             <a className={`pill-btn pill-btn--primary set-btn mcp-client__action ${sinClave ? 'is-disabled' : ''}`}
               href={sinClave ? undefined : cliente.accion.href} aria-disabled={sinClave}>
-              <IconExternal size={14} /> {t(cliente.accion.etiqueta)}
+              {t(cliente.accion.etiqueta)}
             </a>
           )}
           {cliente.bloques.map((b) => <Copiable key={b.codigo} codigo={b.codigo} ruta={b.tipo === 'archivo' ? b.ruta : null} t={t} />)}

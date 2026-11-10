@@ -15,10 +15,17 @@ use super::{
 #[derive(Clone, Debug)]
 pub enum Step {
     Bind(&'static str),
+    /// El modelo efectivo con el que corre.
+    Model(&'static str),
+    /// El proveedor pide permiso para usar una herramienta.
+    Permission { id: &'static str, tool: &'static str },
     Output(String),
     Question { id: &'static str, text: String },
     /// Espera a que llegue una cancelación o una interrupción (con tope, para que una prueba rota no cuelgue).
     Wait,
+    /// Se queda en mitad del turno hasta que la prueba lo suelta con [`FakeAdapter::release_hold`] (con tope): es el «turno ocupado»
+    /// en el que se encola una instrucción. Una cancelación también lo suelta.
+    Hold,
     Complete(Option<String>),
     Fail(AdapterError),
 }
@@ -27,6 +34,10 @@ pub struct FakeAdapter {
     id: String,
     probe: Mutex<ProbeResult>,
     script: Mutex<Vec<Step>>,
+    /// Guiones por turno (LXO-143): cada `events` toma el primero; sin ninguno, repite `script`. Una cola de instrucciones es una
+    /// ejecución con varios turnos y cada uno cuenta una cosa distinta.
+    turns: Mutex<std::collections::VecDeque<Vec<Step>>>,
+    hold_open: AtomicBool,
     calls: Mutex<Vec<String>>,
     seq: AtomicU64,
     interrupted: AtomicBool,
@@ -36,6 +47,9 @@ pub struct FakeAdapter {
     /// Si está, `start` / `resume` devuelven este error en lugar de lanzar.
     start_error: Mutex<Option<AdapterError>>,
     resume_error: Mutex<Option<AdapterError>>,
+    /// Si está, `interrupt` / `steer` devuelven este error (LXO-144): el stop o el steer que el proveedor rechaza.
+    interrupt_error: Mutex<Option<AdapterError>>,
+    steer_error: Mutex<Option<AdapterError>>,
 }
 
 impl FakeAdapter {
@@ -49,6 +63,8 @@ impl FakeAdapter {
             id: id.to_string(),
             probe: Mutex::new(probe),
             script: Mutex::new(vec![Step::Output("hecho".into()), Step::Complete(Some("ok".into()))]),
+            turns: Mutex::new(std::collections::VecDeque::new()),
+            hold_open: AtomicBool::new(false),
             calls: Mutex::new(vec![]),
             seq: AtomicU64::new(0),
             interrupted: AtomicBool::new(false),
@@ -56,6 +72,8 @@ impl FakeAdapter {
             resumes: Mutex::new(vec![]),
             start_error: Mutex::new(None),
             resume_error: Mutex::new(None),
+            interrupt_error: Mutex::new(None),
+            steer_error: Mutex::new(None),
         }
     }
 
@@ -75,12 +93,30 @@ impl FakeAdapter {
         *self.resume_error.lock().unwrap() = e;
     }
 
+    pub fn fail_interrupt_with(&self, e: Option<AdapterError>) {
+        *self.interrupt_error.lock().unwrap() = e;
+    }
+
+    pub fn fail_steer_with(&self, e: Option<AdapterError>) {
+        *self.steer_error.lock().unwrap() = e;
+    }
+
     pub fn set_probe(&self, probe: ProbeResult) {
         *self.probe.lock().unwrap() = probe;
     }
 
     pub fn set_script(&self, steps: Vec<Step>) {
         *self.script.lock().unwrap() = steps;
+    }
+
+    /// El guion del PRÓXIMO turno (`events`): los turnos se consumen en el orden en que se añaden.
+    pub fn push_turn(&self, steps: Vec<Step>) {
+        self.turns.lock().unwrap().push_back(steps);
+    }
+
+    /// Suelta el turno que espera en un [`Step::Hold`].
+    pub fn release_hold(&self) {
+        self.hold_open.store(true, Ordering::SeqCst);
     }
 
     /// Llamadas que llegaron al adapter, en orden (`start`, `events`, `steer:<texto>`…).
@@ -129,12 +165,15 @@ impl ProviderAdapter for FakeAdapter {
     fn events(&self, run: &RunHandle, cancel: &CancelToken, sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
         self.note("events".into());
         self.known(run)?;
-        for step in self.script.lock().unwrap().clone() {
+        let steps = self.turns.lock().unwrap().pop_front().unwrap_or_else(|| self.script.lock().unwrap().clone());
+        for step in steps {
             if cancel.is_cancelled() {
                 return Ok(RunOutcome::Cancelled);
             }
             match step {
                 Step::Bind(r) => sink.push(AdapterEvent::SessionBound { provider_ref: ProviderRef::new(r)? }),
+                Step::Model(model) => sink.push(AdapterEvent::Model { model: model.to_string() }),
+                Step::Permission { id, tool } => sink.push(AdapterEvent::Permission { request_id: id.to_string(), tool: tool.to_string(), summary: format!("usar {tool}") }),
                 Step::Output(text) => sink.push(AdapterEvent::Output { text }),
                 Step::Question { id, text } => sink.push(AdapterEvent::Question { question_id: id.to_string(), text }),
                 Step::Wait => {
@@ -145,6 +184,18 @@ impl ProviderAdapter for FakeAdapter {
                         }
                         if self.interrupted.load(Ordering::SeqCst) {
                             return Ok(RunOutcome::Interrupted);
+                        }
+                        if Instant::now() > until {
+                            return Err(AdapterError::new(super::ErrorCode::Internal, "el fake esperó una señal que no llegó"));
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                Step::Hold => {
+                    let until = Instant::now() + Duration::from_secs(10);
+                    while !self.hold_open.swap(false, Ordering::SeqCst) {
+                        if cancel.is_cancelled() {
+                            return Ok(RunOutcome::Cancelled);
                         }
                         if Instant::now() > until {
                             return Err(AdapterError::new(super::ErrorCode::Internal, "el fake esperó una señal que no llegó"));
@@ -167,13 +218,20 @@ impl ProviderAdapter for FakeAdapter {
     fn interrupt(&self, run: &RunHandle) -> Result<(), AdapterError> {
         self.note("interrupt".into());
         self.known(run)?;
+        if let Some(e) = self.interrupt_error.lock().unwrap().clone() {
+            return Err(e);
+        }
         self.interrupted.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     fn steer(&self, run: &RunHandle, instruction: &str) -> Result<(), AdapterError> {
         self.note(format!("steer:{instruction}"));
-        self.known(run)
+        self.known(run)?;
+        match self.steer_error.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     fn resume(&self, req: ResumeRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
@@ -183,6 +241,7 @@ impl ProviderAdapter for FakeAdapter {
             return Err(e);
         }
         self.resumes.lock().unwrap().push(req.clone());
+        self.interrupted.store(false, Ordering::SeqCst);
         Ok(self.handle(&req.attempt_id))
     }
 }

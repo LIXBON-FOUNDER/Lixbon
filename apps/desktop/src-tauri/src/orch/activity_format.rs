@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 56] = [
+pub(super) const KINDS: [&str; 70] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -47,6 +47,9 @@ pub(super) const KINDS: [&str; 56] = [
     "task.restored",
     "attempt.requested",
     "attempt.continued",
+    "attempt.retried",
+    "attempt.forked",
+    "attempt.adopted",
     "attempt.approved",
     "attempt.rejected",
     "attempt.started",
@@ -57,6 +60,17 @@ pub(super) const KINDS: [&str; 56] = [
     "attempt.resumed",
     "attempt.exited",
     "attempt.integrated",
+    "attempt.queued",
+    "attempt.queue_delivered",
+    "attempt.queue_cancelled",
+    "attempt.queue_failed",
+    "attempt.instruction_requested",
+    "attempt.instruction_result",
+    "attempt.dispatch_ambiguous",
+    "policy.changed",
+    "race.requested",
+    "race.candidate_recorded",
+    "race.cancelled",
     "provider_session.opened",
     "provider_session.bound",
     "provider_session.resumed",
@@ -109,7 +123,24 @@ const STOPPED_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_ter
 /// Cómo declaró el proveedor la referencia de una sesión (`provider_session.bound`).
 const SESSION_BINDINGS: [&str; 2] = ["stream_json", "session_id"];
 const CONTINUITY_STRATEGIES: [&str; 2] = ["native_resume", "context_package"];
+/// Ámbitos, categorías, niveles y direcciones de un cambio de policy (`policy.changed`, LXO-209).
+const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
+const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
+const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
+const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
+/// Un Race (`race.requested`, `race.candidate_recorded`, `race.cancelled`, LXO-215): con qué contexto, qué pasó con cada candidato y qué se canceló.
+const RACE_OUTCOMES: [&str; 2] = ["launched", "failed"];
+const RACE_SCOPES: [&str; 2] = ["one", "remaining"];
+/// Con qué contexto arrancó un Fork (`attempt.forked`).
+const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
+/// Parámetros que un reintento pudo cambiar a propósito (`attempt.retried`).
+const RETRY_OVERRIDES: [&str; 4] = ["provider", "model", "effort", "profile"];
 const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_changed", "resume_unsupported", "session_unavailable", "session_expired"];
+/// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`).
+const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"];
+/// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_requested`, `attempt.instruction_result`).
+const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Procedencia de un Worktree que ya existía (`worktree.adopted`).
@@ -305,6 +336,11 @@ fn closed(p: &Value, key: &str, allowed: &[&'static str]) -> Option<Value> {
     one_of(p, key, allowed).map(|a| json!(a))
 }
 
+/// Como [`closed`], pero ausente o `null` es «no hay» (`None`) en vez de inválido: quien lo pide lo marca opcional con `?`.
+fn opt_closed(p: &Value, key: &str, allowed: &[&'static str]) -> Option<Value> {
+    p.get(key).filter(|v| !v.is_null()).and_then(|_| closed(p, key, allowed))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tabla Event kind -> Activity
 // ---------------------------------------------------------------------------------------------
@@ -455,6 +491,88 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("reason", closed(p, "reason", &CONTINUITY_REASONS)),
             ],
         ),
+        "attempt.retried" => {
+            // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+            let overrides = match p.get("overrides").filter(|v| !v.is_null()) {
+                None => None,
+                Some(list) => {
+                    let names = list
+                        .as_array()?
+                        .iter()
+                        .map(|v| v.as_str().filter(|s| RETRY_OVERRIDES.contains(s)).map(|s| json!(s)))
+                        .collect::<Option<Vec<Value>>>()?;
+                    if names.is_empty() {
+                        return None;
+                    }
+                    Some(json!(names))
+                }
+            };
+            rendered(
+                "activity.attempt.retried",
+                Visual::Info,
+                vec![("task", id(p, "task")), ("n", number(p, "n")), ("from_n", number(p, "from_n")), ("overrides?", overrides)],
+            )
+        }
+        // Cambio de policy (LXO-209): ámbito, categoría y niveles del override. Nunca credenciales, rutas ni texto libre.
+        "policy.changed" => rendered(
+            "activity.policy.changed",
+            Visual::Info,
+            vec![
+                ("scope", closed(p, "scope", &POLICY_SCOPES)),
+                ("scope_id?", opt_text(p, "scope_id", 200)),
+                ("category", closed(p, "category", &POLICY_CATEGORIES)),
+                ("from?", opt_closed(p, "from", &POLICY_LEVELS)),
+                ("to?", opt_closed(p, "to", &POLICY_LEVELS)),
+                ("direction", closed(p, "direction", &POLICY_DIRECTIONS)),
+                ("revision", number(p, "revision")),
+            ],
+        ),
+        // Race (LXO-215): lo pedido, el desenlace de cada candidato y lo cancelado. Nunca el encargo, el paquete ni texto libre.
+        "race.requested" => rendered(
+            "activity.race.requested",
+            Visual::Info,
+            vec![("race_id", id(p, "race_id")), ("source", id(p, "source")), ("candidates", number(p, "candidates")), ("strategy", closed(p, "strategy", &FORK_STRATEGIES))],
+        ),
+        "race.candidate_recorded" => {
+            let outcome = one_of(p, "outcome", &RACE_OUTCOMES)?;
+            rendered(
+                "activity.race.candidate_recorded",
+                if outcome == "launched" { Visual::Info } else { Visual::Warning },
+                vec![
+                    ("index", number(p, "index")),
+                    ("outcome", Some(json!(outcome))),
+                    ("provider", text(p, "provider", 64)),
+                    ("attempt_id?", if outcome == "launched" { id(p, "attempt_id") } else { None }),
+                    ("code?", if outcome == "failed" { token(p, "code") } else { None }),
+                ],
+            )
+        }
+        "race.cancelled" => {
+            let failed = p.get("failed")?.as_u64()?;
+            rendered(
+                "activity.race.cancelled",
+                if failed > 0 { Visual::Warning } else { Visual::Info },
+                vec![
+                    ("scope", closed(p, "scope", &RACE_SCOPES)),
+                    ("attempt_id?", opt_token_id(p, "attempt_id")),
+                    ("stopped", number(p, "stopped")),
+                    ("rejected", number(p, "rejected")),
+                    ("failed", number(p, "failed")),
+                ],
+            )
+        }
+        // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
+        "attempt.forked" => rendered(
+            "activity.attempt.forked",
+            Visual::Info,
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("source_task", id(p, "source_task")),
+                ("source_n", number(p, "source_n")),
+                ("strategy", closed(p, "strategy", &FORK_STRATEGIES)),
+            ],
+        ),
         "attempt.requested" => rendered(
             "activity.attempt.requested",
             Visual::Info,
@@ -513,6 +631,39 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         "attempt.resumed" => rendered("activity.attempt.resumed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.exited" => rendered("activity.attempt.exited", Visual::Error, vec![("task", id(p, "task")), ("n", number(p, "n")), ("from", closed(p, "from", &ACTIVE_FROM))]),
         "attempt.integrated" => rendered("activity.attempt.integrated", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        // Adoptar trabajo externo (LXO-149): solo el hecho. Nunca la rama ni la base (son nombres del repositorio de la persona).
+        "attempt.adopted" => rendered("activity.attempt.adopted", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        // Pending Queue (LXO-143). Nunca el texto de la instrucción ni el id del item: solo el hecho.
+        "attempt.queued" => rendered(
+            "activity.attempt.queued",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("position", number(p, "position")), ("attachments", number(p, "attachments"))],
+        ),
+        "attempt.queue_delivered" => rendered("activity.attempt.queue_delivered", Visual::Success, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.queue_cancelled" => rendered("activity.attempt.queue_cancelled", Visual::Warning, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.dispatch_ambiguous" => rendered("activity.attempt.dispatch_ambiguous", Visual::Warning, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        "attempt.queue_failed" => rendered(
+            "activity.attempt.queue_failed",
+            Visual::Error,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("reason", closed(p, "reason", &QUEUE_FAILURES))],
+        ),
+        // Steer y Stop & Send (LXO-144). Nunca el texto de la instrucción: solo el hecho y cómo acabó.
+        "attempt.instruction_requested" => rendered(
+            "activity.attempt.instruction_requested",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("mode", closed(p, "mode", &INSTRUCTION_MODES))],
+        ),
+        "attempt.instruction_result" => rendered(
+            "activity.attempt.instruction_result",
+            if one_of(p, "outcome", &INSTRUCTION_OUTCOMES) == Some("delivered") { Visual::Success } else { Visual::Error },
+            vec![
+                ("task", id(p, "task")),
+                ("n", number(p, "n")),
+                ("mode", closed(p, "mode", &INSTRUCTION_MODES)),
+                ("outcome", closed(p, "outcome", &INSTRUCTION_OUTCOMES)),
+                ("reason?", closed(p, "reason", &QUEUE_FAILURES)),
+            ],
+        ),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",
             Visual::Info,

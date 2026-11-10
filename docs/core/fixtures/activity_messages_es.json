@@ -659,6 +659,113 @@
       "text": "El intento 4 de la tarea t-3 continúa el intento 3 con un paquete de contexto (cambió el proveedor)."
     },
     {
+      "key": "activity.attempt.retried",
+      "args": {
+        "task": "t-3",
+        "n": 4,
+        "from_n": 3
+      },
+      "text": "El intento 4 de la tarea t-3 reintenta el intento 3."
+    },
+    {
+      "key": "activity.attempt.retried",
+      "args": {
+        "task": "t-3",
+        "n": 5,
+        "from_n": 4,
+        "overrides": [
+          "model",
+          "effort"
+        ]
+      },
+      "text": "El intento 5 de la tarea t-3 reintenta el intento 4 (otro modelo; otro esfuerzo)."
+    },
+    {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 3, "strategy": "clean" },
+      "text": "Se pidió un Race de 3 candidatos desde el intento t-3-a1."
+    },
+    {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "context_package" },
+      "text": "Se pidió un Race de 2 candidatos desde el intento t-3-a1 con un paquete de contexto."
+    },
+    {
+      "key": "activity.race.requested",
+      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "otra" },
+      "text": null
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 0, "outcome": "launched", "provider": "codex", "attempt_id": "t-9-a1" },
+      "text": "Candidato 1 del Race: se lanzó t-9-a1 con codex."
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 1, "outcome": "failed", "provider": "nope", "code": "race_concurrency_limit" },
+      "text": "Candidato 2 del Race: no se pudo lanzar con nope (race_concurrency_limit)."
+    },
+    {
+      "key": "activity.race.candidate_recorded",
+      "args": { "index": 1, "outcome": "launched", "provider": "codex" },
+      "text": null
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "one", "attempt_id": "t-9-a1", "stopped": 1, "rejected": 0, "failed": 0 },
+      "text": "Se canceló el candidato t-9-a1 del Race."
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "remaining", "stopped": 1, "rejected": 2, "failed": 1 },
+      "text": "Se canceló lo que quedaba del Race: 1 detenidos, 2 rechazados, 1 sin poder detenerse."
+    },
+    {
+      "key": "activity.race.cancelled",
+      "args": { "scope": "one", "stopped": 1, "rejected": 0, "failed": 0 },
+      "text": null
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "global", "category": "steer", "to": "confirm", "direction": "tighten", "revision": 1 },
+      "text": "Policy de «corregir» en el ámbito global: de heredado a confirmar (más restrictiva)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "project", "scope_id": "p-1", "category": "fork", "from": "deny", "direction": "reset", "revision": 3 },
+      "text": "Policy de «bifurcar» en el proyecto p-1: de denegar a heredado (vuelve a heredar)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "attempt", "scope_id": "t-3-a1", "category": "integrate", "from": "confirm", "to": "deny", "direction": "tighten", "revision": 4 },
+      "text": "Policy de «integrar» en el intento t-3-a1: de confirmar a denegar (más restrictiva)."
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "team", "category": "fork", "direction": "reset", "revision": 3 },
+      "text": null
+    },
+    {
+      "key": "activity.policy.changed",
+      "args": { "scope": "project", "category": "fork", "direction": "reset", "revision": 3 },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "clean" },
+      "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "context_package" },
+      "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3 con un paquete de contexto."
+    },
+    {
+      "key": "activity.attempt.forked",
+      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "otra" },
+      "text": null
+    },
+    {
       "key": "activity.attempt.approved",
       "args": {
         "task": "t-3",
@@ -765,6 +872,126 @@
         "n": 1
       },
       "text": "Se integró el trabajo del intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.adopted",
+      "args": {
+        "task": "t-3",
+        "n": 1
+      },
+      "text": "Se adoptó trabajo externo como el intento 1 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.queued",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "position": 3,
+        "attachments": 0
+      },
+      "text": "Se encoló una instrucción para el intento 2 de la tarea t-3 (posición 3)."
+    },
+    {
+      "key": "activity.attempt.queued",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "position": 1,
+        "attachments": 2
+      },
+      "text": "Se encoló una instrucción para el intento 2 de la tarea t-3 (posición 1; 2 adjuntos)."
+    },
+    {
+      "key": "activity.attempt.queue_delivered",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Se entregó al intento 2 de la tarea t-3 la instrucción encolada."
+    },
+    {
+      "key": "activity.attempt.queue_cancelled",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "Se canceló una instrucción encolada para el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.dispatch_ambiguous",
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
+      "text": "No se sabe si el proveedor llegó a lanzarse para el intento 2 de la tarea t-3: no se relanzará."
+    },
+    {
+      "key": "activity.attempt.queue_failed",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "reason": "adapter_unavailable"
+      },
+      "text": "No se pudo entregar una instrucción encolada al intento 2 de la tarea t-3: el proveedor no estaba disponible."
+    },
+    {
+      "key": "activity.attempt.queue_failed",
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "reason": "otro"
+      },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "steer" },
+      "text": "Se pidió inyectar una instrucción en el turno en curso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send" },
+      "text": "Se pidió detener el turno en curso del intento 2 de la tarea t-3 y enviarle una instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "delivered" },
+      "text": "Se inyectó la instrucción en el turno en curso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "adapter_error" },
+      "text": "El proveedor no aceptó la instrucción para el turno en curso del intento 2 de la tarea t-3 (el proveedor devolvió un error)."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "delivered" },
+      "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3 y se le envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "failed", "reason": "adapter_unavailable" },
+      "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3, pero la instrucción no llegó (el proveedor no estaba disponible)."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_failed" },
+      "text": "No se pudo detener el turno en curso del intento 2 de la tarea t-3: no se envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_timeout" },
+      "text": "El proveedor no confirmó a tiempo que el turno en curso del intento 2 de la tarea t-3 se hubiera detenido: no se envió la instrucción."
+    },
+    {
+      "key": "activity.attempt.instruction_result",
+      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "otro" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.instruction_requested",
+      "args": { "task": "t-3", "n": 2, "mode": "otro" },
+      "text": null
     },
     {
       "key": "activity.provider_session.opened",

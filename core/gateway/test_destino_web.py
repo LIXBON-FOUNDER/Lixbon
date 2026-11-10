@@ -29,3 +29,17 @@ def test_destino_web(ruta, esperado):
 ])
 def test_prefijo_en_antiguo(ruta, esperado):
     assert destino_web(ruta) == esperado
+
+
+@pytest.mark.parametrize("ruta", [
+    "en//evil.com",
+    "en///evil.com/x",
+    "en/\\evil.com",
+    "en//\\evil.com",
+    "en/ /evil.com",
+])
+def test_prefijo_en_no_es_un_open_redirect(ruta):
+    """`/en//evil.com` no puede acabar en `Location: //evil.com` (otro dominio)."""
+    destino, codigo = destino_web(ruta)
+    assert codigo == 301
+    assert destino.startswith("/") and not destino.startswith(("//", "/\\"))

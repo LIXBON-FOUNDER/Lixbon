@@ -78,6 +78,12 @@ no son del tipo esperado, el item cae al respaldo.
 | `task.discarded` · `task.restored` | `activity.task.discarded` / `.restored` | — | warning / info |
 | `attempt.requested` (LXO-114) | `activity.attempt.requested` | `task`, `n`, `provider`, `model?`, `effort?`, `role?`, `profile?`, `external`, `approval_required` | info |
 | `attempt.continued` (LXO-134) | `activity.attempt.continued` | `task`, `n`, `from_n`, `strategy` ∈ `native_resume` `context_package`, `reason` ∈ `preferred` `requested` `provider_changed` `resume_unsupported` `session_unavailable` `session_expired` | info |
+| `attempt.retried` (LXO-142) | `activity.attempt.retried` | `task`, `n`, `from_n`, `overrides?` ⊆ `provider` `model` `effort` `profile` | info |
+| `attempt.forked` (LXO-145) | `activity.attempt.forked` | `task`, `n`, `source_task`, `source_n`, `strategy` ∈ `clean` `context_package` | info |
+| `policy.changed` (LXO-209) | `activity.policy.changed` | `scope` ∈ `global` `project` `attempt`, `scope_id?`, `category` (las diez de `POLICY.md`), `from?` · `to?` ∈ `allow` `confirm` `elevated` `deny`, `direction` ∈ `tighten` `loosen` `same` `reset`, `revision` | info |
+| `race.requested` (LXO-215) | `activity.race.requested` | `race_id`, `source`, `candidates`, `strategy` ∈ `clean` `context_package` | info |
+| `race.candidate_recorded` (LXO-215) | `activity.race.candidate_recorded` | `index`, `outcome` ∈ `launched` `failed`, `provider`, `attempt_id?` (lanzado), `code?` (fallido) | info · warning si falló |
+| `race.cancelled` (LXO-215) | `activity.race.cancelled` | `scope` ∈ `one` `remaining`, `attempt_id?`, `stopped`, `rejected`, `failed` | info · warning si alguno no se pudo detener |
 | `attempt.approved` | `activity.attempt.approved` | `task`, `n` | success |
 | `attempt.rejected` | `activity.attempt.rejected` | `task`, `n`, `cause` ∈ `cancelled` `run_closed` | warning |
 | `attempt.started` | `activity.attempt.started` | `task`, `n` | info |
@@ -89,6 +95,14 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.resumed` | `activity.attempt.resumed` | `task`, `n`, `from` | info |
 | `attempt.exited` | `activity.attempt.exited` | `task`, `n`, `from` | error |
 | `attempt.integrated` | `activity.attempt.integrated` | `task`, `n` | success |
+| `attempt.adopted` (LXO-149) | `activity.attempt.adopted` | `task`, `n` (nunca la rama ni la base) | success |
+| `attempt.queued` (LXO-143) | `activity.attempt.queued` | `task`, `n`, `position` (1 = la siguiente), `attachments` (cuántos) | info |
+| `attempt.queue_delivered` (LXO-143) | `activity.attempt.queue_delivered` | `task`, `n` | success |
+| `attempt.queue_cancelled` (LXO-143) | `activity.attempt.queue_cancelled` | `task`, `n` | warning |
+| `attempt.dispatch_ambiguous` (LXO-246) | `activity.attempt.dispatch_ambiguous` | `task`, `n` | warning |
+| `attempt.queue_failed` (LXO-143) | `activity.attempt.queue_failed` | `task`, `n`, `reason` ∈ `unsupported` `environment_blocked` `adapter_unavailable` `adapter_error` `attempt_ended` `interrupted` | error |
+| `attempt.instruction_requested` (LXO-144) | `activity.attempt.instruction_requested` | `task`, `n`, `mode` ∈ `steer` `stop_and_send` | info |
+| `attempt.instruction_result` (LXO-144) | `activity.attempt.instruction_result` | `task`, `n`, `mode`, `outcome` ∈ `delivered` `failed` `stop_failed` `stop_timeout`, `reason?` (los de `queue_failed`) | success si `delivered`, error si no |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
 | `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |

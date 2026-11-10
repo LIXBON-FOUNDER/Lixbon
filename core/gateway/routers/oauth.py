@@ -100,7 +100,13 @@ def _validate_redirect_uri(uri: str) -> str:
     """Solo destinos que controla el usuario final: el esquema de la app móvil,
     los de desarrollo de Expo, o la propia web. Evita usar el callback como
     open redirect."""
+    # urlparse y los navegadores leen distinto `https://evil.com\@localhost/`: urlparse ve el
+    # host "localhost" (lo anterior a "@" es usuario) y el navegador toma "\" por "/" y va a evil.com.
+    if any(c == "\\" or c.isspace() or ord(c) < 32 for c in uri):
+        raise HTTPException(status_code=400, detail="redirect_uri no permitida")
     parsed = urlparse(uri)
+    if parsed.username is not None or parsed.password is not None:
+        raise HTTPException(status_code=400, detail="redirect_uri no permitida")
     scheme = (parsed.scheme or "").lower()
     if scheme in {"lixbon", "exp", "exps"}:
         return uri
@@ -261,8 +267,10 @@ def _finish_login(payload: dict[str, Any], user: dict[str, Any]) -> RedirectResp
     for k in [k for k, (_, _, exp) in _login_codes.items() if exp < now]:
         _login_codes.pop(k, None)
     _login_codes[code] = (user["id"], payload["c"], now + _LOGIN_CODE_TTL)
-    sep = "&" if "?" in payload["r"] else "?"
-    return RedirectResponse(f"{payload['r']}{sep}lixbon_code={code}", status_code=303)
+    # El state va firmado y `r` ya se validó al empezar; se vuelve a validar donde se redirige.
+    destino = _validate_redirect_uri(payload["r"])
+    sep = "&" if "?" in destino else "?"
+    return RedirectResponse(f"{destino}{sep}lixbon_code={code}", status_code=303)
 
 
 @router.get("/api/auth/oauth/{provider}/callback")
@@ -275,8 +283,9 @@ async def oauth_callback(provider: str, request: Request,
         raise HTTPException(status_code=400, detail="state inválido o expirado; vuelve a intentarlo")
     if error or not code:
         # El usuario canceló en el proveedor: devolverlo a la app sin código.
-        sep = "&" if "?" in payload["r"] else "?"
-        return RedirectResponse(f"{payload['r']}{sep}lixbon_error=cancelled", status_code=303)
+        destino = _validate_redirect_uri(payload["r"])
+        sep = "&" if "?" in destino else "?"
+        return RedirectResponse(f"{destino}{sep}lixbon_error=cancelled", status_code=303)
 
     callback = f"{_server_base(request)}/api/auth/oauth/{provider}/callback"
     claims = await (_google_claims if provider == "google" else _github_claims)(code, callback)

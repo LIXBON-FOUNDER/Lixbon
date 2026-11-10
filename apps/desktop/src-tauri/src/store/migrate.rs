@@ -48,6 +48,17 @@ pub fn embedded() -> Vec<Migration> {
     EMBEDDED_MIGRATIONS.iter().map(|(v, n, s)| Migration::new(*v, n, s)).collect()
 }
 
+/// Prueba: las migraciones del binario con el CORTE sustituido por una migración vacía. El migrador general no aplica la 014
+/// ni nada posterior (es una barrera); así una base de prueba tiene las migraciones posteriores al corte (017 en adelante)
+/// sin pasar por la maquinaria del corte. Para tests que necesitan, p. ej., el plazo durable de la aprobación inicial (019).
+#[cfg(test)]
+pub(crate) fn embedded_post_cut() -> Vec<Migration> {
+    embedded()
+        .into_iter()
+        .map(|m| if m.name == super::cut::CUT_NAME { Migration::new(m.version, "corte_neutro_de_prueba", "SELECT 1;") } else { m })
+        .collect()
+}
+
 /// Resultado de una llamada a [`migrate`].
 #[derive(Debug, Clone, Default)]
 pub struct MigrationReport {

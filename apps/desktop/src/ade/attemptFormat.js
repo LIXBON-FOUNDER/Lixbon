@@ -13,7 +13,12 @@ export function attemptDuration(attempt) {
   const start = attempt?.started_at;
   const end = attempt?.ended_at;
   if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) return COPY.notAvailable;
-  const total = Math.round((end - start) / 1000);
+  return formatDurationMs(end - start);
+}
+
+/** `1 h 2 min`, `3 min 4 s` o `5 s` a partir de milisegundos. */
+export function formatDurationMs(ms) {
+  const total = Math.round(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;

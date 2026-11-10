@@ -39,7 +39,7 @@ export const usePreviewStore = create((set, get) => ({
   view: 'workspace',
   expanded: { lixbon: true, zajuna: true, sgi: true, tourism: false, t_runtime: true, t_oauth: true },
   filter: { q: '', chips: [], hostId: null },
-  prefs: { followUp: 'queue' },
+  prefs: { followUp: 'queue', pulse: true },
   overlay: null,
   contextOpen: false,
   ...initial(),
@@ -79,6 +79,57 @@ export const usePreviewStore = create((set, get) => ({
         : i === 2 ? { ...t, title: 'x' } : t)),
     attempts: s.attempts.map((a, i) => (i === 0 ? { ...a, branch: 'feature/rama/muy/larga/con/muchos/segmentos/auth-refresh-token-rotation-compat-layer-2026-10-24', latest: 'Una última línea muy larga que sigue y sigue sin un corte natural. '.repeat(4), files: 12840, add: 482100, del: 99120, minutes: 1440, tokens: 48200000, cost: 1234.56 } : a)),
   })),
+  /**
+   * Un Workspace denso (10–50 filas) para evaluar el escaneo del navegador con y sin Pulse (LXO-218). Determinista:
+   * sin azar, así la misma evaluación se repite. Mezcla estados, procedencias y Tasks con dos Intentos. Se deshace con resetAll.
+   */
+  denseCase: (rows = 40) => set((s) => {
+    const n = Math.min(50, Math.max(10, Math.round(rows)));
+    const SHAPES = [
+      { state: 'working', phase: 'tool' }, { state: 'working', phase: 'thinking' }, { state: 'waiting', cause: 'approval' },
+      { state: 'review_ready' }, { state: 'failed' }, { state: 'completed' }, { state: 'waiting', cause: 'answer' },
+      { state: 'paused' }, { state: 'queued' }, { state: 'working', phase: 'writing' },
+    ];
+    const FILES = ['verified', 'agent_reported', 'unknown'];
+    const TESTS = ['verified', 'agent_reported', 'unknown', 'verified'];
+    const TITLES = ['Migrar el cliente HTTP', 'Cache de resultados', 'Pantalla de ajustes', 'Corregir la paginación', 'Exportar informes a CSV', 'Revisión de dependencias', 'Optimizar el arranque en frío', 'Sincronización de preferencias'];
+    const tasks = [];
+    const attempts = [];
+    const attention = [];
+    let rowCount = 0;
+    for (let i = 0; rowCount < n; i++) {
+      const project = PROJECTS[i % PROJECTS.length];
+      const taskId = `t_dense${i}`;
+      tasks.push({ id: taskId, projectId: project.id, title: `${TITLES[i % TITLES.length]} ${i + 1}`, objective: 'Tarea generada para evaluar la densidad.', criteria: [], constraints: [], decisions: [], branchBase: `feat/dense-${i}` });
+      const intents = i % 5 === 4 ? 2 : 1;
+      for (let k = 0; k < intents; k++) {
+        const shape = SHAPES[(i + k) % SHAPES.length];
+        const id = `att_dense${i}_${k}`;
+        const noTree = shape.state === 'queued';
+        const total = 20 + ((i * 7) % 90);
+        const pass = (i + k) % 4 === 1 ? total - 1 - ((i * 3) % 5) : total;
+        const provider = ['claude', 'codex', 'gemini', 'opencode'][(i + k) % 4];
+        attempts.push({
+          control: 'agent', origin: i % 6 === 5 ? 'CLI' : 'ADE', unread: i % 9 === 0, policy: 'delegar_con_revision', add: 0, del: 0, cost: 0, tokens: 0, latest: '', ctx: 'v1',
+          id, taskId, label: String.fromCharCode(65 + k), provider, model: PROVIDERS[provider].models[0], effort: null,
+          branch: noTree ? null : `feat/dense-${i}-${k}`, worktree: noTree ? null : `%LOCALAPPDATA%\\Lixbon\\worktrees\\${project.id}\\${id}`,
+          host: i % 7 === 3 ? 'macbook' : 'desktop', ...shape,
+          minutes: noTree ? 0 : 3 + ((i * 13 + k * 5) % 160),
+          files: noTree ? 0 : 1 + ((i * 5) % 30),
+          tests: (i + k) % 5 === 0 ? null : { pass, total },
+          evidence: { files: FILES[(i + k) % FILES.length], tests: TESTS[(i + k) % TESTS.length] },
+        });
+        rowCount += 1;
+        if (shape.state === 'waiting') attention.push({ id: `at_dense${i}_${k}`, kind: shape.cause === 'answer' ? 'question' : 'permission', attemptId: id, risk: 'low', ago: 'ahora', title: 'Decisión pendiente' });
+        if (shape.state === 'review_ready') attention.push({ id: `at_dense${i}_${k}`, kind: 'review', attemptId: id, risk: 'medium', ago: 'ahora', title: 'Listo para revisar' });
+        if (rowCount >= n) break;
+      }
+    }
+    const expanded = { ...s.expanded };
+    PROJECTS.forEach((p) => { expanded[p.id] = true; });
+    tasks.forEach((t) => { expanded[t.id] = true; });
+    return { tasks: [...s.tasks, ...tasks], attempts: [...s.attempts, ...attempts], attention: [...s.attention, ...attention], expanded };
+  }),
   resetAll: () => set({ ...initial(), sel: { projectId: 'lixbon', taskId: 't_runtime', attemptId: 'att_rt_a' }, view: 'workspace', overlay: null }),
 
   // ── Compositor: Cola / Corregir / Detener y enviar / Nuevo Intento ──────
@@ -186,7 +237,7 @@ export const usePreviewStore = create((set, get) => ({
     const next = {
       ...src, id, label, provider, model, host, policy: policy || src.policy, branch,
       worktree: branch ? `%LOCALAPPDATA%\\Lixbon\\worktrees\\${task.projectId}\\${id}` : null,
-      state: 'starting', phase: undefined, cause: undefined, minutes: 0, files: 0, add: 0, del: 0, tests: null, cost: 0, tokens: 0,
+      state: 'starting', phase: undefined, cause: undefined, minutes: 0, files: 0, add: 0, del: 0, tests: null, evidence: {}, cost: 0, tokens: 0,
       latest: 'Creando el worktree y cargando el ContextPackage', origin: from, control: 'agent', unread: false, forkOf: src.id,
     };
     set((s) => ({
@@ -215,7 +266,7 @@ export const usePreviewStore = create((set, get) => ({
     set((s) => ({
       tasks: [...s.tasks, { id: tid, projectId, title, objective: objective || title, criteria: [], constraints: [], decisions: [], branchBase: `feat/${slug}` }],
       attempts: [...s.attempts, {
-        control: 'agent', origin: 'ADE', unread: false, policy: 'delegar_con_revision', files: 0, add: 0, del: 0, tests: null, cost: 0, tokens: 0, minutes: 0,
+        control: 'agent', origin: 'ADE', unread: false, policy: 'delegar_con_revision', files: 0, add: 0, del: 0, tests: null, evidence: {}, cost: 0, tokens: 0, minutes: 0,
         id, taskId: tid, label: 'A', provider, model, effort: 'medium', branch: `feat/${slug}`, worktree: `%LOCALAPPDATA%\\Lixbon\\worktrees\\${projectId}\\${id}`,
         host, state: 'starting', latest: 'Creando el worktree y el ContextPackage', ctx: 'v1',
       }],

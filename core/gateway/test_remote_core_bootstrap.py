@@ -22,14 +22,18 @@ def test_respuestas_del_core_se_reparten_pero_no_entran_en_el_replay_ni_en_la_bd
             {"type": "orch_core_attention", "rid": "m3", "ok": True, "items": [], "has_more": False},
             {"type": "orch_core_task", "rid": "m4", "ok": True, "task": {"id": "t1"}},
             {"type": "orch_core_activity", "rid": "m5", "ok": True, "items": [], "has_more": False},
+            {"type": "orch_core_attempts", "rid": "m6", "ok": True, "task": {"id": "t1"}, "attempts": []},
+            {"type": "orch_core_attempt", "rid": "m7", "ok": True, "attempt": {"id": "t1-a1"}},
         ])
-        kinds = ["user_msg", "orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity"]
-        assert [q.get_nowait()["type"] for _ in range(6)] == kinds
+        kinds = ["user_msg", "orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity",
+                 "orch_core_attempts", "orch_core_attempt"]
+        assert [q.get_nowait()["type"] for _ in range(len(kinds))] == kinds
         assert [ev["type"] for ev in hub.replay(ch, 0)] == ["user_msg"]
         assert ch.orch is None, "no sustituyen al estado `orch` del host"
 
     asyncio.run(scenario())
-    for kind in ("orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity"):
+    for kind in ("orch_core_snapshot", "orch_core_events", "orch_core_attention", "orch_core_task", "orch_core_activity",
+                 "orch_core_attempts", "orch_core_attempt"):
         assert kind not in REMOTE_PERSISTED_EVENTS, f"{kind} no se guarda en la BD"
 
 
@@ -48,6 +52,8 @@ def host_online(monkeypatch):
     ("core_attention", {"rid": "m3", "category": "question", "limit": 50}),
     ("core_task", {"rid": "m4", "project_id": "p1", "task_id": "t1"}),
     ("core_activity", {"rid": "m5", "task_id": "t1", "cursor": 0, "limit": 30}),
+    ("core_attempts", {"rid": "m6", "task_id": "t1"}),
+    ("core_attempt", {"rid": "m7", "attempt_id": "t1-a2"}),
 ])
 def test_el_controller_puede_pedir_las_lecturas_del_core(host_online, action, args):
     hub, ch = host_online

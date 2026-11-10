@@ -74,16 +74,19 @@ async def model_for_request(
     return resolution.model, resolution
 
 
-def target_or_503(model: str, strict: bool = True) -> tuple[str, dict, str]:
+def target_or_503(model: str, strict: bool = True, afinidad: str | None = None) -> tuple[str, dict, str]:
     """Destino de inferencia (base_url, headers, origen) o 503 claro.
 
     Antes, si ningún nodo tenía el modelo, la petición se enviaba al nodo de
     mayor score igualmente y el usuario veía el error crudo de Ollama. Ahora el
     gateway dice qué falta. Sin nodos online se sigue cayendo al Ollama local:
     ese es el camino de desarrollo, no un error.
+
+    `afinidad`: clave de la conversación (ver NodeOrchestrator.ollama_target),
+    para que vuelva al nodo que ya tiene su contexto en caché.
     """
     try:
-        destino = deps.orquestador.ollama_target(model, strict=strict)
+        destino = deps.orquestador.ollama_target(model, strict=strict, afinidad=afinidad)
     except ModelUnavailable as exc:
         raise HTTPException(status_code=503, detail={
             "code": "model_not_available",

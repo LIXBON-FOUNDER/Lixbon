@@ -149,6 +149,34 @@ describe('ProjectView · Task status, Attention y Activity son ejes distintos', 
   });
 });
 
+describe('ProjectView · estados que esperan y ranura de acciones (hallazgos de la prueba manual)', () => {
+  it('pending_approval y not_started son Tasks activas (el Core las entrega con status=active) y tienen etiqueta', () => {
+    for (const s of ['pending_approval', 'not_started']) {
+      expect(ACTIVE_TASK_STATUSES).toContain(s);
+      expect(taskMatchesFilter(s, 'active')).toBe(true);
+      expect(taskMatchesFilter(s, 'final')).toBe(false);
+    }
+    render(<ProjectView projectId={PID} projectName="Synthetic" tasks={ready([task('t-wait', 'pending_approval')])} filter="active" onOpenTask={() => {}} />);
+    expect(screen.getByText('Pendiente de aprobación')).toBeTruthy();
+    expect(screen.queryByText(/estado desconocido/i)).toBeNull();
+  });
+
+  it('las acciones del Project (Nuevo intento) van bajo la cabecera, antes del resumen', () => {
+    render(<ProjectView projectId={PID} projectName="Synthetic" actions={<button type="button">Nuevo intento</button>} onOpenTask={() => {}} />);
+    const actions = screen.getByTestId('project-actions');
+    expect(within(actions).getByRole('button', { name: 'Nuevo intento' })).toBeTruthy();
+    const view = screen.getByTestId('project-view');
+    const head = view.querySelector('.pv__head');
+    expect(head.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(actions.compareDocumentPosition(view.querySelector('.pv__section')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('sin acciones no se pinta el contenedor', () => {
+    render(<ProjectView projectId={PID} projectName="Synthetic" onOpenTask={() => {}} />);
+    expect(screen.queryByTestId('project-actions')).toBeNull();
+  });
+});
+
 describe('ProjectView · filtros active/final/all', () => {
   it('semántica de taskMatchesFilter: los desconocidos solo entran en all', () => {
     for (const s of ACTIVE_TASK_STATUSES) {
@@ -418,10 +446,11 @@ describe('ProjectView · navegación solo por IDs duraderos', () => {
     expect(Object.values(cb).every((f) => f.mock.calls.length === 0)).toBe(true);
   });
 
-  it('sin callbacks no hay botones de navegación (solo el filtro)', () => {
+  it('sin callbacks no hay botones de navegación (solo el filtro y «Autonomía…», que no navega)', () => {
     view();
+    // LXO-210: «Autonomía…» abre el editor de policy; no navega a ningún sitio y no consulta nada hasta pulsarlo.
     const buttons = screen.queryAllByRole('button', { hidden: true });
-    expect(buttons.length).toBe(0);
+    expect(buttons.map((b) => b.textContent)).toEqual(['Autonomía…']);
     expect(screen.getAllByRole('radio')).toHaveLength(3);
   });
 
@@ -651,9 +680,11 @@ describe('ProjectView · solo lectura', () => {
 
   it('los únicos controles interactivos sin callbacks son los tres radios del filtro', () => {
     const { container } = view();
-    const interactive = container.querySelectorAll('button, [tabindex]');
-    expect([...interactive].every((el) => el.getAttribute('role') === 'radio')).toBe(true);
+    // LXO-210: además, el botón «Autonomía…» (abre el editor de policy; no navega).
+    const interactive = [...container.querySelectorAll('button, [tabindex]')].filter((el) => el.getAttribute('data-testid') !== 'autonomy-open');
+    expect(interactive.every((el) => el.getAttribute('role') === 'radio')).toBe(true);
     expect(interactive).toHaveLength(3);
+    expect(container.querySelectorAll('[data-testid="autonomy-open"]')).toHaveLength(1);
   });
 
   it('el filtro es estado de vista: no llama a ningún callback de dominio', () => {
@@ -808,11 +839,16 @@ describe('ProjectView · inventario de recursos (LXO-101, DTO de Core)', () => {
     expect(inside.getAllByTestId('resinv-row')).toHaveLength(5);
   });
 
-  it('solo lectura: sin controles de mutación, enlaces ni botones nuevos, y sin llamar a callbacks de dominio', () => {
+  it('el inventario sigue siendo de lectura: sin enlaces ni campos, solo «Gestionar…» y «Adoptar…» (LXO-157) y sin llamar a callbacks de dominio', () => {
     const cb = { onOpenTask: vi.fn(), onOpenAttempt: vi.fn(), onOpenAttention: vi.fn(), onOpenResource: vi.fn() };
     const { container } = view({ resourceInventory: INV }, cb);
     const inv = container.querySelector('[data-testid="resinv"]');
-    expect(inv.querySelectorAll('button, a, input, textarea, form, [role="button"]')).toHaveLength(0);
+    // Lo único accionable es «Gestionar…» (abre el panel de una Task propietaria) y «Adoptar…» (abre el de un worktree externo sin dueño): ninguna
+    // mutación se pide sin confirmarla ahí.
+    const labels = [...inv.querySelectorAll('button, [role="button"]')].map((b) => b.textContent);
+    expect(labels.length).toBeGreaterThan(0);
+    expect(labels.filter((l) => !['Gestionar…', 'Adoptar…'].includes(l))).toEqual([]);
+    expect(inv.querySelectorAll('a, input, textarea, form')).toHaveLength(0);
     expect(inv.querySelectorAll('select')).toHaveLength(4);
     const MUTATION = /(crear|lanzar|ejecutar|reintentar|cancelar|detener|eliminar|borrar|limpiar|cleanup|adoptar|adopt|importar|integrar|aprobar|rechazar|guardar|enviar|create|launch|run|retry|delete|remove|clean|merge|approve|reject|save|submit)/i;
     const names = [...inv.querySelectorAll('select, option')].map((el) => el.textContent);

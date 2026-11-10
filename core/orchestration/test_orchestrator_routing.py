@@ -176,3 +176,40 @@ def test_estado_nodos_expone_agent_version():
         assert versiones == {"a": "3.1.0", "b": None}
     finally:
         orq.detener()
+
+
+def test_afinidad_vuelve_al_mismo_nodo_mientras_sea_razonable(monkeypatch):
+    from core.orchestration import orchestrator as mod
+    orq = _orq(a=_estado_nodo("a", ["qwen3:4b"], score=60.0), b=_estado_nodo("b", ["qwen3:4b"], score=50.0))
+    try:
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "a"
+        # b mejora un poco: la conversación se queda en a, donde está su caché.
+        orq._estado["b"]["score"] = 80.0
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "a"
+        # Una conversación nueva va al mejor.
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:2")["id"] == "b"
+        # a va mucho peor que el mejor: se cambia (y se recuerda el nuevo).
+        orq._estado["a"]["score"] = 40.0
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "b"
+        orq._estado["a"]["score"] = 95.0
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "b"
+        # a se cae: la afinidad no lo resucita.
+        orq._estado["b"]["online"] = False
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "a"
+        # Caducada (el modelo ya se habría descargado): vuelve a elegir el mejor.
+        orq._estado["b"].update(online=True, score=99.0)
+        t = mod.time.time() + mod.AFINIDAD_TTL + 1
+        monkeypatch.setattr(mod.time, "time", lambda: t)
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "b"
+    finally:
+        orq.detener()
+
+
+def test_afinidad_es_por_modelo():
+    orq = _orq(a=_estado_nodo("a", ["qwen3:4b"], score=60.0),
+               b=_estado_nodo("b", ["qwen3:4b", "gemma3:4b"], score=50.0))
+    try:
+        assert orq.best_node_for_model("qwen3:4b", afinidad="conv:1")["id"] == "a"
+        assert orq.best_node_for_model("gemma3:4b", afinidad="conv:1")["id"] == "b"
+    finally:
+        orq.detener()

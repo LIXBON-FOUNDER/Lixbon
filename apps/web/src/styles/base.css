@@ -125,47 +125,61 @@
 :root {
   color-scheme: dark;
 
-  --surface-0: #0B0B0A; /* fondo de la aplicación */
-  --surface-1: #131312; /* tarjeta, barra lateral */
-  --surface-2: #181817; /* fila de tabla */
-  --surface-3: #1E1E1C; /* bloque, campo, botón secundario */
-  --surface-4: #262624; /* activo */
-  --surface-5: #30302D; /* encima (hover) */
+  --surface-0: #0E0E0E; /* fondo de la aplicación */
+  --surface-1: #161616; /* tarjeta, barra lateral */
+  --surface-2: #1B1B1B; /* fila de tabla */
+  --surface-3: #222222; /* bloque, campo, botón secundario */
+  --surface-4: #2A2A2A; /* activo */
+  --surface-5: #343434; /* encima (hover) */
 
   --bg: var(--surface-0);
   --bg-sidebar: var(--surface-1);
   --bg-card: var(--surface-1);
   /* Tarjeta elevada: un poco más clara que el fondo y con sombra suave. */
-  --card-elevada: #151514;
+  --card-elevada: #1A1A1A;
   --sombra-elevada: 0 1px 2px rgba(0, 0, 0, 0.5), 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+  /* Paneles de la app (barra lateral, chat, archivo): flotan sobre el lienzo,
+     un tono por encima y con una sombra corta que los despega. */
+  --lienzo: #0E0E0E;
+  --panel: #161616;
+  /* Sombra corta: una larga cruzaba el hueco de 10px y oscurecía el borde
+     del panel vecino (la barra lateral salía en dos tonos). */
+  --sombra-panel: 0 1px 2px rgba(0, 0, 0, 0.4);
   --bg-row: var(--surface-2);
   --bg-secondary: var(--surface-3);
   --bg-input: var(--surface-3);
   --bg-active: var(--surface-4);
   --bg-hover: var(--surface-5);
 
-  --ink: #F6EEDC;           /* principal */
-  --ink-rgb: 246, 238, 220; /* para alphas: hover, tracks, rejillas… */
-  --ink-title: #F6EEDC;     /* título de tarjeta */
-  --ink-body: #E4DCCB;      /* cuerpo largo */
-  --ink-soft: #CFC6B3;      /* secundario */
-  --ink-muted: #A59B86;     /* apagado */
-  --ink-label: #A59B86;     /* etiqueta en versalitas */
-  --ink-faint: #8A8170;     /* al margen */
-  --ink-disabled: #5A5244;
+  --ink: #FFFFFF;           /* principal */
+  --ink-rgb: 255, 255, 255; /* para alphas: hover, tracks, rejillas… */
+  --ink-title: #FFFFFF;     /* título de tarjeta */
+  --ink-body: #EDEDED;      /* cuerpo largo */
+  --ink-soft: #D4D4D4;      /* secundario */
+  --ink-muted: #A3A3A3;     /* apagado */
+  --ink-label: #A3A3A3;     /* etiqueta en versalitas */
+  --ink-faint: #9A9A9A;     /* al margen: legible aun en 12px sobre un panel */
+  --ink-disabled: #5C5C5C;
 
   /* Sin bordes en ninguna parte. Los dos tokens quedan transparentes para
      que ninguna regla heredada vuelva a dibujar una línea. */
   --border: transparent;
   --border-soft: transparent;
+  /* Línea fina para separar información (filas, listas, pie). */
+  --linea: rgba(255, 255, 255, 0.08);
 
   /* Acento y estado. El acento se reserva para el estado, no decora. */
   --accent: #B4C64E;
   --accent-deep: #9AAB3E;
   --accent-soft: rgba(180, 198, 78, 0.16);
-  --on-accent: #1F1B14;
-  --ok: #8FAE4A;
-  --ok-soft: rgba(143, 174, 74, 0.16);
+  --on-accent: #111111;
+  /* Estados: cada color significa siempre lo mismo. Verde = hecho, azul = en
+     curso, ámbar = te necesita, rojo = error. El oliva es la marca y lo
+     activo (plan, «On»), no un estado: por eso «hecho» ya no es oliva. */
+  --ok: #5DBB7C;
+  --ok-soft: rgba(93, 187, 124, 0.15);
+  --info: #6FA8F5;
+  --info-soft: rgba(111, 168, 245, 0.15);
   --warn: #D99A3C;
   --warn-soft: rgba(217, 154, 60, 0.14);
   --danger: #E0683A;
@@ -173,39 +187,55 @@
   --danger-soft: rgba(224, 104, 58, 0.14);
 
   /* Invertido: CTA principal, botón de envío, avatar. */
-  --primary: #F6EEDC;
-  --on-primary: #1F1B14;
+  --primary: #FFFFFF;
+  --on-primary: #0E0E0E;
 
-  --code-bg: #070707;
-  --code-ink: #E4DCCB;
-  --code-inline: #C8D872;
+  --code-bg: #0A0A0A;
+  --code-ink: #EDEDED;
+  --code-inline: #EDEDED; /* el código en línea ya se distingue por su fondo */
   --scrim: rgba(0, 0, 0, 0.66);
   --shadow-rgb: 0, 0, 0;
-  --sombra-menu: 0 0 0 1px #30302D, 0 24px 48px rgba(0, 0, 0, 0.5);
+  --sombra-menu: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 16px 40px rgba(0, 0, 0, 0.55);
 
-  --field: #1E1E1C;
-  --field-focus: #262624;
+  --field: #222222;
+  --field-focus: #2A2A2A;
   --field-error: #2E1A12;
-  --field-disabled: #131312;
+  --field-disabled: #161616;
 
-  /* La voz de founder: Fraunces en titulares, Source Serif para leer,
-     Instrument Sans para la interfaz. */
+  /* Tipografías propias (@lixbon/fonts, en shared/fonts): Lixbon Brand Sans
+     para la interfaz y todo lo que se lee de corrido (también el chat), y
+     Lixbon Brand Serif solo en titulares. --font-brand sigue en Fraunces
+     porque es la letra del logotipo, no un texto. */
   --font-brand: 'Fraunces', 'Iowan Old Style', Georgia, serif;
-  --font-ui: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Lixbon Brand Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Lixbon Brand Serif', 'Iowan Old Style', Georgia, serif;
   --font-sub: var(--font-ui);
-  --font-text: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+  --font-text: var(--font-ui);
+  /* Escala de la interfaz (sans). 12 meta · 13 secundario · 14 interfaz ·
+     15 texto del chat · 17 título de modal o panel · 20 sección · 26 página.
+     Pesos: 400 texto, 500 títulos/etiquetas/botones; 600 solo negritas del
+     Markdown. La serifa (--font-display) solo en titulares de marca. */
+  --fs-meta: 12px;
+  --fs-sec: 13px;
+  --fs-ui: 14px;
+  --fs-texto: 15px;
+  --fs-titulo: 17px;
+  --fs-seccion: 20px;
+  --fs-pagina: 26px;
+  --peso-texto: 400;
+  --peso-titulo: 500;
   --display-peso: 400;
-  --display-tracking: -0.03em;
+  --display-tracking: -0.015em;  /* Lixbon Brand Serif ya viene ajustada */
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
 
-  --radius: 12px;
-  --radius-box: 12px;
-  --radius-pill: 12px;
-  --radius-chip: 12px;
-  --radius-round: 12px;
+  --radius: 8px;
+  --radius-box: 8px;
+  --radius-pill: 8px;
+  --radius-chip: 6px;
+  --radius-round: 8px;
+  --radius-btn: 6px;
 
-  --primary-hover: #FFFFFF;
+  --primary-hover: #E6E6E6;
 
   --sidebar-w: 280px;
   --shell-gap: 12px;
@@ -221,6 +251,7 @@
 /* Tema claro: el papel de founder. Se activa con data-theme="light" en
    <html> (hooks/useTema.js). */
 :root[data-theme="light"] {
+  --linea: rgba(31, 27, 20, 0.12);
   color-scheme: light;
 
   --surface-0: #F2EDE2;
@@ -231,6 +262,9 @@
   --surface-5: #D8D0BC;
   --card-elevada: #FBF8F1;
   --sombra-elevada: 0 1px 2px rgba(31, 27, 20, 0.05), 0 18px 40px -18px rgba(31, 27, 20, 0.18);
+  --lienzo: #EEE8DB;
+  --panel: #FBF8F1;
+  --sombra-panel: 0 1px 2px rgba(31, 27, 20, 0.08);
 
   --ink: #1F1B14;
   --ink-rgb: 31, 27, 20;
@@ -239,15 +273,17 @@
   --ink-soft: #5A5244;
   --ink-muted: #6B6353;
   --ink-label: #5A5244;
-  --ink-faint: #8A8170;
+  --ink-faint: #776E5E;
   --ink-disabled: #B5AC98;
 
   --accent: #5E6B1E;
   --accent-deep: #4D5818;
   --accent-soft: rgba(180, 198, 78, 0.32);
   --on-accent: #F2EDE2;
-  --ok: #4D5C12;
-  --ok-soft: rgba(94, 107, 30, 0.14);
+  --ok: #1E7A43;
+  --ok-soft: rgba(30, 122, 67, 0.12);
+  --info: #2563C9;
+  --info-soft: rgba(37, 99, 201, 0.11);
   --warn: #A85D0A;
   --warn-soft: rgba(168, 93, 10, 0.12);
   --danger: #9A3412;
@@ -260,7 +296,7 @@
 
   --code-bg: var(--surface-3);
   --code-ink: var(--ink-body);
-  --code-inline: #5E6B1E;
+  --code-inline: #2B261C;
   --scrim: rgba(31, 27, 20, 0.4);
   --sombra-menu: 0 0 0 1px #D8D0BC, 0 24px 48px rgba(31, 27, 20, 0.14);
 
@@ -374,8 +410,10 @@ body::-webkit-scrollbar,
   display: none;
 }
 
+/* Foco de teclado: un anillo neutro y tenue, no el oliva (que es la marca). */
+:root { --anillo-foco: rgba(var(--ink-rgb), 0.28); }
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 1.5px solid var(--anillo-foco);
   outline-offset: 2px;
 }
 
@@ -411,12 +449,12 @@ body::-webkit-scrollbar,
   width: 86px;
   height: 11px;
   margin-left: 20px;
-  border-radius: 12px 12px 0 0;
+  border-radius: 8px 8px 0 0;
   background: var(--tab-fill, var(--surface-3));
 }
 
 .eyebrow {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -854,17 +892,19 @@ body::-webkit-scrollbar,
   font-weight: 500;
 }
 
-.verify-bar__btn {
+/* .pill-btn.… gana al fondo gris que motion.css da a los .pill-btn--outline. */
+.pill-btn.verify-bar__btn {
   height: 28px;
   padding: 0 12px;
   border-radius: var(--radius);
   background: var(--warn);
   color: var(--on-primary);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
 }
+.pill-btn.verify-bar__btn:hover:not(:disabled) { background: var(--warn); filter: brightness(1.08); }
 
-.verify-bar.is-error .verify-bar__btn {
+.verify-bar.is-error .pill-btn.verify-bar__btn {
   background: var(--danger);
   color: #FBEEEB;
 }
@@ -875,3 +915,13 @@ body::-webkit-scrollbar,
     padding: 10px 14px;
   }
 }
+
+/* Dentro de los paneles de la app (#161616) una tarjeta del mismo tono no se
+   distinguía: lo que va encima de un panel sube dos tonos. En las páginas
+   públicas el fondo es el lienzo y --bg-card sigue un tono por encima. */
+.chat-main, .panel-archivo { --bg-card: var(--surface-3); }
+
+/* Iconos: trazo 1.75 en la web. A 2 pesaban más que la letra de al lado
+   (Lixbon Brand Sans es estrecha); a 1.5 no se veían. El icono toma siempre
+   el color de su texto (currentColor): nada de iconos en acento por adorno. */
+:root .ico { stroke-width: 1.75; }

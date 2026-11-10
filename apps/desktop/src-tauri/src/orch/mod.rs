@@ -22,6 +22,7 @@ mod model_read;
 mod model_read_tests;
 #[cfg(test)]
 mod tasks_read_tests;
+mod resource_adopt;
 mod resource_git;
 mod resource_inventory;
 mod attention_action;
@@ -74,12 +75,76 @@ mod hardening_tests;
 mod projects;
 mod project_ops;
 mod task_ops;
+mod approval_expiry;
+mod dispatch;
+mod worktree_provision;
+mod run_pump;
+mod adapter_launcher;
+mod initial_approval_rpc;
+mod attempt_retry_rpc;
+mod fork_runtime;
+mod compare_read;
+mod proof_pack;
+mod integration_attempt;
+mod resource_actions;
+mod attempt_resume_rpc;
+mod queue_runtime;
+mod queue_rpc;
+mod policy;
+mod race_runtime;
+#[cfg(test)]
+mod policy_tests;
+mod live_run;
+mod steer_commands;
+mod steer_runtime;
+#[cfg(test)]
+mod initial_approval_tests;
+#[cfg(test)]
+mod dispatch_tests;
+#[cfg(test)]
+mod worktree_provision_tests;
+#[cfg(test)]
+mod adapter_launcher_tests;
+#[cfg(test)]
+mod run_pump_tests;
+#[cfg(test)]
+mod dispatch_boot_tests;
+#[cfg(test)]
+mod attempt_e2e_tests;
+#[cfg(test)]
+mod steer_e2e_tests;
+#[cfg(test)]
+mod fork_e2e_tests;
+#[cfg(test)]
+mod race_e2e_tests;
+#[cfg(test)]
+mod compare_e2e_tests;
+#[cfg(test)]
+mod proof_pack_e2e_tests;
+#[cfg(test)]
+mod integration_attempt_e2e_tests;
+#[cfg(test)]
+mod resource_actions_e2e_tests;
+#[cfg(test)]
+mod resource_adopt_tests;
+#[cfg(test)]
+mod real_provider_tests;
+#[cfg(test)]
+mod initial_approval_rpc_tests;
+#[cfg(test)]
+mod task_create_attempt_tests;
+mod task_create_api;
+#[cfg(test)]
+mod task_create_rpc_tests;
 mod attempt_ops;
 #[cfg(test)]
 mod attempt_ops_tests;
 #[cfg(test)]
 mod attempt_runtime_ops_tests;
 mod continuity;
+mod attempt_commands;
+#[cfg(test)]
+mod attempt_commands_tests;
 mod provider_registry;
 mod context_preview;
 mod usage_read;
@@ -97,6 +162,11 @@ mod continuity_tests;
 mod worktree_ops;
 #[cfg(test)]
 mod worktree_ops_tests;
+// Pending Queue de un Attempt (LXO-143): instrucciones enviadas mientras está ocupado.
+mod queue_commands;
+mod queue_rules;
+#[cfg(test)]
+mod queue_commands_tests;
 mod agentic_cut;
 mod startup_cut;
 #[cfg(test)]
@@ -247,6 +317,13 @@ pub struct Core {
     provider_registry: Arc<provider_registry::LiveRegistry>,
     /// El uso y los límites de cada proveedor (LXO-206): se consulta en segundo plano y la lectura no espera a ninguna CLI.
     usage_live: Arc<usage_read::LiveUsage>,
+    /// El lanzador de los primeros Attempts (LXO-141). Sin uno instalado, `task_create` no acepta `attempt`: nada podría
+    /// ejecutarlo. Producción no instala ninguno hasta que exista el `Launcher` real (worktree + adapter).
+    launcher: Mutex<Option<Arc<dyn dispatch::Launcher>>>,
+    /// Las ejecuciones por adapter que están vivas, por Task (LXO-246): cómo cancelarlas y saber que su proceso murió.
+    adapter_runs: Mutex<HashMap<String, run_pump::RunControl>>,
+    /// Steer y Stop & Send (LXO-144): las peticiones ya atendidas (idempotencia) y cuánto se espera a que un stop se confirme.
+    instructions: steer_runtime::InstructionState,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -289,6 +366,9 @@ impl Default for Orch {
             ttl_ms: spawn_approval::ttl_ms(),
             usage_live: usage_read::LiveUsage::over(&provider_registry),
             provider_registry,
+            launcher: Mutex::new(None),
+            adapter_runs: Mutex::new(HashMap::new()),
+            instructions: steer_runtime::InstructionState::default(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

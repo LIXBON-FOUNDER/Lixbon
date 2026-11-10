@@ -120,7 +120,7 @@ impl<'a> CutView<'a> {
                 Ok((o, r.get::<_, String>(6)?))
             },
         )?;
-        let (aid, session_id, core) = c.query_row(
+        let current = c.query_row(
             "SELECT id, worktree_id, provider_session_id, provider, model, effort, role, profile, cwd, checkout_branch, status, summary, files, external,
                     integrated, ack_unverified, requested_argv, policy, report_nonce, delivered, delivery_channel, model_effective, model_requested,
                     model_mismatch, model_mismatch_reason, plan_mode, approval_deadline, failure_reason, model_source, started_at, stream_json,
@@ -145,9 +145,25 @@ impl<'a> CutView<'a> {
                 let core = r.get::<_, String>(31)? == "core";
                 let started = if core { r.get::<_, Option<i64>>(32)? } else { r.get::<_, Option<i64>>(29)? };
                 o.insert("attempt_started".into(), json!(started));
+                // Un Attempt adoptado (024): el documento lo recuerda para que su reconstrucción coincida con el estado.
+                o.insert("adopted".into(), json!(super::attempts::attempt_adopted_at_in(c, &r.get::<_, String>(0)?).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?.is_some()));
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(2)?, core))
             },
-        )?;
+        ).optional()?;
+        // Una Task creada con `task.create` sin Attempt (`not_started`) no tiene fila en `attempts`: se proyecta con los
+        // valores por defecto que tiene en el documento, sin fabricar ejecución.
+        let (aid, session_id, core) = match current {
+            Some(found) => found,
+            None => {
+                o.insert("agent".into(), json!(""));
+                o.insert("cwd".into(), json!(repo));
+                o.insert("branch".into(), Value::Null);
+                o.insert("base".into(), Value::Null);
+                o.insert("worktree".into(), Value::Null);
+                o.insert("status".into(), json!("not_started"));
+                (String::new(), None, false)
+            }
+        };
         // El Worktree es de la Task: el último que se registró, aunque lo registrara un Attempt anterior.
         let wt = c
             .query_row(

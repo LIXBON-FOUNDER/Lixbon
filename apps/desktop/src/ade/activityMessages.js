@@ -44,6 +44,10 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.project.location_added',
   'activity.project.archived',
   'activity.project.restored',
+  'activity.policy.changed',
+  'activity.race.requested',
+  'activity.race.candidate_recorded',
+  'activity.race.cancelled',
   'activity.project.relocated',
   'activity.spawn.requested',
   'activity.spawn.approved',
@@ -64,6 +68,9 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.task.restored',
   'activity.attempt.requested',
   'activity.attempt.continued',
+  'activity.attempt.retried',
+  'activity.attempt.forked',
+  'activity.attempt.adopted',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -75,6 +82,13 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.resumed',
   'activity.attempt.exited',
   'activity.attempt.integrated',
+  'activity.attempt.queued',
+  'activity.attempt.queue_delivered',
+  'activity.attempt.queue_cancelled',
+  'activity.attempt.queue_failed',
+  'activity.attempt.instruction_requested',
+  'activity.attempt.instruction_result',
+  'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -157,6 +171,29 @@ const CONTINUITY_REASONS = {
   session_unavailable: 'no había una sesión que reanudar',
   session_expired: 'la sesión caducó',
 };
+const FORK_STRATEGIES = new Set(['clean', 'context_package']);
+// Race (LXO-215): con qué contexto, el desenlace de cada candidato y lo que se canceló.
+const RACE_OUTCOMES = new Set(['launched', 'failed']);
+const RACE_SCOPES = new Set(['one', 'remaining']);
+// Cambio de policy (LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
+const POLICY_SCOPES = new Set(['global', 'project', 'attempt']);
+const POLICY_CATEGORIES = {
+  start: 'arrancar', answer: 'responder', queue: 'encolar', steer: 'corregir', stop: 'detener', fork: 'bifurcar', review: 'revisar',
+  integrate: 'integrar', cleanup: 'limpiar', provider_permissions: 'permisos del proveedor',
+};
+const POLICY_LEVELS = { allow: 'permitir', confirm: 'confirmar', elevated: 'elevado', deny: 'denegar' };
+const POLICY_DIRECTIONS = { tighten: 'más restrictiva', loosen: 'menos restrictiva', same: 'mismo nivel efectivo', reset: 'vuelve a heredar' };
+const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
+const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
+const QUEUE_FAILURES = {
+  unsupported: 'el proveedor no admite entregarla',
+  environment_blocked: 'el entorno del proveedor está bloqueado',
+  adapter_unavailable: 'el proveedor no estaba disponible',
+  adapter_error: 'el proveedor devolvió un error',
+  attempt_ended: 'el intento ya había terminado',
+  interrupted: 'la entrega se interrumpió y no se sabe si llegó',
+};
+const RETRY_OVERRIDES = { provider: 'otro proveedor', model: 'otro modelo', effort: 'otro esfuerzo', profile: 'otro perfil de permisos' };
 const SESSION_CLOSED_FROM = new Set(['open', 'idle']);
 const WORKTREE_REMOVAL = { integrated: 'integrado', discarded: 'descartado', gone: 'ya no existía' };
 const ARTIFACT_KINDS = {
@@ -287,6 +324,8 @@ function formatAttempt(key, args) {
       return `Empezó el ${attempt}.`;
     case 'activity.attempt.integrated':
       return `Se integró el trabajo del ${attempt}.`;
+    case 'activity.attempt.adopted':
+      return `Se adoptó trabajo externo como el ${attempt}.`;
     case 'activity.attempt.rejected': {
       const cause = requiredCode(args, 'cause', STOP_CAUSES);
       return cause ? `Se rechazó el ${attempt}${cause === 'run_closed' ? ' al cerrarse la ejecución' : ''}.` : null;
@@ -443,6 +482,74 @@ const FORMATTERS = {
     const reason = requiredCode(args, 'reason', new Set(Object.keys(CONTINUITY_REASONS)));
     return reason ? `El ${attempt} continúa el intento ${fromN} con un paquete de contexto (${CONTINUITY_REASONS[reason]}).` : null;
   },
+  'activity.attempt.retried': (args) => {
+    const attempt = attemptOf(args);
+    const fromN = requiredNumber(args, 'from_n');
+    if (!requiredArguments(attempt, fromN)) return null;
+    // Ausente: se heredó todo. Presente: una lista no vacía de nombres cerrados.
+    const overrides = args.overrides;
+    if (overrides != null && (!Array.isArray(overrides) || !overrides.length
+      || !overrides.every((o) => typeof o === 'string' && Object.hasOwn(RETRY_OVERRIDES, o)))) return null;
+    return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
+  },
+  // Race (LXO-215). Nunca el encargo, el paquete ni texto libre.
+  'activity.race.requested': (args) => {
+    const raceId = requiredText(args, 'race_id');
+    const source = requiredText(args, 'source');
+    const candidates = requiredNumber(args, 'candidates');
+    const strategy = requiredCode(args, 'strategy', FORK_STRATEGIES);
+    if (!requiredArguments(raceId, source, candidates, strategy)) return null;
+    return `Se pidió un Race de ${candidates} candidatos desde el intento ${source}${strategy === 'context_package' ? ' con un paquete de contexto' : ''}.`;
+  },
+  'activity.race.candidate_recorded': (args) => {
+    const index = requiredNumber(args, 'index');
+    const provider = requiredText(args, 'provider');
+    const outcome = requiredCode(args, 'outcome', RACE_OUTCOMES);
+    if (!requiredArguments(index, provider, outcome)) return null;
+    if (outcome === 'launched') {
+      const attempt = requiredText(args, 'attempt_id');
+      return requiredArguments(attempt) ? `Candidato ${index + 1} del Race: se lanzó ${attempt} con ${provider}.` : null;
+    }
+    const code = requiredText(args, 'code');
+    return requiredArguments(code) ? `Candidato ${index + 1} del Race: no se pudo lanzar con ${provider} (${code}).` : null;
+  },
+  'activity.race.cancelled': (args) => {
+    const scope = requiredCode(args, 'scope', RACE_SCOPES);
+    const stopped = requiredNumber(args, 'stopped');
+    const rejected = requiredNumber(args, 'rejected');
+    const failed = requiredNumber(args, 'failed');
+    if (!requiredArguments(scope, stopped, rejected, failed)) return null;
+    if (scope === 'one') {
+      const attempt = requiredText(args, 'attempt_id');
+      return requiredArguments(attempt) ? `Se canceló el candidato ${attempt} del Race.` : null;
+    }
+    return `Se canceló lo que quedaba del Race: ${stopped} detenidos, ${rejected} rechazados${failed > 0 ? `, ${failed} sin poder detenerse` : ''}.`;
+  },
+  // Cambio de policy (LXO-209). Ausente `from`/`to`: el ámbito heredaba o vuelve a heredar.
+  'activity.policy.changed': (args) => {
+    const scope = requiredCode(args, 'scope', POLICY_SCOPES);
+    const scopeId = scope === 'global' ? '' : requiredText(args, 'scope_id');
+    const category = typeof args.category === 'string' && Object.hasOwn(POLICY_CATEGORIES, args.category) ? POLICY_CATEGORIES[args.category] : null;
+    const level = (key) => {
+      if (args[key] === undefined || args[key] === null) return 'heredado';
+      return typeof args[key] === 'string' && Object.hasOwn(POLICY_LEVELS, args[key]) ? POLICY_LEVELS[args[key]] : null;
+    };
+    const [from, to] = [level('from'), level('to')];
+    const direction = typeof args.direction === 'string' && Object.hasOwn(POLICY_DIRECTIONS, args.direction) ? POLICY_DIRECTIONS[args.direction] : null;
+    const revision = requiredNumber(args, 'revision');
+    if (!requiredArguments(scope, scopeId, category, from, to, direction, revision)) return null;
+    const place = scope === 'global' ? 'el ámbito global' : `${scope === 'project' ? 'el proyecto' : 'el intento'} ${scopeId}`;
+    return `Policy de «${category}» en ${place}: de ${from} a ${to} (${direction}).`;
+  },
+  // Fork (LXO-145): el Attempt nuevo y de dónde salió. Nunca el encargo ni el contenido del paquete.
+  'activity.attempt.forked': (args) => {
+    const attempt = attemptOf(args);
+    const sourceTask = requiredText(args, 'source_task');
+    const sourceN = requiredNumber(args, 'source_n');
+    const strategy = requiredCode(args, 'strategy', FORK_STRATEGIES);
+    if (!requiredArguments(attempt, sourceTask, sourceN, strategy)) return null;
+    return `El ${attempt} se bifurcó del intento ${sourceN} de la tarea ${sourceTask}${strategy === 'context_package' ? ' con un paquete de contexto' : ''}.`;
+  },
   'activity.attempt.requested': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');
@@ -472,6 +579,66 @@ const FORMATTERS = {
   'activity.attempt.resumed': formatAttempt,
   'activity.attempt.exited': formatAttempt,
   'activity.attempt.integrated': formatAttempt,
+  'activity.attempt.adopted': formatAttempt,
+  // Pending Queue (LXO-143): nunca el texto de la instrucción, solo el hecho.
+  'activity.attempt.queued': (args) => {
+    const attempt = attemptOf(args);
+    const position = requiredNumber(args, 'position');
+    const attachments = requiredNumber(args, 'attachments');
+    if (!requiredArguments(attempt, position, attachments)) return null;
+    return `Se encoló una instrucción para el ${attempt}${optionalDetails([
+      `posición ${position}`,
+      attachments > 0 ? plural(attachments, 'adjunto', 'adjuntos') : null,
+    ])}.`;
+  },
+  'activity.attempt.queue_delivered': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se entregó al ${attempt} la instrucción encolada.` : null;
+  },
+  'activity.attempt.queue_cancelled': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `Se canceló una instrucción encolada para el ${attempt}.` : null;
+  },
+  // Steer y Stop & Send (LXO-144): nunca el texto de la instrucción, solo el hecho y cómo acabó.
+  'activity.attempt.instruction_requested': (args) => {
+    const attempt = attemptOf(args);
+    const mode = requiredCode(args, 'mode', INSTRUCTION_MODES);
+    if (!requiredArguments(attempt, mode)) return null;
+    return mode === 'steer'
+      ? `Se pidió inyectar una instrucción en el turno en curso del ${attempt}.`
+      : `Se pidió detener el turno en curso del ${attempt} y enviarle una instrucción.`;
+  },
+  'activity.attempt.instruction_result': (args) => {
+    const attempt = attemptOf(args);
+    const mode = requiredCode(args, 'mode', INSTRUCTION_MODES);
+    const outcome = requiredCode(args, 'outcome', INSTRUCTION_OUTCOMES);
+    if (!requiredArguments(attempt, mode, outcome)) return null;
+    // `reason` es opcional, pero si viene tiene que ser uno de los motivos cerrados.
+    const reason = args.reason === undefined ? null : requiredCode(args, 'reason', new Set(Object.keys(QUEUE_FAILURES)));
+    if (args.reason !== undefined && !reason) return null;
+    const detail = reason ? ` (${QUEUE_FAILURES[reason]})` : '';
+    if (outcome === 'delivered') {
+      return mode === 'steer'
+        ? `Se inyectó la instrucción en el turno en curso del ${attempt}.`
+        : `Se detuvo el turno en curso del ${attempt} y se le envió la instrucción.`;
+    }
+    if (outcome === 'failed') {
+      return mode === 'steer'
+        ? `El proveedor no aceptó la instrucción para el turno en curso del ${attempt}${detail}.`
+        : `Se detuvo el turno en curso del ${attempt}, pero la instrucción no llegó${detail}.`;
+    }
+    if (outcome === 'stop_failed') return `No se pudo detener el turno en curso del ${attempt}: no se envió la instrucción${detail}.`;
+    return `El proveedor no confirmó a tiempo que el turno en curso del ${attempt} se hubiera detenido: no se envió la instrucción.`;
+  },
+  'activity.attempt.dispatch_ambiguous': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `No se sabe si el proveedor llegó a lanzarse para el ${attempt}: no se relanzará.` : null;
+  },
+  'activity.attempt.queue_failed': (args) => {
+    const attempt = attemptOf(args);
+    const reason = requiredCode(args, 'reason', new Set(Object.keys(QUEUE_FAILURES)));
+    return requiredArguments(attempt, reason) ? `No se pudo entregar una instrucción encolada al ${attempt}: ${QUEUE_FAILURES[reason]}.` : null;
+  },
   'activity.provider_session.opened': (args) => {
     const attempt = attemptOf(args);
     const provider = requiredText(args, 'provider');

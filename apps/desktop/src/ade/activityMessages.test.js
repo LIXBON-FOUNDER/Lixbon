@@ -48,6 +48,10 @@ const EXPECTED_V1_KEYS = [
   'activity.project.location_added',
   'activity.project.archived',
   'activity.project.restored',
+  'activity.policy.changed',
+  'activity.race.requested',
+  'activity.race.candidate_recorded',
+  'activity.race.cancelled',
   'activity.project.relocated',
   'activity.spawn.requested',
   'activity.spawn.approved',
@@ -67,6 +71,9 @@ const EXPECTED_V1_KEYS = [
   'activity.task.restored',
   'activity.attempt.requested',
   'activity.attempt.continued',
+  'activity.attempt.retried',
+  'activity.attempt.forked',
+  'activity.attempt.adopted',
   'activity.attempt.approved',
   'activity.attempt.rejected',
   'activity.attempt.started',
@@ -78,6 +85,13 @@ const EXPECTED_V1_KEYS = [
   'activity.attempt.resumed',
   'activity.attempt.exited',
   'activity.attempt.integrated',
+  'activity.attempt.queued',
+  'activity.attempt.queue_delivered',
+  'activity.attempt.queue_cancelled',
+  'activity.attempt.queue_failed',
+  'activity.attempt.instruction_requested',
+  'activity.attempt.instruction_result',
+  'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
   'activity.provider_session.resumed',
@@ -107,6 +121,12 @@ const MODEL_ARGS = {
   'activity.task.restored': {},
   'activity.attempt.requested': { task: 'task-1', n: 1, provider: 'codex', external: false, approval_required: true },
   'activity.attempt.continued': { task: 'task-1', n: 2, from_n: 1, strategy: 'native_resume', reason: 'preferred' },
+  'activity.attempt.retried': { task: 'task-1', n: 2, from_n: 1, overrides: ['model'] },
+  'activity.attempt.forked': { task: 'task-2', n: 1, source_task: 'task-1', source_n: 2, strategy: 'clean' },
+  'activity.race.requested': { race_id: 'rc-aaaaaaaaaaaaaaaaaaaa', source: 'task-1-a1', candidates: 3, strategy: 'clean' },
+  'activity.race.candidate_recorded': { index: 0, outcome: 'launched', provider: 'codex', attempt_id: 'task-2-a1' },
+  'activity.race.cancelled': { scope: 'remaining', stopped: 1, rejected: 1, failed: 0 },
+  'activity.policy.changed': { scope: 'project', scope_id: 'project-1', category: 'fork', from: 'allow', to: 'deny', direction: 'tighten', revision: 2 },
   'activity.attempt.approved': { task: 'task-1', n: 1 },
   'activity.attempt.rejected': { task: 'task-1', n: 1, cause: 'cancelled' },
   'activity.attempt.started': { task: 'task-1', n: 1 },
@@ -118,6 +138,14 @@ const MODEL_ARGS = {
   'activity.attempt.resumed': { task: 'task-1', n: 1, from: 'waiting' },
   'activity.attempt.exited': { task: 'task-1', n: 1, from: 'running' },
   'activity.attempt.integrated': { task: 'task-1', n: 1 },
+  'activity.attempt.adopted': { task: 'task-1', n: 1 },
+  'activity.attempt.queued': { task: 'task-1', n: 1, position: 2, attachments: 0 },
+  'activity.attempt.queue_delivered': { task: 'task-1', n: 1 },
+  'activity.attempt.queue_cancelled': { task: 'task-1', n: 1 },
+  'activity.attempt.dispatch_ambiguous': { task: 'task-1', n: 1 },
+  'activity.attempt.queue_failed': { task: 'task-1', n: 1, reason: 'adapter_unavailable' },
+  'activity.attempt.instruction_requested': { task: 'task-1', n: 1, mode: 'steer' },
+  'activity.attempt.instruction_result': { task: 'task-1', n: 1, mode: 'steer', outcome: 'delivered' },
   'activity.provider_session.opened': { task: 'task-1', n: 1, provider: 'claude', resumable: true, bound: true },
   'activity.provider_session.bound': { task: 'task-1', binding: 'stream_json' },
   'activity.provider_session.resumed': { task: 'task-1', n: 2 },
@@ -279,6 +307,24 @@ describe('translateActivityMessage', () => {
     expect(translate('activity.task.updated', { changed: ['otro'] })).toBeNull();
     expect(translate('activity.worktree.created', { task: 'task-1', n: 1, branch: ['x'] })).toBeNull();
     expect(translate('activity.attempt.integrated', { task: 'task-1', n: 3 })).toBe('Se integró el trabajo del intento 3 de la tarea task-1.');
+    expect(translate('activity.attempt.adopted', { task: 'task-1', n: 1 })).toBe('Se adoptó trabajo externo como el intento 1 de la tarea task-1.');
+  });
+
+  it('la Pending Queue (LXO-143) cuenta el hecho sin la instrucción y rechaza códigos fuera de su lista', () => {
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 3, attachments: 0 }))
+      .toBe('Se encoló una instrucción para el intento 2 de la tarea task-1 (posición 3).');
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 2 }))
+      .toBe('Se encoló una instrucción para el intento 2 de la tarea task-1 (posición 1; 2 adjuntos).');
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 1, attachments: 1 })).toContain('1 adjunto)');
+    expect(translate('activity.attempt.queue_delivered', { task: 'task-1', n: 2 })).toBe('Se entregó al intento 2 de la tarea task-1 la instrucción encolada.');
+    expect(translate('activity.attempt.queue_cancelled', { task: 'task-1', n: 2 })).toBe('Se canceló una instrucción encolada para el intento 2 de la tarea task-1.');
+    expect(translate('activity.attempt.dispatch_ambiguous', { task: 'task-1', n: 2 })).toBe('No se sabe si el proveedor llegó a lanzarse para el intento 2 de la tarea task-1: no se relanzará.');
+    for (const reason of ['unsupported', 'environment_blocked', 'adapter_unavailable', 'adapter_error', 'attempt_ended', 'interrupted']) {
+      expect(translate('activity.attempt.queue_failed', { task: 'task-1', n: 2, reason })).toMatch(/^No se pudo entregar una instrucción encolada al intento 2 de la tarea task-1: .+\.$/);
+    }
+    expect(translate('activity.attempt.queue_failed', { task: 'task-1', n: 2, reason: 'otra' })).toBeNull();
+    expect(translate('activity.attempt.queued', { task: 'task-1', n: 2, position: 'x', attachments: 0 })).toBeNull();
+    expect(translate('activity.attempt.queue_delivered', { task: 'task-1' })).toBeNull();
   });
 
   it('formatea estados y argumentos booleanos desde la clave y argumentos contractuales', () => {

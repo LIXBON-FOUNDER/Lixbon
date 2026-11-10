@@ -3,7 +3,7 @@ import { useT } from '../i18n/useT';
 import { paraGuardar, paraWeb } from '../lib/visualsApi';
 import { FUENTES_MARCA, enlazarFuente, pilaDe, primeraFamilia } from '../lib/googleFonts';
 import { Fila, Num, Range, Sec, Seg, SelectorFuente } from './EditorCampos';
-import { IconCheck, IconPencil, IconPlay, IconRedo, IconStop, IconUndo } from './Icons';
+import { IconCheck, IconPencil, IconRedo, IconUndo, Interruptor } from './Icons';
 
 const PALETA = ['#B4C64E', '#8CA038', '#4B5327', '#171717', '#F6F7ED', '#DCD6BC', '#FFFFFF', '#C4553D'];
 const TEMAS = ['lima', 'tinta', 'crema'];
@@ -1038,7 +1038,7 @@ export function PiezaEditor({ html, meta, baseHref, nombre, onSave, onClose, sav
         {isVideo && (
           <div className="pe-tl">
             <button className="vis-tool vis-tool--icono" onClick={play} aria-label={playing ? t('editor.pause') : t('editor.play')} title={playing ? t('editor.pause') : t('editor.play')}>
-              {playing ? <IconStop size={15} /> : <IconPlay size={15} />}
+              <Interruptor tipo="reproducir" on={playing} size={15} />
             </button>
             <input
               type="range" className="pe-range" min="0" max={meta.seconds} step="0.05" value={curT} style={{ '--p': `${(curT / meta.seconds) * 100}%` }}

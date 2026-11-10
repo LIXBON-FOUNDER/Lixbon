@@ -110,3 +110,47 @@ describe('AttemptActivity (LXO-121)', () => {
     expect(screen.getByRole('listitem').querySelector('details')).toBeNull();
   });
 });
+
+describe('AttemptActivity · A7 · tramos de ejecución', () => {
+  const events = [
+    attemptEvent(6, 't3-a2', 'attempt.completed', { task: 't3', n: 2, has_summary: true }, 'success', 1792000000000 + 190_000),
+    attemptEvent(5, 't3-a2', 'attempt.resumed', { task: 't3', n: 2, from: 'waiting' }, 'info', 1792000000000 + 100_000),
+    attemptEvent(4, 't3-a2', 'attempt.waiting', { task: 't3', n: 2, from: 'running' }, 'info', 1792000000000 + 40_000),
+    attemptEvent(3, 't3-a2', 'attempt.started', { task: 't3', n: 2 }, 'info', 1792000000000 + 10_000),
+    attemptEvent(2, 't3-a2', 'attempt.approved', { task: 't3', n: 2 }, 'success', 1792000000000 + 5_000),
+    attemptEvent(1, 't3-a2', 'attempt.requested', { task: 't3', n: 2, provider: 'claude', model: 'haiku', external: false, approval_required: true }, 'info', 1792000000000 + 1_000),
+  ];
+
+  it('agrupa por tramos con su duración, el más nuevo primero, y dice qué no registra el Core', async () => {
+    mount(() => attemptActivityPage(events));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    const groups = screen.getAllByTestId('attempt-activity-group');
+    expect(groups.map((g) => g.getAttribute('data-group-kind'))).toEqual(['run', 'run', 'before']);
+    expect(groups[0].querySelector('h5').textContent).toContain('Ejecución 2');
+    expect(groups[0].querySelector('h5').textContent).toContain('1 min 30 s · Completado');
+    expect(groups[1].querySelector('h5').textContent).toContain('Ejecución 1');
+    expect(groups[1].querySelector('h5').textContent).toContain('30 s · Esperando una respuesta');
+    expect(groups[2].querySelector('h5').textContent).toBe('Solicitud y aprobación');
+    // Los eventos siguen siendo las únicas filas y conservan el orden del más nuevo al más viejo.
+    expect(within(screen.getByTestId('attempt-activity')).getAllByRole('listitem').map((r) => r.getAttribute('data-event-id'))).toEqual(['ev-6', 'ev-5', 'ev-4', 'ev-3', 'ev-2', 'ev-1']);
+    expect(screen.getByTestId('attempt-activity-grouping').textContent).toMatch(/no registra los mensajes ni las herramientas/);
+  });
+
+  it('esperar, reanudar y el resto del ciclo de vida tienen texto propio, no «Evento desconocido»', async () => {
+    mount(() => attemptActivityPage(events));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    const text = screen.getByTestId('attempt-activity').textContent;
+    expect(text).toContain('Esperando una respuesta');
+    expect(text).toContain('Siguió en ejecución');
+    expect(text).not.toContain(COPY.unknownEvent);
+  });
+
+  it('un tramo que sigue en marcha se dice «en curso»', async () => {
+    mount(() => attemptActivityPage(events.slice(3)));
+    render(<AttemptActivity attemptId="t3-a2" coreModel={V1} />);
+    await flush();
+    expect(screen.getAllByTestId('attempt-activity-group')[0].querySelector('h5').textContent).toContain('en curso');
+  });
+});

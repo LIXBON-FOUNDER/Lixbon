@@ -1,0 +1,41 @@
+/* Lixbon Brand Sans. Generado por source/package.py: no editar a mano. */
+@font-face {
+  font-family: 'Lixbon Brand Sans';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('../fonts/sans/LixbonBrandSans-Light.woff2') format('woff2'),
+       url('../fonts/sans/LixbonBrandSans-Light.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/sans/LixbonBrandSans-Regular.woff2') format('woff2'),
+       url('../fonts/sans/LixbonBrandSans-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/sans/LixbonBrandSans-Medium.woff2') format('woff2'),
+       url('../fonts/sans/LixbonBrandSans-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/sans/LixbonBrandSans-SemiBold.woff2') format('woff2'),
+       url('../fonts/sans/LixbonBrandSans-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Lixbon Brand Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/sans/LixbonBrandSans-Bold.woff2') format('woff2'),
+       url('../fonts/sans/LixbonBrandSans-Bold.ttf') format('truetype');
+}

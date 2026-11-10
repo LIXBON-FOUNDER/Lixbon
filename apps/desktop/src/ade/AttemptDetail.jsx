@@ -1,6 +1,18 @@
+import { useEffect, useState } from 'react';
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
+import { AutonomyEditor } from './AutonomyEditor';
+import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
+import { AttemptChanges } from './AttemptChanges';
+import { AttemptContextLine } from './AttemptContextLine';
+import { AttemptIntegration } from './AttemptIntegration';
+import { AttemptLineage } from './AttemptLineage';
+import { AttemptProofPack } from './AttemptProofPack';
+import { AttemptQueue } from './AttemptQueue';
+import { AttemptResume } from './AttemptResume';
+import { AttemptRetry } from './AttemptRetry';
+import { AttemptStop } from './AttemptStop';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
@@ -11,6 +23,9 @@ import { useCoreQuery } from './useCoreQuery';
  * contrato no trae se muestra «no disponible». Rutas y URIs son texto (PathText), nunca enlaces.
  * La sesión del proveedor es opaca: solo id interno, vínculo y si se puede reanudar.
  */
+/** Estados de un intento que todavía puede cambiar solo: se sondea más a menudo. */
+const ACTIVE_ATTEMPT_STATUSES = ['starting', 'running', 'waiting', 'awaiting_terminal_approval'];
+const ACTIVE_POLL_MS = 3000;
 const yesNo = (value) => (value === true ? 'sí' : value === false ? 'no' : COPY.notAvailable);
 const text = (value) => (typeof value === 'string' && value.trim() ? value : COPY.notAvailable);
 
@@ -23,9 +38,14 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
-  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled });
+  // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
+  // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
+  const [fast, setFast] = useState(false);
+  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled, pollMs: fast ? ACTIVE_POLL_MS : undefined });
+  const liveStatus = state.data?.attempt?.status;
+  useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
 
   let body;
@@ -53,6 +73,7 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
+        <AttemptContextLine attempt={attempt} />
         <dl>
           <Row label="Intento"><span className="mono">{attempt.id}</span> · #{attempt.n}</Row>
           <Row label="Task">
@@ -62,13 +83,32 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           <Row label="Proveedor">{[attempt.provider, attempt.model].filter(Boolean).join(' · ') || COPY.notAvailable}{attempt.external ? ' · externo' : ''}</Row>
           <Row label="Rol / perfil / esfuerzo">{[text(attempt.role), text(attempt.profile), text(attempt.effort)].join(' / ')}</Row>
           <Row label="Creado"><When ms={attempt.created_at} /></Row>
-          <Row label="Iniciado"><When ms={attempt.started_at} /></Row>
-          <Row label="Terminado"><When ms={attempt.ended_at} /></Row>
-          <Row label="Duración">{duration === COPY.notAvailable ? COPY.durationUnavailable : duration}</Row>
+          {attempt.adopted ? (
+            <Row label="Origen"><span data-testid="attempt-adopted">Trabajo externo adoptado el <When ms={attempt.adopted_at} />. Lixbon no lo ejecutó: no hay inicio, fin ni duración.</span></Row>
+          ) : (
+            <>
+              <Row label="Iniciado"><When ms={attempt.started_at} /></Row>
+              <Row label="Terminado"><When ms={attempt.ended_at} /></Row>
+              <Row label="Duración">{duration === COPY.notAvailable ? COPY.durationUnavailable : duration}</Row>
+            </>
+          )}
           <Row label="Integrado">{yesNo(attempt.integrated)}</Row>
           {attempt.failure_reason && <Row label="Motivo del fallo">{attempt.failure_reason}</Row>}
           <Row label="Resumen">{text(attempt.summary)}</Row>
         </dl>
+
+        {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
+        {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
+        {/* Detener la ejecución en marcha (el Core no declara detenido a un Attempt cuyo proceso no pudo matar). */}
+        <AttemptStop taskId={attempt.task_id} status={attempt.status} onStopped={state.retry} />
+        {/* Reintentar un intento que terminó mal: un Attempt nuevo y limpio, que el Core lanza por su camino de siempre. */}
+        <AttemptRetry attempt={attempt} onRetried={state.retry} />
+        {/* Continuar la sesión del proveedor de un intento terminado con un mensaje nuevo (reanudación nativa). */}
+        <AttemptResume attempt={attempt} onResumed={state.retry} />
+        {/* Instrucciones para un intento ocupado (Queue explícito) y la cola pendiente, tal como la dice el Core. */}
+        <AttemptQueue attempt={attempt} />
+        {/* De dónde salió el intento, los Forks que nacieron de él y la acción de bifurcar (abrir uno es siempre una elección explícita). */}
+        <AttemptLineage attempt={attempt} onOpenAttempt={onOpenAttempt} active={active} />
 
         <h4 className="ssec__label">Sesión del proveedor</h4>
         {session ? (
@@ -109,15 +149,22 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onBa
           </ul>
         ) : <p className="ade-missing">{COPY.noArtifacts}</p>}
 
-        <h4 className="ssec__label">Revisión</h4>
+        <h4 className="ssec__label">Cambios y revisión</h4>
+        {/* LXO-155: la evidencia antes del diff, con su procedencia, y aceptar/rechazar sobre el HEAD exacto que se ve. */}
+        <AttemptProofPack attempt={attempt} onDecided={state.retry} active={active} />
+        {/* LXO-156: integrar la revisión aceptada (fusionar o publicar un PR), con el destino a la vista. */}
+        <AttemptIntegration attempt={attempt} onDone={state.retry} active={active} />
+        <AttemptChanges taskId={attempt.task_id} status={attempt.status} worktree={worktree} onReviewed={state.retry} />
         {review ? (
           <dl data-testid="attempt-review">
             <Row label="Veredicto">{text(review.verdict)}</Row>
             <Row label="Commits"><span className="mono">{text(review.base_commit)}</span> → <span className="mono">{text(review.head_commit)}</span></Row>
-            <Row label="Frescura"><StatusText info={reviewFreshnessInfo(review)} /></Row>
+            <Row label="Frescura"><StatusText info={reviewFreshnessInfo(review)} mark={false} /></Row>
           </dl>
         ) : <p className="ade-missing">{COPY.noReview}</p>}
 
+        {/* Autonomía de ESTE intento (LXO-210): cerrada hasta que se pide. */}
+        <AutonomyEditor attemptId={attempt.id} />
         <AttemptActivity attemptId={attempt.id} coreModel={coreModel} active={active} />
       </>
     );

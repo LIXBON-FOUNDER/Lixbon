@@ -81,7 +81,7 @@ def modelo(monkeypatch):
     monkeypatch.setattr(chat_mod, "stream_chat_openai", fake_stream)
     monkeypatch.setattr(chat_mod, "fetch_models", fake_models)
     monkeypatch.setattr(model_router, "fetch_models", fake_models)
-    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True: ("http://fake", {}, "fake"))
+    monkeypatch.setattr(chat_mod, "target_or_503", lambda model, strict=True, afinidad=None: ("http://fake", {}, "fake"))
     monkeypatch.setattr(chat_mod, "resolve_model_weight",
                         lambda m: {"input_credits_per_mtok": 0, "output_credits_per_mtok": 1_000_000})
     monkeypatch.setattr(chat_mod, "_persist_assistant", cobrar)
@@ -140,6 +140,10 @@ def _snapshot(session_pct, week_pct, unlimited=False):
     (50.0, 10.0, None, None),
     (85.0, 10.0, "near", "session"),
     (40.0, 100.0, "exhausted", "week"),
+    # La semana avisa desde el 75 % y gana a la sesión si las dos están cerca.
+    (10.0, 76.0, "near", "week"),
+    (85.0, 80.0, "near", "week"),
+    (100.0, 80.0, "exhausted", "session"),
 ])
 def test_aviso_de_cupo(monkeypatch, sesion, semana, estado, scope):
     monkeypatch.setattr(quota, "credit_buckets_snapshot", _snapshot(sesion, semana))
@@ -149,6 +153,12 @@ def test_aviso_de_cupo(monkeypatch, sesion, semana, estado, scope):
     else:
         assert aviso["state"] == estado and aviso["scope"] == scope
         assert "Gratuito" in aviso["message"] and "Se reinicia" in aviso["message"]
+
+
+@pytest.mark.parametrize("semana,nivel", [(76.0, 75), (91.0, 90), (100.0, 100)])
+def test_escalon_del_aviso_semanal(monkeypatch, semana, nivel):
+    monkeypatch.setattr(quota, "credit_buckets_snapshot", _snapshot(10.0, semana))
+    assert quota.quota_notice(1, {"name": "Gratuito"})["level"] == nivel
 
 
 def test_sin_limites_no_hay_aviso(monkeypatch):

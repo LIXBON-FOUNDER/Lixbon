@@ -1,9 +1,18 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { FileCard } from './FileCard';
-import { IconCheck, IconCopy, IconCorreo, IconDownload } from './Icons';
+import { IconCorreo, IconDownload, IconCopiar } from './Icons';
 import { descargarBlob, extForLang, parseFileLang } from '../lib/archivos';
 import { useT } from '../i18n/useT';
+import '../styles/markdown.css';
+
+// GFM (tablas, tachado, listas de tareas, enlaces sueltos) y colores de
+// sintaxis. Sin lenguaje declarado no se adivina: un bloque de texto plano
+// coloreado al azar se lee peor que sin colores.
+const REMARK = [remarkGfm];
+const REHYPE = [[rehypeHighlight, { detect: false }]];
 
 function textoDe(children) {
   if (typeof children === 'string') return children;
@@ -12,7 +21,7 @@ function textoDe(children) {
   return '';
 }
 
-function Bloque({ lang, codigo }) {
+function Bloque({ lang, codigo, children }) {
   const t = useT('common');
   const [copiado, setCopiado] = useState(false);
   const copiar = async () => {
@@ -30,11 +39,11 @@ function Bloque({ lang, codigo }) {
         <span className="md-code__actions">
           <button className="md-code__btn" onClick={descargar} title={t('downloadAsFile')}><IconDownload size={13} /></button>
           <button className="md-code__btn" onClick={copiar} title={t('copy')}>
-            {copiado ? <IconCheck size={13} /> : <IconCopy size={13} />}
+            <IconCopiar hecho={copiado} size={13} />
           </button>
         </span>
       </div>
-      <pre><code>{codigo}</code></pre>
+      <pre>{children || <code>{codigo}</code>}</pre>
     </div>
   );
 }
@@ -79,7 +88,7 @@ function Correo({ codigo }) {
           {c.para && <span className="md-correo__para">{t('emailTo')}: {c.para}</span>}
         </div>
         <button type="button" className="md-code__btn" onClick={copiar} title={t('copy')}>
-          {copiado ? <IconCheck size={14} /> : <IconCopy size={14} />}
+          <IconCopiar hecho={copiado} size={14} />
         </button>
         <a className="md-correo__abrir" href={mailto}>{t('openInMail')}</a>
       </div>
@@ -97,7 +106,11 @@ export function Markdown({ children, streaming = false }) {
       if (info) return <FileCard info={info} contenido={codigo} streaming={streaming} />;
       const lang = (/language-([\w.+-]+)/.exec(props.className || '') || [])[1] || '';
       if (/^(email|correo|mail)$/i.test(lang)) return <Correo codigo={codigo} />;
-      return <Bloque lang={lang} codigo={codigo} />;
+      return <Bloque lang={lang} codigo={codigo}>{hijo}</Bloque>;
+    },
+    table({ children: filas }) {
+      // Envoltorio con scroll: una tabla ancha no rompe el ancho del hilo.
+      return <div className="md-tabla"><table>{filas}</table></div>;
     },
     img({ src, alt }) {
       if (!/^https:\/\//.test(src || '')) return null;
@@ -112,7 +125,7 @@ export function Markdown({ children, streaming = false }) {
   }), [streaming]);
   return (
     <div className="md">
-      <ReactMarkdown components={components}>{children}</ReactMarkdown>
+      <ReactMarkdown components={components} remarkPlugins={REMARK} rehypePlugins={REHYPE}>{children}</ReactMarkdown>
     </div>
   );
 }

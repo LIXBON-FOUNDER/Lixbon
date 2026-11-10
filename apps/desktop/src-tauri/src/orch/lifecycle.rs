@@ -127,6 +127,8 @@ impl Core {
         if let Ok(mut s) = self.settings.lock() {
             *s = settings;
         }
+        // El lanzador de los Attempts va detrás del ajuste del Orquestador (LXO-246).
+        self.sync_launcher();
         if enabled {
             let _ = self.start_server();
             skill::refresh_outdated(&lxo_path().to_string_lossy());
@@ -137,7 +139,7 @@ impl Core {
         let weak = Arc::downgrade(self);
         std::thread::spawn(move || {
             while let Some(core) = weak.upgrade() {
-                core.close_idle_runs();
+                core.periodic_sweep();
                 drop(core);
                 std::thread::sleep(SWEEP_EVERY);
             }
@@ -195,6 +197,12 @@ impl Core {
         if needs_orphan {
             self.close_orphans();
         }
+        // Tras cerrar las huérfanas: cada claim en vuelo se asienta (con su evidencia) o queda `ambiguous` (LXO-246).
+        if on_tables {
+            self.reconcile_dispatch_claims_at_boot();
+            // Después de cerrar las huérfanas: lo pendiente de un Attempt que ya no corre falla con motivo.
+            self.queue_recover_at_boot();
+        }
         // `close_orphans` puede haber avanzado la fila: el informe lleva la revisión
         // realmente confirmada al terminar el arranque, no la que se cargó.
         let rev = match self.storage.confirmed_rev() {
@@ -209,9 +217,10 @@ impl Core {
 
     /// Cierra las tareas que quedaron abiertas al apagarse el Core anterior. Pasa por
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
-    fn close_orphans(&self) {
+    pub(super) fn close_orphans(&self) {
         let r = self.mutate(|tx| {
-            if !tx.tasks.values().any(|t| !t.status.is_final() && !t.external) {
+            // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
+            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external) {
                 tx.no_change();
                 return Ok(());
             }
@@ -233,6 +242,15 @@ impl Core {
             host.notify("Lixbon no puede iniciar", &msg);
         }
         msg
+    }
+
+    /// Un ciclo de las tareas periódicas del Core (cada `SWEEP_EVERY`): cierra los Runs inactivos, expira las aprobaciones
+    /// iniciales cuyo plazo durable venció y, si hay un lanzador instalado, despacha los aprobados que quedaron esperando
+    /// (p. ej. tras un reinicio). Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
+    pub(super) fn periodic_sweep(&self) {
+        self.close_idle_runs();
+        self.sweep_initial_approvals();
+        self.dispatch_waiting_approved();
     }
 
     pub(super) fn close_idle_runs(&self) {

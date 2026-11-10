@@ -20,6 +20,22 @@ function mount(handler) {
 afterEach(() => { cleanup(); invoke.mockReset(); });
 
 describe('AttemptDetail (LXO-122)', () => {
+  it('un Attempt adoptado dice que es trabajo externo y no muestra inicio, fin ni duración (LXO-149)', async () => {
+    const base = CANONICAL['attempt_detail.v1.json'];
+    mount((payload) => {
+      if (payload.query === 'provider_capabilities') return live();
+      if (payload.query === 'activity_list') return attemptActivityPage([]);
+      return { ...base, attempt: { ...base.attempt, adopted: true, adopted_at: 1_700_000_000_000, started_at: null, ended_at: null } };
+    });
+    render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} onSelectTask={vi.fn()} />);
+    await flush();
+    const root = screen.getByTestId('attempt-detail');
+    expect(within(root).getByTestId('attempt-adopted').textContent).toMatch(/Trabajo externo adoptado/);
+    expect(within(root).getByTestId('attempt-adopted').textContent).toMatch(/no hay inicio, fin ni duración/);
+    expect(within(root).queryByText('Iniciado')).toBeNull();
+    expect(within(root).queryByText('Duración')).toBeNull();
+  });
+
   it('fixture canónica: identidad, ciclo de vida, sesión opaca, worktree, artefactos como texto y revisión', async () => {
     const calls = mount((payload) => {
       if (payload.query === 'provider_capabilities') return live();
@@ -34,7 +50,7 @@ describe('AttemptDetail (LXO-122)', () => {
     expect(calls[0]).toEqual({ query: 'attempt_detail', args: { attempt_id: 't3-a1' } });
     expect(within(root).getByText('t3-a1')).toBeTruthy();
     expect(within(root).getByText('Terminado', { selector: '.ade-status' })).toBeTruthy();
-    expect(within(root).getByText('codex · gpt-6.1-sol')).toBeTruthy();
+    expect(within(root).getByText('Proveedor').nextSibling.textContent).toBe('codex · gpt-6.1-sol');
     expect(within(root).getByText('implementador / implementar / high')).toBeTruthy();
     // ended_at nulo (Attempts migrados en el cutover): sin hora de fin ni duración inventada.
     expect(within(root).getByText('duración no disponible')).toBeTruthy();
@@ -64,8 +80,9 @@ describe('AttemptDetail (LXO-122)', () => {
     const activity = screen.getByTestId('attempt-activity');
     expect(within(activity).getByText('Actividad parcial: no incluye eventos de sesión ni worktree')).toBeTruthy();
     expect(within(activity).getByRole('listitem').textContent).toContain('Completado');
-    // Además de las dos lecturas del Attempt, el bloque de capacidades lee lo que ofrece el proveedor (LXO-135).
-    expect(calls.map((call) => call.query).filter((query) => query !== 'provider_capabilities')).toEqual(['attempt_detail', 'activity_list']);
+    // Además de las dos lecturas del Attempt, el bloque de capacidades lee lo que ofrece el proveedor (LXO-135) y, con una sesión que se
+    // puede reanudar, «Continuar» lee el historial de la Task para saber si este es el último intento, la cola de instrucciones lee la suya y la procedencia (Forks, LXO-145/153) lee `attempt_lineage` y el Proof Pack (LXO-147/155) lee `attempt_proof_pack`.
+    expect(calls.map((call) => call.query).filter((query) => !['provider_capabilities', 'attempts_by_task', 'pending_queue', 'attempt_lineage', 'attempt_proof_pack', 'attempt_integration_preview'].includes(query))).toEqual(['attempt_detail', 'activity_list']);
     expect(calls.filter((call) => call.query === 'provider_capabilities').every((call) => Object.keys(call.args).length === 0)).toBe(true);
     expect(calls.find((call) => call.query === 'activity_list').args).toMatchObject({ target_kind: 'attempt', target_id: 't3-a1' });
   });

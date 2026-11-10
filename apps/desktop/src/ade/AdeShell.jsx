@@ -15,6 +15,7 @@ import { TaskWorkspace } from './TaskWorkspace';
 import { AttemptHistory } from './AttemptHistory';
 import { AttemptDetail } from './AttemptDetail';
 import { ContextPreview } from './ContextPreview';
+import { NewAttemptForm } from './NewAttemptForm';
 import { ProviderInspector } from './ProviderInspector';
 import { UsageView } from './UsageView';
 import { useCoreModel } from './useCoreModel';
@@ -909,10 +910,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   };
 
   return (
-    <div
-      className="wb wb--orch ade__layout"
-      data-testid="ade-composition"
-    >
+    <div className="ade__frame" data-testid="ade-composition">
       <JumpPaletteHost open={jumpPaletteOpen && modeActive} onClose={closeJumpPalette} onNavigate={jumpTo} />
       {modeActive && <StartupCutNotice storage={coreModel.storage ?? null} />}
       {modeActive && navNotice && (
@@ -921,6 +919,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
           <button type="button" className="lk" onClick={() => setNavNotice(null)}>{COPY.cutDismiss}</button>
         </div>
       )}
+      <div className="wb wb--orch ade__layout">
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>
@@ -987,6 +986,15 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                     onRetryResourceInventory={projectInventory.retry}
                     onOpenTask={selectTask}
                     onOpenAttention={openProjectAttention}
+                    // LXO-141: crear una Task con su primer Attempt; queda pendiente de la aprobación de la persona.
+                    actions={(
+                      <NewAttemptForm
+                        projectId={selectedProjectId}
+                        coreModel={coreModel}
+                        active={workspaceActive && workspaceView === 'workspace'}
+                        onCreated={({ projectId, taskId, attemptId }) => selectAttempt({ projectId, taskId, attemptId })}
+                      />
+                    )}
                   />
                   {/* Qué ofrece cada proveedor (LXO-135): lo que dice el Core, no lo que se supone por su nombre. */}
                   <ProviderInspector active={workspaceActive && workspaceView === 'workspace'} />
@@ -1014,6 +1022,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                       coreModel={coreModel}
                       active={workspaceActive && workspaceView === 'workspace'}
                       onSelectTask={(taskId) => selectTask({ projectId: selectedProjectId, taskId })}
+                      onOpenAttempt={({ taskId, attemptId }) => selectAttempt({ projectId: selectedProjectId, taskId, attemptId })}
                       onBack={() => selectTask({ projectId: selectedProjectId, taskId: null })}
                     />
                   )}
@@ -1094,6 +1103,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
             </div>
           </RightDock>
         </div>
+      </div>
       </div>
     </div>
   );

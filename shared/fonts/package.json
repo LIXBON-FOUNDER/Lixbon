@@ -1,0 +1,27 @@
+{
+  "name": "@lixbon/fonts",
+  "version": "0.1.0",
+  "description": "Tipografías de marca de Lixbon: Lixbon Brand Sans y Lixbon Brand Serif.",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "style": "css/lixbon-brand.css",
+  "files": [
+    "css/",
+    "fonts/",
+    "README.md",
+    "LICENSE.md",
+    "OFL.txt"
+  ],
+  "exports": {
+    ".": "./css/lixbon-brand.css",
+    "./sans.css": "./css/sans.css",
+    "./serif.css": "./css/serif.css",
+    "./serif-variable.css": "./css/serif-variable.css",
+    "./tokens.css": "./css/tokens.css",
+    "./fonts/*": "./fonts/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "python source/package.py"
+  }
+}

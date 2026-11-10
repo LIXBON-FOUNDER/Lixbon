@@ -5,9 +5,10 @@
 //!   que ve la persona (Desktop, móvil, CLI) son presentación y viven en
 //!   `contracts/status-vocabulary.json` (sección `presentation`), que el Core no
 //!   carga.
-//! - **No cambia nada**: no hay enums nuevos ni se toca `Status`/`Kind`; no
-//!   cambia el formato de `state.json` ni de HTTP. Son constantes con pruebas
-//!   que fallan si el código y `contracts/status-vocabulary.json` se desvían.
+//! - El formato incluye `not_started` (LXO-141): Task creada con `task.create` que todavía no ha
+//!   solicitado un Attempt. No es `starting`, que pertenece a una ejecución iniciada, ni tiene un
+//!   estado de Attempt equivalente. Son constantes con pruebas que fallan si el código y
+//!   `contracts/status-vocabulary.json` se desvían.
 //! - Los ids «reservados» (intento, estado derivado de la tarea, kinds de
 //!   Attention, eventos durables) son nombres acordados en el modelo del runtime,
 //!   **sin consumidores todavía**: no son API pública hasta el corte
@@ -22,7 +23,9 @@
 use super::state::Status;
 
 /// Ids de `Task.status`, en el orden del enum.
-pub const TASK_STATUS: [&str; 8] = [
+pub const TASK_STATUS: [&str; 10] = [
+    "not_started",
+    "pending_approval",
     "starting",
     "running",
     "waiting",
@@ -35,7 +38,9 @@ pub const TASK_STATUS: [&str; 8] = [
 
 /// Todos los estados de la tarea. `task_status_id` los recorre con un `match`
 /// exhaustivo: añadir una variante a `Status` no compila hasta decidir su id aquí.
-pub const TASK_STATUS_ALL: [Status; 8] = [
+pub const TASK_STATUS_ALL: [Status; 10] = [
+    Status::NotStarted,
+    Status::PendingApproval,
     Status::Starting,
     Status::Running,
     Status::Waiting,
@@ -49,6 +54,8 @@ pub const TASK_STATUS_ALL: [Status; 8] = [
 /// Id de máquina de un estado; es el mismo texto que serializa serde.
 pub const fn task_status_id(s: Status) -> &'static str {
     match s {
+        Status::NotStarted => "not_started",
+        Status::PendingApproval => "pending_approval",
         Status::Starting => "starting",
         Status::Running => "running",
         Status::Waiting => "waiting",
@@ -107,20 +114,21 @@ pub const INTEGRATION_OUTCOME: [&str; 4] = ["merged", "conflict", "error", "targ
 pub const ATTENTION_KIND: [&str; 4] = ["approve_in_terminal", "integrate", "review", "failed"];
 
 /// RESERVADO. `events.entity_kind` (slice E) y prefijo de los eventos durables.
-pub const ENTITY_KIND: [&str; 13] = [
-    "project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "attention",
+pub const ENTITY_KIND: [&str; 14] = [
+    "project", "task", "attempt", "provider_session", "thread", "worktree", "artifact", "review", "integration", "agent", "decision", "policy", "race", "attention",
 ];
 
 /// RESERVADO. Eventos de dominio durables (`entidad.verbo`), slice E.
-pub const DURABLE_EVENT: [&str; 44] = [
+pub const DURABLE_EVENT: [&str; 58] = [
     "project.registered", "project.archived", "project.relocated",
     "task.created", "task.updated", "task.closed",
-    "attempt.requested", "attempt.continued", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
+    "attempt.requested", "attempt.continued", "attempt.retried", "attempt.forked", "attempt.adopted", "attempt.approved", "attempt.rejected", "attempt.started", "attempt.waiting", "attempt.resumed", "attempt.completed", "attempt.failed", "attempt.stopped", "attempt.exited", "attempt.integrated",
+    "attempt.queued", "attempt.queue_delivered", "attempt.queue_cancelled", "attempt.queue_failed", "attempt.instruction_requested", "attempt.instruction_result", "attempt.dispatch_ambiguous",
     "provider_session.opened", "provider_session.bound", "provider_session.resumed", "provider_session.detached", "provider_session.closed",
     "thread.created", "thread.summarized", "worktree.created", "worktree.adopted", "worktree.attached", "worktree.missing", "worktree.found", "worktree.removed", "artifact.created",
     "review.requested", "review.completed", "review.invalidated",
     "integration.requested", "integration.completed", "integration.conflict",
-    "agent.question", "agent.answered", "decision.created", "policy.warning",
+    "agent.question", "agent.answered", "decision.created", "policy.warning", "policy.changed", "race.requested", "race.candidate_recorded", "race.cancelled",
     "attention.created", "attention.resolved",
 ];
 
@@ -242,13 +250,16 @@ mod tests {
         assert!(EPHEMERAL_EVENT.iter().all(|e| !DURABLE_EVENT.contains(e)));
         let attempt = ids_de(&json, "attempt_state");
         assert_eq!(attempt, ATTEMPT_STATE.map(String::from).to_vec());
-        // El intento reutiliza los ids de la tarea; solo `pending_approval` es nuevo.
-        for id in ATTEMPT_STATE.iter().filter(|i| **i != "pending_approval") {
+        // El intento reutiliza los ids de la tarea salvo `not_started`, que expresa la ausencia de Attempt.
+        for id in ATTEMPT_STATE.iter() {
             assert!(TASK_STATUS.contains(id), "el estado de intento {id} no existe como estado de tarea");
         }
-        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len() + 1);
+        assert_eq!(ATTEMPT_STATE.len(), TASK_STATUS.len() - 1);
         for item in json["domain"]["task_status"]["items"].as_array().unwrap() {
-            assert!(ATTEMPT_STATE.contains(&item["attempt_state"].as_str().unwrap()));
+            match item["attempt_state"].as_str() {
+                Some(id) => assert!(ATTEMPT_STATE.contains(&id)),
+                None => assert_eq!(item["id"], "not_started"),
+            }
         }
         let finales: Vec<&str> = json["domain"]["attempt_state"]["final"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         let finales_tarea: Vec<&str> = TASK_STATUS_ALL.iter().filter(|s| s.is_final()).map(|s| task_status_id(*s)).collect();

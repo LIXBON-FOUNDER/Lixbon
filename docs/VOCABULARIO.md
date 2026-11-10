@@ -19,6 +19,8 @@ Fuente de datos: [`contracts/status-vocabulary.json`](../contracts/status-vocabu
 
 | id (`state.rs::Status`) | ¿final? | Grupo visual | Desktop | Móvil | `lxo list` | Estado de Attempt equivalente (reservado) |
 |---|---|---|---|---|---|---|
+| `not_started` | no | neutral | Sin iniciar | sin iniciar | `[not_started]` | *(no existe: todavía no hay Attempt)* |
+| `pending_approval` | no | needs_person | Pendiente de aprobación | pendiente de aprobación | `[pending_approval]` | `pending_approval` |
 | `starting` | no | active | Arrancando | arrancando | `[starting]` | `starting` |
 | `running` | no | active | Trabajando | trabajando | `[running]` | `running` |
 | `waiting` | no | waiting | Esperando respuesta | esperando | `[waiting]` | `waiting` |
@@ -30,7 +32,7 @@ Fuente de datos: [`contracts/status-vocabulary.json`](../contracts/status-vocabu
 
 El TUI de Go (`apps/cli/internal/tui/orquestador.go`) no pinta estados de tareas hoy: solo comprueba que `lxo` esté disponible. Si algún día los pinta, usa esta tabla.
 
-`is_final()` (`done`, `failed`, `stopped`, `exited`) existe hoy en tres copias: `state.rs`, `isFinal` en `orchStore.js` y `FINAL` en `RemoteOrch.js`. El contrato las fija todas.
+`is_final()` (`done`, `failed`, `stopped`, `exited`) existe hoy en tres copias: `state.rs`, `isFinal` en `orchStore.js` y `FINAL` en `RemoteOrch.js`. El contrato las fija todas. `not_started` no es final, pero tampoco es trabajo activo: `Status::has_attempt()` distingue la Task abierta sin ejecución solicitada (ver `core/TASKS.md` § LXO-141).
 
 ## 3. Intento (`Attempt`) — reservado
 

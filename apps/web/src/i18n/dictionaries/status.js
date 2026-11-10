@@ -1,8 +1,8 @@
 export default {
   es: {
     seoTitle: 'Estado del servicio',
-    seoDescription: 'Estado en tiempo real de lixbon: API, modelos, base de datos, pagos y correo, con la disponibilidad de los últimos 90 días.',
-    subtitle: 'Lo que está funcionando ahora mismo y lo que ha pasado en los últimos 90 días.',
+    seoDescription: 'Estado en tiempo real de lixbon: API, modelos, base de datos, pagos y correo, con la disponibilidad de los últimos 90 días',
+    subtitle: 'Lo que está funcionando ahora mismo y lo que ha pasado en los últimos 90 días',
     statusOperational: 'Operativo',
     statusDegraded: 'Degradado',
     statusDown: 'Caído',
@@ -37,8 +37,8 @@ export default {
   },
   en: {
     seoTitle: 'Service status',
-    seoDescription: 'Real-time status of lixbon: API, models, database, payments and email, with availability for the last 90 days.',
-    subtitle: 'What’s working right now and what’s happened over the last 90 days.',
+    seoDescription: 'Real-time status of lixbon: API, models, database, payments and email, with availability for the last 90 days',
+    subtitle: 'What’s working right now and what’s happened over the last 90 days',
     statusOperational: 'Operational',
     statusDegraded: 'Degraded',
     statusDown: 'Down',

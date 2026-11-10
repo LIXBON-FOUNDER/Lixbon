@@ -57,7 +57,8 @@ export const LEGACY_GUIDE_IDS = {
 // AccountPage.jsx: pestaña de /account/:section (no se prerenderiza, no necesita
 // entrada en rutasPublicas.js, pero sí redirección para enlaces/marcadores viejos).
 export const LEGACY_ACCOUNT_SECTIONS = {
-  cuenta: 'profile',
+  cuenta: 'general',
+  profile: 'security',
   privacidad: 'privacy',
   facturacion: 'billing',
   uso: 'usage',

@@ -40,11 +40,34 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use super::adapter::CancelToken;
+use super::attempt_ops;
+use super::steer_commands;
+use super::queue_commands::{self, Cancelled, DeliveryResult, ErrorKind as QueueErrorKind, PendingQueue, QueueError, QueuePort, QueueRequest, Queued};
+use super::worktree_ops::attach as attempt_worktree_attach;
+use super::dispatch::{DispatchSnapshot, ReserveOutcome};
+use super::attempt_ops::DispatchAmbiguityCause;
+use super::events::MutationContext;
 use super::mirror;
 use super::mutation::{PersistError, Persistence};
 use super::state::State;
 use super::Core;
-use crate::store::{self, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
+/// Lo que el log dice de la procedencia de un Attempt (LXO-145): el payload de su `attempt.forked` y los Forks que nacieron de él.
+pub(super) struct ForkLineageRows {
+    pub origin: Option<String>,
+    pub forks: Vec<ForkChildRow>,
+}
+
+pub(super) struct ForkChildRow {
+    pub attempt_id: String,
+    pub payload: String,
+    pub status: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub at: i64,
+}
+
+use crate::store::{self, InstructionMode, InstructionOutcome, AttentionPage, AttentionQuery, AttentionRow, EventPage, EventQuery, InstanceLock, Migration, MigrationReport, NewEvent, RuntimeDoc, Store, StoreError, StoreResult};
 
 /// Por qué no se pudo abrir el almacén, ya clasificado.
 #[derive(Debug)]
@@ -419,6 +442,55 @@ impl Persistence for TablesPersistence {
         true
     }
 
+    fn lookup_idempotent(&self, identity_scope: &str, request_id: &str, payload_sha256: &str)
+        -> Result<Option<crate::store::RuntimeResultIds>, PersistError> {
+        let slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_ref() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        store.runtime_lookup_idempotent_recorded(identity_scope, request_id, payload_sha256).map_err(|e| match e {
+            // Reutilizar el request_id con otro payload o un ledger incoherente no es un fallo de disco.
+            StoreError::TaskConflict(_) | StoreError::InvalidTask(_) => PersistError::rejected(e.to_string()),
+            e => PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false },
+        })
+    }
+
+    fn persist_idempotent(
+        &self,
+        state: &State,
+        events: &[NewEvent],
+        identity_scope: &str,
+        request_id: &str,
+        payload_sha256: &str,
+        result_ids: &crate::store::RuntimeResultIds,
+    ) -> Result<crate::store::RuntimeCommitOutcome, PersistError> {
+        let next = serde_json::to_value(state)
+            .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
+            .and_then(|v| RuntimeDoc::from_value(v).map_err(|e| PersistError::structural(e.to_string())))?;
+        let mut committed = self.committed.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(store) = slot.store.as_mut() else {
+            return Err(PersistError::structural("el almacén SQLite no está abierto"));
+        };
+        match store.runtime_commit_idempotent_recorded(
+            &committed, &next, events, identity_scope, request_id, payload_sha256, result_ids,
+            |view, changes| super::agentic_cut::verify_runtime_view(view, changes, state),
+        ) {
+            Ok(outcome) => {
+                if matches!(outcome, crate::store::RuntimeCommitOutcome::Committed { .. }) {
+                    *committed = next;
+                }
+                Ok(outcome)
+            }
+            // Lo que las tablas no representan, o un conflicto del ledger, se rechaza sin degradar el Core: la
+            // transacción se deshizo entera.
+            Err(e @ (StoreError::RuntimeMapping(_) | StoreError::TaskConflict(_) | StoreError::InvalidTask(_))) => {
+                Err(PersistError::rejected(e.to_string()))
+            }
+            Err(e) => Err(PersistError { transient: e.is_transient(), message: e.to_string(), rejected: false }),
+        }
+    }
+
     fn persist(&self, state: &State, events: &[NewEvent]) -> Result<(), PersistError> {
         let next = serde_json::to_value(state)
             .map_err(|e| PersistError::structural(format!("no se pudo serializar el estado: {e}")))
@@ -460,6 +532,314 @@ fn acquire(core_dir: &Path) -> Result<InstanceLock, OpenStoreError> {
 }
 
 impl Core {
+    /// Ids de los Attempts con aprobación inicial pendiente cuyo plazo durable ya venció (a lo sumo `limit`).
+    ///
+    /// `None`: no hay SQLite autoritativa, así que no existe un plazo durable que expirar. Solo entrega candidatos: cada
+    /// cambio pasa por `Core::mutate`, donde el commit vuelve a validar el plazo bajo la transacción.
+    pub(super) fn initial_approval_expiry_candidates(&self, now: i64, limit: usize) -> Option<crate::store::StoreResult<Vec<String>>> {
+        self.storage.with_store(|store| {
+            store.runtime_on_tables().and_then(|active| {
+                if active {
+                    store.attempt_initial_approval_expiry_candidates(now, limit)
+                } else {
+                    Ok(Vec::new())
+                }
+            })
+        })
+    }
+
+    /// Estado, plazo durable y decisión canónica de la aprobación inicial de un Attempt. `None`: no existe.
+    pub(super) fn initial_approval_snapshot(&self, attempt_id: &str) -> Result<Option<crate::store::InitialApprovalSnapshot>, String> {
+        self.storage
+            .read_store(|store| {
+                if !store.runtime_on_tables().map_err(|e| e.to_string())? {
+                    return Err("el runtime Task/Attempt no está activo".to_string());
+                }
+                store.attempt_initial_approval_snapshot(attempt_id).map_err(|e| e.to_string())
+            })
+            .ok_or_else(|| "el almacén del Core no está abierto".to_string())?
+    }
+
+    /// Lo que el despachador lee de un Attempt: sus filas durables y su claim. `None`: el Attempt no existe.
+    pub(super) fn dispatch_snapshot(&self, attempt_id: &str) -> Result<Option<DispatchSnapshot>, String> {
+        let read = self
+            .storage
+            .with_store(|store| -> crate::store::StoreResult<Option<DispatchSnapshot>> {
+                let Some(attempt) = store.attempt_row(attempt_id)? else { return Ok(None) };
+                let Some(task) = store.task_row(&attempt.task_id)? else { return Ok(None) };
+                let Some(run) = store.run_row(&task.run_id)? else { return Ok(None) };
+                let claim = store.read(|c| Ok(c.query_row("SELECT dispatch_claim FROM attempts WHERE id = ?1", [attempt_id], |r| r.get::<_, String>(0))?))?;
+                let session = match attempt.provider_session_id.as_deref() {
+                    Some(id) => store.provider_session_row(id)?,
+                    None => None,
+                };
+                Ok(Some(DispatchSnapshot { attempt, task, run, claim, session }))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    // ── La policy de autonomía (LXO-209): el almacén solo se toca desde aquí ──────────────────────────────────────────────────
+
+    /// La policy guardada AHORA. Se lee en cada Command: nunca se cachea ni se confía en lo que la interfaz vio. Sin almacén abierto o con un
+    /// error de lectura devuelve `Err`: quien decide falla CERRADO.
+    pub(super) fn policy_snapshot(&self) -> Result<crate::store::PolicySnapshot, String> {
+        match self.storage.read_store(|st| st.policy_snapshot()) {
+            Some(Ok(snapshot)) => Ok(snapshot),
+            Some(Err(e)) => Err(format!("No se pudo leer la policy: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// Los eventos de un Race (entidad `race`), del más antiguo al más nuevo: `(kind, payload, at)`. Solo lectura.
+    pub(super) fn race_events(&self, race_id: &str) -> Result<Vec<(String, String, i64)>, String> {
+        let q = EventQuery { entity_kind: Some("race".into()), entity_id: Some(race_id.into()), ..EventQuery::default() };
+        match self.storage.events_page(&q) {
+            Some(Ok(page)) => Ok(page.events.into_iter().map(|e| (e.kind, e.payload, e.at)).collect()),
+            Some(Err(e)) => Err(format!("No se pudo leer el Race: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// Los `race.requested` más recientes (de cualquier Race), para listar los de un Attempt. Solo lectura.
+    pub(super) fn race_requests(&self, limit: usize) -> Result<Vec<(String, String, i64)>, String> {
+        let q = EventQuery { kind: Some("race.requested".into()), newest_first: true, limit: Some(limit), ..EventQuery::default() };
+        match self.storage.events_page(&q) {
+            Some(Ok(page)) => Ok(page.events.into_iter().map(|e| (e.entity_id, e.payload, e.at)).collect()),
+            Some(Err(e)) => Err(format!("No se pudo leer los Races: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// ¿Existe el Project en el registro? (Para no crear overrides huérfanos de un id inventado.)
+    pub(super) fn project_exists(&self, project_id: &str) -> Result<bool, String> {
+        match self.storage.read_store(|st| st.project(project_id)) {
+            Some(Ok(row)) => Ok(row.is_some()),
+            Some(Err(e)) => Err(format!("No se pudo leer el registro de proyectos: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    /// Escribe un cambio de policy con su Event de auditoría (una transacción). `event` recibe el nivel anterior y la revisión nueva.
+    pub(super) fn policy_apply(
+        &self,
+        expected_revision: i64,
+        write: &crate::store::PolicyWrite,
+        set_by: &str,
+        at: i64,
+        event: impl FnOnce(Option<&str>, i64) -> crate::store::StoreResult<crate::store::NewEvent>,
+    ) -> Result<crate::store::PolicyChange, String> {
+        match self.storage.with_store(|st| st.policy_apply_recorded(expected_revision, write, set_by, at, event)) {
+            Some(Ok(change)) => Ok(change),
+            Some(Err(crate::store::StoreError::AgenticModelInactive)) => Err("core_model_inactive: la policy se puede editar tras el corte Task/Attempt".into()),
+            Some(Err(e)) => Err(format!("No se pudo guardar la policy: {e}")),
+            None => Err("El almacén del Core no está abierto".into()),
+        }
+    }
+
+    // ── La cola de instrucciones (LXO-143): el almacén solo se toca desde aquí ───────────────────────────────────────────────
+
+    fn queue_store<R>(&self, f: impl FnOnce(&mut Store) -> Result<R, QueueError>) -> Result<R, QueueError> {
+        self.storage.with_store(f).unwrap_or_else(|| Err(QueueError::new(QueueErrorKind::Failed, "store", "el almacén del Core no está abierto")))
+    }
+
+    /// `attempt.queue`: encola y, si el run ya está en un límite de turno, entrega (nunca desde el RPC: ahí es `Busy`).
+    pub(super) fn queue_enqueue(&self, port: &dyn QueuePort, ctx: &MutationContext, cancel: &CancelToken, req: &QueueRequest<'_>) -> Result<Queued, QueueError> {
+        self.queue_store(|st| queue_commands::queue_attempt(st, port, ctx, cancel, req))
+    }
+
+    pub(super) fn queue_cancel(&self, ctx: &MutationContext, queue_id: &str) -> Result<Cancelled, QueueError> {
+        self.queue_store(|st| queue_commands::cancel_queued(st, ctx, queue_id))
+    }
+
+    pub(super) fn queue_pending(&self, ctx: &MutationContext, attempt_id: &str) -> Result<PendingQueue, QueueError> {
+        self.queue_store(|st| queue_commands::pending(st, ctx, attempt_id))
+    }
+
+    /// Lo que ya NO está pendiente (`delivered`, `cancelled`, `failed`), en el orden en que se encoló, como mucho los últimos.
+    pub(super) fn queue_finished(&self, ctx: &MutationContext, attempt_id: &str, limit: usize) -> Result<Vec<crate::store::QueueItemRow>, QueueError> {
+        self.queue_store(|st| queue_commands::finished(st, ctx, attempt_id, limit))
+    }
+
+    // ── Fork (LXO-145): la procedencia de un Attempt sale del log, y solo se lee desde aquí ────────────────────────────────────
+
+    /// Lo que el log dice de la procedencia de un Attempt: su `attempt.forked` (si nació de otro) y los Forks que nacieron de él, con
+    /// el estado y el proveedor que tienen AHORA. Solo lectura.
+    pub(super) fn fork_lineage_rows(&self, attempt_id: &str) -> Result<ForkLineageRows, String> {
+        self.storage
+            .with_store(|store| {
+                store.read(|c| {
+                    let mut first = c.prepare("SELECT payload FROM events WHERE kind = 'attempt.forked' AND entity_id = ?1 ORDER BY seq LIMIT 1")?;
+                    let origin = first.query_map([attempt_id], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?.into_iter().next();
+                    let mut stmt = c.prepare(
+                        "SELECT e.entity_id, e.payload, a.status, a.provider, a.model, e.at FROM events e JOIN attempts a ON a.id = e.entity_id                          WHERE e.kind = 'attempt.forked' AND json_extract(e.payload, '$.source') = ?1 ORDER BY e.seq",
+                    )?;
+                    let forks = stmt
+                        .query_map([attempt_id], |r| {
+                            Ok(ForkChildRow { attempt_id: r.get(0)?, payload: r.get(1)?, status: r.get(2)?, provider: r.get(3)?, model: r.get(4)?, at: r.get(5)? })
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(ForkLineageRows { origin, forks })
+                })
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    // ── Steer y Stop & Send (LXO-144): el almacén solo se toca desde aquí ────────────────────────────────────────────────────
+
+    /// Lee el Attempt y comprueba que `ctx` puede instruirlo.
+    pub(super) fn instruction_authorize(&self, ctx: &MutationContext, attempt_id: &str) -> Result<crate::store::AttemptRow, QueueError> {
+        self.queue_store(|st| steer_commands::authorize(st, ctx, attempt_id))
+    }
+
+    /// `attempt.instruction_requested`.
+    pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::requested_event(st, ctx, attempt_id, request_id, mode, chars)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
+    /// `attempt.instruction_result`.
+    pub(super) fn instruction_record_result(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<crate::store::QueueFailure>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::result_event(st, ctx, attempt_id, request_id, mode, outcome, reason)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
+    /// Entrega el siguiente item si el run está en un límite de turno (lo llama el bombeo).
+    pub(super) fn queue_deliver_next(&self, port: &dyn QueuePort, cancel: &CancelToken, attempt_id: &str) -> Result<DeliveryResult, QueueError> {
+        self.queue_store(|st| queue_commands::deliver_next(st, port, cancel, attempt_id))
+    }
+
+    /// El Attempt terminó: lo que seguía pendiente ya no se entregará (falla con `attempt_ended`).
+    pub(super) fn queue_settle(&self, attempt_id: &str) {
+        match self.queue_store(|st| queue_commands::settle_attempt_end(st, attempt_id)) {
+            Ok(_) => {}
+            Err(why) => eprintln!("[core] no se pudo cerrar la cola de {attempt_id} al terminar el Attempt: {why}"),
+        }
+    }
+
+    /// Arranque: lo `delivering` falla (`interrupted`: nunca se reintenta) y lo `queued` de un Attempt terminado también.
+    pub(super) fn queue_recover_at_boot(&self) {
+        match self.queue_store(queue_commands::recover) {
+            Ok(r) if r.interrupted + r.ended == 0 => {}
+            Ok(r) => eprintln!("[core] cola de instrucciones: {} interrumpida(s), {} de Attempts terminados; {} se conservan", r.interrupted, r.ended, r.kept),
+            Err(why) => eprintln!("[core] no se pudo recuperar la cola de instrucciones al arrancar: {why}"),
+        }
+    }
+
+    /// La fila del Attempt (la reanudación necesita su perfil, modelo y esfuerzo).
+    pub(super) fn attempt_row_for_resume(&self, attempt_id: &str) -> Result<Option<crate::store::AttemptRow>, String> {
+        self.storage.with_store(|store| store.attempt_row(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?.map_err(|e| e.to_string())
+    }
+
+    /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
+    pub(super) fn attempt_session_record(&self, attempt_id: &str) -> Result<Option<crate::store::ProviderSessionRow>, String> {
+        let read = self
+            .storage
+            .with_store(|store| -> crate::store::StoreResult<Option<crate::store::ProviderSessionRow>> {
+                let Some(attempt) = store.attempt_row(attempt_id)? else { return Ok(None) };
+                match attempt.provider_session_id.as_deref() {
+                    Some(id) => store.provider_session_row(id),
+                    None => Ok(None),
+                }
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// `(id, estado)` del Worktree que la Task ya tiene registrado, si lo hay (lo registró un Attempt anterior). `None`: es su
+    /// primer Attempt. Lo usa el lanzador para decidir entre crear el Worktree o adjuntarse al de la Task.
+    pub(super) fn task_worktree_record(&self, task_id: &str) -> Result<Option<(String, String)>, String> {
+        let read = self
+            .storage
+            .with_store(|store| {
+                store.read(|c| {
+                    let mut stmt = c.prepare("SELECT id, state FROM worktrees WHERE task_id = ?1 ORDER BY rowid LIMIT 1")?;
+                    let rows = stmt.query_map([task_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                    Ok(rows.collect::<Result<Vec<_>, _>>()?.into_iter().next())
+                })
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        read.map_err(|e| e.to_string())
+    }
+
+    /// Enlaza el Attempt al Worktree de su Task (un reintento trabaja en él). Si el proyector ya lo enlazó no cambia nada.
+    pub(super) fn attach_attempt_to_worktree(&self, worktree_id: &str, attempt_id: &str) -> Result<(), String> {
+        let attached = self
+            .storage
+            .with_store(|store| attempt_worktree_attach(store, &MutationContext::core(), worktree_id, attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?;
+        attached.map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    /// Reserva el claim de despacho (un solo uso). Una elegibilidad que cambió es `Ineligible`, no un error del almacén.
+    pub(super) fn dispatch_reserve(&self, attempt_id: &str) -> Result<ReserveOutcome, String> {
+        let result = self.storage.with_store(|store| store.attempt_dispatch_reserve(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?;
+        match result {
+            Ok(true) => Ok(ReserveOutcome::Reserved),
+            Ok(false) => Ok(ReserveOutcome::AlreadyClaimed),
+            Err(crate::store::StoreError::AttemptConflict(why)) => Ok(ReserveOutcome::Ineligible(why)),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Marca el claim `ambiguous` y deja constancia (`attempt.dispatch_ambiguous`) en la misma transacción. Si el Attempt ya
+    /// tiene evidencia terminal canónica se asienta en su lugar, sin un falso hecho de ambigüedad. `false`: no había claim en vuelo.
+    pub(super) fn dispatch_mark_ambiguous(&self, attempt_id: &str, cause: DispatchAmbiguityCause) -> Result<bool, String> {
+        let ctx = MutationContext::core();
+        let at = super::state::now_ms() as i64;
+        self.storage
+            .with_store(|store| store.attempt_dispatch_mark_ambiguous_recorded(attempt_id, |a, t, from| attempt_ops::dispatch_ambiguous_fact(a, t, from, cause, &ctx, at)))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Arranque: reconcilia en UNA transacción todo claim `reserved` o `started` que quedó en vuelo. Con evidencia terminal
+    /// canónica se asienta; sin ella pasa a `ambiguous` con su hecho. Devuelve cuántos cambió.
+    pub(super) fn dispatch_reconcile_in_flight(&self) -> Result<usize, String> {
+        let ctx = MutationContext::core();
+        let at = super::state::now_ms() as i64;
+        self.storage
+            .with_store(|store| {
+                if !store.runtime_on_tables()? {
+                    return Ok(0);
+                }
+                store.attempt_dispatch_reconcile_ambiguous_recorded(|a, t, from| attempt_ops::dispatch_ambiguous_fact(a, t, from, DispatchAmbiguityCause::CoreRestart, &ctx, at))
+            })
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// `reserved -> started`, solo si el `attempt.started` canónico ya es durable.
+    pub(super) fn dispatch_mark_started(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_started(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Asienta el claim de un Attempt terminal con evidencia canónica (también uno que terminó sin `attempt.started`).
+    pub(super) fn dispatch_settle(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage
+            .with_store(|store| store.attempt_dispatch_settled(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// Attempts aprobados que esperan despacho (cola de recuperación). Solo lista: reservar el claim es la única puerta.
+    pub(super) fn approved_dispatch_candidates(&self, limit: usize) -> Result<Vec<String>, String> {
+        self.storage
+            .with_store(|store| store.runtime_on_tables().and_then(|active| if active { store.attempt_approved_dispatch_candidates(limit) } else { Ok(Vec::new()) }))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
     /// Primer paso de `init`: adquirir `core.lock` ANTES de leer o reescribir
     /// `state.json`, para que un segundo Core no llegue a tocarlo. Todo fallo aquí
     /// es bloqueante: sin el bloqueo no hay garantía de un único escritor.

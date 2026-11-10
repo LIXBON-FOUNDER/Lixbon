@@ -46,13 +46,27 @@ mod private;
 mod projects;
 mod attempts;
 mod continuity;
+mod retries;
 mod sessions;
 mod worktrees;
 mod cut;
 mod reviews;
 mod runtime;
+mod dispatch_evidence;
+mod initial_approval;
+mod task_create;
+#[cfg(test)]
+mod runtime_idempotency_tests;
+#[cfg(test)]
+mod attempt_initial_approval_tests;
+#[cfg(test)]
+mod approval_timeout_tests;
+#[cfg(test)]
+mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
+mod queue;
+mod policy;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -72,9 +86,17 @@ mod sessions_tests;
 #[cfg(test)]
 mod continuity_tests;
 #[cfg(test)]
+mod retries_tests;
+#[cfg(test)]
 mod worktrees_tests;
 #[cfg(test)]
 mod reviews_tests;
+#[cfg(test)]
+mod queue_tests;
+#[cfg(test)]
+mod policy_tests;
+#[cfg(test)]
+mod adopted_attempts_tests;
 #[cfg(test)]
 mod tests;
 
@@ -120,6 +142,9 @@ pub(crate) use sessions::{env_block_set_in, looks_secret, thread_message_append_
 // ProviderSession y Thread (LXO-115): inertes hasta el corte; solo los usan `orch::session_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use continuity::{Continued, ContinuationRow, NewContinuation, Reason as ContinuationReason, Strategy as ContinuityStrategy, MAX_REQUEST_ID_CHARS};
+// Reintento de un Attempt (LXO-142): inerte hasta el corte; solo lo usan `orch::attempt_commands` y las pruebas.
+#[allow(unused_imports)]
+pub use retries::{retryable, ForkStrategy, NewRetry, Override as RetryOverride, Retried, RetryRow};
 pub use sessions::{session_transition_allowed, NewProviderSession, ProviderSessionRow, SessionBinding, SessionStatus, SessionStep, ThreadMessageRow, ThreadRow, MAX_EXTERNAL_REF_CHARS, MAX_THREAD_SUMMARY_CHARS};
 // Worktree y Artifact (LXO-116): inertes hasta el corte; solo los usan `orch::worktree_ops` y las pruebas.
 #[allow(unused_imports)]
@@ -129,14 +154,27 @@ pub use worktrees::{worktree_transition_allowed, ArtifactKind, ArtifactRow, NewA
 pub use cut::{cut_migration, inspect_copy, CopyFacts, CutCounts, CutOutcome, CutView, CUT_IDEM_KEY, CUT_NAME};
 // Runtime sobre las tablas Task/Attempt (LXO-232): lo usa la persistencia del Core tras el corte.
 pub use runtime::{RuntimeChanges, RuntimeDoc};
+pub(crate) use runtime::{RuntimeCommitOutcome, RuntimeResultIds};
+pub(crate) use task_create::task_create_payload_sha256;
+// Sin consumidor fuera del almacén hasta el RPC de decisión del primer Attempt (LXO-141, fase 2c).
+#[allow(unused_imports)]
+pub use initial_approval::{InitialApprovalDecision, InitialApprovalSnapshot, INITIAL_APPROVAL_TTL_MS};
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
+// Pending Queue de un Attempt (LXO-143): inerte hasta el corte; solo la usan `orch::queue_commands` y las pruebas.
+#[allow(unused_imports)]
+pub use queue::{queue_digest, Enqueued, InstructionMode, InstructionOutcome, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
+// Policy de autonomía (LXO-209): overrides durables por ámbito; las reglas viven en `orch::policy`.
+#[allow(unused_imports)]
+pub use policy::{PolicyChange, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
+#[cfg(test)]
+pub(crate) use migrate::embedded_post_cut;
 use migrate::now_ms;
 
 const LOCK_FILE: &str = "core.lock";

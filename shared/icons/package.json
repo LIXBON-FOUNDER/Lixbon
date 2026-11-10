@@ -1,0 +1,37 @@
+{
+  "name": "@lixbon/icons",
+  "version": "0.1.0",
+  "description": "Iconos de Lixbon (152, rejilla 24, trazo 2) para la web, el IDE y la app móvil.",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
+  "type": "module",
+  "main": "react/index.js",
+  "react-native": "native/Icono.js",
+  "exports": {
+    ".": {
+      "react-native": "./native/Icono.js",
+      "default": "./react/index.js"
+    },
+    "./native": "./native/Icono.js",
+    "./css": "./react/iconos.css",
+    "./icons.json": "./icons.json",
+    "./svg/*": "./svg/*",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "*.css",
+    "./react/iconos.css"
+  ],
+  "peerDependencies": {
+    "react": ">=18",
+    "react-native-svg": ">=13"
+  },
+  "peerDependenciesMeta": {
+    "react-native-svg": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build:native": "node scripts/build-native.mjs"
+  }
+}
