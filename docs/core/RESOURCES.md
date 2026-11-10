@@ -343,8 +343,9 @@ configuración de la persona lo esconden; solo se ignora lo NO versionado de `.l
 checkout principal (nombre completo, sin el prefijo `heads/` que git antepone si hay una etiqueta homónima). La previsualización la lee cualquier Person autenticada
 (como `resource_inventory`); adoptar es solo de Desktop.
 
-**Límites conocidos.** Adoptar necesita una Task sin ejecución con `repo`; la interfaz todavía no crea una Task sin Attempt (LXO-150), así que el diálogo dice
-«crea una primero» si no hay (`adopt_no_task`). Adoptar no toca git ni la carpeta.
+**Límites conocidos.** Adoptar necesita una Task sin ejecución con `repo`. La interfaz la crea con «Nuevo intento» → «Solo la tarea» (LXO-150; el Core ancla su
+`repo` a la ubicación verificada del Project). La Task queda anclada a esa ubicación: tras reubicar el Project (`project_locate`) las Tasks anteriores no se ofrecen
+(son de otro repositorio) y el diálogo (`adopt_no_task`) lo dice. Adoptar no toca git ni la carpeta.
 
 ### Pruebas (`resource_actions_e2e_tests.rs`, `resource_actions.rs`)
 

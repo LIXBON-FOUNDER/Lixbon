@@ -185,7 +185,7 @@ pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationCon
     let adoptable = match &candidate {
         Err(b) => blocked_json(b),
         Ok(_) if !healthy => json!({ "ok": false, "code": "adopt_degraded", "message": "el Core está en solo lectura: no puede registrar la adopción" }),
-        Ok(_) if tasks.is_empty() => json!({ "ok": false, "code": "adopt_no_task", "message": "no hay una Task sin ejecución en este Project que reciba el worktree: crea una primero" }),
+        Ok(_) if tasks.is_empty() => json!({ "ok": false, "code": "adopt_no_task", "message": "no hay una Task sin ejecución, de la ubicación actual de este Project, que reciba el worktree: crea una (una Task creada antes de reubicar el Project sigue anclada a su ubicación anterior)" }),
         Ok(_) => json!({ "ok": true }),
     };
     let (branch, base) = match &candidate {

@@ -139,6 +139,19 @@ export async function createTaskWithAttempt({ requestId, projectId, title, objec
   return response;
 }
 
+/**
+ * Crea SOLO la Task (sin Attempt, sin worktree, sin ejecutar nada): la intención de trabajo queda `not_started` en el Project. Después solo se le
+ * puede adoptar un worktree externo (Adopt): todavía no hay un RPC para darle su primer intento. El Core fija el repositorio (la ubicación verificada del Project). Misma clave de
+ * idempotencia que `createTaskWithAttempt`. Devuelve `{ status, run_id, task_id, attempt_id: null }`.
+ */
+export async function createTaskOnly({ requestId, projectId, title, objective, spec = '' }) {
+  const response = await call('task_create', { request_id: requestId, project_id: projectId, objective, title, spec });
+  if (!response || typeof response.task_id !== 'string') {
+    throw new Error('ade_command_invalid_response: task_create no devolvió la Task');
+  }
+  return response;
+}
+
 /** Aprueba el primer Attempt. `status`: `Approved` · `Replayed` · `Expired`. Aprobar no lanza nada por sí mismo. */
 export const approveAttempt = (attemptId) => call('attempt_approve', { attempt_id: attemptId });
 

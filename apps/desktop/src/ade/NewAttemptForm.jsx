@@ -1,9 +1,13 @@
 import { useId, useRef, useState } from 'react';
-import { ATTEMPT_PROFILES, createTaskWithAttempt, describeCommandError, newRequestId } from './attemptCommands';
+import { ATTEMPT_PROFILES, createTaskOnly, createTaskWithAttempt, describeCommandError, newRequestId } from './attemptCommands';
 import { useProviderCapabilities } from './useProviderCapabilities';
 import './NewAttemptForm.css';
 
 /**
+ * LXO-150 · Se puede crear SOLO la Task (sin intento: queda `not_started`; hoy lo único que se le puede hacer es adoptarle un worktree externo: no hay RPC para darle su primer intento después) o la Task
+ * con su primer intento. Antes de enviar, una vista previa dice QUÉ pasará con el botón o con Enter: en qué Project, qué se crea, que nada se ejecuta y
+ * que el intento tendrá un worktree nuevo y propio. No hay selector de host (el Core tiene uno solo) ni worktree compartido (no existe): se dice, no se oculta.
+ *
  * LXO-141 · Crear una Task con su primer Attempt en el Project abierto. La persona elige proveedor, perfil y (opcional) modelo
  * y esfuerzo; lo demás —que el Attempt nazca `pending_approval`, el plazo, el worktree— lo fija el Core. Crear NO lanza nada:
  * el intento queda esperando la aprobación de la persona, que se da en el detalle del intento.
@@ -12,11 +16,12 @@ import './NewAttemptForm.css';
  */
 const startable = (provider) => provider?.matrix?.capabilities?.start?.state === 'available';
 
-export function NewAttemptForm({ projectId, coreModel, active = true, onCreated }) {
+export function NewAttemptForm({ projectId, projectName = null, coreModel, active = true, onCreated }) {
   const uid = useId();
   const enabled = Boolean(active && projectId && coreModel?.vNext);
   const { snapshot, unsupported, probing } = useProviderCapabilities({ enabled });
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState('attempt');
   const [title, setTitle] = useState('');
   const [instructions, setInstructions] = useState('');
   const [provider, setProvider] = useState('');
@@ -32,30 +37,30 @@ export function NewAttemptForm({ projectId, coreModel, active = true, onCreated 
 
   const providers = (snapshot?.providers ?? []).filter(startable);
   const chosen = providers.some((p) => p.id === provider) ? provider : providers[0]?.id ?? '';
-  const ready = Boolean(chosen) && title.trim() !== '' && instructions.trim() !== '' && !busy;
+  const taskOnly = mode === 'task';
+  const ready = !busy && title.trim() !== '' && (taskOnly || (Boolean(chosen) && instructions.trim() !== ''));
 
   const submit = async (event) => {
     event.preventDefault();
     if (!ready) return;
-    requestId.current ??= newRequestId();
+    // La misma clave con OTRO payload es un conflicto en el Core: solo se reutiliza si lo que se envía es lo mismo (reintento tras un fallo de red).
+    const signature = JSON.stringify([mode, title.trim(), instructions.trim(), taskOnly ? null : [chosen, profile, model.trim(), effort.trim()]]);
+    if (!requestId.current || requestId.current.signature !== signature) requestId.current = { id: newRequestId(), signature };
     setBusy(true);
     setError(null);
     try {
-      const created = await createTaskWithAttempt({
-        requestId: requestId.current,
-        projectId,
-        title: title.trim(),
-        objective: title.trim(),
-        spec: instructions.trim(),
-        attempt: { provider: chosen, profile, model, effort },
-      });
+      const base = { requestId: requestId.current.id, projectId, title: title.trim(), objective: title.trim(), spec: instructions.trim() };
+      const created = taskOnly
+        ? await createTaskOnly(base)
+        : await createTaskWithAttempt({ ...base, attempt: { provider: chosen, profile, model, effort } });
       requestId.current = null;
+      setMode('attempt');
       setTitle('');
       setInstructions('');
       setModel('');
       setEffort('');
       setOpen(false);
-      onCreated?.({ projectId, taskId: created.task_id, attemptId: created.attempt_id, status: created.status });
+      onCreated?.({ projectId, taskId: created.task_id, attemptId: created.attempt_id ?? null, status: created.status });
     } catch (failure) {
       setError(describeCommandError(failure));
     } finally {
@@ -63,8 +68,11 @@ export function NewAttemptForm({ projectId, coreModel, active = true, onCreated 
     }
   };
 
+  const profileLabel = ATTEMPT_PROFILES.find((p) => p.id === profile)?.label ?? profile;
+  const where = projectName ? `${projectName} (${projectId})` : projectId;
   let note = null;
-  if (unsupported) note = 'Este Core no informa de lo que ofrece cada proveedor: no se puede crear un intento.';
+  if (taskOnly) note = null;
+  else if (unsupported) note = 'Este Core no informa de lo que ofrece cada proveedor: no se puede crear un intento.';
   else if (!snapshot) note = 'Comprobando los proveedores…';
   else if (!providers.length) {
     note = probing ? 'El Core está comprobando los proveedores…' : 'Ningún proveedor puede arrancar un intento ahora mismo; mira «Proveedores» más abajo.';
@@ -77,15 +85,31 @@ export function NewAttemptForm({ projectId, coreModel, active = true, onCreated 
       ) : (
         <form className="nat__form" onSubmit={submit} data-testid="new-attempt-form">
           <h3 className="ssec__label">Nuevo intento</h3>
+          <fieldset className="nat__field nat__modes" data-testid="new-attempt-modes">
+            <legend>¿Qué creas?</legend>
+            <label>
+              <input type="radio" name={`${uid}-mode`} value="attempt" checked={!taskOnly} onChange={() => { setMode('attempt'); setError(null); }} data-testid="new-attempt-mode-attempt" />
+              {' '}La tarea y su primer intento (espera tu aprobación)
+            </label>
+            <label>
+              <input type="radio" name={`${uid}-mode`} value="task" checked={taskOnly} onChange={() => { setMode('task'); setError(null); }} data-testid="new-attempt-mode-task" />
+              {' '}Solo la tarea, sin ejecutar (después puedes adoptarle un worktree externo)
+            </label>
+          </fieldset>
+          {/* Se anuncia el CAMBIO DE MODO, no cada letra del título (la vista previa de abajo no es una región viva). */}
+          <p className="nat__sr" role="status" data-testid="new-attempt-announce">
+            {taskOnly ? 'Se creará solo la tarea, sin intento.' : 'Se creará la tarea y su primer intento, que esperará tu aprobación.'}
+          </p>
           {note && <p className="nat__note" role="status" data-testid="new-attempt-note">{note}</p>}
           <label className="nat__field" htmlFor={`${uid}-title`}>
             <span>Título de la tarea</span>
             <input id={`${uid}-title`} type="text" value={title} maxLength={512} onChange={(e) => setTitle(e.target.value)} data-testid="new-attempt-title" />
           </label>
           <label className="nat__field" htmlFor={`${uid}-instructions`}>
-            <span>Instrucciones para el agente</span>
+            <span>{taskOnly ? 'Instrucciones (opcional)' : 'Instrucciones para el agente'}</span>
             <textarea id={`${uid}-instructions`} rows={5} value={instructions} onChange={(e) => setInstructions(e.target.value)} data-testid="new-attempt-instructions" />
           </label>
+          {!taskOnly && (<>
           <div className="nat__row">
             <label className="nat__field" htmlFor={`${uid}-provider`}>
               <span>Proveedor</span>
@@ -110,7 +134,22 @@ export function NewAttemptForm({ projectId, coreModel, active = true, onCreated 
               <input id={`${uid}-effort`} type="text" value={effort} maxLength={128} onChange={(e) => setEffort(e.target.value)} data-testid="new-attempt-effort" />
             </label>
           </div>
-          <p className="nat__hint">Crear el intento no lo ejecuta: queda esperando tu aprobación.</p>
+          </>)}
+          <div className="nat__preview" role="region" aria-label="Qué ocurrirá al crear" data-testid="new-attempt-preview">
+            <strong>{taskOnly ? 'Crear (o Enter) hará esto:' : 'Crear el intento (o Enter) hará esto:'}</strong>
+            <ul>
+              <li data-testid="new-attempt-preview-project">Proyecto: <span className="mono">{where}</span> (el que tienes abierto; no se deduce de ninguna carpeta).</li>
+              {taskOnly ? (
+                <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» sin intento: no hay worktree ni proveedor y no se ejecuta nada.</li>
+              ) : (
+                <>
+                  <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» y su intento 1 con <span className="mono">{chosen || '…'}</span> · {profileLabel}{model.trim() ? ` · ${model.trim()}` : ''}{effort.trim() ? ` · ${effort.trim()}` : ''}.</li>
+                  <li data-testid="new-attempt-preview-approval">Nada se ejecuta todavía: el intento queda esperando tu aprobación.</li>
+                  <li data-testid="new-attempt-preview-worktree">Al aprobarlo, el Core le dará un worktree nuevo y propio (no se comparte con otras tareas), en este equipo.</li>
+                </>
+              )}
+            </ul>
+          </div>
           {error && (
             <div className="ade-notice ade-notice--error" role="alert" data-testid="new-attempt-error">
               <span>{error.message}</span>
@@ -120,8 +159,8 @@ export function NewAttemptForm({ projectId, coreModel, active = true, onCreated 
             </div>
           )}
           <div className="nat__actions">
-            <button type="submit" className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : 'Crear intento'}</button>
-            <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); }} disabled={busy}>Cancelar</button>
+            <button type="submit" className="btn btn--primary btn--sm" disabled={!ready} data-testid="new-attempt-submit">{busy ? 'Creando…' : taskOnly ? 'Crear tarea' : 'Crear intento'}</button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setOpen(false); setError(null); requestId.current = null; }} disabled={busy}>Cancelar</button>
           </div>
         </form>
       )}

@@ -27,7 +27,7 @@ const BLOCKS = Object.freeze({
   adopt_locked: 'El worktree está bloqueado (git worktree lock): quien lo bloqueó lo quiere conservar.',
   adopt_is_base: 'Está en la rama base: no tiene trabajo propio que adoptar.',
   adopt_degraded: 'El Core está en solo lectura: no puede registrar la adopción.',
-  adopt_no_task: 'No hay una tarea sin ejecución en este proyecto que lo reciba: crea una primero.',
+  adopt_no_task: 'No hay una tarea sin ejecución, de la ubicación actual de este proyecto, que lo reciba: crea una con «Nuevo intento» → «Solo la tarea». (Una tarea creada antes de reubicar el proyecto sigue anclada a su ubicación anterior.)',
 });
 
 export function ResourceAdopt({ projectId, path, onChanged }) {

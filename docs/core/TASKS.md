@@ -295,8 +295,10 @@ plazos… son un error).
   un replay ya se atendió antes y no la repite.
 * **`repo` de la Task:** con `attempt`, la Task guarda la **ubicación verificada del Project** en esta máquina
   (`Core::project_launch_location`), no el `repo` que mande el cliente: el Worktree del Attempt se registra con el `repo` de la
-  Task (no puede estar vacío) y la Task no lo cambia después. Sin `attempt`, `repo` sigue siendo lo que mandó el cliente. Si el
-  Project no tiene en esta máquina una ubicación que exista como carpeta, la solicitud se rechaza antes de escribir.
+  Task (no puede estar vacío) y la Task no lo cambia después. Sin `attempt`, un `repo` explícito se respeta tal cual y, si
+  viene vacío (la interfaz no conoce la ruta), también es la ubicación verificada (LXO-150). En ambos casos, si el Project no tiene en esta máquina una
+  ubicación que exista como carpeta, la solicitud se rechaza antes de escribir: `Task.repo` es inmutable y una Task sin repositorio nunca podría recibir un
+  worktree adoptado ni un Attempt.
 * **Respuesta:** `{ status: Committed | Replayed, run_id, task_id, attempt_id }`, con `attempt_id = <task>-a1`; el ledger
   guarda el Attempt y un replay lo devuelve.
 * **Lanzador:** el Core tiene una ranura de lanzador (`Core::install_launcher`). Sin uno instalado, `task_create` rechaza
