@@ -604,8 +604,15 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
   Job (microsegundos) solo lo cubre el recorrido por `ppid`. Cubrirlos exigiría un contenedor del sistema (cgroups).
   **Windows y `KILL_ON_JOB_CLOSE` (LXO-242):** el job se crea con el límite, y si el sistema no lo acepta no se adjunta
   (sin job el cierre sigue siendo por escaneo, como antes). Efecto a tener presente: lo que la raíz deje en segundo plano
-  muere cuando se suelta el `Tree` (también si el Core cae), no sigue huérfano. Lo que el job aún NO cubre: la raíz
-  corre antes de entrar en él (la raíz suspendida y la regla estricta de cobertura son el incremento siguiente).
+  muere cuando se suelta el `Tree` (también si el Core cae), no sigue huérfano.
+  **Windows, raíz suspendida (LXO-242, incremento 2):** el lanzamiento canalizado (`spawn_piped`) crea la raíz con
+  `CREATE_SUSPENDED`, la mete en el job (`Tree::capture_suspended`) y solo la reanuda (`resume_suspended`) si el job quedó
+  adjunto (`has_complete_job`): ningún descendiente nace antes de que el job lo cubra. Si no se puede asignar o
+  reanudar, la raíz —que no ejecutó nada— se mata por la misma compensación que cualquier fallo de arranque (custodia si
+  no muere) y el lanzamiento devuelve `Err`. `resume_suspended` falla cerrado: sin una hebra única suspendida una vez,
+  no reanuda nada. **Residuo: la ConPTY (`spawn_pty`) NO se crea suspendida** (`portable-pty` no deja pasar flags de
+  creación): ahí el job sigue siendo tardío y un proceso creado por la raíz antes de entrar solo lo cubre el recorrido
+  por `ppid`. Los lanzamientos de los adapters (`adapter/process.rs`) tampoco usan aún este camino.
 * **Pruebas.** Mundo simulado determinista (`proctable::tests::World`, corre en Windows) para cada carrera: nacido entre
   instantáneas con la raíz zombi de ancla, raíz que sale dejando un huérfano (con y sin observación), pin roto, número
   reutilizado por un líder ajeno (vivo o muerto), zombi sin token, opacos rastreados/ajenos/hijos, identidad de la raíz.
