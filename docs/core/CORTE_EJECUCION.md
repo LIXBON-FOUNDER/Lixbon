@@ -82,6 +82,11 @@ La única diferencia de la vista legacy con el documento es la de D3 (t4: `sessi
 `model_source` → `unknown`). La fixture grande sintética (1040 Tasks, 40 Runs, los 8 estados, sesiones de los tres
 tipos, Worktrees activos y ramas conservadas, mensajes y revisiones) pasa la misma validación.
 
+**Artifacts sin campo legacy (LXO-241).** El documento legacy solo tiene campos para `report`, `pull_request` y
+`last_message`. Un Artifact `commit` o `file` no entra en la vista: sigue en las tablas y en `attempt_detail`, y la vista
+queda igual con y sin él. Como la vista se reconstruye en cada carga de una base cortada, esto es lo que deja arrancar un
+Core que ya los tenga. Un error de la vista ya no se presenta como un fallo de la migración del corte.
+
 ## Rollback (ADR §12)
 
 Solo si el corte se confirmó y aparece una regresión crítica. Un corte que falla no lo necesita: la transacción se
