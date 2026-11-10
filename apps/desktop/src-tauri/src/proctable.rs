@@ -31,9 +31,11 @@
 //!   2. Windows: la raíz entra en un Job Object al crearla (solo si el proceso abierto tiene la MISMA hora de creación
 //!      que la capturada, para que un pid reutilizado nunca meta a un ajeno en un job que luego se termina) y el job da
 //!      la lista autoritativa de sus procesos vivos;
-//!   3. Unix: la raíz es líder de su propio grupo de procesos (`process_group(0)` al lanzar; la PTY hace `setsid`) y los
-//!      procesos con ese `pgid` se leen en UNA instantánea junto a su token de identidad y a quien ocupa el pid `pgid`.
-//!      Cada miembro se mata con `terminate(Proc)` (identidad comprobada justo antes), nunca con `kill(-pgid)`.
+//!   3. Unix: la raíz es líder de su propio grupo de procesos y de su PROPIA SESIÓN (`setsid` al lanzar, en el lanzamiento
+//!      canalizado y en la PTY; en Linux `leads_group` lo exige leyendo la sesión de `/proc`) y los procesos con ese `pgid`
+//!      se leen en UNA instantánea junto a su token de identidad y a quien ocupa el pid `pgid`. Cada miembro se mata con
+//!      `terminate(Proc)` (en Linux ≥ 5.3 por `pidfd_send_signal`, con la identidad comprobada tras abrir el `pidfd`; si no
+//!      hay `pidfd`, por `kill -9` con la identidad comprobada justo antes), nunca con `kill(-pgid)`.
 //!
 //!      **Propiedad del número de grupo.** Un `pgid` solo está reservado mientras alguien lo ocupa (como PID o como PGID).
 //!      Un grupo con el líder muerto es indistinguible de uno AJENO que reutilizó el número y cuyo líder murió dejando
@@ -652,6 +654,23 @@ fn parse_proc_stat(pid: u32, stat: &[u8]) -> Option<PsRow> {
     Some(PsRow { pid, ppid, pgid, zombie: matches!(state, "Z" | "X" | "x"), start: Some(start) })
 }
 
+/// El número de SESIÓN (campo 6 de `/proc/<pid>/stat`: tras `state`, `ppid` y `pgrp`). `None` si no se entiende.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_proc_session(stat: &[u8]) -> Option<u32> {
+    let close = stat.iter().rposition(|&b| b == b')')?;
+    let after = std::str::from_utf8(&stat[close + 1..]).ok()?;
+    after.split_whitespace().nth(3)?.parse().ok()
+}
+
+/// ¿Es `pid` líder de su PROPIA sesión (`pgid == pid` y `sid == pid`)? Solo entonces el número de su grupo está aislado: un
+/// proceso de otra sesión no puede unirse a un grupo ajeno (`setpgid` lo prohíbe), así que nadie puede colar a un ajeno en
+/// él. Un grupo nuevo dentro de la sesión de Lixbon (`process_group(0)`) NO basta: otro proceso de esa sesión puede hacer
+/// `setpgid` hacia ese mismo número (LXO-242).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn leads_own_session(pid: u32, stat: &[u8]) -> bool {
+    parse_proc_stat(pid, stat).is_some_and(|r| r.pgid == pid) && parse_proc_session(stat) == Some(pid)
+}
+
 /// Una fila de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` (macOS y otros Unix) o de `/proc/<pid>/stat` (Linux).
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(windows, allow(dead_code))]
@@ -869,7 +888,8 @@ fn group_view(_pgid: u32) -> Option<GroupView> {
 fn leads_group(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::fs::read(format!("/proc/{pid}/stat")).ok().and_then(|t| parse_proc_stat(pid, &t)).is_some_and(|r| r.pgid == pid)
+        // Linux: además de liderar su grupo, la raíz debe liderar su PROPIA sesión (`setsid` al lanzar): ver `leads_own_session`.
+        std::fs::read(format!("/proc/{pid}/stat")).ok().is_some_and(|t| leads_own_session(pid, &t))
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -1076,11 +1096,59 @@ fn proven_absent(pid: u32) -> bool {
     process_snapshot().is_some_and(|(t, opaque)| !t.iter().any(|(q, _)| *q == pid) && !opaque.contains(&pid))
 }
 
-/// En Unix la identidad se comprueba justo antes de `kill -9`: son dos llamadas seguidas, no una sola operación (no hay
-/// handle que ancle el pid sin pidfd). La ventana es la de dos `fork/exec` (decenas de milisegundos con carga), frente a
+/// Linux ≥ 5.3 (LXO-242): el `pidfd` fija el proceso al que se envía la señal aunque su número se reutilice después. La
+/// identidad se comprueba DESPUÉS de abrirlo: si el token de `/proc` coincide con el que se anotó, el proceso que tiene
+/// ahora ese pid es el original, y el original no pudo ser reemplazado antes (empezó antes que cualquier reutilizador), así
+/// que el `pidfd` apunta a él y no a un ajeno. `None`: el kernel no ofrece `pidfd` (o lo bloquea): se usa la vía de `kill`.
+/// Residuo: el token es el `starttime` de `/proc`, en ticks de 10 ms.
+#[cfg(target_os = "linux")]
+fn terminate_with_pidfd(p: Proc) -> Option<Fate> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    // SAFETY: `pidfd_open` no recibe punteros; el descriptor devuelto pasa a un `OwnedFd` que lo cierra.
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, p.pid as libc::c_long, 0 as libc::c_long) };
+    if raw < 0 {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            // El kernel dice que no existe ningún proceso con ese pid.
+            Some(libc::ESRCH) => Some(Fate::Gone),
+            // Sin `pidfd` (kernel viejo, seccomp, límite de descriptores…): que lo resuelva la vía de `kill`.
+            _ => None,
+        };
+    }
+    // SAFETY: `raw` es un descriptor recién abierto y propio.
+    let pidfd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw as i32) };
+    match start_time(p.pid) {
+        Some(s) if s == p.start => {}
+        // El pid lo ocupa otro proceso: el original ya no existe. No se envía nada.
+        Some(_) => return Some(Fate::Gone),
+        None => return Some(if proven_absent(p.pid) { Fate::Gone } else { Fate::Unknown }),
+    }
+    // SAFETY: el `pidfd` es válido; `siginfo` nulo y `flags` 0 son los valores admitidos.
+    let sent = unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd.as_raw_fd() as libc::c_long, libc::SIGKILL as libc::c_long, std::ptr::null::<libc::siginfo_t>(), 0 as libc::c_long) };
+    if sent == 0 {
+        return Some(Fate::Killed);
+    }
+    Some(match std::io::Error::last_os_error().raw_os_error() {
+        // El `pidfd` fija el proceso: ya terminó.
+        Some(libc::ESRCH) => Fate::Gone,
+        _ => Fate::Unknown,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn terminate(p: Proc) -> Fate {
+    terminate_with_pidfd(p).unwrap_or_else(|| terminate_with_kill(p))
+}
+
+#[cfg(all(not(windows), not(target_os = "linux")))]
+fn terminate(p: Proc) -> Fate {
+    terminate_with_kill(p)
+}
+
+/// En Unix sin `pidfd` la identidad se comprueba justo antes de `kill -9`: son dos llamadas seguidas, no una sola operación
+/// (no hay handle que ancle el pid). La ventana es la de dos `fork/exec` (decenas de milisegundos con carga), frente a
 /// la de horas que había al reintentar con pids viejos; es un residuo documentado, no una garantía.
 #[cfg(not(windows))]
-fn terminate(p: Proc) -> Fate {
+fn terminate_with_kill(p: Proc) -> Fate {
     match start_time(p.pid) {
         Some(s) if s == p.start => {}
         Some(_) => return Fate::Gone,
@@ -2246,7 +2314,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn el_grupo_de_procesos_real_mata_a_un_nieto_huerfano_de_verdad() {
-        use std::os::unix::process::CommandExt;
         let dir = std::env::temp_dir().join(format!("lxo-pgrp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -2254,7 +2321,7 @@ mod tests {
         let script = format!("( sleep 60 & ); echo ok > '{}'; sleep 60", marcador.display());
         let mut cmd = std::process::Command::new("sh");
         cmd.args(["-c", &script]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        cmd.process_group(0);
+        en_sesion_propia(&mut cmd);
         let mut child = cmd.spawn().unwrap();
         let mut os = RealOs::default();
         let mut t = Tree::capture(&mut os, child.id());
@@ -2272,14 +2339,91 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Unix, procesos de verdad: un `sh` en su propio grupo que lanza `script`.
+    /// Unix: el proceso nace líder de su PROPIA sesión (`setsid`: pgid == sid == pid), como el lanzamiento real.
+    #[cfg(unix)]
+    fn en_sesion_propia(cmd: &mut std::process::Command) {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: el callback solo llama a `setsid` entre `fork` y `exec`.
+        unsafe {
+            cmd.pre_exec(|| if libc::setsid() == -1 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+        }
+    }
+
+    /// Unix, procesos de verdad: un `sh` en su propia sesión (y grupo) que lanza `script`.
     #[cfg(unix)]
     fn lanza_raiz(script: &str) -> std::process::Child {
-        use std::os::unix::process::CommandExt;
         let mut cmd = std::process::Command::new("sh");
         cmd.args(["-c", script]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        cmd.process_group(0);
+        en_sesion_propia(&mut cmd);
         cmd.spawn().unwrap()
+    }
+
+    // --- Linux (LXO-242, incremento 3): la sesión propia y el `pidfd` ---
+
+    /// Una línea de `/proc/<pid>/stat` con `comm` raro (paréntesis y espacios dentro) y los campos que interesan.
+    fn stat_de(pid: u32, comm: &str, ppid: u32, pgrp: u32, sesion: u32) -> Vec<u8> {
+        format!("{pid} ({comm}) S {ppid} {pgrp} {sesion} 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 987654 1000000 100 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0").into_bytes()
+    }
+
+    #[test]
+    fn la_sesion_se_lee_del_stat_aunque_el_nombre_tenga_parentesis() {
+        assert_eq!(parse_proc_session(&stat_de(500, "a) (b c", 1, 500, 500)), Some(500));
+        assert_eq!(parse_proc_session(&stat_de(500, "sh", 1, 500, 77)), Some(77));
+        assert_eq!(parse_proc_session(b"sin parentesis"), None);
+        assert_eq!(parse_proc_session(b"1 (x) S 1"), None, "truncado: no se entiende");
+    }
+
+    #[test]
+    fn solo_lidera_su_grupo_quien_lidera_tambien_su_propia_sesion() {
+        assert!(leads_own_session(500, &stat_de(500, "sh", 1, 500, 500)), "pgid == sid == pid: sesión propia");
+        assert!(!leads_own_session(500, &stat_de(500, "sh", 1, 500, 77)), "líder de grupo en la sesión de otro (`process_group(0)`): su número no es suyo");
+        assert!(!leads_own_session(500, &stat_de(500, "sh", 1, 77, 500)), "líder de sesión sin liderar su grupo");
+        assert!(!leads_own_session(500, b"basura"), "sin entender el stat no se asume nada");
+    }
+
+    /// Linux, procesos de verdad: la raíz lanzada con `setsid` lidera su grupo; con solo `process_group(0)` no.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_real_solo_la_raiz_con_sesion_propia_lidera_su_grupo() {
+        use std::os::unix::process::CommandExt;
+        let mut con_sesion = lanza_raiz("sleep 60");
+        let mut solo_grupo = {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.args(["-c", "sleep 60"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+            cmd.process_group(0);
+            cmd.spawn().unwrap()
+        };
+        assert!(leads_group(con_sesion.id()), "pgid == sid == pid");
+        assert!(!leads_group(solo_grupo.id()), "lidera su grupo pero está en la sesión de Lixbon");
+        let _ = con_sesion.kill();
+        let _ = solo_grupo.kill();
+        let _ = con_sesion.wait();
+        let _ = solo_grupo.wait();
+    }
+
+    /// Linux, procesos de verdad: con el `pidfd` se mata al proceso con la identidad anotada y a nadie con otra.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_real_pidfd_mata_con_la_identidad_exacta_y_no_toca_a_un_proceso_con_otra() {
+        let mut child = std::process::Command::new("sleep").arg("60").stdin(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        let start = start_time(pid).expect("identidad");
+        // Otra identidad (un pid reutilizado): no se envía nada y el proceso sigue vivo.
+        match terminate_with_pidfd(Proc { pid, start: start.wrapping_add(1) }) {
+            None => {
+                eprintln!("este kernel no ofrece pidfd: prueba omitida");
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            Some(f) => assert_eq!(f, Fate::Gone, "otra identidad: el original ya no existe"),
+        }
+        assert!(child.try_wait().unwrap().is_none(), "y el proceso (que NO era ese) sigue vivo");
+        assert_eq!(terminate_with_pidfd(Proc { pid, start }), Some(Fate::Killed), "con la identidad exacta se mata");
+        let estado = child.wait().unwrap();
+        assert!(!estado.success(), "murió por la señal: {estado:?}");
+        // Ya reapeado: el pid no existe.
+        assert_eq!(terminate_with_pidfd(Proc { pid, start }), Some(Fate::Gone));
     }
 
     #[cfg(unix)]
