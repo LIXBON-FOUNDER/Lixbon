@@ -323,6 +323,21 @@ thread_local! {
     pub(crate) static BREAK_KILLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// La n-ésima creación de un hilo del agente (1 = la primera) falla; 0 = ninguna.
     pub(crate) static FAIL_THREAD_SPAWN: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Windows: no se puede reanudar la raíz suspendida del lanzamiento canalizado (LXO-242).
+    pub(crate) static FAIL_RESUME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Windows: reanuda la raíz suspendida del lanzamiento canalizado.
+#[cfg(windows)]
+fn resume_root(pid: u32) -> bool {
+    #[cfg(test)]
+    {
+        LAST_SPAWNED_PID.with(|p| p.set(Some(pid)));
+        if FAIL_RESUME.with(|f| f.get()) {
+            return false;
+        }
+    }
+    crate::proctable::resume_suspended(pid)
 }
 
 #[cfg(test)]
@@ -465,7 +480,11 @@ struct TreeKiller {
 impl TreeKiller {
     /// Se crea justo después de crear el proceso (su pid es seguro): anota su identidad en ese instante.
     fn new(pid: u32) -> Self {
-        TreeKiller { tree: Arc::new(Mutex::new(crate::proctable::Tree::capture(&mut crate::proctable::RealOs::default(), pid))) }
+        Self::from_tree(crate::proctable::Tree::capture(&mut crate::proctable::RealOs::default(), pid))
+    }
+
+    fn from_tree(tree: crate::proctable::Tree) -> Self {
+        TreeKiller { tree: Arc::new(Mutex::new(tree)) }
     }
 
     /// El árbol, para quien espera a la raíz.
@@ -577,9 +596,42 @@ fn spawn_piped(
     for (k, v) in &l.env {
         cmd.env(k, v);
     }
-    let mut child = hide_console(&mut cmd).spawn().map_err(|e| format!("No se pudo lanzar el agente: {e}"))?;
+    hide_console(&mut cmd);
+    // Windows (LXO-242): la raíz nace SUSPENDIDA y no corre ni una instrucción hasta estar dentro del Job, así que ningún
+    // descendiente puede nacer antes de que el Job lo cubra. (La ConPTY de `spawn_pty` no admite esto: `portable-pty`
+    // no deja pasar los flags de creación; ahí el job sigue siendo tardío.)
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("No se pudo lanzar el agente: {e}"))?;
     let pid = child.id();
     // La identidad de la raíz se anota ahora, con el proceso recién creado.
+    #[cfg(windows)]
+    let tree = {
+        let tree = TreeKiller::from_tree(crate::proctable::Tree::capture_suspended(&mut crate::proctable::RealOs::default(), pid));
+        // Solo se reanuda si el Job quedó adjunto con la raíz aún suspendida; si no, se mata sin haber ejecutado nada.
+        let complete = tree.shared().lock().unwrap_or_else(|e| e.into_inner()).has_complete_job();
+        let motivo = if !complete {
+            Some("No se pudo meter la raíz suspendida en un Job Object")
+        } else if !resume_root(pid) {
+            Some("No se pudo reanudar la raíz suspendida")
+        } else {
+            None
+        };
+        if let Some(motivo) = motivo {
+            let dead = kill_after_failed_setup(l.owner, Some(pid), tree.clone_killer(), &mut || child.kill());
+            if dead {
+                let _ = child.wait();
+            }
+            return Err(setup_failure(format!("{motivo}; no se lanzó el agente"), Some(pid), dead));
+        }
+        tree
+    };
+    #[cfg(not(windows))]
     let tree = TreeKiller::new(pid);
     let waiter_tree = tree.shared();
     // El proceso ya existe: si falta cualquier tubería, se mata antes de devolver el error.
@@ -1164,6 +1216,15 @@ pub(crate) mod pruebas {
         r
     }
 
+    /// Windows: ejecuta `f` con la reanudación de la raíz suspendida del lanzamiento canalizado fallando.
+    #[cfg(windows)]
+    pub fn con_fallo_al_reanudar<R>(f: impl FnOnce() -> R) -> R {
+        FAIL_RESUME.with(|x| x.set(true));
+        let r = f();
+        FAIL_RESUME.with(|x| x.set(false));
+        r
+    }
+
     /// Carpeta de trabajo propia de cada llamada: las pruebas corren en paralelo dentro del mismo proceso y
     /// compartir carpeta (y su `launch.cmd`) entre dos lanzamientos los pisaba.
     pub fn carpeta(nombre: &str) -> std::path::PathBuf {
@@ -1178,6 +1239,40 @@ pub(crate) mod pruebas {
 
 /// P2-6: un hilo que no se puede crear DESPUÉS de crear el proceso (`thread::spawn` habría entrado en pánico y soltado
 /// un proceso vivo sin dueño) pasa por la misma compensación comprobada y, si no se confirma la muerte, por la custodia.
+/// Windows, LXO-242: el lanzamiento canalizado crea la raíz SUSPENDIDA y solo la reanuda con el Job adjunto. Si no se puede
+/// reanudar, el proceso que nunca ejecutó nada se mata y el lanzamiento falla: no queda una raíz suspendida para siempre.
+#[cfg(all(test, windows))]
+mod raiz_suspendida_en_el_lanzamiento_canalizado {
+    use super::pruebas::*;
+    use super::*;
+
+    #[test]
+    fn si_no_se_puede_reanudar_la_raiz_suspendida_se_mata_y_el_lanzamiento_falla() {
+        let _serie = serie_custodia();
+        let dir = carpeta("suspendida-no-reanuda");
+        let r = con_fallo_al_reanudar(|| lanza(&dir, true));
+        let pid = ultimo_pid().expect("pid");
+        let e = r.err().expect("el lanzamiento falla");
+        assert!(e.contains("no se lanzó el agente") && !e.contains("custodia"), "{e}");
+        assert!(espera_muerto(pid), "la raíz suspendida se mató: no queda colgada");
+        assert!(!unowned().iter().filter_map(|u| u.pid).any(|p| p == pid), "y compensado: nada que custodiar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sin fallo, la raíz corre (se reanudó) y el lanzamiento canalizado sigue funcionando de punta a punta.
+    #[test]
+    fn sin_fallo_la_raiz_suspendida_se_reanuda_y_corre() {
+        let _serie = serie_custodia();
+        let dir = carpeta("suspendida-reanuda");
+        let mut term = lanza(&dir, true).expect("lanzamiento");
+        let pid = ultimo_pid().expect("pid");
+        assert!(vivo(pid), "la raíz corre: se reanudó");
+        term.try_kill().expect("el árbol se mata y se comprueba");
+        assert!(espera_muerto(pid));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 #[cfg(test)]
 mod hilos_tras_crear_el_proceso {
     use super::pruebas::*;

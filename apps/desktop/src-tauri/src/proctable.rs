@@ -173,6 +173,10 @@ pub(crate) struct Tree {
     /// del árbol, después de anotar el grupo). Mientras sea así el pid —y con él el número de grupo— no puede ser de otro,
     /// y la identidad de la raíz puede tomarse en cualquier momento. Ver la cabecera del módulo.
     pinned: bool,
+    /// Windows: el Job se asignó con la raíz todavía SUSPENDIDA (ver [`Tree::capture_suspended`]), así que cubre a la raíz
+    /// desde antes de que ejecute una instrucción. Con una captura normal el job es tardío (LXO-242).
+    #[cfg(windows)]
+    job_from_start: bool,
 }
 
 /// Intentos de leer la identidad de la raíz al crearla: su pid es seguro (acaba de crearse), así que un fallo transitorio
@@ -182,6 +186,24 @@ const CAPTURE_TRIES: usize = 4;
 impl Tree {
     /// Anota la raíz recién creada (su pid es seguro: acaba de crearse). Si ya no existe, nace verificada muerta.
     pub(crate) fn capture(os: &mut dyn Os, pid: u32) -> Tree {
+        Self::capture_with(os, pid, false)
+    }
+
+    /// Windows: anota una raíz creada SUSPENDIDA (`CREATE_SUSPENDED`) y la mete en el Job antes de que ejecute nada. Quien
+    /// la lanza solo puede reanudarla ([`resume_suspended`]) si [`Tree::has_complete_job`] da `true`: así ningún
+    /// descendiente nace antes de que el Job lo cubra. Una raíz que ya corría usa [`Tree::capture`] (job tardío).
+    #[cfg(windows)]
+    pub(crate) fn capture_suspended(os: &mut dyn Os, pid: u32) -> Tree {
+        Self::capture_with(os, pid, true)
+    }
+
+    /// Windows: ¿el Job cubre a la raíz desde antes de que ejecutara? Solo si se capturó suspendida y el job se adjuntó.
+    #[cfg(windows)]
+    pub(crate) fn has_complete_job(&self) -> bool {
+        self.group.is_some() && self.job_from_start
+    }
+
+    fn capture_with(os: &mut dyn Os, pid: u32, _suspended: bool) -> Tree {
         let mut start = os.start(pid);
         // Un fallo transitorio de la consulta con la raíz presente se reintenta (acotado): el pid sigue siendo seguro.
         for _ in 1..CAPTURE_TRIES {
@@ -194,7 +216,21 @@ impl Tree {
         let group = os.make_group(pid, start);
         let pgid = os.leads_group(pid).then_some(pid);
         let gone = start.is_none() && os.table().is_some_and(|t| !t.iter().any(|(p, _)| *p == pid)) && !os.opaque().contains(&pid);
-        Tree { pid, start, root_dead: gone, root_gone: false, seen: Vec::new(), unproven: Vec::new(), group, pgid, pinned: false }
+        #[cfg(windows)]
+        let job_from_start = _suspended && group.is_some();
+        Tree {
+            pid,
+            start,
+            root_dead: gone,
+            root_gone: false,
+            seen: Vec::new(),
+            unproven: Vec::new(),
+            group,
+            pgid,
+            pinned: false,
+            #[cfg(windows)]
+            job_from_start,
+        }
     }
 
     /// Declara que el proceso raíz no se reapeará hasta [`root_exited`] (lo garantiza quien espera al hijo: ver
@@ -608,7 +644,15 @@ impl Os for RealOs {
     }
 }
 
-/// Windows: un Job Object sin límites (nada se mata al soltarlo ni se impide escapar a nadie: solo contabiliza).
+/// Windows: reanuda una raíz creada con `CREATE_SUSPENDED` (ver [`Tree::capture_suspended`]). `false` si no se pudo, sin
+/// haber reanudado nada.
+#[cfg(windows)]
+pub(crate) fn resume_suspended(pid: u32) -> bool {
+    win::resume_suspended(pid)
+}
+
+/// Windows: un Job Object con `KILL_ON_JOB_CLOSE` (soltar el último handle termina a sus miembros; no impide escapar a
+/// nadie con `BREAKAWAY`, que no se concede).
 #[cfg(windows)]
 fn make_group(pid: u32, start: Option<u64>) -> Option<std::sync::Arc<dyn Group>> {
     win::Job::attach(pid, start).map(|j| std::sync::Arc::new(j) as std::sync::Arc<dyn Group>)
@@ -938,6 +982,55 @@ mod win {
     pub fn terminate(h: &Handle) -> bool {
         // SAFETY: handle válido con PROCESS_TERMINATE.
         unsafe { TerminateProcess(h.0, 1) != 0 }
+    }
+
+    const ERROR_NO_MORE_FILES: u32 = 18;
+
+    /// Reanuda la única hebra del proceso recién creado con `CREATE_SUSPENDED`. `std::process::Child` no expone el handle
+    /// de la hebra, así que se busca en una instantánea. Falla CERRADO (devuelve `false` sin reanudar nada) si la
+    /// instantánea no es completa, si hay cero o más de una hebra (no es un proceso recién creado), si la hebra no es de
+    /// `pid` o si no estaba suspendida exactamente una vez.
+    pub fn resume_suspended(pid: u32) -> bool {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32};
+        use windows_sys::Win32::System::Threading::{GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION, THREAD_SUSPEND_RESUME};
+        // SAFETY: instantánea local; la estructura se inicializa con su tamaño antes de usarla; los handles se cierran.
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return false;
+            }
+            let mut entry: THREADENTRY32 = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+            if Thread32First(snapshot, &mut entry) == 0 {
+                CloseHandle(snapshot);
+                return false;
+            }
+            let mut primary: Option<u32> = None;
+            loop {
+                if entry.th32OwnerProcessID == pid && primary.replace(entry.th32ThreadID).is_some() {
+                    CloseHandle(snapshot);
+                    return false;
+                }
+                if Thread32Next(snapshot, &mut entry) == 0 {
+                    if GetLastError() != ERROR_NO_MORE_FILES {
+                        CloseHandle(snapshot);
+                        return false;
+                    }
+                    break;
+                }
+            }
+            CloseHandle(snapshot);
+            let Some(tid) = primary else { return false };
+            let thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION | THREAD_SUSPEND_RESUME, 0, tid);
+            if thread == 0 {
+                return false;
+            }
+            // `ResumeThread` devuelve el contador de suspensión ANTERIOR: 1 = estaba suspendida una vez y corre ahora.
+            let reanudada = GetProcessIdOfThread(thread) == pid && ResumeThread(thread) == 1;
+            CloseHandle(thread);
+            reanudada
+        }
     }
 
     /// Job Object con la raíz dentro. Los hijos que cree la raíz DESPUÉS de entrar heredan el job (sin
@@ -2209,6 +2302,66 @@ mod tests {
         let job = win::Job::attach(pid, Some(start)).expect("con la identidad exacta sí");
         assert!(Group::members(&job).is_some_and(|m| m.contains(&pid)));
         assert!(Group::terminate(&job));
+        let _ = child.wait();
+    }
+
+    /// Windows, un proceso de verdad creado SUSPENDIDO: `cmd /C exit 0` termina al instante si corre, así que seguir vivo
+    /// tras un segundo prueba que no ha ejecutado nada.
+    #[cfg(windows)]
+    fn lanza_suspendido() -> std::process::Child {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "exit 0"]).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        cmd.spawn().unwrap()
+    }
+
+    /// LXO-242 (incremento 2): una raíz suspendida entra en el Job SIN haber ejecutado nada, y solo entonces se reanuda.
+    #[cfg(windows)]
+    #[test]
+    fn una_raiz_suspendida_entra_en_el_job_antes_de_ejecutar_y_se_reanuda() {
+        let mut child = lanza_suspendido();
+        let pid = child.id();
+        let mut os = RealOs::default();
+        let t = Tree::capture_suspended(&mut os, pid);
+        assert!(t.has_complete_job(), "el job cubre a la raíz desde antes de que ejecute");
+        assert!(t.group_members().is_some_and(|m| m.contains(&pid)), "y la raíz está dentro");
+        std::thread::sleep(Duration::from_millis(1000));
+        assert!(child.try_wait().unwrap().is_none(), "suspendida: no ha ejecutado nada (si corriera, `exit 0` ya habría salido)");
+        assert!(resume_suspended(pid), "se reanuda");
+        let limite = std::time::Instant::now() + Duration::from_secs(15);
+        let estado = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break Some(s);
+            }
+            if std::time::Instant::now() > limite {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        if estado.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert!(estado.is_some_and(|s| s.success()), "reanudada, corre y termina");
+    }
+
+    /// LXO-242 (incremento 2): reanudar falla CERRADO ante un proceso que ya corre (no estaba suspendido), y una captura
+    /// normal (job tardío) no se presenta como cobertura completa.
+    #[cfg(windows)]
+    #[test]
+    fn no_se_reanuda_un_proceso_que_ya_corre_y_una_captura_normal_no_es_cobertura_completa() {
+        let mut child = std::process::Command::new("ping").args(["-n", "60", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        let mut os = RealOs::default();
+        let t = Tree::capture(&mut os, pid);
+        assert!(t.group_members().is_some(), "el job se adjuntó (tardío)");
+        assert!(!t.has_complete_job(), "pero un job tardío no prueba que cubra desde el principio");
+        assert!(!resume_suspended(pid), "un proceso que ya corre no se reanuda");
+        assert!(child.try_wait().unwrap().is_none(), "y sigue vivo");
+        let _ = child.kill();
         let _ = child.wait();
     }
 
