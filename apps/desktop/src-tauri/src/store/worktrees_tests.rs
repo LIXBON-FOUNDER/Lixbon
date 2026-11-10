@@ -442,6 +442,50 @@ fn un_artifact_no_guarda_secretos_ni_contenido_y_no_cambia() {
     assert!(sql(&mut w.s, &format!("DELETE FROM artifacts WHERE id = '{}'", x.id)).is_err());
 }
 
+/// LXO-241: un Artifact `commit` o `file` no tiene campo en el documento legacy. La vista no lo traduce ni falla: sigue
+/// en las tablas y en las lecturas vNext, y la vista queda igual con y sin él.
+#[test]
+fn la_vista_legacy_ignora_los_artifacts_commit_y_file_y_no_cambia() {
+    let t = Tmp::new();
+    let mut w = mundo(t.path());
+    let hija = w.hija.clone();
+    let a = corre(&mut w, &hija);
+    deja(&mut w, &a.id, ArtifactKind::PullRequest, "https://github.com/ana/app/pull/42").unwrap();
+    let sin = w.s.cut_view(|v| v.legacy_task(&hija)).unwrap();
+    assert_eq!(sin["pr_url"], "https://github.com/ana/app/pull/42");
+
+    deja(&mut w, &a.id, ArtifactKind::Commit, "0123456789abcdef0123456789abcdef01234567").unwrap();
+    deja(&mut w, &a.id, ArtifactKind::File, "docs/evidencia/captura.png").unwrap();
+    let con = w.s.cut_view(|v| v.legacy_task(&hija)).unwrap();
+    assert_eq!(con, sin, "con commit y file la vista legacy es la misma");
+
+    // No se pierden: siguen en las tablas y en la lectura por Attempt.
+    let tipos: Vec<ArtifactKind> = w.s.artifacts_of_attempt(&a.id).unwrap().into_iter().map(|x| x.kind).collect();
+    assert!(tipos.contains(&ArtifactKind::Commit) && tipos.contains(&ArtifactKind::File), "{tipos:?}");
+}
+
+/// LXO-241: un Core ya cortado con Artifacts `commit` y `file` arranca (la carga reconstruye la vista legacy) y los
+/// reabre igual tras cerrar y volver a abrir la base.
+#[test]
+fn un_core_cortado_con_artifacts_commit_y_file_carga_y_reabre() {
+    let t = Tmp::new();
+    let hija;
+    let attempt;
+    {
+        let mut w = mundo(t.path());
+        hija = w.hija.clone();
+        let a = corre(&mut w, &hija);
+        attempt = a.id.clone();
+        deja(&mut w, &a.id, ArtifactKind::Commit, "0123456789abcdef0123456789abcdef01234567").unwrap();
+        deja(&mut w, &a.id, ArtifactKind::File, "docs/evidencia/captura.png").unwrap();
+        let carga = w.s.runtime_load().expect("la carga no se bloquea por un commit ni un file");
+        assert!(carga.doc["tasks"][&hija].is_object(), "la Task está en el documento cargado");
+    }
+    let s = Store::open_with(t.path(), &embedded(), "t").unwrap();
+    s.runtime_load().expect("tras reabrir, la carga sigue sin bloquearse");
+    assert_eq!(s.artifacts_of_attempt(&attempt).unwrap().len(), 2);
+}
+
 #[test]
 fn un_attempt_que_no_arranco_no_deja_artifacts_y_las_lecturas_cubren_attempt_task_y_project() {
     let t = Tmp::new();

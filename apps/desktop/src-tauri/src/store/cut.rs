@@ -88,8 +88,10 @@ fn json_col(v: Option<String>) -> Value {
     v.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null)
 }
 
+/// Error de la vista legacy. La vista se reconstruye en cada carga de una base ya cortada (`runtime::load_in`) y en el
+/// paso 5b del corte: el error no puede decir «migración», porque casi siempre ocurre al cargar (LXO-241).
 fn view_err(m: String) -> StoreError {
-    StoreError::MigrationFailed { version: 0, name: CUT_NAME.into(), detail: format!("vista legacy: {m}") }
+    StoreError::RuntimeMapping(format!("vista legacy: {m}"))
 }
 
 impl<'a> CutView<'a> {
@@ -214,6 +216,9 @@ impl<'a> CutView<'a> {
                 "report" => "report",
                 "pull_request" => "pr_url",
                 "last_message" => "last_message_path",
+                // El documento legacy no tiene campo para un commit ni para un archivo (LXO-241): siguen en las tablas
+                // y en las lecturas vNext, pero no entran en esta vista, que es la forma del documento.
+                "commit" | "file" => continue,
                 otro => return Err(view_err(format!("{id}: Artifact de tipo {otro} en el legado"))),
             };
             o.insert(key.into(), json!(uri));
