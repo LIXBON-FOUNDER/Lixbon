@@ -573,10 +573,17 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
 | plataforma | identidad `start` | vías de descubrimiento | garantía |
 |---|---|---|---|
 | Windows | FILETIME (instante real, comparable: un hijo no es anterior a su padre) | `ppid` + **Job Object** al crear la raíz, solo si el proceso abierto tiene la misma hora de creación capturada | el job lista a todos los procesos vivos del árbol, también huérfanos con `ppid` colgando; se termina con el mismo handle que se verifica. El job lleva `KILL_ON_JOB_CLOSE` (LXO-242): cerrar su último handle —soltar el `Tree`, o la caída del Core— termina a los miembros que sigan dentro |
-| Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo, leída EN BYTES (el nombre del proceso no tiene por qué ser UTF-8) | `ppid` + **grupo de procesos** de la raíz (`process_group(0)` al lanzar, `setsid` en la PTY) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada, si se PRUEBA que el grupo es nuestro (abajo) |
+| Linux | `starttime` de `/proc/<pid>/stat` en ticks de 10 ms (token solo para igualdad); `ppid`, `pgrp` y `starttime` salen de la misma lectura del archivo, leída EN BYTES (el nombre del proceso no tiene por qué ser UTF-8) | `ppid` + **grupo de procesos** de la raíz, que debe liderar también su propia **sesión** (`setsid` al lanzar, en el lanzamiento canalizado y en la PTY; `leads_group` lo comprueba en `/proc`) leído recorriendo `/proc` | los huérfanos reparentados a init que siguen en el grupo se encuentran y se matan uno a uno con identidad comprobada, si se PRUEBA que el grupo es nuestro (abajo) |
 | macOS | hash normalizado de `ps lstart` (resolución de 1 s, `TZ=UTC` y `LC_ALL=C` fijados; solo igualdad) | igual, con una única instantánea de `ps -e -o pid=,ppid=,pgid=,stat=,lstart=` | igual. **No demostrado:** un falso «mismo proceso» exige reutilizar el pid y arrancar en el mismo segundo; es una suposición de caudal, no una prueba. Identidad fina (`proc_pidinfo`, µs) pendiente. Sin ejecutar en un macOS real |
 | otros Unix | como macOS | como macOS | **sin garantía** (pids aleatorios en FreeBSD/OpenBSD) |
 
+* **Linux, `pidfd` y sesión propia (LXO-242, incremento 3).** En Linux ≥ 5.3 cada miembro se termina con
+  `pidfd_send_signal`: el `pidfd` se abre ANTES de comprobar la identidad (token de `/proc`), así que si coincide el
+  proceso fijado es el original y nunca un ajeno que reutilizó el pid; sin `pidfd` (o `ENOSYS`/seccomp) se usa la vía de
+  `kill`. Además, en Linux `leads_group` exige que la raíz lidere su PROPIA sesión (`pgid == sid == pid`): con solo
+  `process_group(0)` otro proceso de la sesión de Lixbon podría unirse a ese número con `setpgid`, y el lanzamiento
+  canalizado usa ahora `setsid` como la PTY. En macOS la comprobación sigue siendo `pgid == pid` (el `setsid` del
+  lanzamiento vale igual, pero no se verifica). **Probado solo en CI de Linux/macOS: sin ejecución local.**
 * **Unix y el número de grupo: la propiedad se prueba, no se supone.** Un `pgid` solo está reservado mientras alguien lo
   ocupa, y un grupo con el líder muerto es indistinguible de uno ajeno que reutilizó el número (su líder murió dejando
   hijos). Una sola lectura da los miembros, su token y quien ocupa el PID `pgid`. Son nuestros si: (1) la raíz sigue sin
@@ -599,8 +606,9 @@ reutiliza), así que cada proceso es `Proc { pid, start }` con `start` = hora de
 * **Identidad de la raíz.** Se reintenta (acotado, `CAPTURE_TRIES`) al crearla, con su pid seguro. Si aun así falta y la
   raíz sigue sin reapear (pin), se toma al matar; si no, `Err` y custodia (nunca se mata un pid sin identidad).
 * **Residuales (no cubiertos):** un proceso que se desvincula a propósito tras perder a su padre (`setsid`/`setpgid` a
-  otro grupo, daemonización) escapa a las tres vías; en Unix la identidad se comprueba justo antes de `kill -9` (dos
-  llamadas, sin handle que ancle el pid; ventana de decenas de milisegundos con carga: no es una garantía); un proceso creado por la raíz antes de entrar en el
+  otro grupo, daemonización) escapa a las tres vías; en Unix SIN `pidfd` (macOS, otros, o un kernel Linux anterior a 5.3 o
+  con `pidfd` bloqueado) la identidad se comprueba justo antes de `kill -9` (dos llamadas, sin handle que ancle el pid;
+  ventana de decenas de milisegundos con carga: no es una garantía); un proceso creado por la raíz antes de entrar en el
   Job (microsegundos) solo lo cubre el recorrido por `ppid`. Cubrirlos exigiría un contenedor del sistema (cgroups).
   **Windows y `KILL_ON_JOB_CLOSE` (LXO-242):** el job se crea con el límite, y si el sistema no lo acepta no se adjunta
   (sin job el cierre sigue siendo por escaneo, como antes). Efecto a tener presente: lo que la raíz deje en segundo plano

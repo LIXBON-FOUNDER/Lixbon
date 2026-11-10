@@ -586,12 +586,17 @@ fn spawn_piped(
     let (program, args) = write_script(l.script_dir, &l.command)?;
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(l.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Unix: la raíz lidera su PROPIO grupo de procesos (pgid == pid) para que `proctable` pueda encontrar a toda su
-    // descendencia aunque un padre intermedio salga y sus hijos se reparenten a init. (La PTY ya hace `setsid`.)
+    // Unix: la raíz lidera su PROPIA SESIÓN (`setsid`: pgid == sid == pid) para que `proctable` pueda encontrar a toda su
+    // descendencia aunque un padre intermedio salga y sus hijos se reparenten a init, y para que el número de su grupo sea
+    // suyo: un grupo nuevo dentro de la sesión de Lixbon (`process_group(0)`) no basta, otro proceso de esa sesión podría
+    // unirse a él con `setpgid` (LXO-242). (La PTY ya hace `setsid`.)
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
+        // SAFETY: el callback solo llama a `setsid` entre `fork` y `exec`; no toca el estado de Rust ni reserva memoria.
+        unsafe {
+            cmd.pre_exec(|| if libc::setsid() == -1 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+        }
     }
     for (k, v) in &l.env {
         cmd.env(k, v);
@@ -1386,8 +1391,8 @@ mod error_tras_crear_el_proceso {
     }
 }
 
-/// Unix, procesos de verdad: el lanzamiento deja a la raíz como líder de su grupo (`process_group(0)` canalizado, `setsid`
-/// en la PTY), el matador del árbol lo sabe, y una raíz que sale dejando un proceso en segundo plano no deja un cleanup
+/// Unix, procesos de verdad: el lanzamiento deja a la raíz como líder de su grupo y de su PROPIA sesión (`setsid`, tanto
+/// canalizado como en la PTY), el matador del árbol lo sabe, y una raíz que sale dejando un proceso en segundo plano no deja un cleanup
 /// imposible: el grupo se anota al salir la raíz (todavía zombi) y el kill posterior lo encuentra.
 #[cfg(all(test, unix))]
 mod grupo_de_procesos_unix {
