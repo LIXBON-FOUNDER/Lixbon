@@ -1239,9 +1239,10 @@ mod tests {
 
         let json_output = projected.to_string();
         let text_output = show_text(&json!({ "attempt": projected, "activity": null }));
-        for salida in [&json_output, &text_output] {
-            for secreto in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "SENTINEL_UNSAFE"] {
-                assert!(!salida.contains(secreto), "{secreto} salió en: {salida}");
+        // Los mensajes de fallo no interpolan el centinela ni la salida: dicen cuál de ellos salió y en qué salida, por posición.
+        for (formato, salida) in [("json", &json_output), ("texto", &text_output)] {
+            for (n, centinela) in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "SENTINEL_UNSAFE"].iter().enumerate() {
+                assert!(!salida.contains(centinela), "el centinela nº {n} salió en la salida {formato}");
             }
         }
         assert!(text_output.contains("PR: https://github.com/org/repo/pull/14"), "{text_output}");
@@ -1270,9 +1271,9 @@ mod tests {
         let data = show_data(&mut rpc, "t3-a1").expect("show");
         let salida_json = data.to_string();
         let salida_texto = show_text(&data);
-        for salida in [&salida_json, &salida_texto] {
-            for secreto in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "bot:"] {
-                assert!(!salida.contains(secreto), "{secreto} salió en: {salida}");
+        for (formato, salida) in [("json", &salida_json), ("texto", &salida_texto)] {
+            for (n, centinela) in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "bot:"].iter().enumerate() {
+                assert!(!salida.contains(centinela), "el centinela nº {n} salió en la salida {formato}");
             }
         }
         assert_eq!(data["attempt"]["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14");
