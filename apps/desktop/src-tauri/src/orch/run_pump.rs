@@ -6,8 +6,9 @@
 //!   hilo: Gated::events(run, cancel, sink)     <- BLOQUEA hasta el final; el sink llama a Core::mutate
 //!     SessionBound  -> Task.session_ref + session_match = session_id   (el proveedor declara su sesión)
 //!     Model         -> Task.model_effective + model_source = session_declared
-//!     Permission / Question -> el Attempt pasa a `awaiting_terminal_approval` (Attention `approval`) con un plazo;
-//!                              NO se responde (no hay RPC para eso todavía); vencido el plazo se cancela la ejecución
+//!     Permission / Question -> el Attempt pasa a `awaiting_terminal_approval` (Attention `approval`) con un plazo y la petición
+//!                              queda pendiente (`provider_requests.rs`); una persona la responde con `attempt_answer`
+//!                              (`answer_runtime.rs`); vencido el plazo sin respuesta se cancela la ejecución
 //!     Output, ToolUse, Retry, Transport, Usage -> sin hecho durable
 //!   al volver `events`: el proceso ya murió (el adapter lo mata antes de devolver) -> se libera la ejecución del registro,
 //!   se aplica el desenlace al Attempt y se asienta el claim
@@ -46,6 +47,7 @@ use super::adapter_launcher::StartedRun;
 use super::events::MutationContext;
 use super::live_run::{LiveRun, LiveSlot, SendVerdict};
 use super::mutation::Health;
+use super::provider_requests::{Awaiting, ProviderRequest};
 use super::state::{now_ms, Status};
 use super::Core;
 use crate::store::MAX_SUMMARY_CHARS;
@@ -61,6 +63,8 @@ type Done = Arc<(Mutex<bool>, Condvar)>;
 pub(super) struct RunControl {
     cancel: CancelToken,
     done: Done,
+    /// Las peticiones del proveedor que esperan a una persona (LXO-247): las ve el bombeo, las responde `attempt_answer`.
+    awaiting: Arc<Awaiting>,
     /// Lo que Steer y Stop & Send necesitan para hablar con la ejecución (LXO-144, `live_run.rs`). Vacío hasta que el bombeo arranca.
     pub(super) live: LiveSlot,
 }
@@ -95,8 +99,8 @@ pub(super) fn terminal_for(result: &Result<RunOutcome, AdapterError>, timed_out:
 
 /// Estado compartido entre el sink (que ve las peticiones), el vigilante (que vigila el plazo) y el hilo del bombeo.
 struct PumpState {
-    /// Cuándo vence la espera de una respuesta humana, si el proveedor pidió una.
-    pending_until: Mutex<Option<Instant>>,
+    /// Las peticiones pendientes y cuándo vence la espera de una respuesta humana, si el proveedor pidió una.
+    awaiting: Arc<Awaiting>,
     timed_out: AtomicBool,
     finished: AtomicBool,
 }
@@ -107,10 +111,16 @@ impl Core {
     }
 
     /// Da de alta una ejecución viva de `task`.
-    pub(super) fn register_adapter_run(&self, task: &str, cancel: CancelToken) -> Done {
+    pub(super) fn register_adapter_run(&self, task: &str, cancel: CancelToken) -> (Done, Arc<Awaiting>) {
         let done: Done = Arc::new((Mutex::new(false), Condvar::new()));
-        self.adapter_runs_lock().insert(task.to_string(), RunControl { cancel, done: Arc::clone(&done), live: Arc::new(Mutex::new(None)) });
-        done
+        let awaiting = Arc::new(Awaiting::default());
+        self.adapter_runs_lock().insert(task.to_string(), RunControl { cancel, done: Arc::clone(&done), awaiting: Arc::clone(&awaiting), live: Arc::new(Mutex::new(None)) });
+        (done, awaiting)
+    }
+
+    /// Las peticiones del proveedor de la ejecución viva de `task`, si la tiene.
+    pub(super) fn awaiting_of(&self, task: &str) -> Option<Arc<Awaiting>> {
+        self.adapter_runs_lock().get(task).map(|control| Arc::clone(&control.awaiting))
     }
 
     /// El proceso de `task` ya murió: sale del registro y avisa a quien esperaba.
@@ -184,14 +194,20 @@ impl Core {
                 Ok(())
             }),
             AdapterEvent::Permission { .. } | AdapterEvent::Question { .. } => {
-                let mut pending = state.pending_until.lock().unwrap_or_else(|e| e.into_inner());
-                if pending.is_some() {
+                let Some(request) = ProviderRequest::from_event(&event, now_ms()) else { return };
+                // Con el candado de las peticiones tomado ANTES que el del Core (`mutate_as`): `attempt_answer` lo hace en el mismo orden.
+                let mut awaiting = state.awaiting.lock();
+                if awaiting.knows(&request.id) {
+                    return; // el proveedor repitió un evento: ya se vio
+                }
+                if awaiting.waiting() {
+                    awaiting.push(request); // otra petición mientras se espera: comparte el plazo de la primera
                     return;
                 }
                 let deadline_ms = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
                 let result = self.mutate_as(&core, |tx| tx.await_terminal_approval(task, deadline_ms).map(|_| ()));
                 if result.is_ok() {
-                    *pending = Some(Instant::now() + ttl);
+                    awaiting.begin(request, Instant::now() + ttl);
                 }
                 result
             }
@@ -240,10 +256,10 @@ impl Core {
 pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Duration) {
     let cancel = run.cancel.clone();
     let task = run.task_id.clone();
-    let done = core.register_adapter_run(&task, cancel.clone());
+    let (done, awaiting) = core.register_adapter_run(&task, cancel.clone());
     core.set_live_run(&task, LiveRun { adapter: Arc::clone(&run.adapter), matrix: run.matrix.clone(), handle: run.handle.clone(), attempt_id: run.handle.attempt_id.clone(), pending_send: None });
     let weak = Arc::downgrade(core);
-    let spawned = std::thread::Builder::new().name("adapter-run".into()).spawn(move || pump(weak, run, approval_ttl, done));
+    let spawned = std::thread::Builder::new().name("adapter-run".into()).spawn(move || pump(weak, run, approval_ttl, done, awaiting));
     if let Err(why) = spawned {
         eprintln!("[core] no se pudo crear el hilo de una ejecución: {why}");
         cancel.cancel();
@@ -251,17 +267,17 @@ pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Durati
     }
 }
 
-fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done) {
+fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done, awaiting: Arc<Awaiting>) {
     let StartedRun { adapter, matrix, handle, cancel, worktree: _worktree, task_id, .. } = run;
     let attempt = handle.attempt_id.clone();
-    let state = Arc::new(PumpState { pending_until: Mutex::new(None), timed_out: AtomicBool::new(false), finished: AtomicBool::new(false) });
+    let state = Arc::new(PumpState { awaiting, timed_out: AtomicBool::new(false), finished: AtomicBool::new(false) });
 
     // El vigilante: si el proveedor pidió una respuesta que nadie puede dar, vencido el plazo cancela la ejecución.
     {
         let (state, cancel) = (Arc::clone(&state), cancel.clone());
         let _ = std::thread::Builder::new().name("adapter-run-watchdog".into()).spawn(move || {
             while !state.finished.load(Ordering::SeqCst) {
-                let due = state.pending_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|until| Instant::now() >= until);
+                let due = state.awaiting.lock().is_due(Instant::now());
                 if due {
                     state.timed_out.store(true, Ordering::SeqCst);
                     cancel.cancel();
@@ -296,7 +312,7 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done) 
                     }
                     match core.resume_with_instruction(&task_id, &attempt, &gated, &cancel, &send.instruction) {
                         Ok(next) => {
-                            *state.pending_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                            state.awaiting.lock().clear();
                             core.set_live_handle(&task_id, &next);
                             handle = next;
                             send.verdict.set(SendVerdict::Sent);
@@ -315,7 +331,7 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done) 
             }
             let Some(next) = core.upgrade().and_then(|c| c.queue_next_turn(&task_id, &attempt, &gated, &cancel)) else { return outcome };
             // Turno nuevo: la espera de una respuesta del turno anterior ya no cuenta.
-            *state.pending_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            state.awaiting.lock().clear();
             if let Some(core) = core.upgrade() {
                 core.set_live_handle(&task_id, &next);
             }

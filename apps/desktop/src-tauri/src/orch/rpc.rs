@@ -303,6 +303,19 @@ impl Core {
                 let mode = if cmd == "attempt_steer" { crate::store::InstructionMode::Steer } else { crate::store::InstructionMode::StopAndSend };
                 super::steer_runtime::rpc(self, context, mode, &input)
             }
+            "attempt_answer" | "attempt_pending_requests" => {
+                let context = authenticated_context.as_ref().ok_or("responder a un proveedor requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("responder a un proveedor solo está permitido a una Person autenticada".into());
+                }
+                if cmd == "attempt_answer" {
+                    let input: super::answer_runtime::AnswerInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de respuesta inválida".to_string())?;
+                    super::answer_runtime::rpc_answer(self, context, &input)
+                } else {
+                    let input: super::answer_runtime::PendingInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de peticiones pendientes inválida".to_string())?;
+                    super::answer_runtime::rpc_pending(self, context, &input)
+                }
+            }
             "status" => {
                 let person_root = if matches!(&caller, Caller::User) && channel == Channel::Lxo && !s(args, "root_task").is_empty() {
                     Some(self.coordinator_task(channel, &caller, args)?)
@@ -746,7 +759,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

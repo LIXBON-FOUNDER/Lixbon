@@ -79,6 +79,8 @@ mod approval_expiry;
 mod dispatch;
 mod worktree_provision;
 mod run_pump;
+mod provider_requests;
+mod answer_runtime;
 mod adapter_launcher;
 mod initial_approval_rpc;
 mod attempt_retry_rpc;
@@ -113,6 +115,8 @@ mod dispatch_boot_tests;
 mod attempt_e2e_tests;
 #[cfg(test)]
 mod steer_e2e_tests;
+#[cfg(test)]
+mod answer_e2e_tests;
 #[cfg(test)]
 mod fork_e2e_tests;
 #[cfg(test)]
