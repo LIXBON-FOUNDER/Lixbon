@@ -97,4 +97,23 @@ mod tests {
         }
         assert_eq!(sanitize_pr_url(&format!("https://github.com/{}", "a".repeat(400))), None, "una URL desmedida se descarta, no se recorta");
     }
+
+    /// LXO-243: los vectores que comparten el Core, `lxo` y los tres clientes (web, mobile y desktop). El Core es la autoridad: si
+    /// cambia su regla, cambian este fixture y las demás copias. Ver `docs/core/fixtures/pr_url_allowlist.v1.json`.
+    #[test]
+    fn coincide_con_los_vectores_compartidos_con_lxo_y_los_clientes() {
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../../../../docs/core/fixtures/pr_url_allowlist.v1.json")).unwrap();
+        assert_eq!(v["max_len"].as_u64(), Some(super::MAX_LEN as u64));
+        for caso in v["keep"].as_array().unwrap() {
+            let (raw, clean) = (caso["raw"].as_str().unwrap(), caso["clean"].as_str().unwrap());
+            assert_eq!(sanitize_pr_url(raw).as_deref(), Some(clean), "{raw:?}");
+        }
+        for raw in v["reject"].as_array().unwrap() {
+            assert_eq!(sanitize_pr_url(raw.as_str().unwrap()), None, "{raw:?}");
+        }
+        for g in v["reject_generated"].as_array().unwrap() {
+            let raw = format!("{}{}", g["prefix"].as_str().unwrap(), g["fill"].as_str().unwrap().repeat(g["count"].as_u64().unwrap() as usize));
+            assert_eq!(sanitize_pr_url(&raw), None, "{}", g["why"]);
+        }
+    }
 }

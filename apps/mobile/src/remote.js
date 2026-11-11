@@ -5,6 +5,7 @@
 import { AppState } from 'react-native';
 
 import { ApiException, extractDetail } from './api';
+import { hasValidSeq, reduceRemoteOrchEvent } from './remoteOrchReducer';
 
 // ── SSE genérico (GET) ──────────────────────────────────────────────────────
 
@@ -332,26 +333,18 @@ function closeOpenAssistant(items, finalText, keepIfEmpty = false) {
 }
 
 export function remoteReducer(state, ev) {
-  // channel_status llega primero al (re)conectar con el seq más alto del canal:
-  // si avanzara lastSeq, el replay de lo perdido que viene detrás se
-  // descartaría entero como duplicado.
-  const status = ev.type === 'channel_status';
-  if (!status && typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
+  // Un seq que no es un entero seguro >= 0 (NaN, Infinity, negativo, texto…) ni se aplica ni envenena lastSeq (LXO-243).
+  if (!hasValidSeq(ev)) return state;
+  // Los dos canales que pueden reemplazar la snapshot del orquestador, con su pr_url saneada y el control de seq.
+  // channel_status llega primero al (re)conectar con el seq más alto del canal: no avanza lastSeq, o el replay de lo
+  // perdido que viene detrás se descartaría entero como duplicado (lo explica `reduceRemoteOrchEvent`).
+  if (ev.type === 'channel_status' || ev.type === 'orch') return reduceRemoteOrchEvent(state, ev);
+  if (typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
     return state; // replay duplicado
   }
-  const s = status || typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
+  const s = typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
 
   switch (ev.type) {
-    case 'channel_status':
-      return {
-        ...s,
-        hostConnected: !!ev.host_connected,
-        session: ev.session || s.session,
-        meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
-        orch: ev.orch || s.orch,
-      };
-    case 'orch':
-      return { ...s, orch: ev };
     case 'orch_diff':
       return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
     case 'orch_term':
