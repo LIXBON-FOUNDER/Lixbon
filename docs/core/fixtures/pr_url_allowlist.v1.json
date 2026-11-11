@@ -1,0 +1,51 @@
+{
+  "v": 1,
+  "description": "Vectores de la allowlist de URLs de PR (LXO-243). UNA sola fuente: la consumen las pruebas del Core (apps/desktop/src-tauri/src/orch/pr_url.rs), de lxo (apps/desktop/lxo/src/attempts.rs) y de los tres clientes (apps/desktop/src/lib/remotePrUrl.js, apps/web/src/lib/remotePrUrl.js, apps/mobile/src/remotePrUrl.js). Si una implementación cambia su regla, este archivo y TODAS las copias cambian juntas.",
+  "max_len": 300,
+  "keep": [
+    { "raw": "https://github.com/o/r/pull/7", "clean": "https://github.com/o/r/pull/7" },
+    { "raw": "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3", "clean": "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3" },
+    { "raw": "  https://github.com/o/r/pull/7  ", "clean": "https://github.com/o/r/pull/7" },
+    { "raw": "https://user:SECRETO@github.com/o/r/pull/1", "clean": "https://github.com/o/r/pull/1" },
+    { "raw": "https://github.com/o/r/pull/1?token=SECRETO", "clean": "https://github.com/o/r/pull/1" },
+    { "raw": "https://github.com/o/r/pull/1#SECRETO", "clean": "https://github.com/o/r/pull/1" },
+    { "raw": "https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO", "clean": "https://github.com/o/r/pull/1" },
+    { "raw": "https://user:SECRETO@github.com/o/r/pull/1?x=1", "clean": "https://github.com/o/r/pull/1" }
+  ],
+  "reject": [
+    "",
+    "github.com/o/r/pull/1",
+    "ftp://github.com/o/r/pull/1",
+    "javascript://github.com/o/r/pull/1",
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "HTTPS://github.com/o/r/pull/1",
+    "https://",
+    "https://github.com",
+    "https://github.com/",
+    "https:///o/r/pull/1",
+    "https://user:pa/ss@github.com/o/r/pull/1",
+    "https://github.com/o@r/pull/1",
+    "https://github.com/o/r/pull/1;secreto=abc",
+    "https://github.com/o/r/pull/1%0Atoken",
+    "https://github.com/o/r/pull/1\\..\\x",
+    "https://github.com/o/r/pull/1\ntoken",
+    "https://github.com/o/r/pull/1\u0000",
+    "https://github.com/o/r//pull/1",
+    "https://github.com/o/../pull/1",
+    "https://github.com/o/./pull/1",
+    "https://github.com/o/r/pull/ 1",
+    "https://github.com:abc/o/r/pull/1",
+    "https://github.com:/o/r/pull/1",
+    "https://github.com:123456/o/r/pull/1",
+    "https://github.com:80:90/o/r/pull/1",
+    "https://[::1]/o/r/pull/1",
+    "https://-github.com/o/r/pull/1",
+    "https://github.com-/o/r/pull/1",
+    "https://.github.com/o/r/pull/1",
+    "https://gíthub.com/o/r/pull/1"
+  ],
+  "reject_generated": [
+    { "prefix": "https://github.com/", "fill": "a", "count": 400, "why": "una URL de más de max_len caracteres se descarta, no se recorta" }
+  ]
+}

@@ -1308,6 +1308,23 @@ mod tests {
         assert_eq!(sanitize_pr_url(&format!("https://github.com/{}", "a".repeat(400))), None, "una URL desmedida se descarta, no se recorta");
     }
 
+    /// LXO-243: los mismos vectores que ejecutan el Core y los tres clientes (`docs/core/fixtures/pr_url_allowlist.v1.json`).
+    #[test]
+    fn la_allowlist_del_cli_coincide_con_el_fixture_compartido() {
+        let v: Value = serde_json::from_str(include_str!("../../../../docs/core/fixtures/pr_url_allowlist.v1.json")).unwrap();
+        for caso in v["keep"].as_array().unwrap() {
+            let (raw, clean) = (caso["raw"].as_str().unwrap(), caso["clean"].as_str().unwrap());
+            assert_eq!(sanitize_pr_url(raw).as_deref(), Some(clean), "{raw:?}");
+        }
+        for raw in v["reject"].as_array().unwrap() {
+            assert_eq!(sanitize_pr_url(raw.as_str().unwrap()), None, "{raw:?}");
+        }
+        for g in v["reject_generated"].as_array().unwrap() {
+            let raw = format!("{}{}", g["prefix"].as_str().unwrap(), g["fill"].as_str().unwrap().repeat(g["count"].as_u64().unwrap() as usize));
+            assert_eq!(sanitize_pr_url(&raw), None, "{}", g["why"]);
+        }
+    }
+
     #[test]
     fn snapshot_json_de_la_lista_distingue_task_y_attempt() {
         let data = list(&["attempts", "--task", "t5"]).unwrap();

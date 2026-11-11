@@ -11,6 +11,7 @@ import { DEFAULT_COLS, ptyCols } from './orchTermSize';
 import { useOrchStore, prepareOrchestrate } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
 import { handleCoreAction } from './remoteCore';
+import { sanitizePrUrl } from './remotePrUrl';
 
 const RUNS = 12;
 const MESSAGES = 150;
@@ -64,7 +65,8 @@ export function compactSnapshot(snap) {
     status: t.status, created: t.created, updated: t.updated,
     phases: (t.phases || []).slice(-15).map((p) => ({ name: cut(p.name, 120), done: !!p.done, at: p.at, note: cut(p.note, 300) })),
     spec: cut(t.spec, 2000), summary: cut(t.summary, 2000), files: (t.files || []).slice(0, 30),
-    branch: t.branch || null, merged: !!t.merged, pr_url: t.pr_url || null,
+    // Lo que sale hacia Remote lleva la pr_url ya saneada (allowlist común, LXO-243): ningún cliente recibe una URL con credenciales.
+    branch: t.branch || null, merged: !!t.merged, pr_url: sanitizePrUrl(t.pr_url),
     report: t.report ? base(t.report) : null, repo: base(t.repo),
   }));
   const messages = (snap.messages || []).filter((m) => ids.has(m.run)).slice(-MESSAGES).map((m) => ({

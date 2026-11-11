@@ -1,5 +1,7 @@
 // Mismo protocolo y reducción que la app móvil (apps/mobile/src/remote.js).
 
+import { hasValidSeq, reduceRemoteOrchEvent } from './remoteOrchReducer.js';
+
 export function openEventStream({ path, signal, onEvent }) {
   // Devuelve una promesa que termina cuando el stream se corta (el llamador
   // decide reconectar). La auth es la cookie de sesión (same-origin): el
@@ -94,25 +96,18 @@ function closeOpenAssistant(items, finalText) {
 }
 
 export function remoteReducer(state, ev) {
-  // channel_status llega primero al reconectar con el seq más alto del canal:
-  // si avanzara lastSeq, el replay de lo perdido se descartaría como duplicado.
-  const status = ev.type === 'channel_status';
-  if (!status && typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
+  // Un seq que no es un entero seguro >= 0 (NaN, Infinity, negativo, texto…) ni se aplica ni envenena lastSeq (LXO-243).
+  if (!hasValidSeq(ev)) return state;
+  // Los dos canales que pueden reemplazar la snapshot del orquestador, con su pr_url saneada y el control de seq.
+  // channel_status llega primero al reconectar con el seq más alto del canal: no avanza lastSeq, o el replay de lo perdido
+  // se descartaría como duplicado (lo explica `reduceRemoteOrchEvent`).
+  if (ev.type === 'channel_status' || ev.type === 'orch') return reduceRemoteOrchEvent(state, ev);
+  if (typeof ev.seq === 'number' && ev.seq <= state.lastSeq) {
     return state;
   }
-  const s = status || typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
+  const s = typeof ev.seq !== 'number' ? state : { ...state, lastSeq: ev.seq };
 
   switch (ev.type) {
-    case 'channel_status':
-      return {
-        ...s,
-        hostConnected: !!ev.host_connected,
-        session: ev.session || s.session,
-        meta: ev.meta && Object.keys(ev.meta).length ? ev.meta : s.meta,
-        orch: ev.orch || s.orch,
-      };
-    case 'orch':
-      return { ...s, orch: ev };
     case 'orch_diff':
       return { ...s, orchDiff: { ...s.orchDiff, [ev.task]: ev } };
     case 'orch_term':
