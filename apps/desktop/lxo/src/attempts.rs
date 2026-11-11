@@ -54,6 +54,8 @@ const ATTEMPT_API: u64 = 1;
 /// Versión de `task_detail_v2`.
 const TASK_API: u64 = 2;
 const MODEL: &str = "task_attempt_v1";
+/// Lo que sale en `uri` de un artefacto `pull_request` cuya URL no es segura. Es un string (no `null`): `v1` publica `uri` como texto.
+const REDACTED_PR_URI: &str = "redacted:pull_request";
 /// `contracts/status-vocabulary.json` `attempt_state`.
 const STATUSES: [&str; 9] = [
     "pending_approval",
@@ -220,6 +222,48 @@ fn text(value: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// La URL pública de un PR, o `None` si no es segura. Misma allowlist que el Core (`orch/pr_url.rs::sanitize_pr_url`): lxo no
+/// depende del crate del Core, así que la copia vive aquí y `la_allowlist_del_cli_es_la_del_core` fija sus vectores. Un Core
+/// anterior al saneado de `attempt_detail` puede devolver una URI heredada con credenciales, query o fragmento (LXO-245): lxo no
+/// confía en su proyección.
+fn sanitize_pr_url(raw: &str) -> Option<String> {
+    const MAX_LEN: usize = 300;
+    let (scheme, rest) = raw.trim().split_once("://")?;
+    if !matches!(scheme, "https" | "http") {
+        return None;
+    }
+    let rest = rest.split(['?', '#']).next()?;
+    let (authority, path) = rest.split_at(rest.find('/')?);
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let (host, port) = match host_port.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (host_port, None),
+    };
+    let host_ok = !host.is_empty()
+        && !host.starts_with(['.', '-'])
+        && !host.ends_with(['.', '-'])
+        && host.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
+    let port_ok = port.is_none_or(|p| (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()));
+    let path_ok = path[1..]
+        .split('/')
+        .all(|s| !s.is_empty() && s != "." && s != ".." && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'~' | b'-')));
+    if !(host_ok && port_ok && path_ok) {
+        return None;
+    }
+    let clean = format!("{scheme}://{host_port}{path}");
+    (clean.len() <= MAX_LEN).then_some(clean)
+}
+
+/// El `uri` de un artefacto tal como lo emite lxo: el de un `pull_request` pasa SIEMPRE por la allowlist (y sin URL segura sale el
+/// marcador); el resto, como lo dijo el Core.
+fn artifact_uri(kind: &Value, uri: &Value) -> Value {
+    if kind == "pull_request" {
+        uri.as_str().and_then(sanitize_pr_url).map(Value::String).unwrap_or_else(|| json!(REDACTED_PR_URI))
+    } else {
+        text(uri)
+    }
+}
+
 fn origin(external: &Value) -> Value {
     match external.as_bool() {
         Some(true) => json!("external"),
@@ -365,7 +409,7 @@ fn detail(a: &Value) -> Value {
         "artifacts": a["artifacts"].as_array().into_iter().flatten().map(|x| json!({
             "artifact_id": text(&x["id"]),
             "kind": text(&x["kind"]),
-            "uri": text(&x["uri"]),
+            "uri": artifact_uri(&x["kind"], &x["uri"]),
             "sha256": text(&x["sha256"]),
             "bytes": x["bytes"].as_u64(),
         })).collect::<Vec<_>>(),
@@ -616,6 +660,8 @@ fn artifact_lines(items: &Value) -> Vec<String> {
                 Some(other) => clean(other),
                 None => "desconocido".into(),
             };
+            // El marcador interno del `--json` no es para una persona: en el texto se dice en llano.
+            let uri = if x["kind"] == "pull_request" && x["uri"] == REDACTED_PR_URI { "URL oculta por seguridad".to_string() } else { dash(field(x, "uri")) };
             format!(
                 "{}{kind}: {}",
                 if i == 0 {
@@ -623,7 +669,7 @@ fn artifact_lines(items: &Value) -> Vec<String> {
                 } else {
                     "               "
                 },
-                dash(field(x, "uri"))
+                uri
             )
         })
         .collect()
@@ -1167,6 +1213,98 @@ mod tests {
             data["activity"]["items"][0]["seq"] == 20,
             "lo último al final"
         );
+    }
+
+    /// LXO-245: un Core ANTERIOR al saneado de `attempt_detail` puede devolver una URI de PR heredada con credenciales, query o
+    /// fragmento. lxo no confía en su proyección: la sanea con la misma allowlist que el Core y, si no es segura, emite un
+    /// marcador de texto que conserva el contrato `v1` (`uri` sigue siendo un string).
+    #[test]
+    fn un_core_sin_sanear_no_hace_que_el_cli_emita_una_url_de_pr_con_secretos() {
+        let sucia = "https://bot:SENTINEL_CREDENTIAL@github.com/org/repo/pull/14?token=SENTINEL_QUERY#SENTINEL_FRAGMENT";
+        let insegura = "https://github.com/org/repo/pull/14;token=SENTINEL_UNSAFE";
+        let projected = detail(&json!({
+            "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done",
+            "artifacts": [
+                { "id": "a-pr", "kind": "pull_request", "uri": sucia, "sha256": null, "bytes": null },
+                { "id": "a-pr-insegura", "kind": "pull_request", "uri": insegura, "sha256": null, "bytes": null },
+                { "id": "a-pr-vacia", "kind": "pull_request", "uri": null, "sha256": null, "bytes": null },
+                { "id": "a-informe", "kind": "report", "uri": "/home/ana/informe.md", "sha256": null, "bytes": null }
+            ],
+            "provider_session": null, "worktree": null, "review": null
+        }));
+        assert_eq!(projected["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14", "se conserva lo público y se quita el resto");
+        assert_eq!(projected["artifacts"][1]["uri"], REDACTED_PR_URI, "una URL no segura se redacta con el marcador, no se recorta a ciegas");
+        assert_eq!(projected["artifacts"][2]["uri"], REDACTED_PR_URI, "un PR sin URI también: nunca `null` en un campo v1 de texto");
+        assert_eq!(projected["artifacts"][3]["uri"], "/home/ana/informe.md", "solo se tocan los PR");
+
+        let json_output = projected.to_string();
+        let text_output = show_text(&json!({ "attempt": projected, "activity": null }));
+        for salida in [&json_output, &text_output] {
+            for secreto in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "SENTINEL_UNSAFE"] {
+                assert!(!salida.contains(secreto), "{secreto} salió en: {salida}");
+            }
+        }
+        assert!(text_output.contains("PR: https://github.com/org/repo/pull/14"), "{text_output}");
+        assert!(text_output.contains("PR: URL oculta por seguridad"), "el marcador se enseña en llano: {text_output}");
+        assert!(!text_output.contains(REDACTED_PR_URI), "y no el código interno: {text_output}");
+    }
+
+    /// Extremo a extremo por `show_data` (la misma entrada que usa `lxo attempt show`) contra un Core que responde como uno anterior al
+    /// saneado: el `attempt_detail` trae la URI heredada sin sanear. Ni el `--json` v1 ni el texto la dejan salir.
+    /// (No hay un Core real «sin sanear» contra el que correrlo: el almacén de hoy ya rechaza esas URI al escribirlas.)
+    #[test]
+    fn show_contra_un_core_sin_sanear_redacta_la_url_en_el_json_v1_y_en_el_texto() {
+        let sucia = "https://bot:SENTINEL_CREDENTIAL@github.com/org/repo/pull/14?token=SENTINEL_QUERY#SENTINEL_FRAGMENT";
+        let mut rpc = move |cmd: &str, _args: &Value| match cmd {
+            "attempt_detail" => Ok(json!({
+                "v": ATTEMPT_API, "core_model": MODEL,
+                "attempt": {
+                    "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done",
+                    "artifacts": [{ "id": "t3-a1-pull_request", "kind": "pull_request", "uri": sucia, "sha256": null, "bytes": null }],
+                    "provider_session": null, "worktree": null, "review": null
+                }
+            })),
+            "activity_list" => Ok(json!({ "v": 1, "order": "desc", "has_more": false, "items": [] })),
+            otro => panic!("comando inesperado {otro}"),
+        };
+        let data = show_data(&mut rpc, "t3-a1").expect("show");
+        let salida_json = data.to_string();
+        let salida_texto = show_text(&data);
+        for salida in [&salida_json, &salida_texto] {
+            for secreto in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "bot:"] {
+                assert!(!salida.contains(secreto), "{secreto} salió en: {salida}");
+            }
+        }
+        assert_eq!(data["attempt"]["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14");
+        assert_eq!((data["v"].clone(), data["core_model"].clone()), (json!(CONTRACT), json!(MODEL)), "el contrato v1 no cambia");
+    }
+
+    /// La allowlist es la del Core (`orch/pr_url.rs`): los mismos vectores. Si el Core cambia la suya, esta prueba y su copia deben
+    /// cambiar juntas (lxo no depende del crate del Core).
+    #[test]
+    fn la_allowlist_del_cli_es_la_del_core() {
+        for (raw, esperada) in [
+            ("https://github.com/o/r/pull/7", "https://github.com/o/r/pull/7"),
+            ("http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3", "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3"),
+            ("  https://github.com/o/r/pull/7  ", "https://github.com/o/r/pull/7"),
+            ("https://user:SECRETO@github.com/o/r/pull/1", "https://github.com/o/r/pull/1"),
+            ("https://github.com/o/r/pull/1?token=SECRETO", "https://github.com/o/r/pull/1"),
+            ("https://github.com/o/r/pull/1#SECRETO", "https://github.com/o/r/pull/1"),
+            ("https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO", "https://github.com/o/r/pull/1"),
+        ] {
+            assert_eq!(sanitize_pr_url(raw).as_deref(), Some(esperada), "{raw}");
+        }
+        for raw in [
+            "", "github.com/o/r/pull/1", "ftp://github.com/o/r/pull/1", "javascript://github.com/o/r/pull/1", "https://", "https://github.com",
+            "https://github.com/", "https:///o/r/pull/1", "https://user:pa/ss@github.com/o/r/pull/1", "https://github.com/o@r/pull/1",
+            "https://github.com/o/r/pull/1;secreto=abc", "https://github.com/o/r/pull/1%0Atoken", "https://github.com/o/r/pull/1\\..\\x",
+            "https://github.com/o/r/pull/1\ntoken", "https://github.com/o/r/pull/1\0", "https://github.com/o/r//pull/1",
+            "https://github.com/o/../pull/1", "https://github.com/o/r/pull/ 1", "https://github.com:abc/o/r/pull/1", "https://github.com:/o/r/pull/1",
+            "https://github.com:123456/o/r/pull/1", "https://[::1]/o/r/pull/1", "https://-github.com/o/r/pull/1", "https://gíthub.com/o/r/pull/1",
+        ] {
+            assert_eq!(sanitize_pr_url(raw), None, "{raw:?}");
+        }
+        assert_eq!(sanitize_pr_url(&format!("https://github.com/{}", "a".repeat(400))), None, "una URL desmedida se descarta, no se recorta");
     }
 
     #[test]
