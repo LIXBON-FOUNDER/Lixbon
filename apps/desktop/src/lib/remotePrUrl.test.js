@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+// Los vectores son los del Core, los de lxo y los de web y mobile: una sola fuente (LXO-243). Se importan como los demás fixtures de
+// docs/core (no con `new URL(import.meta.url)`: en vitest no es una URL `file:`).
+import vectors from '../../../../docs/core/fixtures/pr_url_allowlist.v1.json';
 import { PR_URL_MAX_LEN, sanitizeOrchSnapshot, sanitizePrUrl } from './remotePrUrl';
-
-// Los vectores son los del Core, los de lxo y los de web y mobile: una sola fuente (LXO-243).
-const vectors = JSON.parse(readFileSync(new URL('../../../../docs/core/fixtures/pr_url_allowlist.v1.json', import.meta.url), 'utf8'));
 
 describe('sanitizePrUrl: la allowlist del cliente es la del Core', () => {
   it('conserva y limpia lo que el fixture dice', () => {
