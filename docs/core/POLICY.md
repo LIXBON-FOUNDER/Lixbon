@@ -25,7 +25,7 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 | `review` | `attempt_review` | `confirm` |
 | `integrate` | `attempt_integrate` | `confirm` |
 | `cleanup` | `resource_clean`, `resource_delete_worktree` | `confirm` |
-| `answer`, `provider_permissions` | **ninguno todavía** (`enforced: false`) | `provider_permissions`: `confirm` |
+| `answer`, `provider_permissions` | **ninguno todavía** (`enforced: false`). `attempt_answer` (LXO-247) existe pero **no está gobernado**: lo puede ejecutar cualquier Person de Desktop aunque el nivel de `answer` sea `deny`. Gobernarlo exige decidir qué significa `confirm` para quien responde a un permiso del proveedor | `provider_permissions`: `confirm` |
 
 No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la aprobación inicial es
 parte del propio `start`), `resource_adopt` (LXO-149: no ejecuta nada, solo registra trabajo que ya existía, y exige una Person y `confirm`) ni una Task sin `attempt` (no ejecuta nada). La interfaz lo dice con `enforced: false` en vez de aparentar una

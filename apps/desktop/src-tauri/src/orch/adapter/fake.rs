@@ -50,6 +50,8 @@ pub struct FakeAdapter {
     /// Si está, `interrupt` / `steer` devuelven este error (LXO-144): el stop o el steer que el proveedor rechaza.
     interrupt_error: Mutex<Option<AdapterError>>,
     steer_error: Mutex<Option<AdapterError>>,
+    /// Si está, `answer` devuelve este error (LXO-247): la respuesta que el proveedor no acepta.
+    answer_error: Mutex<Option<AdapterError>>,
 }
 
 impl FakeAdapter {
@@ -74,6 +76,7 @@ impl FakeAdapter {
             resume_error: Mutex::new(None),
             interrupt_error: Mutex::new(None),
             steer_error: Mutex::new(None),
+            answer_error: Mutex::new(None),
         }
     }
 
@@ -99,6 +102,10 @@ impl FakeAdapter {
 
     pub fn fail_steer_with(&self, e: Option<AdapterError>) {
         *self.steer_error.lock().unwrap() = e;
+    }
+
+    pub fn fail_answer_with(&self, e: Option<AdapterError>) {
+        *self.answer_error.lock().unwrap() = e;
     }
 
     pub fn set_probe(&self, probe: ProbeResult) {
@@ -212,7 +219,13 @@ impl ProviderAdapter for FakeAdapter {
 
     fn answer(&self, run: &RunHandle, answer: Answer) -> Result<(), AdapterError> {
         self.note(format!("answer:{}", answer.question_id));
-        self.known(run)
+        // Lo que de verdad llegó (LXO-247): una prueba comprueba `allow` frente a `deny`, y el texto de una pregunta.
+        self.note(format!("answer_text:{}:{}", answer.question_id, answer.text));
+        self.known(run)?;
+        match self.answer_error.lock().unwrap().clone() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     fn interrupt(&self, run: &RunHandle) -> Result<(), AdapterError> {

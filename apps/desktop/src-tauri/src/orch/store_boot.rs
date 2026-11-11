@@ -693,6 +693,11 @@ impl Core {
         self.queue_store(|st| steer_commands::authorize(st, ctx, attempt_id))
     }
 
+    /// Lee el Attempt para responder a una petición del proveedor (LXO-247). Solo lectura; quién puede responder lo decide el RPC.
+    pub(super) fn attempt_for_answer(&self, attempt_id: &str) -> Result<crate::store::AttemptRow, QueueError> {
+        self.queue_store(|st| queue_commands::attempt_of(st, attempt_id))
+    }
+
     /// `attempt.instruction_requested`.
     pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
         self.queue_store(|st| {
