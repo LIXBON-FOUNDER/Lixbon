@@ -208,17 +208,37 @@ pub(super) mod e2e {
     /// Las carpetas (datos y Core) de cada Core de la fixture, por dirección: lo que hace falta para reiniciarlo.
     static FIXTURE_DIRS: Mutex<Vec<(usize, PathBuf, PathBuf)>> = Mutex::new(Vec::new());
 
+    /// Las carpetas del Core VIVO en la dirección `key`: la entrada MÁS RECIENTE de esa dirección.
+    ///
+    /// `FIXTURE_DIRS` solo crece y su clave es la dirección de memoria del `Core`. Cuando un Core muere y otro (de otra prueba, en otro
+    /// hilo del mismo proceso) ocupa la misma dirección, la lista tiene dos entradas con esa clave: la del muerto, más antigua, y la del
+    /// vivo, que siempre se anota después de ocupar la dirección. Quedarse con la primera (`find` desde el principio) reiniciaba el
+    /// Core sobre la base de datos de OTRA prueba, donde `tN-a1` está en otro estado: de ahí el flaky de
+    /// `dispatch_boot_tests::reiniciar_el_core_concilia…` (`stopped/none` o `done/settled` en lugar de `exited/settled`), solo con la
+    /// suite entera en el mismo proceso y solo cuando el asignador reutiliza la dirección (Windows y macOS).
+    fn dirs_of_live_core(entries: &[(usize, PathBuf, PathBuf)], key: usize) -> Option<(PathBuf, PathBuf)> {
+        entries.iter().rev().find(|(k, _, _)| *k == key).map(|(_, data, core_dir)| (data.clone(), core_dir.clone()))
+    }
+
+    #[test]
+    fn una_direccion_reutilizada_resuelve_a_las_carpetas_del_core_vivo_y_no_a_las_de_un_muerto() {
+        let p = |s: &str| PathBuf::from(s);
+        let entries = vec![
+            (0xA000, p("viejo/orch"), p("viejo/core")),
+            (0xB000, p("otro/orch"), p("otro/core")),
+            (0xA000, p("nuevo/orch"), p("nuevo/core")), // un Core posterior ocupó la dirección 0xA000
+        ];
+        assert_eq!(dirs_of_live_core(&entries, 0xA000), Some((p("nuevo/orch"), p("nuevo/core"))), "la más reciente, no la del Core muerto");
+        assert_eq!(dirs_of_live_core(&entries, 0xB000), Some((p("otro/orch"), p("otro/core"))));
+        assert_eq!(dirs_of_live_core(&entries, 0xC000), None, "una dirección que nunca fue de la fixture");
+        assert_eq!(dirs_of_live_core(&[], 0xA000), None);
+    }
+
     /// Reinicia el Core de la fixture sobre sus mismas carpetas: lo suelta (esperando a que libere `core.lock`) y arranca otro.
     /// Es un reinicio limpio de proceso, no un apagado ordenado de las tareas: el estado queda como estaba.
     pub(in crate::orch) fn restart_fixture_core(core: Arc<Core>) -> Arc<Core> {
         let key = Arc::as_ptr(&core) as usize;
-        let (data, core_dir) = FIXTURE_DIRS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .find(|(k, _, _)| *k == key)
-            .map(|(_, d, c)| (d.clone(), c.clone()))
-            .expect("el Core no viene de la fixture");
+        let (data, core_dir) = dirs_of_live_core(&FIXTURE_DIRS.lock().unwrap_or_else(|e| e.into_inner()), key).expect("el Core no viene de la fixture");
         core.shutdown();
         suelta(core, &core_dir);
         let core = Orch::default().0;
