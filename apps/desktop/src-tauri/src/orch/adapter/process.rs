@@ -9,6 +9,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -91,6 +92,11 @@ fn read_bounded_line(r: &mut impl BufRead) -> Option<String> {
 
 pub struct ChildProcess {
     child: Mutex<Child>,
+    /// El árbol de procesos de la raíz, con su identidad y (Windows) su Job: es con lo que se cierra todo el árbol sin tocar
+    /// nunca a un proceso ajeno (LXO-242).
+    tree: Mutex<crate::proctable::Tree>,
+    /// El árbol se cerró y la raíz se reapeó: no hay nada más que cerrar.
+    closed: AtomicBool,
     stdin: Mutex<Option<ChildStdin>>,
     rx: Mutex<Receiver<Option<String>>>,
     stderr: Arc<Mutex<Vec<u8>>>,
@@ -118,7 +124,7 @@ impl Process for ChildProcess {
 
     fn kill(&self) {
         self.close_input();
-        crate::mcp::kill_tree(&mut self.child.lock().unwrap_or_else(|e| e.into_inner()));
+        self.close_tree();
     }
 
     fn stderr_tail(&self) -> String {
@@ -127,12 +133,44 @@ impl Process for ChildProcess {
     }
 }
 
+impl ChildProcess {
+    /// Cierra TODO el árbol de la raíz comprobando la identidad de cada proceso (`proctable::kill_tree`) y, solo si se
+    /// comprobó su muerte, reapea la raíz. `true` si no queda nada. Si no se puede probar (identidad ilegible, tabla de
+    /// procesos no fiable) NO se hace un kill ciego del resto del árbol: el árbol y la raíz sin reapear se conservan para
+    /// reintentarlo (en Unix la raíz sin reapear ancla su pid). A la raíz, que este `Child` posee, sí se le ordena morir:
+    /// su handle (o su zombi) impide que ese pid sea de otro.
+    fn close_tree(&self) -> bool {
+        if self.closed.load(Ordering::Acquire) {
+            return true;
+        }
+        let mut tree = self.tree.lock().unwrap_or_else(|e| e.into_inner());
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        // Con el candado del árbol: una segunda llamada concurrente espera y ve `closed`.
+        if self.closed.load(Ordering::Acquire) {
+            return true;
+        }
+        match crate::proctable::kill_tree(&mut tree, &mut crate::proctable::RealOs::default()) {
+            Ok(()) => {
+                let _ = child.wait();
+                self.closed.store(true, Ordering::Release);
+                true
+            }
+            Err(_) => {
+                let _ = child.kill();
+                false
+            }
+        }
+    }
+}
+
 impl Drop for ChildProcess {
     fn drop(&mut self) {
-        // Un adapter que suelta el proceso sin cerrarlo no deja una CLI huérfana.
-        if let Ok(mut c) = self.child.lock() {
-            if matches!(c.try_wait(), Ok(None)) {
-                crate::mcp::kill_tree(&mut c);
+        // Un adapter que suelta el proceso sin cerrarlo no deja una CLI huérfana ni sus descendientes.
+        if !self.close_tree() {
+            // Sin poder probar el árbol: último recurso sobre la raíz, que es nuestra (nunca el resto a ciegas), y se reapea.
+            if let Ok(mut c) = self.child.lock() {
+                let _ = c.kill();
+                let _ = c.wait();
             }
         }
     }
@@ -142,56 +180,347 @@ pub struct RealLauncher;
 
 impl Launcher for RealLauncher {
     fn launch(&self, spec: &LaunchSpec) -> Result<Arc<dyn Process>, AdapterError> {
-        // Un .cmd (npm) en Windows se ejecuta a través de cmd, igual que en `agents.rs`.
-        let mut cmd = if cfg!(windows) && spec.program.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
-            let mut c = Command::new("cmd");
-            c.arg("/C").arg(&spec.program);
-            c
-        } else {
-            Command::new(&spec.program)
-        };
-        cmd.args(&spec.args).current_dir(&spec.cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        for k in &spec.env_remove {
-            cmd.env_remove(k);
-        }
-        for (k, v) in &spec.env {
-            cmd.env(k, v);
-        }
-        let mut child = crate::hide_console(&mut cmd).spawn().map_err(|e| AdapterError::provider(&format!("no se pudo lanzar {}: {e}", spec.program.display())))?;
-        let stdin = child.stdin.take();
-        let stdout = child.stdout.take().ok_or_else(|| AdapterError::new(crate::orch::adapter::ErrorCode::Internal, "el proceso no expuso stdout"))?;
-        let stderr_pipe = child.stderr.take();
+        Ok(Arc::new(spawn_child(spec)?))
+    }
+}
 
-        let (tx, rx) = mpsc::channel();
+/// Mata la raíz recién lanzada que no llegó a usarse y la reapea. La raíz es nuestra: su handle (o su zombi) ancla su pid.
+fn abort_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Lanza el proceso del proveedor bajo la custodia de `proctable` (LXO-242). Windows: la raíz nace SUSPENDIDA, se mete en su
+/// Job antes de ejecutar nada y solo se reanuda si quedó dentro. Unix: la raíz lidera su PROPIA sesión (`setsid`).
+fn spawn_child(spec: &LaunchSpec) -> Result<ChildProcess, AdapterError> {
+    // Un .cmd (npm) en Windows se ejecuta a través de cmd, igual que en `agents.rs`.
+    let mut cmd = if cfg!(windows) && spec.program.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(&spec.program);
+        c
+    } else {
+        Command::new(&spec.program)
+    };
+    cmd.args(&spec.args).current_dir(&spec.cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for k in &spec.env_remove {
+        cmd.env_remove(k);
+    }
+    for (k, v) in &spec.env {
+        cmd.env(k, v);
+    }
+    crate::hide_console(&mut cmd);
+    // Windows: la raíz nace suspendida (los flags sustituyen a los de `hide_console`, así que se repite CREATE_NO_WINDOW).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_SUSPENDED: u32 = 0x0000_0004;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    }
+    // Unix: la raíz lidera su PROPIA sesión (pgid == sid == pid): el número de su grupo es suyo y `proctable` encuentra a
+    // los descendientes que se reparenten a init.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: el callback solo llama a `setsid` entre `fork` y `exec`; no toca el estado de Rust ni reserva memoria.
+        unsafe {
+            cmd.pre_exec(|| if libc::setsid() == -1 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+        }
+    }
+    let mut child = cmd.spawn().map_err(|e| AdapterError::provider(&format!("no se pudo lanzar {}: {e}", spec.program.display())))?;
+    let pid = child.id();
+    #[cfg(windows)]
+    let tree = {
+        let tree = crate::proctable::Tree::capture_suspended(&mut crate::proctable::RealOs::default(), pid);
+        // Solo se reanuda con el Job adjunto y la raíz aún suspendida; si no, se mata sin haber ejecutado nada.
+        if !tree.has_complete_job() {
+            abort_child(&mut child);
+            return Err(AdapterError::provider("no se pudo meter el proceso suspendido en un Job Object; no se lanzó"));
+        }
+        if !resume_root(pid) {
+            abort_child(&mut child);
+            return Err(AdapterError::provider("no se pudo reanudar el proceso suspendido; no se lanzó"));
+        }
+        tree
+    };
+    #[cfg(not(windows))]
+    let tree = {
+        let mut tree = crate::proctable::Tree::capture(&mut crate::proctable::RealOs::default(), pid);
+        // Nadie reapea a la raíz hasta `close_tree`: su pid (y el número de su grupo) es suyo mientras tanto.
+        tree.pin_root();
+        tree
+    };
+    let stdin = child.stdin.take();
+    let Some(stdout) = child.stdout.take() else {
+        abort_child(&mut child);
+        return Err(AdapterError::new(crate::orch::adapter::ErrorCode::Internal, "el proceso no expuso stdout"));
+    };
+    let stderr_pipe = child.stderr.take();
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut r = BufReader::new(stdout);
+        while let Some(line) = read_bounded_line(&mut r) {
+            if tx.send(Some(line)).is_err() {
+                return;
+            }
+        }
+        let _ = tx.send(None);
+    });
+
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    if let Some(mut pipe) = stderr_pipe {
+        let sink = Arc::clone(&stderr);
         thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            while let Some(line) = read_bounded_line(&mut r) {
-                if tx.send(Some(line)).is_err() {
-                    return;
+            let mut chunk = [0u8; 1024];
+            while let Ok(n) = pipe.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                let mut b = sink.lock().unwrap_or_else(|e| e.into_inner());
+                b.extend_from_slice(&chunk[..n]);
+                // Solo se conserva la cola.
+                if b.len() > STDERR_TAIL_BYTES {
+                    let cut = b.len() - STDERR_TAIL_BYTES;
+                    b.drain(..cut);
                 }
             }
-            let _ = tx.send(None);
         });
+    }
+    Ok(ChildProcess { child: Mutex::new(child), tree: Mutex::new(tree), closed: AtomicBool::new(false), stdin: Mutex::new(stdin), rx: Mutex::new(rx), stderr })
+}
 
-        let stderr = Arc::new(Mutex::new(Vec::new()));
-        if let Some(mut pipe) = stderr_pipe {
-            let sink = Arc::clone(&stderr);
-            thread::spawn(move || {
-                let mut chunk = [0u8; 1024];
-                while let Ok(n) = pipe.read(&mut chunk) {
-                    if n == 0 {
-                        break;
-                    }
-                    let mut b = sink.lock().unwrap_or_else(|e| e.into_inner());
-                    b.extend_from_slice(&chunk[..n]);
-                    // Solo se conserva la cola.
-                    if b.len() > STDERR_TAIL_BYTES {
-                        let cut = b.len() - STDERR_TAIL_BYTES;
-                        b.drain(..cut);
-                    }
-                }
-            });
+/// SOLO pruebas: la reanudación de la raíz suspendida falla (camino de aborto del lanzamiento, Windows).
+#[cfg(all(test, windows))]
+thread_local! {
+    static FAIL_RESUME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Windows: reanuda la raíz suspendida (`false` si no se pudo, sin haber reanudado nada).
+#[cfg(windows)]
+fn resume_root(pid: u32) -> bool {
+    #[cfg(test)]
+    if FAIL_RESUME.with(|f| f.get()) {
+        return false;
+    }
+    crate::proctable::resume_suspended(pid)
+}
+
+impl ChildProcess {
+    #[cfg(test)]
+    fn pid(&self) -> u32 {
+        self.child.lock().unwrap_or_else(|e| e.into_inner()).id()
+    }
+}
+
+/// Procesos de verdad (LXO-242): el cierre del lanzador real termina TODO el árbol, también al nieto huérfano que el
+/// recorrido por `ppid` (y `taskkill /T`) no ve, y un lanzamiento que no puede ponerse bajo el Job no llega a ejecutar nada.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::time::Instant;
+
+    fn carpeta(nombre: &str) -> PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let d = std::env::temp_dir().join(format!("lxo-adapter-{nombre}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn spec(program: PathBuf, args: Vec<String>) -> LaunchSpec {
+        LaunchSpec { program, args, cwd: std::env::temp_dir(), env: vec![], env_remove: vec![] }
+    }
+
+    fn espera(mut cond: impl FnMut() -> bool, segundos: u64) -> bool {
+        let limite = Instant::now() + Duration::from_secs(segundos);
+        while Instant::now() < limite {
+            if cond() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(100));
         }
-        Ok(Arc::new(ChildProcess { child: Mutex::new(child), stdin: Mutex::new(stdin), rx: Mutex::new(rx), stderr }))
+        cond()
+    }
+
+    // --- Windows ---
+
+    #[cfg(windows)]
+    fn powershell(script: &str) -> String {
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+        String::from_utf8_lossy(&crate::hide_console(&mut cmd).output().expect("powershell").stdout).into_owned()
+    }
+
+    /// Pids de los `ping.exe` de esta prueba, reconocidos por su cuenta de paquetes `marca`.
+    #[cfg(windows)]
+    fn pings_con(marca: &str) -> Vec<u32> {
+        powershell(&format!("Get-CimInstance Win32_Process | Where-Object {{ $_.Name -eq 'PING.EXE' -and $_.CommandLine -like '*-n {marca} 127.0.0.1*' }} | ForEach-Object {{ $_.ProcessId }}"))
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect()
+    }
+
+    /// Si la prueba falla a medias, los `ping` no pueden quedarse vivos.
+    #[cfg(windows)]
+    struct LimpiaPings(&'static [&'static str]);
+
+    #[cfg(windows)]
+    impl Drop for LimpiaPings {
+        fn drop(&mut self) {
+            for m in self.0 {
+                for pid in pings_con(m) {
+                    powershell(&format!("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"));
+                }
+            }
+        }
+    }
+
+    /// Un `.cmd` cuyo intermedio lanza un `ping` en segundo plano y sale (el `ping` queda huérfano con el `ppid` colgando) y
+    /// cuya raíz sigue viva con otro `ping`. El lanzador real ejecuta un `.cmd` a través de `cmd /C`.
+    #[cfg(windows)]
+    fn guion_con_huerfano(dir: &Path, huerfano: &str, raiz: &str) -> PathBuf {
+        let f = dir.join("agente.cmd");
+        std::fs::write(&f, format!("@echo off\r\ncmd /C \"start \"\" /B ping -n {huerfano} 127.0.0.1 >nul\"\r\nping -n {raiz} 127.0.0.1 >nul\r\n")).unwrap();
+        f
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_kill_cierra_tambien_al_nieto_huerfano_con_el_job() {
+        let _limpia = LimpiaPings(&["133", "134"]);
+        let dir = carpeta("huerfano");
+        let p = spawn_child(&spec(guion_con_huerfano(&dir, "133", "134"), vec![])).expect("lanzamiento");
+        assert!(espera(|| !pings_con("133").is_empty() && !pings_con("134").is_empty(), 20), "el huérfano y el ping de la raíz arrancaron");
+        let (huerfano, raiz) = (pings_con("133"), pings_con("134"));
+        p.kill();
+        assert!(espera(|| pings_con("133").is_empty() && pings_con("134").is_empty(), 20), "murieron el huérfano {huerfano:?} (su `ppid` cuelga de un cmd que ya salió) y el de la raíz {raiz:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_soltar_el_proceso_cierra_el_arbol_entero() {
+        let _limpia = LimpiaPings(&["135", "136"]);
+        let dir = carpeta("drop");
+        let p = spawn_child(&spec(guion_con_huerfano(&dir, "135", "136"), vec![])).expect("lanzamiento");
+        assert!(espera(|| !pings_con("135").is_empty() && !pings_con("136").is_empty(), 20), "arrancaron");
+        drop(p);
+        assert!(espera(|| pings_con("135").is_empty() && pings_con("136").is_empty(), 20), "soltar el proceso no deja una CLI ni un huérfano vivos");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Si no se puede reanudar la raíz suspendida, el lanzamiento falla y la raíz, que no ejecutó nada, se mata: el guion no
+    /// llega a lanzar ningún `ping`.
+    #[cfg(windows)]
+    #[test]
+    fn windows_si_no_se_puede_reanudar_la_raiz_suspendida_no_se_ejecuta_nada() {
+        let _limpia = LimpiaPings(&["137", "138"]);
+        let dir = carpeta("no-reanuda");
+        FAIL_RESUME.with(|f| f.set(true));
+        let r = spawn_child(&spec(guion_con_huerfano(&dir, "137", "138"), vec![]));
+        FAIL_RESUME.with(|f| f.set(false));
+        let e = r.err().expect("el lanzamiento falla");
+        assert!(e.to_string().contains("no se lanzó"), "{e}");
+        thread::sleep(Duration::from_secs(3));
+        assert!(pings_con("137").is_empty() && pings_con("138").is_empty(), "la raíz estaba suspendida y muerta: el guion nunca corrió");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // --- Unix (solo la CI) ---
+
+    /// ¿Sigue vivo `pid`? Un zombi (muerto sin reapear, p. ej. huérfano reparentado a un init que no reapea) cuenta como muerto.
+    #[cfg(unix)]
+    fn vivo(pid: u32) -> bool {
+        let mut cmd = Command::new("ps");
+        cmd.args(["-o", "stat=", "-p", &pid.to_string()]);
+        let out = String::from_utf8_lossy(&cmd.output().expect("ps").stdout).trim().to_string();
+        !out.is_empty() && !out.starts_with('Z')
+    }
+
+    /// Un `sh` cuyo subshell lanza un `sleep` y sale (el `sleep` se reparenta a init) y cuya raíz sigue viva con otro `sleep`.
+    /// El pid del huérfano se anota en un archivo.
+    #[cfg(unix)]
+    fn lanza_con_huerfano(dir: &Path, huerfano: &str, raiz: &str) -> (ChildProcess, PathBuf) {
+        let pidfile = dir.join("huerfano.pid");
+        let script = format!("( sleep {huerfano} & echo $! > '{}' ); sleep {raiz}", pidfile.display());
+        let p = spawn_child(&spec(PathBuf::from("sh"), vec!["-c".into(), script])).expect("lanzamiento");
+        (p, pidfile)
+    }
+
+    #[cfg(unix)]
+    fn pid_del_huerfano(pidfile: &Path) -> u32 {
+        assert!(espera(|| std::fs::read_to_string(pidfile).is_ok_and(|t| t.trim().parse::<u32>().is_ok()), 20), "el huérfano arrancó");
+        std::fs::read_to_string(pidfile).unwrap().trim().parse().unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_kill_cierra_tambien_al_nieto_huerfano() {
+        let dir = carpeta("huerfano");
+        let (p, pidfile) = lanza_con_huerfano(&dir, "133", "134");
+        let huerfano = pid_del_huerfano(&pidfile);
+        assert!(vivo(huerfano) && vivo(p.pid()), "antes de cerrar viven la raíz y el huérfano");
+        p.kill();
+        assert!(espera(|| !vivo(huerfano), 20), "el huérfano {huerfano} (reparentado a init) murió con el árbol");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// La raíz termina SOLA dejando un proceso en segundo plano (la CLI acaba su turno con un hijo vivo): la raíz queda zombi
+    /// (nadie la reapea hasta `close_tree`) y su grupo sigue siendo suyo; cerrar después encuentra y mata al huérfano.
+    #[cfg(unix)]
+    #[test]
+    fn unix_kill_tras_salir_la_raiz_sola_cierra_al_huerfano() {
+        let dir = carpeta("raiz-sale");
+        let pidfile = dir.join("huerfano.pid");
+        let script = format!("sleep 140 & echo $! > '{}'; exit 0", pidfile.display());
+        let p = spawn_child(&spec(PathBuf::from("sh"), vec!["-c".into(), script])).expect("lanzamiento");
+        let huerfano = pid_del_huerfano(&pidfile);
+        assert!(espera(|| !vivo(p.pid()), 20), "la raíz salió sola (queda zombi)");
+        assert!(vivo(huerfano), "y el huérfano sigue vivo");
+        p.kill();
+        assert!(espera(|| !vivo(huerfano), 20), "cerrar el árbol mató al huérfano {huerfano} aunque la raíz ya había salido");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_soltar_el_proceso_cierra_el_arbol_entero() {
+        let dir = carpeta("drop");
+        let (p, pidfile) = lanza_con_huerfano(&dir, "135", "136");
+        let (huerfano, raiz) = (pid_del_huerfano(&pidfile), p.pid());
+        drop(p);
+        assert!(espera(|| !vivo(huerfano) && !vivo(raiz), 20), "soltar el proceso no deja la raíz {raiz} ni el huérfano {huerfano} vivos");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // --- Todas las plataformas ---
+
+    fn proceso_largo() -> LaunchSpec {
+        if cfg!(windows) {
+            spec(PathBuf::from("ping"), vec!["-n".into(), "139".into(), "127.0.0.1".into()])
+        } else {
+            spec(PathBuf::from("sleep"), vec!["139".into()])
+        }
+    }
+
+    #[test]
+    fn cerrar_dos_veces_es_inocuo_y_la_raiz_muere() {
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.kill();
+        p.kill();
+        assert!(p.closed.load(Ordering::Acquire), "el cierre se comprobó");
+        #[cfg(windows)]
+        assert!(espera(|| !powershell(&format!("Get-Process -Id {pid} -ErrorAction SilentlyContinue")).contains("ProcessName"), 10), "la raíz murió");
+        #[cfg(unix)]
+        assert!(espera(|| !vivo(pid), 10), "la raíz murió");
+    }
+
+    #[test]
+    fn un_programa_que_no_existe_falla_sin_dejar_nada() {
+        let e = spawn_child(&spec(PathBuf::from("este-programa-no-existe-lxo-242"), vec![])).err().expect("falla");
+        assert!(e.to_string().contains("no se pudo lanzar"), "{e}");
     }
 }
