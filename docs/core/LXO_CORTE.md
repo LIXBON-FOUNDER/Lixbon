@@ -40,6 +40,7 @@ publicadas están en [`fixtures/lxo/`](fixtures/lxo/). Las genera `apps/desktop/
 | `lxo attempt show --json` | `{v: 1, core_model, attempt, activity}` | [`attempt_show.v1.json`](fixtures/lxo/attempt_show.v1.json) | tras el corte |
 | `lxo provider list --json` | `{v: 1, status, refreshing, generation, checked_at_ms, providers}` | [`provider_list.v1.json`](fixtures/lxo/provider_list.v1.json) | siempre (no depende del corte) |
 | `lxo provider status --json` | `{v: 1, status, refreshing, generation, checked_at_ms, provider, check, attempt}` | [`provider_status.v1.json`](fixtures/lxo/provider_status.v1.json), [con `--attempt`](fixtures/lxo/provider_status_attempt.v1.json) | siempre; `--attempt` tras el corte |
+| `lxo usage --json` | `{v: 1, status, refreshing, generated_at_ms, filters, providers, excluded}` | [`usage.v1.json`](fixtures/lxo/usage.v1.json) | siempre (no depende del corte) |
 
 `lxo provider` (LXO-137) es de solo lectura sobre `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)):
 lxo no decide soporte por nombre ni versión y enseña las seis capabilities que da el Core. `status` fija el código de salida por lo
@@ -47,6 +48,16 @@ que mira (sin `--capability`, el entorno; con ella, esa capability): `0` listo o
 `environment_blocked` (el entorno lo impide: **no** es un Attempt fallido), `9` `unsupported`. `--attempt` suma la ProviderSession del
 intento como hechos, sin veredicto: si reanudar procede lo decide el Core. El canal (`transport`) sale como lo dice el Core; que sea
 el de respaldo **no** se informa todavía en `provider_capabilities`, así que lxo no lo escribe.
+
+`lxo usage` (LXO-207) es de solo lectura sobre `usage_report` ([QUERIES.md](QUERIES.md#usage_report-lxo-206)): lxo no consulta a ningún proveedor, no estima
+y no suma magnitudes de proveedores distintos. **Desconocido no es cero**: lo que el Core no da sale `null` en el `--json` y «sin dato» en el texto, y lo que el
+proveedor declara que no informa (`support`) se dice distinto de lo que no llegó. Un proveedor `stale`, `unknown` o con el entorno bloqueado es parte de la
+respuesta (sale `0`), no un fallo del comando ni de un Attempt. `--model` y `--account` no descartan en silencio a los proveedores que no informan ese dato:
+los nombra en `excluded`. `--refresh` pide la consulta una vez y espera; si el Core la atiende con el dato guardado, `throttled` lo dice.
+
+**Corte con el comando histórico.** El `usage` que ya existía es el `lixbon usage` del CLI de Go (el uso de la cuenta Lixbon del gateway, `apps/cli`): **no
+cambia** ni se redirige. `lxo usage` es otro binario sobre otra fuente (el Core y las cuentas de cada proveedor) y no lo sustituye; quien quiera el uso del
+gateway sigue con `lixbon usage`. No hay alias entre los dos, así que ninguna semántica cambia en silencio.
 
 Reglas de la forma 2:
 * Ids nombrados: `task_id`, `parent_task_id`, `children_ids`, `attempt_id`. Nunca un `id` a secas.
