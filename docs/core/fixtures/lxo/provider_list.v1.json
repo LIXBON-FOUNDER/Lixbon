@@ -1,0 +1,105 @@
+{
+  "checked_at_ms": 1792000000000,
+  "generation": 3,
+  "providers": [
+    {
+      "capabilities": {
+        "answer": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        },
+        "events": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        },
+        "interrupt": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        },
+        "resume": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        },
+        "start": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        },
+        "steer": {
+          "block": "cli_missing",
+          "state": "environment_blocked"
+        }
+      },
+      "cli_version": null,
+      "environment": {
+        "blocks": [
+          "cli_missing"
+        ],
+        "state": "blocked"
+      },
+      "id": "fake-bloqueado",
+      "transport": null
+    },
+    {
+      "capabilities": {
+        "answer": {
+          "state": "available"
+        },
+        "events": {
+          "state": "available"
+        },
+        "interrupt": {
+          "state": "available"
+        },
+        "resume": {
+          "state": "available"
+        },
+        "start": {
+          "state": "available"
+        },
+        "steer": {
+          "state": "available"
+        }
+      },
+      "cli_version": "0.0.0-fake",
+      "environment": {
+        "blocks": [],
+        "state": "ready"
+      },
+      "id": "fake-completo",
+      "transport": null
+    },
+    {
+      "capabilities": {
+        "answer": {
+          "state": "available"
+        },
+        "events": {
+          "state": "available"
+        },
+        "interrupt": {
+          "state": "available"
+        },
+        "resume": {
+          "reason": "la sesión nativa no se puede reanudar con esta versión",
+          "state": "unavailable"
+        },
+        "start": {
+          "state": "available"
+        },
+        "steer": {
+          "state": "unsupported"
+        }
+      },
+      "cli_version": "1.2.3",
+      "environment": {
+        "blocks": [],
+        "state": "ready"
+      },
+      "id": "fake-parcial",
+      "transport": null
+    }
+  ],
+  "refreshing": false,
+  "status": "ready",
+  "v": 1
+}

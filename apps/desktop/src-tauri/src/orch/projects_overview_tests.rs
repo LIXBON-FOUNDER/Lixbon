@@ -748,6 +748,13 @@ impl RealStoreServer {
     }
 }
 
+/// Registra la credencial de un agente (la de una tarea) con vigencia desde ahora, para comprobar que una lectura de personas lo rechaza.
+pub(super) fn registra_agente(core: &Core, task: &str, installation: &str, token: &str) {
+    let registration = crate::store::ClientRegistration::new(crate::store::ClientSurface::Cli, crate::store::DeviceIdentity::new(installation, None).unwrap()).unwrap();
+    let credential = crate::store::ClientCredential::new(crate::store::ClientPrincipal::Agent(task.into()), token).unwrap();
+    core.storage.with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64).unwrap()).unwrap();
+}
+
 impl Drop for RealStoreServer {
     fn drop(&mut self) {
         use crate::secure_store::{OsStore, SecretStore};

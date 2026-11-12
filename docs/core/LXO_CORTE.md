@@ -38,6 +38,15 @@ publicadas están en [`fixtures/lxo/`](fixtures/lxo/). Las genera `apps/desktop/
 | `lxo task show <task_id> --json --schema 2` | `{v: 2, task_model: "task_attempt_v1", task, activity}` | [`task_show.v2.json`](fixtures/lxo/task_show.v2.json) | tras el corte |
 | `lxo attempts --task --json` | `{v: 1, core_model, task, filters, total, attempts}` | [`attempts.v1.json`](fixtures/lxo/attempts.v1.json) | tras el corte |
 | `lxo attempt show --json` | `{v: 1, core_model, attempt, activity}` | [`attempt_show.v1.json`](fixtures/lxo/attempt_show.v1.json) | tras el corte |
+| `lxo provider list --json` | `{v: 1, status, refreshing, generation, checked_at_ms, providers}` | [`provider_list.v1.json`](fixtures/lxo/provider_list.v1.json) | siempre (no depende del corte) |
+| `lxo provider status --json` | `{v: 1, status, refreshing, generation, checked_at_ms, provider, check, attempt}` | [`provider_status.v1.json`](fixtures/lxo/provider_status.v1.json), [con `--attempt`](fixtures/lxo/provider_status_attempt.v1.json) | siempre; `--attempt` tras el corte |
+
+`lxo provider` (LXO-137) es de solo lectura sobre `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)):
+lxo no decide soporte por nombre ni versión y enseña las seis capabilities que da el Core. `status` fija el código de salida por lo
+que mira (sin `--capability`, el entorno; con ella, esa capability): `0` listo o disponible, `7` `unavailable`, `8`
+`environment_blocked` (el entorno lo impide: **no** es un Attempt fallido), `9` `unsupported`. `--attempt` suma la ProviderSession del
+intento como hechos, sin veredicto: si reanudar procede lo decide el Core. El canal (`transport`) sale como lo dice el Core; que sea
+el de respaldo **no** se informa todavía en `provider_capabilities`, así que lxo no lo escribe.
 
 Reglas de la forma 2:
 * Ids nombrados: `task_id`, `parent_task_id`, `children_ids`, `attempt_id`. Nunca un `id` a secas.

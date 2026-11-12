@@ -1,0 +1,62 @@
+{
+  "attempt": {
+    "attempt_id": "t3-a1",
+    "provider": "fake-parcial",
+    "provider_session": {
+      "binding": "session_id",
+      "bound": true,
+      "opened_by_attempt_id": "t3-a1",
+      "provider_session_id": "ps-t3-a1",
+      "resumable": true,
+      "status": "idle"
+    },
+    "resume": {
+      "reason": "la sesión nativa no se puede reanudar con esta versión",
+      "state": "unavailable"
+    },
+    "status": "done",
+    "task_id": "t3"
+  },
+  "check": {
+    "block": null,
+    "capability": null,
+    "reason": null,
+    "scope": "environment",
+    "state": "ready"
+  },
+  "checked_at_ms": 1792000000000,
+  "generation": 3,
+  "provider": {
+    "capabilities": {
+      "answer": {
+        "state": "available"
+      },
+      "events": {
+        "state": "available"
+      },
+      "interrupt": {
+        "state": "available"
+      },
+      "resume": {
+        "reason": "la sesión nativa no se puede reanudar con esta versión",
+        "state": "unavailable"
+      },
+      "start": {
+        "state": "available"
+      },
+      "steer": {
+        "state": "unsupported"
+      }
+    },
+    "cli_version": "1.2.3",
+    "environment": {
+      "blocks": [],
+      "state": "ready"
+    },
+    "id": "fake-parcial",
+    "transport": null
+  },
+  "refreshing": false,
+  "status": "ready",
+  "v": 1
+}

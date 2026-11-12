@@ -14,6 +14,7 @@ mod attention;
 mod client_auth;
 mod events;
 mod projects;
+mod provider;
 mod summary;
 mod tasks;
 
@@ -50,6 +51,10 @@ Coordinador (el agente con el que habla el usuario):
                                                   (solo lectura y solo personas)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
+  lxo provider list [--refresh] [--json]
+  lxo provider status <proveedor> [--capability C] [--attempt ID] [--refresh] [--json]
+                                                  qué ofrece cada proveedor según el Core: capabilities, entorno
+                                                  (bloqueado ≠ fallido) y sesión de un intento (solo lectura y solo personas)
   lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
   lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
                                                   Lixbon (solo personas; se pierde lo posterior al corte)
@@ -1028,6 +1033,9 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
+    }
+    if a.at(0).as_deref() == Some("provider") {
+        return provider::run(&a);
     }
     // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
     if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {

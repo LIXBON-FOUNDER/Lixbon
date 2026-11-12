@@ -1,0 +1,45 @@
+{
+  "attempt": null,
+  "check": {
+    "block": null,
+    "capability": "resume",
+    "reason": "la sesión nativa no se puede reanudar con esta versión",
+    "scope": "capability",
+    "state": "unavailable"
+  },
+  "checked_at_ms": 1792000000000,
+  "generation": 3,
+  "provider": {
+    "capabilities": {
+      "answer": {
+        "state": "available"
+      },
+      "events": {
+        "state": "available"
+      },
+      "interrupt": {
+        "state": "available"
+      },
+      "resume": {
+        "reason": "la sesión nativa no se puede reanudar con esta versión",
+        "state": "unavailable"
+      },
+      "start": {
+        "state": "available"
+      },
+      "steer": {
+        "state": "unsupported"
+      }
+    },
+    "cli_version": "1.2.3",
+    "environment": {
+      "blocks": [],
+      "state": "ready"
+    },
+    "id": "fake-parcial",
+    "transport": null
+  },
+  "refreshing": false,
+  "status": "ready",
+  "v": 1
+}
