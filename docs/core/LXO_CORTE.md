@@ -41,6 +41,9 @@ publicadas están en [`fixtures/lxo/`](fixtures/lxo/). Las genera `apps/desktop/
 | `lxo provider list --json` | `{v: 1, status, refreshing, generation, checked_at_ms, providers}` | [`provider_list.v1.json`](fixtures/lxo/provider_list.v1.json) | siempre (no depende del corte) |
 | `lxo provider status --json` | `{v: 1, status, refreshing, generation, checked_at_ms, provider, check, attempt}` | [`provider_status.v1.json`](fixtures/lxo/provider_status.v1.json), [con `--attempt`](fixtures/lxo/provider_status_attempt.v1.json) | siempre; `--attempt` tras el corte |
 | `lxo usage --json` | `{v: 1, status, refreshing, generated_at_ms, filters, providers, excluded}` | [`usage.v1.json`](fixtures/lxo/usage.v1.json) | siempre (no depende del corte) |
+| `lxo context show --json` | la respuesta `valid` del Core tal cual: `{v: 1, status, verification, package_id, package, summary}` | [`context_show.v1.json`](fixtures/lxo/context_show.v1.json) | siempre |
+| `lxo context validate --json` | la misma sin `package` | [`context_validate.v1.json`](fixtures/lxo/context_validate.v1.json) | siempre |
+| `lxo context … --json` (rechazado, sale `7`) | `{v: 1, status: "invalid", error: {code, message}, serialized_bytes[, declared_id, recomputed_id]}` | [`context_invalid.v1.json`](fixtures/lxo/context_invalid.v1.json) | siempre |
 
 `lxo provider` (LXO-137) es de solo lectura sobre `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)):
 lxo no decide soporte por nombre ni versión y enseña las seis capabilities que da el Core. `status` fija el código de salida por lo
@@ -58,6 +61,18 @@ los nombra en `excluded`. `--refresh` pide la consulta una vez y espera; si el C
 **Corte con el comando histórico.** El `usage` que ya existía es el `lixbon usage` del CLI de Go (el uso de la cuenta Lixbon del gateway, `apps/cli`): **no
 cambia** ni se redirige. `lxo usage` es otro binario sobre otra fuente (el Core y las cuentas de cada proveedor) y no lo sustituye; quien quiera el uso del
 gateway sigue con `lixbon usage`. No hay alias entre los dos, así que ninguna semántica cambia en silencio.
+
+`lxo context` (LXO-138) revisa un ContextPackage v1 **de un archivo** (o de la entrada estándar con `-`): `show` lo enseña y `validate` dice si el Core lo
+acepta, ambos sobre `context_package_preview` ([QUERIES.md](QUERIES.md#context_package_preview-lxo-136)). La verificación (versión, formato, identidad
+`package_id` = sha256 del contenido canónico, secretos) es del Core; lxo no calcula ningún hash. Un paquete rechazado sale con `7`, **no muestra su
+contenido** (si la identidad no coincide, da la huella declarada y la recalculada) y el contenido del archivo nunca vuelve en un error. Los adjuntos constan
+como «sin comprobar»: sus bytes no viajan con el paquete. Antes de llamar al Core se descartan, con `2`, lo que no es un archivo, lo de más de 128 KiB y lo que
+no es UTF-8 (el UTF-16 de PowerShell 5 se dice con su nombre; un BOM UTF-8 se ignora); un archivo inexistente sale con `6`.
+
+**Alcance de F4: solo lectura sobre archivos.** `lxo context export`, `import` y `show <package_id|attempt_id>` (que pedía la issue) **no existen todavía** y lo
+dicen (`2`): el Core de F4 no construye un paquete a partir de un Attempt (solo `build()` con datos en memoria, para el *fallback* de resume), no guarda
+paquetes (la tabla de continuidades guarda solo el `package_id`) y no hay dónde dejar uno «preparado» para un Attempt futuro. Hacerlo exige una query de
+construcción, un almacén con migración posterior al corte y `import`; queda para F6, junto al handoff.
 
 Reglas de la forma 2:
 * Ids nombrados: `task_id`, `parent_task_id`, `children_ids`, `attempt_id`. Nunca un `id` a secas.

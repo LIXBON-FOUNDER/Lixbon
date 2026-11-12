@@ -1,0 +1,30 @@
+{
+  "package_id": "sha256:ed8802df89b2fc0ce7b1535f6233a49548df5bdfd5ffaa984ccb6c2cd213b6a4",
+  "status": "valid",
+  "summary": {
+    "completeness": "complete",
+    "counts": {
+      "artifacts": 1,
+      "attachments": 4,
+      "attachments_bytes": 4196,
+      "attachments_not_scanned": 1,
+      "attachments_omitted": 0,
+      "constraints": 1,
+      "decisions": 2,
+      "files": 2,
+      "redactions": 0,
+      "truncated_fields": 0,
+      "untracked": 1
+    },
+    "notes": [
+      "attachment_not_scanned"
+    ],
+    "serialized_bytes": 2105
+  },
+  "v": 1,
+  "verification": {
+    "attachments": "not_checked",
+    "identity": "verified",
+    "secrets": "none_found"
+  }
+}

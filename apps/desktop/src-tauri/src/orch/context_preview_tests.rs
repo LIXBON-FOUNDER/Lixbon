@@ -283,3 +283,109 @@ fn las_respuestas_de_ejemplo_coinciden_con_las_fixtures_versionadas() {
         assert_eq!(actual, esperado.replace("\r\n", "\n"), "{archivo} no coincide: regenerar con LXO_WRITE_API_FIXTURES=1 y revisar");
     }
 }
+
+/// LXO-138 · `lxo context show` y `lxo context validate` con el binario real, como persona, contra el HTTP del Core: las 15 fixtures
+/// publicadas se aceptan o se rechazan como dice su manifiesto, `show --json` es la vista del propio Core, un paquete rechazado sale con
+/// 7 sin contenido ni el secreto, y los límites del archivo, el agente y el Core cerrado dan sus códigos. Requiere `LXO_BIN`; usa el
+/// almacén seguro real.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_context_person_real_store() {
+    use super::projects_overview_tests::RealStoreServer;
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+    let me = persona(&core, "ana", "install-lxo-context-e2e", "ana-lxo-context-e2e-secret-0123456789");
+    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+    let secreto = "sk-ant-api03-xxxxxxxxxxxxxxxxxxxx";
+    let manifest: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(fixtures().join("casos.json")).unwrap()).unwrap();
+    assert!(manifest.len() >= 15);
+
+    for c in &manifest {
+        let (archivo, esperado) = (c["archivo"].as_str().unwrap(), c["esperado"].as_str().unwrap());
+        let ruta = fixtures().join(archivo);
+        let ruta = ruta.to_str().unwrap();
+        let core_view = rpc(&core, &me, "context_package_preview", json!({ "package": leer(archivo) })).unwrap();
+        let validate = server.lxo(&["context", "validate", ruta, "--json"], None);
+        let show = server.lxo(&["context", "show", ruta, "--json"], None);
+        let (v_out, s_out) = (text(&validate.stdout), text(&show.stdout));
+        // Nunca el secreto por stderr, ni por stdout si el paquete se rechaza.
+        for out in [&validate, &show] {
+            assert!(!text(&out.stderr).contains(secreto), "{archivo}: el secreto salió por stderr");
+            if esperado != "ok" {
+                assert!(!text(&out.stdout).contains(secreto), "{archivo}: el secreto salió por stdout");
+            }
+        }
+        if esperado == "ok" {
+            assert_eq!((validate.status.code(), show.status.code()), (Some(0), Some(0)), "{archivo}: {:?}", text(&show.stderr));
+            let mut sin_paquete = core_view.clone();
+            sin_paquete.as_object_mut().unwrap().remove("package");
+            assert_eq!(serde_json::from_str::<Value>(&v_out).unwrap(), sin_paquete, "{archivo}: validate = la vista del Core sin el paquete");
+            assert_eq!(serde_json::from_str::<Value>(&s_out).unwrap(), core_view, "{archivo}: show = la vista del Core tal cual");
+        } else {
+            assert_eq!((validate.status.code(), show.status.code()), (Some(7), Some(7)), "{archivo}");
+            for out in [&v_out, &s_out] {
+                let v: Value = serde_json::from_str(out).unwrap();
+                assert_eq!((v["status"].as_str(), v["error"]["code"].as_str()), (Some("invalid"), Some(esperado)), "{archivo}: {v}");
+                assert!(v.get("package").is_none() && v.get("summary").is_none() && v.get("package_id").is_none(), "{archivo}: {v}");
+                assert_eq!(v.get("declared_id").is_some(), esperado == "id_mismatch", "{archivo}: solo la alteración trae las huellas");
+            }
+            // En texto, el rechazo va por el error, con su código, y sin el contenido del paquete.
+            let humano = server.lxo(&["context", "show", ruta], None);
+            assert_eq!(humano.status.code(), Some(7));
+            let (o, e) = (text(&humano.stdout), text(&humano.stderr));
+            assert!(o.is_empty() && e.contains(&format!("({esperado})")) && e.contains("No se muestra su contenido"), "{archivo}: {o} / {e}");
+            assert!(!e.contains("Normalizar el uso de cada proveedor"), "{archivo}: el rechazo enseñó el contenido");
+        }
+    }
+
+    // El paquete alterado hace visibles las dos huellas, y el Core las da distintas.
+    let alterado = fixtures().join("invalido-alterado.json");
+    let alterado: Value = serde_json::from_slice(&server.lxo(&["context", "validate", alterado.to_str().unwrap(), "--json"], None).stdout).unwrap();
+    assert_ne!(alterado["declared_id"], alterado["recomputed_id"]);
+
+    // Texto humano de un paquete válido: identidad, procedencia y adjuntos sin comprobar.
+    let valido = fixtures().join("valido-completo.json");
+    let humano = text(&server.lxo(&["context", "show", valido.to_str().unwrap()], None).stdout);
+    assert!(humano.contains("· válido") && humano.contains("identidad verificada") && humano.contains("adjuntos: sin comprobar"), "{humano}");
+    assert!(humano.contains("Origen:") && humano.contains("Revisión:") && humano.contains("Adjuntos ("), "{humano}");
+
+    // La entrada estándar, con y sin BOM, da lo mismo que el archivo.
+    let bytes = std::fs::read(&valido).unwrap();
+    let por_archivo = server.json(&["context", "show", valido.to_str().unwrap(), "--json"]);
+    let por_stdin = server.lxo_stdin(&["context", "show", "-", "--json"], &bytes);
+    assert_eq!(por_stdin.status.code(), Some(0), "{}", text(&por_stdin.stderr));
+    assert_eq!(serde_json::from_slice::<Value>(&por_stdin.stdout).unwrap(), por_archivo);
+    let con_bom = [&[0xef, 0xbb, 0xbf][..], &bytes].concat();
+    assert_eq!(serde_json::from_slice::<Value>(&server.lxo_stdin(&["context", "show", "-", "--json"], &con_bom).stdout).unwrap(), por_archivo, "el BOM se ignora");
+
+    // Límites: nada de esto llega al Core ni repite el contenido del archivo.
+    let carpeta = cleanup.0.join("ctx");
+    std::fs::create_dir_all(&carpeta).unwrap();
+    let ruta_de = |n: &str| carpeta.join(n).to_string_lossy().into_owned();
+    std::fs::write(carpeta.join("enorme.json"), vec![b'a'; 128 * 1024 + 1]).unwrap();
+    let utf16: Vec<u8> = [0xff, 0xfe].into_iter().chain("{}".encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
+    std::fs::write(carpeta.join("utf16.json"), utf16).unwrap();
+    std::fs::write(carpeta.join("vacio.json"), "").unwrap();
+    for (nombre, codigo, aviso) in [("enorme.json", 2, "pesa más de 128 KiB"), ("utf16.json", 2, "UTF-16"), ("vacio.json", 2, "vacío"), ("no-existe.json", 6, "No hay ningún archivo")] {
+        let out = server.lxo(&["context", "validate", &ruta_de(nombre)], None);
+        assert_eq!(out.status.code(), Some(codigo), "{nombre}: {:?}", text(&out.stderr));
+        assert!(text(&out.stderr).contains(aviso), "{nombre}: {}", text(&out.stderr));
+    }
+    let carpeta_str = carpeta.to_string_lossy().into_owned();
+    assert_eq!(server.lxo(&["context", "show", &carpeta_str], None).status.code(), Some(2), "una carpeta no es un archivo");
+    let falta: Value = serde_json::from_slice(&server.lxo(&["context", "show", &ruta_de("no-existe.json"), "--json"], None).stderr).unwrap();
+    assert_eq!(falta["code"], "not_found");
+    // Lo que el Core aún no sirve.
+    for args in [&["context", "export", "p.json"][..], &["context", "import", "p.json"], &["context", "show"], &["context", "validate", &ruta_de("a"), &ruta_de("b")]] {
+        assert_eq!(server.lxo(args, None).status.code(), Some(2), "{args:?}");
+    }
+
+    // Solo personas: un agente recibe 3. Y con el Core cerrado, 5.
+    let token = "agent-lxo-context-e2e-token-with-32-bytes-minimum";
+    super::projects_overview_tests::registra_agente(&core, "t-agente", "install-agent-lxo-context-e2e", token);
+    let como_agente = server.lxo(&["context", "validate", valido.to_str().unwrap()], Some(("t-agente", token)));
+    assert_eq!(como_agente.status.code(), Some(3), "{}", text(&como_agente.stderr));
+    assert!(text(&como_agente.stderr).contains("solo para personas"), "{}", text(&como_agente.stderr));
+    core.stop_server_with(&server.discovery);
+    assert_eq!(server.lxo(&["context", "validate", valido.to_str().unwrap()], None).status.code(), Some(5), "Lixbon cerrado");
+}

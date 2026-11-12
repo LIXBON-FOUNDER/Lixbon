@@ -740,6 +740,26 @@ impl RealStoreServer {
         command.output().unwrap()
     }
 
+    /// `lxo` como persona con `input` por la entrada estándar (el paquete de `lxo context show -`).
+    pub(super) fn lxo_stdin(&self, args: &[&str], input: &[u8]) -> std::process::Output {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut child = std::process::Command::new(&self.binary)
+            .args(args)
+            .env("USERPROFILE", &self.home)
+            .env("HOME", &self.home)
+            .env_remove("LXO_TASK_ID")
+            .env_remove("LXO_CLIENT_TOKEN")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Si lxo termina sin leer todo (un archivo enorme), la escritura se corta: no es un fallo de la prueba.
+        let _ = child.stdin.take().unwrap().write_all(input);
+        child.wait_with_output().unwrap()
+    }
+
     /// Salida JSON de un `lxo` que debe terminar bien.
     pub(super) fn json(&self, args: &[&str]) -> Value {
         let out = self.lxo(args, None);

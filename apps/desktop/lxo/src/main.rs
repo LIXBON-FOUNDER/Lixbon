@@ -12,6 +12,7 @@ mod activity;
 mod attempts;
 mod attention;
 mod client_auth;
+mod context;
 mod events;
 mod projects;
 mod provider;
@@ -56,6 +57,10 @@ Coordinador (el agente con el que habla el usuario):
   lxo provider status <proveedor> [--capability C] [--attempt ID] [--refresh] [--json]
                                                   qué ofrece cada proveedor según el Core: capabilities, entorno
                                                   (bloqueado ≠ fallido) y sesión de un intento (solo lectura y solo personas)
+  lxo context show <archivo|-> [--json]
+  lxo context validate <archivo|-> [--json]
+                                                  revisa un ContextPackage v1 de un archivo con la verificación del Core
+                                                  (solo lectura y solo personas; rechazado → 7 y sin mostrar su contenido)
   lxo usage [--provider P] [--model M] [--account A] [--refresh] [--json]
                                                   uso y límites de cada proveedor según el Core (solo lectura y solo personas;
                                                   desconocido ≠ cero; no es el `lixbon usage` del CLI de Go)
@@ -1043,6 +1048,9 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("usage") {
         return usage::run(&a);
+    }
+    if a.at(0).as_deref() == Some("context") {
+        return context::run(&a);
     }
     // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
     if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {
