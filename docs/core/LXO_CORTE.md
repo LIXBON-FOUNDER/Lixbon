@@ -51,7 +51,10 @@ que mira (sin `--capability`, el entorno; con ella, esa capability): `0` listo o
 `environment_blocked` (el entorno lo impide: **no** es un Attempt fallido), `9` `unsupported`. `--attempt` suma la ProviderSession del
 intento como hechos, sin veredicto: si reanudar procede lo decide el Core. El canal (`transport`) sale como lo dice el Core; que sea
 un respaldo lo dice solo `transport_fallback` (`{reason}` o `null`, LXO-137): lxo escribe «(respaldo)» y el motivo **únicamente** si el Core lo informa, nunca por
-el nombre del canal. Es un campo nuevo, siempre presente, de las formas `v1` de `provider` (aún sin consumidores: se publicó en el PR #231 y no se ha lanzado) y
+el nombre del canal. `blocked_profiles` (`[{profile, block}]`, vacío si ninguno) dice los perfiles de lanzamiento que el entorno impide aunque el proveedor esté listo (p. ej.
+el sandbox elevado de Codex en Windows impide `explorar` y `proponer`): se enseña como «Perfiles bloqueados» y `status --profile P` sale con `8` si ese perfil
+está bloqueado (con `--capability`, el perfil bloqueado manda). lxo no decide por el nombre del perfil: solo cuenta lo que dice el Core. Ambos
+(`transport_fallback` y `blocked_profiles`) son campos nuevos, siempre presentes, de las formas `v1` de `provider` (aún sin consumidores: se publicó en el PR #231 y no se ha lanzado) y
 su snapshot con respaldo es [`provider_list_respaldo.v1.json`](fixtures/lxo/provider_list_respaldo.v1.json).
 
 `lxo usage` (LXO-207) es de solo lectura sobre `usage_report` ([QUERIES.md](QUERIES.md#usage_report-lxo-206)): lxo no consulta a ningún proveedor, no estima

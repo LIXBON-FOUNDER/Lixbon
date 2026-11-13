@@ -138,6 +138,18 @@ pub struct ProbeResult {
     /// respaldo por esto y nunca lo deduce del nombre del canal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_fallback: Option<TransportFallback>,
+    /// Perfiles de lanzamiento que el entorno impide aunque el proveedor esté listo (LXO-137): p. ej. el sandbox elevado de Codex en Windows
+    /// impide los perfiles de solo lectura. Vacío = ninguno. No es un fallo de ningún Attempt ni cambia `environment`: el proveedor sigue
+    /// sirviendo los demás perfiles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_profiles: Vec<ProfileBlock>,
+}
+
+/// Un perfil de lanzamiento (`explorar`, `proponer`…) que el entorno impide, y la causa tipada.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ProfileBlock {
+    pub profile: String,
+    pub block: EnvBlock,
 }
 
 const MAX_FALLBACK_REASON_CHARS: usize = 300;
@@ -151,11 +163,17 @@ pub struct TransportFallback {
 impl ProbeResult {
     /// Entorno listo con la matriz dada.
     pub fn ready(cli_version: Option<&str>, matrix: CapabilityMatrix) -> ProbeResult {
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix, transport: None, transport_fallback: None }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix, transport: None, transport_fallback: None, blocked_profiles: vec![] }
     }
 
     pub fn with_transport(mut self, transport: &str) -> ProbeResult {
         self.transport = Some(transport.to_string());
+        self
+    }
+
+    /// Perfiles que el entorno impide (ver [`ProbeResult::blocked_profiles`]).
+    pub fn with_blocked_profiles(mut self, blocked: Vec<ProfileBlock>) -> ProbeResult {
+        self.blocked_profiles = blocked;
         self
     }
 
@@ -170,7 +188,7 @@ impl ProbeResult {
     /// Entorno bloqueado: toda la matriz queda `environment_blocked` por el primer bloqueo.
     pub fn blocked(cli_version: Option<&str>, blocks: Vec<EnvBlock>) -> ProbeResult {
         let first = blocks.first().copied().unwrap_or(EnvBlock::CliMissing);
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first), transport: None, transport_fallback: None }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first), transport: None, transport_fallback: None, blocked_profiles: vec![] }
     }
 }
 

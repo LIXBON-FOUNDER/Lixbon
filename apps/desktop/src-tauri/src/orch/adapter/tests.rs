@@ -395,7 +395,8 @@ fn el_snapshot_del_registro_coincide_con_la_fixture_versionada() {
 #[test]
 fn un_canal_de_respaldo_viaja_en_el_snapshot_con_su_motivo() {
     let m = CapabilityMatrix::new().with(Capability::Start, CapabilityState::Available).with(Capability::Events, CapabilityState::Available);
-    let respaldo = ProbeResult::ready(Some("0.166.0"), m).with_transport("exec_json").with_transport_fallback("esta versión de Codex no incluye app-server");
+    let bloqueados = vec![ProfileBlock { profile: "explorar".into(), block: EnvBlock::WindowsSandboxElevated }, ProfileBlock { profile: "proponer".into(), block: EnvBlock::WindowsSandboxElevated }];
+    let respaldo = ProbeResult::ready(Some("0.166.0"), m).with_transport("exec_json").with_transport_fallback("esta versión de Codex no incluye app-server").with_blocked_profiles(bloqueados);
     let principal = ProbeResult::ready(Some("2.0.0"), CapabilityMatrix::all_available()).with_transport("app_server");
     let reg = registry_con(vec![Arc::new(FakeAdapter::with_probe("fake-respaldo", respaldo)), Arc::new(FakeAdapter::with_probe("fake-principal", principal))]);
     let v = serde_json::to_value(reg.snapshot()).unwrap();
@@ -403,6 +404,10 @@ fn un_canal_de_respaldo_viaja_en_el_snapshot_con_su_motivo() {
     assert_eq!(v["providers"][1]["transport_fallback"], json!({ "reason": "esta versión de Codex no incluye app-server" }));
     assert_eq!(v["providers"][1]["transport"], "exec_json");
     assert!(v["providers"][0].get("transport_fallback").is_none() && v["providers"][0]["transport"] == "app_server");
+    // LXO-137 · los perfiles que el entorno impide viajan tipados; el que no tiene ninguno no lleva el campo (ausente, no vacío).
+    assert_eq!(v["providers"][1]["blocked_profiles"], json!([{ "profile": "explorar", "block": "windows_sandbox_elevated" }, { "profile": "proponer", "block": "windows_sandbox_elevated" }]));
+    assert!(v["providers"][0].get("blocked_profiles").is_none());
+    assert_eq!(v["providers"][1]["environment"]["state"], "ready", "bloquear perfiles no bloquea el entorno");
     fixture("provider_capabilities_respaldo.v1.json", &v);
     assert_eq!(serde_json::from_value::<RegistrySnapshot>(v).unwrap(), reg.snapshot());
     // El motivo viaja acotado y redactado.

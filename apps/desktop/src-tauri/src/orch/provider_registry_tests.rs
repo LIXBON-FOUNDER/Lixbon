@@ -268,6 +268,8 @@ fn lxo_bin_e2e_provider_person_real_store() {
         assert_eq!(lp["cli_version"], cp["cli_version"], "{id}");
         // LXO-137 · el respaldo lo dice el Core (`transport_fallback`) y lxo lo repite: ausente en el Core es `null` en lxo.
         assert_eq!(lp["transport_fallback"], cp.get("transport_fallback").map_or(Value::Null, |f| json!({ "reason": f["reason"] })), "{id}");
+        // LXO-137 · los perfiles bloqueados por el entorno: ausentes en el Core = lista vacía en lxo (el proveedor no se bloquea por ellos).
+        assert_eq!(lp["blocked_profiles"], cp.get("blocked_profiles").cloned().unwrap_or(json!([])), "{id}");
         assert_eq!(lp["environment"]["state"], cp["environment"]["state"], "{id}");
         let bloqueado = cp["environment"]["state"] == "blocked";
         for cap in CAPS {

@@ -34,6 +34,22 @@ describe('provider_capabilities · contrato cliente', () => {
     reject(sinCanal);
   });
 
+  it('LXO-137 · acepta los perfiles bloqueados por el entorno y rechaza los mal formados', () => {
+    const response = live(FALLBACK_SNAPSHOT);
+    const [principal, respaldo] = response.providers;
+    expect(principal.blocked_profiles).toBeUndefined();
+    expect(respaldo.blocked_profiles).toEqual([
+      { profile: 'explorar', block: 'windows_sandbox_elevated' },
+      { profile: 'proponer', block: 'windows_sandbox_elevated' },
+    ]);
+    expect(respaldo.environment.state).toBe('ready');
+    for (const bad of [[], 'explorar', [{ profile: 'explorar' }], [{ block: 'x' }], [{ profile: '', block: 'x' }], [null]]) {
+      const x = clone(response);
+      x.providers[1].blocked_profiles = bad;
+      reject(x);
+    }
+  });
+
   it('acepta el primer sondeo: sin proveedores, sin hora y refrescando', () => {
     expect(validateProviderCapabilities(PROBING)).toBe(PROBING);
   });

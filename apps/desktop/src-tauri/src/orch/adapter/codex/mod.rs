@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 use super::process::{LaunchSpec, Launcher, Process, RealLauncher, Recv};
 use super::redact::{redact, safe_text};
 use super::{
-    AdapterError, AdapterEvent, Answer, CancelToken, Capability, CapabilityMatrix, CapabilityState, ErrorCode, EventSink, ProbeResult, ProviderAdapter,
+    AdapterError, AdapterEvent, Answer, CancelToken, Capability, CapabilityMatrix, CapabilityState, Environment, ErrorCode, EventSink, ProbeResult, ProfileBlock, ProviderAdapter,
     ProviderRef, ResumeRequest, RunHandle, RunOutcome, StartRequest,
 };
 use crate::orch::agents::{self, EnvBlock, EnvProof, Profile};
@@ -174,10 +174,34 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>, ex
     plan(ProbeResult::blocked(version, vec![EnvBlock::CliFlagsUnsupported]), None, None)
 }
 
+/// El sandbox elevado de Windows (`[windows] sandbox = "elevated"` en el `config.toml` de Codex, solo se lee) impide los perfiles de solo lectura
+/// que se lanzan con `codex exec` (Explorar y Proponer), aunque Codex esté listo y ofrezca todo lo demás (LXO-137). Es el mismo bloqueo que ve la
+/// persona al elegir el perfil; aquí viaja tipado en `provider_capabilities`. El entorno NO pasa a bloqueado: Delegar sigue siendo posible.
+pub fn apply_windows_sandbox(mut plan: Plan, windows_sandbox: Option<&str>) -> Plan {
+    if windows_sandbox == Some("elevated") && matches!(plan.probe.environment, Environment::Ready) {
+        let blocked = Profile::ALL
+            .into_iter()
+            .filter(|p| agents::codex_exec(ID, *p))
+            .map(|p| ProfileBlock { profile: p.id().to_string(), block: EnvBlock::WindowsSandboxElevated })
+            .collect();
+        plan.probe = plan.probe.with_blocked_profiles(blocked);
+    }
+    plan
+}
+
+/// `[windows] sandbox` del `config.toml` de Codex, solo en Windows (en otro sistema no existe). `probe_cli` no lo trae: lo lee quien lanza
+/// (`resolve_task_policy`) y, aquí, la sonda del registro, de la misma fuente y con el mismo parser.
+pub fn windows_sandbox_of(config: Option<&str>, windows: bool) -> Option<String> {
+    if windows { config.and_then(agents::codex_windows_sandbox) } else { None }
+}
+
 fn real_plan() -> Plan {
     match agents::probe_cli("codex") {
         None => probe_from(false, None, None, None, None),
-        Some(p) => probe_from(true, p.version.as_deref(), p.help.as_deref(), p.exec_help.as_deref(), None),
+        Some(p) => {
+            let sandbox = windows_sandbox_of(agents::codex_config_text().as_deref(), cfg!(windows));
+            apply_windows_sandbox(probe_from(true, p.version.as_deref(), p.help.as_deref(), p.exec_help.as_deref(), None), sandbox.as_deref())
+        }
     }
 }
 

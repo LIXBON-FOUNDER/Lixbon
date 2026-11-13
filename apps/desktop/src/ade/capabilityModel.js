@@ -130,6 +130,11 @@ export const describeAll = (provider, providerId = provider?.id ?? null) => CAPA
 /** ¿Puede la interfaz ofrecer esta acción para este proveedor AHORA? Solo si el Core la declara `available`. */
 export const canDo = (snapshot, providerId, capability) => describeCapability(providerOf(snapshot, providerId), capability, providerId).enabled;
 
+/** Perfiles que el entorno impide en un proveedor listo (LXO-137), con el texto de cada causa. No bloquean el proveedor entero. */
+export function describeBlockedProfiles(provider) {
+  return (provider?.blocked_profiles ?? []).map((b) => ({ profile: b.profile, code: b.block, text: blockText(b.block) }));
+}
+
 /** Resumen del entorno de un proveedor: listo, o bloqueado con los textos de cada bloqueo. */
 export function describeEnvironment(provider) {
   if (!provider) return { state: 'unknown', label: STATE_LABELS.unknown, blocks: [] };

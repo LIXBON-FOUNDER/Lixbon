@@ -3,6 +3,7 @@
   "generation": 2,
   "providers": [
     {
+      "blocked_profiles": [],
       "capabilities": {
         "answer": {
           "state": "available"
@@ -33,6 +34,16 @@
       "transport_fallback": null
     },
     {
+      "blocked_profiles": [
+        {
+          "block": "windows_sandbox_elevated",
+          "profile": "explorar"
+        },
+        {
+          "block": "windows_sandbox_elevated",
+          "profile": "proponer"
+        }
+      ],
       "capabilities": {
         "answer": {
           "state": "unsupported"

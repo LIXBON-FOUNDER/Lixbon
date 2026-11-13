@@ -55,6 +55,13 @@ function validateProvider(provider) {
     if (!isRecord(provider.transport_fallback) || !nonEmpty(provider.transport_fallback.reason)) throw invalid(`${id}: transport_fallback`);
     if (provider.transport === undefined) throw invalid(`${id}: un respaldo sin canal`);
   }
+  // LXO-137 · perfiles que el entorno impide aunque el proveedor esté listo (p. ej. el sandbox elevado de Codex): ausente = ninguno.
+  if (provider.blocked_profiles !== undefined) {
+    if (!Array.isArray(provider.blocked_profiles) || provider.blocked_profiles.length === 0
+      || !provider.blocked_profiles.every((b) => isRecord(b) && nonEmpty(b.profile) && nonEmpty(b.block))) {
+      throw invalid(`${id}: blocked_profiles`);
+    }
+  }
 }
 
 /** El snapshot del registro (la fixture canónica): versión, generación y proveedores con su matriz. */
