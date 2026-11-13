@@ -93,3 +93,21 @@ eventos ni filas.
 * Un Attempt anterior de una Task sin revisión no tiene cambios propios que mostrar (ver arriba).
 * Sin `host` por proveedor remoto: es la máquina del worktree.
 * No se probó con un proveedor real; las pruebas usan adapters falsos con repositorios y worktrees de verdad.
+
+## Cliente de terminal: `lxo compare` (LXO-161)
+
+`lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]` es una lectura autenticada como Person.
+El CLI no calcula git, pruebas, solapes ni procedencia: valida la selección contra las lecturas del Core y pasa los ids en el
+orden indicado a `attempt_compare`.
+
+* Con ids explícitos se exigen de 2 a 4 Attempts distintos y todos deben pertenecer a `--task`; los filtros, si se pasan,
+  deben coincidir con cada id. El cliente no mezcla Tasks aunque el Core también permita comparar una familia de Forks.
+* Sin ids, lista todas las páginas de `attempts_by_task`, aplica `--status` y `--provider` (sin distinguir mayúsculas) y solo
+  compara si quedan entre 2 y 4. Si quedan más, hay que elegir ids; nunca elige una selección arbitraria.
+* La salida humana es vertical (un dato por línea), para evitar una tabla horizontal ilegible en terminales estrechas. Cada
+  dato conserva `✓ Verificado`, `⚠ Declarado por el agente` o `? Sin dato (<motivo>)`. Las pruebas desconocidas no se muestran
+  como un cero. Cada fila da el id para `lxo review <attempt_id>` y para abrir el Attempt en Desktop.
+* `--json` devuelve sin reducir ni reinterpretar la respuesta completa `v: 1` de `attempt_compare`. Las respuestas fuera del
+  contrato o en un orden distinto al pedido se rechazan.
+* Salidas: 0 correcto, 1 error interno, 2 uso/selección no comparable, 3 autenticación/permiso, 4 versión/contrato,
+  5 Core no disponible, 6 Task o Attempt inexistente.

@@ -13,6 +13,7 @@ mod activity;
 mod attempts;
 mod attention;
 mod client_auth;
+mod compare;
 mod context;
 mod context_store;
 mod events;
@@ -62,6 +63,9 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempt resume <attempt_id> --message \"...\"
   lxo attempt stop <attempt_id> --confirm
                                                    start/retry/resume esperan aprobación Desktop; stop exige confirmación exacta
+                                                  (solo lectura y solo personas)
+  lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
+                                                   compara 2–4 intentos con la evidencia del Core (solo personas)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo provider list [--refresh] [--json]
@@ -1088,6 +1092,9 @@ fn main() -> ExitCode {
             return fork::run(&a);
         }
         return attempts::run(&a);
+    }
+    if a.at(0).as_deref() == Some("compare") {
+        return compare::run(&a);
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
