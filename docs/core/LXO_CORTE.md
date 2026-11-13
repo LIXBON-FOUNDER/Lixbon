@@ -41,8 +41,8 @@ publicadas están en [`fixtures/lxo/`](fixtures/lxo/). Las genera `apps/desktop/
 | `lxo provider list --json` | `{v: 1, status, refreshing, generation, checked_at_ms, providers}` | [`provider_list.v1.json`](fixtures/lxo/provider_list.v1.json) | siempre (no depende del corte) |
 | `lxo provider status --json` | `{v: 1, status, refreshing, generation, checked_at_ms, provider, check, attempt}` | [`provider_status.v1.json`](fixtures/lxo/provider_status.v1.json), [con `--attempt`](fixtures/lxo/provider_status_attempt.v1.json) | siempre; `--attempt` tras el corte |
 | `lxo usage --json` | `{v: 1, status, refreshing, generated_at_ms, filters, providers, excluded}` | [`usage.v1.json`](fixtures/lxo/usage.v1.json) | siempre (no depende del corte) |
-| `lxo context show --json` | la respuesta `valid` del Core tal cual: `{v: 1, status, verification, package_id, package, summary}` | [`context_show.v1.json`](fixtures/lxo/context_show.v1.json) | siempre |
-| `lxo context validate --json` | la misma sin `package` | [`context_validate.v1.json`](fixtures/lxo/context_validate.v1.json) | siempre |
+| `lxo context show --json` | la respuesta `valid` del Core tal cual: `{v: 1, status, verification, package_id, package, summary[, attachments, stored]}` | [`context_show.v1.json`](fixtures/lxo/context_show.v1.json) | siempre |
+| `lxo context validate --json` · `import --json` | la misma sin `package` | [`context_validate.v1.json`](fixtures/lxo/context_validate.v1.json) | siempre |
 | `lxo context … --json` (rechazado, sale `7`) | `{v: 1, status: "invalid", error: {code, message}, serialized_bytes[, declared_id, recomputed_id]}` | [`context_invalid.v1.json`](fixtures/lxo/context_invalid.v1.json) | siempre |
 
 `lxo provider` (LXO-137) es de solo lectura sobre `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)):
@@ -62,17 +62,28 @@ los nombra en `excluded`. `--refresh` pide la consulta una vez y espera; si el C
 cambia** ni se redirige. `lxo usage` es otro binario sobre otra fuente (el Core y las cuentas de cada proveedor) y no lo sustituye; quien quiera el uso del
 gateway sigue con `lixbon usage`. No hay alias entre los dos, así que ninguna semántica cambia en silencio.
 
-`lxo context` (LXO-138) revisa un ContextPackage v1 **de un archivo** (o de la entrada estándar con `-`): `show` lo enseña y `validate` dice si el Core lo
-acepta, ambos sobre `context_package_preview` ([QUERIES.md](QUERIES.md#context_package_preview-lxo-136)). La verificación (versión, formato, identidad
-`package_id` = sha256 del contenido canónico, secretos) es del Core; lxo no calcula ningún hash. Un paquete rechazado sale con `7`, **no muestra su
-contenido** (si la identidad no coincide, da la huella declarada y la recalculada) y el contenido del archivo nunca vuelve en un error. Los adjuntos constan
-como «sin comprobar»: sus bytes no viajan con el paquete. Antes de llamar al Core se descartan, con `2`, lo que no es un archivo, lo de más de 128 KiB y lo que
-no es UTF-8 (el UTF-16 de PowerShell 5 se dice con su nombre; un BOM UTF-8 se ignora); un archivo inexistente sale con `6`.
+`lxo context` (LXO-138) revisa, exporta e importa un ContextPackage v1. `validate` y `show <archivo|->` leen un archivo con
+`context_package_preview` ([QUERIES.md](QUERIES.md#context_package_preview-lxo-136)); `show <package_id|attempt_id>` lee uno que el Core ya guardó
+(`context_package_get`: por `package_id`, o el más reciente de un intento); `export <package_id|attempt_id> --out <archivo>` hace que el Core **construya**
+el paquete de un intento con la evidencia de su worktree, lo **guarde** y lo deje en el archivo (con `--stored`, el último que ya había; con un
+`package_id`, ese paquete tal cual); `import <archivo|->` lo valida por la misma puerta que un Attempt y lo deja **preparado** para un intento futuro
+([QUERIES.md](QUERIES.md#context_package_build-context_package_get-y-context_package_import-lxo-138)). La verificación (versión, formato, identidad
+`package_id` = sha256 del contenido canónico, secretos, adjuntos) es del Core; lxo no calcula ningún hash. **Ninguna orden inicia un intento ni una
+transferencia.**
 
-**Alcance de F4: solo lectura sobre archivos.** `lxo context export`, `import` y `show <package_id|attempt_id>` (que pedía la issue) **no existen todavía** y lo
-dicen (`2`): el Core de F4 no construye un paquete a partir de un Attempt (solo `build()` con datos en memoria, para el *fallback* de resume), no guarda
-paquetes (la tabla de continuidades guarda solo el `package_id`) y no hay dónde dejar uno «preparado» para un Attempt futuro. Hacerlo exige una query de
-construcción, un almacén con migración posterior al corte y `import`; queda para F6, junto al handoff.
+* **El archivo es explícito y privado.** `--out` es obligatorio (no se escribe en la salida estándar), no se sobrescribe sin `--force`, no se crea la carpeta
+  que falte (`2`) y se escribe con permisos solo del dueño (`0600`, y `0700` la carpeta de adjuntos) donde el sistema los admite; en Windows hereda los
+  permisos de la carpeta de destino. El paquete sale tal cual lo guardó el Core (inmutable) y los adjuntos van en `<archivo>.attachments/att-<id>`
+  (el `:` del id no vale en un nombre de archivo de Windows). Un fallo no deja un archivo a medias.
+* **Un paquete rechazado sale con `7`, no se guarda y no muestra su contenido** (si la identidad no coincide, da la huella declarada y la recalculada) y el
+  contenido del archivo nunca vuelve en un error. Alterado, de otra versión, con un secreto, con un adjunto que no coincide, que falta o que sobra.
+* Antes de llamar al Core se descartan, con `2`, lo que no es un archivo, lo de más de 128 KiB y lo que no es UTF-8 (el UTF-16 de PowerShell 5 se dice con
+  su nombre; un BOM UTF-8 se ignora), los adjuntos de más de 1 MiB (o 2 MiB en total: es lo que cabe por el RPC) y una carpeta de adjuntos con algo que no es
+  un adjunto. Un archivo, intento o paquete inexistente sale con `6`; antes del corte Task/Attempt, `4` (no hay dónde guardar); un agente, `3`.
+* `show X` decide por el formato de `X`: `-` es la entrada estándar, `sha256:…` un `package_id`, `<tarea>-a<n>` un intento y todo lo demás un archivo (así un
+  error de tipeo en una ruta da «archivo inexistente», no «intento»).
+* Los adjuntos que llevaban algo con forma de secreto **no viajan** (constan como `omitted`); lo no comprometido que pasa de 1 MiB o los commits sin publicar
+  que no caben en un bundle se dicen en `constraints` del paquete, no se omiten en silencio.
 
 Reglas de la forma 2:
 * Ids nombrados: `task_id`, `parent_task_id`, `children_ids`, `attempt_id`. Nunca un `id` a secas.

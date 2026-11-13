@@ -13,6 +13,7 @@ mod attempts;
 mod attention;
 mod client_auth;
 mod context;
+mod context_store;
 mod events;
 mod projects;
 mod provider;
@@ -57,10 +58,13 @@ Coordinador (el agente con el que habla el usuario):
   lxo provider status <proveedor> [--capability C] [--attempt ID] [--refresh] [--json]
                                                   qué ofrece cada proveedor según el Core: capabilities, entorno
                                                   (bloqueado ≠ fallido) y sesión de un intento (solo lectura y solo personas)
-  lxo context show <archivo|-> [--json]
+  lxo context show <archivo|-|package_id|attempt_id> [--json]
   lxo context validate <archivo|-> [--json]
-                                                  revisa un ContextPackage v1 de un archivo con la verificación del Core
-                                                  (solo lectura y solo personas; rechazado → 7 y sin mostrar su contenido)
+  lxo context export <package_id|attempt_id> --out <archivo> [--stored] [--force] [--json]
+  lxo context import <archivo|-> [--json]
+                                                  revisa, exporta e importa un ContextPackage v1 con la verificación del Core
+                                                  (solo personas; el archivo es privado y no se sobrescribe sin --force;
+                                                  importar no inicia ningún intento; rechazado → 7 y sin mostrar su contenido)
   lxo usage [--provider P] [--model M] [--account A] [--refresh] [--json]
                                                   uso y límites de cada proveedor según el Core (solo lectura y solo personas;
                                                   desconocido ≠ cero; no es el `lixbon usage` del CLI de Go)
@@ -134,7 +138,7 @@ fn parse(raw: Vec<String>) -> Args {
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help",
+    "follow", "help", "stored",
 ];
 
 impl Args {
