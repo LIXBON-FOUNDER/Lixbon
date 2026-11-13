@@ -599,7 +599,7 @@ mod tests {
     // --- Supervisor: la custodia de lo que no se pudo cerrar con prueba (LXO-242) ---
 
     use crate::orch::adapter::supervisor;
-    use crate::orch::pty::pruebas::{espera_muerto, serie_custodia, vivo};
+    use crate::orch::pty::pruebas::{espera_muerto, serie_custodia, vivo as proceso_vivo};
 
     /// Un cierre que no se puede probar sin matar nada (el hook de prueba) y vuelve a la normalidad.
     fn kill_sin_prueba(p: &ChildProcess) -> Closure {
@@ -622,7 +622,7 @@ mod tests {
         assert_eq!(kill_sin_prueba(&p), Closure::Unproven);
         assert_eq!(supervisor::count(), antes + 1, "la familia quedó en custodia");
         assert!(supervisor::in_custody("t9-a1") && supervisor::task_in_custody("t9"));
-        assert!(vivo(pid), "sin prueba no se mata a ciegas: el proceso sigue vivo");
+        assert!(proceso_vivo(pid), "sin prueba no se mata a ciegas: el proceso sigue vivo");
 
         assert_eq!(supervisor::reap(), antes, "con el cierre ya posible, lo comprobado sale de la custodia");
         assert!(!supervisor::in_custody("t9-a1") && !supervisor::task_in_custody("t9"));
@@ -642,7 +642,7 @@ mod tests {
         BREAK_CLOSE.with(|b| b.set(false));
 
         assert_eq!(supervisor::count(), antes + 1, "soltarlo no lo descarta");
-        assert!(supervisor::in_custody("t8-a2") && vivo(pid));
+        assert!(supervisor::in_custody("t8-a2") && proceso_vivo(pid));
         assert_eq!(supervisor::reap(), antes);
         assert!(espera_muerto(pid));
     }
