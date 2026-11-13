@@ -13,6 +13,7 @@ mod tests {
     use super::super::boot_tests::{arranca, dirs, suelta};
     use super::super::agentic_cut;
     use super::super::host::RecordingHost;
+    use super::super::pty::pruebas;
     use super::super::{Orch};
     use super::super::rpc::rpc_action_for_tests;
     use super::super::{Core, Status};
@@ -90,7 +91,10 @@ mod tests {
         let cut = core.storage.with_store(|store| agentic_cut::run(store, &core_dir, &data, "task-create-test"))
             .unwrap().unwrap();
         assert!(matches!(cut, agentic_cut::CutReport::Applied { .. }), "{cut:?}");
-        core.shutdown();
+        {
+            let _serie = pruebas::serie_custodia();
+            core.shutdown();
+        }
         suelta(core, &core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
@@ -107,7 +111,10 @@ mod tests {
 
     /// Reinicia el Core sobre las mismas carpetas, como un cierre y arranque de la aplicación.
     fn restart(core: Arc<Core>, data: &std::path::Path, core_dir: &std::path::Path) -> Arc<Core> {
-        core.shutdown();
+        {
+            let _serie = pruebas::serie_custodia();
+            core.shutdown();
+        }
         suelta(core, core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), data, core_dir).unwrap();

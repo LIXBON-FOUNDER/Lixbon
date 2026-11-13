@@ -57,7 +57,10 @@ fn legacy_rev(core: &Core) -> i64 {
 pub(super) fn reinicia(e: Env) -> Env {
     let (data, core_dir) = carpetas(&e);
     let Env { _l, core, root, run, project, repo, .. } = e;
-    core.shutdown();
+    {
+        let _serie = pruebas::serie_custodia();
+        core.shutdown();
+    }
     suelta(core, &core_dir);
     let mut orch = Orch::default();
     Arc::get_mut(&mut orch.0).unwrap().resolver = fake;
