@@ -352,6 +352,22 @@ fn casos() -> Vec<Caso> {
             "activity.attempt.instruction_result",
             "error",
         ),
+        (
+            "attempt.request_answered",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "request_id": "toolu_01", "kind": "permission", "decision": "allow" }),
+            "activity.attempt.request_answered",
+            "info",
+        ),
+        (
+            "attempt.request_answered",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "request_id": "q-1", "kind": "question" }),
+            "activity.attempt.request_answered",
+            "info",
+        ),
         ("attempt.dispatch_ambiguous", State, ("attempt", "t-7-a2"), json!({ "task": "t-7", "n": 2, "from": "started", "cause": "core_restart" }), "activity.attempt.dispatch_ambiguous", "warning"),
         (
             "attempt.queue_failed",
@@ -727,7 +743,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 103] = [
+const CLAVES: [&str; 104] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
@@ -746,6 +762,7 @@ const CLAVES: [&str; 103] = [
     "activity.attempt.queue_failed",
     "activity.attempt.queued",
     "activity.attempt.rejected",
+    "activity.attempt.request_answered",
     "activity.attempt.requested",
     "activity.attempt.resumed",
     "activity.attempt.retried",

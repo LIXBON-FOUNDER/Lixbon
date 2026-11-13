@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { COPY, attemptStatusInfo, reviewFreshnessInfo } from './adeLabels';
 import { AttemptActivity } from './AttemptActivity';
 import { AutonomyEditor } from './AutonomyEditor';
+import { AttemptAnswer } from './AttemptAnswer';
 import { AttemptApproval } from './AttemptApproval';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { AttemptChanges } from './AttemptChanges';
@@ -99,6 +100,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
 
         {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
         {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
+        {/* LXO-247: lo que el proveedor le pide a la persona (permiso o pregunta) mientras el intento espera; el Core lo entrega y reanuda. */}
+        {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
         {/* Detener la ejecución en marcha (el Core no declara detenido a un Attempt cuyo proceso no pudo matar). */}
         <AttemptStop taskId={attempt.task_id} status={attempt.status} onStopped={state.retry} />
         {/* Reintentar un intento que terminó mal: un Attempt nuevo y limpio, que el Core lanza por su camino de siempre. */}

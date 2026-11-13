@@ -214,9 +214,9 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     assert_eq!((steer["level"].as_str(), steer["source"].as_str(), steer["reason"].as_str(), steer["enforced"].as_bool()), (Some("allow"), Some("baseline"), Some("baseline_default"), Some(true)));
     let integrate = cat(&e, "integrate");
     assert_eq!((integrate["level"].as_str(), integrate["floor"].as_str()), (Some("confirm"), Some("confirm")));
-    // Lo que todavía no tiene punto de aplicación lo dice en vez de aparentar protección.
-    assert_eq!(cat(&e, "answer")["enforced"], false);
-    assert_eq!(cat(&e, "provider_permissions")["enforced"], false);
+    // Desde LXO-247 `attempt_answer` gobierna `answer` y `provider_permissions`: las diez categorías tienen punto de aplicación.
+    assert_eq!(cat(&e, "answer")["enforced"], true);
+    assert_eq!(cat(&e, "provider_permissions")["enforced"], true);
     // La matriz actor × categoría viaja completa.
     assert_eq!(e["baseline_matrix"]["mobile_person"]["steer"], "deny");
     assert_eq!(e["baseline_matrix"]["cli_person"]["start"], "confirm");

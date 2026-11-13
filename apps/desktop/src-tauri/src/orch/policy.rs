@@ -28,6 +28,7 @@ use crate::store::{AuthenticatedClient, ClientPrincipal, ClientSurface, PolicyCh
 use super::attempt_ops::{policy_changed_fact, PolicyDirection};
 use super::events::{Actor, MutationContext};
 use super::mutation::Health;
+use super::provider_requests::RequestKind;
 use super::state::now_ms;
 use super::Core;
 
@@ -117,10 +118,11 @@ impl Category {
         }
     }
 
-    /// ¿Algún Command aplica ya esta categoría? `answer` y `provider_permissions` se declaran en la matriz pero todavía no tienen punto de
-    /// aplicación: la interfaz lo dice en vez de aparentar una protección que no existe.
+    /// ¿Algún Command aplica ya esta categoría? Desde LXO-247 las diez las aplica algún Command (`attempt_answer` gobierna `answer` y
+    /// `provider_permissions`). El campo se conserva en el contrato: si una categoría futura se declara antes de tener punto de
+    /// aplicación, la interfaz lo dice en vez de aparentar una protección que no existe.
     pub(super) fn enforced(self) -> bool {
-        !matches!(self, Category::Answer | Category::ProviderPermissions)
+        true
     }
 }
 
@@ -417,6 +419,27 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
     })
 }
 
+/// `attempt_answer` (LXO-247) se gobierna según LO QUE SE RESPONDE: PERMITIR un permiso del proveedor es `provider_permissions` (piso
+/// `confirm`: exige `confirm: true`); denegarlo o contestar una pregunta es `answer`. El tipo sale de la petición VIVA del Attempt, no de
+/// lo que el cliente afirme. Si la petición ya no está (una repetición, una desconocida) manda `answer`, lo menos restrictivo: ese
+/// Command no entrega nada al proveedor y el runtime responde `Replayed` o `request_unknown`.
+fn classify_answer(core: &Core, args: &Value) -> (Category, Hint) {
+    let attempt_id = text(args, "attempt_id");
+    let allows = text(args, "answer").is_some_and(|a| a.eq_ignore_ascii_case("allow"));
+    let permission = allows
+        && attempt_id
+            .as_deref()
+            .and_then(task_of_attempt)
+            .zip(text(args, "request_id"))
+            .and_then(|(task, request)| {
+                let awaiting = core.awaiting_of(task)?;
+                let kind = awaiting.lock().pending().into_iter().find(|r| r.id == request).map(|r| r.kind);
+                kind
+            })
+            == Some(RequestKind::Permission);
+    (if permission { Category::ProviderPermissions } else { Category::Answer }, Hint { attempt_id, ..Hint::default() })
+}
+
 /// SOLO pruebas: la categoría que gobierna un Command, como texto.
 #[cfg(test)]
 pub(super) fn classify_for_tests(cmd: &str, args: &Value) -> Option<&'static str> {
@@ -449,7 +472,8 @@ fn confirmed(args: &Value) -> bool {
 /// Decide si `class` puede ejecutar `cmd` AHORA. Se llama en cada Command, antes de despachar, con la policy leída en ese instante:
 /// una foto vieja de la interfaz no autoriza nada. Falla cerrado si no puede leer la policy.
 pub(super) fn gate(core: &Core, class: ActorClass, cmd: &str, args: &Value) -> Result<(), String> {
-    let Some((category, hint)) = classify(cmd, args) else { return Ok(()) };
+    let classified = if cmd == "attempt_answer" { Some(classify_answer(core, args)) } else { classify(cmd, args) };
+    let Some((category, hint)) = classified else { return Ok(()) };
     if class == ActorClass::Core {
         return Ok(());
     }

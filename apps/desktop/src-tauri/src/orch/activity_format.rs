@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 70] = [
+pub(super) const KINDS: [&str; 71] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -66,6 +66,7 @@ pub(super) const KINDS: [&str; 70] = [
     "attempt.queue_failed",
     "attempt.instruction_requested",
     "attempt.instruction_result",
+    "attempt.request_answered",
     "attempt.dispatch_ambiguous",
     "policy.changed",
     "race.requested",
@@ -141,6 +142,9 @@ const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapte
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_requested`, `attempt.instruction_result`).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
+/// Qué pidió el proveedor y qué se decidió (`attempt.request_answered`): la decisión solo existe en un permiso.
+const REQUEST_KINDS: [&str; 2] = ["permission", "question"];
+const REQUEST_DECISIONS: [&str; 2] = ["allow", "deny"];
 /// Estados desde los que se cierra una sesión (`provider_session.closed`).
 const SESSION_CLOSED_FROM: [&str; 2] = ["open", "idle"];
 /// Procedencia de un Worktree que ya existía (`worktree.adopted`).
@@ -663,6 +667,12 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
                 ("outcome", closed(p, "outcome", &INSTRUCTION_OUTCOMES)),
                 ("reason?", closed(p, "reason", &QUEUE_FAILURES)),
             ],
+        ),
+        // Responder al proveedor (LXO-247). Solo el tipo y, en un permiso, allow/deny: nunca el texto de una respuesta libre ni el id de la petición.
+        "attempt.request_answered" => rendered(
+            "activity.attempt.request_answered",
+            Visual::Info,
+            vec![("task", id(p, "task")), ("n", number(p, "n")), ("kind", closed(p, "kind", &REQUEST_KINDS)), ("decision?", closed(p, "decision", &REQUEST_DECISIONS))],
         ),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",

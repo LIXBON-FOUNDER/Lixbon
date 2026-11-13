@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 104] = [
+pub(crate) const MESSAGE_KEYS: [&str; 105] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -97,6 +97,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 104] = [
     "activity.attempt.queue_failed",
     "activity.attempt.instruction_requested",
     "activity.attempt.instruction_result",
+    "activity.attempt.request_answered",
     "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
@@ -251,6 +252,9 @@ const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
+/// Qué pidió el proveedor y qué se decidió (`attempt.request_answered`, LXO-247): la decisión solo existe en un permiso.
+const REQUEST_KINDS: [&str; 2] = ["permission", "question"];
+const REQUEST_DECISIONS: [&str; 2] = ["allow", "deny"];
 
 /// Por qué no se entregó una instrucción de la Pending Queue (`attempt.queue_failed`, LXO-143).
 fn queue_failure(code: &str) -> Option<&'static str> {
@@ -579,6 +583,13 @@ fn attempt(key: &str, a: &A) -> Option<String> {
                 _ => format!("El proveedor no confirmó a tiempo que el turno en curso del {at} se hubiera detenido: no se envió la instrucción."),
             }
         }
+        // Responder al proveedor (LXO-247): solo el tipo y, en un permiso, allow/deny. Nunca el texto de una respuesta libre.
+        "activity.attempt.request_answered" => match a.code("kind", &REQUEST_KINDS)? {
+            "question" if !a.present("decision") => format!("Se respondió una pregunta del proveedor en el {at}."),
+            "permission" if a.code("decision", &REQUEST_DECISIONS)? == "allow" => format!("Se permitió lo que el proveedor pedía en el {at}."),
+            "permission" => format!("Se denegó lo que el proveedor pedía en el {at}."),
+            _ => return None,
+        },
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
@@ -861,6 +872,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.queue_failed"
         | "activity.attempt.instruction_requested"
         | "activity.attempt.instruction_result"
+        | "activity.attempt.request_answered"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;

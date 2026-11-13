@@ -708,6 +708,15 @@ impl Core {
         self.queue_store(|st| queue_commands::attempt_of(st, attempt_id))
     }
 
+    /// `attempt.request_answered` (LXO-247): lo que una persona respondió a una petición del proveedor, ya aceptada por este.
+    pub(super) fn request_answered(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::answered_event(st, ctx, attempt_id, request_id, kind, decision)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// `attempt.instruction_requested`.
     pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
         self.queue_store(|st| {

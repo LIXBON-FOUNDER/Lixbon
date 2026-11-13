@@ -46,8 +46,15 @@ const KNOWN_ERRORS = [
   [/provider_resume_unsupported/i, 'Este proveedor no permite reanudar sesiones.'],
   [/solo se continúa un Attempt terminado/i, 'Solo se continúa un intento que ya terminó.'],
   [/solo se continúa el último/i, 'Hay un intento más reciente: continúa ese.'],
+  // Responder al proveedor (LXO-247). `request_conflict` de aquí se distingue del de la cola por su texto.
+  [/ya se respondió de otra forma/i, 'Esa petición ya se respondió con otra decisión.'],
+  [/request_unknown/i, 'Esa petición ya no está pendiente: el proveedor no la espera o ya se respondió.'],
+  [/invalid_answer/i, 'La respuesta no es válida: un permiso se responde «permitir» o «denegar»; una pregunta, con un texto de hasta 4 000 caracteres.'],
+  [/answer_unsupported/i, 'Este proveedor no ofrece responder a sus peticiones desde Lixbon: respóndele en su terminal.'],
+  [/answer_failed/i, 'El proveedor no aceptó la respuesta. La petición sigue pendiente: puedes volver a intentarlo.'],
+  [/not_waiting/i, 'El intento ya no espera una respuesta.'],
   [/queue_unsupported/i, 'Este proveedor no puede entregar instrucciones entre turnos: no se puede encolar.'],
-  [/attempt_final/i, 'El intento ya terminó: no admite instrucciones.'],
+  [/attempt_final/i, 'El intento ya terminó: no admite instrucciones ni respuestas.'],
   [/queue_full/i, 'La cola está llena (50 instrucciones pendientes): espera a que se entregue alguna.'],
   [/not_cancellable/i, 'Esa instrucción ya no se puede cancelar: se está entregando, se entregó o falló.'],
   [/request_conflict/i, 'Esa clave ya se usó con otra instrucción: vuelve a enviarla.'],
@@ -59,7 +66,7 @@ const KNOWN_ERRORS = [
   [/stop_failed/i, 'No se pudo detener el turno: no se envió la instrucción.'],
   [/send_failed/i, 'Se detuvo el turno pero la instrucción no llegó al proveedor. Continúa la sesión con ella si hace falta.'],
   [/session_missing/i, 'El proveedor aún no ha declarado su sesión: no se puede detener y enviar todavía.'],
-  [/busy\/not_running/i, 'El intento no está en marcha ahora (espera una respuesta o no ha arrancado): no admite esta instrucción.'],
+  [/busy\/not_running/i, 'El intento no tiene una ejecución viva ahora (no ha arrancado o ya se cerró): no admite instrucciones ni respuestas.'],
   [/in_progress/i, 'Esa petición ya se está atendiendo.'],
   [/context_package_source_mismatch/i, 'El paquete de contexto no sale de este intento (o de este proyecto): revisa que sea el correcto.'],
   [/context_package_invalid/i, 'El paquete de contexto no pasa la verificación del Core: no se puede usar.'],
@@ -160,6 +167,25 @@ export const rejectAttempt = (attemptId) => call('attempt_reject', { attempt_id:
 
 /** Responde la pregunta abierta de un agente (`reply`). Lo manda la persona en nombre del destinatario de la pregunta. */
 export const answerQuestion = (questionId, answer) => call('reply', { question: questionId, answer });
+
+/**
+ * Lo que el proveedor de un intento le pide a la persona y espera (`attempt_pending_requests`, LXO-247): permisos y preguntas. Una lectura.
+ * Devuelve `{ attempt_id, live, requests: [{ request_id, kind: 'permission' | 'question', subject, summary, asked_at }] }`.
+ */
+export const pendingProviderRequests = (attemptId) => call('attempt_pending_requests', { attempt_id: attemptId });
+
+/**
+ * Responde a UNA petición del proveedor (`attempt_answer`, LXO-247). Un permiso se responde `allow` o `deny`; una pregunta, con texto libre
+ * (hasta 4 000 caracteres). Solo una persona en Desktop. Repetir la misma respuesta devuelve `Replayed` sin volver a llamar al proveedor.
+ * PERMITIR un permiso es la categoría `provider_permissions` de la policy (piso «pedir confirmación»): hay que mandar `confirm: true`, la decisión
+ * explícita de la persona. Denegar o contestar una pregunta (`answer`) no la piden. Devuelve `{ status: 'Answered' | 'Replayed', attempt_id, request_id, kind }`.
+ */
+export const answerProviderRequest = (attemptId, requestId, answer, { confirm = false } = {}) => call('attempt_answer', {
+  attempt_id: attemptId,
+  request_id: requestId,
+  answer,
+  ...(confirm ? { confirm: true } : {}),
+});
 
 /**
  * Detiene la Task en marcha (`stop`): el Core corta el proceso del proveedor y cierra el Attempt como `stopped`. Si el

@@ -1242,6 +1242,29 @@ pub(super) fn attempt_instruction_result(a: &AttemptRow, t: &TaskRow, request_id
     attempt_draft(a, t, &AttemptInstructionResult { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, outcome, reason })
 }
 
+/// `attempt.request_answered` (LXO-247): una persona respondió a una petición del proveedor y este la aceptó. `request_id` es el de la
+/// propia petición (ya acotado y sin caracteres de control); `kind` ∈ `permission` · `question`. `decision` ∈ `allow` · `deny` y solo
+/// existe en un permiso: la respuesta a una pregunta es texto libre y NUNCA viaja en el Event (ni su contenido ni su longitud).
+#[derive(Serialize)]
+pub(super) struct AttemptRequestAnswered {
+    task: String,
+    n: i64,
+    request_id: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision: Option<&'static str>,
+}
+
+impl EventPayload for AttemptRequestAnswered {
+    const KIND: &'static str = "attempt.request_answered";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_request_answered(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptRequestAnswered { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), kind, decision })
+}
+
 /// De dónde venía el claim de despacho cuando no se pudo probar su desenlace.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

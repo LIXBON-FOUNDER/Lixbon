@@ -103,6 +103,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.queue_failed` (LXO-143) | `activity.attempt.queue_failed` | `task`, `n`, `reason` ∈ `unsupported` `environment_blocked` `adapter_unavailable` `adapter_error` `attempt_ended` `interrupted` | error |
 | `attempt.instruction_requested` (LXO-144) | `activity.attempt.instruction_requested` | `task`, `n`, `mode` ∈ `steer` `stop_and_send` | info |
 | `attempt.instruction_result` (LXO-144) | `activity.attempt.instruction_result` | `task`, `n`, `mode`, `outcome` ∈ `delivered` `failed` `stop_failed` `stop_timeout`, `reason?` (los de `queue_failed`) | success si `delivered`, error si no |
+| `attempt.request_answered` (LXO-247) | `activity.attempt.request_answered` | `task`, `n`, `kind` ∈ `permission` `question`, `decision?` ∈ `allow` `deny` (solo con `permission`; con `question` no debe venir) | info |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |
 | `provider_session.resumed` | `activity.provider_session.resumed` | `task`, `n` | info |

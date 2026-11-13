@@ -64,13 +64,22 @@ describe('A1 · aprobar o rechazar desde la bandeja de Attention', () => {
     expect(decisions(calls)).toEqual([{ cmd: 'attempt_reject', args: { attempt_id: 't3-a1' } }]);
   });
 
-  it('la aprobación de una petición de terminal (el intento ya corre) NO ofrece decidir aquí', async () => {
-    mountCore({ status: 'awaiting_terminal_approval', attention: [row()] });
+  it('la aprobación de una petición del proveedor (el intento ya corre) NO ofrece aprobar el lanzamiento: ofrece responderla (LXO-247)', async () => {
+    const calls = mountCore({
+      status: 'awaiting_terminal_approval',
+      attention: [row()],
+      decide: () => ({ attempt_id: 't3-a1', live: true, requests: [{ request_id: 'p1', kind: 'permission', subject: 'Bash', summary: 'ls', asked_at: 1 }] }),
+    });
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
     await flush();
     await flush();
     expect(screen.queryByTestId('attempt-approve')).toBeNull();
+    expect(screen.queryByTestId('attempt-reject')).toBeNull();
     expect(screen.getByRole('button', { name: /Aprobación/i })).toBeTruthy();
+    const actions = await screen.findByTestId('attention-launch-actions');
+    fireEvent.click(await within(actions).findByTestId('attempt-answer-allow'));
+    await flush();
+    expect(decisions(calls)).toContainEqual({ cmd: 'attempt_answer', args: { attempt_id: 't3-a1', request_id: 'p1', answer: 'allow', confirm: true } });
   });
 
   it('otras Attention no leen ningún Attempt ni ofrecen botones', async () => {

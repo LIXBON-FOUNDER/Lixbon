@@ -126,6 +126,11 @@ pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id
     finalize_single(event_kinds::attempt_instruction_requested(a, t, request_id, mode, chars), ctx, at)
 }
 
+/// El hecho `attempt.request_answered` (LXO-247): qué se respondió a una petición del proveedor (solo `allow`/`deny` en un permiso).
+pub(super) fn request_answered_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_request_answered(a, t, request_id, kind, decision), ctx, at)
+}
+
 pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_instruction_result(a, t, request_id, mode, outcome, reason), ctx, at)
 }

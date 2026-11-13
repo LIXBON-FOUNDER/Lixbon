@@ -10,7 +10,7 @@ puede responder desde Desktop.
 | RPC | Entrada | Qué hace |
 |---|---|---|
 | `attempt_pending_requests` | `{attempt_id}` | lo que espera respuesta: `request_id`, `kind` (`permission` \| `question`), `subject` (la herramienta o el texto de la pregunta), `summary`, `asked_at`. Una lectura: no cambia nada |
-| `attempt_answer` | `{attempt_id, request_id, answer}` | responde. `request_id` es el de la propia petición del proveedor |
+| `attempt_answer` | `{attempt_id, request_id, answer, confirm?}` | responde. `request_id` es el de la propia petición del proveedor. `confirm: true` es obligatorio para **permitir** un permiso (policy `provider_permissions`) |
 
 Un agente, el CLI o el Core no responden por una persona (la automatización es F9).
 
@@ -28,7 +28,9 @@ Un agente, el CLI o el Core no responden por una persona (la automatización es 
 4. la respuesta vale para su tipo
 5. el Attempt espera (`awaiting_terminal_approval`) y el proveedor ofrece la capability `answer`
 6. Gated::answer(handle, respuesta)    si el proveedor la rechaza, la petición SIGUE pendiente y no cambia nada
-7. la petición sale de las pendientes; si era la última, el Attempt vuelve a `running`
+7. queda constancia de la decisión (`attempt.request_answered`: tipo y, en un permiso, `allow`/`deny`; nunca el texto de una
+   respuesta libre)
+8. la petición sale de las pendientes; si era la última, el Attempt vuelve a `running`
    (`attempt.resumed`, que resuelve la Attention `approval`) y el plazo se apaga
 ```
 
@@ -42,14 +44,15 @@ Un agente, el CLI o el Core no responden por una persona (la automatización es 
    rastro y la petición sigue pendiente.
 4. **No es una instrucción.** Steer y Stop & Send exigen un Attempt `running`; lo que se le dice a un Attempt que espera es una
    respuesta (`not_running` en aquellos).
-5. **Todavía no pasa por la policy de autonomía** (`policy.rs`, LXO-209). La policy reserva las categorías `answer` y
-   `provider_permissions` (esta con piso `confirm`) y las marca `enforced: false`; este comando **no las engancha**: una Person de
-   Desktop puede responder aunque el nivel de `answer` sea `deny`. Gobernarlo exige decidir qué significa `confirm` para quien
-   responde a un permiso del proveedor, y qué hace la interfaz con `enforced`. Es una decisión de producto pendiente.
+5. **Pasa por la policy de autonomía** (`policy.rs`, LXO-209), antes de despachar y con la policy leída en ese instante. **Permitir**
+   un permiso es la categoría `provider_permissions` (piso `confirm`): exige `confirm: true`, la decisión explícita de la persona.
+   **Denegar** un permiso y **contestar** una pregunta son `answer` (baseline `allow` para una Person de Desktop). El tipo sale de la
+   petición viva del Attempt, no del texto de la respuesta. Una policy que niega lo pedido (`policy_denied`) o exige confirmar
+   (`policy_confirm_required`) no toca al proveedor: la petición sigue pendiente y no queda Event.
 
 ## Errores (`<tipo>/<código>`)
 
-`invalid/invalid_request`, `invalid/attempt_missing`, `invalid/attempt_final`, `invalid/request_unknown`, `invalid/invalid_answer`,
+`policy_confirm_required` · `policy_denied` · `policy_out_of_band_required` (de la policy: ver el invariante 5), `invalid/invalid_request`, `invalid/attempt_missing`, `invalid/attempt_final`, `invalid/request_unknown`, `invalid/invalid_answer`,
 `invalid/request_conflict`, `busy/not_running`, `busy/not_waiting`, `busy/in_progress` (otra llamada la responde ahora mismo),
 `unsupported/answer_unsupported` (el proveedor no ofrece `answer`), `failed/answer_failed` (el proveedor rechazó la respuesta).
 
@@ -61,9 +64,9 @@ poder repetirlas.
 
 ## Lo que NO hace (límites conocidos)
 
-* **No deja un Event propio de la respuesta.** Queda constancia del cambio de estado (`attempt.resumed`, con el actor), no de **qué**
-  se decidió (`allow`/`deny`) ni de a qué petición. Un registro durable de la decisión sería un Event nuevo (`attempt.request_answered`)
-  y toca el vocabulario compartido con Mobile y CLI.
+* **El Event de la decisión es de mejor esfuerzo.** `attempt.request_answered` se escribe cuando el proveedor ya aceptó la respuesta;
+  si el registro falla, el proveedor ya la tiene: el Core lo dice por su log y no deshace nada (el `attempt.resumed` sigue su curso).
+  No lleva el texto de una pregunta respondida (ni su longitud): solo el tipo y, en un permiso, `allow`/`deny`.
 * **No hay interfaz todavía.** Hoy se responde por el RPC; la bandeja de Attention y el detalle del Attempt de Desktop no lo ofrecen.
 * Solo Claude implementa `answer` de forma verificada con la CLI real; Codex lo ofrece para aprobaciones
   (`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`) y no se ha probado con una CLI real.

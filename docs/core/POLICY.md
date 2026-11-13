@@ -25,7 +25,8 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 | `review` | `attempt_review` | `confirm` |
 | `integrate` | `attempt_integrate` | `confirm` |
 | `cleanup` | `resource_clean`, `resource_delete_worktree` | `confirm` |
-| `answer`, `provider_permissions` | **ninguno todavía** (`enforced: false`). `attempt_answer` (LXO-247) existe pero **no está gobernado**: lo puede ejecutar cualquier Person de Desktop aunque el nivel de `answer` sea `deny`. Gobernarlo exige decidir qué significa `confirm` para quien responde a un permiso del proveedor | `provider_permissions`: `confirm` |
+| `answer` | `attempt_answer` (LXO-247) cuando **deniega** un permiso del proveedor o **contesta una pregunta** | — |
+| `provider_permissions` | `attempt_answer` cuando **permite** un permiso del proveedor (`answer: allow` sobre una petición de tipo `permission`). El tipo sale de la petición viva, no del texto: una pregunta respondida con la palabra «allow» es `answer`. Con el piso `confirm` hace falta `confirm: true` (el clic explícito en «Permitir»); sin él, `policy_confirm_required` y el proveedor no se toca | `confirm` |
 
 No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la aprobación inicial es
 parte del propio `start`), `resource_adopt` (LXO-149: no ejecuta nada, solo registra trabajo que ya existía, y exige una Person y `confirm`) ni una Task sin `attempt` (no ejecuta nada). La interfaz lo dice con `enforced: false` en vez de aparentar una
@@ -105,7 +106,7 @@ override no borra los hechos anteriores: la historia está en `events` y es appe
 ## Lo que NO hay (honesto)
 
 * **Canal fuera de banda**: `elevated` hoy se rechaza siempre. No hay un segundo factor fuera del cliente que lo satisfaga.
-* **`answer` y `provider_permissions` no tienen punto de aplicación**: se declaran, se guardan y se muestran con `enforced: false`.
+* **Las diez categorías tienen ya punto de aplicación** (`enforced: true`, desde LXO-247). El campo se conserva en el contrato por si una categoría futura se declara antes de tener Command que la aplique. Decisión de producto tomada en LXO-247, revisable: `confirm` para quien responde a un permiso es la confirmación explícita de **permitir** (no de denegar).
 * **Roles de equipo (F9)**, editor de reglas, lenguaje de reglas y bypass por flags/env: fuera de alcance.
 * **El camino legacy de la interfaz** (`orch_integrate`, `orch_publish_pr`, `orch_review_task`, que no pasan por `rpc_authenticated_via`) **no** consulta
   esta policy: sigue con su propio `confirm`. Los Commands `attempt_*` y `resource_*` sí.
