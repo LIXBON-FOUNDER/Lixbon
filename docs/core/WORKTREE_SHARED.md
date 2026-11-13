@@ -64,6 +64,13 @@ Compartir entre Tasks distintas exige **una migración nueva** (la siguiente lib
 * Rama: varios Attempts sobre la misma rama. `branch -d` solo borra lo integrado; no hay que inventar ramas por Attempt.
 * Dos peticiones simultáneas de adjuntar al mismo worktree: la segunda es `WorktreeConflict` (la base de datos, no un candado en Rust).
 
+## Race (decisión)
+
+Un Race no ofrece worktree compartido, y **no es una carencia sino la consecuencia de la regla en serie**: sus candidatos corren a la vez, y la
+base de datos no deja que dos Attempts vivos usen un mismo worktree. Cada candidato recibe el suyo. Lo que sí se puede hacer a mano es compartir
+el worktree del origen con **un** candidato pendiente (`attempt_share_worktree`): lo ocupa desde que se enlaza; un segundo candidato recibe
+`share_conflict` mientras el primero no termine. Lo fija `race_e2e_tests::en_un_race_solo_un_candidato_puede_compartir_el_worktree_del_origen`.
+
 ## Fuera de alcance (igual que en la issue)
 
 Asignación de puertos y servicios entre Attempts paralelos (LXO-222). Con la semántica «en serie» no hay Attempts paralelos sobre un mismo

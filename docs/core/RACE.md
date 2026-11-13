@@ -81,7 +81,10 @@ Los tres salen en Activity (`activity.race.*`).
 
 ## Lo que NO hay (honesto)
 
-* **Host y estrategia de worktree por candidato**: no existen; cada candidato recibe su worktree.
+* **Host y estrategia de worktree por candidato**: no existen; cada candidato recibe su worktree. **Un Race no ofrece worktree compartido y es por diseño**
+  ([WORKTREE_SHARED.md](WORKTREE_SHARED.md)): compartir es en serie (nunca dos Attempts vivos sobre una carpeta) y un Race corre sus candidatos a la
+  vez. Si la persona comparte a mano el worktree del origen con un candidato pendiente, ese candidato lo ocupa y el segundo se rechaza
+  (`share_conflict`): una prueba lo fija.
 * **Estimación de coste/uso por candidato**: el Core no la tiene; el límite es solo de Tasks activas.
 * **Un Race necesita un Attempt origen** (de él salen el perfil y el contexto): no hay Race desde una Task sin ningún Attempt.
 * **Mientras un Race corre no hay política de equilibrio**: no se reparte cuota entre candidatos ni se limita por proveedor.

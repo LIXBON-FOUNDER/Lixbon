@@ -343,6 +343,28 @@ fn un_race_de_un_solo_proveedor_lanza_los_dos_candidatos_del_mismo() {
     assert_eq!(task_count(&w.core), tareas + 2);
 }
 
+/// LXO-248 · Un Race no ofrece worktree compartido: sus candidatos corren a la vez y compartir es en serie. Cada candidato nace SIN worktree (lo recibe
+/// al aprobar, el suyo); si la persona comparte a mano el del origen con uno, ese lo ocupa y el segundo se rechaza hasta que el primero termine.
+#[test]
+fn en_un_race_solo_un_candidato_puede_compartir_el_worktree_del_origen_el_otro_se_rechaza() {
+    let w = world("claude", None);
+    let a1 = w.finished("race-compartido");
+    let out = w.race("race-share", &a1, json!([{}, {"model": "opus"}])).unwrap();
+    let ids = attempts(&out);
+    assert_eq!(ids.len(), 2);
+    for id in &ids {
+        let d = w.desktop("attempt_detail", json!({"attempt_id": id})).unwrap();
+        assert_eq!(d["attempt"]["worktree"], Value::Null, "un candidato de un Race nace sin worktree: lo recibe al aprobar");
+    }
+
+    let share = |attempt: &str| w.desktop("attempt_share_worktree", json!({"attempt_id": attempt, "from_attempt_id": a1, "confirm": true}));
+    assert_eq!(share(&ids[0]).expect("el primero comparte el worktree del origen")["status"], "Shared");
+    let segundo = share(&ids[1]).unwrap_err();
+    assert!(segundo.contains("share_conflict"), "el segundo, en serie, se rechaza: {segundo}");
+    let d = w.desktop("attempt_detail", json!({"attempt_id": ids[1]})).unwrap();
+    assert_eq!(d["attempt"]["worktree"], Value::Null, "y no quedó enlazado a nada");
+}
+
 #[test]
 fn los_hechos_del_race_salen_en_activity_con_sus_argumentos_y_sin_el_encargo() {
     let (w, a1) = duo();

@@ -55,7 +55,7 @@ export function AttemptShareWorktree({ attempt, onShared }) {
   };
 
   return (
-    <details className="nat-share" data-testid="attempt-share" onToggle={(event) => { if (event.currentTarget.open && candidates === null) load(); }}>
+    <details className="nat-share" data-testid="attempt-share" onToggle={(event) => { if (event.currentTarget.open && (candidates === null || loadError)) load(); }}>
       <summary>Compartir el worktree de otro intento</summary>
       <div className="nat-share__body" role="group" aria-label="Compartir el worktree de otro intento">
         <p className="nat__hint">
@@ -71,7 +71,7 @@ export function AttemptShareWorktree({ attempt, onShared }) {
           <p role="status" data-testid="attempt-share-outcome">{outcome}</p>
         ) : candidates === null ? (
           <p role="status">Buscando worktrees que se puedan compartir.</p>
-        ) : candidates.length === 0 ? (
+        ) : loadError ? null : candidates.length === 0 ? (
           <p className="ade-missing" data-testid="attempt-share-empty">No hay otro worktree activo en este proyecto que se pueda compartir.</p>
         ) : (
           <>

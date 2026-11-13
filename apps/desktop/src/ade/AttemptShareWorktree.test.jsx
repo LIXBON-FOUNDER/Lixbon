@@ -88,6 +88,26 @@ describe('AttemptShareWorktree (LXO-248)', () => {
     await abre();
     expect(screen.getByTestId('attempt-share-load-error')).toBeTruthy();
     expect(screen.queryByTestId('attempt-share-source')).toBeNull();
+    // Revisión visual (LXO-248): un fallo de lectura no es «no hay worktrees»: no se afirman las dos cosas a la vez.
+    expect(screen.queryByTestId('attempt-share-empty')).toBeNull();
+  });
+
+  it('tras un fallo de lectura, volver a abrir lo reintenta', async () => {
+    invoke.mockRejectedValue(new Error('boom'));
+    render(<AttemptShareWorktree attempt={PENDING} />);
+    await abre();
+    expect(screen.getByTestId('attempt-share-load-error')).toBeTruthy();
+
+    mountCore();
+    const details = screen.getByTestId('attempt-share');
+    details.open = false;
+    fireEvent(details, new Event('toggle'));
+    await abre();
+
+    // (jsdom también emite su propio `toggle` al cambiar `open`: lo que importa es que hubo una lectura nueva y su resultado se ve.)
+    expect(llamadas('attempt_share_candidates').length).toBeGreaterThan(1);
+    expect(screen.queryByTestId('attempt-share-load-error')).toBeNull();
+    expect(screen.getByTestId('attempt-share-source')).toBeTruthy();
   });
 
   it('un rechazo del Core se dice en llano y deja reintentar', async () => {
