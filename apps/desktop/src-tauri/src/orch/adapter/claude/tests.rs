@@ -427,6 +427,41 @@ fn interrupt_exige_que_la_sesion_lo_declare() {
     });
 }
 
+/// LXO-242 · Si el cierre del proceso NO se pudo probar, una ejecución cancelada no se declara detenida: pasa a un fallo que lo dice. Un cierre
+/// probado sigue siendo `Cancelled`, y un éxito no cambia aunque el cierre no se probara.
+#[test]
+fn un_cierre_sin_probar_no_se_declara_cancelado() {
+    let l = FakeLauncher::new(vec![json!({"__gate": "prompt"}), json!({"type": "system", "subtype": "init", "session_id": SESSION}), json!({"__gate": "never"})]);
+    let reg = registro(adapter(cfg(), l.clone()));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    l.last().1.unprovable();
+    let (tx, rx) = mpsc::channel();
+    let outcome = std::thread::scope(|s| {
+        let h = s.spawn(|| g.events(&run, &cancel, &mut |e: AdapterEvent| tx.send(e).unwrap()));
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), AdapterEvent::SessionBound { .. }));
+        cancel.cancel();
+        h.join().unwrap().unwrap()
+    });
+    let RunOutcome::Failed(e) = outcome else { panic!("un cierre sin probar no puede ser Cancelled: {outcome:?}") };
+    assert_eq!(e.code, ErrorCode::Provider);
+    assert!(e.message.contains("no se pudo probar") && e.message.contains("no se declara detenido"), "{}", e.message);
+    assert!(l.last().1.was_killed(), "se intentó cerrar");
+}
+
+#[test]
+fn un_exito_no_cambia_aunque_el_cierre_no_se_pudiera_probar() {
+    let l = FakeLauncher::new(script_of(NORMAL));
+    let reg = registro(adapter(cfg(), l.clone()));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    l.last().1.unprovable();
+    let outcome = g.events(&run, &cancel, &mut |_e: AdapterEvent| {}).unwrap();
+    assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
+}
+
 #[test]
 fn cancelar_mata_el_proceso_y_termina_cancelled() {
     let l = FakeLauncher::new(vec![json!({"__gate": "prompt"}), json!({"type": "system", "subtype": "init", "session_id": SESSION}), json!({"__gate": "never"})]);

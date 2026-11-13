@@ -35,6 +35,8 @@ pub struct FakeServer {
     written: Arc<Mutex<Vec<Value>>>,
     killed: Arc<AtomicBool>,
     closed: AtomicBool,
+    /// El próximo cierre no se podrá probar (LXO-242).
+    unproven: AtomicBool,
     stderr: String,
 }
 
@@ -104,7 +106,7 @@ impl FakeServer {
             }
             let _ = out_tx.send(None);
         });
-        Arc::new(FakeServer { out: Mutex::new(out_rx), inbox: in_tx, written, killed, closed: AtomicBool::new(false), stderr: stderr.to_string() })
+        Arc::new(FakeServer { out: Mutex::new(out_rx), inbox: in_tx, written, killed, closed: AtomicBool::new(false), unproven: AtomicBool::new(false), stderr: stderr.to_string() })
     }
 
     /// Todo lo que el cliente escribió (JSON, o texto si no lo es).
@@ -114,6 +116,11 @@ impl FakeServer {
 
     pub fn was_killed(&self) -> bool {
         self.killed.load(Ordering::SeqCst)
+    }
+
+    /// El próximo cierre no se podrá probar (LXO-242): `kill` devuelve `Closure::Unproven`.
+    pub fn unprovable(&self) {
+        self.unproven.store(true, Ordering::SeqCst);
     }
 
     pub fn input_closed(&self) -> bool {
@@ -148,8 +155,13 @@ impl Process for FakeServer {
         self.closed.store(true, Ordering::SeqCst);
     }
 
-    fn kill(&self) {
+    fn kill(&self) -> super::super::process::Closure {
         self.killed.store(true, Ordering::SeqCst);
+        if self.unproven.load(Ordering::SeqCst) {
+            super::super::process::Closure::Unproven
+        } else {
+            super::super::process::Closure::Proven
+        }
     }
 
     fn stderr_tail(&self) -> String {

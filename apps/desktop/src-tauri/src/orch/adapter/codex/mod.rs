@@ -412,7 +412,7 @@ impl CodexAdapter {
         }
         let run = self.spawn_server(cwd)?;
         let r = Self::initialize(&run).map(|_| Self::readiness(&run));
-        run.shutdown();
+        let _ = run.shutdown();
         r
     }
 
@@ -445,9 +445,10 @@ impl CodexAdapter {
 
     fn launch_app_server(&self, attempt_id: &str, worktree: &Path, prompt: &str, profile: Profile, model: Option<&str>, effort: Option<&str>, resume: Option<&ProviderRef>) -> Result<RunHandle, AdapterError> {
         let run = self.spawn_server(worktree)?;
+        run.process.set_owner(attempt_id);
         let started = Self::handshake(&run).and_then(|_| Self::begin_turn(&run, if resume.is_some() { "thread/resume" } else { "thread/start" }, resume, worktree, prompt, profile, model, effort));
         if let Err(e) = started {
-            run.shutdown();
+            let _ = run.shutdown();
             return Err(e);
         }
         Ok(self.register(attempt_id, run))
@@ -467,9 +468,10 @@ impl CodexAdapter {
         }
         let spec = LaunchSpec { program: self.program()?, args, cwd: worktree.to_path_buf(), env: vec![], env_remove: vec![] };
         let process = self.launcher.launch(&spec)?;
+        process.set_owner(attempt_id);
         // `codex exec` lee el mensaje de stdin y espera a que se cierre.
         if let Err(e) = process.send(prompt) {
-            process.kill();
+            let _ = process.kill();
             return Err(e);
         }
         process.close_input();
@@ -580,9 +582,9 @@ impl Run {
         }
     }
 
-    fn shutdown(&self) {
+    fn shutdown(&self) -> super::process::Closure {
         self.stop.store(true, Ordering::SeqCst);
-        self.process.kill();
+        self.process.kill()
     }
 
     fn ids(&self) -> Option<(String, String)> {
@@ -620,7 +622,7 @@ impl CodexAdapter {
         let mut malformed = 0usize;
         loop {
             if cancel.is_cancelled() {
-                run.shutdown();
+                let _ = run.shutdown();
                 return RunOutcome::Cancelled;
             }
             let msg = match run.inbox.lock().unwrap_or_else(|e| e.into_inner()).recv_timeout(POLL) {
@@ -733,7 +735,7 @@ impl CodexAdapter {
         let mut malformed = 0usize;
         loop {
             if cancel.is_cancelled() {
-                run.shutdown();
+                let _ = run.shutdown();
                 return RunOutcome::Cancelled;
             }
             let line = match run.process.recv(POLL) {
@@ -819,9 +821,10 @@ impl ProviderAdapter for CodexAdapter {
             Transport::AppServer => self.drive_server(&state, cancel, sink),
             Transport::ExecJson => self.drive_exec(&state, cancel, sink),
         };
-        state.shutdown();
+        // Termine como termine, el proceso no sobrevive a su ejecución; y si el cierre no se pudo probar, no se declara detenido (LXO-242).
+        let closure = state.shutdown();
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).remove(&run.seq);
-        Ok(outcome)
+        Ok(super::process::outcome_after_close(outcome, closure))
     }
 
     fn answer(&self, run: &RunHandle, answer: Answer) -> Result<(), AdapterError> {
@@ -888,7 +891,7 @@ impl ProviderAdapter for CodexAdapter {
             cancel.check()?;
             run.call("account/rateLimits/read", None)
         });
-        run.shutdown();
+        let _ = run.shutdown();
         match read {
             Ok(v) => Ok(usage::snapshot_from(&v, (system_clock())())),
             Err(e) => Err(usage::classify(&e)),

@@ -249,6 +249,8 @@ impl Core {
     /// (p. ej. tras un reinicio). Es lo que ejecuta el hilo de fondo; las pruebas lo llaman a mano.
     pub(super) fn periodic_sweep(&self) {
         self.close_idle_runs();
+        // Un cierre de proceso que no se pudo probar se reintenta en cada ciclo (barato si no hay nada).
+        super::adapter::supervisor::reap();
         self.sweep_initial_approvals();
         self.dispatch_waiting_approved();
     }
@@ -279,6 +281,8 @@ impl Core {
         self.kill_all_terms();
         // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
         super::pty::reap_unowned();
+        // Lo que no se pudo cerrar con prueba de los procesos de los adapters (LXO-242): se reintenta antes de salir.
+        super::adapter::supervisor::reap();
         self.stop_server();
     }
 

@@ -313,8 +313,9 @@ impl ClaudeAdapter {
         let spec = LaunchSpec { program: self.program()?, args, cwd: worktree.to_path_buf(), env, env_remove };
 
         let process = self.launcher.launch(&spec)?;
+        process.set_owner(attempt_id);
         if let Err(e) = process.send(&user_message(prompt)) {
-            process.kill();
+            let _ = process.kill();
             return Err(e);
         }
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
@@ -329,7 +330,8 @@ impl ClaudeAdapter {
         let mut malformed = 0usize;
         loop {
             if cancel.is_cancelled() {
-                run.process.kill();
+                // Se cierra otra vez en `events`, que es quien dice si el cierre quedó probado.
+                let _ = run.process.kill();
                 return RunOutcome::Cancelled;
             }
             let line = match run.process.recv(POLL) {
@@ -415,7 +417,7 @@ impl ClaudeAdapter {
                 }
             }
         };
-        process.kill();
+        let _ = process.kill();
         outcome
     }
 
@@ -468,10 +470,10 @@ impl ProviderAdapter for ClaudeAdapter {
     fn events(&self, run: &RunHandle, cancel: &CancelToken, sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
         let state = self.run_of(run)?;
         let outcome = self.drive(&state, cancel, sink);
-        // Termine como termine, el proceso no sobrevive a su ejecución.
-        state.process.kill();
+        // Termine como termine, el proceso no sobrevive a su ejecución; y si el cierre no se pudo probar, no se declara detenido (LXO-242).
+        let closure = state.process.kill();
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).remove(&run.seq);
-        Ok(outcome)
+        Ok(super::process::outcome_after_close(outcome, closure))
     }
 
     /// Claude solo informa de sus límites DURANTE una ejecución: no hay consulta de cuenta sin gastar una. Por eso `windows`

@@ -15,6 +15,9 @@ mod claude;
 mod codex;
 mod error;
 mod process;
+pub mod supervisor;
+#[cfg(test)]
+pub(crate) use process::lanza_en_custodia;
 mod redact;
 mod registry;
 mod usage;

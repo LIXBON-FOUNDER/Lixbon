@@ -84,9 +84,34 @@ repetido se rechaza.
 | 8 | La cancelación llega a la ejecución | `CancelToken` compartido; `Gated` no arranca si ya está cancelado | `cancelar_antes_de_arrancar_no_llega_al_adapter`, `cancelar_durante_events_termina_cancelled`, `interrumpir_termina_interrupted_sin_ser_un_fallo` |
 | 9 | Los cambios de capabilities se ven sin reiniciar | `refresh` + `generation` | `refresh_refleja_un_cambio_de_capabilities_sin_reiniciar` |
 | 10 | Contrato versionado | `version` de la matriz y del snapshot; la fixture falla si cambia sin subir versión | `la_matriz_serializa_estable_y_hace_roundtrip`, `una_matriz_incompleta_de_otra_version_o_con_nombres_ajenos_no_se_acepta`, `el_snapshot_del_registro_coincide_con_la_fixture_versionada` |
+| 11 | Un cierre que no se pudo probar no se declara detenido (LXO-242) | `Process::kill` devuelve `Closure::{Proven, Unproven}` (`#[must_use]`); al terminar `events`, un `Unproven` convierte `Cancelled`/`Interrupted` en un `Failed` de proveedor que lo dice (`outcome_after_close`), y el Core lo ve como un fallo, no como un `stopped` | `un_cierre_sin_probar_no_se_declara_cancelado` (Claude y Codex), `un_exito_no_cambia_aunque_el_cierre_no_se_pudiera_probar`; el supervisor: `un_cierre_sin_probar_queda_en_custodia_con_su_dueno_y_reap_lo_cierra`, `soltar_un_proceso_sin_probar_no_lo_pierde`, `el_apagado_del_core_reintenta_la_custodia_de_los_adapters`, `un_proceso_de_adapter_en_custodia_bloquea_limpiar_y_borrar_hasta_que_se_cierra` |
 
 El fake (`adapter/fake.rs`, solo en pruebas) cubre las seis capabilities y apunta cada llamada que **llega** al adapter,
 de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_fake_cubre_las_seis_capabilities_a_traves_de_gated`.
+
+### Cierre de procesos: qué se garantiza y qué no (LXO-242)
+
+* **Garantizado:** el cierre del árbol de un proceso comprueba la identidad de cada proceso antes de matarlo (`proctable::kill_tree`) y nunca termina a uno
+  ajeno por reutilización de PID. Si no se puede PROBAR que todo terminó, el cierre es `Unproven` y el árbol se conserva para reintentarlo al soltar el proceso.
+* **Un `Unproven` tras `Completed` o `Failed` no cambia ese resultado** (dicen lo que hizo el proveedor, no que el proceso terminó): queda en el log. Solo
+  `Cancelled` e `Interrupted`, que afirman que el proceso ya no está, pasan a fallo.
+* **Decisión sobre ConPTY (Windows), 2026-11-13:** ConPTY no puede crearse suspendida (`portable-pty` no deja pasar flags de creación), así que su Job se
+  adjunta tarde. **Se acepta confirmar su cierre por Job + recorrido del árbol, con residuo documentado**: un proceso que su raíz creó y que escapó ANTES de
+  entrar en el Job solo lo cubre el recorrido por `ppid`. No se adopta la regla estricta («un Job tardío nunca confirma»): dejaría todo cierre de ConPTY en
+  custodia. Los adapters reales (`claude`, `codex app-server`) no usan ConPTY: nacen suspendidos y dentro del Job.
+* **Supervisor (`adapter/supervisor.rs`, LXO-242):** un cierre `Unproven` ya no se reintenta solo en el `Drop` para perderse después. La **familia** del proceso
+  (la raíz sin reapear, que ancla su pid, y el árbol con su identidad y su Job) queda en una **custodia global a nombre del Attempt** (`<task>-a<n>`;
+  los adapters lo fijan con `Process::set_owner`) hasta que se comprueba el cierre. Antes, soltar el proceso con el cierre sin probar mataba la raíz a ciegas y la
+  reapeaba, perdiendo el ancla. Ahora:
+  * `Process::kill` y `Drop` registran en el supervisor lo que no se probó (idempotente: la misma familia no se registra dos veces).
+  * **Apagado ordenado:** `Core::shutdown` cancela las ejecuciones de los adapters (`kill_all_terms`) y después `supervisor::reap()` reintenta TODA la
+    custodia; el barrido periódico (`periodic_sweep`) también.
+  * **Visibilidad:** el Resource Manager cuenta un proceso en custodia como «en marcha» (`resource_blocked: running`): no limpia ni borra el worktree de esa Task
+    hasta que se cierre (`task_in_custody` compara `<task>-a<dígitos>` exacto: `t9` no es `t90`).
+  * La custodia es global al proceso, como la de las terminales: las pruebas que la tocan van de una en una (`pty::pruebas::serie_custodia`).
+* **Residuo que sigue:** si el cierre no se puede probar nunca (identidad ilegible permanente), la familia sigue en custodia hasta que el Core se apaga; el
+  Core no la descarta ni la mata a ciegas. Un Attempt cuyo cierre no se probó ya terminó como fallo (ver arriba), no como `stopped`. Las rutas de Unix
+  (`pidfd`, `setsid`) no se ejercitan en Windows.
 
 ## Hechos que reporta un adapter
 

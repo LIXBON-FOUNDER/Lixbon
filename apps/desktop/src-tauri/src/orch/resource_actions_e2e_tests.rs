@@ -56,6 +56,30 @@ fn done_with_work() -> (World, String, String) {
     (w, a1, task)
 }
 
+/// LXO-242: un proceso de un adapter que no se pudo cerrar con prueba (en la custodia del supervisor) cuenta como «en marcha»: ni se limpia ni se borra el
+/// worktree de esa Task hasta que se cierre. Cuando el supervisor lo cierra, el Resource Manager vuelve a poder.
+#[test]
+fn un_proceso_de_adapter_en_custodia_bloquea_limpiar_y_borrar_hasta_que_se_cierra() {
+    use super::adapter::lanza_en_custodia;
+    use super::adapter::supervisor;
+    use super::pty::pruebas::serie_custodia;
+
+    let _serie = serie_custodia();
+    let (w, a1, task) = done_with_work();
+    let _asa = lanza_en_custodia(&a1);
+    assert!(supervisor::task_in_custody(&task));
+
+    for resultado in [w.clean(&task), w.delete(&task, false)] {
+        let e = resultado.unwrap_err();
+        assert!(e.contains("resource_blocked: running"), "{e}");
+    }
+    assert!(worktree(&w.core, &a1).is_dir(), "no se tocó nada");
+
+    assert_eq!(supervisor::reap(), 0, "el supervisor cierra lo que ya se puede probar");
+    assert!(!supervisor::task_in_custody(&task));
+    assert_eq!(w.delete(&task, false).expect("ya sin proceso en custodia")["outcome"], "deleted");
+}
+
 fn removal_events(core: &Core, task: &str) -> Vec<String> {
     core.storage
         .with_store(|s| {

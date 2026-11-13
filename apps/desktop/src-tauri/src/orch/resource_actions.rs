@@ -134,7 +134,8 @@ fn gather(core: &Core, task_id: &str) -> Result<Facts, String> {
         base,
         integrated_flag: merged,
         task_final: final_,
-        running: core.has_term(task_id),
+        // Un proceso de un adapter que no se pudo cerrar con prueba (supervisor) también cuenta como «en marcha»: no se toca su worktree.
+        running: core.has_term(task_id) || super::adapter::supervisor::task_in_custody(task_id),
         disk,
         dirty,
         branch_exists,
