@@ -1,6 +1,7 @@
 //! lxo: la CLI con la que cualquier agente habla con el orquestador de Lixbon.
 //! Solo traduce argumentos a peticiones HTTP locales; toda la lógica vive en la app.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -19,6 +20,7 @@ mod f5_support;
 mod fork;
 mod projects;
 mod provider;
+mod race;
 mod summary;
 mod tasks;
 mod usage;
@@ -54,6 +56,7 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
   lxo attempt fork <source_attempt_id> [opciones]  fork explícito; nueva Task, procedencia y aprobación humana
+  lxo race <source_attempt_id> [opciones]          Race de 2–4 Forks comparables; status, follow y cancelación
   lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
   lxo attempt resume <attempt_id> --message \"...\"
@@ -106,31 +109,59 @@ struct Args {
     pos: Vec<String>,
     flags: Map<String, Value>,
     duplicates: Vec<String>,
+    repeated: BTreeMap<String, Vec<Value>>,
+}
+
+fn insert_flag(
+    flags: &mut Map<String, Value>,
+    duplicates: &mut Vec<String>,
+    repeated: &mut BTreeMap<String, Vec<Value>>,
+    name: &str,
+    value: Value,
+) {
+    if let Some(previous) = flags.get(name) {
+        duplicates.push(name.to_string());
+        let values = repeated
+            .entry(name.to_string())
+            .or_insert_with(|| vec![previous.clone()]);
+        values.push(value.clone());
+    }
+    flags.insert(name.to_string(), value);
 }
 
 fn parse(raw: Vec<String>) -> Args {
     let mut pos = vec![];
     let mut flags = Map::new();
     let mut duplicates = vec![];
+    let mut repeated = BTreeMap::new();
     let mut it = raw.into_iter().peekable();
     while let Some(a) = it.next() {
         if let Some(name) = a.strip_prefix("--") {
             if let Some((k, v)) = name.split_once('=') {
-                if flags.contains_key(k) {
-                    duplicates.push(k.to_string());
-                }
-                flags.insert(k.into(), Value::String(v.into()));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    k,
+                    Value::String(v.into()),
+                );
             } else if it.peek().is_some_and(|n| !n.starts_with("--")) && !BOOL_FLAGS.contains(&name)
             {
-                if flags.contains_key(name) {
-                    duplicates.push(name.to_string());
-                }
-                flags.insert(name.into(), Value::String(it.next().unwrap_or_default()));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    name,
+                    Value::String(it.next().unwrap_or_default()),
+                );
             } else {
-                if flags.contains_key(name) {
-                    duplicates.push(name.to_string());
-                }
-                flags.insert(name.into(), Value::Bool(true));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    name,
+                    Value::Bool(true),
+                );
             }
         } else {
             pos.push(a);
@@ -140,12 +171,13 @@ fn parse(raw: Vec<String>) -> Args {
         pos,
         flags,
         duplicates,
+        repeated,
     }
 }
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help", "stored", "background", "confirm",
+    "follow", "help", "stored", "background", "confirm", "dry-run", "wait", "compare",
 ];
 
 impl Args {
@@ -1036,6 +1068,9 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
+    if a.at(0).as_deref() == Some("race") {
+        return race::run(&a);
+    }
     if a.at(0).as_deref() == Some("events") {
         return events::run(&a);
     }
