@@ -180,6 +180,12 @@ mod queue_commands_tests;
 #[cfg(test)]
 mod queue_restart_tests;
 #[cfg(test)]
+mod real_smoke_custody_tests;
+#[cfg(test)]
+mod real_smoke_tests;
+#[cfg(test)]
+mod real_smoke_usage_tests;
+#[cfg(test)]
 mod usage_persist_tests;
 mod agentic_cut;
 mod startup_cut;

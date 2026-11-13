@@ -112,6 +112,11 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 * **Residuo que sigue:** si el cierre no se puede probar nunca (identidad ilegible permanente), la familia sigue en custodia hasta que el Core se apaga; el
   Core no la descarta ni la mata a ciegas. Un Attempt cuyo cierre no se probó ya terminó como fallo (ver arriba), no como `stopped`. Las rutas de Unix
   (`pidfd`, `setsid`) no se ejercitan en Windows.
+* **Validación manual en Windows (2026-11-13), con las CLIs reales** (`cargo test --lib real_smoke_custody -- --ignored --nocapture --test-threads=1`):
+  un Attempt de Claude (2.1.296) y otro de Codex (0.168.0) lanzan, por la herramienta de shell del proveedor, un `node` que se queda 10 minutos; se
+  comprueba que corre (4 procesos con la marca en la línea de comandos en Claude, 2 en Codex), se **detiene por el RPC `stop` de Desktop** y
+  el Attempt queda `stopped` (no fallo: el cierre se probó), **0 procesos con la marca** y nada en la custodia del supervisor. **Linux y macOS no se han
+  validado a mano**: la CI ejecuta sus rutas de Unix con procesos reales (`pidfd`, `setsid`), pero eso no sustituye a una persona en cada sistema.
 
 ## Hechos que reporta un adapter
 

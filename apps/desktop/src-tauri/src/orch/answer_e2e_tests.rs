@@ -485,4 +485,7 @@ fn real_claude_un_permiso_se_responde_desde_desktop_y_el_attempt_continua() {
     assert_eq!(event_count(&core, &attempt, "attempt.request_answered"), 1);
     assert_eq!(event_count(&core, &attempt, "attempt.resumed"), 1);
     assert_ne!(row(&core, &attempt).2.as_deref(), Some("terminal_approval_timeout"));
+    // Permitir tiene efecto de verdad: el comando se ejecutó en el worktree del Attempt.
+    let written = super::real_smoke_tests::worktree_dir(&core, &attempt).and_then(|d| std::fs::read_to_string(d.join("smoke.txt")).ok());
+    assert_eq!(written.as_deref(), Some("SMOKE_OK"), "se permitió: smoke.txt debía existir en el worktree");
 }
