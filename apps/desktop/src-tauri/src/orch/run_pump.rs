@@ -61,6 +61,9 @@ type Done = Arc<(Mutex<bool>, Condvar)>;
 
 /// Una ejecución viva: cómo cancelarla y cómo saber que su proceso murió.
 pub(super) struct RunControl {
+    /// El proceso custodiado pertenece a este Attempt concreto. `task` no basta:
+    /// puede haber una ejecución nueva si una llamada tardía llega después de un retry.
+    attempt_id: String,
     cancel: CancelToken,
     done: Done,
     /// Las peticiones del proveedor que esperan a una persona (LXO-247): las ve el bombeo, las responde `attempt_answer`.
@@ -111,10 +114,16 @@ impl Core {
     }
 
     /// Da de alta una ejecución viva de `task`.
-    pub(super) fn register_adapter_run(&self, task: &str, cancel: CancelToken) -> (Done, Arc<Awaiting>) {
+    pub(super) fn register_adapter_run(&self, task: &str, attempt_id: &str, cancel: CancelToken) -> (Done, Arc<Awaiting>) {
         let done: Done = Arc::new((Mutex::new(false), Condvar::new()));
         let awaiting = Arc::new(Awaiting::default());
-        self.adapter_runs_lock().insert(task.to_string(), RunControl { cancel, done: Arc::clone(&done), awaiting: Arc::clone(&awaiting), live: Arc::new(Mutex::new(None)) });
+        self.adapter_runs_lock().insert(task.to_string(), RunControl {
+            attempt_id: attempt_id.to_string(),
+            cancel,
+            done: Arc::clone(&done),
+            awaiting: Arc::clone(&awaiting),
+            live: Arc::new(Mutex::new(None)),
+        });
         (done, awaiting)
     }
 
@@ -124,8 +133,15 @@ impl Core {
     }
 
     /// El proceso de `task` ya murió: sale del registro y avisa a quien esperaba.
-    pub(super) fn finish_adapter_run(&self, task: &str) {
-        let control = self.adapter_runs_lock().remove(task);
+    pub(super) fn finish_adapter_run(&self, task: &str, attempt_id: &str) {
+        let control = {
+            let mut runs = self.adapter_runs_lock();
+            if runs.get(task).is_some_and(|control| control.attempt_id == attempt_id) {
+                runs.remove(task)
+            } else {
+                None
+            }
+        };
         if let Some(control) = control {
             let (flag, signal) = &*control.done;
             *flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
@@ -154,6 +170,35 @@ impl Core {
         let guard = flag.lock().unwrap_or_else(|e| e.into_inner());
         let (guard, _) = signal.wait_timeout_while(guard, CANCEL_WAIT, |finished| !*finished).unwrap_or_else(|e| e.into_inner());
         Some(if *guard { Ok(()) } else { Err(format!("la ejecución de {task} no terminó a tiempo tras cancelarla")) })
+    }
+
+    /// Cancela SOLO la ejecución registrada para `attempt_id`. Si el registro ya
+    /// corresponde a otro Attempt (o no existe), se niega sin tocar ningún proceso.
+    ///
+    /// El token se clona mientras se comprueba la identidad bajo el mismo lock que
+    /// protege el registro. Aunque el mapa cambie después, el token sigue siendo el
+    /// del proceso verificado, nunca el de una ejecución posterior de la Task.
+    pub(super) fn cancel_adapter_attempt_run(&self, task: &str, attempt_id: &str) -> Result<(), String> {
+        let (cancel, done) = {
+            let runs = self.adapter_runs_lock();
+            let control = runs.get(task).ok_or_else(|| format!("no hay una ejecución viva registrada para {attempt_id}"))?;
+            if control.attempt_id != attempt_id {
+                return Err(format!(
+                    "la ejecución viva de {task} pertenece a {}, no a {attempt_id}",
+                    control.attempt_id
+                ));
+            }
+            (control.cancel.clone(), Arc::clone(&control.done))
+        };
+        cancel.cancel();
+        let (flag, signal) = &*done;
+        let guard = flag.lock().unwrap_or_else(|e| e.into_inner());
+        let (guard, _) = signal.wait_timeout_while(guard, CANCEL_WAIT, |finished| !*finished).unwrap_or_else(|e| e.into_inner());
+        if *guard {
+            Ok(())
+        } else {
+            Err(format!("la ejecución de {attempt_id} no terminó a tiempo tras cancelarla"))
+        }
     }
 
     /// Apagado: cancela todas las ejecuciones vivas y espera (acotado) a cada una.
@@ -256,14 +301,15 @@ impl Core {
 pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Duration) {
     let cancel = run.cancel.clone();
     let task = run.task_id.clone();
-    let (done, awaiting) = core.register_adapter_run(&task, cancel.clone());
+    let attempt = run.handle.attempt_id.clone();
+    let (done, awaiting) = core.register_adapter_run(&task, &attempt, cancel.clone());
     core.set_live_run(&task, LiveRun { adapter: Arc::clone(&run.adapter), matrix: run.matrix.clone(), handle: run.handle.clone(), attempt_id: run.handle.attempt_id.clone(), pending_send: None });
     let weak = Arc::downgrade(core);
     let spawned = std::thread::Builder::new().name("adapter-run".into()).spawn(move || pump(weak, run, approval_ttl, done, awaiting));
     if let Err(why) = spawned {
         eprintln!("[core] no se pudo crear el hilo de una ejecución: {why}");
         cancel.cancel();
-        core.finish_adapter_run(&task);
+        core.finish_adapter_run(&task, &attempt);
     }
 }
 
@@ -341,13 +387,15 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done, 
     state.finished.store(true, Ordering::SeqCst);
 
     let Some(core) = core.upgrade() else { return };
-    // `events` devolvió: el adapter mató el proceso antes. Desde aquí nadie espera a que muera.
-    core.finish_adapter_run(&task_id);
+    // `events` devolvió: el adapter mató el proceso antes. Asienta primero el
+    // desenlace durable; los waiters de Stop solo despiertan después de comprobar
+    // que el Attempt exacto quedó terminal en SQLite.
     match result {
         Ok(result) => core.finish_attempt(&task_id, &attempt, terminal_for(&result, state.timed_out.load(Ordering::SeqCst))),
         // Un pánico no inventa un desenlace: el Attempt queda `running` para la reconciliación de arranque.
         Err(_) => eprintln!("[core] el bombeo de una ejecución entró en pánico: no se infiere su desenlace"),
     }
+    core.finish_adapter_run(&task_id, &attempt);
 }
 
 #[cfg(test)]
@@ -382,5 +430,25 @@ mod tests {
         let long = "x".repeat(MAX_SUMMARY_CHARS * 2);
         let Terminal::Done(summary) = terminal_for(&completed(Some(&long)), false) else { panic!("debía completar") };
         assert!(summary.chars().count() <= MAX_SUMMARY_CHARS, "{}", summary.chars().count());
+    }
+
+    #[test]
+    fn una_finalizacion_tardia_no_retira_ni_cancela_otro_attempt_de_la_misma_task() {
+        let core = super::super::Orch::default().0;
+        let old_cancel = CancelToken::new();
+        let new_cancel = CancelToken::new();
+        let (old_done, _) = core.register_adapter_run("t1", "t1-a1", old_cancel.clone());
+        let (_, _) = core.register_adapter_run("t1", "t1-a2", new_cancel.clone());
+
+        assert!(core.cancel_adapter_attempt_run("t1", "t1-a1").is_err());
+        assert!(!new_cancel.is_cancelled(), "un stop de a1 jamás cancela a2");
+
+        core.finish_adapter_run("t1", "t1-a1");
+        assert!(core.has_adapter_run("t1"), "el pump tardío de a1 no elimina el control de a2");
+        assert!(!*old_done.0.lock().unwrap(), "un pump obsoleto no despierta al waiter de a1");
+        assert!(!new_cancel.is_cancelled());
+
+        core.finish_adapter_run("t1", "t1-a2");
+        assert!(!core.has_adapter_run("t1"));
     }
 }

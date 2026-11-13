@@ -7,7 +7,7 @@ use super::{activity_read, attention_read, compact_snapshot, model_read, project
 use super::events::{Actor, Channel, MutationContext};
 use super::mutation::IdempotentMutation;
 use super::state::{Kind, NewTask, Status, Task};
-use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal};
+use crate::store::{AuthenticatedClient, ClientAction, ClientClaims, ClientPrincipal, ClientSurface};
 
 impl Core {
     /// Resuelve la raíz que usa un coordinador CLI de Person como selector de contexto. La raíz no
@@ -63,6 +63,16 @@ impl Core {
         cmd: &str,
         args: &Value,
     ) -> Result<Value, String> {
+        if matches!(cmd, "attempt_start" | "attempt_retry" | "attempt_resume" | "attempt_stop") {
+            let expected_channel = match client.identity().surface() {
+                ClientSurface::Desktop => Some(Channel::Ui),
+                ClientSurface::Cli => Some(Channel::Lxo),
+                _ => None,
+            };
+            if expected_channel != Some(channel) {
+                return Err("La superficie autenticada no coincide con el transporte del Command F5".into());
+            }
+        }
         let context = MutationContext::authenticated(client, claims, channel)
             .map_err(|error| format!("Identidad de cliente inválida: {error:?}"))?;
         let action = rpc_action(cmd);
@@ -255,6 +265,23 @@ impl Core {
                     "attempt_id": attempt_id,
                     "attempt_status": attempt_status,
                 }))
+            }
+            "attempt_stop" => {
+                let context = authenticated_context.as_ref().ok_or("detener un Attempt requiere una Person autenticada de CLI")?;
+                if !matches!(caller, Caller::User) || !context.is_person() || context.channel != Channel::Lxo {
+                    return Err("attempt_stop solo está permitido a una Person autenticada desde CLI".into());
+                }
+                let input: super::attempt_stop_rpc::StopInput =
+                    serde_json::from_value(args.clone()).map_err(|_| "Solicitud de stop inválida".to_string())?;
+                let task_id = self
+                    .attempt_row_for_resume(&input.attempt_id)?
+                    .map(|attempt| attempt.task_id)
+                    .ok_or_else(|| format!("attempt_stop_not_found: no existe el Attempt {}", input.attempt_id))?;
+                let status = match super::attempt_stop_rpc::stop(self, context, &input)? {
+                    super::attempt_stop_rpc::StopResult::Stopped => "Stopped",
+                    super::attempt_stop_rpc::StopResult::Replayed => "Replayed",
+                };
+                Ok(json!({"status": status, "task_id": task_id, "attempt_id": input.attempt_id}))
             }
             "attempt_retry" => {
                 let context = authenticated_context.as_ref().ok_or("reintentar un Attempt requiere una Person autenticada")?;
@@ -803,8 +830,9 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "attempt_start" => ClientAction::CliAttemptCommand,
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "attempt_start" | "attempt_stop" => ClientAction::CliAttemptCommand,
+        "attempt_retry" | "attempt_resume" => ClientAction::AttemptRequest,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
@@ -888,6 +916,9 @@ mod tests {
         );
         assert_eq!(rpc_action("events"), ClientAction::EventLogRead);
         assert_eq!(rpc_action("attempt_start"), ClientAction::CliAttemptCommand);
+        assert_eq!(rpc_action("attempt_stop"), ClientAction::CliAttemptCommand);
+        assert_eq!(rpc_action("attempt_retry"), ClientAction::AttemptRequest);
+        assert_eq!(rpc_action("attempt_resume"), ClientAction::AttemptRequest);
         assert!(person_cli.authorize(ClientAction::EventLogRead).is_ok(), "Person CLI recibe solo lectura del Event Log");
         assert!(agent_cli.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());
@@ -896,6 +927,9 @@ mod tests {
         assert!(person_cli.authorize(ClientAction::CliAttemptCommand).is_ok());
         assert!(person_desktop.authorize(ClientAction::CliAttemptCommand).is_err());
         assert!(agent_cli.authorize(ClientAction::CliAttemptCommand).is_err());
+        assert!(person_cli.authorize(ClientAction::AttemptRequest).is_ok());
+        assert!(person_desktop.authorize(ClientAction::AttemptRequest).is_ok());
+        assert!(agent_cli.authorize(ClientAction::AttemptRequest).is_err());
 
         for command in &commands {
             let action = rpc_action(command);

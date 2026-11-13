@@ -17,17 +17,17 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 
 | categoría | Commands que gobierna | piso |
 |---|---|---|
-| `start` | `task_create` **con** `attempt`, `attempt_retry`, `attempt_resume` | `confirm` |
+| `start` | `task_create` **con** `attempt`, `attempt_start`, `attempt_retry`, `attempt_resume` | `confirm` |
 | `queue` | `attempt_queue` | — |
 | `steer` | `attempt_steer` | — |
-| `stop` | `attempt_stop_and_send`, `task_race_cancel` | — |
+| `stop` | `attempt_stop`, `attempt_stop_and_send`, `task_race_cancel` | — |
 | `fork` | `attempt_fork`, `task_race` (se vuelve a comprobar antes de CADA candidato) | — |
 | `review` | `attempt_review` | `confirm` |
 | `integrate` | `attempt_integrate` | `confirm` |
 | `cleanup` | `resource_clean`, `resource_delete_worktree` | `confirm` |
 | `answer`, `provider_permissions` | **ninguno todavía** (`enforced: false`). `attempt_answer` (LXO-247) existe pero **no está gobernado**: lo puede ejecutar cualquier Person de Desktop aunque el nivel de `answer` sea `deny`. Gobernarlo exige decidir qué significa `confirm` para quien responde a un permiso del proveedor | `provider_permissions`: `confirm` |
 
-No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la aprobación inicial es
+No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la decisión humana es
 parte del propio `start`), `resource_adopt` (LXO-149: no ejecuta nada, solo registra trabajo que ya existía, y exige una Person y `confirm`) ni una Task sin `attempt` (no ejecuta nada). La interfaz lo dice con `enforced: false` en vez de aparentar una
 protección que no existe.
 
@@ -48,7 +48,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; la aprueba Desktop) | deny | deny |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 

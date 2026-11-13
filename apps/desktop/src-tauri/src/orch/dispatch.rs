@@ -189,7 +189,7 @@ pub(super) fn intent_from_rows(attempt: &AttemptRow, task: &TaskRow, run: &RunRo
 /// El bloque «Seguimiento» que añade una continuación al `spec` de la Task: el último es el mensaje con que continúa la sesión.
 pub(super) const FOLLOW_UP_MARKER: &str = "\n\n---\nSeguimiento:\n";
 
-fn follow_up_prompt(spec: &str) -> Option<String> {
+pub(super) fn follow_up_prompt(spec: &str) -> Option<String> {
     spec.rsplit_once(FOLLOW_UP_MARKER).map(|(_, prompt)| prompt.trim().to_string()).filter(|prompt| !prompt.is_empty())
 }
 

@@ -758,6 +758,14 @@ impl Core {
         self.storage.with_store(|store| store.task_row(task_id)).ok_or_else(|| "el almacén no está abierto".to_string())?.map_err(|e| e.to_string())
     }
 
+    /// Procedencia canónica del Attempt de seguimiento, para no confundir un replay de retry con uno de resume.
+    pub(super) fn attempt_follow_up_kind(&self, attempt_id: &str) -> Result<Option<crate::store::AttemptFollowUpKind>, String> {
+        self.storage
+            .with_store(|store| store.attempt_follow_up_kind(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
     /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
     pub(super) fn attempt_session_record(&self, attempt_id: &str) -> Result<Option<crate::store::ProviderSessionRow>, String> {
         let read = self

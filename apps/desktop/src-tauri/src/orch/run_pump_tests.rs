@@ -1,14 +1,39 @@
 //! El bombeo de eventos (LXO-246, PR C) de extremo a extremo: Core persistente, git real, SQLite y un adapter falso con guion.
 //! La ejecución corre en su propio hilo: cada prueba espera al efecto DURABLE (con límite) y comprueba filas y eventos.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::adapter::fake::{FakeAdapter, Step};
-use super::adapter::AdapterError;
+use super::adapter::{
+    AdapterError, CancelToken, CapabilityMatrix, ErrorCode, EventSink, ProbeResult, ProviderAdapter, RunHandle, RunOutcome, StartRequest,
+};
 use super::adapter_launcher_tests::{fixture, fixture_with_ttl, worktree_dir, worktree_state, Fixture};
 use super::dispatch::DispatchResult;
 use super::dispatch_tests::{event_count, row};
+use super::events::Channel;
+use crate::store::{ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
+
+fn cli_client(core: &super::Core) -> crate::store::AuthenticatedClient {
+    let secret = "f5-stop-test-secret-0123456789abcdef";
+    core.storage
+        .with_store(|store| {
+            let registration = ClientRegistration::new(
+                ClientSurface::Cli,
+                DeviceIdentity::new("f5-stop-cli-test", None).unwrap(),
+            )
+            .unwrap();
+            let credential = ClientCredential::new(
+                ClientPrincipal::Person("e2e-person".into()),
+                secret,
+            )
+            .unwrap();
+            store.register_client(&registration, &credential, 10_000).unwrap();
+        })
+        .unwrap();
+    core.authenticate_client(secret).unwrap().unwrap()
+}
 
 fn launch(f: &Fixture) {
     assert_eq!(f.core.dispatch_attempt(&f.attempt, f.launcher.as_ref()).unwrap(), DispatchResult::Launched);
@@ -44,6 +69,51 @@ fn facts(f: &Fixture) -> (String, Option<String>, Option<String>, bool) {
         })
         .unwrap()
         .unwrap()
+}
+
+/// Pausa `start` tras el `attempt.started` durable y antes de que `spawn_pump`
+/// registre el control cancelable de la ejecución.
+struct BlockingStartAdapter {
+    entered: mpsc::Sender<()>,
+    release: Mutex<mpsc::Receiver<()>>,
+    seq: AtomicU64,
+}
+
+impl ProviderAdapter for BlockingStartAdapter {
+    fn id(&self) -> &str {
+        "fake"
+    }
+
+    fn probe(&self) -> ProbeResult {
+        ProbeResult::ready(Some("0.0.0-fake"), CapabilityMatrix::all_available())
+    }
+
+    fn start(&self, request: StartRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
+        cancel.check()?;
+        let _ = self.entered.send(());
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| AdapterError::new(ErrorCode::Internal, "la prueba no liberó start"))?;
+        cancel.check()?;
+        Ok(RunHandle {
+            attempt_id: request.attempt_id,
+            adapter: self.id().to_string(),
+            seq: self.seq.fetch_add(1, Ordering::SeqCst) + 1,
+        })
+    }
+
+    fn events(&self, _run: &RunHandle, cancel: &CancelToken, _sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
+        let end = Instant::now() + Duration::from_secs(10);
+        while !cancel.is_cancelled() {
+            if Instant::now() >= end {
+                return Err(AdapterError::new(ErrorCode::Internal, "la prueba no recibió cancelación"));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(RunOutcome::Cancelled)
+    }
 }
 
 #[test]
@@ -102,6 +172,86 @@ fn detener_la_task_cancela_la_ejecucion_espera_a_que_muera_y_deja_el_attempt_sto
 }
 
 #[test]
+fn detener_un_attempt_exacto_no_afecta_a_otra_ejecucion_y_espera_el_cierre_durable() {
+    let fake = Arc::new(FakeAdapter::full("fake"));
+    fake.set_script(vec![Step::Wait]);
+    let f = fixture(fake);
+    launch(&f);
+    wait_until("la ejecución está registrada", || f.core.has_term(&f.task));
+
+    let wrong = format!("{}-a99", f.task);
+    let cli = cli_client(&f.core);
+    let stop = |attempt_id: &str, confirm: bool| {
+        f.core.rpc_authenticated_via(
+            &cli,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "attempt_stop",
+            &serde_json::json!({"attempt_id":attempt_id,"confirm":confirm}),
+        )
+    };
+    assert!(stop(&f.attempt, false).unwrap_err().starts_with("policy_confirm_required"));
+    assert_eq!(status(&f), "running", "sin confirmación la policy no permite detener");
+    assert!(stop(&wrong, true).is_err(), "un Attempt diferente no debe detenerse");
+    assert_eq!(status(&f), "running", "una identidad distinta no cancela ni cierra la Task");
+    assert!(f.core.has_term(&f.task));
+
+    let result = stop(&f.attempt, true).expect("el stop exacto");
+    assert_eq!(result["status"], "Stopped");
+    assert!(!f.core.has_term(&f.task), "el stop retorna después de que muere el proceso");
+    wait_until("el Attempt exacto se detiene", || status(&f) == "stopped");
+    wait_settled(&f);
+    assert_eq!(row(&f.core, &f.attempt), ("stopped".into(), "settled".into(), None));
+}
+
+#[test]
+fn stop_en_la_ventana_running_sin_control_falla_cerrado_y_el_mismo_stop_se_puede_reintentar() {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let adapter = Arc::new(BlockingStartAdapter {
+        entered: entered_tx,
+        release: Mutex::new(release_rx),
+        seq: AtomicU64::new(0),
+    });
+    let f = fixture(adapter);
+    let cli = cli_client(&f.core);
+
+    let core = Arc::clone(&f.core);
+    let launcher = Arc::clone(&f.launcher);
+    let attempt = f.attempt.clone();
+    let dispatch = std::thread::spawn(move || core.dispatch_attempt(&attempt, launcher.as_ref()));
+
+    entered_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("el adapter debe detenerse dentro de start");
+    assert_eq!(row(&f.core, &f.attempt), ("running".into(), "started".into(), None));
+    assert!(!f.core.has_term(&f.task), "todavía no existe un RunControl");
+
+    let stop = || {
+        f.core.rpc_authenticated_via(
+            &cli,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "attempt_stop",
+            &serde_json::json!({"attempt_id":f.attempt.clone(),"confirm":true}),
+        )
+    };
+    let unavailable = stop().unwrap_err();
+    assert!(unavailable.starts_with("attempt_stop_unavailable:"), "{unavailable}");
+    assert_eq!(row(&f.core, &f.attempt), ("running".into(), "started".into(), None));
+    assert!(!f.core.has_term(&f.task));
+
+    release_tx.send(()).expect("liberar el lanzamiento");
+    assert_eq!(dispatch.join().unwrap().unwrap(), DispatchResult::Launched);
+    wait_until("el RunControl queda registrado", || f.core.has_term(&f.task));
+
+    assert_eq!(stop().unwrap()["status"], "Stopped", "el mismo stop exacto se puede reintentar");
+    assert_eq!(row(&f.core, &f.attempt), ("stopped".into(), "settled".into(), None));
+}
+
+#[test]
 fn el_apagado_cancela_las_ejecuciones_vivas() {
     let fake = Arc::new(FakeAdapter::full("fake"));
     fake.set_script(vec![Step::Wait]);
@@ -137,7 +287,7 @@ fn una_peticion_del_proveedor_deja_el_attempt_esperando_con_attention_y_vencido_
         wait_until(&format!("{label}: vence el plazo"), || status(&f) == "failed");
         wait_settled(&f);
         assert_eq!(row(&f.core, &f.attempt), ("failed".into(), "settled".into(), Some("terminal_approval_timeout".into())), "{label}");
-        assert!(!f.core.has_term(&f.task), "{label}: la ejecución se canceló");
+        wait_until(&format!("{label}: se libera el control de ejecución"), || !f.core.has_term(&f.task));
     }
 }
 

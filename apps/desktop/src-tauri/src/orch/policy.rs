@@ -169,7 +169,7 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
         // Lo que ya tenía: lo que decide o destruye pide confirmación; instruir al propio Attempt no.
         ActorClass::DesktopPerson => category.floor(),
         // El CLI puede PEDIR un Attempt (queda pendiente de la aprobación de Desktop); nada más de esto.
-        ActorClass::CliPerson if category == Category::Start => Level::Confirm,
+        ActorClass::CliPerson if matches!(category, Category::Start | Category::Stop) => Level::Confirm,
         // El Core se gobierna a sí mismo: la policy rige las peticiones de actores, no su trabajo interno.
         ActorClass::Core => Level::Allow,
         // Mobile, automatización y agentes: nada de estas categorías hasta que una fase lo decida (y con confirmación fuera de banda).
@@ -406,6 +406,7 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
         "attempt_start" => (Category::Start, task()),
         "task_create" if args.get("attempt").is_some_and(|a| !a.is_null()) => (Category::Start, Hint { project_id: text(args, "project_id"), ..Hint::default() }),
         "attempt_retry" | "attempt_resume" => (Category::Start, task()),
+        "attempt_stop" => (Category::Stop, attempt("attempt_id")),
         "attempt_queue" => (Category::Queue, attempt("attempt_id")),
         "attempt_steer" => (Category::Steer, attempt("attempt_id")),
         "attempt_stop_and_send" => (Category::Stop, attempt("attempt_id")),

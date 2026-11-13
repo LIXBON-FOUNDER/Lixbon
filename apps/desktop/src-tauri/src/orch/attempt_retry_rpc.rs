@@ -1,8 +1,8 @@
 //! RPC `attempt_retry`: la persona pide un Attempt LIMPIO para una Task cuyo último Attempt terminó mal (LXO-142, puente PR 3).
 //!
-//! Es la puerta del puente (`docs/core/REINTENTO.md`): valida la petición, pasa la Task a `starting` con `Tx::request_attempt_retry`
-//! (nace el Attempt `n + 1` y su `attempt.retried`) y el despachador lo lanza por el mismo camino que al primer Attempt. Pedirlo no
-//! lanza nada por sí mismo: despierta al despachador, que recoge el Attempt en su barrido.
+//! Es la puerta del puente (`docs/core/REINTENTO.md`): valida la petición y llama a `Tx::request_attempt_retry` (nace el Attempt
+//! `n + 1` y su `attempt.retried`). Desktop lo deja en `starting` y despierta al despachador; CLI lo deja `pending_approval`
+//! hasta que una Person de Desktop lo apruebe.
 //!
 //! # Qué acepta el cliente
 //! * `task_id` y `from_attempt_id`: el Attempt que se reintenta, que tiene que ser el último de la Task. Nombrarlo es lo que hace la
@@ -11,14 +11,16 @@
 //! * `provider`, `model`, `effort` opcionales (lo que se quiere distinto). **No acepta `profile`**: el perfil de permisos se hereda
 //!   del Attempt anterior, así que un reintento nunca amplía lo que el agente puede hacer (`deny_unknown_fields` lo rechaza).
 //!
-//! # Solo una Person de Desktop
-//! `rpc_action` lo clasifica como decisión humana: ni un agente ni el CLI. Aquí se vuelve a exigir una Person autenticada.
+//! # Identidad y aprobación
+//! Desktop pide directamente el retry. CLI también puede solicitarlo, pero nace `pending_approval` y no despierta el despachador
+//! hasta que una Person de Desktop lo apruebe.
 
 use serde::Deserialize;
 
 use super::events::{Channel, MutationContext};
 use super::tx_ops::RetrySelection;
 use super::Core;
+use crate::store::AttemptFollowUpKind;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,37 +74,63 @@ pub(super) fn retry(core: &Core, context: &MutationContext, input: &RetryInput) 
         return Err("reintentar un Attempt requiere una Person autenticada".into());
     }
     let from_n = attempt_number(&input.task_id, &input.from_attempt_id)?;
+    let next_n = from_n.checked_add(1).ok_or_else(|| "Falta un id de Attempt válido".to_string())?;
     let selection = RetrySelection {
         provider: clean("provider", &input.provider)?,
         model: clean("model", &input.model)?,
         effort: clean("effort", &input.effort)?,
         profile: None,
     };
-    // Sin lanzador instalado nada ejecutaría el Attempt nuevo: se rechaza antes de tocar nada.
-    if core.launcher().is_none() {
-        return Err(RETRY_NOT_AVAILABLE.into());
-    }
 
-    let (project_id, current_provider) = {
+    let (current, project_id, current_provider) = {
         let st = core.lock();
         let task = st.tasks.get(&input.task_id).ok_or_else(|| format!("no existe la Task {}", input.task_id))?;
         let current = st.attempt_n.get(&input.task_id).copied().ok_or_else(|| "la Task no tiene ningún Attempt que reintentar".to_string())?;
-        if current == from_n + 1 {
-            // Ya hay un Attempt posterior a ese: es su reintento (el único que nace de él).
-            return Ok(RetryResult::Replayed(format!("{}-a{current}", input.task_id)));
-        }
-        if current != from_n {
-            return Err(format!("solo se reintenta el último Attempt de la Task: el actual es {}-a{current}", input.task_id));
-        }
-        (task.project_id.clone(), task.agent.clone())
+        (current, task.project_id.clone(), task.agent.clone())
     };
+    if current == next_n {
+        let next_id = format!("{}-a{current}", input.task_id);
+        if core.attempt_follow_up_kind(&next_id)? != Some(AttemptFollowUpKind::Retry) {
+            return Err(format!("attempt_retry_conflict: {next_id} no procede de un retry canónico de {}", input.from_attempt_id));
+        }
+        let source = core
+            .attempt_row_for_resume(&input.from_attempt_id)?
+            .ok_or_else(|| format!("attempt_retry_conflict: falta el Attempt fuente {}", input.from_attempt_id))?;
+        let next = core
+            .attempt_row_for_resume(&next_id)?
+            .ok_or_else(|| format!("attempt_retry_conflict: falta el Attempt creado {next_id}"))?;
+        if source.task_id != input.task_id || source.n != i64::from(from_n) {
+            return Err(format!("attempt_retry_conflict: {} no es el origen durable esperado", input.from_attempt_id));
+        }
+        let provider = selection.provider.as_deref().unwrap_or(&source.provider);
+        let same_provider = provider == source.provider;
+        let model = selection.model.as_deref().or_else(|| if same_provider { source.model.as_deref() } else { None });
+        let effort = selection.effort.as_deref().or_else(|| if same_provider { source.effort.as_deref() } else { None });
+        if next.provider != provider
+            || next.model.as_deref() != model
+            || next.effort.as_deref() != effort
+            || next.role != source.role
+            || next.profile != source.profile
+            || next.external != source.external
+        {
+            return Err(format!("attempt_retry_conflict: {next_id} ya existe con otra intención"));
+        }
+        return Ok(RetryResult::Replayed(next_id));
+    }
+    if current != from_n {
+        return Err(format!("solo se reintenta el último Attempt de la Task: el actual es {}-a{current}", input.task_id));
+    }
+    // Un replay no depende de que el lanzador siga instalado; una petición nueva sí.
+    if core.launcher().is_none() {
+        return Err(RETRY_NOT_AVAILABLE.into());
+    }
     // Lo que se comprobó al crear la Task pudo cambiar: se vuelve a mirar ANTES de escribir nada.
     let project_id = project_id.filter(|p| !p.is_empty()).ok_or_else(|| "la Task no tiene Project: no hay desde dónde lanzar".to_string())?;
     core.project_launch_location(&project_id)?;
     core.provider_start_preflight(selection.provider.as_deref().unwrap_or(&current_provider))?;
 
     core.mutate_as(context, |tx| tx.request_attempt_retry(&input.task_id, &selection)).map_err(|e| e.to_string())?;
-    Ok(RetryResult::Requested(format!("{}-a{}", input.task_id, from_n + 1)))
+    Ok(RetryResult::Requested(format!("{}-a{next_n}", input.task_id)))
 }
 
 #[cfg(test)]
