@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { AttemptCapabilities } from './AttemptCapabilities';
 import { ProviderInspector } from './ProviderInspector';
-import { PROBING, blocked, live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
+import { FALLBACK_SNAPSHOT, PROBING, blocked, live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
 
 // LXO-135 · inspector de proveedores y capacidades de un Attempt, con proveedores falsos: lo que se ve es lo que dice el Core.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -19,6 +19,18 @@ beforeEach(() => { vi.useRealTimers(); });
 afterEach(() => { cleanup(); invoke.mockReset(); vi.useRealTimers(); });
 
 describe('ProviderInspector', () => {
+  it('LXO-137 · enseña el canal de respaldo con su motivo, solo en el proveedor que cayó a él', async () => {
+    answer(() => live(FALLBACK_SNAPSHOT));
+    render(<ProviderInspector />);
+    await flush();
+    const table = screen.getByTestId('provider-inspector-table');
+    const meta = (id) => table.querySelector(`tr[data-provider="${id}"] .cap-table__meta`).textContent;
+    expect(meta('fake-principal')).toBe('v2.0.0 · app_server');
+    expect(meta('fake-respaldo')).toBe('v0.166.0 · exec_json (respaldo)');
+    expect(screen.getByTestId('fallback-fake-respaldo').textContent).toContain('canal de respaldo (exec_json): esta versión de Codex no incluye app-server');
+    expect(screen.queryByTestId('fallback-fake-principal')).toBeNull();
+  });
+
   it('pinta una fila por proveedor y una columna por capability, con la matriz del Core tal cual', async () => {
     const calls = answer(() => live());
     render(<ProviderInspector />);

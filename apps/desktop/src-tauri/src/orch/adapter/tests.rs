@@ -391,6 +391,27 @@ fn el_snapshot_del_registro_coincide_con_la_fixture_versionada() {
     assert_eq!(serde_json::from_value::<RegistrySnapshot>(v).unwrap(), snap);
 }
 
+/// LXO-137 · el canal en uso que es un respaldo se dice en el contrato, con su motivo, y no se deduce del nombre del canal.
+#[test]
+fn un_canal_de_respaldo_viaja_en_el_snapshot_con_su_motivo() {
+    let m = CapabilityMatrix::new().with(Capability::Start, CapabilityState::Available).with(Capability::Events, CapabilityState::Available);
+    let respaldo = ProbeResult::ready(Some("0.166.0"), m).with_transport("exec_json").with_transport_fallback("esta versión de Codex no incluye app-server");
+    let principal = ProbeResult::ready(Some("2.0.0"), CapabilityMatrix::all_available()).with_transport("app_server");
+    let reg = registry_con(vec![Arc::new(FakeAdapter::with_probe("fake-respaldo", respaldo)), Arc::new(FakeAdapter::with_probe("fake-principal", principal))]);
+    let v = serde_json::to_value(reg.snapshot()).unwrap();
+    // Solo el que cae al respaldo lo trae: el principal no lleva el campo (no es `null`: ausente).
+    assert_eq!(v["providers"][1]["transport_fallback"], json!({ "reason": "esta versión de Codex no incluye app-server" }));
+    assert_eq!(v["providers"][1]["transport"], "exec_json");
+    assert!(v["providers"][0].get("transport_fallback").is_none() && v["providers"][0]["transport"] == "app_server");
+    fixture("provider_capabilities_respaldo.v1.json", &v);
+    assert_eq!(serde_json::from_value::<RegistrySnapshot>(v).unwrap(), reg.snapshot());
+    // El motivo viaja acotado y redactado.
+    let largo = ProbeResult::ready(None, CapabilityMatrix::new()).with_transport_fallback(&"x".repeat(1000));
+    assert_eq!(largo.transport_fallback.unwrap().reason.chars().count(), 300);
+    let secreto = ProbeResult::ready(None, CapabilityMatrix::new()).with_transport_fallback("falló con sk-ant-api03-xxxxxxxxxxxxxxxxxxxx");
+    assert!(!secreto.transport_fallback.unwrap().reason.contains("sk-ant-api03"));
+}
+
 #[test]
 fn refresh_refleja_un_cambio_de_capabilities_sin_reiniciar() {
     let fake = Arc::new(FakeAdapter::full("f"));

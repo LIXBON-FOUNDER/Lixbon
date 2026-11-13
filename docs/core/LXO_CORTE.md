@@ -50,7 +50,9 @@ lxo no decide soporte por nombre ni versión y enseña las seis capabilities que
 que mira (sin `--capability`, el entorno; con ella, esa capability): `0` listo o disponible, `7` `unavailable`, `8`
 `environment_blocked` (el entorno lo impide: **no** es un Attempt fallido), `9` `unsupported`. `--attempt` suma la ProviderSession del
 intento como hechos, sin veredicto: si reanudar procede lo decide el Core. El canal (`transport`) sale como lo dice el Core; que sea
-el de respaldo **no** se informa todavía en `provider_capabilities`, así que lxo no lo escribe.
+un respaldo lo dice solo `transport_fallback` (`{reason}` o `null`, LXO-137): lxo escribe «(respaldo)» y el motivo **únicamente** si el Core lo informa, nunca por
+el nombre del canal. Es un campo nuevo, siempre presente, de las formas `v1` de `provider` (aún sin consumidores: se publicó en el PR #231 y no se ha lanzado) y
+su snapshot con respaldo es [`provider_list_respaldo.v1.json`](fixtures/lxo/provider_list_respaldo.v1.json).
 
 `lxo usage` (LXO-207) es de solo lectura sobre `usage_report` ([QUERIES.md](QUERIES.md#usage_report-lxo-206)): lxo no consulta a ningún proveedor, no estima
 y no suma magnitudes de proveedores distintos. **Desconocido no es cero**: lo que el Core no da sale `null` en el `--json` y «sin dato» en el texto, y lo que el

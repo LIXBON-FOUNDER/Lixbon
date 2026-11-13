@@ -660,8 +660,12 @@ persona, no de un agente). Un parámetro desconocido o un `refresh` que no es bo
 `status`, `refreshing` y `checked_at_ms` son de la lectura viva.
 
 * `providers`, ordenados por `id`. Cada uno trae `cli_version` (o `null`), `environment` (`ready` o `blocked` con sus `blocks`),
-  `transport` (si el adapter tiene más de un canal) y la `matrix` con **las seis capabilities siempre** (`start`, `events`,
+  `transport` (si el adapter tiene más de un canal), `transport_fallback` y la `matrix` con **las seis capabilities siempre** (`start`, `events`,
   `answer`, `interrupt`, `steer`, `resume`). Lo que el proveedor no ofrece consta como `unsupported`: no hay huecos.
+* `transport_fallback` (LXO-137): `{ reason }`, **presente solo si el canal en uso es un respaldo** (por ejemplo Codex por `exec_json`
+  porque su versión no incluye `app-server`); ausente si el canal es el principal o el adapter tiene uno solo. Es lo único por lo que un
+  cliente dice «respaldo»: nunca lo deduce del nombre del canal. El motivo viaja redactado y acotado a 300 caracteres. Un respaldo exige
+  `transport`. Fixture [`provider_capabilities_respaldo.v1.json`](fixtures/api/provider_capabilities_respaldo.v1.json).
 * Estados de una capability: `available` · `unsupported` (el proveedor no la tiene) · `unavailable` + `reason` (la tiene, ahora no)
   · `environment_blocked` + `block` (el entorno lo impide: no es un Attempt fallido).
 * `generation` **sube solo si algo cambió** (un proveedor nuevo, una matriz, un entorno o una versión). Un cliente que la ve

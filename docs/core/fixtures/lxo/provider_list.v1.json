@@ -37,7 +37,8 @@
         "state": "blocked"
       },
       "id": "fake-bloqueado",
-      "transport": null
+      "transport": null,
+      "transport_fallback": null
     },
     {
       "capabilities": {
@@ -66,7 +67,8 @@
         "state": "ready"
       },
       "id": "fake-completo",
-      "transport": null
+      "transport": null,
+      "transport_fallback": null
     },
     {
       "capabilities": {
@@ -96,7 +98,8 @@
         "state": "ready"
       },
       "id": "fake-parcial",
-      "transport": null
+      "transport": null,
+      "transport_fallback": null
     }
   ],
   "refreshing": false,

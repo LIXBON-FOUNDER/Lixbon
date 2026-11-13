@@ -169,7 +169,7 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>, ex
         };
         // Respaldo: solo start/events. exec resume existe pero no admite -s/-C y no está validado, así que no se declara.
         let m = CapabilityMatrix::new().with(Capability::Start, CapabilityState::Available).with(Capability::Events, CapabilityState::Available);
-        return plan(ProbeResult::ready(version, m).with_transport(Transport::ExecJson.code()), Some(Transport::ExecJson), Some(reason));
+        return plan(ProbeResult::ready(version, m).with_transport(Transport::ExecJson.code()).with_transport_fallback(&reason), Some(Transport::ExecJson), Some(reason));
     }
     plan(ProbeResult::blocked(version, vec![EnvBlock::CliFlagsUnsupported]), None, None)
 }

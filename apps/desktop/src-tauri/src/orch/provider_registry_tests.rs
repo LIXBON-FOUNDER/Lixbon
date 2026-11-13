@@ -266,6 +266,8 @@ fn lxo_bin_e2e_provider_person_real_store() {
         let lp = de_lxo.iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("lxo no enseña {id}"));
         // Lo que enseña lxo es lo que dice el Core.
         assert_eq!(lp["cli_version"], cp["cli_version"], "{id}");
+        // LXO-137 · el respaldo lo dice el Core (`transport_fallback`) y lxo lo repite: ausente en el Core es `null` en lxo.
+        assert_eq!(lp["transport_fallback"], cp.get("transport_fallback").map_or(Value::Null, |f| json!({ "reason": f["reason"] })), "{id}");
         assert_eq!(lp["environment"]["state"], cp["environment"]["state"], "{id}");
         let bloqueado = cp["environment"]["state"] == "blocked";
         for cap in CAPS {

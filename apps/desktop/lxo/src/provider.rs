@@ -262,10 +262,21 @@ fn provider_view(p: &Value) -> Option<Value> {
         }),
         _ => return None,
     };
+    // Solo el Core dice que el canal en uso es un respaldo (`transport_fallback`): lxo no lo deduce del nombre del canal. Un
+    // respaldo sin canal o sin motivo no cumple el contrato.
+    let fallback = match p.get("transport_fallback") {
+        None | Some(Value::Null) => Value::Null,
+        Some(f) => {
+            let reason = f["reason"].as_str().filter(|s| !s.is_empty())?;
+            p["transport"].as_str().filter(|s| !s.is_empty())?;
+            json!({ "reason": reason.chars().take(REASON_MAX).collect::<String>() })
+        }
+    };
     Some(json!({
         "id": id,
         "cli_version": text(&p["cli_version"]),
         "transport": text(&p["transport"]),
+        "transport_fallback": fallback,
         "environment": environment,
         "capabilities": matrix,
     }))
@@ -551,9 +562,18 @@ fn provider_block(p: &Value) -> Vec<String> {
     );
     if let Some(t) = p["transport"].as_str() {
         head.push_str(&format!(" · canal {}", clean(t)));
+        if p["transport_fallback"].is_object() {
+            head.push_str(" (respaldo)");
+        }
     }
     head.push_str(&format!(" · {}", environment_text(p)));
     let mut lines = vec![head];
+    if let Some(reason) = p["transport_fallback"]["reason"].as_str() {
+        lines.push(format!(
+            "  Canal de respaldo: {}.",
+            clean(reason).trim_end_matches('.')
+        ));
+    }
     for name in CAPABILITIES {
         lines.push(format!(
             "  {name:<10} {}",
@@ -729,6 +749,8 @@ mod tests {
 
     const FIXTURE: &str =
         include_str!("../../../../docs/core/fixtures/api/provider_capabilities.v1.json");
+    const FIXTURE_RESPALDO: &str =
+        include_str!("../../../../docs/core/fixtures/api/provider_capabilities_respaldo.v1.json");
     const FIXTURE_DETAIL: &str =
         include_str!("../../../../docs/core/fixtures/api/attempt_detail.v1.json");
     /// Texto que un Core con un campo de más podría colar: no debe llegar a ninguna salida.
@@ -1143,16 +1165,86 @@ mod tests {
             !list_text(&view).contains(LEAK),
             "el texto dejó pasar un campo ajeno"
         );
-        // El canal sale tal cual lo dice el Core: lxo no escribe «respaldo» porque sería deducirlo del nombre.
+        // El canal sale tal cual lo dice el Core; que sea un respaldo solo lo dice `transport_fallback`, nunca el nombre del canal.
         let human = list_text(&view);
         assert!(
-            human.contains("fake-completo · CLI 0.0.0-fake · canal app_server"),
+            human.contains("fake-completo · CLI 0.0.0-fake · canal app_server ·"),
             "{human}"
         );
         assert!(
             !human.contains("respaldo") && !human.to_lowercase().contains("fallback"),
             "{human}"
         );
+        assert!(view["providers"][1]["transport_fallback"].is_null());
+    }
+
+    #[test]
+    fn el_canal_de_respaldo_se_dice_solo_si_el_core_lo_dice() {
+        let respaldo: Value = serde_json::from_str(FIXTURE_RESPALDO).unwrap();
+        let live = |edit: fn(&mut Value)| {
+            let mut data = respaldo.clone();
+            data["status"] = json!("ready");
+            data["checked_at_ms"] = json!(1_792_000_000_000u64);
+            edit(&mut data);
+            let mut rpc = move |_: &str, _: &Value| Ok(data.clone());
+            list_data(&mut rpc, false, NO_WAIT)
+        };
+        let view = live(|_| {}).unwrap();
+        // El principal no lleva respaldo; el que cayó a él, sí, con su motivo.
+        assert!(view["providers"][0]["transport_fallback"].is_null());
+        assert_eq!(
+            view["providers"][1]["transport_fallback"],
+            json!({ "reason": "esta versión de Codex no incluye app-server" })
+        );
+        crate::snapshot("provider_list_respaldo.v1.json", &view);
+        let human = list_text(&view);
+        assert!(
+            human.contains(
+                "fake-principal · CLI 2.0.0 · canal app_server · entorno listo
+"
+            ),
+            "{human}"
+        );
+        assert!(
+            human.contains(
+                "fake-respaldo · CLI 0.166.0 · canal exec_json (respaldo) · entorno listo"
+            ),
+            "{human}"
+        );
+        assert!(
+            human.contains("  Canal de respaldo: esta versión de Codex no incluye app-server."),
+            "{human}"
+        );
+        assert_eq!(human.matches("Canal de respaldo").count(), 1, "{human}");
+        // El nombre del canal no basta: `exec_json` sin `transport_fallback` no se dice respaldo.
+        let sin = live(|d| {
+            d["providers"][1]
+                .as_object_mut()
+                .unwrap()
+                .remove("transport_fallback");
+        })
+        .unwrap();
+        let human = list_text(&sin);
+        assert!(
+            !human.contains("(respaldo)")
+                && !human.contains("Canal de respaldo")
+                && human.contains("canal exec_json"),
+            "{human}"
+        );
+        // Un respaldo sin motivo, con el motivo vacío o sin canal no cumple el contrato.
+        for edit in [
+            (|d: &mut Value| d["providers"][1]["transport_fallback"] = json!({})) as fn(&mut Value),
+            |d| d["providers"][1]["transport_fallback"] = json!({ "reason": "" }),
+            |d| d["providers"][1]["transport_fallback"] = json!("respaldo"),
+            |d| {
+                d["providers"][1]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("transport");
+            },
+        ] {
+            assert!(matches!(live(edit), Err(Failure::Version(_))));
+        }
     }
 
     #[test]

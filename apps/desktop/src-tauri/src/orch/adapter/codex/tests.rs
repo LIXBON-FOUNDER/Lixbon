@@ -99,6 +99,7 @@ fn el_probe_prefiere_app_server_en_una_version_verificada_y_declara_las_seis() {
     assert_eq!(p.transport, Some(Transport::AppServer));
     assert_eq!(p.reason, None);
     assert_eq!(p.probe.transport.as_deref(), Some("app_server"));
+    assert!(p.probe.transport_fallback.is_none(), "el canal principal no es un respaldo");
     assert_eq!(p.probe.environment, Environment::Ready);
     assert_eq!(p.probe.cli_version.as_deref(), Some("0.164.0"));
     for c in Capability::ALL {
@@ -118,6 +119,8 @@ fn una_version_sin_verificar_cae_a_exec_json_y_el_motivo_es_visible() {
     assert_eq!(p.probe.transport.as_deref(), Some("exec_json"));
     let motivo = p.reason.unwrap();
     assert!(motivo.contains("9.9.9") && motivo.contains("0.164.0"), "{motivo}");
+    // LXO-137 · el respaldo viaja en el probe (y de ahí al contrato) con el mismo motivo.
+    assert_eq!(p.probe.transport_fallback.as_ref().map(|f| f.reason.as_str()), Some(motivo.as_str()));
     let m = &p.probe.matrix;
     assert!(m.is_available(Capability::Start) && m.is_available(Capability::Events));
     for c in [Capability::Answer, Capability::Interrupt, Capability::Steer, Capability::Resume] {
@@ -129,6 +132,7 @@ fn una_version_sin_verificar_cae_a_exec_json_y_el_motivo_es_visible() {
     let p = probe_from(true, Some("0.164.0"), Some(&viejo), Some(EXEC_HELP), None);
     assert_eq!(p.transport, Some(Transport::ExecJson));
     assert!(p.reason.unwrap().contains("no incluye app-server"));
+    assert!(p.probe.transport_fallback.unwrap().reason.contains("no incluye app-server"));
 }
 
 #[test]

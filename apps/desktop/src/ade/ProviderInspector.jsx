@@ -45,7 +45,7 @@ export function ProviderInspector({ active = true }) {
                       <span className="mono">{provider.id}</span>
                       <span className="cap-table__meta">
                         {provider.cli_version ? `v${provider.cli_version}` : 'versión desconocida'}
-                        {provider.transport ? ` · ${provider.transport}` : ''}
+                        {provider.transport ? ` · ${provider.transport}${provider.transport_fallback ? ' (respaldo)' : ''}` : ''}
                       </span>
                     </th>
                     {describeAll(provider).map((info) => (
@@ -54,6 +54,13 @@ export function ProviderInspector({ active = true }) {
                       </td>
                     ))}
                   </tr>
+                  {provider.transport_fallback && (
+                    <tr className="cap-table__envrow" data-fallback-of={provider.id}>
+                      <td colSpan={CAPABILITIES.length + 1} data-testid={`fallback-${provider.id}`}>
+                        <strong>{provider.id} · canal de respaldo ({provider.transport}):</strong> {provider.transport_fallback.reason}.
+                      </td>
+                    </tr>
+                  )}
                   {env.state === 'blocked' && (
                     <tr className="cap-table__envrow" data-env-of={provider.id}>
                       <td colSpan={CAPABILITIES.length + 1} data-testid={`env-${provider.id}`}>

@@ -5,8 +5,11 @@
 // `checked_at_ms`) y variantes locales sintéticas (`testOnly: true`) para los casos que la canónica no cubre. Los nombres de
 // proveedor de las variantes (`claude`, `codex`…) son SOLO datos de prueba: ninguna regla de producción los conoce.
 import canonicalSnapshot from '../../../../../docs/core/fixtures/api/provider_capabilities.v1.json';
+import fallbackSnapshot from '../../../../../docs/core/fixtures/api/provider_capabilities_respaldo.v1.json';
 
 export const CANONICAL_SNAPSHOT = Object.freeze(canonicalSnapshot);
+/** LXO-137 · un proveedor en su canal principal y otro que cayó al de respaldo, con su motivo (fixture canónica del Core). */
+export const FALLBACK_SNAPSHOT = Object.freeze(fallbackSnapshot);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
