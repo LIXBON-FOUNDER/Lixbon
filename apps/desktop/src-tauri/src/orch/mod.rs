@@ -176,6 +176,8 @@ mod queue_rules;
 mod queue_commands_tests;
 #[cfg(test)]
 mod queue_restart_tests;
+#[cfg(test)]
+mod usage_persist_tests;
 mod agentic_cut;
 mod startup_cut;
 #[cfg(test)]

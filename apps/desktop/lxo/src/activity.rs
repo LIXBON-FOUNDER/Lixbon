@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 105] = [
+pub(crate) const MESSAGE_KEYS: [&str; 106] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -98,6 +98,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 105] = [
     "activity.attempt.instruction_requested",
     "activity.attempt.instruction_result",
     "activity.attempt.request_answered",
+    "activity.attempt.usage_reported",
     "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
@@ -590,6 +591,8 @@ fn attempt(key: &str, a: &A) -> Option<String> {
             "permission" => format!("Se denegó lo que el proveedor pedía en el {at}."),
             _ => return None,
         },
+        // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del Attempt.
+        "activity.attempt.usage_reported" => format!("El proveedor informó el uso del {at}."),
         "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
@@ -873,6 +876,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.instruction_requested"
         | "activity.attempt.instruction_result"
         | "activity.attempt.request_answered"
+        | "activity.attempt.usage_reported"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;

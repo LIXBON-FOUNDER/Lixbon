@@ -89,6 +89,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.instruction_requested',
   'activity.attempt.instruction_result',
   'activity.attempt.request_answered',
+  'activity.attempt.usage_reported',
   'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
@@ -622,6 +623,12 @@ const FORMATTERS = {
     return decision === 'allow'
       ? `Se permitió lo que el proveedor pedía en el ${attempt}.`
       : `Se denegó lo que el proveedor pedía en el ${attempt}.`;
+  },
+  // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del intento.
+  'activity.attempt.usage_reported': (args) => {
+    const attempt = attemptOf(args);
+    if (!requiredArguments(attempt)) return null;
+    return `El proveedor informó el uso del ${attempt}.`;
   },
   'activity.attempt.instruction_result': (args) => {
     const attempt = attemptOf(args);

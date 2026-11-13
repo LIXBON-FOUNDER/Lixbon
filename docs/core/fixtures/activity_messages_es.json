@@ -1029,6 +1029,16 @@
       "text": null
     },
     {
+      "key": "activity.attempt.usage_reported",
+      "args": { "task": "t-3", "n": 2 },
+      "text": "El proveedor informó el uso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.usage_reported",
+      "args": { "task": "t-3" },
+      "text": null
+    },
+    {
       "key": "activity.provider_session.opened",
       "args": {
         "task": "t-3",

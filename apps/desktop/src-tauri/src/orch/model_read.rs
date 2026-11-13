@@ -343,6 +343,13 @@ pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&Muta
             None
         };
         v["integrated_at"] = json!(integrated_at);
+        // El uso que el proveedor DECLARÓ (LXO-249): la suma de sus turnos, o `null` si no declaró nada. Un campo que ningún turno declaró
+        // es `null`, no cero.
+        v["usage"] = json!(s.attempt_usage(&a.id)?.map(|u| json!({
+            "turns": u.turns, "provider": u.provider, "source": "provider_declared",
+            "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+            "cache_read_tokens": u.cache_read_tokens, "cache_creation_tokens": u.cache_creation_tokens, "cost_usd": u.cost_usd,
+        })));
         let current_n = s.attempt_current(&a.task_id)?.map(|c| c.n);
         v["provider_session"] = json!(s.provider_session_of_attempt(&id)?.map(|ps| json!({
             "id": ps.id, "status": ps.status, "resumable": ps.resumable, "binding": ps.binding, "bound": ps.external_ref.is_some(),

@@ -717,6 +717,19 @@ impl Core {
         })
     }
 
+    /// `attempt.usage_reported` (LXO-249): el uso que el proveedor declaró en un turno del Attempt. Un turno sin nada declarado no deja hecho.
+    pub(super) fn usage_reported(&self, attempt_id: &str, usage: &super::attempt_ops::ReportedUsage) -> Result<(), QueueError> {
+        if !usage.any() {
+            return Ok(());
+        }
+        self.queue_store(|st| {
+            let (attempt, task) = steer_commands::rows(st, attempt_id)?;
+            let event = attempt_ops::usage_reported_fact(&attempt, &task, usage, &MutationContext::core(), super::state::now_ms() as i64).map_err(queue_commands::from_store)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// `attempt.instruction_requested`.
     pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
         self.queue_store(|st| {

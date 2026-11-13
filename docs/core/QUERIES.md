@@ -526,7 +526,7 @@ cortada. Una prueba falla si cambian: cambiar una forma publicada exige subir su
 | `task_list_v2` | `project_id`, `include_discarded?`, `limit?` (1–100, 50), `cursor?` | Tasks del Project por (creación, id): intención, **estado derivado**, origen, `attempt_count` y `current_attempt`. `next_cursor` opaco **por clave** (keyset), ligado al Project | `v: 2` · [`task_list_v2.json`](fixtures/api/task_list_v2.json) |
 | `task_detail_v2` | `task_id`, `project_id?` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
 | `attempts_by_task` | `task_id`, `project_id?`, `limit?` (1–100, 50), `cursor?` | los Attempts de la Task por `n`, paginados por clave; `next_cursor` (`null` al terminar) | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
-| `attempt_detail` | `attempt_id`, `task_id?`, `project_id?` | la ejecución: selección, fechas, resultado, `integrated`, `integrated_at`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts` y su última `review` con su vigencia | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
+| `attempt_detail` | `attempt_id`, `task_id?`, `project_id?` | la ejecución: selección, fechas, resultado, `integrated`, `integrated_at`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts`, `usage` (LXO-249) y su última `review` con su vigencia | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
 
 **Corrección de consultas (LXO-119, cambio compatible).** Solo se **añaden** campos y parámetros opcionales; las
 versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y los validadores de Desktop
@@ -551,6 +551,12 @@ versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y l
   `attempt_is_current`, `integrated`, `integrated_at`). `integrated_at` es la hora del hecho `attempt.integrated` cuando el
   runtime lo registra; los integrados por el corte no tienen hora y dan `null`. El HEAD vivo del Worktree no se lee aquí
   (no hay git en una lectura): lo compara quien invalida la revisión.
+* **`usage`** (LXO-249, campo añadido; `v` no sube): lo que el proveedor DECLARÓ de su uso, sumado de los hechos `attempt.usage_reported` del Attempt
+  (uno por turno). `null` si el proveedor no declaró nada (ausencia explícita, nunca ceros). Con datos: `turns` (turnos en los que informó algo),
+  `provider`, `source` (`provider_declared`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` y `cost_usd`. **Cada
+  campo suma solo los turnos que lo declararon y es `null` si ninguno lo hizo**: un proveedor que da tokens pero no coste deja `cost_usd: null`,
+  no `0`. No se calcula ni se estima nada que el proveedor no dijera; sobrevive a reiniciar el Core (es un hecho durable). Claude declara tokens y
+  coste; Codex declara tokens y no coste.
 * **Activity por Attempt**: `activity_list {attempt_id}` devuelve todos sus hechos, también los de su sesión y su
   Worktree ([ACTIVITY.md](ACTIVITY.md)).
 

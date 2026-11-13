@@ -1265,6 +1265,82 @@ pub(super) fn attempt_request_answered(a: &AttemptRow, t: &TaskRow, request_id: 
     attempt_draft(a, t, &AttemptRequestAnswered { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), kind, decision })
 }
 
+/// Lo que el proveedor DECLARÓ de su uso en un turno (LXO-249). Cada campo `None` = no lo informó: desconocido, NUNCA cero.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct ReportedUsage {
+    pub(super) input_tokens: Option<u64>,
+    pub(super) output_tokens: Option<u64>,
+    pub(super) cache_read_tokens: Option<u64>,
+    pub(super) cache_creation_tokens: Option<u64>,
+    pub(super) cost_usd: Option<f64>,
+}
+
+/// Los tokens caben en un entero exacto de JSON (2^53 - 1): lo que no cabe no se inventa, se descarta.
+const MAX_JSON_INTEGER: u64 = (1 << 53) - 1;
+
+impl ReportedUsage {
+    /// Normaliza lo que informó el adapter: un coste que no es un número finito y no negativo, o un contador que no cabe, se descartan
+    /// (desconocido) en vez de corregirse.
+    pub(super) fn declared(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_creation: Option<u64>, cost_usd: Option<f64>) -> ReportedUsage {
+        let count = |v: Option<u64>| v.filter(|n| *n <= MAX_JSON_INTEGER);
+        ReportedUsage {
+            input_tokens: count(input),
+            output_tokens: count(output),
+            cache_read_tokens: count(cache_read),
+            cache_creation_tokens: count(cache_creation),
+            cost_usd: cost_usd.filter(|c| c.is_finite() && *c >= 0.0),
+        }
+    }
+
+    /// ¿Declaró algo? Un turno sin nada declarado no deja hecho.
+    pub(super) fn any(&self) -> bool {
+        [self.input_tokens, self.output_tokens, self.cache_read_tokens, self.cache_creation_tokens].iter().any(Option::is_some) || self.cost_usd.is_some()
+    }
+}
+
+/// `attempt.usage_reported` (LXO-249): el proveedor informó el uso de un turno del Attempt. Uno por turno (un Attempt con cola de
+/// instrucciones tiene varios); la suma por Attempt sale de ellos (`attempt_detail.usage`). Solo llevan los campos que el proveedor declaró,
+/// nunca un cero inventado. `provider` es el del Attempt: de quién viene el dato.
+#[derive(Serialize)]
+pub(super) struct AttemptUsageReported {
+    task: String,
+    n: i64,
+    provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_read_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_creation_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cost_usd: Option<f64>,
+}
+
+impl EventPayload for AttemptUsageReported {
+    const KIND: &'static str = "attempt.usage_reported";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_usage_reported(a: &AttemptRow, t: &TaskRow, usage: &ReportedUsage) -> Result<EventDraft, EventError> {
+    attempt_draft(
+        a,
+        t,
+        &AttemptUsageReported {
+            task: a.task_id.clone(),
+            n: a.n,
+            provider: a.provider.clone(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_creation_tokens: usage.cache_creation_tokens,
+            cost_usd: usage.cost_usd,
+        },
+    )
+}
+
 /// De dónde venía el claim de despacho cuando no se pudo probar su desenlace.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

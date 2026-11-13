@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 71] = [
+pub(super) const KINDS: [&str; 72] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -67,6 +67,7 @@ pub(super) const KINDS: [&str; 71] = [
     "attempt.instruction_requested",
     "attempt.instruction_result",
     "attempt.request_answered",
+    "attempt.usage_reported",
     "attempt.dispatch_ambiguous",
     "policy.changed",
     "race.requested",
@@ -674,6 +675,8 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             Visual::Info,
             vec![("task", id(p, "task")), ("n", number(p, "n")), ("kind", closed(p, "kind", &REQUEST_KINDS)), ("decision?", closed(p, "decision", &REQUEST_DECISIONS))],
         ),
+        // El uso del proveedor (LXO-249): solo el hecho. Los números están en `attempt_detail.usage`, no en la línea de tiempo.
+        "attempt.usage_reported" => rendered("activity.attempt.usage_reported", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",
             Visual::Info,
