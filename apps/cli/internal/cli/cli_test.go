@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,6 +89,20 @@ type harness struct {
 	out    *bytes.Buffer
 	errOut *bytes.Buffer
 	path   string
+}
+
+type firstWriteSignal struct {
+	writer io.Writer
+	ready  chan struct{}
+	once   sync.Once
+}
+
+func (w *firstWriteSignal) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		w.once.Do(func() { close(w.ready) })
+	}
+	return n, err
 }
 
 func newHarness(t *testing.T, g *fakeGateway, cfg map[string]any) *harness {
@@ -303,14 +318,22 @@ func TestChatOnceCancelDuringSilentStream(t *testing.T) {
 		<-r.Context().Done()
 	}
 	h := newHarness(t, g, map[string]any{"api_key": "k", "model": "m"})
+	firstOutput := make(chan struct{})
+	h.app.Stdout = &firstWriteSignal{writer: h.out, ready: firstOutput}
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(300*time.Millisecond, cancel)
 	done := make(chan int, 1)
 	go func() { done <- h.app.Run(ctx, []string{"chat", "--once", "x"}) }()
+	gotPartial := false
+	select {
+	case <-firstOutput:
+		gotPartial = true
+	case <-time.After(5 * time.Second):
+	}
+	cancel()
 	select {
 	case code := <-done:
-		if code != 0 || h.out.String() != "parcial\n" || !strings.Contains(h.errOut.String(), "interrumpido") {
-			t.Fatalf("code=%d stdout=%q stderr=%q", code, h.out, h.errOut)
+		if !gotPartial || code != 0 || h.out.String() != "parcial\n" || !strings.Contains(h.errOut.String(), "interrumpido") {
+			t.Fatalf("partial=%t code=%d stdout=%q stderr=%q", gotPartial, code, h.out, h.errOut)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("--once no salió tras cancelar")
