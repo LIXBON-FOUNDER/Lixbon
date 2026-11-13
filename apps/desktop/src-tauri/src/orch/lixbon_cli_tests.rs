@@ -75,8 +75,11 @@ fn un_cli_sin_worker_queda_bloqueado_y_uno_con_worker_se_verifica() {
     assert_eq!(p.status, Status::Blocked);
     assert!(p.reason.unwrap().contains("--profile"));
 
+    // Otra versión del CLI: la versión no decide (sus flags sí están en `worker --help`): lanzable, con un aviso.
     let otra_version = Probe { version: Some("9.9.9".into()), ..nuevo };
-    assert_eq!(policy(Profile::Explorar, Detected::Found(&otra_version)).status, Status::Unverified);
+    let p = policy(Profile::Explorar, Detected::Found(&otra_version));
+    assert_eq!(p.status, Status::Ok);
+    assert!(p.warnings.iter().any(|w| w.contains("Versión 9.9.9 sin probar por Lixbon")), "{:?}", p.warnings);
     assert_eq!(policy(Profile::Explorar, Detected::Missing).status, Status::Blocked);
 }
 

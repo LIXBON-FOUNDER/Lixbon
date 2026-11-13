@@ -30,8 +30,9 @@ fn plan_app_server() -> Plan {
     probe_from(true, Some("0.164.0"), Some(HELP), Some(EXEC_HELP), Some(Readiness::Ready))
 }
 
+/// El plan de una CLI SIN `app-server` en su --help (una versión vieja): solo `exec --json`. La versión da igual: decide lo que la CLI ofrece.
 fn plan_exec() -> Plan {
-    probe_from(true, Some("9.9.9"), Some(HELP), Some(EXEC_HELP), None)
+    probe_from(true, Some("0.100.0"), Some(&HELP.replace("app-server", "servidor")), Some(EXEC_HELP), None)
 }
 
 fn registro(plan: Plan, l: Arc<FakeLauncher>) -> AdapterRegistry {
@@ -112,27 +113,112 @@ fn el_probe_prefiere_app_server_en_una_version_verificada_y_declara_las_seis() {
     }
 }
 
+/// El canal se elige por lo que la CLI OFRECE, no por su número de versión: las CLI se actualizan solas y una lista de versiones
+/// permitidas rompería a Lixbon en cada release.
 #[test]
-fn una_version_sin_verificar_cae_a_exec_json_y_el_motivo_es_visible() {
-    let p = plan_exec();
-    assert_eq!(p.transport, Some(Transport::ExecJson));
-    assert_eq!(p.probe.transport.as_deref(), Some("exec_json"));
-    let motivo = p.reason.unwrap();
-    assert!(motivo.contains("9.9.9") && motivo.contains("0.164.0"), "{motivo}");
-    // LXO-137 · el respaldo viaja en el probe (y de ahí al contrato) con el mismo motivo.
-    assert_eq!(p.probe.transport_fallback.as_ref().map(|f| f.reason.as_str()), Some(motivo.as_str()));
-    let m = &p.probe.matrix;
-    assert!(m.is_available(Capability::Start) && m.is_available(Capability::Events));
-    for c in [Capability::Answer, Capability::Interrupt, Capability::Steer, Capability::Resume] {
-        assert_eq!(m.state(c), &CapabilityState::Unsupported, "{}", c.code());
+fn el_canal_se_elige_por_lo_que_la_cli_ofrece_y_no_por_su_version() {
+    for v in ["0.100.0", "0.162.1", "0.166.0", "0.170.0", "1.0.0", "9.9.9"] {
+        let p = probe_from(true, Some(v), Some(HELP), Some(EXEC_HELP), None);
+        assert_eq!(p.transport, Some(Transport::AppServer), "{v}");
+        assert!(p.reason.is_none() && p.probe.transport_fallback.is_none(), "{v}: con app-server no hay respaldo");
+        assert_eq!(p.probe.transport.as_deref(), Some("app_server"), "{v}");
+        assert!(p.probe.matrix.is_available(Capability::Resume) && p.probe.matrix.is_available(Capability::Steer), "{v}");
     }
+    // Sin app-server en la CLI: exec --json, con su motivo (da igual la versión).
+    for v in ["0.100.0", "0.164.0", "0.170.0"] {
+        let viejo = HELP.replace("app-server", "servidor");
+        let p = probe_from(true, Some(v), Some(&viejo), Some(EXEC_HELP), None);
+        assert_eq!(p.transport, Some(Transport::ExecJson), "{v}");
+        assert!(p.reason.as_deref().unwrap().contains("no incluye app-server"));
+        assert_eq!(p.probe.transport_fallback.as_ref().map(|f| f.reason.as_str()), p.reason.as_deref());
+        let m = &p.probe.matrix;
+        assert!(m.is_available(Capability::Start) && m.is_available(Capability::Events));
+        for c in [Capability::Answer, Capability::Interrupt, Capability::Steer, Capability::Resume] {
+            assert_eq!(m.state(c), &CapabilityState::Unsupported, "{v} {}", c.code());
+        }
+    }
+    // Ni app-server ni exec --json: bloqueada por flags, sea cual sea la versión.
+    let sin_nada = probe_from(true, Some("0.170.0"), Some(&HELP.replace("app-server", "servidor")), Some("sin json"), None);
+    assert!(matches!(sin_nada.probe.environment, Environment::Blocked { .. }));
+}
 
-    // Sin app-server en la CLI: también exec, con otro motivo.
-    let viejo = HELP.replace("app-server", "servidor");
-    let p = probe_from(true, Some("0.164.0"), Some(&viejo), Some(EXEC_HELP), None);
-    assert_eq!(p.transport, Some(Transport::ExecJson));
-    assert!(p.reason.unwrap().contains("no incluye app-server"));
-    assert!(p.probe.transport_fallback.unwrap().reason.contains("no incluye app-server"));
+/// Un reparto por subcomando: `app-server` al falso del protocolo y `exec` al falso de exec (o a un fallo si no hay).
+struct PorCanal {
+    app: Arc<FakeLauncher>,
+    exec: Option<Arc<FakeLauncher>>,
+}
+
+impl Launcher for PorCanal {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Arc<dyn Process>, AdapterError> {
+        if spec.args.first().map(String::as_str) == Some("app-server") {
+            return self.app.launch(spec);
+        }
+        match &self.exec {
+            Some(e) => e.launch(spec),
+            None => Err(AdapterError::provider("no se pudo lanzar codex exec")),
+        }
+    }
+}
+
+fn registro_por_canal(plan: Plan, l: PorCanal) -> AdapterRegistry {
+    let mut r = AdapterRegistry::new();
+    r.register(Arc::new(CodexAdapter::with_parts(cfg(), Arc::new(l), Arc::new(move || plan.clone())))).unwrap();
+    r
+}
+
+/// Una versión que cambió el protocolo: `app-server` no responde a `initialize`. El lanzamiento cae a `exec --json` y lo DICE (evento
+/// `Transport` degradado con el motivo): la versión nueva no rompe Lixbon.
+#[test]
+fn si_app_server_no_arranca_en_una_version_nueva_se_lanza_por_exec_y_lo_dice() {
+    let plan = probe_from(true, Some("0.166.0"), Some(HELP), Some(EXEC_HELP), None);
+    assert_eq!(plan.transport, Some(Transport::AppServer));
+    let mut s = script_of(NORMAL);
+    let r = respond_de(&mut s, "initialize");
+    r.as_object_mut().unwrap().remove("result");
+    r["error"] = json!({"code": -32601, "message": "método initialize desconocido en esta versión"});
+    let app = FakeLauncher::new(s);
+    let exec = FakeLauncher::new(script_of(EXEC));
+    let reg = registro_por_canal(plan, PorCanal { app: app.clone(), exec: Some(exec.clone()) });
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).expect("cae a exec en vez de fallar");
+    assert!(app.last().1.was_killed(), "el app-server que no respondió no queda vivo");
+    let mut got = vec![];
+    let outcome = g.events(&run, &cancel, &mut |e: AdapterEvent| got.push(e)).unwrap();
+    let AdapterEvent::Transport { kind, degraded, reason } = &got[0] else { panic!("{:?}", got[0]) };
+    assert_eq!((kind.as_str(), *degraded), ("exec_json", true));
+    let motivo = reason.as_deref().unwrap();
+    assert!(motivo.contains("app-server no arrancó en la versión 0.166.0") && motivo.contains("initialize"), "{motivo}");
+    assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
+    assert_eq!(salida(&got), ["OK"]);
+}
+
+/// Si exec tampoco puede lanzarse, vale el error de app-server (el primero): no se esconde.
+#[test]
+fn si_exec_tampoco_puede_el_error_es_el_de_app_server() {
+    let plan = probe_from(true, Some("0.166.0"), Some(HELP), Some(EXEC_HELP), None);
+    let mut s = script_of(NORMAL);
+    let r = respond_de(&mut s, "initialize");
+    r.as_object_mut().unwrap().remove("result");
+    r["error"] = json!({"code": -32601, "message": "método initialize desconocido en esta versión"});
+    let reg = registro_por_canal(plan, PorCanal { app: FakeLauncher::new(s), exec: None });
+    let e = reg.gated(ID).unwrap().start(start_req("proponer"), &CancelToken::new()).unwrap_err();
+    assert!(e.message.contains("initialize"), "{}", e.message);
+    assert!(!e.message.contains("no se pudo lanzar codex exec"), "{}", e.message);
+}
+
+/// Lo que NO es un problema del canal no cae al respaldo: un bloqueo del entorno (sandbox de Windows) se conserva como tal.
+#[test]
+fn un_bloqueo_del_entorno_no_cae_a_exec() {
+    let plan = probe_from(true, Some("0.166.0"), Some(HELP), Some(EXEC_HELP), Some(Readiness::Ready));
+    let mut s = script_of(NORMAL);
+    respond_de(&mut s, "windowsSandbox/readiness")["result"] = json!({"status": "notConfigured"});
+    let app = FakeLauncher::new(s);
+    let exec = FakeLauncher::new(script_of(EXEC));
+    let reg = registro_por_canal(plan, PorCanal { app, exec: Some(exec.clone()) });
+    let e = reg.gated(ID).unwrap().start(start_req("proponer"), &CancelToken::new()).unwrap_err();
+    assert_eq!((e.code, e.env_block), (ErrorCode::EnvironmentBlocked, Some(EnvBlock::WindowsSandboxSetup)));
+    assert!(exec.launched.lock().unwrap().is_empty(), "no se lanza exec: el entorno impide Codex, no el canal");
 }
 
 #[test]
@@ -650,7 +736,7 @@ fn exec_json_start_events_finish_con_el_canal_degradado_visible() {
     let (got, outcome, l) = corre(plan_exec(), script_of(EXEC), "");
     let AdapterEvent::Transport { kind, degraded, reason } = &got[0] else { panic!("{:?}", got[0]) };
     assert_eq!((kind.as_str(), *degraded), ("exec_json", true));
-    assert!(reason.as_deref().unwrap().contains("9.9.9"), "{reason:?}");
+    assert!(reason.as_deref().unwrap().contains("no incluye app-server"), "{reason:?}");
     assert!(matches!(&got[1], AdapterEvent::SessionBound { provider_ref } if provider_ref.expose().starts_with("00000000-")));
     assert_eq!(salida(&got), ["OK"]);
     assert!(got.iter().any(|e| matches!(e, AdapterEvent::Usage { output_tokens: Some(5), .. })));

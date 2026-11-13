@@ -562,7 +562,8 @@ fn la_sonda_real_separa_la_evidencia_de_entorno_del_estado_de_version_y_modelo()
     };
     let completa = agents::EnvProof { cli_present: true, flags_supported: true, sandbox_not_elevated: false, sandbox_ready: false };
     assert_eq!((fijada.status, fijada.env_proof), (agents::Status::Ok, completa));
-    assert_eq!((sin_fijar.status, sin_fijar.env_proof), (agents::Status::Unverified, completa), "versión sin fijar: sus flags sí están en --help");
+    assert_eq!((sin_fijar.status, sin_fijar.env_proof), (agents::Status::Ok, completa), "versión sin fijar: sus flags sí están en --help, y la versión no decide");
+    assert!(sin_fijar.warnings.iter().any(|w| w.contains("sin probar por Lixbon")), "{:?}", sin_fijar.warnings);
     assert_eq!((modelo.status, modelo.env_proof), (agents::Status::Unverified, completa), "mark_model degrada el status, no la evidencia");
     // Sin ayuda legible o `Skip`: nada demostrado. Con ayuda legible pero sin los flags del perfil solo se demuestra la CLI.
     let sin_ayuda = con_sonda("claude", "explorar", None, wt, "9.9.9", false, true);
@@ -579,12 +580,14 @@ fn una_cli_funcional_de_version_no_fijada_levanta_cli_missing() {
     modo(SIN_CLI);
     pide(&e).expect_err("bloqueado");
     assert_eq!(bloqueos(&e), vec![("claude/explorar".to_string(), EnvBlock::CliMissing)]);
-    // Se instala una CLI que funciona, de una versión que Lixbon no tiene fijada: la policy es `unverified`.
+    // Se instala una CLI que funciona, de una versión que Lixbon no tiene fijada: la versión NO decide, la policy es `ok` (con un aviso).
     modo(VERSION_NO_FIJADA);
     let antes = head(&e.core);
-    let pendiente = pide(&e).expect("unverified no bloquea: queda pendiente (pide ack al aprobar)");
-    assert_eq!(pendiente["policy_status"], "unverified");
-    assert_eq!(e.core.list_pending_spawns()[0].policy.status, agents::Status::Unverified);
+    let pendiente = pide(&e).expect("una versión sin fijar no bloquea: queda pendiente de la aprobación de la persona");
+    assert_eq!(pendiente["policy_status"], "ok");
+    let pend = &e.core.list_pending_spawns()[0].policy;
+    assert_eq!(pend.status, agents::Status::Ok);
+    assert!(pend.warnings.iter().any(|w| w.contains("sin probar por Lixbon")), "{:?}", pend.warnings);
     let evs = desde(&e.core, antes);
     assert_eq!(kinds(&evs), vec!["environment.cleared", "attention.resolved", "spawn.requested", "attention.created"]);
     assert_eq!(cleared_de(&evs), vec![json!({ "profile": "explorar", "code": "cli_missing" })]);

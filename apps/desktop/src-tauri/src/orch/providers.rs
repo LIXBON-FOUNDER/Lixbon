@@ -53,16 +53,25 @@ fn m(id: &str, label: &str, verified: bool) -> ProviderModel {
     ProviderModel { id: id.into(), label: label.into(), verified }
 }
 
-/// Disponibilidad común: instalado y con versión verificada.
+/// Disponibilidad común: instalado y con una versión legible. El NÚMERO de versión no decide si se puede elegir: las CLI se actualizan solas
+/// y una lista de versiones permitidas deja el proveedor inservible en cuanto sale una nueva. Lo que decide es lo que la CLI ofrece de
+/// verdad (sus flags en `--help`, comprobados al lanzar: `cli_flags_unsupported`). Una versión que Lixbon no probó es un AVISO.
 fn availability(id: &str, installed: bool, version: Option<&str>) -> (bool, Option<String>) {
     if !installed {
         return (false, Some(format!("{id} no está instalado o no está en el PATH de Lixbon")));
     }
     match version {
         None => (false, Some(format!("no se pudo leer `{id} --version`"))),
-        Some(v) if agents::version_verified(id, v) => (true, None),
-        Some(v) => (false, Some(format!("versión {v} de {id} no verificada (verificadas: {})", agents::verified_versions(id).join(", ")))),
+        Some(_) => (true, None),
     }
+}
+
+/// El aviso de una versión que Lixbon no ha probado (`None` si es una de las probadas o no hay versión que juzgar).
+fn version_note(id: &str, installed: bool, version: Option<&str>) -> Option<String> {
+    let v = version.filter(|_| installed)?;
+    (!agents::version_verified(id, v)).then(|| {
+        format!("versión {v} de {id} sin probar por Lixbon (probadas: {}): se usa porque su --help ofrece lo que se necesita; si algo falla, es por esta versión", agents::verified_versions(id).join(", "))
+    })
 }
 
 /// Niveles entre paréntesis de la línea `--effort` del `--help` de Claude.
@@ -102,7 +111,7 @@ pub fn claude(installed: bool, version: Option<&str>, help: Option<&str>, init: 
     };
     Provider {
         id: "claude".into(), version: version.map(str::to_string), available, disabled_reason, models, efforts: claude_efforts(help), models_source: source.into(),
-        sandbox_elevated: false, warnings: vec![], blocked_profiles: vec![],
+        sandbox_elevated: false, warnings: version_note("claude", installed, version).into_iter().collect(), blocked_profiles: vec![],
     }
 }
 
@@ -155,12 +164,14 @@ pub fn codex(installed: bool, version: Option<&str>, debug_models: Option<&str>,
     let (available, disabled_reason) = availability("codex", installed, version);
     // Solo se lee config.toml: nunca se escribe.
     let elevated = config.and_then(agents::codex_windows_sandbox).as_deref() == Some("elevated");
-    let (warnings, blocked_profiles) = if elevated {
+    let note = version_note("codex", installed, version);
+    let (mut warnings, blocked_profiles) = if elevated {
         (vec![agents::WARN_ELEVATED_RW.to_string()],
          ["explorar", "proponer"].iter().map(|p| BlockedProfile { profile: p.to_string(), reason: agents::ELEVATED.into() }).collect())
     } else {
         (vec![], vec![])
     };
+    warnings.extend(note);
     let base = |models, efforts, source: &str| Provider {
         id: "codex".into(), version: version.map(str::to_string), available, disabled_reason: disabled_reason.clone(), models, efforts, models_source: source.into(),
         sandbox_elevated: elevated, warnings: warnings.clone(), blocked_profiles: blocked_profiles.clone(),
@@ -206,7 +217,7 @@ pub fn lixbon_cli(installed: bool, version: Option<&str>, worker_help: Option<&s
     let source = if models.is_empty() { "none" } else { "profiles" };
     Provider {
         id: agents::LIXBON_CLI.into(), version: version.map(str::to_string), available, disabled_reason, models, efforts: vec![],
-        models_source: source.into(), sandbox_elevated: false, warnings: vec![], blocked_profiles: vec![],
+        models_source: source.into(), sandbox_elevated: false, warnings: version_note(agents::LIXBON_CLI, installed, version).into_iter().collect(), blocked_profiles: vec![],
     }
 }
 
@@ -317,9 +328,16 @@ mod tests {
         assert!(!p.available && p.disabled_reason.as_deref().unwrap().contains("no está instalado"));
         let p = codex(true, None, None, None);
         assert!(!p.available && p.disabled_reason.as_deref().unwrap().contains("--version"));
+        // Una versión que Lixbon no probó NO deja la CLI no disponible: se puede elegir y lleva un aviso.
         let p = codex(true, Some("0.170.0"), Some(CODEX_MODELS), None);
-        assert!(!p.available && p.disabled_reason.as_deref().unwrap().contains("0.170.0 de codex no verificada"));
+        assert!(p.available && p.disabled_reason.is_none(), "{p:?}");
+        assert!(p.warnings.iter().any(|w| w.contains("versión 0.170.0 de codex sin probar por Lixbon")), "{:?}", p.warnings);
         assert!(!p.models.is_empty());
+        // Una probada no lleva aviso, y sin versión legible sigue sin poder elegirse.
+        assert!(codex(true, Some("0.162.1"), Some(CODEX_MODELS), None).warnings.is_empty());
+        let c = claude(true, Some("9.9.9"), None, None);
+        assert!(c.available && c.warnings.len() == 1);
+        assert!(claude(true, Some("2.1.296"), None, None).warnings.is_empty());
         let c = claude(false, None, None, None);
         assert_eq!((c.id.as_str(), c.available), ("claude", false));
         let v = serde_json::to_value(&p).unwrap();

@@ -43,10 +43,9 @@ use rpc::{Incoming, RpcError};
 
 pub const ID: &str = "codex";
 
-/// Versiones de Codex con el protocolo de `app-server` contrastado en una máquina real. Es DISTINTA de
-/// `agents::VERIFIED` (esa valida los flags de la CLI interactiva): `app-server` es experimental y su protocolo puede
-/// cambiar, así que solo se declara disponible donde se ha probado.
-pub const APP_SERVER_VERIFIED: [&str; 3] = ["0.162.1", "0.163.0", "0.164.0"];
+/// Versiones de Codex con el protocolo de `app-server` contrastado en una máquina real. Es solo DOCUMENTACIÓN: ya no decide el canal (eso lo
+/// decide lo que la CLI ofrece, y si `app-server` no arranca el lanzamiento cae a `exec --json`).
+pub const APP_SERVER_VERIFIED: [&str; 4] = ["0.162.1", "0.163.0", "0.164.0", "0.166.0"];
 
 const POLL: Duration = Duration::from_millis(50);
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -150,10 +149,12 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>, ex
         return plan(ProbeResult::ready(version, m), None, None);
     };
     let has_app_server = super::help_has(help, "app-server");
-    let verified = version.is_some_and(|v| APP_SERVER_VERIFIED.contains(&v));
     let exec_json = exec_help.is_some_and(|h| super::help_has(h, "--json"));
 
-    if has_app_server && verified {
+    // El canal moderno se elige por lo que la CLI OFRECE (`app-server` en su --help), no por su número de versión: las CLI se actualizan
+    // solas y una lista de versiones permitidas rompería a Lixbon en cada release. Si el protocolo cambió y `app-server` no arranca, el
+    // lanzamiento cae a `exec --json` con el motivo (ver `launch`).
+    if has_app_server {
         // El sandbox de Windows no está listo: es un bloqueo de ENTORNO (no «no disponible» ni un fallo), con su causa tipada.
         if matches!(readiness, Some(r) if r != Readiness::Ready) {
             let probe = ProbeResult::blocked(version, vec![EnvBlock::WindowsSandboxSetup]).with_transport(Transport::AppServer.code());
@@ -162,11 +163,7 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>, ex
         return plan(ProbeResult::ready(version, CapabilityMatrix::all_available()).with_transport(Transport::AppServer.code()), Some(Transport::AppServer), None);
     }
     if exec_json {
-        let reason = if !has_app_server {
-            "esta versión de Codex no incluye app-server".to_string()
-        } else {
-            format!("app-server sin verificar en la versión {} (verificadas: {})", version.unwrap_or("desconocida"), APP_SERVER_VERIFIED.join(", "))
-        };
+        let reason = "esta versión de Codex no incluye app-server".to_string();
         // Respaldo: solo start/events. exec resume existe pero no admite -s/-C y no está validado, así que no se declara.
         let m = CapabilityMatrix::new().with(Capability::Start, CapabilityState::Available).with(Capability::Events, CapabilityState::Available);
         return plan(ProbeResult::ready(version, m).with_transport(Transport::ExecJson.code()).with_transport_fallback(&reason), Some(Transport::ExecJson), Some(reason));
@@ -500,7 +497,17 @@ impl CodexAdapter {
         match plan.transport {
             Some(Transport::AppServer) => {
                 plan.probe.matrix.require(Capability::Start)?;
-                self.launch_app_server(attempt_id, worktree, prompt, profile, model, effort, resume)
+                match self.launch_app_server(attempt_id, worktree, prompt, profile, model, effort, resume) {
+                    // Una versión nueva puede haber cambiado el protocolo: si `app-server` no arranca o no entiende el protocolo (fallo del proveedor
+                    // o del adapter), se lanza por `exec --json` (sin reanudar: exec no lo ofrece) y el evento `Transport` dice que es un respaldo y
+                    // por qué. Un bloqueo del ENTORNO (el sandbox de Windows), una petición inválida o una cancelación NO caen al respaldo: no son
+                    // un problema del canal. Si exec tampoco puede, vale el error de arriba.
+                    Err(e) if resume.is_none() && matches!(e.code, ErrorCode::Provider | ErrorCode::Internal) => {
+                        let why = format!("app-server no arrancó en la versión {} ({}): se usa exec --json", plan.probe.cli_version.as_deref().unwrap_or("desconocida"), e.message.chars().take(160).collect::<String>());
+                        self.launch_exec(attempt_id, worktree, prompt, profile, model, effort, Some(why)).map_err(|_| e)
+                    }
+                    other => other,
+                }
             }
             Some(Transport::ExecJson) => {
                 if resume.is_some() {
