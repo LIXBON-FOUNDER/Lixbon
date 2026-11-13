@@ -90,7 +90,7 @@ mod tests {
         let cut = core.storage.with_store(|store| agentic_cut::run(store, &core_dir, &data, "task-create-test"))
             .unwrap().unwrap();
         assert!(matches!(cut, agentic_cut::CutReport::Applied { .. }), "{cut:?}");
-        core.shutdown();
+        crate::orch::pty::pruebas::apaga_en_serie(&core);
         suelta(core, &core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
@@ -107,7 +107,7 @@ mod tests {
 
     /// Reinicia el Core sobre las mismas carpetas, como un cierre y arranque de la aplicación.
     fn restart(core: Arc<Core>, data: &std::path::Path, core_dir: &std::path::Path) -> Arc<Core> {
-        core.shutdown();
+        crate::orch::pty::pruebas::apaga_en_serie(&core);
         suelta(core, core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), data, core_dir).unwrap();

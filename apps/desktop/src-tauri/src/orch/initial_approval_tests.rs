@@ -239,7 +239,7 @@ pub(super) mod e2e {
     pub(in crate::orch) fn restart_fixture_core(core: Arc<Core>) -> Arc<Core> {
         let key = Arc::as_ptr(&core) as usize;
         let (data, core_dir) = dirs_of_live_core(&FIXTURE_DIRS.lock().unwrap_or_else(|e| e.into_inner()), key).expect("el Core no viene de la fixture");
-        core.shutdown();
+        crate::orch::pty::pruebas::apaga_en_serie(&core);
         suelta(core, &core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();
@@ -276,7 +276,7 @@ pub(super) mod e2e {
             .unwrap();
         let cut = core.storage.with_store(|store| agentic_cut::run(store, &core_dir, &data, "initial-approval-e2e")).unwrap().unwrap();
         assert!(matches!(cut, agentic_cut::CutReport::Applied { .. }), "{cut:?}");
-        core.shutdown();
+        crate::orch::pty::pruebas::apaga_en_serie(&core);
         suelta(core, &core_dir);
         let core = Orch::default().0;
         core.init_in(RecordingHost::new(), &data, &core_dir).unwrap();

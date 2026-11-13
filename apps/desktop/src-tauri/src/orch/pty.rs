@@ -1192,11 +1192,43 @@ pub(crate) mod pruebas {
         r
     }
 
-    /// La custodia es global y `Core::shutdown` la vacía entera (mata lo que encuentre): las pruebas que la tocan, o que
-    /// lo invocan, van de una en una.
-    pub fn serie_custodia() -> std::sync::MutexGuard<'static, ()> {
+    /// La serie de las pruebas de custodia: mientras se tiene, ninguna otra prueba toca la custodia ni apaga un Core.
+    /// REENTRANTE por hilo: quien ya la tiene y vuelve a pedirla (una prueba de custodia que arranca una fixture que apaga un Core)
+    /// no se bloquea a sí mismo.
+    pub struct SerieCustodia {
+        _guard: Option<std::sync::MutexGuard<'static, ()>>,
+    }
+
+    thread_local! {
+        static EN_SERIE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    impl Drop for SerieCustodia {
+        fn drop(&mut self) {
+            if self._guard.is_some() {
+                EN_SERIE.with(|e| e.set(false));
+            }
+        }
+    }
+
+    /// La custodia es global y `Core::shutdown` la vacía entera (`reap_unowned`: mata lo que encuentre, de cualquier prueba, y
+    /// los matadores rotos de una prueba son LOCALES a su hilo, así que el barrido de otra los deja funcionar de verdad): las
+    /// pruebas que la tocan, o que apagan un Core, van de una en una. Para apagar un Core desde una fixture, `apaga_en_serie`.
+    pub fn serie_custodia() -> SerieCustodia {
         static SERIE: Mutex<()> = Mutex::new(());
-        SERIE.lock().unwrap_or_else(|e| e.into_inner())
+        if EN_SERIE.with(|e| e.get()) {
+            return SerieCustodia { _guard: None };
+        }
+        let guard = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        EN_SERIE.with(|e| e.set(true));
+        SerieCustodia { _guard: Some(guard) }
+    }
+
+    /// Apaga un Core (`Core::shutdown`, que barre la custodia global) sin pisar a una prueba de custodia que corra a la vez. Es lo que
+    /// deben usar las fixtures de pruebas en vez de `core.shutdown()` a pelo (LXO-238).
+    pub fn apaga_en_serie(core: &super::super::Core) {
+        let _serie = serie_custodia();
+        core.shutdown();
     }
 
     /// ¿Está libre el mutex global de la custodia? Una prueba lo consulta MIENTRAS un matador corre: si estuviera
