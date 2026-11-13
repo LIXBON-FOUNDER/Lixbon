@@ -349,3 +349,78 @@ fn real_uso_con_las_cli_instaladas() {
     let texto = v.to_string();
     assert!(!super::context_package::contains_secret(&texto), "la respuesta no debe llevar nada con forma de credencial");
 }
+
+/// LXO-207 · `lxo usage` con el binario real, como persona, contra el HTTP de un Core con el registro de las
+/// pruebas (adapters simulados, sin CLI real ni cuenta): lxo espera al primer informe (la query del Core nunca consulta), enseña los mismos
+/// proveedores y la misma declaración de soporte que el Core, los filtros no descartan en silencio, y el agente, el filtro inválido, el
+/// proveedor inexistente y el Core cerrado dan sus códigos. Los casos con dato (ventanas, créditos, modelos, stale) los cubren las pruebas
+/// unitarias de lxo con la fixture. Requiere `LXO_BIN`; usa el almacén seguro real.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_usage_person_real_store() {
+    use super::projects_overview_tests::RealStoreServer;
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+    let me = persona(&core, "ana", "install-lxo-usage-e2e", "ana-lxo-usage-e2e-secret-0123456789");
+    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+
+    let uso = server.json(&["usage", "--json"]);
+    assert_eq!((uso["v"].as_u64(), uso["status"].as_str()), (Some(1), Some("ready")), "{uso}");
+    let del_core = rpc(&core, &me, "usage_report", json!({})).unwrap();
+    assert_eq!(del_core["status"], "ready");
+    let (de_lxo, de_core) = (uso["providers"].as_array().unwrap(), del_core["report"]["providers"].as_array().unwrap());
+    assert!(!de_core.is_empty(), "el Core informa al menos un proveedor");
+    assert_eq!(de_lxo.len(), de_core.len());
+    for cp in de_core {
+        let id = cp["provider"].as_str().unwrap();
+        let lp = de_lxo.iter().find(|p| p["provider"] == id).unwrap_or_else(|| panic!("lxo no enseña {id}"));
+        // Qué informa cada proveedor lo dice el Core (la declaración de soporte no cambia entre lecturas); lxo no la completa.
+        for campo in ["windows", "tokens", "credits", "plan", "cost"] {
+            assert_eq!(lp["support"][campo]["state"], cp["support"]["fields"][campo]["state"], "{id} {campo}");
+        }
+        // Sin dato no es cero: lo que el Core no da, lxo lo deja null y nunca lo rellena.
+        if cp.get("snapshot").is_none() {
+            assert!(lp["snapshot"].is_null(), "{id}: sin snapshot en el Core, null en lxo");
+        }
+        // Ningún identificador de cuenta en claro: solo la huella de 8 hex.
+        if let Some(cuenta) = lp["snapshot"]["account"].as_str() {
+            assert!(cuenta.len() == 8 && cuenta.bytes().all(|b| b.is_ascii_hexdigit()), "{id}: {cuenta}");
+        }
+    }
+    assert!(uso.get("excluded").is_some() && uso["filters"] == json!({ "provider": null, "model": null, "account": null }));
+    let humano = text(&server.lxo(&["usage"], None).stdout);
+    assert!(humano.starts_with("Uso de los proveedores · informe "), "{humano}");
+    assert!(humano.contains("Sin totales"), "{humano}");
+    println!("{humano}");
+
+    // Filtros: un proveedor (sin distinguir mayúsculas), y modelo/cuenta que no descartan en silencio a los que no informan.
+    let primero = de_core[0]["provider"].as_str().unwrap();
+    let uno = server.json(&["usage", "--provider", &primero.to_uppercase(), "--json"]);
+    assert_eq!(uno["providers"].as_array().unwrap().len(), 1);
+    assert_eq!(uno["providers"][0]["provider"], primero);
+    let por_modelo = server.json(&["usage", "--model", "modelo-que-no-existe", "--json"]);
+    assert!(por_modelo["providers"].as_array().unwrap().is_empty());
+    let por_cuenta = server.json(&["usage", "--account", "00000000", "--json"]);
+    assert!(por_cuenta["providers"].as_array().unwrap().is_empty());
+    let todos = |v: &Value| -> usize { ["model_unknown", "account_unknown"].iter().map(|k| v["excluded"][*k].as_array().unwrap().len()).sum() };
+    assert!(todos(&por_modelo) + todos(&por_cuenta) <= 2 * de_core.len());
+    assert!(text(&server.lxo(&["usage", "--model", "modelo-que-no-existe"], None).stdout).contains("Ningún proveedor cumple estos filtros."));
+
+    // Códigos: proveedor inexistente 6; uso inválido 2.
+    let falta = server.lxo(&["usage", "--provider", "no-existe", "--json"], None);
+    assert_eq!(falta.status.code(), Some(6));
+    let error: Value = serde_json::from_slice(&falta.stderr).unwrap();
+    assert_eq!(error["code"], "not_found", "{error}");
+    for args in [&["usage", "x"][..], &["usage", "--account", "123"], &["usage", "--json=si"], &["usage", "--provider"]] {
+        assert_eq!(server.lxo(args, None).status.code(), Some(2), "{args:?}");
+    }
+
+    // Solo personas: un agente recibe 3. Y con el Core cerrado, 5.
+    let token = "agent-lxo-usage-e2e-token-with-32-bytes-minimum";
+    super::projects_overview_tests::registra_agente(&core, "t-agente", "install-agent-lxo-usage-e2e", token);
+    let como_agente = server.lxo(&["usage"], Some(("t-agente", token)));
+    assert_eq!(como_agente.status.code(), Some(3), "{}", text(&como_agente.stderr));
+    assert!(text(&como_agente.stderr).contains("solo para personas"), "{}", text(&como_agente.stderr));
+    core.stop_server_with(&server.discovery);
+    assert_eq!(server.lxo(&["usage"], None).status.code(), Some(5), "Lixbon cerrado");
+}

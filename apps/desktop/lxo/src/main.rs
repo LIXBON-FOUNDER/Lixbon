@@ -12,10 +12,13 @@ mod activity;
 mod attempts;
 mod attention;
 mod client_auth;
+mod context;
 mod events;
 mod projects;
+mod provider;
 mod summary;
 mod tasks;
+mod usage;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
 const WORKER: &str = include_str!("../guide/worker.md");
@@ -50,6 +53,17 @@ Coordinador (el agente con el que habla el usuario):
                                                   (solo lectura y solo personas)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
+  lxo provider list [--refresh] [--json]
+  lxo provider status <proveedor> [--capability C] [--attempt ID] [--refresh] [--json]
+                                                  qué ofrece cada proveedor según el Core: capabilities, entorno
+                                                  (bloqueado ≠ fallido) y sesión de un intento (solo lectura y solo personas)
+  lxo context show <archivo|-> [--json]
+  lxo context validate <archivo|-> [--json]
+                                                  revisa un ContextPackage v1 de un archivo con la verificación del Core
+                                                  (solo lectura y solo personas; rechazado → 7 y sin mostrar su contenido)
+  lxo usage [--provider P] [--model M] [--account A] [--refresh] [--json]
+                                                  uso y límites de cada proveedor según el Core (solo lectura y solo personas;
+                                                  desconocido ≠ cero; no es el `lixbon usage` del CLI de Go)
   lxo summary [--json]                             resumen del trabajo activo y la Attention (solo cuenta)
   lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
                                                   Lixbon (solo personas; se pierde lo posterior al corte)
@@ -1028,6 +1042,15 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
+    }
+    if a.at(0).as_deref() == Some("provider") {
+        return provider::run(&a);
+    }
+    if a.at(0).as_deref() == Some("usage") {
+        return usage::run(&a);
+    }
+    if a.at(0).as_deref() == Some("context") {
+        return context::run(&a);
     }
     // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
     if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {

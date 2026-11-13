@@ -740,12 +740,39 @@ impl RealStoreServer {
         command.output().unwrap()
     }
 
+    /// `lxo` como persona con `input` por la entrada estándar (el paquete de `lxo context show -`).
+    pub(super) fn lxo_stdin(&self, args: &[&str], input: &[u8]) -> std::process::Output {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut child = std::process::Command::new(&self.binary)
+            .args(args)
+            .env("USERPROFILE", &self.home)
+            .env("HOME", &self.home)
+            .env_remove("LXO_TASK_ID")
+            .env_remove("LXO_CLIENT_TOKEN")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Si lxo termina sin leer todo (un archivo enorme), la escritura se corta: no es un fallo de la prueba.
+        let _ = child.stdin.take().unwrap().write_all(input);
+        child.wait_with_output().unwrap()
+    }
+
     /// Salida JSON de un `lxo` que debe terminar bien.
     pub(super) fn json(&self, args: &[&str]) -> Value {
         let out = self.lxo(args, None);
         assert!(out.status.success(), "lxo {args:?}: {:?} stderr={}", out.status.code(), String::from_utf8_lossy(&out.stderr));
         serde_json::from_slice(&out.stdout).unwrap()
     }
+}
+
+/// Registra la credencial de un agente (la de una tarea) con vigencia desde ahora, para comprobar que una lectura de personas lo rechaza.
+pub(super) fn registra_agente(core: &Core, task: &str, installation: &str, token: &str) {
+    let registration = crate::store::ClientRegistration::new(crate::store::ClientSurface::Cli, crate::store::DeviceIdentity::new(installation, None).unwrap()).unwrap();
+    let credential = crate::store::ClientCredential::new(crate::store::ClientPrincipal::Agent(task.into()), token).unwrap();
+    core.storage.with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64).unwrap()).unwrap();
 }
 
 impl Drop for RealStoreServer {

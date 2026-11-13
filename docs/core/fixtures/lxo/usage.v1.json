@@ -1,0 +1,169 @@
+{
+  "excluded": {
+    "account_unknown": [],
+    "model_unknown": []
+  },
+  "filters": {
+    "account": null,
+    "model": null,
+    "provider": null
+  },
+  "generated_at_ms": 1800000000000,
+  "providers": [
+    {
+      "age_ms": 0,
+      "error": null,
+      "provider": "codex",
+      "snapshot": {
+        "account": "e7cbf1f7",
+        "credits": {
+          "balance": "42",
+          "has_credits": true,
+          "unlimited": false
+        },
+        "limit_reached": false,
+        "models": [
+          {
+            "cost_usd": 0.5,
+            "input_tokens": 10,
+            "model": "m1",
+            "output_tokens": 20
+          }
+        ],
+        "observed_at_ms": 1800000000000,
+        "plan": "plus",
+        "provenance": "provider_query",
+        "windows": [
+          {
+            "id": "primary",
+            "minutes": 300,
+            "resets_at": 1800003600,
+            "used_percent": 12.0
+          },
+          {
+            "id": "secondary",
+            "minutes": 300,
+            "resets_at": 1800003600,
+            "used_percent": 3.0
+          }
+        ]
+      },
+      "status": "fresh",
+      "support": {
+        "cost": {
+          "state": "available"
+        },
+        "credits": {
+          "state": "available"
+        },
+        "plan": {
+          "state": "available"
+        },
+        "tokens": {
+          "state": "available"
+        },
+        "windows": {
+          "state": "available"
+        }
+      },
+      "throttled": false
+    },
+    {
+      "age_ms": 120000,
+      "error": null,
+      "provider": "claude",
+      "snapshot": {
+        "account": null,
+        "credits": null,
+        "limit_reached": null,
+        "models": [],
+        "observed_at_ms": 1799999880000,
+        "plan": null,
+        "provenance": "run_observation",
+        "windows": [
+          {
+            "id": "five_hour",
+            "minutes": null,
+            "resets_at": 1800003600,
+            "used_percent": null
+          }
+        ]
+      },
+      "status": "fresh",
+      "support": {
+        "cost": {
+          "state": "unsupported"
+        },
+        "credits": {
+          "state": "unsupported"
+        },
+        "plan": {
+          "state": "unsupported"
+        },
+        "tokens": {
+          "state": "unsupported"
+        },
+        "windows": {
+          "state": "available"
+        }
+      },
+      "throttled": false
+    },
+    {
+      "age_ms": null,
+      "error": {
+        "kind": "auth_required",
+        "message": "el proveedor pide iniciar sesión"
+      },
+      "provider": "otro",
+      "snapshot": null,
+      "status": "unknown",
+      "support": {
+        "cost": {
+          "state": "available"
+        },
+        "credits": {
+          "state": "available"
+        },
+        "plan": {
+          "state": "available"
+        },
+        "tokens": {
+          "state": "available"
+        },
+        "windows": {
+          "state": "available"
+        }
+      },
+      "throttled": false
+    },
+    {
+      "age_ms": null,
+      "error": null,
+      "provider": "minimo",
+      "snapshot": null,
+      "status": "unsupported",
+      "support": {
+        "cost": {
+          "state": "unsupported"
+        },
+        "credits": {
+          "state": "unsupported"
+        },
+        "plan": {
+          "state": "unsupported"
+        },
+        "tokens": {
+          "state": "unsupported"
+        },
+        "windows": {
+          "state": "unsupported"
+        }
+      },
+      "throttled": false
+    }
+  ],
+  "refreshing": false,
+  "status": "ready",
+  "v": 1
+}

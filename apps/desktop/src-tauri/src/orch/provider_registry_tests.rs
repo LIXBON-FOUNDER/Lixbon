@@ -236,3 +236,93 @@ fn real_capabilities_con_las_cli_instaladas() {
         assert_eq!(p["matrix"]["capabilities"].as_object().unwrap().len(), 6);
     }
 }
+
+/// LXO-137 · `lxo provider list` y `lxo provider status` con el binario real, como persona, contra el HTTP de un Core con el registro de
+/// las pruebas (adapters simulados `claude` y `codex`: no lanza ninguna CLI real ni toca ninguna cuenta): lo que enseña lxo es, proveedor por
+/// proveedor y capability por capability, lo que dice el Core; los códigos de salida de `status` salen del estado de lo que se mira
+/// (listo/disponible 0, bloqueado por el entorno 8, unavailable 7, unsupported 9); y el agente, el proveedor inexistente, el uso inválido y el
+/// Core cerrado dan sus códigos. Los estados bloqueado/unavailable los cubren las pruebas unitarias de lxo con la fixture. Requiere `LXO_BIN`;
+/// usa el almacén seguro real.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_provider_person_real_store() {
+    use super::projects_overview_tests::RealStoreServer;
+    let (cleanup, data, _core_dir, core) = core_listo();
+    let server = RealStoreServer::start(&core, &data, &cleanup.0);
+    let me = persona(&core, "ana", "install-lxo-provider-e2e", "ana-lxo-provider-e2e-secret-0123456789");
+    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
+    const CAPS: [&str; 6] = ["start", "events", "answer", "interrupt", "steer", "resume"];
+
+    // La query del Core nunca sondea: la primera lectura puede ser `probing` y lxo espera al primer sondeo por su cuenta.
+    let lista = server.json(&["provider", "list", "--json"]);
+    assert_eq!((lista["v"].as_u64(), lista["status"].as_str()), (Some(1), Some("ready")), "{lista}");
+    let del_core = rpc(&core, &me, "provider_capabilities", json!({})).unwrap();
+    let (de_lxo, de_core) = (lista["providers"].as_array().unwrap(), del_core["providers"].as_array().unwrap());
+    assert!(!de_core.is_empty(), "el Core registra al menos un proveedor");
+    assert_eq!(de_lxo.len(), de_core.len());
+
+    for cp in de_core {
+        let id = cp["id"].as_str().unwrap();
+        let lp = de_lxo.iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("lxo no enseña {id}"));
+        // Lo que enseña lxo es lo que dice el Core.
+        assert_eq!(lp["cli_version"], cp["cli_version"], "{id}");
+        assert_eq!(lp["environment"]["state"], cp["environment"]["state"], "{id}");
+        let bloqueado = cp["environment"]["state"] == "blocked";
+        for cap in CAPS {
+            assert_eq!(lp["capabilities"][cap]["state"], cp["matrix"]["capabilities"][cap]["state"], "{id} {cap}");
+        }
+        // `status` sin capability mira el entorno: bloqueado ≠ fallido, con su propio código.
+        let entorno = server.lxo(&["provider", "status", id, "--json"], None);
+        assert_eq!(entorno.status.code(), Some(if bloqueado { 8 } else { 0 }), "{id}: {}", text(&entorno.stderr));
+        let doc: Value = serde_json::from_slice(&entorno.stdout).unwrap();
+        assert_eq!(doc["provider"]["id"], id);
+        assert_eq!(doc["check"]["scope"], "environment");
+        // Con capability, el código sale del estado de esa capability.
+        for cap in CAPS {
+            let quiere = match cp["matrix"]["capabilities"][cap]["state"].as_str().unwrap() {
+                "unavailable" => 7,
+                "environment_blocked" => 8,
+                "unsupported" => 9,
+                _ => 0,
+            };
+            let out = server.lxo(&["provider", "status", id, "--capability", cap, "--json"], None);
+            assert_eq!(out.status.code(), Some(quiere), "{id} {cap}: {}", text(&out.stderr));
+            assert_eq!(serde_json::from_slice::<Value>(&out.stdout).unwrap()["check"]["capability"], cap);
+        }
+        // En texto salen las seis y, si el entorno está bloqueado, se dice que no es un intento fallido.
+        let humano = text(&server.lxo(&["provider", "status", id], None).stdout);
+        for cap in CAPS {
+            assert!(humano.contains(&format!("  {cap:<10} ")), "{id}: falta {cap}: {humano}");
+        }
+        assert_eq!(humano.contains("No es un intento fallido."), bloqueado, "{id}: {humano}");
+    }
+    let humano = text(&server.lxo(&["provider", "list"], None).stdout);
+    assert!(humano.starts_with("Proveedores del Core · generación "), "{humano}");
+    println!("{humano}");
+
+    // `--refresh` pide un sondeo y espera a que termine: la respuesta sigue siendo la del Core.
+    let refrescada = server.json(&["provider", "list", "--refresh", "--json"]);
+    assert_eq!((refrescada["status"].as_str(), refrescada["providers"].as_array().map(Vec::len)), (Some("ready"), Some(de_core.len())));
+
+    // Proveedor inexistente: 6 y los ids que hay. Uso inválido: 2.
+    let falta = server.lxo(&["provider", "status", "no-existe", "--json"], None);
+    assert_eq!(falta.status.code(), Some(6));
+    let error: Value = serde_json::from_slice(&falta.stderr).unwrap();
+    assert_eq!(error["code"], "not_found", "{error}");
+    assert!(error["error"].as_str().unwrap().contains(de_core[0]["id"].as_str().unwrap()), "{error}");
+    for args in [&["provider"][..], &["provider", "status"], &["provider", "status", "x", "--capability", "volar"], &["provider", "list", "--capability", "start"]] {
+        assert_eq!(server.lxo(args, None).status.code(), Some(2), "{args:?}");
+    }
+    // Sin el modelo Task/Attempt cortado, `--attempt` no encuentra el intento y no inventa uno.
+    let sin_intento = server.lxo(&["provider", "status", de_core[0]["id"].as_str().unwrap(), "--attempt", "t9-a9"], None);
+    assert_ne!(sin_intento.status.code(), Some(0), "{}", text(&sin_intento.stdout));
+
+    // Solo personas: un agente recibe 3. Y con el Core cerrado, 5.
+    let token = "agent-lxo-provider-e2e-token-with-32-bytes-minimum";
+    super::projects_overview_tests::registra_agente(&core, "t-agente", "install-agent-lxo-provider-e2e", token);
+    let como_agente = server.lxo(&["provider", "list"], Some(("t-agente", token)));
+    assert_eq!(como_agente.status.code(), Some(3), "{}", text(&como_agente.stderr));
+    assert!(text(&como_agente.stderr).contains("solo para personas"), "{}", text(&como_agente.stderr));
+    core.stop_server_with(&server.discovery);
+    assert_eq!(server.lxo(&["provider", "list"], None).status.code(), Some(5), "Lixbon cerrado");
+}
