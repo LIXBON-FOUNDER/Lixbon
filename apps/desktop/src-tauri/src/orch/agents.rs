@@ -129,7 +129,7 @@ impl Profile {
 }
 
 /// Versiones cuyo `--help` se revisó contra la tabla de perfiles.
-const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.159.0", "0.162.1"]), (LIXBON_CLI, &["2.3.0"])];
+const VERIFIED: &[(&str, &[&str])] = &[("claude", &["2.1.296"]), ("codex", &["0.159.0", "0.162.1", "0.166.0"]), (LIXBON_CLI, &["2.3.0"])];
 
 pub fn verified_versions(provider: &str) -> &'static [&'static str] {
     VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[])
@@ -594,12 +594,13 @@ pub fn evaluate(provider: &str, profile: Profile, worktree: &str, detected: Dete
                 return pol;
             }
             let verified = VERIFIED.iter().find(|(id, _)| *id == provider).map(|(_, v)| *v).unwrap_or(&[]);
-            let mut pol = match version.as_deref() {
-                Some(v) if verified.contains(&v) => ok(Status::Ok, version.clone(), None),
-                v => ok(Status::Unverified, version.clone(), Some(format!(
-                    "Versión {} no verificada (verificadas: {}); sus flags sí aparecen en --help",
-                    v.unwrap_or("desconocida"), verified.join(", ")))),
-            };
+            // La versión NO decide: las CLI se actualizan solas y una lista cerrada las rompería a cada release. Decide lo que la CLI ofrece
+            // (todos los flags del perfil están en su --help, comprobado arriba; si faltan, `cli_flags_unsupported`). Una versión que Lixbon no
+            // probó es un AVISO, no pide confirmación.
+            let mut pol = ok(Status::Ok, version.clone(), None);
+            if let Some(v) = version.as_deref().filter(|v| !verified.contains(v)) {
+                pol.warnings.push(format!("Versión {v} sin probar por Lixbon (probadas: {}); sus flags sí aparecen en --help", verified.join(", ")));
+            }
             // La evidencia de entorno no depende de la versión: CLI hallada con ayuda legible y todos los flags presentes.
             pol.env_proof = EnvProof {
                 cli_present: true,
@@ -1262,10 +1263,12 @@ mod tests {
         let sin_plan = CLAUDE_HELP.replace("\"plan\"", "\"x\"");
         let p = evaluate("claude", Profile::Explorar, "wt", Detected::Found(&probe("2.1.296", &sin_plan)), false);
         assert_eq!(p.reason.as_deref(), Some("Claude Code 2.1.296 no admite: --permission-mode plan"));
-        // CLI ausente: bloqueado; versión no revisada: sin verificar pero lanzable.
+        // CLI ausente: bloqueado; versión que Lixbon no probó: lanzable SIN confirmación (la versión no decide: sus flags sí están en --help).
         assert_eq!(evaluate("claude", Profile::Explorar, "wt", Detected::Missing, false).status, Status::Blocked);
         let p = evaluate("claude", Profile::DelegarConRevision, "wt", Detected::Found(&probe("2.2.0", CLAUDE_HELP)), false);
-        assert_eq!(p.status, Status::Unverified);
+        assert_eq!(p.status, Status::Ok);
+        assert!(p.warnings.iter().any(|w| w.contains("Versión 2.2.0 sin probar por Lixbon")), "{:?}", p.warnings);
+        assert!(authorize(&p, None, false).is_ok(), "no pide ack_unverified");
         assert!(launch_with(&p, None, None, "x").is_ok());
         assert_eq!(evaluate("claude", Profile::DelegarConRevision, "wt", Detected::Found(&probe("2.1.296", CLAUDE_HELP)), false).status, Status::Ok);
     }
@@ -1304,13 +1307,34 @@ mod tests {
         assert!(!help_has("--sandbox-x", "--sandbox"));
     }
 
+    /// Una política `Ok` (versión probada) o `Unverified`. La versión ya NO degrada el estado: se degrada con un modelo que la CLI no lista.
     fn con(status: Status) -> Policy {
         let mut p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.162.1", CODEX_HELP)), false);
         if status == Status::Unverified {
-            p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.170.0", CODEX_HELP)), false);
+            mark_model(&mut p, Some("gpt-6.1-sol"), Some(false));
         }
         assert_eq!(p.status, status);
         p
+    }
+
+    /// Las CLI se actualizan solas: una versión que Lixbon no probó se puede usar, con un aviso y sin pedir confirmación.
+    #[test]
+    fn una_version_nueva_de_la_cli_no_la_rompe() {
+        for v in ["0.170.0", "0.180.0", "1.0.0", "9.9.9"] {
+            for prof in [Profile::Explorar, Profile::Proponer, Profile::DelegarConRevision] {
+                let p = evaluate("codex", prof, "wt", Detected::Found(&probe(v, CODEX_HELP)), false);
+                assert_eq!(p.status, Status::Ok, "{v} {prof:?}: {:?}", p.reason);
+                assert!(p.warnings.iter().any(|w| w.contains(&format!("Versión {v} sin probar por Lixbon"))), "{v}: {:?}", p.warnings);
+                assert!(authorize(&p, None, false).is_ok(), "{v}: no pide ack_unverified");
+            }
+        }
+        // Una versión probada no lleva aviso.
+        let p = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&probe("0.162.1", CODEX_HELP)), false);
+        assert!(p.warnings.iter().all(|w| !w.contains("sin probar")), "{:?}", p.warnings);
+        // Lo que sí decide es lo que la CLI ofrece: sin los flags del perfil, bloqueada aunque la versión sea nueva.
+        let sin_flag = Probe { exec_help: Some(CODEX_EXEC_HELP_162.replace("--output-last-message", "--x")), ..probe("0.170.0", CODEX_HELP) };
+        let b = evaluate("codex", Profile::Explorar, "wt", Detected::Found(&sin_flag), false);
+        assert_eq!((b.status, b.block), (Status::Blocked, Some(BlockCause::Environment(EnvBlock::CliFlagsUnsupported))));
     }
 
     #[test]
@@ -1336,7 +1360,7 @@ mod tests {
     fn sin_verificar_con_confirmacion_lanza_y_lo_registra() {
         let p = con(Status::Unverified);
         let rec = authorize(&p, Some(&p.argv), true).unwrap();
-        assert_eq!(rec, PolicyRecord { profile: "explorar".into(), cli_version: Some("0.170.0".into()), policy_status: Status::Unverified, ack_unverified: true });
+        assert_eq!(rec, PolicyRecord { profile: "explorar".into(), cli_version: Some("0.162.1".into()), policy_status: Status::Unverified, ack_unverified: true });
         // Una versión verificada no necesita confirmación; el registro dice ok y sin ack.
         let rec = authorize(&con(Status::Ok), None, true).unwrap();
         assert_eq!(rec, PolicyRecord { profile: "explorar".into(), cli_version: Some("0.162.1".into()), policy_status: Status::Ok, ack_unverified: false });
@@ -1346,7 +1370,7 @@ mod tests {
     fn registro_del_intento_con_nombres_de_attempts() {
         let rec = authorize(&con(Status::Unverified), None, true).unwrap();
         let v = serde_json::to_value(&rec).unwrap();
-        assert_eq!(v, json!({ "profile": "explorar", "cli_version": "0.170.0", "policy_status": "unverified", "ack_unverified": true }));
+        assert_eq!(v, json!({ "profile": "explorar", "cli_version": "0.162.1", "policy_status": "unverified", "ack_unverified": true }));
         let back: PolicyRecord = serde_json::from_value(v).unwrap();
         assert_eq!(back, rec);
     }

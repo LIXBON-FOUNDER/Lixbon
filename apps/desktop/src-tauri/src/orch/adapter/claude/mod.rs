@@ -148,19 +148,15 @@ pub fn probe_from(installed: bool, version: Option<&str>, help: Option<&str>) ->
     if !stream {
         return ProbeResult::blocked(version, vec![EnvBlock::CliFlagsUnsupported]);
     }
-    // El protocolo de control (interrupt, permisos por stdio) está contrastado con la CLI real solo en las versiones
-    // verificadas; en otra, la capability no se declara disponible.
-    let verified = version.is_some_and(|v| agents::version_verified(ID, v));
-    let control = |ok: bool, what: &str| match (ok, verified) {
-        (false, _) => CapabilityState::Unsupported,
-        (true, true) => CapabilityState::Available,
-        (true, false) => CapabilityState::unavailable(&format!("{what} sin verificar en la versión {} (verificada: {})", version.unwrap_or("desconocida"), agents::verified_versions(ID).join(", "))),
-    };
+    // El protocolo de control (interrupt, permisos por stdio) se declara por lo que la CLI OFRECE (el flag en su --help) y se comprueba en
+    // la sesión (el `init` declara `interrupt_*`), NO por su número de versión: las CLI se actualizan solas y una lista de versiones
+    // dejaría `answer` e `interrupt` fuera en cada release.
+    let control = |ok: bool| if ok { CapabilityState::Available } else { CapabilityState::Unsupported };
     let m = CapabilityMatrix::new()
         .with(Capability::Start, CapabilityState::Available)
         .with(Capability::Events, CapabilityState::Available)
-        .with(Capability::Answer, control(help_has(help, "--permission-prompt-tool"), "el canal de permisos"))
-        .with(Capability::Interrupt, control(true, "interrupt"))
+        .with(Capability::Answer, control(help_has(help, "--permission-prompt-tool")))
+        .with(Capability::Interrupt, control(true))
         // Observado, no supuesto: un mensaje a mitad de turno se encola, no se inyecta.
         .with(Capability::Steer, CapabilityState::Unsupported)
         .with(Capability::Resume, if help_has(help, "--resume") { CapabilityState::Available } else { CapabilityState::Unsupported });

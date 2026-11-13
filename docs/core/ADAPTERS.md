@@ -118,13 +118,14 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | Capability | Cómo se declara | Evidencia |
 |---|---|---|
 | `start`, `events` | flags `--input-format`/`--output-format`/`stream-json` en `--help`; si faltan → `environment_blocked (cli_flags_unsupported)`; sin CLI → `cli_missing` | captura normal |
-| `answer` | flag `--permission-prompt-tool` en `--help` y versión verificada | con `--permission-prompt-tool stdio`, Claude emite `control_request {subtype: "can_use_tool"}` y acepta `{behavior: "allow", updatedInput}` / `{behavior: "deny", message}`. **Sin ese flag, deniega solo** (`system/permission_denied`) y no pregunta |
-| `interrupt` | versión verificada, y además la sesión debe declarar `interrupt_*` en su `init` | `control_request {subtype: "interrupt"}` → `control_response` → `result` con `is_error` |
+| `answer` | flag `--permission-prompt-tool` en `--help` (la versión no decide) | con `--permission-prompt-tool stdio`, Claude emite `control_request {subtype: "can_use_tool"}` y acepta `{behavior: "allow", updatedInput}` / `{behavior: "deny", message}`. **Sin ese flag, deniega solo** (`system/permission_denied`) y no pregunta |
+| `interrupt` | la sesión debe declarar `interrupt_*` en su `init` (la versión no decide) | `control_request {subtype: "interrupt"}` → `control_response` → `result` con `is_error` |
 | `resume` | flag `--resume` en `--help` | solo por `--help`; **no capturado** contra la CLI real |
 | `steer` | siempre `unsupported` | observado: un mensaje enviado en mitad de un turno **se encola** y se procesa después (la ejecución de 150 líneas terminó completa antes de "FIN"). Es una cola (LXO-143), no un steer; "Stop & Send" es `interrupt` + mensaje nuevo, lo compone el Core. La cola de verdad es la **Pending Queue del Core** ([COLA.md](COLA.md)): no depende de esta cola del proveedor |
 
-En una versión de Claude **sin verificar**, `answer` e `interrupt` quedan `unavailable` con el motivo; `start`/`events`
-siguen disponibles si están los flags. Tipos de mensaje que se ignoran a propósito: `hook_*`, `thinking_tokens`,
+**La versión de la CLI no decide qué ofrece Claude** (LXO-137): las CLI se actualizan solas y una lista de versiones permitidas dejaría
+`answer` e `interrupt` fuera en cada release. Decide lo que la CLI ofrece (sus flags en `--help`) y lo que la sesión declara al arrancar. Una
+versión que Lixbon no probó (`agents::VERIFIED`) es un **aviso** (`warnings` de la política y del proveedor), no un bloqueo ni una confirmación. Tipos de mensaje que se ignoran a propósito: `hook_*`, `thinking_tokens`,
 `rate_limit_event`, resultados de herramientas, y el razonamiento (`thinking`) no se copia nunca.
 
 **Salida acotada (invariante 5 de LXO-129):** un texto del modelo se parte en eventos de hasta 4096 caracteres y la
@@ -175,9 +176,13 @@ propia CLI (`codex app-server generate-json-schema`).
 | **`steer`** | **sí, de verdad**: `turn/steer` inyecta en el turno EN CURSO (un solo `turn/completed`). En Claude esto es una cola | no |
 | `resume` | sí: `thread/resume`, también entre procesos distintos | no: `exec resume` existe pero no admite `-s`/`-C` y no está validado |
 
-**Canal.** Se elige en `probe`: `app-server` si la CLI lo incluye **y** la versión está en `APP_SERVER_VERIFIED` (`0.162.1`,
-`0.163.0`, `0.164.0`, lista distinta de `agents::VERIFIED`, que valida los flags de la CLI interactiva); si no, `exec --json`
-con el motivo (`app-server sin verificar en la versión X`), visible en `ProbeResult.transport` y en el evento `Transport`.
+**Canal.** Se elige en `probe` **por lo que la CLI ofrece, no por su número de versión** (LXO-137): `app-server` si su `--help` lo incluye; si no,
+`exec --json` con el motivo (`esta versión de Codex no incluye app-server`), visible en `ProbeResult.transport`, en `transport_fallback` y en el
+evento `Transport`. Una versión nueva puede haber cambiado el protocolo: si `app-server` no arranca (falla el `initialize` o el hilo: errores del
+proveedor o del adapter), el lanzamiento **cae a `exec --json`** (sin reanudar: exec no lo ofrece) y el evento `Transport` lo dice con el motivo
+(`app-server no arrancó en la versión X (…)`); si exec tampoco puede, vale el error de app-server. Un bloqueo del ENTORNO (el sandbox de Windows), una
+petición inválida o una cancelación **no** caen al respaldo: no son un problema del canal. `APP_SERVER_VERIFIED` ya no decide nada: documenta las
+versiones contrastadas. Verificado con Codex 0.166.0 (no estaba en esa lista): `start`, `events`, `resume` e `interrupt` por `app-server`.
 `app-server` es **experimental**: el protocolo puede cambiar entre versiones. De la 0.163.0 a la 0.164.0 solo se añadió un
 método (`feedback/save`) y no se quitó ninguno; los esquemas de `turn/steer`, `turn/interrupt` y de las aprobaciones son
 idénticos.

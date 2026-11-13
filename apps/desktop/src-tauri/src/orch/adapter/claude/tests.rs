@@ -74,16 +74,22 @@ fn el_probe_declara_lo_que_la_cli_real_ofrece_y_steer_no() {
     assert_eq!(p.matrix.state(Capability::Steer), &CapabilityState::Unsupported);
 }
 
+/// El protocolo de control se declara por lo que la CLI OFRECE (su --help), no por su número de versión: las CLI se actualizan solas.
 #[test]
-fn en_una_version_sin_verificar_el_protocolo_de_control_no_se_declara_disponible() {
-    let p = probe_from(true, Some("9.9.9"), Some(HELP));
-    assert!(p.matrix.is_available(Capability::Start) && p.matrix.is_available(Capability::Events) && p.matrix.is_available(Capability::Resume));
-    for c in [Capability::Answer, Capability::Interrupt] {
-        let CapabilityState::Unavailable { reason } = p.matrix.state(c) else { panic!("{}: {:?}", c.code(), p.matrix.state(c)) };
-        assert!(reason.contains("9.9.9") && reason.contains("2.1.296"), "{reason}");
+fn el_protocolo_de_control_se_declara_por_los_flags_y_no_por_la_version() {
+    for v in [Some("2.1.296"), Some("2.2.0"), Some("9.9.9"), None] {
+        let p = probe_from(true, v, Some(HELP));
+        for c in [Capability::Start, Capability::Events, Capability::Answer, Capability::Interrupt, Capability::Resume] {
+            assert!(p.matrix.is_available(c), "{v:?} {}", c.code());
+        }
     }
-    // Sin versión legible, igual.
-    assert!(!probe_from(true, None, Some(HELP)).matrix.is_available(Capability::Interrupt));
+    // Sin el flag de permisos en el --help, `answer` no se ofrece, sea cual sea la versión.
+    let sin_permisos = HELP.replace("--permission-prompt-tool", "--x");
+    for v in ["2.1.296", "9.9.9"] {
+        let p = probe_from(true, Some(v), Some(&sin_permisos));
+        assert_eq!(p.matrix.state(Capability::Answer), &CapabilityState::Unsupported, "{v}");
+        assert!(p.matrix.is_available(Capability::Start));
+    }
 }
 
 #[test]
