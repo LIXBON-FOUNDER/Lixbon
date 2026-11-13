@@ -223,6 +223,9 @@ pub enum ClientAction {
     /// Operación de coordinación con comprobaciones de relación de tarea. Agent permanece
     /// limitado a su task; Person puede usarla como coordinador desde Desktop o CLI.
     AgentOrDesktopCommand,
+    /// Commands de Attempts solicitados explícitamente por una Person desde `lxo`.
+    /// No se concede a agentes ni se confunde con una decisión humana de Desktop.
+    CliAttemptCommand,
     UiCommand,
     HumanDecision,
     CoreCommand,
@@ -360,6 +363,7 @@ impl AuthenticatedClient {
                 ClientAction::EventLogRead | ClientAction::AgentOrDesktopCommand => {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
+                ClientAction::CliAttemptCommand => self.identity.surface() == ClientSurface::Cli,
                 ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
                 }
@@ -940,6 +944,9 @@ mod tests {
         assert!(desktop.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(cli.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(worker.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
+        assert!(cli.authorize(ClientAction::CliAttemptCommand).is_ok());
+        assert_eq!(desktop.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));
+        assert_eq!(worker.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::UiCommand), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::HumanDecision), Err(ClientIdentityError::ForbiddenAction));
         drop(store);

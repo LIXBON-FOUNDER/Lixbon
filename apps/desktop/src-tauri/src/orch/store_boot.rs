@@ -753,6 +753,11 @@ impl Core {
         self.storage.with_store(|store| store.attempt_row(attempt_id)).ok_or_else(|| "el almacén no está abierto".to_string())?.map_err(|e| e.to_string())
     }
 
+    /// La fila durable de la Task antes de aceptar una solicitud `attempt_start`.
+    pub(super) fn task_row_for_start(&self, task_id: &str) -> Result<Option<crate::store::TaskRow>, String> {
+        self.storage.with_store(|store| store.task_row(task_id)).ok_or_else(|| "el almacén no está abierto".to_string())?.map_err(|e| e.to_string())
+    }
+
     /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
     pub(super) fn attempt_session_record(&self, attempt_id: &str) -> Result<Option<crate::store::ProviderSessionRow>, String> {
         let read = self

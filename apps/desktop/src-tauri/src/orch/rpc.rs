@@ -232,6 +232,30 @@ impl Core {
                 };
                 Ok(json!({"status": status, "decision": decision, "attempt_id": input.attempt_id}))
             }
+            "attempt_start" => {
+                let context = authenticated_context.as_ref().ok_or("iniciar una Task requiere una Person autenticada de CLI")?;
+                if !matches!(caller, Caller::User) || !context.is_person() || context.channel != Channel::Lxo {
+                    return Err("attempt_start solo está permitido a una Person autenticada desde CLI".into());
+                }
+                let input: super::attempt_start_rpc::StartInput =
+                    serde_json::from_value(args.clone()).map_err(|_| "Solicitud de start inválida".to_string())?;
+                let (status, attempt_id) = match super::attempt_start_rpc::start(self, context, &input)? {
+                    super::attempt_start_rpc::StartResult::Requested(id) => ("Requested", id),
+                    super::attempt_start_rpc::StartResult::Replayed(id, _) => ("Replayed", id),
+                };
+                let attempt_status = self
+                    .attempt_row_for_resume(&attempt_id)?
+                    .map(|attempt| attempt.status.as_str().to_string())
+                    .ok_or_else(|| format!("attempt_start_unavailable: falta el Attempt durable {attempt_id}"))?;
+                // Ni start ni una repetición despiertan el dispatcher: el Attempt
+                // queda pendiente hasta la aprobación explícita de Desktop.
+                Ok(json!({
+                    "status": status,
+                    "task_id": input.task_id,
+                    "attempt_id": attempt_id,
+                    "attempt_status": attempt_status,
+                }))
+            }
             "attempt_retry" => {
                 let context = authenticated_context.as_ref().ok_or("reintentar un Attempt requiere una Person autenticada")?;
                 if !matches!(caller, Caller::User) || !context.is_person() {
@@ -241,13 +265,20 @@ impl Core {
                     serde_json::from_value(args.clone()).map_err(|_| "Solicitud de reintento inválida".to_string())?;
                 let (status, attempt_id) = match super::attempt_retry_rpc::retry(self, context, &input)? {
                     super::attempt_retry_rpc::RetryResult::Requested(id) => {
-                        // Pedirlo no lanza nada por sí mismo: despierta al despachador, que toma el Attempt de su cola.
-                        self.wake_dispatcher();
+                        // Desktop autoriza el retry con su propia decisión. CLI solo
+                        // crea un pending_approval; no despierta el dispatcher.
+                        if context.channel == Channel::Ui {
+                            self.wake_dispatcher();
+                        }
                         ("Requested", id)
                     }
                     super::attempt_retry_rpc::RetryResult::Replayed(id) => ("Replayed", id),
                 };
-                Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id}))
+                let attempt_status = self
+                    .attempt_row_for_resume(&attempt_id)?
+                    .map(|attempt| attempt.status.as_str().to_string())
+                    .ok_or_else(|| format!("attempt_retry_unavailable: falta el Attempt durable {attempt_id}"))?;
+                Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id, "attempt_status": attempt_status}))
             }
             "attempt_resume" => {
                 let context = authenticated_context.as_ref().ok_or("continuar un Attempt requiere una Person autenticada")?;
@@ -258,13 +289,20 @@ impl Core {
                     serde_json::from_value(args.clone()).map_err(|_| "Solicitud de continuación inválida".to_string())?;
                 let (status, attempt_id) = match super::attempt_resume_rpc::resume(self, context, &input)? {
                     super::attempt_retry_rpc::RetryResult::Requested(id) => {
-                        // Pedirlo no lanza nada por sí mismo: despierta al despachador, que toma el Attempt de su cola.
-                        self.wake_dispatcher();
+                        // Desktop autoriza la continuación con su propia decisión.
+                        // CLI queda pendiente y no puede lanzar antes de aprobar.
+                        if context.channel == Channel::Ui {
+                            self.wake_dispatcher();
+                        }
                         ("Requested", id)
                     }
                     super::attempt_retry_rpc::RetryResult::Replayed(id) => ("Replayed", id),
                 };
-                Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id}))
+                let attempt_status = self
+                    .attempt_row_for_resume(&attempt_id)?
+                    .map(|attempt| attempt.status.as_str().to_string())
+                    .ok_or_else(|| format!("attempt_resume_unavailable: falta el Attempt durable {attempt_id}"))?;
+                Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id, "attempt_status": attempt_status}))
             }
             "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => {
                 let context = authenticated_context.as_ref().ok_or("la cola de instrucciones requiere una Person autenticada")?;
@@ -765,6 +803,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
+        "attempt_start" => ClientAction::CliAttemptCommand,
         "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
@@ -848,11 +887,15 @@ mod tests {
             ClientPrincipal::Person("desktop-person".into()),
         );
         assert_eq!(rpc_action("events"), ClientAction::EventLogRead);
+        assert_eq!(rpc_action("attempt_start"), ClientAction::CliAttemptCommand);
         assert!(person_cli.authorize(ClientAction::EventLogRead).is_ok(), "Person CLI recibe solo lectura del Event Log");
         assert!(agent_cli.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_cli.authorize(ClientAction::UiCommand).is_err());
         assert!(person_cli.authorize(ClientAction::HumanDecision).is_err());
+        assert!(person_cli.authorize(ClientAction::CliAttemptCommand).is_ok());
+        assert!(person_desktop.authorize(ClientAction::CliAttemptCommand).is_err());
+        assert!(agent_cli.authorize(ClientAction::CliAttemptCommand).is_err());
 
         for command in &commands {
             let action = rpc_action(command);

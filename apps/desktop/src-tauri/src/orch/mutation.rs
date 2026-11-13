@@ -162,7 +162,6 @@ impl DerefMut for Tx {
 
 impl Tx {
     /// ¿El contexto de esta mutación es una Person autenticada (con `client_id`)? Solo ella decide una aprobación.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
     pub(super) fn is_authenticated_person(&self) -> bool {
         self.ctx.is_person() && self.ctx.client_id.as_deref().is_some_and(|id| !id.is_empty())
     }
@@ -641,6 +640,12 @@ impl Persister {
 // ---------------------------------------------------------------------------
 
 impl Core {
+    /// Si el corte Task/Attempt está activo. Lo consultan los RPC antes de
+    /// validar Commands nuevos; la mutación vuelve a comprobarlo al escribir.
+    pub(super) fn attempt_model(&self) -> bool {
+        self.persister.attempt_model()
+    }
+
     /// Estado en **solo lectura**. Para escribir: [`Core::mutate`].
     pub(super) fn lock(&self) -> StateRead<'_> {
         StateRead(self.state.raw())

@@ -35,6 +35,16 @@ use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
 use crate::store::{ForkStrategy, RetryOverride};
 
+/// Selección del primer Attempt de una Task que ya existe. El host y la
+/// estrategia de Worktree no pertenecen al cliente: los fija el launcher local.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct InitialAttemptSelection {
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: String,
+}
+
 /// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
 /// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
 pub(super) fn recovered_effect(
@@ -312,9 +322,60 @@ impl Tx {
         Ok(())
     }
 
+    /// Pide el primer Attempt de una Task `not_started`. Solo lo invoca el RPC
+    /// autenticado de CLI; siempre queda pendiente de aprobación Desktop.
+    pub(super) fn request_initial_attempt_for_task(
+        &mut self,
+        task_id: &str,
+        selection: &InitialAttemptSelection,
+    ) -> Result<(), String> {
+        if !self.is_authenticated_person() || self.context().channel != Channel::Lxo {
+            return Err("iniciar una Task existente requiere una Person autenticada de CLI".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if task.status != Status::NotStarted || self.attempt_n.contains_key(task_id) {
+            return Err("la Task ya no está sin iniciar o ya tiene un Attempt".into());
+        }
+        if self.runs.get(&task.run).is_none_or(|run| run.closed) {
+            return Err("el Run de la Task está cerrado".into());
+        }
+        if task.project_id.as_deref().is_none_or(str::is_empty) || task.spec.trim().is_empty() {
+            return Err("la Task necesita un Project y un encargo antes de iniciarse".into());
+        }
+
+        let before = self.snapshot_run_of(task_id);
+        {
+            let task = self.state_mut().task_mut(task_id)?;
+            task.agent = selection.provider.clone();
+            task.model = selection.model.clone();
+            task.effort = selection.effort.clone();
+            task.profile = Some(selection.profile.clone());
+            task.external = false;
+            task.status = Status::PendingApproval;
+            task.summary.clear();
+            task.report = None;
+            task.failure_reason = None;
+            task.session_ref = None;
+            task.model_effective = None;
+            task.model_source = None;
+            task.session_match = None;
+            task.approval_deadline = None;
+            task.merged = false;
+            task.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        self.request_initial_attempt(task_id)
+    }
+
     /// Approve the exact current pending Attempt. The Store validates its durable deadline
     /// again inside the transaction that persists this candidate and its event.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
     pub(super) fn approve_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
         if !self.is_authenticated_person() {
             return Err("aprobar un Attempt requiere una Person autenticada".into());

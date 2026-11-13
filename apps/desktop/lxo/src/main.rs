@@ -51,7 +51,11 @@ Coordinador (el agente con el que habla el usuario):
                                                   la forma del modelo Task/Attempt (docs/core/LXO_CORTE.md)
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
-                                                  (solo lectura y solo personas)
+  lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
+  lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
+  lxo attempt resume <attempt_id> --message \"...\"
+  lxo attempt stop <attempt_id> --confirm
+                                                   start/retry/resume esperan aprobación Desktop; stop exige confirmación exacta
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo provider list [--refresh] [--json]
@@ -138,7 +142,7 @@ fn parse(raw: Vec<String>) -> Args {
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help", "stored",
+    "follow", "help", "stored", "background", "confirm",
 ];
 
 impl Args {

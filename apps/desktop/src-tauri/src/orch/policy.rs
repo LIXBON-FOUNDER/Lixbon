@@ -8,15 +8,16 @@
 //!   restrictivo → allow < confirm < elevated < deny
 //! ```
 //!
-//! * **Base por actor** (código, no editable): una Person de Desktop tiene lo que ya tenía; el CLI solo puede pedir un `start`
-//!   (que sigue necesitando la aprobación de Desktop); Mobile, automatización y los agentes no tienen NADA de estas categorías.
+//! * **Base por actor** (código, no editable): una Person de Desktop tiene lo que ya tenía; el CLI puede pedir un `start`, `retry` o
+//!   `resume` (que siguen necesitando aprobación de Desktop) y detener un Attempt exacto con `confirm: true`; Mobile, automatización
+//!   y los agentes no tienen NADA de estas categorías.
 //! * **Overrides** (SQLite, `policy_overrides`): los fija una Person de Desktop. El global se puede aflojar (con confirmación aparte);
 //!   `project` y `attempt` solo pueden ENDURECER respecto al ámbito de arriba, así que un override más cercano nunca da más permiso.
-//! * **Pisos** (código): `start`, `review`, `integrate`, `cleanup` y `provider_permissions` nunca bajan de `confirm`. Es lo que ya exigían
-//!   (aprobación inicial, `confirm: true`); una policy no los exime.
+//! * **Pisos** (código): `start`, `review`, `integrate`, `cleanup` y `provider_permissions` nunca bajan de `confirm`. El inicio y sus
+//!   continuaciones conservan la aprobación Desktop; `stop` puede requerir confirmación por la policy efectiva.
 //! * **Se revalida en CADA Command** (`gate`), leyendo el almacén en ese instante: una foto que la interfaz vio hace un minuto no autoriza nada.
 //!   El actor sale de la credencial AUTENTICADA (superficie y principal), nunca de lo que el cliente afirme.
-//! * `confirm` = el Command debe traer `confirm: true` (salvo `start`, cuyo `confirm` es la aprobación inicial de Desktop).
+//! * `confirm` = el Command debe traer `confirm: true` (salvo `start`, que crea una solicitud pendiente de aprobación Desktop).
 //!   `elevated` = exige una confirmación FUERA DE BANDA que aún no existe: hoy se rechaza con un código propio. `deny` = nadie.
 //! * Cambiar la policy deja un Event `policy.changed` y no reescribe la historia.
 
@@ -401,7 +402,8 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
     let attempt = |key: &str| Hint { attempt_id: text(args, key), ..Hint::default() };
     let task = || Hint { task_id: text(args, "task_id"), ..Hint::default() };
     Some(match cmd {
-        // Solo el que arranca un Attempt: una Task sin `attempt` no ejecuta nada.
+        // El primer Attempt de una Task existente y sus continuaciones quedan bajo aprobación Desktop.
+        "attempt_start" => (Category::Start, task()),
         "task_create" if args.get("attempt").is_some_and(|a| !a.is_null()) => (Category::Start, Hint { project_id: text(args, "project_id"), ..Hint::default() }),
         "attempt_retry" | "attempt_resume" => (Category::Start, task()),
         "attempt_queue" => (Category::Queue, attempt("attempt_id")),
@@ -459,8 +461,9 @@ pub(super) fn gate(core: &Core, class: ActorClass, cmd: &str, args: &Value) -> R
     let why = format!("«{}» para {} (nivel «{}», origen {})", category.as_str(), class.as_str(), resolved.level.as_str(), resolved.source.as_str());
     match resolved.level {
         Level::Allow => Ok(()),
-        // `start` pide confirmación y ya la tiene: el Attempt nace pendiente de la aprobación de una Person de Desktop (LXO-141).
-        Level::Confirm if category == Category::Start || confirmed(args) => Ok(()),
+        // `start` pide aprobación Desktop; el Attempt nace pendiente y no se despacha.
+        Level::Confirm if category == Category::Start => Ok(()),
+        Level::Confirm if confirmed(args) => Ok(()),
         Level::Confirm => Err(format!("policy_confirm_required: la policy pide confirmación explícita para {why}: repite con confirm: true")),
         Level::Elevated => Err(format!("policy_out_of_band_required: la policy exige confirmación fuera de banda para {why}, y todavía no hay un canal para darla")),
         Level::Deny => Err(format!("policy_denied: la policy niega {why}")),

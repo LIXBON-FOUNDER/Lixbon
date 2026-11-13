@@ -83,7 +83,10 @@ mod provider_requests;
 mod answer_runtime;
 mod adapter_launcher;
 mod initial_approval_rpc;
+mod attempt_start_rpc;
 mod attempt_retry_rpc;
+#[cfg(test)]
+mod attempt_start_rpc_tests;
 mod fork_runtime;
 mod compare_read;
 mod proof_pack;
