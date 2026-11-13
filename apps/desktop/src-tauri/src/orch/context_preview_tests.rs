@@ -375,10 +375,12 @@ fn lxo_bin_e2e_context_person_real_store() {
     assert_eq!(server.lxo(&["context", "show", &carpeta_str], None).status.code(), Some(2), "una carpeta no es un archivo");
     let falta: Value = serde_json::from_slice(&server.lxo(&["context", "show", &ruta_de("no-existe.json"), "--json"], None).stderr).unwrap();
     assert_eq!(falta["code"], "not_found");
-    // Lo que el Core aún no sirve.
-    for args in [&["context", "export", "p.json"][..], &["context", "import", "p.json"], &["context", "show"], &["context", "validate", &ruta_de("a"), &ruta_de("b")]] {
+    // Uso inválido: sin destino, sin paquete y con más de un archivo (export e import existen desde LXO-138; ver `context_store_tests.rs`).
+    for args in [&["context", "export", "p.json"][..], &["context", "export", "t3-a1"], &["context", "show"], &["context", "validate", &ruta_de("a"), &ruta_de("b")]] {
         assert_eq!(server.lxo(args, None).status.code(), Some(2), "{args:?}");
     }
+    // Importar un archivo que no existe: 6, como validar uno.
+    assert_eq!(server.lxo(&["context", "import", &ruta_de("no-existe.json")], None).status.code(), Some(6));
 
     // Solo personas: un agente recibe 3. Y con el Core cerrado, 5.
     let token = "agent-lxo-context-e2e-token-with-32-bytes-minimum";

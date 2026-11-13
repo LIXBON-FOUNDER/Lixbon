@@ -755,6 +755,64 @@ rechaza como dice su manifiesto, el paquete se ve tal cual, completo / parcial /
 visible la diferencia de identidad, ninguna respuesta lleva algo con forma de credencial, permisos y argumentos, y un paquete en el
 tope de tamaño (500 archivos, 100 sin seguimiento) se previsualiza sin coste desproporcionado.
 
+## `context_package_build`, `context_package_get` y `context_package_import` (LXO-138)
+
+Construir, leer e importar un ContextPackage **guardado**. Hasta aquí el Core solo sabía construir un paquete en memoria
+([`context_package_preview`](#context_package_preview-lxo-136) lo revisa sin guardarlo); estos tres comandos le dan dónde vivir (migración
+025, [MIGRACIONES.md](MIGRACIONES.md)) para que una persona pueda **exportarlo a un archivo y volver a importarlo**. Ninguno inicia un Attempt ni
+un handoff (F6) y ninguno escribe Events. Código: `orch/context_store.rs` y `store/context_packages.rs`. Cliente: `lxo context`
+([LXO_CORTE.md](LXO_CORTE.md)).
+
+**Solo una Person autenticada** (`context_store_auth_required`): el paquete lleva el objetivo y las decisiones del trabajo, y construirlo lee el
+worktree. `build` e `import` escriben, así que su clase de acción es la de un comando (`AgentOrDesktopCommand`: Desktop o CLI; el propio comando
+exige que sea una persona); `get` es una lectura. Antes del corte Task/Attempt responden `core_model_inactive`: no hay dónde guardar.
+
+### `context_package_build` · `{ attempt_id }`
+
+Construye el paquete del Attempt con la evidencia de su worktree y lo guarda. **Qué entra**, todo medido por el Core con git (el cliente no aporta nada):
+`source` (proyecto, Task, Attempt, proveedor; la sesión y el host salen como huella `fp:`), el objetivo (el encargo de la Task), el resultado del
+intento (`thread_summary`), la **revisión** (`base_commit`, `head_commit`, `head_tree`, rama, archivos cambiados con `+/−` y el hash y tamaño del diff
+original `base..head`), lo **no comprometido** (parche preparado, parche sin preparar y archivos sin seguimiento, como adjuntos con su `sha256`) y los
+commits **sin publicar** en un `git bundle` (los que no están en ningún remoto). Lo que no se pudo reunir **consta** en `constraints` (un parche de más de
+1 MiB, archivos sin seguimiento ilegibles o demasiado grandes, un bundle que no cabe, el hash del diff que no se pudo calcular): un paquete que calla lo
+que le falta engaña al receptor. Sin worktree (o si ya no está en disco) el paquete es válido y dice `revision_absent_reason`. Redacta antes de
+serializar y omite los adjuntos de texto con forma de secreto (`omitted`).
+
+La respuesta es la de `context_package_preview` (`status: "valid"`, `verification`, `package_id`, `package`, `summary`) más:
+`attachments` (`[{id, kind, bytes, sha256, scanned, omitted, stored}]`: qué adjuntos hay y cuáles están guardados) y `stored`
+(`{origin: "built", created_at_ms, stored_at_ms, created}`). Cada llamada construye un paquete **nuevo** (lleva su `created_at_ms`, así que su
+`package_id` es otro); si coincide al milisegundo con uno guardado, `created` es `false`.
+
+### `context_package_get` · `{ package_id? | attempt_id?, include_attachments? }`
+
+Lee un paquete guardado: por su `package_id`, o el **más reciente** de un Attempt (por `source.attempt_id`); exactamente uno de los dos
+(`context_store_invalid_request`). Sin paquete: `context_store_not_found`. Devuelve la misma vista que `build` (`stored.created` es `null`: no se
+creó nada) y, con `include_attachments: true`, `attachment_data: {id: base64}` con los bytes. Por el RPC solo viajan **2 MiB** de adjuntos
+(`context_store_attachments_too_large` si pasan: el cuerpo HTTP admite 4 MiB); sin pedirlos se lee igual, con la lista de lo que hay. Un paquete
+guardado que ya no pasa `parse` es una base alterada (`context_store_corrupt`), no una petición mala.
+
+### `context_package_import` · `{ package, attachments? }`
+
+`package` es el JSON del paquete como texto (hasta 128 KiB) y `attachments` un objeto `{id: base64}` (hasta 2 MiB). Lo pasa por la **misma puerta que un
+Attempt**: `context_package::parse` (versión, formato, identidad, secretos) y la comprobación de cada adjunto contra su `sha256` y su tamaño (ninguno
+ajeno, ninguno omitido que llegue, ninguno que falte). **Solo si pasa**, lo guarda con `origin: "imported"`, y queda **preparado para un Attempt futuro**:
+no crea ningún Attempt ni Event. Un paquete que no pasa **no es un error de la petición**: es una respuesta `invalid` con el código de rechazo
+(`invalid_json` · `unsupported_version` · `missing_field` · `invalid_field` · `id_mismatch` (con las dos huellas) · `too_large` · `secret_detected` ·
+`attachment_mismatch`), sin `package`, `summary` ni `package_id`, y **no se guarda nada**. Importar el mismo paquete otra vez no escribe nada
+(`stored.created: false`) y conserva el origen y la hora de la primera vez. La procedencia (`source`) **no se reescribe**.
+
+### Lo que NO hace
+
+No transfiere nada a otro host (F6/F7): el archivo lo mueve la persona. No inicia ni continúa un Attempt con el paquete (eso es el comando de continuidad,
+[CONTINUIDAD.md](CONTINUIDAD.md)). No revela lo redactado. No guarda el texto de un adjunto omitido.
+
+### Pruebas
+
+`store/context_packages_tests.rs` (8: una transacción, repetir no escribe, inmutable aunque se escriba SQL a mano, valores acotados, antes del corte) y
+`orch/context_store_tests.rs` (9, con Attempts, repositorios y worktrees de verdad: la evidencia de git, que construir no inicia ni escribe Events ni
+toca el worktree, el paquete guardado tal cual, importar en **otro** Core, paquete alterado y adjuntos que no coinciden sin guardar, un secreto que no
+entra, un Attempt sin worktree, solo personas y argumentos, y adjuntos que no caben por el RPC). Con el binario real: `lxo_bin_e2e_context_store_person_real_store`.
+
 ## `usage_report` (LXO-206)
 
 El uso y los límites de cada proveedor: lo que lee la vista de Usage de Desktop. Es el informe del contrato de LXO-205

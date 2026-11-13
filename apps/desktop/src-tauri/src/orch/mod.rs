@@ -151,11 +151,14 @@ mod attempt_commands;
 mod attempt_commands_tests;
 mod provider_registry;
 mod context_preview;
+mod context_store;
 mod usage_read;
 #[cfg(test)]
 mod usage_read_tests;
 #[cfg(test)]
 mod context_preview_tests;
+#[cfg(test)]
+mod context_store_tests;
 #[cfg(test)]
 mod provider_registry_tests;
 mod session_ops;

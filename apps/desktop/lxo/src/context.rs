@@ -1,13 +1,15 @@
-//! `lxo context show` y `lxo context validate`: revisar un ContextPackage v1 de un archivo, de solo lectura (LXO-138).
+//! `lxo context`: revisar, exportar e importar un ContextPackage v1 sin manipular su JSON a mano (LXO-138).
 //!
-//! La verificación es del Core: lxo manda el texto del archivo a `context_package_preview` por el RPC autenticado, como Person
-//! (`docs/core/QUERIES.md` § `context_package_preview`), y enseña lo que el Core dice: versión, campos, identidad
-//! (`package_id` = sha256 del contenido canónico) y secretos. lxo no calcula ningún hash ni busca secretos.
+//! La verificación es del Core: lxo manda el texto del paquete al Core por el RPC autenticado, como Person, y enseña lo que el Core dice:
+//! versión, campos, identidad (`package_id` = sha256 del contenido canónico), secretos y adjuntos. lxo no calcula ningún hash ni busca
+//! secretos.
 //!
-//! Alcance de F4 (acordado con la persona): solo lectura sobre archivos. El Core no construye un paquete a partir de un
-//! Attempt, no guarda paquetes y no tiene dónde dejar uno «preparado», así que `export`, `import` y `show <package_id|attempt_id>`
-//! no existen todavía y lo dicen. Un paquete rechazado no muestra su contenido; lo redactado no se revela; y el contenido del
-//! archivo nunca vuelve en un error.
+//! * `validate` y `show <archivo|->` leen un archivo con `context_package_preview` (de solo lectura: no guardan nada).
+//! * `show <package_id|attempt_id>` lee un paquete que el Core ya guardó (`context_package_get`).
+//! * `export` (`context_store.rs`) hace que el Core construya el paquete de un Attempt, lo guarde y lo deje en un archivo; `import` se lo da
+//!   al Core, que lo valida por la misma puerta que un Attempt y lo guarda **preparado**, sin iniciar nada.
+//!
+//! Un paquete rechazado no muestra su contenido; lo redactado no se revela; y el contenido del archivo nunca vuelve en un error.
 
 use std::io::Read;
 use std::process::ExitCode;
@@ -15,45 +17,57 @@ use std::process::ExitCode;
 use serde_json::{json, Value};
 
 use crate::client_auth::{self, RpcFailure};
+use crate::context_store::{self, ExportOpts, Target};
 use crate::events::{clean, timestamp_utc};
 use crate::projects::{failure, finish, usage, Failure};
 use crate::Args;
 
-pub(super) const HELP: &str = "Uso: lxo context show <archivo|-> [--json]
+pub(super) const HELP: &str = "Uso: lxo context show <archivo|-|package_id|attempt_id> [--json]
      lxo context validate <archivo|-> [--json]
+     lxo context export <package_id|attempt_id> --out <archivo> [--stored] [--force] [--json]
+     lxo context import <archivo|-> [--json]
 
-Revisa un ContextPackage v1 (el paquete que lleva el contexto de una tarea de un proveedor
-a otro) sin manipular su JSON a mano. Solo lee: no guarda el paquete, no crea ningún intento
-ni inicia ninguna transferencia. La verificación es del Core; lxo no calcula nada.
+Revisa, saca a un archivo y vuelve a meter un ContextPackage v1 (el paquete que lleva el contexto de
+una tarea de un proveedor a otro) sin manipular su JSON a mano. La verificación es del Core; lxo no
+calcula nada. Ninguna orden inicia un intento ni una transferencia.
 
-`lxo context validate <archivo|->` dice si el Core acepta el paquete: versión, formato,
-identidad (que el contenido coincide con su package_id) y que no lleva secretos.
-`lxo context show <archivo|->` además enseña el paquete: de dónde viene (proveedor, tarea,
-intento, proyecto), su identidad, lo redactado y lo truncado, la revisión de git y lo que
-no está comprometido, los adjuntos y las pruebas. `-` lee el paquete por la entrada estándar.
+`show` enseña el paquete: de dónde viene (proveedor, tarea, intento, proyecto), su identidad, lo redactado
+y lo truncado, la revisión de git y lo que no está comprometido, los adjuntos y las pruebas. El argumento
+es, por este orden: `-` (entrada estándar), un `package_id` (sha256:…) o un id de intento (<tarea>-a<n>) que
+el Core ya guardó (el más reciente), o un archivo. `validate` solo dice si el Core acepta el paquete de un
+archivo: versión, formato, identidad (que el contenido coincide con su package_id) y que no lleva secretos.
 
-Lo que NO verifica: los adjuntos. Sus bytes no viajan con el paquete: constan como «sin
-comprobar» y se verifican al recibirlos. Lo redactado llega ya como [redactado]: el Core no
-tiene el original y no hay forma de verlo.
+`export` hace que el Core construya el paquete de un intento con la evidencia de su worktree (revisión,
+cambios, lo no comprometido y los commits sin publicar), lo guarde y lo deje en --out. Con un package_id
+exporta ese paquete tal cual; con un intento construye uno nuevo, o con --stored el último que ya había.
+El archivo lo eliges tú: no se sobrescribe sin --force, no se crea la carpeta que falte y se escribe con
+permisos solo del dueño. Los adjuntos (parches, archivos sin seguimiento, el bundle de commits sin
+publicar) van en <archivo>.attachments/att-<id>; los que llevaban algo con forma de secreto se omiten.
+`import` valida el paquete (y sus adjuntos, de al lado) y lo guarda en el Core como preparado para un
+intento futuro. Antes de guardar, el Core comprueba identidad, formato, secretos y el sha256 de cada adjunto.
 
-Un paquete rechazado (alterado, de otra versión, con un secreto…) sale con 7 y NO muestra su
-contenido: un paquete alterado no se presenta como si fuera de fiar. Si la identidad no
-coincide se dan las dos huellas (la declarada y la recalculada). El contenido del archivo
-nunca aparece en un error. El archivo ha de ser UTF-8 (un BOM se ignora) y de hasta 128 KiB.
+Lo que `validate` y `show <archivo>` no verifican: los adjuntos (sus bytes no viajan con el paquete: constan
+«sin comprobar»). `import` sí. Lo redactado llega ya como [redactado]: no hay forma de verlo.
+
+Un paquete rechazado (alterado, de otra versión, con un secreto, con un adjunto que no coincide…) sale con
+7, NO se guarda y NO muestra su contenido. Si la identidad no coincide se dan las dos huellas. El contenido
+del archivo nunca aparece en un error. El archivo ha de ser UTF-8 (un BOM se ignora) y de hasta 128 KiB;
+los adjuntos, de hasta 1 MiB cada uno y 2 MiB en total (lo que cabe por el RPC del Core).
 
 Salida:
   (por defecto)      texto para personas
-  --json             show: la respuesta `valid` del Core tal cual {v, status, verification,
-                     package_id, package, summary}. validate: la misma sin `package`.
-                     Un paquete rechazado, con --json: {v, status: \"invalid\", error: {code,
-                     message}, serialized_bytes[, declared_id, recomputed_id]}
+  --json             show: la respuesta `valid` del Core tal cual {v, status, verification, package_id,
+                     package, summary[, attachments, stored]}. validate e import: la misma sin `package`.
+                     export: {v, status: \"exported\", package_id, built, file, attachments, omitted…}.
+                     Un paquete rechazado, con --json: {v, status: \"invalid\", error: {code, message},
+                     serialized_bytes[, declared_id, recomputed_id]}
 
-Todavía no existen (el Core de F4 no construye ni guarda paquetes): lxo context export,
-lxo context import y lxo context show <package_id|attempt_id>.
-Solo para personas: dentro de una tarea del orquestador (agente) el Core lo rechaza.
+Guardar y exportar necesitan el modelo Task/Attempt activo (tras el corte). Solo para personas: dentro de
+una tarea del orquestador (agente) el Core lo rechaza.
 
-Códigos de salida: 0 válido, 1 error interno del Core, 2 uso o archivo ilegible, 3 autenticación,
-4 versión o contrato incompatible, 5 Lixbon cerrado o Core no disponible, 6 archivo inexistente,
+Códigos de salida: 0 correcto, 1 error interno del Core, 2 uso, archivo ilegible o destino imposible,
+3 autenticación, 4 versión o contrato incompatible (también: Core sin el modelo Task/Attempt),
+5 Lixbon cerrado o Core no disponible, 6 archivo, intento o paquete inexistente,
 7 paquete rechazado por el Core.
 ";
 
@@ -81,35 +95,36 @@ type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 enum Mode {
     Show,
     Validate,
+    Import,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Request {
     Help,
     Review { mode: Mode, source: String },
+    Export(ExportOpts),
 }
 
 fn parse(a: &Args) -> Result<Request, Failure> {
     if a.b("help") || a.at(1).as_deref() == Some("help") {
         return Ok(Request::Help);
     }
+    if a.at(1).as_deref() == Some("export") {
+        return parse_export(a);
+    }
     let mode = match a.at(1).as_deref() {
         Some("show") => Mode::Show,
         Some("validate") => Mode::Validate,
-        Some(cmd @ ("export" | "import")) => {
-            return Err(usage(format!(
-                "lxo context {cmd} no existe todavía: el Core de F4 no construye un paquete a partir de un intento, no guarda paquetes ni tiene dónde dejar uno preparado. Hoy: lxo context show|validate <archivo>."
-            )))
-        }
+        Some("import") => Mode::Import,
         Some(other) => {
             return Err(usage(format!(
-                "«{}» no es una orden de lxo context; usa show o validate.",
+                "«{}» no es una orden de lxo context; usa show, validate, export o import.",
                 clean(other)
             )))
         }
         None => {
             return Err(usage(
-                "Uso: lxo context show <archivo|-> | lxo context validate <archivo|->. Mira `lxo context --help`.",
+                "Uso: lxo context show|validate|import <archivo> | lxo context export <package_id|attempt_id> --out <archivo>. Mira `lxo context --help`.",
             ))
         }
     };
@@ -130,7 +145,7 @@ fn parse(a: &Args) -> Result<Request, Failure> {
     }
     match a.pos.get(2..).unwrap_or_default() {
         [] => Err(usage(
-            "Falta el archivo del paquete: lxo context show <archivo|->. `-` lo lee por la entrada estándar.",
+            "Falta el paquete: lxo context show <archivo|-|package_id|attempt_id>. `-` lo lee por la entrada estándar.",
         )),
         [source] if !source.trim().is_empty() => Ok(Request::Review {
             mode,
@@ -138,6 +153,41 @@ fn parse(a: &Args) -> Result<Request, Failure> {
         }),
         _ => Err(usage("lxo context recibe un solo archivo.")),
     }
+}
+
+const EXPORT_FLAGS: [&str; 5] = ["out", "stored", "force", "json", "help"];
+
+fn parse_export(a: &Args) -> Result<Request, Failure> {
+    if let Some(name) = a.flags.keys().find(|k| !EXPORT_FLAGS.contains(&k.as_str())) {
+        return Err(usage(format!(
+            "--{name} no es una opción de lxo context export. Mira `lxo context --help`."
+        )));
+    }
+    if let Some(name) = a.duplicates.first() {
+        return Err(usage(format!("--{name} aparece más de una vez.")));
+    }
+    for name in ["json", "help", "force", "stored"] {
+        if a.flags.get(name).is_some_and(|v| !v.is_boolean()) {
+            return Err(usage(format!(
+                "--{name} no admite un valor; úsalo como indicador."
+            )));
+        }
+    }
+    let out = match a.flags.get("out") {
+        None => None,
+        Some(Value::String(v)) if !v.trim().is_empty() => Some(v.clone()),
+        _ => return Err(usage("--out requiere un valor.")),
+    };
+    let target = match a.pos.get(2..).unwrap_or_default() {
+        [] => None,
+        [t] => Some(t.as_str()),
+        _ => {
+            return Err(usage(
+                "lxo context export recibe un solo paquete o intento.",
+            ))
+        }
+    };
+    context_store::parse_export(target, out, a.b("force"), a.b("stored")).map(Request::Export)
 }
 
 fn contract_error() -> Failure {
@@ -166,6 +216,46 @@ fn context_failure(error: RpcFailure) -> Failure {
             return Failure::Version(
                 "Este Core no ofrece la revisión de paquetes de contexto; actualiza Lixbon.".into(),
             );
+        }
+        // Construir, guardar, leer e importar (LXO-138): `context_store_*`.
+        if m.starts_with("context_store_auth_required") {
+            return Failure::Auth(
+                "Los paquetes de contexto son solo para personas: un paquete lleva el objetivo y las decisiones del trabajo y una tarea del orquestador (agente) no puede construirlo, leerlo ni importarlo."
+                    .into(),
+            );
+        }
+        if m.starts_with("core_model_inactive") {
+            return Failure::Version(
+                "Este Core aún usa el modelo anterior: los paquetes guardados (export, import y show por id) llegan tras el corte Task/Attempt. Mientras, usa lxo context show|validate <archivo>."
+                    .into(),
+            );
+        }
+        if let Some(detail) = m.strip_prefix("context_store_invalid_request: ") {
+            return Failure::Version(format!(
+                "El Core rechazó la petición de paquetes ({}); actualiza Lixbon.",
+                clean(detail)
+            ));
+        }
+        if let Some(detail) = m.strip_prefix("context_store_not_found: ") {
+            return Failure::NotFound(clean(detail));
+        }
+        if let Some(detail) = m.strip_prefix("context_store_attachments_too_large: ") {
+            return usage(format!(
+                "{}. Publica la rama y exporta sin esos archivos, o reduce lo que no está comprometido.",
+                clean(detail)
+            ));
+        }
+        if let Some(detail) = m.strip_prefix("context_store_unavailable: ") {
+            return if detail.contains("almacén no está abierto") {
+                Failure::Unavailable(
+                    "El Core de Lixbon no tiene su almacén abierto; reinicia Lixbon.".into(),
+                )
+            } else {
+                usage(clean(detail))
+            };
+        }
+        if m.starts_with("context_store_corrupt") {
+            return Failure::Internal(clean(m));
         }
     }
     failure(error)
@@ -259,11 +349,20 @@ fn is_hash(v: &Value) -> bool {
 }
 
 fn review(rpc: Rpc, package_text: &str) -> Result<Verdict, Failure> {
-    let data = rpc(
+    fetch(
+        rpc,
         "context_package_preview",
         &json!({ "package": package_text }),
     )
-    .map_err(context_failure)?;
+}
+
+/// Una orden de paquetes al Core y su respuesta ya clasificada: válida (con su forma comprobada) o rechazada.
+fn fetch(rpc: Rpc, cmd: &str, args: &Value) -> Result<Verdict, Failure> {
+    let data = rpc(cmd, args).map_err(context_failure)?;
+    classify(data)
+}
+
+fn classify(data: Value) -> Result<Verdict, Failure> {
     if data["v"].as_u64() != Some(API) {
         return Err(contract_error());
     }
@@ -371,6 +470,10 @@ fn note_text(code: &str) -> String {
         }
         other => clean(other),
     }
+}
+
+pub(super) fn verification_line(v: &Value) -> String {
+    verification_text(v)
 }
 
 fn verification_text(v: &Value) -> String {
@@ -519,6 +622,19 @@ fn show_text(data: &Value) -> String {
                 .unwrap_or_else(|| "?".into())
         ),
     ];
+    if data["stored"].is_object() {
+        let atts = data["attachments"].as_array().cloned().unwrap_or_default();
+        let kept = atts.iter().filter(|a| a["stored"] == true).count();
+        lines.push(format!(
+            "  Guardado:     {} · adjuntos guardados: {kept} de {}",
+            match data["stored"]["origin"].as_str() {
+                Some("built") => "construido por este Core",
+                Some("imported") => "importado de un archivo",
+                _ => "origen desconocido",
+            },
+            atts.len()
+        ));
+    }
     lines.extend(summary_lines(data));
     lines.extend(block("Objetivo:", &p["objective"]));
     lines.extend(block("Resumen:", &p["thread_summary"]));
@@ -661,9 +777,9 @@ fn execute(request: Request, json: bool) -> Result<u8, Failure> {
             Ok(0)
         }
         Request::Review { mode, source } => {
-            let text = read_source(&source, &mut std::io::stdin())?;
             let mut rpc = |cmd: &str, args: &Value| client_auth::rpc(cmd, args, &crate::cwd());
-            let out = render(&mode, json, &review(&mut rpc, &text)?);
+            let verdict = acquire(&mut rpc, &mode, &source, &mut std::io::stdin())?;
+            let out = render(&mode, json, &verdict);
             if let Some(stdout) = out.stdout {
                 println!("{stdout}");
             }
@@ -672,7 +788,117 @@ fn execute(request: Request, json: bool) -> Result<u8, Failure> {
             }
             Ok(out.code)
         }
+        Request::Export(opts) => {
+            let mut rpc = |cmd: &str, args: &Value| client_auth::rpc(cmd, args, &crate::cwd());
+            let result = export(&mut rpc, &opts)?;
+            if json {
+                println!("{result}");
+            } else {
+                println!("{}", context_store::export_text(&result));
+            }
+            Ok(0)
+        }
     }
+}
+
+/// El veredicto del Core sobre lo que se pidió: un archivo (o la entrada estándar) que se revisa o se importa, o un paquete que el Core ya guardó.
+fn acquire(rpc: Rpc, mode: &Mode, source: &str, stdin: &mut dyn Read) -> Result<Verdict, Failure> {
+    match (mode, show_target(source)) {
+        (Mode::Show, ShowTarget::Package(id)) => {
+            fetch(rpc, "context_package_get", &json!({ "package_id": id }))
+        }
+        (Mode::Show, ShowTarget::Attempt(id)) => {
+            fetch(rpc, "context_package_get", &json!({ "attempt_id": id }))
+                .map_err(|e| missing_stored(e, &id))
+        }
+        (Mode::Import, _) => {
+            let text = read_source(source, stdin)?;
+            // Los adjuntos viven al lado de un archivo; por la entrada estándar no hay carpeta.
+            let attachments = if source == "-" {
+                None
+            } else {
+                context_store::read_attachments(source)?
+            };
+            let mut args = json!({ "package": text });
+            if let Some(a) = attachments {
+                args["attachments"] = Value::Object(a);
+            }
+            fetch(rpc, "context_package_import", &args)
+        }
+        _ => review(rpc, &read_source(source, stdin)?),
+    }
+}
+
+/// De dónde sale lo que `show` enseña.
+#[derive(Debug, PartialEq, Eq)]
+enum ShowTarget {
+    /// Un archivo o la entrada estándar: el Core solo lo revisa.
+    File,
+    /// Un paquete que el Core ya guardó, por su `package_id`.
+    Package(String),
+    /// El paquete guardado más reciente de un intento.
+    Attempt(String),
+}
+
+fn show_target(source: &str) -> ShowTarget {
+    if source == "-" {
+        ShowTarget::File
+    } else if context_store::is_package_id(source) {
+        ShowTarget::Package(source.to_string())
+    } else if context_store::looks_like_attempt_id(source) && !std::path::Path::new(source).exists()
+    {
+        ShowTarget::Attempt(source.to_string())
+    } else {
+        ShowTarget::File
+    }
+}
+
+fn missing_stored(error: Failure, id: &str) -> Failure {
+    match error {
+        Failure::NotFound(_) => Failure::NotFound(format!(
+            "No hay ningún archivo ni ningún paquete guardado del intento «{}». Para guardar uno: lxo context export {} --out <archivo>.",
+            clean(id),
+            clean(id)
+        )),
+        other => other,
+    }
+}
+
+/// Trae del Core el paquete a exportar (construyéndolo si hace falta) y lo deja en el archivo.
+fn export(rpc: Rpc, opts: &ExportOpts) -> Result<Value, Failure> {
+    // El destino se comprueba antes de pedir nada: no se construye un paquete que no cabe donde se pide.
+    context_store::check_export_destination(&opts.out, opts.force)?;
+    let (get_args, built) = match &opts.target {
+        Target::Package(id) => (
+            json!({ "package_id": id, "include_attachments": true }),
+            false,
+        ),
+        Target::AttemptStored(id) => (
+            json!({ "attempt_id": id, "include_attachments": true }),
+            false,
+        ),
+        Target::AttemptBuild(id) => {
+            let built = fetch(rpc, "context_package_build", &json!({ "attempt_id": id }))?;
+            let Verdict::Valid(view) = built else {
+                return Err(contract_error());
+            };
+            (
+                json!({ "package_id": view["package_id"], "include_attachments": true }),
+                true,
+            )
+        }
+    };
+    let view = match fetch(rpc, "context_package_get", &get_args).map_err(|e| match (e, &opts.target) {
+        (Failure::NotFound(_), Target::AttemptStored(id)) => Failure::NotFound(format!(
+            "No hay ningún paquete guardado del intento «{}»: exporta sin --stored para construir uno.",
+            clean(id)
+        )),
+        (other, _) => other,
+    })? {
+        Verdict::Valid(v) => v,
+        Verdict::Invalid(_) => return Err(contract_error()),
+    };
+    context_store::write_export(&opts.out, opts.force, &view, built)
 }
 
 /// Lo que sale por cada canal y el código de salida de un veredicto. Un paquete rechazado sale con 7: con `--json` el veredicto va
@@ -688,9 +914,10 @@ fn render(mode: &Mode, json: bool, verdict: &Verdict) -> Rendered {
         Verdict::Valid(data) => Rendered {
             stdout: Some(match (mode, json) {
                 (Mode::Show, true) => data.to_string(),
-                (Mode::Validate, true) => without_package(data).to_string(),
+                (Mode::Validate | Mode::Import, true) => without_package(data).to_string(),
                 (Mode::Show, false) => show_text(data),
                 (Mode::Validate, false) => validate_text(data),
+                (Mode::Import, false) => context_store::import_text(data),
             }),
             stderr: None,
             code: 0,
@@ -716,6 +943,7 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::io::Cursor;
+    use std::path::Path;
     use std::rc::Rc;
 
     const VALID: &str =
@@ -1139,24 +1367,32 @@ mod tests {
     }
 
     #[test]
-    fn export_import_y_show_por_id_dicen_que_no_existen_todavia() {
-        for cmd in ["export", "import"] {
-            match parse(&args(&["context", cmd, "p.json"])) {
-                Err(Failure::Usage(m)) => assert!(
-                    m.contains(&format!("lxo context {cmd} no existe todavía")),
-                    "{m}"
-                ),
-                other => panic!("{cmd}: {other:?}"),
-            }
+    fn show_decide_si_es_un_archivo_un_paquete_guardado_o_un_intento() {
+        let id = "sha256:ed8802df89b2fc0ce7b1535f6233a49548df5bdfd5ffaa984ccb6c2cd213b6a4";
+        assert_eq!(show_target("-"), ShowTarget::File);
+        assert_eq!(show_target(id), ShowTarget::Package(id.into()));
+        assert_eq!(show_target("t3-a1"), ShowTarget::Attempt("t3-a1".into()));
+        // Lo que parece una ruta es un archivo, aunque no exista: así un error de tipeo da «archivo inexistente», no «intento».
+        for file in [
+            "paquete.json",
+            "./t3-a1",
+            "dir/t3-a1",
+            "t3-a1.json",
+            "C:\\x\\p.json",
+        ] {
+            assert_eq!(show_target(file), ShowTarget::File, "{file}");
         }
-        // Un package_id o un intento no es un archivo: no se inventa un paquete.
-        match read_source("sha256:ed8802df", &mut Cursor::new(Vec::new())) {
-            Err(Failure::NotFound(m)) => assert!(
-                m.contains("no sirve paquetes por package_id ni por intento"),
-                "{m}"
-            ),
-            other => panic!("{other:?}"),
-        }
+    }
+
+    #[test]
+    fn un_archivo_que_se_llama_como_un_intento_gana_al_intento() {
+        let d = std::env::temp_dir().join(format!("lxo-ctx-shadow-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let file = d.join("t3-a1");
+        std::fs::write(&file, "{}").unwrap();
+        // Con la ruta completa es un archivo; el id a secas, sin archivo en la carpeta actual, es un intento.
+        assert_eq!(show_target(&file.to_string_lossy()), ShowTarget::File);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -1167,8 +1403,35 @@ mod tests {
                 &["context", "ver", "p.json"][..],
                 "no es una orden de lxo context",
             ),
-            (&["context", "show"][..], "Falta el archivo"),
-            (&["context", "validate"][..], "Falta el archivo"),
+            (&["context", "show"][..], "Falta el paquete"),
+            (&["context", "validate"][..], "Falta el paquete"),
+            (&["context", "import"][..], "Falta el paquete"),
+            (&["context", "export"][..], "Falta qué exportar"),
+            (&["context", "export", "t3-a1"][..], "Falta --out"),
+            (
+                &["context", "export", "t3-a1", "--out", "a", "b"][..],
+                "un solo paquete o intento",
+            ),
+            (
+                &["context", "export", "t3-a1", "--out"][..],
+                "--out requiere un valor",
+            ),
+            (
+                &["context", "export", "t3-a1", "--out", "a", "--force=1"][..],
+                "no admite un valor",
+            ),
+            (
+                &["context", "export", "t3-a1", "--out", "a", "--todo"][..],
+                "--todo no es una opción de lxo context export",
+            ),
+            (
+                &["context", "export", "t3-a1", "--out", "a", "--out", "b"][..],
+                "aparece más de una vez",
+            ),
+            (
+                &["context", "import", "a.json", "--out", "b"][..],
+                "--out no es una opción",
+            ),
             (
                 &["context", "show", "a.json", "b.json"][..],
                 "un solo archivo",
@@ -1208,15 +1471,410 @@ mod tests {
                 source: "p.json".into()
             }
         );
+        assert_eq!(
+            parse(&args(&["context", "import", "p.json"])).unwrap(),
+            Request::Review {
+                mode: Mode::Import,
+                source: "p.json".into()
+            }
+        );
+        // `--stored` es un indicador: no se come el argumento que le sigue.
+        assert_eq!(
+            parse(&args(&[
+                "context", "export", "--stored", "t3-a1", "--out", "p.json"
+            ]))
+            .unwrap(),
+            Request::Export(ExportOpts {
+                target: Target::AttemptStored("t3-a1".into()),
+                out: "p.json".into(),
+                force: false
+            })
+        );
     }
 
     #[test]
-    fn la_ayuda_dice_lo_que_no_existe_y_el_resumen_la_lista() {
+    fn la_ayuda_documenta_los_cuatro_comandos_y_el_resumen_los_lista() {
+        for cmd in [
+            "lxo context show",
+            "lxo context validate",
+            "lxo context export",
+            "lxo context import",
+        ] {
+            assert!(HELP.contains(cmd), "{cmd}");
+            assert!(crate::HELP.contains(cmd), "{cmd} en el resumen");
+        }
+        assert!(HELP.contains("7 paquete rechazado") && HELP.contains("NO se guarda"));
         assert!(
-            HELP.contains("lxo context export") && HELP.contains("no construye ni guarda paquetes")
+            HELP.contains("no se sobrescribe sin --force")
+                && HELP.contains("permisos solo del dueño")
         );
-        assert!(HELP.contains("7 paquete rechazado"));
-        assert!(crate::HELP.contains("lxo context show"));
-        assert!(crate::HELP.contains("lxo context validate"));
+        assert!(!HELP.contains("no existen"), "ya existen");
+    }
+
+    // ── export, import y show por id con un Core simulado ──────────────────────────────────────────────────────────────
+
+    /// Un Core que construye, guarda y entrega el paquete de la fixture publicada, con sus adjuntos, y anota lo que se le pidió.
+    fn store_core(sent: Sent) -> impl FnMut(&str, &Value) -> Result<Value, RpcFailure> {
+        move |cmd, a| {
+            sent.borrow_mut().push((cmd.to_string(), a.clone()));
+            let mut v: Value = serde_json::from_str(VALID).unwrap();
+            match cmd {
+                "context_package_build" | "context_package_import" => {
+                    let created = cmd == "context_package_build" || a["attachments"].is_object();
+                    v["stored"] = json!({ "origin": if cmd == "context_package_build" { "built" } else { "imported" }, "created_at_ms": 1, "stored_at_ms": 2, "created": created });
+                }
+                "context_package_get" => {
+                    v["stored"] = json!({ "origin": "built", "created_at_ms": 1, "stored_at_ms": 2, "created": null });
+                }
+                "context_package_preview" => {}
+                other => panic!("comando inesperado {other}"),
+            }
+            let atts: Vec<Value> = v["package"]["attachments"].as_array().unwrap().iter().map(|x| json!({ "id": x["id"], "kind": x["kind"], "bytes": x["bytes"], "sha256": x["sha256"], "scanned": x["scanned"], "omitted": null, "stored": true })).collect();
+            v["attachments"] = Value::Array(atts);
+            if a["include_attachments"] == true {
+                let data: serde_json::Map<String, Value> = v["package"]["attachments"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| {
+                        (
+                            x["id"].as_str().unwrap().to_string(),
+                            Value::String(base64::Engine::encode(
+                                &base64::engine::general_purpose::STANDARD,
+                                format!("bytes de {}", x["id"].as_str().unwrap()),
+                            )),
+                        )
+                    })
+                    .collect();
+                v["attachment_data"] = Value::Object(data);
+            }
+            Ok(v)
+        }
+    }
+
+    const PKG_ID: &str = "sha256:ed8802df89b2fc0ce7b1535f6233a49548df5bdfd5ffaa984ccb6c2cd213b6a4";
+
+    fn export_opts(raw: &[&str]) -> ExportOpts {
+        match parse(&args(raw)).unwrap() {
+            Request::Export(o) => o,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn called(sent: &Sent) -> Vec<String> {
+        sent.borrow().iter().map(|(c, _)| c.clone()).collect()
+    }
+
+    #[test]
+    fn exportar_un_intento_construye_lo_trae_por_id_y_lo_escribe_con_sus_adjuntos() {
+        let d = dir("export-intento");
+        let out = d.join("p.json").to_string_lossy().into_owned();
+        let sent: Sent = Default::default();
+        let r = export(
+            &mut store_core(sent.clone()),
+            &export_opts(&["context", "export", "t3-a1", "--out", &out]),
+        )
+        .unwrap();
+        // Primero construye (el Core decide qué evidencia entra) y luego pide ESE paquete con sus adjuntos.
+        assert_eq!(
+            called(&sent),
+            ["context_package_build", "context_package_get"]
+        );
+        assert_eq!(sent.borrow()[0].1, json!({ "attempt_id": "t3-a1" }));
+        assert_eq!(
+            sent.borrow()[1].1,
+            json!({ "package_id": PKG_ID, "include_attachments": true })
+        );
+        assert_eq!(
+            (
+                r["status"].as_str(),
+                r["built"].as_bool(),
+                r["file"].as_str()
+            ),
+            (Some("exported"), Some(true), Some(out.as_str()))
+        );
+        // El archivo es el paquete tal cual el Core lo dio y los adjuntos van al lado.
+        let escrito: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(
+            escrito,
+            serde_json::from_str::<Value>(VALID).unwrap()["package"]
+        );
+        let adj = d.join("p.json.attachments");
+        assert_eq!(std::fs::read_dir(&adj).unwrap().count(), 4);
+        assert_eq!(
+            std::fs::read_to_string(adj.join("att-c9ac7b0624824f84")).unwrap(),
+            "bytes de att:c9ac7b0624824f84"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn exportar_un_paquete_o_el_ultimo_de_un_intento_no_construye_nada() {
+        let d = dir("export-guardado");
+        let sent: Sent = Default::default();
+        let por_id = d.join("a.json").to_string_lossy().into_owned();
+        let r = export(
+            &mut store_core(sent.clone()),
+            &export_opts(&["context", "export", PKG_ID, "--out", &por_id]),
+        )
+        .unwrap();
+        assert_eq!(
+            (called(&sent), r["built"].as_bool()),
+            (vec!["context_package_get".to_string()], Some(false))
+        );
+        assert_eq!(
+            sent.borrow()[0].1,
+            json!({ "package_id": PKG_ID, "include_attachments": true })
+        );
+        let sent: Sent = Default::default();
+        let por_intento = d.join("b.json").to_string_lossy().into_owned();
+        export(
+            &mut store_core(sent.clone()),
+            &export_opts(&[
+                "context",
+                "export",
+                "t3-a1",
+                "--stored",
+                "--out",
+                &por_intento,
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            called(&sent),
+            ["context_package_get"],
+            "con --stored no se construye"
+        );
+        assert_eq!(
+            sent.borrow()[0].1,
+            json!({ "attempt_id": "t3-a1", "include_attachments": true })
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn un_destino_imposible_no_llega_a_pedir_nada_al_core() {
+        let d = dir("export-destino");
+        let existente = d.join("ya.json");
+        std::fs::write(&existente, "viejo").unwrap();
+        let sent: Sent = Default::default();
+        let o = existente.to_string_lossy().into_owned();
+        match export(
+            &mut store_core(sent.clone()),
+            &export_opts(&["context", "export", "t3-a1", "--out", &o]),
+        ) {
+            Err(Failure::Usage(m)) => assert!(m.contains("no sobrescribe sin --force"), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            sent.borrow().is_empty(),
+            "no se construye un paquete que no cabe donde se pide"
+        );
+        assert_eq!(std::fs::read_to_string(&existente).unwrap(), "viejo");
+        // Con --force sí.
+        export(
+            &mut store_core(sent.clone()),
+            &export_opts(&["context", "export", "t3-a1", "--out", &o, "--force"]),
+        )
+        .unwrap();
+        assert_ne!(std::fs::read_to_string(&existente).unwrap(), "viejo");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sin_paquete_guardado_con_stored_lo_dice_y_sin_stored_construye() {
+        let d = dir("export-sin-guardado");
+        let out = d.join("p.json").to_string_lossy().into_owned();
+        let mut sin_paquete = |_: &str, _: &Value| {
+            Err(RpcFailure::Rejected("context_store_not_found: no hay ningún paquete del Attempt t3-a1: se construye con `context_package_build` o se importa".into()))
+        };
+        match export(
+            &mut sin_paquete,
+            &export_opts(&["context", "export", "t3-a1", "--stored", "--out", &out]),
+        ) {
+            Err(Failure::NotFound(m)) => {
+                assert!(m.contains("exporta sin --stored para construir uno"), "{m}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!Path::new(&out).exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn mostrar_un_paquete_guardado_pide_el_id_o_el_intento_y_dice_su_origen() {
+        for (source, want) in [
+            (PKG_ID, json!({ "package_id": PKG_ID })),
+            ("t3-a1", json!({ "attempt_id": "t3-a1" })),
+        ] {
+            let sent: Sent = Default::default();
+            let v = acquire(
+                &mut store_core(sent.clone()),
+                &Mode::Show,
+                source,
+                &mut Cursor::new(Vec::new()),
+            )
+            .unwrap();
+            assert_eq!(
+                (called(&sent), sent.borrow()[0].1.clone()),
+                (vec!["context_package_get".to_string()], want)
+            );
+            let Verdict::Valid(data) = v else { panic!() };
+            let human = show_text(&data);
+            assert!(
+                human.contains(
+                    "Guardado:     construido por este Core · adjuntos guardados: 4 de 4"
+                ),
+                "{human}"
+            );
+        }
+        // Sin paquete guardado de ese intento: no es un archivo ni un paquete, y dice cómo guardar uno.
+        let mut vacio = |_: &str, _: &Value| {
+            Err(RpcFailure::Rejected(
+                "context_store_not_found: no hay ningún paquete".into(),
+            ))
+        };
+        match acquire(
+            &mut vacio,
+            &Mode::Show,
+            "t9-a1",
+            &mut Cursor::new(Vec::new()),
+        ) {
+            Err(Failure::NotFound(m)) => assert!(
+                m.contains("No hay ningún archivo ni ningún paquete guardado del intento «t9-a1»")
+                    && m.contains("lxo context export t9-a1 --out"),
+                "{m}"
+            ),
+            other => panic!("{other:?}"),
+        }
+        // Un archivo sigue revisándose con la vista previa, sin guardar nada.
+        let sent: Sent = Default::default();
+        acquire(
+            &mut store_core(sent.clone()),
+            &Mode::Show,
+            "-",
+            &mut Cursor::new(b"{}".to_vec()),
+        )
+        .unwrap();
+        assert_eq!(called(&sent), ["context_package_preview"]);
+    }
+
+    #[test]
+    fn importar_manda_el_paquete_y_los_adjuntos_de_al_lado_y_dice_que_no_inicio_nada() {
+        let d = dir("import");
+        let file = d.join("p.json");
+        std::fs::write(&file, "{\"paquete\":true}").unwrap();
+        let adj = d.join("p.json.attachments");
+        std::fs::create_dir_all(&adj).unwrap();
+        std::fs::write(adj.join("att-c9ac7b0624824f84"), b"bundle").unwrap();
+        let sent: Sent = Default::default();
+        let v = acquire(
+            &mut store_core(sent.clone()),
+            &Mode::Import,
+            &file.to_string_lossy(),
+            &mut Cursor::new(Vec::new()),
+        )
+        .unwrap();
+        let args = sent.borrow()[0].1.clone();
+        assert_eq!(
+            (called(&sent), args["package"].as_str()),
+            (
+                vec!["context_package_import".to_string()],
+                Some("{\"paquete\":true}")
+            )
+        );
+        assert_eq!(
+            args["attachments"],
+            json!({ "att:c9ac7b0624824f84": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"bundle") })
+        );
+        let Verdict::Valid(data) = v else { panic!() };
+        let out = render(&Mode::Import, false, &Verdict::Valid(data.clone()));
+        let text = out.stdout.unwrap();
+        assert!(
+            text.contains("importado y guardado en el Core")
+                && text.contains("no se ha iniciado ninguno"),
+            "{text}"
+        );
+        // --json: la respuesta del Core sin el paquete.
+        let json = render(&Mode::Import, true, &Verdict::Valid(data));
+        let v: Value = serde_json::from_str(&json.stdout.unwrap()).unwrap();
+        assert!(v.get("package").is_none() && v["stored"]["origin"] == "imported");
+        // Sin carpeta de adjuntos no manda `attachments`; por la entrada estándar tampoco.
+        let sent: Sent = Default::default();
+        std::fs::remove_dir_all(&adj).unwrap();
+        acquire(
+            &mut store_core(sent.clone()),
+            &Mode::Import,
+            &file.to_string_lossy(),
+            &mut Cursor::new(Vec::new()),
+        )
+        .unwrap();
+        assert!(sent.borrow()[0].1.get("attachments").is_none());
+        let sent: Sent = Default::default();
+        acquire(
+            &mut store_core(sent.clone()),
+            &Mode::Import,
+            "-",
+            &mut Cursor::new(b"{}".to_vec()),
+        )
+        .unwrap();
+        assert!(sent.borrow()[0].1.get("attachments").is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn un_paquete_que_el_core_rechaza_al_importar_sale_con_7_sin_mostrarse() {
+        let d = dir("import-malo");
+        let file = d.join("p.json");
+        std::fs::write(&file, "{}").unwrap();
+        let mut rechazo = |_: &str, _: &Value| Ok(serde_json::from_str::<Value>(INVALID).unwrap());
+        let v = acquire(
+            &mut rechazo,
+            &Mode::Import,
+            &file.to_string_lossy(),
+            &mut Cursor::new(Vec::new()),
+        )
+        .unwrap();
+        let out = render(&Mode::Import, false, &v);
+        assert_eq!(out.code, 7);
+        assert!(out.stdout.is_none() && out.stderr.unwrap().contains("id_mismatch"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn los_errores_de_paquetes_guardados_se_traducen_a_codigos() {
+        let fails = |m: &str| {
+            let m = m.to_string();
+            let mut rpc = move |_: &str, _: &Value| Err(RpcFailure::Rejected(m.clone()));
+            fetch(&mut rpc, "context_package_get", &json!({})).unwrap_err()
+        };
+        assert!(
+            matches!(fails("context_store_auth_required: x"), Failure::Auth(m) if m.contains("solo para personas"))
+        );
+        assert!(
+            matches!(fails("core_model_inactive: legacy"), Failure::Version(m) if m.contains("tras el corte"))
+        );
+        assert!(
+            matches!(fails("context_store_invalid_request: falta"), Failure::Version(m) if m.contains("actualiza Lixbon"))
+        );
+        assert!(
+            matches!(fails("context_store_not_found: no hay el paquete x"), Failure::NotFound(m) if m.contains("no hay el paquete x"))
+        );
+        assert!(
+            matches!(fails("context_store_attachments_too_large: los adjuntos pesan 3 bytes"), Failure::Usage(m) if m.contains("Publica la rama"))
+        );
+        assert!(matches!(
+            fails("context_store_unavailable: el almacén no está abierto"),
+            Failure::Unavailable(_)
+        ));
+        assert!(
+            matches!(fails("context_store_unavailable: la Task no tiene proyecto"), Failure::Usage(m) if m.contains("proyecto"))
+        );
+        assert!(matches!(
+            fails("context_store_corrupt: x"),
+            Failure::Internal(_)
+        ));
+        assert_eq!(fails("context_store_auth_required: x").code().1, 3);
+        assert_eq!(fails("context_store_not_found: x").code().1, 6);
     }
 }

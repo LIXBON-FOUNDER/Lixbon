@@ -50,7 +50,7 @@ continue_attempt(store, registry, ctx, cancel, settings, request) -> Outcome | C
 | `Package(json)` | paquete (un Attempt limpio a petición) | paquete |
 | `Auto { package }` | nativo | paquete **si se aportó** (con su motivo); si no, **error** con `fallback_available` |
 
-El Core no construye paquetes (necesita la evidencia de git: `lxo context`, LXO-138): quien llama lo aporta. Un cliente ve
+El comando de continuidad no construye paquetes: quien llama lo aporta. El Core sí sabe construirlos desde un Attempt y guardarlos (`context_package_build`, LXO-138: [QUERIES.md](QUERIES.md#context_package_build-context_package_get-y-context_package_import-lxo-138)), y `lxo context export` los saca a un archivo. Un cliente ve
 `fallback_available = true` y decide si lo ofrece; el Core nunca lo aplica solo.
 
 ## Política
@@ -190,7 +190,7 @@ caducada, atender una clave reutilizada) rompen al menos una prueba cada uno.
 ## Fuera de este slice
 
 El comando de reintento y resume del Attempt (`attempt.retry` y `attempt.resume`, LXO-142: [REINTENTO.md](REINTENTO.md)) ya existe en el Core, pero sigue sin estar en el RPC ni en `lxo`; leer el flujo de eventos del
-proveedor tras lanzar (el runtime), construir el paquete (`lxo context`, LXO-138), la UI (LXO-135/136), la aprobación previa
+proveedor tras lanzar (el runtime), usar un paquete guardado para continuar (el handoff, F6), la UI (LXO-135/136), la aprobación previa
 de un seguimiento (`requires_approval` es siempre `false` aquí) y el handoff entre Tasks (F6, LXO-172).
 
 ## Sin validar con la CLI real

@@ -125,3 +125,7 @@ jobs:
         run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::context_preview_tests::lxo_bin_e2e_context_person_real_store -- --ignored --exact --nocapture
         env:
           LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
+      - name: Ejecutar E2E de lxo context export, import y show por id contra dos Cores (Credential Manager real)
+        run: cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::context_store_tests::lxo_bin_e2e_context_store_person_real_store -- --ignored --exact --nocapture
+        env:
+          LXO_BIN: ${{ github.workspace }}\apps\desktop\src-tauri\binaries\lxo-x86_64-pc-windows-msvc.exe
