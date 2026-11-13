@@ -15,6 +15,21 @@ use super::state::{Kind, State};
 use super::fsio::cli_installation_file;
 use crate::secure_store::{self, SecretStore};
 
+/// Permiso para barrer la custodia GLOBAL de procesos (la de las terminales y la del supervisor de adapters). En producción siempre se tiene. En
+/// pruebas la custodia es de todas las pruebas del proceso y el barrido de un Core de fixture, en otro hilo, mataba de verdad lo que una prueba de
+/// custodia acababa de dejar sin probar (LXO-238/LXO-242): solo se barre si se puede tomar la serie SIN esperar (esperar bloquearía un apagado hecho
+/// desde otro hilo mientras la prueba, que tiene la serie, lo aguarda, y mantendría vivo el Core de una fixture con su `core.lock`). Una prueba que
+/// toca la custodia ya tiene la serie, así que sus propios apagados barren.
+#[cfg(test)]
+fn custody_sweep_permit() -> Option<super::pty::pruebas::SerieCustodia> {
+    super::pty::pruebas::serie_custodia_si_libre()
+}
+
+#[cfg(not(test))]
+fn custody_sweep_permit() -> Option<()> {
+    Some(())
+}
+
 /// Prueba de que se llama desde el arranque: `Core::adopt_state` la exige y solo
 /// este módulo puede crearla (el campo y el constructor son privados aquí).
 pub(super) struct BootProof(());
@@ -250,7 +265,9 @@ impl Core {
     pub(super) fn periodic_sweep(&self) {
         self.close_idle_runs();
         // Un cierre de proceso que no se pudo probar se reintenta en cada ciclo (barato si no hay nada).
-        super::adapter::supervisor::reap();
+        if let Some(_permit) = custody_sweep_permit() {
+            super::adapter::supervisor::reap();
+        }
         self.sweep_initial_approvals();
         self.dispatch_waiting_approved();
     }
@@ -279,10 +296,12 @@ impl Core {
     pub fn shutdown(&self) {
         // Sin el mapa de terminales bloqueado mientras corre cada matador (ver `kill_all_terms`).
         self.kill_all_terms();
-        // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
-        super::pty::reap_unowned();
-        // Lo que no se pudo cerrar con prueba de los procesos de los adapters (LXO-242): se reintenta antes de salir.
-        super::adapter::supervisor::reap();
+        if let Some(_permit) = custody_sweep_permit() {
+            // Procesos cuya construcción falló y no se pudieron matar entonces (ver `pty::reap_unowned`).
+            super::pty::reap_unowned();
+            // Lo que no se pudo cerrar con prueba de los procesos de los adapters (LXO-242): se reintenta antes de salir.
+            super::adapter::supervisor::reap();
+        }
         self.stop_server();
     }
 

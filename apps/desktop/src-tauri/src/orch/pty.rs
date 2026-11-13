@@ -1206,6 +1206,9 @@ pub(crate) mod pruebas {
         _guard: Option<std::sync::MutexGuard<'static, ()>>,
     }
 
+    /// El mutex de la serie: uno solo, compartido por `serie_custodia` y `serie_custodia_si_libre`.
+    static SERIE: Mutex<()> = Mutex::new(());
+
     thread_local! {
         static EN_SERIE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
@@ -1222,13 +1225,28 @@ pub(crate) mod pruebas {
     /// los matadores rotos de una prueba son LOCALES a su hilo, así que el barrido de otra los deja funcionar de verdad): las
     /// pruebas que la tocan, o que apagan un Core, van de una en una. Para apagar un Core desde una fixture, `apaga_en_serie`.
     pub fn serie_custodia() -> SerieCustodia {
-        static SERIE: Mutex<()> = Mutex::new(());
         if EN_SERIE.with(|e| e.get()) {
             return SerieCustodia { _guard: None };
         }
         let guard = SERIE.lock().unwrap_or_else(|e| e.into_inner());
         EN_SERIE.with(|e| e.set(true));
         SerieCustodia { _guard: Some(guard) }
+    }
+
+    /// Como [`serie_custodia`] pero SIN esperar: `None` si otro hilo tiene la serie. Lo usan el apagado y el barrido de un Core de prueba
+    /// (`lifecycle.rs`) para no pisar la custodia de una prueba que corre a la vez; esperar bloquearía un apagado hecho desde otro hilo mientras
+    /// la prueba (que sí tiene la serie) lo aguarda, y mantendría vivo el Core de una fixture (con su `core.lock`) mientras una prueba larga de custodia corre.
+    pub fn serie_custodia_si_libre() -> Option<SerieCustodia> {
+        if EN_SERIE.with(|e| e.get()) {
+            return Some(SerieCustodia { _guard: None });
+        }
+        let guard = match SERIE.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        EN_SERIE.with(|e| e.set(true));
+        Some(SerieCustodia { _guard: Some(guard) })
     }
 
     /// Apaga un Core (`Core::shutdown`, que barre la custodia global) sin pisar a una prueba de custodia que corra a la vez. Es lo que
