@@ -15,6 +15,8 @@ mod client_auth;
 mod context;
 mod context_store;
 mod events;
+mod f5_support;
+mod fork;
 mod projects;
 mod provider;
 mod summary;
@@ -51,6 +53,7 @@ Coordinador (el agente con el que habla el usuario):
                                                   la forma del modelo Task/Attempt (docs/core/LXO_CORTE.md)
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
+  lxo attempt fork <source_attempt_id> [opciones]  fork explícito; nueva Task, procedencia y aprobación humana
   lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
   lxo attempt resume <attempt_id> --message \"...\"
@@ -1046,6 +1049,9 @@ fn main() -> ExitCode {
         return tasks::run(&a);
     }
     if matches!(a.at(0).as_deref(), Some("attempts" | "attempt")) {
+        if a.at(0).as_deref() == Some("attempt") && a.at(1).as_deref() == Some("fork") {
+            return fork::run(&a);
+        }
         return attempts::run(&a);
     }
     if a.at(0).as_deref() == Some("summary") {
