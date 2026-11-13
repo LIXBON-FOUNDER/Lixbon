@@ -33,7 +33,7 @@ fn level(s: &PolicySnapshot, actor: ActorClass, cat: Category, project: Option<&
 const DESKTOP_CONFIRM: [Category; 5] = [Category::Start, Category::Review, Category::Integrate, Category::Cleanup, Category::ProviderPermissions];
 
 #[test]
-fn la_matriz_base_deja_a_desktop_como_estaba_y_a_los_demas_sin_nada() {
+fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_y_review() {
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
@@ -41,8 +41,12 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_a_los_demas_sin_nada() {
         for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
-        // El CLI solo puede PEDIR un Attempt; la aprobación sigue siendo de Desktop.
-        let cli = if matches!(c, Category::Start | Category::Stop) { Level::Confirm } else { Level::Deny };
+        // Start/retry/resume siguen pendientes de Desktop; stop y review exigen confirmación explícita.
+        let cli = if matches!(c, Category::Start | Category::Stop | Category::Review) {
+            Level::Confirm
+        } else {
+            Level::Deny
+        };
         assert_eq!(baseline(ActorClass::CliPerson, c), cli, "{}", c.as_str());
         assert_eq!(baseline(ActorClass::Core, c), Level::Allow);
     }
@@ -229,6 +233,8 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     assert_eq!(e["baseline_matrix"]["mobile_person"]["steer"], "deny");
     assert_eq!(e["baseline_matrix"]["cli_person"]["start"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["stop"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["review"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "deny");
     assert_eq!(e["baseline_matrix"]["desktop_person"]["queue"], "allow");
 }
 
@@ -467,6 +473,59 @@ fn el_cli_puede_pedir_un_attempt_y_sigue_pendiente_de_la_aprobacion_de_desktop()
     // Una Task sin Attempt no ejecuta nada: la policy de `start` no la toca.
     let r = as_client(&w, &cli, "task_create", json!({"request_id": "r-cli3", "project_id": w.project, "objective": "o", "title": "t3", "spec": "s"}));
     assert!(paso_la_policy(&r), "{r:?}");
+}
+
+#[test]
+fn cli_review_exige_confirm_y_respeta_elevated_y_deny_de_la_policy() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("reviewer".into()),
+        "reviewer",
+    );
+    let args = json!({
+        "attempt_id": "policy-review-a1",
+        "decision": "accepted",
+        "head_commit": "0123456789abcdef",
+        "confirm": false
+    });
+
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", args.clone()),
+        "policy_confirm_required"
+    ));
+    let mut confirmed = args.clone();
+    confirmed["confirm"] = json!(true);
+    assert!(
+        is(
+            as_client(&w, &cli, "attempt_review", confirmed.clone()),
+            "review_not_found"
+        ),
+        "confirm true permite llegar al dominio"
+    );
+
+    w.set("global", None, "review", "elevated", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", confirmed.clone()),
+        "policy_out_of_band_required"
+    ));
+    w.set("global", None, "review", "deny", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", confirmed),
+        "policy_denied"
+    ));
+
+    let effective = as_client(&w, &cli, "policy_effective", json!({})).unwrap();
+    assert_eq!(
+        (
+            cat(&effective, "review")["level"].as_str(),
+            cat(&effective, "review")["source"].as_str()
+        ),
+        (Some("deny"), Some("global"))
+    );
 }
 
 #[test]

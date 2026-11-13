@@ -22,6 +22,7 @@ mod fork;
 mod projects;
 mod provider;
 mod race;
+mod review;
 mod summary;
 mod tasks;
 mod usage;
@@ -66,6 +67,8 @@ Coordinador (el agente con el que habla el usuario):
                                                   (solo lectura y solo personas)
   lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
                                                    compara 2–4 intentos con la evidencia del Core (solo personas)
+  lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
+                                                   Proof Pack y decisión sobre el HEAD exacto (solo personas)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo provider list [--refresh] [--json]
@@ -181,7 +184,8 @@ fn parse(raw: Vec<String>) -> Args {
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help", "stored", "background", "confirm", "dry-run", "wait", "compare",
+    "follow", "help", "stored", "background", "confirm", "dry-run", "wait", "compare", "accept",
+    "reject", "open",
 ];
 
 impl Args {
@@ -1096,6 +1100,9 @@ fn main() -> ExitCode {
     if a.at(0).as_deref() == Some("compare") {
         return compare::run(&a);
     }
+    if a.at(0).as_deref() == Some("review") {
+        return review::run(&a);
+    }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
     }
@@ -1395,6 +1402,8 @@ mod tests {
         assert!(super::HELP.contains("lxo events"));
         assert!(super::events::HELP.contains("--follow"));
         assert!(super::events::HELP.contains("--after"));
+        assert!(super::HELP.contains("lxo review"));
+        assert!(super::review::HELP.contains("--accept"));
     }
 
     #[test]

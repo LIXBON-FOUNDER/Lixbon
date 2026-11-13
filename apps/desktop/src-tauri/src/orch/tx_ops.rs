@@ -852,8 +852,9 @@ impl Tx {
     /// única vía es [`Tx::record_spawn_resolution`]) y cualquier otro `kind` rechaza la mutación completa.
     ///
     /// Validación de actor: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el
-    /// contexto de la mutación debe ser realmente ese actor. Además, review/merge/pr son decisiones de una
-    /// PERSONA desde la interfaz (`Person / Ui`).
+    /// contexto de la mutación debe ser realmente ese actor. Review/merge/pr son decisiones de una Person
+    /// autenticada de Desktop; una Person CLI solo puede llegar por un RPC específico de Attempt cuya acción
+    /// y policy efectiva autoricen esa decisión.
     pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));
@@ -941,8 +942,10 @@ impl Tx {
         if !coincide {
             return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
         }
-        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !ctx.is_person_ui()) {
-            return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
+        let cli_attempt_decision = matches!(kind, "review" | "merge" | "pr") && ctx.is_authenticated_cli_person();
+        let authorized_surface = ctx.is_person_ui() || cli_attempt_decision;
+        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !authorized_surface) {
+            return Err(format!("decisión {kind}: solo la toma una persona autenticada desde Desktop o mediante el RPC específico de Attempt desde CLI (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }
         Ok(())
     }

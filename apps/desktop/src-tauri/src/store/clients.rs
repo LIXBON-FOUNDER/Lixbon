@@ -230,6 +230,8 @@ pub enum ClientAction {
     /// petición CLI que queda pendiente de aprobación.
     AttemptRequest,
     UiCommand,
+    /// Revisión del Proof Pack sobre el HEAD exacto. No concede otras decisiones humanas al CLI.
+    AttemptReview,
     HumanDecision,
     CoreCommand,
 }
@@ -372,6 +374,9 @@ impl AuthenticatedClient {
                 }
                 ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
+                }
+                ClientAction::AttemptReview => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
                 _ => true,
             },
@@ -925,6 +930,11 @@ mod tests {
             token("agent-scoped"),
         )
         .unwrap();
+        let person_mobile = ClientCredential::new(
+            ClientPrincipal::Person("person-mobile".into()),
+            token("person-mobile"),
+        )
+        .unwrap();
         let desktop = store
             .register_client(
                 &registration(ClientSurface::Desktop, "install-action-desktop"),
@@ -946,10 +956,27 @@ mod tests {
                 102,
             )
             .unwrap();
+        let mobile = store
+            .register_client(
+                &registration(ClientSurface::Mobile, "install-action-mobile"),
+                &person_mobile,
+                103,
+            )
+            .unwrap();
 
         assert!(desktop.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(cli.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(worker.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
+        assert!(desktop.authorize(ClientAction::AttemptReview).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptReview).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptReview),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert_eq!(
+            mobile.authorize(ClientAction::AttemptReview),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
         assert!(cli.authorize(ClientAction::CliAttemptCommand).is_ok());
         assert_eq!(desktop.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(worker.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));

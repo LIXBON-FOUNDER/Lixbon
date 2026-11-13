@@ -5,7 +5,7 @@ Dos comandos para que una persona verifique la evidencia **antes** del diff y ac
 | | `attempt_proof_pack { attempt_id }` | `attempt_review { attempt_id, decision, head_commit, comment?, confirm }` |
 |---|---|---|
 | Qué es | lectura | decisión humana |
-| Quién | Person de Desktop | Person de Desktop (ni agentes ni CLI) |
+| Quién | Person autenticada | Person autenticada de Desktop o CLI (ni agentes) |
 | Efecto | ninguno | `decision.recorded` (`review`) sobre la Task; nada más |
 
 ## Proof Pack
@@ -56,5 +56,39 @@ la integración exigen el HEAD exacto. Queda como límite conocido.
 
 * Sin resultados de pruebas ni verificación de hashes de artefactos. Sin capturas de pantalla como locators.
 * Sin reapertura de Attention por HEAD movido (ver arriba).
+* La lectura del HEAD de Git y el registro en SQLite no son atómicos frente a un cambio externo concurrente. Si la rama avanza justo después
+  de comprobarse, la decisión queda asociada al commit exacto recibido y el Proof Pack la marcará `stale` frente al HEAD nuevo.
 * Un Attempt anterior de la Task no se decide (su rama es la del actual).
 * No se probó con un proveedor real.
+
+## Cliente de terminal: `lxo review` (LXO-162)
+
+`lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]` consulta
+`attempt_proof_pack` por el RPC autenticado. Solo `--accept` o `--reject` envía una decisión; el
+cliente no lee el diff local ni decide por la persona.
+
+La Person CLI puede decidir únicamente mediante la capacidad RPC específica de `attempt_review`.
+La base `cli_person.review` exige `confirm`; cada llamada vuelve a evaluar los overrides efectivos,
+y `deny` o `elevated` bloquean la decisión. Las demás acciones `HumanDecision` continúan reservadas
+a Desktop; no se amplía esa autorización genérica.
+
+* Toda decisión queda precedida por una lectura nueva del Proof Pack. Si `decision.can_decide` es
+  falso, se muestra el motivo y no se llama a `attempt_review`.
+* El cliente pasa a `attempt_review.head_commit` exactamente
+  `attempt_proof_pack.decision.head_commit`, junto a `confirm: true`. Si el Core responde
+  `head_moved`, no reintenta: imprime el HEAD esperado y el encontrado, incluye el resultado
+  estructurado y sale con `stale` (7). La persona vuelve a consultar y examina el nuevo Proof Pack.
+* La salida humana etiqueta `verified`, `agent_reported` y `unknown`; incluye estado, objetivo,
+  revisión, cambios y archivos, pruebas, artefactos, aceptación previa y lagunas. Los artefactos
+  se identifican por tipo e id; su URI no se ejecuta ni se abre.
+* `--json` usa el sobre estable `{ v: 1, proof_pack, review }`: `proof_pack` es la respuesta v1
+  completa del Core y `review` es `null` en lectura o la respuesta completa de `attempt_review`.
+  En `head_moved`, stdout contiene `{ ok: false, code: "stale", error, result }` y `result` es ese
+  sobre. Los errores de validación/uso y autorización conservan el formato común de lxo por stderr.
+* `--comment` se recorta y limita a 2000 caracteres; no se puede pasar sin una decisión. El Core
+  no incluye el texto del comentario en el Event Log, pero la respuesta JSON de la decisión sí
+  puede devolverlo.
+* `--open` solo muestra el id del Attempt para abrirlo manualmente en Desktop. Esta versión no
+  inicia la aplicación ni depende de un enlace profundo.
+* Salidas: 0 correcto, 1 error interno, 2 uso/decisión no válida, 3 autenticación/permiso,
+  4 versión/contrato, 5 Core no disponible, 6 Attempt inexistente, 7 HEAD movido.

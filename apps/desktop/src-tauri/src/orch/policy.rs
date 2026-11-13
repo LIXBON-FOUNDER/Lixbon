@@ -8,9 +8,9 @@
 //!   restrictivo → allow < confirm < elevated < deny
 //! ```
 //!
-//! * **Base por actor** (código, no editable): una Person de Desktop tiene lo que ya tenía; el CLI puede pedir un `start`, `retry` o
-//!   `resume` (que siguen necesitando aprobación de Desktop) y detener un Attempt exacto con `confirm: true`; Mobile, automatización
-//!   y los agentes no tienen NADA de estas categorías.
+//! * **Base por actor** (código, no editable): una Person de Desktop tiene lo que ya tenía; el CLI puede pedir `start`, `retry` o
+//!   `resume` (que siguen necesitando aprobación de Desktop), detener un Attempt exacto y decidir su `review` con confirmación
+//!   explícita; Mobile, automatización y los agentes no tienen NADA de estas categorías.
 //! * **Overrides** (SQLite, `policy_overrides`): los fija una Person de Desktop. El global se puede aflojar (con confirmación aparte);
 //!   `project` y `attempt` solo pueden ENDURECER respecto al ámbito de arriba, así que un override más cercano nunca da más permiso.
 //! * **Pisos** (código): `start`, `review`, `integrate`, `cleanup` y `provider_permissions` nunca bajan de `confirm`. El inicio y sus
@@ -168,8 +168,12 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
     match actor {
         // Lo que ya tenía: lo que decide o destruye pide confirmación; instruir al propio Attempt no.
         ActorClass::DesktopPerson => category.floor(),
-        // El CLI puede PEDIR un Attempt (queda pendiente de la aprobación de Desktop); nada más de esto.
-        ActorClass::CliPerson if matches!(category, Category::Start | Category::Stop) => Level::Confirm,
+        // El CLI puede pedir un Attempt (pendiente de Desktop), detenerlo o revisarlo con confirmación explícita.
+        ActorClass::CliPerson
+            if matches!(category, Category::Start | Category::Stop | Category::Review) =>
+        {
+            Level::Confirm
+        }
         // El Core se gobierna a sí mismo: la policy rige las peticiones de actores, no su trabajo interno.
         ActorClass::Core => Level::Allow,
         // Mobile, automatización y agentes: nada de estas categorías hasta que una fase lo decida (y con confirmación fuera de banda).

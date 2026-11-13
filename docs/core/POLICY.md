@@ -48,7 +48,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review: confirm; integrate · cleanup · provider_permissions: deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
@@ -69,6 +69,10 @@ Hoy Mobile ni siquiera se autentica en el Core (`Channel` solo conoce `ui`, `lxo
 
 Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los que nombran una Task (`attempt_retry`, `attempt_resume`,
 `resource_*`) evalúan global + project.
+
+`cli_person` puede ejecutar `attempt_review` del Proof Pack con `confirm: true`, sujeto a la policy efectiva. La decisión debe coincidir
+con el HEAD exacto que se revisó; el Core vuelve a validar ambas condiciones en cada llamada. `attempt_integrate` permanece denegado
+para `cli_person` en esta fase; `cleanup` y `provider_permissions` también.
 
 ## Se revalida en CADA Command (invariante 2)
 

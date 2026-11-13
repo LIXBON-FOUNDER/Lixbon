@@ -147,6 +147,13 @@ impl MutationContext {
         self.is_person() && self.channel == Channel::Ui
     }
 
+    /// Person autenticada que llegó por el servidor local del CLI. `Actor::Person`
+    /// legacy no cuenta; la superficie real se valida antes de construir este contexto.
+    pub(super) fn is_authenticated_cli_person(&self) -> bool {
+        matches!((&self.actor, self.channel), (Actor::PersonId(_), Channel::Lxo))
+            && self.client_id.as_deref().is_some_and(|id| !id.is_empty())
+    }
+
     pub(super) fn with_actor(&self, actor: Actor) -> MutationContext {
         let mut context = self.clone();
         context.actor = actor;

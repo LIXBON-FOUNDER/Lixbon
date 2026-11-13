@@ -3,12 +3,15 @@
 //! es solo sobre el HEAD exacto que se vio, que un HEAD movido no se acepta, y que rechazar no borra nada ni deja texto en el log.
 
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use super::adapter::fake::Step;
 use super::attempt_e2e_tests::{world, World};
 use super::compare_e2e_tests::{commit, event_total, git, task_of, worktree};
 use super::dispatch_tests::{event_count, row};
+use super::events::Channel;
 use super::{Caller, Core};
+use crate::store::{AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
 impl World {
     fn pack(&self, attempt: &str) -> Result<Value, String> {
@@ -26,6 +29,31 @@ impl World {
 
 fn head_of(core: &Core, attempt: &str) -> String {
     git(&worktree(core, attempt), &["rev-parse", "HEAD"])
+}
+
+fn authenticated_cli_person(core: &Core, tag: &str) -> AuthenticatedClient {
+    let secret = format!("proof-pack-cli-{tag}-secret-with-at-least-32-bytes");
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new(format!("install-proof-pack-cli-{tag}"), None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(
+        ClientPrincipal::Person(format!("person-proof-pack-{tag}")),
+        secret.clone(),
+    )
+    .unwrap();
+    core.storage
+        .with_store(|store| store.register_client(&registration, &credential, 100))
+        .expect("almacén abierto")
+        .expect("cliente registrado");
+    core.authenticate_client(&secret)
+        .unwrap()
+        .expect("credencial autenticada")
+}
+
+fn cli_rpc(core: &Arc<Core>, client: &AuthenticatedClient, cmd: &str, args: &Value) -> Result<Value, String> {
+    core.rpc_authenticated_via(client, &ClientClaims::default(), Channel::Lxo, "", cmd, args)
 }
 
 /// El payload de los `decision.recorded` de la Task, en orden.
@@ -135,6 +163,104 @@ fn si_la_rama_se_mueve_antes_de_aceptar_no_se_registra_nada_y_una_aceptacion_vie
     let p = w.pack(&a1).unwrap();
     assert_eq!((p["acceptance"]["state"].as_str(), p["acceptance"]["head_matches"].as_bool()), (Some("stale"), Some(false)));
     assert_eq!(p["acceptance"]["decided_head"], nuevo.as_str());
+}
+
+#[test]
+fn cli_person_autenticada_acepta_el_head_exacto_rechaza_stale_y_puede_rechazar_el_actual() {
+    let (w, a1) = done_with_work("hecho");
+    let cli = authenticated_cli_person(&w.core, "accept-reject");
+    let task = task_of(&a1);
+
+    let proof = cli_rpc(&w.core, &cli, "attempt_proof_pack", &json!({"attempt_id": a1})).unwrap();
+    let visto = proof["decision"]["head_commit"].as_str().unwrap().to_string();
+    assert_eq!(visto, head_of(&w.core, &a1));
+
+    // El HEAD cambia entre la lectura autenticada y la decisión CLI.
+    commit(&w.core, &a1, &[("stale.txt", "HEAD nuevo\n")]);
+    let actual = head_of(&w.core, &a1);
+    assert_ne!(visto, actual);
+    let decisions_before = event_count(&w.core, &task, "decision.recorded");
+    let events_before = event_total(&w.core);
+    let before = (decisions(&w.core, &task).len(), events_before);
+    let stale = cli_rpc(
+        &w.core,
+        &cli,
+        "attempt_review",
+        &json!({"attempt_id": a1, "decision": "accepted", "head_commit": visto, "confirm": true}),
+    )
+    .expect("la solicitud stale se responde sin mutación");
+    assert_eq!(
+        (stale["outcome"].as_str(), stale["expected_commit"].as_str(), stale["found_commit"].as_str()),
+        (Some("head_moved"), Some(visto.as_str()), Some(actual.as_str()))
+    );
+    assert_eq!((decisions(&w.core, &task).len(), event_total(&w.core)), before, "el HEAD stale no deja decisión ni evento");
+
+    let refreshed = cli_rpc(&w.core, &cli, "attempt_proof_pack", &json!({"attempt_id": a1})).unwrap();
+    assert_eq!(refreshed["decision"]["head_commit"], actual);
+    let padded_head = format!("{actual} ");
+    let before_noncanonical = (decisions(&w.core, &task).len(), event_total(&w.core));
+    let noncanonical = cli_rpc(
+        &w.core,
+        &cli,
+        "attempt_review",
+        &json!({"attempt_id": a1, "decision": "accepted", "head_commit": padded_head, "confirm": true}),
+    )
+    .expect("un hash con espacio no se normaliza ni registra");
+    assert_eq!(
+        (noncanonical["outcome"].as_str(), noncanonical["found_commit"].as_str()),
+        (Some("head_moved"), Some(actual.as_str()))
+    );
+    assert_eq!(
+        (decisions(&w.core, &task).len(), event_total(&w.core)),
+        before_noncanonical,
+        "solo se acepta el valor exacto de head_commit"
+    );
+
+    let accepted = cli_rpc(
+        &w.core,
+        &cli,
+        "attempt_review",
+        &json!({"attempt_id": a1, "decision": "accepted", "head_commit": actual, "confirm": true}),
+    )
+    .expect("aceptar el HEAD actual");
+    assert_eq!((accepted["outcome"].as_str(), accepted["head_commit"].as_str()), (Some("recorded"), Some(actual.as_str())));
+    assert_eq!(event_count(&w.core, &task, "decision.recorded"), decisions_before + 1);
+
+    let rejected = cli_rpc(
+        &w.core,
+        &cli,
+        "attempt_review",
+        &json!({"attempt_id": a1, "decision": "rejected", "head_commit": actual, "confirm": true}),
+    )
+    .expect("rechazar el HEAD actual");
+    assert_eq!((rejected["outcome"].as_str(), rejected["decision"].as_str()), (Some("recorded"), Some("rejected")));
+    assert_eq!(event_count(&w.core, &task, "decision.recorded"), decisions_before + 2);
+    assert_eq!(row(&w.core, &a1).0, "done");
+    assert_eq!(worktree_state(&w.core, &a1), "active", "rechazar no borra el Attempt ni su worktree");
+
+    let identity: (String, Option<String>, Option<String>, Option<String>) = w
+        .core
+        .storage
+        .with_store(|store| {
+            store.read(|connection| {
+                Ok(connection.query_row(
+                    "SELECT actor_kind, actor_id, channel, client_id FROM events WHERE kind = 'decision.recorded' AND entity_id = ?1 ORDER BY seq DESC LIMIT 1",
+                    [&task],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?)
+            })
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        identity,
+        (
+            "person".into(),
+            Some("person-proof-pack-accept-reject".into()),
+            Some("lxo".into()),
+            Some(cli.identity().client_id().to_string()),
+        )
+    );
 }
 
 #[test]

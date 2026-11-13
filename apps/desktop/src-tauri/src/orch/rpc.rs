@@ -823,6 +823,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // Escriben un paquete: la autorización de la superficie (Desktop o CLI) la da la acción; que sea Person lo exige el propio comando.
         "context_package_build" | "context_package_import" => ClientAction::AgentOrDesktopCommand,
         "task_create" => ClientAction::AgentOrDesktopCommand,
+        "attempt_review" => ClientAction::AttemptReview,
         "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
             ClientAction::AgentCommand
@@ -832,7 +833,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
         "attempt_start" | "attempt_stop" => ClientAction::CliAttemptCommand,
         "attempt_retry" | "attempt_resume" => ClientAction::AttemptRequest,
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
@@ -869,6 +870,7 @@ mod tests {
             }
             // core_restore: el despacho exige además una persona.
             "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
+            "attempt_review" => ClientAction::AttemptReview,
             "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
             _ => ClientAction::Unknown,
         }
@@ -915,6 +917,8 @@ mod tests {
             ClientPrincipal::Person("desktop-person".into()),
         );
         assert_eq!(rpc_action("events"), ClientAction::EventLogRead);
+        assert_eq!(rpc_action("attempt_review"), ClientAction::AttemptReview);
+        assert_eq!(rpc_action("attempt_integrate"), ClientAction::HumanDecision);
         assert_eq!(rpc_action("attempt_start"), ClientAction::CliAttemptCommand);
         assert_eq!(rpc_action("attempt_stop"), ClientAction::CliAttemptCommand);
         assert_eq!(rpc_action("attempt_retry"), ClientAction::AttemptRequest);
@@ -924,6 +928,10 @@ mod tests {
         assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_cli.authorize(ClientAction::UiCommand).is_err());
         assert!(person_cli.authorize(ClientAction::HumanDecision).is_err());
+        assert!(person_cli.authorize(ClientAction::AttemptReview).is_ok());
+        assert!(person_desktop.authorize(ClientAction::AttemptReview).is_ok());
+        assert!(agent_cli.authorize(ClientAction::AttemptReview).is_err());
+        assert!(person_cli.authorize(rpc_action("attempt_integrate")).is_err());
         assert!(person_cli.authorize(ClientAction::CliAttemptCommand).is_ok());
         assert!(person_desktop.authorize(ClientAction::CliAttemptCommand).is_err());
         assert!(agent_cli.authorize(ClientAction::CliAttemptCommand).is_err());
@@ -941,6 +949,7 @@ mod tests {
                     | ClientAction::EventLogRead
                     | ClientAction::AgentCommand
                     | ClientAction::AgentOrDesktopCommand
+                    | ClientAction::AttemptReview
             );
             let agent_task_allows = matches!(
                 action,

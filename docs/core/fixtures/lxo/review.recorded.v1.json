@@ -1,0 +1,109 @@
+{
+  "proof_pack": {
+    "acceptance": {
+      "state": "none"
+    },
+    "artifacts": {
+      "items": [
+        {
+          "bytes": null,
+          "id": "artifact-1",
+          "kind": "report",
+          "sha256": null,
+          "uri": "report.md"
+        }
+      ],
+      "provenance": "agent_reported"
+    },
+    "attempt_id": "t3-a2",
+    "changes": {
+      "additions": {
+        "provenance": "verified",
+        "value": 2
+      },
+      "deletions": {
+        "provenance": "verified",
+        "value": 0
+      },
+      "files": {
+        "provenance": "verified",
+        "value": 1
+      },
+      "list": [
+        {
+          "additions": 2,
+          "deletions": 0,
+          "path": "src/a.rs"
+        }
+      ],
+      "total_files": 1,
+      "truncated": false
+    },
+    "completeness": {
+      "gaps": [
+        "summary",
+        "tests"
+      ],
+      "state": "complete"
+    },
+    "decision": {
+      "can_decide": true,
+      "head_commit": "head-456"
+    },
+    "is_current": true,
+    "limits": {
+      "max_files": 200,
+      "max_summary_chars": 2000
+    },
+    "n": 2,
+    "objective": {
+      "provenance": "verified",
+      "value": {
+        "objective": "Validar el cambio",
+        "title": "Revisar"
+      }
+    },
+    "revision": {
+      "base_commit": {
+        "provenance": "verified",
+        "value": "base-123"
+      },
+      "head_commit": {
+        "provenance": "verified",
+        "value": "head-456"
+      },
+      "source": "live_branch"
+    },
+    "status": {
+      "provenance": "verified",
+      "value": {
+        "failure_reason": null,
+        "status": "done"
+      }
+    },
+    "summary": {
+      "provenance": "agent_reported",
+      "value": "resumen declarado"
+    },
+    "task_id": "t3",
+    "tests": {
+      "provenance": "unknown",
+      "reason": "not_collected",
+      "value": null
+    },
+    "v": 1
+  },
+  "review": {
+    "at": 42,
+    "attempt_id": "t3-a2",
+    "base_commit": "base-123",
+    "base_source": "recorded",
+    "comment": "LGTM",
+    "decision": "accepted",
+    "decision_id": 17,
+    "head_commit": "head-456",
+    "outcome": "recorded",
+    "task_id": "t3"
+  },
+  "v": 1
+}
