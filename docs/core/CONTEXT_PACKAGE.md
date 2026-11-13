@@ -253,7 +253,16 @@ los mismos datos del experimento: **13 de 13** secretos (antes 6 de 13), **0 fal
 (sha, uuid, ruta, hash de integridad, `NOMBRE_TOKEN=$VARIABLE`, `API_TOKEN=<tu-token>`…) y **1 línea de 1996** marcada en el
 diff real de LXO-205 (el centinela de una prueba), igual que antes. Una referencia a una variable no es un secreto.
 
+**Guardado, export e import (LXO-138).** El paquete se guarda en `context_packages` / `context_package_blobs` (migración 025): el documento **tal
+cual** (su forma canónica), una vez, inmutable (un trigger rechaza cualquier `UPDATE`) y con los bytes de los adjuntos que viajan. `origin` dice cómo
+llegó a ESE almacén (`built` o `imported`); la procedencia sigue dentro del documento (`source`) y no se reescribe. `task_id` y `attempt_id` no son
+claves foráneas: un paquete importado puede venir de otra máquina. Se construye con `context_package_build` desde un Attempt, se exporta con `lxo
+context export` (el archivo es el paquete tal cual y los adjuntos van en `<archivo>.attachments/att-<id>`) y se importa con `context_package_import`
+(`parse` + `verify_attachments` antes de guardar). Ver [QUERIES.md](QUERIES.md#context_package_build-context_package_get-y-context_package_import-lxo-138).
+No hay Event de guardado ni de import: un paquete no es un hecho del Event Log.
+
 **Qué NO hace v1 (y cómo se nota)**
+
 * No escanea un `git_bundle` (va comprimido): su adjunto consta con `scanned: false` y quien lo muestre debe decirlo.
 * No convierte rutas absolutas ni nombres de host: las rechaza (`invalid_field`); quien construye el paquete aporta rutas
   relativas al repositorio.

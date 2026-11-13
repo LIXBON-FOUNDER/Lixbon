@@ -637,6 +637,16 @@ impl Core {
         }
     }
 
+    /// Guarda un ContextPackage ya validado (LXO-138): el paquete y los bytes de sus adjuntos en una transacción. Repetirlo no escribe nada.
+    pub(super) fn context_package_store(&self, p: &crate::store::NewStoredPackage, at: i64) -> Result<crate::store::PutOutcome, String> {
+        match self.storage.with_store(|st| st.context_package_put(p, at)) {
+            Some(Ok(outcome)) => Ok(outcome),
+            Some(Err(crate::store::StoreError::AgenticModelInactive)) => Err("core_model_inactive: el Core aún sirve el modelo legacy; los paquetes guardados llegan tras el corte Task/Attempt".into()),
+            Some(Err(e)) => Err(format!("context_store_unavailable: {e}")),
+            None => Err("context_store_unavailable: el almacén no está abierto".into()),
+        }
+    }
+
     // ── La cola de instrucciones (LXO-143): el almacén solo se toca desde aquí ───────────────────────────────────────────────
 
     fn queue_store<R>(&self, f: impl FnOnce(&mut Store) -> Result<R, QueueError>) -> Result<R, QueueError> {

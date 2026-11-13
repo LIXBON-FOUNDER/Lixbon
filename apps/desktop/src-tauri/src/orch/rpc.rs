@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, context_store, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::mutation::IdempotentMutation;
 use super::state::{Kind, NewTask, Status, Task};
@@ -356,6 +356,10 @@ impl Core {
             "provider_capabilities" => provider_registry::query(self, &caller, authenticated_context.as_ref(), args),
             // Revisar un ContextPackage antes de cualquier transferencia (LXO-136): solo lectura, no guarda ni inicia nada.
             "context_package_preview" => context_preview::query(self, &caller, authenticated_context.as_ref(), args),
+            // Construir, leer e importar un ContextPackage guardado (LXO-138): solo personas; nada inicia un Attempt ni un handoff.
+            "context_package_build" => context_store::build(self, &caller, authenticated_context.as_ref(), args),
+            "context_package_get" => context_store::get(self, &caller, authenticated_context.as_ref(), args),
+            "context_package_import" => context_store::import(self, &caller, authenticated_context.as_ref(), args),
             // El uso y los límites de cada proveedor (LXO-206): lectura inmediata; la consulta corre en segundo plano.
             "usage_report" => usage_read::query(self, &caller, authenticated_context.as_ref(), args),
             "core_model" => model_read::core_model(self, &caller, authenticated_context.as_ref(), args),
@@ -745,12 +749,14 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
         // Person CLI is global in the current authority model; RPC dispatch still requires an authenticated
         // Person and rejects Agent before mutation.
+        // Escriben un paquete: la autorización de la superficie (Desktop o CLI) la da la acción; que sea Person lo exige el propio comando.
+        "context_package_build" | "context_package_import" => ClientAction::AgentOrDesktopCommand,
         "task_create" => ClientAction::AgentOrDesktopCommand,
         "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {

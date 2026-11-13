@@ -67,6 +67,7 @@ mod tasks;
 mod model_pages;
 mod queue;
 mod policy;
+mod context_packages;
 #[cfg(test)]
 mod attention_tests;
 #[cfg(test)]
@@ -95,6 +96,8 @@ mod reviews_tests;
 mod queue_tests;
 #[cfg(test)]
 mod policy_tests;
+#[cfg(test)]
+mod context_packages_tests;
 #[cfg(test)]
 mod adopted_attempts_tests;
 #[cfg(test)]
@@ -168,6 +171,9 @@ pub use queue::{queue_digest, Enqueued, InstructionMode, InstructionOutcome, New
 // Policy de autonomía (LXO-209): overrides durables por ámbito; las reglas viven en `orch::policy`.
 #[allow(unused_imports)]
 pub use policy::{PolicyChange, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
+// ContextPackage guardado (LXO-138): inmutable; lo validan `orch::context_store` y `context_package::parse`.
+#[allow(unused_imports)]
+pub use context_packages::{NewStoredPackage, PackageOrigin, PutOutcome, StoredPackage};
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
