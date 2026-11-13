@@ -33,7 +33,7 @@ fn level(s: &PolicySnapshot, actor: ActorClass, cat: Category, project: Option<&
 const DESKTOP_CONFIRM: [Category; 5] = [Category::Start, Category::Review, Category::Integrate, Category::Cleanup, Category::ProviderPermissions];
 
 #[test]
-fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_y_review() {
+fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_review_e_integrate() {
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
@@ -41,8 +41,11 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_y_review(
         for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
-        // Start/retry/resume siguen pendientes de Desktop; stop y review exigen confirmación explícita.
-        let cli = if matches!(c, Category::Start | Category::Stop | Category::Review) {
+        // Start/retry/resume siguen pendientes de Desktop; stop, review e integrate exigen confirmación.
+        let cli = if matches!(
+            c,
+            Category::Start | Category::Stop | Category::Review | Category::Integrate
+        ) {
             Level::Confirm
         } else {
             Level::Deny
@@ -234,7 +237,7 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     assert_eq!(e["baseline_matrix"]["cli_person"]["start"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["stop"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["review"], "confirm");
-    assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "deny");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "confirm");
     assert_eq!(e["baseline_matrix"]["desktop_person"]["queue"], "allow");
 }
 
@@ -473,6 +476,52 @@ fn el_cli_puede_pedir_un_attempt_y_sigue_pendiente_de_la_aprobacion_de_desktop()
     // Una Task sin Attempt no ejecuta nada: la policy de `start` no la toca.
     let r = as_client(&w, &cli, "task_create", json!({"request_id": "r-cli3", "project_id": w.project, "objective": "o", "title": "t3", "spec": "s"}));
     assert!(paso_la_policy(&r), "{r:?}");
+}
+
+#[test]
+fn cli_persona_puede_integrar_solo_con_confirm_y_respetando_elevated_y_deny() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("user".into()),
+        "cli-integrate",
+    );
+    let args = json!({
+        "attempt_id": "missing-a1",
+        "action": "merge",
+        "head_commit": "head",
+        "confirm": true
+    });
+    let without_confirm = as_client(
+        &w,
+        &cli,
+        "attempt_integrate",
+        json!({
+            "attempt_id": "missing-a1",
+            "action": "merge",
+            "head_commit": "head"
+        }),
+    );
+    assert!(is(without_confirm, "policy_confirm_required"));
+    assert!(
+        paso_la_policy(&as_client(&w, &cli, "attempt_integrate", args.clone())),
+        "confirm explícito pasa policy y continúa sujeto a las guardas del Command"
+    );
+
+    w.set("global", None, "integrate", "elevated", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_integrate", args.clone()),
+        "policy_out_of_band_required"
+    ));
+
+    w.set("global", None, "integrate", "deny", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_integrate", args),
+        "policy_denied"
+    ));
 }
 
 #[test]

@@ -19,6 +19,7 @@ mod context_store;
 mod events;
 mod f5_support;
 mod fork;
+mod integration;
 mod projects;
 mod provider;
 mod race;
@@ -66,9 +67,12 @@ Coordinador (el agente con el que habla el usuario):
                                                    start/retry/resume esperan aprobación Desktop; stop exige confirmación exacta
                                                   (solo lectura y solo personas)
   lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
-                                                   compara 2–4 intentos con la evidencia del Core (solo personas)
+                                                   compara 2-4 intentos con la evidencia del Core (solo personas)
   lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
                                                    Proof Pack y decisión sobre el HEAD exacto (solo personas)
+  lxo integrate merge|pr <attempt_id|review_id> [--dry-run|--confirm] [--squash] [--accept-moved-target SHA] [--json]
+                                                  revisa el destino y la revisión vigente antes de integrar
+                                                  o publicar un PR (solo personas; la policy la decide el Core)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo provider list [--refresh] [--json]
@@ -89,8 +93,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
                                                   Lixbon (solo personas; se pierde lo posterior al corte)
   lxo stop <tarea> | lxo release <tarea> [--force]
-  (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
-   lxo merge y lxo pr se rechazan)
+  (los agentes no integran ni publican PR: lxo merge y lxo pr se rechazan;
+   una persona usa lxo integrate y la policy se revalida en el Core)
 
 Tarea hija:
   lxo phase \"nombre\" --start | --done [--note \"...\"]
@@ -1114,6 +1118,9 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("context") {
         return context::run(&a);
+    }
+    if a.at(0).as_deref() == Some("integrate") {
+        return integration::run(&a);
     }
     // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
     if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {

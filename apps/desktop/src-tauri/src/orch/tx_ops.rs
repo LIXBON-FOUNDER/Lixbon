@@ -853,8 +853,8 @@ impl Tx {
     ///
     /// Validación de actor: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el
     /// contexto de la mutación debe ser realmente ese actor. Review/merge/pr son decisiones de una Person
-    /// autenticada de Desktop; una Person CLI solo puede llegar por un RPC específico de Attempt cuya acción
-    /// y policy efectiva autoricen esa decisión.
+    /// autenticada de Desktop; los RPC específicos `attempt_review` y `attempt_integrate` también admiten
+    /// una Person CLI autenticada, limitada por su acción y categoría en la frontera RPC y la policy.
     pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));

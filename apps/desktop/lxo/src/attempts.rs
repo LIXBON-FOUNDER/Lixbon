@@ -367,7 +367,7 @@ fn text(value: &Value) -> Value {
 /// depende del crate del Core, así que la copia vive aquí y `la_allowlist_del_cli_es_la_del_core` fija sus vectores. Un Core
 /// anterior al saneado de `attempt_detail` puede devolver una URI heredada con credenciales, query o fragmento (LXO-245): lxo no
 /// confía en su proyección.
-fn sanitize_pr_url(raw: &str) -> Option<String> {
+pub(super) fn sanitize_pr_url(raw: &str) -> Option<String> {
     const MAX_LEN: usize = 300;
     let (scheme, rest) = raw.trim().split_once("://")?;
     if !matches!(scheme, "https" | "http") {

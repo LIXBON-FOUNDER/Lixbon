@@ -233,6 +233,8 @@ pub enum ClientAction {
     /// Revisión del Proof Pack sobre el HEAD exacto. No concede otras decisiones humanas al CLI.
     AttemptReview,
     HumanDecision,
+    /// Integrar un Attempt revisado: Person de Desktop o CLI; la policy exige `confirm`.
+    AttemptIntegration,
     CoreCommand,
 }
 
@@ -374,6 +376,9 @@ impl AuthenticatedClient {
                 }
                 ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
+                }
+                ClientAction::AttemptIntegration => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
                 ClientAction::AttemptReview => {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
@@ -985,6 +990,12 @@ mod tests {
         assert_eq!(worker.authorize(ClientAction::AttemptRequest), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::UiCommand), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::HumanDecision), Err(ClientIdentityError::ForbiddenAction));
+        assert!(desktop.authorize(ClientAction::AttemptIntegration).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptIntegration).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptIntegration),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }

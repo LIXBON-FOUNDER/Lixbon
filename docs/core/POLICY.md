@@ -48,7 +48,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review: confirm; integrate · cleanup · provider_permissions: deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
@@ -70,9 +70,10 @@ Hoy Mobile ni siquiera se autentica en el Core (`Channel` solo conoce `ui`, `lxo
 Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los que nombran una Task (`attempt_retry`, `attempt_resume`,
 `resource_*`) evalúan global + project.
 
-`cli_person` puede ejecutar `attempt_review` del Proof Pack con `confirm: true`, sujeto a la policy efectiva. La decisión debe coincidir
-con el HEAD exacto que se revisó; el Core vuelve a validar ambas condiciones en cada llamada. `attempt_integrate` permanece denegado
-para `cli_person` en esta fase; `cleanup` y `provider_permissions` también.
+`cli_person` puede ejecutar `attempt_review` y `attempt_integrate` con `confirm: true`, sujetos a la policy efectiva y a las guardas de
+cada Command. Review solo decide sobre el HEAD exacto del Proof Pack; integrate exige además revisión aceptada y HEAD vigente. El Core
+vuelve a evaluarlas en cada llamada. Un nivel efectivo `elevated` sigue devolviendo `policy_out_of_band_required`: todavía no existe un
+canal para satisfacer esa aprobación, tampoco desde CLI. `cleanup` y `provider_permissions` permanecen denegados para `cli_person`.
 
 ## Se revalida en CADA Command (invariante 2)
 

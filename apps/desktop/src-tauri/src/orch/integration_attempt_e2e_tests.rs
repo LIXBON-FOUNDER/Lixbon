@@ -11,8 +11,10 @@ use super::adapter::fake::Step;
 use super::attempt_e2e_tests::{attention, world, World};
 use super::compare_e2e_tests::{commit, event_total, git, task_of, worktree};
 use super::dispatch_tests::event_count;
+use super::events::Channel;
 use super::integration_attempt::IntegrateInput;
 use super::{Caller, Core};
+use crate::store::{AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
 impl World {
     fn repo(&self) -> PathBuf {
@@ -47,6 +49,12 @@ impl World {
         let input = IntegrateInput { attempt_id: attempt.into(), action: "publish_pr".into(), head_commit: head.into(), confirm: true, squash: false, accept_moved_target: None };
         super::integration_attempt::integrate_attempt(&self.core, &ctx, &input, create)
     }
+
+    fn integrate_with_effects(&self, attempt: &str, action: &str, head: &str, merge_commit: super::integration::MergeCommit<'_>, push_commit: super::integration::PushCommit<'_>, create: super::integration::CreatePr<'_>) -> Result<Value, String> {
+        let ctx = self.core.desktop_mutation_context().unwrap();
+        let input = IntegrateInput { attempt_id: attempt.into(), action: action.into(), head_commit: head.into(), confirm: true, squash: false, accept_moved_target: None };
+        super::integration_attempt::integrate_attempt_with_effects(&self.core, &ctx, &input, merge_commit, push_commit, create)
+    }
 }
 
 fn done_with_work() -> (World, String) {
@@ -56,6 +64,86 @@ fn done_with_work() -> (World, String) {
     w.settled(&a1, "done");
     commit(&w.core, &a1, &[("feature.txt", "la función\n")]);
     (w, a1)
+}
+
+fn cli_person(w: &World) -> AuthenticatedClient {
+    let secret = "integration-cli-person-secret-with-more-than-32-bytes";
+    let registration = ClientRegistration::new(
+        ClientSurface::Cli,
+        DeviceIdentity::new("integration-cli-installation", None).unwrap(),
+    )
+    .unwrap();
+    let credential = ClientCredential::new(ClientPrincipal::Person("cli-integrator".into()), secret).unwrap();
+    w.core
+        .storage
+        .with_store(|store| store.register_client(&registration, &credential, 10_000))
+        .unwrap()
+        .unwrap();
+    w.core.authenticate_client(secret).unwrap().unwrap()
+}
+
+#[test]
+fn cli_persona_integra_por_el_rpc_especifico_y_no_por_la_decision_humana_legacy() {
+    let (w, a1) = done_with_work();
+    let task = task_of(&a1);
+    let reviewed_head = w.accept(&a1);
+    let before = repo_head(&w.repo());
+    let cli = cli_person(&w);
+    let args = json!({
+        "attempt_id": a1,
+        "action": "merge",
+        "head_commit": reviewed_head,
+        "confirm": true
+    });
+
+    let legacy = w.core.rpc_authenticated_via(
+        &cli,
+        &ClientClaims::default(),
+        Channel::Lxo,
+        "",
+        "integrate",
+        &json!({"task": task, "confirm": true}),
+    );
+    assert!(legacy.unwrap_err().contains("ForbiddenAction"));
+
+    let result = w
+        .core
+        .rpc_authenticated_via(
+            &cli,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "attempt_integrate",
+            &args,
+        )
+        .expect("integrar la revisión aceptada desde CLI");
+    assert_eq!(result["outcome"], "merged");
+    assert!(w.repo().join("feature.txt").exists());
+    assert_ne!(repo_head(&w.repo()), before);
+
+    let identity: (String, Option<String>, Option<String>, Option<String>) = w
+        .core
+        .storage
+        .with_store(|store| {
+            store.read(|connection| {
+                Ok(connection.query_row(
+                    "SELECT actor_kind, actor_id, channel, client_id FROM events WHERE kind = 'decision.recorded' AND entity_id = ?1 ORDER BY seq DESC LIMIT 1",
+                    [&task],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?)
+            })
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        identity,
+        (
+            "person".into(),
+            Some("cli-integrator".into()),
+            Some("lxo".into()),
+            Some(cli.identity().client_id().to_string()),
+        )
+    );
 }
 
 fn kinds_of_task(core: &Core, task: &str, kinds: &[&str]) -> Vec<(String, String)> {
@@ -141,6 +229,74 @@ fn integrar_la_revision_aceptada_fusiona_en_el_project_registra_decision_y_efect
     assert_eq!((event_total(&w.core), repo_head(&w.repo())), before);
     let p = w.preview(&a1);
     assert_eq!((p["merge"]["merged"].as_bool(), p["can_merge"]["reason"].as_str()), (Some(true), Some("already_merged")));
+}
+
+#[test]
+fn merge_fija_el_sha_aceptado_aunque_la_rama_cambie_en_el_limite_del_efecto() {
+    let (w, a1) = done_with_work();
+    let reviewed = w.accept(&a1);
+    let wt = worktree(&w.core, &a1);
+    let branch = git(&wt, &["branch", "--show-current"]);
+    let moved = git(&wt, &["rev-parse", &format!("{reviewed}^")]);
+    let ref_name = format!("refs/heads/{branch}");
+    let parent_head = repo_head(&w.repo());
+
+    // Simula un avance concurrente exactamente después de todas las guardas,
+    // sin ejecutar `git merge`.
+    let merge = |_: &str, source_commit: &str, _: &str, _: bool| {
+        git(&wt, &["update-ref", &ref_name, &moved]);
+        assert_eq!(source_commit, reviewed, "el efecto recibe el SHA revisado, no el nombre mutable");
+        Ok("merge simulado".to_string())
+    };
+    let no_push = |_: &str, _: &str, _: &str| -> Result<(), String> {
+        panic!("la acción merge no debe ejecutar push")
+    };
+    let no_pr = |_: &str, _: &str, _: &str, _: &str, _: &str| -> Result<String, String> {
+        panic!("la acción merge no debe crear un PR")
+    };
+
+    let result = w.integrate_with_effects(&a1, "merge", &reviewed, &merge, &no_push, &no_pr).unwrap();
+
+    assert_eq!(result["outcome"], "merged");
+    assert_eq!(result["source_commit"], reviewed);
+    assert_eq!(git(&wt, &["rev-parse", &ref_name]), moved, "la rama sí avanzó durante la carrera");
+    assert_eq!(repo_head(&w.repo()), parent_head, "el test no ejecutó un merge real");
+}
+
+#[test]
+fn publicar_pr_fija_el_sha_aceptado_aunque_la_rama_cambie_antes_del_push() {
+    let (w, a1) = done_with_work();
+    let _bare_remote = with_remote(&w);
+    let reviewed = w.accept(&a1);
+    let wt = worktree(&w.core, &a1);
+    let branch = git(&wt, &["branch", "--show-current"]);
+    let moved = git(&wt, &["rev-parse", &format!("{reviewed}^")]);
+    let ref_name = format!("refs/heads/{branch}");
+    let pushed = std::cell::Cell::new(false);
+
+    // El callback desplaza el ref local en el borde del push, pero no publica
+    // nada. El efecto recibe el SHA aceptado, no vuelve a resolver el nombre.
+    let push = |_: &str, source_commit: &str, source_branch: &str| {
+        git(&wt, &["update-ref", &ref_name, &moved]);
+        assert_eq!(source_commit, reviewed, "el push usa el SHA revisado");
+        assert_eq!(source_branch, branch);
+        pushed.set(true);
+        Ok(())
+    };
+    let create = |_: &str, _: &str, source_branch: &str, _: &str, _: &str| {
+        assert_eq!(source_branch, branch);
+        Ok("https://github.com/lixbon/demo/pull/99".to_string())
+    };
+    let no_merge = |_: &str, _: &str, _: &str, _: bool| -> Result<String, String> {
+        panic!("la acción PR no debe fusionar")
+    };
+
+    let result = w.integrate_with_effects(&a1, "publish_pr", &reviewed, &no_merge, &push, &create).unwrap();
+
+    assert_eq!(result["outcome"], "created");
+    assert_eq!(result["pr_url"], "https://github.com/lixbon/demo/pull/99");
+    assert!(pushed.get());
+    assert_eq!(git(&wt, &["rev-parse", &ref_name]), moved, "la rama sí avanzó durante la carrera");
 }
 
 #[test]

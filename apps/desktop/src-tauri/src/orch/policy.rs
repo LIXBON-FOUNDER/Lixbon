@@ -9,8 +9,8 @@
 //! ```
 //!
 //! * **Base por actor** (código, no editable): una Person de Desktop tiene lo que ya tenía; el CLI puede pedir `start`, `retry` o
-//!   `resume` (que siguen necesitando aprobación de Desktop), detener un Attempt exacto y decidir su `review` con confirmación
-//!   explícita; Mobile, automatización y los agentes no tienen NADA de estas categorías.
+//!   `resume` (que siguen necesitando aprobación de Desktop), decidir el `review` o la integración de un Attempt con confirmación
+//!   explícita y detener un Attempt exacto; Mobile, automatización y los agentes no tienen NADA de estas categorías.
 //! * **Overrides** (SQLite, `policy_overrides`): los fija una Person de Desktop. El global se puede aflojar (con confirmación aparte);
 //!   `project` y `attempt` solo pueden ENDURECER respecto al ámbito de arriba, así que un override más cercano nunca da más permiso.
 //! * **Pisos** (código): `start`, `review`, `integrate`, `cleanup` y `provider_permissions` nunca bajan de `confirm`. El inicio y sus
@@ -168,9 +168,12 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
     match actor {
         // Lo que ya tenía: lo que decide o destruye pide confirmación; instruir al propio Attempt no.
         ActorClass::DesktopPerson => category.floor(),
-        // El CLI puede pedir un Attempt (pendiente de Desktop), detenerlo o revisarlo con confirmación explícita.
+        // El CLI puede pedir, detener o decidir review/integrate; cada decisión requiere confirmación explícita.
         ActorClass::CliPerson
-            if matches!(category, Category::Start | Category::Stop | Category::Review) =>
+            if matches!(
+                category,
+                Category::Start | Category::Stop | Category::Review | Category::Integrate
+            ) =>
         {
             Level::Confirm
         }
