@@ -142,7 +142,7 @@ fn un_proveedor_desconocido_o_sin_capability_se_rechaza_antes_de_escribir() {
 
 #[test]
 fn el_preflight_exige_la_capability_de_lanzar_disponible() {
-    let entry = |matrix: CapabilityMatrix| ProviderLookup::Found(Box::new(ProviderEntry { id: "x".into(), cli_version: None, environment: Environment::Ready, matrix, transport: None, transport_fallback: None }));
+    let entry = |matrix: CapabilityMatrix| ProviderLookup::Found(Box::new(ProviderEntry { id: "x".into(), cli_version: None, environment: Environment::Ready, matrix, transport: None, transport_fallback: None, blocked_profiles: vec![] }));
     let with_start = |state: CapabilityState| CapabilityMatrix::all_available().with(Capability::Start, state);
 
     assert!(start_preflight("x", &entry(CapabilityMatrix::all_available())).is_ok());

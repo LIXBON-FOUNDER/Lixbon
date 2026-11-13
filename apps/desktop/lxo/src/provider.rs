@@ -17,7 +17,7 @@ use crate::projects::{failure, finish, usage, Failure};
 use crate::Args;
 
 pub(super) const HELP: &str = "Uso: lxo provider list [--refresh] [--json]
-     lxo provider status [<proveedor>] [--capability C] [--attempt <attempt_id>] [--refresh] [--json]
+     lxo provider status [<proveedor>] [--capability C] [--profile P] [--attempt <attempt_id>] [--refresh] [--json]
 
 Qué ofrece cada proveedor (adapter) ahora, según el Core. Solo lee: no lanza, reanuda
 ni configura nada. lxo no decide soporte por el nombre ni por la versión del proveedor.
@@ -34,6 +34,9 @@ mira. Sin --capability mira el entorno; con --capability C, esa capability:
   unsupported            9   el proveedor no la ofrece
 Opciones:
   --capability C     start, events, answer, interrupt, steer o resume
+  --profile P        un perfil de lanzamiento (explorar, proponer…): si el entorno lo impide
+                     (p. ej. el sandbox elevado de Codex en Windows impide los de solo lectura)
+                     sale 8 aunque el proveedor esté listo para los demás
   --attempt ID       suma la sesión del proveedor de ese intento (estado, si es
                      reanudable, si está vinculada) junto a la capability resume del
                      proveedor. Son hechos: si reanudar procede lo decide el Core.
@@ -48,7 +51,9 @@ Salida:
                      ni variables de entorno. Lo que el Core no da sale como null
 
 Un proveedor puede estar bloqueado por el entorno (CLI ausente, sandbox de Codex en
-Windows…): se dice con su causa y no cuenta como fallo de ningún intento.
+Windows…): se dice con su causa y no cuenta como fallo de ningún intento. También puede
+estar listo y tener PERFILES bloqueados (`blocked_profiles`): lo mismo que avisa la app al
+elegir el perfil. Eso no cambia el estado del entorno del proveedor.
 Solo para personas: dentro de una tarea del orquestador (agente) usa lxo agents.
 
 Códigos de salida: 0 correcto, 1 error interno del Core, 2 uso inválido, 3 autenticación,
@@ -73,7 +78,14 @@ const STATES: [&str; 4] = [
 ];
 const REASON_MAX: usize = 300;
 const LIST_FLAGS: [&str; 3] = ["refresh", "json", "help"];
-const STATUS_FLAGS: [&str; 5] = ["capability", "attempt", "refresh", "json", "help"];
+const STATUS_FLAGS: [&str; 6] = [
+    "capability",
+    "profile",
+    "attempt",
+    "refresh",
+    "json",
+    "help",
+];
 
 type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 
@@ -98,6 +110,7 @@ enum Request {
     Status {
         provider: Option<String>,
         capability: Option<String>,
+        profile: Option<String>,
         attempt: Option<String>,
         refresh: bool,
     },
@@ -170,9 +183,11 @@ fn parse(a: &Args) -> Result<Request, Failure> {
                     "Falta el proveedor: lxo provider status <proveedor>. Los ids salen en lxo provider list.",
                 ));
             }
+            let profile = text_flag(a, "profile")?;
             Ok(Request::Status {
                 provider,
                 capability,
+                profile,
                 attempt,
                 refresh: a.b("refresh"),
             })
@@ -272,11 +287,30 @@ fn provider_view(p: &Value) -> Option<Value> {
             json!({ "reason": reason.chars().take(REASON_MAX).collect::<String>() })
         }
     };
+    // Perfiles que el entorno impide aunque el proveedor esté listo (p. ej. el sandbox elevado de Codex): ausente = ninguno. Si viene, no
+    // vacío y con causa; el proveedor NO pasa a bloqueado por esto.
+    let blocked_profiles = match p.get("blocked_profiles") {
+        None | Some(Value::Null) => vec![],
+        Some(list) => {
+            let list = list.as_array().filter(|l| !l.is_empty())?;
+            list.iter()
+                .map(|b| {
+                    let profile = b["profile"].as_str().filter(|s| !s.is_empty())?;
+                    let block = b["block"].as_str().filter(|s| !s.is_empty())?;
+                    Some(json!({
+                        "profile": profile.chars().take(REASON_MAX).collect::<String>(),
+                        "block": block.chars().take(REASON_MAX).collect::<String>(),
+                    }))
+                })
+                .collect::<Option<Vec<_>>>()?
+        }
+    };
     Some(json!({
         "id": id,
         "cli_version": text(&p["cli_version"]),
         "transport": text(&p["transport"]),
         "transport_fallback": fallback,
+        "blocked_profiles": blocked_profiles,
         "environment": environment,
         "capabilities": matrix,
     }))
@@ -400,8 +434,32 @@ fn attempt_facts(rpc: Rpc, attempt_id: &str) -> Result<Value, Failure> {
     }))
 }
 
-/// Lo que fija el código de salida de `status`: la capability pedida o, sin ella, el entorno.
-fn check(provider: &Value, capability: Option<&str>) -> Value {
+/// Lo que fija el código de salida de `status`: si se pide un perfil y el entorno lo impide, ese bloqueo; si no, la capability pedida o,
+/// sin ella, el entorno. Un perfil bloqueado es un bloqueo del ENTORNO (código 8), no un fallo; que otro perfil no lo esté no lo arregla.
+fn check(provider: &Value, capability: Option<&str>, profile: Option<&str>) -> Value {
+    if let Some(wanted) = profile {
+        let blocked = provider["blocked_profiles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|b| {
+                b["profile"]
+                    .as_str()
+                    .is_some_and(|x| x.eq_ignore_ascii_case(wanted))
+            });
+        if let Some(b) = blocked {
+            return json!({
+                "scope": "profile", "capability": capability, "profile": b["profile"],
+                "state": "environment_blocked", "reason": null, "block": b["block"],
+            });
+        }
+    }
+    let mut c = check_scope(provider, capability);
+    c["profile"] = profile.map_or(Value::Null, |p| json!(p));
+    c
+}
+
+fn check_scope(provider: &Value, capability: Option<&str>) -> Value {
     match capability {
         Some(name) => {
             let c = &provider["capabilities"][name];
@@ -440,6 +498,7 @@ fn status_data(
     rpc: Rpc,
     provider: Option<&str>,
     capability: Option<&str>,
+    profile: Option<&str>,
     attempt: Option<&str>,
     refresh: bool,
     wait: Wait,
@@ -469,7 +528,7 @@ fn status_data(
     let p = find(&view, &id)
         .ok_or_else(|| unknown_provider(&view, &id))?
         .clone();
-    let check = check(&p, capability);
+    let check = check(&p, capability, profile);
     let code = exit_code(&check);
     let attempt = attempt_facts.map(|mut f| {
         f["resume"] = p["capabilities"]["resume"].clone();
@@ -568,6 +627,27 @@ fn provider_block(p: &Value) -> Vec<String> {
     }
     head.push_str(&format!(" · {}", environment_text(p)));
     let mut lines = vec![head];
+    let profiles: Vec<&Value> = p["blocked_profiles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    if !profiles.is_empty() {
+        let names: Vec<String> = profiles
+            .iter()
+            .filter_map(|b| b["profile"].as_str().map(clean))
+            .collect();
+        let mut causes: Vec<String> = profiles
+            .iter()
+            .filter_map(|b| b["block"].as_str().map(block_text))
+            .collect();
+        causes.dedup();
+        lines.push(format!(
+            "  Perfiles bloqueados: {} ({}). El proveedor sigue disponible para los demás; no es un intento fallido.",
+            names.join(", "),
+            causes.join("; ")
+        ));
+    }
     if let Some(reason) = p["transport_fallback"]["reason"].as_str() {
         lines.push(format!(
             "  Canal de respaldo: {}.",
@@ -618,12 +698,17 @@ fn list_text(view: &Value) -> String {
 }
 
 fn check_text(check: &Value) -> String {
-    let what = match check["capability"].as_str() {
-        Some(c) => format!("la capability {c}"),
-        None => "el entorno".to_string(),
+    let what = match (check["scope"].as_str(), check["capability"].as_str()) {
+        (Some("profile"), _) => format!(
+            "el perfil {}",
+            check["profile"].as_str().map(clean).unwrap_or_default()
+        ),
+        (_, Some(c)) => format!("la capability {c}"),
+        _ => "el entorno".to_string(),
     };
     match check["state"].as_str() {
-        Some("ready") => format!("Comprobado: {what} está lista."),
+        // Solo el entorno llega aquí como `ready`: «listo» (no «lista»).
+        Some("ready") => format!("Comprobado: {what} está listo."),
         Some("available") => format!("Comprobado: {what} está disponible."),
         Some("unavailable") => format!(
             "Comprobado: {what} no está disponible ahora (código 7): {}.",
@@ -712,6 +797,7 @@ fn execute(request: Request, json: bool, wait: Wait) -> Result<u8, Failure> {
         Request::Status {
             provider,
             capability,
+            profile,
             attempt,
             refresh,
         } => {
@@ -719,6 +805,7 @@ fn execute(request: Request, json: bool, wait: Wait) -> Result<u8, Failure> {
                 &mut rpc,
                 provider.as_deref(),
                 capability.as_deref(),
+                profile.as_deref(),
                 attempt.as_deref(),
                 refresh,
                 wait,
@@ -823,12 +910,14 @@ mod tests {
             Request::Status {
                 provider,
                 capability,
+                profile,
                 attempt,
                 refresh,
             } => status_data(
                 &mut core(),
                 provider.as_deref(),
                 capability.as_deref(),
+                profile.as_deref(),
                 attempt.as_deref(),
                 refresh,
                 NO_WAIT,
@@ -906,6 +995,18 @@ mod tests {
             (code, data["check"]["scope"].as_str()),
             (8, Some("capability"))
         );
+    }
+
+    #[test]
+    fn el_entorno_listo_se_dice_en_masculino() {
+        let (data, code) = status(&["provider", "status", "fake-completo"]).unwrap();
+        assert_eq!(code, 0);
+        let human = status_text(&data);
+        assert!(
+            human.contains("Comprobado: el entorno está listo."),
+            "{human}"
+        );
+        assert!(!human.contains("está lista"), "{human}");
     }
 
     #[test]
@@ -1176,6 +1277,144 @@ mod tests {
             "{human}"
         );
         assert!(view["providers"][1]["transport_fallback"].is_null());
+    }
+
+    #[test]
+    fn un_perfil_bloqueado_sale_8_aunque_el_proveedor_este_listo() {
+        let respaldo: Value = serde_json::from_str(FIXTURE_RESPALDO).unwrap();
+        let status = |raw: &[&str]| -> Result<(Value, u8), Failure> {
+            let mut data = respaldo.clone();
+            data["status"] = json!("ready");
+            data["checked_at_ms"] = json!(1_792_000_000_000u64);
+            let mut rpc = move |_: &str, _: &Value| Ok(data.clone());
+            match parse(&args(raw))? {
+                Request::Status {
+                    provider,
+                    capability,
+                    profile,
+                    attempt,
+                    refresh,
+                } => status_data(
+                    &mut rpc,
+                    provider.as_deref(),
+                    capability.as_deref(),
+                    profile.as_deref(),
+                    attempt.as_deref(),
+                    refresh,
+                    NO_WAIT,
+                ),
+                other => panic!("{other:?}"),
+            }
+        };
+        // El proveedor está listo (código 0 sin perfil), pero Explorar y Proponer no se pueden lanzar: 8.
+        let (sin_perfil, code) = status(&["provider", "status", "fake-respaldo"]).unwrap();
+        assert_eq!(
+            (code, sin_perfil["check"]["scope"].as_str()),
+            (0, Some("environment"))
+        );
+        for profile in ["explorar", "Proponer"] {
+            let (data, code) =
+                status(&["provider", "status", "fake-respaldo", "--profile", profile]).unwrap();
+            assert_eq!(code, 8, "{profile}");
+            assert_eq!(
+                (
+                    data["check"]["scope"].as_str(),
+                    data["check"]["state"].as_str(),
+                    data["check"]["block"].as_str()
+                ),
+                (
+                    Some("profile"),
+                    Some("environment_blocked"),
+                    Some("windows_sandbox_elevated")
+                )
+            );
+            let human = status_text(&data);
+            assert!(
+                human.contains("Comprobado: el perfil ")
+                    && human.contains(
+                        "está bloqueado por el entorno (código 8). No es un intento fallido."
+                    ),
+                "{human}"
+            );
+        }
+        // Otro perfil, o el proveedor sin perfiles bloqueados: listo. Lxo no decide por el nombre del perfil: solo cuenta lo que dice el Core.
+        for (provider, profile) in [
+            ("fake-respaldo", "delegar_con_revision"),
+            ("fake-principal", "explorar"),
+        ] {
+            let (data, code) =
+                status(&["provider", "status", provider, "--profile", profile]).unwrap();
+            assert_eq!(
+                (
+                    code,
+                    data["check"]["scope"].as_str(),
+                    data["check"]["profile"].as_str()
+                ),
+                (0, Some("environment"), Some(profile)),
+                "{provider} {profile}"
+            );
+        }
+        // Con una capability disponible, el perfil bloqueado manda; con otro perfil, manda la capability.
+        let (_, code) = status(&[
+            "provider",
+            "status",
+            "fake-respaldo",
+            "--capability",
+            "start",
+            "--profile",
+            "explorar",
+        ])
+        .unwrap();
+        assert_eq!(code, 8);
+        let (_, code) = status(&[
+            "provider",
+            "status",
+            "fake-respaldo",
+            "--capability",
+            "resume",
+            "--profile",
+            "delegar",
+        ])
+        .unwrap();
+        assert_eq!(code, 9, "resume no lo ofrece Codex por exec_json");
+        // En la lista y el estado se dice, sin bloquear el entorno ni la matriz.
+        let (data, _) = status(&["provider", "status", "fake-respaldo"]).unwrap();
+        let human = status_text(&data);
+        assert!(human.contains("Perfiles bloqueados: explorar, proponer (el sandbox elevado de Codex en Windows impide el perfil de solo lectura). El proveedor sigue disponible para los demás; no es un intento fallido."), "{human}");
+        assert!(
+            human.contains(
+                "fake-respaldo · CLI 0.166.0 · canal exec_json (respaldo) · entorno listo"
+            ),
+            "{human}"
+        );
+        assert_eq!(data["provider"]["environment"]["state"], "ready");
+        assert_eq!(
+            data["provider"]["capabilities"]["start"]["state"],
+            "available"
+        );
+        let (data, _) = status(&["provider", "status", "fake-principal"]).unwrap();
+        assert!(data["provider"]["blocked_profiles"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(!status_text(&data).contains("Perfiles bloqueados"));
+        // Un contrato roto no se interpreta: lista vacía, sin causa o con algo que no es una lista.
+        for edit in [
+            (|d: &mut Value| d["providers"][1]["blocked_profiles"] = json!([])) as fn(&mut Value),
+            |d| d["providers"][1]["blocked_profiles"] = json!([{ "profile": "explorar" }]),
+            |d| d["providers"][1]["blocked_profiles"] = json!([{ "block": "x" }]),
+            |d| d["providers"][1]["blocked_profiles"] = json!("explorar"),
+            |d| d["providers"][1]["blocked_profiles"] = json!([null]),
+        ] {
+            let mut data = respaldo.clone();
+            data["status"] = json!("ready");
+            edit(&mut data);
+            let mut rpc = move |_: &str, _: &Value| Ok(data.clone());
+            assert!(matches!(
+                list_data(&mut rpc, false, NO_WAIT),
+                Err(Failure::Version(_))
+            ));
+        }
     }
 
     #[test]

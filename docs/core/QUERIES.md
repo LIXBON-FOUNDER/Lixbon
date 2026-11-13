@@ -666,6 +666,12 @@ persona, no de un agente). Un parámetro desconocido o un `refresh` que no es bo
   porque su versión no incluye `app-server`); ausente si el canal es el principal o el adapter tiene uno solo. Es lo único por lo que un
   cliente dice «respaldo»: nunca lo deduce del nombre del canal. El motivo viaja redactado y acotado a 300 caracteres. Un respaldo exige
   `transport`. Fixture [`provider_capabilities_respaldo.v1.json`](fixtures/api/provider_capabilities_respaldo.v1.json).
+* `blocked_profiles` (LXO-137): `[{ profile, block }]`, **presente solo si el entorno impide algún perfil de lanzamiento aunque el proveedor esté
+  listo**; ausente = ninguno. El caso real: el sandbox elevado de Windows (`[windows] sandbox = "elevated"` en el `config.toml` de Codex, que solo se
+  lee) impide los perfiles de solo lectura que se lanzan con `codex exec` (`explorar` y `proponer`), con `block: "windows_sandbox_elevated"`; es el mismo
+  bloqueo que la persona ve al elegir el perfil. **No** cambia `environment` (el proveedor sigue `ready` y sus capabilities no cambian: Delegar sigue siendo
+  posible) y no es un fallo de ningún Attempt. Un cliente muestra el perfil bloqueado por esto, nunca por el nombre del proveedor. Solo se informa si el
+  entorno del proveedor está listo (si no, manda su propia causa).
 * Estados de una capability: `available` · `unsupported` (el proveedor no la tiene) · `unavailable` + `reason` (la tiene, ahora no)
   · `environment_blocked` + `block` (el entorno lo impide: no es un Attempt fallido).
 * `generation` **sube solo si algo cambió** (un proveedor nuevo, una matriz, un entorno o una versión). Un cliente que la ve

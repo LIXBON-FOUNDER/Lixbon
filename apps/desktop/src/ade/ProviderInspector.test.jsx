@@ -19,6 +19,23 @@ beforeEach(() => { vi.useRealTimers(); });
 afterEach(() => { cleanup(); invoke.mockReset(); vi.useRealTimers(); });
 
 describe('ProviderInspector', () => {
+  it('LXO-137 · enseña los perfiles que el entorno impide sin bloquear el proveedor entero', async () => {
+    answer(() => live(FALLBACK_SNAPSHOT));
+    render(<ProviderInspector />);
+    await flush();
+    const table = screen.getByTestId('provider-inspector-table');
+    const nota = screen.getByTestId('profiles-fake-respaldo').textContent;
+    expect(nota).toContain('perfiles bloqueados');
+    expect(nota).toContain('explorar (el sandbox de Windows requiere elevación)');
+    expect(nota).toContain('proponer (el sandbox de Windows requiere elevación)');
+    expect(nota).toContain('no es un intento fallido');
+    expect(screen.queryByTestId('profiles-fake-principal')).toBeNull();
+    // El proveedor sigue listo: ninguna fila de «entorno bloqueado» y sus capabilities siguen disponibles.
+    expect(table.querySelector('tr[data-provider="fake-respaldo"]').getAttribute('data-env')).toBe('ready');
+    expect(screen.queryByTestId('env-fake-respaldo')).toBeNull();
+    expect(table.querySelector('tr[data-provider="fake-respaldo"] td[data-capability="start"]').getAttribute('data-state')).toBe('available');
+  });
+
   it('LXO-137 · enseña el canal de respaldo con su motivo, solo en el proveedor que cayó a él', async () => {
     answer(() => live(FALLBACK_SNAPSHOT));
     render(<ProviderInspector />);

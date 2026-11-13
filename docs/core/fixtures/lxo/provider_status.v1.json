@@ -3,6 +3,7 @@
   "check": {
     "block": null,
     "capability": "resume",
+    "profile": null,
     "reason": "la sesión nativa no se puede reanudar con esta versión",
     "scope": "capability",
     "state": "unavailable"
@@ -10,6 +11,7 @@
   "checked_at_ms": 1792000000000,
   "generation": 3,
   "provider": {
+    "blocked_profiles": [],
     "capabilities": {
       "answer": {
         "state": "available"

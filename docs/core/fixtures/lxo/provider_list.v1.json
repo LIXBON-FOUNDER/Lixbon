@@ -3,6 +3,7 @@
   "generation": 3,
   "providers": [
     {
+      "blocked_profiles": [],
       "capabilities": {
         "answer": {
           "block": "cli_missing",
@@ -41,6 +42,7 @@
       "transport_fallback": null
     },
     {
+      "blocked_profiles": [],
       "capabilities": {
         "answer": {
           "state": "available"
@@ -71,6 +73,7 @@
       "transport_fallback": null
     },
     {
+      "blocked_profiles": [],
       "capabilities": {
         "answer": {
           "state": "available"

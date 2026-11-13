@@ -33,6 +33,16 @@
       "transport": "app_server"
     },
     {
+      "blocked_profiles": [
+        {
+          "block": "windows_sandbox_elevated",
+          "profile": "explorar"
+        },
+        {
+          "block": "windows_sandbox_elevated",
+          "profile": "proponer"
+        }
+      ],
       "cli_version": "0.166.0",
       "environment": {
         "state": "ready"

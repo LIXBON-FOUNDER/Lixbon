@@ -20,6 +20,7 @@
   "check": {
     "block": null,
     "capability": null,
+    "profile": null,
     "reason": null,
     "scope": "environment",
     "state": "ready"
@@ -27,6 +28,7 @@
   "checked_at_ms": 1792000000000,
   "generation": 3,
   "provider": {
+    "blocked_profiles": [],
     "capabilities": {
       "answer": {
         "state": "available"

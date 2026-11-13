@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProviderAdapter, TransportFallback, UsageTarget};
+use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProfileBlock, ProviderAdapter, TransportFallback, UsageTarget};
 
 /// Versión del formato del snapshot (`docs/core/fixtures/api/provider_capabilities.v1.json`).
 pub const SNAPSHOT_VERSION: u32 = 1;
@@ -28,6 +28,9 @@ pub struct ProviderEntry {
     /// Solo si ese canal es un respaldo: por qué no se usa el principal (LXO-137).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport_fallback: Option<TransportFallback>,
+    /// Perfiles que el entorno impide aunque el proveedor esté listo (LXO-137).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_profiles: Vec<ProfileBlock>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -150,7 +153,7 @@ impl AdapterRegistry {
             providers: self
                 .entries
                 .iter()
-                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone(), transport: e.probe.transport.clone(), transport_fallback: e.probe.transport_fallback.clone() })
+                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone(), transport: e.probe.transport.clone(), transport_fallback: e.probe.transport_fallback.clone(), blocked_profiles: e.probe.blocked_profiles.clone() })
                 .collect(),
         }
     }

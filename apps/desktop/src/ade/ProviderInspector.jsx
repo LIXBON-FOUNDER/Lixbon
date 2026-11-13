@@ -1,6 +1,6 @@
 import { Fragment, useId } from 'react';
 import { CapabilityBadge } from './CapabilityBadge';
-import { CAPABILITY_LABELS, STATE_GLYPHS, STATE_LABELS, STATE_TONES, describeAll, describeEnvironment } from './capabilityModel';
+import { CAPABILITY_LABELS, STATE_GLYPHS, STATE_LABELS, STATE_TONES, describeAll, describeBlockedProfiles, describeEnvironment } from './capabilityModel';
 import { CAPABILITIES } from './providerCapabilitiesContract';
 import { useProviderCapabilities } from './useProviderCapabilities';
 
@@ -58,6 +58,14 @@ export function ProviderInspector({ active = true }) {
                     <tr className="cap-table__envrow" data-fallback-of={provider.id}>
                       <td colSpan={CAPABILITIES.length + 1} data-testid={`fallback-${provider.id}`}>
                         <strong>{provider.id} · canal de respaldo ({provider.transport}):</strong> {provider.transport_fallback.reason}.
+                      </td>
+                    </tr>
+                  )}
+                  {describeBlockedProfiles(provider).length > 0 && (
+                    <tr className="cap-table__envrow" data-blocked-profiles-of={provider.id}>
+                      <td colSpan={CAPABILITIES.length + 1} data-testid={`profiles-${provider.id}`}>
+                        <strong>{provider.id} · perfiles bloqueados:</strong>{' '}
+                        {describeBlockedProfiles(provider).map((b) => `${b.profile} (${b.text})`).join('; ')}. El proveedor sigue disponible para los demás perfiles; no es un intento fallido.
                       </td>
                     </tr>
                   )}

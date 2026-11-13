@@ -136,6 +136,43 @@ fn una_version_sin_verificar_cae_a_exec_json_y_el_motivo_es_visible() {
 }
 
 #[test]
+fn el_sandbox_de_windows_se_lee_del_config_de_codex_solo_en_windows() {
+    let elevado = "[windows]
+sandbox = \"elevated\"
+";
+    assert_eq!(windows_sandbox_of(Some(elevado), true).as_deref(), Some("elevated"));
+    assert_eq!(windows_sandbox_of(Some("windows.sandbox = 'unelevated'"), true).as_deref(), Some("unelevated"));
+    assert_eq!(windows_sandbox_of(Some("model = \"gpt-5\""), true), None);
+    assert_eq!(windows_sandbox_of(None, true), None);
+    assert_eq!(windows_sandbox_of(Some(elevado), false), None, "fuera de Windows no cuenta");
+    // De la config al bloqueo de perfiles.
+    let p = apply_windows_sandbox(plan_exec(), windows_sandbox_of(Some(elevado), true).as_deref());
+    assert_eq!(p.probe.blocked_profiles.len(), 2);
+}
+
+/// LXO-137 · el sandbox elevado de Windows impide Explorar y Proponer (los perfiles de `codex exec`), pero el entorno sigue listo: es un bloqueo
+/// de PERFIL, no del proveedor, y no es un fallo de ningún Attempt.
+#[test]
+fn el_sandbox_elevado_bloquea_los_perfiles_de_solo_lectura_y_no_el_entorno() {
+    let listo = || probe_from(true, Some("0.164.0"), Some(HELP), Some(EXEC_HELP), None);
+    let p = apply_windows_sandbox(listo(), Some("elevated"));
+    assert_eq!(p.probe.environment, Environment::Ready, "el proveedor sigue listo");
+    assert!(p.probe.matrix.is_available(Capability::Start), "y ofrece lo que ofrecía");
+    let perfiles: Vec<(&str, EnvBlock)> = p.probe.blocked_profiles.iter().map(|b| (b.profile.as_str(), b.block)).collect();
+    assert_eq!(perfiles, [("explorar", EnvBlock::WindowsSandboxElevated), ("proponer", EnvBlock::WindowsSandboxElevated)], "solo los de solo lectura");
+    // Sin elevar (o sin saberlo) no hay ninguno.
+    for sandbox in [None, Some("unelevated"), Some("workspace-write"), Some("")] {
+        assert!(apply_windows_sandbox(listo(), sandbox).probe.blocked_profiles.is_empty(), "{sandbox:?}");
+    }
+    // Un entorno que ya está bloqueado (CLI ausente) no suma perfiles: su causa es otra y manda.
+    let sin_cli = apply_windows_sandbox(probe_from(false, None, None, None, None), Some("elevated"));
+    assert!(sin_cli.probe.blocked_profiles.is_empty());
+    // El respaldo de canal y el perfil bloqueado conviven.
+    let viejo = apply_windows_sandbox(plan_exec(), Some("elevated"));
+    assert!(viejo.probe.transport_fallback.is_some() && viejo.probe.blocked_profiles.len() == 2);
+}
+
+#[test]
 fn sin_cli_o_sin_ningun_canal_el_entorno_esta_bloqueado() {
     let p = probe_from(false, None, None, None, None);
     assert_eq!(p.probe.environment, Environment::Blocked { blocks: vec![EnvBlock::CliMissing] });
