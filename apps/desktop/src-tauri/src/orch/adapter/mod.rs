@@ -134,12 +134,24 @@ pub struct ProbeResult {
     /// degradado es visible aquí y en el evento `Transport`. Ausente en los adapters de un solo canal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
+    /// Presente solo si el canal en uso ES un respaldo (LXO-137): dice por qué no se usa el principal. Un cliente muestra el
+    /// respaldo por esto y nunca lo deduce del nombre del canal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_fallback: Option<TransportFallback>,
+}
+
+const MAX_FALLBACK_REASON_CHARS: usize = 300;
+
+/// Por qué el canal en uso es un respaldo (el motivo viaja redactado y acotado hacia los clientes).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TransportFallback {
+    pub reason: String,
 }
 
 impl ProbeResult {
     /// Entorno listo con la matriz dada.
     pub fn ready(cli_version: Option<&str>, matrix: CapabilityMatrix) -> ProbeResult {
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix, transport: None }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Ready, matrix, transport: None, transport_fallback: None }
     }
 
     pub fn with_transport(mut self, transport: &str) -> ProbeResult {
@@ -147,10 +159,18 @@ impl ProbeResult {
         self
     }
 
+    /// Marca el canal en uso como un respaldo y dice por qué.
+    pub fn with_transport_fallback(mut self, reason: &str) -> ProbeResult {
+        // El motivo llega a los clientes: redactado y acotado como el resto de textos del proveedor.
+        let reason: String = redact(reason).chars().take(MAX_FALLBACK_REASON_CHARS).collect();
+        self.transport_fallback = Some(TransportFallback { reason });
+        self
+    }
+
     /// Entorno bloqueado: toda la matriz queda `environment_blocked` por el primer bloqueo.
     pub fn blocked(cli_version: Option<&str>, blocks: Vec<EnvBlock>) -> ProbeResult {
         let first = blocks.first().copied().unwrap_or(EnvBlock::CliMissing);
-        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first), transport: None }
+        ProbeResult { cli_version: cli_version.map(str::to_string), environment: Environment::Blocked { blocks }, matrix: CapabilityMatrix::all_blocked(first), transport: None, transport_fallback: None }
     }
 }
 

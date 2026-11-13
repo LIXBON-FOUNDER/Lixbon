@@ -1,0 +1,71 @@
+{
+  "checked_at_ms": 1792000000000,
+  "generation": 2,
+  "providers": [
+    {
+      "capabilities": {
+        "answer": {
+          "state": "available"
+        },
+        "events": {
+          "state": "available"
+        },
+        "interrupt": {
+          "state": "available"
+        },
+        "resume": {
+          "state": "available"
+        },
+        "start": {
+          "state": "available"
+        },
+        "steer": {
+          "state": "available"
+        }
+      },
+      "cli_version": "2.0.0",
+      "environment": {
+        "blocks": [],
+        "state": "ready"
+      },
+      "id": "fake-principal",
+      "transport": "app_server",
+      "transport_fallback": null
+    },
+    {
+      "capabilities": {
+        "answer": {
+          "state": "unsupported"
+        },
+        "events": {
+          "state": "available"
+        },
+        "interrupt": {
+          "state": "unsupported"
+        },
+        "resume": {
+          "state": "unsupported"
+        },
+        "start": {
+          "state": "available"
+        },
+        "steer": {
+          "state": "unsupported"
+        }
+      },
+      "cli_version": "0.166.0",
+      "environment": {
+        "blocks": [],
+        "state": "ready"
+      },
+      "id": "fake-respaldo",
+      "transport": "exec_json",
+      "transport_fallback": {
+        "reason": "esta versión de Codex no incluye app-server"
+      }
+    }
+  ],
+  "refreshing": false,
+  "status": "ready",
+  "v": 1
+}

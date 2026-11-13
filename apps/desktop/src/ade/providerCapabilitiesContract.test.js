@@ -3,7 +3,7 @@ import {
   CAPABILITIES, CAPABILITY_STATES, PROVIDER_CAPABILITIES_QUERY_SPECS, validateProviderCapabilities, validateRegistrySnapshot,
 } from './providerCapabilitiesContract';
 import { ADE_QUERY_NAMES } from './coreQueries';
-import { CANONICAL_SNAPSHOT, PROBING, blocked, live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
+import { CANONICAL_SNAPSHOT, FALLBACK_SNAPSHOT, PROBING, blocked, live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
 
 // LXO-135 · el contrato cliente de `provider_capabilities` contra la fixture canónica del Core y variantes que debe rechazar.
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -16,6 +16,22 @@ describe('provider_capabilities · contrato cliente', () => {
     expect(validateProviderCapabilities(response)).toBe(response);
     // Los tres proveedores canónicos cubren completo, parcial y bloqueado por el entorno.
     expect(response.providers.map((p) => p.id)).toEqual(['fake-bloqueado', 'fake-completo', 'fake-parcial']);
+  });
+
+  it('LXO-137 · acepta el canal de respaldo con su motivo y rechaza uno sin motivo o sin canal', () => {
+    const response = live(FALLBACK_SNAPSHOT);
+    expect(validateProviderCapabilities(response)).toBe(response);
+    const [principal, respaldo] = response.providers;
+    expect(principal.transport_fallback).toBeUndefined();
+    expect(respaldo.transport_fallback).toEqual({ reason: 'esta versión de Codex no incluye app-server' });
+    for (const bad of [{ reason: '' }, {}, null, 'respaldo']) {
+      const x = clone(response);
+      x.providers[1].transport_fallback = bad;
+      reject(x);
+    }
+    const sinCanal = clone(response);
+    delete sinCanal.providers[1].transport;
+    reject(sinCanal);
   });
 
   it('acepta el primer sondeo: sin proveedores, sin hora y refrescando', () => {

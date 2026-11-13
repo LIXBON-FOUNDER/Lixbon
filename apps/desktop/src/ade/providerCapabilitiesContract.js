@@ -50,6 +50,11 @@ function validateProvider(provider) {
     validateState(`${id}/${capability}`, matrix.capabilities[capability]);
   }
   if (provider.transport !== undefined && !nonEmpty(provider.transport)) throw invalid(`${id}: transport`);
+  // LXO-137 · solo si el canal en uso es un respaldo: trae su motivo y exige canal. El cliente no deduce el respaldo del nombre.
+  if (provider.transport_fallback !== undefined) {
+    if (!isRecord(provider.transport_fallback) || !nonEmpty(provider.transport_fallback.reason)) throw invalid(`${id}: transport_fallback`);
+    if (provider.transport === undefined) throw invalid(`${id}: un respaldo sin canal`);
+  }
 }
 
 /** El snapshot del registro (la fixture canónica): versión, generación y proveedores con su matriz. */

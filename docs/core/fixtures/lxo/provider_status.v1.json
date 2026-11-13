@@ -37,7 +37,8 @@
       "state": "ready"
     },
     "id": "fake-parcial",
-    "transport": null
+    "transport": null,
+    "transport_fallback": null
   },
   "refreshing": false,
   "status": "ready",

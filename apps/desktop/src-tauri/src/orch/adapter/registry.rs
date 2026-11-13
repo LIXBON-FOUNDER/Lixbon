@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProviderAdapter, UsageTarget};
+use super::{AdapterError, CapabilityMatrix, Environment, Gated, ProbeResult, ProviderAdapter, TransportFallback, UsageTarget};
 
 /// Versión del formato del snapshot (`docs/core/fixtures/api/provider_capabilities.v1.json`).
 pub const SNAPSHOT_VERSION: u32 = 1;
@@ -25,6 +25,9 @@ pub struct ProviderEntry {
     /// Canal con que habla el adapter (`app_server`, `exec_json`…), si tiene más de uno.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
+    /// Solo si ese canal es un respaldo: por qué no se usa el principal (LXO-137).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_fallback: Option<TransportFallback>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -147,7 +150,7 @@ impl AdapterRegistry {
             providers: self
                 .entries
                 .iter()
-                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone(), transport: e.probe.transport.clone() })
+                .map(|(id, e)| ProviderEntry { id: id.clone(), cli_version: e.probe.cli_version.clone(), environment: e.probe.environment.clone(), matrix: e.probe.matrix.clone(), transport: e.probe.transport.clone(), transport_fallback: e.probe.transport_fallback.clone() })
                 .collect(),
         }
     }
