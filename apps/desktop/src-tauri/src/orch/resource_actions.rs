@@ -85,6 +85,10 @@ struct Facts {
     integrated_flag: bool,
     task_final: bool,
     running: bool,
+    /// Un Attempt VIVO de OTRA Task que comparte el worktree de esta (LXO-248): mientras exista, no se limpia ni se borra nada.
+    shared_by: Option<String>,
+    /// No se pudo averiguar si alguien más usa el worktree: por seguridad no se toca.
+    shared_unknown: bool,
     disk: Disk,
     dirty: Option<bool>,
     branch_exists: Option<bool>,
@@ -126,6 +130,16 @@ fn gather(core: &Core, task_id: &str) -> Result<Facts, String> {
         (Some(b), Some(base), Some(true)) if !repo.is_empty() => rgit::is_ancestor(&repo, b, base),
         _ => None,
     };
+    // Un Attempt de otra Task puede estar trabajando en el worktree de ESTA (compartido). Un fallo al leerlo no se interpreta como «nadie»: se
+    // trata como `unknown` más abajo.
+    let shared_by = match core.task_worktree_record(task_id) {
+        Ok(Some((worktree_id, _))) => core
+            .worktree_store(|st| st.attempts_of_worktree(&worktree_id))
+            .and_then(|r| r.ok())
+            .map(|attempts| attempts.into_iter().find(|a| a.task_id != task_id && !a.status.is_final()).map(|a| a.id)),
+        Ok(None) => Some(None),
+        Err(_) => None,
+    };
     Ok(Facts {
         task_id: task_id.to_string(),
         repo,
@@ -136,6 +150,8 @@ fn gather(core: &Core, task_id: &str) -> Result<Facts, String> {
         task_final: final_,
         // Un proceso de un adapter que no se pudo cerrar con prueba (supervisor) también cuenta como «en marcha»: no se toca su worktree.
         running: core.has_term(task_id) || super::adapter::supervisor::task_in_custody(task_id),
+        shared_by: shared_by.clone().flatten(),
+        shared_unknown: shared_by.is_none(),
         disk,
         dirty,
         branch_exists,
@@ -156,6 +172,13 @@ fn blocked(reason: &str) -> Value {
 fn common_block(f: &Facts) -> Option<&'static str> {
     if !f.healthy {
         return Some("degraded");
+    }
+    // LXO-248: otro Attempt vivo trabaja en este worktree (compartido), o no se pudo comprobar: no se borra nada.
+    if f.shared_by.is_some() {
+        return Some("shared_in_use");
+    }
+    if f.shared_unknown {
+        return Some("unknown");
     }
     if !f.task_final || f.running {
         return Some("running");
@@ -239,6 +262,8 @@ pub(super) fn inspect(core: &Core, caller: &Caller, context: Option<&MutationCon
         "worktree": { "path": f.worktree, "state": f.disk.code(), "dirty": f.dirty },
         "branch": { "name": f.branch, "exists": f.branch_exists, "base": f.base, "merged": merged_label(&f) },
         "process": { "running": f.running || !f.task_final },
+        // LXO-248: el Attempt vivo de OTRA Task que trabaja en este worktree (compartido), si lo hay: por eso `clean`/`delete_worktree` dicen `shared_in_use`.
+        "shared": { "by": f.shared_by },
         "health": { "writable": f.healthy },
         "actions": { "clean": clean, "delete_worktree": delete },
     }))
@@ -354,6 +379,8 @@ mod tests {
             integrated_flag: true,
             task_final: true,
             running: false,
+            shared_by: None,
+            shared_unknown: false,
             disk: Disk::Present,
             dirty: Some(false),
             branch_exists: Some(true),
@@ -366,6 +393,17 @@ mod tests {
     fn lo_integrado_y_limpio_se_limpia_y_nada_mas() {
         assert_eq!(clean_check(&facts()), Ok(()));
         assert_eq!(delete_check(&facts()), Ok(false));
+    }
+
+    /// LXO-248: con otro Attempt vivo trabajando en el worktree (compartido), o sin poder comprobarlo, no se limpia ni se borra nada.
+    #[test]
+    fn un_worktree_que_otro_attempt_vivo_comparte_no_se_limpia_ni_se_borra() {
+        let compartido = Facts { shared_by: Some("t4-a1".into()), ..facts() };
+        assert_eq!((clean_check(&compartido), delete_check(&compartido)), (Err("shared_in_use"), Err("shared_in_use")));
+        let sin_saber = Facts { shared_unknown: true, ..facts() };
+        assert_eq!((clean_check(&sin_saber), delete_check(&sin_saber)), (Err("unknown"), Err("unknown")));
+        // Sin nadie más, nada cambia.
+        assert_eq!(clean_check(&facts()), Ok(()));
     }
 
     #[test]

@@ -23,6 +23,9 @@ mod model_read_tests;
 #[cfg(test)]
 mod tasks_read_tests;
 mod resource_adopt;
+mod worktree_share;
+#[cfg(test)]
+mod worktree_share_e2e_tests;
 mod resource_git;
 mod resource_inventory;
 mod attention_action;

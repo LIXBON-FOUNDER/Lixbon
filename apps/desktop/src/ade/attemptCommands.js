@@ -46,6 +46,19 @@ const KNOWN_ERRORS = [
   [/provider_resume_unsupported/i, 'Este proveedor no permite reanudar sesiones.'],
   [/solo se continúa un Attempt terminado/i, 'Solo se continúa un intento que ya terminó.'],
   [/solo se continúa el último/i, 'Hay un intento más reciente: continúa ese.'],
+  // Worktree compartido (LXO-248). Los de la limpieza (`shared_in_use`) van aparte, junto a los demás `resource_blocked`.
+  [/share_confirm_required/i, 'Compartir un worktree exige tu confirmación explícita.'],
+  [/share_not_reviewable/i, 'Este intento comparte el worktree de otro: se revisa y se integra desde el intento dueño, que ya incluye lo que se hizo en esa carpeta.'],
+  [/share_source_without_worktree/i, 'Ese intento no trabaja en ningún worktree: no hay nada que compartir.'],
+  [/share_not_pending/i, 'Este intento ya no espera su aprobación: el worktree se elige antes de aprobar.'],
+  [/share_already_has_worktree/i, 'Este intento ya trabaja en un worktree.'],
+  [/share_not_active/i, 'Ese worktree ya no está activo.'],
+  [/share_not_found/i, 'No existe ese intento o ese worktree.'],
+  [/share_invalid/i, 'Indica el id de OTRO intento (por ejemplo t3-a1).'],
+  [/share_conflict.*Project|ni del Project/i, 'Ese worktree es de otro Project: solo se comparte dentro del mismo.'],
+  [/share_conflict.*sigue trabajando/i, 'Otro intento sigue trabajando en ese worktree: se comparte en serie, espera a que termine.'],
+  [/share_conflict/i, 'No se pudo compartir ese worktree: otro intento lo usa o no es del mismo Project.'],
+  [/resource_blocked: shared_in_use/i, 'Otro intento está trabajando en este worktree (compartido): espera a que termine.'],
   // Responder al proveedor (LXO-247). `request_conflict` de aquí se distingue del de la cola por su texto.
   [/ya se respondió de otra forma/i, 'Esa petición ya se respondió con otra decisión.'],
   [/request_unknown/i, 'Esa petición ya no está pendiente: el proveedor no la espera o ya se respondió.'],
@@ -164,6 +177,20 @@ export const approveAttempt = (attemptId) => call('attempt_approve', { attempt_i
 
 /** Rechaza el primer Attempt. `status`: `Rejected` · `Replayed` · `Expired`. */
 export const rejectAttempt = (attemptId) => call('attempt_reject', { attempt_id: attemptId });
+
+/**
+ * Comparte el worktree de otro intento con éste, ANTES de aprobarlo (`attempt_share_worktree`, LXO-248): el intento trabajará en la misma carpeta, en serie
+ * (nunca dos vivos a la vez) y dentro del mismo Project. No es dueño de la carpeta: nada de lo que haga lo borra. Solo una persona en Desktop, con
+ * confirmación. Devuelve `{ status: 'Shared' | 'AlreadyShared', attempt_id, worktree_id, owner_task_id }`.
+ */
+export const shareWorktree = (attemptId, fromAttemptId) => call('attempt_share_worktree', { attempt_id: attemptId, from_attempt_id: fromAttemptId, confirm: true });
+
+/**
+ * Los worktrees que ese intento podría compartir (`attempt_share_candidates`, LXO-248): activos y del mismo Project, cada uno con el intento que se pasa a
+ * `shareWorktree` (`from_attempt_id`) y `busy_by` si otro intento vivo lo usa ahora (en serie: la interfaz lo muestra deshabilitado). Una lectura.
+ * Devuelve `{ attempt_id, candidates: [{ from_attempt_id, worktree_id, owner_task_id, owner_task_title, branch, path, busy_by }] }`.
+ */
+export const listShareCandidates = (attemptId) => call('attempt_share_candidates', { attempt_id: attemptId });
 
 /** Responde la pregunta abierta de un agente (`reply`). Lo manda la persona en nombre del destinatario de la pregunta. */
 export const answerQuestion = (questionId, answer) => call('reply', { question: questionId, answer });

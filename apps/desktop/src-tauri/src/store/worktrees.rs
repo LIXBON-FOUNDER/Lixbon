@@ -492,7 +492,13 @@ impl Store {
             }
             let attempt = attempt_ready(tx, attempt_id)?;
             if attempt.task_id != current.task_id {
-                return Err(conflict(format!("el Attempt {attempt_id} no es de la Task del Worktree {id}")));
+                // LXO-248: un Attempt de OTRA Task puede compartir el Worktree si es del MISMO Project (en serie: `in_use`, abajo). Una
+                // Task sin Project (legacy) nunca comparte. El Worktree sigue siendo de la Task que lo creó.
+                let owner = task_for(tx, &current.task_id)?;
+                let sharer = task_for(tx, &attempt.task_id)?;
+                if owner.project_id.is_none() || owner.project_id != sharer.project_id {
+                    return Err(conflict(format!("el Attempt {attempt_id} no es de la Task ni del Project del Worktree {id}")));
+                }
             }
             if let Some(otro) = in_use(tx, id)? {
                 return Err(conflict(format!("el Attempt {otro} sigue trabajando en {id}")));

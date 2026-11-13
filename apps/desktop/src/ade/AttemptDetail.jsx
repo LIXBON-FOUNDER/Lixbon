@@ -11,6 +11,7 @@ import { AttemptIntegration } from './AttemptIntegration';
 import { AttemptLineage } from './AttemptLineage';
 import { AttemptProofPack } from './AttemptProofPack';
 import { AttemptQueue } from './AttemptQueue';
+import { AttemptShareWorktree } from './AttemptShareWorktree';
 import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
@@ -100,6 +101,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
 
         {/* LXO-141: la decisión de la persona sobre la aprobación inicial; solo mientras el Core la espera. */}
         {attempt.status === 'pending_approval' && <AttemptApproval attemptId={attempt.id} onDecided={state.retry} />}
+        {/* LXO-248: elegir ANTES de aprobar el worktree de otro intento (en serie, mismo proyecto). */}
+        <AttemptShareWorktree attempt={attempt} onShared={state.retry} />
         {/* LXO-247: lo que el proveedor le pide a la persona (permiso o pregunta) mientras el intento espera; el Core lo entrega y reanuda. */}
         {attempt.status === 'awaiting_terminal_approval' && <AttemptAnswer attemptId={attempt.id} onAnswered={state.retry} />}
         {/* Detener la ejecución en marcha (el Core no declara detenido a un Attempt cuyo proceso no pudo matar). */}

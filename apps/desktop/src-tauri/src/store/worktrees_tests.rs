@@ -305,7 +305,8 @@ fn el_seguimiento_trabaja_en_el_mismo_worktree_y_las_lecturas_lo_dicen() {
     let a1 = corre(&mut w, &hija);
     let x = registra(&mut w, &a1.id, &nuevo(Provenance::Created, "m1", "c:/wt/t3")).unwrap();
     let a2 = corre(&mut w, &otra);
-    conflicto(engancha(&mut w, &x.id, &a2.id), "no es de la Task");
+    // LXO-248: otra Task del MISMO Project puede compartir el Worktree, pero en serie: con `a1` vivo, no.
+    conflicto(engancha(&mut w, &x.id, &a2.id), "sigue trabajando");
     termina(&mut w, &a1.id);
     let s2 = corre(&mut w, &hija);
     assert_eq!(engancha(&mut w, &x.id, &s2.id).unwrap(), ChangeOutcome::Changed);
@@ -316,7 +317,7 @@ fn el_seguimiento_trabaja_en_el_mismo_worktree_y_las_lecturas_lo_dicen() {
     assert_eq!(w.s.worktrees_of_task(&hija).unwrap().len(), 1);
     assert_eq!(w.s.worktrees_of_project(&project).unwrap().len(), 1);
     assert!(w.s.worktrees_of_project("p-otro").unwrap().is_empty());
-    // Ni por SQL: el vínculo apunta a un Worktree activo de su Task.
+    // Ni por SQL: con `s2` vivo en el Worktree, el Attempt de otra Task no se enlaza (la 026 impone la serie en la base).
     assert!(sql(&mut w.s, &format!("UPDATE attempts SET worktree_id = '{}' WHERE id = '{}'", x.id, a2.id)).is_err());
     assert!(sql(&mut w.s, &format!("UPDATE attempts SET worktree_id = 'wt-nada' WHERE id = '{}'", a2.id)).is_err());
 }

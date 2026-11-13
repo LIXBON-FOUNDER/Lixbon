@@ -717,6 +717,12 @@ impl Core {
         })
     }
 
+    /// El almacén para compartir un worktree (LXO-248): las lecturas y el enlace de `worktree_share`, la provisión y el Resource Manager. Como
+    /// `queue_store`, el único sitio por el que esas capas lo tocan (frontera de mutación).
+    pub(super) fn worktree_store<R>(&self, f: impl FnOnce(&mut Store) -> R) -> Option<R> {
+        self.storage.with_store(f)
+    }
+
     /// `attempt.usage_reported` (LXO-249): el uso que el proveedor declaró en un turno del Attempt. Un turno sin nada declarado no deja hecho.
     pub(super) fn usage_reported(&self, attempt_id: &str, usage: &super::attempt_ops::ReportedUsage) -> Result<(), QueueError> {
         if !usage.any() {

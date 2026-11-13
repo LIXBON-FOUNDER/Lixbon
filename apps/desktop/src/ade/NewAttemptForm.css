@@ -18,6 +18,10 @@
 .nat__preview ul { margin: 4px 0 0; padding-left: 16px; }
 .nat-stop { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 8px 0; }
 .nat-approval { margin: 8px 0; }
+.nat-share { margin: 8px 0; font-size: 12px; }
+.nat-share__body { display: flex; flex-direction: column; gap: 8px; padding-top: 6px; }
+.nat-share__label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--ink-50); }
+.nat-share__input { width: 100%; font: inherit; }
 .nat-answer { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
 .nat-answer__request { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--ink-10, rgba(127, 127, 127, 0.25)); }
 .nat-answer__title { margin: 0; font-size: 11px; font-weight: 600; color: var(--ink-70, inherit); }
