@@ -191,6 +191,20 @@ fn user_message(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }).to_string()
 }
 
+/// La entrada de `AskUserQuestion` con las respuestas de la persona (`answers`: texto de la pregunta → respuesta), que es como la herramienta las
+/// recibe. Una sola pregunta se contesta con el texto entero; con varias, una línea por pregunta y en el mismo orden (una respuesta que no
+/// encaja se rechaza sin tocar la CLI, para no contestar una pregunta con la respuesta de otra).
+fn answered_questions(input: &Value, questions: &[String], text: &str) -> Result<Value, AdapterError> {
+    let lines: Vec<&str> = if questions.len() == 1 { vec![text.trim()] } else { text.lines().map(str::trim).filter(|l| !l.is_empty()).collect() };
+    if lines.len() != questions.len() || lines.iter().any(|l| l.is_empty()) {
+        return Err(AdapterError::invalid(&format!("el modelo hizo {} pregunta(s): responde con una línea de texto por cada una, en orden", questions.len())));
+    }
+    let answers: serde_json::Map<String, Value> = questions.iter().zip(lines).map(|(q, a)| (q.clone(), Value::String(a.to_string()))).collect();
+    let mut updated = input.clone();
+    updated["answers"] = Value::Object(answers);
+    Ok(updated)
+}
+
 /// Las ventanas de cuota que Claude declaró (`rate_limit_event`), como las ve el resto del Core. Las usan `usage` y el uso persistido por turno.
 fn quota_windows(info: &RateInfo) -> Vec<UsageWindow> {
     info.windows
@@ -386,6 +400,10 @@ impl ClaudeAdapter {
                         run.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), input);
                         sink.push(AdapterEvent::Permission { request_id, tool, summary });
                     }
+                    Msg::QuestionRequest { request_id, text, input } => {
+                        run.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), input);
+                        sink.push(AdapterEvent::Question { question_id: request_id, text });
+                    }
                     Msg::ApiRetry { attempt, max, delay_ms } => sink.push(AdapterEvent::Retry { attempt, max, delay_ms }),
                     Msg::RateLimit(info) => {
                         *run.limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
@@ -559,10 +577,14 @@ impl ProviderAdapter for ClaudeAdapter {
             .get(&answer.question_id)
             .cloned()
             .ok_or_else(|| AdapterError::invalid("no hay una petición de permiso pendiente con ese id"))?;
-        let response = match answer.text.trim().to_ascii_lowercase().as_str() {
-            "allow" => json!({ "behavior": "allow", "updatedInput": input }),
-            "deny" => json!({ "behavior": "deny", "message": DENY_MESSAGE }),
-            _ => return Err(AdapterError::invalid("la respuesta a un permiso es `allow` o `deny`")),
+        let response = match stream::questions_of(&input) {
+            // Una pregunta del modelo (`AskUserQuestion`): la respuesta es TEXTO, no allow/deny, y vuelve junto a las preguntas que se hicieron.
+            Some(questions) => json!({ "behavior": "allow", "updatedInput": answered_questions(&input, &questions, &answer.text)? }),
+            None => match answer.text.trim().to_ascii_lowercase().as_str() {
+                "allow" => json!({ "behavior": "allow", "updatedInput": input }),
+                "deny" => json!({ "behavior": "deny", "message": DENY_MESSAGE }),
+                _ => return Err(AdapterError::invalid("la respuesta a un permiso es `allow` o `deny`")),
+            },
         };
         let line = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": answer.question_id, "response": response } });
         state.process.send(&line.to_string())?;

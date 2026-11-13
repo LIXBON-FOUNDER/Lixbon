@@ -123,7 +123,7 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | `Transport { kind, degraded, reason }` | el canal con que corre la ejecución; `degraded` marca un respaldo y `reason` dice por qué se cayó a él |
 | `Model { model }` | el modelo EFECTIVO (puede diferir del pedido) |
 | `Output { text }` | texto del modelo, redactado y acotado |
-| `Question { question_id, text }` | el proveedor pregunta algo a la persona |
+| `Question { question_id, text }` | el proveedor pregunta algo a la persona. Claude lo emite al recibir su herramienta `AskUserQuestion` (llega como `can_use_tool`) con una entrada `{questions: […]}`; la respuesta es texto y vuelve en `updatedInput.answers` ([RESPUESTAS.md](RESPUESTAS.md)). Codex no lo emite |
 | `Permission { request_id, tool, summary }` | el proveedor pide permiso para una herramienta; el Core decide y responde con `answer` (`allow` o `deny`); el adapter nunca responde por su cuenta |
 | `ToolUse { tool, summary }` | usa una herramienta; `summary` es una ruta o un comando de una línea, nunca el contenido |
 | `Retry { attempt, max, delay_ms }` | reintento de red del proveedor; informativo |
