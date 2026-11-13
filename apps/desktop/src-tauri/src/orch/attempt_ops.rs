@@ -36,7 +36,7 @@
 
 use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
 /// Lo que el proveedor declaró de su uso en un turno (LXO-249). Las capas superiores lo reciben de aquí, no de `event_kinds`.
-pub(super) use super::event_kinds::ReportedUsage;
+pub(super) use super::event_kinds::{ReportedLimit, ReportedUsage};
 // Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
 pub(super) use super::event_kinds::DispatchAmbiguityCause;
 pub(super) use super::event_kinds::PolicyDirection;

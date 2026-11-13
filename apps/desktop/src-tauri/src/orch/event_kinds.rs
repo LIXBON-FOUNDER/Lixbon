@@ -1265,14 +1265,41 @@ pub(super) fn attempt_request_answered(a: &AttemptRow, t: &TaskRow, request_id: 
     attempt_draft(a, t, &AttemptRequestAnswered { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), kind, decision })
 }
 
+/// Una ventana de cuota de la CUENTA del proveedor, tal como la declaró durante un turno (LXO-249): una foto de cuánto llevaba gastado, no lo que
+/// gastó este Attempt. Cada campo `None` = no lo informó.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub(super) struct ReportedLimit {
+    pub(super) id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) used_percent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) resets_at: Option<i64>,
+}
+
+/// Cuántas ventanas guarda un turno: los proveedores declaran dos o tres (sesión, semana…); más es un formato que no se conoce.
+const MAX_REPORTED_LIMITS: usize = 8;
+
+impl ReportedLimit {
+    /// Normaliza una ventana declarada: un id que no es un identificador corto, un porcentaje fuera de 0..=100 o que no es finito, y una hora de
+    /// reinicio no positiva se descartan (desconocido) en vez de corregirse. Sin porcentaje ni reinicio válidos no hay nada que guardar.
+    pub(super) fn declared(id: &str, used_percent: Option<f64>, resets_at: Option<i64>) -> Option<ReportedLimit> {
+        let id_ok = !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        let used_percent = used_percent.filter(|p| p.is_finite() && (0.0..=100.0).contains(p));
+        let resets_at = resets_at.filter(|t| *t > 0);
+        (id_ok && (used_percent.is_some() || resets_at.is_some())).then(|| ReportedLimit { id: id.to_string(), used_percent, resets_at })
+    }
+}
+
 /// Lo que el proveedor DECLARÓ de su uso en un turno (LXO-249). Cada campo `None` = no lo informó: desconocido, NUNCA cero.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ReportedUsage {
     pub(super) input_tokens: Option<u64>,
     pub(super) output_tokens: Option<u64>,
     pub(super) cache_read_tokens: Option<u64>,
     pub(super) cache_creation_tokens: Option<u64>,
     pub(super) cost_usd: Option<f64>,
+    /// Ventanas de cuota de la cuenta declaradas en el turno (vacío = no declaró ninguna).
+    pub(super) limits: Vec<ReportedLimit>,
 }
 
 /// Los tokens caben en un entero exacto de JSON (2^53 - 1): lo que no cabe no se inventa, se descarta.
@@ -1281,7 +1308,7 @@ const MAX_JSON_INTEGER: u64 = (1 << 53) - 1;
 impl ReportedUsage {
     /// Normaliza lo que informó el adapter: un coste que no es un número finito y no negativo, o un contador que no cabe, se descartan
     /// (desconocido) en vez de corregirse.
-    pub(super) fn declared(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_creation: Option<u64>, cost_usd: Option<f64>) -> ReportedUsage {
+    pub(super) fn declared(input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_creation: Option<u64>, cost_usd: Option<f64>, limits: Vec<ReportedLimit>) -> ReportedUsage {
         let count = |v: Option<u64>| v.filter(|n| *n <= MAX_JSON_INTEGER);
         ReportedUsage {
             input_tokens: count(input),
@@ -1289,12 +1316,13 @@ impl ReportedUsage {
             cache_read_tokens: count(cache_read),
             cache_creation_tokens: count(cache_creation),
             cost_usd: cost_usd.filter(|c| c.is_finite() && *c >= 0.0),
+            limits: limits.into_iter().take(MAX_REPORTED_LIMITS).collect(),
         }
     }
 
     /// ¿Declaró algo? Un turno sin nada declarado no deja hecho.
     pub(super) fn any(&self) -> bool {
-        [self.input_tokens, self.output_tokens, self.cache_read_tokens, self.cache_creation_tokens].iter().any(Option::is_some) || self.cost_usd.is_some()
+        [self.input_tokens, self.output_tokens, self.cache_read_tokens, self.cache_creation_tokens].iter().any(Option::is_some) || self.cost_usd.is_some() || !self.limits.is_empty()
     }
 }
 
@@ -1316,6 +1344,9 @@ pub(super) struct AttemptUsageReported {
     cache_creation_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_usd: Option<f64>,
+    /// Ventanas de cuota de la cuenta que el proveedor declaró en el turno: una foto de la cuenta, no consumo de este Attempt.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    limits: Vec<ReportedLimit>,
 }
 
 impl EventPayload for AttemptUsageReported {
@@ -1337,6 +1368,7 @@ pub(super) fn attempt_usage_reported(a: &AttemptRow, t: &TaskRow, usage: &Report
             cache_read_tokens: usage.cache_read_tokens,
             cache_creation_tokens: usage.cache_creation_tokens,
             cost_usd: usage.cost_usd,
+            limits: usage.limits.clone(),
         },
     )
 }

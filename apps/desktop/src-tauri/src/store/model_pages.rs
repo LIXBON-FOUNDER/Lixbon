@@ -17,6 +17,8 @@ pub struct AttemptUsage {
     pub cache_read_tokens: Option<i64>,
     pub cache_creation_tokens: Option<i64>,
     pub cost_usd: Option<f64>,
+    /// Las ventanas de cuota de la CUENTA que declaró el último turno que las declaró (foto de la cuenta, no consumo del Attempt).
+    pub limits: Option<serde_json::Value>,
 }
 
 impl Store {
@@ -39,10 +41,24 @@ impl Store {
                         cache_creation_tokens: r.get(4)?,
                         cost_usd: r.get(5)?,
                         provider: r.get(6)?,
+                        limits: None,
                     })
                 },
             )?;
-            Ok((row.turns > 0).then_some(row))
+            if row.turns == 0 {
+                return Ok(None);
+            }
+            // La foto de cuota más reciente: la del último turno que declaró ventanas (el orden lo da `seq`, no `at`).
+            let limits: Option<String> = c
+                .query_row(
+                    "SELECT json_extract(payload, '$.limits') FROM events \
+                     WHERE kind = 'attempt.usage_reported' AND entity_kind = 'attempt' AND entity_id = ?1 AND json_extract(payload, '$.limits') IS NOT NULL \
+                     ORDER BY seq DESC LIMIT 1",
+                    [attempt_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            Ok(Some(AttemptUsage { limits: limits.and_then(|t| serde_json::from_str(&t).ok()), ..row }))
         })
     }
 

@@ -253,8 +253,9 @@ pub enum AdapterEvent {
     ToolUse { tool: String, summary: String },
     /// El proveedor reintenta una llamada de red: informativo, la ejecución sigue.
     Retry { attempt: u32, max: u32, delay_ms: u64 },
-    /// Uso total al terminar. `None` = el proveedor no lo informó: desconocido, NUNCA cero.
-    Usage { input_tokens: Option<u64>, output_tokens: Option<u64>, cache_read_tokens: Option<u64>, cache_creation_tokens: Option<u64>, cost_usd: Option<f64> },
+    /// Uso total al terminar. `None` = el proveedor no lo informó: desconocido, NUNCA cero. `limits` son las ventanas de cuota de la CUENTA que el
+    /// proveedor declaró durante este turno (LXO-249): una foto de cuánto lleva gastado la cuenta, no lo que gastó este Attempt; vacío si no declaró ninguna.
+    Usage { input_tokens: Option<u64>, output_tokens: Option<u64>, cache_read_tokens: Option<u64>, cache_creation_tokens: Option<u64>, cost_usd: Option<f64>, limits: Vec<UsageWindow> },
 }
 
 /// Cómo terminó una ejecución. Un fallo del proveedor es un RESULTADO (`Failed`); un error de la llamada (`Err`) es que

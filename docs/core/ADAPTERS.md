@@ -127,7 +127,7 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | `Permission { request_id, tool, summary }` | el proveedor pide permiso para una herramienta; el Core decide y responde con `answer` (`allow` o `deny`); el adapter nunca responde por su cuenta |
 | `ToolUse { tool, summary }` | usa una herramienta; `summary` es una ruta o un comando de una línea, nunca el contenido |
 | `Retry { attempt, max, delay_ms }` | reintento de red del proveedor; informativo |
-| `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0 |
+| `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0. `limits` son las ventanas de cuota de la CUENTA que el proveedor declaró durante ese turno (Claude: su `rate_limit_event`, las últimas de ESA ejecución y no las que viera otra; Codex: ninguna), una foto de la cuenta y no lo que gastó el Attempt (LXO-249) |
 
 `ProbeResult.transport` (y el snapshot) dice el canal de un adapter que tiene más de uno (`app_server`, `exec_json`…); falta en los de un solo canal.
 

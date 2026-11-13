@@ -260,6 +260,35 @@ fn start_events_finish_con_la_captura_real() {
     assert!(summary.unwrap().starts_with("1\n2\n3"));
 }
 
+/// LXO-249: las ventanas de cuota que Claude declara durante la ejecución (`rate_limit_event`) viajan con el uso del turno, y son las ÚLTIMAS que
+/// dijo (la captura trae dos eventos: 13 % y después 14 % de la ventana de cinco horas).
+#[test]
+fn el_uso_del_turno_lleva_las_ultimas_ventanas_de_cuota_que_declaro_claude() {
+    let (got, _, _) = corre(script_of(NORMAL), "");
+    let limits = got.iter().find_map(|e| if let AdapterEvent::Usage { limits, .. } = e { Some(limits.clone()) } else { None }).expect("usage");
+    let summary: Vec<_> = limits.iter().map(|w| (w.id.as_str(), w.minutes, w.used_percent, w.resets_at)).collect();
+    assert_eq!(summary, [("five_hour", Some(300), Some(14.0), Some(1_793_054_400)), ("seven_day", Some(10_080), Some(2.0), Some(1_793_613_600))]);
+}
+
+/// Los límites de un turno son los de SU ejecución: lo que otra ejecución del mismo adapter vio antes (o a la vez) no se le atribuye. Una ejecución
+/// que no recibió ningún `rate_limit_event` no declara ventanas aunque el adapter ya tenga unas observadas por otra.
+#[test]
+fn una_ejecucion_sin_rate_limit_event_no_hereda_las_ventanas_que_vio_otra() {
+    use super::stream::{RateInfo, RateWindow};
+    let sin_cuota: String = NORMAL.lines().filter(|l| !l.contains("rate_limit_event")).collect::<Vec<_>>().join("\n");
+    let l = FakeLauncher::new(script_of(&sin_cuota));
+    let a = adapter(cfg(), l);
+    *a.observed_limits.lock().unwrap() = Some((1, RateInfo { status: None, windows: vec![RateWindow { id: "five_hour".into(), utilization: Some(0.99), resets_at: Some(5) }] }));
+    let reg = registro(a);
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    let mut got = vec![];
+    g.events(&run, &cancel, &mut |e: AdapterEvent| got.push(e)).unwrap();
+    let limits = got.iter().find_map(|e| if let AdapterEvent::Usage { limits, .. } = e { Some(limits.clone()) } else { None }).expect("usage");
+    assert!(limits.is_empty(), "esta ejecución no declaró ventanas: {limits:?}");
+}
+
 #[test]
 fn el_id_de_sesion_es_opaco_y_no_aparece_en_ninguna_salida_imprimible() {
     let (got, _, _) = corre(script_of(NORMAL), "");

@@ -556,7 +556,10 @@ versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y l
   `provider`, `source` (`provider_declared`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` y `cost_usd`. **Cada
   campo suma solo los turnos que lo declararon y es `null` si ninguno lo hizo**: un proveedor que da tokens pero no coste deja `cost_usd: null`,
   no `0`. No se calcula ni se estima nada que el proveedor no dijera; sobrevive a reiniciar el Core (es un hecho durable). Claude declara tokens y
-  coste; Codex declara tokens y no coste.
+  coste; Codex declara tokens y no coste. **`limits`** es la cuota de la CUENTA: las ventanas (`[{id, used_percent, resets_at}]`) que declaró el último
+  turno que las declaró, o `null` si ninguno lo hizo. Es una **foto de la cuenta, no el consumo de este Attempt** (la cuota es de la cuenta y la
+  comparten todos): no se suma. Hoy solo Claude las declara durante un turno (`rate_limit_event`); Codex las da por `account/rateLimits/read`, que es del
+  servicio de uso (`usage_report`, LXO-205), no del turno.
 * **Activity por Attempt**: `activity_list {attempt_id}` devuelve todos sus hechos, también los de su sesión y su
   Worktree ([ACTIVITY.md](ACTIVITY.md)).
 

@@ -305,6 +305,8 @@ impl Totals {
             cache_read_tokens: self.cached,
             cache_creation_tokens: self.cache_write,
             cost_usd: None,
+            // Codex no declara los límites de la cuenta durante un turno (están en `account/rateLimits/read`, que es del servicio de uso).
+            limits: Vec::new(),
         })
     }
 }

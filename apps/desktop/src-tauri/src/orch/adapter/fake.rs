@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     Answer, AdapterError, AdapterEvent, CancelToken, CapabilityMatrix, EventSink, ProbeResult, ProviderAdapter, ProviderRef, ResumeRequest, RunHandle,
-    RunOutcome, StartRequest,
+    RunOutcome, StartRequest, UsageWindow,
 };
 
 /// Un paso del guion de `events`.
@@ -21,7 +21,7 @@ pub enum Step {
     Permission { id: &'static str, tool: &'static str },
     Output(String),
     /// El proveedor informa su uso (LXO-249). Cada campo `None` = no lo declaró.
-    Usage { input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_creation: Option<u64>, cost_usd: Option<f64> },
+    Usage { input: Option<u64>, output: Option<u64>, cache_read: Option<u64>, cache_creation: Option<u64>, cost_usd: Option<f64>, limits: Vec<UsageWindow> },
     Question { id: &'static str, text: String },
     /// Espera a que llegue una cancelación o una interrupción (con tope, para que una prueba rota no cuelgue).
     Wait,
@@ -184,8 +184,8 @@ impl ProviderAdapter for FakeAdapter {
                 Step::Model(model) => sink.push(AdapterEvent::Model { model: model.to_string() }),
                 Step::Permission { id, tool } => sink.push(AdapterEvent::Permission { request_id: id.to_string(), tool: tool.to_string(), summary: format!("usar {tool}") }),
                 Step::Output(text) => sink.push(AdapterEvent::Output { text }),
-                Step::Usage { input, output, cache_read, cache_creation, cost_usd } => {
-                    sink.push(AdapterEvent::Usage { input_tokens: input, output_tokens: output, cache_read_tokens: cache_read, cache_creation_tokens: cache_creation, cost_usd })
+                Step::Usage { input, output, cache_read, cache_creation, cost_usd, limits } => {
+                    sink.push(AdapterEvent::Usage { input_tokens: input, output_tokens: output, cache_read_tokens: cache_read, cache_creation_tokens: cache_creation, cost_usd, limits })
                 }
                 Step::Question { id, text } => sink.push(AdapterEvent::Question { question_id: id.to_string(), text }),
                 Step::Wait => {

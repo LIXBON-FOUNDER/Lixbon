@@ -213,9 +213,10 @@ impl Core {
                 result
             }
             // El uso que el proveedor declaró en este turno (LXO-249): un hecho durable por turno, solo con lo declarado.
-            AdapterEvent::Usage { input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd } => {
+            AdapterEvent::Usage { input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, limits } => {
                 let Some(live) = self.live_view(task) else { return };
-                let usage = super::attempt_ops::ReportedUsage::declared(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd);
+                let limits = limits.iter().filter_map(|w| super::attempt_ops::ReportedLimit::declared(&w.id, w.used_percent, w.resets_at)).collect();
+                let usage = super::attempt_ops::ReportedUsage::declared(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, limits);
                 if let Err(why) = self.usage_reported(&live.attempt_id, &usage) {
                     eprintln!("[core] no se pudo registrar el uso que informó el proveedor: {why}");
                 }

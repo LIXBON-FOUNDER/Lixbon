@@ -349,6 +349,9 @@ pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&Muta
             "turns": u.turns, "provider": u.provider, "source": "provider_declared",
             "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
             "cache_read_tokens": u.cache_read_tokens, "cache_creation_tokens": u.cache_creation_tokens, "cost_usd": u.cost_usd,
+            // Las ventanas de cuota de la CUENTA que el proveedor declaró al terminar el último turno que las declaró: una foto de la cuenta,
+            // NO el consumo de este Attempt (la cuota es de la cuenta y la comparten todos). `null` si ningún turno las declaró.
+            "limits": u.limits,
         })));
         let current_n = s.attempt_current(&a.task_id)?.map(|c| c.n);
         v["provider_session"] = json!(s.provider_session_of_attempt(&id)?.map(|ps| json!({

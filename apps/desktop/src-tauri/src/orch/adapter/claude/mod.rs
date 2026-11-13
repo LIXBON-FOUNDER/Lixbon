@@ -191,6 +191,24 @@ fn user_message(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }).to_string()
 }
 
+/// Las ventanas de cuota que Claude declaró (`rate_limit_event`), como las ve el resto del Core. Las usan `usage` y el uso persistido por turno.
+fn quota_windows(info: &RateInfo) -> Vec<UsageWindow> {
+    info.windows
+        .iter()
+        .map(|w| UsageWindow {
+            id: w.id.clone(),
+            minutes: match w.id.as_str() {
+                "five_hour" => Some(300),
+                "seven_day" => Some(10_080),
+                _ => None,
+            },
+            // `utilization` es una fracción; algo fuera de 0..=1 es un formato que no conocemos: desconocido.
+            used_percent: w.utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u)).map(|u| (u * 1000.0).round() / 10.0),
+            resets_at: w.resets_at,
+        })
+        .collect()
+}
+
 // ── El adapter ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 struct Run {
@@ -199,6 +217,8 @@ struct Run {
     session_caps: Mutex<Option<Vec<String>>>,
     /// Peticiones de permiso sin responder: id → entrada original de la herramienta (solo en memoria).
     pending: Mutex<HashMap<String, Value>>,
+    /// Lo último que Claude dijo de sus límites en ESTA ejecución (no el de otra que corra a la vez): se persiste con el uso del turno (LXO-249).
+    limits: Mutex<Option<RateInfo>>,
     interrupted: AtomicBool,
     /// Se lanzó con `--resume`: un «no existe esa conversación» significa sesión caducada, no un fallo de la ejecución.
     resumed: bool,
@@ -319,7 +339,7 @@ impl ClaudeAdapter {
             return Err(e);
         }
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
-        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), interrupted: AtomicBool::new(false), resumed: resume.is_some() };
+        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), limits: Mutex::new(None), interrupted: AtomicBool::new(false), resumed: resume.is_some() };
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).insert(seq, Arc::new(state));
         Ok(RunHandle { attempt_id: attempt_id.to_string(), adapter: self.cfg.id.clone(), seq })
     }
@@ -367,7 +387,10 @@ impl ClaudeAdapter {
                         sink.push(AdapterEvent::Permission { request_id, tool, summary });
                     }
                     Msg::ApiRetry { attempt, max, delay_ms } => sink.push(AdapterEvent::Retry { attempt, max, delay_ms }),
-                    Msg::RateLimit(info) => *self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(((self.clock)(), info)),
+                    Msg::RateLimit(info) => {
+                        *run.limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+                        *self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(((self.clock)(), info));
+                    }
                     Msg::Result(r) => return self.finish(run, r, sink),
                 }
             }
@@ -423,13 +446,15 @@ impl ClaudeAdapter {
 
     fn finish(&self, run: &Run, r: ResultMsg, sink: &mut dyn EventSink) -> RunOutcome {
         let u = &r.usage;
-        if [u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_creation_tokens].iter().any(Option::is_some) || u.cost_usd.is_some() {
+        let limits = run.limits.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|info| quota_windows(info)).unwrap_or_default();
+        if [u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_creation_tokens].iter().any(Option::is_some) || u.cost_usd.is_some() || !limits.is_empty() {
             sink.push(AdapterEvent::Usage {
                 input_tokens: u.input_tokens,
                 output_tokens: u.output_tokens,
                 cache_read_tokens: u.cache_read_tokens,
                 cache_creation_tokens: u.cache_creation_tokens,
                 cost_usd: u.cost_usd,
+                limits,
             });
         }
         if !r.is_error {
@@ -516,21 +541,7 @@ impl ProviderAdapter for ClaudeAdapter {
             return Err(command_error.unwrap_or_else(|| UsageError::unavailable("`claude /usage` no está verificado en esta versión y aún no hay ninguna ejecución de la que leer los límites")));
         };
         let mut snap = UsageSnapshot::new(at, Provenance::RunObservation);
-        snap.windows = info
-            .windows
-            .iter()
-            .map(|w| UsageWindow {
-                id: w.id.clone(),
-                minutes: match w.id.as_str() {
-                    "five_hour" => Some(300),
-                    "seven_day" => Some(10_080),
-                    _ => None,
-                },
-                // `utilization` es una fracción; algo fuera de 0..=1 es un formato que no conocemos: desconocido.
-                used_percent: w.utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u)).map(|u| (u * 1000.0).round() / 10.0),
-                resets_at: w.resets_at,
-            })
-            .collect();
+        snap.windows = quota_windows(&info);
         snap.limit_reached = match info.status.as_deref() {
             Some("allowed") | Some("allowed_warning") => Some(false),
             Some("rejected") => Some(true),
