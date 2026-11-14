@@ -593,7 +593,9 @@ o fallo de lectura).
   según `current_attempt` de la Task. Los filtros se aplican en el cliente (`--status` con los ids de
   `attempt_state`, `--provider` sin distinguir mayúsculas). La Task se nombra siempre: sin `--task` sale con 2.
 * `lxo attempt show <attempt_id> [--json]` (también `lxo attempts show`): estado y fechas, proveedor, modelo,
-  esfuerzo y perfil, la sesión resumida (sin la referencia del proveedor), el Worktree, los Artifacts, la revisión
+  esfuerzo y perfil, la sesión resumida (sin la referencia del proveedor), el Worktree, el **consumo que el proveedor
+  declaró** (`usage`, LXO-249: tokens, coste y cuota de la cuenta; `null` y «el proveedor no declaró consumo» si no dio nada,
+  «sin dato» en lo que ningún turno declaró), los Artifacts, la revisión
   vigente (veredicto, HEAD y base revisados, `active`/`stale`/`superseded`) y los últimos 10 items de Activity
   traducidos. **El id de una Task no selecciona ningún Attempt:** responde 2 y remite a `lxo attempts --task`.
 * `--json` es una allowlist de lxo con `v: 1` y `core_model`: `{v, core_model, task, filters, total, attempts}` y

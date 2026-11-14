@@ -15,6 +15,7 @@ import { AttemptShareWorktree } from './AttemptShareWorktree';
 import { AttemptResume } from './AttemptResume';
 import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
+import { AttemptUsage } from './AttemptUsage';
 import { attemptDuration, formatUtc } from './attemptFormat';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
@@ -141,6 +142,9 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
             <Row label="Estado">{text(worktree.state)} · origen {text(worktree.provenance)} · rama conservada: {yesNo(worktree.branch_kept)}</Row>
           </dl>
         ) : <p className="ade-missing">{COPY.noWorktree}</p>}
+
+        <h4 className="ssec__label">Consumo declarado</h4>
+        <AttemptUsage usage={attempt.usage} />
 
         <h4 className="ssec__label">Artefactos</h4>
         {artifacts.length ? (
