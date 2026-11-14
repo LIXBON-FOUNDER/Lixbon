@@ -68,6 +68,10 @@ pub(super) struct CandidateInput {
 pub(super) struct RaceInput {
     pub request_id: String,
     pub source_attempt_id: String,
+    /// Si el origen se resolvió desde una Task, el cliente declara qué Attempt leyó como actual.
+    /// Se valida junto con la inserción de `race.requested`; los Forks explícitos omiten el campo.
+    #[serde(default)]
+    pub expected_current_attempt_id: Option<String>,
     pub candidates: Vec<CandidateInput>,
     /// El ContextPackage común (JSON como texto) que la persona revisó. Sin él, todos arrancan limpios con el encargo de la Task.
     #[serde(default)]
@@ -143,6 +147,13 @@ pub(super) fn race(core: &Core, class: ActorClass, context: &MutationContext, in
     if !valid_key(&input.request_id) {
         return Err("Falta una clave de idempotencia válida (request_id)".into());
     }
+    if input
+        .expected_current_attempt_id
+        .as_deref()
+        .is_some_and(|expected| expected != input.source_attempt_id.as_str())
+    {
+        return Err("race_invalid_request: expected_current_attempt_id debe coincidir con source_attempt_id".into());
+    }
     let n = input.candidates.len();
     if !(MIN_CANDIDATES..=MAX_CANDIDATES).contains(&n) {
         return Err(format!("race_invalid_request: un Race lleva de {MIN_CANDIDATES} a {MAX_CANDIDATES} candidatos, no {n}"));
@@ -191,7 +202,12 @@ pub(super) fn race(core: &Core, class: ActorClass, context: &MutationContext, in
         }
     } else {
         let draft = event_kinds::race_requested(&race_id, &input.source_attempt_id, source_task, n, strategy, package_id.as_deref(), &digest, Some(&project_id)).or_else(fail)?;
-        core.record_facts(context, vec![draft]).map_err(|e| format!("No se pudo registrar el Race: {e:?}"))?;
+        if let Some(expected) = input.expected_current_attempt_id.as_deref() {
+            core.record_facts_if_current_attempt(context, source_task, expected, vec![draft])
+                .map_err(|e| e.to_string())?;
+        } else {
+            core.record_facts(context, vec![draft]).map_err(|e| format!("No se pudo registrar el Race: {e:?}"))?;
+        }
     }
 
     // 3. Candidato a candidato. Un fallo se registra y se sigue: no deshace a los ya lanzados.

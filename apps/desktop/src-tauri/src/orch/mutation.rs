@@ -434,6 +434,19 @@ pub(super) trait Persistence: Send + Sync {
     fn append(&self, _events: &[NewEvent]) -> Result<(), PersistError> {
         Ok(())
     }
+
+    /// Inserta hechos solo si el Attempt esperado sigue siendo el actual de su Task. Los almacenes
+    /// autoritativos comprueban la precondición dentro de la transacción que inserta los eventos.
+    fn append_if_current_attempt(
+        &self,
+        _events: &[NewEvent],
+        _task_id: &str,
+        _expected_attempt_id: &str,
+    ) -> Result<(), PersistError> {
+        Err(PersistError::rejected(
+            "la persistencia no puede validar atómicamente el Attempt actual",
+        ))
+    }
 }
 
 /// `state.json` en la carpeta de datos: los mismos bytes que escribía `commit()`.
@@ -586,6 +599,16 @@ impl Persister {
     fn append(&self, events: &[NewEvent]) -> Result<(), PersistError> {
         let backend = lock(&self.backend).clone();
         self.with_retries(|| backend.append(events))
+    }
+
+    fn append_if_current_attempt(
+        &self,
+        events: &[NewEvent],
+        task_id: &str,
+        expected_attempt_id: &str,
+    ) -> Result<(), PersistError> {
+        let backend = lock(&self.backend).clone();
+        self.with_retries(|| backend.append_if_current_attempt(events, task_id, expected_attempt_id))
     }
 
     fn with_retries<T>(&self, mut op: impl FnMut() -> Result<T, PersistError>) -> Result<T, PersistError> {
@@ -830,6 +853,46 @@ impl Core {
             return Ok(());
         }
         if let Err(e) = self.persister.append(&finalized) {
+            self.enter_read_only(&e.message);
+            return Err(MutateError::Persist(e.message));
+        }
+        Ok(())
+    }
+
+    /// Como `record_facts`, pero el hecho solo se confirma si la selección sigue siendo actual.
+    /// Mantiene el lock del estado hasta que el backend comprueba la precondición e inserta el evento
+    /// en una sola transacción.
+    pub(super) fn record_facts_if_current_attempt(
+        &self,
+        ctx: &MutationContext,
+        task_id: &str,
+        expected_attempt_id: &str,
+        drafts: Vec<EventDraft>,
+    ) -> Result<(), MutateError> {
+        if let Health::DegradedReadOnly(reason) = self.persister.health() {
+            return Err(MutateError::ReadOnly(reason));
+        }
+        if drafts.is_empty() {
+            return Ok(());
+        }
+        let st = self.lock();
+        let finalized = finalize_all(drafts, ctx, super::state::now_ms() as i64, &|task| {
+            st.tasks.get(task).and_then(|t| t.project_id.clone())
+        })
+        .map_err(|e| MutateError::Rejected(e.to_string()))?;
+        if !self.persister.records_events() {
+            return Err(MutateError::Rejected(
+                "race_current_attempt_check_unavailable: la persistencia no guarda Events".into(),
+            ));
+        }
+        let result = self
+            .persister
+            .append_if_current_attempt(&finalized, task_id, expected_attempt_id);
+        drop(st);
+        if let Err(e) = result {
+            if e.rejected {
+                return Err(MutateError::Rejected(e.message));
+            }
             self.enter_read_only(&e.message);
             return Err(MutateError::Persist(e.message));
         }

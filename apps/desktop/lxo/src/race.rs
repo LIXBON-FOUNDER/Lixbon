@@ -655,9 +655,13 @@ fn follow(rpc: &mut Rpc<'_>, race_id: &str, timeout_ms: u64) -> Result<Value, Fa
 }
 
 fn run_launch(request: LaunchRequest, rpc: &mut Rpc<'_>) -> Result<Value, Failure> {
-    let source = match &request.source {
-        SourceSelector::Task(task_id) => f5_support::source_for_task(rpc, task_id)?,
-        SourceSelector::Attempt(attempt_id) => f5_support::source(rpc, attempt_id)?,
+    let (source, expected_current_attempt_id) = match &request.source {
+        SourceSelector::Task(task_id) => {
+            let source = f5_support::source_for_task(rpc, task_id)?;
+            let expected = source.attempt_id.clone();
+            (source, Some(expected))
+        }
+        SourceSelector::Attempt(attempt_id) => (f5_support::source(rpc, attempt_id)?, None),
     };
     let package = f5_support::context_package(
         request.context_package.as_deref(),
@@ -707,17 +711,17 @@ fn run_launch(request: LaunchRequest, rpc: &mut Rpc<'_>) -> Result<Value, Failur
         }));
     }
 
-    let result = f5_support::send(
-        "task_race",
-        &json!({
-            "request_id": request_id,
-            "source_attempt_id": source.attempt_id,
-            "candidates": candidates,
-            "package": package.map(|package| package.raw),
-            "confirm": request.confirm,
-        }),
-        rpc,
-    )?;
+    let mut race_args = json!({
+        "request_id": request_id,
+        "source_attempt_id": source.attempt_id,
+        "candidates": candidates,
+        "package": package.map(|package| package.raw),
+        "confirm": request.confirm,
+    });
+    if let Some(expected) = expected_current_attempt_id {
+        race_args["expected_current_attempt_id"] = json!(expected);
+    }
+    let result = f5_support::send("task_race", &race_args, rpc)?;
     let race_id = result["race_id"]
         .as_str()
         .filter(|id| valid_race_id(id))
@@ -1170,6 +1174,24 @@ mod tests {
                 .1["source_attempt_id"],
             "t1-a1"
         );
+        assert_eq!(
+            calls
+                .borrow()
+                .iter()
+                .find(|(cmd, _)| cmd == "task_race")
+                .unwrap()
+                .1["expected_current_attempt_id"],
+            "t1-a1"
+        );
+        assert_eq!(
+            calls
+                .borrow()
+                .iter()
+                .filter(|(cmd, _)| cmd == "task_detail_v2")
+                .count(),
+            1,
+            "CLI resuelve una sola vez; el Core valida atómicamente el Attempt esperado"
+        );
 
         let mut no_origin = |cmd: &str, _args: &Value| match cmd {
             "task_detail_v2" => Ok(json!({
@@ -1351,6 +1373,10 @@ mod tests {
             .unwrap()
             .clone();
         assert_eq!(call.1["source_attempt_id"], "t1-a1");
+        assert!(
+            call.1.get("expected_current_attempt_id").is_none(),
+            "el selector posicional explícito no cambia de contrato"
+        );
         assert_eq!(call.1["candidates"].as_array().unwrap().len(), 2);
         assert_eq!(call.1["confirm"], false);
         assert!(!calls

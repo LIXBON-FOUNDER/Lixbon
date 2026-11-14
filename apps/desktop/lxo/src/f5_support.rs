@@ -74,6 +74,7 @@ pub(super) fn rpc_failure(error: RpcFailure) -> Failure {
         }
         if message.starts_with("context_package_")
             || message.starts_with("race_invalid_request")
+            || message.contains("race_source_not_current")
             || message.starts_with("race_candidate_not_found")
             || message.starts_with("request_conflict")
             || message.starts_with("fork_invalid_request")
@@ -176,13 +177,35 @@ pub(super) fn source_for_task(rpc: &mut Rpc<'_>, task_id: &str) -> Result<Source
             ))
         }
     };
-    let source = source(rpc, attempt_id)?;
-    if source.task_id != task_id {
+    let attempt_detail = request(rpc, "attempt_detail", json!({ "attempt_id": attempt_id }))?;
+    if attempt_detail["v"].as_u64() != Some(1)
+        || attempt_detail["core_model"].as_str() != Some("task_attempt_v1")
+        || attempt_detail["attempt"]["id"].as_str() != Some(attempt_id)
+    {
+        return Err(Failure::Version(
+            "El Core devolvió un Attempt con un formato que este lxo no entiende; actualiza Lixbon."
+                .into(),
+        ));
+    }
+    if attempt_detail["attempt"]["task_id"].as_str() != Some(task_id) {
         return Err(Failure::Version(
             "El Attempt actual devuelto por el Core no pertenece a la Task solicitada.".into(),
         ));
     }
-    Ok(source)
+    let project_id = detail["task"]["project_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| {
+            Failure::Usage("La Task origen no tiene un Project desde el que lanzar.".into())
+        })?
+        .to_string();
+    Ok(SourceFacts {
+        attempt_id: attempt_id.to_string(),
+        task_id: task_id.to_string(),
+        project_id,
+        attempt: attempt_detail["attempt"].clone(),
+        task: detail["task"].clone(),
+    })
 }
 
 pub(super) fn dry_run_facts(

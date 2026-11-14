@@ -14,12 +14,13 @@ worktree y el origen no recibe ni un hecho. Todos nacen pendientes de la aprobac
 
 | Command | clase | qué hace |
 |---|---|---|
-| `task_race { request_id, source_attempt_id, candidates[2..4], package?, confirm? }` | Person autenticada de Desktop o CLI | lanza el Race. CLI requiere `confirm: true` por policy. Cada candidato: `{ provider?, model?, effort?, role?, title? }` (lo no pedido se hereda del origen) |
+| `task_race { request_id, source_attempt_id, expected_current_attempt_id?, candidates[2..4], package?, confirm? }` | Person autenticada de Desktop o CLI | lanza el Race. CLI requiere `confirm: true` por policy. Cada candidato: `{ provider?, model?, effort?, role?, title? }` (lo no pedido se hereda del origen) |
 | `task_race_status { race_id }` / `{ source_attempt_id }` | lectura (ADE) | el Race con todos sus candidatos, o los Races de ese Attempt (los más recientes primero) |
 | `task_race_cancel { race_id, attempt_id?, confirm? }` | Person autenticada de Desktop o CLI | cancela UN candidato o todos los que no han terminado; CLI requiere `confirm: true` por policy |
 
-`deny_unknown_fields`: no se acepta `host`, `worktree`, perfil ni aprobación. **No hay elección de host ni de estrategia de worktree**: hoy hay un
-solo host y cada candidato recibe el suyo.
+`deny_unknown_fields`: no se acepta `host`, `worktree`, perfil ni aprobación. `expected_current_attempt_id`, si aparece, debe ser igual a
+`source_attempt_id`; permite que un cliente que seleccionó desde una Task exija que siga siendo su Attempt actual. **No hay elección de host ni de
+estrategia de worktree**: hoy hay un solo host y cada candidato recibe el suyo.
 
 ## Flujo de `task_race`
 
@@ -27,7 +28,10 @@ solo host y cada candidato recibe el suyo.
    ContextPackage (verificado **una vez** contra el origen y el Project). Un candidato inválido rechaza el Race entero; no es un fallo parcial.
 2. `race_id = rc-<hash(identidad, request_id)>`: el mismo reintento cae en el mismo Race. La misma clave con **otra** petición (otros candidatos u
    otro paquete) → `request_conflict`, sin lanzar nada.
-3. `race.requested` (idempotente) con el `digest` de lo pedido.
+3. `race.requested` (idempotente) con el `digest` de lo pedido. Si se envió `expected_current_attempt_id`, el Core comprueba en una transacción
+   SQLite inmediata que sigue siendo el Attempt actual e inserta el evento en esa misma transacción. Si cambió, rechaza antes de registrar o lanzar
+   candidatos (`race_source_not_current`). Los replays de un `race.requested` ya existente conservan la idempotencia y no vuelven a exigir que el origen
+   siga siendo actual.
 4. **Por cada candidato, en orden**: se valida la **policy** (`fork`) y el **límite de Tasks activas** ANTES de lanzar, y solo si no es un replay; luego el
    Fork con la clave `<race_id>-c<i>`, y se registra `race.candidate_recorded`.
 
@@ -92,6 +96,10 @@ Los tres salen en Activity (`activity.race.*`).
 `lxo race --task <task_id>` resuelve el Attempt actual con `task_detail_v2.current_attempt.id` y lo usa como origen
 del Command `task_race`. Una Task sin Attempt actual no puede iniciar un Race; el Core no ofrece `task_race` desde
 una Task vacía. La forma anterior `lxo race <source_attempt_id>` se conserva para compatibilidad.
+
+El selector `--task` envía el mismo id en `expected_current_attempt_id`: no hace una segunda lectura en CLI. El Core valida la precondición e inserta
+`race.requested` en una única transacción; si la Task avanzó entre la selección y el commit, no se registra el Race ni se lanzan candidatos. El selector
+posicional explícito omite esa precondición. Los reintentos de una petición ya registrada siguen la clave idempotente aunque el Attempt actual cambie.
 
 Los candidatos repetibles (`--candidate PROVIDER[:MODEL]`) o `--config FILE` aceptan provider, model, effort, role
 y title. No aceptan host ni estrategia de worktree: la petición RPC del Core usa `deny_unknown_fields` y hoy no
