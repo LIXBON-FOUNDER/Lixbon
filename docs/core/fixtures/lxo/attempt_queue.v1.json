@@ -1,0 +1,8 @@
+{
+  "attempt_id": "task-a1",
+  "command": "attempt.queue",
+  "position": 1,
+  "queue_id": "task-a1-q1",
+  "status": "Queued",
+  "v": 1
+}

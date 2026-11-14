@@ -1,0 +1,36 @@
+{
+  "attempt_id": "task-a1",
+  "command": "queue.list",
+  "finished": [
+    {
+      "author_kind": "agent",
+      "body": "resultado",
+      "confirmed_by": null,
+      "created_at": 124,
+      "delivered_at": null,
+      "ended_at": 125,
+      "failure": "adapter_error",
+      "queue_id": "task-a1-q2",
+      "seq": 2,
+      "status": "failed"
+    }
+  ],
+  "finished_limit": 20,
+  "items": [
+    {
+      "author_kind": "person",
+      "body": "después",
+      "confirmed_by": null,
+      "created_at": 123,
+      "delivered_at": null,
+      "ended_at": null,
+      "failure": null,
+      "position": 1,
+      "queue_id": "task-a1-q1",
+      "seq": 1,
+      "status": "queued"
+    }
+  ],
+  "task_id": "task",
+  "v": 1
+}

@@ -1,5 +1,5 @@
-//! LXO-144 · Steer y Stop & Send de extremo a extremo por la superficie de Desktop (`rpc_via(Ui, User)`, el mismo camino que `orch_call`
-//! del ADE), con proveedores falsos: uno que lo ofrece todo, otro sin `steer` y otro sin `resume`. Cada prueba comprueba el desenlace
+//! LXO-144/LXO-159 · Steer y Stop & Send de extremo a extremo por RPC autenticado de Desktop y CLI (`rpc_via`/`rpc_authenticated_via`),
+//! con proveedores falsos: uno que lo ofrece todo, otro sin `steer` y otro sin `resume`. Cada prueba comprueba el desenlace
 //! DURABLE: los Events (el par `attempt.instruction_requested` -> `attempt.instruction_result`, unido por `request_id`), el estado del
 //! Attempt y lo que de verdad llegó al adapter. Contrato: `docs/core/STEER.md`.
 
@@ -73,6 +73,36 @@ fn stop_and_send(w: &World, attempt: &str, request_id: &str, body: &str) -> Resu
     w.desktop("attempt_stop_and_send", json!({"attempt_id": attempt, "request_id": request_id, "body": body}))
 }
 
+fn steer_cli(
+    w: &World,
+    client: &crate::store::AuthenticatedClient,
+    attempt: &str,
+    request_id: &str,
+    body: &str,
+    confirm: bool,
+) -> Result<Value, String> {
+    w.cli(
+        client,
+        "attempt_steer",
+        json!({"attempt_id": attempt, "request_id": request_id, "body": body, "confirm": confirm}),
+    )
+}
+
+fn stop_and_send_cli(
+    w: &World,
+    client: &crate::store::AuthenticatedClient,
+    attempt: &str,
+    request_id: &str,
+    body: &str,
+    confirm: bool,
+) -> Result<Value, String> {
+    w.cli(
+        client,
+        "attempt_stop_and_send",
+        json!({"attempt_id": attempt, "request_id": request_id, "body": body, "confirm": confirm}),
+    )
+}
+
 // ── Steer ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /// Un adapter con `steer`: la instrucción llega al turno EN CURSO (no a la cola, no se reanuda nada) y quedan los dos Events,
@@ -108,6 +138,61 @@ fn steer_con_capability_inyecta_en_el_turno_en_curso_y_deja_el_par_de_events() {
     w.adapter.release_hold();
     w.settled(&a1, "done");
     assert_eq!(event_count(&w.core, &a1, "attempt.started"), 1, "el mismo Attempt y el mismo turno");
+}
+
+/// La policy base pide a la Person CLI confirmar Steer antes de tocar al proveedor.
+#[test]
+fn cli_persona_necesita_confirmacion_de_policy_para_steer() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![
+        Step::Bind("sess-cli-steer"),
+        Step::Hold,
+        Step::Complete(None),
+    ]);
+    let attempt = w.create("claude", "e2e-cli-steer-policy");
+    w.approve(&attempt);
+    running(&w, &attempt);
+    let client = w.cli_client("steer-person");
+
+    let denied = steer_cli(&w, &client, &attempt, "cli-s1", "sin confirmar", false);
+    assert!(
+        denied.unwrap_err().starts_with("policy_confirm_required"),
+        "la policy base de CLI exige confirm"
+    );
+    assert_eq!(
+        instruction_events(&w.core, &attempt),
+        0,
+        "la policy rechaza antes de escribir"
+    );
+    assert!(!w
+        .adapter
+        .calls()
+        .iter()
+        .any(|call| call.starts_with("steer:")));
+
+    let delivered = steer_cli(&w, &client, &attempt, "cli-s1", "confirmado", true)
+        .expect("la Person CLI confirma explícitamente");
+    assert_eq!(
+        (delivered["status"].as_str(), delivered["mode"].as_str()),
+        (Some("Delivered"), Some("steer"))
+    );
+    assert!(w.adapter.calls().contains(&"steer:confirmado".to_string()));
+    assert_eq!(
+        event_count(&w.core, &attempt, "attempt.instruction_requested"),
+        1
+    );
+    w.adapter.release_hold();
+    w.settled(&attempt, "done");
+    assert!(
+        steer_cli(&w, &client, &attempt, "cli-s-final", "tarde", true)
+            .unwrap_err()
+            .contains("attempt_final"),
+        "el CLI no puede hacer Steer a un Attempt final"
+    );
+    assert_eq!(
+        event_count(&w.core, &attempt, "attempt.instruction_requested"),
+        1
+    );
 }
 
 /// Repetir la petición (un reintento del cliente) devuelve lo que ya pasó sin volver a llamar al proveedor; otra instrucción con la misma
@@ -235,6 +320,81 @@ fn stop_and_send_interrumpe_espera_la_confirmacion_y_envia_como_turno_nuevo() {
     let again = stop_and_send(&w, &a1, "x-1", "para y rehaz el informe");
     assert_eq!(again.unwrap()["status"], "Replayed");
     assert_eq!((w.adapter.resumes().len(), w.adapter.calls().iter().filter(|c| *c == "interrupt").count()), (1, 1));
+}
+
+/// La policy base pide a la Person CLI confirmar Stop & Send antes de interrumpir.
+#[test]
+fn cli_persona_necesita_confirmacion_y_stop_send_reanuda_solo_tras_confirmar() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![
+        Step::Bind("sess-cli-stop-send"),
+        Step::Output("trabajando".into()),
+        Step::Wait,
+    ]);
+    w.adapter.push_turn(vec![
+        Step::Output("nuevo turno".into()),
+        Step::Complete(Some("hecho".into())),
+    ]);
+    let attempt = w.create("claude", "e2e-cli-stop-send-policy");
+    w.approve(&attempt);
+    let task = running(&w, &attempt);
+    bound(&w, &task);
+    let client = w.cli_client("stop-send-person");
+
+    let denied = stop_and_send_cli(
+        &w,
+        &client,
+        &attempt,
+        "cli-ss1",
+        "sin confirmar",
+        false,
+    );
+    assert!(
+        denied.unwrap_err().starts_with("policy_confirm_required"),
+        "la policy base de CLI exige confirm"
+    );
+    assert!(!w.adapter.calls().iter().any(|call| call == "interrupt"));
+    assert!(w.adapter.resumes().is_empty());
+    assert_eq!(instruction_events(&w.core, &attempt), 0);
+
+    let delivered = stop_and_send_cli(
+        &w,
+        &client,
+        &attempt,
+        "cli-ss1",
+        "confirmado",
+        true,
+    )
+    .expect("la Person CLI confirma explícitamente");
+    assert_eq!(
+        (delivered["status"].as_str(), delivered["mode"].as_str()),
+        (Some("Delivered"), Some("stop_and_send"))
+    );
+    w.settled(&attempt, "done");
+    let calls = w.adapter.calls();
+    let interrupt = calls.iter().position(|call| call == "interrupt").unwrap();
+    let resume = calls.iter().position(|call| call == "resume").unwrap();
+    assert!(interrupt < resume);
+    assert_eq!(w.adapter.resumes().len(), 1);
+    assert_eq!(
+        w.adapter.resumes()[0].prompt.as_deref(),
+        Some("confirmado")
+    );
+    assert!(!calls.iter().any(|call| call.starts_with("steer:")));
+    assert!(
+        stop_and_send_cli(
+            &w,
+            &client,
+            &attempt,
+            "cli-ss-final",
+            "tarde",
+            true
+        )
+        .unwrap_err()
+        .contains("attempt_final"),
+        "el CLI no puede hacer Stop & Send a un Attempt final"
+    );
+    assert_eq!(instruction_events(&w.core, &attempt), 2);
 }
 
 /// El proveedor rechaza el stop: NO se presenta como éxito, no se envía nada y el Attempt sigue corriendo.

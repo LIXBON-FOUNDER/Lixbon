@@ -1,0 +1,8 @@
+{
+  "attempt_id": "task-a1",
+  "command": "attempt.stop_and_send",
+  "mode": "stop_and_send",
+  "request_id": "ss-1",
+  "status": "Delivered",
+  "v": 1
+}

@@ -10,6 +10,7 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 mod activity;
+mod attempt_control;
 mod attempts;
 mod attention;
 mod client_auth;
@@ -66,8 +67,14 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
   lxo attempt resume <attempt_id> --message \"...\"
   lxo attempt stop <attempt_id> --confirm
-                                                   start/retry/resume esperan aprobación Desktop; stop exige confirmación exacta
-                                                  (solo lectura y solo personas)
+                                                  start/retry/resume esperan aprobación Desktop; stop es solo para personas y exige confirmación exacta
+  lxo attempt queue <attempt_id> --message \"...\" --confirm [--request-id ID] [--json]
+  lxo attempt steer <attempt_id> --message \"...\" --confirm [--request-id ID] [--json]
+  lxo attempt stop <attempt_id> --send --message \"...\" --confirm [--request-id ID] [--json]
+  lxo queue list <attempt_id> [--json] | lxo queue cancel <queue_id> [--json]
+                                                    Queue, Steer y Stop & Send son semánticas distintas, sin fallback;
+                                                    mutaciones solo para personas y exigen --confirm; Core revalida policy.
+                                                    list/cancel son solo para personas y no requieren confirmación de policy.
   lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
                                                    compara 2-4 intentos con la evidencia del Core (solo personas)
   lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
@@ -189,9 +196,28 @@ fn parse(raw: Vec<String>) -> Args {
 }
 
 const BOOL_FLAGS: &[&str] = &[
-    "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help", "stored", "background", "confirm", "dry-run", "wait", "compare", "accept",
-    "reject", "open",
+    "json",
+    "start",
+    "done",
+    "failed",
+    "squash",
+    "force",
+    "shared",
+    "stat",
+    "refresh",
+    "all",
+    "follow",
+    "help",
+    "stored",
+    "background",
+    "confirm",
+    "dry-run",
+    "wait",
+    "compare",
+    "accept",
+    "reject",
+    "open",
+    "send",
 ];
 
 impl Args {
@@ -209,6 +235,13 @@ impl Args {
     fn num(&self, k: &str) -> Option<u64> {
         self.s(k).and_then(|v| v.parse().ok())
     }
+}
+
+fn routes_attempt_control(a: &Args) -> bool {
+    a.at(0).as_deref() == Some("queue")
+        || (a.at(0).as_deref() == Some("attempt")
+            && (matches!(a.at(1).as_deref(), Some("queue" | "steer"))
+                || (a.at(1).as_deref() == Some("stop") && a.flags.contains_key("send"))))
 }
 
 fn home() -> PathBuf {
@@ -1085,6 +1118,9 @@ fn main() -> ExitCode {
     if a.at(0).as_deref() == Some("race") {
         return race::run(&a);
     }
+    if routes_attempt_control(&a) {
+        return attempt_control::run(&a);
+    }
     if a.at(0).as_deref() == Some("events") {
         return events::run(&a);
     }
@@ -1272,6 +1308,24 @@ mod tests {
 
     fn p(s: &[&str]) -> Args {
         parse(s.iter().map(|x| x.to_string()).collect())
+    }
+
+    #[test]
+    fn el_enrutamiento_reserva_queue_steer_y_stop_send_sin_cambiar_stop_normal() {
+        for command in [
+            &["queue", "list", "task-a1"][..],
+            &["attempt", "queue", "task-a1"][..],
+            &["attempt", "steer", "task-a1"][..],
+            &["attempt", "stop", "task-a1", "--send"][..],
+        ] {
+            assert!(routes_attempt_control(&p(command)), "{command:?}");
+        }
+        for command in [
+            &["attempt", "stop", "task-a1", "--confirm"][..],
+            &["attempt", "resume", "task-a1"][..],
+        ] {
+            assert!(!routes_attempt_control(&p(command)), "{command:?}");
+        }
     }
 
     #[test]

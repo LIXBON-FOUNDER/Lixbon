@@ -48,7 +48,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | confirm solo para `attempt_stop`; deny para queue · steer · fork |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer · stop: confirm (`attempt_queue`, `attempt_steer`, `attempt_stop`, `attempt_stop_and_send`); answer · fork: deny |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
@@ -73,7 +73,9 @@ Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los q
 `cli_person` puede ejecutar `attempt_review` y `attempt_integrate` con `confirm: true`, sujetos a la policy efectiva y a las guardas de
 cada Command. Review solo decide sobre el HEAD exacto del Proof Pack; integrate exige además revisión aceptada y HEAD vigente. El Core
 vuelve a evaluarlas en cada llamada. Un nivel efectivo `elevated` sigue devolviendo `policy_out_of_band_required`: todavía no existe un
-canal para satisfacer esa aprobación, tampoco desde CLI. `cleanup` y `provider_permissions` permanecen denegados para `cli_person`.
+canal para satisfacer esa aprobación, tampoco desde CLI. Queue, Steer y Stop & Send también están disponibles para una Person CLI con
+`confirm: true`; consultar o cancelar la Queue no ejecuta una instrucción y no requiere confirmación de policy. `cleanup` y
+`provider_permissions` permanecen denegados para `cli_person`.
 
 ## Se revalida en CADA Command (invariante 2)
 

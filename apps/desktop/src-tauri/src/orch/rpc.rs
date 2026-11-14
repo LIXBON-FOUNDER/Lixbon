@@ -63,7 +63,18 @@ impl Core {
         cmd: &str,
         args: &Value,
     ) -> Result<Value, String> {
-        if matches!(cmd, "attempt_start" | "attempt_retry" | "attempt_resume" | "attempt_stop") {
+        if matches!(
+            cmd,
+            "attempt_start"
+                | "attempt_retry"
+                | "attempt_resume"
+                | "attempt_stop"
+                | "attempt_queue"
+                | "attempt_queue_cancel"
+                | "pending_queue"
+                | "attempt_steer"
+                | "attempt_stop_and_send"
+        ) {
             let expected_channel = match client.identity().surface() {
                 ClientSurface::Desktop => Some(Channel::Ui),
                 ClientSurface::Cli => Some(Channel::Lxo),
@@ -834,7 +845,12 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
         "attempt_start" | "attempt_stop" => ClientAction::CliAttemptCommand,
         "attempt_retry" | "attempt_resume" => ClientAction::AttemptRequest,
-        "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "attempt_queue"
+        | "attempt_queue_cancel"
+        | "pending_queue"
+        | "attempt_steer"
+        | "attempt_stop_and_send" => ClientAction::AttemptInstructionCommand,
+        "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
@@ -847,12 +863,26 @@ mod tests {
 
     fn cli_commands() -> std::collections::BTreeSet<&'static str> {
         const CLI_MAIN: &str = include_str!("../../../lxo/src/main.rs");
+        const CLI_ATTEMPT_CONTROL: &str = include_str!("../../../lxo/src/attempt_control.rs");
         let mut commands = std::collections::BTreeSet::new();
         let mut remaining = CLI_MAIN;
         while let Some((_, after_marker)) = remaining.split_once("call(\"") {
             let (command, after_command) = after_marker.split_once('\"').expect("literal call command closes");
             commands.insert(command);
             remaining = after_command;
+        }
+        for command in [
+            "attempt_queue",
+            "attempt_queue_cancel",
+            "pending_queue",
+            "attempt_steer",
+            "attempt_stop_and_send",
+        ] {
+            assert!(
+                CLI_ATTEMPT_CONTROL.contains(&format!("\"{command}\"")),
+                "{command} debe estar en el cliente de Queue/Instruction"
+            );
+            commands.insert(command);
         }
         commands
     }
@@ -873,6 +903,13 @@ mod tests {
             "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
             "attempt_review" => ClientAction::AttemptReview,
             "attempt_integrate" => ClientAction::AttemptIntegration,
+            "attempt_queue"
+            | "attempt_queue_cancel"
+            | "pending_queue"
+            | "attempt_steer"
+            | "attempt_stop_and_send" => {
+                ClientAction::AttemptInstructionCommand
+            }
             "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,
             _ => ClientAction::Unknown,
         }
@@ -922,6 +959,15 @@ mod tests {
         assert_eq!(rpc_action("attempt_review"), ClientAction::AttemptReview);
         assert_eq!(rpc_action("attempt_start"), ClientAction::CliAttemptCommand);
         assert_eq!(rpc_action("attempt_stop"), ClientAction::CliAttemptCommand);
+        for command in [
+            "attempt_queue",
+            "attempt_queue_cancel",
+            "pending_queue",
+            "attempt_steer",
+            "attempt_stop_and_send",
+        ] {
+            assert_eq!(rpc_action(command), ClientAction::AttemptInstructionCommand);
+        }
         assert_eq!(rpc_action("attempt_retry"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_resume"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_integrate"), ClientAction::AttemptIntegration);
@@ -943,6 +989,9 @@ mod tests {
         assert!(person_cli.authorize(ClientAction::AttemptRequest).is_ok());
         assert!(person_desktop.authorize(ClientAction::AttemptRequest).is_ok());
         assert!(agent_cli.authorize(ClientAction::AttemptRequest).is_err());
+        assert!(person_cli.authorize(ClientAction::AttemptInstructionCommand).is_ok());
+        assert!(person_desktop.authorize(ClientAction::AttemptInstructionCommand).is_ok());
+        assert!(agent_cli.authorize(ClientAction::AttemptInstructionCommand).is_err());
         assert!(person_cli.authorize(ClientAction::AttemptIntegration).is_ok());
         assert!(person_desktop.authorize(ClientAction::AttemptIntegration).is_ok());
         assert!(agent_cli.authorize(ClientAction::AttemptIntegration).is_err());
@@ -957,6 +1006,7 @@ mod tests {
                     | ClientAction::EventLogRead
                     | ClientAction::AgentCommand
                     | ClientAction::AgentOrDesktopCommand
+                    | ClientAction::AttemptInstructionCommand
                     | ClientAction::AttemptReview
                     | ClientAction::AttemptIntegration
             );

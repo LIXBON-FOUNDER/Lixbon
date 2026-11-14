@@ -1,0 +1,7 @@
+{
+  "code": "policy_confirm_required",
+  "error": "La policy requiere confirmación explícita: vuelve a ejecutar con --confirm. falta confirmación",
+  "kind": "policy",
+  "ok": false,
+  "v": 1
+}

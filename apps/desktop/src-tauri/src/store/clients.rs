@@ -226,6 +226,9 @@ pub enum ClientAction {
     /// Commands de Attempts solicitados explícitamente por una Person desde `lxo`.
     /// No se concede a agentes ni se confunde con una decisión humana de Desktop.
     CliAttemptCommand,
+    /// Instrucciones explícitas a un Attempt: Person autenticada de Desktop o CLI, nunca Agent.
+    /// La policy Core decide confirmación para Queue, Steer y Stop & Send.
+    AttemptInstructionCommand,
     /// Retry/resume mantienen su superficie de decisión Desktop y admiten la
     /// petición CLI que queda pendiente de aprobación.
     AttemptRequest,
@@ -371,6 +374,9 @@ impl AuthenticatedClient {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
                 ClientAction::CliAttemptCommand => self.identity.surface() == ClientSurface::Cli,
+                ClientAction::AttemptInstructionCommand => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
+                }
                 ClientAction::AttemptRequest => {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }

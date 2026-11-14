@@ -33,7 +33,7 @@ fn level(s: &PolicySnapshot, actor: ActorClass, cat: Category, project: Option<&
 const DESKTOP_CONFIRM: [Category; 5] = [Category::Start, Category::Review, Category::Integrate, Category::Cleanup, Category::ProviderPermissions];
 
 #[test]
-fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_review_e_integrate() {
+fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_con_confirmacion() {
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
@@ -41,10 +41,15 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_start_stop_review_e_
         for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
-        // Start/retry/resume siguen pendientes de Desktop; stop, review e integrate exigen confirmación.
+        // Start/retry/resume siguen pendientes de Desktop; queue, steer, stop, review e integrate exigen confirmación.
         let cli = if matches!(
             c,
-            Category::Start | Category::Stop | Category::Review | Category::Integrate
+            Category::Start
+                | Category::Queue
+                | Category::Steer
+                | Category::Stop
+                | Category::Review
+                | Category::Integrate
         ) {
             Level::Confirm
         } else {
@@ -235,6 +240,8 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     // La matriz actor × categoría viaja completa.
     assert_eq!(e["baseline_matrix"]["mobile_person"]["steer"], "deny");
     assert_eq!(e["baseline_matrix"]["cli_person"]["start"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["queue"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["steer"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["stop"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["review"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "confirm");
@@ -265,6 +272,61 @@ fn confirm_exige_confirm_true_y_elevated_no_se_puede_dar_aun() {
     assert!(paso_la_policy(&q(true)));
     w.set("global", None, "queue", "elevated", false).unwrap();
     assert!(is(q(true), "policy_out_of_band_required"), "elevated pide una confirmación fuera de banda que no existe: confirm no basta");
+}
+
+#[test]
+fn cli_queue_steer_y_stop_send_exigen_confirm_y_respetan_deny_y_elevated() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("instruction-policy-person".into()),
+        "cli-instruction-policy",
+    );
+    for (command, category, request) in [
+        (
+            "attempt_queue",
+            "queue",
+            json!({"attempt_id":"missing-a1", "request_id":"q1", "body":"texto"}),
+        ),
+        (
+            "attempt_steer",
+            "steer",
+            json!({"attempt_id":"missing-a1", "request_id":"s1", "body":"texto"}),
+        ),
+        (
+            "attempt_stop_and_send",
+            "stop",
+            json!({"attempt_id":"missing-a1", "request_id":"ss1", "body":"texto"}),
+        ),
+    ] {
+        assert!(
+            is(as_client(&w, &cli, command, request.clone()), "policy_confirm_required"),
+            "{command} pide confirmación al CLI"
+        );
+        let mut confirmed = request.clone();
+        confirmed["confirm"] = json!(true);
+        assert!(
+            paso_la_policy(&as_client(&w, &cli, command, confirmed.clone())),
+            "{command} pasa su confirmación base"
+        );
+
+        w.set("global", None, category, "deny", false)
+            .expect("endurecer la policy");
+        assert!(
+            is(as_client(&w, &cli, command, confirmed.clone()), "policy_denied"),
+            "{command}: confirm no salta deny"
+        );
+        w.set("global", None, category, "elevated", true)
+            .expect("aflojar con confirmación");
+        assert!(
+            is(
+                as_client(&w, &cli, command, confirmed),
+                "policy_out_of_band_required"
+            ),
+            "{command}: confirm local no satisface elevated"
+        );
+    }
 }
 
 #[test]
@@ -452,14 +514,17 @@ fn cada_actor_ve_su_propia_policy_y_mobile_no_eleva_lo_que_el_core_niega() {
         assert!(w.core.rpc_authenticated_via(&mobile, &ClientClaims::default(), channel, "", "policy_effective", &json!({})).is_err());
     }
     let c = as_client(&w, &cli, "policy_effective", json!({})).unwrap();
-    assert_eq!((c["actor"]["class"].as_str(), cat(&c, "start")["level"].as_str(), cat(&c, "steer")["level"].as_str()), (Some("cli_person"), Some("confirm"), Some("deny")));
-    // Desktop afloja todo lo que puede; Mobile y CLI siguen sin poder: ni la policy ni `confirm` les dan lo que su base niega.
+    assert_eq!((c["actor"]["class"].as_str(), cat(&c, "start")["level"].as_str(), cat(&c, "steer")["level"].as_str()), (Some("cli_person"), Some("confirm"), Some("confirm")));
+    // Desktop afloja todo lo que puede; Mobile no puede elevar lo que su base niega y el CLI no satisface `elevated` con confirm local.
     w.set("global", None, "steer", "elevated", false).unwrap();
     let args = json!({"attempt_id": "nope-a1", "request_id": "r-m", "body": "x", "confirm": true});
     for channel in [Channel::Ui, Channel::Lxo] {
         assert!(w.core.rpc_authenticated_via(&mobile, &ClientClaims::default(), channel, "", "attempt_steer", &args).is_err());
     }
-    assert!(as_client(&w, &cli, "attempt_steer", args).is_err());
+    assert!(is(
+        as_client(&w, &cli, "attempt_steer", args),
+        "policy_out_of_band_required"
+    ));
     assert!(is(steer(&w, "nope-a1", true), "policy_out_of_band_required"));
 }
 

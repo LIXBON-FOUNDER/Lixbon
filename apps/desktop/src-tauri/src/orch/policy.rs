@@ -168,11 +168,16 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
     match actor {
         // Lo que ya tenía: lo que decide o destruye pide confirmación; instruir al propio Attempt no.
         ActorClass::DesktopPerson => category.floor(),
-        // El CLI puede pedir, detener o decidir review/integrate; cada decisión requiere confirmación explícita.
+        // CLI puede pedir start/retry/resume; las instrucciones y decisiones requieren confirmación explícita.
         ActorClass::CliPerson
             if matches!(
                 category,
-                Category::Start | Category::Stop | Category::Review | Category::Integrate
+                Category::Start
+                    | Category::Queue
+                    | Category::Steer
+                    | Category::Stop
+                    | Category::Review
+                    | Category::Integrate
             ) =>
         {
             Level::Confirm

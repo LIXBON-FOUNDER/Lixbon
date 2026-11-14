@@ -3,7 +3,7 @@
 Dos comandos para hablar con un Attempt **ocupado** sin esperar a su siguiente turno. Son distintos entre sí y distintos de
 encolar (`attempt.queue`, [COLA.md](COLA.md)): ninguno se adapta a otro en silencio.
 
-| comando (RPC de Desktop) | qué hace | capability que exige | cuándo llega la instrucción |
+| comando (RPC de Desktop/CLI) | qué hace | capability que exige | cuándo llega la instrucción |
 |---|---|---|---|
 | `attempt_queue` ([COLA.md](COLA.md)) | la guarda y la entrega como el SIGUIENTE turno | `resume` | al terminar el turno en curso |
 | `attempt_steer` | la inyecta en el turno EN CURSO | `steer` | ya, en el mismo turno |
@@ -14,13 +14,14 @@ Quién decide qué ofrecer es la matriz de capabilities del proveedor (`provider
 ## Petición
 
 ```json
-{ "attempt_id": "t2-a1", "request_id": "s-1", "body": "usa la rama develop" }
+{ "attempt_id": "t2-a1", "request_id": "s-1", "body": "usa la rama develop", "confirm": true }
 ```
 
 * `request_id`: clave de idempotencia del cliente (1 a 64 caracteres entre letras, dígitos, `_`, `.` y `-`). **Obligatoria.**
 * `body`: de 1 a 20 000 caracteres, sin ser solo espacios. Ningún otro campo: el autor sale de la identidad autenticada.
-* Solo una Person de Desktop (`HumanDecision`). Un agente no instruye por este RPC. La policy efectiva por actor y Attempt llegará
-  con LXO-209; hasta entonces la validación es la del actor (persona o el agente que coordina la Task, como la cola).
+* Solo una Person autenticada de Desktop o CLI (`AttemptInstructionCommand`). Un agente no instruye por este RPC.
+* `confirm` es opcional para Desktop y obligatorio para CLI según la policy base; el Core revalida la policy efectiva por actor y Attempt
+  en cada llamada. `attempt_stop_and_send` usa la categoría `stop`.
 
 Respuesta: `{ "status": "Delivered" | "Replayed", "mode", "attempt_id", "request_id" }`. Un error trae `categoría/código: mensaje`.
 
@@ -90,6 +91,6 @@ Una petición rechazada **antes** de actuar (tabla de errores, «no») no deja E
 
 * La idempotencia vive en memoria del proceso (ver invariante 6). No hay `request_id` durable porque no hay entrega durable: o se
   hizo ahora, con el proveedor, o no se hizo.
-* La policy efectiva (LXO-209) aún no filtra estos comandos.
+* La CLI `lxo` ofrece `attempt steer` y `attempt stop --send`; ambos exigen `--confirm` según la policy base de CLI. Ver [COLA.md](COLA.md) para Queue y consulta/cancelación.
 * El plazo del stop (15 s) no es configurable por el cliente.
 * Mientras un Stop & Send espera su veredicto, la llamada RPC está abierta (hasta 15 s).

@@ -70,7 +70,7 @@ impl World {
         wait_until("el claim se asienta", || row(&self.core, attempt).1 == "settled");
     }
 
-    fn cli_client(&self, tag: &str) -> AuthenticatedClient {
+    pub(super) fn cli_client(&self, tag: &str) -> AuthenticatedClient {
         let secret = format!("f5-cli-{tag}-secret-0123456789abcdef");
         let registration = ClientRegistration::new(
             ClientSurface::Cli,
@@ -86,7 +86,32 @@ impl World {
         self.core.authenticate_client(&secret).unwrap().unwrap()
     }
 
-    fn cli(&self, client: &AuthenticatedClient, cmd: &str, args: Value) -> Result<Value, String> {
+    pub(super) fn cli_agent_client(&self, task: &str, tag: &str) -> AuthenticatedClient {
+        let secret = format!("f5-agent-{tag}-secret-0123456789abcdef");
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new(format!("f5-agent-install-{tag}"), None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(
+            ClientPrincipal::Agent(task.into()),
+            &secret,
+        )
+        .unwrap();
+        self.core
+            .storage
+            .with_store(|store| store.register_client(&registration, &credential, 10_000))
+            .unwrap()
+            .unwrap();
+        self.core.authenticate_client(&secret).unwrap().unwrap()
+    }
+
+    pub(super) fn cli(
+        &self,
+        client: &AuthenticatedClient,
+        cmd: &str,
+        args: Value,
+    ) -> Result<Value, String> {
         self.core.rpc_authenticated_via(client, &ClientClaims::default(), Channel::Lxo, "", cmd, &args)
     }
 }
@@ -672,7 +697,7 @@ fn attempt_summary(core: &Core, attempt: &str) -> String {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT summary FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, String>(0))?))).unwrap().unwrap()
 }
 
-/// LXO-143 · la cola de instrucciones por el RPC de Desktop. Encolar no entrega nada: el Attempt está en mitad de un turno. En cada fin
+/// LXO-143/LXO-159 · la cola de instrucciones por RPC autenticado de Desktop y CLI. Encolar no entrega nada: el Attempt está en mitad de un turno. En cada fin
 /// de turno el bombeo entrega la primera REANUDANDO la misma sesión, y el Attempt sigue `running` entre turnos: `completed` llega
 /// solo cuando la cola se vacía. FIFO, idempotente por `request_id`, lo cancelado no se entrega jamás.
 #[test]
@@ -746,6 +771,134 @@ fn la_cola_entrega_en_fifo_reanudando_la_sesion_y_el_attempt_termina_al_vaciarse
     // Terminado, no admite instrucciones.
     assert!(queue("r9", "tarde").unwrap_err().contains("attempt_final"));
     let _ = task;
+}
+
+/// El CLI usa la identidad autenticada y la policy del Core: Person puede encolar/listar/cancelar con confirmación;
+/// Agent no puede ejecutar ninguno de los comandos de instrucción aunque presente confirm.
+#[test]
+fn cli_persona_autenticada_gestiona_queue_con_policy_y_agent_sigue_denegado() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![
+        Step::Bind("sess-cli-q"),
+        Step::Output("trabajando".into()),
+        Step::Hold,
+        Step::Complete(Some("primer turno".into())),
+    ]);
+    w.adapter
+        .push_turn(vec![Step::Complete(Some("terminado".into()))]);
+    let attempt = w.create("claude", "e2e-cli-queue");
+    w.approve(&attempt);
+    wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
+    let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    let person = w.cli_client("queue-person");
+
+    let missing_confirmation = w.cli(
+        &person,
+        "attempt_queue",
+        json!({"attempt_id": attempt, "request_id": "cli-q1", "body": "primera"}),
+    );
+    assert!(missing_confirmation
+        .unwrap_err()
+        .starts_with("policy_confirm_required"));
+    assert!(queue_rows(&w.core, &attempt).is_empty(), "la policy se aplica antes de escribir");
+
+    let first = w
+        .cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q1", "body": "primera", "confirm": true}),
+        )
+        .expect("CLI Person encola con confirmación");
+    let second = w
+        .cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q2", "body": "segunda", "confirm": true}),
+        )
+        .expect("CLI Person encola el siguiente item");
+    assert_eq!(
+        (first["position"].as_i64(), second["position"].as_i64()),
+        (Some(1), Some(2))
+    );
+
+    let pending = w
+        .cli(&person, "pending_queue", json!({"attempt_id": attempt}))
+        .expect("CLI Person consulta la cola");
+    assert_eq!(
+        pending["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["body"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["primera", "segunda"]
+    );
+    let queue_id = second["queue_id"].as_str().unwrap();
+    assert_eq!(
+        w.cli(
+            &person,
+            "attempt_queue_cancel",
+            json!({"queue_id": queue_id}),
+        )
+        .expect("CLI Person cancela un item pendiente")["status"],
+        "Cancelled"
+    );
+
+    let agent = w.cli_agent_client(&task, "queue-agent");
+    for (command, args) in [
+        (
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "agent-q1", "body": "no", "confirm": true}),
+        ),
+        (
+            "attempt_steer",
+            json!({"attempt_id": attempt, "request_id": "agent-s1", "body": "no", "confirm": true}),
+        ),
+        (
+            "attempt_stop_and_send",
+            json!({"attempt_id": attempt, "request_id": "agent-ss1", "body": "no", "confirm": true}),
+        ),
+    ] {
+        let error = w.cli(&agent, command, args).unwrap_err();
+        assert!(error.starts_with("Acción no permitida"), "{command}: {error}");
+    }
+    assert_eq!(queue_rows(&w.core, &attempt).len(), 2, "Agent no encoló nada");
+    assert_eq!(event_count(&w.core, &attempt, "attempt.instruction_requested"), 0);
+    assert!(!w.adapter.calls().iter().any(|call| call == "interrupt" || call.starts_with("steer:")));
+
+    w.adapter.release_hold();
+    w.settled(&attempt, "done");
+    assert_eq!(
+        queue_rows(&w.core, &attempt),
+        vec![
+            (
+                format!("{attempt}-q1"),
+                "delivered".into(),
+                None,
+                Some("adapter_result".into()),
+            ),
+            (
+                format!("{attempt}-q2"),
+                "cancelled".into(),
+                None,
+                None,
+            ),
+        ]
+    );
+    assert_eq!(w.adapter.resumes().len(), 1);
+    assert_eq!(w.adapter.resumes()[0].prompt.as_deref(), Some("primera"));
+    assert!(
+        w.cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q-final", "body": "tarde", "confirm": true}),
+        )
+        .unwrap_err()
+        .contains("attempt_final"),
+        "un Attempt final no admite Queue por CLI"
+    );
+    assert_eq!(queue_rows(&w.core, &attempt).len(), 2);
 }
 
 /// Un fallo de la entrega no falla el Attempt: solo el item (`attempt.queue_failed`), y el Attempt termina bien.
