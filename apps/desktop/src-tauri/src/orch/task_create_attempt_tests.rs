@@ -15,7 +15,10 @@ use super::provider_registry::{start_preflight, ProviderLookup};
 use super::state::Status;
 use super::task_create_api::ATTEMPT_NOT_AVAILABLE;
 use super::Core;
-use crate::store::{AuthenticatedClient, ClientClaims};
+use crate::store::{
+    AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration,
+    ClientSurface, DeviceIdentity,
+};
 
 fn create(core: &Arc<Core>, client: &AuthenticatedClient, project: &str, request_id: &str, attempt: Value) -> Result<Value, String> {
     let mut args = json!({"request_id": request_id, "project_id": project, "objective": "o", "title": "t", "spec": "haz algo"});
@@ -23,6 +26,24 @@ fn create(core: &Arc<Core>, client: &AuthenticatedClient, project: &str, request
         args["attempt"] = attempt;
     }
     core.rpc_authenticated_via(client, &ClientClaims::default(), Channel::Ui, "", "task_create", &args)
+}
+
+fn cli_person(core: &Core) -> AuthenticatedClient {
+    const SECRET: &str = "task-create-cli-person-secret-0123456789abcdef";
+    core.storage
+        .with_store(|store| {
+            let registration = ClientRegistration::new(
+                ClientSurface::Cli,
+                DeviceIdentity::new("task-create-cli-install", None).unwrap(),
+            )
+            .unwrap();
+            let credential =
+                ClientCredential::new(ClientPrincipal::Person("task-create-cli-person".into()), SECRET)
+                    .unwrap();
+            store.register_client(&registration, &credential, 10_000).unwrap();
+        })
+        .unwrap();
+    core.authenticate_client(SECRET).unwrap().unwrap()
 }
 
 fn decide(core: &Arc<Core>, client: &AuthenticatedClient, cmd: &str, attempt: &str) -> Result<Value, String> {
@@ -123,6 +144,71 @@ fn con_lanzador_se_crea_la_task_con_su_primer_attempt_pendiente_de_aprobacion() 
     assert!(conflict.contains("otro payload"), "{conflict}");
     assert_eq!(core.lock().tasks.len(), 1);
     assert_eq!(rev(&core), before);
+}
+
+#[test]
+fn la_persona_cli_puede_solicitar_pero_solo_desktop_aprueba_y_lanza() {
+    let (core, desktop, _ctx, project) = core_with_project();
+    let cli = cli_person(&core);
+    let (_fake, log) = with_launcher(&core, StartOutcome::Running);
+    let request = json!({
+        "request_id": "cli-task-create-pending",
+        "project_id": project,
+        "objective": "objetivo CLI",
+        "title": "Task desde CLI",
+        "spec": "haz el trabajo",
+        "attempt": {"provider": "claude", "profile": "explorar"}
+    });
+    let created = core
+        .rpc_authenticated_via(
+            &cli,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "task_create",
+            &request,
+        )
+        .unwrap();
+    let task = created["task_id"].as_str().unwrap().to_string();
+    let attempt = created["attempt_id"].as_str().unwrap().to_string();
+    assert_eq!(attempt, format!("{task}-a1"));
+    assert_eq!(core.lock().tasks[&task].status, Status::PendingApproval);
+    assert_eq!(row(&core, &attempt), ("pending_approval".into(), "none".into(), None));
+    assert!(calls(&log).is_empty(), "crear desde CLI nunca ejecuta al proveedor");
+
+    assert!(
+        core.rpc_authenticated_via(
+            &cli,
+            &ClientClaims::default(),
+            Channel::Lxo,
+            "",
+            "attempt_approve",
+            &json!({"attempt_id": attempt}),
+        )
+        .is_err(),
+        "la credencial CLI no puede resolver la aprobación inicial"
+    );
+    core.dispatch_waiting_approved();
+    assert!(calls(&log).is_empty(), "sin decisión de Desktop no hay lanzamiento");
+    assert_eq!(row(&core, &attempt).0, "pending_approval");
+
+    assert_eq!(
+        core.rpc_authenticated_via(
+            &desktop,
+            &ClientClaims::default(),
+            Channel::Ui,
+            "",
+            "attempt_approve",
+            &json!({"attempt_id": attempt}),
+        )
+        .unwrap()["status"],
+        "Approved"
+    );
+    wait_until("aprobación Desktop lanza el Attempt", || calls(&log).iter().any(|call| call == "start"));
+    assert_eq!(row(&core, &attempt).0, "running");
+    assert_eq!(event_count(&core, &attempt, "attempt.approved"), 1);
+    assert_eq!(event_count(&core, &attempt, "attempt.started"), 1);
+    assert_eq!(calls(&log).iter().filter(|call| *call == "start").count(), 1);
 }
 
 #[test]

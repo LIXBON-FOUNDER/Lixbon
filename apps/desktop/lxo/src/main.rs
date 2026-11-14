@@ -26,6 +26,7 @@ mod race;
 mod review;
 mod summary;
 mod tasks;
+mod task_create;
 mod usage;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
@@ -54,6 +55,7 @@ Coordinador (el agente con el que habla el usuario):
   lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
                                                   Event Log paginado con autenticación de cliente
   lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--json [--schema 2]]
+  lxo task create --project ID|NOMBRE --objective \"...\" --title \"...\" [opciones]
   lxo task show <task_id> [--json [--schema 2]]    tareas del Core en árbol (solo lectura); --schema 2 es
                                                   la forma del modelo Task/Attempt (docs/core/LXO_CORTE.md)
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
@@ -1091,6 +1093,9 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("projects") {
         return projects::run(&a);
+    }
+    if a.at(0).as_deref() == Some("task") && a.at(1).as_deref() == Some("create") {
+        return task_create::run(&a);
     }
     if matches!(a.at(0).as_deref(), Some("tasks" | "task")) {
         return tasks::run(&a);

@@ -259,6 +259,21 @@ El RPC no despierta al despachador. Tras una aprobación explícita en Desktop, 
 lanza el provider. La policy clasifica el Command como `start`; sus overrides pueden endurecer o denegar el inicio, nunca quitar la
 aprobación Desktop.
 
+### Crear desde la CLI (`lxo task create`, LXO-158)
+
+`lxo task create --project ID|NOMBRE --objective ... --title ...` llama al RPC autenticado `task_create`; el Project es obligatorio
+y no se infiere del `cwd`. El nombre registrado se resuelve con `projects_overview` y la validación final sigue en el Core. `--repo` solo se
+envía si la persona lo indicó; si falta, el Core usa la ubicación verificada del Project. No hay `--host` ni opciones de Worktree:
+esos recursos los determina el Core.
+
+Sin `--provider`/`--profile`, se crea solo la intención. Con ambos y `--spec`, la misma petición puede incluir el primer Attempt:
+el Core fija `pending_approval`, y **nunca** lo ejecuta antes de una decisión de Desktop. La CLI consulta después `attempt_detail`
+para enseñar el estado durable actual; repetir una solicitud que ya avanzó no la presenta como pendiente.
+
+`--request-id` permite fijar la clave idempotente. Si se omite, lxo deriva una clave estable de la intención y de la selección; repetir
+el mismo comando no crea otra Task. Una forma `--json` v1 publica `status`, `request_id`, `project_id`, `run_id`, `task_id`,
+`attempt_id`, `attempt_status`, `approval_required` y `approval_surface`; no publica host ni rutas no devueltas por el Core.
+
 ### RPC del reintento (`attempt_retry`)
 
 `attempt_retry` · `{ task_id, from_attempt_id, provider?, model?, effort? }` (`deny_unknown_fields`). Lo puede pedir una Person de Desktop

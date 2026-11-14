@@ -16,6 +16,7 @@ use crate::Args;
 pub(super) const HELP: &str =
     "Uso: lxo tasks [--project ID|NOMBRE] [--active | --final] [--status S] [--run ID] [--json]
      lxo tasks --json --schema 2 [--project ID|NOMBRE] [--state S] [--run ID]
+     lxo task create --project ID|NOMBRE --objective \"...\" --title \"...\" [opciones]
      lxo task show <id o nombre> [--json]      (también: lxo tasks show …)
      lxo task show <task_id> --json --schema 2
 
@@ -324,6 +325,15 @@ impl Overview {
             }
         }
     }
+}
+
+/// Resuelve el selector explícito de `--project` con el registro del Core. La mutación nunca infiere
+/// el Project a partir del cwd.
+pub(super) fn resolve_project(
+    rpc: &mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>,
+    wanted: &str,
+) -> Result<String, Failure> {
+    overview(&mut *rpc)?.resolve(wanted)
 }
 
 /// Todas las Tasks de un Project con `tasks_by_project` (LXO-91), página a página.
