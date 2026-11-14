@@ -31,7 +31,8 @@ Opciones:
   --json                    salida estructurada (v1)
 
 El host y la estrategia del worktree no son opciones: el Core usa el host local y un worktree
-propio. Un intento creado queda pending_approval hasta que una persona lo apruebe en Lixbon.
+propio. Un intento recién creado queda pending_approval hasta que una persona lo apruebe en
+Lixbon. Si se repite una solicitud, lxo muestra el estado actual del Core.
 El Core puede rechazar la mutación si la identidad autenticada del CLI no está autorizada.
 ";
 
@@ -50,6 +51,17 @@ const FLAGS: [&str; 13] = [
     "background",
     "timeout-ms",
     "json",
+];
+const ATTEMPT_STATUSES: [&str; 9] = [
+    "pending_approval",
+    "starting",
+    "running",
+    "waiting",
+    "awaiting_terminal_approval",
+    "done",
+    "failed",
+    "stopped",
+    "exited",
 ];
 const FINAL: [&str; 4] = ["done", "failed", "stopped", "exited"];
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -231,19 +243,51 @@ fn execute(request: Request, rpc: &mut Rpc<'_>) -> Result<Value, Failure> {
         }),
         rpc,
     )?;
+    let status = result["status"]
+        .as_str()
+        .filter(|status| matches!(*status, "Requested" | "Replayed"))
+        .ok_or_else(|| {
+            Failure::Version("El Core devolvió una respuesta de Fork que lxo no reconoce.".into())
+        })?;
+    let task_id = result["task_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| Failure::Version("El Core no devolvió la Task del Fork.".into()))?;
     let attempt_id = result["attempt_id"]
         .as_str()
         .filter(|id| !id.is_empty())
         .ok_or_else(|| Failure::Version("El Core no devolvió el id del Attempt creado.".into()))?;
-    let status = result["status"].as_str().unwrap_or("Requested");
+    let (attempt_status, followed) = if let Some(timeout_ms) = request.wait_ms {
+        let followed = follow(rpc, attempt_id, task_id, timeout_ms)?;
+        let status = if followed["timed_out"] == true {
+            followed["status"].as_str()
+        } else {
+            followed["attempt"]["status"].as_str()
+        }
+        .ok_or_else(|| {
+            Failure::Version("El Core no devolvió el estado actual del Attempt.".into())
+        })?
+        .to_string();
+        (status, Some(followed))
+    } else {
+        let attempt = current_attempt(rpc, attempt_id, task_id)?;
+        let status = attempt["status"]
+            .as_str()
+            .expect("current_attempt validates status")
+            .to_string();
+        (status, None)
+    };
+    let approval_required = attempt_status == "pending_approval";
     let mut output = json!({
         "v": CONTRACT,
         "status": status,
         "source_attempt_id": source.attempt_id,
         "target": target,
         "run_id": result["run_id"],
-        "task_id": result["task_id"],
+        "task_id": task_id,
         "attempt_id": attempt_id,
+        "attempt_status": attempt_status,
+        "approval_required": approval_required,
         "strategy": result["strategy"],
         "package_id": result["package_id"],
         "provenance": {
@@ -251,29 +295,49 @@ fn execute(request: Request, rpc: &mut Rpc<'_>) -> Result<Value, Failure> {
             "strategy": result["strategy"],
             "package_id": result["package_id"],
         },
-        "approval": "pending_approval",
+        "approval": if approval_required { Some("pending_approval") } else { None },
     });
-    if let Some(timeout_ms) = request.wait_ms {
-        let followed = follow(rpc, attempt_id, timeout_ms)?;
+    if let Some(followed) = followed {
         output["follow"] = followed;
     }
     Ok(output)
 }
 
-fn follow(rpc: &mut Rpc<'_>, attempt_id: &str, timeout_ms: u64) -> Result<Value, Failure> {
+fn current_attempt(rpc: &mut Rpc<'_>, attempt_id: &str, task_id: &str) -> Result<Value, Failure> {
+    let detail = f5_support::send("attempt_detail", &json!({ "attempt_id": attempt_id }), rpc)?;
+    let attempt = &detail["attempt"];
+    let status = attempt["status"].as_str().ok_or_else(|| {
+        Failure::Version("El Core devolvió un estado de Attempt que lxo no reconoce.".into())
+    })?;
+    if detail["v"].as_u64() != Some(1)
+        || detail["core_model"].as_str() != Some("task_attempt_v1")
+        || attempt["id"].as_str() != Some(attempt_id)
+        || attempt["task_id"].as_str() != Some(task_id)
+        || !ATTEMPT_STATUSES.contains(&status)
+    {
+        return Err(Failure::Version(
+            "El Core devolvió un Attempt con un formato que este lxo no entiende.".into(),
+        ));
+    }
+    Ok(attempt.clone())
+}
+
+fn follow(
+    rpc: &mut Rpc<'_>,
+    attempt_id: &str,
+    task_id: &str,
+    timeout_ms: u64,
+) -> Result<Value, Failure> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
-        let detail = f5_support::send("attempt_detail", &json!({ "attempt_id": attempt_id }), rpc)?;
-        if detail["v"].as_u64() != Some(1) || detail["attempt"]["id"].as_str() != Some(attempt_id) {
-            return Err(Failure::Version(
-                "El Core devolvió un Attempt con un formato que este lxo no entiende.".into(),
-            ));
-        }
-        let status = detail["attempt"]["status"].as_str().unwrap_or("");
+        let attempt = current_attempt(rpc, attempt_id, task_id)?;
+        let status = attempt["status"]
+            .as_str()
+            .expect("current_attempt validates status");
         if FINAL.contains(&status) {
             return Ok(json!({
                 "timed_out": false,
-                "attempt": detail["attempt"],
+                "attempt": attempt,
             }));
         }
         if Instant::now() >= deadline {
@@ -299,18 +363,18 @@ fn human(data: &Value) -> String {
         );
     }
     let mut text = format!(
-        "Fork {} desde {} · Task {} · proveedor {} · estado pendiente de aprobación.",
+        "Fork {} desde {} · Task {} · proveedor {} · estado actual en Core: {}.",
         data["attempt_id"].as_str().unwrap_or(""),
         data["source_attempt_id"].as_str().unwrap_or(""),
         data["task_id"].as_str().unwrap_or(""),
         data["target"]["provider"].as_str().unwrap_or(""),
+        data["attempt_status"].as_str().unwrap_or("desconocido"),
     );
-    if data["follow"]["timed_out"] == true {
-        text.push_str(" La espera terminó; el Attempt sigue sin estado final.");
-    } else if let Some(status) = data["follow"]["attempt"]["status"].as_str() {
-        text.push_str(&format!(" Estado actual: {status}."));
-    } else {
+    if data["approval_required"] == true {
         text.push_str(" Apruébalo o recházalo en Lixbon Desktop.");
+    }
+    if data["follow"]["timed_out"] == true {
+        text.push_str(" La espera terminó antes de alcanzar un estado terminal.");
     }
     text
 }
@@ -375,10 +439,29 @@ mod tests {
     fn facts(
         calls: Rc<RefCell<Vec<(String, Value)>>>,
     ) -> impl FnMut(&str, &Value) -> Result<Value, RpcFailure> {
+        facts_with_state(calls, "Requested", "pending_approval")
+    }
+
+    fn facts_with_state(
+        calls: Rc<RefCell<Vec<(String, Value)>>>,
+        response_status: &str,
+        attempt_status: &str,
+    ) -> impl FnMut(&str, &Value) -> Result<Value, RpcFailure> {
+        let response_status = response_status.to_string();
+        let attempt_status = attempt_status.to_string();
         move |cmd, args| {
             calls.borrow_mut().push((cmd.to_string(), args.clone()));
             match cmd {
-                "attempt_detail" => Ok(source_attempt()),
+                "attempt_detail" if args["attempt_id"] == "t1-a1" => Ok(source_attempt()),
+                "attempt_detail" => Ok(json!({
+                    "v": 1,
+                    "core_model": "task_attempt_v1",
+                    "attempt": {
+                        "id": args["attempt_id"],
+                        "task_id": "t2",
+                        "status": attempt_status,
+                    }
+                })),
                 "task_detail_v2" => Ok(task()),
                 "resource_inspect" => {
                     Ok(json!({"v":1,"task_id":"t1","worktree":{"state":"present","dirty":false}}))
@@ -387,7 +470,7 @@ mod tests {
                     json!({"v":1,"revision":3,"actor":{"class":"cli_person"},"categories":[{"category":"fork","level":"confirm","source":"global"}]}),
                 ),
                 "attempt_fork" => Ok(json!({
-                    "status":"Requested", "source_attempt_id":"t1-a1", "run_id":"r2",
+                    "status":response_status, "source_attempt_id":"t1-a1", "run_id":"r2",
                     "task_id":"t2", "attempt_id":"t2-a1", "strategy":"clean", "package_id":null
                 })),
                 _ => panic!("RPC inesperado: {cmd}"),
@@ -414,7 +497,15 @@ mod tests {
         assert_eq!(result["attempt_id"], "t2-a1");
         assert_eq!(result["provenance"]["source_attempt_id"], "t1-a1");
         assert_eq!(result["approval"], "pending_approval");
-        let call = calls.borrow().last().unwrap().clone();
+        assert_eq!(result["status"], "Requested");
+        assert_eq!(result["attempt_status"], "pending_approval");
+        assert_eq!(result["approval_required"], true);
+        let call = calls
+            .borrow()
+            .iter()
+            .find(|(cmd, _)| cmd == "attempt_fork")
+            .unwrap()
+            .clone();
         assert_eq!(call.0, "attempt_fork");
         assert_eq!(call.1["source_attempt_id"], "t1-a1");
         assert_eq!(call.1["confirm"], false);
@@ -424,6 +515,53 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("lxo-fork-"));
+    }
+
+    #[test]
+    fn un_replay_muestra_el_estado_actual_aprobado_del_core() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = facts_with_state(calls, "Replayed", "running");
+        let request = parse(&args(&["attempt", "fork", "t1-a1"]))
+            .unwrap()
+            .unwrap();
+        let result = execute(request, &mut rpc).unwrap();
+        assert_eq!(
+            result["status"], "Replayed",
+            "status conserva el resultado de la solicitud"
+        );
+        assert_eq!(
+            result["attempt_status"], "running",
+            "estado actual viene del Core"
+        );
+        assert_eq!(result["approval_required"], false);
+        assert!(result["approval"].is_null());
+        assert!(human(&result).contains("estado actual en Core: running"));
+        assert!(!human(&result).contains("Apruébalo"));
+    }
+
+    #[test]
+    fn wait_en_un_fork_terminal_muestra_el_estado_terminal_del_core() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = facts_with_state(calls, "Requested", "done");
+        let request = parse(&args(&[
+            "attempt",
+            "fork",
+            "t1-a1",
+            "--wait",
+            "--timeout-ms",
+            "1000",
+        ]))
+        .unwrap()
+        .unwrap();
+        let result = execute(request, &mut rpc).unwrap();
+        assert_eq!(result["status"], "Requested");
+        assert_eq!(result["attempt_status"], "done");
+        assert_eq!(result["approval_required"], false);
+        assert!(result["approval"].is_null());
+        assert_eq!(result["follow"]["timed_out"], false);
+        assert_eq!(result["follow"]["attempt"]["status"], "done");
+        assert!(human(&result).contains("estado actual en Core: done"));
+        assert!(!human(&result).contains("Apruébalo"));
     }
 
     #[test]
