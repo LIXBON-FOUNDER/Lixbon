@@ -45,6 +45,8 @@ fn share(w: &World, attempt: &str, from: &str, confirm: bool) -> Result<Value, S
 /// la dueña puede borrarlo.
 #[test]
 fn compartir_el_worktree_no_crea_otro_y_la_duena_no_lo_borra_mientras_otro_trabaja() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let w = world("claude", None);
     let a1 = w.create("claude", "owner");
     w.approve(&a1);
@@ -166,6 +168,8 @@ fn si_el_lanzamiento_de_quien_comparte_falla_el_worktree_del_dueno_sigue_ahi() {
 /// Attempt vivo está usando salen con `busy_by` (se comparte en serie). Es una lectura: no cambia nada.
 #[test]
 fn los_candidatos_del_selector_dicen_cuales_estan_ocupados() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let w = world("claude", None);
     w.adapter.push_turn(vec![Step::Bind("sess-owner"), Step::Hold, Step::Complete(None)]);
     let a1 = w.create("claude", "owner");
@@ -193,6 +197,8 @@ fn los_candidatos_del_selector_dicen_cuales_estan_ocupados() {
 /// `resource_inspect` de la Task dueña dice quién comparte su worktree y por qué no se puede limpiar.
 #[test]
 fn resource_inspect_dice_quien_comparte_el_worktree() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let w = world("claude", None);
     let a1 = w.create("claude", "owner");
     w.approve(&a1);
@@ -213,6 +219,8 @@ fn resource_inspect_dice_quien_comparte_el_worktree() {
 /// lo continuó. Después la dueña puede limpiar lo integrado, y limpiar desde quien comparte no toca la carpeta.
 #[test]
 fn integrar_el_attempt_que_comparte_fusiona_el_trabajo_de_los_dos_y_luego_la_duena_limpia() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     use super::compare_e2e_tests::{commit, git, task_of};
 
     let w = world("claude", None);

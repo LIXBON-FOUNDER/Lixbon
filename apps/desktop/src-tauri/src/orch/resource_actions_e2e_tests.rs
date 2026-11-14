@@ -95,6 +95,8 @@ fn removal_events(core: &Core, task: &str) -> Vec<String> {
 
 #[test]
 fn limpiar_lo_integrado_quita_el_worktree_y_la_rama_registra_el_efecto_sin_rutas_y_repetir_no_hace_nada() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     w.integrate(&a1);
     let dir = worktree(&w.core, &a1);
@@ -131,6 +133,8 @@ fn limpiar_lo_integrado_quita_el_worktree_y_la_rama_registra_el_efecto_sin_rutas
 
 #[test]
 fn lo_sucio_o_sin_integrar_se_conserva_y_se_dice_por_que() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     let dir = worktree(&w.core, &a1);
     let branch = branch_of(&w.core, &task);
@@ -154,6 +158,8 @@ fn lo_sucio_o_sin_integrar_se_conserva_y_se_dice_por_que() {
 
 #[test]
 fn borrar_el_worktree_conserva_la_rama_con_el_trabajo_y_lo_sin_commit_exige_descartarlo_aparte() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     let dir = worktree(&w.core, &a1);
     let branch = branch_of(&w.core, &task);
@@ -171,6 +177,8 @@ fn borrar_el_worktree_conserva_la_rama_con_el_trabajo_y_lo_sin_commit_exige_desc
 
 #[test]
 fn descartar_cambios_sin_commit_es_una_decision_explicita() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     let dir = worktree(&w.core, &a1);
     std::fs::write(dir.join("README.md"), "a medias\n").unwrap();
@@ -188,6 +196,8 @@ fn descartar_cambios_sin_commit_es_una_decision_explicita() {
 
 #[test]
 fn un_worktree_que_ya_no_esta_en_disco_solo_se_anota_y_repetir_es_un_no_op() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     let dir = worktree(&w.core, &a1);
     std::fs::remove_dir_all(&dir).unwrap();
@@ -206,6 +216,8 @@ fn un_worktree_que_ya_no_esta_en_disco_solo_se_anota_y_repetir_es_un_no_op() {
 
 #[test]
 fn con_el_core_degradado_o_el_intento_en_marcha_no_se_toca_nada() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     w.integrate(&a1);
     let dir = worktree(&w.core, &a1);
@@ -233,6 +245,8 @@ fn con_el_core_degradado_o_el_intento_en_marcha_no_se_toca_nada() {
 
 #[test]
 fn la_peticion_se_valida_y_solo_una_persona_de_desktop_limpia() {
+    // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).
+    let _serie = super::pty::pruebas::serie_custodia();
     let (w, a1, task) = done_with_work();
     w.integrate(&a1);
     let dir = worktree(&w.core, &a1);
