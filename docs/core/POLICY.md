@@ -48,7 +48,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`); fork: confirm (`attempt_fork`); answer: deny |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`, `task_race_cancel`); fork: confirm (`attempt_fork`, `task_race`); answer: deny |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
@@ -77,9 +77,11 @@ canal para satisfacer esa aprobación, tampoco desde CLI. Queue, Steer y Stop & 
 `confirm: true`; consultar o cancelar la Queue no ejecuta una instrucción y no requiere confirmación de policy. `cleanup` y
 `provider_permissions` permanecen denegados para `cli_person`.
 
-Una Person autenticada por CLI también puede solicitar `attempt_fork` con `confirm: true`. `deny` y `elevated` siguen prevaleciendo.
-El Fork nace `pending_approval`: solo la aprobación de Desktop despierta el lanzamiento. La acción de credenciales permite únicamente
-`attempt_fork`; no concede otras decisiones `HumanDecision` al CLI. Agent, Mobile y automatización siguen denegados.
+Una Person autenticada por CLI también puede solicitar `attempt_fork` y `task_race`, y cancelar candidatos con `task_race_cancel`.
+Las tres operaciones requieren `confirm: true` por sus categorías (`fork` para Fork/Race, `stop` para cancelación); `deny` y
+`elevated` siguen prevaleciendo. Los Forks y candidatos nacen `pending_approval`: solo la aprobación de Desktop despierta el
+lanzamiento. La acción de credenciales permite únicamente estos Commands; no concede otras decisiones `HumanDecision` al CLI.
+Agent, Mobile y automatización siguen denegados.
 
 ## Se revalida en CADA Command (invariante 2)
 

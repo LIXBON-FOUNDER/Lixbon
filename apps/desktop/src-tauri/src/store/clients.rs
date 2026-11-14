@@ -235,7 +235,7 @@ pub enum ClientAction {
     UiCommand,
     /// Revisión del Proof Pack sobre el HEAD exacto. No concede otras decisiones humanas al CLI.
     AttemptReview,
-    /// Fork es una solicitud limitada de una Person de Desktop o CLI;
+    /// Fork y Race son solicitudes limitadas de una Person de Desktop o CLI;
     /// la policy del Core y la confirmación siguen decidiendo cada ejecución.
     AttemptForkCommand,
     HumanDecision,

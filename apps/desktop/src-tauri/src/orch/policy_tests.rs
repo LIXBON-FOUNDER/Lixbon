@@ -748,6 +748,138 @@ fn cli_person_fork_pasa_por_policy_y_solo_desktop_aprueba() {
 }
 
 #[test]
+fn cli_person_race_y_cancel_pasan_por_policy_y_aprobacion_desktop() {
+    let w = world("claude", Some(vec![Step::Complete(Some("hecho".into()))]));
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("f5-cli-race".into()),
+        "f5-cli-race",
+    );
+    let desktop = client(
+        &w,
+        ClientSurface::Desktop,
+        ClientPrincipal::Person("f5-desktop-race-approver".into()),
+        "f5-desktop-race",
+    );
+    let source = w.create("claude", "f5-cli-race-source");
+    let source_task = source.rsplit_once("-a").unwrap().0.to_string();
+
+    let race_args = json!({
+        "request_id": "f5-cli-race",
+        "source_attempt_id": source,
+        "candidates": [{}, {}],
+        "confirm": false
+    });
+    let before_unconfirmed = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "task_race", race_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed);
+
+    let mut confirmed_race = race_args;
+    confirmed_race["confirm"] = json!(true);
+    let race = as_client(&w, &cli, "task_race", confirmed_race).unwrap();
+    assert_eq!(race["summary"]["launched"], 2);
+    let race_id = race["race_id"].as_str().unwrap().to_string();
+    let race_attempts: Vec<String> = race["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate["attempt_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(race_attempts.len(), 2);
+    for attempt_id in &race_attempts {
+        assert_eq!(row(&w.core, attempt_id).0, "pending_approval");
+    }
+    assert!(w.adapter.starts().is_empty(), "ningún candidato se despacha antes de aprobación");
+
+    approve_as_client(&w, &desktop, &race_attempts[0]);
+    w.settled(&race_attempts[0], "done");
+    let starts = w.adapter.starts();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(starts[0].attempt_id, race_attempts[0]);
+    assert_eq!(row(&w.core, &race_attempts[1]).0, "pending_approval");
+
+    let race_attempt = race_attempts[1].clone();
+    let cancel_args = json!({
+        "race_id": race_id,
+        "attempt_id": race_attempt,
+        "confirm": false
+    });
+    let before_unconfirmed_cancel = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "task_race_cancel", cancel_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed_cancel);
+
+    let agent = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Agent(source_task),
+        "f5-cli-agent-race",
+    );
+    for (cmd, args) in [
+        (
+            "task_race",
+            json!({"request_id":"agent-race","source_attempt_id":source,"candidates":[{},{}],"confirm":true}),
+        ),
+        (
+            "task_race_cancel",
+            json!({"race_id":race_id,"confirm":true}),
+        ),
+    ] {
+        let rejected = as_client(&w, &agent, cmd, args).unwrap_err();
+        assert!(rejected.contains("Acción no permitida"), "{cmd}: {rejected}");
+    }
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "fork", policy_level, false).unwrap();
+        let before = events_head(&w);
+        assert!(is(
+            as_client(
+                &w,
+                &cli,
+                "task_race",
+                json!({"request_id":format!("blocked-race-{policy_level}"),"source_attempt_id":source,"candidates":[{},{}],"confirm":true})
+            ),
+            code
+        ));
+        assert_eq!(events_head(&w), before, "fork={policy_level} no crea Race");
+    }
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "stop", policy_level, false).unwrap();
+        let before = events_head(&w);
+        let mut confirmed_cancel = cancel_args.clone();
+        confirmed_cancel["confirm"] = json!(true);
+        assert!(is(
+            as_client(&w, &cli, "task_race_cancel", confirmed_cancel),
+            code
+        ));
+        assert_eq!(events_head(&w), before);
+        assert_eq!(row(&w.core, &race_attempt).0, "pending_approval");
+        assert_eq!(w.adapter.starts().len(), 1);
+    }
+
+    w.unset("global", None, "stop", true).unwrap();
+    let mut confirmed_cancel = cancel_args;
+    confirmed_cancel["confirm"] = json!(true);
+    let cancelled = as_client(&w, &cli, "task_race_cancel", confirmed_cancel).unwrap();
+    assert_eq!(cancelled["results"][0]["outcome"], "rejected");
+    assert_eq!(row(&w.core, &race_attempt).0, "stopped");
+    assert_eq!(w.adapter.starts().len(), 1);
+}
+
+#[test]
 fn con_el_core_en_solo_lectura_no_se_cambia_la_policy_pero_se_sigue_leyendo() {
     let w = world("claude", None);
     w.core.degrade_for_tests("disco lleno");

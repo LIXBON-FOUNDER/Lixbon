@@ -850,7 +850,9 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "pending_queue"
         | "attempt_steer"
         | "attempt_stop_and_send" => ClientAction::AttemptInstructionCommand,
-        "attempt_fork" => ClientAction::AttemptForkCommand,
+        "attempt_fork" | "task_race" | "task_race_cancel" => {
+            ClientAction::AttemptForkCommand
+        }
         "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_lineage" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
@@ -976,6 +978,9 @@ mod tests {
             rpc_action("attempt_fork"),
             ClientAction::AttemptForkCommand
         );
+        for cmd in ["task_race", "task_race_cancel"] {
+            assert_eq!(rpc_action(cmd), ClientAction::AttemptForkCommand, "{cmd}");
+        }
         assert!(person_cli.authorize(ClientAction::EventLogRead).is_ok(), "Person CLI recibe solo lectura del Event Log");
         assert!(agent_cli.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());

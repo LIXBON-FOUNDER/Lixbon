@@ -14,9 +14,9 @@ worktree y el origen no recibe ni un hecho. Todos nacen pendientes de la aprobac
 
 | Command | clase | qué hace |
 |---|---|---|
-| `task_race { request_id, source_attempt_id, candidates[2..4], package?, confirm? }` | `HumanDecision` (Person de Desktop) | lanza el Race. Cada candidato: `{ provider?, model?, effort?, role?, title? }` (lo no pedido se hereda del origen) |
+| `task_race { request_id, source_attempt_id, candidates[2..4], package?, confirm? }` | Person autenticada de Desktop o CLI | lanza el Race. CLI requiere `confirm: true` por policy. Cada candidato: `{ provider?, model?, effort?, role?, title? }` (lo no pedido se hereda del origen) |
 | `task_race_status { race_id }` / `{ source_attempt_id }` | lectura (ADE) | el Race con todos sus candidatos, o los Races de ese Attempt (los más recientes primero) |
-| `task_race_cancel { race_id, attempt_id?, confirm? }` | `HumanDecision` | cancela UN candidato o todos los que no han terminado |
+| `task_race_cancel { race_id, attempt_id?, confirm? }` | Person autenticada de Desktop o CLI | cancela UN candidato o todos los que no han terminado; CLI requiere `confirm: true` por policy |
 
 `deny_unknown_fields`: no se acepta `host`, `worktree`, perfil ni aprobación. **No hay elección de host ni de estrategia de worktree**: hoy hay un
 solo host y cada candidato recibe el suyo.
