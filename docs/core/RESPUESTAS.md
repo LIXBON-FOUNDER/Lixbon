@@ -74,6 +74,28 @@ Las peticiones pendientes (`provider_requests.rs`) viven en memoria junto a la e
 ella lo pendiente (el Attempt ya no espera nada que se pueda responder). Recuerdan hasta 64 respuestas dadas por ejecución para
 poder repetirlas.
 
+## Validación manual en la app de Tauri (2026-11-13)
+
+Hecha en Windows con el binario de debug (`cargo build` en `src-tauri`), Claude 2.1.296 real (haiku) y un repositorio temporal. Lo que se vio **en la
+aplicación**, no en un navegador con el Core simulado:
+
+* **Permiso:** «Quiere usar Bash: …» con Permitir / Denegar en el detalle del Attempt; al permitir, el intento termina `done`, el archivo existe en su worktree y la
+  insignia de Attention de «Orquestar» se apaga.
+* **Pregunta libre:** «¿Cuál es tu color favorito? (opciones: Rojo, Azul)» con su caja de texto; se contestó «verde» y el resumen del intento fue `COLOR=verde`.
+  Los Events son `requested, approved, started, waiting, request_answered, resumed, usage_reported, completed`.
+* **Consumo declarado** (LXO-249): tokens, coste y las ventanas de cuota de la cuenta, con el aviso de que la cuota no es lo que gastó el intento.
+* **Compartir worktree** (LXO-248): el selector listó los dos intentos terminados del proyecto y, al compartir, el intento sin aprobar quedó sobre el worktree del dueño.
+
+Cómo repetirlo (lo que no es evidente):
+
+* Aislar los datos: `USERPROFILE` a una carpeta temporal (el Core vive en `~/.lixbon/core`) y `CLAUDE_CONFIG_DIR` a la configuración real de Claude para que la CLI tenga sesión.
+* El modelo Task/Attempt **no está activo por defecto**: `LIXBON_AGENTIC_CUT=1` corta la base al arrancar (sobre la carpeta aislada es seguro) y, para que el Core **lance** Attempts, hay que
+  activar el Orquestador (`enabled: true` en los ajustes). Sin eso `task_create` responde «requiere el lifecycle de lanzamiento verificado».
+* El ADE vive en el modo «Orquestar» → pestaña «Core», y solo se monta con una carpeta abierta o tras «Continuar sin carpeta».
+* Para manejar la ventana sin tocar nada a mano: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` y `WEBVIEW2_USER_DATA_FOLDER` propio, y hablarle por CDP.
+  Al reiniciar la app hay que parar antes los `msedgewebview2.exe` huérfanos de esa carpeta (sujetan el puerto).
+* La app pide iniciar sesión con la cuenta de lixbon.com: en la prueba se puso una sesión ficticia **solo en memoria** (`useAppStore.setState`), sin credenciales ni persistencia.
+
 ## Lo que NO hace (límites conocidos)
 
 * **El Event de la decisión es de mejor esfuerzo.** `attempt.request_answered` se escribe cuando el proveedor ya aceptó la respuesta;
