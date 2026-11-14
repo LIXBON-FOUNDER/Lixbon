@@ -81,8 +81,26 @@ Los tres salen en Activity (`activity.race.*`).
 
 ## Lo que NO hay (honesto)
 
-* **Host y estrategia de worktree por candidato**: no existen; cada candidato recibe su worktree.
+* **Host remoto y estrategia de worktree por candidato**: no existen; el Command rechaza esos campos y cada candidato recibe un worktree propio en el host que administra el Core.
 * **Estimación de coste/uso por candidato**: el Core no la tiene; el límite es solo de Tasks activas.
 * **Un Race necesita un Attempt origen** (de él salen el perfil y el contexto): no hay Race desde una Task sin ningún Attempt.
 * **Mientras un Race corre no hay política de equilibrio**: no se reparte cuota entre candidatos ni se limita por proveedor.
 * El límite de 8 es fijo, no configurable.
+
+## Cliente CLI: `lxo race` (LXO-217)
+
+`lxo race --task <task_id>` resuelve el Attempt actual con `task_detail_v2.current_attempt.id` y lo usa como origen
+del Command `task_race`. Una Task sin Attempt actual no puede iniciar un Race; el Core no ofrece `task_race` desde
+una Task vacía. La forma anterior `lxo race <source_attempt_id>` se conserva para compatibilidad.
+
+Los candidatos repetibles (`--candidate PROVIDER[:MODEL]`) o `--config FILE` aceptan provider, model, effort, role
+y title. No aceptan host ni estrategia de worktree: la petición RPC del Core usa `deny_unknown_fields` y hoy no
+dispone de host remoto por candidato. No se envía `confirm` salvo con `--confirm`; el Core vuelve a comprobar la
+policy antes de cada candidato y los nuevos Attempts siguen `pending_approval` hasta la decisión de Desktop.
+
+`--dry-run` consulta y muestra el origen/revisión, el ContextPackage validado, los recursos y la policy efectiva
+sin enviar `task_race`. `--json` conserva `race_id`, candidatos (también fallidos), `attempt_ids`, resumen y
+provenance. `status --follow` sondea el Core; `cancel` requiere la acción explícita y `--confirm` si la policy lo pide.
+Si hay al menos dos candidatos lanzados, el output incluye `lxo compare --race <race_id>`. Ese comando usa los
+IDs que el Core publica en `task_race_status.compare.attempt_ids` y luego consulta `attempt_compare`; no incluye
+candidatos fallidos, no puntúa y no selecciona ganador.

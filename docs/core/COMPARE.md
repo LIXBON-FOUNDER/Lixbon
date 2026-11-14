@@ -17,7 +17,7 @@ acepta por la procedencia registrada en el log (`attempt.forked`), no por nombre
 ## Petición y respuesta
 
 ```text
-attempt_compare { attempt_ids: [2–4 ids, sin repetir] }          // solo una Person de Desktop; ningún otro campo
+attempt_compare { attempt_ids: [2–4 ids, sin repetir] }          // solo una Person autenticada; ningún otro campo
 → { v: 1,
     relation: { kind, root },
     attempts: [ …en el orden pedido… ],
@@ -94,16 +94,21 @@ eventos ni filas.
 * Sin `host` por proveedor remoto: es la máquina del worktree.
 * No se probó con un proveedor real; las pruebas usan adapters falsos con repositorios y worktrees de verdad.
 
-## Cliente de terminal: `lxo compare` (LXO-161)
+## Cliente de terminal: `lxo compare` (LXO-161 / LXO-217)
 
-`lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]` es una lectura autenticada como Person.
-El CLI no calcula git, pruebas, solapes ni procedencia: valida la selección contra las lecturas del Core y pasa los ids en el
-orden indicado a `attempt_compare`.
+`lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]` y
+`lxo compare --race <race_id> [--json]` son lecturas autenticadas como Person desde CLI. El Core clasifica
+`attempt_compare` como lectura y admite tanto Desktop como CLI; los agentes siguen rechazados por `require_person`.
+El CLI no calcula git, pruebas, solapes ni procedencia: valida la selección contra las lecturas del Core y pasa los ids
+en el orden indicado a `attempt_compare`.
 
 * Con ids explícitos se exigen de 2 a 4 Attempts distintos y todos deben pertenecer a `--task`; los filtros, si se pasan,
   deben coincidir con cada id. El cliente no mezcla Tasks aunque el Core también permita comparar una familia de Forks.
 * Sin ids, lista todas las páginas de `attempts_by_task`, aplica `--status` y `--provider` (sin distinguir mayúsculas) y solo
   compara si quedan entre 2 y 4. Si quedan más, hay que elegir ids; nunca elige una selección arbitraria.
+* `--race` lee `task_race_status` y toma exactamente `compare.attempt_ids`: candidatos lanzados del Race, sin fallidos.
+  Exige al menos dos, verifica la correspondencia Attempt/Task y acepta solo `relation.kind = fork_family` con raíz igual al
+  Attempt origen del Race. No mezcla candidatos de otro Race ni reconstruye esa relación por nombres.
 * La salida humana es vertical (un dato por línea), para evitar una tabla horizontal ilegible en terminales estrechas. Cada
   dato conserva `✓ Verificado`, `⚠ Declarado por el agente` o `? Sin dato (<motivo>)`. Las pruebas desconocidas no se muestran
   como un cero. Cada fila da el id para `lxo review <attempt_id>` y para abrir el Attempt en Desktop.

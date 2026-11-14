@@ -140,6 +140,51 @@ pub(super) fn source(rpc: &mut Rpc<'_>, attempt_id: &str) -> Result<SourceFacts,
     })
 }
 
+pub(super) fn source_for_task(rpc: &mut Rpc<'_>, task_id: &str) -> Result<SourceFacts, Failure> {
+    let detail = request(rpc, "task_detail_v2", json!({ "task_id": task_id }))?;
+    if detail["v"].as_u64() != Some(2)
+        || detail["core_model"].as_str() != Some("task_attempt_v1")
+        || detail["task"]["id"].as_str() != Some(task_id)
+    {
+        return Err(Failure::Version(
+            "El Core devolvió una Task con un formato que este lxo no entiende; actualiza Lixbon."
+                .into(),
+        ));
+    }
+    let current_attempt = detail["task"]
+        .get("current_attempt")
+        .ok_or_else(|| Failure::Version("La Task no incluye current_attempt.".into()))?;
+    let attempt_id = match current_attempt {
+        Value::Null => {
+            return Err(Failure::Usage(format!(
+                "La Task «{}» no tiene un Attempt actual desde el que lanzar un Race.",
+                task_id
+            )))
+        }
+        Value::Object(attempt) => attempt
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| {
+                !id.trim().is_empty()
+                    && id.chars().count() <= 200
+                    && !id.chars().any(char::is_control)
+            })
+            .ok_or_else(|| Failure::Version("current_attempt no incluye un id válido.".into()))?,
+        _ => {
+            return Err(Failure::Version(
+                "El Core devolvió current_attempt con un formato no válido.".into(),
+            ))
+        }
+    };
+    let source = source(rpc, attempt_id)?;
+    if source.task_id != task_id {
+        return Err(Failure::Version(
+            "El Attempt actual devuelto por el Core no pertenece a la Task solicitada.".into(),
+        ));
+    }
+    Ok(source)
+}
+
 pub(super) fn dry_run_facts(
     rpc: &mut Rpc<'_>,
     source: &SourceFacts,

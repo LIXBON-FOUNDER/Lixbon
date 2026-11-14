@@ -7,21 +7,23 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
-use crate::client_auth::RpcFailure;
 use crate::f5_support::{self, PreparedPackage, Rpc, SourceFacts};
 use crate::projects::{self, Failure};
 use crate::Args;
 
 pub(super) const HELP: &str = "Uso:
+  lxo race --task <task_id> [--candidate PROVIDER[:MODEL] ...] [opciones]
   lxo race <source_attempt_id> [--candidate PROVIDER[:MODEL] ...] [opciones]
   lxo race status <race_id|source_attempt_id> [--follow]
   lxo race cancel <race_id> [--attempt <attempt_id>] [--confirm]
 
-Lanza de 2 a 4 Forks desde un Attempt explícito. Cada candidato recibe su propia Task y
-worktree. El Core verifica la policy, los límites y la procedencia común; no se elige ganador.
-Sin --follow, devuelve el estado inicial y deja el Race en segundo plano.
+Lanza de 2 a 4 Forks desde el Attempt actual de la Task (o desde un Attempt explícito,
+por compatibilidad). Cada candidato recibe su propia Task y worktree. El Core verifica la
+policy, los límites y la procedencia común; no se elige ganador. Sin --follow, devuelve el
+estado inicial y deja el Race en segundo plano.
 
 Opciones de lanzamiento:
+  --task ID                Task cuyo Attempt actual será el origen del Race
   --candidate P[:M]        candidato repetible; también admite un objeto JSON
   --config FILE            JSON {\"candidates\":[{...}],\"context_package\":\"ID|FILE\"}
   --context-package ID|FILE ContextPackage guardado (sha256:.) o archivo; '-' lee stdin
@@ -37,15 +39,14 @@ Config JSON:
    \"context_package\":\"sha256:...\"}
 Cada candidato acepta provider, model, effort, role y title. --candidate puede repetirse o
 usarse --config, no ambos. Un ContextPackage relativo al config se resuelve junto a ese archivo.
-No se aceptan --task, --host ni una estrategia de worktree: Race exige el Attempt origen y el
-Core asigna un worktree propio a cada candidato.
+El Core actual no acepta host ni estrategia de worktree por candidato: ambos los asigna el Core.
+Sin un Attempt actual, una Task no puede ser origen de un Race.
 
 Cancelación:
   Sin --attempt, cancela los candidatos que sigan activos; con --attempt, solo ese candidato.
   El Core puede exigir --confirm. Ningún candidato se cancela automáticamente al terminar otro.
-Compare no elige ganador: los IDs se entregan para compararlos en Lixbon Desktop.
-El Core puede restringir el lanzamiento y la cancelación a una identidad de Desktop; lxo no
-eleva permisos ni cambia la policy.
+Compare no elige ganador: con al menos dos lanzados se puede ejecutar `lxo compare --race <race_id>`
+o abrirlos en Desktop. lxo no eleva permisos ni cambia la policy.
 ";
 
 const CONTRACT: u64 = 1;
@@ -64,8 +65,14 @@ struct Candidate {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum SourceSelector {
+    Task(String),
+    Attempt(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct LaunchRequest {
-    source_attempt_id: String,
+    source: SourceSelector,
     candidates: Vec<Candidate>,
     context_base_dir: Option<PathBuf>,
     context_package: Option<String>,
@@ -390,6 +397,7 @@ fn parse_launch(a: &Args) -> Result<Request, Failure> {
         &[
             "candidate",
             "config",
+            "task",
             "context-package",
             "request-id",
             "confirm",
@@ -414,15 +422,36 @@ fn parse_launch(a: &Args) -> Result<Request, Failure> {
             "compare",
         ],
     )?;
-    let source_attempt_id = a
-        .at(1)
-        .filter(|value| !value.trim().is_empty() && value.as_str() != "status")
-        .ok_or_else(|| usage("Falta el origen: lxo race <source_attempt_id>."))?
-        .trim()
-        .to_string();
-    if a.pos.len() != 2 {
+    let source =
+        match (value_flag(a, "task")?, a.at(1)) {
+            (Some(task_id), None) if a.pos.len() == 1 => {
+                if task_id.chars().count() > 200 || task_id.chars().any(char::is_control) {
+                    return Err(usage(
+                        "--task debe contener de 1 a 200 caracteres sin controles.",
+                    ));
+                }
+                SourceSelector::Task(task_id)
+            }
+            (Some(_), _) => {
+                return Err(usage(
+                    "Usa --task sin un Attempt posicional, o bien pasa solo <source_attempt_id>.",
+                ))
+            }
+            (None, Some(source_attempt_id))
+                if a.pos.len() == 2
+                    && !source_attempt_id.trim().is_empty()
+                    && source_attempt_id != "status" =>
+            {
+                SourceSelector::Attempt(source_attempt_id.trim().to_string())
+            }
+            (None, _) => return Err(usage(
+                "Falta el origen: usa lxo race --task <task_id> o lxo race <source_attempt_id>.",
+            )),
+        };
+    if matches!(&source, SourceSelector::Attempt(id) if id.chars().count() > 200 || id.chars().any(char::is_control))
+    {
         return Err(usage(
-            "lxo race recibe un único source_attempt_id. No puede inferir un Attempt desde una Task.",
+            "El Attempt origen debe contener de 1 a 200 caracteres sin controles.",
         ));
     }
     if a.b("follow") && a.b("background") {
@@ -475,7 +504,7 @@ fn parse_launch(a: &Args) -> Result<Request, Failure> {
         ));
     }
     Ok(Request::Launch(LaunchRequest {
-        source_attempt_id,
+        source,
         candidates,
         context_base_dir,
         context_package,
@@ -487,7 +516,7 @@ fn parse_launch(a: &Args) -> Result<Request, Failure> {
     }))
 }
 
-fn valid_race_id(value: &str) -> bool {
+pub(super) fn valid_race_id(value: &str) -> bool {
     value.len() == 23
         && value.starts_with("rc-")
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -555,7 +584,7 @@ fn request_id(
     })
 }
 
-fn status_value(mut value: Value, race_id: Option<&str>) -> Result<Value, Failure> {
+pub(super) fn status_value(mut value: Value, race_id: Option<&str>) -> Result<Value, Failure> {
     if value["v"].as_u64() != Some(CONTRACT)
         || !value["candidates"].is_array()
         || !value["summary"].is_object()
@@ -567,6 +596,11 @@ fn status_value(mut value: Value, race_id: Option<&str>) -> Result<Value, Failur
             "El Core devolvió un estado de Race con un formato que este lxo no entiende.".into(),
         ));
     }
+    let id = value["race_id"]
+        .as_str()
+        .filter(|id| valid_race_id(id))
+        .ok_or_else(|| Failure::Version("El Core devolvió un race_id inválido.".into()))?
+        .to_string();
     let attempt_ids = value["candidates"]
         .as_array()
         .into_iter()
@@ -577,9 +611,10 @@ fn status_value(mut value: Value, race_id: Option<&str>) -> Result<Value, Failur
     value["attempt_ids"] = json!(attempt_ids);
     value["compare_handoff"] = json!({
         "available": attempt_ids.len() >= 2,
-        "surface": "Lixbon Desktop",
+        "surface": "lxo compare --race",
+        "command": if attempt_ids.len() >= 2 { json!(format!("lxo compare --race {id}")) } else { Value::Null },
         "attempt_ids": attempt_ids,
-        "direct_cli": false,
+        "direct_cli": true,
     });
     Ok(value)
 }
@@ -620,7 +655,10 @@ fn follow(rpc: &mut Rpc<'_>, race_id: &str, timeout_ms: u64) -> Result<Value, Fa
 }
 
 fn run_launch(request: LaunchRequest, rpc: &mut Rpc<'_>) -> Result<Value, Failure> {
-    let source = f5_support::source(rpc, &request.source_attempt_id)?;
+    let source = match &request.source {
+        SourceSelector::Task(task_id) => f5_support::source_for_task(rpc, task_id)?,
+        SourceSelector::Attempt(attempt_id) => f5_support::source(rpc, attempt_id)?,
+    };
     let package = f5_support::context_package(
         request.context_package.as_deref(),
         request.context_base_dir.as_deref(),
@@ -661,9 +699,10 @@ fn run_launch(request: LaunchRequest, rpc: &mut Rpc<'_>) -> Result<Value, Failur
             "compare_handoff": {
                 "available": false,
                 "will_be_available_if_launch_succeeds": candidate_preview.len() >= 2,
-                "surface": "Lixbon Desktop",
+                "surface": "lxo compare --race",
+                "command": null,
                 "attempt_ids": [],
-                "direct_cli": false,
+                "direct_cli": true,
             },
         }));
     }
@@ -869,13 +908,16 @@ fn human(data: &Value) -> String {
         text.push_str(&details);
     }
     if !compare.is_empty() {
+        let command = data["compare_handoff"]["command"]
+            .as_str()
+            .unwrap_or("lxo compare --race <race_id>");
         if data["compare_handoff"]["requested"] == true {
             text.push_str(&format!(
-                "\nHandoff a Compare en Lixbon Desktop; Attempts: {compare}. El Core no permite ejecutar attempt_compare desde la superficie CLI."
+                "\nCompara desde CLI con `{command}` o abre esos Attempts en Desktop: {compare}."
             ));
         } else {
             text.push_str(&format!(
-                "\nCompara en Lixbon Desktop; Attempts: {compare}."
+                "\nCompara con `{command}` o abre esos Attempts en Desktop: {compare}."
             ));
         }
     } else if data["compare_handoff"]["requested"] == true {
@@ -921,6 +963,7 @@ pub(super) fn run(a: &Args) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client_auth::RpcFailure;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -943,7 +986,8 @@ mod tests {
 
     fn task() -> Value {
         json!({"v": 2, "core_model": "task_attempt_v1", "task": {
-            "id": "t1", "project_id": "p1", "state": "integrated", "title": "Origen"
+            "id": "t1", "project_id": "p1", "state": "integrated", "title": "Origen",
+            "current_attempt": {"id":"t1-a1"}
         }})
     }
 
@@ -1022,21 +1066,66 @@ mod tests {
             "remote"
         ]))
         .is_err());
+        assert!(parse(&args(&[
+            "race",
+            "t1-a1",
+            "--candidate",
+            r#"{"provider":"claude","host":"remote"}"#,
+            "--candidate",
+            "codex"
+        ]))
+        .is_err());
     }
 
     #[test]
-    fn parse_exige_attempt_origen_y_de_dos_a_cuatro_candidatos() {
+    fn parse_acepta_task_y_attempt_explicito_y_exige_dos_a_cuatro_candidatos() {
+        assert_eq!(
+            parse(&args(&[
+                "race",
+                "--task",
+                "t1",
+                "--candidate",
+                "claude",
+                "--candidate",
+                "codex"
+            ])),
+            Ok(Request::Launch(LaunchRequest {
+                source: SourceSelector::Task("t1".into()),
+                candidates: vec![
+                    Candidate {
+                        provider: Some("claude".into()),
+                        ..Candidate::default()
+                    },
+                    Candidate {
+                        provider: Some("codex".into()),
+                        ..Candidate::default()
+                    }
+                ],
+                context_base_dir: None,
+                context_package: None,
+                request_id: None,
+                confirm: false,
+                dry_run: false,
+                follow_ms: None,
+                compare_handoff: false,
+            }))
+        );
+        assert!(matches!(
+            parse(&args(&["race", "t1-a1", "--candidate", "claude", "--candidate", "codex"])),
+            Ok(Request::Launch(LaunchRequest { source: SourceSelector::Attempt(id), .. })) if id == "t1-a1"
+        ));
         assert!(parse(&args(&[
             "race",
             "--task",
             "t1",
+            "t1-a1",
             "--candidate",
             "claude",
             "--candidate",
             "codex"
         ]))
         .is_err());
-        assert!(parse(&args(&["race", "t1-a1", "--candidate", "claude"])).is_err());
+        assert!(parse(&args(&["race", "--task", "t1", "--candidate", "claude"])).is_err());
         assert!(parse(&args(&[
             "race",
             "t1-a1",
@@ -1052,6 +1141,73 @@ mod tests {
             "fifth"
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn race_task_resuelve_el_attempt_actual_y_no_lanza_si_falta_el_origen() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = facts(calls.clone());
+        let Request::Launch(request) = parse(&args(&[
+            "race",
+            "--task",
+            "t1",
+            "--candidate",
+            "claude",
+            "--candidate",
+            "codex",
+        ]))
+        .unwrap() else {
+            panic!("se esperaba lanzamiento");
+        };
+        let output = run_launch(request, &mut rpc).unwrap();
+        assert_eq!(output["source_attempt_id"], "t1-a1");
+        assert_eq!(
+            calls
+                .borrow()
+                .iter()
+                .find(|(cmd, _)| cmd == "task_race")
+                .unwrap()
+                .1["source_attempt_id"],
+            "t1-a1"
+        );
+
+        let mut no_origin = |cmd: &str, _args: &Value| match cmd {
+            "task_detail_v2" => Ok(json!({
+                "v":2,
+                "core_model":"task_attempt_v1",
+                "task":{"id":"t-empty","project_id":"p1","current_attempt":null}
+            })),
+            other => panic!("no debía llamar {other}"),
+        };
+        assert!(matches!(
+            f5_support::source_for_task(&mut no_origin, "t-empty"),
+            Err(Failure::Usage(message)) if message.contains("no tiene un Attempt actual")
+        ));
+    }
+
+    #[test]
+    fn estado_publica_handoff_cli_solo_con_dos_attempts_lanzados() {
+        let one = status_value(race_status(), Some("rc-aaaaaaaaaaaaaaaaaaaa")).unwrap();
+        assert_eq!(one["compare_handoff"]["available"], false);
+        assert_eq!(one["compare_handoff"]["command"], Value::Null);
+
+        let mut two = race_status();
+        two["candidates"][1] = json!({
+            "index":1,"outcome":"launched","provider":"codex","model":"m2",
+            "task_id":"t3","attempt_id":"t3-a1","status":"pending_approval","code":null
+        });
+        two["summary"]["launched"] = json!(2);
+        two["summary"]["failed"] = json!(0);
+        two["summary"]["active"] = json!(2);
+        two["cancellable"] = json!(["t2-a1", "t3-a1"]);
+        two["compare"]["attempt_ids"] = json!(["t2-a1", "t3-a1"]);
+        let two = status_value(two, Some("rc-aaaaaaaaaaaaaaaaaaaa")).unwrap();
+        assert_eq!(two["compare_handoff"]["available"], true);
+        assert_eq!(
+            two["compare_handoff"]["command"],
+            "lxo compare --race rc-aaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(two["attempt_ids"], json!(["t2-a1", "t3-a1"]));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! `lxo compare`: selección explícita de Attempts y presentación de la query estructurada del Core.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::ExitCode;
 
 use serde_json::{json, Value};
@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::attempts;
 use crate::client_auth::{self, RpcFailure};
 use crate::events::clean;
+use crate::f5_support;
 use crate::projects::{finish, usage, Failure};
 use crate::Args;
 
@@ -28,18 +29,21 @@ const STATUSES: [&str; 9] = [
     "stopped",
     "exited",
 ];
-const FLAGS: [&str; 5] = ["task", "status", "provider", "json", "help"];
+const FLAGS: [&str; 6] = ["task", "race", "status", "provider", "json", "help"];
 
 type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 
-pub(super) const HELP: &str =
-    "Uso: lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
+pub(super) const HELP: &str = "Uso:
+  lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
+  lxo compare --race <race_id> [--json]
 
 Compara de 2 a 4 Attempts de una misma Task usando `attempt_compare` del Core.
+Con --race, compara los Attempts lanzados de un Race usando su familia verificada por el Core.
 No calcula pruebas ni git, no puntúa, no elige ganador y no integra.
 
 Selección:
   --task ID          Task obligatoria; impide mezclar Tasks
+  --race ID          selección exacta de Attempts desde el estado autoritativo del Race
   attempt_id ...     2–4 ids explícitos, en el orden que se compararán
   --status S         sin ids explícitos, selecciona por estado
   --provider P       sin ids explícitos, selecciona por proveedor (sin distinguir mayúsculas)
@@ -52,7 +56,7 @@ Core no las recoja. La salida humana es vertical para terminales estrechas e
 incluye `lxo review <attempt_id>` y el id que puede abrirse en Desktop.
 --json devuelve la respuesta v1 completa de `attempt_compare`.
 
-Solo para personas (3 si la credencial es de un agente).
+Solo para personas autenticadas (3 si la credencial es de un agente).
 Códigos: 0 correcto, 1 error interno, 2 uso o selección inválida,
 3 autenticación o permiso, 4 versión o contrato, 5 Core no disponible,
 6 Task o Attempt inexistente.
@@ -71,6 +75,9 @@ enum Request {
         task_id: String,
         attempt_ids: Vec<String>,
         filters: Filters,
+    },
+    CompareRace {
+        race_id: String,
     },
 }
 
@@ -112,9 +119,32 @@ fn parse(a: &Args) -> Result<Request, Failure> {
             )));
         }
     }
-    let Some(task_id) = text_flag(a, "task")? else {
+    let task_id = text_flag(a, "task")?;
+    let race_id = text_flag(a, "race")?;
+    if task_id.is_some() && race_id.is_some() {
+        return Err(usage("--task y --race se excluyen mutuamente."));
+    }
+    if let Some(race_id) = race_id {
+        if a.pos.len() != 1 {
+            return Err(usage(
+                "lxo compare --race no admite ids ni filtros; el Core fija los Attempts del Race.",
+            ));
+        }
+        if a.flags.contains_key("status") || a.flags.contains_key("provider") {
+            return Err(usage(
+                "--status y --provider solo se usan con lxo compare --task.",
+            ));
+        }
+        if !super::race::valid_race_id(&race_id) {
+            return Err(usage(
+                "--race debe ser un race_id válido (rc- y 20 dígitos hexadecimales).",
+            ));
+        }
+        return Ok(Request::CompareRace { race_id });
+    }
+    let Some(task_id) = task_id else {
         return Err(usage(
-            "Falta la tarea: lxo compare --task <task_id> [attempt_id ...].",
+            "Falta el selector: usa lxo compare --task <task_id> o --race <race_id>.",
         ));
     };
     if !valid_id(&task_id) {
@@ -440,11 +470,17 @@ fn validate_attempt(
     Ok(())
 }
 
-fn check_compare(data: Value, requested_ids: &[String], task_id: &str) -> Result<Value, Failure> {
+fn check_compare_contract(
+    data: Value,
+    requested_ids: &[String],
+    relation_kind: &str,
+    relation_root: &str,
+    task_by_attempt: &HashMap<String, String>,
+) -> Result<Value, Failure> {
     if data["v"].as_u64() != Some(API) {
         return Err(contract_error("versión"));
     }
-    if data["relation"]["kind"] != "same_task" || data["relation"]["root"] != task_id {
+    if data["relation"]["kind"] != relation_kind || data["relation"]["root"] != relation_root {
         return Err(contract_error("relation"));
     }
     let rows = data["attempts"]
@@ -455,6 +491,9 @@ fn check_compare(data: Value, requested_ids: &[String], task_id: &str) -> Result
         return Err(contract_error("attempts.length"));
     }
     for (index, (row, id)) in rows.iter().zip(requested_ids).enumerate() {
+        let task_id = task_by_attempt
+            .get(id)
+            .ok_or_else(|| contract_error("attempt task mapping"))?;
         validate_attempt(row, index, id, task_id)?;
     }
     let overlaps = &data["overlaps"];
@@ -488,6 +527,131 @@ fn check_compare(data: Value, requested_ids: &[String], task_id: &str) -> Result
         return Err(contract_error("limits"));
     }
     Ok(data)
+}
+
+fn check_compare(data: Value, requested_ids: &[String], task_id: &str) -> Result<Value, Failure> {
+    let task_by_attempt = requested_ids
+        .iter()
+        .map(|id| (id.clone(), task_id.to_string()))
+        .collect();
+    check_compare_contract(data, requested_ids, "same_task", task_id, &task_by_attempt)
+}
+
+struct RaceCompareSelection {
+    source_attempt_id: String,
+    attempt_ids: Vec<String>,
+    task_by_attempt: HashMap<String, String>,
+}
+
+fn race_selection(rpc: Rpc, race_id: &str) -> Result<RaceCompareSelection, Failure> {
+    let raw = f5_support::send("task_race_status", &json!({ "race_id": race_id }), rpc)?;
+    let status = super::race::status_value(raw, Some(race_id))?;
+    let source_attempt_id = status["source_attempt_id"]
+        .as_str()
+        .filter(|id| valid_id(id))
+        .ok_or_else(|| contract_error("race.source_attempt_id"))?
+        .to_string();
+    let candidates = status["candidates"]
+        .as_array()
+        .filter(|items| (2..=MAX_ATTEMPTS).contains(&items.len()))
+        .ok_or_else(|| contract_error("race.candidates"))?;
+    if status["requested"].as_u64() != Some(candidates.len() as u64) {
+        return Err(contract_error("race.requested"));
+    }
+
+    let mut launched_ids = Vec::new();
+    let mut task_by_attempt = HashMap::new();
+    let mut failed = 0usize;
+    let mut not_attempted = 0usize;
+    for (index, candidate) in candidates.iter().enumerate() {
+        if candidate["index"].as_u64() != Some(index as u64) {
+            return Err(contract_error("race.candidates[].index"));
+        }
+        match candidate["outcome"].as_str() {
+            Some("launched") => {
+                let attempt_id = candidate["attempt_id"]
+                    .as_str()
+                    .filter(|id| valid_id(id))
+                    .ok_or_else(|| contract_error("race.candidates[].attempt_id"))?
+                    .to_string();
+                let task_id = candidate["task_id"]
+                    .as_str()
+                    .filter(|id| valid_id(id))
+                    .ok_or_else(|| contract_error("race.candidates[].task_id"))?
+                    .to_string();
+                if task_by_attempt
+                    .insert(attempt_id.clone(), task_id)
+                    .is_some()
+                {
+                    return Err(contract_error("race.candidates duplicate attempt_id"));
+                }
+                launched_ids.push(attempt_id);
+            }
+            Some("failed")
+                if candidate["task_id"].is_null() && candidate["attempt_id"].is_null() =>
+            {
+                failed += 1;
+            }
+            Some("not_attempted")
+                if candidate["task_id"].is_null() && candidate["attempt_id"].is_null() =>
+            {
+                not_attempted += 1;
+            }
+            _ => return Err(contract_error("race.candidates[].outcome")),
+        }
+    }
+    if status["summary"]["launched"].as_u64() != Some(launched_ids.len() as u64)
+        || status["summary"]["failed"].as_u64() != Some(failed as u64)
+        || status["summary"]["not_attempted"].as_u64() != Some(not_attempted as u64)
+    {
+        return Err(contract_error("race.summary"));
+    }
+    if launched_ids.len() < 2 {
+        return Err(usage(format!(
+            "El Race {race_id} tiene menos de dos candidatos lanzados; Compare aún no está disponible."
+        )));
+    }
+
+    let compare_ids = status["compare"]["attempt_ids"]
+        .as_array()
+        .filter(|ids| (2..=MAX_ATTEMPTS).contains(&ids.len()))
+        .ok_or_else(|| contract_error("race.compare.attempt_ids"))?;
+    let compare_ids = compare_ids
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .filter(|id| valid_id(id))
+                .map(str::to_string)
+                .ok_or_else(|| contract_error("race.compare.attempt_ids[]"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if compare_ids != launched_ids {
+        return Err(contract_error(
+            "race.compare.attempt_ids no coincide con los candidatos lanzados",
+        ));
+    }
+
+    Ok(RaceCompareSelection {
+        source_attempt_id,
+        attempt_ids: compare_ids,
+        task_by_attempt,
+    })
+}
+
+fn compare_race_data(rpc: Rpc, race_id: &str) -> Result<Value, Failure> {
+    let selected = race_selection(rpc, race_id)?;
+    let data = rpc(
+        "attempt_compare",
+        &json!({ "attempt_ids": selected.attempt_ids }),
+    )
+    .map_err(compare_failure)?;
+    check_compare_contract(
+        data,
+        &selected.attempt_ids,
+        "fork_family",
+        &selected.source_attempt_id,
+        &selected.task_by_attempt,
+    )
 }
 
 fn compare_failure(error: RpcFailure) -> Failure {
@@ -637,7 +801,7 @@ fn render_artifacts(attempt: &Value) -> Vec<String> {
         .collect()
 }
 
-fn compare_text(data: &Value) -> String {
+pub(super) fn compare_text(data: &Value) -> String {
     let relation = data["relation"]["kind"].as_str().unwrap_or("?");
     let root = clean(data["relation"]["root"].as_str().unwrap_or("?"));
     let rows = data["attempts"].as_array().cloned().unwrap_or_default();
@@ -756,6 +920,15 @@ fn execute(request: Request, json_output: bool) -> Result<(), Failure> {
                 println!("{}", compare_text(&data));
             }
         }
+        Request::CompareRace { race_id } => {
+            let mut rpc = |cmd: &str, args: &Value| client_auth::rpc(cmd, args, &crate::cwd());
+            let data = compare_race_data(&mut rpc, &race_id)?;
+            if json_output {
+                println!("{data}");
+            } else {
+                println!("{}", compare_text(&data));
+            }
+        }
     }
     Ok(())
 }
@@ -839,6 +1012,24 @@ mod tests {
         })
     }
 
+    fn race_status() -> Value {
+        json!({
+            "v": 1,
+            "race_id": "rc-aaaaaaaaaaaaaaaaaaaa",
+            "source_attempt_id": "t1-a1",
+            "requested": 3,
+            "candidates": [
+                {"index":0,"outcome":"launched","provider":"claude","model":"m1","task_id":"t2","attempt_id":"t2-a1","status":"done","code":null},
+                {"index":1,"outcome":"failed","provider":"missing","model":null,"task_id":null,"attempt_id":null,"status":null,"code":"provider_not_found"},
+                {"index":2,"outcome":"launched","provider":"codex","model":"m2","task_id":"t4","attempt_id":"t4-a1","status":"done","code":null}
+            ],
+            "summary":{"launched":2,"failed":1,"not_attempted":0,"active":0,"finished":2},
+            "compare":{"attempt_ids":["t2-a1","t4-a1"]},
+            "cancellable":[],
+            "limits":{"min_candidates":2,"max_candidates":4,"max_active_tasks":8}
+        })
+    }
+
     fn list_row(id: &str, n: u64, status: &str, provider: &str) -> Value {
         json!({"id": id, "n": n, "status": status, "provider": provider})
     }
@@ -883,7 +1074,7 @@ mod tests {
             })
         );
         for (raw, wanted) in [
-            (&["compare"][..], "Falta la tarea"),
+            (&["compare"][..], "Falta el selector"),
             (&["compare", "--task", "t3", "t3-a1"][..], "de 2 a 4"),
             (
                 &["compare", "--task", "t3", "t3-a1", "t3-a1"][..],
@@ -907,6 +1098,31 @@ mod tests {
                 "no admite un valor",
             ),
             (&["compare", "help"][..], "Uso: lxo compare"),
+            (
+                &[
+                    "compare",
+                    "--task",
+                    "t3",
+                    "--race",
+                    "rc-aaaaaaaaaaaaaaaaaaaa",
+                ][..],
+                "se excluyen",
+            ),
+            (&["compare", "--race", "invalid"][..], "race_id válido"),
+            (
+                &["compare", "--race", "rc-aaaaaaaaaaaaaaaaaaaa", "t3-a1"][..],
+                "no admite ids",
+            ),
+            (
+                &[
+                    "compare",
+                    "--race",
+                    "rc-aaaaaaaaaaaaaaaaaaaa",
+                    "--provider",
+                    "codex",
+                ][..],
+                "solo se usan",
+            ),
         ] {
             if raw.last() == Some(&"help") {
                 assert_eq!(parse(&args(raw)).unwrap(), Request::Help);
@@ -923,6 +1139,98 @@ mod tests {
             parse(&args(&["compare", "--task", "t3"])),
             Ok(Request::Compare { attempt_ids, .. }) if attempt_ids.is_empty()
         ));
+        assert_eq!(
+            parse(&args(&["compare", "--race", "rc-aaaaaaaaaaaaaaaaaaaa"])),
+            Ok(Request::CompareRace {
+                race_id: "rc-aaaaaaaaaaaaaaaaaaaa".into()
+            })
+        );
+    }
+
+    #[test]
+    fn compare_race_usa_solo_ids_lanzados_y_valida_la_familia_del_core() {
+        let expected = vec!["t2-a1".to_string(), "t4-a1".to_string()];
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = {
+            let calls = calls.clone();
+            let expected = expected.clone();
+            move |cmd: &str, args: &Value| {
+                calls.borrow_mut().push((cmd.to_string(), args.clone()));
+                match cmd {
+                    "task_race_status" => {
+                        assert_eq!(args, &json!({"race_id":"rc-aaaaaaaaaaaaaaaaaaaa"}));
+                        Ok(race_status())
+                    }
+                    "attempt_compare" => {
+                        assert_eq!(args, &json!({"attempt_ids":expected}));
+                        let mut data = compare_response(&expected);
+                        data["relation"] = json!({"kind":"fork_family","root":"t1-a1"});
+                        data["attempts"][0]["task_id"] = json!("t2");
+                        data["attempts"][1]["task_id"] = json!("t4");
+                        data["attempts"][0]["forked_from"] = json!("t1-a1");
+                        data["attempts"][1]["forked_from"] = json!("t1-a1");
+                        data["attempts"][0]["is_current"] = json!(true);
+                        data["attempts"][1]["is_current"] = json!(true);
+                        Ok(data)
+                    }
+                    other => panic!("comando inesperado {other}"),
+                }
+            }
+        };
+        let data = compare_race_data(&mut rpc, "rc-aaaaaaaaaaaaaaaaaaaa").unwrap();
+        assert_eq!(
+            data["relation"],
+            json!({"kind":"fork_family","root":"t1-a1"})
+        );
+        assert_eq!(
+            data["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|attempt| attempt["attempt_id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["t2-a1", "t4-a1"]
+        );
+        assert_eq!(
+            calls
+                .borrow()
+                .iter()
+                .map(|(cmd, _)| cmd.as_str())
+                .collect::<Vec<_>>(),
+            ["task_race_status", "attempt_compare"]
+        );
+        assert!(!compare_text(&data).contains("ganador:"));
+    }
+
+    #[test]
+    fn compare_race_rechaza_fallos_parciales_sin_dos_lanzados() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = {
+            let calls = calls.clone();
+            move |cmd: &str, _args: &Value| {
+                calls.borrow_mut().push(cmd.to_string());
+                match cmd {
+                    "task_race_status" => {
+                        let mut status = race_status();
+                        status["requested"] = json!(2);
+                        status["candidates"] = json!([
+                            {"index":0,"outcome":"launched","task_id":"t2","attempt_id":"t2-a1"},
+                            {"index":1,"outcome":"failed","task_id":null,"attempt_id":null}
+                        ]);
+                        status["summary"]["launched"] = json!(1);
+                        status["summary"]["failed"] = json!(1);
+                        status["compare"]["attempt_ids"] = Value::Null;
+                        Ok(status)
+                    }
+                    other => panic!("no debía llamar {other}"),
+                }
+            }
+        };
+        assert!(matches!(
+            compare_race_data(&mut rpc, "rc-aaaaaaaaaaaaaaaaaaaa"),
+            Err(Failure::Usage(message)) if message.contains("menos de dos candidatos lanzados")
+        ));
+        assert_eq!(calls.borrow().as_slice(), ["task_race_status"]);
     }
 
     #[test]

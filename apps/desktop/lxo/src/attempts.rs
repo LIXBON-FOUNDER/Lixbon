@@ -149,8 +149,12 @@ fn check_flags(a: &Args, allowed: &[&str], command: &str) -> Result<(), Failure>
 fn only_attempt_id(a: &Args, command: &str) -> Result<String, Failure> {
     match a.pos.get(2..) {
         Some([id]) if valid_attempt_id(id) => Ok(id.clone()),
-        Some([]) => Err(usage(format!("Falta el intento: lxo attempt {command} <attempt_id>."))),
-        _ => Err(usage(format!("lxo attempt {command} recibe un solo id de Attempt exacto."))),
+        Some([]) => Err(usage(format!(
+            "Falta el intento: lxo attempt {command} <attempt_id>."
+        ))),
+        _ => Err(usage(format!(
+            "lxo attempt {command} recibe un solo id de Attempt exacto."
+        ))),
     }
 }
 
@@ -158,7 +162,9 @@ fn valid_attempt_id(id: &str) -> bool {
     if id.is_empty() || id.len() > ATTEMPT_ID_MAX || id.chars().any(char::is_control) {
         return false;
     }
-    let Some((task, raw_n)) = id.rsplit_once("-a") else { return false };
+    let Some((task, raw_n)) = id.rsplit_once("-a") else {
+        return false;
+    };
     !task.is_empty()
         && raw_n
             .parse::<u32>()
@@ -168,33 +174,56 @@ fn valid_attempt_id(id: &str) -> bool {
 
 fn attempt_task_id(id: &str) -> Result<String, Failure> {
     if !valid_attempt_id(id) {
-        return Err(usage("El id debe ser el de un Attempt exacto (formato <task_id>-a<n>)."));
+        return Err(usage(
+            "El id debe ser el de un Attempt exacto (formato <task_id>-a<n>).",
+        ));
     }
     Ok(id.rsplit_once("-a").expect("validated id").0.to_string())
 }
 
 fn start_request(a: &Args) -> Result<Request, Failure> {
     const FLAGS: [&str; 12] = [
-        "task", "provider", "agent", "model", "effort", "profile", "host",
-        "background", "worktree", "worktree-strategy", "json", "help",
+        "task",
+        "provider",
+        "agent",
+        "model",
+        "effort",
+        "profile",
+        "host",
+        "background",
+        "worktree",
+        "worktree-strategy",
+        "json",
+        "help",
     ];
     check_flags(a, &FLAGS, "lxo attempt start")?;
     if a.pos.len() != 2 {
         return Err(usage("Uso: lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background."));
     }
     if a.flags.get("background") != Some(&Value::Bool(true)) {
-        return Err(usage("lxo attempt start requiere --background como indicador."));
+        return Err(usage(
+            "lxo attempt start requiere --background como indicador.",
+        ));
     }
     if text_flag(a, "host")?.as_deref() != Some("local") {
-        return Err(usage("Solo está soportado --host local: el Core local crea y ejecuta el Worktree."));
+        return Err(usage(
+            "Solo está soportado --host local: el Core local crea y ejecuta el Worktree.",
+        ));
     }
-    let worktree = match (text_flag(a, "worktree")?, text_flag(a, "worktree-strategy")?) {
-        (Some(_), Some(_)) => return Err(usage("Usa solo una de --worktree o --worktree-strategy.")),
+    let worktree = match (
+        text_flag(a, "worktree")?,
+        text_flag(a, "worktree-strategy")?,
+    ) {
+        (Some(_), Some(_)) => {
+            return Err(usage("Usa solo una de --worktree o --worktree-strategy."))
+        }
         (Some(value), None) | (None, Some(value)) => value,
         (None, None) => "new".into(),
     };
     if worktree != "new" {
-        return Err(usage("Solo está soportada la estrategia de Worktree `new`."));
+        return Err(usage(
+            "Solo está soportada la estrategia de Worktree `new`.",
+        ));
     }
     let task_id = text_flag(a, "task")?.ok_or_else(|| usage("Falta --task <task_id>."))?;
     let (provider, agent) = (text_flag(a, "provider")?, text_flag(a, "agent")?);
@@ -206,14 +235,24 @@ fn start_request(a: &Args) -> Result<Request, Failure> {
     let profile = text_flag(a, "profile")?.ok_or_else(|| usage("Falta --profile <id>."))?;
     let model = text_flag(a, "model")?;
     let effort = text_flag(a, "effort")?;
-    Ok(Request::Start { task_id, provider, model, effort, profile })
+    Ok(Request::Start {
+        task_id,
+        provider,
+        model,
+        effort,
+        profile,
+    })
 }
 
 fn action_request(a: &Args, command: &str) -> Result<Request, Failure> {
     match command {
         "start" => start_request(a),
         "retry" => {
-            check_flags(a, &["provider", "model", "effort", "json", "help"], "lxo attempt retry")?;
+            check_flags(
+                a,
+                &["provider", "model", "effort", "json", "help"],
+                "lxo attempt retry",
+            )?;
             let attempt_id = only_attempt_id(a, "retry")?;
             let task_id = attempt_task_id(&attempt_id)?;
             Ok(Request::Retry {
@@ -225,10 +264,15 @@ fn action_request(a: &Args, command: &str) -> Result<Request, Failure> {
             })
         }
         "resume" => {
-            check_flags(a, &["message", "model", "effort", "json", "help"], "lxo attempt resume")?;
+            check_flags(
+                a,
+                &["message", "model", "effort", "json", "help"],
+                "lxo attempt resume",
+            )?;
             let attempt_id = only_attempt_id(a, "resume")?;
             let task_id = attempt_task_id(&attempt_id)?;
-            let prompt = text_flag(a, "message")?.ok_or_else(|| usage("Falta --message \"...\" para continuar la sesión."))?;
+            let prompt = text_flag(a, "message")?
+                .ok_or_else(|| usage("Falta --message \"...\" para continuar la sesión."))?;
             Ok(Request::Resume {
                 attempt_id,
                 task_id,
@@ -245,7 +289,9 @@ fn action_request(a: &Args, command: &str) -> Result<Request, Failure> {
             }
             Ok(Request::Stop(attempt_id))
         }
-        _ => Err(usage(format!("«{command}» no es una orden de lxo attempt."))),
+        _ => Err(usage(format!(
+            "«{command}» no es una orden de lxo attempt."
+        ))),
     }
 }
 
@@ -375,7 +421,9 @@ pub(super) fn sanitize_pr_url(raw: &str) -> Option<String> {
     }
     let rest = rest.split(['?', '#']).next()?;
     let (authority, path) = rest.split_at(rest.find('/')?);
-    let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    let host_port = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
     let (host, port) = match host_port.split_once(':') {
         Some((host, port)) => (host, Some(port)),
         None => (host_port, None),
@@ -383,11 +431,18 @@ pub(super) fn sanitize_pr_url(raw: &str) -> Option<String> {
     let host_ok = !host.is_empty()
         && !host.starts_with(['.', '-'])
         && !host.ends_with(['.', '-'])
-        && host.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
-    let port_ok = port.is_none_or(|p| (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()));
-    let path_ok = path[1..]
-        .split('/')
-        .all(|s| !s.is_empty() && s != "." && s != ".." && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'~' | b'-')));
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'));
+    let port_ok =
+        port.is_none_or(|p| (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()));
+    let path_ok = path[1..].split('/').all(|s| {
+        !s.is_empty()
+            && s != "."
+            && s != ".."
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'~' | b'-'))
+    });
     if !(host_ok && port_ok && path_ok) {
         return None;
     }
@@ -399,7 +454,10 @@ pub(super) fn sanitize_pr_url(raw: &str) -> Option<String> {
 /// marcador); el resto, como lo dijo el Core.
 fn artifact_uri(kind: &Value, uri: &Value) -> Value {
     if kind == "pull_request" {
-        uri.as_str().and_then(sanitize_pr_url).map(Value::String).unwrap_or_else(|| json!(REDACTED_PR_URI))
+        uri.as_str()
+            .and_then(sanitize_pr_url)
+            .map(Value::String)
+            .unwrap_or_else(|| json!(REDACTED_PR_URI))
     } else {
         text(uri)
     }
@@ -802,7 +860,11 @@ fn artifact_lines(items: &Value) -> Vec<String> {
                 None => "desconocido".into(),
             };
             // El marcador interno del `--json` no es para una persona: en el texto se dice en llano.
-            let uri = if x["kind"] == "pull_request" && x["uri"] == REDACTED_PR_URI { "URL oculta por seguridad".to_string() } else { dash(field(x, "uri")) };
+            let uri = if x["kind"] == "pull_request" && x["uri"] == REDACTED_PR_URI {
+                "URL oculta por seguridad".to_string()
+            } else {
+                dash(field(x, "uri"))
+            };
             format!(
                 "{}{kind}: {}",
                 if i == 0 {
@@ -930,7 +992,10 @@ fn execute(request: Request, json: bool) -> Result<(), Failure> {
                 println!("{}", show_text(&data));
             }
         }
-        Request::Start { .. } | Request::Retry { .. } | Request::Resume { .. } | Request::Stop(_) => {
+        Request::Start { .. }
+        | Request::Retry { .. }
+        | Request::Resume { .. }
+        | Request::Stop(_) => {
             unreachable!("las mutaciones se ejecutan en execute_action")
         }
     }
@@ -946,22 +1011,37 @@ struct ActionFailure {
 
 impl ActionFailure {
     fn new(code: &'static str, exit: u8, message: impl Into<String>) -> Self {
-        Self { code, exit, message: message.into() }
+        Self {
+            code,
+            exit,
+            message: message.into(),
+        }
     }
 }
 
 fn action_failure(error: RpcFailure) -> ActionFailure {
     if let RpcFailure::Rejected(message) = &error {
-        if message.starts_with("Comando desconocido") || message.starts_with("core_model_inactive") {
-            return ActionFailure::new("version", 4, "Este Core no ofrece el lifecycle CLI de Attempts; actualiza Lixbon.");
+        if message.starts_with("Comando desconocido") || message.starts_with("core_model_inactive")
+        {
+            return ActionFailure::new(
+                "version",
+                4,
+                "Este Core no ofrece el lifecycle CLI de Attempts; actualiza Lixbon.",
+            );
         }
         let code = if message.starts_with("policy_") {
             Some(("policy", 9))
-        } else if message.contains("environment_blocked") || message.contains("_environment_blocked") {
+        } else if message.contains("environment_blocked")
+            || message.contains("_environment_blocked")
+        {
             Some(("environment_blocked", 8))
-        } else if message.contains("_unsupported") || message.starts_with("provider_start_unsupported") {
+        } else if message.contains("_unsupported")
+            || message.starts_with("provider_start_unsupported")
+        {
             Some(("unsupported", 7))
-        } else if message.contains("_capability_unavailable") || message.starts_with("provider_probing:") {
+        } else if message.contains("_capability_unavailable")
+            || message.starts_with("provider_probing:")
+        {
             Some(("capability_unavailable", 5))
         } else if message.contains("_busy") {
             Some(("busy", 10))
@@ -973,7 +1053,8 @@ fn action_failure(error: RpcFailure) -> ActionFailure {
             Some(("conflict", 12))
         } else if message.contains("_confirm_required") {
             Some(("confirmation_required", 9))
-        } else if message.contains("_auth_required") || message.starts_with("Acción no permitida") {
+        } else if message.contains("_auth_required") || message.starts_with("Acción no permitida")
+        {
             Some(("authentication", 3))
         } else if message.contains("_unavailable") {
             Some(("core_unavailable", 5))
@@ -996,7 +1077,11 @@ fn action_rpc(command: &str, args: &Value) -> Result<Value, ActionFailure> {
 }
 
 fn action_contract_error() -> ActionFailure {
-    ActionFailure::new("version", 4, "El Core devolvió una respuesta de Attempt que lxo no reconoce; actualiza Lixbon.")
+    ActionFailure::new(
+        "version",
+        4,
+        "El Core devolvió una respuesta de Attempt que lxo no reconoce; actualiza Lixbon.",
+    )
 }
 
 fn approval_required(data: &Value) -> Result<bool, ActionFailure> {
@@ -1013,19 +1098,35 @@ fn action_response(
     from_attempt: Option<&str>,
     expected_statuses: &[&str],
 ) -> Result<(String, String, String, Value), ActionFailure> {
-    let status = data["status"].as_str().ok_or_else(action_contract_error)?.to_string();
+    let status = data["status"]
+        .as_str()
+        .ok_or_else(action_contract_error)?
+        .to_string();
     if !expected_statuses.contains(&status.as_str()) {
         return Err(action_contract_error());
     }
     let task = data["task_id"].as_str().ok_or_else(action_contract_error)?;
-    let attempt = data["attempt_id"].as_str().ok_or_else(action_contract_error)?;
-    if task != task_id || !valid_attempt_id(attempt) || attempt_task_id(attempt).ok().as_deref() != Some(task_id) {
+    let attempt = data["attempt_id"]
+        .as_str()
+        .ok_or_else(action_contract_error)?;
+    if task != task_id
+        || !valid_attempt_id(attempt)
+        || attempt_task_id(attempt).ok().as_deref() != Some(task_id)
+    {
         return Err(action_contract_error());
     }
     if let Some(source) = from_attempt {
-        let source_n = source.rsplit_once("-a").and_then(|(_, n)| n.parse::<u32>().ok()).ok_or_else(action_contract_error)?;
-        let result_n = attempt.rsplit_once("-a").and_then(|(_, n)| n.parse::<u32>().ok()).ok_or_else(action_contract_error)?;
-        if result_n != source_n.saturating_add(1) || !matches!(status.as_str(), "Requested" | "Replayed") {
+        let source_n = source
+            .rsplit_once("-a")
+            .and_then(|(_, n)| n.parse::<u32>().ok())
+            .ok_or_else(action_contract_error)?;
+        let result_n = attempt
+            .rsplit_once("-a")
+            .and_then(|(_, n)| n.parse::<u32>().ok())
+            .ok_or_else(action_contract_error)?;
+        if result_n != source_n.saturating_add(1)
+            || !matches!(status.as_str(), "Requested" | "Replayed")
+        {
             return Err(action_contract_error());
         }
     }
@@ -1034,14 +1135,23 @@ fn action_response(
 
 fn execute_action(request: Request) -> Result<(Value, String), ActionFailure> {
     match request {
-        Request::Start { task_id, provider, model, effort, profile } => {
-            let data = action_rpc("attempt_start", &json!({
-                "task_id": task_id,
-                "provider": provider,
-                "profile": profile,
-                "model": model,
-                "effort": effort,
-            }))?;
+        Request::Start {
+            task_id,
+            provider,
+            model,
+            effort,
+            profile,
+        } => {
+            let data = action_rpc(
+                "attempt_start",
+                &json!({
+                    "task_id": task_id,
+                    "provider": provider,
+                    "profile": profile,
+                    "model": model,
+                    "effort": effort,
+                }),
+            )?;
             let (status, task, attempt, data) =
                 action_response(data, &task_id, None, &["Requested", "Replayed"])?;
             if !matches!(status.as_str(), "Requested" | "Replayed") {
@@ -1065,18 +1175,30 @@ fn execute_action(request: Request) -> Result<(Value, String), ActionFailure> {
             let human = if status == "Requested" {
                 format!("{attempt} solicitado para {task}; queda pendiente de aprobación en Desktop. El Core local creará el Worktree `new` al lanzarlo.")
             } else {
-                format!("{attempt} ya existe para {task}; estado actual: {}.", status_text(attempt_status))
+                format!(
+                    "{attempt} ya existe para {task}; estado actual: {}.",
+                    status_text(attempt_status)
+                )
             };
             Ok((result, human))
         }
-        Request::Retry { attempt_id, task_id, provider, model, effort } => {
-            let data = action_rpc("attempt_retry", &json!({
-                "task_id": task_id,
-                "from_attempt_id": attempt_id,
-                "provider": provider,
-                "model": model,
-                "effort": effort,
-            }))?;
+        Request::Retry {
+            attempt_id,
+            task_id,
+            provider,
+            model,
+            effort,
+        } => {
+            let data = action_rpc(
+                "attempt_retry",
+                &json!({
+                    "task_id": task_id,
+                    "from_attempt_id": attempt_id,
+                    "provider": provider,
+                    "model": model,
+                    "effort": effort,
+                }),
+            )?;
             action_response(data, &task_id, Some(&attempt_id), &["Requested", "Replayed"]).and_then(|(status, task, attempt, data)| {
                 if !matches!(status.as_str(), "Requested" | "Replayed") {
                     return Err(action_contract_error());
@@ -1096,14 +1218,23 @@ fn execute_action(request: Request) -> Result<(Value, String), ActionFailure> {
                 Ok((result, human))
             })
         }
-        Request::Resume { attempt_id, task_id, prompt, model, effort } => {
-            let data = action_rpc("attempt_resume", &json!({
-                "task_id": task_id,
-                "from_attempt_id": attempt_id,
-                "prompt": prompt,
-                "model": model,
-                "effort": effort,
-            }))?;
+        Request::Resume {
+            attempt_id,
+            task_id,
+            prompt,
+            model,
+            effort,
+        } => {
+            let data = action_rpc(
+                "attempt_resume",
+                &json!({
+                    "task_id": task_id,
+                    "from_attempt_id": attempt_id,
+                    "prompt": prompt,
+                    "model": model,
+                    "effort": effort,
+                }),
+            )?;
             action_response(data, &task_id, Some(&attempt_id), &["Requested", "Replayed"]).and_then(|(status, task, attempt, data)| {
                 if !matches!(status.as_str(), "Requested" | "Replayed") {
                     return Err(action_contract_error());
@@ -1124,9 +1255,14 @@ fn execute_action(request: Request) -> Result<(Value, String), ActionFailure> {
             })
         }
         Request::Stop(attempt_id) => {
-            let task_id = attempt_task_id(&attempt_id).map_err(|failure| ActionFailure::new("usage", 2, failure.message().to_string()))?;
-            let data = action_rpc("attempt_stop", &json!({"attempt_id": attempt_id, "confirm": true}))?;
-            let (status, task, attempt, _) = action_response(data, &task_id, None, &["Stopped", "Replayed"])?;
+            let task_id = attempt_task_id(&attempt_id)
+                .map_err(|failure| ActionFailure::new("usage", 2, failure.message().to_string()))?;
+            let data = action_rpc(
+                "attempt_stop",
+                &json!({"attempt_id": attempt_id, "confirm": true}),
+            )?;
+            let (status, task, attempt, _) =
+                action_response(data, &task_id, None, &["Stopped", "Replayed"])?;
             if !matches!(status.as_str(), "Stopped" | "Replayed") || attempt != attempt_id {
                 return Err(action_contract_error());
             }
@@ -1141,7 +1277,10 @@ fn execute_action(request: Request) -> Result<(Value, String), ActionFailure> {
     }
 }
 
-fn finish_action(result: Result<(Value, String), ActionFailure>, json: bool) -> std::process::ExitCode {
+fn finish_action(
+    result: Result<(Value, String), ActionFailure>,
+    json: bool,
+) -> std::process::ExitCode {
     match result {
         Ok((data, human)) => {
             if json {
@@ -1153,7 +1292,10 @@ fn finish_action(result: Result<(Value, String), ActionFailure>, json: bool) -> 
         }
         Err(error) => {
             if json {
-                eprintln!("{}", json!({"v": CONTRACT, "ok": false, "code": error.code, "error": error.message}));
+                eprintln!(
+                    "{}",
+                    json!({"v": CONTRACT, "ok": false, "code": error.code, "error": error.message})
+                );
             } else {
                 eprintln!("lxo: {}", error.message);
             }
@@ -1165,9 +1307,12 @@ fn finish_action(result: Result<(Value, String), ActionFailure>, json: bool) -> 
 pub(super) fn run(a: &Args) -> std::process::ExitCode {
     let json = a.b("json");
     match parse(a) {
-        Ok(request @ (Request::Start { .. } | Request::Retry { .. } | Request::Resume { .. } | Request::Stop(_))) => {
-            finish_action(execute_action(request), json)
-        }
+        Ok(
+            request @ (Request::Start { .. }
+            | Request::Retry { .. }
+            | Request::Resume { .. }
+            | Request::Stop(_)),
+        ) => finish_action(execute_action(request), json),
         Ok(request) => finish(execute(request, json), json),
         Err(error) => finish(Err(error), json),
     }
@@ -1429,8 +1574,19 @@ mod tests {
     fn los_comandos_de_mutacion_exigen_ids_y_opciones_soportadas() {
         assert_eq!(
             parse(&args(&[
-                "attempt", "start", "--task", "t1", "--agent", "Claude", "--profile", "explorar",
-                "--host", "local", "--background", "--worktree", "new",
+                "attempt",
+                "start",
+                "--task",
+                "t1",
+                "--agent",
+                "Claude",
+                "--profile",
+                "explorar",
+                "--host",
+                "local",
+                "--background",
+                "--worktree",
+                "new",
             ]))
             .unwrap(),
             Request::Start {
@@ -1467,17 +1623,99 @@ mod tests {
         );
 
         for (raw, wanted) in [
-            (&["attempt", "start", "--task", "t1", "--provider", "claude", "--profile", "explorar", "--host", "remote", "--background"][..], "Solo está soportado --host local"),
-            (&["attempt", "start", "--task", "t1", "--provider", "claude", "--profile", "explorar", "--host", "local"][..], "requiere --background"),
-            (&["attempt", "start", "--task", "t1", "--provider", "claude", "--profile", "explorar", "--host", "local", "--background", "--worktree", "shared"][..], "estrategia de Worktree"),
-            (&["attempt", "start", "--task", "t1", "--provider", "claude", "--agent", "codex", "--profile", "explorar", "--host", "local", "--background"][..], "solo uno de --provider o --agent"),
-            (&["attempt", "start", "--task", "t1", "--provider", "claude", "--profile", "explorar", "--host", "local", "--background", "--queue"][..], "no es una opción"),
+            (
+                &[
+                    "attempt",
+                    "start",
+                    "--task",
+                    "t1",
+                    "--provider",
+                    "claude",
+                    "--profile",
+                    "explorar",
+                    "--host",
+                    "remote",
+                    "--background",
+                ][..],
+                "Solo está soportado --host local",
+            ),
+            (
+                &[
+                    "attempt",
+                    "start",
+                    "--task",
+                    "t1",
+                    "--provider",
+                    "claude",
+                    "--profile",
+                    "explorar",
+                    "--host",
+                    "local",
+                ][..],
+                "requiere --background",
+            ),
+            (
+                &[
+                    "attempt",
+                    "start",
+                    "--task",
+                    "t1",
+                    "--provider",
+                    "claude",
+                    "--profile",
+                    "explorar",
+                    "--host",
+                    "local",
+                    "--background",
+                    "--worktree",
+                    "shared",
+                ][..],
+                "estrategia de Worktree",
+            ),
+            (
+                &[
+                    "attempt",
+                    "start",
+                    "--task",
+                    "t1",
+                    "--provider",
+                    "claude",
+                    "--agent",
+                    "codex",
+                    "--profile",
+                    "explorar",
+                    "--host",
+                    "local",
+                    "--background",
+                ][..],
+                "solo uno de --provider o --agent",
+            ),
+            (
+                &[
+                    "attempt",
+                    "start",
+                    "--task",
+                    "t1",
+                    "--provider",
+                    "claude",
+                    "--profile",
+                    "explorar",
+                    "--host",
+                    "local",
+                    "--background",
+                    "--queue",
+                ][..],
+                "no es una opción",
+            ),
             (&["attempt", "retry", "t1-a01"][..], "Attempt exacto"),
             (&["attempt", "retry", "t1"][..], "Attempt exacto"),
             (&["attempt", "resume", "t1-a1"][..], "Falta --message"),
             (&["attempt", "stop", "t1-a1"][..], "requiere --confirm"),
         ] {
-            assert!(matches!(parse(&args(raw)), Err(Failure::Usage(m)) if m.contains(wanted)), "{raw:?}");
+            assert!(
+                matches!(parse(&args(raw)), Err(Failure::Usage(m)) if m.contains(wanted)),
+                "{raw:?}"
+            );
         }
     }
 
@@ -1492,29 +1730,81 @@ mod tests {
 
     #[test]
     fn las_respuestas_de_mutacion_se_validan_contra_task_y_attempt_explicitos() {
-        let ok = action_response(json!({
-            "status":"Requested","task_id":"t1","attempt_id":"t1-a3"
-        }), "t1", Some("t1-a2"), &["Requested", "Replayed"]).unwrap();
-        assert_eq!((&ok.0, &ok.1, &ok.2), (&"Requested".to_string(), &"t1".to_string(), &"t1-a3".to_string()));
-        assert!(action_response(json!({
-            "status":"Requested","task_id":"t2","attempt_id":"t2-a3"
-        }), "t1", Some("t1-a2"), &["Requested", "Replayed"]).is_err());
-        assert!(action_response(json!({
-            "status":"Requested","task_id":"t1","attempt_id":"t1-a4"
-        }), "t1", Some("t1-a2"), &["Requested", "Replayed"]).is_err(), "el Core no puede cambiar el intento fuente");
-        assert!(action_response(json!({
-            "status":"Stopped","task_id":"t1","attempt_id":"t1-a3"
-        }), "t1", Some("t1-a2"), &["Requested", "Replayed"]).is_err(), "retry/resume solo aceptan Requested/Replayed");
+        let ok = action_response(
+            json!({
+                "status":"Requested","task_id":"t1","attempt_id":"t1-a3"
+            }),
+            "t1",
+            Some("t1-a2"),
+            &["Requested", "Replayed"],
+        )
+        .unwrap();
+        assert_eq!(
+            (&ok.0, &ok.1, &ok.2),
+            (
+                &"Requested".to_string(),
+                &"t1".to_string(),
+                &"t1-a3".to_string()
+            )
+        );
+        assert!(action_response(
+            json!({
+                "status":"Requested","task_id":"t2","attempt_id":"t2-a3"
+            }),
+            "t1",
+            Some("t1-a2"),
+            &["Requested", "Replayed"]
+        )
+        .is_err());
+        assert!(
+            action_response(
+                json!({
+                    "status":"Requested","task_id":"t1","attempt_id":"t1-a4"
+                }),
+                "t1",
+                Some("t1-a2"),
+                &["Requested", "Replayed"]
+            )
+            .is_err(),
+            "el Core no puede cambiar el intento fuente"
+        );
+        assert!(
+            action_response(
+                json!({
+                    "status":"Stopped","task_id":"t1","attempt_id":"t1-a3"
+                }),
+                "t1",
+                Some("t1-a2"),
+                &["Requested", "Replayed"]
+            )
+            .is_err(),
+            "retry/resume solo aceptan Requested/Replayed"
+        );
     }
 
     #[test]
     fn los_errores_de_policy_capability_y_entorno_tienen_codigos_distintos() {
         let rejected = |message: &str| RpcFailure::Rejected(message.into());
-        assert_eq!(action_failure(rejected("policy_denied: start")).code, "policy");
-        assert_eq!(action_failure(rejected("provider_environment_blocked: local")).code, "environment_blocked");
-        assert_eq!(action_failure(rejected("provider_start_unsupported: claude")).code, "unsupported");
-        assert_eq!(action_failure(rejected("attempt_retry_busy: occupied")).code, "busy");
-        assert_eq!(action_failure(rejected("attempt_start_not_found: task")).code, "not_found");
+        assert_eq!(
+            action_failure(rejected("policy_denied: start")).code,
+            "policy"
+        );
+        assert_eq!(
+            action_failure(rejected("provider_environment_blocked: local")).code,
+            "environment_blocked"
+        );
+        assert_eq!(
+            action_failure(rejected("provider_start_unsupported: claude")).code,
+            "unsupported"
+        );
+        assert_eq!(
+            action_failure(rejected("attempt_retry_busy: occupied")).code,
+            "busy"
+        );
+        assert_eq!(
+            action_failure(rejected("attempt_start_not_found: task")).code,
+            "not_found"
+        );
     }
 
     #[test]
@@ -1699,22 +1989,54 @@ mod tests {
             ],
             "provider_session": null, "worktree": null, "review": null
         }));
-        assert_eq!(projected["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14", "se conserva lo público y se quita el resto");
-        assert_eq!(projected["artifacts"][1]["uri"], REDACTED_PR_URI, "una URL no segura se redacta con el marcador, no se recorta a ciegas");
-        assert_eq!(projected["artifacts"][2]["uri"], REDACTED_PR_URI, "un PR sin URI también: nunca `null` en un campo v1 de texto");
-        assert_eq!(projected["artifacts"][3]["uri"], "/home/ana/informe.md", "solo se tocan los PR");
+        assert_eq!(
+            projected["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14",
+            "se conserva lo público y se quita el resto"
+        );
+        assert_eq!(
+            projected["artifacts"][1]["uri"], REDACTED_PR_URI,
+            "una URL no segura se redacta con el marcador, no se recorta a ciegas"
+        );
+        assert_eq!(
+            projected["artifacts"][2]["uri"], REDACTED_PR_URI,
+            "un PR sin URI también: nunca `null` en un campo v1 de texto"
+        );
+        assert_eq!(
+            projected["artifacts"][3]["uri"], "/home/ana/informe.md",
+            "solo se tocan los PR"
+        );
 
         let json_output = projected.to_string();
         let text_output = show_text(&json!({ "attempt": projected, "activity": null }));
         // Los mensajes de fallo no interpolan el centinela ni la salida: dicen cuál de ellos salió y en qué salida, por posición.
         for (formato, salida) in [("json", &json_output), ("texto", &text_output)] {
-            for (n, centinela) in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "SENTINEL_UNSAFE"].iter().enumerate() {
-                assert!(!salida.contains(centinela), "el centinela nº {n} salió en la salida {formato}");
+            for (n, centinela) in [
+                "SENTINEL_CREDENTIAL",
+                "SENTINEL_QUERY",
+                "SENTINEL_FRAGMENT",
+                "SENTINEL_UNSAFE",
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert!(
+                    !salida.contains(centinela),
+                    "el centinela nº {n} salió en la salida {formato}"
+                );
             }
         }
-        assert!(text_output.contains("PR: https://github.com/org/repo/pull/14"), "{text_output}");
-        assert!(text_output.contains("PR: URL oculta por seguridad"), "el marcador se enseña en llano: {text_output}");
-        assert!(!text_output.contains(REDACTED_PR_URI), "y no el código interno: {text_output}");
+        assert!(
+            text_output.contains("PR: https://github.com/org/repo/pull/14"),
+            "{text_output}"
+        );
+        assert!(
+            text_output.contains("PR: URL oculta por seguridad"),
+            "el marcador se enseña en llano: {text_output}"
+        );
+        assert!(
+            !text_output.contains(REDACTED_PR_URI),
+            "y no el código interno: {text_output}"
+        );
     }
 
     /// Extremo a extremo por `show_data` (la misma entrada que usa `lxo attempt show`) contra un Core que responde como uno anterior al
@@ -1732,19 +2054,39 @@ mod tests {
                     "provider_session": null, "worktree": null, "review": null
                 }
             })),
-            "activity_list" => Ok(json!({ "v": 1, "order": "desc", "has_more": false, "items": [] })),
+            "activity_list" => {
+                Ok(json!({ "v": 1, "order": "desc", "has_more": false, "items": [] }))
+            }
             otro => panic!("comando inesperado {otro}"),
         };
         let data = show_data(&mut rpc, "t3-a1").expect("show");
         let salida_json = data.to_string();
         let salida_texto = show_text(&data);
         for (formato, salida) in [("json", &salida_json), ("texto", &salida_texto)] {
-            for (n, centinela) in ["SENTINEL_CREDENTIAL", "SENTINEL_QUERY", "SENTINEL_FRAGMENT", "bot:"].iter().enumerate() {
-                assert!(!salida.contains(centinela), "el centinela nº {n} salió en la salida {formato}");
+            for (n, centinela) in [
+                "SENTINEL_CREDENTIAL",
+                "SENTINEL_QUERY",
+                "SENTINEL_FRAGMENT",
+                "bot:",
+            ]
+            .iter()
+            .enumerate()
+            {
+                assert!(
+                    !salida.contains(centinela),
+                    "el centinela nº {n} salió en la salida {formato}"
+                );
             }
         }
-        assert_eq!(data["attempt"]["artifacts"][0]["uri"], "https://github.com/org/repo/pull/14");
-        assert_eq!((data["v"].clone(), data["core_model"].clone()), (json!(CONTRACT), json!(MODEL)), "el contrato v1 no cambia");
+        assert_eq!(
+            data["attempt"]["artifacts"][0]["uri"],
+            "https://github.com/org/repo/pull/14"
+        );
+        assert_eq!(
+            (data["v"].clone(), data["core_model"].clone()),
+            (json!(CONTRACT), json!(MODEL)),
+            "el contrato v1 no cambia"
+        );
     }
 
     /// La allowlist es la del Core (`orch/pr_url.rs`): los mismos vectores. Si el Core cambia la suya, esta prueba y su copia deben
@@ -1752,42 +2094,98 @@ mod tests {
     #[test]
     fn la_allowlist_del_cli_es_la_del_core() {
         for (raw, esperada) in [
-            ("https://github.com/o/r/pull/7", "https://github.com/o/r/pull/7"),
-            ("http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3", "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3"),
-            ("  https://github.com/o/r/pull/7  ", "https://github.com/o/r/pull/7"),
-            ("https://user:SECRETO@github.com/o/r/pull/1", "https://github.com/o/r/pull/1"),
-            ("https://github.com/o/r/pull/1?token=SECRETO", "https://github.com/o/r/pull/1"),
-            ("https://github.com/o/r/pull/1#SECRETO", "https://github.com/o/r/pull/1"),
-            ("https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO", "https://github.com/o/r/pull/1"),
+            (
+                "https://github.com/o/r/pull/7",
+                "https://github.com/o/r/pull/7",
+            ),
+            (
+                "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3",
+                "http://git.example.com:8080/grupo/sub.grupo/repo/-/merge_requests/3",
+            ),
+            (
+                "  https://github.com/o/r/pull/7  ",
+                "https://github.com/o/r/pull/7",
+            ),
+            (
+                "https://user:SECRETO@github.com/o/r/pull/1",
+                "https://github.com/o/r/pull/1",
+            ),
+            (
+                "https://github.com/o/r/pull/1?token=SECRETO",
+                "https://github.com/o/r/pull/1",
+            ),
+            (
+                "https://github.com/o/r/pull/1#SECRETO",
+                "https://github.com/o/r/pull/1",
+            ),
+            (
+                "https://user:SECRETO@github.com/o/r/pull/1?token=SECRETO#SECRETO",
+                "https://github.com/o/r/pull/1",
+            ),
         ] {
             assert_eq!(sanitize_pr_url(raw).as_deref(), Some(esperada), "{raw}");
         }
         for raw in [
-            "", "github.com/o/r/pull/1", "ftp://github.com/o/r/pull/1", "javascript://github.com/o/r/pull/1", "https://", "https://github.com",
-            "https://github.com/", "https:///o/r/pull/1", "https://user:pa/ss@github.com/o/r/pull/1", "https://github.com/o@r/pull/1",
-            "https://github.com/o/r/pull/1;secreto=abc", "https://github.com/o/r/pull/1%0Atoken", "https://github.com/o/r/pull/1\\..\\x",
-            "https://github.com/o/r/pull/1\ntoken", "https://github.com/o/r/pull/1\0", "https://github.com/o/r//pull/1",
-            "https://github.com/o/../pull/1", "https://github.com/o/r/pull/ 1", "https://github.com:abc/o/r/pull/1", "https://github.com:/o/r/pull/1",
-            "https://github.com:123456/o/r/pull/1", "https://[::1]/o/r/pull/1", "https://-github.com/o/r/pull/1", "https://gíthub.com/o/r/pull/1",
+            "",
+            "github.com/o/r/pull/1",
+            "ftp://github.com/o/r/pull/1",
+            "javascript://github.com/o/r/pull/1",
+            "https://",
+            "https://github.com",
+            "https://github.com/",
+            "https:///o/r/pull/1",
+            "https://user:pa/ss@github.com/o/r/pull/1",
+            "https://github.com/o@r/pull/1",
+            "https://github.com/o/r/pull/1;secreto=abc",
+            "https://github.com/o/r/pull/1%0Atoken",
+            "https://github.com/o/r/pull/1\\..\\x",
+            "https://github.com/o/r/pull/1\ntoken",
+            "https://github.com/o/r/pull/1\0",
+            "https://github.com/o/r//pull/1",
+            "https://github.com/o/../pull/1",
+            "https://github.com/o/r/pull/ 1",
+            "https://github.com:abc/o/r/pull/1",
+            "https://github.com:/o/r/pull/1",
+            "https://github.com:123456/o/r/pull/1",
+            "https://[::1]/o/r/pull/1",
+            "https://-github.com/o/r/pull/1",
+            "https://gíthub.com/o/r/pull/1",
         ] {
             assert_eq!(sanitize_pr_url(raw), None, "{raw:?}");
         }
-        assert_eq!(sanitize_pr_url(&format!("https://github.com/{}", "a".repeat(400))), None, "una URL desmedida se descarta, no se recorta");
+        assert_eq!(
+            sanitize_pr_url(&format!("https://github.com/{}", "a".repeat(400))),
+            None,
+            "una URL desmedida se descarta, no se recorta"
+        );
     }
 
     /// LXO-243: los mismos vectores que ejecutan el Core y los tres clientes (`docs/core/fixtures/pr_url_allowlist.v1.json`).
     #[test]
     fn la_allowlist_del_cli_coincide_con_el_fixture_compartido() {
-        let v: Value = serde_json::from_str(include_str!("../../../../docs/core/fixtures/pr_url_allowlist.v1.json")).unwrap();
+        let v: Value = serde_json::from_str(include_str!(
+            "../../../../docs/core/fixtures/pr_url_allowlist.v1.json"
+        ))
+        .unwrap();
         for caso in v["keep"].as_array().unwrap() {
-            let (raw, clean) = (caso["raw"].as_str().unwrap(), caso["clean"].as_str().unwrap());
+            let (raw, clean) = (
+                caso["raw"].as_str().unwrap(),
+                caso["clean"].as_str().unwrap(),
+            );
             assert_eq!(sanitize_pr_url(raw).as_deref(), Some(clean), "{raw:?}");
         }
         for raw in v["reject"].as_array().unwrap() {
             assert_eq!(sanitize_pr_url(raw.as_str().unwrap()), None, "{raw:?}");
         }
         for g in v["reject_generated"].as_array().unwrap() {
-            let raw = format!("{}{}", g["prefix"].as_str().unwrap(), g["fill"].as_str().unwrap().repeat(g["count"].as_u64().unwrap() as usize));
+            let raw = format!(
+                "{}{}",
+                g["prefix"].as_str().unwrap(),
+                g["fill"]
+                    .as_str()
+                    .unwrap()
+                    .repeat(g["count"].as_u64().unwrap() as usize)
+            );
             assert_eq!(sanitize_pr_url(&raw), None, "{}", g["why"]);
         }
     }

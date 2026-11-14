@@ -77,7 +77,13 @@ const LIST_FLAGS: [&str; 9] = [
     "project", "active", "final", "status", "state", "run", "schema", "json", "help",
 ];
 /// Estado derivado de la Task (`contracts/status-vocabulary.json` `task_derived_state`), para `--state`.
-const STATES: [&str; 5] = ["open", "in_progress", "in_review", "integrated", "discarded"];
+const STATES: [&str; 5] = [
+    "open",
+    "in_progress",
+    "in_review",
+    "integrated",
+    "discarded",
+];
 /// Forma del `--json` vNext (LXO-125): `{v: 2, task_model: "task_attempt_v1"}`.
 const CONTRACT_V2: u64 = 2;
 const MODEL_V2: &str = "task_attempt_v1";
@@ -1945,7 +1951,9 @@ mod tests {
     fn aviso_de_compatibilidad_solo_tras_el_corte() {
         let cut = |attempts: usize| {
             move |cmd: &str, args: &Value| match cmd {
-                "core_model" => Ok(json!({ "core_model": "task_attempt_v1", "compat": ["legacy_task_v1"] })),
+                "core_model" => {
+                    Ok(json!({ "core_model": "task_attempt_v1", "compat": ["legacy_task_v1"] }))
+                }
                 "attempts_by_task" => {
                     assert_eq!(args, &json!({ "task_id": "t2" }));
                     Ok(json!({ "v": 1, "items": vec![json!({}); attempts] }))
@@ -1955,10 +1963,16 @@ mod tests {
         };
         let (notice, n) = legacy_notice(&mut cut(3), Some("t2")).unwrap();
         assert_eq!(n, Some(3));
-        assert!(notice.contains("intento actual (campos en desuso) y la tarea tiene 3 intentos"), "{notice}");
+        assert!(
+            notice.contains("intento actual (campos en desuso) y la tarea tiene 3 intentos"),
+            "{notice}"
+        );
         assert!(notice.ends_with("lxo attempts --task t2."), "{notice}");
         let (one, _) = legacy_notice(&mut cut(1), Some("t2")).unwrap();
-        assert!(!one.contains("intentos;"), "con uno no hace falta contarlo: {one}");
+        assert!(
+            !one.contains("intentos;"),
+            "con uno no hace falta contarlo: {one}"
+        );
         let (list, n) = legacy_notice(&mut cut(0), None).unwrap();
         assert_eq!(n, None);
         assert!(list.contains("lxo attempts --task <id>"), "{list}");
@@ -1968,11 +1982,18 @@ mod tests {
             other => panic!("antes del corte no pide {other}"),
         };
         assert!(legacy_notice(&mut legacy, Some("t2")).is_none());
-        let mut old = |_: &str, _: &Value| Err(RpcFailure::Rejected("Comando desconocido: core_model".into()));
+        let mut old = |_: &str, _: &Value| {
+            Err(RpcFailure::Rejected(
+                "Comando desconocido: core_model".into(),
+            ))
+        };
         assert!(legacy_notice(&mut old, None).is_none());
 
         let mut data = show("t2");
-        assert!(!show_text(&data).contains("Intentos:"), "sin el corte no hay línea de intentos");
+        assert!(
+            !show_text(&data).contains("Intentos:"),
+            "sin el corte no hay línea de intentos"
+        );
         data["attempt_count"] = json!(3);
         assert!(show_text(&data).contains("  Intentos:    3 · cada uno con lxo attempts --task t2"));
     }
@@ -1994,7 +2015,10 @@ mod tests {
                     "core_model_inactive: el Core aún sirve el modelo legacy; usa tasks_by_project y task_detail".into(),
                 ));
             }
-            let mut items = serde_json::from_str::<Value>(API_LIST).unwrap()["items"].as_array().unwrap().clone();
+            let mut items = serde_json::from_str::<Value>(API_LIST).unwrap()["items"]
+                .as_array()
+                .unwrap()
+                .clone();
             items.push(json!({
                 "id": "t9", "title": "reintentada", "project_id": "p-1", "run_id": "r9", "parent_task_id": null, "depth": 0,
                 "intent": "open", "state": "in_progress", "origin": "lixbon", "created_at": 1_792_000_100_000u64,
@@ -2002,13 +2026,23 @@ mod tests {
                 "spec": "encargo privado"
             }));
             match cmd {
-                "projects_overview" => Ok(json!({ "v": 1, "projects": [{ "id": "p-1", "name": "app" }], "unassigned": { "tasks": 0 } })),
+                "projects_overview" => Ok(
+                    json!({ "v": 1, "projects": [{ "id": "p-1", "name": "app" }], "unassigned": { "tasks": 0 } }),
+                ),
                 "task_list_v2" => {
-                    assert_eq!((args["include_discarded"].as_bool(), args["limit"].as_u64()), (Some(true), Some(100)));
-                    let start: usize = args["cursor"].as_str().map(|c| c.parse().unwrap()).unwrap_or(0);
+                    assert_eq!(
+                        (args["include_discarded"].as_bool(), args["limit"].as_u64()),
+                        (Some(true), Some(100))
+                    );
+                    let start: usize = args["cursor"]
+                        .as_str()
+                        .map(|c| c.parse().unwrap())
+                        .unwrap_or(0);
                     let page: Vec<Value> = items.iter().skip(start).take(2).cloned().collect();
                     let next = (start + 2 < items.len()).then(|| (start + 2).to_string());
-                    Ok(json!({ "v": 2, "core_model": MODEL_V2, "project_id": "p-1", "items": page, "next_cursor": next }))
+                    Ok(
+                        json!({ "v": 2, "core_model": MODEL_V2, "project_id": "p-1", "items": page, "next_cursor": next }),
+                    )
                 }
                 "task_detail_v2" => match args["task_id"].as_str().unwrap() {
                     "t3" => Ok(serde_json::from_str(API_DETAIL).unwrap()),
@@ -2016,11 +2050,16 @@ mod tests {
                         let mut t = items.last().unwrap().clone();
                         t["children"] = json!([]);
                         // Del Core, en otro orden: lxo los ordena por n.
-                        t["attempts"] = json!([attempt_v2("t9", 2, "running"), attempt_v2("t9", 1, "failed")]);
+                        t["attempts"] = json!([
+                            attempt_v2("t9", 2, "running"),
+                            attempt_v2("t9", 1, "failed")
+                        ]);
                         t["thread"] = Value::Null;
                         Ok(json!({ "v": 2, "core_model": MODEL_V2, "task": t }))
                     }
-                    id => Err(RpcFailure::Rejected(format!("model_not_found: no existe la Task {id}"))),
+                    id => Err(RpcFailure::Rejected(format!(
+                        "model_not_found: no existe la Task {id}"
+                    ))),
                 },
                 "activity_list" => Ok(json!({ "v": 1, "items": [], "has_more": false })),
                 other => panic!("comando inesperado {other}"),
@@ -2035,17 +2074,52 @@ mod tests {
 
     #[test]
     fn la_forma_del_json_se_elige_con_schema_y_por_defecto_es_la_1() {
-        assert_eq!(schema_of(&["tasks", "--json"]).unwrap(), 1, "sin --schema, la forma 1 (ventana de compatibilidad)");
+        assert_eq!(
+            schema_of(&["tasks", "--json"]).unwrap(),
+            1,
+            "sin --schema, la forma 1 (ventana de compatibilidad)"
+        );
         assert_eq!(schema_of(&["tasks", "--json", "--schema", "1"]).unwrap(), 1);
-        assert_eq!(schema_of(&["task", "show", "t3", "--json", "--schema", "2"]).unwrap(), 2);
-        assert_eq!(schema_of(&["tasks", "--json", "--schema", "2", "--state", "in_review", "--run", "r1"]).unwrap(), 2);
+        assert_eq!(
+            schema_of(&["task", "show", "t3", "--json", "--schema", "2"]).unwrap(),
+            2
+        );
+        assert_eq!(
+            schema_of(&[
+                "tasks",
+                "--json",
+                "--schema",
+                "2",
+                "--state",
+                "in_review",
+                "--run",
+                "r1"
+            ])
+            .unwrap(),
+            2
+        );
         for (raw, wanted) in [
-            (&["tasks", "--json", "--schema", "3"][..], "--schema admite 1"),
+            (
+                &["tasks", "--json", "--schema", "3"][..],
+                "--schema admite 1",
+            ),
             (&["tasks", "--schema", "2"][..], "úsalo junto a --json"),
-            (&["tasks", "--json", "--schema", "2", "--status", "running"][..], "filtra por el estado de la tarea con --state"),
-            (&["tasks", "--json", "--schema", "2", "--active"][..], "lxo attempts --task <id>"),
-            (&["tasks", "--json", "--state", "open"][..], "úsalo con --json --schema 2"),
-            (&["tasks", "--json", "--schema", "2", "--state", "rara"][..], "--state no reconoce"),
+            (
+                &["tasks", "--json", "--schema", "2", "--status", "running"][..],
+                "filtra por el estado de la tarea con --state",
+            ),
+            (
+                &["tasks", "--json", "--schema", "2", "--active"][..],
+                "lxo attempts --task <id>",
+            ),
+            (
+                &["tasks", "--json", "--state", "open"][..],
+                "úsalo con --json --schema 2",
+            ),
+            (
+                &["tasks", "--json", "--schema", "2", "--state", "rara"][..],
+                "--state no reconoce",
+            ),
         ] {
             match schema_of(raw) {
                 Err(Failure::Usage(m)) => assert!(m.contains(wanted), "{raw:?}: {m}"),
@@ -2066,31 +2140,76 @@ mod tests {
         // La forma 2 no lleva nada de la ejecución: eso es del Attempt (lxo attempt show).
         for doc in [&v2, &detail] {
             let text = doc.to_string();
-            for legacy in ["\"provider\"", "\"branch\"", "\"worktree\"", "\"pr_url\"", "\"failure_reason\"", "\"status\":\"done\",\"final\""] {
+            for legacy in [
+                "\"provider\"",
+                "\"branch\"",
+                "\"worktree\"",
+                "\"pr_url\"",
+                "\"failure_reason\"",
+                "\"status\":\"done\",\"final\"",
+            ] {
                 assert!(!text.contains(legacy), "{legacy} en la forma 2: {text}");
             }
-            assert!(!text.contains("encargo privado") && !text.contains("Implementa /api/session"), "no copia el encargo");
-            assert!(!text.contains("\"id\":"), "ids nombrados: task_id, attempt_id…");
+            assert!(
+                !text.contains("encargo privado") && !text.contains("Implementa /api/session"),
+                "no copia el encargo"
+            );
+            assert!(
+                !text.contains("\"id\":"),
+                "ids nombrados: task_id, attempt_id…"
+            );
         }
     }
 
     #[test]
     fn forma_2_en_arbol_paginada_y_con_filtros() {
         let all = list_v2(&mut core_v2(MODEL_V2), &Filters::default()).unwrap();
-        let ids: Vec<&str> = all["tasks"].as_array().unwrap().iter().map(|t| t["task_id"].as_str().unwrap()).collect();
-        assert_eq!(ids, ["t2", "t3", "t4", "t5", "t9", "t17"], "raíz y sus hijas, por creación, de las tres páginas");
-        assert_eq!((all["v"].clone(), all["task_model"].clone()), (json!(2), json!("task_attempt_v1")));
-        let depth: Vec<u64> = all["tasks"].as_array().unwrap().iter().map(|t| t["depth"].as_u64().unwrap()).collect();
+        let ids: Vec<&str> = all["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["task_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            ids,
+            ["t2", "t3", "t4", "t5", "t9", "t17"],
+            "raíz y sus hijas, por creación, de las tres páginas"
+        );
+        assert_eq!(
+            (all["v"].clone(), all["task_model"].clone()),
+            (json!(2), json!("task_attempt_v1"))
+        );
+        let depth: Vec<u64> = all["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["depth"].as_u64().unwrap())
+            .collect();
         assert_eq!(depth, [0, 1, 1, 1, 0, 0]);
         let filtered = list_v2(
             &mut core_v2(MODEL_V2),
-            &Filters { state: Some("in_review".into()), ..Filters::default() },
+            &Filters {
+                state: Some("in_review".into()),
+                ..Filters::default()
+            },
         )
         .unwrap();
-        let ids: Vec<&str> = filtered["tasks"].as_array().unwrap().iter().map(|t| t["task_id"].as_str().unwrap()).collect();
+        let ids: Vec<&str> = filtered["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["task_id"].as_str().unwrap())
+            .collect();
         assert_eq!(ids, ["t2", "t5"]);
         assert_eq!(
-            list_v2(&mut core_v2(MODEL_V2), &Filters { run: Some("r9".into()), ..Filters::default() }).unwrap()["tasks"]
+            list_v2(
+                &mut core_v2(MODEL_V2),
+                &Filters {
+                    run: Some("r9".into()),
+                    ..Filters::default()
+                }
+            )
+            .unwrap()["tasks"]
                 .as_array()
                 .unwrap()
                 .len(),
@@ -2111,8 +2230,18 @@ mod tests {
                 { "attempt_id": "t9-a2", "n": 2, "status": "running" }
             ])
         );
-        assert_eq!((task["attempt_count"].clone(), task["current_attempt"]["attempt_id"].clone()), (json!(2), json!("t9-a2")));
-        assert!(task.get("provider").is_none() && task.get("branch").is_none() && task.get("worktree").is_none());
+        assert_eq!(
+            (
+                task["attempt_count"].clone(),
+                task["current_attempt"]["attempt_id"].clone()
+            ),
+            (json!(2), json!("t9-a2"))
+        );
+        assert!(
+            task.get("provider").is_none()
+                && task.get("branch").is_none()
+                && task.get("worktree").is_none()
+        );
         match show_v2(&mut core_v2(MODEL_V2), "reintentada") {
             Err(Failure::NotFound(m)) => assert!(m.contains("se busca por id"), "{m}"),
             other => panic!("{other:?}"),
@@ -2127,7 +2256,11 @@ mod tests {
         ] {
             match result {
                 Err(f @ Failure::Version(_)) => {
-                    assert!(f.message().contains("--json sin --schema"), "{}", f.message());
+                    assert!(
+                        f.message().contains("--json sin --schema"),
+                        "{}",
+                        f.message()
+                    );
                     assert_eq!(f.code().1, 4);
                 }
                 other => panic!("{other:?}"),

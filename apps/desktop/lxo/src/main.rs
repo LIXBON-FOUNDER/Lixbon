@@ -26,8 +26,8 @@ mod provider;
 mod race;
 mod review;
 mod summary;
-mod tasks;
 mod task_create;
+mod tasks;
 mod usage;
 
 const COORDINATOR: &str = include_str!("../guide/coordinator.md");
@@ -62,7 +62,7 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
   lxo attempt fork <source_attempt_id> [opciones]  fork explícito; nueva Task, procedencia y aprobación humana
-  lxo race <source_attempt_id> [opciones]          Race de 2–4 Forks comparables; status, follow y cancelación
+  lxo race --task <task_id> [opciones]             Race desde el Attempt actual; status, follow y cancelación
   lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
   lxo attempt resume <attempt_id> --message \"...\"
@@ -76,7 +76,7 @@ Coordinador (el agente con el que habla el usuario):
                                                     mutaciones solo para personas y exigen --confirm; Core revalida policy.
                                                     list/cancel son solo para personas y no requieren confirmación de policy.
   lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
-                                                   compara 2-4 intentos con la evidencia del Core (solo personas)
+  lxo compare --race <race_id> [--json]            compara los candidatos lanzados del Race con la evidencia del Core
   lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
                                                    Proof Pack y decisión sobre el HEAD exacto (solo personas)
   lxo integrate merge|pr <attempt_id|review_id> [--dry-run|--confirm] [--squash] [--accept-moved-target SHA] [--json]
@@ -1172,7 +1172,14 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Ok(r) if a.b("cancel") => {
-                println!("{}", if r["cancelled"] == true { "Restauración retirada." } else { "No había ninguna restauración pedida." });
+                println!(
+                    "{}",
+                    if r["cancelled"] == true {
+                        "Restauración retirada."
+                    } else {
+                        "No había ninguna restauración pedida."
+                    }
+                );
                 ExitCode::SUCCESS
             }
             Ok(r) => {
@@ -1619,14 +1626,24 @@ mod tests {
     #[test]
     fn events_attempt_es_el_atajo_de_la_entidad_attempt() {
         let p = |raw: &[&str]| super::parse(raw.iter().map(|s| s.to_string()).collect());
-        let opts = super::events::parse_events_options(&p(&["events", "--attempt", "t3-a2"])).unwrap();
-        assert_eq!((opts.query["entity_kind"].as_str(), opts.query["entity_id"].as_str()), ("attempt", "t3-a2"));
+        let opts =
+            super::events::parse_events_options(&p(&["events", "--attempt", "t3-a2"])).unwrap();
+        assert_eq!(
+            (
+                opts.query["entity_kind"].as_str(),
+                opts.query["entity_id"].as_str()
+            ),
+            ("attempt", "t3-a2")
+        );
         for raw in [
             &["events", "--attempt", "t3-a2", "--task", "t3"][..],
             &["events", "--attempt", "t3-a2", "--entity-kind", "task"],
             &["events", "--attempt"],
         ] {
-            assert!(super::events::parse_events_options(&p(raw)).is_err(), "{raw:?}");
+            assert!(
+                super::events::parse_events_options(&p(raw)).is_err(),
+                "{raw:?}"
+            );
         }
     }
 }
