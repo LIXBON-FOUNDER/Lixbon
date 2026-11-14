@@ -23,6 +23,9 @@ mod model_read_tests;
 #[cfg(test)]
 mod tasks_read_tests;
 mod resource_adopt;
+mod worktree_share;
+#[cfg(test)]
+mod worktree_share_e2e_tests;
 mod resource_git;
 mod resource_inventory;
 mod attention_action;
@@ -174,6 +177,16 @@ mod queue_commands;
 mod queue_rules;
 #[cfg(test)]
 mod queue_commands_tests;
+#[cfg(test)]
+mod queue_restart_tests;
+#[cfg(test)]
+mod real_smoke_custody_tests;
+#[cfg(test)]
+mod real_smoke_tests;
+#[cfg(test)]
+mod real_smoke_usage_tests;
+#[cfg(test)]
+mod usage_persist_tests;
 mod agentic_cut;
 mod startup_cut;
 #[cfg(test)]

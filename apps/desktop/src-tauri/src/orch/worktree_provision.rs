@@ -81,6 +81,41 @@ impl Core {
         }
     }
 
+    /// El worktree en el que el Attempt YA trabaja si es de otra Task (compartido, LXO-248). `None`: no comparte nada.
+    fn shared_worktree_of(&self, intent: &DispatchIntent) -> Result<Option<crate::store::WorktreeRow>, PrepareError> {
+        let read = self
+            .worktree_store(|st| -> crate::store::StoreResult<Option<crate::store::WorktreeRow>> {
+                let Some(attempt) = st.attempt_row(&intent.attempt_id)? else { return Ok(None) };
+                let Some(id) = attempt.worktree_id else { return Ok(None) };
+                Ok(st.worktree_row(&id)?.filter(|w| w.task_id != intent.task_id))
+            })
+            .ok_or_else(|| PrepareError::Unavailable("el almacén del Core no está abierto".into()))?;
+        read.map_err(|e| PrepareError::Failed(format!("no se pudo leer el worktree del Attempt: {e}")))
+    }
+
+    /// Se adjunta al worktree compartido: comprueba que sigue activo y en disco y NO crea, ni registra, ni borra nada. No es dueño: `reused`
+    /// hace que `release_worktree` lo deje intacto. El estado de la Task no recibe `worktree`/`branch` (eso la haría «dueña» para el Resource Manager).
+    fn attach_shared_worktree(&self, intent: &DispatchIntent, shared: crate::store::WorktreeRow) -> Result<ProvisionedWorktree, PrepareError> {
+        if shared.state != crate::store::WorktreeState::Active {
+            return Err(PrepareError::Unavailable(format!("el worktree compartido {} ya no está activo ({}): no hay dónde trabajar", shared.id, shared.state.as_str())));
+        }
+        let dir = shared.path.clone().ok_or_else(|| PrepareError::Unavailable(format!("el worktree compartido {} no tiene ruta", shared.id)))?;
+        if !std::path::Path::new(&dir).is_dir() {
+            return Err(PrepareError::Unavailable(format!("el worktree compartido ya no está en disco ({dir}): no hay dónde trabajar")));
+        }
+        let previous_cwd = self.lock().tasks.get(&intent.task_id).map(|t| t.cwd.clone()).ok_or_else(|| PrepareError::Failed(format!("la Task {} no existe en el estado", intent.task_id)))?;
+        let repo_root = git::main_root(&shared.repo).or_else(|| git::toplevel(&shared.repo)).unwrap_or_else(|| shared.repo.clone());
+        Ok(ProvisionedWorktree {
+            dir: PathBuf::from(dir),
+            branch: shared.branch.unwrap_or_default(),
+            base: shared.base_branch.unwrap_or_default(),
+            repo_root,
+            task: intent.task_id.clone(),
+            previous_cwd,
+            reused: true,
+        })
+    }
+
     /// Un reintento trabaja en el Worktree de la Task: se comprueba que sigue en disco y el Attempt se adjunta a él. Nada se
     /// crea ni se registra de nuevo. El proyector suele haber enlazado ya al Attempt nuevo al nacer: entonces `attach` no
     /// cambia nada (`Unchanged`, sin evento); si no, lo enlaza y deja `worktree.attached`.
@@ -106,6 +141,10 @@ impl Core {
     pub(super) fn provision_worktree(&self, intent: &DispatchIntent) -> Result<ProvisionedWorktree, PrepareError> {
         if !matches!(self.health(), Health::Normal) {
             return Err(PrepareError::Unavailable("el Core no está en estado normal: no se puede registrar un worktree".into()));
+        }
+        // LXO-248: el Attempt ya trabaja en el worktree de OTRA Task (la persona lo compartió antes de aprobar): se adjunta sin crear nada.
+        if let Some(shared) = self.shared_worktree_of(intent)? {
+            return self.attach_shared_worktree(intent, shared);
         }
         if let Some(worktree_id) = self.task_worktree(intent)? {
             return self.attach_to_task_worktree(intent, &worktree_id);

@@ -260,6 +260,35 @@ fn start_events_finish_con_la_captura_real() {
     assert!(summary.unwrap().starts_with("1\n2\n3"));
 }
 
+/// LXO-249: las ventanas de cuota que Claude declara durante la ejecución (`rate_limit_event`) viajan con el uso del turno, y son las ÚLTIMAS que
+/// dijo (la captura trae dos eventos: 13 % y después 14 % de la ventana de cinco horas).
+#[test]
+fn el_uso_del_turno_lleva_las_ultimas_ventanas_de_cuota_que_declaro_claude() {
+    let (got, _, _) = corre(script_of(NORMAL), "");
+    let limits = got.iter().find_map(|e| if let AdapterEvent::Usage { limits, .. } = e { Some(limits.clone()) } else { None }).expect("usage");
+    let summary: Vec<_> = limits.iter().map(|w| (w.id.as_str(), w.minutes, w.used_percent, w.resets_at)).collect();
+    assert_eq!(summary, [("five_hour", Some(300), Some(14.0), Some(1_793_054_400)), ("seven_day", Some(10_080), Some(2.0), Some(1_793_613_600))]);
+}
+
+/// Los límites de un turno son los de SU ejecución: lo que otra ejecución del mismo adapter vio antes (o a la vez) no se le atribuye. Una ejecución
+/// que no recibió ningún `rate_limit_event` no declara ventanas aunque el adapter ya tenga unas observadas por otra.
+#[test]
+fn una_ejecucion_sin_rate_limit_event_no_hereda_las_ventanas_que_vio_otra() {
+    use super::stream::{RateInfo, RateWindow};
+    let sin_cuota: String = NORMAL.lines().filter(|l| !l.contains("rate_limit_event")).collect::<Vec<_>>().join("\n");
+    let l = FakeLauncher::new(script_of(&sin_cuota));
+    let a = adapter(cfg(), l);
+    *a.observed_limits.lock().unwrap() = Some((1, RateInfo { status: None, windows: vec![RateWindow { id: "five_hour".into(), utilization: Some(0.99), resets_at: Some(5) }] }));
+    let reg = registro(a);
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    let mut got = vec![];
+    g.events(&run, &cancel, &mut |e: AdapterEvent| got.push(e)).unwrap();
+    let limits = got.iter().find_map(|e| if let AdapterEvent::Usage { limits, .. } = e { Some(limits.clone()) } else { None }).expect("usage");
+    assert!(limits.is_empty(), "esta ejecución no declaró ventanas: {limits:?}");
+}
+
 #[test]
 fn el_id_de_sesion_es_opaco_y_no_aparece_en_ninguna_salida_imprimible() {
     let (got, _, _) = corre(script_of(NORMAL), "");
@@ -362,6 +391,107 @@ fn el_resumen_de_la_herramienta_no_copia_el_contenido() {
     assert_eq!(summarize_tool(&json!({"content": "solo contenido"})), "");
 }
 
+// ── Preguntas del modelo (`AskUserQuestion`, LXO-247) ─────────────────────────────────────────────────────────────────
+
+const PREGUNTA: &str = include_str!("../../testdata/claude-2.1.296-adapter-pregunta.jsonl");
+const PREGUNTA_ID: &str = "04eed0e3-f388-49d7-8e32-d0ab8543fe81";
+const PREGUNTA_TEXTO: &str = "¿Cuál es tu color favorito?";
+
+/// Corre el guion de la pregunta e intenta cada respuesta de `intentos` hasta que una se acepta. Devuelve los eventos, el resultado de cada intento y
+/// lo que se escribió a la CLI.
+fn corre_con_pregunta(intentos: &[&str]) -> (Vec<AdapterEvent>, Vec<Result<(), AdapterError>>, RunOutcome, Arc<FakeLauncher>) {
+    let l = FakeLauncher::new(script_of(PREGUNTA));
+    let reg = registro(adapter(cfg(), l.clone()));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("delegar_con_revision"), &cancel).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let (got, results, outcome) = std::thread::scope(|s| {
+        let h = s.spawn(|| g.events(&run, &cancel, &mut |e: AdapterEvent| tx.send(e).unwrap()));
+        let mut got = vec![];
+        let mut results = vec![];
+        loop {
+            // Si la pregunta no llega, se cancela la ejecución antes de fallar: si no, el hilo de `events` espera para siempre y la prueba se cuelga
+            // en vez de fallar.
+            let Ok(e) = rx.recv_timeout(Duration::from_secs(5)) else {
+                cancel.cancel();
+                panic!("llegó la pregunta (eventos hasta ahora: {got:?})");
+            };
+            let asked = matches!(e, AdapterEvent::Question { .. });
+            got.push(e);
+            if asked {
+                for text in intentos {
+                    let r = g.answer(&run, Answer { question_id: PREGUNTA_ID.into(), text: (*text).into() });
+                    let accepted = r.is_ok();
+                    results.push(r);
+                    if accepted {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        // Ninguna respuesta se aceptó: la CLI nunca recibirá la que espera. Se cancela para que la prueba falle en lugar de colgarse.
+        if results.last().is_none_or(Result::is_err) {
+            cancel.cancel();
+        }
+        let outcome = h.join().unwrap().unwrap();
+        got.extend(rx.try_iter());
+        (got, results, outcome)
+    });
+    (got, results, outcome, l)
+}
+
+#[test]
+fn una_pregunta_del_modelo_llega_como_question_y_no_como_permiso() {
+    let (got, _, _, _) = corre_con_pregunta(&["verde"]);
+    assert!(got.iter().all(|e| !matches!(e, AdapterEvent::Permission { .. })), "una pregunta no es un permiso: {got:?}");
+    let AdapterEvent::Question { question_id, text } = got.iter().find(|e| matches!(e, AdapterEvent::Question { .. })).unwrap() else { unreachable!() };
+    assert_eq!(question_id, PREGUNTA_ID);
+    assert_eq!(text, "¿Cuál es tu color favorito? (opciones: Rojo, Azul)", "la pregunta con sus opciones, para que la persona vea qué se le pide");
+}
+
+#[test]
+fn la_respuesta_a_una_pregunta_vuelve_a_claude_con_las_preguntas_y_sus_respuestas() {
+    let (_, results, outcome, l) = corre_con_pregunta(&["verde"]);
+    assert!(results.iter().all(Result::is_ok));
+    let resp = l.last().1.written().into_iter().find(|w| w["type"] == "control_response").expect("respuesta");
+    assert_eq!(resp["response"]["request_id"], PREGUNTA_ID);
+    assert_eq!(resp["response"]["response"]["behavior"], "allow");
+    let updated = &resp["response"]["response"]["updatedInput"];
+    assert_eq!(updated["answers"], json!({ PREGUNTA_TEXTO: "verde" }), "la clave es el texto de la pregunta tal cual la dijo el modelo");
+    assert_eq!(updated["questions"][0]["question"], PREGUNTA_TEXTO, "las preguntas originales vuelven intactas");
+    assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
+}
+
+#[test]
+fn una_respuesta_vacia_a_una_pregunta_se_rechaza_sin_tocar_la_cli() {
+    let (_, results, _, l) = corre_con_pregunta(&["   ", "verde"]);
+    assert_eq!(results[0].as_ref().unwrap_err().code, ErrorCode::InvalidRequest);
+    assert!(results[1].is_ok(), "la respuesta válida posterior sí pasa");
+    assert_eq!(l.last().1.written().iter().filter(|w| w["type"] == "control_response").count(), 1, "solo se escribió la válida");
+}
+
+#[test]
+fn con_varias_preguntas_hace_falta_una_linea_por_cada_una_y_en_orden() {
+    let input = json!({"questions": [{"question": "uno?"}, {"question": "dos?"}]});
+    let qs = stream::questions_of(&input).unwrap();
+    assert_eq!(qs, ["uno?", "dos?"]);
+    assert_eq!(answered_questions(&input, &qs, "a\nb").unwrap()["answers"], json!({"uno?": "a", "dos?": "b"}));
+    assert_eq!(answered_questions(&input, &qs, "solo una").unwrap_err().code, ErrorCode::InvalidRequest, "una respuesta para dos preguntas no se reparte");
+    assert_eq!(answered_questions(&input, &qs, "a\nb\nc").unwrap_err().code, ErrorCode::InvalidRequest, "ni sobran");
+}
+
+#[test]
+fn una_entrada_de_ask_user_question_con_otra_forma_sigue_siendo_un_permiso() {
+    let line = |input: Value| json!({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": input}}).to_string();
+    for raro in [json!({}), json!({"questions": []}), json!({"questions": [{"sin": "pregunta"}]}), json!({"questions": "no es una lista"})] {
+        let msgs = parse_line(&line(raro.clone()));
+        assert!(matches!(msgs.as_slice(), [Msg::PermissionRequest { .. }]), "{raro}: {msgs:?}");
+    }
+    assert!(stream::questions_of(&json!({"questions": [{"question": "a"}, {"question": "b"}, {"question": "c"}, {"question": "d"}, {"question": "e"}]})).is_none(), "más de cuatro no es la herramienta");
+}
+
 // ── Interrupt y cancelación ───────────────────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -425,6 +555,41 @@ fn interrupt_exige_que_la_sesion_lo_declare() {
         cancel.cancel();
         h.join().unwrap().unwrap();
     });
+}
+
+/// LXO-242 · Si el cierre del proceso NO se pudo probar, una ejecución cancelada no se declara detenida: pasa a un fallo que lo dice. Un cierre
+/// probado sigue siendo `Cancelled`, y un éxito no cambia aunque el cierre no se probara.
+#[test]
+fn un_cierre_sin_probar_no_se_declara_cancelado() {
+    let l = FakeLauncher::new(vec![json!({"__gate": "prompt"}), json!({"type": "system", "subtype": "init", "session_id": SESSION}), json!({"__gate": "never"})]);
+    let reg = registro(adapter(cfg(), l.clone()));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    l.last().1.unprovable();
+    let (tx, rx) = mpsc::channel();
+    let outcome = std::thread::scope(|s| {
+        let h = s.spawn(|| g.events(&run, &cancel, &mut |e: AdapterEvent| tx.send(e).unwrap()));
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), AdapterEvent::SessionBound { .. }));
+        cancel.cancel();
+        h.join().unwrap().unwrap()
+    });
+    let RunOutcome::Failed(e) = outcome else { panic!("un cierre sin probar no puede ser Cancelled: {outcome:?}") };
+    assert_eq!(e.code, ErrorCode::Provider);
+    assert!(e.message.contains("no se pudo probar") && e.message.contains("no se declara detenido"), "{}", e.message);
+    assert!(l.last().1.was_killed(), "se intentó cerrar");
+}
+
+#[test]
+fn un_exito_no_cambia_aunque_el_cierre_no_se_pudiera_probar() {
+    let l = FakeLauncher::new(script_of(NORMAL));
+    let reg = registro(adapter(cfg(), l.clone()));
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    l.last().1.unprovable();
+    let outcome = g.events(&run, &cancel, &mut |_e: AdapterEvent| {}).unwrap();
+    assert!(matches!(outcome, RunOutcome::Completed { .. }), "{outcome:?}");
 }
 
 #[test]

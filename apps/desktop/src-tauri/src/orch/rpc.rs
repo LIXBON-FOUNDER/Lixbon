@@ -381,6 +381,7 @@ impl Core {
                 if !matches!(caller, Caller::User) || !context.is_person() {
                     return Err("integrar un Attempt solo está permitido a una Person autenticada".into());
                 }
+                super::worktree_share::ensure_not_a_sharer(self, args)?;
                 let input: super::integration_attempt::IntegrateInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de integración inválida".to_string())?;
                 super::integration_attempt::integrate_attempt(self, context, &input, &git::gh_pr)
             }
@@ -391,6 +392,23 @@ impl Core {
             "resource_adopt_preview" => {
                 let input: super::resource_adopt::PreviewInput = serde_json::from_value(args.clone()).map_err(|_| "resource_inventory_invalid_request: Solicitud de adopción inválida".to_string())?;
                 super::resource_adopt::preview(self, &caller, authenticated_context.as_ref(), &input)
+            }
+            // Compartir el worktree de otro Attempt antes de aprobar (LXO-248).
+            "attempt_share_worktree" => {
+                let context = authenticated_context.as_ref().ok_or("compartir un worktree requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("compartir un worktree solo está permitido a una Person autenticada".into());
+                }
+                let input: super::worktree_share::ShareInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud para compartir worktree inválida".to_string())?;
+                super::worktree_share::share(self, context, &input)
+            }
+            "attempt_share_candidates" => {
+                let context = authenticated_context.as_ref().ok_or("ver los worktrees que se pueden compartir requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("ver los worktrees que se pueden compartir solo está permitido a una Person autenticada".into());
+                }
+                let input: super::worktree_share::CandidatesInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de candidatos inválida".to_string())?;
+                super::worktree_share::candidates(self, context, &input)
             }
             "resource_adopt" => {
                 let context = authenticated_context.as_ref().ok_or("adoptar un worktree requiere una Person autenticada")?;
@@ -417,6 +435,7 @@ impl Core {
                 if !matches!(caller, Caller::User) || !context.is_person() {
                     return Err("revisar un Attempt solo está permitido a una Person autenticada".into());
                 }
+                super::worktree_share::ensure_not_a_sharer(self, args)?;
                 let input: super::proof_pack::ReviewInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de revisión inválida".to_string())?;
                 super::proof_pack::review_attempt(self, context, &input)
             }
@@ -765,7 +784,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // `core_restore` exige además una persona en el propio comando: un agente nunca restaura.
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
-        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "integrate" | "merge" | "pr" | "review" | "attempt_review" | "attempt_integrate" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_share_worktree" | "attempt_share_candidates" | "attempt_approve" | "attempt_reject" | "attempt_retry" | "attempt_resume" | "attempt_fork" | "attempt_lineage" | "attempt_queue" | "attempt_queue_cancel" | "pending_queue" | "attempt_steer" | "attempt_stop_and_send" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }

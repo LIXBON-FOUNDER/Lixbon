@@ -272,7 +272,7 @@ El inventario sigue siendo de solo lectura. Las acciones son comandos aparte, de
 
 | Comando | Qué hace | Qué nunca hace |
 |---|---|---|
-| `resource_inspect { task_id }` | estado del worktree (`none` · `present` · `missing` · `unknown`, y si está sucio), de la rama (existe, base, `integrated` · `not_merged` · `unknown`), del proceso y del Core; y qué acciones valen ahora con su motivo | nada |
+| `resource_inspect { task_id }` | estado del worktree (`none` · `present` · `missing` · `unknown`, y si está sucio), de la rama (existe, base, `integrated` · `not_merged` · `unknown`), del proceso y del Core; `shared.by` (LXO-248: el Attempt vivo de otra Task que lo comparte, o `null`); y qué acciones valen ahora con su motivo | nada |
 | `resource_clean { task_id, confirm }` | quita el worktree **limpio** de trabajo **integrado** y borra su rama con `branch -d` | borrar trabajo sin integrar, ni usar `-D` |
 | `resource_delete_worktree { task_id, confirm, discard_uncommitted? }` | quita la carpeta del worktree y **conserva la rama** | perder cambios sin commit sin `discard_uncommitted`; borrar la rama |
 
@@ -346,6 +346,29 @@ checkout principal (nombre completo, sin el prefijo `heads/` que git antepone si
 **Límites conocidos.** Adoptar necesita una Task sin ejecución con `repo`. La interfaz la crea con «Nuevo intento» → «Solo la tarea» (LXO-150; el Core ancla su
 `repo` a la ubicación verificada del Project). La Task queda anclada a esa ubicación: tras reubicar el Project (`project_locate`) las Tasks anteriores no se ofrecen
 (son de otro repositorio) y el diálogo (`adopt_no_task`) lo dice. Adoptar no toca git ni la carpeta.
+
+### Worktree compartido (LXO-248, migración 026)
+
+Un Attempt de **otra Task del mismo Project** puede reutilizar el worktree de otro Attempt (diseño y reglas: [WORKTREE_SHARED.md](WORKTREE_SHARED.md)).
+`attempt_share_worktree { attempt_id, from_attempt_id, confirm: true }` (solo una Person de Desktop) enlaza el Attempt destino —que **espera su
+aprobación**— al worktree en el que trabaja el origen; aprobar es lo que ejecuta, y el despachador se adjunta a esa carpeta sin crear, registrar ni
+borrar nada. Estados de la respuesta: `Shared` · `AlreadyShared` (repetir no cambia nada). Errores: `share_confirm_required` · `share_invalid` ·
+`share_not_found` · `share_source_without_worktree` · `share_not_pending` · `share_already_has_worktree` · `share_not_active` · `share_conflict`
+(Project distinto, o **otro Attempt vivo** ya usa ese worktree) · `share_degraded`.
+
+`attempt_share_candidates { attempt_id }` (lectura, solo una Person de Desktop) devuelve `candidates[]` del mismo Project y activos, cada uno con `from_attempt_id`
+(el que se pasa a `attempt_share_worktree`: el Attempt que creó el worktree), `owner_task_id`, `owner_task_title`, `branch`, `path` y `busy_by` (el Attempt vivo
+que lo usa ahora, o `null`): la interfaz muestra los ocupados deshabilitados, porque se comparte en serie.
+
+**Revisar e integrar (decisión de LXO-248):** un Attempt que COMPARTE no se revisa ni se integra desde sí mismo (`share_not_reviewable`, con el Attempt dueño en el
+mensaje): su Task no tiene rama propia —no es dueño, y si la tuviera su limpieza borraría la carpeta del dueño—. El trabajo vive en la rama del dueño, así que
+se revisa y se integra **desde el Attempt dueño**, que ya incluye lo que se hizo en esa carpeta (prueba `integrar_el_attempt_que_comparte_fusiona_el_trabajo_de_los_dos_y_luego_la_duena_limpia`).
+
+**Para este módulo importa:** el worktree sigue siendo de la Task que lo creó (`worktrees.task_id`); la Task que comparte **no** recibe `worktree` ni `branch`
+en su estado, así que `resource_clean` / `resource_delete_worktree` de ella son `nothing_to_do` y no tocan la carpeta del dueño. En la Task **dueña**,
+ambas se niegan con `resource_blocked: shared_in_use` mientras un Attempt vivo (no final) de otra Task lo use, y con `unknown` si no se pudo comprobar.
+Desde que se enlaza, quien comparte **ocupa** el worktree aunque aún espere su aprobación (en serie: nadie más entra, tampoco un seguimiento de la
+dueña); si se rechaza o termina, se libera.
 
 ### Pruebas (`resource_actions_e2e_tests.rs`, `resource_actions.rs`)
 

@@ -35,6 +35,8 @@
 #![cfg_attr(not(test), allow(dead_code))] // inerte hasta el corte: lo conectará el runtime de Attempt
 
 use super::event_kinds::{self, DispatchClaimSource, FailureCode, StopCause};
+/// Lo que el proveedor declaró de su uso en un turno (LXO-249). Las capas superiores lo reciben de aquí, no de `event_kinds`.
+pub(super) use super::event_kinds::{ReportedLimit, ReportedUsage};
 // Las capas superiores nombran la causa por aquí: el catálogo de eventos solo lo importan quienes construyen hechos.
 pub(super) use super::event_kinds::DispatchAmbiguityCause;
 pub(super) use super::event_kinds::PolicyDirection;
@@ -124,6 +126,16 @@ pub(super) fn queue_failed_fact(a: &AttemptRow, t: &TaskRow, item: &QueueItemRow
 /// Los hechos de Steer y Stop & Send (LXO-144): una petición aceptada y su resultado, unidos por `request_id`.
 pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, chars: i64, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_instruction_requested(a, t, request_id, mode, chars), ctx, at)
+}
+
+/// El hecho `attempt.request_answered` (LXO-247): qué se respondió a una petición del proveedor (solo `allow`/`deny` en un permiso).
+pub(super) fn request_answered_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_request_answered(a, t, request_id, kind, decision), ctx, at)
+}
+
+/// El hecho `attempt.usage_reported` (LXO-249): el uso que el proveedor declaró en un turno.
+pub(super) fn usage_reported_fact(a: &AttemptRow, t: &TaskRow, usage: &event_kinds::ReportedUsage, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_usage_reported(a, t, usage), ctx, at)
 }
 
 pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {

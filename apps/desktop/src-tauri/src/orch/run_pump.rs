@@ -9,7 +9,8 @@
 //!     Permission / Question -> el Attempt pasa a `awaiting_terminal_approval` (Attention `approval`) con un plazo y la petición
 //!                              queda pendiente (`provider_requests.rs`); una persona la responde con `attempt_answer`
 //!                              (`answer_runtime.rs`); vencido el plazo sin respuesta se cancela la ejecución
-//!     Output, ToolUse, Retry, Transport, Usage -> sin hecho durable
+//!     Output, ToolUse, Retry, Transport -> sin hecho durable
+//!     Usage -> attempt.usage_reported (uno por turno, solo lo declarado; LXO-249)
 //!   al volver `events`: el proceso ya murió (el adapter lo mata antes de devolver) -> se libera la ejecución del registro,
 //!   se aplica el desenlace al Attempt y se asienta el claim
 //! ```
@@ -211,8 +212,18 @@ impl Core {
                 }
                 result
             }
+            // El uso que el proveedor declaró en este turno (LXO-249): un hecho durable por turno, solo con lo declarado.
+            AdapterEvent::Usage { input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, limits } => {
+                let Some(live) = self.live_view(task) else { return };
+                let limits = limits.iter().filter_map(|w| super::attempt_ops::ReportedLimit::declared(&w.id, w.used_percent, w.resets_at)).collect();
+                let usage = super::attempt_ops::ReportedUsage::declared(input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, limits);
+                if let Err(why) = self.usage_reported(&live.attempt_id, &usage) {
+                    eprintln!("[core] no se pudo registrar el uso que informó el proveedor: {why}");
+                }
+                return;
+            }
             // Hechos informativos: ninguno es un hecho durable del Attempt.
-            AdapterEvent::Output { .. } | AdapterEvent::ToolUse { .. } | AdapterEvent::Retry { .. } | AdapterEvent::Transport { .. } | AdapterEvent::Usage { .. } => return,
+            AdapterEvent::Output { .. } | AdapterEvent::ToolUse { .. } | AdapterEvent::Retry { .. } | AdapterEvent::Transport { .. } => return,
         };
         if let Err(why) = result {
             eprintln!("[core] no se pudo registrar un hecho del proveedor: {why}");

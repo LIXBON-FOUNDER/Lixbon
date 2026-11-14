@@ -57,6 +57,12 @@ está bloqueado (con `--capability`, el perfil bloqueado manda). lxo no decide p
 (`transport_fallback` y `blocked_profiles`) son campos nuevos, siempre presentes, de las formas `v1` de `provider` (aún sin consumidores: se publicó en el PR #231 y no se ha lanzado) y
 su snapshot con respaldo es [`provider_list_respaldo.v1.json`](fixtures/lxo/provider_list_respaldo.v1.json).
 
+`lxo attempt show` (LXO-249) enseña el consumo que el proveedor declaró en el Attempt: el campo `usage` de `attempt_detail`, con la misma regla que el Core
+(`null` si no declaró nada; lo que ningún turno declaró es `null`, nunca `0`; lo imposible se descarta, no se corrige). Su `limits` es la cuota de la **cuenta**
+(una foto del último turno que la informó), no lo que gastó el intento, y el texto lo dice. Es un campo nuevo, siempre presente, de la forma `v1` de la ficha
+(`attempt_show.v1.json`; no se ha lanzado ningún `lxo` con esa forma): el `v` no sube. `lxo usage` **no** lo lee: sigue siendo la cuota de las cuentas
+(`usage_report`), otra fuente.
+
 `lxo usage` (LXO-207) es de solo lectura sobre `usage_report` ([QUERIES.md](QUERIES.md#usage_report-lxo-206)): lxo no consulta a ningún proveedor, no estima
 y no suma magnitudes de proveedores distintos. **Desconocido no es cero**: lo que el Core no da sale `null` en el `--json` y «sin dato» en el texto, y lo que el
 proveedor declara que no informa (`support`) se dice distinto de lo que no llegó. Un proveedor `stale`, `unknown` o con el entorno bloqueado es parte de la

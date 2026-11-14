@@ -363,6 +363,52 @@ fn list_data(rpc: Rpc, task_id: &str, filters: &Filters) -> Result<Value, Failur
     }))
 }
 
+/// Un número entero del Core o `null`: lo que no es un entero no se corrige (desconocido no es cero).
+fn whole(value: &Value) -> Value {
+    value.as_u64().map(Value::from).unwrap_or(Value::Null)
+}
+
+/// Un número del Core dentro de `min..=max` o `null`: lo imposible se descarta, no se corrige (misma regla que el Core).
+fn bounded(value: &Value, min: f64, max: f64) -> Value {
+    match value.as_f64() {
+        Some(n) if n.is_finite() && n >= min && n <= max => value.clone(),
+        _ => Value::Null,
+    }
+}
+
+/// `usage` de `attempt_detail` (LXO-249): lo que el PROVEEDOR declaró, sumado por turnos. `null` si no declaró nada (ausencia explícita);
+/// un campo que ningún turno declaró es `null`, nunca `0`. `limits` es la cuota de la CUENTA (una foto del último turno que la informó,
+/// no el consumo de este intento) y es `null` si el proveedor no la dio.
+fn usage_view(u: &Value) -> Value {
+    if !u.is_object() {
+        return Value::Null;
+    }
+    let windows: Vec<Value> = u["limits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|w| w.is_object())
+        .map(|w| {
+            json!({
+                "id": text(&w["id"]),
+                "used_percent": bounded(&w["used_percent"], 0.0, 100.0),
+                "resets_at": whole(&w["resets_at"]),
+            })
+        })
+        .collect();
+    json!({
+        "turns": whole(&u["turns"]),
+        "provider": text(&u["provider"]),
+        "source": text(&u["source"]),
+        "input_tokens": whole(&u["input_tokens"]),
+        "output_tokens": whole(&u["output_tokens"]),
+        "cache_read_tokens": whole(&u["cache_read_tokens"]),
+        "cache_creation_tokens": whole(&u["cache_creation_tokens"]),
+        "cost_usd": bounded(&u["cost_usd"], 0.0, f64::MAX),
+        "limits": if windows.is_empty() { Value::Null } else { Value::Array(windows) },
+    })
+}
+
 /// Allowlist de la ficha (`attempt_detail`). La sesión va sin la referencia del proveedor (el Core no la da).
 fn detail(a: &Value) -> Value {
     let status = a["status"].as_str().unwrap_or("");
@@ -406,6 +452,7 @@ fn detail(a: &Value) -> Value {
             "branch_kept": worktree["branch_kept"].as_bool(),
             "registered_by_attempt_id": text(&worktree["registered_by_attempt_id"]),
         }) } else { Value::Null },
+        "usage": usage_view(&a["usage"]),
         "artifacts": a["artifacts"].as_array().into_iter().flatten().map(|x| json!({
             "artifact_id": text(&x["id"]),
             "kind": text(&x["kind"]),
@@ -701,6 +748,61 @@ fn review_text(r: &Value) -> String {
     )
 }
 
+fn usage_text(u: &Value) -> Vec<String> {
+    if !u.is_object() {
+        return vec!["  Consumo:     el proveedor no declaró consumo".into()];
+    }
+    let n = |name: &str| {
+        u[name]
+            .as_u64()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "sin dato".into())
+    };
+    let mut origin = vec!["declarado por el proveedor".to_string()];
+    if let Some(p) = field(u, "provider") {
+        origin.push(p);
+    }
+    if let Some(t) = u["turns"].as_u64().filter(|t| *t > 0) {
+        origin.push(if t == 1 { "1 turno".into() } else { format!("{t} turnos") });
+    }
+    let mut lines = vec![
+        format!(
+            "  Consumo:     entrada {} · salida {} · caché leída {} · caché creada {}",
+            n("input_tokens"),
+            n("output_tokens"),
+            n("cache_read_tokens"),
+            n("cache_creation_tokens")
+        ),
+        format!(
+            "               coste {} · {}",
+            u["cost_usd"]
+                .as_f64()
+                .map(|c| format!("{c:.4} USD"))
+                .unwrap_or_else(|| "sin dato".into()),
+            origin.join(" · ")
+        ),
+    ];
+    let windows = u["limits"].as_array().cloned().unwrap_or_default();
+    if !windows.is_empty() {
+        lines.push("  Cuota:       de la CUENTA en el último turno que la informó (no es lo que gastó este intento)".into());
+        for w in windows {
+            let used = w["used_percent"]
+                .as_f64()
+                .map(|p| format!("{p:.1} % usado"))
+                .unwrap_or_else(|| "uso sin dato".into());
+            let reset = w["resets_at"]
+                .as_u64()
+                .map(|s| format!("se reinicia {} UTC", timestamp_utc(s as i64 * 1000)[..16].replace('T', " ")))
+                .unwrap_or_else(|| "reinicio sin dato".into());
+            lines.push(format!(
+                "               {} · {used} · {reset}",
+                field(&w, "id").unwrap_or_else(|| "?".into())
+            ));
+        }
+    }
+    lines
+}
+
 fn show_text(data: &Value) -> String {
     let d = &data["attempt"];
     let id = field(d, "attempt_id").unwrap_or_default();
@@ -754,6 +856,7 @@ fn show_text(data: &Value) -> String {
     ));
     lines.extend(session_text(&d["provider_session"], &id));
     lines.extend(worktree_text(&d["worktree"]));
+    lines.extend(usage_text(&d["usage"]));
     lines.extend(artifact_lines(&d["artifacts"]));
     lines.push(review_text(&d["review"]));
     lines.extend(activity_lines(
@@ -1166,7 +1269,7 @@ mod tests {
                 "provider": "codex", "model": "gpt-6.1-sol", "effort": "high", "profile": "implementar",
                 "role": "implementador", "origin": "lixbon",
                 "created_at": 1_792_000_040_000u64, "started_at": 1_792_000_050_000u64, "ended_at": null,
-                "summary": "API lista", "failure_reason": null, "integrated": true,
+                "summary": "API lista", "failure_reason": null, "integrated": true, "usage": null,
                 "provider_session": {
                     "provider_session_id": "ps-t3-a1", "status": "idle", "resumable": true,
                     "binding": "session_id", "bound": true, "opened_by_attempt_id": "t3-a1"
@@ -1213,6 +1316,59 @@ mod tests {
             data["activity"]["items"][0]["seq"] == 20,
             "lo último al final"
         );
+    }
+
+    /// LXO-249: el uso que el proveedor declaró sale en la ficha (JSON y texto) tal cual: sin ceros inventados, con la cuota marcada como
+    /// de la cuenta, y lo imposible (porcentaje fuera de rango, coste negativo, enteros que no lo son) se descarta en vez de corregirse.
+    #[test]
+    fn la_ficha_lleva_el_uso_declarado_sin_inventar_ceros() {
+        let sin = detail(&json!({ "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done", "usage": null }));
+        assert_eq!(sin["usage"], Value::Null, "sin uso declarado: ausencia explícita");
+        assert!(show_text(&json!({ "attempt": sin, "activity": null })).contains("Consumo:     el proveedor no declaró consumo"));
+        let faltante = detail(&json!({ "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done" }));
+        assert_eq!(faltante["usage"], Value::Null, "un Core anterior que no trae `usage` tampoco inventa nada");
+
+        let con = detail(&json!({
+            "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done",
+            "usage": {
+                "turns": 2, "provider": "claude", "source": "provider_declared",
+                "input_tokens": 1200, "output_tokens": 340, "cache_read_tokens": 9000, "cache_creation_tokens": null,
+                "cost_usd": 0.0421,
+                "limits": [
+                    { "id": "five_hour", "used_percent": 58.0, "resets_at": 1_792_000_000u64 },
+                    { "id": "seven_day", "used_percent": 140.0, "resets_at": -5 },
+                    "no soy una ventana"
+                ]
+            }
+        }));
+        assert_eq!(
+            con["usage"],
+            json!({
+                "turns": 2, "provider": "claude", "source": "provider_declared",
+                "input_tokens": 1200, "output_tokens": 340, "cache_read_tokens": 9000, "cache_creation_tokens": null,
+                "cost_usd": 0.0421,
+                "limits": [
+                    { "id": "five_hour", "used_percent": 58.0, "resets_at": 1_792_000_000u64 },
+                    { "id": "seven_day", "used_percent": null, "resets_at": null }
+                ]
+            })
+        );
+        let human = show_text(&json!({ "attempt": con, "activity": null }));
+        assert!(human.contains("Consumo:     entrada 1200 · salida 340 · caché leída 9000 · caché creada sin dato"), "{human}");
+        assert!(human.contains("coste 0.0421 USD · declarado por el proveedor · claude · 2 turnos"), "{human}");
+        assert!(human.contains("Cuota:       de la CUENTA en el último turno que la informó (no es lo que gastó este intento)"), "{human}");
+        assert!(human.contains("five_hour · 58.0 % usado · se reinicia 2026-10-14 17:46 UTC"), "{human}");
+        assert!(human.contains("seven_day · uso sin dato · reinicio sin dato"), "{human}");
+
+        let sin_cuota = detail(&json!({
+            "id": "t3-a1", "task_id": "t3", "n": 1, "status": "done",
+            "usage": { "turns": 1, "provider": "codex", "source": "provider_declared", "input_tokens": 10, "output_tokens": 5, "cost_usd": null, "limits": [] }
+        }));
+        assert_eq!(sin_cuota["usage"]["cost_usd"], Value::Null, "un proveedor que da tokens y no coste deja el coste sin dato, no 0");
+        assert_eq!(sin_cuota["usage"]["limits"], Value::Null);
+        let human = show_text(&json!({ "attempt": sin_cuota, "activity": null }));
+        assert!(human.contains("coste sin dato · declarado por el proveedor · codex · 1 turno"), "{human}");
+        assert!(!human.contains("Cuota:"), "sin ventanas no se pinta la cuota: {human}");
     }
 
     /// LXO-245: un Core ANTERIOR al saneado de `attempt_detail` puede devolver una URI de PR heredada con credenciales, query o

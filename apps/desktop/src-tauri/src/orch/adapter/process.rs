@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::orch::adapter::redact::safe_text;
-use crate::orch::adapter::AdapterError;
+use crate::orch::adapter::{AdapterError, RunOutcome};
 
 /// Una línea de stdout más larga que esto se descarta (llega como [`OVERSIZE`]): un volcado no puede agotar la memoria.
 pub const MAX_LINE_BYTES: usize = 1024 * 1024;
@@ -50,16 +50,44 @@ pub enum Recv {
     Timeout,
 }
 
+/// Cómo quedó el cierre de un proceso (LXO-242). `Unproven`: no se pudo PROBAR que el proceso y sus descendientes terminaron (identidad ilegible, tabla
+/// de procesos no fiable, un kill que falló). Nunca es un éxito: quien cierra debe decirlo y no declarar detenido lo que puede seguir vivo. El árbol se
+/// conserva para reintentar el cierre al soltar el proceso (`Drop`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "un cierre sin probar tiene que decirse: no se declara detenido un proceso que puede seguir vivo"]
+pub enum Closure {
+    Proven,
+    Unproven,
+}
+
+/// El desenlace de una ejecución tras cerrar su proceso. Una ejecución `Cancelled` o `Interrupted` afirma que el proceso ya no está: si el cierre no se
+/// probó, eso es mentira y pasa a un fallo que lo dice (el Core no declara detenido a un Attempt cuyo proceso no pudo cerrar). Un `Completed` o un
+/// `Failed` ya dicen lo que el proveedor hizo, no que el proceso terminó: se conservan y el cierre sin probar queda en el log.
+pub fn outcome_after_close(outcome: RunOutcome, closure: Closure) -> RunOutcome {
+    match (closure, outcome) {
+        (Closure::Unproven, RunOutcome::Cancelled | RunOutcome::Interrupted) => RunOutcome::Failed(AdapterError::provider(
+            "no se pudo probar que el proceso del proveedor y sus descendientes terminaron: puede seguir vivo, así que no se declara detenido",
+        )),
+        (Closure::Unproven, kept) => {
+            eprintln!("[core] el cierre del proceso de un proveedor no se pudo probar: puede seguir vivo");
+            kept
+        }
+        (Closure::Proven, kept) => kept,
+    }
+}
+
 /// Un proceso vivo. Todos los métodos son `&self` y thread-safe: `events` lee mientras `answer`/`interrupt` escriben.
 pub trait Process: Send + Sync {
     fn send(&self, line: &str) -> Result<(), AdapterError>;
     fn recv(&self, timeout: Duration) -> Recv;
     /// Cierra stdin: la CLI termina sola al acabar el turno.
     fn close_input(&self);
-    /// Mata el proceso y sus hijos.
-    fn kill(&self);
+    /// Mata el proceso y sus hijos y dice si el cierre quedó PROBADO ([`Closure`]).
+    fn kill(&self) -> Closure;
     /// Cola de stderr, ya redactada: es lo que acompaña a un fallo como diagnóstico.
     fn stderr_tail(&self) -> String;
+    /// El Attempt dueño del proceso (`<task>-a<n>`), para que un cierre sin probar quede en la custodia a su nombre (LXO-242). No-op por defecto.
+    fn set_owner(&self, _owner: &str) {}
 }
 
 pub trait Launcher: Send + Sync {
@@ -90,13 +118,45 @@ fn read_bounded_line(r: &mut impl BufRead) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).trim_end_matches(['\r', '\n']).to_string())
 }
 
-pub struct ChildProcess {
+/// La familia de procesos de una ejecución: la raíz, su árbol con identidad y (Windows) su Job, y si ya se cerró. Es lo que el supervisor conserva
+/// cuando un cierre no se pudo probar (`supervisor.rs`): vive aparte del `ChildProcess` para poder sobrevivirle.
+pub(super) struct Family {
     child: Mutex<Child>,
     /// El árbol de procesos de la raíz, con su identidad y (Windows) su Job: es con lo que se cierra todo el árbol sin tocar
     /// nunca a un proceso ajeno (LXO-242).
     tree: Mutex<crate::proctable::Tree>,
     /// El árbol se cerró y la raíz se reapeó: no hay nada más que cerrar.
     closed: AtomicBool,
+}
+
+/// SOLO pruebas: el siguiente cierre de ESTE hilo no se puede probar (no mata nada), para ejercitar la custodia sin esperar a un fallo real.
+#[cfg(test)]
+thread_local! {
+    pub(super) static BREAK_CLOSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// SOLO pruebas: lanza un proceso real de larga duración y deja su cierre SIN PROBAR, en la custodia del supervisor y a nombre de `owner`. Devuelve el
+/// asa (soltarla no lo cierra: la familia ya está en custodia) para que una prueba de otro módulo vea los efectos.
+#[cfg(test)]
+pub(crate) fn lanza_en_custodia(owner: &str) -> Arc<dyn Process> {
+    let spec = if cfg!(windows) {
+        LaunchSpec { program: PathBuf::from("ping"), args: vec!["-n".into(), "139".into(), "127.0.0.1".into()], cwd: std::env::temp_dir(), env: vec![], env_remove: vec![] }
+    } else {
+        LaunchSpec { program: PathBuf::from("sleep"), args: vec!["139".into()], cwd: std::env::temp_dir(), env: vec![], env_remove: vec![] }
+    };
+    let p = spawn_child(&spec).expect("lanzamiento");
+    p.set_owner(owner);
+    BREAK_CLOSE.with(|b| b.set(true));
+    let closure = p.kill();
+    BREAK_CLOSE.with(|b| b.set(false));
+    assert_eq!(closure, Closure::Unproven);
+    Arc::new(p)
+}
+
+pub struct ChildProcess {
+    family: Arc<Family>,
+    /// El Attempt dueño de este proceso (`<task>-a<n>`), si el adapter lo dijo: lo que permite decir «esa Task tiene un proceso sin cerrar».
+    owner: Mutex<Option<String>>,
     stdin: Mutex<Option<ChildStdin>>,
     rx: Mutex<Receiver<Option<String>>>,
     stderr: Arc<Mutex<Vec<u8>>>,
@@ -122,9 +182,19 @@ impl Process for ChildProcess {
         *self.stdin.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
-    fn kill(&self) {
+    fn kill(&self) -> Closure {
         self.close_input();
-        self.close_tree();
+        if self.family.close() {
+            Closure::Proven
+        } else {
+            // Sin prueba, el supervisor conserva la familia (no se pierde ni se mata a ciegas) y la reintentará.
+            super::supervisor::keep(self.owner(), Arc::clone(&self.family));
+            Closure::Unproven
+        }
+    }
+
+    fn set_owner(&self, owner: &str) {
+        *self.owner.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner.to_string());
     }
 
     fn stderr_tail(&self) -> String {
@@ -134,12 +204,22 @@ impl Process for ChildProcess {
 }
 
 impl ChildProcess {
+    fn owner(&self) -> Option<String> {
+        self.owner.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+impl Family {
     /// Cierra TODO el árbol de la raíz comprobando la identidad de cada proceso (`proctable::kill_tree`) y, solo si se
     /// comprobó su muerte, reapea la raíz. `true` si no queda nada. Si no se puede probar (identidad ilegible, tabla de
     /// procesos no fiable) NO se hace un kill ciego del resto del árbol: el árbol y la raíz sin reapear se conservan para
     /// reintentarlo (en Unix la raíz sin reapear ancla su pid). A la raíz, que este `Child` posee, sí se le ordena morir:
     /// su handle (o su zombi) impide que ese pid sea de otro.
-    fn close_tree(&self) -> bool {
+    pub(super) fn close(&self) -> bool {
+        #[cfg(test)]
+        if BREAK_CLOSE.with(|b| b.get()) {
+            return false;
+        }
         if self.closed.load(Ordering::Acquire) {
             return true;
         }
@@ -165,13 +245,10 @@ impl ChildProcess {
 
 impl Drop for ChildProcess {
     fn drop(&mut self) {
-        // Un adapter que suelta el proceso sin cerrarlo no deja una CLI huérfana ni sus descendientes.
-        if !self.close_tree() {
-            // Sin poder probar el árbol: último recurso sobre la raíz, que es nuestra (nunca el resto a ciegas), y se reapea.
-            if let Ok(mut c) = self.child.lock() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
+        // Un adapter que suelta el proceso sin cerrarlo no deja una CLI huérfana ni sus descendientes. Si el cierre no se puede probar, el supervisor
+        // CONSERVA la familia (antes se mataba la raíz a ciegas y se reapeaba, perdiendo el ancla de su pid): la reintentará `reap`.
+        if !self.family.close() {
+            super::supervisor::keep(self.owner(), Arc::clone(&self.family));
         }
     }
 }
@@ -287,7 +364,8 @@ fn spawn_child(spec: &LaunchSpec) -> Result<ChildProcess, AdapterError> {
             }
         });
     }
-    Ok(ChildProcess { child: Mutex::new(child), tree: Mutex::new(tree), closed: AtomicBool::new(false), stdin: Mutex::new(stdin), rx: Mutex::new(rx), stderr })
+    let family = Arc::new(Family { child: Mutex::new(child), tree: Mutex::new(tree), closed: AtomicBool::new(false) });
+    Ok(ChildProcess { family, owner: Mutex::new(None), stdin: Mutex::new(stdin), rx: Mutex::new(rx), stderr })
 }
 
 /// SOLO pruebas: la reanudación de la raíz suspendida falla (camino de aborto del lanzamiento, Windows).
@@ -309,7 +387,7 @@ fn resume_root(pid: u32) -> bool {
 impl ChildProcess {
     #[cfg(test)]
     fn pid(&self) -> u32 {
-        self.child.lock().unwrap_or_else(|e| e.into_inner()).id()
+        self.family.child.lock().unwrap_or_else(|e| e.into_inner()).id()
     }
 }
 
@@ -394,7 +472,7 @@ mod tests {
         let p = spawn_child(&spec(guion_con_huerfano(&dir, "133", "134"), vec![])).expect("lanzamiento");
         assert!(espera(|| !pings_con("133").is_empty() && !pings_con("134").is_empty(), 20), "el huérfano y el ping de la raíz arrancaron");
         let (huerfano, raiz) = (pings_con("133"), pings_con("134"));
-        p.kill();
+        assert_eq!(p.kill(), Closure::Proven);
         assert!(espera(|| pings_con("133").is_empty() && pings_con("134").is_empty(), 20), "murieron el huérfano {huerfano:?} (su `ppid` cuelga de un cmd que ya salió) y el de la raíz {raiz:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -462,7 +540,7 @@ mod tests {
         let (p, pidfile) = lanza_con_huerfano(&dir, "133", "134");
         let huerfano = pid_del_huerfano(&pidfile);
         assert!(vivo(huerfano) && vivo(p.pid()), "antes de cerrar viven la raíz y el huérfano");
-        p.kill();
+        assert_eq!(p.kill(), Closure::Proven);
         assert!(espera(|| !vivo(huerfano), 20), "el huérfano {huerfano} (reparentado a init) murió con el árbol");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -479,7 +557,7 @@ mod tests {
         let huerfano = pid_del_huerfano(&pidfile);
         assert!(espera(|| !vivo(p.pid()), 20), "la raíz salió sola (queda zombi)");
         assert!(vivo(huerfano), "y el huérfano sigue vivo");
-        p.kill();
+        assert_eq!(p.kill(), Closure::Proven);
         assert!(espera(|| !vivo(huerfano), 20), "cerrar el árbol mató al huérfano {huerfano} aunque la raíz ya había salido");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -509,13 +587,111 @@ mod tests {
     fn cerrar_dos_veces_es_inocuo_y_la_raiz_muere() {
         let p = spawn_child(&proceso_largo()).expect("lanzamiento");
         let pid = p.pid();
-        p.kill();
-        p.kill();
-        assert!(p.closed.load(Ordering::Acquire), "el cierre se comprobó");
+        assert_eq!(p.kill(), Closure::Proven);
+        assert_eq!(p.kill(), Closure::Proven);
+        assert!(p.family.closed.load(Ordering::Acquire), "el cierre se comprobó");
         #[cfg(windows)]
         assert!(espera(|| !powershell(&format!("Get-Process -Id {pid} -ErrorAction SilentlyContinue")).contains("ProcessName"), 10), "la raíz murió");
         #[cfg(unix)]
         assert!(espera(|| !vivo(pid), 10), "la raíz murió");
+    }
+
+    // --- Supervisor: la custodia de lo que no se pudo cerrar con prueba (LXO-242) ---
+
+    use crate::orch::adapter::supervisor;
+    use crate::orch::pty::pruebas::{espera_muerto, serie_custodia, vivo as proceso_vivo};
+
+    /// Un cierre que no se puede probar sin matar nada (el hook de prueba) y vuelve a la normalidad.
+    fn kill_sin_prueba(p: &ChildProcess) -> Closure {
+        BREAK_CLOSE.with(|b| b.set(true));
+        let c = p.kill();
+        BREAK_CLOSE.with(|b| b.set(false));
+        c
+    }
+
+    /// Un cierre sin probar NO mata a ciegas ni pierde el árbol: queda en la custodia a nombre de su Attempt, el proceso sigue vivo, y `reap` lo cierra
+    /// cuando ya se puede probar. Lo comprobado sale de la custodia.
+    #[test]
+    fn un_cierre_sin_probar_queda_en_custodia_con_su_dueno_y_reap_lo_cierra() {
+        let _serie = serie_custodia();
+        let antes = supervisor::count();
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.set_owner("t9-a1");
+
+        assert_eq!(kill_sin_prueba(&p), Closure::Unproven);
+        assert_eq!(supervisor::count(), antes + 1, "la familia quedó en custodia");
+        assert!(supervisor::in_custody("t9-a1") && supervisor::task_in_custody("t9"));
+        assert!(proceso_vivo(pid), "sin prueba no se mata a ciegas: el proceso sigue vivo");
+
+        assert_eq!(supervisor::reap(), antes, "con el cierre ya posible, lo comprobado sale de la custodia");
+        assert!(!supervisor::in_custody("t9-a1") && !supervisor::task_in_custody("t9"));
+        assert!(espera_muerto(pid), "el árbol terminó");
+    }
+
+    /// Soltar el proceso (`Drop`) con el cierre sin probar tampoco lo pierde: antes se mataba la raíz a ciegas y se reapeaba, perdiendo el ancla de su pid.
+    #[test]
+    fn soltar_un_proceso_sin_probar_no_lo_pierde() {
+        let _serie = serie_custodia();
+        let antes = supervisor::count();
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.set_owner("t8-a2");
+        BREAK_CLOSE.with(|b| b.set(true));
+        drop(p);
+        BREAK_CLOSE.with(|b| b.set(false));
+
+        assert_eq!(supervisor::count(), antes + 1, "soltarlo no lo descarta");
+        assert!(supervisor::in_custody("t8-a2") && proceso_vivo(pid));
+        assert_eq!(supervisor::reap(), antes);
+        assert!(espera_muerto(pid));
+    }
+
+    /// La misma familia no se registra dos veces aunque se intente cerrar varias veces sin prueba.
+    #[test]
+    fn la_misma_familia_no_se_registra_dos_veces() {
+        let _serie = serie_custodia();
+        let antes = supervisor::count();
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.set_owner("t7-a1");
+        assert_eq!((kill_sin_prueba(&p), kill_sin_prueba(&p)), (Closure::Unproven, Closure::Unproven));
+        assert_eq!(supervisor::count(), antes + 1);
+        assert_eq!(supervisor::reap(), antes);
+        assert!(espera_muerto(pid));
+    }
+
+    /// El dueño se compara exacto: la Task `t9` no es la `t90`.
+    #[test]
+    fn la_task_en_custodia_se_compara_por_su_id_exacto() {
+        let _serie = serie_custodia();
+        let antes = supervisor::count();
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.set_owner("t90-a1");
+        assert_eq!(kill_sin_prueba(&p), Closure::Unproven);
+        assert!(supervisor::task_in_custody("t90"));
+        assert!(!supervisor::task_in_custody("t9"), "t9 no es t90");
+        assert!(!supervisor::task_in_custody("t90-a"), "ni un prefijo");
+        assert_eq!(supervisor::reap(), antes);
+        assert!(espera_muerto(pid));
+    }
+
+    /// El apagado ordenado del Core reintenta la custodia de los adapters antes de salir.
+    #[test]
+    fn el_apagado_del_core_reintenta_la_custodia_de_los_adapters() {
+        let _serie = serie_custodia();
+        let antes = supervisor::count();
+        let p = spawn_child(&proceso_largo()).expect("lanzamiento");
+        let pid = p.pid();
+        p.set_owner("t6-a1");
+        assert_eq!(kill_sin_prueba(&p), Closure::Unproven);
+        assert_eq!(supervisor::count(), antes + 1);
+
+        crate::orch::Orch::default().0.shutdown();
+
+        assert_eq!(supervisor::count(), antes, "Core::shutdown vació la custodia de los adapters");
+        assert!(espera_muerto(pid));
     }
 
     #[test]

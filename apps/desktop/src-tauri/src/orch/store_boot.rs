@@ -708,6 +708,34 @@ impl Core {
         self.queue_store(|st| queue_commands::attempt_of(st, attempt_id))
     }
 
+    /// `attempt.request_answered` (LXO-247): lo que una persona respondió a una petición del proveedor, ya aceptada por este.
+    pub(super) fn request_answered(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let event = steer_commands::answered_event(st, ctx, attempt_id, request_id, kind, decision)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
+    /// El almacén para compartir un worktree (LXO-248): las lecturas y el enlace de `worktree_share`, la provisión y el Resource Manager. Como
+    /// `queue_store`, el único sitio por el que esas capas lo tocan (frontera de mutación).
+    pub(super) fn worktree_store<R>(&self, f: impl FnOnce(&mut Store) -> R) -> Option<R> {
+        self.storage.with_store(f)
+    }
+
+    /// `attempt.usage_reported` (LXO-249): el uso que el proveedor declaró en un turno del Attempt. Un turno sin nada declarado no deja hecho.
+    pub(super) fn usage_reported(&self, attempt_id: &str, usage: &super::attempt_ops::ReportedUsage) -> Result<(), QueueError> {
+        if !usage.any() {
+            return Ok(());
+        }
+        self.queue_store(|st| {
+            let (attempt, task) = steer_commands::rows(st, attempt_id)?;
+            let event = attempt_ops::usage_reported_fact(&attempt, &task, usage, &MutationContext::core(), super::state::now_ms() as i64).map_err(queue_commands::from_store)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// `attempt.instruction_requested`.
     pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
         self.queue_store(|st| {

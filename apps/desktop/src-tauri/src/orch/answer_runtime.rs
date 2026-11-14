@@ -20,12 +20,12 @@
 //! * **El plazo sigue siendo el límite.** Mientras queden peticiones sin responder el Attempt sigue esperando y el plazo corre; una
 //!   respuesta tardía (la ejecución ya se canceló por el plazo) es `not_running`/`attempt_final`, no una resurrección.
 //! * **Solo una Person.** Ni un agente ni el Core responden por una persona (la automatización es F9).
-//! * **Todavía no pasa por la policy de autonomía** (`policy.rs`): las categorías `answer` y `provider_permissions` están reservadas
-//!   y `enforced: false`; este comando no las engancha (decisión de producto pendiente, ver `docs/core/POLICY.md`).
+//! * **Pasa por la policy de autonomía** (`policy.rs`, antes de despachar): PERMITIR un permiso es `provider_permissions` (piso
+//!   `confirm`: exige `confirm: true`); denegarlo o contestar una pregunta es `answer`. Ver `docs/core/POLICY.md`.
 //! * La respuesta de un permiso es siempre `allow` o `deny`; nunca se deduce de un texto libre.
 //!
-//! Lo que NO hace: no deja un Event propio de la respuesta (qué se decidió). Queda constancia del cambio de estado
-//! (`attempt.resumed`), no de la decisión; ver `docs/core/RESPUESTAS.md`.
+//! Deja un Event durable de la decisión (`attempt.request_answered`: tipo y `allow`/`deny`, nunca el texto de una respuesta libre),
+//! escrito antes del `attempt.resumed`; ver `docs/core/RESPUESTAS.md`.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -141,6 +141,16 @@ impl Core {
         // El proveedor la aceptó: ya no se puede deshacer. Con el candado de las peticiones tomado (antes que el del Core, como el
         // bombeo): así una petición nueva no llega entre medias, y el Attempt no vuelve a `running` con algo sin responder.
         let mut waiting = awaiting.lock();
+        // Queda constancia de QUÉ se decidió (solo `allow`/`deny` en un permiso; el texto de una pregunta no viaja). Si no se puede
+        // escribir, el proveedor ya la tiene: se dice, no se esconde, y no se deshace nada.
+        let decided = match (request.kind, decision.as_str()) {
+            (RequestKind::Permission, "allow") => Some("allow"),
+            (RequestKind::Permission, _) => Some("deny"),
+            (RequestKind::Question, _) => None,
+        };
+        if let Err(why) = self.request_answered(ctx, &attempt.id, &request.id, request.kind.as_str(), decided) {
+            eprintln!("[core] el proveedor aceptó la respuesta a {request_id} de {} pero no quedó constancia de la decisión: {why}", attempt.id);
+        }
         if waiting.finish(&request.id, &decision) {
             match self.mutate_as(ctx, |tx| tx.resume_from_approval(&attempt.task_id).map(|_| ())) {
                 Ok(()) => waiting.stop_waiting(),
@@ -177,6 +187,10 @@ pub(super) struct AnswerInput {
     pub attempt_id: String,
     pub request_id: String,
     pub answer: String,
+    /// La confirmación explícita que pide la policy para PERMITIR un permiso del proveedor (`provider_permissions`, LXO-247). La lee la
+    /// policy en `rpc` antes de despachar, no este Command.
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Deserialize)]

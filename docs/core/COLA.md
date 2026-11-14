@@ -118,6 +118,11 @@ Events y en `Store::queue_of_attempt`.
 | `queued` | terminado | `failed(attempt_ended)`, sin Attention |
 | `queued` | vivo | **se conserva**: se entrega en su próximo límite de turno |
 
+**Tras un reinicio real del Core la tercera fila no se da** (LXO-250): el arranque cierra como `exited` TODA tarea no final (`orphan_all`),
+también las que esperaban una respuesta o un permiso, porque el proceso del proveedor murió con el Core. Un Attempt «vivo» al recuperar
+solo existe en pruebas de almacén que llaman a `recover` sin pasar por el arranque. La fila se conserva por si `recover` se invoca desde
+otro sitio, pero hoy en la práctica todo lo pendiente falla al reiniciar: `delivering` → `interrupted`, `queued` → `attempt_ended`.
+
 Idempotente: una segunda pasada no encuentra nada que cerrar. `settle_attempt_end(attempt)` aplica lo mismo a un solo
 Attempt (lo llama el runtime tras cerrarlo, y `deliver_next` si lo encuentra cerrado).
 
@@ -186,7 +191,13 @@ Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y
 * `pending_queue` está en la lista de lecturas del ADE (`ADE_READ_QUERIES`) y el ADE la pinta en `AttemptQueue.jsx` (compositor, dock de pendientes con
   «Cancelar» e historial). El mismo compositor ofrece Steer y «Detener y enviar» (LXO-144, [STEER.md](STEER.md)) cuando el proveedor los ofrece; los que no,
   salen desactivados con su razón y nunca caen a encolar en silencio.
-* La recuperación al arrancar está cableada pero solo probada a nivel de `recover` (`queue_commands_tests.rs`), no con un reinicio real del Core.
+* **Entrega idle (decisión, LXO-250):** el paso 5 («entrega inmediata si el run ya está en un límite de turno») **no es alcanzable por el RPC**:
+  `TurnPort` devuelve siempre `Busy` al encolar y un Attempt `running` está siempre en mitad de un turno. Se conserva en `queue_attempt` para
+  los llamantes que no son el RPC y se prueba a nivel de unidad (`queue_commands_tests.rs`); lo que sí corre de punta a punta es la entrega
+  en el fin de turno por el bombeo (`la_cola_entrega_en_fifo…`). No se añade un camino idle por RPC: no hay un estado de Attempt que lo permita.
+* La recuperación al arrancar se prueba con un **reinicio real del Core** (`queue_restart_tests.rs`: suelta el Core y arranca otro sobre las
+  mismas carpetas): lo en vuelo falla `interrupted`, lo encolado `attempt_ended`, nada se entrega y un segundo reinicio no escribe más. Comprobado
+  que quitar `queue_recover_at_boot` del arranque hace fallar la prueba.
 * Sin adjuntos (D11) y sin `lxo` (LXO-159).
 
 Pruebas del puente: `orch/attempt_e2e_tests.rs` (`la_cola_entrega_en_fifo…`, `si_la_entrega_falla…`, `detener_con_instrucciones_en_cola…`,
@@ -227,6 +238,6 @@ nacería *después* del evento final que la habría cerrado, quedando abierta pa
 | 4 | La entrega se confirma con un hecho del adapter | `QueueConfirmation` sin valor «stdin»; `delivered` exige `confirmed_by` (CHECK) | `la_confirmacion_queda_registrada_y_solo_la_da_el_adapter`, `si_el_adapter_no_confirma_el_item_falla_con_su_motivo_su_evento_y_su_attention`, `la_identidad_el_contenido_y_la_historia_no_se_tocan` |
 | 5 | La persona puede inspeccionar qué sigue pendiente | `pending` + `Store::queue_pending_of_attempt` | `la_query_de_la_cola_pendiente_muestra_lo_que_sigue_y_en_que_orden` |
 | 6 | FIFO | `seq` consecutivo + trigger `attempt_queue_fifo` + un solo `delivering` por Attempt | `n_items_se_entregan_en_fifo_uno_por_limite_de_turno`, `un_item_nuevo_no_se_adelanta_a_los_que_ya_esperaban`, `la_base_impone_fifo_una_entrega_en_vuelo_y_un_orden_sin_huecos` |
-| 7 | Reinicio / recuperación | policy D7 | `la_recuperacion_conserva_lo_encolado_de_un_attempt_vivo_y_no_reintenta_lo_que_iba_en_vuelo`, `la_cola_sobrevive_a_reabrir_el_almacen_con_su_orden_y_su_estado` |
+| 7 | Reinicio / recuperación | policy D7 | `la_recuperacion_conserva_lo_encolado_de_un_attempt_vivo_y_no_reintenta_lo_que_iba_en_vuelo`, `la_cola_sobrevive_a_reabrir_el_almacen_con_su_orden_y_su_estado`, y con reinicio real `un_reinicio_real_con_la_cola_no_vacia_cierra_lo_pendiente_y_no_entrega_nada` |
 | 8 | Estado + Event, juntos | una transacción por mutador | `si_el_evento_falla_o_no_es_del_attempt_no_queda_ni_el_item` |
 | 9 | La instrucción no viaja en Events ni Activity | payloads tipados sin cuerpo | `los_eventos_llevan_el_hecho_y_nunca_la_instruccion`, `cada_evento_de_la_cola_tiene_su_activity_sin_la_instruccion` |

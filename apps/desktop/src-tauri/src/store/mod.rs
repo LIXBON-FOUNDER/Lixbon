@@ -91,6 +91,8 @@ mod retries_tests;
 #[cfg(test)]
 mod worktrees_tests;
 #[cfg(test)]
+mod worktree_shared_tests;
+#[cfg(test)]
 mod reviews_tests;
 #[cfg(test)]
 mod queue_tests;
