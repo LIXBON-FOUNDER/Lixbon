@@ -235,6 +235,9 @@ pub enum ClientAction {
     UiCommand,
     /// Revisión del Proof Pack sobre el HEAD exacto. No concede otras decisiones humanas al CLI.
     AttemptReview,
+    /// Fork es una solicitud limitada de una Person de Desktop o CLI;
+    /// la policy del Core y la confirmación siguen decidiendo cada ejecución.
+    AttemptForkCommand,
     HumanDecision,
     /// Integrar un Attempt revisado: Person de Desktop o CLI; la policy exige `confirm`.
     AttemptIntegration,
@@ -382,6 +385,12 @@ impl AuthenticatedClient {
                 }
                 ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
+                }
+                ClientAction::AttemptForkCommand => {
+                    matches!(
+                        self.identity.surface(),
+                        ClientSurface::Desktop | ClientSurface::Cli
+                    )
                 }
                 ClientAction::AttemptIntegration => {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
@@ -982,6 +991,16 @@ mod tests {
         assert!(cli.authorize(ClientAction::AttemptReview).is_ok());
         assert_eq!(
             worker.authorize(ClientAction::AttemptReview),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert!(desktop.authorize(ClientAction::AttemptForkCommand).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptForkCommand).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptForkCommand),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert_eq!(
+            mobile.authorize(ClientAction::AttemptForkCommand),
             Err(ClientIdentityError::ForbiddenAction)
         );
         assert_eq!(

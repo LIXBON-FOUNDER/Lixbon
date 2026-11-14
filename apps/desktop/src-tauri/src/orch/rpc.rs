@@ -850,7 +850,8 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "pending_queue"
         | "attempt_steer"
         | "attempt_stop_and_send" => ClientAction::AttemptInstructionCommand,
-        "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_fork" | "attempt_lineage" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" | "task_race" | "task_race_cancel" => ClientAction::HumanDecision,
+        "attempt_fork" => ClientAction::AttemptForkCommand,
+        "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_approve" | "attempt_reject" | "attempt_lineage" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" => ClientAction::HumanDecision,
         _ => ClientAction::Unknown,
     }
 }
@@ -971,11 +972,17 @@ mod tests {
         assert_eq!(rpc_action("attempt_retry"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_resume"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_integrate"), ClientAction::AttemptIntegration);
+        assert_eq!(
+            rpc_action("attempt_fork"),
+            ClientAction::AttemptForkCommand
+        );
         assert!(person_cli.authorize(ClientAction::EventLogRead).is_ok(), "Person CLI recibe solo lectura del Event Log");
         assert!(agent_cli.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_desktop.authorize(ClientAction::EventLogRead).is_ok());
         assert!(person_cli.authorize(ClientAction::UiCommand).is_err());
         assert!(person_cli.authorize(ClientAction::HumanDecision).is_err());
+        assert!(person_cli.authorize(ClientAction::AttemptForkCommand).is_ok());
+        assert!(agent_cli.authorize(ClientAction::AttemptForkCommand).is_err());
         assert!(person_cli.authorize(ClientAction::AttemptReview).is_ok());
         assert!(person_desktop
             .authorize(ClientAction::AttemptReview)

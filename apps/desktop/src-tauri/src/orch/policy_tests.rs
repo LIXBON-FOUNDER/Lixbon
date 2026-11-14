@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use super::adapter::fake::Step;
 use super::adapter::AdapterError;
 use super::attempt_e2e_tests::{world, World};
+use super::dispatch_tests::row;
 use super::events::Channel;
 use super::policy::*;
 use crate::store::{AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
@@ -33,7 +34,7 @@ fn level(s: &PolicySnapshot, actor: ActorClass, cat: Category, project: Option<&
 const DESKTOP_CONFIRM: [Category; 5] = [Category::Start, Category::Review, Category::Integrate, Category::Cleanup, Category::ProviderPermissions];
 
 #[test]
-fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_con_confirmacion() {
+fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_y_fork_con_confirmacion() {
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
@@ -41,13 +42,14 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_con_co
         for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
-        // Start/retry/resume siguen pendientes de Desktop; queue, steer, stop, review e integrate exigen confirmación.
+        // Start/retry/resume siguen pendientes de Desktop; queue, steer, stop, fork, review e integrate exigen confirmación.
         let cli = if matches!(
             c,
             Category::Start
                 | Category::Queue
                 | Category::Steer
                 | Category::Stop
+                | Category::Fork
                 | Category::Review
                 | Category::Integrate
         ) {
@@ -221,6 +223,24 @@ fn policy_events(w: &World) -> Vec<(Value, String, Option<String>, Option<String
         .unwrap()
 }
 
+fn events_head(w: &World) -> i64 {
+    w.core
+        .storage
+        .with_store(|store| store.events_head().unwrap())
+        .unwrap()
+}
+
+fn approve_as_client(w: &World, client: &AuthenticatedClient, attempt_id: &str) {
+    let result = as_client(
+        w,
+        client,
+        "attempt_approve",
+        json!({"attempt_id": attempt_id}),
+    )
+    .unwrap();
+    assert_eq!(result["status"], "Approved");
+}
+
 #[test]
 fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     let w = world("claude", None);
@@ -243,6 +263,7 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     assert_eq!(e["baseline_matrix"]["cli_person"]["queue"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["steer"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["stop"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["fork"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["review"], "confirm");
     assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "confirm");
     assert_eq!(e["baseline_matrix"]["desktop_person"]["queue"], "allow");
@@ -640,6 +661,90 @@ fn cli_review_exige_confirm_y_respeta_elevated_y_deny_de_la_policy() {
         ),
         (Some("deny"), Some("global"))
     );
+}
+
+#[test]
+fn cli_person_fork_pasa_por_policy_y_solo_desktop_aprueba() {
+    let w = world("claude", Some(vec![Step::Complete(Some("hecho".into()))]));
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("f5-cli-fork".into()),
+        "f5-cli-fork",
+    );
+    let desktop = client(
+        &w,
+        ClientSurface::Desktop,
+        ClientPrincipal::Person("f5-desktop-fork-approver".into()),
+        "f5-desktop-fork",
+    );
+    let source = w.create("claude", "f5-cli-fork-source");
+    let source_task = source.rsplit_once("-a").unwrap().0.to_string();
+
+    let fork_args = json!({
+        "request_id": "f5-cli-fork",
+        "source_attempt_id": source,
+        "confirm": false
+    });
+    let before_unconfirmed = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "attempt_fork", fork_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed);
+
+    let mut confirmed_fork = fork_args;
+    confirmed_fork["confirm"] = json!(true);
+    let fork = as_client(&w, &cli, "attempt_fork", confirmed_fork).unwrap();
+    let fork_attempt = fork["attempt_id"].as_str().unwrap().to_string();
+    assert_eq!(row(&w.core, &fork_attempt).0, "pending_approval");
+    assert!(w.adapter.starts().is_empty(), "Fork no inicia sin aprobación Desktop");
+    assert!(as_client(
+        &w,
+        &cli,
+        "attempt_approve",
+        json!({"attempt_id": fork_attempt})
+    )
+    .is_err(), "CLI no puede aprobar su propio Fork");
+
+    approve_as_client(&w, &desktop, &fork_attempt);
+    w.settled(&fork_attempt, "done");
+    let starts = w.adapter.starts();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(starts[0].attempt_id, fork_attempt);
+
+    let agent = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Agent(source_task),
+        "f5-cli-agent-fork",
+    );
+    let rejected = as_client(
+        &w,
+        &agent,
+        "attempt_fork",
+        json!({"request_id":"agent-fork","source_attempt_id":source,"confirm":true}),
+    )
+    .unwrap_err();
+    assert!(rejected.contains("Acción no permitida"), "{rejected}");
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "fork", policy_level, false).unwrap();
+        let before = events_head(&w);
+        assert!(is(
+            as_client(
+                &w,
+                &cli,
+                "attempt_fork",
+                json!({"request_id":format!("blocked-fork-{policy_level}"),"source_attempt_id":source,"confirm":true})
+            ),
+            code
+        ));
+        assert_eq!(events_head(&w), before, "fork={policy_level} no escribe");
+    }
 }
 
 #[test]
