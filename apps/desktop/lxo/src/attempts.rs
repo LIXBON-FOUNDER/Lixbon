@@ -320,9 +320,10 @@ fn parse(a: &Args) -> Result<Request, Failure> {
         }
         check_flags(a, &["json", "help"], "lxo attempt show")?;
         return match a.pos.get(2..).unwrap_or_default() {
-            [id] if valid_attempt_id(id) => Ok(Request::Show(id.clone())),
             [] => Err(usage("Falta el intento: lxo attempt show <attempt_id>. Los ids salen en lxo attempts --task <task_id>.")),
-            _ => Err(usage("lxo attempt show recibe un solo id de Attempt exacto.")),
+            // La lectura no valida el formato: el Core distingue un intento de una Task y dice qué comando usar.
+            [id] if !id.trim().is_empty() => Ok(Request::Show(id.trim().to_string())),
+            _ => Err(usage("lxo attempt show recibe un solo id de intento.")),
         };
     }
     if let Some(extra) = a.at(1) {
@@ -1669,6 +1670,11 @@ mod tests {
         assert_eq!(
             parse(&args(&["attempts", "show", "t3-a1"])).unwrap(),
             Request::Show("t3-a1".into())
+        );
+        // El id de una Task llega al Core, que explica cuál es el comando (`lxo attempts --task`).
+        assert_eq!(
+            parse(&args(&["attempt", "show", "t3"])).unwrap(),
+            Request::Show("t3".into())
         );
         assert_eq!(parse(&args(&["attempt", "help"])).unwrap(), Request::Help);
     }
