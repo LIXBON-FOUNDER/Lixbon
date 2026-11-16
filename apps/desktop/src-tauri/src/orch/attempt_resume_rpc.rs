@@ -15,8 +15,9 @@
 //! Si la sesión no sirve (no se guardó, está cerrada, el proveedor no ofrece `resume`) es un error que lo dice. El **fallback con
 //! ContextPackage** (arrancar limpio con el paquete del Attempt anterior) exige que la persona vea y confirme el motivo, y no entra aquí.
 //!
-//! # Solo una Person de Desktop
-//! `rpc_action` lo clasifica como decisión humana: ni un agente ni el CLI. Aquí se vuelve a exigir una Person autenticada.
+//! # Identidad y aprobación
+//! Desktop pide directamente la continuación. CLI también puede solicitarla, pero nace `pending_approval` y no despierta el
+//! despachador hasta que una Person de Desktop la apruebe.
 
 use serde::Deserialize;
 
@@ -25,7 +26,7 @@ use super::continuity::MAX_PROMPT_CHARS;
 use super::events::{Channel, MutationContext};
 use super::tx_ops::RetrySelection;
 use super::Core;
-use crate::store::SessionStatus;
+use crate::store::{AttemptFollowUpKind, SessionStatus};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -47,6 +48,9 @@ pub(super) fn clean_prompt(prompt: &str) -> Result<String, String> {
     if p.is_empty() {
         return Err("falta el mensaje con que continúa la sesión".into());
     }
+    if p.contains(super::dispatch::FOLLOW_UP_MARKER) {
+        return Err("el mensaje contiene el delimitador reservado de seguimiento".into());
+    }
     if p.chars().count() > MAX_PROMPT_CHARS || p.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')) {
         return Err("el mensaje no es válido: demasiado largo o con caracteres de control".into());
     }
@@ -58,29 +62,56 @@ pub(super) fn resume(core: &Core, context: &MutationContext, input: &ResumeInput
         return Err("continuar un Attempt requiere una Person autenticada".into());
     }
     let from_n = attempt_number(&input.task_id, &input.from_attempt_id)?;
+    let next_n = from_n.checked_add(1).ok_or_else(|| "Falta un id de Attempt válido".to_string())?;
     let prompt = clean_prompt(&input.prompt)?;
     let selection = RetrySelection { provider: None, model: clean("model", &input.model)?, effort: clean("effort", &input.effort)?, profile: None };
-    // Sin lanzador instalado nada ejecutaría el Attempt nuevo: se rechaza antes de tocar nada.
-    if core.launcher().is_none() {
-        return Err(RESUME_NOT_AVAILABLE.into());
-    }
 
-    let (project_id, provider) = {
+    let (current, project_id, provider, spec) = {
         let st = core.lock();
         let task = st.tasks.get(&input.task_id).ok_or_else(|| format!("no existe la Task {}", input.task_id))?;
         let current = st.attempt_n.get(&input.task_id).copied().ok_or_else(|| "la Task no tiene ningún Attempt que continuar".to_string())?;
-        if current == from_n + 1 {
-            // Ya hay un Attempt posterior a ese: es su continuación (el único que nace de él).
-            return Ok(RetryResult::Replayed(format!("{}-a{current}", input.task_id)));
-        }
-        if current != from_n {
-            return Err(format!("solo se continúa el último Attempt de la Task: el actual es {}-a{current}", input.task_id));
-        }
-        if !task.status.is_final() {
-            return Err("solo se continúa un Attempt terminado".into());
-        }
-        (task.project_id.clone(), task.agent.clone())
+        (current, task.project_id.clone(), task.agent.clone(), task.spec.clone())
     };
+    if current == next_n {
+        let next_id = format!("{}-a{current}", input.task_id);
+        if core.attempt_follow_up_kind(&next_id)? != Some(AttemptFollowUpKind::NativeResume) {
+            return Err(format!("attempt_resume_conflict: {next_id} no procede de un resume nativo de {}", input.from_attempt_id));
+        }
+        let source = core
+            .attempt_row_for_resume(&input.from_attempt_id)?
+            .ok_or_else(|| format!("attempt_resume_conflict: falta el Attempt fuente {}", input.from_attempt_id))?;
+        let next = core
+            .attempt_row_for_resume(&next_id)?
+            .ok_or_else(|| format!("attempt_resume_conflict: falta el Attempt creado {next_id}"))?;
+        if source.task_id != input.task_id || source.n != i64::from(from_n) {
+            return Err(format!("attempt_resume_conflict: {} no es el origen durable esperado", input.from_attempt_id));
+        }
+        let expected_model = selection.model.as_deref().or(source.model.as_deref());
+        let expected_effort = selection.effort.as_deref().or(source.effort.as_deref());
+        if next.provider != source.provider
+            || next.model.as_deref() != expected_model
+            || next.effort.as_deref() != expected_effort
+            || next.role != source.role
+            || next.profile != source.profile
+            || next.external != source.external
+            || next.provider_session_id != source.provider_session_id
+            || source.provider_session_id.is_none()
+            || super::dispatch::follow_up_prompt(&spec).as_deref() != Some(prompt.as_str())
+        {
+            return Err(format!("attempt_resume_conflict: {next_id} ya existe con otra intención"));
+        }
+        return Ok(RetryResult::Replayed(next_id));
+    }
+    if current != from_n {
+        return Err(format!("solo se continúa el último Attempt de la Task: el actual es {}-a{current}", input.task_id));
+    }
+    if !core.lock().tasks.get(&input.task_id).is_some_and(|task| task.status.is_final()) {
+        return Err("solo se continúa un Attempt terminado".into());
+    }
+    // Un replay no depende de que el lanzador siga instalado; una petición nueva sí.
+    if core.launcher().is_none() {
+        return Err(RESUME_NOT_AVAILABLE.into());
+    }
 
     // La sesión del Attempt anterior tiene que servir para reanudarla; si no, se dice por qué ANTES de escribir nada.
     let session = core.attempt_session_record(&input.from_attempt_id)?.ok_or_else(|| "el Attempt anterior no tuvo una sesión del proveedor que reanudar".to_string())?;
@@ -99,7 +130,7 @@ pub(super) fn resume(core: &Core, context: &MutationContext, input: &ResumeInput
     core.provider_resume_preflight(&provider)?;
 
     core.mutate_as(context, |tx| tx.request_attempt_continuation(&input.task_id, &prompt, &selection)).map_err(|e| e.to_string())?;
-    Ok(RetryResult::Requested(format!("{}-a{}", input.task_id, from_n + 1)))
+    Ok(RetryResult::Requested(format!("{}-a{next_n}", input.task_id)))
 }
 
 #[cfg(test)]
@@ -112,6 +143,8 @@ mod tests {
         for bad in ["", "   ", "a\u{0}b", "a\u{1b}[31mb"] {
             assert!(clean_prompt(bad).is_err(), "{bad:?}");
         }
+        let marker = super::super::dispatch::FOLLOW_UP_MARKER;
+        assert!(clean_prompt(&format!("texto{marker}ambiguo")).is_err());
         assert!(clean_prompt(&"x".repeat(MAX_PROMPT_CHARS + 1)).is_err());
     }
 

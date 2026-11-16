@@ -1,0 +1,257 @@
+{
+  "attempts": [
+    {
+      "artifacts": {
+        "items": [
+          {
+            "bytes": null,
+            "id": "art-1",
+            "kind": "report",
+            "sha256": null,
+            "uri": "report.md"
+          }
+        ],
+        "provenance": "agent_reported"
+      },
+      "attempt_id": "t3-a1",
+      "changes": {
+        "additions": {
+          "provenance": "verified",
+          "value": 2
+        },
+        "deletions": {
+          "provenance": "verified",
+          "value": 0
+        },
+        "files": {
+          "provenance": "verified",
+          "value": 1
+        },
+        "list": [
+          {
+            "additions": 2,
+            "deletions": 0,
+            "path": "src/a.rs"
+          }
+        ],
+        "total_files": 1,
+        "truncated": false
+      },
+      "forked_from": null,
+      "host": {
+        "provenance": "verified",
+        "value": "machine-1"
+      },
+      "is_current": false,
+      "n": 1,
+      "project_id": "p1",
+      "review": {
+        "provenance": "verified",
+        "value": {
+          "at": 1,
+          "base_commit": "base",
+          "closed_at": null,
+          "head_commit": "head",
+          "observed_head": null,
+          "status": "active",
+          "verdict": "accepted"
+        }
+      },
+      "revision": {
+        "base_commit": {
+          "provenance": "verified",
+          "value": "base-sha"
+        },
+        "head_commit": {
+          "provenance": "verified",
+          "value": "head-1"
+        },
+        "source": "live_branch"
+      },
+      "selection": {
+        "provenance": "verified",
+        "value": {
+          "effort": null,
+          "external": false,
+          "model": "m1",
+          "profile": null,
+          "provider": "claude",
+          "role": null
+        }
+      },
+      "status": {
+        "provenance": "verified",
+        "value": {
+          "failure_reason": null,
+          "status": "failed"
+        }
+      },
+      "summary": {
+        "provenance": "agent_reported",
+        "value": "resultado declarado"
+      },
+      "task_id": "t3",
+      "tests": {
+        "provenance": "unknown",
+        "reason": "not_collected",
+        "value": null
+      },
+      "timing": {
+        "provenance": "verified",
+        "value": {
+          "created_at": 1000,
+          "duration_ms": 1500,
+          "ended_at": 3500,
+          "started_at": 2000
+        }
+      },
+      "worktree": {
+        "provenance": "verified",
+        "value": {
+          "base_branch": "main",
+          "branch": "feature",
+          "id": "wt-1",
+          "state": "active"
+        }
+      }
+    },
+    {
+      "artifacts": {
+        "items": [
+          {
+            "bytes": null,
+            "id": "art-2",
+            "kind": "report",
+            "sha256": null,
+            "uri": "report.md"
+          }
+        ],
+        "provenance": "agent_reported"
+      },
+      "attempt_id": "t3-a2",
+      "changes": {
+        "additions": {
+          "provenance": "verified",
+          "value": 2
+        },
+        "deletions": {
+          "provenance": "verified",
+          "value": 0
+        },
+        "files": {
+          "provenance": "verified",
+          "value": 1
+        },
+        "list": [
+          {
+            "additions": 2,
+            "deletions": 0,
+            "path": "src/a.rs"
+          }
+        ],
+        "total_files": 1,
+        "truncated": false
+      },
+      "forked_from": null,
+      "host": {
+        "provenance": "verified",
+        "value": "machine-1"
+      },
+      "is_current": true,
+      "n": 2,
+      "project_id": "p1",
+      "review": {
+        "provenance": "verified",
+        "value": {
+          "at": 1,
+          "base_commit": "base",
+          "closed_at": null,
+          "head_commit": "head",
+          "observed_head": null,
+          "status": "active",
+          "verdict": "accepted"
+        }
+      },
+      "revision": {
+        "base_commit": {
+          "provenance": "verified",
+          "value": "base-sha"
+        },
+        "head_commit": {
+          "provenance": "verified",
+          "value": "head-2"
+        },
+        "source": "live_branch"
+      },
+      "selection": {
+        "provenance": "verified",
+        "value": {
+          "effort": null,
+          "external": false,
+          "model": "m1",
+          "profile": null,
+          "provider": "codex",
+          "role": null
+        }
+      },
+      "status": {
+        "provenance": "verified",
+        "value": {
+          "failure_reason": null,
+          "status": "done"
+        }
+      },
+      "summary": {
+        "provenance": "agent_reported",
+        "value": "resultado declarado"
+      },
+      "task_id": "t3",
+      "tests": {
+        "provenance": "unknown",
+        "reason": "not_collected",
+        "value": null
+      },
+      "timing": {
+        "provenance": "verified",
+        "value": {
+          "created_at": 1000,
+          "duration_ms": 1500,
+          "ended_at": 3500,
+          "started_at": 2000
+        }
+      },
+      "worktree": {
+        "provenance": "verified",
+        "value": {
+          "base_branch": "main",
+          "branch": "feature",
+          "id": "wt-2",
+          "state": "active"
+        }
+      }
+    }
+  ],
+  "limits": {
+    "max_attempts": 4,
+    "max_files_per_attempt": 200,
+    "max_overlaps": 100
+  },
+  "overlaps": {
+    "complete": true,
+    "items": [
+      {
+        "attempt_ids": [
+          "t3-a1",
+          "t3-a2"
+        ],
+        "path": "src/a.rs"
+      }
+    ],
+    "total": 1
+  },
+  "relation": {
+    "kind": "same_task",
+    "root": "t3"
+  },
+  "v": 1
+}

@@ -1,6 +1,6 @@
 # Reintento y reanudación de un Attempt (LXO-142)
 
-Estado: **implementado en el Core; los comandos por el almacén siguen inertes, pero Desktop ya reintenta y continúa por el [puente al despachador](#puente-al-despachador-proyecto-de-cuatro-pr) (RPC `attempt_retry` / `attempt_resume` y botones en el ADE); sigue sin `lxo`**. Primer comando de la épica
+Estado: **implementado en el Core y conectado al despachador**: Desktop reintenta y continúa por el [puente al despachador](#puente-al-despachador-proyecto-de-cuatro-pr); CLI puede pedir retry/resume y el Attempt queda pendiente de aprobación explícita de Desktop antes de lanzarse. El contrato de `lxo` está en [TASKS.md](TASKS.md#rpc-del-reintento-attempt_retry). Primer comando de la épica
 `[CORE][F5]`. Hay dos comandos explícitos, y no se parecen:
 
 | Comando | Qué hace | Qué conserva del Attempt anterior | Código |
@@ -8,8 +8,13 @@ Estado: **implementado en el Core; los comandos por el almacén siguen inertes, 
 | `attempt.retry` | un Attempt **limpio** para la misma Task | sus parámetros (proveedor, modelo, esfuerzo, rol, perfil), salvo los que se piden distintos | `orch/attempt_commands.rs` (`retry`) |
 | `attempt.resume` | **continúa la ProviderSession** del Attempt | lo que el proveedor guarda de la conversación | `orch/attempt_commands.rs` (`resume`) sobre `continue_attempt` ([CONTINUIDAD.md](CONTINUIDAD.md)) |
 
-Ninguno reabre un Attempt: un final es final ([ATTEMPTS.md](ATTEMPTS.md), invariante 3). Los dos crean el `n + 1`, con la
-procedencia `origen → nuevo` guardada en una tabla inmutable, y los dos son idempotentes por `request_id`.
+Ninguno reabre un Attempt: un final es final ([ATTEMPTS.md](ATTEMPTS.md), invariante 3). Los dos crean el `n + 1`.
+El contrato original del almacén (`store::retries` / `store::continuity`) conserva la procedencia en tablas inmutables y usa
+`request_id`. Los RPC F5 de este puente no exponen ese campo: su identidad es la Task, el Attempt fuente y la intención
+persistida del `attempt.retried` o `attempt.continued`.
+
+> La sección siguiente describe el contrato original de comandos directos al almacén. No es el flujo de los RPC F5, que está
+> documentado en [CLI y puente al despachador](#cli-lxo-159) y usa el lifecycle actual de Attempts.
 
 * Migración [`021_attempt_retries.sql`](../../apps/desktop/src-tauri/src/store/migrations/021_attempt_retries.sql).
 * Almacén: `store/retries.rs`. Pruebas: `store/retries_tests.rs`.
@@ -85,6 +90,8 @@ la respuesta del coordinador o la aprobación (`attempt.resumed`, LXO-231), no c
 
 ## Idempotencia
 
+Este es el contrato de idempotencia del almacén descrito arriba:
+
 La clave es de la Task y **identifica una petición**, sea reintento o reanudación (triggers `attempt_retries_request_id_free`
 y `attempt_continuations_request_id_free`, y las mismas comprobaciones en los dos comandos).
 
@@ -94,6 +101,14 @@ y `attempt_continuations_request_id_free`, y las mismas comprobaciones en los do
 * Un rechazo antes de crear (entorno bloqueado, Attempt activo, origen inválido) **no gasta** la clave.
 * Si el lanzamiento falla, el Attempt nuevo queda cerrado y repetir la clave devuelve ese. Para volver a intentar hace falta
   una clave nueva: cada intento es un Attempt de la historia.
+
+### Replays de los RPC F5
+
+`attempt_retry` y `attempt_resume` no exponen `request_id`. Su clave exacta es el `from_attempt_id` canónico junto con el
+tipo de operación y la intención efectiva. El Core devuelve `Replayed` solo si el Attempt siguiente tiene procedencia durable
+canónica del mismo tipo, apunta al origen inmediato y conserva la selección efectiva de retry o, para resume, el proveedor,
+la sesión, el modelo, el esfuerzo y el último mensaje «Seguimiento». Cambiar el tipo o la intención produce
+`attempt_retry_conflict` / `attempt_resume_conflict`; no escribe ni lanza otro Attempt.
 
 ## Entorno bloqueado
 
@@ -159,36 +174,43 @@ de Attention rompen al menos una prueba cada una.
 | D56 | **Una clave identifica una petición de la Task** entre reintentos y reanudaciones | espacios de claves separados: la misma clave podría significar dos cosas según el comando |
 | D57 | **Reintentar o reanudar resuelve el `failed` del anterior (`acted`)** | dejarlo activo: el panel seguiría pidiendo atención por algo ya atendido |
 
+## CLI (LXO-159)
+
+`lxo attempt retry <attempt_id>` y `lxo attempt resume <attempt_id> --message "…"` envían al Core el Attempt fuente explícito.
+La Person CLI puede solicitar el siguiente Attempt, pero nace `pending_approval`; el RPC no despierta al despachador. Solo una
+aprobación explícita de Desktop permite lanzarlo. Un retry repetido sobre el mismo origen devuelve el mismo Attempt y no altera
+su selección; un resume solo se repite con el mismo mensaje y la misma sesión. Repetir el origen con otro tipo o intención es un
+conflicto, no una segunda petición.
+
 ## Fuera de este slice
 
-El RPC y `lxo` (`lxo attempt retry` / `resume`), la UI, la política de reintento automático, la carrera/Fork entre Attempts
-(F6) y construir el ContextPackage (`lxo context`, LXO-138: lo aporta quien llama). Tampoco se ha probado una reanudación
-real de una sesión existente: las pruebas usan adapters falsos, como en [CONTINUIDAD.md](CONTINUIDAD.md#sin-validar-con-la-cli-real).
+La política de reintento automático, la carrera/Fork entre Attempts (F6) y construir el ContextPackage (`lxo context`, LXO-138:
+lo aporta quien llama). Tampoco se ha probado una reanudación real de una sesión existente: las pruebas usan adapters falsos,
+como en [CONTINUIDAD.md](CONTINUIDAD.md#sin-validar-con-la-cli-real).
 
 ## Puente al despachador (proyecto de cuatro PR)
 
-`attempt.retry` y `attempt.resume` de arriba trabajan **directamente sobre el almacén** y lanzan ellos mismos. El camino que de
-verdad lanza hoy es otro: el estado en memoria cambia, sus Events se proyectan a las tablas y el despachador (`dispatch.rs`)
-reserva el claim, el lanzador (`adapter_launcher.rs`) crea el worktree y llama al adapter. Un reintento por la vía del almacén
-correría fuera del claim, sin bombeo de eventos y con el estado en memoria desfasado. El puente hace que un reintento use el
-**mismo camino** que el primer Attempt:
+El contrato original de comandos directos al almacén no es el puente F5. En este, el estado en memoria cambia y sus Events se
+proyectan a las tablas; después el despachador (`dispatch.rs`) reserva el claim, el lanzador (`adapter_launcher.rs`) prepara el
+worktree y llama al adapter. Retry y resume usan el **mismo camino** que el primer Attempt:
 
 | PR | Qué | Estado |
 |---|---|---|
 | 1 | `Tx::request_attempt_retry` (estado en memoria) + el lanzador reutiliza el Worktree de la Task | **hecho** |
 | 2 | `attempt.retried` en la misma mutación que el Attempt nuevo (resuelve el `failed` del anterior) | **hecho** |
-| 3 | RPC `attempt_retry` (solo una Person de Desktop) y el botón Reintentar | **hecho** |
-| 4 | `resume`: el lanzador elige `start` o `resume` (reutiliza la ProviderSession) + su RPC y botón | **hecho** (solo reanudación nativa) |
+| 3 | RPC `attempt_retry` (Desktop despierta al despachador; CLI queda pendiente de aprobación) y el botón Reintentar | **hecho** |
+| 4 | `resume`: el lanzador elige `start` o `resume` (reutiliza la ProviderSession) + su RPC y botón; CLI queda pendiente | **hecho** (solo reanudación nativa) |
 
 ### PR 1 · lo que hace
 
-* `Tx::request_attempt_retry(task, RetrySelection)` pasa la Task de `failed`/`stopped`/`exited` a `starting`. Como en cualquier paso
-  de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la selección que se pida; el anterior sigue final.
+* `Tx::request_attempt_retry(task, RetrySelection)` pasa la Task de `failed`/`stopped`/`exited` a `starting` desde Desktop o a
+  `pending_approval` desde CLI. Como en cualquier paso de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la
+  selección que se pida; el anterior sigue final.
   Exige una Person autenticada. El modelo y el esfuerzo se heredan solo dentro del mismo proveedor; el rol y el perfil, siempre.
-* El Attempt nuevo queda `starting` con el claim `none`. **No pide aprobación**: la petición de la persona es la decisión, y la
-  reserva del claim ya distingue las continuaciones (`n > 1`) del primer Attempt de `task.create`.
-* El barrido periódico (`approved_dispatch_candidates`) solo recoge Attempts con plazo de aprobación, así que **no** lanza un
-  reintento por su cuenta: se despacha por `dispatch_attempt`, que llamará el RPC del PR 3 tras despertar al despachador.
+* Desde Desktop, el Attempt nuevo queda `starting` con el claim `none` y no pide aprobación adicional. Desde CLI nace
+  `pending_approval`; no se despacha hasta que Desktop registra `attempt.approved`.
+* El barrido (`approved_dispatch_candidates`) recoge el Attempt tras la aprobación Desktop o un retry directo de Desktop. El
+  retry CLI permanece `pending_approval`, no despierta el despachador y no es candidato hasta que Desktop lo aprueba.
 
 ### PR 2 · lo que hace
 
@@ -198,10 +220,10 @@ correría fuera del claim, sin bombeo de eventos y con el estado en memoria desf
 
 ### PR 3 · lo que hace
 
-El RPC `attempt_retry` ([TASKS.md](TASKS.md#rpc-del-reintento-attempt_retry)) valida la petición (Person de Desktop, el último Attempt, lanzador, Project y
-proveedor), llama a `Tx::request_attempt_retry` y despierta al despachador. El barrido del despachador recoge los reintentos: la
-consulta de candidatos añade a los aprobados los Attempts `n > 1` en `starting`, sin plazo, no externos y con `attempt.retried` o
-`attempt.continued`. La interfaz es el botón «Reintentar» del detalle del Attempt.
+El RPC `attempt_retry` ([TASKS.md](TASKS.md#rpc-del-reintento-attempt_retry)) valida la petición (Person autenticada, el último Attempt,
+lanzador, Project y proveedor) y llama a `Tx::request_attempt_retry`. Desktop despierta al despachador; CLI espera la aprobación
+inicial de Desktop. El barrido recoge los reintentos aprobados y los replays comprueban tipo, origen e intención efectiva antes
+de devolver el mismo Attempt. La interfaz es el botón «Reintentar» del detalle del Attempt.
 
 ### PR 4 · lo que hace
 

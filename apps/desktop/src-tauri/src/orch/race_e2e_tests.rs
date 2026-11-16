@@ -4,6 +4,8 @@
 
 use serde_json::{json, Value};
 
+use super::adapter::fake::Step;
+use super::adapter::AdapterError;
 use super::attempt_e2e_tests::{kinds, world, World};
 use super::dispatch_tests::row;
 use super::fork_e2e_tests::{forked_payload, package_in, task_count, world_duo};
@@ -58,6 +60,15 @@ fn duo() -> (World, String) {
     (w, a1)
 }
 
+fn failed_duo() -> (World, String) {
+    let (w, _codex) = world_duo();
+    w.adapter.set_script(vec![Step::Fail(AdapterError::provider("fallo de prueba"))]);
+    let a1 = w.create("claude", "race-origen-fallido");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    (w, a1)
+}
+
 #[test]
 fn un_race_de_dos_candidatos_mixtos_deja_dos_forks_reales_con_su_procedencia_comun_y_no_toca_el_origen() {
     let (w, a1) = duo();
@@ -98,6 +109,64 @@ fn un_race_de_dos_candidatos_mixtos_deja_dos_forks_reales_con_su_procedencia_com
     assert_eq!(ev[0].1["strategy"], "clean");
     assert!(ev[0].1.get("package_id").is_none());
     assert!(!ev[0].1.to_string().contains("haz algo"), "el encargo no viaja en el Event");
+}
+
+#[test]
+fn si_el_attempt_avanza_tras_seleccion_no_se_registra_ni_se_lanza_un_race() {
+    let (w, a1) = failed_duo();
+    let task = task_of(&a1);
+    let tasks_before = task_count(&w.core);
+
+    // Simula la ventana entre la lectura de current_attempt hecha por `lxo race --task`
+    // y su mutación: otra operación avanza la Task a a2 antes de que Race llegue al Core.
+    let retry = w
+        .desktop("attempt_retry", json!({"task_id": task, "from_attempt_id": a1}))
+        .expect("avanzar el Attempt actual");
+    assert_eq!(retry["attempt_id"], format!("{task}-a2"));
+
+    let stale = w.race_with(
+        "race-stale-source",
+        &a1,
+        json!([{}, {"provider": "codex"}]),
+        json!({"expected_current_attempt_id": a1}),
+    );
+    let error = stale.expect_err("el Core debe rechazar el Attempt que ya no es actual");
+    assert!(error.contains("race_source_not_current"), "{error}");
+    assert_eq!(task_count(&w.core), tasks_before, "no se crean Tasks de candidatos");
+    assert!(race_events(&w.core).is_empty(), "race.requested no se registra");
+}
+
+#[test]
+fn reintentar_un_race_registrado_no_revalida_el_attempt_actual() {
+    let (w, a1) = failed_duo();
+    let task = task_of(&a1);
+    let candidates = json!([{}, {"provider": "codex"}]);
+    let request = |request_id: &str| {
+        w.race_with(
+            request_id,
+            &a1,
+            candidates.clone(),
+            json!({"expected_current_attempt_id": a1}),
+        )
+    };
+
+    let first = request("race-replay-after-advance").expect("crear Race");
+    let candidate_attempts = attempts(&first);
+    let tasks_after_first = task_count(&w.core);
+
+    let retry = w
+        .desktop("attempt_retry", json!({"task_id": task, "from_attempt_id": a1}))
+        .expect("avanzar el Attempt actual");
+    assert_eq!(retry["attempt_id"], format!("{task}-a2"));
+
+    let replay = request("race-replay-after-advance")
+        .expect("el replay idempotente no vuelve a comprobar current_attempt");
+    assert_eq!(replay["status"], "Retried");
+    assert_eq!(attempts(&replay), candidate_attempts);
+    assert_eq!(task_count(&w.core), tasks_after_first, "el replay no crea Tasks de candidatos adicionales");
+    let events = race_events(&w.core);
+    assert_eq!(count_of(&events, "race.requested"), 1);
+    assert_eq!(count_of(&events, "race.candidate_recorded"), 2);
 }
 
 #[test]

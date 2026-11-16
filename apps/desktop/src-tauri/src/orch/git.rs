@@ -100,13 +100,14 @@ pub fn is_clean(dir: &str) -> bool {
     ok(dir, &["status", "--porcelain", "--untracked-files=no"]).map(|s| s.is_empty()).unwrap_or(false)
 }
 
-/// Fusiona en el checkout del padre. Con conflictos se aborta y se devuelven
-/// los archivos: resolverlos es decisión del coordinador, no de Lixbon.
-pub fn merge(parent_dir: &str, branch: &str, message: &str, squash: bool) -> Result<String, String> {
+/// Fusiona en el checkout del padre el commit fijado, no el ref mutable de una rama.
+/// Con conflictos se aborta y se devuelven los archivos: resolverlos es decisión
+/// del coordinador, no de Lixbon.
+pub fn merge(parent_dir: &str, commit: &str, message: &str, squash: bool) -> Result<String, String> {
     if !is_clean(parent_dir) {
         return Err("El checkout del padre tiene cambios sin commit: haz commit o stash antes de fusionar".into());
     }
-    let args: Vec<&str> = if squash { vec!["merge", "--squash", branch] } else { vec!["merge", "--no-ff", "-m", message, branch] };
+    let args: Vec<&str> = if squash { vec!["merge", "--squash", commit] } else { vec!["merge", "--no-ff", "-m", message, commit] };
     let o = run(parent_dir, &args)?;
     if !o.ok {
         let conflicts = ok(parent_dir, &["diff", "--name-only", "--diff-filter=U"]).unwrap_or_default();
@@ -131,8 +132,15 @@ pub fn remote_url(dir: &str) -> Option<String> {
     ok(dir, &["remote", "get-url", "origin"]).ok().filter(|s| !s.is_empty())
 }
 
-pub fn push(dir: &str, branch: &str) -> Result<(), String> {
-    ok(dir, &["push", "-u", "origin", branch]).map(|_| ())
+fn push_refspec(commit: &str, branch: &str) -> String {
+    format!("{commit}:refs/heads/{branch}")
+}
+
+/// Publica el commit fijado en la rama remota. El HEAD local puede moverse
+/// después de la comprobación; el refspec no vuelve a resolverlo por nombre.
+pub fn push(dir: &str, commit: &str, branch: &str) -> Result<(), String> {
+    let refspec = push_refspec(commit, branch);
+    ok(dir, &["push", "origin", &refspec]).map(|_| ())
 }
 
 pub fn gh_pr(dir: &str, base: &str, branch: &str, title: &str, body: &str) -> Result<String, String> {
@@ -289,6 +297,17 @@ pub fn normalize_remote(url: &str) -> Option<String> {
     let path = path.strip_suffix(".git").unwrap_or(path).trim_matches('/');
     let host = host.to_ascii_lowercase();
     Some(if path.is_empty() { host } else { format!("{host}/{path}") })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_refspec;
+
+    #[test]
+    fn push_refspec_publica_el_commit_fijo_en_la_rama_destino() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(push_refspec(commit, "lx/task-1"), format!("{commit}:refs/heads/lx/task-1"));
+    }
 }
 
 /// ¿Es el formato scp (`usuario@host:ruta`) y no una ruta local que contiene una `@`?

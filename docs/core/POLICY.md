@@ -17,10 +17,10 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 
 | categoría | Commands que gobierna | piso |
 |---|---|---|
-| `start` | `task_create` **con** `attempt`, `attempt_retry`, `attempt_resume` | `confirm` |
+| `start` | `task_create` **con** `attempt`, `attempt_start`, `attempt_retry`, `attempt_resume` | `confirm` |
 | `queue` | `attempt_queue` | — |
 | `steer` | `attempt_steer` | — |
-| `stop` | `attempt_stop_and_send`, `task_race_cancel` | — |
+| `stop` | `attempt_stop`, `attempt_stop_and_send`, `task_race_cancel` | — |
 | `fork` | `attempt_fork`, `task_race` (se vuelve a comprobar antes de CADA candidato) | — |
 | `review` | `attempt_review` | `confirm` |
 | `integrate` | `attempt_integrate` | `confirm` |
@@ -28,7 +28,7 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 | `answer` | `attempt_answer` (LXO-247) cuando **deniega** un permiso del proveedor o **contesta una pregunta** | — |
 | `provider_permissions` | `attempt_answer` cuando **permite** un permiso del proveedor (`answer: allow` sobre una petición de tipo `permission`). El tipo sale de la petición viva, no del texto: una pregunta respondida con la palabra «allow» es `answer`. Con el piso `confirm` hace falta `confirm: true` (el clic explícito en «Permitir»); sin él, `policy_confirm_required` y el proveedor no se toca | `confirm` |
 
-No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la aprobación inicial es
+No se gobiernan: las lecturas, `attempt_queue_cancel` (deshace, no ejecuta), `attempt_approve`/`attempt_reject` (la decisión humana es
 parte del propio `start`), `resource_adopt` (LXO-149: no ejecuta nada, solo registra trabajo que ya existía, y exige una Person y `confirm`) ni una Task sin `attempt` (no ejecuta nada). La interfaz lo dice con `enforced: false` en vez de aparentar una
 protección que no existe.
 
@@ -49,7 +49,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 | | start | review · integrate · cleanup · provider_permissions | answer · queue · steer · stop · fork |
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
-| `cli_person` | confirm (solo **pide**; la aprueba Desktop) | deny | deny |
+| `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`, `task_race_cancel`); fork: confirm (`attempt_fork`, `task_race`); answer: deny |
 | `mobile_person`, `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
@@ -70,6 +70,19 @@ Hoy Mobile ni siquiera se autentica en el Core (`Channel` solo conoce `ui`, `lxo
 
 Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los que nombran una Task (`attempt_retry`, `attempt_resume`,
 `resource_*`) evalúan global + project.
+
+`cli_person` puede ejecutar `attempt_review` y `attempt_integrate` con `confirm: true`, sujetos a la policy efectiva y a las guardas de
+cada Command. Review solo decide sobre el HEAD exacto del Proof Pack; integrate exige además revisión aceptada y HEAD vigente. El Core
+vuelve a evaluarlas en cada llamada. Un nivel efectivo `elevated` sigue devolviendo `policy_out_of_band_required`: todavía no existe un
+canal para satisfacer esa aprobación, tampoco desde CLI. Queue, Steer y Stop & Send también están disponibles para una Person CLI con
+`confirm: true`; consultar o cancelar la Queue no ejecuta una instrucción y no requiere confirmación de policy. `cleanup` y
+`provider_permissions` permanecen denegados para `cli_person`.
+
+Una Person autenticada por CLI también puede solicitar `attempt_fork` y `task_race`, y cancelar candidatos con `task_race_cancel`.
+Las tres operaciones requieren `confirm: true` por sus categorías (`fork` para Fork/Race, `stop` para cancelación); `deny` y
+`elevated` siguen prevaleciendo. Los Forks y candidatos nacen `pending_approval`: solo la aprobación de Desktop despierta el
+lanzamiento. La acción de credenciales permite únicamente estos Commands; no concede otras decisiones `HumanDecision` al CLI.
+Agent, Mobile y automatización siguen denegados.
 
 ## Se revalida en CADA Command (invariante 2)
 

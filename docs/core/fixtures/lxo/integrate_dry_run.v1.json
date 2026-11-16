@@ -1,0 +1,44 @@
+{
+  "action": "merge",
+  "attempt_id": "task-1-a1",
+  "dry_run": true,
+  "preview": {
+    "can_merge": {
+      "ok": true,
+      "reason": null
+    },
+    "can_publish_pr": {
+      "ok": true,
+      "reason": null
+    },
+    "is_current": true,
+    "merge": {
+      "merged": false,
+      "result_commit": null
+    },
+    "pr": {
+      "has_remote": true,
+      "url": null
+    },
+    "review": {
+      "state": "accepted"
+    },
+    "revision": {
+      "head_commit": "attempt-head"
+    },
+    "target": {
+      "branch": "main",
+      "branch_matches": true,
+      "clean": true,
+      "expected_branch": "main",
+      "expected_head": "target-head",
+      "head": "target-head",
+      "kind": "project_checkout",
+      "moved": false
+    }
+  },
+  "requested_id": "task-1-a1",
+  "result": null,
+  "review_id": null,
+  "v": 1
+}

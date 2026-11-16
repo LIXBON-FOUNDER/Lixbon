@@ -223,8 +223,24 @@ pub enum ClientAction {
     /// Operación de coordinación con comprobaciones de relación de tarea. Agent permanece
     /// limitado a su task; Person puede usarla como coordinador desde Desktop o CLI.
     AgentOrDesktopCommand,
+    /// Commands de Attempts solicitados explícitamente por una Person desde `lxo`.
+    /// No se concede a agentes ni se confunde con una decisión humana de Desktop.
+    CliAttemptCommand,
+    /// Instrucciones explícitas a un Attempt: Person autenticada de Desktop o CLI, nunca Agent.
+    /// La policy Core decide confirmación para Queue, Steer y Stop & Send.
+    AttemptInstructionCommand,
+    /// Retry/resume mantienen su superficie de decisión Desktop y admiten la
+    /// petición CLI que queda pendiente de aprobación.
+    AttemptRequest,
     UiCommand,
+    /// Revisión del Proof Pack sobre el HEAD exacto. No concede otras decisiones humanas al CLI.
+    AttemptReview,
+    /// Fork y Race son solicitudes limitadas de una Person de Desktop o CLI;
+    /// la policy del Core y la confirmación siguen decidiendo cada ejecución.
+    AttemptForkCommand,
     HumanDecision,
+    /// Integrar un Attempt revisado: Person de Desktop o CLI; la policy exige `confirm`.
+    AttemptIntegration,
     CoreCommand,
 }
 
@@ -360,8 +376,27 @@ impl AuthenticatedClient {
                 ClientAction::EventLogRead | ClientAction::AgentOrDesktopCommand => {
                     matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
+                ClientAction::CliAttemptCommand => self.identity.surface() == ClientSurface::Cli,
+                ClientAction::AttemptInstructionCommand => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
+                }
+                ClientAction::AttemptRequest => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
+                }
                 ClientAction::UiCommand | ClientAction::HumanDecision => {
                     self.identity.surface() == ClientSurface::Desktop
+                }
+                ClientAction::AttemptForkCommand => {
+                    matches!(
+                        self.identity.surface(),
+                        ClientSurface::Desktop | ClientSurface::Cli
+                    )
+                }
+                ClientAction::AttemptIntegration => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
+                }
+                ClientAction::AttemptReview => {
+                    matches!(self.identity.surface(), ClientSurface::Desktop | ClientSurface::Cli)
                 }
                 _ => true,
             },
@@ -915,6 +950,11 @@ mod tests {
             token("agent-scoped"),
         )
         .unwrap();
+        let person_mobile = ClientCredential::new(
+            ClientPrincipal::Person("person-mobile".into()),
+            token("person-mobile"),
+        )
+        .unwrap();
         let desktop = store
             .register_client(
                 &registration(ClientSurface::Desktop, "install-action-desktop"),
@@ -936,12 +976,51 @@ mod tests {
                 102,
             )
             .unwrap();
+        let mobile = store
+            .register_client(
+                &registration(ClientSurface::Mobile, "install-action-mobile"),
+                &person_mobile,
+                103,
+            )
+            .unwrap();
 
         assert!(desktop.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(cli.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
         assert!(worker.authorize(ClientAction::AgentOrDesktopCommand).is_ok());
+        assert!(desktop.authorize(ClientAction::AttemptReview).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptReview).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptReview),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert!(desktop.authorize(ClientAction::AttemptForkCommand).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptForkCommand).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptForkCommand),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert_eq!(
+            mobile.authorize(ClientAction::AttemptForkCommand),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert_eq!(
+            mobile.authorize(ClientAction::AttemptReview),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
+        assert!(cli.authorize(ClientAction::CliAttemptCommand).is_ok());
+        assert_eq!(desktop.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));
+        assert_eq!(worker.authorize(ClientAction::CliAttemptCommand), Err(ClientIdentityError::ForbiddenAction));
+        assert!(desktop.authorize(ClientAction::AttemptRequest).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptRequest).is_ok());
+        assert_eq!(worker.authorize(ClientAction::AttemptRequest), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::UiCommand), Err(ClientIdentityError::ForbiddenAction));
         assert_eq!(cli.authorize(ClientAction::HumanDecision), Err(ClientIdentityError::ForbiddenAction));
+        assert!(desktop.authorize(ClientAction::AttemptIntegration).is_ok());
+        assert!(cli.authorize(ClientAction::AttemptIntegration).is_ok());
+        assert_eq!(
+            worker.authorize(ClientAction::AttemptIntegration),
+            Err(ClientIdentityError::ForbiddenAction)
+        );
         drop(store);
         let _ = std::fs::remove_dir_all(dir);
     }

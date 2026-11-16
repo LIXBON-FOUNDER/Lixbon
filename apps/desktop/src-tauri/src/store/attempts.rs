@@ -190,6 +190,16 @@ pub struct AttemptRow {
     pub origin: TaskOrigin,
 }
 
+/// Procedencia de un Attempt de seguimiento creada por el puente del runtime.
+///
+/// Retry y resume son intenciones distintas aunque nombren el mismo Attempt fuente;
+/// un replay solo puede confirmar la que dejó su evento canónico.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptFollowUpKind {
+    Retry,
+    NativeResume,
+}
+
 /// Qué ejecución se pide. La Task la fija el mutador; el número y el id, también.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewAttempt {
@@ -627,6 +637,96 @@ impl Store {
         self.read(|c| attempt_in(c, id))
     }
 
+    /// Identifica la intención que creó un Attempt `n > 1` según su evento durable.
+    ///
+    /// Devuelve `None` si falta la procedencia, está duplicada o no es coherente con
+    /// la fila y la identidad autenticada del evento. No infiere el tipo a partir del
+    /// estado actual de la Task.
+    pub fn attempt_follow_up_kind(&self, id: &str) -> StoreResult<Option<AttemptFollowUpKind>> {
+        self.read(|conn| {
+            let Some(attempt) = attempt_in(conn, id)? else {
+                return Ok(None);
+            };
+            let Some(from_n) = attempt.n.checked_sub(1).filter(|n| *n > 0) else {
+                return Ok(None);
+            };
+            if attempt.origin != TaskOrigin::Core || attempt.id != format!("{}-a{}", attempt.task_id, attempt.n) {
+                return Ok(None);
+            }
+            let Some(task) = task_in(conn, &attempt.task_id)? else {
+                return Ok(None);
+            };
+
+            let mut stmt = conn.prepare(
+                "SELECT kind, v, class, actor_kind, actor_id, channel, client_id, run_id, project_id, at, payload
+                 FROM events
+                 WHERE entity_kind='attempt' AND entity_id=?1
+                   AND kind IN ('attempt.retried', 'attempt.continued')
+                 ORDER BY seq",
+            )?;
+            let events = stmt
+                .query_map([id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if events.len() != 1 {
+                return Ok(None);
+            }
+
+            let (kind, version, class, actor_kind, actor_id, channel, client_id, run_id, project_id, at, raw_payload) =
+                events.into_iter().next().expect("one event was checked");
+            if version != 1
+                || class != "state"
+                || actor_kind != "person"
+                || run_id.as_deref() != Some(task.run_id.as_str())
+                || project_id.as_deref() != task.project_id.as_deref()
+                || !super::initial_approval::has_authenticated_person_identity(
+                    conn,
+                    actor_id.as_deref(),
+                    client_id.as_deref(),
+                    channel.as_deref(),
+                    at,
+                )?
+            {
+                return Ok(None);
+            }
+            let Ok(payload) = serde_json::from_str::<serde_json::Value>(&raw_payload) else {
+                return Ok(None);
+            };
+            let Some(fields) = payload.as_object() else {
+                return Ok(None);
+            };
+            if fields.get("task").and_then(serde_json::Value::as_str) != Some(attempt.task_id.as_str())
+                || fields.get("n").and_then(serde_json::Value::as_i64) != Some(attempt.n)
+                || fields.get("from_n").and_then(serde_json::Value::as_i64) != Some(from_n)
+            {
+                return Ok(None);
+            }
+
+            match kind.as_str() {
+                "attempt.retried" => Ok(Some(AttemptFollowUpKind::Retry)),
+                "attempt.continued"
+                    if fields.get("strategy").and_then(serde_json::Value::as_str) == Some("native_resume") =>
+                {
+                    Ok(Some(AttemptFollowUpKind::NativeResume))
+                }
+                _ => Ok(None),
+            }
+        })
+    }
+
     /// Todos los Attempts de una Task, del primero al último (la historia completa).
     pub fn attempts_of_task(&self, task_id: &str) -> StoreResult<Vec<AttemptRow>> {
         self.read(|c| attempts_where(c, "task_id = ?1", task_id))
@@ -921,8 +1021,9 @@ impl Store {
 
             // `task.create` may create a Task without an Attempt and a later Core
             // mutation can then create its first one. The immutable request ledger
-            // is the durable provenance fence for that first execution; continuations
-            // (n > 1) deliberately do not inherit this policy.
+            // is the durable provenance fence for that first execution. Any Attempt
+            // with an approval deadline (including a CLI retry/resume) also requires
+            // its canonical approval event; Desktop continuations may have no deadline.
             let task_create_first_attempt = n == 1
                 && tx.query_row(
                     "SELECT EXISTS (
@@ -1245,10 +1346,10 @@ impl Store {
                     }
                 }
             }
-            // Un reintento o una continuación (`n > 1`) nace sin aprobación: la petición de la persona es la decisión, y la
-            // reserva del claim ya lo admite. Solo se recoge con el evento que prueba esa petición (`attempt.retried` /
-            // `attempt.continued`): un Attempt `starting` sin plazo y sin ese evento nunca se lanza por su cuenta.
-            // Es también la recuperación si Lixbon cayó entre pedir el reintento y despacharlo.
+            // Retry/resume de Desktop (`n > 1`) pueden nacer sin aprobación inicial; se recogen por el evento que prueba la
+            // petición (`attempt.retried` / `attempt.continued`). Los pedidos CLI llevan plazo y pasan por la consulta anterior,
+            // que exige aprobación canónica. Un Attempt `starting` sin plazo y sin evento de petición nunca se lanza por su cuenta.
+            // Ambas consultas recuperan el despacho si Lixbon cayó entre la solicitud/aprobación y el lanzamiento.
             if approved.len() < limit {
                 let mut stmt = conn.prepare(
                     "SELECT a.id FROM attempts a

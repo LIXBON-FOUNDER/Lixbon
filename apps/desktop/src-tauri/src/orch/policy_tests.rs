@@ -7,7 +7,10 @@
 
 use serde_json::{json, Value};
 
+use super::adapter::fake::Step;
+use super::adapter::AdapterError;
 use super::attempt_e2e_tests::{world, World};
+use super::dispatch_tests::row;
 use super::events::Channel;
 use super::policy::*;
 use crate::store::{AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
@@ -31,7 +34,7 @@ fn level(s: &PolicySnapshot, actor: ActorClass, cat: Category, project: Option<&
 const DESKTOP_CONFIRM: [Category; 5] = [Category::Start, Category::Review, Category::Integrate, Category::Cleanup, Category::ProviderPermissions];
 
 #[test]
-fn la_matriz_base_deja_a_desktop_como_estaba_y_a_los_demas_sin_nada() {
+fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_y_fork_con_confirmacion() {
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
@@ -39,8 +42,21 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_a_los_demas_sin_nada() {
         for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
-        // El CLI solo puede PEDIR un Attempt; la aprobación sigue siendo de Desktop.
-        let cli = if c == Category::Start { Level::Confirm } else { Level::Deny };
+        // Start/retry/resume siguen pendientes de Desktop; queue, steer, stop, fork, review e integrate exigen confirmación.
+        let cli = if matches!(
+            c,
+            Category::Start
+                | Category::Queue
+                | Category::Steer
+                | Category::Stop
+                | Category::Fork
+                | Category::Review
+                | Category::Integrate
+        ) {
+            Level::Confirm
+        } else {
+            Level::Deny
+        };
         assert_eq!(baseline(ActorClass::CliPerson, c), cli, "{}", c.as_str());
         assert_eq!(baseline(ActorClass::Core, c), Level::Allow);
     }
@@ -73,8 +89,14 @@ fn un_override_mas_cercano_nunca_da_mas_permiso_que_el_de_arriba() {
 #[test]
 fn el_piso_de_cada_categoria_no_baja_de_confirm_aunque_la_fila_diga_allow() {
     // Una fila que el CHECK admite pero las reglas no deberían producir: aun así la resolución no baja del piso.
-    let s = snap(&[("global", "", "integrate", "allow"), ("global", "", "cleanup", "allow")]);
-    for c in [Category::Integrate, Category::Cleanup] {
+    let s = snap(&[
+        ("global", "", "start", "allow"),
+        ("global", "", "review", "allow"),
+        ("global", "", "integrate", "allow"),
+        ("global", "", "cleanup", "allow"),
+        ("global", "", "provider_permissions", "allow"),
+    ]);
+    for c in DESKTOP_CONFIRM {
         assert_eq!(level(&s, ActorClass::DesktopPerson, c, None, None), "confirm", "{}", c.as_str());
     }
     // Para un actor sin nada, el piso no lo "sube" a confirm: sigue en deny.
@@ -201,6 +223,24 @@ fn policy_events(w: &World) -> Vec<(Value, String, Option<String>, Option<String
         .unwrap()
 }
 
+fn events_head(w: &World) -> i64 {
+    w.core
+        .storage
+        .with_store(|store| store.events_head().unwrap())
+        .unwrap()
+}
+
+fn approve_as_client(w: &World, client: &AuthenticatedClient, attempt_id: &str) {
+    let result = as_client(
+        w,
+        client,
+        "attempt_approve",
+        json!({"attempt_id": attempt_id}),
+    )
+    .unwrap();
+    assert_eq!(result["status"], "Approved");
+}
+
 #[test]
 fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     let w = world("claude", None);
@@ -220,6 +260,12 @@ fn policy_effective_trae_la_matriz_los_diez_niveles_y_el_origen_de_cada_uno() {
     // La matriz actor × categoría viaja completa.
     assert_eq!(e["baseline_matrix"]["mobile_person"]["steer"], "deny");
     assert_eq!(e["baseline_matrix"]["cli_person"]["start"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["queue"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["steer"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["stop"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["fork"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["review"], "confirm");
+    assert_eq!(e["baseline_matrix"]["cli_person"]["integrate"], "confirm");
     assert_eq!(e["baseline_matrix"]["desktop_person"]["queue"], "allow");
 }
 
@@ -247,6 +293,139 @@ fn confirm_exige_confirm_true_y_elevated_no_se_puede_dar_aun() {
     assert!(paso_la_policy(&q(true)));
     w.set("global", None, "queue", "elevated", false).unwrap();
     assert!(is(q(true), "policy_out_of_band_required"), "elevated pide una confirmación fuera de banda que no existe: confirm no basta");
+}
+
+#[test]
+fn cli_queue_steer_y_stop_send_exigen_confirm_y_respetan_deny_y_elevated() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("instruction-policy-person".into()),
+        "cli-instruction-policy",
+    );
+    for (command, category, request) in [
+        (
+            "attempt_queue",
+            "queue",
+            json!({"attempt_id":"missing-a1", "request_id":"q1", "body":"texto"}),
+        ),
+        (
+            "attempt_steer",
+            "steer",
+            json!({"attempt_id":"missing-a1", "request_id":"s1", "body":"texto"}),
+        ),
+        (
+            "attempt_stop_and_send",
+            "stop",
+            json!({"attempt_id":"missing-a1", "request_id":"ss1", "body":"texto"}),
+        ),
+    ] {
+        assert!(
+            is(as_client(&w, &cli, command, request.clone()), "policy_confirm_required"),
+            "{command} pide confirmación al CLI"
+        );
+        let mut confirmed = request.clone();
+        confirmed["confirm"] = json!(true);
+        assert!(
+            paso_la_policy(&as_client(&w, &cli, command, confirmed.clone())),
+            "{command} pasa su confirmación base"
+        );
+
+        w.set("global", None, category, "deny", false)
+            .expect("endurecer la policy");
+        assert!(
+            is(as_client(&w, &cli, command, confirmed.clone()), "policy_denied"),
+            "{command}: confirm no salta deny"
+        );
+        w.set("global", None, category, "elevated", true)
+            .expect("aflojar con confirmación");
+        assert!(
+            is(
+                as_client(&w, &cli, command, confirmed),
+                "policy_out_of_band_required"
+            ),
+            "{command}: confirm local no satisface elevated"
+        );
+    }
+}
+
+#[test]
+fn start_retry_resume_y_stop_cli_pasan_por_policy_y_no_conceden_mas_que_sus_flujos() {
+    let w = world("claude", None);
+    let cli = client(&w, ClientSurface::Cli, ClientPrincipal::Person("user".into()), "cli-f5");
+    let task = w.desktop(
+        "task_create",
+        json!({"request_id":"f5-policy-task","project_id":w.project,"objective":"o","title":"t","spec":"s"}),
+    ).unwrap()["task_id"].as_str().unwrap().to_string();
+
+    assert_eq!(classify_for_tests("attempt_start", &json!({"task_id":task})), Some("start"));
+    assert_eq!(classify_for_tests("attempt_retry", &json!({"task_id":task})), Some("start"));
+    assert_eq!(classify_for_tests("attempt_resume", &json!({"task_id":task})), Some("start"));
+    assert_eq!(classify_for_tests("attempt_stop", &json!({"attempt_id":format!("{task}-a1")})), Some("stop"));
+
+    let start = as_client(&w, &cli, "attempt_start", json!({
+        "task_id":task,"provider":"claude","profile":"explorar"
+    }));
+    assert!(paso_la_policy(&start), "a cut or runtime precondition may reject start, but policy must not");
+    w.set("global", None, "start", "deny", false).unwrap();
+    let denied_start = as_client(&w, &cli, "attempt_start", json!({
+        "task_id":task,"provider":"claude","profile":"explorar"
+    }));
+    assert!(is(denied_start, "policy_denied"), "endurecer start también bloquea al CLI");
+
+    w.set("global", None, "stop", "deny", false).unwrap();
+    let denied_stop = as_client(&w, &cli, "attempt_stop", json!({"attempt_id":format!("{task}-a1"),"confirm":true}));
+    assert!(is(denied_stop, "policy_denied"), "confirm no salta un deny de stop");
+
+    let agent = client(&w, ClientSurface::Cli, ClientPrincipal::Agent(task.clone()), "agent-f5-policy");
+    assert!(as_client(&w, &agent, "attempt_start", json!({
+        "task_id":task,"provider":"claude","profile":"explorar"
+    })).is_err(), "la frontera autenticada sigue excluyendo al Agent");
+}
+
+#[test]
+fn retry_y_resume_respetan_todos_los_niveles_de_start_en_desktop_y_cli() {
+    for (cmd, tag, script, expected_status) in [
+        (
+            "attempt_retry",
+            "policy-retry-elevated-deny",
+            vec![Step::Fail(AdapterError::provider("fallo inicial"))],
+            "failed",
+        ),
+        (
+            "attempt_resume",
+            "policy-resume-elevated-deny",
+            vec![Step::Bind("policy-session"), Step::Complete(Some("hecho".into()))],
+            "done",
+        ),
+    ] {
+        let w = world("claude", Some(script));
+        let a1 = w.create("claude", tag);
+        w.approve(&a1);
+        w.settled(&a1, expected_status);
+        let task = a1.rsplit_once("-a").unwrap().0.to_string();
+        let a2 = format!("{task}-a2");
+        let cli = client(&w, ClientSurface::Cli, ClientPrincipal::Person(format!("{tag}-person")), tag);
+        let args = if cmd == "attempt_retry" {
+            json!({"task_id": task, "from_attempt_id": a1})
+        } else {
+            json!({"task_id": task, "from_attempt_id": a1, "prompt": "continúa"})
+        };
+
+        for (level, error_code) in [
+            ("elevated", "policy_out_of_band_required"),
+            ("deny", "policy_denied"),
+        ] {
+            w.set("global", None, "start", level, false).unwrap();
+            let cli_effective = as_client(&w, &cli, "policy_effective", json!({"project_id": w.project})).unwrap();
+            assert_eq!(cat(&cli_effective, "start")["level"], level);
+            assert!(is(as_client(&w, &cli, cmd, args.clone()), error_code), "CLI {cmd} con {level}");
+            assert!(is(w.desktop(cmd, args.clone()), error_code), "Desktop {cmd} con {level}");
+            assert_eq!(super::dispatch_tests::event_count(&w.core, &a2, "attempt.requested"), 0, "un rechazo no crea Attempts");
+            assert!(w.core.approved_dispatch_candidates(16).unwrap().is_empty());
+        }
+    }
 }
 
 #[test]
@@ -356,14 +535,17 @@ fn cada_actor_ve_su_propia_policy_y_mobile_no_eleva_lo_que_el_core_niega() {
         assert!(w.core.rpc_authenticated_via(&mobile, &ClientClaims::default(), channel, "", "policy_effective", &json!({})).is_err());
     }
     let c = as_client(&w, &cli, "policy_effective", json!({})).unwrap();
-    assert_eq!((c["actor"]["class"].as_str(), cat(&c, "start")["level"].as_str(), cat(&c, "steer")["level"].as_str()), (Some("cli_person"), Some("confirm"), Some("deny")));
-    // Desktop afloja todo lo que puede; Mobile y CLI siguen sin poder: ni la policy ni `confirm` les dan lo que su base niega.
+    assert_eq!((c["actor"]["class"].as_str(), cat(&c, "start")["level"].as_str(), cat(&c, "steer")["level"].as_str()), (Some("cli_person"), Some("confirm"), Some("confirm")));
+    // Desktop afloja todo lo que puede; Mobile no puede elevar lo que su base niega y el CLI no satisface `elevated` con confirm local.
     w.set("global", None, "steer", "elevated", false).unwrap();
     let args = json!({"attempt_id": "nope-a1", "request_id": "r-m", "body": "x", "confirm": true});
     for channel in [Channel::Ui, Channel::Lxo] {
         assert!(w.core.rpc_authenticated_via(&mobile, &ClientClaims::default(), channel, "", "attempt_steer", &args).is_err());
     }
-    assert!(as_client(&w, &cli, "attempt_steer", args).is_err());
+    assert!(is(
+        as_client(&w, &cli, "attempt_steer", args),
+        "policy_out_of_band_required"
+    ));
     assert!(is(steer(&w, "nope-a1", true), "policy_out_of_band_required"));
 }
 
@@ -380,6 +562,321 @@ fn el_cli_puede_pedir_un_attempt_y_sigue_pendiente_de_la_aprobacion_de_desktop()
     // Una Task sin Attempt no ejecuta nada: la policy de `start` no la toca.
     let r = as_client(&w, &cli, "task_create", json!({"request_id": "r-cli3", "project_id": w.project, "objective": "o", "title": "t3", "spec": "s"}));
     assert!(paso_la_policy(&r), "{r:?}");
+}
+
+#[test]
+fn cli_persona_puede_integrar_solo_con_confirm_y_respetando_elevated_y_deny() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("user".into()),
+        "cli-integrate",
+    );
+    let args = json!({
+        "attempt_id": "missing-a1",
+        "action": "merge",
+        "head_commit": "head",
+        "confirm": true
+    });
+    let without_confirm = as_client(
+        &w,
+        &cli,
+        "attempt_integrate",
+        json!({
+            "attempt_id": "missing-a1",
+            "action": "merge",
+            "head_commit": "head"
+        }),
+    );
+    assert!(is(without_confirm, "policy_confirm_required"));
+    assert!(
+        paso_la_policy(&as_client(&w, &cli, "attempt_integrate", args.clone())),
+        "confirm explícito pasa policy y continúa sujeto a las guardas del Command"
+    );
+
+    w.set("global", None, "integrate", "elevated", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_integrate", args.clone()),
+        "policy_out_of_band_required"
+    ));
+
+    w.set("global", None, "integrate", "deny", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_integrate", args),
+        "policy_denied"
+    ));
+}
+
+#[test]
+fn cli_review_exige_confirm_y_respeta_elevated_y_deny_de_la_policy() {
+    let w = world("claude", None);
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("reviewer".into()),
+        "reviewer",
+    );
+    let args = json!({
+        "attempt_id": "policy-review-a1",
+        "decision": "accepted",
+        "head_commit": "0123456789abcdef",
+        "confirm": false
+    });
+
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", args.clone()),
+        "policy_confirm_required"
+    ));
+    let mut confirmed = args.clone();
+    confirmed["confirm"] = json!(true);
+    assert!(
+        is(
+            as_client(&w, &cli, "attempt_review", confirmed.clone()),
+            "review_not_found"
+        ),
+        "confirm true permite llegar al dominio"
+    );
+
+    w.set("global", None, "review", "elevated", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", confirmed.clone()),
+        "policy_out_of_band_required"
+    ));
+    w.set("global", None, "review", "deny", false)
+        .unwrap();
+    assert!(is(
+        as_client(&w, &cli, "attempt_review", confirmed),
+        "policy_denied"
+    ));
+
+    let effective = as_client(&w, &cli, "policy_effective", json!({})).unwrap();
+    assert_eq!(
+        (
+            cat(&effective, "review")["level"].as_str(),
+            cat(&effective, "review")["source"].as_str()
+        ),
+        (Some("deny"), Some("global"))
+    );
+}
+
+#[test]
+fn cli_person_fork_pasa_por_policy_y_solo_desktop_aprueba() {
+    let w = world("claude", Some(vec![Step::Complete(Some("hecho".into()))]));
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("f5-cli-fork".into()),
+        "f5-cli-fork",
+    );
+    let desktop = client(
+        &w,
+        ClientSurface::Desktop,
+        ClientPrincipal::Person("f5-desktop-fork-approver".into()),
+        "f5-desktop-fork",
+    );
+    let source = w.create("claude", "f5-cli-fork-source");
+    let source_task = source.rsplit_once("-a").unwrap().0.to_string();
+
+    let fork_args = json!({
+        "request_id": "f5-cli-fork",
+        "source_attempt_id": source,
+        "confirm": false
+    });
+    let before_unconfirmed = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "attempt_fork", fork_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed);
+
+    let mut confirmed_fork = fork_args;
+    confirmed_fork["confirm"] = json!(true);
+    let fork = as_client(&w, &cli, "attempt_fork", confirmed_fork).unwrap();
+    let fork_attempt = fork["attempt_id"].as_str().unwrap().to_string();
+    assert_eq!(row(&w.core, &fork_attempt).0, "pending_approval");
+    assert!(w.adapter.starts().is_empty(), "Fork no inicia sin aprobación Desktop");
+    assert!(as_client(
+        &w,
+        &cli,
+        "attempt_approve",
+        json!({"attempt_id": fork_attempt})
+    )
+    .is_err(), "CLI no puede aprobar su propio Fork");
+
+    approve_as_client(&w, &desktop, &fork_attempt);
+    w.settled(&fork_attempt, "done");
+    let starts = w.adapter.starts();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(starts[0].attempt_id, fork_attempt);
+
+    let agent = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Agent(source_task),
+        "f5-cli-agent-fork",
+    );
+    let rejected = as_client(
+        &w,
+        &agent,
+        "attempt_fork",
+        json!({"request_id":"agent-fork","source_attempt_id":source,"confirm":true}),
+    )
+    .unwrap_err();
+    assert!(rejected.contains("Acción no permitida"), "{rejected}");
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "fork", policy_level, false).unwrap();
+        let before = events_head(&w);
+        assert!(is(
+            as_client(
+                &w,
+                &cli,
+                "attempt_fork",
+                json!({"request_id":format!("blocked-fork-{policy_level}"),"source_attempt_id":source,"confirm":true})
+            ),
+            code
+        ));
+        assert_eq!(events_head(&w), before, "fork={policy_level} no escribe");
+    }
+}
+
+#[test]
+fn cli_person_race_y_cancel_pasan_por_policy_y_aprobacion_desktop() {
+    let w = world("claude", Some(vec![Step::Complete(Some("hecho".into()))]));
+    let cli = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Person("f5-cli-race".into()),
+        "f5-cli-race",
+    );
+    let desktop = client(
+        &w,
+        ClientSurface::Desktop,
+        ClientPrincipal::Person("f5-desktop-race-approver".into()),
+        "f5-desktop-race",
+    );
+    let source = w.create("claude", "f5-cli-race-source");
+    let source_task = source.rsplit_once("-a").unwrap().0.to_string();
+
+    let race_args = json!({
+        "request_id": "f5-cli-race",
+        "source_attempt_id": source,
+        "candidates": [{}, {}],
+        "confirm": false
+    });
+    let before_unconfirmed = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "task_race", race_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed);
+
+    let mut confirmed_race = race_args;
+    confirmed_race["confirm"] = json!(true);
+    let race = as_client(&w, &cli, "task_race", confirmed_race).unwrap();
+    assert_eq!(race["summary"]["launched"], 2);
+    let race_id = race["race_id"].as_str().unwrap().to_string();
+    let race_attempts: Vec<String> = race["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate["attempt_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(race_attempts.len(), 2);
+    for attempt_id in &race_attempts {
+        assert_eq!(row(&w.core, attempt_id).0, "pending_approval");
+    }
+    assert!(w.adapter.starts().is_empty(), "ningún candidato se despacha antes de aprobación");
+
+    approve_as_client(&w, &desktop, &race_attempts[0]);
+    w.settled(&race_attempts[0], "done");
+    let starts = w.adapter.starts();
+    assert_eq!(starts.len(), 1);
+    assert_eq!(starts[0].attempt_id, race_attempts[0]);
+    assert_eq!(row(&w.core, &race_attempts[1]).0, "pending_approval");
+
+    let race_attempt = race_attempts[1].clone();
+    let cancel_args = json!({
+        "race_id": race_id,
+        "attempt_id": race_attempt,
+        "confirm": false
+    });
+    let before_unconfirmed_cancel = events_head(&w);
+    assert!(is(
+        as_client(&w, &cli, "task_race_cancel", cancel_args.clone()),
+        "policy_confirm_required"
+    ));
+    assert_eq!(events_head(&w), before_unconfirmed_cancel);
+
+    let agent = client(
+        &w,
+        ClientSurface::Cli,
+        ClientPrincipal::Agent(source_task),
+        "f5-cli-agent-race",
+    );
+    for (cmd, args) in [
+        (
+            "task_race",
+            json!({"request_id":"agent-race","source_attempt_id":source,"candidates":[{},{}],"confirm":true}),
+        ),
+        (
+            "task_race_cancel",
+            json!({"race_id":race_id,"confirm":true}),
+        ),
+    ] {
+        let rejected = as_client(&w, &agent, cmd, args).unwrap_err();
+        assert!(rejected.contains("Acción no permitida"), "{cmd}: {rejected}");
+    }
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "fork", policy_level, false).unwrap();
+        let before = events_head(&w);
+        assert!(is(
+            as_client(
+                &w,
+                &cli,
+                "task_race",
+                json!({"request_id":format!("blocked-race-{policy_level}"),"source_attempt_id":source,"candidates":[{},{}],"confirm":true})
+            ),
+            code
+        ));
+        assert_eq!(events_head(&w), before, "fork={policy_level} no crea Race");
+    }
+
+    for (policy_level, code) in [
+        ("elevated", "policy_out_of_band_required"),
+        ("deny", "policy_denied"),
+    ] {
+        w.set("global", None, "stop", policy_level, false).unwrap();
+        let before = events_head(&w);
+        let mut confirmed_cancel = cancel_args.clone();
+        confirmed_cancel["confirm"] = json!(true);
+        assert!(is(
+            as_client(&w, &cli, "task_race_cancel", confirmed_cancel),
+            code
+        ));
+        assert_eq!(events_head(&w), before);
+        assert_eq!(row(&w.core, &race_attempt).0, "pending_approval");
+        assert_eq!(w.adapter.starts().len(), 1);
+    }
+
+    w.unset("global", None, "stop", true).unwrap();
+    let mut confirmed_cancel = cancel_args;
+    confirmed_cancel["confirm"] = json!(true);
+    let cancelled = as_client(&w, &cli, "task_race_cancel", confirmed_cancel).unwrap();
+    assert_eq!(cancelled["results"][0]["outcome"], "rejected");
+    assert_eq!(row(&w.core, &race_attempt).0, "stopped");
+    assert_eq!(w.adapter.starts().len(), 1);
 }
 
 #[test]

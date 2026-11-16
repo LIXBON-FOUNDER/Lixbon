@@ -3,10 +3,11 @@
 //! exige que la última revisión de la tarea sea `accepted` y sobre el HEAD
 //! actual de la rama (ver `integration.rs`).
 //!
-//! Solo la interfaz llega aquí (`orch_task_diff`, `orch_review_task`): los
-//! agentes no pueden revisar ni leer el diff por esta vía. Los rechazos para
-//! `orch_call` y el servidor HTTP de `lxo` están en dos listas separadas:
-//! decisiones humanas y lecturas cerradas por ahora.
+//! La revisión legacy (`orch_task_diff`, `orch_review_task`) sigue siendo de la interfaz.
+//! El Proof Pack expone `attempt_review` a Personas autenticadas de Desktop y CLI; los
+//! agentes no pueden decidir ni leer el diff por esta vía. Los rechazos para `orch_call`
+//! y el servidor HTTP de `lxo` están en dos listas separadas: decisiones humanas legacy
+//! y lecturas cerradas por ahora.
 
 use std::collections::HashMap;
 #[cfg(test)]
@@ -19,7 +20,7 @@ use super::integration::{AGENT_REJECT, PR_REJECT};
 use super::mutation::StateAccess;
 use super::state::{Decision, State};
 
-/// Decisiones que solo toma una persona desde la interfaz.
+/// Decisiones legacy que solo toma una persona desde la interfaz.
 pub const HUMAN_DECISION_CMDS: &[&str] = &["integrate", "pr", "review"];
 /// Lecturas cerradas a los agentes por ahora (se pueden abrir sin tocar las decisiones).
 pub const CLOSED_READ_CMDS: &[&str] = &["task_diff"];
@@ -186,7 +187,7 @@ pub fn task_diff(state: &impl StateAccess, id: &str, limit: usize) -> Result<Val
 }
 
 /// Revisión de la persona sobre `head_commit`. Si la rama ya no está en ese
-/// commit devuelve `head_moved` y no registra nada.
+/// commit al comprobarla, devuelve `head_moved` y no registra nada.
 pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
     if !confirm {
         return Err(NEED_CONFIRM_REVIEW.into());
@@ -195,16 +196,17 @@ pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_comm
         return Err(format!("decision debe ser accepted o rejected (llegó {decision:?})"));
     }
     let t = target(state, id)?;
-    // Rama borrada: error de uso, no un head_moved con found_commit null. No se registra nada.
-    let found = branch_head(&t.repo, &t.branch)
-        .ok_or_else(|| format!("no_branch: la rama {} de {id} ya no existe", t.branch))?;
-    if found != head_commit.trim() {
-        return Ok(json!({ "task_id": id, "outcome": "head_moved", "expected_commit": head_commit, "found_commit": found }));
-    }
     let (base, source) = match resolve_base(&t) {
         Ok((b, s)) => (Some(b), Some(s)),
         Err(_) => (None, None),
     };
+    // Verificar lo más cerca posible del registro. Git y SQLite no comparten transacción:
+    // una rama externa todavía podría moverse justo después de esta comprobación.
+    let found = branch_head(&t.repo, &t.branch)
+        .ok_or_else(|| format!("no_branch: la rama {} de {id} ya no existe", t.branch))?;
+    if found != head_commit {
+        return Ok(json!({ "task_id": id, "outcome": "head_moved", "expected_commit": head_commit, "found_commit": found }));
+    }
     let comment = comment.map(str::trim).filter(|c| !c.is_empty());
     let (did, at) = state.mutate(|st| {
         let did = st.record_decision(id, "review", "human", &json!({

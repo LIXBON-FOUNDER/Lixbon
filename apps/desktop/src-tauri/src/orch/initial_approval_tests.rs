@@ -201,6 +201,7 @@ pub(super) mod e2e {
     use super::super::boot_tests::{arranca, dirs, suelta};
     use super::super::events::{Channel, MutationContext};
     use super::super::host::RecordingHost;
+    use super::super::pty::pruebas;
     use super::super::state::Status;
     use super::super::{Core, Orch};
     use crate::store::{ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity, Fingerprint, NewLocation};

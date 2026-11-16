@@ -21,7 +21,8 @@ de las tareas sigue siendo el documento legacy. Mientras tanto:
   contador de ids);
 * los triggers `runs_inert_*` y `tasks_inert_*` abortan cualquier `INSERT`, `UPDATE` o `DELETE` que se salte el
   almacén;
-* nada está conectado al RPC, a `lxo` ni a la interfaz.
+* el runtime Core no tiene autoridad; las mutaciones rechazan antes de escribir, aunque las rutas RPC estén conectadas y fallen
+  cerrado mientras el modelo esté inactivo. `lxo` no puede leer ni crear Tasks/Attempts hasta que el corte active el modelo.
 
 Así el esquema puede publicarse antes que los datos sin que nazca una segunda autoridad (ADR D15, revisada en
 LXO-113). El corte escribe `meta.agentic_model` **antes** de copiar.
@@ -153,7 +154,7 @@ sigue rechazado.
 * **Ledger (017):** `task_create_requests` guarda scope, método, `request_id`, huella, Run y Task (y el Attempt, si lo hay). Las inserciones están **inertes hasta el corte** (`meta.agentic_model`), las filas son inmutables
   y no se borran, y una Task nace de una sola petición (`UNIQUE(task_id)`).
 
-### Aprobación inicial (fase 2a, inerte)
+### Aprobación inicial (fase 2a)
 
 Un Attempt puede nacer `pending_approval`: espera la decisión de una **Person autenticada** hasta un plazo **durable** de
 30 minutos (`attempts.initial_approval_deadline`, migración 019), fijado por el servidor al crearlo. La Task raíz lo refleja
@@ -177,11 +178,11 @@ con el estado `pending_approval` (distinto de `awaiting_terminal_approval`, que 
   borrado mientras `recursive_triggers` esté OFF, y la huella original se perdería. La migración 018 lo aborta con un trigger
   local; no se cambia ningún PRAGMA de la base.
 
-Esta fase es **inerte**: `task_create` sigue rechazando todo `attempt` y los RPC de decisión no existen todavía. Pedir el
-primer Attempt, decidirlo y lanzarlo se conecta en la fase siguiente (`Tx::request_initial_attempt`, la resolución de la
-decisión y el despacho). Hoy solo ejecutan este código las pruebas y el barrido de expiración.
+La aprobación inicial protege el primer lanzamiento: `task_create` puede crear un Attempt pendiente y `lxo attempt start` puede
+solicitarlo para una Task abierta existente. Los retry/resume pedidos por CLI también vuelven a esta misma barrera. La decisión
+sigue reservada a Desktop.
 
-### Claim de despacho (fase 2b, inerte)
+### Claim de despacho (fase 2b)
 
 Antes de cualquier efecto externo, el despacho de un Attempt reserva un **claim durable de un solo uso**
 (`attempts.dispatch_claim`, migración 020). El orden del protocolo es: reservar → registrar `attempt.started` → marcar el
@@ -189,8 +190,9 @@ claim `started` → llamar al proveedor. Los estados son `none → reserved → 
 Core reinicia sin poder probar el desenlace; el trigger de la base impide reiniciar un claim o saltarse pasos.
 
 * **Reservar (`attempt_dispatch_reserve`):** solo si el Attempt es del Core y está `starting`, su Task sigue abierta en un Run
-  abierto y un Project activo y, para el primer Attempt de una Task de `task.create`, existe un spec no vacío y la
-  aprobación canónica de una Person autenticada con plazo durable. Devuelve `false` si ya hay claim: nunca se repite.
+  abierto y un Project activo. `a1` exige un spec no vacío cuando nació de `task.create`; cualquier Attempt con plazo de aprobación
+  (incluido retry/resume CLI) exige la decisión canónica de una Person. Los `n > 1` sin plazo requieren además
+  `attempt.retried` o `attempt.continued`. Devuelve `false` si ya hay claim.
 * **Asentar (`settled`):** solo con evidencia canónica de un Attempt final (`store/dispatch_evidence.rs`): exactamente un
   `attempt.started` seguido de exactamente un evento terminal, ambos como los emitiría el Core. Un fallo posterior al
   arranque con resultado desconocido no es un terminal conocido: el claim queda `ambiguous` y lo resuelve una persona.
@@ -201,16 +203,17 @@ Core reinicia sin poder probar el desenlace; el trigger de la base impide reinic
 * **Reconciliar al arrancar:** los claims `reserved`/`started` sin evidencia terminal pasan a `ambiguous` y se registra
   `attempt.dispatch_ambiguous`; los que sí la tienen se asientan sin ese hecho falso.
 
-Esta fase es **inerte**: no hay dispatcher que llame a estas primitivas del almacén (llegará en 2c).
+El Core reserva y asienta estos claims en el despacho; el runtime queda inactivo antes del corte de Task/Attempt.
 
-### Despachador del primer Attempt (fase 2c-1a, inerte)
+### Despachador del primer Attempt y continuaciones (fase 2c)
 
 `orch/dispatch.rs` lleva un Attempt aprobado (`starting`) a «lanzado» respetando el claim de despacho. Reconstruye todo de
 filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real detrás de un `Launcher` inyectable:
 
 1. Lee las filas durables y resuelve la **ubicación verificada del Project** en esta máquina (`Core::project_launch_location`:
    la de esta máquina, no `missing`, que exista como carpeta). `Task.repo` no se usa: lo dice quien crea la Task.
-2. Reserva el claim (revalida aprobación canónica, Run abierto, Project activo).
+2. Reserva el claim (revalida el plazo y la aprobación canónica cuando existe; sin plazo exige para `n > 1` la solicitud canónica
+   `attempt.retried` o `attempt.continued`; además Run abierto y Project activo).
 3. `Launcher::prepare` (worktree, capability, entorno): sin ningún efecto del proveedor. Si falla, el Attempt se cierra
    **desde `starting`** (`failed(launch_failed)` si falló algo esperado; `stopped` si no había nada que lanzar) y el claim se
    asienta sin `attempt.started`.
@@ -219,11 +222,7 @@ filas persistidas, nunca de lo que diga quien llama, y deja el lanzamiento real 
    (el claim se queda `started` y el Attempt `running`: ni se da por fallido ni se relanza).
 
 Un Attempt con claim nunca se despacha otra vez, tampoco tras un reintento del cliente o una nueva pasada
-(`Core::dispatch_approved`).
-
-**Fuera de esta fase** (hecho después): el `Launcher` real ([§ Launcher real](#launcher-real-lxo-246-pr-b)), la conversión de los
-eventos del proveedor ([§ Bombeo de eventos](#bombeo-de-eventos-lxo-246-pr-c)) y `attempt.dispatch_ambiguous` con la reconciliación
-de los claims en vuelo al arrancar ([§ Encender el lanzador](#encender-el-lanzador-lxo-246-pr-d)).
+(`Core::dispatch_approved`). El barrido periódico y la recuperación de claims completan el mismo protocolo.
 
 ### RPC de la aprobación inicial (fase 2c-2)
 
@@ -239,43 +238,98 @@ del runtime revalida el plazo durable y la evidencia canónica bajo la transacci
 | el plazo ya venció | `{ "status": "Expired", … }`: el Attempt queda detenido (`attempt.rejected`, causa `approval_timeout`, actor System); una aprobación tardía **nunca** aprueba |
 | la decisión contraria ya estaba tomada, no está pendiente, no existe o el id es inválido | error, sin cambios |
 
-**Aprobar no lanza nada:** deja el Attempt en `starting`, y es el despachador (`dispatch.rs`) el que lo toma de la cola de
-aprobados. Mientras `task_create` rechace `attempt` (fase 2c-3) no puede existir un Attempt pendiente creado por el RPC, así que
-estos comandos son inertes en la práctica.
+**Aprobar no lanza directamente:** deja el Attempt en `starting`, y es el despachador (`dispatch.rs`) el que lo toma de la cola de
+aprobados. El primer Attempt puede nacer desde `task_create` o `lxo attempt start`; los retry/resume solicitados por CLI también
+quedan `pending_approval`. Solo una Person de Desktop puede aprobar o rechazar.
+
+### Primer Attempt desde CLI (`attempt_start`, LXO-158)
+
+`attempt_start` · `{ task_id, provider, profile, model?, effort? }` (`deny_unknown_fields`). Solo una Person autenticada por CLI puede
+solicitarlo. El Core toma Task, Project, Run, encargo y repositorio de sus propios registros; el cliente no envía host, ruta, prompt,
+estrategia de Worktree ni flags de lanzamiento. Requiere una Task Core abierta y sin Attempts, Project localizable y provider/profile
+habilitados. El lanzador crea el Worktree `new`.
+
+| caso | respuesta |
+|---|---|
+| solicitud aceptada | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a1", "attempt_status": "pending_approval" }`; claim `none` |
+| repetición | `status: "Replayed"`, mismo `attempt_id` y estado durable actual en `attempt_status`; otra selección da conflicto |
+| Task, provider, perfil, Project o launcher no elegible | error antes de crear el Attempt |
+
+El RPC no despierta al despachador. Tras una aprobación explícita en Desktop, el dispatcher reserva el claim, crea el Worktree y
+lanza el provider. La policy clasifica el Command como `start`; sus overrides pueden endurecer o denegar el inicio, nunca quitar la
+aprobación Desktop.
+
+### Crear desde la CLI (`lxo task create`, LXO-158)
+
+`lxo task create --project ID|NOMBRE --objective ... --title ...` llama al RPC autenticado `task_create`; el Project es obligatorio
+y no se infiere del `cwd`. El nombre registrado se resuelve con `projects_overview` y la validación final sigue en el Core. `--repo` solo se
+envía si la persona lo indicó; si falta, el Core usa la ubicación verificada del Project. No hay `--host` ni opciones de Worktree:
+esos recursos los determina el Core.
+
+Sin `--provider`/`--profile`, se crea solo la intención. Con ambos y `--spec`, la misma petición puede incluir el primer Attempt:
+el Core fija `pending_approval`, y **nunca** lo ejecuta antes de una decisión de Desktop. La CLI consulta después `attempt_detail`
+para enseñar el estado durable actual; repetir una solicitud que ya avanzó no la presenta como pendiente.
+
+`--request-id` permite fijar la clave idempotente. Si se omite, lxo deriva una clave estable de la intención y de la selección; repetir
+el mismo comando no crea otra Task. Una forma `--json` v1 publica `status`, `request_id`, `project_id`, `run_id`, `task_id`,
+`attempt_id`, `attempt_status`, `approval_required` y `approval_surface`; no publica host ni rutas no devueltas por el Core.
 
 ### RPC del reintento (`attempt_retry`)
 
-`attempt_retry` · `{ task_id, from_attempt_id, provider?, model?, effort? }` (`deny_unknown_fields`). Es `HumanDecision`: **solo una
-Person en Desktop**. **No acepta `profile`**: el perfil se hereda del Attempt anterior, así que un reintento nunca amplía lo que el agente
-puede hacer. El módulo es `orch/attempt_retry_rpc.rs`; el cambio de estado es `Tx::request_attempt_retry`
+`attempt_retry` · `{ task_id, from_attempt_id, provider?, model?, effort? }` (`deny_unknown_fields`). Lo puede pedir una Person de Desktop
+o CLI; para CLI, el nuevo Attempt nace `pending_approval` y solo lo lanza la aprobación posterior en Desktop. **No acepta `profile`**:
+el perfil se hereda del Attempt anterior, así que un reintento nunca amplía lo que el agente puede hacer. El módulo es
+`orch/attempt_retry_rpc.rs`; el cambio de estado es `Tx::request_attempt_retry`
 ([REINTENTO.md](REINTENTO.md#puente-al-despachador-proyecto-de-cuatro-pr)).
 
 | caso | respuesta |
 |---|---|
-| `from_attempt_id` es el último de la Task y terminó mal (`failed`, `stopped`, `exited`) | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>" }` y se despierta al despachador |
-| ya existe el Attempt siguiente a ese | `{ "status": "Replayed", … }` con ese Attempt: repetir la petición no abre otro ni lanza de nuevo |
+| `from_attempt_id` es el último de la Task y terminó mal (`failed`, `stopped`, `exited`) | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>", "attempt_status" }`; Desktop despierta al despachador, CLI queda `pending_approval` |
+| ya existe el Attempt siguiente a ese con procedencia e intención efectivas coincidentes | `{ "status": "Replayed", …, "attempt_status" }` con su estado durable actual: repetir no abre otro ni lanza de nuevo |
+| el mismo origen ya se usó para resume o se repite con otra selección efectiva | `attempt_retry_conflict`; no se escribe ni se lanza |
 | no es el último, no terminó mal, no existe, id inválido o de otra Task | error, sin cambios |
 | sin lanzador (Orquestador desactivado), sin Project o proveedor sin `start` | error ANTES de escribir nada |
 
-**Pedirlo no lanza nada:** el Attempt nuevo queda `starting` con el claim `none` y lo lanza el despachador. El barrido periódico recoge ahora,
+**Pedirlo no lanza nada:** Desktop crea el Attempt en `starting`; CLI lo crea en `pending_approval`. Tras aprobar, el despachador lo lanza
+con el claim `none`. El barrido periódico recoge ahora,
 además de los aprobados, los Attempts `n > 1` sin plazo de aprobación que llevan `attempt.retried` / `attempt.continued` (la prueba de que una
 persona lo pidió): es también la recuperación si Lixbon cae entre pedir el reintento y despacharlo.
 
 ### RPC de la continuación (`attempt_resume`)
 
-`attempt_resume` · `{ task_id, from_attempt_id, prompt, model?, effort? }` (`deny_unknown_fields`). `HumanDecision`: **solo una Person en
-Desktop**. **No acepta `provider`** (una ProviderSession no se comparte entre proveedores) **ni `profile`** (se hereda: continuar nunca amplía
-permisos). El módulo es `orch/attempt_resume_rpc.rs`; el cambio de estado es `Tx::request_attempt_continuation`
+`attempt_resume` · `{ task_id, from_attempt_id, prompt, model?, effort? }` (`deny_unknown_fields`). Lo puede pedir una Person de Desktop o
+CLI; el resume CLI queda `pending_approval` hasta que lo apruebe Desktop. **No acepta `provider`** (una ProviderSession no se comparte
+entre proveedores) **ni `profile`** (se hereda: continuar nunca amplía permisos). El módulo es `orch/attempt_resume_rpc.rs`; el cambio de
+estado es `Tx::request_attempt_continuation`
 ([REINTENTO.md](REINTENTO.md#puente-al-despachador-proyecto-de-cuatro-pr)).
 
 | caso | respuesta |
 |---|---|
-| `from_attempt_id` es el último, está terminado y su sesión se puede reanudar | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>" }` y se despierta al despachador |
-| ya existe el Attempt siguiente | `{ "status": "Replayed", … }` con ese Attempt: no reanuda de nuevo |
-| en marcha, sin sesión, sesión cerrada / no resumible / sin referencia / no en espera, proveedor sin `resume`, mensaje vacío o con controles, no es el último | error ANTES de escribir nada |
+| `from_attempt_id` es el último, está terminado y su sesión se puede reanudar | `{ "status": "Requested", "task_id", "attempt_id": "<task>-a<n+1>", "attempt_status" }`; Desktop despierta al despachador, CLI queda `pending_approval` |
+| ya existe el Attempt siguiente con procedencia, sesión e intención coincidentes | `{ "status": "Replayed", …, "attempt_status" }` con su estado durable actual: no reanuda de nuevo |
+| el mismo origen ya se usó para retry o se repite con otro mensaje / selección | `attempt_resume_conflict`; no se escribe ni se reanuda |
+| en marcha, sin sesión, sesión cerrada / no resumible / sin referencia / no en espera, proveedor sin `resume`, mensaje vacío, con controles o con el delimitador reservado «Seguimiento», no es el último | error ANTES de escribir nada |
 
 **Solo reanudación nativa:** el fallback con ContextPackage no entra por aquí. El Attempt nuevo se enlaza a la MISMA sesión y el despachador lo lanza con
 `adapter.resume` (la referencia sale de la sesión durable, el mensaje del último bloque «Seguimiento» del `spec`), no con `start`.
+Los RPC no reciben una clave `request_id`: `from_attempt_id` identifica el replay solo junto al tipo de operación y su intención efectiva.
+
+### Stop exacto desde CLI (`attempt_stop`, LXO-159)
+
+`attempt_stop` · `{ attempt_id, confirm }` (`deny_unknown_fields`). Solo CLI Person autenticada; `attempt_id` debe ser el id canónico
+completo (`<task>-a<n>`) y `confirm` debe ser `true`. No acepta un `task_id` ni selecciona automáticamente el Attempt actual.
+La policy clasifica el comando como `stop`; la policy efectiva también debe permitirlo.
+
+| estado durable | resultado |
+|---|---|
+| `pending_approval` | registra el rechazo de la solicitud; no lanza |
+| `running` sin control registrado todavía | `attempt_stop_unavailable`; falla cerrado, no modifica el estado. Se puede reintentar el mismo stop exacto cuando se registre el control |
+| `running`, `waiting`, `awaiting_terminal_approval` con control registrado para ese `attempt_id` | cancela solo ese control, espera al cierre y confirma `stopped` durable |
+| `stopped` | replay idempotente |
+| `starting`, intento distinto, control de otro Attempt, terminal no detenido o timeout | error; no confirma un stop que no pueda garantizar |
+
+La respuesta correcta es `{ "status": "Stopped" \| "Replayed", "task_id", "attempt_id" }`. El RPC falla cerrado si el proceso vivo
+no corresponde a ese id o el pump no asienta el desenlace antes del límite.
 
 ### Primer Attempt con `task_create` (fase 2c-3)
 
@@ -328,7 +382,8 @@ la del Project, `shared`, queda para otra fase).
 * **Sin plan de entorno:** no se aplica `worktree_env` (enlaces de `node_modules`, copias de `.env`): ese plan es lo que una persona
   aprobó para una hija y el primer Attempt no tiene una aprobación equivalente.
 
-Inerte: nada en producción lo llama todavía.
+`AdapterLauncher::prepare` usa esta provisión en producción cuando el Orquestador está activo; los Attempts de CLI solicitan la
+estrategia fija `new` y no pueden elegir una ruta o Worktree compartido.
 
 ### Launcher real (LXO-246, PR B)
 

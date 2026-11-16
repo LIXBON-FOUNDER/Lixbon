@@ -120,6 +120,9 @@ impl CreateTaskInput {
             return Err("Solicitud task.create inválida".into());
         }
         let attempt = self.attempt.map(CreateAttemptInput::authorize).transpose()?;
+        if attempt.is_some() && self.spec.trim().is_empty() {
+            return Err("Solicitud task.create inválida".into());
+        }
         Ok(AuthorizedCreate {
             identity_scope,
             request_id: self.request_id,
@@ -240,7 +243,7 @@ mod tests {
     }
 
     fn with_attempt(attempt: serde_json::Value) -> CreateTaskInput {
-        input(json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t", "attempt": attempt}))
+        input(json!({"request_id": "r1", "project_id": "p1", "objective": "x", "title": "t", "spec": "task instructions", "attempt": attempt}))
     }
 
     #[test]
@@ -284,6 +287,22 @@ mod tests {
                 assert_eq!(input.authorize_context(&person()).unwrap_err(), "Solicitud task.create inválida", "{attempt}");
             }
         }
+    }
+
+    #[test]
+    fn pedir_un_attempt_exige_un_encargo_antes_de_autorizar_la_mutacion() {
+        let value = json!({
+            "request_id": "r1",
+            "project_id": "p1",
+            "objective": "objetivo",
+            "title": "tarea",
+            "spec": "  ",
+            "attempt": {"provider": "codex", "profile": "explorar"}
+        });
+        assert_eq!(
+            input(value).authorize_context(&person()).unwrap_err(),
+            "Solicitud task.create inválida"
+        );
     }
 
     #[test]

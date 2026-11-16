@@ -1,0 +1,8 @@
+{
+  "attempt_id": "task-a1",
+  "command": "attempt.steer",
+  "mode": "steer",
+  "request_id": "s-1",
+  "status": "Delivered",
+  "v": 1
+}

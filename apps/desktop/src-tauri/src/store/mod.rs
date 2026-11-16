@@ -138,7 +138,7 @@ pub use legacy::{bootstrap_legacy_snapshot, verify_snapshot, ImportOutcome, Snap
 pub use lock::InstanceLock;
 // Attempt como ejecución (LXO-114): inerte hasta el corte; hasta entonces solo la usan `orch::attempt_ops` y las pruebas.
 #[allow(unused_imports)]
-pub use attempts::{transition_allowed, AttemptAction, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, RuntimeField, MAX_SUMMARY_CHARS};
+pub use attempts::{transition_allowed, AttemptAction, AttemptFollowUpKind, AttemptRow, AttemptStatus, AttemptStep, NewAttempt, RuntimeField, MAX_SUMMARY_CHARS};
 // Piezas sin evento propio para el runtime sobre las tablas (LXO-231 → LXO-232): se llaman dentro de `Store::write`.
 #[allow(unused_imports)]
 pub(crate) use attempts::{attempt_phase_append_in, attempt_runtime_update_in};

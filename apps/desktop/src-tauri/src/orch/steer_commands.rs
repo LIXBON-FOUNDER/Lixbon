@@ -12,8 +12,8 @@
 //! `steer_runtime.rs`; aquí está lo que lee y escribe el almacén: la autorización, las validaciones y los dos Events.
 //!
 //! # Decisiones
-//! 1. **Quién**: una persona o el agente que coordina la Task (como la cola). El Core no instruye a nadie: la automatización es F9.
-//!    La policy efectiva por actor/Attempt (LXO-209) todavía no existe: hasta entonces la validación es la del actor.
+//! 1. **Quién**: la capa de comando permite una persona o el agente que coordina la Task; los RPC públicos de Desktop/CLI exigen
+//!    una Person autenticada, nunca Agent. `rpc_authenticated_via` aplica la policy por actor/Attempt antes de despachar.
 //! 2. **Cuándo**: solo un Attempt `running` con una ejecución viva. Uno terminado es `attempt_final`; uno que espera una respuesta
 //!    (`waiting`, `awaiting_terminal_approval`) o aún no ha arrancado es `busy`: lo que se le diga entonces es un `answer`.
 //! 3. **Todo o nada antes de actuar**: la capability, la sesión y el estado se comprueban ANTES de escribir nada o de tocar el proveedor.

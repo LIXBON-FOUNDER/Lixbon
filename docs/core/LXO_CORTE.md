@@ -44,6 +44,15 @@ publicadas están en [`fixtures/lxo/`](fixtures/lxo/). Las genera `apps/desktop/
 | `lxo context show --json` | la respuesta `valid` del Core tal cual: `{v: 1, status, verification, package_id, package, summary[, attachments, stored]}` | [`context_show.v1.json`](fixtures/lxo/context_show.v1.json) | siempre |
 | `lxo context validate --json` · `import --json` | la misma sin `package` | [`context_validate.v1.json`](fixtures/lxo/context_validate.v1.json) | siempre |
 | `lxo context … --json` (rechazado, sale `7`) | `{v: 1, status: "invalid", error: {code, message}, serialized_bytes[, declared_id, recomputed_id]}` | [`context_invalid.v1.json`](fixtures/lxo/context_invalid.v1.json) | siempre |
+| `lxo attempt queue <attempt_id> --message … --confirm --json` | `{v: 1, command: "attempt.queue", status, attempt_id, queue_id, position}` | [`attempt_queue.v1.json`](fixtures/lxo/attempt_queue.v1.json), [replay](fixtures/lxo/attempt_queue_replay.v1.json) | LXO-159 |
+| `lxo attempt steer <attempt_id> --message … --confirm --json` | `{v: 1, command: "attempt.steer", status, mode, attempt_id, request_id}` | [`attempt_steer.v1.json`](fixtures/lxo/attempt_steer.v1.json) | LXO-159 |
+| `lxo attempt stop <attempt_id> --send --message … --confirm --json` | `{v: 1, command: "attempt.stop_and_send", status, mode, attempt_id, request_id}` | [`attempt_stop_send.v1.json`](fixtures/lxo/attempt_stop_send.v1.json) | LXO-159 |
+| `lxo queue list <attempt_id> --json` | `{v: 1, command: "queue.list", attempt_id, task_id, items, finished, finished_limit}` | [`queue_list.v1.json`](fixtures/lxo/queue_list.v1.json) | LXO-159 |
+| `lxo queue cancel <queue_id> --json` | `{v: 1, command: "queue.cancel", status, queue_id}` | [`queue_cancel.v1.json`](fixtures/lxo/queue_cancel.v1.json) | LXO-159 |
+
+Con `--json`, los errores de estos comandos salen por `stderr` con `{v: 1, ok: false, code, error[, kind]}`; `kind` solo aparece
+para errores de policy o respuestas categorizadas del Core. El ejemplo versionado es
+[`attempt_control_policy_error.v1.json`](fixtures/lxo/attempt_control_policy_error.v1.json).
 
 `lxo provider` (LXO-137) es de solo lectura sobre `provider_capabilities` ([QUERIES.md](QUERIES.md#provider_capabilities-lxo-135)):
 lxo no decide soporte por nombre ni versión y enseña las seis capabilities que da el Core. `status` fija el código de salida por lo

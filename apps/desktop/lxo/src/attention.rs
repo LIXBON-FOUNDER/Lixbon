@@ -763,7 +763,10 @@ mod tests {
     #[test]
     fn attempt_es_el_atajo_del_target_attempt() {
         let opts = list(&["attention", "--attempt", "t3-a2"]).unwrap();
-        assert_eq!(Value::Object(opts.filters), json!({ "target_kind": "attempt", "target_id": "t3-a2" }));
+        assert_eq!(
+            Value::Object(opts.filters),
+            json!({ "target_kind": "attempt", "target_id": "t3-a2" })
+        );
         for raw in [
             &["attention", "--attempt", "t3-a2", "--task", "t3"][..],
             &["attention", "--attempt", "t3-a2", "--target-kind", "task"],

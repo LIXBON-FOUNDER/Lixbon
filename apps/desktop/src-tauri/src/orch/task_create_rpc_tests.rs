@@ -13,6 +13,7 @@ mod tests {
     use super::super::boot_tests::{arranca, dirs, suelta};
     use super::super::agentic_cut;
     use super::super::host::RecordingHost;
+    use super::super::pty::pruebas;
     use super::super::{Orch};
     use super::super::rpc::rpc_action_for_tests;
     use super::super::{Core, Status};
@@ -135,6 +136,22 @@ mod tests {
     #[test]
     fn task_create_is_a_normal_global_person_rpc_not_a_ui_only_command() {
         assert_eq!(rpc_action_for_tests("task_create"), ClientAction::AgentOrDesktopCommand);
+    }
+
+    #[test]
+    fn task_create_no_acepta_un_host_aportado_por_el_cliente() {
+        let (core, client, project) = fixture();
+        let mut args = request();
+        args["project_id"] = json!(project);
+        args["host"] = json!("inventado");
+        let before = core.storage.with_store(|store| store.events_head().unwrap()).unwrap();
+        assert!(rpc(&core, &client, args).is_err(), "el host no es un campo de task_create");
+        assert!(core.lock().tasks.is_empty());
+        assert_eq!(
+            core.storage.with_store(|store| store.events_head().unwrap()).unwrap(),
+            before,
+            "el rechazo no deja eventos"
+        );
     }
 
     #[test]
@@ -265,6 +282,7 @@ mod tests {
             let mut attempt = request();
             attempt["request_id"] = json!(request_id);
             attempt["project_id"] = json!(project);
+            attempt["spec"] = json!("haz algo");
             attempt["attempt"] = attempt_value;
             let error = rpc(&core, &client, attempt).unwrap_err();
             assert!(error.contains(expected), "{request_id}: {error}");

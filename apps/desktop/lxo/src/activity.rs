@@ -185,7 +185,12 @@ fn resolution(code: &str) -> Option<&'static str> {
 }
 
 const STOP_CAUSES: [&str; 2] = ["cancelled", "run_closed"];
-const ACTIVE_FROM: [&str; 4] = ["starting", "running", "waiting", "awaiting_terminal_approval"];
+const ACTIVE_FROM: [&str; 4] = [
+    "starting",
+    "running",
+    "waiting",
+    "awaiting_terminal_approval",
+];
 
 fn intent_field(code: &str) -> Option<&'static str> {
     Some(match code {
@@ -211,7 +216,18 @@ const RACE_SCOPES: [&str; 2] = ["one", "remaining"];
 
 /// Un cambio de policy (`policy.changed`, LXO-209): ámbito, categoría, niveles del override y qué hizo con la restricción efectiva.
 const POLICY_SCOPES: [&str; 3] = ["global", "project", "attempt"];
-const POLICY_CATEGORIES: [&str; 10] = ["start", "answer", "queue", "steer", "stop", "fork", "review", "integrate", "cleanup", "provider_permissions"];
+const POLICY_CATEGORIES: [&str; 10] = [
+    "start",
+    "answer",
+    "queue",
+    "steer",
+    "stop",
+    "fork",
+    "review",
+    "integrate",
+    "cleanup",
+    "provider_permissions",
+];
 const POLICY_LEVELS: [&str; 4] = ["allow", "confirm", "elevated", "deny"];
 const POLICY_DIRECTIONS: [&str; 4] = ["tighten", "loosen", "same", "reset"];
 
@@ -556,12 +572,27 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         "activity.attempt.queued" => {
             let position = a.number("position")?;
             let attachments = a.number("attachments")?;
-            format!("Se encoló una instrucción para el {at}{}.", details(&[Some(format!("posición {position}")), (attachments > 0).then(|| plural(attachments, "adjunto", "adjuntos"))]))
+            format!(
+                "Se encoló una instrucción para el {at}{}.",
+                details(&[
+                    Some(format!("posición {position}")),
+                    (attachments > 0).then(|| plural(attachments, "adjunto", "adjuntos"))
+                ])
+            )
         }
-        "activity.attempt.queue_delivered" => format!("Se entregó al {at} la instrucción encolada."),
-        "activity.attempt.queue_cancelled" => format!("Se canceló una instrucción encolada para el {at}."),
-        "activity.attempt.dispatch_ambiguous" => format!("No se sabe si el proveedor llegó a lanzarse para el {at}: no se relanzará."),
-        "activity.attempt.queue_failed" => format!("No se pudo entregar una instrucción encolada al {at}: {}.", a.code_in("reason", queue_failure)?),
+        "activity.attempt.queue_delivered" => {
+            format!("Se entregó al {at} la instrucción encolada.")
+        }
+        "activity.attempt.queue_cancelled" => {
+            format!("Se canceló una instrucción encolada para el {at}.")
+        }
+        "activity.attempt.dispatch_ambiguous" => {
+            format!("No se sabe si el proveedor llegó a lanzarse para el {at}: no se relanzará.")
+        }
+        "activity.attempt.queue_failed" => format!(
+            "No se pudo entregar una instrucción encolada al {at}: {}.",
+            a.code_in("reason", queue_failure)?
+        ),
         // Steer y Stop & Send (LXO-144): nunca el texto de la instrucción, solo el hecho y cómo acabó.
         "activity.attempt.instruction_requested" => {
             if a.code("mode", &INSTRUCTION_MODES)? == "steer" {
@@ -574,7 +605,11 @@ fn attempt(key: &str, a: &A) -> Option<String> {
             let steer = a.code("mode", &INSTRUCTION_MODES)? == "steer";
             let outcome = a.code("outcome", &INSTRUCTION_OUTCOMES)?;
             // `reason` es opcional, pero si viene tiene que ser uno de los motivos cerrados.
-            let detail = if a.present("reason") { format!(" ({})", a.code_in("reason", queue_failure)?) } else { String::new() };
+            let detail = if a.present("reason") {
+                format!(" ({})", a.code_in("reason", queue_failure)?)
+            } else {
+                String::new()
+            };
             match (outcome, steer) {
                 ("delivered", true) => format!("Se inyectó la instrucción en el turno en curso del {at}."),
                 ("delivered", false) => format!("Se detuvo el turno en curso del {at} y se le envió la instrucción."),
@@ -593,10 +628,16 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         },
         // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del Attempt.
         "activity.attempt.usage_reported" => format!("El proveedor informó el uso del {at}."),
-        "activity.attempt.rejected" => format!("Se rechazó el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?)),
+        "activity.attempt.rejected" => format!(
+            "Se rechazó el {at}{}.",
+            run_closed(a.code("cause", &STOP_CAUSES)?)
+        ),
         "activity.attempt.completed" => {
             let summary = a.boolean("has_summary")?;
-            format!("El {at} terminó correctamente{}.", if summary { " con resumen" } else { "" })
+            format!(
+                "El {at} terminó correctamente{}.",
+                if summary { " con resumen" } else { "" }
+            )
         }
         "activity.attempt.failed" => {
             let reason = a.code_in("reason", attempt_failure)?;
@@ -605,7 +646,10 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         }
         "activity.attempt.stopped" => {
             a.code("from", &ACTIVE_FROM)?;
-            format!("Se detuvo el {at}{}.", run_closed(a.code("cause", &STOP_CAUSES)?))
+            format!(
+                "Se detuvo el {at}{}.",
+                run_closed(a.code("cause", &STOP_CAUSES)?)
+            )
         }
         _ => {
             a.code("from", &ACTIVE_FROM)?;
@@ -626,11 +670,20 @@ fn review(key: &str, a: &A) -> Option<String> {
     let head = a.text("head_commit")?;
     if key == "activity.review.invalidated" {
         let observed = a.text("observed_head")?;
-        return Some(format!("La revisión del {at} sobre {head} dejó de valer: la rama está en {observed}."));
+        return Some(format!(
+            "La revisión del {at} sobre {head} dejó de valer: la rama está en {observed}."
+        ));
     }
     let comment = a.boolean("has_comment")?;
-    let verdict = if key == "activity.review.accepted" { "aceptó" } else { "rechazó" };
-    Some(format!("Se {verdict} la revisión del {at} sobre {head}{}.", if comment { " con comentario" } else { "" }))
+    let verdict = if key == "activity.review.accepted" {
+        "aceptó"
+    } else {
+        "rechazó"
+    };
+    Some(format!(
+        "Se {verdict} la revisión del {at} sobre {head}{}.",
+        if comment { " con comentario" } else { "" }
+    ))
 }
 
 /// Una rama opcional: ausente, `null` o texto vacío se omiten; otro tipo deja el item sin texto.
@@ -741,7 +794,10 @@ fn format(key: &str, a: &A) -> Option<String> {
             let parent = a.optional_text("parent")?;
             Some(format!(
                 "Se creó la tarea «{title}»{}.",
-                details(&[parent.map(|p| format!("depende de {p}")), Some(format!("profundidad {depth}"))])
+                details(&[
+                    parent.map(|p| format!("depende de {p}")),
+                    Some(format!("profundidad {depth}"))
+                ])
             ))
         }
         "activity.task.updated" => {
@@ -749,7 +805,10 @@ fn format(key: &str, a: &A) -> Option<String> {
             if changed.is_empty() {
                 return None;
             }
-            let fields = changed.iter().map(|f| f.as_str().and_then(intent_field)).collect::<Option<Vec<_>>>()?;
+            let fields = changed
+                .iter()
+                .map(|f| f.as_str().and_then(intent_field))
+                .collect::<Option<Vec<_>>>()?;
             let title = a.optional_text("title")?;
             Some(format!(
                 "Se actualizó {} de la tarea{}.",
@@ -765,9 +824,14 @@ fn format(key: &str, a: &A) -> Option<String> {
             Some(match a.code_in("strategy", continuity_strategy)? {
                 "native_resume" => {
                     a.code("reason", &["preferred"])?;
-                    format!("El {at} continúa el intento {from_n} reanudando la sesión del proveedor.")
+                    format!(
+                        "El {at} continúa el intento {from_n} reanudando la sesión del proveedor."
+                    )
                 }
-                _ => format!("El {at} continúa el intento {from_n} con un paquete de contexto ({}).", a.code_in("reason", continuity_reason)?),
+                _ => format!(
+                    "El {at} continúa el intento {from_n} con un paquete de contexto ({}).",
+                    a.code_in("reason", continuity_reason)?
+                ),
             })
         }
         "activity.attempt.retried" => {
@@ -777,33 +841,58 @@ fn format(key: &str, a: &A) -> Option<String> {
             let overrides = match a.get("overrides") {
                 Value::Null => Vec::new(),
                 list => {
-                    let names = list.as_array()?.iter().map(|o| o.as_str().and_then(retry_override)).collect::<Option<Vec<_>>>()?;
+                    let names = list
+                        .as_array()?
+                        .iter()
+                        .map(|o| o.as_str().and_then(retry_override))
+                        .collect::<Option<Vec<_>>>()?;
                     if names.is_empty() {
                         return None;
                     }
                     names
                 }
             };
-            let parts: Vec<Option<String>> = overrides.into_iter().map(|o| Some(o.to_string())).collect();
-            Some(format!("El {at} reintenta el intento {from_n}{}.", details(&parts)))
+            let parts: Vec<Option<String>> =
+                overrides.into_iter().map(|o| Some(o.to_string())).collect();
+            Some(format!(
+                "El {at} reintenta el intento {from_n}{}.",
+                details(&parts)
+            ))
         }
         "activity.race.requested" => {
             let candidates = a.number("candidates")?;
             let source = a.text("source")?;
             a.text("race_id")?;
             let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
-            Some(format!("Se pidió un Race de {candidates} candidatos desde el intento {source}{}.", if with_package { " con un paquete de contexto" } else { "" }))
+            Some(format!(
+                "Se pidió un Race de {candidates} candidatos desde el intento {source}{}.",
+                if with_package {
+                    " con un paquete de contexto"
+                } else {
+                    ""
+                }
+            ))
         }
         "activity.race.candidate_recorded" => {
             let n = a.number("index")? + 1;
             let provider = a.text("provider")?;
             match a.code("outcome", &RACE_OUTCOMES)? {
-                "launched" => Some(format!("Candidato {n} del Race: se lanzó {} con {provider}.", a.text("attempt_id")?)),
-                _ => Some(format!("Candidato {n} del Race: no se pudo lanzar con {provider} ({}).", a.text("code")?)),
+                "launched" => Some(format!(
+                    "Candidato {n} del Race: se lanzó {} con {provider}.",
+                    a.text("attempt_id")?
+                )),
+                _ => Some(format!(
+                    "Candidato {n} del Race: no se pudo lanzar con {provider} ({}).",
+                    a.text("code")?
+                )),
             }
         }
         "activity.race.cancelled" => {
-            let (stopped, rejected, failed) = (a.number("stopped")?, a.number("rejected")?, a.number("failed")?);
+            let (stopped, rejected, failed) = (
+                a.number("stopped")?,
+                a.number("rejected")?,
+                a.number("failed")?,
+            );
             match a.code("scope", &RACE_SCOPES)? {
                 "one" => Some(format!("Se canceló el candidato {} del Race.", a.text("attempt_id")?)),
                 _ => Some(format!("Se canceló lo que quedaba del Race: {stopped} detenidos, {rejected} rechazados{}.", if failed > 0 { format!(", {failed} sin poder detenerse") } else { String::new() })),
@@ -827,14 +916,23 @@ fn format(key: &str, a: &A) -> Option<String> {
             let (from, to) = (level("from")?, level("to")?);
             let direction = policy_direction(a.code("direction", &POLICY_DIRECTIONS)?);
             a.number("revision")?;
-            Some(format!("Policy de «{category}» en {place}: de {from} a {to} ({direction})."))
+            Some(format!(
+                "Policy de «{category}» en {place}: de {from} a {to} ({direction})."
+            ))
         }
         "activity.attempt.forked" => {
             let at = attempt_of(a)?;
             let source_task = a.text("source_task")?;
             let source_n = a.number("source_n")?;
             let with_package = a.code("strategy", &FORK_STRATEGIES)? == "context_package";
-            Some(format!("El {at} se bifurcó del intento {source_n} de la tarea {source_task}{}.", if with_package { " con un paquete de contexto" } else { "" }))
+            Some(format!(
+                "El {at} se bifurcó del intento {source_n} de la tarea {source_task}{}.",
+                if with_package {
+                    " con un paquete de contexto"
+                } else {
+                    ""
+                }
+            ))
         }
         "activity.attempt.requested" => {
             let at = attempt_of(a)?;
@@ -885,26 +983,39 @@ fn format(key: &str, a: &A) -> Option<String> {
             let bound = a.boolean("bound")?;
             Some(format!(
                 "Se abrió una sesión de {provider} en el {at}{}.",
-                details(&[resumable.then(|| "reanudable".into()), bound.then(|| "vinculada".into())])
+                details(&[
+                    resumable.then(|| "reanudable".into()),
+                    bound.then(|| "vinculada".into())
+                ])
             ))
         }
         "activity.provider_session.bound" => {
             let task = a.text("task")?;
             let binding = a.code_in("binding", session_binding)?;
-            Some(format!("La sesión de la tarea {task} quedó vinculada {binding}."))
+            Some(format!(
+                "La sesión de la tarea {task} quedó vinculada {binding}."
+            ))
         }
         "activity.provider_session.resumed" => {
             let task = a.text("task")?;
             let n = a.number("n")?;
-            Some(format!("Se reanudó la sesión de la tarea {task} en el intento {n}."))
+            Some(format!(
+                "Se reanudó la sesión de la tarea {task} en el intento {n}."
+            ))
         }
-        "activity.provider_session.detached" => Some(format!("La sesión de la tarea {} quedó en espera.", a.text("task")?)),
+        "activity.provider_session.detached" => Some(format!(
+            "La sesión de la tarea {} quedó en espera.",
+            a.text("task")?
+        )),
         "activity.provider_session.closed" => {
             let task = a.text("task")?;
             a.code("from", &["open", "idle"])?;
             Some(format!("Se cerró la sesión de la tarea {task}."))
         }
-        "activity.thread.created" => Some(format!("Se abrió la conversación de la tarea {}.", a.text("task")?)),
+        "activity.thread.created" => Some(format!(
+            "Se abrió la conversación de la tarea {}.",
+            a.text("task")?
+        )),
         "activity.thread.summarized" => {
             let task = a.text("task")?;
             Some(if a.boolean("has_summary")? {
@@ -916,7 +1027,10 @@ fn format(key: &str, a: &A) -> Option<String> {
         "activity.worktree.created" => {
             let at = attempt_of(a)?;
             let branch = optional_branch(a)?;
-            Some(format!("Se creó el worktree del {at}{}.", branch.map(|b| format!(" para «{b}»")).unwrap_or_default()))
+            Some(format!(
+                "Se creó el worktree del {at}{}.",
+                branch.map(|b| format!(" para «{b}»")).unwrap_or_default()
+            ))
         }
         "activity.worktree.adopted" => {
             let at = attempt_of(a)?;
@@ -924,26 +1038,46 @@ fn format(key: &str, a: &A) -> Option<String> {
             let branch = optional_branch(a)?;
             Some(format!(
                 "{} en el {at}{}.",
-                if external { "Se registró un worktree externo" } else { "Se adoptó un worktree existente" },
+                if external {
+                    "Se registró un worktree externo"
+                } else {
+                    "Se adoptó un worktree existente"
+                },
                 branch.map(|b| format!(" («{b}»)")).unwrap_or_default()
             ))
         }
-        "activity.worktree.attached" => Some(format!("El {} reutiliza su worktree.", attempt_of(a)?)),
-        "activity.worktree.missing" => Some(format!("No se encuentra el worktree de la tarea {}.", a.text("task")?)),
-        "activity.worktree.found" => Some(format!("Se volvió a encontrar el worktree de la tarea {}.", a.text("task")?)),
+        "activity.worktree.attached" => {
+            Some(format!("El {} reutiliza su worktree.", attempt_of(a)?))
+        }
+        "activity.worktree.missing" => Some(format!(
+            "No se encuentra el worktree de la tarea {}.",
+            a.text("task")?
+        )),
+        "activity.worktree.found" => Some(format!(
+            "Se volvió a encontrar el worktree de la tarea {}.",
+            a.text("task")?
+        )),
         "activity.worktree.removed" => {
             let task = a.text("task")?;
             let reason = a.code_in("reason", worktree_removal)?;
             let kept = a.boolean("branch_kept")?;
-            Some(format!("Se quitó el worktree de la tarea {task} ({reason}{}).", if kept { "; se conserva la rama" } else { "" }))
+            Some(format!(
+                "Se quitó el worktree de la tarea {task} ({reason}{}).",
+                if kept { "; se conserva la rama" } else { "" }
+            ))
         }
         "activity.artifact.created" => {
             let at = attempt_of(a)?;
             let kind = a.code_in("kind", artifact_kind)?;
             let verifiable = a.boolean("verifiable")?;
-            Some(format!("El {at} dejó {kind}{}.", if verifiable { " verificable" } else { "" }))
+            Some(format!(
+                "El {at} dejó {kind}{}.",
+                if verifiable { " verificable" } else { "" }
+            ))
         }
-        "activity.review.accepted" | "activity.review.rejected" | "activity.review.invalidated" => review(key, a),
+        "activity.review.accepted" | "activity.review.rejected" | "activity.review.invalidated" => {
+            review(key, a)
+        }
         "activity.core.agentic_cut" => {
             let tasks = a.number("tasks")?;
             let attempts = a.number("attempts")?;

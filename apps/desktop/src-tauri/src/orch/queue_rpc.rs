@@ -1,6 +1,7 @@
 //! RPC de la cola de instrucciones (LXO-143): `attempt_queue`, `attempt_queue_cancel` y `pending_queue`.
 //!
-//! Solo una Person de Desktop (`attempt_queue` y `attempt_queue_cancel` son `HumanDecision`). El cuerpo lo valida el almacén (hasta
+//! Solo una Person autenticada de Desktop o CLI. La policy Core gobierna `attempt_queue`; cancelar y consultar no ejecutan
+//! una instrucción y no requieren confirmación de policy. El cuerpo lo valida el almacén (hasta
 //! 20 000 caracteres) y la clave de idempotencia es del cliente: **repetir la petición devuelve el mismo item** (`Replayed`) sin
 //! duplicarlo ni entregarlo dos veces, y reutilizar la clave para otra instrucción es `request_conflict`.
 //!

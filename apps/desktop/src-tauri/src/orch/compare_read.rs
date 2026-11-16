@@ -282,7 +282,7 @@ pub(super) fn load_one(s: &crate::store::Store, id: &str, fork_source: Option<St
     }))
 }
 
-/// `attempt_compare` · `{ attempt_ids: [2–4 ids] }`. Solo lectura, solo una Person de Desktop.
+/// `attempt_compare` · `{ attempt_ids: [2–4 ids] }`. Solo lectura de una Person autenticada (Desktop o CLI).
 pub(super) fn compare(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
     require_person(caller, context)?;
     let context = context.ok_or_else(|| "model_auth_required: solo una Person autenticada puede comparar Attempts".to_string())?;

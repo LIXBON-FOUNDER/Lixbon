@@ -47,6 +47,7 @@ pub(super) enum Failure {
     Version(String),
     Unavailable(String),
     NotFound(String),
+    Stale(String),
 }
 
 impl Failure {
@@ -58,6 +59,7 @@ impl Failure {
             Failure::Version(_) => ("version", 4),
             Failure::Unavailable(_) => ("core_unavailable", 5),
             Failure::NotFound(_) => ("not_found", 6),
+            Failure::Stale(_) => ("stale", 7),
         }
     }
 
@@ -68,7 +70,8 @@ impl Failure {
             | Failure::Auth(m)
             | Failure::Version(m)
             | Failure::Unavailable(m)
-            | Failure::NotFound(m) => m,
+            | Failure::NotFound(m)
+            | Failure::Stale(m) => m,
         }
     }
 }

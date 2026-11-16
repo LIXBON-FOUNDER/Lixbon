@@ -1,0 +1,56 @@
+{
+  "action": "pr",
+  "attempt_id": "task-1-a1",
+  "dry_run": false,
+  "preview": {
+    "can_merge": {
+      "ok": true,
+      "reason": null
+    },
+    "can_publish_pr": {
+      "ok": true,
+      "reason": null
+    },
+    "is_current": true,
+    "merge": {
+      "merged": false,
+      "result_commit": null
+    },
+    "pr": {
+      "has_remote": true,
+      "url": null
+    },
+    "review": {
+      "state": "accepted"
+    },
+    "revision": {
+      "head_commit": "attempt-head"
+    },
+    "target": {
+      "branch": "main",
+      "branch_matches": true,
+      "clean": true,
+      "expected_branch": "main",
+      "expected_head": "target-head",
+      "head": "target-head",
+      "kind": "project_checkout",
+      "moved": false
+    }
+  },
+  "requested_id": "42",
+  "result": {
+    "accepted_moved_target": null,
+    "attempt_id": "task-1-a1",
+    "conflict_count": null,
+    "decision_id": 78,
+    "expected_branch": null,
+    "expected_commit": null,
+    "found_branch": null,
+    "found_commit": null,
+    "outcome": "created",
+    "pr_url": "https://github.com/lixbon/demo/pull/4",
+    "result_commit": null
+  },
+  "review_id": 42,
+  "v": 1
+}

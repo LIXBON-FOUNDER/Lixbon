@@ -185,8 +185,7 @@ pub(super) fn parse_events_options(args: &Args) -> Result<EventsOptions, EventsE
     for kind in ["task", "attempt"] {
         if let Some(id) = text_arg(args, kind)? {
             validate_filter(kind, &id).map_err(usage)?;
-            if text_arg(args, "entity-kind")?.is_some() || text_arg(args, "entity-id")?.is_some()
-            {
+            if text_arg(args, "entity-kind")?.is_some() || text_arg(args, "entity-id")?.is_some() {
                 return Err(usage(format!(
                     "--{kind} no se combina con --entity-kind ni --entity-id."
                 )));

@@ -17,6 +17,7 @@ use super::events::{Channel, MutationContext};
 use super::initial_approval_tests::e2e::core_with_project_at;
 use super::tx_ops::RetrySelection;
 use super::{Caller, Core};
+use crate::store::{AuthenticatedClient, ClientClaims, ClientCredential, ClientPrincipal, ClientRegistration, ClientSurface, DeviceIdentity};
 
 pub(super) struct World {
     pub(super) core: Arc<Core>,
@@ -67,6 +68,51 @@ impl World {
     pub(super) fn settled(&self, attempt: &str, status: &str) {
         wait_until(&format!("el Attempt llega a {status}"), || row(&self.core, attempt).0 == status);
         wait_until("el claim se asienta", || row(&self.core, attempt).1 == "settled");
+    }
+
+    pub(super) fn cli_client(&self, tag: &str) -> AuthenticatedClient {
+        let secret = format!("f5-cli-{tag}-secret-0123456789abcdef");
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new(format!("f5-cli-install-{tag}"), None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(ClientPrincipal::Person("e2e-cli-person".into()), &secret).unwrap();
+        self.core
+            .storage
+            .with_store(|store| store.register_client(&registration, &credential, 10_000))
+            .unwrap()
+            .unwrap();
+        self.core.authenticate_client(&secret).unwrap().unwrap()
+    }
+
+    pub(super) fn cli_agent_client(&self, task: &str, tag: &str) -> AuthenticatedClient {
+        let secret = format!("f5-agent-{tag}-secret-0123456789abcdef");
+        let registration = ClientRegistration::new(
+            ClientSurface::Cli,
+            DeviceIdentity::new(format!("f5-agent-install-{tag}"), None).unwrap(),
+        )
+        .unwrap();
+        let credential = ClientCredential::new(
+            ClientPrincipal::Agent(task.into()),
+            &secret,
+        )
+        .unwrap();
+        self.core
+            .storage
+            .with_store(|store| store.register_client(&registration, &credential, 10_000))
+            .unwrap()
+            .unwrap();
+        self.core.authenticate_client(&secret).unwrap().unwrap()
+    }
+
+    pub(super) fn cli(
+        &self,
+        client: &AuthenticatedClient,
+        cmd: &str,
+        args: Value,
+    ) -> Result<Value, String> {
+        self.core.rpc_authenticated_via(client, &ClientClaims::default(), Channel::Lxo, "", cmd, &args)
     }
 }
 
@@ -348,6 +394,69 @@ fn el_rpc_attempt_retry_reintenta_y_el_despachador_lo_lanza_solo_una_vez() {
     assert_eq!(w.adapter.starts().len(), 2);
 }
 
+#[test]
+fn retry_cli_queda_pendiente_y_desktop_debe_aprobar_antes_del_lanzamiento() {
+    let w = world("claude", Some(vec![Step::Output("empiezo".into()), Step::Fail(AdapterError::provider("el proveedor se cayó"))]));
+    let a1 = w.create("claude", "e2e-cli-retry-approval");
+    w.approve(&a1);
+    w.settled(&a1, "failed");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    let cli = w.cli_client("retry-approval");
+    w.adapter.set_script(vec![Step::Output("ahora sí".into()), Step::Complete(Some("hecho".into()))]);
+
+    let wrong_channel = w.core.rpc_authenticated_via(
+        &cli,
+        &ClientClaims::default(),
+        Channel::Ui,
+        "",
+        "attempt_retry",
+        &json!({"task_id": task, "from_attempt_id": a1}),
+    );
+    assert!(wrong_channel.unwrap_err().contains("superficie autenticada"), "la identidad CLI no puede presentarse como Desktop");
+    assert_eq!(event_count(&w.core, &a2, "attempt.requested"), 0, "un canal discordante no crea el retry");
+
+    let out = w.cli(&cli, "attempt_retry", json!({"task_id": task, "from_attempt_id": a1})).expect("CLI solicita retry");
+    assert_eq!((out["status"].as_str(), out["attempt_id"].as_str()), (Some("Requested"), Some(a2.as_str())));
+    assert_eq!(out["attempt_status"], "pending_approval");
+    assert_eq!(row(&w.core, &a2), ("pending_approval".into(), "none".into(), None));
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0);
+    assert_eq!(event_count(&w.core, &a2, "attempt.started"), 0);
+    assert!(w.core.approved_dispatch_candidates(16).unwrap().is_empty(), "un retry CLI sin decisión Desktop no es candidato durable");
+    assert!(
+        w.cli(&cli, "attempt_approve", json!({"attempt_id": a2})).unwrap_err().contains("Acción no permitida"),
+        "la credencial CLI no puede aprobar su propio retry"
+    );
+    assert_eq!(w.adapter.starts().len(), 1, "solicitar desde CLI no lanza el provider");
+
+    w.core.dispatch_waiting_approved();
+    assert_eq!(row(&w.core, &a2).0, "pending_approval", "el barrido no sortea la aprobación Desktop");
+    assert!(w.core.approved_dispatch_candidates(16).unwrap().is_empty());
+    assert_eq!(w.adapter.starts().len(), 1);
+
+    w.approve(&a2);
+    w.settled(&a2, "done");
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.retried", "attempt.approved", "attempt.started", "attempt.completed"]);
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 1);
+    assert_eq!(w.adapter.starts().len(), 2);
+
+    let again = w.cli(&cli, "attempt_retry", json!({"task_id": task, "from_attempt_id": a1})).expect("retry idempotente");
+    assert_eq!((again["status"].as_str(), again["attempt_id"].as_str()), (Some("Replayed"), Some(a2.as_str())));
+    assert_eq!(again["attempt_status"], "done", "el replay informa el estado que tiene ahora");
+    assert_eq!(w.adapter.starts().len(), 2, "el replay no crea ni lanza otro Attempt");
+
+    let changed_intent = w.cli(&cli, "attempt_retry", json!({"task_id": task, "from_attempt_id": a1, "model": "otro-modelo"}));
+    assert!(changed_intent.unwrap_err().starts_with("attempt_retry_conflict"), "la misma clave no identifica otra selección");
+    let wrong_kind = w.cli(
+        &cli,
+        "attempt_resume",
+        json!({"task_id": task, "from_attempt_id": a1, "prompt": "no es el retry solicitado"}),
+    );
+    assert!(wrong_kind.unwrap_err().starts_with("attempt_resume_conflict"), "un retry no es un resume");
+    assert_eq!(event_count(&w.core, &format!("{task}-a3"), "attempt.requested"), 0);
+    assert_eq!(w.adapter.resumes().len(), 0);
+}
+
 /// Lo que el RPC rechaza: no es el último, no terminó mal, un perfil, un agente, y sin lanzador. Nada de eso crea un Attempt.
 #[test]
 fn el_rpc_attempt_retry_rechaza_lo_que_no_debe_y_no_crea_nada() {
@@ -446,6 +555,53 @@ fn el_rpc_attempt_resume_continua_la_sesion_y_el_despachador_la_reanuda_una_sola
     let again = w.desktop("attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue con la parte dos"})).expect("la repetición");
     assert_eq!((again["status"].as_str(), again["attempt_id"].as_str()), (Some("Replayed"), Some(a2.as_str())));
     assert_eq!(w.adapter.resumes().len(), 1);
+
+    let changed_intent = w.desktop("attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "un mensaje distinto"}));
+    assert!(changed_intent.unwrap_err().starts_with("attempt_resume_conflict"), "el mismo origen no identifica otro prompt");
+    let wrong_kind = w.desktop("attempt_retry", json!({"task_id": task, "from_attempt_id": a1}));
+    assert!(wrong_kind.unwrap_err().starts_with("attempt_retry_conflict"), "un resume no es un retry");
+    assert_eq!(event_count(&w.core, &format!("{task}-a3"), "attempt.requested"), 0);
+    assert_eq!(w.adapter.resumes().len(), 1);
+}
+
+#[test]
+fn resume_cli_queda_pendiente_y_desktop_debe_aprobar_antes_de_reanudar() {
+    let w = world("claude", Some(vec![Step::Bind("sess-cli-resume"), Step::Output("hecho".into()), Step::Complete(Some("hecho".into()))]));
+    let a1 = w.create("claude", "e2e-cli-resume-approval");
+    w.approve(&a1);
+    w.settled(&a1, "done");
+    let task = a1.rsplit_once("-a").unwrap().0.to_string();
+    let a2 = format!("{task}-a2");
+    let cli = w.cli_client("resume-approval");
+    w.adapter.set_script(vec![Step::Output("sigo".into()), Step::Complete(Some("seguido".into()))]);
+
+    let out = w
+        .cli(&cli, "attempt_resume", json!({"task_id": task, "from_attempt_id": a1, "prompt": "sigue con la parte dos"}))
+        .expect("CLI solicita resume");
+    assert_eq!((out["status"].as_str(), out["attempt_id"].as_str()), (Some("Requested"), Some(a2.as_str())));
+    assert_eq!(out["attempt_status"], "pending_approval");
+    assert_eq!(row(&w.core, &a2), ("pending_approval".into(), "none".into(), None));
+    assert_eq!(event_count(&w.core, &a2, "attempt.approved"), 0);
+    assert_eq!(event_count(&w.core, &a2, "attempt.started"), 0);
+    assert!(w.core.approved_dispatch_candidates(16).unwrap().is_empty(), "un resume CLI sin decisión Desktop no es candidato durable");
+    assert!(
+        w.cli(&cli, "attempt_approve", json!({"attempt_id": a2})).unwrap_err().contains("Acción no permitida"),
+        "la credencial CLI no puede aprobar su propio resume"
+    );
+    assert!(w.adapter.resumes().is_empty(), "solicitar desde CLI no reanuda el provider");
+
+    w.core.dispatch_waiting_approved();
+    assert_eq!(row(&w.core, &a2).0, "pending_approval");
+    assert!(w.core.approved_dispatch_candidates(16).unwrap().is_empty());
+    assert!(w.adapter.resumes().is_empty(), "el barrido no sortea la aprobación Desktop");
+
+    w.approve(&a2);
+    w.settled(&a2, "done");
+    ordered(&kinds(&w.core, &a2), &["attempt.requested", "attempt.continued", "attempt.approved", "attempt.started", "attempt.completed"]);
+    assert_eq!(w.adapter.resumes().len(), 1);
+    assert_eq!(w.adapter.resumes()[0].provider_ref.expose(), "sess-cli-resume");
+    assert_eq!(w.adapter.resumes()[0].prompt.as_deref(), Some("sigue con la parte dos"));
+    assert_eq!(w.adapter.starts().len(), 1, "el segundo Attempt reanuda, no arranca de cero");
 }
 
 /// Lo que `attempt_resume` rechaza: en marcha, sin sesión, no es el último, mensaje vacío, proveedor o perfil, un agente y sin lanzador.
@@ -541,7 +697,7 @@ fn attempt_summary(core: &Core, attempt: &str) -> String {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT summary FROM attempts WHERE id = ?1", [attempt], |r| r.get::<_, String>(0))?))).unwrap().unwrap()
 }
 
-/// LXO-143 · la cola de instrucciones por el RPC de Desktop. Encolar no entrega nada: el Attempt está en mitad de un turno. En cada fin
+/// LXO-143/LXO-159 · la cola de instrucciones por RPC autenticado de Desktop y CLI. Encolar no entrega nada: el Attempt está en mitad de un turno. En cada fin
 /// de turno el bombeo entrega la primera REANUDANDO la misma sesión, y el Attempt sigue `running` entre turnos: `completed` llega
 /// solo cuando la cola se vacía. FIFO, idempotente por `request_id`, lo cancelado no se entrega jamás.
 #[test]
@@ -615,6 +771,134 @@ fn la_cola_entrega_en_fifo_reanudando_la_sesion_y_el_attempt_termina_al_vaciarse
     // Terminado, no admite instrucciones.
     assert!(queue("r9", "tarde").unwrap_err().contains("attempt_final"));
     let _ = task;
+}
+
+/// El CLI usa la identidad autenticada y la policy del Core: Person puede encolar/listar/cancelar con confirmación;
+/// Agent no puede ejecutar ninguno de los comandos de instrucción aunque presente confirm.
+#[test]
+fn cli_persona_autenticada_gestiona_queue_con_policy_y_agent_sigue_denegado() {
+    let w = world("claude", None);
+    w.adapter.push_turn(vec![
+        Step::Bind("sess-cli-q"),
+        Step::Output("trabajando".into()),
+        Step::Hold,
+        Step::Complete(Some("primer turno".into())),
+    ]);
+    w.adapter
+        .push_turn(vec![Step::Complete(Some("terminado".into()))]);
+    let attempt = w.create("claude", "e2e-cli-queue");
+    w.approve(&attempt);
+    wait_until("el Attempt corre", || row(&w.core, &attempt).0 == "running");
+    let task = attempt.rsplit_once("-a").unwrap().0.to_string();
+    wait_until("la ejecución está registrada", || w.core.has_term(&task));
+    let person = w.cli_client("queue-person");
+
+    let missing_confirmation = w.cli(
+        &person,
+        "attempt_queue",
+        json!({"attempt_id": attempt, "request_id": "cli-q1", "body": "primera"}),
+    );
+    assert!(missing_confirmation
+        .unwrap_err()
+        .starts_with("policy_confirm_required"));
+    assert!(queue_rows(&w.core, &attempt).is_empty(), "la policy se aplica antes de escribir");
+
+    let first = w
+        .cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q1", "body": "primera", "confirm": true}),
+        )
+        .expect("CLI Person encola con confirmación");
+    let second = w
+        .cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q2", "body": "segunda", "confirm": true}),
+        )
+        .expect("CLI Person encola el siguiente item");
+    assert_eq!(
+        (first["position"].as_i64(), second["position"].as_i64()),
+        (Some(1), Some(2))
+    );
+
+    let pending = w
+        .cli(&person, "pending_queue", json!({"attempt_id": attempt}))
+        .expect("CLI Person consulta la cola");
+    assert_eq!(
+        pending["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["body"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["primera", "segunda"]
+    );
+    let queue_id = second["queue_id"].as_str().unwrap();
+    assert_eq!(
+        w.cli(
+            &person,
+            "attempt_queue_cancel",
+            json!({"queue_id": queue_id}),
+        )
+        .expect("CLI Person cancela un item pendiente")["status"],
+        "Cancelled"
+    );
+
+    let agent = w.cli_agent_client(&task, "queue-agent");
+    for (command, args) in [
+        (
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "agent-q1", "body": "no", "confirm": true}),
+        ),
+        (
+            "attempt_steer",
+            json!({"attempt_id": attempt, "request_id": "agent-s1", "body": "no", "confirm": true}),
+        ),
+        (
+            "attempt_stop_and_send",
+            json!({"attempt_id": attempt, "request_id": "agent-ss1", "body": "no", "confirm": true}),
+        ),
+    ] {
+        let error = w.cli(&agent, command, args).unwrap_err();
+        assert!(error.starts_with("Acción no permitida"), "{command}: {error}");
+    }
+    assert_eq!(queue_rows(&w.core, &attempt).len(), 2, "Agent no encoló nada");
+    assert_eq!(event_count(&w.core, &attempt, "attempt.instruction_requested"), 0);
+    assert!(!w.adapter.calls().iter().any(|call| call == "interrupt" || call.starts_with("steer:")));
+
+    w.adapter.release_hold();
+    w.settled(&attempt, "done");
+    assert_eq!(
+        queue_rows(&w.core, &attempt),
+        vec![
+            (
+                format!("{attempt}-q1"),
+                "delivered".into(),
+                None,
+                Some("adapter_result".into()),
+            ),
+            (
+                format!("{attempt}-q2"),
+                "cancelled".into(),
+                None,
+                None,
+            ),
+        ]
+    );
+    assert_eq!(w.adapter.resumes().len(), 1);
+    assert_eq!(w.adapter.resumes()[0].prompt.as_deref(), Some("primera"));
+    assert!(
+        w.cli(
+            &person,
+            "attempt_queue",
+            json!({"attempt_id": attempt, "request_id": "cli-q-final", "body": "tarde", "confirm": true}),
+        )
+        .unwrap_err()
+        .contains("attempt_final"),
+        "un Attempt final no admite Queue por CLI"
+    );
+    assert_eq!(queue_rows(&w.core, &attempt).len(), 2);
 }
 
 /// Un fallo de la entrega no falla el Attempt: solo el item (`attempt.queue_failed`), y el Attempt termina bien.

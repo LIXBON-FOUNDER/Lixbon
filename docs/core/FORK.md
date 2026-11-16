@@ -35,7 +35,9 @@ attempt_fork { request_id, source_attempt_id, provider?, model?, effort?, role?,
   y secretos) y comprueba que sale **de este Attempt y de este Project**; si no, se rechaza antes de crear nada. Sin él, el Fork
   arranca limpio con el encargo de la Task origen.
 
-No acepta `profile`, `worktree`, `host`, `external` ni `approved` (`deny_unknown_fields`). Solo una **Person de Desktop**.
+No acepta `profile`, `worktree`, `host`, `external` ni `approved` (`deny_unknown_fields`). Solo una **Person autenticada de Desktop o CLI**:
+el CLI debe enviar `confirm: true` y superar la policy efectiva. El Attempt nuevo sigue `pending_approval`; únicamente la aprobación
+posterior de Desktop permite lanzarlo.
 
 Respuesta: `{ status: Requested|Replayed, source_attempt_id, run_id, task_id, attempt_id, strategy, package_id? }`.
 

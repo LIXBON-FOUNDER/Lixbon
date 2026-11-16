@@ -35,6 +35,16 @@ use super::spawn_approval::PendingSpawn;
 use super::state::{NewTask, State, Status};
 use crate::store::{ForkStrategy, RetryOverride};
 
+/// Selección del primer Attempt de una Task que ya existe. El host y la
+/// estrategia de Worktree no pertenecen al cliente: los fija el launcher local.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct InitialAttemptSelection {
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub profile: String,
+}
+
 /// Reconstruye el hecho tipado de un registro del journal sin ejecutar su efecto externo. La hora del
 /// registro (`at`) se conserva: es cuándo ocurrió el efecto, no cuándo se reconcilió.
 pub(super) fn recovered_effect(
@@ -83,7 +93,6 @@ pub(super) fn effect_observed_is_valid(
 /// Estado de las tareas de un run (o de todos) antes de un mutador: `tarea -> (estado, run)`.
 type Snapshot = BTreeMap<String, (Status, String)>;
 
-#[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
 fn current_attempt_task(tx: &Tx, attempt_id: &str) -> Result<String, String> {
     let (task_id, n) = match attempt_id.rsplit_once("-a") {
         Some((task_id, raw_n)) => {
@@ -290,7 +299,6 @@ impl Tx {
     /// Registra el primer Attempt solicitado durante task.create sin pasar por el runner.
     /// La política y el estado inicial los resuelve el servidor antes de entrar aquí;
     /// estado, contador, proyección y evento se conservan juntos en la mutación.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
     pub(super) fn request_initial_attempt(&mut self, task_id: &str) -> Result<(), String> {
         if !self.attempt_model() {
             return Err("El runtime de Attempts no está activo".into());
@@ -312,9 +320,60 @@ impl Tx {
         Ok(())
     }
 
+    /// Pide el primer Attempt de una Task `not_started`. Solo lo invoca el RPC
+    /// autenticado de CLI; siempre queda pendiente de aprobación Desktop.
+    pub(super) fn request_initial_attempt_for_task(
+        &mut self,
+        task_id: &str,
+        selection: &InitialAttemptSelection,
+    ) -> Result<(), String> {
+        if !self.is_authenticated_person() || self.context().channel != Channel::Lxo {
+            return Err("iniciar una Task existente requiere una Person autenticada de CLI".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self
+            .tasks
+            .get(task_id)
+            .cloned()
+            .ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if task.status != Status::NotStarted || self.attempt_n.contains_key(task_id) {
+            return Err("la Task ya no está sin iniciar o ya tiene un Attempt".into());
+        }
+        if self.runs.get(&task.run).is_none_or(|run| run.closed) {
+            return Err("el Run de la Task está cerrado".into());
+        }
+        if task.project_id.as_deref().is_none_or(str::is_empty) || task.spec.trim().is_empty() {
+            return Err("la Task necesita un Project y un encargo antes de iniciarse".into());
+        }
+
+        let before = self.snapshot_run_of(task_id);
+        {
+            let task = self.state_mut().task_mut(task_id)?;
+            task.agent = selection.provider.clone();
+            task.model = selection.model.clone();
+            task.effort = selection.effort.clone();
+            task.profile = Some(selection.profile.clone());
+            task.external = false;
+            task.status = Status::PendingApproval;
+            task.summary.clear();
+            task.report = None;
+            task.failure_reason = None;
+            task.session_ref = None;
+            task.model_effective = None;
+            task.model_source = None;
+            task.session_match = None;
+            task.approval_deadline = None;
+            task.merged = false;
+            task.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        self.request_initial_attempt(task_id)
+    }
+
     /// Approve the exact current pending Attempt. The Store validates its durable deadline
     /// again inside the transaction that persists this candidate and its event.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
     pub(super) fn approve_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
         if !self.is_authenticated_person() {
             return Err("aprobar un Attempt requiere una Person autenticada".into());
@@ -330,7 +389,6 @@ impl Tx {
     }
 
     /// Reject the exact current pending Attempt; the lifecycle event is `attempt.rejected`.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC del primer Attempt (LXO-141, fase 2c)
     pub(super) fn reject_attempt(&mut self, attempt_id: &str) -> Result<(), String> {
         if !self.is_authenticated_person() {
             return Err("rechazar un Attempt requiere una Person autenticada".into());
@@ -345,17 +403,16 @@ impl Tx {
         Ok(())
     }
 
-    /// Pide un Attempt LIMPIO para una Task cuyo último Attempt terminó mal (`failed`, `stopped` o `exited`): la Task vuelve
-    /// a `starting` y, como en cualquier paso de un final a un activo, nace el Attempt `n + 1` (`attempt.requested`) con la
-    /// selección de ejecución que se pida. Nada se reabre: el Attempt anterior sigue siendo final y no se toca.
+    /// Pide un Attempt LIMPIO para una Task cuyo último Attempt terminó mal (`failed`, `stopped` o `exited`): la Task pasa a
+    /// `starting` desde Desktop o `pending_approval` desde CLI y, como en cualquier paso de un final a un activo, nace el Attempt
+    /// `n + 1` (`attempt.requested`) con la selección de ejecución que se pida. Nada se reabre: el Attempt anterior sigue final.
     ///
     /// Es el puente entre la petición de la persona y el despachador: el Attempt nuevo queda `starting` con el claim
-    /// `none`, y lo lanza el mismo camino que al primero (reserva del claim, worktree, `attempt.started`, adapter). A
-    /// diferencia del primero, no pide aprobación: la decisión de la persona es la propia petición de reintentar.
+    /// `none`, y lo lanza el mismo camino que al primero (reserva del claim, worktree, `attempt.started`, adapter). En Desktop la
+    /// petición autoriza el retry; desde el CLI el nuevo Attempt queda `pending_approval` hasta que lo apruebe una Person de Desktop.
     ///
     /// Heredado del Attempt anterior salvo lo que se pida: el modelo y el esfuerzo solo dentro del mismo proveedor (son
-    /// del proveedor), el rol y el perfil siempre. Sin consumidor hasta el RPC de reintento.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_retry`
+    /// del proveedor), el rol y el perfil siempre.
     pub(super) fn request_attempt_retry(&mut self, task_id: &str, selection: &RetrySelection) -> Result<(), String> {
         if !self.is_authenticated_person() {
             return Err("reintentar un Attempt requiere una Person autenticada".into());
@@ -393,6 +450,7 @@ impl Tx {
         if selection.profile.is_some() && profile != task.profile {
             overrides.push(RetryOverride::Profile);
         }
+        let requires_approval = self.context().channel == Channel::Lxo;
         {
             let t = self.state_mut().task_mut(task_id)?;
             t.model = model;
@@ -409,7 +467,7 @@ impl Tx {
             t.session_match = None;
             t.approval_deadline = None;
             t.merged = false;
-            t.status = Status::Starting;
+            t.status = if requires_approval { Status::PendingApproval } else { Status::Starting };
             t.updated = super::state::now_ms();
         }
         self.push_status_changes(before, None);
@@ -422,15 +480,14 @@ impl Tx {
         Ok(())
     }
 
-    /// Pide un Attempt que CONTINÚA la ProviderSession del anterior (reanudación nativa): la Task vuelve a `starting` y nace el
-    /// Attempt `n + 1` con `attempt.continued`. Como `request_attempt_retry` es el puente al despachador (el Attempt nuevo queda
-    /// `starting` con el claim `none` y lo lanza el despachador), pero aquí la sesión **se conserva**: el proyector enlaza el Attempt
-    /// nuevo a la ProviderSession de la Task y el lanzador reanuda en vez de arrancar.
+    /// Pide un Attempt que CONTINÚA la ProviderSession del anterior (reanudación nativa): la Task pasa a `starting` desde Desktop
+    /// o `pending_approval` desde CLI y nace el Attempt `n + 1` con `attempt.continued`. Como en `request_attempt_retry`, el
+    /// despachador reserva el claim antes de ejecutar; aquí la sesión **se conserva**: el proyector enlaza el Attempt nuevo a la
+    /// ProviderSession de la Task y el lanzador reanuda en vez de arrancar.
     ///
     /// Se continúa un Attempt terminado de cualquier manera (también `done`: es un seguimiento) y siempre en el mismo proveedor:
     /// una sesión no se comparte entre proveedores. El mensaje se añade al `spec` como bloque «Seguimiento» (la convención de
-    /// `lxo continue`), y ese bloque es el mensaje con que continúa la sesión. Sin consumidor hasta el RPC `attempt_resume`.
-    #[cfg_attr(not(test), allow(dead_code))] // sin consumidor hasta el RPC `attempt_resume`
+    /// `lxo continue`), y ese bloque es el mensaje con que continúa la sesión.
     pub(super) fn request_attempt_continuation(&mut self, task_id: &str, prompt: &str, selection: &RetrySelection) -> Result<(), String> {
         if !self.is_authenticated_person() {
             return Err("continuar un Attempt requiere una Person autenticada".into());
@@ -456,6 +513,7 @@ impl Tx {
             return Err("continuar una sesión no cambia de proveedor: una ProviderSession no se comparte entre proveedores".into());
         }
         let before = self.snapshot_run_of(task_id);
+        let requires_approval = self.context().channel == Channel::Lxo;
         {
             let t = self.state_mut().task_mut(task_id)?;
             t.model = selection.model.clone().or_else(|| t.model.clone());
@@ -468,7 +526,7 @@ impl Tx {
             t.failure_reason = None;
             t.approval_deadline = None;
             t.merged = false;
-            t.status = Status::Starting;
+            t.status = if requires_approval { Status::PendingApproval } else { Status::Starting };
             t.updated = super::state::now_ms();
         }
         self.push_status_changes(before, None);
@@ -794,8 +852,9 @@ impl Tx {
     /// única vía es [`Tx::record_spawn_resolution`]) y cualquier otro `kind` rechaza la mutación completa.
     ///
     /// Validación de actor: la fila legacy dice quién decide (`"human"`, `"system"` o una tarea) y el
-    /// contexto de la mutación debe ser realmente ese actor. Además, review/merge/pr son decisiones de una
-    /// PERSONA desde la interfaz (`Person / Ui`).
+    /// contexto de la mutación debe ser realmente ese actor. Review/merge/pr son decisiones de una Person
+    /// autenticada de Desktop; los RPC específicos `attempt_review` y `attempt_integrate` también admiten
+    /// una Person CLI autenticada, limitada por su acción y categoría en la frontera RPC y la policy.
     pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));
@@ -883,8 +942,10 @@ impl Tx {
         if !coincide {
             return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
         }
-        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !ctx.is_person_ui()) {
-            return Err(format!("decisión {kind}: solo la toma una persona desde la interfaz (llegó {:?} por {:?})", ctx.actor, ctx.channel));
+        let cli_attempt_decision = matches!(kind, "review" | "merge" | "pr") && ctx.is_authenticated_cli_person();
+        let authorized_surface = ctx.is_person_ui() || cli_attempt_decision;
+        if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !authorized_surface) {
+            return Err(format!("decisión {kind}: solo la toma una persona autenticada desde Desktop o mediante el RPC específico de Attempt desde CLI (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }
         Ok(())
     }

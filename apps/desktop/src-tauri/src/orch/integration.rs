@@ -28,6 +28,9 @@ pub const NEED_CONFIRM_PR: &str = "Publicar el PR exige confirmación explícita
 
 pub const NEED_CONFIRM: &str = "Integrar exige confirmación explícita de la persona (confirm: true)";
 
+pub(super) type MergeCommit<'a> = &'a dyn Fn(&str, &str, &str, bool) -> Result<String, String>;
+pub(super) type PushCommit<'a> = &'a dyn Fn(&str, &str, &str) -> Result<(), String>;
+
 /// Punto de extensión para reglas de integración automática: **apagado y sin
 /// lógica**. Queda fuera de esta etapa; nada lo llama para integrar.
 #[allow(dead_code)]
@@ -49,6 +52,16 @@ fn bool_arg(args: &Value, k: &str) -> bool {
 /// con UNA mutación posterior (`mutate_after_effect`); si ese registro falla, el
 /// error lo dice y el merge queda anotado para reconciliar.
 pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Result<Value, String> {
+    integrate_with_commit(state, from_user, args, None, &git::merge)
+}
+
+/// Camino de Attempt: conserva la identidad del HEAD que se comprobó al entrar
+/// y la vuelve a exigir justo antes del efecto.
+pub(super) fn integrate_attempt(state: &impl StateAccess, args: &Value, expected_head: &str, merge_commit: MergeCommit<'_>) -> Result<Value, String> {
+    integrate_with_commit(state, true, args, Some(expected_head), merge_commit)
+}
+
+fn integrate_with_commit(state: &impl StateAccess, from_user: bool, args: &Value, expected_head: Option<&str>, merge_commit: MergeCommit<'_>) -> Result<Value, String> {
     if !from_user {
         return Err(AGENT_REJECT.into());
     }
@@ -94,10 +107,18 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     // Solo se integra lo que la persona revisó: la última revisión tiene que ser
     // `accepted` sobre el HEAD actual de la rama. Si no, ni git ni decisión.
     let head = super::review::branch_head(&repo, &branch);
-    let reviewed = state.read(|st| {
-        head.as_deref().is_some_and(|h| super::review::accepted_for(st, &id, h)).then_some(()).ok_or_else(|| super::review::last_review(st, &id))
-    });
-    if let Err(last_review) = reviewed {
+    if expected_head.is_some_and(|expected| head.as_deref() != Some(expected)) {
+        return Ok(json!({ "task": id, "outcome": "head_moved", "branch": branch, "expected_commit": expected_head, "found_commit": head,
+            "message": "La rama del Attempt cambió desde que se comprobó la revisión; no se integró." }));
+    }
+    let Some(source_commit) = head.as_deref() else {
+        let last_review = state.read(|st| super::review::last_review(st, &id));
+        return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": head, "last_review": last_review,
+            "message": "Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual." }));
+    };
+    let reviewed = state.read(|st| super::review::accepted_for(st, &id, source_commit));
+    if !reviewed {
+        let last_review = state.read(|st| super::review::last_review(st, &id));
         return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": head, "last_review": last_review,
             "message": "Antes de integrar, revisa el diff de la tarea y acéptalo sobre su commit actual." }));
     }
@@ -126,7 +147,7 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
             "expected_commit": exp, "found_commit": found,
             "message": "La rama destino cambió fuera de Lixbon (commit, merge o reset manual): revisa el destino antes de integrar. No se integró." }));
     }
-    let res = git::merge(&into, &branch, &format!("lxo: integra {id} · {title}"), squash);
+    let res = merge_commit(&into, source_commit, &format!("lxo: integra {id} · {title}"), squash);
     let result = res.as_ref().ok().and_then(|_| git::head(&into));
     let (outcome, conflicts, message) = match &res {
         Ok(out) => ("merged", Value::Null, out.clone()),
@@ -137,7 +158,7 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
         Err(e) => ("error", Value::Null, e.clone()),
     };
     let mut detail = json!({
-        "outcome": outcome, "branch": branch, "into": into, "squash": squash,
+        "outcome": outcome, "branch": branch, "source_commit": source_commit, "into": into, "squash": squash,
         "base_commit": found, "result_commit": result, "conflicts": conflicts,
         "base_check": if expected.is_some() { "ok" } else { "sin_referencia" },
     });
@@ -148,8 +169,8 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
     }
     // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
     let effect = Effect::new("integrate", "git_merge").task(&id).repo(&repo)
-        .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "into": into }))
-        .observed(json!({ "outcome": outcome, "branch": branch, "base_commit": found, "result_commit": result }));
+        .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "source_commit": source_commit, "into": into }))
+        .observed(json!({ "outcome": outcome, "branch": branch, "source_commit": source_commit, "base_commit": found, "result_commit": result }));
     let decision = state.mutate_after_effect(effect, |st| {
         let decision = st.record_decision(&id, "merge", "human", &detail)?;
         if outcome == "merged" {
@@ -158,7 +179,7 @@ pub fn integrate(state: &impl StateAccess, from_user: bool, args: &Value) -> Res
         Ok(decision)
     })?;
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
-        "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message });
+        "source_commit": source_commit, "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message });
     if accepted {
         out["accepted_moved_target"] = json!(true);
         out["expected_commit"] = json!(moved);
@@ -229,6 +250,11 @@ fn expected_target(st: &State, t: &Task, into: &str) -> Option<String> {
 /// Crea el PR (en la app, `git::gh_pr`; en pruebas, un gh simulado).
 pub type CreatePr<'a> = &'a dyn Fn(&str, &str, &str, &str, &str) -> Result<String, String>;
 
+/// Publica un PR desde el Attempt después de fijar el mismo HEAD que se revisó.
+pub(super) fn publish_pr_attempt(state: &impl StateAccess, args: &Value, expected_head: &str, push_commit: PushCommit<'_>, create: CreatePr<'_>) -> Result<Value, String> {
+    publish_pr_with_commit(state, true, args, Some(expected_head), push_commit, create)
+}
+
 fn first_url(text: &str) -> Option<String> {
     text.split_whitespace().find(|w| w.starts_with("https://")).map(|w| w.trim_end_matches(['.', ',', ')']).to_string())
 }
@@ -237,6 +263,10 @@ fn first_url(text: &str) -> Option<String> {
 /// aprobado por la persona. Idempotente: si la tarea ya tiene PR, o gh dice que
 /// ya existe, no crea otro. Cada llamada confirmada deja una decisión `pr`.
 pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, create: CreatePr) -> Result<Value, String> {
+    publish_pr_with_commit(state, from_user, args, None, &git::push, create)
+}
+
+fn publish_pr_with_commit(state: &impl StateAccess, from_user: bool, args: &Value, expected_head: Option<&str>, push_commit: PushCommit<'_>, create: CreatePr<'_>) -> Result<Value, String> {
     if !from_user {
         return Err(PR_REJECT.into());
     }
@@ -256,10 +286,27 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
     let remote = git::remote_url(&dir);
     // Con un PR ya registrado NO se ejecuta push ni `gh`: no hay efecto externo que observar.
     let executed = existing.is_none();
+    let source_commit = if executed {
+        let Some(found) = super::review::branch_head(&dir, &branch) else {
+            return Err(format!("no_branch: la rama {branch} ya no existe"));
+        };
+        if expected_head.is_some_and(|expected| expected != found) {
+            return Ok(json!({ "task": id, "outcome": "head_moved", "branch": branch, "expected_commit": expected_head, "found_commit": found,
+                "message": "La rama del Attempt cambió desde que se comprobó la revisión; no se publicó el PR." }));
+        }
+        if expected_head.is_some() && !state.read(|st| super::review::accepted_for(st, &id, &found)) {
+            return Ok(json!({ "task": id, "outcome": "review_required", "branch": branch, "head_commit": found,
+                "message": "La revisión ya no está vigente para el HEAD del Attempt; no se publicó el PR." }));
+        }
+        Some(found)
+    } else {
+        None
+    };
     let (outcome, url, err) = match existing {
         Some(u) => ("already_exists", Some(u), None),
         None => {
-            let res = git::push(&dir, &branch).and_then(|_| create(&dir, &base, &branch, &title,
+            let source_commit = source_commit.as_deref().expect("el HEAD se comprobó arriba");
+            let res = push_commit(&dir, source_commit, &branch).and_then(|_| create(&dir, &base, &branch, &title,
                 &format!("{summary}\n\n_Tarea {id} del orquestador de Lixbon._")));
             match res {
                 Ok(u) => ("created", Some(u), None),
@@ -271,7 +318,8 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
     // Lo que dijo `gh` no se guarda ni se devuelve tal cual: solo una URL https saneada (sin credenciales, query ni fragmento). El Artifact
     // `pull_request` del runtime exige https, así que una URL que no lo sea ni se registra (sería una acción ejecutada que no queda anotada).
     let url = url.and_then(|u| super::pr_url::sanitize_pr_url(&u)).filter(|u| u.starts_with("https://"));
-    let detail = json!({ "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
+    let source_commit = source_commit.as_deref();
+    let detail = json!({ "outcome": outcome, "branch": branch, "source_commit": source_commit, "remote": remote, "pr_url": url });
     let register = |st: &mut Tx| -> Result<u64, String> {
         let decision = st.record_decision(&id, "pr", "human", &detail)?;
         if url.is_some() {
@@ -282,14 +330,14 @@ pub fn publish_pr(state: &impl StateAccess, from_user: bool, args: &Value, creat
     let decision = if executed {
         // El push y el PR ya ocurrieron (incluso si `gh` responde «ya existe»): su registro es UNA mutación posterior.
         let effect = Effect::new("publish_pr", "git_push_pr").task(&id)
-            .expected(json!({ "record": "decision pr", "pr_url_set": url.is_some() }))
-            .observed(json!({ "outcome": outcome, "branch": branch, "pr_url": url }));
+            .expected(json!({ "record": "decision pr", "source_commit": source_commit, "pr_url_set": url.is_some() }))
+            .observed(json!({ "outcome": outcome, "branch": branch, "source_commit": source_commit, "pr_url": url }));
         state.mutate_after_effect(effect, register)?
     } else {
         // Sin efecto: solo la decisión (`already_exists`), por la vía normal. Sin `effect.observed` ni diario.
         state.mutate(register)?
     };
-    let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "remote": remote, "pr_url": url });
+    let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "source_commit": source_commit, "remote": remote, "pr_url": url });
     if let Some(e) = err {
         out["message"] = json!(e);
     }
@@ -607,6 +655,7 @@ mod tests {
     fn pr_con_confirmacion_hace_push_y_registra_y_es_idempotente() {
         let (st, id, dir) = setup("pr-ok", false);
         let bare = with_remote(&dir);
+        let source_commit = git(&dir, &["rev-parse", "lx/t"]);
         let calls = std::cell::Cell::new(0);
         let gh = |d: &str, base: &str, branch: &str, _: &str, _: &str| {
             calls.set(calls.get() + 1);
@@ -618,7 +667,7 @@ mod tests {
         // El push llegó al remoto bare.
         assert_eq!(git(&bare, &["rev-parse", "lx/t"]), git(&dir, &["rev-parse", "lx/t"]));
         let d = detail(&st, 0);
-        assert_eq!(d, json!({ "outcome": "created", "branch": "lx/t", "remote": bare.to_str().unwrap(), "pr_url": "https://github.com/o/r/pull/7" }));
+        assert_eq!(d, json!({ "outcome": "created", "branch": "lx/t", "source_commit": source_commit, "remote": bare.to_str().unwrap(), "pr_url": "https://github.com/o/r/pull/7" }));
         { let s = st.lock().unwrap(); assert_eq!((ds(&s)[0].kind.as_str(), ds(&s)[0].actor.as_str()), ("pr", "human")); }
         // Repetida: no vuelve a crear, deja constancia already_exists.
         let again = publish_pr(&st, true, &json!({ "task": id, "confirm": true }), &gh).unwrap();
@@ -641,14 +690,39 @@ mod tests {
         assert_eq!(st.lock().unwrap().task(&id).unwrap().pr_url.as_deref(), Some("https://github.com/o/r/pull/3"));
         // Sin remoto: push falla → error registrado, sin PR.
         let (st2, id2, dir2) = setup("pr-error", false);
+        let source_commit2 = git(&dir2, &["rev-parse", "lx/t"]);
         let ok_gh = |_: &str, _: &str, _: &str, _: &str, _: &str| Ok("https://x".to_string());
         let out = publish_pr(&st2, true, &json!({ "task": id2, "confirm": true }), &ok_gh).unwrap();
         assert_eq!((out["outcome"].as_str(), out["decision"].as_u64(), out["branch"].as_str()), (Some("error"), Some(2), Some("lx/t")));
         assert!(out["pr_url"].is_null() && out["remote"].is_null());
         assert!(out["message"].as_str().unwrap().contains("push"));
-        assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "remote": null, "pr_url": null }));
+        assert_eq!(detail(&st2, 0), json!({ "outcome": "error", "branch": "lx/t", "source_commit": source_commit2, "remote": null, "pr_url": null }));
         assert!(st2.lock().unwrap().task(&id2).unwrap().pr_url.is_none());
         for d in [dir, bare, dir2] { let _ = std::fs::remove_dir_all(d); }
+    }
+
+    #[test]
+    fn pr_de_attempt_revalida_que_la_revision_siga_aceptada_antes_del_push() {
+        let (st, id, dir) = setup("pr-review-stale", false);
+        let head = git(&dir, &["rev-parse", "lx/t"]);
+        assert_eq!(review_task(&st, &id, "rejected", &head, None, true).unwrap()["outcome"], "recorded");
+        let calls = std::cell::Cell::new(0);
+        let push = |_: &str, _: &str, _: &str| {
+            calls.set(calls.get() + 1);
+            Ok(())
+        };
+        let create = |_: &str, _: &str, _: &str, _: &str, _: &str| Ok("https://github.com/o/r/pull/8".to_string());
+        let out = super::publish_pr_attempt(
+            &ConContexto::persona(&st),
+            &json!({ "task": id, "confirm": true }),
+            &head,
+            &push,
+            &create,
+        ).unwrap();
+
+        assert_eq!(out["outcome"], "review_required");
+        assert_eq!(calls.get(), 0, "ni push ni creación de PR");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

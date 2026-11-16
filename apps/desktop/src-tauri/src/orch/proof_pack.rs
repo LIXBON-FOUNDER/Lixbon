@@ -74,7 +74,7 @@ fn proof_range(core: &Core, context: &MutationContext, item: &Loaded) -> Result<
     range_of(core, context, item)
 }
 
-/// `attempt_proof_pack` · `{ attempt_id }`. Solo lectura, solo una Person de Desktop.
+/// `attempt_proof_pack` · `{ attempt_id }`. Solo lectura para una Person autenticada.
 pub(super) fn proof_pack(core: &Core, caller: &Caller, context: Option<&MutationContext>, input: &ProofPackInput) -> Result<Value, String> {
     require_person(caller, context)?;
     let context = context.ok_or_else(|| "model_auth_required: solo una Person autenticada puede leer el Proof Pack".to_string())?;
@@ -190,7 +190,8 @@ pub(super) fn proof_pack(core: &Core, caller: &Caller, context: Option<&Mutation
     }))
 }
 
-/// `attempt_review`: la decisión de la persona sobre el HEAD que vio. Solo una Person de Desktop.
+/// `attempt_review`: decisión de una Person autenticada de Desktop o CLI sobre el HEAD que vio. La policy
+/// y la acción RPC específica delimitan el permiso CLI; no lo hereda ninguna otra decisión humana.
 pub(super) fn review_attempt(core: &Core, context: &MutationContext, input: &ReviewInput) -> Result<Value, String> {
     if !context.is_person() || !matches!(context.actor, Actor::PersonId(_)) || context.client_id.as_deref().is_none_or(str::is_empty) {
         return Err("revisar un Attempt requiere una Person autenticada".into());

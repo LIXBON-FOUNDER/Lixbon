@@ -1,6 +1,6 @@
 # Queue con semántica explícita y Pending Queue (LXO-143)
 
-Estado: **implementado y conectado**: la entrega por reanudación en el runtime y el RPC de Desktop están en [Conexión al runtime y al RPC](#conexión-al-runtime-y-al-rpc); la interfaz (Pending Queue Dock y composer ocupado, LXO-151/152) y `lxo` (LXO-159) siguen pendientes. Épica `[CORE][F5]`. Contratos relacionados:
+Estado: **implementado y conectado**: la entrega por reanudación en el runtime y el RPC de Desktop/CLI están en [Conexión al runtime y al RPC](#conexión-al-runtime-y-al-rpc); solo quedan pendientes la interfaz (Pending Queue Dock y composer ocupado, LXO-151/152). La CLI `lxo` (LXO-159) está implementada. Épica `[CORE][F5]`. Contratos relacionados:
 [Attempt](ATTEMPTS.md) · [adapters](ADAPTERS.md) · [Events](EVENTOS.md) · [Activity](ACTIVITY.md) · [Attention](ATTENTION.md).
 
 **Queue** es la semántica normalizada para una instrucción enviada **mientras un Attempt está ocupado**: el Core la guarda
@@ -105,7 +105,7 @@ Events y en `Store::queue_of_attempt`.
 | D8 | **La entrega es reanudar la misma sesión en cada fin de turno, dentro del mismo Attempt** | un contrato de adapter nuevo («entregar en un límite de turno») y procesos de larga vida en los dos adapters reales: varios PR de riesgo alto. Un run ya es un turno (el adapter lo cierra en el primer `result`), así que el siguiente turno es un `resume` de la sesión que ya existe |
 | D9 | **Encolar exige que el proveedor ofrezca `resume` AHORA**; sin él es `queue_unsupported` y no se escribe nada | prometer una entrega que el adapter no puede hacer. La sesión tiene que estar vinculada al entregar: si no lo está, el item falla (`adapter_unavailable`) y el Attempt termina como siempre |
 | D10 | **El Attempt sigue `running` entre turnos**: `completed` llega solo cuando la cola se vacía | cerrar el Attempt en cada turno y abrir otro por instrucción: eso es continuar (`attempt_resume`), no encolar |
-| D11 | **Por el RPC solo una Person de Desktop, sin adjuntos**: el autor sale de la identidad autenticada | aceptar `author` o `client_id` del cliente; los adjuntos necesitan que la entrega los lleve al turno |
+| D11 | **Por el RPC solo una Person autenticada de Desktop o CLI, sin adjuntos**: el autor sale de la identidad autenticada | aceptar `author` o `client_id` del cliente; los adjuntos necesitan que la entrega los lleve al turno |
 
 ### Policy de recuperación (D7)
 
@@ -169,11 +169,11 @@ events(run) = Completed ─► Core::queue_next_turn ─► deliver_next (TurnPo
 
 ### RPC (`orch/queue_rpc.rs`)
 
-Los tres son solo de una Person de Desktop (`HumanDecision`) y `deny_unknown_fields`.
+Los tres son solo de una Person autenticada de Desktop o CLI (`AttemptInstructionCommand`) y `deny_unknown_fields`. `attempt_queue` pasa por la policy Core; la base CLI exige `confirm: true`. Consultar y cancelar no requieren confirmación de policy.
 
 | comando | entrada | respuesta |
 |---|---|---|
-| `attempt_queue` | `{ attempt_id, request_id, body }` | `{ "status": "Queued" \| "Replayed", attempt_id, queue_id, position }` (`position` es `null` en un `Replayed`) |
+| `attempt_queue` | `{ attempt_id, request_id, body, confirm? }` | `{ "status": "Queued" \| "Replayed", attempt_id, queue_id, position }` (`position` es `null` en un `Replayed`) |
 | `attempt_queue_cancel` | `{ queue_id }` | `{ "status": "Cancelled" \| "AlreadyCancelled", queue_id }` |
 | `pending_queue` | `{ attempt_id }` | `{ v: 1, attempt_id, task_id, items: [{ position, queue_id, status, body, … }], finished: [{ queue_id, seq, status, failure, confirmed_by, … }], finished_limit: 20 }`. `items` es lo pendiente (`queued`/`delivering`); `finished` son las últimas 20 ya resueltas (`delivered`/`cancelled`/`failed`) |
 
@@ -198,7 +198,7 @@ Encolar **no entrega nada**: el Attempt está `running`, en mitad de un turno, y
 * La recuperación al arrancar se prueba con un **reinicio real del Core** (`queue_restart_tests.rs`: suelta el Core y arranca otro sobre las
   mismas carpetas): lo en vuelo falla `interrupted`, lo encolado `attempt_ended`, nada se entrega y un segundo reinicio no escribe más. Comprobado
   que quitar `queue_recover_at_boot` del arranque hace fallar la prueba.
-* Sin adjuntos (D11) y sin `lxo` (LXO-159).
+* Sin adjuntos (D11). La CLI `lxo` está documentada en [STEER.md](STEER.md) para Queue, Steer y Stop & Send.
 
 Pruebas del puente: `orch/attempt_e2e_tests.rs` (`la_cola_entrega_en_fifo…`, `si_la_entrega_falla…`, `detener_con_instrucciones_en_cola…`,
 `encolar_con_un_proveedor_sin_resume…`, `el_rpc_de_la_cola_rechaza…`), con el adapter falso (`Step::Hold` y un guion por turno).

@@ -1,6 +1,7 @@
 //! lxo: la CLI con la que cualquier agente habla con el orquestador de Lixbon.
 //! Solo traduce argumentos a peticiones HTTP locales; toda la lógica vive en la app.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -9,15 +10,23 @@ use std::time::Duration;
 use serde_json::{json, Map, Value};
 
 mod activity;
+mod attempt_control;
 mod attempts;
 mod attention;
 mod client_auth;
+mod compare;
 mod context;
 mod context_store;
 mod events;
+mod f5_support;
+mod fork;
+mod integration;
 mod projects;
 mod provider;
+mod race;
+mod review;
 mod summary;
+mod task_create;
 mod tasks;
 mod usage;
 
@@ -47,11 +56,32 @@ Coordinador (el agente con el que habla el usuario):
   lxo events [--after SEQ] [--limit N] [filtros] [--json] [--follow]
                                                   Event Log paginado con autenticación de cliente
   lxo tasks [--project ID|NOMBRE] [--active|--final] [--status S] [--json [--schema 2]]
+  lxo task create --project ID|NOMBRE --objective \"...\" --title \"...\" [opciones]
   lxo task show <task_id> [--json [--schema 2]]    tareas del Core en árbol (solo lectura); --schema 2 es
                                                   la forma del modelo Task/Attempt (docs/core/LXO_CORTE.md)
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
-                                                  (solo lectura y solo personas)
+  lxo attempt fork <source_attempt_id> [opciones]  fork explícito; nueva Task, procedencia y aprobación humana
+  lxo race --task <task_id> [opciones]             Race desde el Attempt actual; status, follow y cancelación
+  lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
+  lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
+  lxo attempt resume <attempt_id> --message \"...\"
+  lxo attempt stop <attempt_id> --confirm
+                                                  start/retry/resume esperan aprobación Desktop; stop es solo para personas y exige confirmación exacta
+  lxo attempt queue <attempt_id> --message \"...\" --confirm [--request-id ID] [--json]
+  lxo attempt steer <attempt_id> --message \"...\" --confirm [--request-id ID] [--json]
+  lxo attempt stop <attempt_id> --send --message \"...\" --confirm [--request-id ID] [--json]
+  lxo queue list <attempt_id> [--json] | lxo queue cancel <queue_id> [--json]
+                                                    Queue, Steer y Stop & Send son semánticas distintas, sin fallback;
+                                                    mutaciones solo para personas y exigen --confirm; Core revalida policy.
+                                                    list/cancel son solo para personas y no requieren confirmación de policy.
+  lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
+  lxo compare --race <race_id> [--json]            compara los candidatos lanzados del Race con la evidencia del Core
+  lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
+                                                   Proof Pack y decisión sobre el HEAD exacto (solo personas)
+  lxo integrate merge|pr <attempt_id|review_id> [--dry-run|--confirm] [--squash] [--accept-moved-target SHA] [--json]
+                                                  revisa el destino y la revisión vigente antes de integrar
+                                                  o publicar un PR (solo personas; la policy la decide el Core)
   lxo attention [--project ID] [--category C] [--severity S] [--task ID | --attempt ID] [--json]
   lxo attention show <attention_id>                lo que necesita atención según el Core (solo lectura)
   lxo provider list [--refresh] [--json]
@@ -72,8 +102,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo core restore [--copy <ruta>] [--cancel]      vuelve a la base de antes del corte Task/Attempt al reabrir
                                                   Lixbon (solo personas; se pierde lo posterior al corte)
   lxo stop <tarea> | lxo release <tarea> [--force]
-  (integrar una rama o publicar un PR no es cosa de agentes: lo aprueba una persona desde Lixbon;
-   lxo merge y lxo pr se rechazan)
+  (los agentes no integran ni publican PR: lxo merge y lxo pr se rechazan;
+   una persona usa lxo integrate y la policy se revalida en el Core)
 
 Tarea hija:
   lxo phase \"nombre\" --start | --done [--note \"...\"]
@@ -99,31 +129,59 @@ struct Args {
     pos: Vec<String>,
     flags: Map<String, Value>,
     duplicates: Vec<String>,
+    repeated: BTreeMap<String, Vec<Value>>,
+}
+
+fn insert_flag(
+    flags: &mut Map<String, Value>,
+    duplicates: &mut Vec<String>,
+    repeated: &mut BTreeMap<String, Vec<Value>>,
+    name: &str,
+    value: Value,
+) {
+    if let Some(previous) = flags.get(name) {
+        duplicates.push(name.to_string());
+        let values = repeated
+            .entry(name.to_string())
+            .or_insert_with(|| vec![previous.clone()]);
+        values.push(value.clone());
+    }
+    flags.insert(name.to_string(), value);
 }
 
 fn parse(raw: Vec<String>) -> Args {
     let mut pos = vec![];
     let mut flags = Map::new();
     let mut duplicates = vec![];
+    let mut repeated = BTreeMap::new();
     let mut it = raw.into_iter().peekable();
     while let Some(a) = it.next() {
         if let Some(name) = a.strip_prefix("--") {
             if let Some((k, v)) = name.split_once('=') {
-                if flags.contains_key(k) {
-                    duplicates.push(k.to_string());
-                }
-                flags.insert(k.into(), Value::String(v.into()));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    k,
+                    Value::String(v.into()),
+                );
             } else if it.peek().is_some_and(|n| !n.starts_with("--")) && !BOOL_FLAGS.contains(&name)
             {
-                if flags.contains_key(name) {
-                    duplicates.push(name.to_string());
-                }
-                flags.insert(name.into(), Value::String(it.next().unwrap_or_default()));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    name,
+                    Value::String(it.next().unwrap_or_default()),
+                );
             } else {
-                if flags.contains_key(name) {
-                    duplicates.push(name.to_string());
-                }
-                flags.insert(name.into(), Value::Bool(true));
+                insert_flag(
+                    &mut flags,
+                    &mut duplicates,
+                    &mut repeated,
+                    name,
+                    Value::Bool(true),
+                );
             }
         } else {
             pos.push(a);
@@ -133,12 +191,33 @@ fn parse(raw: Vec<String>) -> Args {
         pos,
         flags,
         duplicates,
+        repeated,
     }
 }
 
 const BOOL_FLAGS: &[&str] = &[
-    "json", "start", "done", "failed", "squash", "force", "shared", "stat", "refresh", "all",
-    "follow", "help", "stored",
+    "json",
+    "start",
+    "done",
+    "failed",
+    "squash",
+    "force",
+    "shared",
+    "stat",
+    "refresh",
+    "all",
+    "follow",
+    "help",
+    "stored",
+    "background",
+    "confirm",
+    "dry-run",
+    "wait",
+    "compare",
+    "accept",
+    "reject",
+    "open",
+    "send",
 ];
 
 impl Args {
@@ -156,6 +235,13 @@ impl Args {
     fn num(&self, k: &str) -> Option<u64> {
         self.s(k).and_then(|v| v.parse().ok())
     }
+}
+
+fn routes_attempt_control(a: &Args) -> bool {
+    a.at(0).as_deref() == Some("queue")
+        || (a.at(0).as_deref() == Some("attempt")
+            && (matches!(a.at(1).as_deref(), Some("queue" | "steer"))
+                || (a.at(1).as_deref() == Some("stop") && a.flags.contains_key("send"))))
 }
 
 fn home() -> PathBuf {
@@ -1029,6 +1115,12 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
+    if a.at(0).as_deref() == Some("race") {
+        return race::run(&a);
+    }
+    if routes_attempt_control(&a) {
+        return attempt_control::run(&a);
+    }
     if a.at(0).as_deref() == Some("events") {
         return events::run(&a);
     }
@@ -1038,11 +1130,23 @@ fn main() -> ExitCode {
     if a.at(0).as_deref() == Some("projects") {
         return projects::run(&a);
     }
+    if a.at(0).as_deref() == Some("task") && a.at(1).as_deref() == Some("create") {
+        return task_create::run(&a);
+    }
     if matches!(a.at(0).as_deref(), Some("tasks" | "task")) {
         return tasks::run(&a);
     }
     if matches!(a.at(0).as_deref(), Some("attempts" | "attempt")) {
+        if a.at(0).as_deref() == Some("attempt") && a.at(1).as_deref() == Some("fork") {
+            return fork::run(&a);
+        }
         return attempts::run(&a);
+    }
+    if a.at(0).as_deref() == Some("compare") {
+        return compare::run(&a);
+    }
+    if a.at(0).as_deref() == Some("review") {
+        return review::run(&a);
     }
     if a.at(0).as_deref() == Some("summary") {
         return summary::run(&a);
@@ -1056,6 +1160,9 @@ fn main() -> ExitCode {
     if a.at(0).as_deref() == Some("context") {
         return context::run(&a);
     }
+    if a.at(0).as_deref() == Some("integrate") {
+        return integration::run(&a);
+    }
     // `lxo core restore`: vuelve a la base de antes del corte Task/Attempt (LXO-234). Lo aplica el siguiente arranque.
     if a.at(0).as_deref() == Some("core") && a.at(1).as_deref() == Some("restore") {
         let args = json!({ "copy": a.s("copy").unwrap_or_default(), "cancel": a.b("cancel") });
@@ -1065,7 +1172,14 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Ok(r) if a.b("cancel") => {
-                println!("{}", if r["cancelled"] == true { "Restauración retirada." } else { "No había ninguna restauración pedida." });
+                println!(
+                    "{}",
+                    if r["cancelled"] == true {
+                        "Restauración retirada."
+                    } else {
+                        "No había ninguna restauración pedida."
+                    }
+                );
                 ExitCode::SUCCESS
             }
             Ok(r) => {
@@ -1201,6 +1315,24 @@ mod tests {
 
     fn p(s: &[&str]) -> Args {
         parse(s.iter().map(|x| x.to_string()).collect())
+    }
+
+    #[test]
+    fn el_enrutamiento_reserva_queue_steer_y_stop_send_sin_cambiar_stop_normal() {
+        for command in [
+            &["queue", "list", "task-a1"][..],
+            &["attempt", "queue", "task-a1"][..],
+            &["attempt", "steer", "task-a1"][..],
+            &["attempt", "stop", "task-a1", "--send"][..],
+        ] {
+            assert!(routes_attempt_control(&p(command)), "{command:?}");
+        }
+        for command in [
+            &["attempt", "stop", "task-a1", "--confirm"][..],
+            &["attempt", "resume", "task-a1"][..],
+        ] {
+            assert!(!routes_attempt_control(&p(command)), "{command:?}");
+        }
     }
 
     #[test]
@@ -1343,6 +1475,8 @@ mod tests {
         assert!(super::HELP.contains("lxo events"));
         assert!(super::events::HELP.contains("--follow"));
         assert!(super::events::HELP.contains("--after"));
+        assert!(super::HELP.contains("lxo review"));
+        assert!(super::review::HELP.contains("--accept"));
     }
 
     #[test]
@@ -1492,14 +1626,24 @@ mod tests {
     #[test]
     fn events_attempt_es_el_atajo_de_la_entidad_attempt() {
         let p = |raw: &[&str]| super::parse(raw.iter().map(|s| s.to_string()).collect());
-        let opts = super::events::parse_events_options(&p(&["events", "--attempt", "t3-a2"])).unwrap();
-        assert_eq!((opts.query["entity_kind"].as_str(), opts.query["entity_id"].as_str()), ("attempt", "t3-a2"));
+        let opts =
+            super::events::parse_events_options(&p(&["events", "--attempt", "t3-a2"])).unwrap();
+        assert_eq!(
+            (
+                opts.query["entity_kind"].as_str(),
+                opts.query["entity_id"].as_str()
+            ),
+            ("attempt", "t3-a2")
+        );
         for raw in [
             &["events", "--attempt", "t3-a2", "--task", "t3"][..],
             &["events", "--attempt", "t3-a2", "--entity-kind", "task"],
             &["events", "--attempt"],
         ] {
-            assert!(super::events::parse_events_options(&p(raw)).is_err(), "{raw:?}");
+            assert!(
+                super::events::parse_events_options(&p(raw)).is_err(),
+                "{raw:?}"
+            );
         }
     }
 }

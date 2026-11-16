@@ -1,0 +1,6 @@
+{
+  "command": "queue.cancel",
+  "queue_id": "task-a1-q2",
+  "status": "Cancelled",
+  "v": 1
+}

@@ -22,7 +22,7 @@
 //! módulo no genera nada: un reintento de la persistencia vuelve a insertar exactamente lo mismo.
 
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, Transaction};
+use rusqlite::{params, params_from_iter, OptionalExtension, Transaction};
 use serde::Serialize;
 
 use super::error::{StoreError, StoreResult};
@@ -393,6 +393,36 @@ impl Store {
         }
         let projector = self.projector.clone();
         self.write(|tx| insert_events_projected(tx, events, None, projector.as_deref()))
+    }
+
+    /// Comprueba cuál es el Attempt actual e inserta los eventos en la misma transacción inmediata.
+    /// Se usa al aceptar un Race desde una Task: un Attempt que dejó de ser actual no puede crear su
+    /// evento `race.requested`.
+    pub(crate) fn append_events_if_current_attempt(
+        &mut self,
+        task_id: &str,
+        expected_attempt_id: &str,
+        events: &[NewEvent],
+    ) -> StoreResult<Vec<Inserted>> {
+        for event in events {
+            event.check()?;
+        }
+        let projector = self.projector.clone();
+        self.write(|tx| {
+            let current: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM attempts WHERE task_id = ?1 ORDER BY n DESC LIMIT 1",
+                    [task_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if current.as_deref() != Some(expected_attempt_id) {
+                return Err(StoreError::AttemptConflict(format!(
+                    "race_source_not_current: el Attempt {expected_attempt_id} ya no es el actual de la Task {task_id}"
+                )));
+            }
+            insert_events_projected(tx, events, None, projector.as_deref())
+        })
     }
 
     /// Una página de eventos por cursor de `seq` (ver [`EventQuery`]). Las filas y `head_seq` salen de

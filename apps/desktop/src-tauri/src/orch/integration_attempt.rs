@@ -15,7 +15,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::events::{Actor, MutationContext};
-use super::integration::{self, CreatePr};
+use super::git;
+use super::integration::{self, CreatePr, MergeCommit, PushCommit};
 use super::model_read::{invalid, require_person};
 use super::review;
 use super::{Caller, Core};
@@ -142,6 +143,10 @@ pub(super) fn preview(core: &Core, caller: &Caller, context: Option<&MutationCon
 
 /// `attempt_integrate`. `create` crea el PR (en la app, `gh`; en pruebas, uno simulado).
 pub(super) fn integrate_attempt(core: &Core, context: &MutationContext, input: &IntegrateInput, create: CreatePr) -> Result<Value, String> {
+    integrate_attempt_with_effects(core, context, input, &git::merge, &git::push, create)
+}
+
+pub(super) fn integrate_attempt_with_effects(core: &Core, context: &MutationContext, input: &IntegrateInput, merge_commit: MergeCommit<'_>, push_commit: PushCommit<'_>, create: CreatePr) -> Result<Value, String> {
     if !context.is_person() || !matches!(context.actor, Actor::PersonId(_)) || context.client_id.as_deref().is_none_or(str::is_empty) {
         return Err("integrar un Attempt requiere una Person autenticada".into());
     }
@@ -181,9 +186,9 @@ pub(super) fn integrate_attempt(core: &Core, context: &MutationContext, input: &
     }
     // 3. El efecto. Merge y PR son decisiones distintas; ninguna limpia el worktree.
     let mut out = if input.action == "merge" {
-        integration::integrate(&acting, true, &json!({ "task": task_id, "confirm": true, "squash": input.squash, "accept_moved_target": input.accept_moved_target }))?
+        integration::integrate_attempt(&acting, &json!({ "task": task_id, "confirm": true, "squash": input.squash, "accept_moved_target": input.accept_moved_target }), &head, merge_commit)?
     } else {
-        integration::publish_pr(&acting, true, &json!({ "task": task_id, "confirm": true }), create)?
+        integration::publish_pr_attempt(&acting, &json!({ "task": task_id, "confirm": true }), &head, push_commit, create)?
     };
     // El Task puede guardar lo que dijo `gh`: al cliente solo llega saneado.
     out["pr_url"] = safe_pr_url(&out["pr_url"]);

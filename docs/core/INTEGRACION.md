@@ -1,6 +1,7 @@
 # Integración de un Attempt revisado (LXO-148, épica F5)
 
-Integrar es una decisión **distinta** de revisar: aceptar una revisión no es haber integrado. Dos comandos, ambos de una Person de Desktop:
+Integrar es una decisión **distinta** de revisar: aceptar una revisión no es haber integrado. Ambos comandos exigen una Person autenticada;
+la policy autoriza Desktop y CLI con confirmación, nunca agentes:
 
 | | `attempt_integration_preview { attempt_id }` | `attempt_integrate { attempt_id, action, head_commit, confirm, squash?, accept_moved_target? }` |
 |---|---|---|
@@ -67,3 +68,21 @@ Cada efecto ejecutado deja `effect.observed` y su `decision.recorded` en UNA mut
 ## La URL del PR (revisión final)
 
 `publish_pr` guarda y devuelve **solo una URL https saneada** (`pr_url::sanitize_pr_url`: sin credenciales, query ni fragmento). Lo que dijo `gh` y no cumple eso (`javascript:`, `http://`…) ni se guarda ni llega al cliente: el PR se creó y el resultado se registra, pero Lixbon no conoce su URL. Antes se guardaba tal cual, y una URL no https hacía que el Artifact `pull_request` del runtime (que exige https) rechazara el registro: la acción ejecutada quedaba sin anotar. La vista previa y el resultado de `attempt_integrate` usan el mismo saneado.
+
+## CLI `lxo integrate` (LXO-163)
+
+La integración de un Attempt revisado está disponible para una Person autenticada en Desktop/CLI. Los comandos legacy `lxo merge` y `lxo pr` siguen rechazados; los agentes no pueden integrar ni publicar.
+
+```text
+lxo integrate merge|pr <attempt_id|review_id> [--dry-run|--confirm] [--squash] [--accept-moved-target SHA] [--json]
+```
+
+* Por defecto, y también con `--dry-run`, consulta `attempt_integration_preview` y solo muestra qué rama, HEAD y revisión se usarían. No invoca el efecto. `--dry-run` y `--confirm` son excluyentes.
+* `--confirm` solicita `attempt_integrate` con el HEAD de la vista previa. El Core vuelve a comprobar la revisión vigente, la identidad autenticada y la policy antes de ejecutar; una vista previa no autoriza una acción posterior.
+* `merge` se envía como `action: "merge"`; `pr`, como `action: "publish_pr"`. `--squash` solo aplica a merge. `--accept-moved-target SHA` solo aplica a merge confirmado y acepta únicamente el HEAD indicado.
+* El selector puede ser un Attempt (`<task>-a<n>`) o el `decision_id` numérico de una revisión. Para este último, el CLI busca el Attempt asociado en Event Log y coteja ese id con el `decision_id` de la revisión que figura en el detalle vigente. Si ya no coincide, falla sin solicitar la acción.
+* Una Person autenticada como `cli_person` puede pedir `attempt_integrate` con `confirm: true`; la policy efectiva puede endurecerlo, pero no aflojar el nivel base `confirm`. `--confirm` nunca satisface `elevated`. Si el Core devuelve `policy_out_of_band_required`, la operación queda bloqueada: todavía no existe un canal para esa aprobación, tampoco desde CLI.
+
+Con `--json`, stdout usa el contrato v1: `{ "v", "action", "requested_id", "attempt_id", "review_id", "dry_run", "preview", "result" }`. `preview` conserva solo los campos necesarios para explicar la decisión (`is_current`, `revision`, `review`, `merge`, `pr`, `target`, `can_merge`, `can_publish_pr`); `result` es `null` durante la vista previa. Al confirmar, incluye `outcome`, `decision_id`, commits/ramas relevantes, cantidad de conflictos y URL PR saneada, no rutas locales ni mensajes crudos del efecto. Los errores se emiten en stderr como `{ "ok": false, "code", "error" }` y devuelven un código de salida distinto de cero.
+
+Fixtures del contrato: [`integrate_dry_run.v1.json`](fixtures/lxo/integrate_dry_run.v1.json), [`integrate_merge.v1.json`](fixtures/lxo/integrate_merge.v1.json) e [`integrate_pr.v1.json`](fixtures/lxo/integrate_pr.v1.json). Las pruebas del CLI usan RPC y Event Log simulados: no ejecutan Git, `gh`, merge ni publicación reales.

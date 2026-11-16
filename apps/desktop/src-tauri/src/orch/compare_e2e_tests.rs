@@ -120,6 +120,36 @@ fn dos_forks_hermanos_son_comparables_y_lo_demas_no() {
 }
 
 #[test]
+fn una_persona_cli_puede_comparar_por_el_rpc_autenticado_y_no_escribe() {
+    let w = world("claude", None);
+    w.core.settings.lock().unwrap().enabled = true;
+    let source = w.finished("cmp-cli-origen");
+    let fork = w.fork_done(&source, "cmp-cli-fork");
+    let cli = w.cli_client("compare-read");
+    let before = event_total(&w.core);
+
+    let result = w
+        .cli(
+            &cli,
+            "attempt_compare",
+            json!({"attempt_ids": [source.clone(), fork.clone()]}),
+        )
+        .expect("Compare debe aceptar la credencial Person de CLI");
+    assert_eq!(result["relation"]["kind"], "fork_family");
+    assert_eq!(event_total(&w.core), before, "Compare es solo lectura");
+
+    let agent = w.cli_agent_client(&task_of(&source), "compare-read-agent");
+    let denied = w
+        .cli(
+            &agent,
+            "attempt_compare",
+            json!({"attempt_ids": [source, fork]}),
+        )
+        .unwrap_err();
+    assert!(denied.contains("model_auth_required"), "{denied}");
+}
+
+#[test]
 fn dos_attempts_de_la_misma_task_se_comparan_y_el_anterior_no_inventa_cambios() {
     let w = world("claude", Some(vec![Step::Output("empiezo".into()), Step::Fail(AdapterError::provider("se cayó"))]));
     let a1 = w.create("claude", "cmp-misma-task");
