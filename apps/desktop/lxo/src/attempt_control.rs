@@ -1152,7 +1152,8 @@ mod tests {
         assert!(human.contains("Pendientes:"));
         assert!(human.contains("Historial reciente:"));
         assert!(human.contains("(adapter_error)"));
-        for secret in [
+        // Nombres de campos internos que la lectura no publica (no son valores).
+        for campo_interno in [
             "request_id",
             "request_digest",
             "client_id",
@@ -1160,9 +1161,9 @@ mod tests {
             "attachments",
         ] {
             assert!(
-                result["items"][0].get(secret).is_none()
-                    && result["finished"][0].get(secret).is_none(),
-                "{secret}"
+                result["items"][0].get(campo_interno).is_none()
+                    && result["finished"][0].get(campo_interno).is_none(),
+                "el campo interno {campo_interno} no debe publicarse"
             );
         }
         crate::snapshot("queue_list.v1.json", &result);
