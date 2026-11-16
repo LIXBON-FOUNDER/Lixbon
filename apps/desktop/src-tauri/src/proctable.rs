@@ -2373,6 +2373,21 @@ mod tests {
         let _ = child.wait();
     }
 
+    /// LXO-242: el `terminate` REAL de Windows abre el proceso UNA vez, compara su hora de creación y termina con ese mismo handle.
+    /// Con la identidad de otro dueño (un pid reutilizado) no toca al proceso y dice `Gone`; con la exacta lo mata. Hasta ahora solo lo
+    /// ejercían las pruebas con un sistema falso: una mutación que mataba aunque la identidad no coincidiera sobrevivía a toda la suite.
+    #[cfg(windows)]
+    #[test]
+    fn el_terminate_real_no_mata_a_un_proceso_con_otra_identidad() {
+        let mut child = std::process::Command::new("ping").args(["-n", "60", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        let pid = child.id();
+        let start = start_time(pid).expect("identidad del proceso");
+        assert_eq!(terminate(Proc { pid, start: start.wrapping_add(1) }), Fate::Gone, "otra identidad: ese pid es de otro dueño");
+        assert!(child.try_wait().unwrap().is_none(), "el proceso con otra identidad NO se tocó");
+        assert_eq!(terminate(Proc { pid, start }), Fate::Killed, "con la identidad exacta sí se termina");
+        let _ = child.wait();
+    }
+
     /// Windows, un proceso de verdad creado SUSPENDIDO: `cmd /C exit 0` termina al instante si corre, así que seguir vivo
     /// tras un segundo prueba que no ha ejecutado nada.
     #[cfg(windows)]

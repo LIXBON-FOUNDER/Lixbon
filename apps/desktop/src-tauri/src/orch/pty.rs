@@ -284,31 +284,38 @@ pub fn resolve_custody(owner: &str) -> Option<Result<(), String>> {
 /// del hijo (`direct`, solo alcanza a la raíz) se intenta por si ayuda, pero NO libera nada: el proceso pasa a la
 /// custodia del módulo (`UNOWNED`, a nombre de `owner`) con su matador del árbol, que recuerda los descendientes que
 /// vio y los verificará al reintentar.
-fn kill_after_failed_setup(owner: Option<&str>, pid: Option<u32>, mut killer: Killer, direct: &mut dyn FnMut() -> std::io::Result<()>) -> bool {
+///
+/// `Ok` si se puede dar por muerto; `Err(motivo)` si no, con el motivo que dio el matador (LXO-238: el residuo de custodia que se vio bajo
+/// carga no se pudo explicar porque este mensaje lo descartaba).
+fn kill_after_failed_setup(owner: Option<&str>, pid: Option<u32>, mut killer: Killer, direct: &mut dyn FnMut() -> std::io::Result<()>) -> Result<(), String> {
     #[cfg(test)]
     let broken = BREAK_KILLS.with(|b| b.get());
     #[cfg(not(test))]
     let broken = false;
-    let dead = !broken && killer.kill().is_ok();
-    if dead {
-        #[cfg(test)]
-        KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
-    } else {
-        if !broken {
-            let _ = direct();
+    let killed = if broken { Err(std::io::Error::other("matador roto (prueba)")) } else { killer.kill() };
+    match killed {
+        Ok(()) => {
+            #[cfg(test)]
+            KILLS_AFTER_FAILED_SETUP.with(|k| k.set(k.get() + 1));
+            Ok(())
         }
-        push_unowned(owner.map(str::to_string), pid, killer);
+        Err(why) => {
+            if !broken {
+                let _ = direct();
+            }
+            push_unowned(owner.map(str::to_string), pid, killer);
+            Err(why.to_string())
+        }
     }
-    dead
 }
 
-/// El `Err` de un lanzamiento cuya construcción falló, con lo que pasó con el proceso si no se pudo matar.
-fn setup_failure(e: String, pid: Option<u32>, dead: bool) -> String {
-    if dead {
+/// El `Err` de un lanzamiento cuya construcción falló, con lo que pasó con el proceso si no se pudo matar (y por qué).
+fn setup_failure(e: String, pid: Option<u32>, closed: &Result<(), String>) -> String {
+    let Err(why) = closed else {
         return e;
-    }
+    };
     let who = pid.map_or("recién creado".to_string(), |p| p.to_string());
-    format!("{e}. El proceso {who} no se pudo matar y queda bajo la custodia de Lixbon")
+    format!("{e}. El proceso {who} no se pudo matar y queda bajo la custodia de Lixbon ({why})")
 }
 
 // SOLO pruebas: punto de fallo inyectable justo después de crear el proceso (el equivalente de que
@@ -573,8 +580,8 @@ fn spawn_thread<F: FnOnce() + Send + 'static>(f: F) -> std::io::Result<thread::J
 /// construcción (`thread::spawn` habría entrado en pánico y dejado el proceso sin dueño). Devuelve el `Err` del
 /// lanzamiento.
 fn thread_failure(owner: Option<&str>, pid: Option<u32>, killer: Killer, direct: &mut dyn FnMut() -> std::io::Result<()>, e: std::io::Error) -> (String, bool) {
-    let dead = kill_after_failed_setup(owner, pid, killer, direct);
-    (setup_failure(format!("No se pudo crear un hilo del agente: {e}"), pid, dead), dead)
+    let closed = kill_after_failed_setup(owner, pid, killer, direct);
+    (setup_failure(format!("No se pudo crear un hilo del agente: {e}"), pid, &closed), closed.is_ok())
 }
 
 fn spawn_piped(
@@ -628,11 +635,11 @@ fn spawn_piped(
             None
         };
         if let Some(motivo) = motivo {
-            let dead = kill_after_failed_setup(l.owner, Some(pid), tree.clone_killer(), &mut || child.kill());
-            if dead {
+            let closed = kill_after_failed_setup(l.owner, Some(pid), tree.clone_killer(), &mut || child.kill());
+            if closed.is_ok() {
                 let _ = child.wait();
             }
-            return Err(setup_failure(format!("{motivo}; no se lanzó el agente"), Some(pid), dead));
+            return Err(setup_failure(format!("{motivo}; no se lanzó el agente"), Some(pid), &closed));
         }
         tree
     };
@@ -648,11 +655,11 @@ fn spawn_piped(
     let (stdout, stderr) = match pipes {
         Ok(p) => p,
         Err(e) => {
-            let dead = kill_after_failed_setup(l.owner, Some(pid), tree.clone_killer(), &mut || child.kill());
-            if dead {
+            let closed = kill_after_failed_setup(l.owner, Some(pid), tree.clone_killer(), &mut || child.kill());
+            if closed.is_ok() {
                 let _ = child.wait();
             }
-            return Err(setup_failure(e, Some(pid), dead));
+            return Err(setup_failure(e, Some(pid), &closed));
         }
     };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -792,11 +799,11 @@ fn spawn_pty(
         Ok((r, w)) => (r, Arc::new(Mutex::new(w))),
         Err(e) => {
             let pid = child.process_id();
-            let dead = kill_after_failed_setup(l.owner, pid, killer, &mut || child.kill());
-            if dead {
+            let closed = kill_after_failed_setup(l.owner, pid, killer, &mut || child.kill());
+            if closed.is_ok() {
                 let _ = child.wait();
             }
-            return Err(setup_failure(e, pid, dead));
+            return Err(setup_failure(e, pid, &closed));
         }
     };
     let buffer = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -1192,11 +1199,61 @@ pub(crate) mod pruebas {
         r
     }
 
-    /// La custodia es global y `Core::shutdown` la vacía entera (mata lo que encuentre): las pruebas que la tocan, o que
-    /// lo invocan, van de una en una.
-    pub fn serie_custodia() -> std::sync::MutexGuard<'static, ()> {
-        static SERIE: Mutex<()> = Mutex::new(());
-        SERIE.lock().unwrap_or_else(|e| e.into_inner())
+    /// La serie de las pruebas de custodia: mientras se tiene, ninguna otra prueba toca la custodia ni apaga un Core.
+    /// REENTRANTE por hilo: quien ya la tiene y vuelve a pedirla (una prueba de custodia que arranca una fixture que apaga un Core)
+    /// no se bloquea a sí mismo.
+    pub struct SerieCustodia {
+        _guard: Option<std::sync::MutexGuard<'static, ()>>,
+    }
+
+    /// El mutex de la serie: uno solo, compartido por `serie_custodia` y `serie_custodia_si_libre`.
+    static SERIE: Mutex<()> = Mutex::new(());
+
+    thread_local! {
+        static EN_SERIE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    impl Drop for SerieCustodia {
+        fn drop(&mut self) {
+            if self._guard.is_some() {
+                EN_SERIE.with(|e| e.set(false));
+            }
+        }
+    }
+
+    /// La custodia es global y `Core::shutdown` la vacía entera (`reap_unowned`: mata lo que encuentre, de cualquier prueba, y
+    /// los matadores rotos de una prueba son LOCALES a su hilo, así que el barrido de otra los deja funcionar de verdad): las
+    /// pruebas que la tocan, o que apagan un Core, van de una en una. Para apagar un Core desde una fixture, `apaga_en_serie`.
+    pub fn serie_custodia() -> SerieCustodia {
+        if EN_SERIE.with(|e| e.get()) {
+            return SerieCustodia { _guard: None };
+        }
+        let guard = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        EN_SERIE.with(|e| e.set(true));
+        SerieCustodia { _guard: Some(guard) }
+    }
+
+    /// Como [`serie_custodia`] pero SIN esperar: `None` si otro hilo tiene la serie. Lo usan el apagado y el barrido de un Core de prueba
+    /// (`lifecycle.rs`) para no pisar la custodia de una prueba que corre a la vez; esperar bloquearía un apagado hecho desde otro hilo mientras
+    /// la prueba (que sí tiene la serie) lo aguarda, y mantendría vivo el Core de una fixture (con su `core.lock`) mientras una prueba larga de custodia corre.
+    pub fn serie_custodia_si_libre() -> Option<SerieCustodia> {
+        if EN_SERIE.with(|e| e.get()) {
+            return Some(SerieCustodia { _guard: None });
+        }
+        let guard = match SERIE.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return None,
+        };
+        EN_SERIE.with(|e| e.set(true));
+        Some(SerieCustodia { _guard: Some(guard) })
+    }
+
+    /// Apaga un Core (`Core::shutdown`, que barre la custodia global) sin pisar a una prueba de custodia que corra a la vez. Es lo que
+    /// deben usar las fixtures de pruebas en vez de `core.shutdown()` a pelo (LXO-238).
+    pub fn apaga_en_serie(core: &super::super::Core) {
+        let _serie = serie_custodia();
+        core.shutdown();
     }
 
     /// ¿Está libre el mutex global de la custodia? Una prueba lo consulta MIENTRAS un matador corre: si estuviera
@@ -1315,6 +1372,8 @@ mod hilos_tras_crear_el_proceso {
                 let pid = ultimo_pid().expect("el proceso llegó a crearse");
                 let e = r.err().expect("el lanzamiento falla");
                 assert!(e.contains("hilo") && e.contains("custodia"), "{e}");
+                // LXO-238: el mensaje dice POR QUÉ no se pudo matar (antes se descartaba y el residuo bajo carga no se pudo explicar).
+                assert!(e.contains("(matador roto (prueba))"), "el motivo del fallo del matador va en el mensaje: {e}");
                 // Una PTY puede morir sola al soltar su master; uno canalizado solo muere si alguien lo mata.
                 assert!(in_custody(&dueno) && (!piped || vivo(pid)), "no se suelta un proceso vivo (piped={piped}, hilo {n}, inject={inject:?})");
                 assert!(matches!(resolve_custody(&dueno), Some(Ok(()))), "el reintento lo mata");

@@ -496,6 +496,33 @@ fn hasta_turn_start(mut s: Vec<Value>) -> Vec<Value> {
     s
 }
 
+/// LXO-242 · Un cierre que no se pudo probar no se declara cancelado (ver el homólogo de Claude).
+#[test]
+fn un_cierre_sin_probar_no_se_declara_cancelado() {
+    let mut s = hasta_turn_start(script_of(NORMAL));
+    s.push(json!({"gate": "never"}));
+    let l = FakeLauncher::new(s);
+    let reg = registro(plan_app_server(), l.clone());
+    let g = reg.gated(ID).unwrap();
+    let cancel = CancelToken::new();
+    let run = g.start(start_req("proponer"), &cancel).unwrap();
+    l.last().1.unprovable();
+    let (tx, rx) = mpsc::channel();
+    let outcome = std::thread::scope(|sc| {
+        let h = sc.spawn(|| g.events(&run, &cancel, &mut |e: AdapterEvent| tx.send(e).unwrap()));
+        loop {
+            if let AdapterEvent::SessionBound { .. } = rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                break;
+            }
+        }
+        cancel.cancel();
+        h.join().unwrap().unwrap()
+    });
+    let RunOutcome::Failed(e) = outcome else { panic!("un cierre sin probar no puede ser Cancelled: {outcome:?}") };
+    assert_eq!(e.code, ErrorCode::Provider);
+    assert!(e.message.contains("no se pudo probar"), "{}", e.message);
+}
+
 #[test]
 fn cancelar_mata_el_proceso_y_termina_cancelled() {
     let mut s = hasta_turn_start(script_of(NORMAL));

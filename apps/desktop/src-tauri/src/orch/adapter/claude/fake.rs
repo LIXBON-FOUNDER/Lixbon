@@ -43,6 +43,8 @@ pub struct FakeProcess {
     written: Arc<Mutex<Vec<Value>>>,
     killed: Arc<AtomicBool>,
     closed: AtomicBool,
+    /// El próximo cierre no se podrá probar (LXO-242).
+    unproven: AtomicBool,
     stderr: String,
 }
 
@@ -99,7 +101,7 @@ impl FakeProcess {
             }
             let _ = out_tx.send(None);
         });
-        Arc::new(FakeProcess { out: Mutex::new(out_rx), inbox: in_tx, written, killed, closed: AtomicBool::new(false), stderr: stderr.to_string() })
+        Arc::new(FakeProcess { out: Mutex::new(out_rx), inbox: in_tx, written, killed, closed: AtomicBool::new(false), unproven: AtomicBool::new(false), stderr: stderr.to_string() })
     }
 
     /// Todo lo que el adapter escribió, ya como JSON.
@@ -109,6 +111,11 @@ impl FakeProcess {
 
     pub fn was_killed(&self) -> bool {
         self.killed.load(Ordering::SeqCst)
+    }
+
+    /// El próximo cierre no se podrá probar (LXO-242): `kill` devuelve `Closure::Unproven`.
+    pub fn unprovable(&self) {
+        self.unproven.store(true, Ordering::SeqCst);
     }
 }
 
@@ -136,8 +143,13 @@ impl Process for FakeProcess {
         self.closed.store(true, Ordering::SeqCst);
     }
 
-    fn kill(&self) {
+    fn kill(&self) -> super::super::process::Closure {
         self.killed.store(true, Ordering::SeqCst);
+        if self.unproven.load(Ordering::SeqCst) {
+            super::super::process::Closure::Unproven
+        } else {
+            super::super::process::Closure::Proven
+        }
     }
 
     fn stderr_tail(&self) -> String {

@@ -259,3 +259,56 @@ fn una_rama_con_trabajo_sin_integrar_se_conserva_al_liberar() {
     assert_eq!((row.0.as_str(), row.3, row.2.as_deref()), ("removed", 1, Some(wt.branch.as_str())), "el Worktree quitado sigue conservando su rama");
     assert_eq!(core.lock().tasks[&intent.task_id].branch.as_deref(), Some(wt.branch.as_str()));
 }
+
+/// Persistencia de prueba delante de la real: la siguiente escritura falla (el registro del worktree) y las demás pasan a la real.
+struct FallaAlRegistrar {
+    inner: std::sync::Mutex<Option<Arc<dyn super::mutation::Persistence>>>,
+    quedan: std::sync::atomic::AtomicUsize,
+}
+
+impl super::mutation::Persistence for FallaAlRegistrar {
+    fn persist(&self, state: &super::state::State, events: &[crate::store::NewEvent]) -> Result<(), super::mutation::PersistError> {
+        if self.quedan.load(Ordering::SeqCst) > 0 {
+            self.quedan.fetch_sub(1, Ordering::SeqCst);
+            return Err(super::mutation::PersistError::structural("disco simulado"));
+        }
+        let inner = self.inner.lock().unwrap().clone().expect("persistencia real");
+        inner.persist(state, events)
+    }
+
+    fn records_events(&self) -> bool {
+        self.inner.lock().unwrap().as_ref().is_some_and(|i| i.records_events())
+    }
+
+    fn after_publish(&self, state: &super::state::State) -> Result<(), String> {
+        let inner = self.inner.lock().unwrap().clone().expect("persistencia real");
+        inner.after_publish(state)
+    }
+}
+
+/// «Solo se borra lo que este módulo creó» también al revés: si el worktree se crea en disco y el Core NO puede registrarlo, esta llamada
+/// deshace lo que acaba de crear (carpeta y rama) en vez de dejar un worktree que el Core no conoce. Sin la fila, ni el estado afirma un worktree.
+#[test]
+fn si_el_registro_falla_se_deshace_lo_que_esta_llamada_creo() {
+    let repo = repo_with_commit("registro-falla");
+    let (core, intent) = core_with_intent(&repo);
+    let ramas_antes = branches(&repo);
+    let previous_cwd = core.lock().tasks[&intent.task_id].cwd.clone();
+    let falla = Arc::new(FallaAlRegistrar { inner: std::sync::Mutex::new(None), quedan: std::sync::atomic::AtomicUsize::new(1) });
+    let f2 = falla.clone();
+    core.wrap_persistence(move |inner| {
+        *f2.inner.lock().unwrap() = Some(inner);
+        f2
+    });
+
+    let e = core.provision_worktree(&intent).expect_err("el registro falla");
+    assert!(matches!(&e, PrepareError::Failed(m) if m.contains("no se pudo registrar el worktree")), "{e:?}");
+
+    let dir = repo.parent().unwrap().join("repo.lixbon-wt").join(&intent.attempt_id);
+    assert!(!dir.exists(), "la carpeta que esta llamada creó se deshizo");
+    assert_eq!(branches(&repo), ramas_antes, "la rama que esta llamada creó se deshizo");
+    assert!(worktree_row(&core, &intent.task_id).is_none(), "no consta ningún worktree");
+    let task = core.lock().tasks[&intent.task_id].clone();
+    assert_eq!((task.worktree, task.branch, task.cwd), (None, None, previous_cwd), "el estado no afirma un worktree que no existe");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "", "el repositorio principal no se tocó");
+}

@@ -61,6 +61,9 @@ pub enum Msg {
     ToolUse { tool: String, summary: String },
     /// `input` es la entrada original de la herramienta: se guarda SOLO en memoria para devolverla en el `allow`.
     PermissionRequest { request_id: String, tool: String, summary: String, input: Value },
+    /// Una pregunta del modelo a la persona (su herramienta `AskUserQuestion`, que llega como `can_use_tool`): no es un permiso, se contesta con
+    /// texto. `text` es lo que se muestra (las preguntas con sus opciones); `input` se guarda SOLO en memoria para devolverlo con las respuestas.
+    QuestionRequest { request_id: String, text: String, input: Value },
     ApiRetry { attempt: u32, max: u32, delay_ms: u64 },
     Result(ResultMsg),
     /// Un mensaje válido que el adapter no usa.
@@ -83,6 +86,39 @@ pub fn summarize_tool(input: &Value) -> String {
     // Una sola línea: un comando con saltos no debe ocupar el log.
     let one_line = text.lines().next().unwrap_or("");
     safe_text(one_line, MAX_SUMMARY_CHARS)
+}
+
+/// La herramienta con la que Claude le hace una pregunta a la persona.
+pub const ASK_TOOL: &str = "AskUserQuestion";
+
+/// Tope de una pregunta mostrada (con sus opciones) y de cuántas puede traer una petición (la herramienta admite hasta cuatro).
+const MAX_QUESTION_CHARS: usize = 400;
+const MAX_QUESTIONS: usize = 4;
+
+/// Los textos de las preguntas de la entrada de `AskUserQuestion` (`{"questions": [{"question": …, "options": […]}]}`), tal cual los dijo el
+/// modelo y SIN acotar: son la clave con la que se devuelven las respuestas. `None` si la forma no es esa (entonces no se trata como pregunta).
+pub fn questions_of(input: &Value) -> Option<Vec<String>> {
+    let list = input.get("questions")?.as_array()?;
+    if list.is_empty() || list.len() > MAX_QUESTIONS {
+        return None;
+    }
+    list.iter().map(|q| q.get("question").and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map(str::to_string)).collect()
+}
+
+/// Lo que se muestra de una petición de `AskUserQuestion`: cada pregunta con sus opciones, redactado y acotado, una por línea.
+fn describe_questions(input: &Value) -> Option<String> {
+    questions_of(input)?;
+    let list = input.get("questions")?.as_array()?;
+    let lines: Vec<String> = list
+        .iter()
+        .filter_map(|q| {
+            let text = q.get("question").and_then(Value::as_str)?;
+            let options: Vec<&str> = q.get("options").and_then(Value::as_array).map(|o| o.iter().filter_map(|o| o.get("label").and_then(Value::as_str)).collect()).unwrap_or_default();
+            let full = if options.is_empty() { text.to_string() } else { format!("{text} (opciones: {})", options.join(", ")) };
+            Some(safe_text(&full.replace('\n', " "), MAX_QUESTION_CHARS))
+        })
+        .collect();
+    Some(lines.join("\n"))
 }
 
 fn assistant(v: &Value) -> Vec<Msg> {
@@ -176,6 +212,11 @@ pub fn parse_line(line: &str) -> Vec<Msg> {
             match (req.get("subtype").and_then(Value::as_str), s(&v, "request_id")) {
                 (Some("can_use_tool"), Some(request_id)) => {
                     let input = req.get("input").cloned().unwrap_or(Value::Null);
+                    if req.get("tool_name").and_then(Value::as_str) == Some(ASK_TOOL) {
+                        if let Some(text) = describe_questions(&input) {
+                            return vec![Msg::QuestionRequest { request_id, text, input }];
+                        }
+                    }
                     vec![Msg::PermissionRequest {
                         request_id,
                         tool: safe_text(&s(req, "tool_name").unwrap_or_else(|| "?".into()), 80),

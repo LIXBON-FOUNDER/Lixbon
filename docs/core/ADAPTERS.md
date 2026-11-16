@@ -84,9 +84,39 @@ repetido se rechaza.
 | 8 | La cancelación llega a la ejecución | `CancelToken` compartido; `Gated` no arranca si ya está cancelado | `cancelar_antes_de_arrancar_no_llega_al_adapter`, `cancelar_durante_events_termina_cancelled`, `interrumpir_termina_interrupted_sin_ser_un_fallo` |
 | 9 | Los cambios de capabilities se ven sin reiniciar | `refresh` + `generation` | `refresh_refleja_un_cambio_de_capabilities_sin_reiniciar` |
 | 10 | Contrato versionado | `version` de la matriz y del snapshot; la fixture falla si cambia sin subir versión | `la_matriz_serializa_estable_y_hace_roundtrip`, `una_matriz_incompleta_de_otra_version_o_con_nombres_ajenos_no_se_acepta`, `el_snapshot_del_registro_coincide_con_la_fixture_versionada` |
+| 11 | Un cierre que no se pudo probar no se declara detenido (LXO-242) | `Process::kill` devuelve `Closure::{Proven, Unproven}` (`#[must_use]`); al terminar `events`, un `Unproven` convierte `Cancelled`/`Interrupted` en un `Failed` de proveedor que lo dice (`outcome_after_close`), y el Core lo ve como un fallo, no como un `stopped` | `un_cierre_sin_probar_no_se_declara_cancelado` (Claude y Codex), `un_exito_no_cambia_aunque_el_cierre_no_se_pudiera_probar`; el supervisor: `un_cierre_sin_probar_queda_en_custodia_con_su_dueno_y_reap_lo_cierra`, `soltar_un_proceso_sin_probar_no_lo_pierde`, `el_apagado_del_core_reintenta_la_custodia_de_los_adapters`, `un_proceso_de_adapter_en_custodia_bloquea_limpiar_y_borrar_hasta_que_se_cierra` |
 
 El fake (`adapter/fake.rs`, solo en pruebas) cubre las seis capabilities y apunta cada llamada que **llega** al adapter,
 de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_fake_cubre_las_seis_capabilities_a_traves_de_gated`.
+
+### Cierre de procesos: qué se garantiza y qué no (LXO-242)
+
+* **Garantizado:** el cierre del árbol de un proceso comprueba la identidad de cada proceso antes de matarlo (`proctable::kill_tree`) y nunca termina a uno
+  ajeno por reutilización de PID. Si no se puede PROBAR que todo terminó, el cierre es `Unproven` y el árbol se conserva para reintentarlo al soltar el proceso.
+* **Un `Unproven` tras `Completed` o `Failed` no cambia ese resultado** (dicen lo que hizo el proveedor, no que el proceso terminó): queda en el log. Solo
+  `Cancelled` e `Interrupted`, que afirman que el proceso ya no está, pasan a fallo.
+* **Decisión sobre ConPTY (Windows), 2026-11-13:** ConPTY no puede crearse suspendida (`portable-pty` no deja pasar flags de creación), así que su Job se
+  adjunta tarde. **Se acepta confirmar su cierre por Job + recorrido del árbol, con residuo documentado**: un proceso que su raíz creó y que escapó ANTES de
+  entrar en el Job solo lo cubre el recorrido por `ppid`. No se adopta la regla estricta («un Job tardío nunca confirma»): dejaría todo cierre de ConPTY en
+  custodia. Los adapters reales (`claude`, `codex app-server`) no usan ConPTY: nacen suspendidos y dentro del Job.
+* **Supervisor (`adapter/supervisor.rs`, LXO-242):** un cierre `Unproven` ya no se reintenta solo en el `Drop` para perderse después. La **familia** del proceso
+  (la raíz sin reapear, que ancla su pid, y el árbol con su identidad y su Job) queda en una **custodia global a nombre del Attempt** (`<task>-a<n>`;
+  los adapters lo fijan con `Process::set_owner`) hasta que se comprueba el cierre. Antes, soltar el proceso con el cierre sin probar mataba la raíz a ciegas y la
+  reapeaba, perdiendo el ancla. Ahora:
+  * `Process::kill` y `Drop` registran en el supervisor lo que no se probó (idempotente: la misma familia no se registra dos veces).
+  * **Apagado ordenado:** `Core::shutdown` cancela las ejecuciones de los adapters (`kill_all_terms`) y después `supervisor::reap()` reintenta TODA la
+    custodia; el barrido periódico (`periodic_sweep`) también.
+  * **Visibilidad:** el Resource Manager cuenta un proceso en custodia como «en marcha» (`resource_blocked: running`): no limpia ni borra el worktree de esa Task
+    hasta que se cierre (`task_in_custody` compara `<task>-a<dígitos>` exacto: `t9` no es `t90`).
+  * La custodia es global al proceso, como la de las terminales: las pruebas que la tocan van de una en una (`pty::pruebas::serie_custodia`).
+* **Residuo que sigue:** si el cierre no se puede probar nunca (identidad ilegible permanente), la familia sigue en custodia hasta que el Core se apaga; el
+  Core no la descarta ni la mata a ciegas. Un Attempt cuyo cierre no se probó ya terminó como fallo (ver arriba), no como `stopped`. Las rutas de Unix
+  (`pidfd`, `setsid`) no se ejercitan en Windows.
+* **Validación manual en Windows (2026-11-13), con las CLIs reales** (`cargo test --lib real_smoke_custody -- --ignored --nocapture --test-threads=1`):
+  un Attempt de Claude (2.1.296) y otro de Codex (0.168.0) lanzan, por la herramienta de shell del proveedor, un `node` que se queda 10 minutos; se
+  comprueba que corre (4 procesos con la marca en la línea de comandos en Claude, 2 en Codex), se **detiene por el RPC `stop` de Desktop** y
+  el Attempt queda `stopped` (no fallo: el cierre se probó), **0 procesos con la marca** y nada en la custodia del supervisor. **Linux y macOS no se han
+  validado a mano**: la CI ejecuta sus rutas de Unix con procesos reales (`pidfd`, `setsid`), pero eso no sustituye a una persona en cada sistema.
 
 ## Hechos que reporta un adapter
 
@@ -98,11 +128,11 @@ de modo que una prueba demuestra que `Gated` no la dejó pasar. Cobertura: `el_f
 | `Transport { kind, degraded, reason }` | el canal con que corre la ejecución; `degraded` marca un respaldo y `reason` dice por qué se cayó a él |
 | `Model { model }` | el modelo EFECTIVO (puede diferir del pedido) |
 | `Output { text }` | texto del modelo, redactado y acotado |
-| `Question { question_id, text }` | el proveedor pregunta algo a la persona |
+| `Question { question_id, text }` | el proveedor pregunta algo a la persona. Claude lo emite al recibir su herramienta `AskUserQuestion` (llega como `can_use_tool`) con una entrada `{questions: […]}`; la respuesta es texto y vuelve en `updatedInput.answers` ([RESPUESTAS.md](RESPUESTAS.md)). Codex no lo emite |
 | `Permission { request_id, tool, summary }` | el proveedor pide permiso para una herramienta; el Core decide y responde con `answer` (`allow` o `deny`); el adapter nunca responde por su cuenta |
 | `ToolUse { tool, summary }` | usa una herramienta; `summary` es una ruta o un comando de una línea, nunca el contenido |
 | `Retry { attempt, max, delay_ms }` | reintento de red del proveedor; informativo |
-| `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0 |
+| `Usage { … }` | uso total al terminar; un campo ausente es `None` (desconocido), nunca 0. `limits` son las ventanas de cuota de la CUENTA que el proveedor declaró durante ese turno (Claude: su `rate_limit_event`, las últimas de ESA ejecución y no las que viera otra; Codex: ninguna), una foto de la cuenta y no lo que gastó el Attempt (LXO-249) |
 
 `ProbeResult.transport` (y el snapshot) dice el canal de un adapter que tiene más de uno (`app_server`, `exec_json`…); falta en los de un solo canal.
 

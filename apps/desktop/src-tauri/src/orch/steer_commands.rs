@@ -92,13 +92,19 @@ pub(super) fn requested_event(st: &Store, ctx: &MutationContext, attempt_id: &st
     attempt_ops::instruction_requested_fact(&attempt, &task, request_id, mode, chars, ctx, now_ms() as i64).map_err(from_store)
 }
 
+/// El hecho `attempt.request_answered` (LXO-247): la respuesta a una petición del proveedor. Lo escribe el almacén (`store_boot.rs`).
+pub(super) fn answered_event(st: &Store, ctx: &MutationContext, attempt_id: &str, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<NewEvent, QueueError> {
+    let (attempt, task) = rows(st, attempt_id)?;
+    attempt_ops::request_answered_fact(&attempt, &task, request_id, kind, decision, ctx, now_ms() as i64).map_err(from_store)
+}
+
 /// El hecho `attempt.instruction_result`: lo que pasó con esa petición.
 pub(super) fn result_event(st: &Store, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>) -> Result<NewEvent, QueueError> {
     let (attempt, task) = rows(st, attempt_id)?;
     attempt_ops::instruction_result_fact(&attempt, &task, request_id, mode, outcome, reason, ctx, now_ms() as i64).map_err(from_store)
 }
 
-fn rows(st: &Store, attempt_id: &str) -> Result<(AttemptRow, crate::store::TaskRow), QueueError> {
+pub(super) fn rows(st: &Store, attempt_id: &str) -> Result<(AttemptRow, crate::store::TaskRow), QueueError> {
     let attempt = attempt_of(st, attempt_id)?;
     let task = st.task_row(&attempt.task_id).map_err(from_store)?.ok_or_else(|| QueueError::new(ErrorKind::Failed, "store", "no se encontró la Task del Attempt"))?;
     Ok((attempt, task))

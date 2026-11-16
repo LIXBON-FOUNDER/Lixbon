@@ -88,6 +88,8 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.queue_failed',
   'activity.attempt.instruction_requested',
   'activity.attempt.instruction_result',
+  'activity.attempt.request_answered',
+  'activity.attempt.usage_reported',
   'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
@@ -185,6 +187,8 @@ const POLICY_LEVELS = { allow: 'permitir', confirm: 'confirmar', elevated: 'elev
 const POLICY_DIRECTIONS = { tighten: 'más restrictiva', loosen: 'menos restrictiva', same: 'mismo nivel efectivo', reset: 'vuelve a heredar' };
 const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
 const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
+const REQUEST_KINDS = new Set(['permission', 'question']);
+const REQUEST_DECISIONS = new Set(['allow', 'deny']);
 const QUEUE_FAILURES = {
   unsupported: 'el proveedor no admite entregarla',
   environment_blocked: 'el entorno del proveedor está bloqueado',
@@ -607,6 +611,24 @@ const FORMATTERS = {
     return mode === 'steer'
       ? `Se pidió inyectar una instrucción en el turno en curso del ${attempt}.`
       : `Se pidió detener el turno en curso del ${attempt} y enviarle una instrucción.`;
+  },
+  // Responder al proveedor (LXO-247): solo el tipo y, en un permiso, allow/deny. Nunca el texto de una respuesta libre.
+  'activity.attempt.request_answered': (args) => {
+    const attempt = attemptOf(args);
+    const kind = requiredCode(args, 'kind', REQUEST_KINDS);
+    if (!requiredArguments(attempt, kind)) return null;
+    if (kind === 'question') return args.decision === undefined ? `Se respondió una pregunta del proveedor en el ${attempt}.` : null;
+    const decision = requiredCode(args, 'decision', REQUEST_DECISIONS);
+    if (!requiredArguments(decision)) return null;
+    return decision === 'allow'
+      ? `Se permitió lo que el proveedor pedía en el ${attempt}.`
+      : `Se denegó lo que el proveedor pedía en el ${attempt}.`;
+  },
+  // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del intento.
+  'activity.attempt.usage_reported': (args) => {
+    const attempt = attemptOf(args);
+    if (!requiredArguments(attempt)) return null;
+    return `El proveedor informó el uso del ${attempt}.`;
   },
   'activity.attempt.instruction_result': (args) => {
     const attempt = attemptOf(args);

@@ -191,6 +191,38 @@ fn user_message(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }).to_string()
 }
 
+/// La entrada de `AskUserQuestion` con las respuestas de la persona (`answers`: texto de la pregunta → respuesta), que es como la herramienta las
+/// recibe. Una sola pregunta se contesta con el texto entero; con varias, una línea por pregunta y en el mismo orden (una respuesta que no
+/// encaja se rechaza sin tocar la CLI, para no contestar una pregunta con la respuesta de otra).
+fn answered_questions(input: &Value, questions: &[String], text: &str) -> Result<Value, AdapterError> {
+    let lines: Vec<&str> = if questions.len() == 1 { vec![text.trim()] } else { text.lines().map(str::trim).filter(|l| !l.is_empty()).collect() };
+    if lines.len() != questions.len() || lines.iter().any(|l| l.is_empty()) {
+        return Err(AdapterError::invalid(&format!("el modelo hizo {} pregunta(s): responde con una línea de texto por cada una, en orden", questions.len())));
+    }
+    let answers: serde_json::Map<String, Value> = questions.iter().zip(lines).map(|(q, a)| (q.clone(), Value::String(a.to_string()))).collect();
+    let mut updated = input.clone();
+    updated["answers"] = Value::Object(answers);
+    Ok(updated)
+}
+
+/// Las ventanas de cuota que Claude declaró (`rate_limit_event`), como las ve el resto del Core. Las usan `usage` y el uso persistido por turno.
+fn quota_windows(info: &RateInfo) -> Vec<UsageWindow> {
+    info.windows
+        .iter()
+        .map(|w| UsageWindow {
+            id: w.id.clone(),
+            minutes: match w.id.as_str() {
+                "five_hour" => Some(300),
+                "seven_day" => Some(10_080),
+                _ => None,
+            },
+            // `utilization` es una fracción; algo fuera de 0..=1 es un formato que no conocemos: desconocido.
+            used_percent: w.utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u)).map(|u| (u * 1000.0).round() / 10.0),
+            resets_at: w.resets_at,
+        })
+        .collect()
+}
+
 // ── El adapter ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 struct Run {
@@ -199,6 +231,8 @@ struct Run {
     session_caps: Mutex<Option<Vec<String>>>,
     /// Peticiones de permiso sin responder: id → entrada original de la herramienta (solo en memoria).
     pending: Mutex<HashMap<String, Value>>,
+    /// Lo último que Claude dijo de sus límites en ESTA ejecución (no el de otra que corra a la vez): se persiste con el uso del turno (LXO-249).
+    limits: Mutex<Option<RateInfo>>,
     interrupted: AtomicBool,
     /// Se lanzó con `--resume`: un «no existe esa conversación» significa sesión caducada, no un fallo de la ejecución.
     resumed: bool,
@@ -313,12 +347,13 @@ impl ClaudeAdapter {
         let spec = LaunchSpec { program: self.program()?, args, cwd: worktree.to_path_buf(), env, env_remove };
 
         let process = self.launcher.launch(&spec)?;
+        process.set_owner(attempt_id);
         if let Err(e) = process.send(&user_message(prompt)) {
-            process.kill();
+            let _ = process.kill();
             return Err(e);
         }
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
-        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), interrupted: AtomicBool::new(false), resumed: resume.is_some() };
+        let state = Run { process, session_caps: Mutex::new(None), pending: Mutex::new(HashMap::new()), limits: Mutex::new(None), interrupted: AtomicBool::new(false), resumed: resume.is_some() };
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).insert(seq, Arc::new(state));
         Ok(RunHandle { attempt_id: attempt_id.to_string(), adapter: self.cfg.id.clone(), seq })
     }
@@ -329,7 +364,8 @@ impl ClaudeAdapter {
         let mut malformed = 0usize;
         loop {
             if cancel.is_cancelled() {
-                run.process.kill();
+                // Se cierra otra vez en `events`, que es quien dice si el cierre quedó probado.
+                let _ = run.process.kill();
                 return RunOutcome::Cancelled;
             }
             let line = match run.process.recv(POLL) {
@@ -364,8 +400,15 @@ impl ClaudeAdapter {
                         run.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), input);
                         sink.push(AdapterEvent::Permission { request_id, tool, summary });
                     }
+                    Msg::QuestionRequest { request_id, text, input } => {
+                        run.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(request_id.clone(), input);
+                        sink.push(AdapterEvent::Question { question_id: request_id, text });
+                    }
                     Msg::ApiRetry { attempt, max, delay_ms } => sink.push(AdapterEvent::Retry { attempt, max, delay_ms }),
-                    Msg::RateLimit(info) => *self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(((self.clock)(), info)),
+                    Msg::RateLimit(info) => {
+                        *run.limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.clone());
+                        *self.observed_limits.lock().unwrap_or_else(|e| e.into_inner()) = Some(((self.clock)(), info));
+                    }
                     Msg::Result(r) => return self.finish(run, r, sink),
                 }
             }
@@ -415,19 +458,21 @@ impl ClaudeAdapter {
                 }
             }
         };
-        process.kill();
+        let _ = process.kill();
         outcome
     }
 
     fn finish(&self, run: &Run, r: ResultMsg, sink: &mut dyn EventSink) -> RunOutcome {
         let u = &r.usage;
-        if [u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_creation_tokens].iter().any(Option::is_some) || u.cost_usd.is_some() {
+        let limits = run.limits.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|info| quota_windows(info)).unwrap_or_default();
+        if [u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_creation_tokens].iter().any(Option::is_some) || u.cost_usd.is_some() || !limits.is_empty() {
             sink.push(AdapterEvent::Usage {
                 input_tokens: u.input_tokens,
                 output_tokens: u.output_tokens,
                 cache_read_tokens: u.cache_read_tokens,
                 cache_creation_tokens: u.cache_creation_tokens,
                 cost_usd: u.cost_usd,
+                limits,
             });
         }
         if !r.is_error {
@@ -468,10 +513,10 @@ impl ProviderAdapter for ClaudeAdapter {
     fn events(&self, run: &RunHandle, cancel: &CancelToken, sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
         let state = self.run_of(run)?;
         let outcome = self.drive(&state, cancel, sink);
-        // Termine como termine, el proceso no sobrevive a su ejecución.
-        state.process.kill();
+        // Termine como termine, el proceso no sobrevive a su ejecución; y si el cierre no se pudo probar, no se declara detenido (LXO-242).
+        let closure = state.process.kill();
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).remove(&run.seq);
-        Ok(outcome)
+        Ok(super::process::outcome_after_close(outcome, closure))
     }
 
     /// Claude solo informa de sus límites DURANTE una ejecución: no hay consulta de cuenta sin gastar una. Por eso `windows`
@@ -514,21 +559,7 @@ impl ProviderAdapter for ClaudeAdapter {
             return Err(command_error.unwrap_or_else(|| UsageError::unavailable("`claude /usage` no está verificado en esta versión y aún no hay ninguna ejecución de la que leer los límites")));
         };
         let mut snap = UsageSnapshot::new(at, Provenance::RunObservation);
-        snap.windows = info
-            .windows
-            .iter()
-            .map(|w| UsageWindow {
-                id: w.id.clone(),
-                minutes: match w.id.as_str() {
-                    "five_hour" => Some(300),
-                    "seven_day" => Some(10_080),
-                    _ => None,
-                },
-                // `utilization` es una fracción; algo fuera de 0..=1 es un formato que no conocemos: desconocido.
-                used_percent: w.utilization.filter(|u| u.is_finite() && (0.0..=1.0).contains(u)).map(|u| (u * 1000.0).round() / 10.0),
-                resets_at: w.resets_at,
-            })
-            .collect();
+        snap.windows = quota_windows(&info);
         snap.limit_reached = match info.status.as_deref() {
             Some("allowed") | Some("allowed_warning") => Some(false),
             Some("rejected") => Some(true),
@@ -546,10 +577,14 @@ impl ProviderAdapter for ClaudeAdapter {
             .get(&answer.question_id)
             .cloned()
             .ok_or_else(|| AdapterError::invalid("no hay una petición de permiso pendiente con ese id"))?;
-        let response = match answer.text.trim().to_ascii_lowercase().as_str() {
-            "allow" => json!({ "behavior": "allow", "updatedInput": input }),
-            "deny" => json!({ "behavior": "deny", "message": DENY_MESSAGE }),
-            _ => return Err(AdapterError::invalid("la respuesta a un permiso es `allow` o `deny`")),
+        let response = match stream::questions_of(&input) {
+            // Una pregunta del modelo (`AskUserQuestion`): la respuesta es TEXTO, no allow/deny, y vuelve junto a las preguntas que se hicieron.
+            Some(questions) => json!({ "behavior": "allow", "updatedInput": answered_questions(&input, &questions, &answer.text)? }),
+            None => match answer.text.trim().to_ascii_lowercase().as_str() {
+                "allow" => json!({ "behavior": "allow", "updatedInput": input }),
+                "deny" => json!({ "behavior": "deny", "message": DENY_MESSAGE }),
+                _ => return Err(AdapterError::invalid("la respuesta a un permiso es `allow` o `deny`")),
+            },
         };
         let line = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": answer.question_id, "response": response } });
         state.process.send(&line.to_string())?;

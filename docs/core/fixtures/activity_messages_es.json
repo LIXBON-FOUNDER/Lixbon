@@ -994,6 +994,51 @@
       "text": null
     },
     {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "allow" },
+      "text": "Se permitió lo que el proveedor pedía en el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "deny" },
+      "text": "Se denegó lo que el proveedor pedía en el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "question" },
+      "text": "Se respondió una pregunta del proveedor en el intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "permission" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "otro" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "question", "decision": "allow" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.request_answered",
+      "args": { "task": "t-3", "n": 2, "kind": "otro" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.usage_reported",
+      "args": { "task": "t-3", "n": 2 },
+      "text": "El proveedor informó el uso del intento 2 de la tarea t-3."
+    },
+    {
+      "key": "activity.attempt.usage_reported",
+      "args": { "task": "t-3" },
+      "text": null
+    },
+    {
       "key": "activity.provider_session.opened",
       "args": {
         "task": "t-3",

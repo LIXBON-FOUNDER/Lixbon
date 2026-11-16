@@ -191,6 +191,8 @@ export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
   'activity.attempt.queue_failed': 'No se pudo entregar la instrucción de la cola',
   'activity.attempt.instruction_requested': 'Instrucción al turno en curso pedida',
   'activity.attempt.instruction_result': 'Resultado de la instrucción al turno en curso',
+  'activity.attempt.request_answered': 'Respuesta al proveedor',
+  'activity.attempt.usage_reported': 'Uso informado por el proveedor',
   'activity.attempt.dispatch_ambiguous': 'No se sabe si llegó a lanzarse',
 });
 

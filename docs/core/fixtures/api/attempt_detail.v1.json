@@ -64,6 +64,7 @@
     "status": "done",
     "summary": "API lista",
     "task_id": "t3",
+    "usage": null,
     "worktree": {
       "base_branch": "main",
       "branch": "lx/r1/t3-api-de-sesiones",
