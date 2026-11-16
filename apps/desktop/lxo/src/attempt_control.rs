@@ -39,15 +39,19 @@ envía la instrucción como un turno nuevo. No hay fallback entre estas semánti
 permite repetir una petición con idempotencia; si se omite, se deriva del Attempt,
 la operación y el texto. Para enviar intencionadamente el mismo texto otra vez,
 usa una clave nueva. Queue y Steer requieren `--confirm` según la policy base de
-CLI; Stop & Send también requiere confirmación. El Core revalida siempre la policy.
+CLI; Stop & Send también requiere confirmación. Sin `--confirm` el cliente termina
+con código 2 (uso) antes de llamar al Core; el código 9 es del Core, cuando la policy
+rechaza o exige una confirmación que `--confirm` no satisface. El Core revalida siempre
+la policy.
 
 `queue list` muestra pendientes FIFO e historial reciente; `queue cancel` solo
 cancela un item que aún no empezó a entregarse. Ni la lectura ni la cancelación
 requieren confirmación de policy.
 
-Salida JSON: contrato v1. Códigos: 0 correcto, 1 error interno, 2 uso, 3
-autenticación, 4 versión incompatible, 5 Core no disponible, 6 inexistente,
-7 capability no soportada, 8 entorno bloqueado, 9 policy/confirmación, 10 ocupado,
+Salida JSON: contrato v1 (también en los errores). Códigos: 0 correcto, 1 error
+interno, 2 uso (incluye la falta de `--confirm`), 3 autenticación, 4 versión
+incompatible, 5 Core no disponible, 6 inexistente, 7 capability no soportada,
+8 entorno bloqueado, 9 policy o confirmación que decide el Core, 10 ocupado,
 11 Attempt final, 12 conflicto o estado no cancelable.";
 
 #[derive(Debug, PartialEq, Eq)]
