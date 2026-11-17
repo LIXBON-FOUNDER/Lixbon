@@ -450,9 +450,9 @@ describe('OrchestratorMode', () => {
 // (estado, «Pedido», aviso de la terminal) desborda sobre las pestañas. jsdom no calcula el diseño: se comprueba la regla.
 describe('cabecera del detalle de un run', () => {
   const css = (name) => readFileSync(resolve(__dirname, '../styles', name), 'utf8');
-  it('la regla que fija la altura del panelhead tiene una réplica para .orch__head con altura automática', () => {
+  it('la regla que fija la altura del panelhead tiene una réplica más específica para .orch__head con altura automática', () => {
     expect(css('ide.css')).toMatch(/\[data-ui='ide'\] \.panelhead \{[^}]*height:\s*48px/);
-    expect(css('orch.css')).toMatch(/\[data-ui='ide'\] \.orch__head \{[^}]*height:\s*auto/);
+    expect(css('orch.css')).toMatch(/\[data-ui='ide'\] \.panelhead\.orch__head \{[^}]*height:\s*auto/);
   });
 });
 
