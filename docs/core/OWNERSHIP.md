@@ -83,4 +83,4 @@ Cada dueño y cada candidato trae un `link` `lixbon://` canónico (ver [DEEP_LIN
 
 ## Pruebas
 
-`ownership_read_tests.rs`: terminado ≠ dueño; dueño vivo sin haber tocado el archivo; varios Attempts sin elegir uno; reintento sin evidencia → `partial`; Review inmutable con el worktree quitado; otra máquina; revisión `current`/`stale`/`unknown`; rutas peligrosas y patrones de git; ids ajenos; autorización antes que la forma; ambigüedad.
+`ownership_read_tests.rs`: terminado ≠ dueño; dueño vivo sin haber tocado el archivo; varios Attempts sin elegir uno; reintento sin evidencia → `partial`; Review inmutable con el worktree quitado; otra máquina; revisión `current`/`stale`/`unknown`; rutas peligrosas y patrones de git; ids ajenos; autorización antes que la forma; ambigüedad. Se comprobó por mutación (ocho mutaciones, todas detectadas) que cada una de esas reglas hace fallar alguna prueba: pathspec literal, «sin evidencia» ≠ «no lo tocó», los Attempts finales no son dueños, la autorización, la validación de la ruta, no elegir uno en la ambigüedad, el worktree de otro Project y el bloqueo por otra máquina.
