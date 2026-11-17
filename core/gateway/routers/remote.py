@@ -72,7 +72,7 @@ CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "fi
 ORCH_ACTIONS = (
     "refresh", "enable", "settings", "stop", "remove_run", "diff", "term", "agents",
     "core_snapshot", "core_events", "core_attention", "core_task", "core_activity",
-    "core_attempts", "core_attempt",
+    "core_attempts", "core_attempt", "core_attempt_capabilities",
 )
 MAX_ORCH_ARGS = 4_000
 MAX_ATTACHMENTS = 6
