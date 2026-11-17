@@ -35,6 +35,7 @@ fn world_custom(matrix: CapabilityMatrix, ttl: Option<Duration>, script: Vec<Ste
 /// Un Attempt que pide `peticiones` y espera: el turno se queda en un `Hold` hasta que la prueba lo suelte.
 fn waiting_world(peticiones: Vec<Step>) -> (World, String) {
     let w = world("claude", None);
+    let expected = peticiones.len();
     let mut script = vec![Step::Bind("sess-ans")];
     script.extend(peticiones);
     script.extend([Step::Hold, Step::Complete(Some("hecho".into()))]);
@@ -42,6 +43,9 @@ fn waiting_world(peticiones: Vec<Step>) -> (World, String) {
     let attempt = w.create("claude", "e2e-answer");
     w.approve(&attempt);
     wait_until("el Attempt espera una respuesta", || row(&w.core, &attempt).0 == "awaiting_terminal_approval");
+    // El primer permiso cambia el estado antes de que el adapter publique el
+    // resto. No responder hasta que estén todas las peticiones del escenario.
+    wait_until("el adapter publica todas las peticiones", || pending(&w, &attempt).len() == expected);
     (w, attempt)
 }
 
