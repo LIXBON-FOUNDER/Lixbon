@@ -66,6 +66,34 @@ def test_comando_invalido_devuelve_ack_con_error(client):
         assert ack["ok"] is False and ack["status"] == 409
 
 
+@pytest.mark.parametrize("action,args", [
+    ("core_attempt_capabilities", {"attempt_id": "t1-a2", "refresh": True}),
+    ("core_attempt_context", {"attempt_id": "t1-a2"}),
+    ("core_usage", {"refresh": True}),
+])
+def test_resumen_mobile_f4_atraviesa_websocket_y_no_se_repite_al_reconectar(client, action, args):
+    with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
+        until(host, "channel")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            payload = {"type": "orch", "action": action, "args": {**args, "rid": "f4"}}
+            phone.send_json({"op": "cmd", "rid": "outer", "command": payload})
+            assert until(phone, "ack")["ok"] is True
+            command = until(host, "orch")
+            assert command["action"] == action
+            assert command["args"] == payload["args"]
+            result = {"type": f"orch_{action}", "rid": "f4", "protocol": 1, "ok": True, "summary": {"status": "ready"}}
+            host.send_json({"op": "events", "rid": "host-result", "events": [result]})
+            until(host, "ack")
+            assert until(phone, result["type"])["summary"] == {"status": "ready"}
+
+        assert remote.hub.replay(remote.hub.get("s1"), 0) == []
+        with client.websocket_connect("/api/remote/sessions/s1/ws?from_seq=0", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            phone.send_json({"op": "ping"})
+            assert phone.receive_json()["type"] == "pong"
+
+
 def test_con_eventos_en_el_buffer_no_se_pide_un_snapshot_que_los_borre(client):
     with client.websocket_connect("/api/remote/sessions/s1/host?last_cmd=0") as host:
         host.send_json({"op": "auth", "token": "lxb_test"})
