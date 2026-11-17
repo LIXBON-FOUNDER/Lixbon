@@ -11,7 +11,7 @@
 //! ```
 //!
 //! **Activación (LXO-234):** el arranque llama a [`run`] tras las migraciones anteriores al corte, con `core.lock` tomado,
-//! solo con el interruptor de dogfood ([`SWITCH`]) y si no hay una espera ([`HOLD_FILE`]: la deja una restauración).
+//! salvo que el interruptor ([`SWITCH`]) lo apague (`LIXBON_AGENTIC_CUT=0`, LXO-235) y si no hay una espera ([`HOLD_FILE`]: la deja una restauración).
 //! El paso 6 (Attempts huérfanos a `exited`) lo hace el runtime en cada arranque sobre las tablas.
 //!
 //! **Restauración:** [`request_restore`] (desde `lxo core restore`, con el Core en marcha) comprueba la copia y la deja
@@ -34,7 +34,8 @@ use crate::store::{cut_migration, inspect_copy, lock_path, sha256_hex, CutCounts
 
 /// Etiqueta de la copia previa obligatoria.
 pub(super) const BACKUP_LABEL: &str = "pre-f3-cut";
-/// Interruptor de dogfood (LXO-234): el arranque corta la base solo con `LIXBON_AGENTIC_CUT=1`. Desactivado por defecto.
+/// Interruptor del corte (LXO-234, LXO-235). **Activo por defecto**: el arranque corta la base salvo que `LIXBON_AGENTIC_CUT` valga
+/// `0`, `false`, `off` o `no` (cualquier otro valor, incluido `1`, o no ponerlo, la deja activa). Fue de dogfood (`=1` para activarlo).
 pub(super) const SWITCH: &str = "LIXBON_AGENTIC_CUT";
 /// En `core/`: tras restaurar la copia previa, el arranque no vuelve a cortar aunque el interruptor siga puesto (el
 /// «fijar la versión» de la ADR §12). Se borra a mano cuando se quiera volver a intentarlo.
@@ -48,13 +49,28 @@ thread_local! {
     pub(super) static SWITCH_FOR_TESTS: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
-/// ¿Pide el entorno el corte al arrancar?
+/// ¿Qué hace el arranque con el valor del interruptor? Activo salvo un valor que lo apague de forma inequívoca (LXO-235). Un valor raro
+/// NO desactiva el corte: lo único que lo evita es decirlo claro.
+pub(super) fn enabled_by(value: Option<&str>) -> bool {
+    !value.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | "no"))
+}
+
+/// ¿Corta el arranque? Por defecto sí (LXO-235); `LIXBON_AGENTIC_CUT=0` lo evita.
+///
+/// En pruebas el valor por defecto sigue siendo «no cortar» (las que parten de una base legacy lo necesitan): cada una lo fija con
+/// [`SWITCH_FOR_TESTS`] o el barrido entero con `LIXBON_AGENTIC_CUT=1`. El valor por defecto de producción lo cubre `enabled_by`.
 pub(super) fn switch_on() -> bool {
     #[cfg(test)]
-    if let Some(v) = SWITCH_FOR_TESTS.with(Cell::get) {
-        return v;
+    {
+        if let Some(v) = SWITCH_FOR_TESTS.with(Cell::get) {
+            return v;
+        }
+        std::env::var(SWITCH).as_deref() == Ok("1")
     }
-    std::env::var(SWITCH).as_deref() == Ok("1")
+    #[cfg(not(test))]
+    {
+        enabled_by(std::env::var(SWITCH).ok().as_deref())
+    }
 }
 
 /// ¿Hay una espera (tras una restauración) que impide cortar?

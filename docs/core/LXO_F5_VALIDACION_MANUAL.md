@@ -7,7 +7,8 @@ simulados; esto cubre el tramo Desktop → Core → proveedor.
 ## Montaje
 
 1. **Corte activo.** `lxo task create` es idempotente solo sobre el Core cortado. Arranca Desktop con
-   `LIXBON_AGENTIC_CUT=1`; sin él falla con «persistencia sin soporte idempotente» (el corte por defecto es LXO-235).
+   `LIXBON_AGENTIC_CUT=1` (con una build que ya incluya LXO-235 no hace falta: el corte es el valor por defecto);
+   sin el corte falla con «persistencia sin soporte idempotente».
 2. **Perfil aislado.** `USERPROFILE` apunta a una carpeta de pruebas, de modo que el Core vive en
    `<USERPROFILE>\.lixbon` y no toca el perfil real. Con ese cambio hacen falta además `CARGO_HOME` y `RUSTUP_HOME`
    explícitos para compilar.

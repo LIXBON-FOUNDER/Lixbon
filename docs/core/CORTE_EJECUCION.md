@@ -1,9 +1,9 @@
 # Ejecución del corte Task/Attempt (LXO-117)
 
-Estado: **activado en dogfood (LXO-234)**. El arranque corta la base solo con el interruptor `LIXBON_AGENTIC_CUT=1`,
-que está desactivado por defecto. Ya cortada, el runtime persiste y carga desde las tablas
-([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)); sin cortar, sigue en `legacy_state`. Activarlo para todos espera a una release
-en dogfood sin rollback (ver [Activación](#activación)).
+Estado: **activo por defecto en el código (LXO-235), pendiente de dogfood**. El arranque corta la base salvo que
+`LIXBON_AGENTIC_CUT` valga `0`, `false`, `off` o `no` (hasta LXO-234 era al revés: solo cortaba con `=1`). Ya cortada, el
+runtime persiste y carga desde las tablas ([RUNTIME_TABLAS.md](RUNTIME_TABLAS.md)); sin cortar (`=0`), sigue en
+`legacy_state`. **Este cambio no se publica** hasta cumplir los criterios de dogfood (ver [Activación](#activación)).
 
 Mapeo, decisiones e invariantes: la [ADR de LXO-112](CORTE_TASK_ATTEMPT.md). Este documento fija cómo se ejecuta.
 
@@ -129,10 +129,10 @@ Activado en **dogfood** (LXO-234).
    posterior a ella, mientras la base no esté cortada. Al aplicarse el corte en el arranque, la barrera cae y
    `cut_if_switched` vuelve a aplicar las migraciones posteriores (la 015…) en ESE mismo arranque, no en el siguiente.
 3. **Hecho.** En el arranque (`boot_authority::cut_if_switched`), tras las migraciones anteriores al corte y con
-   `core.lock` tomado, se llama a `agentic_cut::run`. Solo ocurre con `LIXBON_AGENTIC_CUT=1` y si no hay espera de
-   restauración (`core/agentic-cut-hold.json`).
+   `core.lock` tomado, se llama a `agentic_cut::run`. Ocurre salvo que `LIXBON_AGENTIC_CUT` lo apague (LXO-235) y si no hay
+   espera de restauración (`core/agentic-cut-hold.json`).
    * Si falla, el arranque se bloquea con su mensaje en Desktop (D13) y la base queda como estaba
-     (`un_corte_que_falla_bloquea_el_arranque_…`). Sin el interruptor, arranca como siempre.
+     (`un_corte_que_falla_bloquea_el_arranque_…`). El mensaje dice cómo arrancar con el modelo anterior: `LIXBON_AGENTIC_CUT=0`.
    * Después, el paso 6.
 4. **Hecho.** `cut_migration()` lee la migración embebida. La prueba que exigía que no estuviera en `migrations/` pasa a
    ser `el_migrador_no_aplica_el_corte_y_solo_el_arranque_con_el_interruptor_lo_ejecuta`.
@@ -140,4 +140,13 @@ Activado en **dogfood** (LXO-234).
 6. **Copias de bases reales.** `activation_tests::real_copy_corte_uso_reinicio_y_restauracion` se lanza a mano con
    `LIXBON_REAL_COPY=<carpeta con lixbon.db, state.json y authority.json>`. Trabaja sobre una copia temporal y recorre
    el corte, el uso, el reinicio y la restauración. La copia de la base se hace en solo lectura (`VACUUM INTO`).
-7. **Pendiente.** Activarlo por defecto requiere al menos una release en dogfood sin rollback.
+7. **Código hecho (LXO-235), sin publicar.** El corte está activo por defecto (`agentic_cut::enabled_by`):
+   * Se apaga con `LIXBON_AGENTIC_CUT=0` (también `false`, `off`, `no`, sin distinguir mayúsculas). **Cualquier otro valor, incluido
+     `1`, o no ponerlo, lo deja activo**: un valor raro no desactiva un corte, hay que decirlo claro.
+   * Apagarlo no deshace nada: sobre una base ya cortada el arranque sigue cargando de las tablas. Volver atrás es `lxo core restore`.
+   * En las pruebas del repo el valor por defecto sigue siendo «no cortar» (las que parten de una base legacy lo necesitan): lo
+     fijan por hilo o el barrido entero con `LIXBON_AGENTIC_CUT=1`. El valor por defecto de producción lo cubre
+     `el_corte_esta_activo_por_defecto_y_solo_se_apaga_diciendolo_claro`.
+8. **Pendiente: criterios de LXO-235 antes de publicar.** Al menos una release en dogfood **sin** `lxo core restore`, y
+   `real_copy_corte_uso_reinicio_y_restauracion` sobre copias de bases de **otras personas del equipo** (hasta hoy solo la de
+   una máquina: v6, 10 Tasks). Hasta entonces este cambio no se mergea a `master`.
