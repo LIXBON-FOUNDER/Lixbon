@@ -53,16 +53,16 @@ function FilterChip({ label, value, onPress }) {
 }
 
 /** Fila de Attention. `inert`: no navega (por ejemplo, la Attention de la Task que ya se está viendo). */
-export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswer = false }) {
+export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswer = false, canApprove = false }) {
   const c = useColors();
   const cat = categoryOf(item.category);
   const sev = severityOf(item.severity);
-  const found = attentionTarget(item, canAnswer);
+  const found = attentionTarget(item, canAnswer, canApprove);
   const target = inert ? { ...found, navigable: false } : found;
   return (
     <Pressable
       accessibilityRole={target.navigable ? 'button' : 'text'}
-      accessibilityLabel={attentionA11y(item, names, now, canAnswer)}
+      accessibilityLabel={attentionA11y(item, names, now, canAnswer, canApprove)}
       disabled={!target.navigable}
       onPress={() => target.navigable && onOpen(target.route)}
       style={({ pressed }) => ({
@@ -116,6 +116,7 @@ export default function AttentionScreen({ obs, route }) {
   const anyFilter = f.project_id || f.category || f.severity;
   const open = (r) => obs.push(r);
   const canAnswer = obs.capabilities?.includes('mobile_question');
+  const canApprove = obs.capabilities?.includes('mobile_launch_approval');
 
   return (
     <View style={{ gap: 14 }}>
@@ -154,14 +155,14 @@ export default function AttentionScreen({ obs, route }) {
           <View key={g.projectId || 'none'} style={{ gap: 8 }}>
             <Eyebrow style={{ paddingHorizontal: 4 }}>{`${g.name} · ${g.items.length}`}</Eyebrow>
             {g.items.map((item) => (
-              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} />
+              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
             ))}
           </View>
         ))
       ) : (
         <View style={{ gap: 8 }}>
           {list.items.map((item) => (
-            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} />
+            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
           ))}
         </View>
       )}

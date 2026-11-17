@@ -43,7 +43,7 @@ export const categoryOf = (code) => CATEGORY[code] || { label: String(code || 'd
 export const severityOf = (code) => SEVERITY[code] || { label: String(code || '—'), tone: 'muted' };
 
 /** Adónde lleva una fila. Solo las Tasks tienen pantalla en F2; lo demás se describe sin navegar. */
-export function attentionTarget(item, canAnswer = false) {
+export function attentionTarget(item, canAnswer = false, canApprove = false) {
   const kind = item?.target_kind;
   if (kind === 'task' && item.target_id) {
     return { navigable: true, label: TARGET.task, route: { name: 'task', taskId: item.target_id, projectId: item.project_id || null } };
@@ -53,6 +53,9 @@ export function attentionTarget(item, canAnswer = false) {
     const route = { name: 'attempt', attemptId: item.target_id, projectId: item.project_id || null };
     if (canAnswer && item.category === 'question' && item.id) {
       return { navigable: true, label: TARGET.attempt, route: { ...route, name: 'question', attentionId: item.id } };
+    }
+    if (canApprove && item.category === 'approval' && item.launch_approval === true && item.id) {
+      return { navigable: true, label: TARGET.attempt, route: { ...route, name: 'launchApproval', attentionId: item.id } };
     }
     return { navigable: true, label: TARGET.attempt, route };
   }
@@ -95,14 +98,15 @@ export function groupByProject(items, names) {
 }
 
 /** Texto para el lector de pantalla de una fila. */
-export function attentionA11y(item, names, now, canAnswer = false) {
-  const target = attentionTarget(item, canAnswer);
+export function attentionA11y(item, names, now, canAnswer = false, canApprove = false) {
+  const target = attentionTarget(item, canAnswer, canApprove);
+  const destination = { question: 'abre la pregunta', launchApproval: 'abre la aprobación' }[target.route?.name] || 'abre la tarea';
   return [
     categoryOf(item.category).label,
     `severidad ${severityOf(item.severity).label.toLowerCase()}`,
     `${target.label} en ${projectLabel(item.project_id, names)}`,
     ageText(item.created_at, now),
-    target.navigable ? (target.route.name === 'question' ? 'abre la pregunta' : 'abre la tarea') : null,
+    target.navigable ? destination : null,
   ]
     .filter(Boolean)
     .join(', ');

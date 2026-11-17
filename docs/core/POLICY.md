@@ -50,14 +50,15 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
 | `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`, `task_race_cancel`); fork: confirm (`attempt_fork`, `task_race`); answer: deny |
-| `mobile_person` | deny | deny | answer: confirm (preguntas del proveedor); demás: deny |
+| `mobile_person` | confirm (aprobación inicial de un lanzamiento compatible) | deny | answer: confirm (preguntas del proveedor); demás: deny |
 | `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
 `policy_effective` devuelve esta matriz completa (`baseline_matrix`). Un agente nunca hereda alcance humano (invariante 3), y Mobile no
 puede elevar lo que el Core clasifica `elevated`/`deny` (invariante 4): ni la policy ni `confirm` le dan lo que su base niega.
-El gateway autentica la sesión Mobile para las preguntas del proveedor (LXO-164). El Core registra la acción con el canal `mobile`
-y vuelve a comprobar la policy efectiva y el tipo de petición en el Attempt vivo.
+El gateway autentica la sesión Mobile para las preguntas del proveedor (LXO-164) y las aprobaciones iniciales (LXO-165).
+El Core registra las acciones con el canal `mobile` y comprueba la policy efectiva, el tipo de petición y el Attempt.
+La aprobación inicial móvil requiere un lanzamiento de alcance compatible y confirmación explícita.
 
 ### Precedencia y overrides
 

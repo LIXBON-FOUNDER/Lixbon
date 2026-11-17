@@ -18,16 +18,18 @@ import HomeScreen from './observe/HomeScreen';
 import ProjectScreen from './observe/ProjectScreen';
 import AttemptScreen from './observe/AttemptScreen';
 import QuestionScreen from './observe/QuestionScreen';
+import LaunchApprovalScreen from './observe/LaunchApprovalScreen';
 import TaskScreen from './observe/TaskScreen';
 
 // Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
-const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen, question: QuestionScreen };
+const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen, question: QuestionScreen, launchApproval: LaunchApprovalScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
   task: 'Tarea',
   attempt: 'Intento',
   question: 'Pregunta',
+  launchApproval: 'Aprobación de lanzamiento',
   project: 'Proyecto',
 };
 

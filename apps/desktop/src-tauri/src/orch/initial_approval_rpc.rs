@@ -17,10 +17,11 @@
 //! **Aprobar no lanza nada**: el despacho es del despachador (`dispatch.rs`), que lee la cola de aprobados.
 
 use serde::Deserialize;
+use serde_json::{json, Value};
 
 use super::events::{Channel, MutationContext};
 use super::Core;
-use crate::store::{AttemptStatus, InitialApprovalDecision, InitialApprovalSnapshot};
+use crate::store::{AttemptRow, AttemptStatus, AttentionCategory, AttentionStatus, InitialApprovalDecision, InitialApprovalSnapshot, TargetKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ApprovalResolution {
@@ -139,10 +140,162 @@ pub(super) fn decide(core: &Core, context: &MutationContext, attempt_id: &str, a
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MobileApprovalInput {
+    attention_id: String,
+    attempt_id: String,
+    decision: Option<MobileDecision>,
+    #[serde(default)]
+    confirm: bool,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MobileDecision {
+    Approve,
+    Reject,
+}
+
+fn launch_blocked(attempt: &AttemptRow) -> Option<&'static str> {
+    if !crate::store::mobile_launch_shape(attempt) {
+        return Some("launch_scope_unsupported");
+    }
+    if cfg!(windows) && attempt.provider == "codex"
+        && !super::agents::sandbox_proves_not_elevated(
+            super::agents::codex_config_text().as_deref().and_then(super::agents::codex_windows_sandbox).as_deref()
+        )
+    {
+        return Some("sandbox_requires_desktop");
+    }
+    None
+}
+
+pub(super) fn guard_mobile_launch(core: &Core, attempt: &AttemptRow, project: Option<&str>) -> Result<(), String> {
+    use super::policy::{Category, Level};
+    if let Some(reason) = launch_blocked(attempt) {
+        return Err(format!("{reason}: el lanzamiento requiere Desktop"));
+    }
+    match super::policy::mobile_policy(core, Category::Start, project, &attempt.id)? {
+        Level::Allow | Level::Confirm => Ok(()),
+        Level::Elevated => Err("policy_out_of_band_required: el lanzamiento requiere Desktop".into()),
+        Level::Deny => Err("policy_denied: la policy deniega el lanzamiento desde Mobile".into()),
+    }
+}
+
+impl Core {
+    pub(super) fn mobile_launch_approval(&self, user_id: u64, session_id: u64, args: Value) -> Result<Value, String> {
+        use super::policy::Category;
+        let input: MobileApprovalInput = serde_json::from_value(args).map_err(|_| "invalid_request: aprobación inválida")?;
+        parse_attempt_id(&input.attempt_id).map_err(|_| "invalid_request: Attempt inválido")?;
+        if input.attention_id.is_empty() || input.attention_id.len() > 200 || user_id == 0 || session_id == 0 {
+            return Err("invalid_request: destino inválido".into());
+        }
+        let attention = self.storage.attention_get_scoped(&input.attention_id, None)
+            .and_then(Result::ok).flatten().ok_or("stale_approval: la aprobación ya no está activa")?;
+        if attention.category != AttentionCategory::Approval || attention.target.kind != TargetKind::Attempt
+            || attention.target.id != input.attempt_id || attention.subject.as_deref() != Some(super::attention_rules::LAUNCH)
+        {
+            return Err("unsupported_approval: la solicitud requiere Desktop".into());
+        }
+        let snapshot = snapshot_of(self, &input.attempt_id).map_err(|_| "stale_approval: el Attempt ya no existe")?;
+        let attempt = self.attempt_for_answer(&input.attempt_id).map_err(|_| "stale_approval: el Attempt ya no existe")?;
+        let expired = snapshot.decision == Some(InitialApprovalDecision::Expired)
+            || (snapshot.status == AttemptStatus::PendingApproval && snapshot.deadline_ms.is_some_and(|ms| ms <= super::state::now_ms() as i64));
+        let status = if expired { "expired" } else if snapshot.decision.is_some() { "resolved" }
+            else if snapshot.status == AttemptStatus::PendingApproval && attention.status == AttentionStatus::Active && snapshot.deadline_ms.is_some() { "pending" }
+            else { "stale" };
+        if let Some(decision) = input.decision {
+            match status {
+                "expired" => return Err("approval_expired: el plazo de la aprobación venció".into()),
+                "resolved" => return Err("already_resolved: la aprobación ya se resolvió".into()),
+                "pending" => {}
+                _ => return Err("stale_approval: la aprobación dejó de estar activa".into()),
+            }
+            if !input.confirm {
+                return Err("policy_confirm_required: confirma la decisión".into());
+            }
+            guard_mobile_launch(self, &attempt, attention.project_id.as_deref())?;
+            let ctx = self.mobile_context(user_id, session_id)?;
+            let result = decide(self, &ctx, &input.attempt_id, matches!(decision, MobileDecision::Approve));
+            let outcome = match result {
+                Ok(InitialApprovalResult::Approved) => "approved",
+                Ok(InitialApprovalResult::Rejected) => "rejected",
+                Ok(InitialApprovalResult::Expired) => return Err("approval_expired: el plazo venció".into()),
+                Ok(_) => return Err("already_resolved: la aprobación ya se resolvió".into()),
+                Err(_) if snapshot_of(self, &input.attempt_id).is_ok_and(|latest| latest.decision.is_some()) =>
+                    return Err("already_resolved: la aprobación ya se resolvió".into()),
+                Err(_) => return Err("stale_approval: cambió la aprobación".into()),
+            };
+            return Ok(json!({"outcome": outcome, "attempt_id": input.attempt_id}));
+        }
+        let policy = super::policy::mobile_policy(self, Category::Start, attention.project_id.as_deref(), &attempt.id)?;
+        let blocked_reason = launch_blocked(&attempt);
+        Ok(json!({
+            "status": status, "deadline_ms": snapshot.deadline_ms, "attempt_id": attempt.id, "task_id": attempt.task_id,
+            "project_id": attention.project_id, "provider": attempt.provider, "profile": attempt.profile,
+            "worktree_strategy": if attempt.worktree_id.is_some() { "attached" } else if attempt.provider_session_id.is_some() { "resume" } else { "new" },
+            "policy": policy.as_str(), "blocked_reason": blocked_reason,
+            "can_decide": status == "pending" && blocked_reason.is_none() && matches!(policy, super::policy::Level::Allow | super::policy::Level::Confirm)
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn mobile_decide_el_lanzamiento_vigente_con_contexto_autenticado() {
+        use super::super::attempt_e2e_tests::world;
+        use super::super::dispatch_tests::row;
+
+        let w = world("claude", None);
+        for (decision, outcome) in [("approve", "approved"), ("reject", "rejected")] {
+            let attempt = w.create("claude", decision);
+            let items = w.desktop("attention_list", json!({"category":"approval","target_kind":"attempt","target_id":attempt})).unwrap();
+            let item = &items["items"][0];
+            assert_eq!(item["launch_approval"], true);
+            let target = json!({"attention_id":item["id"],"attempt_id":attempt});
+            let data = w.core.mobile_launch_approval(7, 42, target.clone()).unwrap();
+            assert_eq!(data["policy"], "confirm");
+            assert_eq!(data["can_decide"], true);
+            assert_eq!(data["worktree_strategy"], "new");
+            assert_eq!(data["provider"], "claude");
+            let mut args = target;
+            args["decision"] = json!(decision);
+            assert!(w.core.mobile_launch_approval(7, 42, args.clone()).unwrap_err().contains("policy_confirm_required"));
+            args["confirm"] = json!(true);
+            assert!(w.core.mobile_launch_approval(0, 42, args.clone()).is_err());
+            assert_eq!(w.core.mobile_launch_approval(7, 42, args.clone()).unwrap()["outcome"], outcome);
+            assert!(w.core.mobile_launch_approval(7, 42, args).unwrap_err().contains("already_resolved"));
+            if decision == "approve" {
+                w.core.wake_dispatcher();
+                w.settled(&attempt, "done");
+            } else {
+                assert_eq!(row(&w.core, &attempt).0, "stopped");
+            }
+        }
+    }
+
+    #[test]
+    fn mobile_no_decide_fuera_de_banda_o_despues_del_plazo() {
+        use super::super::attempt_e2e_tests::world;
+        use super::super::initial_approval_tests::e2e::make_deadline_due;
+        let w = world("claude", None);
+        let attempt = w.create("claude", "blocked-mobile");
+        let items = w.desktop("attention_list", json!({"category":"approval","target_kind":"attempt","target_id":attempt})).unwrap();
+        let mut args = json!({"attention_id":items["items"][0]["id"],"attempt_id":attempt});
+        let revision = w.desktop("policy_effective", json!({})).unwrap()["revision"].clone();
+        w.desktop("policy_set", json!({"scope":{"kind":"global"},"category":"start","level":"elevated","expected_revision":revision})).unwrap();
+        assert_eq!(w.core.mobile_launch_approval(7, 42, args.clone()).unwrap()["can_decide"], false);
+        args["decision"] = json!("approve");
+        args["confirm"] = json!(true);
+        assert!(w.core.mobile_launch_approval(7, 42, args.clone()).unwrap_err().contains("policy_out_of_band_required"));
+        make_deadline_due(&w.core, &attempt);
+        assert!(w.core.mobile_launch_approval(7, 42, args).unwrap_err().contains("approval_expired"));
+    }
 
     #[test]
     fn el_plazo_es_exclusivo_y_un_reloj_invalido_expira() {

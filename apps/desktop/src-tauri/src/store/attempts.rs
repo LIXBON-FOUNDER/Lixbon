@@ -690,6 +690,7 @@ impl Store {
             if version != 1
                 || class != "state"
                 || actor_kind != "person"
+                || channel.as_deref() == Some("mobile")
                 || run_id.as_deref() != Some(task.run_id.as_str())
                 || project_id.as_deref() != task.project_id.as_deref()
                 || !super::initial_approval::has_authenticated_person_identity(

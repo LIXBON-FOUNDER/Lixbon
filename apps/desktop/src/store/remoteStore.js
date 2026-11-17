@@ -31,7 +31,7 @@ const MACHINE = 'Lixbon IDE';
 // `core_snapshot`: el IDE atiende el bootstrap observacional de Mobile (LXO-107, lib/remoteCore.js);
 // `core_attention`, la bandeja de Attention completa (LXO-109); `core_task`, detalle y Activity de una Task (LXO-110);
 // `core_attempts`, los intentos de una Task y la ficha de cada uno (LXO-126).
-const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config', 'core_snapshot', 'core_attention', 'core_task', 'core_attempts', 'mobile_question'];
+const CAPABILITIES = ['attachments', 'images', 'mentions', 'files', 'orch', 'config', 'core_snapshot', 'core_attention', 'core_task', 'core_attempts', 'mobile_question', 'mobile_launch_approval'];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;
 const AGENT_LABEL = { lixbon: 'Lixbon', claude: 'Claude Code' };

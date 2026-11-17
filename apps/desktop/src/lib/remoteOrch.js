@@ -196,19 +196,20 @@ export async function handleOrchAction(action, args = {}, mobile) {
         });
         return;
       }
-      case 'mobile_question': {
+      case 'mobile_question':
+      case 'mobile_launch_approval': {
         const { rid, ...input } = args;
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(rid || '') || !mobile) return;
         const emit = emitFn;
         const fields = { rid, protocol: CORE_RELAY_PROTOCOL };
         try {
-          const result = await invoke('orch_mobile_question', {
+          const result = await invoke(`orch_${action}`, {
             userId: mobile.user_id, sessionId: mobile.session_id, args: input,
           });
-          emit?.('orch_mobile_question', { ...fields, ok: true, result });
+          emit?.(`orch_${action}`, { ...fields, ok: true, result });
         } catch (error) {
           const code = String(error?.message ?? error).match(/^(?:[a-z_]+\/)?([a-z_]+):/)?.[1] || 'core_error';
-          emit?.('orch_mobile_question', { ...fields, ok: false, code });
+          emit?.(`orch_${action}`, { ...fields, ok: false, code });
         }
         return;
       }

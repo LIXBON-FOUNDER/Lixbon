@@ -29,7 +29,7 @@ from fastapi.responses import Response, StreamingResponse
 from core.config import PUBLIC_BASE_URL
 from core.gateway import deps
 from core.gateway.push import push_task
-from core.gateway.remote_hub import HOST_GRACE_SECONDS, hub
+from core.gateway.remote_hub import HOST_GRACE_SECONDS, PRIVATE_MOBILE_ACTIONS, hub
 from core.persistence.queries import (
     claim_remote_session,
     count_remote_events,
@@ -76,7 +76,7 @@ ORCH_ACTIONS = (
     "core_attempts", "core_attempt",
 )
 MAX_ORCH_ARGS = 4_000
-MOBILE_QUESTION_TIMEOUT = 20
+MOBILE_OPERATION_TIMEOUT = 20
 MAX_ATTACHMENTS = 6
 MAX_DOC_CHARS = 20_000
 # Las imágenes viajan en base64 por la cola del host: ~6 MB entre todas.
@@ -427,8 +427,8 @@ def _queue_command(ch, payload: dict[str, Any], rid: Any = None) -> None:
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
 
 
-async def _queue_mobile_question(ch, sess, cid: int, payload: dict[str, Any], token: Any) -> None:
-    """Solo una sesión Mobile vigente del dueño puede leer o responder preguntas."""
+async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], token: Any) -> None:
+    """Solo una sesión Mobile vigente del dueño puede usar el RPC privado."""
     if not isinstance(token, str) or not token.startswith("lixbon_at_") or len(token) > 200:
         raise HTTPException(status_code=403, detail="Se requiere una sesión de Mobile")
     user = await asyncio.to_thread(authenticate, None, f"Bearer {token}", False)
@@ -436,9 +436,12 @@ async def _queue_mobile_question(ch, sess, cid: int, payload: dict[str, Any], to
         raise HTTPException(status_code=403, detail="Se requiere una sesión de Mobile del dueño")
     if cid not in ch.controllers or not ch.host_connected or hub.get(ch.session_id) is not ch:
         raise HTTPException(status_code=409, detail="El IDE no está conectado")
+    action = payload["action"]
+    common_fields = {"rid", "attention_id", "attempt_id"}
+    operation_fields = {"reply"} if action == "mobile_question" else {"decision", "confirm"}
     args = payload.get("args")
-    if not isinstance(args, dict) or set(args) - {"rid", "attention_id", "attempt_id", "reply"}:
-        raise HTTPException(status_code=422, detail="Pregunta inválida")
+    if not isinstance(args, dict) or set(args) - (common_fields | operation_fields):
+        raise HTTPException(status_code=422, detail="Solicitud inválida")
     rid = args.get("rid")
     if not isinstance(rid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
         raise HTTPException(status_code=422, detail="Identificador de petición inválido")
@@ -454,6 +457,9 @@ async def _queue_mobile_question(ch, sess, cid: int, payload: dict[str, Any], to
         or reply["confirm"] is not True
     ):
         raise HTTPException(status_code=422, detail="Respuesta inválida")
+    if "decision" in args or "confirm" in args:
+        if args.get("decision") not in ("approve", "reject") or args.get("confirm") is not True:
+            raise HTTPException(status_code=422, detail="Decisión inválida")
     now = time.monotonic()
     ch.mobile_requests = {key: value for key, value in ch.mobile_requests.items() if value[2] > now}
     if len(ch.mobile_requests) >= 50:
@@ -462,12 +468,12 @@ async def _queue_mobile_question(ch, sess, cid: int, payload: dict[str, Any], to
         return
     relay_rid = secrets.token_urlsafe(18)
     command = {
-        "type": "orch", "action": "mobile_question", "args": {**args, "rid": relay_rid},
+        "type": "orch", "action": action, "args": {**args, "rid": relay_rid},
         "mobile": {"user_id": user["id"], "session_id": user["session_id"]},
     }
     if not hub.push_command(ch, command, replay=False):
         raise HTTPException(status_code=429, detail="El host tiene demasiados comandos pendientes")
-    ch.mobile_requests[relay_rid] = (cid, rid, now + MOBILE_QUESTION_TIMEOUT)
+    ch.mobile_requests[relay_rid] = (cid, rid, now + MOBILE_OPERATION_TIMEOUT, f"orch_{action}")
 
 
 # ── SSE + POST (CLI y clientes anteriores al WebSocket) ─────────────────────
@@ -754,8 +760,9 @@ async def controller_ws(ws: WebSocket, session_id: str, from_seq: int = 0) -> No
             if hub.get(session_id) is not ch:
                 raise HTTPException(status_code=410, detail="La sesión remota ya terminó")
             payload = msg.get("command") or {}
-            if isinstance(payload, dict) and payload.get("type") == "orch" and payload.get("action") == "mobile_question":
-                await _queue_mobile_question(ch, sess, cid, payload, msg.get("credential"))
+            action = payload.get("action") if isinstance(payload, dict) else None
+            if isinstance(action, str) and action in PRIVATE_MOBILE_ACTIONS and payload.get("type") == "orch":
+                await _queue_mobile_operation(ch, sess, cid, payload, msg.get("credential"))
             else:
                 _queue_command(ch, payload, rid)
             await send({"type": "ack", "rid": rid, "ok": True})

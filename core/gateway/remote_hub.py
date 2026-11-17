@@ -17,6 +17,8 @@ QUEUE_MAX = 1000             # tope defensivo por cola
 MAX_CONTROLLERS = 5          # controllers simultáneos por sesión
 RECENT_COMMANDS = 50         # comandos que se pueden reentregar a un host que reconecta
 COMMAND_REPLAY_SECONDS = 300
+PRIVATE_MOBILE_ACTIONS = frozenset({"mobile_question", "mobile_launch_approval"})
+PRIVATE_MOBILE_EVENTS = frozenset(f"orch_{action}" for action in PRIVATE_MOBILE_ACTIONS)
 RECENT_REQUESTS = 200        # rid de comandos ya encolados: un reenvío del móvil no duplica
 # Un host que se reconecta tarda unos segundos: durante ese margen sigue
 # contando como conectado para el móvil y sus comandos se encolan.
@@ -65,7 +67,7 @@ class RemoteChannel:
     cmd_seq: int = 0
     recent_cmds: deque = field(default_factory=lambda: deque(maxlen=RECENT_COMMANDS))
     recent_rids: deque = field(default_factory=lambda: deque(maxlen=RECENT_REQUESTS))
-    mobile_requests: dict[str, tuple[int, str, float]] = field(default_factory=dict)
+    mobile_requests: dict[str, tuple[int, str, float, str]] = field(default_factory=dict)
     last_touch: float = 0.0
     last_host_seen: float = field(default_factory=time.time)
     _next_controller_id: int = 0
@@ -102,11 +104,12 @@ class RemoteHub:
         """Asigna seq, guarda en el buffer de replay y reparte. Devuelve el último seq."""
         ch.last_host_seen = time.time()
         for ev in events:
-            if ev.get("type") == "orch_mobile_question":
+            if ev.get("type") in PRIVATE_MOBILE_EVENTS:
                 rid = ev.get("rid")
-                request = ch.mobile_requests.pop(rid, None) if isinstance(rid, str) else None
-                if request:
-                    cid, original_rid, deadline = request
+                request = ch.mobile_requests.get(rid) if isinstance(rid, str) else None
+                if request and ev["type"] == request[3]:
+                    del ch.mobile_requests[rid]
+                    cid, original_rid, deadline, _ = request
                     queue = ch.controllers.get(cid)
                     if queue and not queue.full() and time.monotonic() < deadline:
                         queue.put_nowait({**ev, "rid": original_rid})
@@ -160,7 +163,7 @@ class RemoteHub:
         pending: dict[int, dict[str, Any]] = {}
         while not old.empty():
             cmd = old.get_nowait()
-            if cmd is not None and cmd.get("action") != "mobile_question":
+            if cmd is not None and cmd.get("action") not in PRIVATE_MOBILE_ACTIONS:
                 pending[cmd.get("cmd_seq", 0)] = cmd
         if last_cmd is not None:
             cutoff = time.time() - COMMAND_REPLAY_SECONDS

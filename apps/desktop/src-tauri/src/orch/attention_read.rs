@@ -294,7 +294,7 @@ fn decode_cursor(
 }
 
 fn dto(row: &AttentionRow) -> Value {
-    json!({
+    let mut value = json!({
         "id": row.id,
         "category": row.category.as_str(),
         "severity": row.severity.as_str(),
@@ -307,7 +307,13 @@ fn dto(row: &AttentionRow) -> Value {
         "created_at": row.created_at,
         "resolved_at": row.resolved_at,
         "resolution": row.resolution.map(Resolution::as_str),
-    })
+    });
+    if row.category == AttentionCategory::Approval && row.target.kind == TargetKind::Attempt
+        && row.subject.as_deref() == Some(super::attention_rules::LAUNCH)
+    {
+        value["launch_approval"] = json!(true);
+    }
+    value
 }
 
 pub(super) fn list(

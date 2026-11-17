@@ -274,7 +274,7 @@ impl Core {
                 "stale_question: la pregunta dejó de estar activa"
             }.into());
         }
-        let policy = super::policy::mobile_answer_policy(self, attention.project_id.as_deref(), &input.attempt_id)?;
+        let policy = super::policy::mobile_policy(self, super::policy::Category::Answer, attention.project_id.as_deref(), &input.attempt_id)?;
         if let Some(reply) = input.reply {
             match policy {
                 Level::Allow => {}
@@ -283,7 +283,7 @@ impl Core {
                 Level::Elevated => return Err("policy_out_of_band_required: responde desde Desktop".into()),
                 Level::Deny => return Err("policy_denied: la policy impide responder".into()),
             }
-            let context = self.mobile_question_context(user_id, session_id)?;
+            let context = self.mobile_context(user_id, session_id)?;
             return self.answer_request(&context, &input.attempt_id, &reply.request_id, &reply.answer, Some(reply.asked_at)).map_err(|e| e.to_string());
         }
         let attempt = self.attempt_for_answer(&input.attempt_id).map_err(|e| e.to_string())?;

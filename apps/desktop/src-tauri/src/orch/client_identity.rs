@@ -178,7 +178,7 @@ impl Core {
         }
     }
 
-    pub(super) fn mobile_question_context(&self, user_id: u64, session_id: u64) -> Result<MutationContext, String> {
+    pub(super) fn mobile_context(&self, user_id: u64, session_id: u64) -> Result<MutationContext, String> {
         if user_id == 0 || session_id == 0 {
             return Err("forbidden: faltan las credenciales del relé móvil".into());
         }

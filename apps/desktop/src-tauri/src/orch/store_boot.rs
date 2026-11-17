@@ -619,6 +619,15 @@ impl Core {
         read.map_err(|e| e.to_string())
     }
 
+    pub(super) fn was_approved_from_mobile(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage.read_store(|st| st.read(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS (SELECT 1 FROM events WHERE entity_kind='attempt' AND entity_id=?1 AND kind='attempt.approved' AND channel='mobile')",
+                [attempt_id], |row| row.get(0)
+            )?)
+        })).ok_or("el almacén no está abierto")?.map_err(|error| error.to_string())
+    }
+
     // ── La policy de autonomía (LXO-209): el almacén solo se toca desde aquí ──────────────────────────────────────────────────
 
     /// La policy guardada AHORA. Se lee en cada Command: nunca se cachea ni se confía en lo que la interfaz vio. Sin almacén abierto o con un

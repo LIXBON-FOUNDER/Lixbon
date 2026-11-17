@@ -73,7 +73,7 @@ fn copy_codes(from: &Value, keys: &[&str]) -> Value {
 const TERMINAL: &str = "terminal";
 pub(super) const PROVIDER_QUESTIONS: &str = "provider_questions";
 /// Subject de la aprobación de lanzar un Attempt (`pending_approval`).
-const LAUNCH: &str = "launch";
+pub(super) const LAUNCH: &str = "launch";
 
 /// El alcance de un `environment.*`: la causa (del conjunto cerrado `EnvBlock`) y el perfil (de los conocidos). Un código
 /// o un perfil fuera de esos conjuntos no es una señal y no levanta ni resuelve nada.

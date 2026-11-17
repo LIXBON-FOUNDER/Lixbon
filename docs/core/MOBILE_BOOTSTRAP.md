@@ -103,6 +103,19 @@ pregunta, aunque queden permisos del proveedor. El texto de la respuesta tampoco
 en el Event. Mobile refresca desde el Core y conserva el borrador en memoria si pierde
 la confirmación. La persona puede volver a consultar el estado tras reconectar.
 
+## Aprobación inicial (LXO-165)
+
+Una Attention `approval` incluye `launch_approval: true` si el Core la vinculó al lanzamiento
+de un Attempt. Con la capability `mobile_launch_approval`, la bandeja abre el intento, el
+proveedor, el perfil, el host y la estrategia de worktree. Usa el mismo canal autenticado
+y dirigido que las preguntas. La decisión requiere confirmación y vence con el plazo
+durable del Core. Repetirla devuelve el estado de resolución vigente.
+
+Mobile admite un lanzamiento gestionado con un worktree nuevo y un perfil compatible.
+Los intentos externos, los worktrees enlazados y las continuaciones se resuelven en Desktop.
+En Windows, Codex requiere evidencia positiva de sandbox no elevado. La policy de lanzamiento
+se vuelve a comprobar al decidir y antes de despachar un intento autorizado desde Mobile.
+
 ## Estados en el móvil
 
 `apps/mobile/src/observe/bootstrap.js` (sin React Native; se prueba con `node --test`).
