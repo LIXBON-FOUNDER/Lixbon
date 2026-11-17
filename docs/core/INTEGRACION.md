@@ -27,6 +27,11 @@ que la persona ve:
 * Si el destino se movió fuera de Lixbon, `outcome: target_moved` (se registra una decisión, no hay merge); solo se integra si la persona acepta exactamente el
   commit que vio (`accept_moved_target`).
 * Con cambios sin commit en el checkout, el merge es un `error` del efecto y no se toca nada.
+* **Motivo del `error` (LXO-251).** Un merge que termina en `error` lleva `reason`, un código cerrado y sin el texto de git (que puede traer rutas):
+  `target_dirty` (cambios sin commit en el checkout), `git_identity_missing` (git no puede firmar el commit: faltan `user.name` y `user.email`; se decide con
+  `git var GIT_COMMITTER_IDENT`, no leyendo el idioma del mensaje) o `git_failed` (cualquier otro fallo de git). Va en el resultado de `attempt_integrate`, en
+  `decision.recorded` y en `effect.observed` (`git_merge`), siempre opcional y solo con `error`. `lxo integrate` lo proyecta en `result.reason` (solo si es uno
+  de esos tres) y **sale con código 10** cuando el resultado es `error`, tanto en merge como en PR: el resultado se imprime igual. Repetir tras corregirlo integra.
 
 ## Resultados (los del efecto, no excepciones)
 

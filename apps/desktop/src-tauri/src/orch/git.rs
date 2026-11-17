@@ -28,6 +28,12 @@ fn ok(dir: &str, args: &[&str]) -> Result<String, String> {
     if o.ok { Ok(o.stdout) } else { Err(format!("git {}: {}", args.join(" "), if o.stderr.is_empty() { o.stdout } else { o.stderr })) }
 }
 
+/// ¿Git no puede firmar un commit en este checkout por falta de identidad (`user.name`/`user.email`)? Lo decide `git var`, no el texto del error
+/// (que cambia con el idioma). Si no se puede preguntar a git, `false`: no se afirma lo que no se sabe (LXO-251).
+pub fn identity_missing(dir: &str) -> bool {
+    run(dir, &["var", "GIT_COMMITTER_IDENT"]).is_ok_and(|o| !o.ok)
+}
+
 /// Commit actual (`HEAD`) de un checkout.
 pub fn head(dir: &str) -> Option<String> {
     ok(dir, &["rev-parse", "HEAD"]).ok().filter(|s| !s.is_empty())

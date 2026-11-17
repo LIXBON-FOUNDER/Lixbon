@@ -527,6 +527,7 @@ cortada. Una prueba falla si cambian: cambiar una forma publicada exige subir su
 | `task_detail_v2` | `task_id`, `project_id?` | lo anterior, más `spec`, `children`, la historia de `attempts` y su `thread` (`has_summary`) | `v: 2` · [`task_detail_v2.json`](fixtures/api/task_detail_v2.json) |
 | `attempts_by_task` | `task_id`, `project_id?`, `limit?` (1–100, 50), `cursor?` | los Attempts de la Task por `n`, paginados por clave; `next_cursor` (`null` al terminar) | `v: 1` · [`attempts_by_task.v1.json`](fixtures/api/attempts_by_task.v1.json) |
 | `attempt_detail` | `attempt_id`, `task_id?`, `project_id?` | la ejecución: selección, fechas, resultado, `integrated`, `integrated_at`, `provider_session` (sin la referencia del proveedor), `worktree`, `artifacts`, `usage` (LXO-249) y su última `review` con su vigencia | `v: 1` · [`attempt_detail.v1.json`](fixtures/api/attempt_detail.v1.json) |
+| `attempt_detail_v2` | `attempt_id`, `task_id?`, `project_id?` | lo mismo que `attempt_detail`, con la URL del pull request **redactada** (LXO-244): el Artifact `pull_request` trae `uri: null`. Un `uri: null` en cualquier otro tipo de Artifact no es válido. Se anuncia en `core_model.queries`; un cliente que no la ve lee `attempt_detail` y no pinta esa URL | `v: 2` · [`attempt_detail.v2.json`](fixtures/api/attempt_detail.v2.json) |
 
 **Corrección de consultas (LXO-119, cambio compatible).** Solo se **añaden** campos y parámetros opcionales; las
 versiones (`v`) no suben porque ningún campo publicado cambia ni desaparece y los validadores de Desktop

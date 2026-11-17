@@ -91,6 +91,8 @@ export const COPY = Object.freeze({
   durationUnavailable: 'duración no disponible',
   hostUnavailable: 'Host: no disponible (el Core no lo informa)',
   noArtifacts: 'Sin artefactos',
+  prUrlHidden: 'URL del pull request oculta por seguridad',
+  attemptDetailV2Unsupported: 'Este Core es anterior y no ofrece attempt_detail_v2: el detalle se lee con la consulta anterior y la URL del pull request no se muestra.',
   noReview: 'Sin revisión registrada',
   noWorktree: 'Sin worktree registrado',
   attemptActivity: 'Actividad del intento',

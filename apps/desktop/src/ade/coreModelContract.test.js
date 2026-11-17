@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ADE_QUERY_NAMES, queryAdeCore } from './coreQueries';
-import { CORE_MODEL_QUERY_SPECS, coreErrorCode, isLegacyModelCode, validAttemptBrief, validAttemptDetail, validTaskV2 } from './coreModelContract';
+import { ATTEMPT_DETAIL_V2, CORE_MODEL_QUERY_SPECS, coreErrorCode, isLegacyModelCode, validAttemptBrief, validAttemptDetail, validTaskV2 } from './coreModelContract';
 import { CANONICAL, ERRORS, VARIANTS, attemptDetail } from './testFixtures/coreModelFixtures';
 
 // LXO-120 · contrato vNext (LXO-119) en el cliente: forma, vocabulario y target, contra las fixtures del Core.
@@ -82,5 +82,39 @@ describe('coreModelContract', () => {
     expect(isLegacyModelCode(coreErrorCode(ERRORS.unavailable))).toBe(false);
     // El texto suelto no cuenta: solo el prefijo de código.
     expect(coreErrorCode('fallo: dice core_model_inactive en medio')).toBe('fallo');
+  });
+  // LXO-244 · `attempt_detail_v2`: el Core redacta la URL del PR (`uri: null`), solo en el Artifact `pull_request`.
+  describe('attempt_detail_v2 (LXO-244)', () => {
+    const PR = { id: 't3-a1-pr', kind: 'pull_request', uri: null, sha256: null, bytes: null };
+    const v2 = (artifacts) => {
+      const base = CANONICAL['attempt_detail.v1.json'];
+      return { ...base, v: 2, attempt: { ...base.attempt, artifacts } };
+    };
+
+    it('acepta `uri: null` en un pull_request y deja pasar el resto de artefactos', () => {
+      const response = v2([...CANONICAL['attempt_detail.v1.json'].attempt.artifacts, PR]);
+      expect(CORE_MODEL_QUERY_SPECS[ATTEMPT_DETAIL_V2].validate(response, { attempt_id: 't3-a1' })).toBe(response);
+    });
+
+    it('un `uri: null` en cualquier otro tipo de artefacto sigue siendo error de contrato', () => {
+      for (const kind of ['report', 'last_message', 'commit', 'file']) {
+        const response = v2([{ ...PR, kind, id: `t3-a1-${kind}` }]);
+        expect(() => CORE_MODEL_QUERY_SPECS[ATTEMPT_DETAIL_V2].validate(response, { attempt_id: 't3-a1' }), kind).toThrow(/fuera del contrato/);
+      }
+    });
+
+    it('la v1 NO acepta `uri: null` (ni siquiera en un pull_request) y la v2 exige su propia versión de respuesta', () => {
+      const conNulo = { ...CANONICAL['attempt_detail.v1.json'], attempt: { ...CANONICAL['attempt_detail.v1.json'].attempt, artifacts: [PR] } };
+      expect(() => CORE_MODEL_QUERY_SPECS.attempt_detail.validate(conNulo, { attempt_id: 't3-a1' })).toThrow(/fuera del contrato/);
+      expect(() => CORE_MODEL_QUERY_SPECS[ATTEMPT_DETAIL_V2].validate(CANONICAL['attempt_detail.v1.json'], { attempt_id: 't3-a1' })).toThrow(/versión de respuesta no compatible/);
+      expect(() => CORE_MODEL_QUERY_SPECS[ATTEMPT_DETAIL_V2].validate(v2([PR]), { attempt_id: 't3-a2' })).toThrow(/no corresponde/);
+    });
+
+    it('se pide por su nombre y con los mismos parámetros que la v1', async () => {
+      invoke.mockResolvedValueOnce(v2([PR]));
+      await queryAdeCore(ATTEMPT_DETAIL_V2, { attemptId: 't3-a1' });
+      expect(invoke).toHaveBeenLastCalledWith('orch_query', { query: 'attempt_detail_v2', args: { attempt_id: 't3-a1' } });
+      expect(ADE_QUERY_NAMES).toContain(ATTEMPT_DETAIL_V2);
+    });
   });
 });

@@ -6,7 +6,7 @@ import { AttentionInbox } from './AttentionInbox';
 import { ATTENTION_LIMIT } from './coreQueries';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -28,7 +28,7 @@ function mountCore({ status = 'running', attention = [], decide = () => ({ statu
       return { v: 1, items: attention, next_cursor: null, has_more: false, limit: ATTENTION_LIMIT };
     }
     if (payload.query === 'projects_overview') return { v: 1, filters: { archived: 'include', machine: null }, total: 0, projects: [], unassigned: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: {} } } };
-    return attemptDetail({ id: 't3-a1', task_id: 't3', status, ...over });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status, ...over });
   });
   return calls;
 }
@@ -87,7 +87,7 @@ describe('A1 · aprobar o rechazar desde la bandeja de Attention', () => {
     render(<AttentionInbox onOpenTarget={vi.fn()} />);
     await flush();
     expect(screen.queryByTestId('attention-launch-actions')).toBeNull();
-    expect(calls.some((c) => c.payload?.query === 'attempt_detail')).toBe(false);
+    expect(calls.some((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2'))).toBe(false);
   });
 });
 

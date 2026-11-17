@@ -23,6 +23,9 @@ export const ARTIFACT_KINDS = Object.freeze(['report', 'pull_request', 'last_mes
 export const REVIEW_VERDICTS = Object.freeze(['accepted', 'rejected']);
 export const REVIEW_STATUSES = Object.freeze(['active', 'stale', 'superseded']);
 
+/** La consulta de detalle con la URL del PR ya redactada por el Core (LXO-244): el Core la anuncia en `core_model.queries`. */
+export const ATTEMPT_DETAIL_V2 = 'attempt_detail_v2';
+
 /** Página de `task_list_v2` (1–100 en el contrato). `include_discarded` no se envía: vale el defecto del Core. */
 export const TASK_LIST_V2_LIMIT = 100;
 
@@ -71,6 +74,10 @@ const SESSION_SCHEMA = {
   status: oneOf(PS_STATUS_SET),
 };
 const ARTIFACT_SCHEMA = { id, kind: oneOf(ARTIFACT_SET), uri: id, sha256: optText, bytes: (v) => v === null || count(v) };
+// LXO-244 · `attempt_detail_v2`: el Core redacta la URL del PR. Su `uri` puede ser `null`, pero SOLO en un Artifact `pull_request`.
+const ARTIFACT_SCHEMA_V2 = { ...ARTIFACT_SCHEMA, uri: optText };
+const validArtifactV1 = (artifact) => matches(artifact, ARTIFACT_SCHEMA);
+const validArtifactV2 = (artifact) => matches(artifact, ARTIFACT_SCHEMA_V2) && (artifact.uri !== null || artifact.kind === 'pull_request');
 const REVIEW_SCHEMA = {
   decision_id: count, head_commit: id, base_commit: optText, verdict: oneOf(VERDICT_SET),
   // Como los estados de Attempt: un valor nuevo se acepta y la UI lo muestra «desconocido», no rompe el detalle.
@@ -94,13 +101,13 @@ export function validTaskV2(task) {
   return validAttemptBrief(current, task.id);
 }
 
-export function validAttemptDetail(attempt) {
+export function validAttemptDetail(attempt, validArtifact = validArtifactV1) {
   if (!validAttemptBrief(attempt) || !id(attempt.task_id) || attempt.id !== `${attempt.task_id}-a${attempt.n}`) return false;
   return optText(attempt.effort) && optText(attempt.profile) && optText(attempt.failure_reason)
     && text(attempt.summary) && bool(attempt.integrated)
     && (attempt.provider_session === null || matches(attempt.provider_session, SESSION_SCHEMA))
     && (attempt.worktree === null || matches(attempt.worktree, WORKTREE_SCHEMA))
-    && Array.isArray(attempt.artifacts) && attempt.artifacts.every((a) => matches(a, ARTIFACT_SCHEMA))
+    && Array.isArray(attempt.artifacts) && attempt.artifacts.every(validArtifact)
     && (attempt.review === null || matches(attempt.review, REVIEW_SCHEMA));
 }
 
@@ -119,7 +126,7 @@ function envelope(query, response, version) {
   if (response.core_model !== 'task_attempt_v1') throw invalid(query, 'la respuesta no es del modelo Task/Attempt');
 }
 
-/** Peticiones y validación de las cinco lecturas vNext. Se fusionan en la tabla de `coreQueries.js`. */
+/** Peticiones y validación de las lecturas vNext. Se fusionan en la tabla de `coreQueries.js`. */
 export const CORE_MODEL_QUERY_SPECS = Object.freeze({
   core_model: {
     request: () => ({}),
@@ -182,6 +189,17 @@ export const CORE_MODEL_QUERY_SPECS = Object.freeze({
       envelope('attempt_detail', response, 1);
       if (!validAttemptDetail(response.attempt)) throw invalid('attempt_detail', 'el detalle del Attempt está fuera del contrato');
       if (response.attempt.id !== args.attempt_id) throw invalid('attempt_detail', 'el detalle no corresponde al Attempt solicitado');
+      return response;
+    },
+  },
+  // LXO-244: lo mismo que `attempt_detail`, con `uri: null` en el Artifact `pull_request` (el Core redacta la URL del PR). Un `uri: null` en
+  // cualquier otro tipo de Artifact sigue siendo una respuesta fuera del contrato.
+  [ATTEMPT_DETAIL_V2]: {
+    request: (args) => ({ attempt_id: durable(args?.attemptId, 'attempt_id') }),
+    validate: (response, args) => {
+      envelope(ATTEMPT_DETAIL_V2, response, 2);
+      if (!validAttemptDetail(response.attempt, validArtifactV2)) throw invalid(ATTEMPT_DETAIL_V2, 'el detalle del Attempt está fuera del contrato');
+      if (response.attempt.id !== args.attempt_id) throw invalid(ATTEMPT_DETAIL_V2, 'el detalle no corresponde al Attempt solicitado');
       return response;
     },
   },

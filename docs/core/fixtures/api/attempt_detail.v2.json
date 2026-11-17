@@ -1,0 +1,75 @@
+{
+  "attempt": {
+    "artifacts": [
+      {
+        "bytes": null,
+        "id": "t5-a1-pull_request",
+        "kind": "pull_request",
+        "sha256": null,
+        "uri": null
+      }
+    ],
+    "created_at": 1792000046000,
+    "effort": null,
+    "ended_at": null,
+    "ended_at_known": false,
+    "external": false,
+    "failure_reason": null,
+    "id": "t5-a1",
+    "integrated": false,
+    "integrated_at": null,
+    "model": "sonnet",
+    "n": 1,
+    "origin": "legacy",
+    "profile": null,
+    "provider": "claude",
+    "provider_session": {
+      "binding": "stream_json",
+      "bound": true,
+      "id": "ps-t5-a1",
+      "opened_by_attempt_id": "t5-a1",
+      "resumable": true,
+      "status": "idle"
+    },
+    "result": {
+      "failure_reason": null,
+      "summary": "Tests de login y logout",
+      "truncated": false
+    },
+    "review": {
+      "at": 1792000700000,
+      "base_commit": "b0b0b0",
+      "closed_at": null,
+      "decision_id": 3,
+      "head_commit": "c5c5c5",
+      "observed_head": null,
+      "status": "active",
+      "validity": {
+        "active": true,
+        "attempt_is_current": true,
+        "integrated": false,
+        "integrated_at": null
+      },
+      "verdict": "rejected"
+    },
+    "role": null,
+    "started_at": 1792000070000,
+    "status": "done",
+    "summary": "Tests de login y logout",
+    "task_id": "t5",
+    "usage": null,
+    "worktree": {
+      "base_branch": "main",
+      "branch": "lx/r1/t5-tests-de-login",
+      "branch_kept": true,
+      "id": "wt-t5-a1",
+      "machine": null,
+      "path": null,
+      "provenance": "created",
+      "registered_by_attempt_id": "t5-a1",
+      "state": "removed"
+    }
+  },
+  "core_model": "task_attempt_v1",
+  "v": 2
+}

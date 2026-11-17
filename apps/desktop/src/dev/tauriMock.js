@@ -283,7 +283,7 @@ function adeQuery(query, args) {
     }
     case 'core_model':
       return vNext
-        ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail'] }
+        ? { compat: ['legacy_task_v1'], core_model: 'task_attempt_v1', queries: ['task_list_v2', 'task_detail_v2', 'attempts_by_task', 'attempt_detail', 'attempt_detail_v2'] }
         : { compat: [], core_model: 'legacy', queries: [] };
     case 'projects_overview':
       return { v: 1, filters: { archived: args.archived, machine: null }, total: 1, projects: [{ id: 'demo-p1', name: 'Demo', state: 'active', status: 'active', locations: [], counts: { tasks: 3, active: 2, failed: 0, attention: { total: 0, by_category: ADE_ZERO } } }], unassigned: { tasks: 0, active: 0, failed: 0, attention: { total: 0, by_category: ADE_ZERO } } };
@@ -298,12 +298,13 @@ function adeQuery(query, args) {
     case 'attempts_by_task':
       if (!vNext) return inactive();
       return { v: 1, core_model: 'task_attempt_v1', task_id: args.task_id, items: ADE_ATTEMPTS[args.task_id] ?? [] };
-    case 'attempt_detail': {
+    case 'attempt_detail':
+    case 'attempt_detail_v2': {
       if (!vNext) return inactive();
       const task = args.attempt_id.replace(/-a\d+$/, '');
       const brief = (ADE_ATTEMPTS[task] ?? []).find((a) => a.id === args.attempt_id);
       if (!brief) throw new Error(`model_not_found: no existe el Attempt ${args.attempt_id}`);
-      return { v: 1, core_model: 'task_attempt_v1', attempt: { ...brief, task_id: task, effort: null, profile: null, failure_reason: brief.status === 'failed' ? 'exit_code' : null, summary: '', integrated: false, provider_session: null, worktree: null, artifacts: [], review: null } };
+      return { v: query === 'attempt_detail_v2' ? 2 : 1, core_model: 'task_attempt_v1', attempt: { ...brief, task_id: task, effort: null, profile: null, failure_reason: brief.status === 'failed' ? 'exit_code' : null, summary: '', integrated: false, provider_session: null, worktree: null, artifacts: [], review: null } };
     }
     default:
       throw new Error(`Comando desconocido: ${query}`);

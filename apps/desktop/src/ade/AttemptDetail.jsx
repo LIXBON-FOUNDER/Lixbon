@@ -17,6 +17,7 @@ import { AttemptRetry } from './AttemptRetry';
 import { AttemptStop } from './AttemptStop';
 import { AttemptUsage } from './AttemptUsage';
 import { attemptDuration, formatUtc } from './attemptFormat';
+import { ATTEMPT_DETAIL_V2 } from './coreModelContract';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
 import { useCoreQuery } from './useCoreQuery';
@@ -25,6 +26,9 @@ import { useCoreQuery } from './useCoreQuery';
  * LXO-122 · Detalle de UN Attempt (solo lectura), de `attempt_detail`. Nada se inventa: lo que el
  * contrato no trae se muestra «no disponible». Rutas y URIs son texto (PathText), nunca enlaces.
  * La sesión del proveedor es opaca: solo id interno, vínculo y si se puede reanudar.
+ *
+ * LXO-244: se pide `attempt_detail_v2` solo si el Core la anuncia (`core_model.queries`); el Core redacta la URL del PR. Con un Core
+ * anterior se lee `attempt_detail` y se AVISA (`attempt_detail_v2_unsupported`). En ambos casos la URL de un Artifact `pull_request` nunca se pinta.
  */
 /** Estados de un intento que todavía puede cambiar solo: se sondea más a menudo. */
 const ACTIVE_ATTEMPT_STATUSES = ['starting', 'running', 'waiting', 'awaiting_terminal_approval'];
@@ -46,7 +50,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
   const [fast, setFast] = useState(false);
-  const state = useCoreQuery('attempt_detail', { attempt_id: attemptId }, { enabled, pollMs: fast ? ACTIVE_POLL_MS : undefined });
+  const detailV2 = Array.isArray(coreModel?.queries) && coreModel.queries.includes(ATTEMPT_DETAIL_V2);
+  const state = useCoreQuery(detailV2 ? ATTEMPT_DETAIL_V2 : 'attempt_detail', { attempt_id: attemptId }, { enabled, pollMs: fast ? ACTIVE_POLL_MS : undefined });
   const liveStatus = state.data?.attempt?.status;
   useEffect(() => { setFast(ACTIVE_ATTEMPT_STATUSES.includes(liveStatus)); }, [liveStatus]);
   const attempt = state.data?.attempt ?? null;
@@ -76,6 +81,9 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
     const artifacts = Array.isArray(attempt.artifacts) ? attempt.artifacts : [];
     body = (
       <>
+        {!detailV2 && (
+          <p className="ade-notice ade-notice--warn" role="status" data-code="attempt_detail_v2_unsupported">{COPY.attemptDetailV2Unsupported}</p>
+        )}
         <AttemptContextLine attempt={attempt} />
         <dl>
           <Row label="Intento"><span className="mono">{attempt.id}</span> · #{attempt.n}</Row>
@@ -151,7 +159,9 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
           <ul className="ade-attempt__artifacts" data-testid="attempt-artifacts">
             {artifacts.map((artifact) => (
               <li key={artifact.id}>
-                {text(artifact.kind)}: <PathText path={artifact.uri} repoRoot={worktree?.path ?? null} />
+                {text(artifact.kind)}: {artifact.kind === 'pull_request'
+                  ? <span className="ade-missing" data-testid="attempt-pr-url-hidden">{COPY.prUrlHidden}</span>
+                  : <PathText path={artifact.uri} repoRoot={worktree?.path ?? null} />}
                 {' · '}sha256 {artifact.sha256 ? <code className="mono">{artifact.sha256.slice(0, 12)}</code> : COPY.notAvailable}
                 {' · '}{Number.isSafeInteger(artifact.bytes) ? `${artifact.bytes} bytes` : `tamaño ${COPY.notAvailable}`}
               </li>

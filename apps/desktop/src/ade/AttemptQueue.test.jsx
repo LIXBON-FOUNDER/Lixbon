@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -36,7 +36,7 @@ function mountCore({ status = 'running', provider: attemptProvider = 'fake-compl
     if (payload.query === 'activity_list') return attemptActivityPage([]);
     if (payload.query === 'attempts_by_task') return { ...CANONICAL['attempts_by_task.v1.json'], task_id: 't3', items: [] };
     if (payload.query === 'pending_queue') return typeof queue === 'function' ? queue() : queue;
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider: attemptProvider });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status, provider: attemptProvider });
   });
   return calls;
 }

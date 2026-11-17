@@ -5,6 +5,7 @@
 // fallido, Task descartada, modo legacy y cada código de error). Las variantes son sintéticas y se
 // marcan `testOnly: true`; las canónicas no se modifican (lo comprueba coreModelContract.test.js).
 import attemptDetailV1 from '../../../../../docs/core/fixtures/api/attempt_detail.v1.json';
+import attemptDetailV2 from '../../../../../docs/core/fixtures/api/attempt_detail.v2.json';
 import attemptsByTaskV1 from '../../../../../docs/core/fixtures/api/attempts_by_task.v1.json';
 import coreModelV1 from '../../../../../docs/core/fixtures/api/core_model.v1.json';
 import taskDetailV2 from '../../../../../docs/core/fixtures/api/task_detail_v2.json';
@@ -12,6 +13,7 @@ import taskListV2 from '../../../../../docs/core/fixtures/api/task_list_v2.json'
 
 export const CANONICAL = Object.freeze({
   'attempt_detail.v1.json': attemptDetailV1,
+  'attempt_detail.v2.json': attemptDetailV2,
   'attempts_by_task.v1.json': attemptsByTaskV1,
   'core_model.v1.json': coreModelV1,
   'task_detail_v2.json': taskDetailV2,
@@ -61,6 +63,12 @@ export function attemptDetail(over = {}) {
   const response = clone(attemptDetailV1);
   Object.assign(response.attempt, over);
   return response;
+}
+
+/** Lo que responde un Core de pruebas a la lectura del detalle: la v2 (LXO-244) es la misma ejecución con `v: 2` (esta fixture no trae PR que redactar). */
+export function attemptDetailFor(payload, over = {}) {
+  const response = attemptDetail(over);
+  return payload?.query === 'attempt_detail_v2' ? { ...response, v: 2 } : response;
 }
 
 /** Mensajes de error tal como los emite el Core (model_read.rs) y un Core anterior a LXO-119. */

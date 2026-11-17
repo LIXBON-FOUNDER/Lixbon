@@ -384,6 +384,7 @@ fn un_checkout_sucio_o_en_otra_rama_no_se_toca() {
     let r = w.merge(&a1, &head, json!({})).unwrap();
     assert_eq!(r["outcome"], "error");
     assert!(r["message"].as_str().is_some_and(|m| m.contains("sin commit")));
+    assert_eq!(r["reason"], "target_dirty", "LXO-251: el error dice por qué");
     assert_eq!(repo_head(&w.repo()), antes);
     git(&w.repo(), &["checkout", "--", "README.md"]);
 
@@ -395,6 +396,44 @@ fn un_checkout_sucio_o_en_otra_rama_no_se_toca() {
     assert_eq!((r["outcome"].as_str(), r["expected_branch"].as_str(), r["found_branch"].as_str()), (Some("target_branch_mismatch"), Some("main"), Some("otra")));
     assert_eq!(repo_head(&w.repo()), antes);
     assert!(!w.repo().join("feature.txt").exists());
+}
+
+/// LXO-251: si git no puede crear el commit de merge por falta de identidad, el resultado `error` lo dice (`reason`), el motivo queda en el
+/// `effect.observed` y en la decisión (sin rutas), y repetir el comando tras corregirlo integra bien.
+#[test]
+fn un_merge_sin_identidad_de_git_dice_el_motivo_y_repetir_tras_corregirlo_integra() {
+    let (w, a1) = done_with_work();
+    let head = w.accept(&a1);
+    let antes = repo_head(&w.repo());
+
+    // Una identidad vacía en el repo del Project (la local manda sobre cualquier global) deja a git sin poder firmar.
+    git(&w.repo(), &["config", "user.name", ""]);
+    git(&w.repo(), &["config", "user.email", ""]);
+    let r = w.merge(&a1, &head, json!({})).unwrap();
+    assert_eq!((r["outcome"].as_str(), r["reason"].as_str()), (Some("error"), Some("git_identity_missing")), "{r}");
+    assert_eq!(repo_head(&w.repo()), antes, "no se integró nada");
+    assert_eq!(w.preview(&a1)["merge"]["merged"], false);
+
+    let payloads: Vec<String> = w
+        .core
+        .storage
+        .with_store(|s| {
+            s.read(|c| {
+                let mut stmt = c.prepare("SELECT payload FROM events WHERE kind IN ('effect.observed', 'decision.recorded') AND entity_id = ?1 ORDER BY seq")?;
+                let rows = stmt.query_map([task_of(&a1)], |r| r.get::<_, String>(0))?;
+                Ok(rows.collect::<Result<Vec<_>, _>>()?.into_iter().filter(|p| p.contains("git_merge") || p.contains("\"merge\"")).collect())
+            })
+        })
+        .unwrap()
+        .unwrap();
+    assert!(payloads.iter().all(|p| p.contains("git_identity_missing")) && !payloads.is_empty(), "el motivo llega al evento: {payloads:?}");
+    assert!(payloads.iter().all(|p| !p.contains("Please tell me") && !p.contains("fatal:")), "sin el texto crudo de git: {payloads:?}");
+
+    git(&w.repo(), &["config", "user.name", "Lixbon Test"]);
+    git(&w.repo(), &["config", "user.email", "test@lixbon.invalid"]);
+    let r = w.merge(&a1, &head, json!({})).unwrap();
+    assert_eq!(r["outcome"], "merged", "{r}");
+    assert!(r["reason"].is_null(), "un éxito no lleva motivo");
 }
 
 #[test]

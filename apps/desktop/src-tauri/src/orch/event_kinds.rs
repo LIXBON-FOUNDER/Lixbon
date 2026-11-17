@@ -320,6 +320,9 @@ pub(super) enum DecisionRecorded {
         expected_commit: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         found_commit: Option<String>,
+        /// Por qué un merge terminó en `error` (LXO-251): un código cerrado, nunca el texto de git.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<&'static str>,
     },
     Pr {
         decision_id: u64,
@@ -368,6 +371,23 @@ fn opt_bool(who: &str, d: &serde_json::Value, key: &str) -> Result<Option<bool>,
         None | Some(serde_json::Value::Null) => Ok(None),
         Some(serde_json::Value::Bool(b)) => Ok(Some(*b)),
         Some(_) => Err(format!("{who}: `{key}` debe ser booleano o null")),
+    }
+}
+
+/// Motivos cerrados de un merge que terminó en `error` (LXO-251). Lo que no es de la lista es un error de contrato: el motivo es un código,
+/// nunca el mensaje de git (puede traer rutas o credenciales).
+const MERGE_ERROR_REASONS: [&str; 3] = ["git_identity_missing", "target_dirty", "git_failed"];
+
+fn opt_merge_error_reason(who: &str, d: &serde_json::Value) -> Result<Option<&'static str>, String> {
+    match d.get("reason") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => MERGE_ERROR_REASONS
+            .iter()
+            .copied()
+            .find(|r| r == s)
+            .map(Some)
+            .ok_or_else(|| format!("{who}: `reason` {s:?} fuera del contrato (admitidos: {})", MERGE_ERROR_REASONS.join(", "))),
+        Some(_) => Err(format!("{who}: `reason` debe ser texto o null")),
     }
 }
 
@@ -422,6 +442,7 @@ impl DecisionRecorded {
                     accepted_moved_target: opt_bool(DEC, detail, "accepted_moved_target")?,
                     expected_commit: opt_str(DEC, detail, "expected_commit")?,
                     found_commit: opt_str(DEC, detail, "found_commit")?,
+                    reason: opt_merge_error_reason(DEC, detail)?,
                 }
             }
             "pr" => {
@@ -492,6 +513,9 @@ pub(super) enum EffectObserved {
         base_commit: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         result_commit: Option<String>,
+        /// Por qué el merge terminó en `error` (LXO-251): un código cerrado, nunca el texto de git.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<&'static str>,
     },
     GitPushPr {
         effect_id: String,
@@ -558,6 +582,7 @@ impl EffectObserved {
                     branch: req_str(EFF, observed, "branch")?,
                     base_commit: opt_str(EFF, observed, "base_commit")?,
                     result_commit: opt_str(EFF, observed, "result_commit")?,
+                    reason: opt_merge_error_reason(EFF, observed)?,
                 }
             }
             "git_push_pr" => {

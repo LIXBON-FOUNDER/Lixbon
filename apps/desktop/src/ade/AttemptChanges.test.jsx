@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -30,7 +30,7 @@ function mountCore({ status = 'done', worktree = WORKTREE, review = () => ({ out
     if (command === 'orch_review_task') return review(payload);
     if (payload?.query === 'provider_capabilities') return live();
     if (payload?.query === 'activity_list') return attemptActivityPage([]);
-    return attemptDetail({ id: 't3-a1', task_id: 't3', status, worktree });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status, worktree });
   });
   return calls;
 }
@@ -78,7 +78,7 @@ describe('A5 · cambios de la rama del intento', () => {
       if (command === 'orch_task_diff') throw new Error('La rama lx/r1/t3-a1 ya no existe');
       if (payload?.query === 'provider_capabilities') return live();
       if (payload?.query === 'activity_list') return attemptActivityPage([]);
-      return attemptDetail({ id: 't3-a1', task_id: 't3', status: 'done', worktree: WORKTREE });
+      return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status: 'done', worktree: WORKTREE });
     });
     mount();
     await flush();
@@ -103,11 +103,11 @@ describe('A6 · revisar sobre un commit fijo', () => {
     const calls = mountCore();
     mount();
     await flush();
-    const before = calls.filter((c) => c.payload?.query === 'attempt_detail').length;
+    const before = calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length;
     await openAndAccept(calls);
     expect(sent(calls, 'orch_review_task')).toEqual([{ task_id: 't3', decision: 'accepted', head_commit: 'bbbbbbb2222', confirm: true }]);
     expect(screen.getByTestId('tdv-done').textContent).toMatch(/Diff aceptado/);
-    expect(calls.filter((c) => c.payload?.query === 'attempt_detail').length).toBeGreaterThan(before);
+    expect(calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length).toBeGreaterThan(before);
   });
 
   it('si la rama se movió no se registra nada y se pide recargar', async () => {
