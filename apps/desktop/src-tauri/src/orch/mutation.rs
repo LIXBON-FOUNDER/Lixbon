@@ -987,6 +987,7 @@ impl Core {
         let channel = match ctx.channel {
             Channel::Ui => "ui",
             Channel::Lxo => "lxo",
+            Channel::Mobile => "mobile",
             Channel::Core => "core",
         };
         let record = RecordV2 {

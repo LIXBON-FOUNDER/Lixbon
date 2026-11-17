@@ -65,6 +65,7 @@ class RemoteChannel:
     cmd_seq: int = 0
     recent_cmds: deque = field(default_factory=lambda: deque(maxlen=RECENT_COMMANDS))
     recent_rids: deque = field(default_factory=lambda: deque(maxlen=RECENT_REQUESTS))
+    mobile_requests: dict[str, tuple[int, str, float]] = field(default_factory=dict)
     last_touch: float = 0.0
     last_host_seen: float = field(default_factory=time.time)
     _next_controller_id: int = 0
@@ -101,6 +102,15 @@ class RemoteHub:
         """Asigna seq, guarda en el buffer de replay y reparte. Devuelve el último seq."""
         ch.last_host_seen = time.time()
         for ev in events:
+            if ev.get("type") == "orch_mobile_question":
+                rid = ev.get("rid")
+                request = ch.mobile_requests.pop(rid, None) if isinstance(rid, str) else None
+                if request:
+                    cid, original_rid, deadline = request
+                    queue = ch.controllers.get(cid)
+                    if queue and not queue.full() and time.monotonic() < deadline:
+                        queue.put_nowait({**ev, "rid": original_rid})
+                continue
             ch.last_seq += 1
             ev["seq"] = ch.last_seq
             ev.setdefault("ts", time.time())
@@ -124,7 +134,7 @@ class RemoteHub:
     def replay(self, ch: RemoteChannel, from_seq: int) -> list[dict[str, Any]]:
         return [ev for ev in ch.buffer if ev.get("seq", 0) > from_seq]
 
-    def push_command(self, ch: RemoteChannel, command: dict[str, Any]) -> bool:
+    def push_command(self, ch: RemoteChannel, command: dict[str, Any], *, replay: bool = True) -> bool:
         ch.cmd_seq += 1
         command = {**command, "cmd_seq": ch.cmd_seq}
         try:
@@ -132,7 +142,8 @@ class RemoteHub:
         except asyncio.QueueFull:
             ch.cmd_seq -= 1
             return False
-        ch.recent_cmds.append((time.time(), command))
+        if replay:
+            ch.recent_cmds.append((time.time(), command))
         return True
 
     def attach_host(self, ch: RemoteChannel, last_cmd: int | None) -> tuple[int, asyncio.Queue]:
@@ -149,7 +160,7 @@ class RemoteHub:
         pending: dict[int, dict[str, Any]] = {}
         while not old.empty():
             cmd = old.get_nowait()
-            if cmd is not None:
+            if cmd is not None and cmd.get("action") != "mobile_question":
                 pending[cmd.get("cmd_seq", 0)] = cmd
         if last_cmd is not None:
             cutoff = time.time() - COMMAND_REPLAY_SECONDS
@@ -215,6 +226,7 @@ class RemoteHub:
 
     def detach_controller(self, ch: RemoteChannel, cid: int) -> None:
         ch.controllers.pop(cid, None)
+        ch.mobile_requests = {rid: value for rid, value in ch.mobile_requests.items() if value[0] != cid}
 
     def subscribe_user(self, user_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)

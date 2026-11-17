@@ -129,8 +129,12 @@ pub(super) fn instruction_requested_fact(a: &AttemptRow, t: &TaskRow, request_id
 }
 
 /// El hecho `attempt.request_answered` (LXO-247): qué se respondió a una petición del proveedor (solo `allow`/`deny` en un permiso).
-pub(super) fn request_answered_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
-    finalize_single(event_kinds::attempt_request_answered(a, t, request_id, kind, decision), ctx, at)
+pub(super) fn request_answered_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>, last_question: Option<bool>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_request_answered(a, t, request_id, kind, decision, last_question), ctx, at)
+}
+
+pub(super) fn question_requested_fact(a: &AttemptRow, t: &TaskRow, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_question_requested(a, t), &MutationContext::core(), at)
 }
 
 /// El hecho `attempt.usage_reported` (LXO-249): el uso que el proveedor declaró en un turno.

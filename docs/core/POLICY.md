@@ -50,12 +50,14 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
 | `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`, `task_race_cancel`); fork: confirm (`attempt_fork`, `task_race`); answer: deny |
-| `mobile_person`, `automation`, `agent` | deny | deny | deny |
+| `mobile_person` | deny | deny | answer: confirm (preguntas del proveedor); demás: deny |
+| `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 
 `policy_effective` devuelve esta matriz completa (`baseline_matrix`). Un agente nunca hereda alcance humano (invariante 3), y Mobile no
 puede elevar lo que el Core clasifica `elevated`/`deny` (invariante 4): ni la policy ni `confirm` le dan lo que su base niega.
-Hoy Mobile ni siquiera se autentica en el Core (`Channel` solo conoce `ui`, `lxo` y `core`); la matriz ya lo deja sin nada para cuando exista.
+El gateway autentica la sesión Mobile para las preguntas del proveedor (LXO-164). El Core registra la acción con el canal `mobile`
+y vuelve a comprobar la policy efectiva y el tipo de petición en el Attempt vivo.
 
 ### Precedencia y overrides
 
@@ -82,7 +84,7 @@ Una Person autenticada por CLI también puede solicitar `attempt_fork` y `task_r
 Las tres operaciones requieren `confirm: true` por sus categorías (`fork` para Fork/Race, `stop` para cancelación); `deny` y
 `elevated` siguen prevaleciendo. Los Forks y candidatos nacen `pending_approval`: solo la aprobación de Desktop despierta el
 lanzamiento. La acción de credenciales permite únicamente estos Commands; no concede otras decisiones `HumanDecision` al CLI.
-Agent, Mobile y automatización siguen denegados.
+Los Commands de Fork y Race siguen denegados a Agent, Mobile y automatización.
 
 ## Se revalida en CADA Command (invariante 2)
 

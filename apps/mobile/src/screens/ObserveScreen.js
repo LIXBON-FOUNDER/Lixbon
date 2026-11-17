@@ -1,4 +1,4 @@
-// ObserveScreen.js — sección Supervisar con datos reales del Core (F2, solo lectura).
+// ObserveScreen.js — sección Supervisar con datos reales del Core.
 //
 // Sustituye al prototipo de datos de ejemplo (LXO-227, SupervisionScreen.js), que se queda en el repo sin
 // montar. Aquí: cabecera con el IDE (host) que se supervisa, banner de conexión (LXO-111) y la pantalla de
@@ -17,15 +17,17 @@ import AttentionScreen from './observe/AttentionScreen';
 import HomeScreen from './observe/HomeScreen';
 import ProjectScreen from './observe/ProjectScreen';
 import AttemptScreen from './observe/AttemptScreen';
+import QuestionScreen from './observe/QuestionScreen';
 import TaskScreen from './observe/TaskScreen';
 
 // Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
-const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen };
+const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen, question: QuestionScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
   task: 'Tarea',
   attempt: 'Intento',
+  question: 'Pregunta',
   project: 'Proyecto',
 };
 
@@ -68,6 +70,7 @@ export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
         key={obs.stack.length}
         contentContainerStyle={{ paddingHorizontal: gutter, paddingTop: 4, paddingBottom: insets.bottom + 32, gap: 18 }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <ConnectionBanner view={obs.view} onRetry={obs.retry} hostLabel={session ? hostName(session, obs.meta) : null} />
         {Route ? (

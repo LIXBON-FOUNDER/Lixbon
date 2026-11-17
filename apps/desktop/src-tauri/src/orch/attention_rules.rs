@@ -71,6 +71,7 @@ fn copy_codes(from: &Value, keys: &[&str]) -> Value {
 }
 
 const TERMINAL: &str = "terminal";
+pub(super) const PROVIDER_QUESTIONS: &str = "provider_questions";
 /// Subject de la aprobación de lanzar un Attempt (`pending_approval`).
 const LAUNCH: &str = "launch";
 
@@ -202,7 +203,14 @@ pub(super) fn derive(e: &EventRow) -> Derived {
         ("attempt.waiting", "attempt") if p["state"] == "awaiting_terminal_approval" => {
             d.raise(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Severity::Medium, copy_codes(&p, &["task"]))
         }
+        ("attempt.question_requested", "attempt") => {
+            d.raise(C::Question, TargetKind::Attempt, id, Some(PROVIDER_QUESTIONS.into()), Severity::Medium, copy_codes(&p, &["task"]));
+        }
+        ("attempt.request_answered", "attempt") if p["kind"] == "question" && p["last_question"] == true => {
+            d.resolve(C::Question, TargetKind::Attempt, id, Some(PROVIDER_QUESTIONS.into()), Resolution::Acted);
+        }
         ("attempt.resumed", "attempt") if p["from"] == "awaiting_terminal_approval" => {
+            d.resolve(C::Question, TargetKind::Attempt, id, Some(PROVIDER_QUESTIONS.into()), Resolution::ConditionCleared);
             d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::Acted);
             // La espera en la terminal levantada sobre la Task antes del corte se respeta hasta resolverse (D10).
             if let Some(task) = p["task"].as_str() {
@@ -210,12 +218,14 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             }
         }
         ("attempt.completed" | "attempt.stopped" | "attempt.exited", "attempt") => {
+            d.resolve(C::Question, TargetKind::Attempt, id, Some(PROVIDER_QUESTIONS.into()), Resolution::ConditionCleared);
             d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
             if let Some(task) = p["task"].as_str() {
                 d.resolve(C::Approval, TargetKind::Task, task, Some(TERMINAL.into()), Resolution::ConditionCleared);
             }
         }
         ("attempt.failed", "attempt") => {
+            d.resolve(C::Question, TargetKind::Attempt, id, Some(PROVIDER_QUESTIONS.into()), Resolution::ConditionCleared);
             d.resolve(C::Approval, TargetKind::Attempt, id, Some(TERMINAL.into()), Resolution::ConditionCleared);
             if let Some(task) = p["task"].as_str() {
                 d.resolve(C::Approval, TargetKind::Task, task, Some(TERMINAL.into()), Resolution::ConditionCleared);
@@ -234,6 +244,7 @@ pub(super) fn derive(e: &EventRow) -> Derived {
             // Con el runtime sobre las tablas, lo levantado sobre su Attempt actual (LXO-233).
             if let Some(n) = p["attempt"].as_u64() {
                 let attempt = format!("{id}-a{n}");
+                d.resolve(C::Question, TargetKind::Attempt, &attempt, Some(PROVIDER_QUESTIONS.into()), Resolution::ConditionCleared);
                 d.resolve(C::Failed, TargetKind::Attempt, &attempt, None, Resolution::ConditionCleared);
                 d.resolve(C::Approval, TargetKind::Attempt, &attempt, Some(TERMINAL.into()), Resolution::ConditionCleared);
             }

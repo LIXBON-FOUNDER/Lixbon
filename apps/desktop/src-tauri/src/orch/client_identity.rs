@@ -177,6 +177,30 @@ impl Core {
             None => Ok(MutationContext::person(Channel::Ui)),
         }
     }
+
+    pub(super) fn mobile_question_context(&self, user_id: u64, session_id: u64) -> Result<MutationContext, String> {
+        if user_id == 0 || session_id == 0 {
+            return Err("forbidden: faltan las credenciales del relé móvil".into());
+        }
+        let mut cached = self.mobile_identities.lock().unwrap_or_else(|e| e.into_inner());
+        let key = (user_id, session_id);
+        if let Some(client) = cached.get(&key) {
+            return MutationContext::authenticated(client, &ClientClaims::default(), Channel::Mobile)
+                .map_err(|_| "forbidden: identidad móvil inválida".into());
+        }
+        let device = DeviceIdentity::new(format!("relay-mobile-{user_id}-{session_id}"), None)
+            .map_err(|_| "forbidden: sesión móvil inválida")?;
+        let registration = ClientRegistration::new(ClientSurface::Mobile, device)
+            .map_err(|_| "forbidden: instalación móvil inválida")?;
+        let credential = ClientCredential::new(ClientPrincipal::Person(format!("relay-user-{user_id}")), strong_random_token()?)
+            .map_err(|_| "forbidden: credencial móvil inválida")?;
+        let client = self.storage.with_store(|store| store.register_client(&registration, &credential, super::state::now_ms() as i64))
+            .and_then(Result::ok).ok_or("forbidden: identidad móvil revocada o no disponible")?;
+        let context = MutationContext::authenticated(&client, &ClientClaims::default(), Channel::Mobile)
+            .map_err(|_| "forbidden: identidad móvil inválida")?;
+        cached.insert(key, client);
+        Ok(context)
+    }
 }
 
 fn load_or_create_installation_id(path: &Path) -> Result<String, String> {

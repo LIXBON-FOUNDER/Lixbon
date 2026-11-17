@@ -1532,6 +1532,7 @@ pub fn run() {
             orch::orch_startup_cut,
             orch::orch_settings_set,
             orch::orch_call,
+            orch::orch_mobile_question,
             orch::orch_query,
             orch::orch_projects,
             orch::orch_project_add,

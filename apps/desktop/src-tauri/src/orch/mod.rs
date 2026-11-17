@@ -320,6 +320,8 @@ pub struct Core {
     settings: Mutex<Settings>,
     /// Identidad autenticada del límite Tauri, estable para esta instalación.
     desktop_identity: Mutex<Option<crate::store::AuthenticatedClient>>,
+    /// Identidades de sesiones autenticadas por el gateway Relay.
+    mobile_identities: Mutex<HashMap<(u64, u64), crate::store::AuthenticatedClient>>,
     /// Credenciales Agent activas por proceso y tarea, revocadas al cerrar su terminal.
     agent_clients: Mutex<HashMap<String, Vec<String>>>,
     /// Credenciales cuya revocación no confirmó SQLite; se reintentan antes de autenticar.
@@ -379,6 +381,7 @@ impl Default for Orch {
             terms: Mutex::new(HashMap::new()),
             settings: Mutex::new(Settings::default()),
             desktop_identity: Mutex::new(None),
+            mobile_identities: Mutex::new(HashMap::new()),
             agent_clients: Mutex::new(HashMap::new()),
             agent_revocations_pending: Mutex::new(HashSet::new()),
             attention_cursor_key: Mutex::new(None),

@@ -187,6 +187,7 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
         }
         // El Core se gobierna a sí mismo: la policy rige las peticiones de actores, no su trabajo interno.
         ActorClass::Core => Level::Allow,
+        ActorClass::MobilePerson if category == Category::Answer => Level::Confirm,
         // Mobile, automatización y agentes: nada de estas categorías hasta que una fase lo decida (y con confirmación fuera de banda).
         _ => Level::Deny,
     }
@@ -506,6 +507,11 @@ pub(super) fn gate(core: &Core, class: ActorClass, cmd: &str, args: &Value) -> R
         Level::Elevated => Err(format!("policy_out_of_band_required: la policy exige confirmación fuera de banda para {why}, y todavía no hay un canal para darla")),
         Level::Deny => Err(format!("policy_denied: la policy niega {why}")),
     }
+}
+
+pub(super) fn mobile_answer_policy(core: &Core, project: Option<&str>, attempt: &str) -> Result<Level, String> {
+    let snapshot = core.policy_snapshot().map_err(|_| "policy_unavailable: no se pudo comprobar la policy")?;
+    Ok(resolve(&snapshot, ActorClass::MobilePerson, Category::Answer, project, Some(attempt)).level)
 }
 
 // ── Comandos propios: policy_effective · policy_set · policy_reset ──────────────────────────────────────────────────────────────
