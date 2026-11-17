@@ -46,6 +46,9 @@ mod effect_journal;
 mod pr_url;
 mod deep_link;
 mod deep_link_read;
+mod ownership_read;
+#[cfg(test)]
+mod ownership_read_tests;
 #[cfg(test)]
 mod deep_link_tests;
 #[cfg(test)]

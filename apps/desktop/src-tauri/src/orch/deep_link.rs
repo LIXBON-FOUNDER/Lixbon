@@ -322,7 +322,7 @@ fn check_id(id: &str, what: &str) -> Result<(), LinkError> {
     }
 }
 
-fn check_revision(rev: &str) -> Result<(), LinkError> {
+pub(super) fn check_revision(rev: &str) -> Result<(), LinkError> {
     let ok = (MIN_REVISION_CHARS..=MAX_REVISION_CHARS).contains(&rev.len()) && rev.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
     if ok {
         Ok(())
@@ -332,7 +332,7 @@ fn check_revision(rev: &str) -> Result<(), LinkError> {
 }
 
 /// Valida una ruta relativa YA decodificada.
-fn check_file(file: &str) -> Result<(), LinkError> {
+pub(super) fn check_file(file: &str) -> Result<(), LinkError> {
     if file.is_empty() || file.chars().count() > MAX_FILE_CHARS {
         return Err(malformed("`file` debe tener de 1 a 1024 caracteres"));
     }
