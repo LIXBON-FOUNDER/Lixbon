@@ -102,6 +102,20 @@ Actualizar. Mientras el Core sondea consulta cada 3 segundos. La última lectura
 solo en memoria, separada por host e intento, y se marca desactualizada cuando la
 conexión o la frescura de la sonda lo requieren. Estos datos no ejecutan acciones.
 
+### ContextPackage guardado (LXO-140)
+
+`core_attempt_context` lee el último paquete guardado del Attempt con
+`context_package_get`; la lectura verifica su identidad y origen. Devuelve metadatos
+de procedencia, revisión, pruebas declaradas, contadores, redacción, recortes y tamaño.
+El objetivo se resume por su tamaño y el contenido del paquete permanece en el host.
+Un paquete ausente tiene estado `absent`; uno corrupto o de otro origen, `invalid`.
+Los campos de contenido se omiten en ambos casos. No construye ni importa paquetes.
+
+La UI distingue entre paquete completo, parcial, adjuntos ausentes y adjuntos cuya
+verificación debe realizarse al recibirlos. Muestra la reanudación nativa por separado,
+en el resumen de capacidades. El mensaje `orch_core_attempt_context` es efímero y la
+memoria móvil se separa por host e intento, con advertencia de antigüedad offline.
+
 `apps/mobile/src/observe/bootstrap.js` (sin React Native; se prueba con `node --test`).
 
 | Estado | Cuándo |

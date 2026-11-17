@@ -203,7 +203,8 @@ export async function handleOrchAction(action, args = {}) {
       case 'core_activity':
       case 'core_attempts':
       case 'core_attempt':
-      case 'core_attempt_capabilities': {
+      case 'core_attempt_capabilities':
+      case 'core_attempt_context': {
         // Bootstrap observacional de Mobile (LXO-107): lectura del Core con la identidad del IDE.
         const out = await handleCoreAction(action, args, (cmd, a) => invoke('orch_call', { cmd, args: a }));
         emitFn?.(out.type, out.fields);
