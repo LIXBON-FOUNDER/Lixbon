@@ -415,6 +415,35 @@ describe('OrchestratorMode', () => {
     expect(document.querySelector('.orchst--waiting svg circle')).not.toBeNull();
   });
 
+  // LXO-252: un Attempt lanzado desde la CLI no tiene padre; si espera aprobación en su terminal, esa terminal debe ser alcanzable.
+  describe('terminal de aprobación de una tarea sin padre', () => {
+    const awaiting = (over = {}) => task('c2', { parent: null, branch: null, status: 'awaiting_terminal_approval', approval_deadline: Date.now() + 240000, ...over });
+
+    it('abre en la terminal, ofrece «Ir a la terminal» y permite detener el intento', () => {
+      mountWith(snapshot([awaiting()]), [], undefined, 'c2');
+      expect(screen.getByRole('radio', { name: 'Terminal' })).toBeTruthy();
+      expect(screen.getByTestId('agent-terminal')).toBeTruthy();
+      expect(screen.getByTestId('terminal-approval').textContent).toMatch(/Esperando aprobación en la terminal/);
+      expect(screen.getByRole('button', { name: 'Ir a la terminal' })).toBeTruthy();
+      const stop = screen.getByRole('button', { name: 'Detener' });
+      expect(stop.getAttribute('title')).toMatch(/no vas a aprobarlo/);
+    });
+
+    it('«Ir a la terminal» devuelve a la terminal desde otra pestaña', async () => {
+      mountWith(snapshot([awaiting()]), [], undefined, 'c2');
+      fireEvent.click(screen.getByRole('radio', { name: 'Actividad' }));
+      expect(screen.queryByTestId('agent-terminal')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Ir a la terminal' }));
+      expect(await screen.findByTestId('agent-terminal')).toBeTruthy();
+    });
+
+    it('una tarea sin padre que no espera aprobación sigue sin pestaña Terminal ni Detener', () => {
+      mountWith(snapshot([awaiting({ status: 'running' })]), [], undefined, 'c2');
+      expect(screen.queryByRole('radio', { name: 'Terminal' })).toBeNull();
+      expect(screen.queryByTestId('agent-terminal')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Detener' })).toBeNull();
+    });
+  });
 });
 
 // LXO-255: ide.css fija la altura de todo `.panelhead` con un selector más específico que `.orch__head`; sin repetirlo aquí la cabecera
