@@ -1,6 +1,10 @@
 // Mismo protocolo y reducción que la app móvil (apps/mobile/src/remote.js).
 
 import { hasValidSeq, reduceRemoteOrchEvent } from './remoteOrchReducer.js';
+import { sanitizePrUrl } from './remotePrUrl.js';
+
+// Tres latidos del gateway (SSE_PING_SECONDS = 15) sin recibir nada.
+const SILENCIO_MS = 50000;
 
 export function openEventStream({ path, signal, onEvent }) {
   // Devuelve una promesa que termina cuando el stream se corta (el llamador
@@ -20,7 +24,14 @@ export function openEventStream({ path, signal, onEvent }) {
     const decoder = new TextDecoder();
     let buffer = '';
     for (;;) {
-      const { done, value } = await reader.read();
+      // El gateway manda un latido cada 15 s. Si no llega nada en SILENCIO_MS
+      // la conexión está muerta sin haberse cerrado (reinicio del gateway
+      // detrás de un proxy, red que cambia): se suelta para que el llamador
+      // reconecte desde su último seq en vez de esperar para siempre.
+      let reloj;
+      const silencio = new Promise((resolve) => { reloj = setTimeout(() => resolve({ mudo: true }), SILENCIO_MS); });
+      const { done, value, mudo } = await Promise.race([reader.read(), silencio]).finally(() => clearTimeout(reloj));
+      if (mudo) { reader.cancel().catch(() => {}); return; }
       if (done) return;
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split('\n\n');
@@ -53,6 +64,20 @@ export const initialRemoteState = {
   session: null,
   ended: false,
   lastSeq: 0,
+  // Coding (sesiones en la nube): entorno, rama, PR, vista previa, paneles,
+  // preguntas del agente y ventana de contexto.
+  sandbox: null,
+  branch: null,
+  pr: null,
+  preview: null,
+  diff: null,
+  tree: null,
+  archivo: null, // contenido del archivo abierto en el panel Código
+  commits: null, // commits de la rama (pestaña PRs)
+  procs: [], // comandos en segundo plano del entorno
+  choices: [],
+  context: null,
+  turnStart: null,
 };
 
 let nextKey = 1;
@@ -87,6 +112,14 @@ const lastIdx = (items, pred) => {
   return -1;
 };
 
+// La duración del turno (assistant_done.ms) va en su última burbuja: Coding la
+// enseña como «Trabajó 12s · 4 pasos».
+function conDuracion(items, ms) {
+  if (!ms) return items;
+  const idx = lastIdx(items, (it) => it.kind === 'assistant');
+  return idx === -1 ? items : items.map((it, i) => (i === idx ? { ...it, ms } : it));
+}
+
 function closeOpenAssistant(items, finalText) {
   const idx = lastIdx(items, (it) => it.kind === 'assistant' && it.open);
   if (idx === -1) return items;
@@ -94,6 +127,8 @@ function closeOpenAssistant(items, finalText) {
   if (!text.trim()) return [...items.slice(0, idx), ...items.slice(idx + 1)];
   return items.map((it, i) => (i === idx ? { ...it, text, open: false } : it));
 }
+
+const tsDe = (ev) => (typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now());
 
 export function remoteReducer(state, ev) {
   // Un seq que no es un entero seguro >= 0 (NaN, Infinity, negativo, texto…) ni se aplica ni envenena lastSeq (LXO-243).
@@ -128,7 +163,14 @@ export function remoteReducer(state, ev) {
           model_value: ev.model_value ?? null,
           efforts: Array.isArray(ev.efforts) ? ev.efforts : [],
           effort: ev.effort ?? null,
+          repo: ev.repo || null,
+          branch: ev.branch || null,
+          default_branch: ev.default_branch || null,
+          // Límites del entorno: { turn_minutes, background_max }.
+          limits: ev.limits && typeof ev.limits === 'object' ? ev.limits : null,
+          espacio: ev.espacio || null,
         },
+        branch: ev.branch || s.branch,
       };
     case 'files':
       return { ...s, files: { query: ev.query || '', items: Array.isArray(ev.items) ? ev.items : [] } };
@@ -139,6 +181,8 @@ export function remoteReducer(state, ev) {
     case 'user_msg':
       return {
         ...s,
+        turnLimit: null,
+        turnStart: Date.now(),
         items: [...closeOpenAssistant(s.items), withKey({
           kind: 'user', text: ev.text || '', origin: ev.origin, images: ev.images || 0, imageIds: ids(ev.image_ids),
           mentions: ev.mentions || [],
@@ -167,10 +211,10 @@ export function remoteReducer(state, ev) {
       if (idx === -1) {
         const text = ev.text || '';
         return text.trim()
-          ? { ...s, items: [...s.items, withKey({ kind: 'assistant', text, open: false })] }
+          ? { ...s, items: [...s.items, withKey({ kind: 'assistant', text, open: false, ms: ev.ms || null })] }
           : s;
       }
-      return { ...s, items: closeOpenAssistant(s.items, ev.text || '') };
+      return { ...s, items: conDuracion(closeOpenAssistant(s.items, ev.text || ''), ev.ms) };
     }
     case 'tool_use':
       return {
@@ -190,18 +234,80 @@ export function remoteReducer(state, ev) {
       else items[idx] = { ...items[idx], ...patch };
       return { ...s, items };
     }
-    case 'status':
-      return { ...s, agentState: ev.state === 'thinking' ? 'thinking' : 'idle', activity: ev.state === 'thinking' ? ev.activity || null : null };
+    case 'status': {
+      const thinking = ev.state === 'thinking';
+      return {
+        ...s,
+        agentState: thinking ? 'thinking' : 'idle',
+        activity: thinking ? ev.activity || null : null,
+        activityLabel: thinking ? ev.label || null : null,
+        turnStart: thinking ? (s.turnStart || Date.now()) : s.turnStart,
+      };
+    }
+    // ── Coding (sesiones en la nube) ──
+    case 'sandbox_status':
+      return { ...s, sandbox: { estado: ev.estado, detalle: ev.detalle || null, motivo: ev.motivo || null } };
+    case 'branch':
+      return { ...s, branch: ev.name || s.branch };
+    case 'pr': {
+      const url = sanitizePrUrl(ev.url);
+      if (!url) return s;
+      const pr = { url, number: ev.number, branch: ev.branch, base: ev.base };
+      return { ...s, pr, items: [...closeOpenAssistant(s.items), withKey({ kind: 'pr', ...pr })] };
+    }
+    case 'preview_shown':
+      return { ...s, preview: { port: ev.port, path: ev.path || '/', n: (s.preview?.n || 0) + 1, ts: typeof ev.ts === 'number' ? ev.ts * 1000 : Date.now() } };
+    case 'diff':
+      return { ...s, diff: { files: Array.isArray(ev.files) ? ev.files : [], truncated: !!ev.truncated, base: ev.base, branch: ev.branch } };
+    case 'tree':
+      return { ...s, tree: { entries: Array.isArray(ev.entries) ? ev.entries : [], truncated: !!ev.truncated, branch: ev.branch } };
+    case 'file_content':
+      return { ...s, archivo: { path: ev.path, text: ev.text ?? null, binary: !!ev.binary, truncated: !!ev.truncated, error: ev.error || null } };
+    case 'commits':
+      return { ...s, commits: { items: Array.isArray(ev.items) ? ev.items : [], pushed: !!ev.pushed, branch: ev.branch, base: ev.base } };
+    case 'procs':
+      return { ...s, procs: Array.isArray(ev.items) ? ev.items : [],
+        ...(Array.isArray(ev.ports) ? { ports: { items: ev.ports, ts: tsDe(ev) } } : {}) };
+    // Puertos que escuchan en el entorno: [{ port, label?, command? }].
+    case 'ports':
+      return { ...s, ports: { items: Array.isArray(ev.items) ? ev.items : [], ts: tsDe(ev) } };
+    // Preparación del repo tras clonar (instalar dependencias).
+    case 'setup':
+      return { ...s, setup: {
+        estado: ev.estado, comando: ev.command || ev.comando || '', lockfile: ev.lockfile || '',
+        ms: ev.ms || 0, pasos: Array.isArray(ev.steps) ? ev.steps : [], salida: ev.output || '', detalle: ev.detail || '',
+        inicio: s.setup?.estado === 'instalando' ? s.setup.inicio : tsDe(ev),
+      } };
+    // El turno llegó a su límite de tiempo: el agente se detuvo.
+    case 'turn_limit':
+      return { ...s, turnLimit: { minutes: ev.minutes || null, detalle: ev.detail || '', n: (s.turnLimit?.n || 0) + 1 } };
+    // Uso de la sesión entera: { tokens, seconds }.
+    case 'usage':
+      return { ...s, usage: { tokens: ev.tokens || 0, seconds: ev.seconds || 0 } };
+    // El agente propone una nota para la memoria del espacio.
+    case 'memory_proposal':
+      if (!ev.id || (s.propuestas || []).some((x) => x.id === ev.id)) return s;
+      return { ...s, propuestas: [...(s.propuestas || []), { id: ev.id, text: ev.text || '', espacio: ev.espacio || null }] };
+    case 'context':
+      return { ...s, context: { used: ev.tokens || 0, total: ev.window || null } };
+    case 'choice_request':
+      if (!ev.id || s.choices.some((c) => c.id === ev.id)) return s;
+      return { ...s, choices: [...s.choices, { id: ev.id, title: ev.title || '', header: ev.header || '', options: Array.isArray(ev.options) ? ev.options : [], free: ev.free !== false }] };
+    case 'choice_resolved':
+      return { ...s, choices: s.choices.filter((c) => c.id !== ev.id) };
     case 'approval_request':
       if (s.approvals.some((a) => a.id === ev.id)) return s;
-      return { ...s, approvals: [...s.approvals, { id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit' }] };
+      return { ...s, approvals: [...s.approvals, {
+        id: ev.id, tool: ev.tool, summary: ev.summary || '', risk: ev.risk || 'edit',
+        path: ev.path || '', adds: ev.adds || 0, dels: ev.dels || 0,
+      }] };
     case 'approval_resolved':
       return { ...s, approvals: s.approvals.filter((a) => a.id !== ev.id) };
     case 'error':
       return { ...s, items: [...s.items, withKey({ kind: 'error', text: ev.message || 'Error' })] };
     case 'bye':
     case 'session_ended':
-      return { ...s, ended: true, hostConnected: false, approvals: [] };
+      return { ...s, ended: true, hostConnected: false, approvals: [], choices: [] };
     default:
       return s;
   }

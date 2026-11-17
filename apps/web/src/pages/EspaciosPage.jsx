@@ -9,6 +9,7 @@ import { useT } from '../i18n/useT';
 import { useAuth } from '../hooks/useAuth';
 import { useShell } from '../components/AppShell';
 import { useConfirmar } from '../hooks/useConfirmar';
+import { useDismiss } from '../hooks/useDismiss';
 import { Icono, IconMenu, IconSearch, IconX, IconSend } from '../components/Icons';
 import { LogoMarca } from '../components/LogosMarcas';
 import { useMenu } from '../components/GithubChat';
@@ -309,6 +310,15 @@ function CartaAccesos({ github }) {
 }
 
 // ── Detalle ─────────────────────────────────────────────────────────────────
+// Plantillas de «Nuevo agente». La de Coding (sesión en la nube que abre un
+// PR) espera a que los agentes puedan lanzar sesiones de Coding.
+const PLANTILLAS = [
+  { id: 'resumen', dias: [0, 1, 2, 3, 4], hora: '09:00' },
+  { id: 'triaje', dias: [0, 1, 2, 3, 4], hora: '10:00' },
+  { id: 'notas', dias: [4], hora: '16:00' },
+  { id: 'deps', dias: [0], hora: '09:00', coding: true },
+];
+
 function Detalle({ id }) {
   const t = useT('espacios');
   const navigate = useNavigate();
@@ -319,6 +329,12 @@ function Detalle({ id }) {
   const [espacio, setEspacio] = useState(undefined);
   const [github, setGithub] = useState(null);
   const [ventana, setVentana] = useState(null); // editar | instrucciones | agente
+  const [plantillas, setPlantillas] = useState(false);
+  const [plantilla, setPlantilla] = useState(null);
+  const plantillasRef = useRef(null);
+  const cerrarPlantillas = useCallback(() => setPlantillas(false), []);
+  useDismiss(plantillas, plantillasRef, cerrarPlantillas);
+  const usarPlantilla = (p) => { setPlantilla(p); setPlantillas(false); setVentana('agente'); };
   const [texto, setTexto] = useState('');
   useSeo({ title: espacio?.nombre || t('seoTitle'), noindex: true });
 
@@ -385,9 +401,34 @@ function Detalle({ id }) {
             <section className="esp-seccion">
               <div className="esp-seccion__cab">
                 <h2>{t('agents')}</h2>
-                <button type="button" className="pill-btn pill-btn--outline" onClick={() => setVentana('agente')}>
-                  <Icono nombre="mas" size={15} /> {t('newAgent')}
-                </button>
+                <div className="esp-plantillas" ref={plantillasRef}>
+                  <button type="button" className="pill-btn pill-btn--outline" aria-haspopup="menu" aria-expanded={plantillas}
+                    onClick={() => setPlantillas((v) => !v)}>
+                    <Icono nombre="mas" size={15} /> {t('newAgent')}
+                  </button>
+                  {plantillas && (
+                    <div className="modelo-menu__panel is-abajo nv-plantillas" role="menu" aria-label={t('newAgent')}>
+                      <p className="modelo-menu__etq">{t('templatesTitle')}</p>
+                      <div className="modelo-menu__lista">
+                        {PLANTILLAS.map((p) => (
+                          <button key={p.id} type="button" role="menuitem" disabled={p.coding}
+                            className={`modelo-menu__opt ${p.coding ? 'nv-off' : ''}`} onClick={() => usarPlantilla(p)}>
+                            <span className="modelo-menu__txt">
+                              <span className="modelo-menu__nom">{t(`tpl_${p.id}`)}</span>
+                              <span className="modelo-menu__det">{p.coding ? t('tplCodingSoon') : t(`tpl_${p.id}_det`)}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="modelo-menu__sep" />
+                      <div className="modelo-menu__lista">
+                        <button type="button" role="menuitem" className="modelo-menu__opt" onClick={() => usarPlantilla(null)}>
+                          <span className="modelo-menu__txt"><span className="modelo-menu__nom">{t('tplBlank')}</span></span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               {!espacio.agentes.length && <p className="esp-vacio">{t('noAgents')}</p>}
               <div className="esp-rejilla">
@@ -396,7 +437,9 @@ function Detalle({ id }) {
                     <Baldosa icono="agente" />
                     <span className="esp-tarjeta__texto">
                       <span className="esp-tarjeta__titulo">{a.nombre}</span>
-                      <span className="esp-tarjeta__sub">{a.pausado ? t('paused') : horario(a)}</span>
+                      <span className="esp-tarjeta__sub">
+                        {a.pausado ? t('paused') : [horario(a), a.tipo === 'coding' && t('codingSession'), a.abre_pr && t('opensPr')].filter(Boolean).join(' · ')}
+                      </span>
                     </span>
                     <Estado estado={a.pausado ? 'pausa' : a.ultima?.estado} />
                   </Link>
@@ -437,7 +480,10 @@ function Detalle({ id }) {
 
       {ventana === 'editar' && <VentanaEspacio espacio={espacio} onClose={() => setVentana(null)} onListo={cargar} />}
       {ventana === 'instrucciones' && <VentanaInstrucciones espacio={espacio} onClose={() => setVentana(null)} onListo={cargar} />}
-      {ventana === 'agente' && <VentanaAgente espacio={espacio} onClose={() => setVentana(null)} onListo={(a) => navigate(`/agentes/${a.id}`)} />}
+      {ventana === 'agente' && (
+        <VentanaAgente espacio={espacio} inicial={plantilla && { nombre: t(`tpl_${plantilla.id}`), tarea: t(`tpl_${plantilla.id}_tarea`), dias: plantilla.dias, hora: plantilla.hora }}
+          onClose={() => { setVentana(null); setPlantilla(null); }} onListo={(a) => navigate(`/agentes/${a.id}`)} />
+      )}
     </section>
   );
 }

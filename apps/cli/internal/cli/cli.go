@@ -61,6 +61,8 @@ Comandos:
   chat     Enviar un mensaje con --once "texto" (alias: run, start)
   events   Leer y seguir el Event Log del Core (lixbon events --help)
   worker   Correr como agente hijo del orquestador de Lixbon Desktop (lixbon worker --help)
+  host     Host de una sesión de Coding en la nube (solo dentro de su entorno aislado)
+  pr       Subir la rama de la sesión de Coding y abrir su PR (solo dentro del entorno)
 `
 
 func (a *App) Run(ctx context.Context, args []string) int {
@@ -84,6 +86,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.events(ctx, rest)
 	case "worker":
 		return a.worker(ctx, rest)
+	case "host":
+		return a.host(ctx, rest)
+	case "pr":
+		return a.pr(ctx, rest)
 	case "setup":
 		return a.setup(ctx, rest)
 	case "usage":

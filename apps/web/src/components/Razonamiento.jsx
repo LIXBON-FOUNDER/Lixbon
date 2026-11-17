@@ -4,11 +4,13 @@
 // admite el modelo (el gateway publica `reasoning: toggle|levels` en
 // /v1/models). «Auto» deja que decida el gateway según el mensaje.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { IconCheck, IconChevron, IconX } from './Icons';
+import { IconChevron, IconX } from './Icons';
 import { useDismiss } from '../hooks/useDismiss';
 import { useSalida } from '../hooks/useSalida';
 import { useT } from '../i18n/useT';
 import { cuando } from '../lib/cuando';
+import { Link } from '../i18n/link';
+import { Aviso } from './Pulido';
 
 const ETIQUETA = { auto: 'effortAuto', off: 'effortOff', on: 'effortOn', low: 'effortLow', medium: 'effortMedium', high: 'effortHigh' };
 const ANCHO_SUB = 280;
@@ -81,7 +83,8 @@ function Deslizador({ niveles, valor, onChange }) {
   );
 }
 
-export function ModeloMenu({ models, modelInfo = {}, model, onModelChange, niveles = [], razonar = 'auto', onRazonar }) {
+// `apagados`: modelos que se ven pero no se pueden elegir ahora ({ id: motivo }).
+export function ModeloMenu({ models, modelInfo = {}, model, onModelChange, niveles = [], razonar = 'auto', onRazonar, apagados = {} }) {
   const t = useT('chat');
   const [abierto, setAbierto] = useState(false);
   const [sub, setSub] = useState(false);
@@ -161,15 +164,17 @@ export function ModeloMenu({ models, modelInfo = {}, model, onModelChange, nivel
         >
           <p className="modelo-menu__etq">{t('modelsTitle')}</p>
           <div className="modelo-menu__lista">
-            {models.map((m) => {
-              const det = detalle(m);
+            {[...models, ...Object.keys(apagados).filter((m) => !models.includes(m))].map((m) => {
+              const off = Object.prototype.hasOwnProperty.call(apagados, m);
+              const det = off ? apagados[m] : detalle(m);
               return (
                 <button
                   key={m}
                   type="button"
                   role="menuitemradio"
                   aria-checked={m === model}
-                  className={`modelo-menu__opt ${m === model ? 'is-sel' : ''}`}
+                  disabled={off}
+                  className={`modelo-menu__opt ${m === model ? 'is-sel' : ''} ${off ? 'nv-off' : ''}`}
                   onPointerEnter={(e) => { if (e.pointerType === 'mouse' && sub) cerrarSubLuego(); }}
                   onClick={() => elegir(m)}
                 >
@@ -177,7 +182,6 @@ export function ModeloMenu({ models, modelInfo = {}, model, onModelChange, nivel
                     <span className="modelo-menu__nom">{modelInfo[m]?.name || m}</span>
                     {det && <span className="modelo-menu__det">{det}</span>}
                   </span>
-                  {m === model && <IconCheck size={15} />}
                 </button>
               );
             })}
@@ -222,17 +226,22 @@ export function AvisoCuota({ aviso, onCerrar }) {
   const t = useT('chat');
   if (!aviso) return null;
   const idioma = document.documentElement.lang || 'es';
-  const ambito = t(aviso.scope === 'week' ? 'quotaWeek' : 'quotaSession');
-  const reinicio = aviso.reset_at ? ` ${t('quotaResets', { when: cuando(aviso.reset_at, idioma) })}` : '';
-  const texto = aviso.state === 'exhausted'
-    ? t('quotaExhausted', { scope: ambito }) + reinicio
-    : t('quotaNear', { pct: Math.round(aviso.percent || 0), scope: ambito }) + reinicio;
+  const semana = aviso.scope === 'week';
+  const agotado = aviso.state === 'exhausted';
+  const titulo = agotado
+    ? t('quotaExhausted', { scope: t(semana ? 'quotaExWeek' : 'quotaExSession') })
+    : t('quotaNear', { left: Math.max(0, 100 - Math.round(aviso.percent || 0)), scope: t(semana ? 'quotaNearWeek' : 'quotaNearSession') });
+  const texto = aviso.reset_at ? t('quotaResets', { when: cuando(aviso.reset_at, idioma) }) : '';
+  // Ámbar si queda poco; rojo si ya no queda. Una línea, acciones a la derecha.
   return (
-    <div className={`aviso-cuota ${aviso.state === 'exhausted' ? 'is-agotado' : ''}`} role="status">
-      <span>{texto}</span>
-      <button type="button" className="aviso-cuota__x" onClick={onCerrar} aria-label={t('quotaDismiss')}>
-        <IconX size={13} />
-      </button>
-    </div>
+    <Aviso tipo={agotado ? 'mal' : 'warn'} icono="uso" titulo={titulo} texto={texto} className="aviso-cuota-nuevo"
+      acciones={(
+        <>
+          <Link to="/account/usage" className="pill-btn pill-btn--outline">{t('seeUsage')}</Link>
+          <button type="button" className="pill-btn pill-btn--ghost pill-btn--icono" onClick={onCerrar} aria-label={t('quotaDismiss')} title={t('quotaDismiss')}>
+            <IconX size={14} />
+          </button>
+        </>
+      )} />
   );
 }

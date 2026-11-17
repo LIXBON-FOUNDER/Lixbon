@@ -574,6 +574,29 @@
     {
       "type": "function",
       "function": {
+        "name": "show_preview",
+        "description": "Abre para el usuario, en el panel derecho de la sesión de Coding, la app que corre en un puerto del entorno. Úsala SOLO cuando el usuario pida ver la interfaz o la app. Antes arranca el servidor de desarrollo en segundo plano con run_command usando la ruta base de $LIXBON_PREVIEW_BASE (con {port} sustituido): p. ej. `npx vite --host 127.0.0.1 --port 5173 --base \"$base\"`. Para comprobarla tú, usa browser_navigate.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "description": "Puerto donde escucha el servidor de desarrollo"
+            },
+            "path": {
+              "type": "string",
+              "description": "Ruta que abrir, por defecto /"
+            }
+          },
+          "required": [
+            "port"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "browser_navigate",
         "description": "Abre una URL o un archivo del workspace (index.html, web/, logo.svg: HTML, SVG, PDF, imágenes…) en el navegador del agente y devuelve el snapshot con refs [eN] y los errores de JavaScript de la página. Úsalo para ver y probar lo que construyes, páginas con JavaScript, formularios, sesiones iniciadas o el localhost del usuario; para solo leer una web, fetch_url basta.",
         "parameters": {
@@ -953,6 +976,11 @@
       "description": "Enseñar una imagen al usuario"
     },
     {
+      "name": "show_preview",
+      "args": "port, path?",
+      "description": "Abrir la app en el panel de vista previa"
+    },
+    {
       "name": "browser_navigate",
       "args": "url, new_tab?",
       "description": "Abrir una página o un archivo del proyecto en el navegador"
@@ -1036,7 +1064,8 @@
     "todo",
     "web_search",
     "browser_viewport",
-    "show_image"
+    "show_image",
+    "show_preview"
   ],
   "mutating": [
     "append_file",
@@ -1173,6 +1202,10 @@
     "show_image": [
       "path",
       "caption"
+    ],
+    "show_preview": [
+      "port",
+      "path"
     ]
   }
 }

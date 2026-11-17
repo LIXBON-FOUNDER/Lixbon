@@ -45,6 +45,9 @@ type Toolbox struct {
 	Remote bool
 	// OnImage recibe cada imagen que el agente enseña con show_image.
 	OnImage func(ShownImage)
+	// OnPreview abre la vista previa de la app (show_preview). Solo en las
+	// sesiones de Coding en la nube; nil oculta la herramienta.
+	OnPreview func(ShownPreview)
 	// OnTodo avisa a la interfaz de que la lista de pasos cambió.
 	OnTodo func(items, previous []TodoItem)
 	// OnOutput recibe la salida cruda de run_command mientras corre (desde
@@ -168,6 +171,8 @@ func (tb *Toolbox) dispatch(ctx context.Context, name string, args map[string]an
 		return tb.askUser(ctx, args), nil
 	case "show_image":
 		return tb.showImage(ctx, args)
+	case "show_preview":
+		return tb.showPreview(ctx, args)
 	}
 	return dispatch(ctx, tb.Root, name, args)
 }

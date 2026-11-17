@@ -41,6 +41,8 @@ logger = logging.getLogger("lixbon.quota")
 
 UNLIMITED = -1
 PLANES_CON_VISUALS = ("pro", "advance")
+# Sesiones de Coding en la nube (entorno aislado por sesión): Pro y Advance.
+PLANES_CON_CODING = ("pro", "advance")
 
 # Época fija (lunes 00:00 UTC) desde la que se cuentan los ciclos semanales de
 # créditos. No representa nada especial; solo hace falta que sea siempre la
@@ -122,6 +124,17 @@ def render_limits(user_data: dict[str, Any], plan: dict[str, Any]) -> tuple[int,
     base = VISUAL_RENDERS_DEFAULT.get(plan.get("id"), (0, 0))
     images, videos = plan.get("visual_renders_per_day"), plan.get("visual_video_renders_per_day")
     return (base[0] if images is None else int(images), base[1] if videos is None else int(videos))
+
+
+def ensure_can_use_coding(user_data: dict[str, Any], plan: dict[str, Any]) -> None:
+    """Las sesiones de Coding en la nube son de Pro y Advance; los admins siempre."""
+    if user_data.get("role") == "admin" or plan.get("id") in PLANES_CON_CODING:
+        return
+    raise HTTPException(status_code=403, detail={
+        "code": "coding_requires_plan",
+        "scope": "plan",
+        "message": "Las sesiones de Coding en la nube están en los planes Pro y Advance. Mejora tu plan para usarlas.",
+    })
 
 
 def ensure_can_use_visuals(user_data: dict[str, Any], plan: dict[str, Any]) -> None:

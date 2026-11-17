@@ -24,7 +24,8 @@ from core.persistence.queries import (
     touch_remote_session,
 )
 from core.security.auth import security_headers_middleware
-from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, connectors, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills, espacios
+from core.gateway.routers import admin, admin_panel, ask, attachments, auth, avatar, billing, chat, coding, connectors, conversations, ide_auth, images, installer, keys, nodes_admin, nodes_link, oauth, payments, remote, status, support, team, team_issues, versions, ws_status, monitor, visuals, mcp, skills, espacios
+from core.sandbox.alcance import AlcanceCodingMiddleware
 
 FOUNDER_URL = "https://founder.lixbon.com"
 
@@ -69,8 +70,16 @@ async def lifespan(app: FastAPI):
         from core.gateway.agentes import iniciar_programador
         programador = iniciar_programador()
 
+    # Coding: pausa los entornos inactivos y borra los abandonados.
+    barrido_coding = None
+    if _os.getenv("CODING_BARRIDO", "1") != "0":
+        from core.sandbox.ciclo import iniciar_barrido
+        barrido_coding = iniciar_barrido()
+
     yield
 
+    if barrido_coding is not None:
+        barrido_coding.cancel()
     if programador is not None:
         programador.cancel()
     if render_stop is not None:
@@ -110,6 +119,9 @@ app.add_middleware(
 )
 
 app.middleware("http")(security_headers_middleware)
+# Alcance del token de los contenedores de Coding (lixbon_ct_): fija por ruta
+# qué sesión puede usarlo. ASGI puro: cubre también los WebSockets.
+app.add_middleware(AlcanceCodingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(ide_auth.router)   # /ide/connect + canje del IDE
@@ -129,6 +141,7 @@ app.include_router(admin_panel.router)
 app.include_router(installer.router)
 app.include_router(versions.router)
 app.include_router(remote.router)
+app.include_router(coding.router)     # /api/coding/*: sesiones de Coding en la nube
 app.include_router(ws_status.router)
 app.include_router(monitor.router)
 app.include_router(status.router)    # /api/status público (página /status)

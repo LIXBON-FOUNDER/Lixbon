@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { IconX, IconTrash, IconCopiar } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';
 import { useT } from '../i18n/useT';
+import { Rombos } from './Pulido';
 
 export function ShareDialog({ conversationId, onClose }) {
   const t = useT('dialogs');
@@ -87,8 +88,8 @@ export function ShareDialog({ conversationId, onClose }) {
             <p className="card__muted modal__desc">
               {t('shareDescInactive')}
             </p>
-            <button className="pill-btn pill-btn--primary modal__cta" onClick={enable} disabled={busy}>
-              {busy ? t('creating') : t('createShareLink')}
+            <button className={`pill-btn pill-btn--primary modal__cta ${busy ? 'is-esperando' : ''}`} onClick={enable} disabled={busy} aria-busy={busy}>
+              {busy && <Rombos />}{busy ? t('creating').replace(/…$/, '') : t('createShareLink')}
             </button>
           </>
         )}

@@ -11,6 +11,7 @@ import { LogoMarca } from '../components/LogosMarcas';
 import { useConfirmar } from '../hooks/useConfirmar';
 import { desconectarGithub, estadoGithub, estadoGithubConocido } from '../lib/github';
 import { ConectarGithub } from '../components/ConectarGithub';
+import { Rombos } from '../components/Pulido';
 import '../styles/github.css';
 
 const AVISOS_GITHUB = ['connected', 'installed', 'requested', 'cancelled', 'error', 'session', 'expired'];
@@ -111,7 +112,9 @@ function AccionGithub({ estado, onCambio }) {
         <a className="icon-btn" href={estado.manage_url} target="_blank" rel="noreferrer"
           aria-label={tg('manage')} title={tg('manage')}><IconExternal size={16} /></a>
       )}
-      <button type="button" className="pill-btn" onClick={quitar} disabled={ocupado}>{tg('disconnect')}</button>
+      <button type="button" className={`pill-btn pill-btn--ghost ${ocupado ? 'is-danger is-esperando' : ''}`} onClick={quitar} disabled={ocupado} aria-busy={ocupado}>
+        {ocupado && <Rombos />}{ocupado ? tg('disconnecting') : tg('disconnect')}
+      </button>
     </span>
   );
 }

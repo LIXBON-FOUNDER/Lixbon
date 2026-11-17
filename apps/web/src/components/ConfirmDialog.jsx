@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { IconX } from './Icons';
 import { useCierreAnimado } from '../hooks/useCierreAnimado';
 import { useT } from '../i18n/useT';
+import { Rombos } from './Pulido';
 
 export function ConfirmDialog({
   title,
@@ -56,11 +57,12 @@ export function ConfirmDialog({
             {tc('cancel')}
           </button>
           <button
-            className={danger ? 'pill-btn pill-btn--primary is-danger' : 'pill-btn pill-btn--primary'}
+            className={`${danger ? 'pill-btn pill-btn--primary is-danger' : 'pill-btn pill-btn--primary'} ${busy ? 'is-esperando' : ''}`}
             disabled={!canConfirm}
+            aria-busy={busy}
             onClick={() => onConfirm(password)}
           >
-            {busy ? (busyLabel || t('processing')) : (confirmLabel || tc('confirm'))}
+            {busy && <Rombos />}{busy ? (busyLabel || t('processing')).replace(/…$/, '') : (confirmLabel || tc('confirm'))}
           </button>
         </div>
       </div>

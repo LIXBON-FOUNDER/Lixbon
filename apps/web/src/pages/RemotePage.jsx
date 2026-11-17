@@ -13,6 +13,7 @@ import { ShimmerText } from '../components/ShimmerText';
 import { Markdown } from '../components/Markdown';
 import { WaveText } from '../components/WaveText';
 import { RemoteOrch } from '../components/RemoteOrch';
+import { CodingInicio, CodingSesion } from '../components/Coding';
 import { Select } from '../components/Select';
 import { IconBook, IconChevron, IconCli, IconClip, IconFile, IconIde, IconImage, IconMenu, IconNext, IconSend, IconStop, IconX } from '../components/Icons';
 import { LogoMark, LogoTrabajando } from '../components/Logo';
@@ -28,7 +29,8 @@ export default function RemotePage() {
   const t = useT('remote');
   const tc = useT('common');
   const tch = useT('chat');
-  useSeo({ title: t('seoTitle'), noindex: true });
+  const tco = useT('coding');
+  useSeo({ title: tco('seoTitle'), noindex: true });
   const { token } = useParams();
   const [params] = useSearchParams();
   const elegida = params.get('s');
@@ -65,19 +67,33 @@ export default function RemotePage() {
   useEffect(() => {
     if (token) return;
     if (!elegida) { setSession(null); return; }
-    if (session?.id === elegida) return;
     const ya = remotas.find((x) => x.id === elegida);
-    if (ya) { setSession(ya); return; }
+    if (ya) {
+      // La barra puede renombrar la sesión abierta: la cabecera sigue el título
+      // nuevo sin recargar ni perder el hilo del chat.
+      setSession((actual) => (actual?.id === ya.id && actual.title === ya.title && actual.status === ya.status
+        && JSON.stringify(actual.sandbox) === JSON.stringify(ya.sandbox)
+        ? actual
+        : ya));
+      return;
+    }
+    if (session?.id === elegida) return;
     let vivo = true;
     api.get('/api/remote/sessions')
       .then((res) => {
         const s = (res.data.sessions || []).find((x) => x.id === elegida);
-        if (vivo) { if (s) setSession(s); else navigate('/remote', { replace: true }); }
+        if (vivo) { if (s) setSession(s); else navigate('/coding', { replace: true }); }
       })
       .catch(() => {});
     return () => { vivo = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elegida, token, remotas]);
+
+  // Coding: las sesiones en la nube se ven como una conversación del chat, y
+  // sin sesión elegida se empieza una (las del CLI/IDE siguen como Remoto).
+  if (!token && session?.source === 'cloud') {
+    return <CodingSesion key={session.id} session={session} />;
+  }
 
   return (
     <section className={`chat-main remote-main ${session ? 'remote-page--session' : ''}`}>
@@ -91,7 +107,7 @@ export default function RemotePage() {
         >
           <IconMenu />
         </button>
-        <span className="chat-header__seccion">{session ? '' : t('badge')}</span>
+        <span className="chat-header__seccion">{session ? '' : tco('badge')}</span>
       </header>
 
       {claiming ? (
@@ -101,18 +117,17 @@ export default function RemotePage() {
       ) : session ? (
         <RemoteSession key={session.id} session={session} t={t} tc={tc} />
       ) : (
-        <RemoteInicio t={t} hayActivas={remotas.some((x) => x.status === 'online')} />
+        <CodingInicio remoto={<ConectarRemoto t={t} />} />
       )}
     </section>
   );
 }
 
-// Sin sesión elegida: el colibrí y cómo conectar una desde el IDE o el CLI.
-// Las sesiones se eligen en la barra lateral (modo Remoto).
-function RemoteInicio({ t, hayActivas }) {
+// Cómo conectar una sesión del IDE o el CLI (/remote). En Coding se enseña a
+// quien no tiene plan para sesiones en la nube: las remotas siguen siendo suyas.
+function ConectarRemoto({ t }) {
   return (
-    <HeroInicio>
-      <h2 className="chat-hero__title">{t('homeTitle')}<br /><em>{t('homeTitleEm')}</em></h2>
+    <>
       {/* Las dos formas de conectar en una tarjeta de un solo tono (sin rayas),
           con el isotipo posado en el borde; la guía va debajo como enlace. */}
       <div className="remote-inicio">
@@ -133,8 +148,7 @@ function RemoteInicio({ t, hayActivas }) {
         <span>{t('homeDocs')}</span>
         <IconNext size={14} />
       </Link>
-      <p className="remote-inicio__nota">{hayActivas ? t('homePickActive') : t('homePick')}</p>
-    </HeroInicio>
+    </>
   );
 }
 

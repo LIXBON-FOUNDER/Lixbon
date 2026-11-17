@@ -70,6 +70,12 @@ type Command struct {
 	Effort      string       `json:"effort"`
 	ID          string       `json:"id"`
 	Value       string       `json:"value"`
+	// Coding: carpeta del árbol (tree), título/cuerpo del PR (create_pr) y
+	// modo del agente (config: auto, manual, ask o plan).
+	Mode  string `json:"mode"`
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
 }
 
 // Attachment es un adjunto de un prompt: una imagen en base64 o un documento
@@ -153,7 +159,15 @@ func (l *Link) Start(ctx context.Context, hello map[string]any) error {
 	if err != nil {
 		return err
 	}
-	l.sessionID, l.shareURL = session.ID, session.ShareURL
+	l.shareURL = session.ShareURL
+	l.Attach(session.ID, hello)
+	return nil
+}
+
+// Attach engancha el enlace a una sesión que ya existe: en Coding la crea el
+// gateway y el host del contenedor solo se conecta a ella.
+func (l *Link) Attach(sessionID string, hello map[string]any) {
+	l.sessionID = sessionID
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
 	fields := map[string]any{"source": l.Source, "title": l.Title, "machine": l.Machine}
@@ -164,7 +178,6 @@ func (l *Link) Start(ctx context.Context, hello map[string]any) error {
 	l.wg.Add(2)
 	go l.readCommands()
 	go l.flushLoop()
-	return nil
 }
 
 // QR devuelve el QR unicode del enlace, o vacío si el gateway no lo da.
@@ -439,7 +452,9 @@ func (l *Link) consume(body io.ReadCloser) {
 
 func (l *Link) dispatch(cmd Command, id, decision string) {
 	switch cmd.Type {
-	case "prompt", "interrupt", "files", "config":
+	// git_diff, tree, read_file, git_log, procs, stop_proc y create_pr solo los
+	// manda la web a un host de Coding.
+	case "prompt", "interrupt", "files", "config", "git_diff", "tree", "read_file", "git_log", "procs", "stop_proc", "create_pr":
 		l.deliver(cmd)
 	case "approve":
 		l.mu.Lock()

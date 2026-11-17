@@ -10,6 +10,9 @@ import { useConfirmar } from '../hooks/useConfirmar';
 import { useIsCompact } from '../hooks/useMediaQuery';
 import { api } from '../lib/api';
 import { Sidebar } from './Sidebar';
+import { NuevaSesionModal } from './Coding';
+import { ShareDialog } from './ShareDialog';
+import { MoverEspacio } from './MoverEspacio';
 import { Logo } from './Logo';
 
 const CONV_PAGE = 10; // conversaciones por página: las 10 recientes y otras 10 con «Cargar más»
@@ -23,7 +26,7 @@ function seccionDe(pathname) {
   const partes = pathname.split('/').filter(Boolean);
   if (partes[0] === 'es') partes.shift();
   if (partes[0] === 'visuals') return 'visuals';
-  if (partes[0] === 'remote') return 'remote';
+  if (partes[0] === 'remote' || partes[0] === 'coding') return 'remote';
   if (partes[0] === 'integraciones') return 'integraciones';
   if (partes[0] === 'espacios' || partes[0] === 'agentes') return 'espacios';
   return 'chat';
@@ -41,6 +44,7 @@ function visualDe(pathname) {
 
 export default function AppShell() {
   const t = useT('chat');
+  const ts = useT('sidebar');
   const tc = useT('common');
   const { user, loading, logout } = useAuth();
   const confirmar = useConfirmar();
@@ -50,6 +54,7 @@ export default function AppShell() {
   const seccion = seccionDe(pathname);
   const activeId = convDe(pathname);
   const visualId = visualDe(pathname);
+  const remotaActiva = seccion === 'remote' ? params.get('s') : null;
 
   // «Chat» y «Visuals» vuelven a donde estabas: la última conversación o el
   // último visual abierto (o el lienzo vacío si lo último fue uno nuevo).
@@ -78,6 +83,13 @@ export default function AppShell() {
   // Avisos que lanza el marco (renombrar o borrar desde la barra) y que pinta
   // la página de dentro con su propio toast.
   const [aviso, setAviso] = useState(null);
+  // Avisos breves de la barra (abajo a la izquierda, 5 s), con acción opcional.
+  const [toast, setToast] = useState(null);
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 5000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
@@ -88,7 +100,7 @@ export default function AppShell() {
   // cuando la lista se acerca al final.
   const loadConversations = useCallback(async () => {
     try {
-      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}`);
+      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}&archived=false`);
       const page = res.data.conversations;
       // Refrescar solo renueva la primera página: lo que ya trajo «Cargar
       // más» se conserva, para que la lista no se encoja tras cada mensaje.
@@ -108,7 +120,7 @@ export default function AppShell() {
     if (moreRef.current) return;
     moreRef.current = true;
     try {
-      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}&offset=${conversationsRef.current.length}`);
+      const res = await api.get(`/api/conversations?limit=${CONV_PAGE}&archived=false&offset=${conversationsRef.current.length}`);
       const page = res.data.conversations;
       setConversations((prev) => {
         const seen = new Set(prev.map((c) => c.id));
@@ -178,6 +190,120 @@ export default function AppShell() {
     return true;
   }, [activeId, confirmar, loadConversations, navigate, t, tc]);
 
+  // Chats fijados: se piden aparte (pueden no estar entre los 10 recientes).
+  const [fijados, setFijados] = useState([]);
+  const loadFijados = useCallback(() => {
+    if (!user) { setFijados([]); return; }
+    api.get('/api/conversations?pinned=true&archived=false&limit=30')
+      .then((res) => setFijados(res.data.conversations || []))
+      .catch(() => {});
+  }, [user]);
+  useEffect(() => { loadFijados(); }, [loadFijados]);
+
+  const avisar = useCallback((texto, accion) => setToast({ texto, accion, n: Date.now() }), []);
+
+  const pinConversation = useCallback(async (id, pinned) => {
+    try {
+      await (pinned ? api.post(`/api/conversations/${id}/pin`) : api.delete(`/api/conversations/${id}/pin`));
+    } catch { avisar(ts('sessionActionFailed')); }
+    loadFijados();
+    loadConversations();
+  }, [avisar, loadConversations, loadFijados, ts]);
+
+  const archiveConversation = useCallback(async (id) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    setFijados((prev) => prev.filter((c) => c.id !== id));
+    try {
+      await api.post(`/api/conversations/${id}/archive`);
+      avisar(ts('chatArchived'), {
+        label: ts('undo'),
+        fn: async () => {
+          await api.delete(`/api/conversations/${id}/archive`).catch(() => {});
+          loadConversations();
+          loadFijados();
+        },
+      });
+    } catch {
+      avisar(ts('sessionActionFailed'));
+      loadConversations();
+      loadFijados();
+    }
+  }, [avisar, loadConversations, loadFijados, ts]);
+
+  const [mover, setMover] = useState(null); // chat que se mueve a un espacio
+  const [compartir, setCompartir] = useState(null); // id del chat a compartir
+
+  // Sesiones (nube, CLI, IDE) desde la barra: se pinta al instante y la
+  // respuesta del servidor manda después.
+  const cambiarRemota = useCallback(async (id, cambios) => {
+    setRemotas((prev) => prev.map((r) => (r.id === id ? {
+      ...r,
+      ...cambios,
+      ...(cambios.pinned ? { archived: false } : {}),
+      ...(cambios.archived ? { pinned: false } : {}),
+    } : r)));
+    try {
+      const res = await api.patch(`/api/remote/sessions/${id}`, cambios);
+      const ses = res.data?.session;
+      if (ses) setRemotas((prev) => prev.map((r) => (r.id === id ? { ...r, title: ses.title, pinned: ses.pinned, archived: ses.archived } : r)));
+      return true;
+    } catch {
+      avisar(ts('sessionActionFailed'));
+      loadRemotas();
+      return false;
+    }
+  }, [avisar, loadRemotas, ts]);
+
+  const quitarRemota = useCallback(async (r) => {
+    setRemotas((prev) => prev.filter((x) => x.id !== r.id));
+    if (r.id === remotaActiva) {
+      setDrawerOpen(false);
+      navigate('/coding');
+    }
+    try {
+      await (r.source === 'cloud' ? api.delete(`/api/coding/sessions/${r.id}`) : api.post(`/api/remote/sessions/${r.id}/forget`));
+    } catch {
+      avisar(ts('sessionDeleteFailed'));
+      loadRemotas();
+    }
+  }, [avisar, remotaActiva, loadRemotas, navigate, ts]);
+
+  const accionRemota = useCallback((ruta, metodo = 'post') => async (id) => {
+    try {
+      await api[metodo](ruta(id));
+    } catch (err) {
+      avisar(err.response?.data?.detail?.message || ts('sessionActionFailed'));
+    }
+    loadRemotas();
+  }, [avisar, loadRemotas, ts]);
+
+  const accionesRemota = useMemo(() => ({
+    renombrar: (id, title) => cambiarRemota(id, { title }),
+    pin: (id, pinned) => cambiarRemota(id, { pinned }),
+    archivar: (id, archived) => cambiarRemota(id, { archived }),
+    borrar: quitarRemota,
+    terminar: accionRemota((id) => `/api/remote/sessions/${id}`, 'delete'),
+    pausar: accionRemota((id) => `/api/coding/sessions/${id}/pause`),
+    reanudar: accionRemota((id) => `/api/coding/sessions/${id}/resume`),
+  }), [accionRemota, cambiarRemota, quitarRemota]);
+
+  // «Nueva sesión» (Coding): el modal se monta aquí para abrirlo desde la
+  // barra, el atajo o el inicio de Coding.
+  const [nuevaSesion, setNuevaSesion] = useState(null);
+  const abrirNuevaSesion = useCallback((inicial = {}) => setNuevaSesion({ ...inicial, n: Date.now() }), []);
+
+  // Ctrl/Cmd + K: nuevo chat o, en Coding, nueva sesión.
+  useEffect(() => {
+    const f = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== 'k') return;
+      e.preventDefault();
+      if (seccion === 'remote') abrirNuevaSesion();
+      else navigate('/chat');
+    };
+    document.addEventListener('keydown', f);
+    return () => document.removeEventListener('keydown', f);
+  }, [seccion, abrirNuevaSesion, navigate]);
+
   const handleLogout = useCallback(async () => {
     const ok = await confirmar({
       titulo: t('logoutTitle'),
@@ -196,8 +322,8 @@ export default function AppShell() {
 
   const valor = useMemo(() => ({
     conversations, setConversations, loadConversations, renameConversation, deleteConversation,
-    remotas, loadRemotas, openDrawer, drawerOpen, compact, aviso,
-  }), [conversations, loadConversations, renameConversation, deleteConversation, remotas, loadRemotas, openDrawer, drawerOpen, compact, aviso]);
+    remotas, loadRemotas, openDrawer, drawerOpen, compact, aviso, abrirNuevaSesion,
+  }), [conversations, loadConversations, renameConversation, deleteConversation, remotas, loadRemotas, openDrawer, drawerOpen, compact, aviso, abrirNuevaSesion]);
 
   if (loading) {
     return (
@@ -221,8 +347,15 @@ export default function AppShell() {
           activeId={activeId}
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((v) => !v)}
+          fijados={fijados}
           onRename={renameConversation}
           onDelete={deleteConversation}
+          onPin={pinConversation}
+          onArchive={archiveConversation}
+          onMove={setMover}
+          onShare={setCompartir}
+          accionesRemota={accionesRemota}
+          onNuevaSesion={() => abrirNuevaSesion()}
           onLogout={handleLogout}
           compact={compact}
           open={compact && drawerOpen}
@@ -230,13 +363,24 @@ export default function AppShell() {
           seccion={seccion}
           remotas={remotas}
           ultimas={ultimas}
-          remotaActiva={seccion === 'remote' ? params.get('s') : null}
+          remotaActiva={remotaActiva}
         />
         {compact && drawerOpen && (
           <div className="sidebar-scrim" onClick={closeDrawer} aria-hidden="true" />
         )}
         <Outlet />
       </div>
+      {nuevaSesion && <NuevaSesionModal key={nuevaSesion.n} inicial={nuevaSesion} onClose={() => setNuevaSesion(null)} />}
+      {mover && <MoverEspacio conv={mover} onClose={() => setMover(null)} onHecho={() => { setMover(null); loadConversations(); loadFijados(); }} />}
+      {compartir && <ShareDialog conversationId={compartir} onClose={() => setCompartir(null)} />}
+      {toast && (
+        <div className="cd-toast" role="status" key={toast.n}>
+          <span>{toast.texto}</span>
+          {toast.accion && (
+            <button type="button" className="pill-btn pill-btn--outline" onClick={() => { setToast(null); toast.accion.fn(); }}>{toast.accion.label}</button>
+          )}
+        </div>
+      )}
     </ShellContext.Provider>
   );
 }

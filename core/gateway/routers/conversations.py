@@ -23,6 +23,7 @@ from core.persistence.queries import (
     rename_conversation,
     rewind_last_turn,
     set_conversation_archived,
+    set_conversation_pinned,
     set_conversation_share,
 )
 from core.security.auth import web_or_api_key_auth, session_or_api_key
@@ -78,6 +79,7 @@ async def api_list_conversations(
     offset: int = Query(default=0, ge=0),
     source: str | None = Query(default=None, max_length=16),
     archived: bool | None = Query(default=None),
+    pinned: bool | None = Query(default=None),
     user_data: dict[str, Any] = Depends(session_or_api_key),
 ):
     # Historial por superficie: cada cliente pide su `source` (web/mobile/ide/cli);
@@ -89,7 +91,8 @@ async def api_list_conversations(
     # Solo el historial del IDE caduca; se purga al listarlo para no depender de un cron.
     if source == "ide":
         purge_inactive_conversations(user_data["id"], "ide", IDE_PURGE_DAYS)
-    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q, source=source, archived=archived)
+    items = list_conversations(user_data["id"], limit=limit, offset=offset, q=q, source=source,
+                               archived=archived, pinned=pinned)
     return {"conversations": items, "limit": limit, "offset": offset}
 
 
@@ -178,6 +181,38 @@ async def api_unarchive_conversation(
     if not set_conversation_archived(conversation_id, user_data["id"], False):
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
     return {"id": conversation_id, "archived": False}
+
+
+@router.post("/api/conversations/{conversation_id}/pin")
+async def api_pin_conversation(conversation_id: str, user_data: dict[str, Any] = Depends(session_or_api_key)):
+    if not set_conversation_pinned(conversation_id, user_data["id"], True):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"id": conversation_id, "pinned": True}
+
+
+@router.delete("/api/conversations/{conversation_id}/pin")
+async def api_unpin_conversation(conversation_id: str, user_data: dict[str, Any] = Depends(session_or_api_key)):
+    if not set_conversation_pinned(conversation_id, user_data["id"], False):
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"id": conversation_id, "pinned": False}
+
+
+class EspacioPayload(BaseModel):
+    espacio_id: str | None = Field(default=None, max_length=64)
+
+
+@router.put("/api/conversations/{conversation_id}/espacio")
+async def api_move_conversation(conversation_id: str, payload: EspacioPayload,
+                                user_data: dict[str, Any] = Depends(session_or_api_key)):
+    """Mover el chat a un espacio (o sacarlo con null) desde la barra lateral."""
+    from core.persistence import espacios as store_espacios
+    try:
+        ok = await run_in_threadpool(store_espacios.mover_conversacion, user_data["id"], conversation_id, payload.espacio_id)
+    except store_espacios.ErrorEspacio as exc:
+        raise HTTPException(status_code=exc.codigo, detail=exc.detalle)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+    return {"id": conversation_id, "espacio_id": payload.espacio_id}
 
 
 @router.post("/api/conversations/{conversation_id}/rewind")

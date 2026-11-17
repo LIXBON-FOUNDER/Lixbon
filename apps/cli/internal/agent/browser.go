@@ -60,6 +60,10 @@ func (s *Session) browserAllowed(origin string) bool {
 // ToolAllowed dice si se le ofrece la herramienta al modelo: las del
 // navegador solo con el navegador activo, y la captura solo si ve imágenes.
 func (s *Session) ToolAllowed(name string) bool {
+	if name == "show_preview" {
+		// Solo en una sesión de Coding: allí hay un panel donde abrirla.
+		return s.Tools != nil && s.Tools.OnPreview != nil
+	}
 	if !toolspec.IsBrowser(name) {
 		return true
 	}

@@ -14,17 +14,29 @@ export function LogoMark({ size = 26, className = '' }) {
   );
 }
 
-// El isotipo mientras el agente trabaja: la chispa gira dentro del rombo. La
-// chispa recorta con una máscara, así sirve sobre cualquier fondo.
+// El isotipo mientras el agente trabaja: quieto, y una ola de color suave lo
+// recorre en diagonal (verde de marca → verde agua → ámbar pálido). La chispa
+// sigue calada, así sirve sobre cualquier fondo. Con «reducir movimiento» la
+// ola no se monta (SMIL no atiende a la media query de CSS).
+const quieto = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
 export function LogoTrabajando({ size = 18 }) {
-  const id = useId();
+  const id = useId().replace(/:/g, '');
   return (
     <svg className="logo-trabajo" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <mask id={id}>
-        <path d={ROMBO} fill="#fff" />
-        <path className="logo-trabajo__chispa" d={CHISPA} fill="#000" />
-      </mask>
-      <path d={ROMBO} fill="currentColor" mask={`url(#${id})`} />
+      <defs>
+        <linearGradient id={`${id}g`} x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse" spreadMethod="repeat">
+          <stop offset="0" stopColor="#B4C64E" />
+          <stop offset="0.35" stopColor="#86C9A0" />
+          <stop offset="0.65" stopColor="#DCCF86" />
+          <stop offset="1" stopColor="#B4C64E" />
+          {!quieto() && (
+            <animateTransform attributeName="gradientTransform" type="translate"
+              from="0 0" to="32 32" dur="2.6s" repeatCount="indefinite" />
+          )}
+        </linearGradient>
+      </defs>
+      <path d={`${ROMBO}${CHISPA}`} fillRule="evenodd" fill={`url(#${id}g)`} />
     </svg>
   );
 }

@@ -28,7 +28,7 @@
   border-radius: var(--radius-chip);
   background: var(--surface-3);
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -49,7 +49,7 @@
   padding: 9px 10px;
   border-radius: var(--radius);
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 15px;
   text-align: left;
   transition: background 0.18s ease, color 0.18s ease;
 }
@@ -82,7 +82,7 @@
   padding: 7px 10px 7px 41px;
   border-radius: var(--radius);
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   transition: background 0.18s ease, color 0.18s ease;
 }
@@ -150,7 +150,7 @@
   border-radius: var(--radius-round);
   background: var(--surface-5);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
 }
 
@@ -163,7 +163,7 @@
 }
 
 .adm__name {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -177,7 +177,7 @@
   border-radius: var(--radius-chip);
   background: #ce7f25;
   color: var(--surface-0);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
 }
 
@@ -214,7 +214,7 @@
 
 .adm__lead {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
   text-wrap: pretty;
 }
@@ -246,7 +246,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
   transition: background 0.18s ease, color 0.18s ease;
 }
@@ -282,7 +282,7 @@
 .adm-btn--sm {
   height: 30px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .adm-btn.is-danger {
@@ -318,14 +318,14 @@
 
 .adm-card__title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--ink-title);
 }
 
 .adm-card__nota {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   color: var(--ink-label);
   text-wrap: pretty;
@@ -353,7 +353,7 @@
 }
 
 .adm-stat__label {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -368,7 +368,7 @@
 }
 
 .adm-stat__pie {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -380,7 +380,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
@@ -416,7 +416,7 @@
   background: var(--surface-2);
   color: var(--ink-soft);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .adm-chips {
@@ -453,7 +453,7 @@ a.adm-btn {
 }
 
 .adm-tabla__th {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -478,7 +478,7 @@ a.adm-btn {
 
 .adm-tabla__td {
   min-width: 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -488,7 +488,7 @@ a.adm-btn {
 .adm-tabla__td--num {
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -525,7 +525,7 @@ a.adm-btn {
   border-radius: var(--radius-round);
   background: var(--surface-4);
   color: var(--ink-body);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .adm-quien__txt {
@@ -542,7 +542,7 @@ a.adm-btn {
 }
 
 .adm-quien__mail {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -576,7 +576,7 @@ a.adm-btn {
   background: none;
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
 }
 
@@ -598,7 +598,7 @@ a.adm-btn {
 }
 
 .adm-campo__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -618,7 +618,7 @@ a.adm-btn {
   background: var(--field);
   color: var(--ink);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
   transition: background 0.18s ease;
 }
@@ -661,7 +661,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: var(--field);
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -671,7 +671,7 @@ a.adm-btn {
 
 .adm-file__nombre {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-soft);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -682,7 +682,7 @@ a.adm-btn {
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
 }
 
@@ -701,13 +701,13 @@ a.adm-btn {
 }
 
 .adm-medida__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
 }
 
 .adm-medida__valor {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -730,12 +730,12 @@ a.adm-btn {
 }
 
 .adm-medida--gruesa .adm-medida__label {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
 }
 
 .adm-medida--gruesa .adm-medida__valor {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
 }
 
@@ -768,12 +768,12 @@ a.adm-btn {
 }
 
 .adm-aviso__titulo {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--danger-ink);
 }
 
 .adm-aviso__sub {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
 }
 
@@ -811,7 +811,7 @@ a.adm-btn {
 }
 
 .adm-token__aviso {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
   text-wrap: pretty;
 }
@@ -823,7 +823,7 @@ a.adm-btn {
   background: var(--surface-0);
   color: var(--code-inline);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   word-break: break-all;
   white-space: pre-wrap;
 }
@@ -831,7 +831,7 @@ a.adm-btn {
 .adm-vacio {
   padding: 18px 16px;
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -840,7 +840,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: var(--field-error);
   color: var(--danger-ink);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .adm-ok {
@@ -848,7 +848,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: rgba(110, 158, 62, 0.1);
   color: var(--ok);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .adm-pie {
@@ -860,7 +860,7 @@ a.adm-btn {
 }
 
 .adm-pie__cuenta {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-label);
 }
 
@@ -876,7 +876,7 @@ a.adm-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -972,7 +972,7 @@ a.adm-btn {
 
 .adm-columnas__cifra {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -983,7 +983,7 @@ a.adm-btn {
 }
 
 .adm-columnas__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -995,7 +995,7 @@ a.adm-btn {
 }
 
 .adm-metrica__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -1052,12 +1052,12 @@ a.adm-btn {
 
 .adm-nodo__slug {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
 }
 
 .adm-nodo__url {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1071,7 +1071,7 @@ a.adm-btn {
 }
 
 .adm-nodo__score-label {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -1079,7 +1079,7 @@ a.adm-btn {
 
 .adm-nodo__score-valor {
   font-family: var(--font-mono);
-  font-size: 17px;
+  font-size: 18px;
   color: var(--ink);
 }
 
@@ -1109,12 +1109,12 @@ a.adm-btn {
 }
 
 .adm-prov__titulo {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
 }
 
 .adm-prov__sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -1126,7 +1126,7 @@ a.adm-btn {
   border-radius: var(--radius);
   background: var(--surface-2);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -1150,13 +1150,13 @@ a.adm-btn {
 }
 
 .adm-dato__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-label);
 }
 
 .adm-dato__valor {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
 }
 
@@ -1176,12 +1176,12 @@ a.adm-btn {
 }
 
 .adm-ajuste__titulo {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-title);
 }
 
 .adm-ajuste__sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
   text-wrap: pretty;
 }
@@ -1260,7 +1260,7 @@ a.adm-btn {
 
 .adm-modelo__id {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1268,13 +1268,13 @@ a.adm-btn {
 }
 
 .adm-modelo__uso {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-soft);
 }
 
 .adm-modelo__tarifa {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1322,14 +1322,14 @@ a.adm-btn {
 
 .adm-detalle__id {
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 15px;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .adm-detalle__sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -1348,7 +1348,7 @@ a.adm-btn {
 
 .adm-lista__label {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
 }
 
@@ -1357,7 +1357,7 @@ a.adm-btn {
 .adm-lista__valor {
   min-width: 0;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-body);
   text-align: right;
   overflow-wrap: anywhere;
@@ -1371,7 +1371,7 @@ a.adm-btn {
 }
 
 .adm-bloque__label {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -1510,7 +1510,7 @@ a.adm-btn {
   padding: 3px 9px;
   border-radius: var(--radius);
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .adm-chip-add:hover {
@@ -1527,7 +1527,7 @@ a.adm-btn {
   background: var(--field-focus);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 
@@ -1538,7 +1538,7 @@ a.adm-btn {
 .adm-input--sm {
   height: 32px;
   padding: 0 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .adm-fila-campo {
@@ -1592,7 +1592,7 @@ a.adm-btn {
   padding: 0 14px;
   border-radius: calc(var(--radius) - 2px);
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;
 }
