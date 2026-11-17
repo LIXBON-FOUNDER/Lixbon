@@ -38,7 +38,7 @@ use super::provider_requests::{Claim, ProviderRequest, RequestKind};
 use super::queue_commands::{ErrorKind, QueueError};
 use super::steer_commands as cmd;
 use super::Core;
-use crate::store::AttemptStatus;
+use crate::store::{AttemptStatus, AttentionCategory, AttentionStatus, TargetKind};
 
 /// Una respuesta de texto admite hasta 4 000 caracteres.
 pub(super) const MAX_ANSWER_CHARS: usize = 4_000;
@@ -96,7 +96,7 @@ fn answered(attempt_id: &str, request_id: &str, kind: Option<RequestKind>, repla
 
 impl Core {
     /// `attempt_answer`. Ver el diagrama del módulo.
-    pub(super) fn answer_request(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, answer: &str) -> Result<Value, QueueError> {
+    pub(super) fn answer_request(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, answer: &str, mobile_asked_at: Option<u64>) -> Result<Value, QueueError> {
         check_ids(attempt_id, Some(request_id))?;
         let attempt = self.attempt_for_answer(attempt_id)?;
         if attempt.status.is_final() {
@@ -108,10 +108,20 @@ impl Core {
             .ok_or_else(|| busy("not_running", format!("el Attempt {} no tiene una ejecución viva a la que responder", attempt.id)))?;
         let awaiting = self.awaiting_of(&attempt.task_id).ok_or_else(|| busy("not_running", format!("el Attempt {} no tiene una ejecución viva a la que responder", attempt.id)))?;
 
-        let request = match awaiting.lock().claim(request_id) {
+        let claim = {
+            let mut waiting = awaiting.lock();
+            if mobile_asked_at.is_some() && waiting.is_due(std::time::Instant::now()) {
+                return Err(invalid("stale_question", "venció el plazo de la pregunta"));
+            }
+            waiting.claim(request_id)
+        };
+        let request = match claim {
             Claim::Taken(request) => request,
             Claim::Busy => return Err(busy("in_progress", "esa petición se está respondiendo ahora mismo")),
             Claim::Answered(decision) => {
+                if mobile_asked_at.is_some() {
+                    return Err(invalid("already_answered", "la pregunta ya se respondió"));
+                }
                 let wanted = answer.trim();
                 return if decision == wanted || decision.eq_ignore_ascii_case(wanted) {
                     Ok(answered(&attempt.id, request_id, None, true))
@@ -127,6 +137,9 @@ impl Core {
             awaiting.lock().release(request_id);
             why
         };
+        if mobile_asked_at.is_some_and(|asked_at| request.kind != RequestKind::Question || request.asked_at_ms != asked_at) {
+            return Err(release(invalid("stale_question", "la pregunta pendiente cambió")));
+        }
         let decision = decision_for(&request, answer).map_err(release)?;
         if attempt.status != AttemptStatus::AwaitingTerminalApproval {
             return Err(release(busy("not_waiting", format!("el Attempt {} no está esperando una respuesta", attempt.id))));
@@ -148,7 +161,8 @@ impl Core {
             (RequestKind::Permission, _) => Some("deny"),
             (RequestKind::Question, _) => None,
         };
-        if let Err(why) = self.request_answered(ctx, &attempt.id, &request.id, request.kind.as_str(), decided) {
+        let last_question = (request.kind == RequestKind::Question).then(|| !waiting.has_other_questions(&request.id));
+        if let Err(why) = self.request_answered(ctx, &attempt.id, &request.id, request.kind.as_str(), decided, last_question) {
             eprintln!("[core] el proveedor aceptó la respuesta a {request_id} de {} pero no quedó constancia de la decisión: {why}", attempt.id);
         }
         if waiting.finish(&request.id, &decision) {
@@ -209,11 +223,76 @@ fn person(context: &MutationContext, what: &str) -> Result<(), String> {
 /// `attempt_answer`: solo una Person de Desktop (`HumanDecision`).
 pub(super) fn rpc_answer(core: &Core, context: &MutationContext, input: &AnswerInput) -> Result<Value, String> {
     person(context, "responder a un proveedor")?;
-    core.answer_request(context, &input.attempt_id, &input.request_id, &input.answer).map_err(|e| e.to_string())
+    core.answer_request(context, &input.attempt_id, &input.request_id, &input.answer, None).map_err(|e| e.to_string())
 }
 
 /// `attempt_pending_requests`: solo una Person de Desktop.
 pub(super) fn rpc_pending(core: &Core, context: &MutationContext, input: &PendingInput) -> Result<Value, String> {
     person(context, "ver lo que espera una respuesta")?;
     core.pending_provider_requests(&input.attempt_id).map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct MobileQuestionInput {
+    attention_id: String,
+    attempt_id: String,
+    reply: Option<MobileReply>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MobileReply {
+    request_id: String,
+    asked_at: u64,
+    answer: String,
+    confirm: bool,
+}
+
+impl Core {
+    pub(super) fn mobile_question(&self, user_id: u64, session_id: u64, args: Value) -> Result<Value, String> {
+        use super::policy::Level;
+
+        let input: MobileQuestionInput = serde_json::from_value(args).map_err(|_| "invalid_request: pregunta inválida")?;
+        check_ids(&input.attempt_id, None).map_err(|e| e.to_string())?;
+        if input.attention_id.is_empty() || input.attention_id.len() > 200 || user_id == 0 || session_id == 0 {
+            return Err("invalid_request: destino inválido".into());
+        }
+        let attention = self.storage.attention_get_scoped(&input.attention_id, None)
+            .and_then(Result::ok).flatten().ok_or("stale_question: la pregunta ya no está activa")?;
+        if attention.category != AttentionCategory::Question
+            || attention.target.kind != TargetKind::Attempt
+            || attention.target.id != input.attempt_id
+            || attention.subject.as_deref() != Some(super::attention_rules::PROVIDER_QUESTIONS)
+        {
+            return Err("stale_question: el destino cambió".into());
+        }
+        if attention.status != AttentionStatus::Active {
+            return Err(if attention.resolution == Some(crate::store::Resolution::Acted) {
+                "already_answered: la pregunta ya se respondió"
+            } else {
+                "stale_question: la pregunta dejó de estar activa"
+            }.into());
+        }
+        let policy = super::policy::mobile_policy(self, super::policy::Category::Answer, attention.project_id.as_deref(), &input.attempt_id)?;
+        if let Some(reply) = input.reply {
+            match policy {
+                Level::Allow => {}
+                Level::Confirm if reply.confirm => {}
+                Level::Confirm => return Err("policy_confirm_required: confirma el destino".into()),
+                Level::Elevated => return Err("policy_out_of_band_required: responde desde Desktop".into()),
+                Level::Deny => return Err("policy_denied: la policy impide responder".into()),
+            }
+            let context = self.mobile_context(user_id, session_id)?;
+            return self.answer_request(&context, &input.attempt_id, &reply.request_id, &reply.answer, Some(reply.asked_at)).map_err(|e| e.to_string());
+        }
+        let attempt = self.attempt_for_answer(&input.attempt_id).map_err(|e| e.to_string())?;
+        let pending = self.pending_provider_requests(&input.attempt_id).map_err(|e| e.to_string())?;
+        let questions = pending["requests"].as_array().into_iter().flatten()
+            .filter(|r| r["kind"] == "question").collect::<Vec<_>>();
+        Ok(json!({
+            "project_id": attention.project_id, "task_id": attempt.task_id, "attempt_id": attempt.id,
+            "policy": policy.as_str(), "questions": questions
+        }))
+    }
 }

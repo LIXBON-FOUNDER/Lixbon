@@ -38,8 +38,9 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_y_fork
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
-        // Mobile, automatización y agentes: nada de estas categorías (invariante 3: un agente no hereda el alcance humano).
-        for a in [ActorClass::MobilePerson, ActorClass::Automation, ActorClass::Agent] {
+        let mobile = if matches!(c, Category::Answer | Category::Start) { Level::Confirm } else { Level::Deny };
+        assert_eq!(baseline(ActorClass::MobilePerson, c), mobile);
+        for a in [ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());
         }
         // Start/retry/resume siguen pendientes de Desktop; queue, steer, stop, fork, review e integrate exigen confirmación.

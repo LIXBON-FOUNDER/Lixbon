@@ -18,6 +18,8 @@ test('distingue unsupported, unavailable, blocked y available desde la matriz de
 test('reanudar requiere la sesión de ese intento y un perfil permitido', () => {
   const capabilities = { resume: { state: 'available' } };
   assert.match(capabilitySummary({ capabilities })[0].detail, /no tiene una sesión/);
+  assert.equal(capabilitySummary({ capabilities })[0].stateLabel, 'No disponible ahora');
   assert.match(capabilitySummary({ capabilities, session: { bound: true, resumable: true } })[0].detail, /Sesión nativa disponible/);
   assert.match(capabilitySummary({ capabilities, profile_block: 'windows_sandbox_elevated' })[0].detail, /sandbox/);
+  assert.equal(capabilitySummary({ capabilities, profile_block: 'windows_sandbox_elevated' })[0].stateLabel, 'Bloqueado por el entorno');
 });

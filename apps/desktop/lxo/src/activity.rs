@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 106] = [
+pub(crate) const MESSAGE_KEYS: [&str; 107] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -97,6 +97,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 106] = [
     "activity.attempt.queue_failed",
     "activity.attempt.instruction_requested",
     "activity.attempt.instruction_result",
+    "activity.attempt.question_requested",
     "activity.attempt.request_answered",
     "activity.attempt.usage_reported",
     "activity.attempt.dispatch_ambiguous",
@@ -620,6 +621,7 @@ fn attempt(key: &str, a: &A) -> Option<String> {
             }
         }
         // Responder al proveedor (LXO-247): solo el tipo y, en un permiso, allow/deny. Nunca el texto de una respuesta libre.
+        "activity.attempt.question_requested" => format!("El {at} pide una respuesta al proveedor."),
         "activity.attempt.request_answered" => match a.code("kind", &REQUEST_KINDS)? {
             "question" if !a.present("decision") => format!("Se respondió una pregunta del proveedor en el {at}."),
             "permission" if a.code("decision", &REQUEST_DECISIONS)? == "allow" => format!("Se permitió lo que el proveedor pedía en el {at}."),
@@ -973,6 +975,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.queue_failed"
         | "activity.attempt.instruction_requested"
         | "activity.attempt.instruction_result"
+        | "activity.attempt.question_requested"
         | "activity.attempt.request_answered"
         | "activity.attempt.usage_reported"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),

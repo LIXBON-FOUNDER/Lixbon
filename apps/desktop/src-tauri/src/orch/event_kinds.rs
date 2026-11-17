@@ -1278,6 +1278,8 @@ pub(super) struct AttemptRequestAnswered {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     decision: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_question: Option<bool>,
 }
 
 impl EventPayload for AttemptRequestAnswered {
@@ -1286,8 +1288,24 @@ impl EventPayload for AttemptRequestAnswered {
     const CLASS: EventClass = EventClass::State;
 }
 
-pub(super) fn attempt_request_answered(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<EventDraft, EventError> {
-    attempt_draft(a, t, &AttemptRequestAnswered { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), kind, decision })
+pub(super) fn attempt_request_answered(a: &AttemptRow, t: &TaskRow, request_id: &str, kind: &'static str, decision: Option<&'static str>, last_question: Option<bool>) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptRequestAnswered { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), kind, decision, last_question })
+}
+
+#[derive(Serialize)]
+struct AttemptQuestionRequested {
+    task: String,
+    n: i64,
+}
+
+impl EventPayload for AttemptQuestionRequested {
+    const KIND: &'static str = "attempt.question_requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_question_requested(a: &AttemptRow, t: &TaskRow) -> Result<EventDraft, EventError> {
+    attempt_draft(a, t, &AttemptQuestionRequested { task: a.task_id.clone(), n: a.n })
 }
 
 /// Una ventana de cuota de la CUENTA del proveedor, tal como la declaró durante un turno (LXO-249): una foto de cuánto llevaba gastado, no lo que

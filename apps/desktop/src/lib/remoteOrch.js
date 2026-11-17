@@ -10,7 +10,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { DEFAULT_COLS, ptyCols } from './orchTermSize';
 import { useOrchStore, prepareOrchestrate } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
-import { handleCoreAction } from './remoteCore';
+import { CORE_RELAY_PROTOCOL, handleCoreAction } from './remoteCore';
 import { sanitizePrUrl } from './remotePrUrl';
 
 const RUNS = 12;
@@ -124,7 +124,7 @@ const known = (task) => !!useOrchStore.getState().snap?.tasks?.[task];
 /** Una acción que llega del controller. Las respuestas a peticiones puntuales
     (diff, terminal, agentes) van como eventos efímeros; los errores, como
     `orch_error` para que el controller los enseñe. */
-export async function handleOrchAction(action, args = {}) {
+export async function handleOrchAction(action, args = {}, mobile) {
   const fail = (message) => emitFn?.('orch_error', { action, message: String(message) });
   const orch = useOrchStore.getState();
   try {
@@ -194,6 +194,23 @@ export async function handleOrchAction(action, args = {}) {
             models: (a.models || []).slice(0, 60).map((m) => m.id), efforts: a.efforts || [],
           })),
         });
+        return;
+      }
+      case 'mobile_question':
+      case 'mobile_launch_approval': {
+        const { rid, ...input } = args;
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(rid || '') || !mobile) return;
+        const emit = emitFn;
+        const fields = { rid, protocol: CORE_RELAY_PROTOCOL };
+        try {
+          const result = await invoke(`orch_${action}`, {
+            userId: mobile.user_id, sessionId: mobile.session_id, args: input,
+          });
+          emit?.(`orch_${action}`, { ...fields, ok: true, result });
+        } catch (error) {
+          const code = String(error?.message ?? error).match(/^(?:[a-z_]+\/)?([a-z_]+):/)?.[1] || 'core_error';
+          emit?.(`orch_${action}`, { ...fields, ok: false, code });
+        }
         return;
       }
       case 'core_snapshot':

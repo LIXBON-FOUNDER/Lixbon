@@ -255,13 +255,16 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         {
           flexDirection: 'row',
           gap: 8,
           borderRadius: sm ? RADIUS_SM : RADIUS,
           paddingHorizontal: sm ? 12 : 18,
-          height: lg ? 50 : sm ? 36 : 44,
+          minHeight: lg ? 50 : sm ? 36 : 44,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: bg,
@@ -272,7 +275,7 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
       ]}
     >
       {icon ? <Icon name={icon} size={16} color={fg} /> : null}
-      <Text style={{ fontFamily: danger || outline ? FONTS.uiMedium : FONTS.uiSemiBold, fontSize: sm ? 13.5 : 15, color: fg }}>{label}</Text>
+      <Text style={{ flexShrink: 1, textAlign: 'center', fontFamily: danger || outline ? FONTS.uiMedium : FONTS.uiSemiBold, fontSize: sm ? 13.5 : 15, color: fg }}>{label}</Text>
     </Pressable>
   );
 }

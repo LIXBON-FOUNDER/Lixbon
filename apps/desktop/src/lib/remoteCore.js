@@ -75,6 +75,7 @@ export function slimAttention(a) {
     run_id: id(a?.run_id),
     occurrence: int(a?.occurrence),
     created_at: int(a?.created_at),
+    ...(a?.launch_approval === true ? { launch_approval: true } : {}),
   };
 }
 

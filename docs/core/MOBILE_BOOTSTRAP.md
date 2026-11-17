@@ -2,7 +2,7 @@
 
 Estado: **implementado**. Mobile arranca su vista observacional desde la [snapshot compacta del
 Core](QUERIES.md#compact_snapshot) (LXO-94) y sigue los cambios por el Event Log desde su cursor, sin el
-webview ni la interfaz de Desktop. Solo lectura: no hay comandos operacionales, push ni cola offline.
+webview ni la interfaz de Desktop. La bandeja usa lecturas del Core y permite responder preguntas de proveedor (LXO-164).
 
 ## Ruta e identidad
 
@@ -84,6 +84,37 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
   * Sin conexión, el móvil enseña los últimos intentos que vio de esa tarea, guardados solo en memoria (no en
     disco), y los marca como desactualizados con su edad.
   * El gateway admite las dos acciones en `ORCH_ACTIONS` y sus respuestas como `EPHEMERAL_EVENTS`.
+
+## Preguntas del proveedor (LXO-164)
+
+Si el IDE anuncia `mobile_question`, una Attention de categoría `question` con destino
+`attempt` abre la consulta y respuesta de la pregunta. El relé vuelve a autenticar una
+sesión Mobile vigente de la cuenta dueña con cada operación. El gateway asigna el
+identificador de correlación del host y entrega la respuesta únicamente al WebSocket
+que pidió la operación. El contenido de la pregunta y la respuesta no se persiste ni
+se reentrega por el relé cuando se reconecta.
+
+El Core comprueba la Attention, el Attempt, la petición pendiente y la policy vigente.
+Mobile muestra Project, Task e Attempt antes de enviar. La respuesta a la pregunta
+requiere confirmación explícita y reutiliza la entrega idempotente de `attempt_answer`.
+El Event `attempt.question_requested` crea Attention sin guardar el texto de la pregunta.
+El Event `attempt.request_answered` resuelve esa Attention cuando se contesta la última
+pregunta, aunque queden permisos del proveedor. El texto de la respuesta tampoco viaja
+en el Event. Mobile refresca desde el Core y conserva el borrador en memoria si pierde
+la confirmación. La persona puede volver a consultar el estado tras reconectar.
+
+## Aprobación inicial (LXO-165)
+
+Una Attention `approval` incluye `launch_approval: true` si el Core la vinculó al lanzamiento
+de un Attempt. Con la capability `mobile_launch_approval`, la bandeja abre el intento, el
+proveedor, el perfil, el host y la estrategia de worktree. Usa el mismo canal autenticado
+y dirigido que las preguntas. La decisión requiere confirmación y vence con el plazo
+durable del Core. Repetirla devuelve el estado de resolución vigente.
+
+Mobile admite un lanzamiento gestionado con un worktree nuevo y un perfil compatible.
+Los intentos externos, los worktrees enlazados y las continuaciones se resuelven en Desktop.
+En Windows, Codex requiere evidencia positiva de sandbox no elevado. La policy de lanzamiento
+se vuelve a comprobar al decidir y antes de despachar un intento autorizado desde Mobile.
 
 ## Estados en el móvil
 

@@ -145,6 +145,43 @@ fn la_decision_queda_en_un_event_sin_el_texto_de_una_pregunta() {
 
 // ── Policy de autonomía (LXO-209 · LXO-247) ──────────────────────────────────────────────────────────────────────────────
 
+#[test]
+fn mobile_responde_solo_la_pregunta_actual_y_resuelve_su_attention() {
+    let (w, attempt) = waiting_world(vec![Step::Permission { id: "p1", tool: "Bash" }, Step::Question { id: "q1", text: "¿sigo?".into() }]);
+    wait_until("el Core publica Attention de pregunta", || event_count(&w.core, &attempt, "attempt.question_requested") == 1);
+    let items = w.desktop("attention_list", json!({"category": "question", "target_kind": "attempt", "target_id": attempt})).unwrap();
+    let attention = items["items"][0]["id"].as_str().unwrap();
+    let target = json!({"attention_id": attention, "attempt_id": attempt});
+    let detail = w.core.mobile_question(42, 2, target.clone()).unwrap();
+    assert_eq!(detail["policy"], "confirm");
+    assert_eq!(detail["questions"].as_array().unwrap().len(), 1);
+    assert_eq!(detail["questions"][0]["request_id"], "q1");
+    assert_eq!(detail["questions"][0]["subject"], "¿sigo?");
+    let asked_at = detail["questions"][0]["asked_at"].as_u64().unwrap();
+    let reply = |id, at, confirm| {
+        let mut args = target.clone();
+        args["reply"] = json!({"request_id": id, "asked_at": at, "answer": "allow", "confirm": confirm});
+        w.core.mobile_question(42, 2, args)
+    };
+    assert!(reply("p1", asked_at, true).unwrap_err().contains("stale_question"));
+    assert!(reply("q1", asked_at + 1, true).unwrap_err().contains("stale_question"));
+    assert!(reply("q1", asked_at, false).unwrap_err().contains("policy_confirm_required"));
+    set_level(&w, "answer", "elevated");
+    assert!(reply("q1", asked_at, true).unwrap_err().contains("policy_out_of_band_required"));
+    w.desktop("policy_reset", json!({"scope":{"kind":"global"},"category":"answer","expected_revision":1,"confirm":true})).unwrap();
+
+    assert_eq!(reply("q1", asked_at, true).unwrap()["status"], "Answered");
+    assert!(reply("q1", asked_at, true).unwrap_err().contains("already_answered"));
+    assert_eq!(delivered(&w, "answer_text:"), vec!["answer_text:q1:allow".to_string()]);
+    assert_eq!(active_approvals(&w.core), 1, "el permiso elevado de Bash sigue pendiente");
+    let item = w.desktop("attention_detail", json!({"attention_id": attention})).unwrap();
+    assert_eq!(item["status"], "resolved");
+    assert_eq!(item["resolution"], "acted");
+    answer(&w, &attempt, "p1", "deny").unwrap();
+    w.adapter.release_hold();
+    w.settled(&attempt, "done");
+}
+
 /// PERMITIR un permiso del proveedor es `provider_permissions` (piso `confirm`): sin `confirm: true` el Core no toca al proveedor, la
 /// petición sigue pendiente y no queda Event. Con la confirmación explícita se entrega.
 #[test]

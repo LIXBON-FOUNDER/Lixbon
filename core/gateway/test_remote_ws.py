@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from core.gateway import remote_hub
 from core.gateway.routers import remote
 
-SESS = {"id": "s1", "user_id": 7, "status": "online", "title": "t", "agent": "claude"}
+SESS = {"id": "s1", "user_id": 7, "status": "online", "title": "t", "agent": "claude", "source": "ide"}
 
 
 @pytest.fixture
@@ -64,6 +64,77 @@ def test_comando_invalido_devuelve_ack_con_error(client):
         phone.send_json({"op": "cmd", "rid": "r2", "command": {"type": "prompt", "text": "x"}})
         ack = until(phone, "ack")
         assert ack["ok"] is False and ack["status"] == 409
+
+
+@pytest.mark.parametrize("action,args", [
+    ("core_attempt_capabilities", {"attempt_id": "t1-a2", "refresh": True}),
+    ("core_attempt_context", {"attempt_id": "t1-a2"}),
+    ("core_usage", {"refresh": True}),
+])
+def test_resumen_mobile_f4_atraviesa_websocket_y_no_se_repite_al_reconectar(client, action, args):
+    with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
+        until(host, "channel")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            payload = {"type": "orch", "action": action, "args": {**args, "rid": "f4"}}
+            phone.send_json({"op": "cmd", "rid": "outer", "command": payload})
+            assert until(phone, "ack")["ok"] is True
+            command = until(host, "orch")
+            assert command["action"] == action
+            assert command["args"] == payload["args"]
+            result = {"type": f"orch_{action}", "rid": "f4", "protocol": 1, "ok": True, "summary": {"status": "ready"}}
+            host.send_json({"op": "events", "rid": "host-result", "events": [result]})
+            until(host, "ack")
+            assert until(phone, result["type"])["summary"] == {"status": "ready"}
+
+        assert remote.hub.replay(remote.hub.get("s1"), 0) == []
+        with client.websocket_connect("/api/remote/sessions/s1/ws?from_seq=0", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            phone.send_json({"op": "ping"})
+            assert phone.receive_json()["type"] == "pong"
+
+
+@pytest.mark.parametrize(("action", "extra"), [
+    ("mobile_question", {}),
+    ("mobile_launch_approval", {"decision": "approve", "confirm": True}),
+])
+def test_operacion_mobile_valida_credencial_y_entrega_solo_al_controller(client, monkeypatch, action, extra):
+    identities = {
+        "Bearer lixbon_at_mobile": {"id": 7, "session_id": 42, "client": "mobile"},
+        "Bearer lixbon_at_other": {"id": 8, "session_id": 43, "client": "mobile"},
+        "Bearer lixbon_at_ide": {"id": 7, "session_id": 44, "client": "ide"},
+    }
+    monkeypatch.setattr(remote, "authenticate", lambda _cookie, token, _limit: identities[token])
+    args = {"rid": "p1", "attention_id": "att_1", "attempt_id": "t1-a1", **extra}
+    command = {"type": "orch", "action": action, "args": args, "mobile": {"user_id": 8, "session_id": 999}}
+    with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
+        until(host, "channel")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer reader"}) as other:
+            until(other, "channel_status")
+            with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer reader"}) as phone:
+                until(phone, "channel_status")
+                for credential in ("api-key", "lixbon_at_other", "lixbon_at_ide"):
+                    phone.send_json({"op": "cmd", "rid": "outer", "command": command, "credential": credential})
+                    assert until(phone, "ack")["status"] == 403
+
+                spoofed = {**command, "args": {**args, "scope": "desktop"}}
+                phone.send_json({"op": "cmd", "rid": "spoof", "command": spoofed, "credential": "lixbon_at_mobile"})
+                assert until(phone, "ack")["status"] == 422
+
+                phone.send_json({"op": "cmd", "rid": "outer", "command": command, "credential": "lixbon_at_mobile"})
+                assert until(phone, "ack")["ok"] is True
+                forwarded = until(host, "orch")
+                assert forwarded["mobile"] == {"user_id": 7, "session_id": 42}
+                assert forwarded["args"]["rid"] != "p1"
+                assert "credential" not in forwarded
+                event = {"type": f"orch_{action}", "rid": forwarded["args"]["rid"], "result": {"status": "privada"}}
+                host.send_json({"op": "events", "events": [event]})
+                assert until(phone, f"orch_{action}")["rid"] == "p1"
+                other.send_json({"op": "ping"})
+                assert other.receive_json()["type"] == "pong"
+                channel = remote.hub.get("s1")
+                assert remote.hub.replay(channel, 0) == []
+                assert all(cmd.get("action") != action for _, cmd in channel.recent_cmds)
 
 
 def test_con_eventos_en_el_buffer_no_se_pide_un_snapshot_que_los_borre(client):

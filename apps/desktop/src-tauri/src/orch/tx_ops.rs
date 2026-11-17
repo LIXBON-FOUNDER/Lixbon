@@ -69,6 +69,7 @@ pub(super) fn recovered_effect(
     let channel = match record.channel.as_str() {
         "ui" => Channel::Ui,
         "lxo" => Channel::Lxo,
+        "mobile" => Channel::Mobile,
         "core" => Channel::Core,
         _ => return None,
     };

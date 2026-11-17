@@ -241,6 +241,7 @@ impl Core {
             }),
             AdapterEvent::Permission { .. } | AdapterEvent::Question { .. } => {
                 let Some(request) = ProviderRequest::from_event(&event, now_ms()) else { return };
+                let question = matches!(event, AdapterEvent::Question { .. });
                 // Con el candado de las peticiones tomado ANTES que el del Core (`mutate_as`): `attempt_answer` lo hace en el mismo orden.
                 let mut awaiting = state.awaiting.lock();
                 if awaiting.knows(&request.id) {
@@ -248,14 +249,22 @@ impl Core {
                 }
                 if awaiting.waiting() {
                     awaiting.push(request); // otra petición mientras se espera: comparte el plazo de la primera
-                    return;
-                }
-                let deadline_ms = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
-                let result = self.mutate_as(&core, |tx| tx.await_terminal_approval(task, deadline_ms).map(|_| ()));
-                if result.is_ok() {
+                } else {
+                    let deadline_ms = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
+                    if let Err(e) = self.mutate_as(&core, |tx| tx.await_terminal_approval(task, deadline_ms).map(|_| ())) {
+                        eprintln!("[core] no pudo registrar la espera del proveedor: {e}");
+                        return;
+                    }
                     awaiting.begin(request, Instant::now() + ttl);
                 }
-                result
+                if question {
+                    if let Some(live) = self.live_view(task) {
+                        if let Err(e) = self.provider_question_requested(&live.attempt_id) {
+                            eprintln!("[core] no pudo registrar la pregunta del proveedor: {e}");
+                        }
+                    }
+                }
+                Ok(())
             }
             // El uso que el proveedor declaró en este turno (LXO-249): un hecho durable por turno, solo con lo declarado.
             AdapterEvent::Usage { input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, limits } => {
