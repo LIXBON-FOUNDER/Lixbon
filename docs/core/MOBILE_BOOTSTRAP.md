@@ -116,6 +116,21 @@ verificación debe realizarse al recibirlos. Muestra la reanudación nativa por 
 en el resumen de capacidades. El mensaje `orch_core_attempt_context` es efímero y la
 memoria móvil se separa por host e intento, con advertencia de antigüedad offline.
 
+### Uso de proveedores (LXO-208)
+
+Home de Supervisar abre Uso de proveedores. `core_usage` llama únicamente a
+`usage_report` del Core y devuelve su informe resumido en `orch_core_usage`, efímero.
+Se validan el contrato, las cuentas como huellas de ocho hexadecimales y los valores
+numéricos. Los errores viajan como código, sin el texto del diagnóstico.
+
+Cada proveedor tiene su tarjeta, con soporte campo por campo, cuota por ventana,
+plan, créditos, tokens y coste declarado cuando existen. Un valor ausente aparece
+como sin dato. El estado y la hora de observación acompañan al resultado, incluidos
+datos antiguos, errores de autenticación y límites de consulta. Se limita el resumen
+a 30 proveedores, 20 ventanas y 30 modelos por proveedor, con aviso explícito de recorte.
+La vista conserva el último informe en memoria por host y consulta solo en primer
+plano, al reconectar, periódicamente y mediante Actualizar uso.
+
 `apps/mobile/src/observe/bootstrap.js` (sin React Native; se prueba con `node --test`).
 
 | Estado | Cuándo |

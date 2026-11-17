@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import providers from '../../../../docs/core/fixtures/api/provider_capabilities.v1.json';
 import contextPreview from '../../../../docs/core/fixtures/api/context_package_preview.v1.json';
 import contextInvalid from '../../../../docs/core/fixtures/api/context_package_preview_invalid.v1.json';
+import usageFixture from '../../../../docs/core/fixtures/api/usage_report.v1.json';
 import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttempt, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTEMPTS_MAX, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
 
 describe('Mobile F4 · capacidades', () => {
@@ -69,6 +70,41 @@ describe('Mobile F4 · ContextPackage', () => {
       notes: ['truncated', 'redacted', 'attachment_omitted'],
       counts: { redactions: 2, truncated_fields: 1, attachments_bytes: 12 * 1024 * 1024 },
     });
+  });
+});
+
+describe('Mobile F4 · Usage', () => {
+  const query = async (response) => handleCoreAction('core_usage', { rid: 'r', refresh: true }, vi.fn().mockImplementation(async (cmd, args) => {
+    expect(cmd).toBe('usage_report');
+    expect(args).toEqual({ refresh: true });
+    return response;
+  }));
+  it('mantiene datos parciales, estados y códigos y excluye diagnósticos y cuentas sin huella', async () => {
+    const report = structuredClone(usageFixture);
+    report.providers[0].snapshot.account = 'SENTINEL-ACCOUNT';
+    report.providers[0].snapshot.secret = 'SENTINEL-TOKEN';
+    report.providers[0].snapshot.credits.balance = 'SENTINEL-BALANCE';
+    report.providers[2].error.message = 'SENTINEL-DIAGNOSTIC';
+    const out = await query({ v: 1, status: 'ready', refreshing: false, report });
+    expect(out.fields.summary.providers).toHaveLength(4);
+    expect(out.fields.summary.providers[0].snapshot.account).toBeNull();
+    expect(out.fields.summary.providers[1].snapshot.windows[0].used_percent).toBeNull();
+    expect(out.fields.summary.providers[2].error).toBe('auth_required');
+    expect(JSON.stringify(out)).not.toContain('SENTINEL');
+  });
+  it('cargando no fabrica cuotas y un fallo del contrato no publica datos', async () => {
+    const loading = await query({ v: 1, status: 'loading', refreshing: true, report: null });
+    expect(loading.fields.summary.providers).toEqual([]);
+    const invalid = await query({ v: 99, status: 'ready', refreshing: false, report: usageFixture });
+    expect(invalid.fields.ok).toBe(false);
+  });
+  it('un proveedor stale conserva el dato antiguo y el código de rate limit', async () => {
+    const report = structuredClone(usageFixture);
+    report.providers[0].status = 'stale';
+    report.providers[0].error = { kind: 'rate_limited', message: 'privado' };
+    const out = await query({ v: 1, status: 'ready', refreshing: false, report });
+    expect(out.fields.summary.providers[0]).toMatchObject({ status: 'stale', error: 'rate_limited', snapshot: { models: [{ cost_usd: 0.5 }] } });
+    expect(out.fields.summary.providers[0].snapshot.credits.balance).toBe('42');
   });
 });
 
