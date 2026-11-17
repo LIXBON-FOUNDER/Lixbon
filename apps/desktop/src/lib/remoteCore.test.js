@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import providers from '../../../../docs/core/fixtures/api/provider_capabilities.v1.json';
+import contextPreview from '../../../../docs/core/fixtures/api/context_package_preview.v1.json';
+import contextInvalid from '../../../../docs/core/fixtures/api/context_package_preview_invalid.v1.json';
 import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttempt, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTEMPTS_MAX, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
 
 describe('Mobile F4 · capacidades', () => {
@@ -19,6 +21,54 @@ describe('Mobile F4 · capacidades', () => {
     const result = await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 't-a2' }, call);
     expect(result.fields.summary.capabilities.answer.state).toBe('unknown');
     expect((await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 'ajeno' }, call)).fields.ok).toBe(false);
+  });
+});
+
+describe('Mobile F4 · ContextPackage', () => {
+  const attempt = { id: contextPreview.package.source.attempt_id, task_id: contextPreview.package.source.task_id, provider: contextPreview.package.source.provider };
+  const query = async (preview) => handleCoreAction('core_attempt_context', { rid: 'r', attempt_id: attempt.id }, vi.fn().mockImplementation(async (cmd, args) => {
+    if (cmd === 'attempt_detail_v2') return { attempt };
+    expect(cmd).toBe('context_package_get');
+    expect(args).toEqual({ attempt_id: attempt.id });
+    if (preview instanceof Error) throw preview;
+    return preview;
+  }));
+  it('usa el paquete guardado y transmite solo metadatos del contenido verificado', async () => {
+    const out = await query(contextPreview);
+    expect(out.fields.summary).toMatchObject({ status: 'valid', checksum: 'verified', counts: { decisions: 2, files: 2 }, tests: { passed: 1441 }, portable: false });
+    const raw = JSON.stringify(out.fields.summary);
+    expect(raw).not.toContain(contextPreview.package.objective);
+    expect(raw).not.toContain('attachment_data');
+    expect(raw).not.toContain('thread_summary');
+    expect(raw).not.toContain('command');
+  });
+  it('no publica contenido de un paquete alterado ni del paquete de otro intento', async () => {
+    expect((await query(contextInvalid)).fields.summary).toMatchObject({ status: 'invalid', portable: false });
+    const other = structuredClone(contextPreview);
+    other.package.source.attempt_id = 'another-a1';
+    const out = await query(other);
+    expect(out.fields.summary).toMatchObject({ status: 'invalid', error: 'source_mismatch' });
+    expect(out.fields.summary).not.toHaveProperty('counts');
+  });
+  it('distingue un paquete ausente de uno corrupto y reemplaza el dato antiguo', async () => {
+    expect((await query(new Error('context_store_not_found: privado'))).fields.summary.status).toBe('absent');
+    const out = await query(new Error('context_store_corrupt: privado'));
+    expect(out.fields.summary.status).toBe('invalid');
+    expect(JSON.stringify(out)).not.toContain('privado');
+  });
+  it('conserva las señales de redacción y recorte y el peso total de adjuntos', async () => {
+    const partial = structuredClone(contextPreview);
+    partial.summary.completeness = 'partial';
+    partial.summary.notes = ['truncated', 'redacted', 'attachment_omitted'];
+    partial.summary.counts.redactions = 2;
+    partial.summary.counts.truncated_fields = 1;
+    partial.summary.counts.attachments_bytes = 12 * 1024 * 1024;
+    const out = await query(partial);
+    expect(out.fields.summary).toMatchObject({
+      completeness: 'partial', portability: 'partial', portable: false,
+      notes: ['truncated', 'redacted', 'attachment_omitted'],
+      counts: { redactions: 2, truncated_fields: 1, attachments_bytes: 12 * 1024 * 1024 },
+    });
   });
 });
 

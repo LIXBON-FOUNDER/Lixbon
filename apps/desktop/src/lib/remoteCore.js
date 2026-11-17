@@ -8,6 +8,7 @@
 // Ninguna de estas acciones escribe en el Core. Contrato: docs/core/MOBILE_BOOTSTRAP.md.
 
 import { CAPABILITIES, validateProviderCapabilities } from '../ade/providerCapabilitiesContract.js';
+import { validateContextPreview } from '../ade/contextPreviewContract.js';
 
 /** Capability que anuncia el host en su `hello`: sin ella, el móvil sabe que el IDE es anterior. */
 export const CORE_SNAPSHOT_CAPABILITY = 'core_snapshot';
@@ -190,6 +191,42 @@ export function slimAttemptCapabilities(attempt, snapshot) {
   };
 }
 
+/** Solo metadatos del paquete verificado por el Core. El contenido permanece en el host. */
+export function slimContextPackage(preview, attempt) {
+  validateContextPreview(preview);
+  if (preview.status === 'invalid') {
+    return { attempt_id: attempt.id, status: 'invalid', error: preview.error.code, portable: false };
+  }
+  const pkg = preview.package;
+  if (pkg.source.attempt_id !== attempt.id || pkg.source.task_id !== attempt.task_id || pkg.source.provider !== attempt.provider) {
+    return { attempt_id: attempt.id, status: 'invalid', error: 'source_mismatch', portable: false };
+  }
+  const counts = preview.summary.counts;
+  const attachments = preview.attachments;
+  const missing = Array.isArray(attachments) ? attachments.some((item) => !item.omitted && item.stored !== true) : pkg.attachments?.length > 0;
+  let portability = 'ready';
+  if (preview.summary.completeness === 'partial') portability = 'partial';
+  else if (missing) portability = 'attachments_missing';
+  else if (counts.attachments > 0) portability = 'attachments_not_verified';
+  return {
+    attempt_id: attempt.id,
+    status: 'valid',
+    package_id: preview.package_id,
+    source: { project_id: id(pkg.source.project_id), task_id: id(pkg.source.task_id), attempt_id: id(pkg.source.attempt_id), provider: text(pkg.source.provider, 60) },
+    created_at_ms: int(pkg.created_at_ms),
+    serialized_bytes: preview.summary.serialized_bytes,
+    completeness: preview.summary.completeness,
+    notes: preview.summary.notes,
+    counts: Object.fromEntries(Object.entries(counts).filter(([key]) => ['decisions', 'constraints', 'files', 'untracked', 'artifacts', 'attachments', 'attachments_bytes', 'attachments_omitted', 'attachments_not_scanned', 'redactions', 'truncated_fields'].includes(key))),
+    objective_chars: [...pkg.objective].length,
+    revision: pkg.revision ? { base_commit: text(pkg.revision.base_commit, 64), head_commit: text(pkg.revision.head_commit, 64) } : null,
+    tests: pkg.test_results ? { passed: int(pkg.test_results.passed), failed: int(pkg.test_results.failed), ignored: int(pkg.test_results.ignored), source: 'package_reported' } : null,
+    portability,
+    portable: portability === 'ready',
+    checksum: preview.verification.identity,
+  };
+}
+
 export function slimTaskDetail(t) {
   const messages = Array.isArray(t?.messages) ? t.messages : [];
   const answered = new Set(messages.map((m) => m?.reply_to).filter((x) => x !== null && x !== undefined));
@@ -305,7 +342,7 @@ export function parseCoreRequest(action, raw = {}) {
     if (!id(raw.attempt_id) || !raw.attempt_id) return { rid, code: 'invalid_request' };
     return { rid, args: { attempt_id: raw.attempt_id } };
   }
-  if (action === 'core_attempt_capabilities') {
+  if (action === 'core_attempt_capabilities' || action === 'core_attempt_context') {
     if (!id(raw.attempt_id) || !raw.attempt_id || (raw.refresh !== undefined && typeof raw.refresh !== 'boolean')) {
       return { rid, code: 'invalid_request' };
     }
@@ -340,11 +377,28 @@ export async function handleCoreAction(action, raw, call) {
       core_attempts: 'orch_core_attempts',
       core_attempt: 'orch_core_attempt',
       core_attempt_capabilities: 'orch_core_attempt_capabilities',
+      core_attempt_context: 'orch_core_attempt_context',
     }[action] ||
     'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
   try {
+    if (action === 'core_attempt_context') {
+      const detail = await call('attempt_detail_v2', { attempt_id: req.args.attempt_id });
+      const attempt = detail?.attempt;
+      if (attempt?.id !== req.args.attempt_id) throw new Error('invalid_response: destino inesperado');
+      let summary;
+      try {
+        const stored = await call('context_package_get', { attempt_id: attempt.id });
+        summary = slimContextPackage(stored, attempt);
+      } catch (error) {
+        const code = coreErrorCode(error);
+        if (code === 'context_store_not_found') summary = { attempt_id: attempt.id, status: 'absent', portable: false };
+        else if (code === 'context_store_corrupt') summary = { attempt_id: attempt.id, status: 'invalid', error: 'stored_corrupt', portable: false };
+        else throw error;
+      }
+      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, summary } };
+    }
     if (action === 'core_attempt_capabilities') {
       const detail = await call('attempt_detail_v2', { attempt_id: req.args.attempt_id });
       if (detail?.attempt?.id !== req.args.attempt_id) throw new Error('invalid_response: destino inesperado');

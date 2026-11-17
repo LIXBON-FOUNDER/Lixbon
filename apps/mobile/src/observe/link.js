@@ -15,6 +15,7 @@ const RESPONSES = {
   orch_core_attempts: 'core_attempts',
   orch_core_attempt: 'core_attempt',
   orch_core_attempt_capabilities: 'core_attempt_capabilities',
+  orch_core_attempt_context: 'core_attempt_context',
 };
 const DEFAULT_TIMEOUT_MS = 20000;
 
