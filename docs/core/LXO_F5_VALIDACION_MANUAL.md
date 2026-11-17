@@ -12,7 +12,7 @@ simulados; esto cubre el tramo Desktop → Core → proveedor.
    `<USERPROFILE>\.lixbon` y no toca el perfil real. Con ese cambio hacen falta además `CARGO_HOME` y `RUSTUP_HOME`
    explícitos para compilar.
 3. **Proveedor.** Con otro `USERPROFILE` Codex no tiene sesión y se queda en `awaiting_terminal_approval`
-   (la terminal no es accesible desde Orquestar). Apunta `CODEX_HOME` a la carpeta real de Codex.
+   (hasta LXO-252 la terminal no era accesible desde Orquestar; ahora está en la pestaña Terminal del detalle del run). Apunta `CODEX_HOME` a la carpeta real de Codex. Ojo: Codex resuelve su home con la API del sistema, no con `USERPROFILE`; un perfil aislado no basta para dejarlo sin sesión, y un `CODEX_HOME` vacío cancela el Attempt en vez de dejarlo esperando.
 4. **Project.** No hay botón para registrarlo. Desde la consola del webview (F12):
    `await window.__TAURI_INTERNALS__.invoke('orch_project_add', { path: '<repo>', name: '<nombre>' })`.
 5. **Repo desechable sin remoto.** Para `integrate merge`, con `user.name` y `user.email` fijados en el repo (si no,
