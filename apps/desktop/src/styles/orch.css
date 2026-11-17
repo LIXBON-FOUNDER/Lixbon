@@ -118,6 +118,9 @@
 
 .orch__main { display: flex; flex-direction: column; }
 .orch__head { height: auto; min-height: 54px; gap: 12px; padding-top: 8px; padding-bottom: 8px; flex-wrap: wrap; }
+/* LXO-255: `[data-ui='ide'] .panelhead` (ide.css) fija la altura en 48px y gana a la regla de arriba por especificidad: la cabecera
+   desbordaba sobre las pestañas. Aquí se repite el selector para que la cabecera crezca con su contenido. */
+[data-ui='ide'] .orch__head { height: auto; min-height: 54px; padding-top: 8px; padding-bottom: 8px; row-gap: 6px; }
 .orch__head-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .orch__head-text .panelhead__meta { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; white-space: normal; }
 .orch__tabs { display: flex; align-items: center; gap: 12px; padding: 0 16px 10px; }

@@ -6,6 +6,8 @@ import { useOrchStore } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
 import { useWorkbenchStore } from '../store/workbenchStore';
 import { live } from '../ade/testFixtures/providerCapabilitiesFixtures';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -411,6 +413,17 @@ describe('OrchestratorMode', () => {
     mountWith(snapshot([task('t3', { status: 'awaiting_terminal_approval' })]));
     expect(screen.getByTestId('attention-t3').textContent).toContain('Aprobar en la terminal');
     expect(document.querySelector('.orchst--waiting svg circle')).not.toBeNull();
+  });
+
+});
+
+// LXO-255: ide.css fija la altura de todo `.panelhead` con un selector más específico que `.orch__head`; sin repetirlo aquí la cabecera
+// (estado, «Pedido», aviso de la terminal) desborda sobre las pestañas. jsdom no calcula el diseño: se comprueba la regla.
+describe('cabecera del detalle de un run', () => {
+  const css = (name) => readFileSync(resolve(__dirname, '../styles', name), 'utf8');
+  it('la regla que fija la altura del panelhead tiene una réplica para .orch__head con altura automática', () => {
+    expect(css('ide.css')).toMatch(/\[data-ui='ide'\] \.panelhead \{[^}]*height:\s*48px/);
+    expect(css('orch.css')).toMatch(/\[data-ui='ide'\] \.orch__head \{[^}]*height:\s*auto/);
   });
 });
 
