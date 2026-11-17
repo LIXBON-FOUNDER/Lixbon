@@ -44,6 +44,12 @@ mod events_read;
 mod events_read_tests;
 mod effect_journal;
 mod pr_url;
+mod deep_link;
+mod deep_link_read;
+#[cfg(test)]
+mod deep_link_tests;
+#[cfg(test)]
+mod deep_link_read_tests;
 mod tx_ops;
 #[cfg(test)]
 mod events_tests;
