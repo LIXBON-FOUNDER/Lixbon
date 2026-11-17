@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -25,7 +25,7 @@ function mount({ status = 'pending_approval', afterDecision = 'running', decide 
     }
     if (payload.query === 'provider_capabilities') return live();
     if (payload.query === 'activity_list') return attemptActivityPage([]);
-    return attemptDetail({ id: 't3-a1', task_id: 't3', status: state.status });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status: state.status });
   });
   return state;
 }
@@ -44,12 +44,12 @@ describe('AttemptApproval (LXO-141)', () => {
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
     await flush();
     expect(screen.getByTestId('attempt-approval')).toBeTruthy();
-    const readsBefore = state.calls.filter((c) => c.payload?.query === 'attempt_detail').length;
+    const readsBefore = state.calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length;
     fireEvent.click(screen.getByTestId('attempt-approve'));
     await flush();
 
     expect(decisions(state)).toEqual([{ command: 'orch_call', payload: { cmd: 'attempt_approve', args: { attempt_id: 't3-a1' } } }]);
-    expect(state.calls.filter((c) => c.payload?.query === 'attempt_detail').length).toBeGreaterThan(readsBefore);
+    expect(state.calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length).toBeGreaterThan(readsBefore);
     // Ya no está pendiente: la decisión desaparece con el estado nuevo.
     expect(screen.queryByTestId('attempt-approval')).toBeNull();
   });

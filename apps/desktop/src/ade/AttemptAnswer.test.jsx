@@ -5,7 +5,7 @@ import { AttemptAnswer, MAX_ANSWER_CHARS } from './AttemptAnswer';
 import { AttemptDetail } from './AttemptDetail';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -36,7 +36,7 @@ function mountCore({ requests = [PERMISSION], liveRun = true, answer } = {}) {
     }
     if (payload?.query === 'provider_capabilities') return live();
     if (payload?.query === 'activity_list') return attemptActivityPage([]);
-    return attemptDetail({ id: 't3-a1', task_id: 't3', status: 'awaiting_terminal_approval' });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status: 'awaiting_terminal_approval' });
   });
   return state;
 }
@@ -182,7 +182,7 @@ describe('AttemptAnswer en el detalle del Attempt', () => {
     invoke.mockImplementation(async (command, payload) => {
       if (payload?.query === 'provider_capabilities') return live();
       if (payload?.query === 'activity_list') return attemptActivityPage([]);
-      return attemptDetail({ id: 't3-a1', task_id: 't3', status: 'running' });
+      return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', status: 'running' });
     });
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
     await flush();

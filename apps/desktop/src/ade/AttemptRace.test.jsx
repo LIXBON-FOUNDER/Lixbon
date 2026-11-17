@@ -5,7 +5,7 @@ import { AttemptDetail } from './AttemptDetail';
 import { validateRace, validateRaceList } from './raceContract';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -63,7 +63,7 @@ function mountCore({ caps = liveWith([provider('fake-completo'), provider('otro'
       return { v: 1, source_attempt_id: 't3-a1', races: past };
     }
     if (payload.query === 'attempt_compare') throw new Error('compare no se abre solo');
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
   });
   return { calls, state };
 }

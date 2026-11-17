@@ -5,7 +5,7 @@ import { AttemptDetail } from './AttemptDetail';
 import { validateAttemptLineage } from './forkContract';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { CANONICAL_INVALID, validVariant } from './testFixtures/contextPreviewFixtures';
 import { live, liveWith, provider } from './testFixtures/providerCapabilitiesFixtures';
@@ -46,7 +46,7 @@ function mountCore({
     if (payload.query === 'pending_queue') return { v: 1, attempt_id: 't3-a1', task_id: 't3', items: [], finished: [], finished_limit: 20 };
     if (payload.query === 'attempt_lineage') return typeof lineage === 'function' ? lineage() : lineage;
     if (payload.query === 'context_package_preview') return typeof preview === 'function' ? preview(payload) : preview;
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
   });
   return calls;
 }

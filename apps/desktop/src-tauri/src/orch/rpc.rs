@@ -443,6 +443,7 @@ impl Core {
             "task_detail_v2" => model_read::task_detail(self, &caller, authenticated_context.as_ref(), args),
             "attempts_by_task" => model_read::attempts_by_task(self, &caller, authenticated_context.as_ref(), args),
             "attempt_detail" => model_read::attempt_detail(self, &caller, authenticated_context.as_ref(), args),
+            "attempt_detail_v2" => model_read::attempt_detail_v2(self, &caller, authenticated_context.as_ref(), args),
             "attempt_compare" => super::compare_read::compare(self, &caller, authenticated_context.as_ref(), args),
             "attempt_proof_pack" => {
                 let input: super::proof_pack::ProofPackInput = serde_json::from_value(args.clone()).map_err(|_| "model_invalid_request: Solicitud de Proof Pack inválida".to_string())?;
@@ -844,7 +845,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,

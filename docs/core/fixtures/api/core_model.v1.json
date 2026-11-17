@@ -7,7 +7,8 @@
     "task_list_v2",
     "task_detail_v2",
     "attempts_by_task",
-    "attempt_detail"
+    "attempt_detail",
+    "attempt_detail_v2"
   ],
   "storage": {
     "code": null,

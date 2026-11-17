@@ -28,7 +28,9 @@ export function coreModelFromState(state) {
     const storage = state.data?.storage && typeof state.data.storage === 'object' ? state.data.storage : null;
     // LXO-123: `compat` decide la ventana del shim de navegación F2 (`legacy_task_v1`).
     const compat = Array.isArray(state.data?.compat) ? state.data.compat.filter((c) => typeof c === 'string') : [];
-    return { mode: model, vNext: model === 'task_attempt_v1', code: null, modelKey: model, retry: state.retry, storage, compat };
+    // LXO-244: las queries que el Core anuncia (p. ej. `attempt_detail_v2`): el cliente pide una consulta nueva solo si está aquí.
+    const queries = Array.isArray(state.data?.queries) ? state.data.queries.filter((q) => typeof q === 'string') : [];
+    return { mode: model, vNext: model === 'task_attempt_v1', code: null, modelKey: model, retry: state.retry, storage, compat, queries };
   }
   if (state.error) {
     const code = coreErrorCode(state.error);

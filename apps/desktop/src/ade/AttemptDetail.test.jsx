@@ -14,7 +14,12 @@ const LEGACY = coreModelFromState({ data: VARIANTS.coreModelLegacy, error: null 
 const flush = async () => { await act(async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); }); };
 function mount(handler) {
   const calls = [];
-  invoke.mockImplementation(async (command, payload) => { calls.push(payload); return handler(payload); });
+  // El Core canónico anuncia `attempt_detail_v2` (LXO-244): la misma ejecución con `v: 2` (las fixtures v1 de aquí no traen PR que redactar).
+  invoke.mockImplementation(async (command, payload) => {
+    calls.push(payload);
+    const response = await handler(payload);
+    return payload?.query === 'attempt_detail_v2' && response?.v === 1 ? { ...response, v: 2 } : response;
+  });
   return calls;
 }
 afterEach(() => { cleanup(); invoke.mockReset(); });
@@ -47,7 +52,7 @@ describe('AttemptDetail (LXO-122)', () => {
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} onSelectTask={onSelectTask} />);
     await flush();
     const root = screen.getByTestId('attempt-detail');
-    expect(calls[0]).toEqual({ query: 'attempt_detail', args: { attempt_id: 't3-a1' } });
+    expect(calls[0]).toEqual({ query: 'attempt_detail_v2', args: { attempt_id: 't3-a1' } });
     expect(within(root).getByText('t3-a1')).toBeTruthy();
     expect(within(root).getByText('Terminado', { selector: '.ade-status' })).toBeTruthy();
     expect(within(root).getByText('Proveedor').nextSibling.textContent).toBe('codex · gpt-6.1-sol');
@@ -82,7 +87,7 @@ describe('AttemptDetail (LXO-122)', () => {
     expect(within(activity).getByRole('listitem').textContent).toContain('Completado');
     // Además de las dos lecturas del Attempt, el bloque de capacidades lee lo que ofrece el proveedor (LXO-135) y, con una sesión que se
     // puede reanudar, «Continuar» lee el historial de la Task para saber si este es el último intento, la cola de instrucciones lee la suya y la procedencia (Forks, LXO-145/153) lee `attempt_lineage` y el Proof Pack (LXO-147/155) lee `attempt_proof_pack`.
-    expect(calls.map((call) => call.query).filter((query) => !['provider_capabilities', 'attempts_by_task', 'pending_queue', 'attempt_lineage', 'attempt_proof_pack', 'attempt_integration_preview'].includes(query))).toEqual(['attempt_detail', 'activity_list']);
+    expect(calls.map((call) => call.query).filter((query) => !['provider_capabilities', 'attempts_by_task', 'pending_queue', 'attempt_lineage', 'attempt_proof_pack', 'attempt_integration_preview'].includes(query))).toEqual(['attempt_detail_v2', 'activity_list']);
     expect(calls.filter((call) => call.query === 'provider_capabilities').every((call) => Object.keys(call.args).length === 0)).toBe(true);
     expect(calls.find((call) => call.query === 'activity_list').args).toMatchObject({ target_kind: 'attempt', target_id: 't3-a1' });
   });
@@ -155,5 +160,56 @@ describe('AttemptDetail (LXO-122)', () => {
     await flush();
     expect(screen.getByText('El Core no responde')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
+  });
+  // LXO-244 · `attempt_detail_v2` solo si el Core la anuncia; la URL del PR nunca se pinta, con o sin v2.
+  describe('attempt_detail_v2 (LXO-244)', () => {
+    const PR_URL = 'https://github.com/ana/app/pull/42';
+    const withPr = (uri, v) => {
+      const base = CANONICAL['attempt_detail.v1.json'];
+      return { ...base, v, attempt: { ...base.attempt, artifacts: [...base.attempt.artifacts, { id: 't3-a1-pr', kind: 'pull_request', uri, sha256: null, bytes: null }] } };
+    };
+    const announcing = (queries) => coreModelFromState({ data: { ...CANONICAL['core_model.v1.json'], queries }, error: null });
+    const respond = (detail) => (payload) => {
+      if (payload.query === 'provider_capabilities') return live();
+      if (payload.query === 'activity_list') return attemptActivityPage([]);
+      return detail;
+    };
+
+    it('con el Core que la anuncia pide solo v2 y dice «URL oculta» sin pintar ninguna URL ni avisar', async () => {
+      const calls = mount(respond(withPr(null, 2)));
+      render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={announcing(['task_list_v2', 'attempt_detail', 'attempt_detail_v2'])} />);
+      await flush();
+      const root = screen.getByTestId('attempt-detail');
+      expect(calls.filter((c) => c.query === 'attempt_detail_v2')).toHaveLength(1);
+      expect(calls.some((c) => c.query === 'attempt_detail'), 'sin lecturas legacy adicionales').toBe(false);
+      expect(within(root).getByTestId('attempt-pr-url-hidden').textContent).toBe('URL del pull request oculta por seguridad');
+      expect(root.textContent).not.toContain('github.com');
+      expect(within(root).queryByText(/attempt_detail_v2/)).toBeNull();
+      expect(root.querySelector('[data-code="attempt_detail_v2_unsupported"]')).toBeNull();
+    });
+
+    it('con un Core anterior lee attempt_detail, AVISA y tampoco pinta la URL del PR', async () => {
+      const calls = mount(respond(withPr(PR_URL, 1)));
+      render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={announcing(['task_list_v2', 'attempt_detail'])} />);
+      await flush();
+      const root = screen.getByTestId('attempt-detail');
+      expect(calls.some((c) => c.query === 'attempt_detail')).toBe(true);
+      expect(calls.some((c) => c.query === 'attempt_detail_v2')).toBe(false);
+      const notice = root.querySelector('[data-code="attempt_detail_v2_unsupported"]');
+      expect(notice?.textContent).toMatch(/Este Core es anterior/);
+      expect(within(root).getByTestId('attempt-pr-url-hidden')).toBeTruthy();
+      expect(root.textContent).not.toContain('github.com');
+      // El resto del detalle sigue ahí: el aviso no rompe nada.
+      expect(within(root).getByText('t3-a1')).toBeTruthy();
+    });
+
+    it('con v2 y `uri: null` en un artefacto que no es el PR, el detalle es un error de contrato y no se pinta', async () => {
+      const base = CANONICAL['attempt_detail.v1.json'];
+      mount(respond({ ...base, v: 2, attempt: { ...base.attempt, artifacts: [{ ...base.attempt.artifacts[0], uri: null }] } }));
+      render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={announcing(['attempt_detail_v2'])} />);
+      await flush();
+      expect(screen.queryByTestId('attempt-artifacts')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Reintentar' })).toBeTruthy();
+    });
   });
 });

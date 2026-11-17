@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -33,7 +33,7 @@ function mountCore({ status = 'failed', history = briefs(1), decide = () => ({ s
       if (historyError) throw new Error(historyError);
       return history;
     }
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status });
   });
   return calls;
 }
@@ -88,7 +88,7 @@ describe('Reintentar un intento', () => {
     const calls = mountCore();
     mount();
     await flush();
-    const before = calls.filter((c) => c.payload?.query === 'attempt_detail').length;
+    const before = calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length;
     fireEvent.click(screen.getByTestId('attempt-retry-open'));
     fireEvent.click(screen.getByTestId('attempt-retry-confirm'));
     await flush();
@@ -96,7 +96,7 @@ describe('Reintentar un intento', () => {
     const outcome = screen.getByTestId('attempt-retry-outcome').textContent;
     expect(outcome).toMatch(/Reintento pedido/);
     expect(outcome).toContain('t3-a2');
-    expect(calls.filter((c) => c.payload?.query === 'attempt_detail').length).toBeGreaterThan(before);
+    expect(calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length).toBeGreaterThan(before);
     expect(screen.queryByTestId('attempt-retry-open')).toBeNull();
   });
 

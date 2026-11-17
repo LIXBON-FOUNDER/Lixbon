@@ -18,7 +18,7 @@ use super::Core;
 use crate::store::{ClientAction, NewAttempt, NewRun, NewTaskIntent};
 
 const FIXTURE: &str = include_str!("../../../../../docs/core/fixtures/corte-task-attempt/legacy_state.before.json");
-const QUERIES: [&str; 5] = ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"];
+const QUERIES: [&str; 6] = ["core_model", "task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "attempt_detail_v2"];
 
 fn yo(core: &Core) -> crate::store::AuthenticatedClient {
     persona(core, "person-model", "install-person-model", "person-model-secret-0123456789abcdef")
@@ -71,6 +71,49 @@ fn son_lecturas_y_solo_una_person_las_hace() {
     }
 }
 
+/// LXO-244: `attempt_detail_v2` redacta SOLO la URL del pull request (`uri: null`); lo demás es idéntico a `attempt_detail`, que sigue
+/// devolviendo la URL tal cual (contrato v1 intacto). Con `task_id`/`project_id` se comporta igual que la v1.
+#[test]
+fn attempt_detail_v2_redacta_la_url_del_pr_y_no_cambia_nada_mas() {
+    let (_l, data, core_dir, core) = con_fixture();
+    corta(&core, &core_dir, &data);
+    let me = yo(&core);
+    let args = json!({ "attempt_id": "t5-a1" });
+    let v1 = rpc(&core, &me, "attempt_detail", args.clone()).unwrap();
+    let v2 = rpc(&core, &me, "attempt_detail_v2", args).unwrap();
+    let pr1: Vec<&Value> = v1["attempt"]["artifacts"].as_array().unwrap().iter().filter(|a| a["kind"] == "pull_request").collect();
+    assert_eq!(pr1.len(), 1, "la fixture de t5 trae un PR");
+    assert_eq!(pr1[0]["uri"], "https://github.com/ana/app/pull/42", "la v1 sigue dando la URL");
+
+    assert_eq!((v1["v"].as_u64(), v2["v"].as_u64()), (Some(1), Some(2)));
+    assert!(!v2.to_string().contains("github.com") && !v2.to_string().contains("pull/42"), "la URL del PR no sale en la v2: {v2}");
+    let artifacts = |v: &Value| v["attempt"]["artifacts"].as_array().unwrap().clone();
+    assert_eq!(artifacts(&v1).len(), artifacts(&v2).len());
+    for (a1, a2) in artifacts(&v1).iter().zip(artifacts(&v2).iter()) {
+        if a1["kind"] == "pull_request" {
+            assert!(a2["uri"].is_null(), "{a2}");
+            assert_eq!((&a1["id"], &a1["sha256"], &a1["bytes"]), (&a2["id"], &a2["sha256"], &a2["bytes"]));
+        } else {
+            assert_eq!(a1, a2, "los demás artefactos no cambian");
+        }
+    }
+    // Todo lo que no es de un artefacto pull_request es idéntico.
+    let mut sin_artefactos = (v1.clone(), v2.clone());
+    for v in [&mut sin_artefactos.0, &mut sin_artefactos.1] {
+        v["attempt"]["artifacts"] = json!([]);
+        v["v"] = json!(0);
+    }
+    assert_eq!(sin_artefactos.0, sin_artefactos.1);
+    // Un Attempt sin PR: la v2 es la v1 con `v: 2`.
+    let t3_1 = rpc(&core, &me, "attempt_detail", json!({ "attempt_id": "t3-a1" })).unwrap();
+    let t3_2 = rpc(&core, &me, "attempt_detail_v2", json!({ "attempt_id": "t3-a1" })).unwrap();
+    assert_eq!((t3_1["attempt"].clone(), t3_2["v"].as_u64()), (t3_2["attempt"].clone(), Some(2)));
+    // Mismas guardas de pertenencia que la v1.
+    assert!(rpc(&core, &me, "attempt_detail_v2", json!({ "attempt_id": "t5-a1", "task_id": "t3" })).unwrap_err().contains("model_not_found"));
+    assert!(rpc(&core, &me, "attempt_detail_v2", json!({ "attempt_id": "t999-a1" })).unwrap_err().contains("model_not_found"));
+    assert!(rpc(&core, &me, "attempt_detail_v2", json!({ "attempt_id": "t5-a1", "extra": 1 })).is_err());
+}
+
 #[test]
 fn antes_del_corte_el_core_anuncia_legacy_y_las_lecturas_vnext_lo_dicen() {
     let (_l, _d, _c, core) = con_fixture();
@@ -81,6 +124,7 @@ fn antes_del_corte_el_core_anuncia_legacy_y_las_lecturas_vnext_lo_dicen() {
         ("task_detail_v2", json!({ "task_id": "t3" })),
         ("attempts_by_task", json!({ "task_id": "t3" })),
         ("attempt_detail", json!({ "attempt_id": "t3-a1" })),
+        ("attempt_detail_v2", json!({ "attempt_id": "t3-a1" })),
     ] {
         let e = rpc(&core, &me, q, args).unwrap_err();
         assert!(e.contains("core_model_inactive"), "{q}: {e}");
@@ -98,6 +142,8 @@ fn tras_el_corte_las_lecturas_responden_con_su_version_y_cuadran_con_las_fixture
     fixture("attempts_by_task.v1.json", &rpc(&core, &me, "attempts_by_task", json!({ "task_id": "t5" })).unwrap());
     let t3 = rpc(&core, &me, "attempt_detail", json!({ "attempt_id": "t3-a1" })).unwrap();
     fixture("attempt_detail.v1.json", &t3);
+    // LXO-244: la v2 es la misma ejecución con la URL del PR redactada. t5 es la Task con un pull request.
+    fixture("attempt_detail.v2.json", &rpc(&core, &me, "attempt_detail_v2", json!({ "attempt_id": "t5-a1" })).unwrap());
     // La ejecución lleva lo suyo: sesión (sin la referencia del proveedor), Worktree, Artifacts y revisión.
     let a = &t3["attempt"];
     assert_eq!((a["provider_session"]["binding"].as_str(), a["provider_session"]["bound"].as_bool()), (Some("session_id"), Some(true)));

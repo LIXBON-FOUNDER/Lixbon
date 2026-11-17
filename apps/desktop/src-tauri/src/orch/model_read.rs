@@ -16,6 +16,8 @@ use crate::store::{AttemptRow, AttemptStatus, Store, StoreResult, TaskIntent, Ta
 
 const TASK_API: u8 = 2;
 const ATTEMPT_API: u8 = 1;
+/// `attempt_detail_v2` (LXO-244): el mismo detalle con la URL del pull request redactada.
+const ATTEMPT_DETAIL_V2_API: u8 = 2;
 const MAX_ID_CHARS: usize = 200;
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 100;
@@ -91,7 +93,7 @@ pub(super) fn core_model(core: &Core, caller: &Caller, context: Option<&Mutation
     let active = core.storage.read_store(|s| s.agentic_model_active()).unwrap_or(Ok(false)).map_err(store_err)?;
     let storage = json!({ "status": core.storage.status_name(), "code": null, "message": null });
     Ok(if active {
-        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail"], "storage": storage })
+        json!({ "core_model": AGENTIC_MODEL, "compat": [LEGACY_COMPAT], "queries": ["task_list_v2", "task_detail_v2", "attempts_by_task", "attempt_detail", "attempt_detail_v2"], "storage": storage })
     } else {
         json!({ "core_model": LEGACY_MODEL, "compat": [], "queries": [], "storage": storage })
     })
@@ -312,6 +314,16 @@ pub(super) fn attempts_by_task(core: &Core, caller: &Caller, context: Option<&Mu
 /// `attempt_detail {attempt_id}`: la ejecución con su sesión (sin la referencia del proveedor), su Worktree, sus
 /// Artifacts y su revisión vigente.
 pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    attempt_detail_with(core, caller, context, args, false)
+}
+
+/// `attempt_detail_v2 {attempt_id}` (LXO-244): lo mismo, con la URL del pull request REDACTADA: el Artifact `pull_request` sale con `uri: null`
+/// (puede traer credenciales o datos del remoto que el cliente no debe pintar). Los demás Artifacts no cambian.
+pub(super) fn attempt_detail_v2(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    attempt_detail_with(core, caller, context, args, true)
+}
+
+fn attempt_detail_with(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value, redact_pr_url: bool) -> Result<Value, String> {
     require_person(caller, context)?;
     let empty = Map::new();
     let map = args_of(args, &["attempt_id", "task_id", "project_id"], &empty)?;
@@ -362,7 +374,10 @@ pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&Muta
             "id": w.id, "provenance": w.provenance, "state": w.state, "machine": w.machine, "path": w.path, "branch": w.branch, "base_branch": w.base_branch,
             "branch_kept": w.branch_kept, "registered_by_attempt_id": w.attempt_id,
         })));
-        v["artifacts"] = json!(s.artifacts_of_attempt(&id)?.iter().map(|x| json!({ "id": x.id, "kind": x.kind, "uri": x.uri, "sha256": x.sha256, "bytes": x.bytes })).collect::<Vec<_>>());
+        v["artifacts"] = json!(s.artifacts_of_attempt(&id)?.iter().map(|x| {
+            let redacted = redact_pr_url && x.kind == crate::store::ArtifactKind::PullRequest;
+            json!({ "id": x.id, "kind": x.kind, "uri": if redacted { Value::Null } else { json!(x.uri) }, "sha256": x.sha256, "bytes": x.bytes })
+        }).collect::<Vec<_>>());
         // La última revisión con su vigencia: cuándo se hizo y se cerró, el HEAD que invalidó una `stale`, si es la
         // activa, si el Attempt sigue siendo el actual de su Task (D8) y si ya se integró.
         v["review"] = json!(s.reviews_of_attempt(&id)?.pop().map(|r| {
@@ -371,6 +386,6 @@ pub(super) fn attempt_detail(core: &Core, caller: &Caller, context: Option<&Muta
                     "at": r.at, "closed_at": r.closed_at, "observed_head": r.observed_head,
                     "validity": { "active": active, "attempt_is_current": current_n == Some(a.n), "integrated": integrated, "integrated_at": integrated_at } })
         }));
-        Ok(Ok(json!({ "v": ATTEMPT_API, "core_model": AGENTIC_MODEL, "attempt": v })))
+        Ok(Ok(json!({ "v": if redact_pr_url { ATTEMPT_DETAIL_V2_API } else { ATTEMPT_API }, "core_model": AGENTIC_MODEL, "attempt": v })))
     })
 }

@@ -7,7 +7,7 @@ import { AttemptHistory } from './AttemptHistory';
 import { validateAttemptCompare } from './compareContract';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail, attemptsPage, brief } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor, attemptsPage, brief } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -275,7 +275,7 @@ describe('Comparar intentos · cómo se llega', () => {
       if (payload.query === 'activity_list') return attemptActivityPage([]);
       if (payload.query === 'attempts_by_task') return { ...CANONICAL['attempts_by_task.v1.json'], task_id: 't3', items: [] };
       if (payload.query === 'pending_queue') return { v: 1, attempt_id: 't3-a1', task_id: 't3', items: [], finished: [], finished_limit: 20 };
-      return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status: 'done', provider: 'fake-completo' });
+      return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status: 'done', provider: 'fake-completo' });
     });
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
     await flush();

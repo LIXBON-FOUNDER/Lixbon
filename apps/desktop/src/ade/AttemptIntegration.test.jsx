@@ -5,7 +5,7 @@ import { AttemptDetail } from './AttemptDetail';
 import { validateIntegrationPreview } from './integrationContract';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -48,7 +48,7 @@ function mountCore({ status = 'done', previews = [preview()], decide = () => ({ 
     if (payload.query === 'pending_queue') return { v: 1, attempt_id: 't3-a1', task_id: 't3', items: [], finished: [], finished_limit: 20 };
     if (payload.query === 'attempt_lineage') return { v: 1, attempt_id: 't3-a1', forked_from: null, forks: [] };
     if (payload.query === 'attempt_proof_pack') throw new Error('sin proof pack en esta prueba');
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status, provider: 'fake-completo' });
   });
   return calls;
 }

@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { resetOutstandingQueries } from './coreQueryPolicy';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -35,7 +35,7 @@ function mountCore({ status = 'done', session = SESSION, history = briefs(1), de
       if (historyError) throw new Error(historyError);
       return history;
     }
-    return attemptDetail({ id: 't3-a1', task_id: 't3', n: 1, status, provider_session: session });
+    return attemptDetailFor(payload, { id: 't3-a1', task_id: 't3', n: 1, status, provider_session: session });
   });
   return calls;
 }
@@ -102,7 +102,7 @@ describe('Continuar la sesión de un intento', () => {
     const calls = mountCore();
     mount();
     await flush();
-    const before = calls.filter((c) => c.payload?.query === 'attempt_detail').length;
+    const before = calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length;
     await open();
     write('  sigue con la parte dos  ');
     fireEvent.click(screen.getByTestId('attempt-resume-send'));
@@ -111,7 +111,7 @@ describe('Continuar la sesión de un intento', () => {
     const outcome = screen.getByTestId('attempt-resume-outcome').textContent;
     expect(outcome).toMatch(/Continuación pedida/);
     expect(outcome).toContain('t3-a2');
-    expect(calls.filter((c) => c.payload?.query === 'attempt_detail').length).toBeGreaterThan(before);
+    expect(calls.filter((c) => (c.payload?.query === 'attempt_detail' || c.payload?.query === 'attempt_detail_v2')).length).toBeGreaterThan(before);
     expect(screen.queryByTestId('attempt-resume-open')).toBeNull();
   });
 

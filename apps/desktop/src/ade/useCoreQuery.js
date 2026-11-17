@@ -53,7 +53,7 @@ function coreArgs(query, args) {
   if (query === 'usage_report') return { refresh: args.refresh === true };
   if (query === 'task_list_v2') return { projectId: args.project_id, cursor: args.cursor ?? null };
   if (query === 'task_detail_v2' || query === 'attempts_by_task') return { taskId: args.task_id };
-  if (query === 'attempt_detail') return { attemptId: args.attempt_id };
+  if (query === 'attempt_detail' || query === 'attempt_detail_v2') return { attemptId: args.attempt_id };
   if (query === 'pending_queue') return { attemptId: args.attempt_id };
   if (query === 'attempt_lineage') return { attemptId: args.attempt_id };
   if (query === 'attempt_compare') return { attemptIds: args.attempt_ids };

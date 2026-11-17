@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { AttemptDetail } from './AttemptDetail';
 import { AttemptUsage } from './AttemptUsage';
 import { coreModelFromState } from './useCoreModel';
-import { CANONICAL, attemptDetail } from './testFixtures/coreModelFixtures';
+import { CANONICAL, attemptDetail, attemptDetailFor } from './testFixtures/coreModelFixtures';
 import { attemptActivityPage } from './testFixtures/attemptActivityFixtures';
 import { live } from './testFixtures/providerCapabilitiesFixtures';
 
@@ -81,7 +81,7 @@ describe('AttemptUsage (LXO-249)', () => {
     const handler = (extra) => (payload) => {
       if (payload.query === 'provider_capabilities') return live();
       if (payload.query === 'activity_list') return attemptActivityPage([]);
-      return attemptDetail(extra);
+      return attemptDetailFor(payload, extra);
     };
     invoke.mockImplementation(async (_c, payload) => handler({ usage: USAGE })(payload));
     render(<AttemptDetail attemptId="t3-a1" taskId="t3" coreModel={V1} />);
