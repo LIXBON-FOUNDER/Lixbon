@@ -20,7 +20,7 @@ results: dict[str, object] = {}
 
 
 def adb(*args: str) -> str:
-    return subprocess.run(["adb", *args], capture_output=True, text=True, errors="replace").stdout
+    return subprocess.run(["adb", *args], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
 
 
 def shot(name: str) -> None:
