@@ -1,5 +1,26 @@
 import { describe, it, expect, vi } from 'vitest';
+import providers from '../../../../docs/core/fixtures/api/provider_capabilities.v1.json';
 import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttempt, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTEMPTS_MAX, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
+
+describe('Mobile F4 · capacidades', () => {
+  const snapshot = { ...providers, status: 'ready', refreshing: false, checked_at_ms: 1234 };
+  it('consulta el proveedor de ese Attempt y elimina referencias y diagnósticos privados', async () => {
+    const attempt = { id: 't-a2', provider: 'fake-parcial', provider_session: { resumable: true, bound: true, status: 'idle', external_ref: 'SENTINEL' } };
+    const call = vi.fn().mockImplementation(async (cmd) => cmd === 'attempt_detail_v2' ? { attempt } : snapshot);
+    const result = await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 't-a2', refresh: true }, call);
+    expect(call).toHaveBeenCalledWith('provider_capabilities', { refresh: true });
+    expect(result.fields.summary.capabilities.resume.state).toBe('unavailable');
+    expect(result.fields.summary.capabilities.steer.state).toBe('unsupported');
+    expect(JSON.stringify(result)).not.toContain('SENTINEL');
+    expect(JSON.stringify(result)).not.toContain('reason');
+  });
+  it('un proveedor ausente se presenta como desconocido y un destino ajeno se rechaza', async () => {
+    const call = vi.fn().mockImplementation(async (cmd) => cmd === 'attempt_detail_v2' ? { attempt: { id: 't-a2', provider: 'nuevo' } } : snapshot);
+    const result = await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 't-a2' }, call);
+    expect(result.fields.summary.capabilities.answer.state).toBe('unknown');
+    expect((await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 'ajeno' }, call)).fields.ok).toBe(false);
+  });
+});
 
 const event = {
   seq: 7, id: 'ev-7', ts: 1000, v: 2, kind: 'task.created', class: 'state',

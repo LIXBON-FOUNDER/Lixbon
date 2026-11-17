@@ -87,6 +87,21 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
 
 ## Estados en el móvil
 
+### Capacidades del intento (LXO-139)
+
+El host anuncia `core_attempt_capabilities`. La lectura consulta `attempt_detail_v2`
+y `provider_capabilities` y devuelve una matriz resumida del proveedor de ese Attempt.
+Las capabilities ausentes se presentan como desconocidas. Se conservan los estados
+`available`, `unsupported`, `unavailable` y `environment_blocked`, los códigos de
+bloqueo de perfil y el estado de la sesión, sin referencias del proveedor ni diagnósticos
+libres. El mensaje de respuesta es `orch_core_attempt_capabilities`, efímero.
+
+La ficha de Mobile muestra las capacidades y la disponibilidad de la sesión nativa.
+Consulta de nuevo al reconectar, al volver a primer plano, cada 30 segundos y al pulsar
+Actualizar. Mientras el Core sondea consulta cada 3 segundos. La última lectura queda
+solo en memoria, separada por host e intento, y se marca desactualizada cuando la
+conexión o la frescura de la sonda lo requieren. Estos datos no ejecutan acciones.
+
 `apps/mobile/src/observe/bootstrap.js` (sin React Native; se prueba con `node --test`).
 
 | Estado | Cuándo |

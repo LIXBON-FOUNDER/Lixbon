@@ -7,6 +7,8 @@
 //
 // Ninguna de estas acciones escribe en el Core. Contrato: docs/core/MOBILE_BOOTSTRAP.md.
 
+import { CAPABILITIES, validateProviderCapabilities } from '../ade/providerCapabilitiesContract.js';
+
 /** Capability que anuncia el host en su `hello`: sin ella, el móvil sabe que el IDE es anterior. */
 export const CORE_SNAPSHOT_CAPABILITY = 'core_snapshot';
 /** Protocolo del relé (formas de `orch_core_snapshot` y `orch_core_events`). */
@@ -155,6 +157,39 @@ export function slimAttempt(a) {
   };
 }
 
+/** La matriz vigente del proveedor de este Attempt, sin diagnósticos libres ni ids de sesión. */
+export function slimAttemptCapabilities(attempt, snapshot) {
+  validateProviderCapabilities(snapshot);
+  const provider = snapshot.providers.find((entry) => entry.id === attempt.provider);
+  const capabilities = {};
+  for (const capability of CAPABILITIES) {
+    const state = provider?.matrix.capabilities[capability];
+    capabilities[capability] = {
+      state: state?.state || 'unknown',
+      block: typeof state?.block === 'string' && /^[a-z_]{1,64}$/.test(state.block) ? state.block : null,
+    };
+  }
+  const profileBlock = provider?.blocked_profiles?.find((entry) => entry.profile === attempt.profile);
+  return {
+    attempt_id: id(attempt.id),
+    provider: text(attempt.provider, 60),
+    profile: text(attempt.profile, 60),
+    status: snapshot.status,
+    refreshing: snapshot.refreshing,
+    checked_at_ms: snapshot.checked_at_ms,
+    capabilities,
+    profile_block: typeof profileBlock?.block === 'string' && /^[a-z_]{1,64}$/.test(profileBlock.block) ? profileBlock.block : null,
+    environment: provider?.environment.state || 'unknown',
+    transport: text(provider?.transport, 40),
+    fallback: !!provider?.transport_fallback,
+    session: attempt.provider_session ? {
+      status: text(attempt.provider_session.status, 40),
+      resumable: bool(attempt.provider_session.resumable),
+      bound: bool(attempt.provider_session.bound),
+    } : null,
+  };
+}
+
 export function slimTaskDetail(t) {
   const messages = Array.isArray(t?.messages) ? t.messages : [];
   const answered = new Set(messages.map((m) => m?.reply_to).filter((x) => x !== null && x !== undefined));
@@ -270,6 +305,12 @@ export function parseCoreRequest(action, raw = {}) {
     if (!id(raw.attempt_id) || !raw.attempt_id) return { rid, code: 'invalid_request' };
     return { rid, args: { attempt_id: raw.attempt_id } };
   }
+  if (action === 'core_attempt_capabilities') {
+    if (!id(raw.attempt_id) || !raw.attempt_id || (raw.refresh !== undefined && typeof raw.refresh !== 'boolean')) {
+      return { rid, code: 'invalid_request' };
+    }
+    return { rid, args: { attempt_id: raw.attempt_id, refresh: raw.refresh === true } };
+  }
   if (action === 'core_activity') {
     // De una Task (`task_id`) o de un intento concreto (`attempt_id`, LXO-127), nunca de los dos.
     const attempt = raw.attempt_id !== undefined && raw.attempt_id !== null;
@@ -298,11 +339,18 @@ export async function handleCoreAction(action, raw, call) {
       core_activity: 'orch_core_activity',
       core_attempts: 'orch_core_attempts',
       core_attempt: 'orch_core_attempt',
+      core_attempt_capabilities: 'orch_core_attempt_capabilities',
     }[action] ||
     'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
   try {
+    if (action === 'core_attempt_capabilities') {
+      const detail = await call('attempt_detail_v2', { attempt_id: req.args.attempt_id });
+      if (detail?.attempt?.id !== req.args.attempt_id) throw new Error('invalid_response: destino inesperado');
+      const providers = await call('provider_capabilities', { refresh: req.args.refresh });
+      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, summary: slimAttemptCapabilities(detail.attempt, providers) } };
+    }
     if (action === 'core_snapshot') {
       const snapshot = await call('compact_snapshot', req.args);
       return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, snapshot } };
