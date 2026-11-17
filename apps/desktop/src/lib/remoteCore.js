@@ -9,6 +9,7 @@
 
 import { CAPABILITIES, validateProviderCapabilities } from '../ade/providerCapabilitiesContract.js';
 import { validateContextPreview } from '../ade/contextPreviewContract.js';
+import { USAGE_FIELDS, validateUsageResponse } from '../ade/usageContract.js';
 
 /** Capability que anuncia el host en su `hello`: sin ella, el móvil sabe que el IDE es anterior. */
 export const CORE_SNAPSHOT_CAPABILITY = 'core_snapshot';
@@ -227,6 +228,49 @@ export function slimContextPackage(preview, attempt) {
   };
 }
 
+/** Informe normalizado de uso. Las cuentas se transmiten como huella y los errores como código. */
+export function slimUsage(response) {
+  validateUsageResponse(response);
+  return {
+    status: response.status,
+    refreshing: response.refreshing,
+    generated_at_ms: response.report?.generated_at_ms ?? null,
+    providers: (response.report?.providers || []).slice(0, 30).map((provider) => {
+      const source = provider.snapshot;
+      const snapshot = source ? {
+        observed_at_ms: source.observed_at_ms,
+        provenance: source.provenance,
+        account: /^[a-f0-9]{8}$/.test(source.account || '') ? source.account : null,
+        plan: text(source.plan, 80),
+        limit_reached: bool(source.limit_reached),
+        windows: (source.windows || []).slice(0, 20).map((window) => ({
+          id: text(window.id, 80), minutes: int(window.minutes), resets_at: int(window.resets_at),
+          used_percent: Number.isFinite(window.used_percent) ? window.used_percent : null,
+        })),
+        models: (source.models || []).slice(0, 30).map((model) => ({
+          model: text(model.model, 120), input_tokens: int(model.input_tokens), output_tokens: int(model.output_tokens),
+          cache_read_tokens: int(model.cache_read_tokens), cache_creation_tokens: int(model.cache_creation_tokens),
+          cost_usd: Number.isFinite(model.cost_usd) ? model.cost_usd : null,
+        })),
+        credits: source.credits ? {
+          has_credits: bool(source.credits.has_credits), unlimited: bool(source.credits.unlimited),
+          balance: typeof source.credits.balance === 'string' && /^-?\d{1,20}(\.\d{1,12})?$/.test(source.credits.balance) ? source.credits.balance : null,
+        } : null,
+      } : null;
+      return {
+        provider: text(provider.provider, 60), status: provider.status,
+        support: Object.fromEntries(USAGE_FIELDS.map((field) => [field, provider.support.fields[field].state])),
+        age_ms: int(provider.age_ms),
+        error: provider.error?.kind || null,
+        throttled: provider.throttled === true,
+        snapshot,
+        truncated: (source?.windows?.length || 0) > 20 || (source?.models?.length || 0) > 30,
+      };
+    }),
+    truncated: (response.report?.providers.length || 0) > 30,
+  };
+}
+
 export function slimTaskDetail(t) {
   const messages = Array.isArray(t?.messages) ? t.messages : [];
   const answered = new Set(messages.map((m) => m?.reply_to).filter((x) => x !== null && x !== undefined));
@@ -285,6 +329,10 @@ export function slimActivity(a) {
 export function parseCoreRequest(action, raw = {}) {
   const rid = typeof raw.rid === 'string' && RID.test(raw.rid) ? raw.rid : null;
   if (!rid) return { rid: null, code: 'invalid_request' };
+  if (action === 'core_usage') {
+    if (raw.refresh !== undefined && typeof raw.refresh !== 'boolean') return { rid, code: 'invalid_request' };
+    return { rid, args: { refresh: raw.refresh === true } };
+  }
   if (action === 'core_snapshot') {
     const n = raw.attention_items;
     if (n !== undefined && n !== null && !(Number.isInteger(n) && n >= 0 && n <= MAX_ATTENTION_ITEMS)) {
@@ -378,11 +426,16 @@ export async function handleCoreAction(action, raw, call) {
       core_attempt: 'orch_core_attempt',
       core_attempt_capabilities: 'orch_core_attempt_capabilities',
       core_attempt_context: 'orch_core_attempt_context',
+      core_usage: 'orch_core_usage',
     }[action] ||
     'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
   try {
+    if (action === 'core_usage') {
+      const report = await call('usage_report', req.args);
+      return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, summary: slimUsage(report) } };
+    }
     if (action === 'core_attempt_context') {
       const detail = await call('attempt_detail_v2', { attempt_id: req.args.attempt_id });
       const attempt = detail?.attempt;

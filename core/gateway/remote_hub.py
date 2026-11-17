@@ -39,7 +39,7 @@ STATE_EVENTS = frozenset({"orch"})
 EPHEMERAL_EVENTS = frozenset({
     "orch_diff", "orch_term", "orch_agents", "orch_error",
     "orch_core_snapshot", "orch_core_events", "orch_core_attention",
-    "orch_core_task", "orch_core_activity", "orch_core_attempts", "orch_core_attempt", "orch_core_attempt_capabilities", "orch_core_attempt_context",
+    "orch_core_task", "orch_core_activity", "orch_core_attempts", "orch_core_attempt", "orch_core_attempt_capabilities", "orch_core_attempt_context", "orch_core_usage",
 })
 
 HELLO_META_KEYS = (

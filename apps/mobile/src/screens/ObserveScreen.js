@@ -18,15 +18,17 @@ import HomeScreen from './observe/HomeScreen';
 import ProjectScreen from './observe/ProjectScreen';
 import AttemptScreen from './observe/AttemptScreen';
 import TaskScreen from './observe/TaskScreen';
+import UsageScreen from './observe/UsageScreen';
 
 // Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
-const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen };
+const ROUTES = { home: HomeScreen, project: ProjectScreen, attention: AttentionScreen, task: TaskScreen, attempt: AttemptScreen, usage: UsageScreen };
 
 const ROUTE_TITLE = {
   attention: 'Atención',
   task: 'Tarea',
   attempt: 'Intento',
   project: 'Proyecto',
+  usage: 'Uso de proveedores',
 };
 
 export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
