@@ -39,6 +39,9 @@ Resultados merge: merged, conflict, error, target_moved, target_branch_mismatch,
 already_merged, head_moved o review_required. Resultados PR: created,
 already_exists, error, head_moved o review_required. El resultado de un efecto no
 garantiza que haya tenido éxito. No se limpia el worktree ni se resuelven conflictos.
+Un resultado error termina con código 10 (el resultado se imprime igual). En merge,
+`result.reason` dice por qué: git_identity_missing (faltan user.name y user.email
+en el repositorio), target_dirty (cambios sin commit en el destino) o git_failed.
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -537,7 +540,7 @@ fn result_projection(data: &Value, action: Action, attempt_id: &str) -> Result<V
         .as_array()
         .map(|conflicts| json!(conflicts.len()))
         .unwrap_or(Value::Null);
-    Ok(json!({
+    let mut projected = json!({
         "outcome": outcome,
         "attempt_id": data["attempt_id"].as_str().map(clean).unwrap_or_else(|| attempt_id.to_string()),
         "decision_id": data["decision"].as_u64(),
@@ -549,7 +552,33 @@ fn result_projection(data: &Value, action: Action, attempt_id: &str) -> Result<V
         "found_branch": nullable_text(&data["found_branch"]),
         "accepted_moved_target": nullable_bool(&data["accepted_moved_target"]),
         "conflict_count": conflict_count,
-    }))
+    });
+    // LXO-251: `reason` solo existe en un `error` con un motivo conocido: el contrato v1 de los demás resultados no cambia.
+    if let Some(reason) = merge_reason(&data["reason"]) {
+        projected["reason"] = json!(reason);
+    }
+    Ok(projected)
+}
+
+/// LXO-251: el motivo de un `error` de merge es un código del Core, no su texto (que puede traer rutas o secretos). Lo que no es de la lista, nada.
+fn merge_reason(value: &Value) -> Option<&'static str> {
+    match value.as_str() {
+        Some("git_identity_missing") => Some("git_identity_missing"),
+        Some("target_dirty") => Some("target_dirty"),
+        Some("git_failed") => Some("git_failed"),
+        _ => None,
+    }
+}
+
+/// Código de salida cuando el efecto terminó en `error` (LXO-251): el resultado se imprime igual, pero no se confunde con un éxito.
+const EXIT_EFFECT_ERROR: u8 = 10;
+
+fn result_exit(data: &Value) -> ExitCode {
+    if data["dry_run"] == false && data["result"]["outcome"] == "error" {
+        ExitCode::from(EXIT_EFFECT_ERROR)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn output(
@@ -749,9 +778,12 @@ fn result_text(data: &Value, action: Action) -> String {
             "Conflicto al integrar ({} archivo(s)); el efecto quedó registrado y el worktree se conservó.",
             result["conflict_count"].as_u64().unwrap_or(0)
         ),
-        (Action::Merge, "error") => {
-            "El merge terminó con error; el resultado quedó registrado en el Core.".into()
-        }
+        (Action::Merge, "error") => match result["reason"].as_str() {
+            Some("git_identity_missing") => "El merge no se hizo: git no tiene identidad (user.name y user.email) en el repositorio del Project. Configúrala y repite el comando.".into(),
+            Some("target_dirty") => "El merge no se hizo: el checkout del Project tiene cambios sin commit. Haz commit o stash y repite el comando.".into(),
+            Some(_) => "El merge no se hizo: git falló al fusionar. Revisa el repositorio del Project con git y repite el comando.".into(),
+            None => "El merge terminó con error; el resultado quedó registrado en el Core.".into(),
+        },
         (Action::Merge, "target_moved") => format!(
             "El destino se movió; no se integró. Revisa el HEAD {} antes de repetir.",
             result["found_commit"].as_str().unwrap_or("actual")
@@ -789,7 +821,7 @@ fn finish(result: Result<Value, Failure>, json_output: bool, action: Action) -> 
                 "{}",
                 serde_json::to_string_pretty(&data).unwrap_or_default()
             );
-            ExitCode::SUCCESS
+            result_exit(&data)
         }
         Ok(data) => {
             if data["dry_run"] == true {
@@ -805,7 +837,7 @@ fn finish(result: Result<Value, Failure>, json_output: bool, action: Action) -> 
             } else {
                 println!("{}", result_text(&data, action));
             }
-            ExitCode::SUCCESS
+            result_exit(&data)
         }
         Err(failure) => {
             let (code, exit) = failure.code();
@@ -1124,5 +1156,46 @@ mod tests {
         assert!(result["pr_url"].is_null());
         assert!(!result.to_string().contains("secreto"));
         assert!(!result.to_string().contains("privada"));
+    }
+
+    #[test]
+    fn un_error_de_merge_lleva_el_motivo_del_core_y_no_su_texto() {
+        let proyectar = |reason: Value| {
+            result_projection(
+                &json!({ "outcome": "error", "attempt_id": "task-1-a1", "message": "C:/ruta/privada token=secreto", "reason": reason }),
+                Action::Merge,
+                "task-1-a1",
+            )
+            .unwrap()
+        };
+        for reason in ["git_identity_missing", "target_dirty", "git_failed"] {
+            assert_eq!(proyectar(json!(reason))["reason"], reason);
+        }
+        // Un código que el CLI no conoce no se reenvía tal cual: es texto del Core que podría llevar de todo.
+        assert!(proyectar(json!("C:/ruta/privada")).get("reason").is_none());
+        assert!(proyectar(Value::Null).get("reason").is_none());
+        assert!(!proyectar(json!("git_identity_missing")).to_string().contains("secreto"));
+    }
+
+    #[test]
+    fn el_texto_de_un_error_de_merge_dice_que_falta() {
+        let texto = |reason: Value| {
+            let resultado = result_projection(&json!({ "outcome": "error", "attempt_id": "task-1-a1", "reason": reason }), Action::Merge, "task-1-a1").unwrap();
+            result_text(&json!({ "result": resultado }), Action::Merge)
+        };
+        assert!(texto(json!("git_identity_missing")).contains("user.name y user.email"));
+        assert!(texto(json!("target_dirty")).contains("cambios sin commit"));
+        assert!(texto(json!("git_failed")).contains("git falló"));
+        assert!(texto(Value::Null).contains("terminó con error"));
+    }
+
+    #[test]
+    fn un_resultado_error_no_sale_con_codigo_de_exito_y_un_dry_run_o_un_merge_si() {
+        let con = |dry_run: bool, outcome: &str| result_exit(&json!({ "dry_run": dry_run, "result": { "outcome": outcome } }));
+        assert_eq!(format!("{:?}", con(false, "error")), format!("{:?}", ExitCode::from(10)));
+        for (dry_run, outcome) in [(false, "merged"), (false, "conflict"), (false, "already_merged")] {
+            assert_eq!(format!("{:?}", con(dry_run, outcome)), format!("{:?}", ExitCode::SUCCESS), "{outcome}");
+        }
+        assert_eq!(format!("{:?}", result_exit(&json!({ "dry_run": true, "result": null }))), format!("{:?}", ExitCode::SUCCESS));
     }
 }

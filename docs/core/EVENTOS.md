@@ -336,7 +336,7 @@ sin evento, sin cambios de estado).
 | `decision_kind` | Campos | Nunca |
 |---|---|---|
 | `review` | `decision_id`, `outcome` (`accepted`·`rejected`), `head_commit`, `base_commit?`, `base_source?`, `has_comment` | `comment` |
-| `merge` | `decision_id`, `outcome` (`merged`·`conflict`·`error`·`target_moved`), `branch`, `squash`, `base_commit?`, `result_commit?`, `conflict_count?`, `base_check?`, `accepted_moved_target?`, `expected_commit?`, `found_commit?` | `into`, mensajes de git, lista de archivos en conflicto |
+| `merge` | `decision_id`, `outcome` (`merged`·`conflict`·`error`·`target_moved`), `branch`, `squash`, `base_commit?`, `result_commit?`, `conflict_count?`, `base_check?`, `accepted_moved_target?`, `expected_commit?`, `found_commit?`, `reason?` (solo con `error`: `git_identity_missing`·`target_dirty`·`git_failed`, LXO-251; un valor fuera de esos tres rechaza la mutación) | `into`, mensajes de git, lista de archivos en conflicto |
 | `pr` | `decision_id`, `outcome` (`created`·`already_exists`·`error`), `branch`, `pr_url?` | `remote`, error textual |
 
 ### Decisión y efecto
@@ -380,7 +380,7 @@ emite SOLO `Tx::observe_effect`, que invoca únicamente la frontera `StateAccess
 ### Payload (cerrado por `effect_kind`, `operation` validada contra valores conocidos)
 | `effect_kind` | `operation` | Campos (además de `effect_id`) |
 |---|---|---|
-| `git_merge` | `integrate` | `result` (`merged`·`conflict`·`error`), `branch`, `base_commit?`, `result_commit?` |
+| `git_merge` | `integrate` | `result` (`merged`·`conflict`·`error`), `branch`, `base_commit?`, `result_commit?`, `reason?` (solo con `error`: `git_identity_missing`·`target_dirty`·`git_failed`, LXO-251) |
 | `git_push_pr` | `publish_pr` | `result` (`created`·`already_exists`·`error`), `branch`, `pr_url?` |
 | `git_worktree` | `spawn` | `branch`, `base?` |
 | `git_worktree_removed` | `release`·`close_idle_runs`·`spawn_cleanup` | `worktree_removed`, `branch?`, `branch_deleted` |

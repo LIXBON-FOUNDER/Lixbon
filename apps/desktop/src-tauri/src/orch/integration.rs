@@ -157,6 +157,8 @@ fn integrate_with_commit(state: &impl StateAccess, from_user: bool, args: &Value
         }
         Err(e) => ("error", Value::Null, e.clone()),
     };
+    // LXO-251: un `error` lleva un motivo estable (código, sin el texto de git: puede traer rutas) para el evento y para los clientes.
+    let reason = (outcome == "error").then(|| merge_error_reason(&message, &into));
     let mut detail = json!({
         "outcome": outcome, "branch": branch, "source_commit": source_commit, "into": into, "squash": squash,
         "base_commit": found, "result_commit": result, "conflicts": conflicts,
@@ -167,10 +169,15 @@ fn integrate_with_commit(state: &impl StateAccess, from_user: bool, args: &Value
         detail["expected_commit"] = json!(moved);
         detail["found_commit"] = json!(found);
     }
+    let mut observed = json!({ "outcome": outcome, "branch": branch, "source_commit": source_commit, "base_commit": found, "result_commit": result });
+    if let Some(reason) = reason {
+        detail["reason"] = json!(reason);
+        observed["reason"] = json!(reason);
+    }
     // El git merge ya ocurrió: la decisión y la marca `merged` se registran juntas, en UNA mutación.
     let effect = Effect::new("integrate", "git_merge").task(&id).repo(&repo)
         .expected(json!({ "record": "decision merge", "merged": outcome == "merged", "branch": branch, "source_commit": source_commit, "into": into }))
-        .observed(json!({ "outcome": outcome, "branch": branch, "source_commit": source_commit, "base_commit": found, "result_commit": result }));
+        .observed(observed);
     let decision = state.mutate_after_effect(effect, |st| {
         let decision = st.record_decision(&id, "merge", "human", &detail)?;
         if outcome == "merged" {
@@ -180,12 +187,28 @@ fn integrate_with_commit(state: &impl StateAccess, from_user: bool, args: &Value
     })?;
     let mut out = json!({ "task": id, "decision": decision, "outcome": outcome, "branch": branch, "into": into,
         "source_commit": source_commit, "base_commit": found, "result_commit": result, "conflicts": conflicts, "message": message });
+    if let Some(reason) = reason {
+        out["reason"] = json!(reason);
+    }
     if accepted {
         out["accepted_moved_target"] = json!(true);
         out["expected_commit"] = json!(moved);
         out["found_commit"] = json!(found);
     }
     Ok(out)
+}
+
+/// Motivo estable de un merge que terminó en `error` (LXO-251): `target_dirty` (el checkout del destino tiene cambios sin commit),
+/// `git_identity_missing` (git no puede firmar el commit: faltan `user.name`/`user.email`) o `git_failed` (cualquier otro fallo de git). Se decide
+/// sin depender del idioma de git: lo de la identidad lo pregunta `git var`, no se lee su mensaje.
+fn merge_error_reason(error: &str, dir: &str) -> &'static str {
+    if error.starts_with("El checkout del padre tiene cambios sin commit") {
+        "target_dirty"
+    } else if git::identity_missing(dir) {
+        "git_identity_missing"
+    } else {
+        "git_failed"
+    }
 }
 
 /// Lo que la persona necesita ver ANTES de integrar una Task (LXO-148): el destino, si se movió, si la rama está en su base, qué se
