@@ -40,24 +40,48 @@ npm.cmd --prefix apps/desktop test -- remoteCore remoteF4
 python -m pytest -q core/gateway/test_remote_ws.py core/gateway/test_remote_core_bootstrap.py core/gateway/test_remote_hub.py
 ~~~
 
-## Validación en dispositivo pendiente
+## E2E Android reproducible
 
-1. Conectar Mobile al IDE actualizado y abrir un Attempt. Comprobar proveedor,
-   sesión, canal y diferencias entre capacidades disponibles, ausentes y bloqueadas.
-2. Cambiar el estado del proveedor en el escritorio y actualizar desde el teléfono.
-   Confirmar que el historial del Attempt conserva sus Events.
-3. Consultar un ContextPackage completo, otro con recortes o redacción y otro ausente.
-   Verificar que el teléfono muestra los metadatos del paquete guardado. Para el caso
-   alterado, usar una copia aislada de la base de pruebas.
-4. Abrir Uso con varios proveedores. Comprobar cuota, modelos, coste declarado,
-   datos ausentes, autenticación requerida y límites de consulta.
-5. Cortar la conexión. Confirmar que los datos conservados se marcan antiguos.
-   Volver a conectar, cambiar de IDE y repetir después de volver de segundo plano.
-6. Repetir con fuente ampliada y lector de pantalla. Verificar que los botones
-   Actualizar siguen siendo accesibles y que los estados se leen sin depender del color.
+`apps/mobile/e2e/f4_drive.py` recorre la app nativa instalada, desde el login
+hasta Supervisar → Task → Attempt y Uso. Usa UIAutomator y deja capturas,
+`results.json` y `relay-evidence.json`. El gateway de pruebas monta las rutas
+WebSocket de producción y un host que llama a `handleCoreAction` de Desktop;
+solo las respuestas RPC del Core y la cuenta son fixtures. Se complementa con
+las pruebas Rust del Core, sin credenciales ni proveedores reales.
 
-La aceptación manual de estos casos queda pendiente en los PRs. El merge lo
-realiza Gabriel después de su revisión.
+Casos: capacidades disponibles, bloqueadas y no soportadas; ContextPackage
+válido, parcial con redacción y recortes, corrupto y ausente; varios proveedores
+con datos desconocidos o no soportados y rate limit; desconexión del host con
+datos antiguos, reconexión y pausa del polling durante el segundo plano.
+El host de pruebas rechaza cualquier RPC fuera de las queries permitidas y
+comprueba que el objetivo completo y los errores privados no salgan del host.
+
+Preparar el APK release x86_64 siguiendo `.github/workflows/mobile-e2e.yml`,
+con `EXPO_PUBLIC_API_BASE=http://127.0.0.1:8765` y HTTP local permitido solo
+en el manifiesto generado para pruebas. Instalar las dependencias de Python
+del repositorio, las de Desktop y Mobile, y tener Node en PATH. Desde la raíz,
+en dos terminales, con un emulador desechable:
+
+~~~powershell
+# Terminal 1: servidor ligado exclusivamente a loopback.
+python apps/mobile/e2e/f4_gateway.py
+
+# Terminal 2: seleccionar explícitamente el emulador de pruebas.
+$env:ANDROID_SERIAL = 'emulator-5580'
+adb reverse tcp:8765 tcp:8765
+adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+adb shell pm clear com.usuario.lixbon
+python apps/mobile/e2e/f4_drive.py .dev/f4-e2e-out
+~~~
+
+La prueba empieza con los datos de la app borrados en ese emulador. No debe
+ejecutarse sobre un teléfono con datos personales. La comprobación manual con
+TalkBack, un dispositivo físico y proveedores reales queda como cobertura
+adicional; los fixtures no validan el comportamiento de binarios externos.
+
+La regresión `answer_e2e_tests::waiting_world` espera todas las peticiones del
+adapter antes de responder: esperar solo el estado del primer permiso dejaba
+una carrera que podía producir un `attempt.resumed` prematuro en el test.
 
 ## Integración con F5
 

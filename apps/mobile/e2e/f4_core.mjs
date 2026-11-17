@@ -35,7 +35,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         case 'provider_capabilities': return registry;
         case 'context_package_get':
           if (scenario === 'corrupt') throw new Error('context_store_corrupt: PRIVATE_SENTINEL');
-          if (scenario === 'absent') throw new Error('context_store_not_found');
+          if (scenario === 'absent') throw new Error('context_store_not_found: fixture');
           if (scenario === 'partial') {
             const partial = structuredClone(context);
             partial.summary.completeness = 'partial';
