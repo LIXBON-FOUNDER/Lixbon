@@ -92,7 +92,7 @@ async def login():
 
 
 @app.get("/api/auth/me")
-async def me(): return USER
+async def me(): return {"user": USER}
 
 
 @app.get("/api/models")

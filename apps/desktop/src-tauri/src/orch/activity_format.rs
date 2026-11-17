@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 72] = [
+pub(super) const KINDS: [&str; 73] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -66,6 +66,7 @@ pub(super) const KINDS: [&str; 72] = [
     "attempt.queue_failed",
     "attempt.instruction_requested",
     "attempt.instruction_result",
+    "attempt.question_requested",
     "attempt.request_answered",
     "attempt.usage_reported",
     "attempt.dispatch_ambiguous",
@@ -670,6 +671,11 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             ],
         ),
         // Responder al proveedor (LXO-247). Solo el tipo y, en un permiso, allow/deny: nunca el texto de una respuesta libre ni el id de la petición.
+        "attempt.question_requested" => rendered(
+            "activity.attempt.question_requested",
+            Visual::Warning,
+            vec![("task", id(p, "task")), ("n", number(p, "n"))],
+        ),
         "attempt.request_answered" => rendered(
             "activity.attempt.request_answered",
             Visual::Info,

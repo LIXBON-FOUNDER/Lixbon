@@ -93,6 +93,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.queue_failed',
   'activity.attempt.instruction_requested',
   'activity.attempt.instruction_result',
+  'activity.attempt.question_requested',
   'activity.attempt.request_answered',
   'activity.attempt.usage_reported',
   'activity.attempt.dispatch_ambiguous',
@@ -618,6 +619,10 @@ const FORMATTERS = {
       : `Se pidió detener el turno en curso del ${attempt} y enviarle una instrucción.`;
   },
   // Responder al proveedor (LXO-247): solo el tipo y, en un permiso, allow/deny. Nunca el texto de una respuesta libre.
+  'activity.attempt.question_requested': (args) => {
+    const attempt = attemptOf(args);
+    return attempt ? `El ${attempt} pide una respuesta al proveedor.` : null;
+  },
   'activity.attempt.request_answered': (args) => {
     const attempt = attemptOf(args);
     const kind = requiredCode(args, 'kind', REQUEST_KINDS);

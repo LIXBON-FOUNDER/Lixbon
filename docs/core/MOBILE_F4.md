@@ -90,6 +90,12 @@ LXO-165 (PRs #243 y #244). La resolución del merge reúne las capabilities del
 host, las respuestas del enlace móvil y las rutas de Uso, Pregunta y Aprobación
 de lanzamiento. También conserva ambas familias de pruebas WebSocket.
 
+El evento `attempt.question_requested` tiene proyección de Activity y traducción
+en ambos clientes: solo anuncia la existencia de una pregunta, sin su texto.
+La integración conserva la resolución de Attention de preguntas al reanudar o
+terminar. Los botones declaran su rol y estado accesibles y admiten altura
+variable; los estados pueden envolver texto al ampliar la fuente del sistema.
+
 Orden de revisión de F4: #245, #246, #247 y el PR de LXO-48. El PR de integración
 incluye F5 en su historial para resolver los conflictos antes del merge en
 master. La aceptación de los PRs de F5 sigue a cargo de Gabriel.
