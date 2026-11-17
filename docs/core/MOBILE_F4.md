@@ -58,3 +58,14 @@ python -m pytest -q core/gateway/test_remote_ws.py core/gateway/test_remote_core
 
 La aceptación manual de estos casos queda pendiente en los PRs. El merge lo
 realiza Gabriel después de su revisión.
+
+## Integración con F5
+
+La rama de integración de LXO-48 incluye los commits revisables de LXO-164 y
+LXO-165 (PRs #243 y #244). La resolución del merge reúne las capabilities del
+host, las respuestas del enlace móvil y las rutas de Uso, Pregunta y Aprobación
+de lanzamiento. También conserva ambas familias de pruebas WebSocket.
+
+Orden de revisión de F4: #245, #246, #247 y el PR de LXO-48. El PR de integración
+incluye F5 en su historial para resolver los conflictos antes del merge en
+master. La aceptación de los PRs de F5 sigue a cargo de Gabriel.

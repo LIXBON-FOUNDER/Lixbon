@@ -17,6 +17,8 @@ const RESPONSES = {
   orch_core_attempt_capabilities: 'core_attempt_capabilities',
   orch_core_attempt_context: 'core_attempt_context',
   orch_core_usage: 'core_usage',
+  orch_mobile_question: 'mobile_question',
+  orch_mobile_launch_approval: 'mobile_launch_approval',
 };
 const DEFAULT_TIMEOUT_MS = 20000;
 
