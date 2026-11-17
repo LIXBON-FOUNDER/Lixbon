@@ -243,6 +243,28 @@ fn con_el_core_degradado_o_el_intento_en_marcha_no_se_toca_nada() {
     live.core.kill_term(&task_of(&b1)).unwrap();
 }
 
+/// LXO-254: `process.running` refleja un proceso vivo, no el estado de la Task. Un Attempt `pending_approval` (aún sin proceso ni worktree) y uno final
+/// dicen `false`; uno en marcha, `true`. El pendiente sigue sin poder limpiarse ni borrarse (la Task no es final).
+#[test]
+fn process_running_solo_es_true_con_un_proceso_vivo() {
+    let _serie = super::pty::pruebas::serie_custodia();
+    let w = world("claude", Some(vec![Step::Output("trabajando".into()), Step::Wait]));
+    let pendiente = w.create("claude", "rm-pendiente");
+    assert_eq!(row(&w.core, &pendiente).0, "pending_approval");
+    let ip = w.inspect(&task_of(&pendiente));
+    assert_eq!(ip["process"]["running"], json!(false), "{ip}");
+    assert_eq!((ip["worktree"]["state"].as_str(), ip["actions"]["delete_worktree"]["reason"].as_str()), (Some("none"), Some("no_worktree")));
+    assert_eq!(ip["actions"]["clean"]["ok"], json!(false), "una Task no final no se limpia");
+
+    w.approve(&pendiente);
+    wait_until("hay ejecución", || w.core.has_term(&task_of(&pendiente)));
+    assert_eq!(w.inspect(&task_of(&pendiente))["process"]["running"], json!(true));
+    w.core.kill_term(&task_of(&pendiente)).unwrap();
+
+    let (wd, _a1, task) = done_with_work();
+    assert_eq!(wd.inspect(&task)["process"]["running"], json!(false), "un Attempt final no tiene proceso");
+}
+
 #[test]
 fn la_peticion_se_valida_y_solo_una_persona_de_desktop_limpia() {
     // La custodia es global: en serie con la prueba que deja un proceso a nombre de `t2-a1` (si no, la `t2` de este Core se ve «en marcha»).

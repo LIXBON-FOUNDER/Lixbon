@@ -261,7 +261,9 @@ pub(super) fn inspect(core: &Core, caller: &Caller, context: Option<&MutationCon
         "task_id": f.task_id,
         "worktree": { "path": f.worktree, "state": f.disk.code(), "dirty": f.dirty },
         "branch": { "name": f.branch, "exists": f.branch_exists, "base": f.base, "merged": merged_label(&f) },
-        "process": { "running": f.running || !f.task_final },
+        // LXO-254: solo un proceso vivo (ejecución del Core o custodia del supervisor). Una Task no final SIN proceso (p. ej. `pending_approval`) no corre:
+        // sigue bloqueando limpiar/borrar (`task_final` en `common_block`), pero no se anuncia como «en marcha».
+        "process": { "running": f.running },
         // LXO-248: el Attempt vivo de OTRA Task que trabaja en este worktree (compartido), si lo hay: por eso `clean`/`delete_worktree` dicen `shared_in_use`.
         "shared": { "by": f.shared_by },
         "health": { "writable": f.healthy },
