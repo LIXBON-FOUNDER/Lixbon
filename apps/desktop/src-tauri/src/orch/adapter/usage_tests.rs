@@ -130,9 +130,17 @@ fn target(a: &Arc<UsageFake>) -> UsageTarget {
     UsageTarget { id: a.id.clone(), adapter: Arc::clone(a) as Arc<dyn ProviderAdapter>, environment_blocked: false }
 }
 
+/// El reloj de TTL y backoff es falso, pero el servicio espera la respuesta del hilo del adapter en tiempo REAL. El adapter falso
+/// contesta al instante, así que el tope solo sirve de red de seguridad: con 300 ms, una máquina cargada lo vencía antes de que el
+/// hilo llegara a contestar y el informe salía `Unknown` en vez de `Fresh`/`Stale`.
 fn servicio() -> (UsageService, Arc<AtomicI64>) {
+    servicio_con_tope(Duration::from_secs(30))
+}
+
+/// Solo para la prueba de «no contesta», que SÍ necesita que el tope venza pronto (vencer tarde no la hace fallar).
+fn servicio_con_tope(timeout: Duration) -> (UsageService, Arc<AtomicI64>) {
     let (clock, now) = reloj();
-    (UsageService::with_clock(UsageConfig { timeout: Duration::from_millis(300), ..UsageConfig::default() }, clock), now)
+    (UsageService::with_clock(UsageConfig { timeout, ..UsageConfig::default() }, clock), now)
 }
 
 fn one(r: &UsageReport) -> &ProviderUsage {
@@ -280,13 +288,17 @@ fn tras_un_fallo_no_se_martillea_al_proveedor_salvo_refresco_manual() {
 
 #[test]
 fn una_consulta_que_no_contesta_se_corta_por_tiempo_y_se_cancela() {
-    let (svc, _) = servicio();
+    let (svc, _) = servicio_con_tope(Duration::from_millis(300));
     let a = UsageFake::new("a", completo(), Reply::Hang);
     let t0 = std::time::Instant::now();
     let p = svc.report(&[target(&a)], Refresh::IfStale).providers.remove(0);
     assert!(t0.elapsed() < Duration::from_secs(3), "el informe no espera al proveedor");
     assert_eq!((p.status, p.error.unwrap().kind), (UsageStatus::Unknown, UsageErrorKind::ProviderUnavailable));
-    std::thread::sleep(Duration::from_millis(100));
+    // El adapter falso mira la cancelación cada 2 ms y se rinde a los 5 s: se espera a verla, no a un instante fijo.
+    let limite = std::time::Instant::now() + Duration::from_secs(4);
+    while !a.saw_cancel.load(Ordering::SeqCst) && std::time::Instant::now() < limite {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert!(a.saw_cancel.load(Ordering::SeqCst), "al pasar el tope se cancela la consulta");
 }
 
