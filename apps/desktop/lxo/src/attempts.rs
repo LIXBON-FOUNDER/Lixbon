@@ -1396,16 +1396,18 @@ fn finish_action(
         }
         Err(error) => {
             if json {
-                eprintln!(
-                    "{}",
-                    json!({"v": CONTRACT, "ok": false, "code": error.code, "error": error.message})
-                );
+                eprintln!("{}", action_failure_json(&error));
             } else {
                 eprintln!("lxo: {}", error.message);
             }
             std::process::ExitCode::from(error.exit)
         }
     }
+}
+
+/// El error JSON de los comandos de `lxo attempt`: siempre con `v`, también si el uso es inválido.
+fn action_failure_json(error: &ActionFailure) -> Value {
+    json!({"v": CONTRACT, "ok": false, "code": error.code, "error": error.message})
 }
 
 pub(super) fn run(a: &Args) -> std::process::ExitCode {
@@ -1418,7 +1420,14 @@ pub(super) fn run(a: &Args) -> std::process::ExitCode {
             | Request::Stop(_)),
         ) => finish_action(execute_action(request), json),
         Ok(request) => finish(execute(request, json), json),
-        Err(error) => finish(Err(error), json),
+        // Un uso inválido (p. ej. `attempt stop` sin `--confirm`) también lleva `v` en JSON.
+        Err(error) => {
+            let (code, exit) = error.code();
+            finish_action(
+                Err(ActionFailure::new(code, exit, error.message().to_string())),
+                json,
+            )
+        }
     }
 }
 
@@ -2021,6 +2030,20 @@ mod tests {
     }
 
     /// Snapshot del `--json` de la ficha sobre la fixture publicada del Core (`attempt_detail.v1.json`).
+    #[test]
+    fn la_falta_de_confirm_es_un_uso_invalido_con_contrato_v1() {
+        let falta = match parse(&args(&["attempt", "stop", "t1-a1"])) {
+            Err(failure) => failure,
+            other => panic!("{other:?}"),
+        };
+        let (code, exit) = falta.code();
+        assert_eq!((code, exit), ("usage", 2), "sin --confirm el cliente termina con 2, no con 9");
+        let json = action_failure_json(&ActionFailure::new(code, exit, falta.message().to_string()));
+        assert_eq!(json["v"], 1);
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["code"], "usage");
+    }
+
     #[test]
     fn snapshot_json_de_la_ficha_sobre_la_fixture_del_core() {
         let data = show_data(&mut core(), "t3-a1").unwrap();

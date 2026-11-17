@@ -91,6 +91,6 @@ Una petición rechazada **antes** de actuar (tabla de errores, «no») no deja E
 
 * La idempotencia vive en memoria del proceso (ver invariante 6). No hay `request_id` durable porque no hay entrega durable: o se
   hizo ahora, con el proveedor, o no se hizo.
-* La CLI `lxo` ofrece `attempt steer` y `attempt stop --send`; ambos exigen `--confirm` según la policy base de CLI. Ver [COLA.md](COLA.md) para Queue y consulta/cancelación.
+* La CLI `lxo` ofrece `attempt steer` y `attempt stop --send`; ambos exigen `--confirm` según la policy base de CLI. Sin `--confirm` el cliente termina con código 2 (uso) y no llama al Core; el código 9 (`policy_confirm_required`) es del Core, cuando la policy rechaza o pide una confirmación que `--confirm` no satisface (también `lxo attempt stop`). Los errores JSON de `lxo attempt` llevan siempre `v: 1`. Ver [COLA.md](COLA.md) para Queue y consulta/cancelación.
 * El plazo del stop (15 s) no es configurable por el cliente.
 * Mientras un Stop & Send espera su veredicto, la llamada RPC está abierta (hasta 15 s).
