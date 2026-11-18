@@ -862,6 +862,7 @@ impl Tx {
     /// contexto de la mutación debe ser realmente ese actor. Review/merge/pr son decisiones de una Person
     /// autenticada de Desktop; los RPC específicos `attempt_review` y `attempt_integrate` también admiten
     /// una Person CLI autenticada, limitada por su acción y categoría en la frontera RPC y la policy.
+    /// Mobile solo registra `review` por su operación privada, tras comprobar policy y revisión exacta.
     pub(super) fn record_decision(&mut self, task: &str, kind: &str, actor: &str, detail: &serde_json::Value) -> Result<u64, String> {
         if !self.tasks.contains_key(task) {
             return Err(format!("decisión {kind}: la tarea {task} no existe"));
@@ -950,7 +951,10 @@ impl Tx {
             return Err(format!("decisión {kind}: la fila dice actor {actor:?} pero la mutación la hace {:?}", ctx.actor));
         }
         let cli_attempt_decision = matches!(kind, "review" | "merge" | "pr") && ctx.is_authenticated_cli_person();
-        let authorized_surface = ctx.is_person_ui() || cli_attempt_decision;
+        // Mobile F5 has one dedicated, policy/hash-checked review operation;
+        // it never receives the authority to merge or publish a PR.
+        let mobile_review = kind == "review" && ctx.is_authenticated_mobile_person();
+        let authorized_surface = ctx.is_person_ui() || cli_attempt_decision || mobile_review;
         if matches!(kind, "review" | "merge" | "pr") && (actor != "human" || !authorized_surface) {
             return Err(format!("decisión {kind}: solo la toma una persona autenticada desde Desktop o mediante el RPC específico de Attempt desde CLI (llegó {:?} por {:?})", ctx.actor, ctx.channel));
         }

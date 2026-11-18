@@ -438,7 +438,11 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
         raise HTTPException(status_code=409, detail="El IDE no está conectado")
     action = payload["action"]
     common_fields = {"rid", "attention_id", "attempt_id"}
-    operation_fields = {"reply"} if action == "mobile_question" else {"decision", "confirm"}
+    operation_fields = {
+        "mobile_question": {"reply"},
+        "mobile_launch_approval": {"decision", "confirm"},
+        "mobile_review": {"decision", "open_desktop"},
+    }[action]
     args = payload.get("args")
     if not isinstance(args, dict) or set(args) - (common_fields | operation_fields):
         raise HTTPException(status_code=422, detail="Solicitud inválida")
@@ -457,9 +461,20 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
         or reply["confirm"] is not True
     ):
         raise HTTPException(status_code=422, detail="Respuesta inválida")
-    if "decision" in args or "confirm" in args:
+    if action == "mobile_launch_approval" and ("decision" in args or "confirm" in args):
         if args.get("decision") not in ("approve", "reject") or args.get("confirm") is not True:
             raise HTTPException(status_code=422, detail="Decisión inválida")
+    if action == "mobile_review":
+        decision = args.get("decision")
+        if "decision" in args and (
+            not isinstance(decision, dict) or set(decision) != {"review_id", "head_commit", "verdict", "confirm"}
+            or not isinstance(decision["review_id"], str) or not 0 < len(decision["review_id"]) <= 200
+            or not isinstance(decision["head_commit"], str) or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", decision["head_commit"])
+            or decision["verdict"] not in ("accepted", "rejected") or decision["confirm"] is not True
+        ):
+            raise HTTPException(status_code=422, detail="Revisión inválida")
+        if "open_desktop" in args and (args["open_desktop"] is not True or decision is not None):
+            raise HTTPException(status_code=422, detail="Apertura inválida")
     now = time.monotonic()
     ch.mobile_requests = {key: value for key, value in ch.mobile_requests.items() if value[2] > now}
     if len(ch.mobile_requests) >= 50:

@@ -465,6 +465,14 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
   const sizes = useWorkbenchStore((s) => s.sizes);
   const adeSelection = useWorkbenchStore((s) => s.adeSelection);
   const setAdeSelection = useWorkbenchStore((s) => s.setAdeSelection);
+  useEffect(() => {
+    const openReview = (event) => {
+      setAdeSelection(event.detail);
+      setWorkspaceView('workspace');
+    };
+    window.addEventListener('lixbon-mobile-review-open', openReview);
+    return () => window.removeEventListener('lixbon-mobile-review-open', openReview);
+  }, [setAdeSelection]);
   const jumpPaletteOpen = useWorkbenchStore((s) => s.jumpPaletteOpen);
   const setJumpPaletteOpen = useWorkbenchStore((s) => s.setJumpPaletteOpen);
   // `active` dice qué canvas se ve (Workspace ADE o Ejecuciones); `modeActive`, si el modo Orquestador

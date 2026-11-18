@@ -76,7 +76,7 @@ fn worktree_state(core: &Core, attempt: &str) -> String {
     core.storage.with_store(|s| s.read(|c| Ok(c.query_row("SELECT state FROM worktrees WHERE attempt_id = ?1", [attempt], |r| r.get::<_, String>(0))?))).unwrap().unwrap()
 }
 
-fn done_with_work(claim: &str) -> (World, String) {
+pub(super) fn done_with_work(claim: &str) -> (World, String) {
     let w = world("claude", Some(vec![Step::Output("trabajo".into()), Step::Complete(Some(claim.into()))]));
     let attempt = w.create("claude", "pp-origen");
     w.approve(&attempt);

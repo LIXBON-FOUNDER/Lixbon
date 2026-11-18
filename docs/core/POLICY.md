@@ -50,7 +50,7 @@ La clase del actor sale de la credencial **autenticada** (principal + superficie
 |---|---|---|---|
 | `desktop_person` | confirm | confirm | allow |
 | `cli_person` | confirm (solo **pide**; start/retry/resume los aprueba Desktop) | review · integrate: confirm; cleanup · provider_permissions: deny | queue · steer: confirm (`attempt_queue`, `attempt_steer`); stop: confirm (`attempt_stop`, `attempt_stop_and_send`, `task_race_cancel`); fork: confirm (`attempt_fork`, `task_race`); answer: deny |
-| `mobile_person` | confirm (aprobación inicial de un lanzamiento compatible) | deny | answer: confirm (preguntas del proveedor); demás: deny |
+| `mobile_person` | confirm (aprobación inicial de un lanzamiento compatible) | review: confirm por el RPC privado sobre revisión legible y hash exacto; demás: deny | answer: confirm (preguntas del proveedor); demás: deny |
 | `automation`, `agent` | deny | deny | deny |
 | `core` | allow | allow | allow |
 

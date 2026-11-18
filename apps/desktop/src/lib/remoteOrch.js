@@ -10,7 +10,10 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { DEFAULT_COLS, ptyCols } from './orchTermSize';
 import { useOrchStore, prepareOrchestrate } from '../store/orchStore';
 import { useAppStore } from '../store/appStore';
-import { CORE_RELAY_PROTOCOL, handleCoreAction } from './remoteCore';
+import { handleCoreAction } from './remoteCore';
+import { handleMobileAction } from './remoteMobile';
+import { useWorkbenchStore } from '../store/workbenchStore';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { sanitizePrUrl } from './remotePrUrl';
 
 const RUNS = 12;
@@ -197,20 +200,19 @@ export async function handleOrchAction(action, args = {}, mobile) {
         return;
       }
       case 'mobile_question':
-      case 'mobile_launch_approval': {
-        const { rid, ...input } = args;
-        if (!/^[A-Za-z0-9_-]{1,64}$/.test(rid || '') || !mobile) return;
+      case 'mobile_launch_approval':
+      case 'mobile_review': {
         const emit = emitFn;
-        const fields = { rid, protocol: CORE_RELAY_PROTOCOL };
-        try {
-          const result = await invoke(`orch_${action}`, {
-            userId: mobile.user_id, sessionId: mobile.session_id, args: input,
-          });
-          emit?.(`orch_${action}`, { ...fields, ok: true, result });
-        } catch (error) {
-          const code = String(error?.message ?? error).match(/^(?:[a-z_]+\/)?([a-z_]+):/)?.[1] || 'core_error';
-          emit?.(`orch_${action}`, { ...fields, ok: false, code });
-        }
+        const out = await handleMobileAction(action, args, mobile, invoke, async (selection) => {
+          const store = useWorkbenchStore.getState();
+          store.setAdeSelection(selection);
+          store.setOrchView('ade');
+          store.setMode('orch');
+          window.dispatchEvent(new CustomEvent('lixbon-mobile-review-open', { detail: selection }));
+          await getCurrentWindow().show();
+          await getCurrentWindow().setFocus();
+        });
+        if (out) emit?.(out.type, out.fields);
         return;
       }
       case 'core_snapshot':

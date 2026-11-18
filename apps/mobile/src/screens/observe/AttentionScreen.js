@@ -53,16 +53,16 @@ function FilterChip({ label, value, onPress }) {
 }
 
 /** Fila de Attention. `inert`: no navega (por ejemplo, la Attention de la Task que ya se está viendo). */
-export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswer = false, canApprove = false }) {
+export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswer = false, canApprove = false, canReview = false }) {
   const c = useColors();
   const cat = categoryOf(item.category);
   const sev = severityOf(item.severity);
-  const found = attentionTarget(item, canAnswer, canApprove);
+  const found = attentionTarget(item, canAnswer, canApprove, canReview);
   const target = inert ? { ...found, navigable: false } : found;
   return (
     <Pressable
       accessibilityRole={target.navigable ? 'button' : 'text'}
-      accessibilityLabel={attentionA11y(item, names, now, canAnswer, canApprove)}
+      accessibilityLabel={attentionA11y(item, names, now, canAnswer, canApprove, canReview)}
       disabled={!target.navigable}
       onPress={() => target.navigable && onOpen(target.route)}
       style={({ pressed }) => ({
@@ -90,6 +90,7 @@ export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswe
 }
 
 export default function AttentionScreen({ obs, route }) {
+  const canReview = obs.capabilities?.includes('mobile_review') === true;
   const c = useColors();
   const { sheet } = useDialogs();
   const { list, setFilters, more, capability, reachable } = useAttentionList(obs, { active: true });
@@ -155,14 +156,14 @@ export default function AttentionScreen({ obs, route }) {
           <View key={g.projectId || 'none'} style={{ gap: 8 }}>
             <Eyebrow style={{ paddingHorizontal: 4 }}>{`${g.name} · ${g.items.length}`}</Eyebrow>
             {g.items.map((item) => (
-              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
+              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} />
             ))}
           </View>
         ))
       ) : (
         <View style={{ gap: 8 }}>
           {list.items.map((item) => (
-            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
+            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} />
           ))}
         </View>
       )}

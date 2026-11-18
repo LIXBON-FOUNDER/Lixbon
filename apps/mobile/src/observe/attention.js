@@ -43,8 +43,12 @@ export const categoryOf = (code) => CATEGORY[code] || { label: String(code || 'd
 export const severityOf = (code) => SEVERITY[code] || { label: String(code || '—'), tone: 'muted' };
 
 /** Adónde lleva una fila. Solo las Tasks tienen pantalla en F2; lo demás se describe sin navegar. */
-export function attentionTarget(item, canAnswer = false, canApprove = false) {
+export function attentionTarget(item, canAnswer = false, canApprove = false, canReview = false) {
   const kind = item?.target_kind;
+  if (canReview && item?.category === 'review_ready' && item.id && item.target_id && ['task', 'attempt'].includes(kind)) {
+    return { navigable: true, label: TARGET[kind], route: { name: 'review', attentionId: item.id, projectId: item.project_id || null,
+      ...(kind === 'task' ? { taskId: item.target_id } : { attemptId: item.target_id }) } };
+  }
   if (kind === 'task' && item.target_id) {
     return { navigable: true, label: TARGET.task, route: { name: 'task', taskId: item.target_id, projectId: item.project_id || null } };
   }
@@ -98,9 +102,9 @@ export function groupByProject(items, names) {
 }
 
 /** Texto para el lector de pantalla de una fila. */
-export function attentionA11y(item, names, now, canAnswer = false, canApprove = false) {
-  const target = attentionTarget(item, canAnswer, canApprove);
-  const destination = { question: 'abre la pregunta', launchApproval: 'abre la aprobación' }[target.route?.name] || 'abre la tarea';
+export function attentionA11y(item, names, now, canAnswer = false, canApprove = false, canReview = false) {
+  const target = attentionTarget(item, canAnswer, canApprove, canReview);
+  const destination = { question: 'abre la pregunta', launchApproval: 'abre la aprobación', review: 'abre la revisión' }[target.route?.name] || 'abre la tarea';
   return [
     categoryOf(item.category).label,
     `severidad ${severityOf(item.severity).label.toLowerCase()}`,
