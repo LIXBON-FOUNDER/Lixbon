@@ -120,6 +120,17 @@ pub(super) trait Launcher: Send + Sync {
     /// El proveedor aceptó la ejecución del Attempt (`StartOutcome::Running`): ya es de quien la escucha. Por defecto no hace
     /// nada; el lanzador real arranca aquí el bombeo de eventos.
     fn started(&self, _attempt_id: &str) {}
+
+    /// El adapter del proveedor y su matriz TAL COMO LOS VE este lanzador (LXO-170): Return to Agent reanuda un Attempt sin pasar por un despacho y debe
+    /// hablar con el MISMO adapter que lanzó al agente. En producción es el registro del Core; en las pruebas, el falso. Por defecto, ninguno.
+    fn adapter_for(&self, _provider: &str) -> Option<(std::sync::Arc<dyn super::adapter::ProviderAdapter>, super::adapter::CapabilityMatrix)> {
+        None
+    }
+
+    /// Cuánto espera el bombeo una respuesta humana a una petición del proveedor antes de cancelar la ejecución.
+    fn approval_ttl(&self) -> std::time::Duration {
+        super::approval::DEFAULT_APPROVAL_TTL
+    }
 }
 
 /// Desenlace de [`Core::dispatch_attempt`].

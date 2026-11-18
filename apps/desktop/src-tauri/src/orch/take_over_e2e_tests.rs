@@ -14,7 +14,7 @@ use super::dispatch_tests::{event_count, row};
 use super::steer_e2e_tests::world_without;
 use super::{Caller, Core};
 
-fn payloads(core: &Core, attempt: &str, kind: &str) -> Vec<Value> {
+pub(super) fn payloads(core: &Core, attempt: &str, kind: &str) -> Vec<Value> {
     let rows: Vec<String> = core
         .storage
         .with_store(|s| {
@@ -29,20 +29,20 @@ fn payloads(core: &Core, attempt: &str, kind: &str) -> Vec<Value> {
     rows.iter().map(|p| serde_json::from_str(p).unwrap()).collect()
 }
 
-fn owner_events(core: &Core, attempt: &str) -> usize {
+pub(super) fn owner_events(core: &Core, attempt: &str) -> usize {
     event_count(core, attempt, "attempt.ownership_changed") as usize
 }
 
-fn calls(w: &World, name: &str) -> usize {
+pub(super) fn calls(w: &World, name: &str) -> usize {
     w.adapter.calls().iter().filter(|c| c.as_str() == name).count()
 }
 
-fn take(w: &World, attempt: &str, request_id: &str) -> Result<Value, String> {
+pub(super) fn take(w: &World, attempt: &str, request_id: &str) -> Result<Value, String> {
     w.desktop("attempt_take_over", json!({ "attempt_id": attempt, "request_id": request_id }))
 }
 
 /// El Attempt corre con su ejecución viva y la sesión declarada.
-fn running(w: &World, attempt: &str) -> String {
+pub(super) fn running(w: &World, attempt: &str) -> String {
     wait_until("el Attempt corre", || row(&w.core, attempt).0 == "running");
     let task = attempt.rsplit_once("-a").unwrap().0.to_string();
     wait_until("la ejecución está registrada", || w.core.has_term(&task));
@@ -51,7 +51,7 @@ fn running(w: &World, attempt: &str) -> String {
 }
 
 /// Un Attempt `claude` que trabaja hasta que se le interrumpe (`Wait` reacciona a la interrupción).
-fn live_world(request: &str) -> (World, String, String) {
+pub(super) fn live_world(request: &str) -> (World, String, String) {
     let w = world("claude", None);
     w.adapter.push_turn(vec![Step::Bind("sess-to"), Step::Output("trabajando".into()), Step::Wait]);
     let a = w.create("claude", request);

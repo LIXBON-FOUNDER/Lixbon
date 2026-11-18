@@ -116,6 +116,9 @@ mod live_run;
 mod steer_commands;
 mod steer_runtime;
 mod take_over_runtime;
+mod return_runtime;
+#[cfg(test)]
+mod return_e2e_tests;
 #[cfg(test)]
 mod take_over_e2e_tests;
 #[cfg(test)]
@@ -364,6 +367,8 @@ pub struct Core {
     instructions: steer_runtime::InstructionState,
     /// Take Over (LXO-170): las peticiones ya atendidas (idempotencia) y cuánto se espera a que la interrupción se confirme.
     take_overs: take_over_runtime::TakeOverState,
+    /// Return to Agent (LXO-170): las peticiones ya atendidas (idempotencia) y los Attempts que se están devolviendo ahora mismo.
+    returns: take_over_runtime::TakeOverState,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -411,6 +416,7 @@ impl Default for Orch {
             adapter_runs: Mutex::new(HashMap::new()),
             instructions: steer_runtime::InstructionState::default(),
             take_overs: take_over_runtime::TakeOverState::default(),
+            returns: take_over_runtime::TakeOverState::default(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]
