@@ -6,7 +6,7 @@ import './NewAttemptForm.css';
 /**
  * LXO-150 · Se puede crear SOLO la Task (sin intento: queda `not_started`; hoy lo único que se le puede hacer es adoptarle un worktree externo: no hay RPC para darle su primer intento después) o la Task
  * con su primer intento. Antes de enviar, una vista previa dice QUÉ pasará con el botón o con Enter: en qué Project, qué se crea, que nada se ejecuta y
- * que el intento tendrá un worktree nuevo y propio. No hay selector de host (el Core tiene uno solo) ni worktree compartido (no existe): se dice, no se oculta.
+ * que el intento tendrá un worktree nuevo y propio. No hay selector de host (el Core tiene uno solo). El worktree compartido (LXO-248) no se elige aquí: se hace en el detalle del intento, antes de aprobarlo; la vista previa lo dice.
  *
  * LXO-141 · Crear una Task con su primer Attempt en el Project abierto. La persona elige proveedor, perfil y (opcional) modelo
  * y esfuerzo; lo demás —que el Attempt nazca `pending_approval`, el plazo, el worktree— lo fija el Core. Crear NO lanza nada:
@@ -145,7 +145,7 @@ export function NewAttemptForm({ projectId, projectName = null, coreModel, activ
                 <>
                   <li data-testid="new-attempt-preview-what">Crea la tarea «{title.trim() || '…'}» y su intento 1 con <span className="mono">{chosen || '…'}</span> · {profileLabel}{model.trim() ? ` · ${model.trim()}` : ''}{effort.trim() ? ` · ${effort.trim()}` : ''}.</li>
                   <li data-testid="new-attempt-preview-approval">Nada se ejecuta todavía: el intento queda esperando tu aprobación.</li>
-                  <li data-testid="new-attempt-preview-worktree">Al aprobarlo, el Core le dará un worktree nuevo y propio (no se comparte con otras tareas), en este equipo.</li>
+                  <li data-testid="new-attempt-preview-worktree">Al aprobarlo, el Core le dará un worktree nuevo y propio, en este equipo. Si prefieres reutilizar el de otro intento del Project, elígelo en el detalle del intento antes de aprobarlo.</li>
                 </>
               )}
             </ul>
