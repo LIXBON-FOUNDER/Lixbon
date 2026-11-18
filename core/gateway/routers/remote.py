@@ -437,11 +437,12 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
     if cid not in ch.controllers or not ch.host_connected or hub.get(ch.session_id) is not ch:
         raise HTTPException(status_code=409, detail="El IDE no está conectado")
     action = payload["action"]
-    common_fields = {"rid", "attention_id", "attempt_id"}
+    common_fields = {"rid", "attempt_id"} if action == "mobile_controls" else {"rid", "attention_id", "attempt_id"}
     operation_fields = {
         "mobile_question": {"reply"},
         "mobile_launch_approval": {"decision", "confirm"},
         "mobile_review": {"decision", "open_desktop"},
+        "mobile_controls": {"operation", "request_id"},
     }[action]
     args = payload.get("args")
     if not isinstance(args, dict) or set(args) - (common_fields | operation_fields):
@@ -449,7 +450,8 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
     rid = args.get("rid")
     if not isinstance(rid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", rid):
         raise HTTPException(status_code=422, detail="Identificador de petición inválido")
-    if any(not isinstance(args.get(k), str) or not 0 < len(args[k]) <= 200 for k in ("attention_id", "attempt_id")):
+    targets = ("attempt_id",) if action == "mobile_controls" else ("attention_id", "attempt_id")
+    if any(not isinstance(args.get(k), str) or not 0 < len(args[k]) <= 200 for k in targets):
         raise HTTPException(status_code=422, detail="Destino inválido")
     reply = args.get("reply")
     if "reply" in args and (
@@ -475,6 +477,19 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
             raise HTTPException(status_code=422, detail="Revisión inválida")
         if "open_desktop" in args and (args["open_desktop"] is not True or decision is not None):
             raise HTTPException(status_code=422, detail="Apertura inválida")
+    if action == "mobile_controls":
+        if "request_id" in args and (not isinstance(args["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", args["request_id"])):
+            raise HTTPException(status_code=422, detail="Solicitud inválida")
+        if "operation" in args:
+            op = args["operation"]
+            fields = {"queue": {"kind", "request_id", "body", "confirm"}, "cancel": {"kind", "queue_id", "confirm"}, "stop": {"kind", "confirm"}}
+            if not isinstance(op, dict) or op.get("kind") not in fields or set(op) != fields[op["kind"]] or op["confirm"] is not True:
+                raise HTTPException(status_code=422, detail="Control inválido")
+            if op["kind"] == "queue" and (not isinstance(op["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", op["request_id"])
+                    or not isinstance(op["body"], str) or not op["body"].strip() or len(op["body"]) > 4000):
+                raise HTTPException(status_code=422, detail="Instrucción inválida")
+            if op["kind"] == "cancel" and (not isinstance(op["queue_id"], str) or not 0 < len(op["queue_id"]) <= 200):
+                raise HTTPException(status_code=422, detail="Elemento inválido")
     now = time.monotonic()
     ch.mobile_requests = {key: value for key, value in ch.mobile_requests.items() if value[2] > now}
     if len(ch.mobile_requests) >= 50:

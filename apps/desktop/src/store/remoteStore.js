@@ -35,7 +35,7 @@ const CAPABILITIES = [
   'attachments', 'images', 'mentions', 'files', 'orch', 'config',
   'core_snapshot', 'core_attention', 'core_task', 'core_attempts',
   'core_attempt_capabilities', 'core_attempt_context', 'core_usage',
-  'mobile_question', 'mobile_launch_approval', 'mobile_review',
+  'mobile_question', 'mobile_launch_approval', 'mobile_review', 'mobile_controls',
 ];
 const FILE_RESULTS = 30;
 const FILES_TTL_MS = 30_000;

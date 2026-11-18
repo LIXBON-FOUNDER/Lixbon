@@ -187,7 +187,7 @@ pub(super) fn baseline(actor: ActorClass, category: Category) -> Level {
         }
         // El Core se gobierna a sí mismo: la policy rige las peticiones de actores, no su trabajo interno.
         ActorClass::Core => Level::Allow,
-        ActorClass::MobilePerson if matches!(category, Category::Answer | Category::Start | Category::Review) => Level::Confirm,
+        ActorClass::MobilePerson if matches!(category, Category::Answer | Category::Start | Category::Review | Category::Queue | Category::Stop) => Level::Confirm,
         // Mobile, automatización y agentes: nada de estas categorías hasta que una fase lo decida (y con confirmación fuera de banda).
         _ => Level::Deny,
     }

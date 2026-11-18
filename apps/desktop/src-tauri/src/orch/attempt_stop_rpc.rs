@@ -57,6 +57,18 @@ pub(super) fn stop(
     {
         return Err("attempt_stop_auth_required: attempt_stop requiere una Person autenticada de CLI".into());
     }
+    stop_confirmed(core, context, input)
+}
+
+/// Dedicated Mobile entry; it does not open the generic CLI RPC to Mobile.
+pub(super) fn stop_mobile(core: &Core, context: &MutationContext, input: &StopInput) -> Result<StopResult, String> {
+    if !context.is_authenticated_mobile_person() {
+        return Err("attempt_stop_auth_required: falta una Person Mobile autenticada".into());
+    }
+    stop_confirmed(core, context, input)
+}
+
+fn stop_confirmed(core: &Core, context: &MutationContext, input: &StopInput) -> Result<StopResult, String> {
     require_confirmation(input)?;
     let (task_id, number) = task_and_number(&input.attempt_id)?;
     let attempt = core

@@ -104,6 +104,7 @@ mod fork_runtime;
 mod compare_read;
 mod proof_pack;
 mod mobile_review;
+mod mobile_controls;
 mod integration_attempt;
 mod resource_actions;
 mod attempt_resume_rpc;

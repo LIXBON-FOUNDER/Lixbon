@@ -17,6 +17,7 @@ import { FONTS, RADIUS } from '../../theme';
 import { AttentionRow } from './AttentionScreen';
 import CapabilitySummary from './CapabilitySummary';
 import ContextSummary from './ContextSummary';
+import AttemptControls from './AttemptControls';
 
 export function Field({ label, children, mono = false, secondary = false }) {
   const c = useColors();
@@ -73,6 +74,7 @@ export default function AttemptScreen({ obs, route }) {
             <Body muted>{m.lifecycle}</Body>
           </View>
 
+          <AttemptControls key={route.attemptId} obs={obs} attemptId={route.attemptId} />
           <View style={{ gap: 8 }}>
             <Eyebrow>Ejecución</Eyebrow>
             <Box>

@@ -20,6 +20,7 @@ const RESPONSES = {
   orch_mobile_question: 'mobile_question',
   orch_mobile_launch_approval: 'mobile_launch_approval',
   orch_mobile_review: 'mobile_review',
+  orch_mobile_controls: 'mobile_controls',
 };
 const DEFAULT_TIMEOUT_MS = 20000;
 
