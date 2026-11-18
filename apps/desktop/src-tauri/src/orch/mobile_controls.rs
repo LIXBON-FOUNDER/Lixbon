@@ -89,7 +89,7 @@ impl Core {
                     if let Some(reason) = policy_reason(queue_policy) {
                         return Err(format!("{reason}: no se puede encolar ahora"));
                     }
-                    let replay = self.storage.with_store(|s| s.queue_by_request(&attempt.id, &request_id)).and_then(Result::ok).flatten().is_some();
+                    let replay = self.queue_request_row(&attempt.id, &request_id)?.is_some();
                     if !replay {
                         if let Some(reason) = queue_reason {
                             return Err(format!("{reason}: no se puede encolar ahora"));
@@ -99,7 +99,7 @@ impl Core {
                 }
                 Operation::Cancel { queue_id, confirm } => {
                     require(confirm)?;
-                    let item = self.storage.with_store(|s| s.queue_item(&queue_id)).and_then(Result::ok).flatten().ok_or("stale_queue: el elemento ya no existe")?;
+                    let item = self.queue_item_row(&queue_id)?.ok_or("stale_queue: el elemento ya no existe")?;
                     if item.attempt_id != attempt.id {
                         return Err("stale_queue: el elemento pertenece a otro Attempt".into());
                     }
@@ -136,10 +136,7 @@ impl Core {
             if request_id.len() > 128 || request_id.is_empty() {
                 return Err("invalid_request: solicitud inválida".into());
             }
-            self.storage
-                .with_store(|s| s.queue_by_request(&attempt.id, &request_id))
-                .and_then(Result::ok)
-                .flatten()
+            self.queue_request_row(&attempt.id, &request_id)?
                 .map(|item| json!({"request_id": request_id, "queue_id": item.queue_id, "status": item.status}))
         } else {
             None

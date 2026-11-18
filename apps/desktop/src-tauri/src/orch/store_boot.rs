@@ -702,6 +702,14 @@ impl Core {
         self.storage.with_store(f).unwrap_or_else(|| Err(QueueError::new(QueueErrorKind::Failed, "store", "el almacén del Core no está abierto")))
     }
 
+    pub(super) fn queue_item_row(&self, queue_id: &str) -> Result<Option<crate::store::QueueItemRow>, String> {
+        self.storage.with_store(|s| s.queue_item(queue_id)).ok_or("queue_unavailable: almacén cerrado")?.map_err(|_| "queue_unavailable: no se pudo consultar el elemento".into())
+    }
+
+    pub(super) fn queue_request_row(&self, attempt_id: &str, request_id: &str) -> Result<Option<crate::store::QueueItemRow>, String> {
+        self.storage.with_store(|s| s.queue_by_request(attempt_id, request_id)).ok_or("queue_unavailable: almacén cerrado")?.map_err(|_| "queue_unavailable: no se pudo consultar la solicitud".into())
+    }
+
     /// `attempt.queue`: encola y, si el run ya está en un límite de turno, entrega (nunca desde el RPC: ahí es `Busy`).
     pub(super) fn queue_enqueue(&self, port: &dyn QueuePort, ctx: &MutationContext, cancel: &CancelToken, req: &QueueRequest<'_>) -> Result<Queued, QueueError> {
         self.queue_store(|st| queue_commands::queue_attempt(st, port, ctx, cancel, req))
