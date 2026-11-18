@@ -157,7 +157,7 @@ describe('NewAttemptForm · solo la tarea y vista previa (LXO-150)', () => {
     expect(screen.getByTestId('new-attempt-preview-project').textContent).toMatch(/Lixbon \(p1\)/);
     expect(screen.getByTestId('new-attempt-preview-what').textContent).toMatch(/Arreglar el login.*intento 1.*claude.*haiku/);
     expect(screen.getByTestId('new-attempt-preview-approval').textContent).toMatch(/Nada se ejecuta todavía/);
-    expect(screen.getByTestId('new-attempt-preview-worktree').textContent).toMatch(/worktree nuevo y propio.*no se comparte/);
+    expect(screen.getByTestId('new-attempt-preview-worktree').textContent).toMatch(/worktree nuevo y propio.*reutilizar el de otro intento.*antes de aprobarlo/);
     // En «solo la tarea» no hay intento ni worktree.
     fireEvent.click(screen.getByTestId('new-attempt-mode-task'));
     expect(screen.queryByTestId('new-attempt-preview-worktree')).toBeNull();

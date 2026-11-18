@@ -282,7 +282,9 @@ function DiffTab({ task }) {
 
 function TaskView({ task, snap, intent, terminalVisible = true, modeActive = true }) {
   const call = useOrchStore((s) => s.call);
-  const [tab, setTab] = useState(task.parent && intent !== ATTENTION.review && intent !== ATTENTION.integrate ? 'term' : 'activity');
+  // LXO-252: un Attempt lanzado desde la CLI no tiene padre, pero si espera aprobación en su terminal esa terminal existe y es el único sitio donde contestar.
+  const hasTerminal = Boolean(task.parent) || isAwaitingTerminalApproval(task);
+  const [tab, setTab] = useState(hasTerminal && intent !== ATTENTION.review && intent !== ATTENTION.integrate ? 'term' : 'activity');
   const live = snap.live.includes(task.id);
   const parent = task.parent ? snap.tasks[task.parent] : null;
   const final = isFinal(task.status);
@@ -311,7 +313,7 @@ function TaskView({ task, snap, intent, terminalVisible = true, modeActive = tru
             {task.branch && <> · <IconGitBranch size={11} /> <span className="mono">{task.branch}</span></>}
           </span>
           <ModelInfo task={task} />
-          <TerminalApprovalNotice task={task} now={now} onGoToTerminal={task.parent ? () => setTab('term') : undefined} />
+          <TerminalApprovalNotice task={task} now={now} onGoToTerminal={hasTerminal ? () => setTab('term') : undefined} />
         </div>
         <div className="panelhead__fill" />
         {task.pr_url && <a className="lk" href={task.pr_url} target="_blank" rel="noreferrer">Ver PR</a>}
@@ -322,8 +324,8 @@ function TaskView({ task, snap, intent, terminalVisible = true, modeActive = tru
         {canIntegrate && (
           <button className="lk" title="Integrar la rama de esta tarea con tu confirmación" onClick={() => setIntegrating((v) => !v)}>{integrating ? 'Cerrar integración' : 'Integrar'}</button>
         )}
-        {!final && parent && (
-          <button className="lk is-danger" title="Solo para emergencias: el coordinador recibe el aviso" onClick={() => call('stop', { task: task.id }, 'Tarea detenida')}>Detener</button>
+        {!final && (parent || isAwaitingTerminalApproval(task)) && (
+          <button className="lk is-danger" title={parent ? 'Solo para emergencias: el coordinador recibe el aviso' : 'Detiene el intento si no vas a aprobarlo en su terminal'} onClick={() => call('stop', { task: task.id }, 'Tarea detenida')}>Detener</button>
         )}
       </div>
       <div className="orch__tabs">
@@ -332,7 +334,7 @@ function TaskView({ task, snap, intent, terminalVisible = true, modeActive = tru
           onChange={setTab}
           width={96}
           options={[
-            ...(task.parent ? [{ value: 'term', label: 'Terminal' }] : []),
+            ...(hasTerminal ? [{ value: 'term', label: 'Terminal' }] : []),
             { value: 'activity', label: 'Actividad' },
             ...(task.branch ? [{ value: 'diff', label: 'Cambios' }] : []),
           ]}
@@ -352,7 +354,7 @@ function TaskView({ task, snap, intent, terminalVisible = true, modeActive = tru
       )}
       <div className="orch__body">
         {/* Oculto el modo, la terminal se desmonta: el PTY vive en Rust y al volver repone su buffer. */}
-        {tab === 'term' && task.parent && modeActive && <AgentTerminal key={task.id} task={task.id} live={live} visible={terminalVisible} />}
+        {tab === 'term' && hasTerminal && modeActive && <AgentTerminal key={task.id} task={task.id} live={live} visible={terminalVisible} />}
         {tab === 'activity' && <Activity task={task} messages={snap.messages} tasks={snap.tasks} />}
         {tab === 'diff' && <DiffTab task={task} />}
       </div>
