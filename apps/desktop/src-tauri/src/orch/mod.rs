@@ -106,6 +106,9 @@ mod proof_pack;
 mod integration_attempt;
 mod resource_actions;
 mod attempt_resume_rpc;
+mod handoff_runtime;
+#[cfg(test)]
+mod handoff_e2e_tests;
 mod queue_runtime;
 mod queue_rpc;
 mod policy;

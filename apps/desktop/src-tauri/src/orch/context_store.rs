@@ -20,7 +20,7 @@ use std::process::Command;
 use base64::Engine;
 use serde_json::{json, Map, Value};
 
-use super::context_package::{self, sha256_hex, Artifact, ArtifactKind, FileChange, NewPackage, PackageErrorCode, Revision, RevisionInput, UncommittedInput, UntrackedInput};
+use super::context_package::{self, ContextPackage, sha256_hex, Artifact, ArtifactKind, FileChange, NewPackage, PackageErrorCode, Revision, RevisionInput, UncommittedInput, UntrackedInput};
 use super::context_preview;
 use super::events::{Actor, MutationContext};
 use super::model_read::with_model;
@@ -249,7 +249,27 @@ pub(super) fn build(core: &Core, caller: &Caller, context: Option<&MutationConte
     let empty = Map::new();
     let map = args_of(args, &["attempt_id"], &empty)?;
     let attempt_id = text_arg(map, "attempt_id")?.ok_or_else(|| invalid("falta `attempt_id`"))?;
+    let b = build_and_store(core, attempt_id)?;
+    stored_view(&b.row, &b.blobs, Some(b.created))
+}
 
+/// El JSON de un paquete guardado, tal cual se guardó (`None`: no hay ninguno con ese id). Quien lo usa lo vuelve a pasar por `context_package::parse`.
+pub(super) fn stored_json(core: &Core, package_id: &str) -> Result<Option<String>, String> {
+    with_model(core, |s| Ok(Ok(s.context_package(package_id)?.map(|p| p.json)))).map_err(|e| e.replacen("model_unavailable", "context_store_unavailable", 1))
+}
+
+/// Un paquete recién construido y guardado.
+pub(super) struct Built {
+    pub package: ContextPackage,
+    row: StoredPackage,
+    blobs: BTreeMap<String, Vec<u8>>,
+    /// `true`: se guardó ahora; `false`: ya estaba guardado (el id es el hash del contenido).
+    created: bool,
+}
+
+/// Construye el paquete del Attempt con la evidencia de su worktree y lo guarda. Lo comparten `context_package_build` y Agent Handoff (LXO-172):
+/// el que traspasa sin aportar paquete lo construye con exactamente las mismas reglas (redacción, truncado, evidencia verificable).
+pub(super) fn build_and_store(core: &Core, attempt_id: &str) -> Result<Built, String> {
     let loaded = with_model(core, |s| {
         let Some(attempt) = s.attempt_row(attempt_id)? else { return Ok(Err(format!("context_store_not_found: no existe el Attempt {attempt_id}"))) };
         let Some(task) = s.task_row(&attempt.task_id)? else { return Ok(Err(format!("context_store_not_found: no existe la Task {}", attempt.task_id))) };
@@ -268,7 +288,9 @@ pub(super) fn build(core: &Core, caller: &Caller, context: Option<&MutationConte
         Some(_) => Evidence { revision: RevisionInput::Absent("el worktree del intento ya no está en disco".into()), uncommitted: None, bundle: None, artifacts: vec![], notes: vec![] },
         None => Evidence { revision: RevisionInput::Absent("el intento no tiene worktree".into()), uncommitted: None, bundle: None, artifacts: vec![], notes: vec![] },
     };
-    let objective = if l.task.spec.trim().is_empty() { l.task.title.clone() } else { l.task.spec.clone() };
+    // Sin los traspasos anteriores: el encargo es lo que se pidió, no los paquetes que ya viajaron (si no, cada traspaso anidaría el anterior).
+    let spec = super::handoff_runtime::without_handoff(&l.task.spec);
+    let objective = if spec.trim().is_empty() { l.task.title.clone() } else { spec };
     let summary = l.attempt.summary.trim();
     let built = context_package::build(NewPackage {
         created_at_ms: now_ms() as i64,
@@ -308,7 +330,7 @@ pub(super) fn build(core: &Core, caller: &Caller, context: Option<&MutationConte
     let outcome = put(core, &stored)?;
     let blobs_now: BTreeMap<String, Vec<u8>> = built.blobs;
     let row = StoredPackage { package_id: stored.package_id.clone(), origin: stored.origin, task_id: stored.task_id.clone(), attempt_id: stored.attempt_id.clone(), created_at: stored.created_at, stored_at: now_ms() as i64, json: stored.json.clone() };
-    stored_view(&row, &blobs_now, Some(outcome == PutOutcome::Created))
+    Ok(Built { package, row, blobs: blobs_now, created: outcome == PutOutcome::Created })
 }
 
 // ── Leer ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

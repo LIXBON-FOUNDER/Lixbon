@@ -68,6 +68,7 @@ impl Core {
             "attempt_start"
                 | "attempt_retry"
                 | "attempt_resume"
+                | "attempt_handoff"
                 | "attempt_stop"
                 | "attempt_queue"
                 | "attempt_queue_cancel"
@@ -344,6 +345,34 @@ impl Core {
                     .map(|attempt| attempt.status.as_str().to_string())
                     .ok_or_else(|| format!("attempt_resume_unavailable: falta el Attempt durable {attempt_id}"))?;
                 Ok(json!({"status": status, "task_id": input.task_id, "attempt_id": attempt_id, "attempt_status": attempt_status}))
+            }
+            "attempt_handoff" => {
+                let context = authenticated_context.as_ref().ok_or("traspasar un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("traspasar un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::handoff_runtime::HandoffInput =
+                    serde_json::from_value(args.clone()).map_err(|e| format!("Solicitud de traspaso inválida: {e}"))?;
+                let outcome = super::handoff_runtime::handoff(self, context, &input)?;
+                // Desktop autoriza el traspaso con su propia decisión; CLI queda pendiente y no lanza antes de aprobar.
+                if outcome.requested && context.channel == Channel::Ui {
+                    self.wake_dispatcher();
+                }
+                let attempt_status = self
+                    .attempt_row_for_resume(&outcome.attempt_id)?
+                    .map(|attempt| attempt.status.as_str().to_string())
+                    .ok_or_else(|| format!("attempt_handoff_unavailable: falta el Attempt durable {}", outcome.attempt_id))?;
+                Ok(json!({
+                    "status": if outcome.requested { "Requested" } else { "Replayed" },
+                    "task_id": input.task_id,
+                    "attempt_id": outcome.attempt_id,
+                    "source_attempt_id": input.from_attempt_id,
+                    "attempt_status": attempt_status,
+                    "strategy": "context_package",
+                    "reason": if outcome.provider_changed { "provider_changed" } else { "requested" },
+                    "package_id": outcome.package_id,
+                    "transfer": outcome.transfer,
+                }))
             }
             "attempt_queue" | "attempt_queue_cancel" | "pending_queue" => {
                 let context = authenticated_context.as_ref().ok_or("la cola de instrucciones requiere una Person autenticada")?;
@@ -899,7 +928,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
         // Aprobar o rechazar la ejecución inicial es una decisión de una Person en Desktop: ni el CLI ni un agente.
         "attempt_start" | "attempt_stop" => ClientAction::CliAttemptCommand,
-        "attempt_retry" | "attempt_resume" => ClientAction::AttemptRequest,
+        "attempt_retry" | "attempt_resume" | "attempt_handoff" => ClientAction::AttemptRequest,
         "attempt_queue"
         | "attempt_queue_cancel"
         | "pending_queue"
@@ -1032,6 +1061,7 @@ mod tests {
         }
         assert_eq!(rpc_action("attempt_retry"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_resume"), ClientAction::AttemptRequest);
+        assert_eq!(rpc_action("attempt_handoff"), ClientAction::AttemptRequest);
         assert_eq!(rpc_action("attempt_integrate"), ClientAction::AttemptIntegration);
         assert_eq!(
             rpc_action("attempt_fork"),

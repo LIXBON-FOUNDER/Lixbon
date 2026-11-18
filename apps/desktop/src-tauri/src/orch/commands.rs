@@ -377,7 +377,7 @@ mod ade_query_tests {
             assert!(is_ade_read_query(query), "{query} debe ser una lectura vNext permitida");
         }
         // Las mutaciones del Attempt no entran por esta superficie: el ADE F3 solo lee.
-        for operation in ["attempt_request", "attempt_start", "attempt_stop", "attempt_retry", "attempt_resume", "attempt_fork", "attempt_review", "attempt_integrate", "resource_clean", "resource_delete_worktree", "attempt_queue", "attempt_queue_cancel", "task_discard", "policy_set", "policy_reset", "task_race", "task_race_cancel"] {
+        for operation in ["attempt_request", "attempt_start", "attempt_stop", "attempt_retry", "attempt_resume", "attempt_handoff", "attempt_fork", "attempt_review", "attempt_integrate", "resource_clean", "resource_delete_worktree", "attempt_queue", "attempt_queue_cancel", "task_discard", "policy_set", "policy_reset", "task_race", "task_race_cancel"] {
             assert!(!is_ade_read_query(operation), "{operation} no debe exponerse en el ADE");
         }
         for operation in ["project_archive", "run_create", "spawn", "remove_run", "events", "unknown"] {

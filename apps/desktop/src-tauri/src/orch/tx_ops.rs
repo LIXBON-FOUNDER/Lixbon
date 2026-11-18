@@ -132,6 +132,16 @@ pub(super) struct RetrySelection {
     pub profile: Option<String>,
 }
 
+/// Lo que `attempt_handoff` le pide a la mutación (LXO-172). Todo viene ya validado y resuelto por `handoff_runtime`: aquí solo se escribe.
+pub(super) struct HandoffRequest {
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// El bloque que se añade al encargo (con delimitadores): el paquete, qué viaja y qué no, y la instrucción de la persona.
+    pub block: String,
+    pub package_id: String,
+}
+
 /// Lo que `attempt.fork` le pide a la mutación (LXO-145). Todo viene ya validado y resuelto por `fork_runtime`: aquí solo se escribe.
 pub(super) struct ForkRequest {
     pub source_attempt: String,
@@ -477,6 +487,59 @@ impl Tx {
         let retried = self.tasks.get(task_id).cloned().map(|t| ev::runtime_attempt_retried(&t, n, overrides));
         if let Some(retried) = retried {
             self.try_push_event(retried);
+        }
+        Ok(())
+    }
+
+    /// Pide un Attempt NUEVO que arranca de cero con el ContextPackage del anterior (Agent Handoff, LXO-172): la Task pasa a `starting` desde
+    /// Desktop o `pending_approval` desde CLI y nace el Attempt `n + 1` con `attempt.continued` (estrategia `context_package`). Se parece a un
+    /// reintento (arranque limpio, otro proveedor si se pide) y se diferencia en que el encargo lleva el contexto transferido y en que el hecho
+    /// dice con qué paquete. **No comparte la ProviderSession** (se borra `session_ref`, como en un reintento) ni amplía permisos (el perfil se hereda).
+    pub(super) fn request_attempt_handoff(&mut self, task_id: &str, request: &HandoffRequest) -> Result<(), String> {
+        if !self.is_authenticated_person() {
+            return Err("traspasar un Attempt requiere una Person autenticada".into());
+        }
+        if !self.attempt_model() {
+            return Err("El runtime de Attempts no está activo".into());
+        }
+        let task = self.tasks.get(task_id).cloned().ok_or_else(|| format!("No existe la Task {task_id}"))?;
+        if !self.attempt_n.contains_key(task_id) {
+            return Err("la Task no tiene ningún Attempt que traspasar".into());
+        }
+        if !task.status.is_final() {
+            return Err("solo se traspasa un Attempt terminado".into());
+        }
+        if task.profile.as_deref().is_none_or(|p| p.trim().is_empty()) {
+            return Err("el Attempt anterior no tiene un perfil de permisos que heredar".into());
+        }
+        let same_provider = request.provider == task.agent;
+        let before = self.snapshot_run_of(task_id);
+        let requires_approval = self.context().channel == Channel::Lxo;
+        {
+            let t = self.state_mut().task_mut(task_id)?;
+            t.model = request.model.clone().or_else(|| if same_provider { t.model.clone() } else { None });
+            t.effort = request.effort.clone().or_else(|| if same_provider { t.effort.clone() } else { None });
+            t.agent = request.provider.clone();
+            // El traspaso anterior (si lo hubo) se sustituye: el nuevo paquete ya lo contiene.
+            t.spec = format!("{}{}", super::handoff_runtime::without_handoff(&t.spec), request.block);
+            // Lo del Attempt anterior no se arrastra al nuevo, ni siquiera la sesión: no se comparte entre proveedores.
+            t.summary.clear();
+            t.report = None;
+            t.delivery_channel = None;
+            t.failure_reason = None;
+            t.session_ref = None;
+            t.model_source = None;
+            t.session_match = None;
+            t.approval_deadline = None;
+            t.merged = false;
+            t.status = if requires_approval { Status::PendingApproval } else { Status::Starting };
+            t.updated = super::state::now_ms();
+        }
+        self.push_status_changes(before, None);
+        let n = self.attempt_n.get(task_id).copied().unwrap_or(1);
+        let continued = self.tasks.get(task_id).cloned().map(|t| ev::runtime_handoff_continuation(&t, n, !same_provider, &request.package_id));
+        if let Some(continued) = continued {
+            self.try_push_event(continued);
         }
         Ok(())
     }
