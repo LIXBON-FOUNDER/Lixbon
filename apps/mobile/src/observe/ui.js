@@ -22,7 +22,7 @@ export function StateText({ tone, children }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <Dot color={toneColor(tone, c)} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{children}</Text>
+      <Text style={{ flexShrink: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{children}</Text>
     </View>
   );
 }

@@ -1,8 +1,8 @@
-// AttentionScreen.js — bandeja de Attention de Supervisar (LXO-109, solo lectura).
+// AttentionScreen.js — bandeja de Attention de Supervisar.
 //
 // Lista en el orden del Core con filtros por Project, categoría y severidad, agrupación opcional por Project,
 // icono por categoría, severidad, destino y edad. Las Attention de una Task abren su detalle (LXO-110); abrir
-// no resuelve ni marca nada. Sin responder, aprobar, posponer ni «no leído» en F2.
+// no cambia su estado. Las preguntas de un Attempt pueden abrir su pantalla de respuesta (LXO-164).
 import React, { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -53,16 +53,16 @@ function FilterChip({ label, value, onPress }) {
 }
 
 /** Fila de Attention. `inert`: no navega (por ejemplo, la Attention de la Task que ya se está viendo). */
-export function AttentionRow({ item, names, now, onOpen, inert = false }) {
+export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswer = false, canApprove = false }) {
   const c = useColors();
   const cat = categoryOf(item.category);
   const sev = severityOf(item.severity);
-  const found = attentionTarget(item);
+  const found = attentionTarget(item, canAnswer, canApprove);
   const target = inert ? { ...found, navigable: false } : found;
   return (
     <Pressable
       accessibilityRole={target.navigable ? 'button' : 'text'}
-      accessibilityLabel={attentionA11y(item, names, now)}
+      accessibilityLabel={attentionA11y(item, names, now, canAnswer, canApprove)}
       disabled={!target.navigable}
       onPress={() => target.navigable && onOpen(target.route)}
       style={({ pressed }) => ({
@@ -115,6 +115,8 @@ export default function AttentionScreen({ obs, route }) {
   const notice = listNotice(list, { capability, online: reachable, snapshotTotal: snapshot?.attention?.total });
   const anyFilter = f.project_id || f.category || f.severity;
   const open = (r) => obs.push(r);
+  const canAnswer = obs.capabilities?.includes('mobile_question');
+  const canApprove = obs.capabilities?.includes('mobile_launch_approval');
 
   return (
     <View style={{ gap: 14 }}>
@@ -153,14 +155,14 @@ export default function AttentionScreen({ obs, route }) {
           <View key={g.projectId || 'none'} style={{ gap: 8 }}>
             <Eyebrow style={{ paddingHorizontal: 4 }}>{`${g.name} · ${g.items.length}`}</Eyebrow>
             {g.items.map((item) => (
-              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} />
+              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
             ))}
           </View>
         ))
       ) : (
         <View style={{ gap: 8 }}>
           {list.items.map((item) => (
-            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} />
+            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} />
           ))}
         </View>
       )}

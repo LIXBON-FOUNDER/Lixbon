@@ -89,6 +89,10 @@ export default function HomeScreen({ obs }) {
         {home.activeHidden ? <Body muted style={{ fontSize: 12.5 }}>{`Y ${home.activeHidden} más: el resumen enseña las 50 más recientes.`}</Body> : null}
       </View>
 
+      <RowButton label="Consultar uso de proveedores" onPress={() => open({ name: 'usage' })}>
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>Uso de proveedores</Text>
+      </RowButton>
+
       <View style={{ gap: 8 }}>
         <Eyebrow>{`Proyectos · ${home.projectsTotal}`}</Eyebrow>
         {home.projects.length === 0 ? (

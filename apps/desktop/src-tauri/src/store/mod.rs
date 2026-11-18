@@ -164,6 +164,7 @@ pub(crate) use task_create::task_create_payload_sha256;
 // Sin consumidor fuera del almacén hasta el RPC de decisión del primer Attempt (LXO-141, fase 2c).
 #[allow(unused_imports)]
 pub use initial_approval::{InitialApprovalDecision, InitialApprovalSnapshot, INITIAL_APPROVAL_TTL_MS};
+pub(crate) use initial_approval::mobile_launch_shape;
 // Review targeting (LXO-118): inerte hasta el corte; solo lo usan `orch::review_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};

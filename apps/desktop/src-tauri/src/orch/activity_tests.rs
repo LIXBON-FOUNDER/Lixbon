@@ -353,6 +353,14 @@ fn casos() -> Vec<Caso> {
             "error",
         ),
         (
+            "attempt.question_requested",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "question": "PRIVATE_SENTINEL" }),
+            "activity.attempt.question_requested",
+            "warning",
+        ),
+        (
             "attempt.request_answered",
             State,
             ("attempt", "t-7-a2"),
@@ -751,7 +759,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 105] = [
+const CLAVES: [&str; 106] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
@@ -770,6 +778,7 @@ const CLAVES: [&str; 105] = [
     "activity.attempt.queue_failed",
     "activity.attempt.queued",
     "activity.attempt.rejected",
+    "activity.attempt.question_requested",
     "activity.attempt.request_answered",
     "activity.attempt.requested",
     "activity.attempt.resumed",

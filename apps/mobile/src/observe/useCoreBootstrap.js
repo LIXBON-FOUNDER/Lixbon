@@ -23,7 +23,7 @@ const log = (code, fields) => {
  * - `send(command)`: entrega un comando y resuelve su acuse `{ ok, status? }`.
  * - `transportOpen`, `hostConnected`, `capabilities`: estado del enlace y `hello` del IDE.
  * Devuelve `{ state, retry, handleEvent, request }`; `handleEvent(ev)` es `true` si el evento era del bootstrap
- * y `request(action, args)` hace otra lectura por el mismo enlace (por ejemplo `core_attention`).
+ * y `request(action, args)` consulta Attention y, desde Supervisar, permite contestar preguntas del proveedor.
  */
 export function useCoreBootstrap({ enabled = true, sessionId, send, transportOpen, hostConnected, capabilities }) {
   const [state, setState] = useState(null);
