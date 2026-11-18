@@ -77,6 +77,7 @@ impl Core {
                 | "attempt_take_over"
                 | "attempt_return_to_agent"
                 | "attempt_return_preview"
+                | "attempt_delegate"
         ) {
             let expected_channel = match client.identity().surface() {
                 ClientSurface::Desktop => Some(Channel::Ui),
@@ -110,7 +111,7 @@ impl Core {
         self.rpc_with_context(channel, caller, cwd, cmd, args, Some(context))
     }
 
-    fn rpc_with_context(
+    pub(super) fn rpc_with_context(
         self: &Arc<Self>,
         channel: Channel,
         caller: Caller,
@@ -390,6 +391,15 @@ impl Core {
                 }
                 let input: super::take_over_runtime::TakeOverInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de Take Over inválida".to_string())?;
                 super::take_over_runtime::rpc(self, context, &input)
+            }
+            // Delegate (LXO-171): una persona delega un trabajo, con el origen verificado y su procedencia anotada.
+            "attempt_delegate" => {
+                let context = authenticated_context.as_ref().ok_or("delegar un trabajo requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("delegar un trabajo solo está permitido a una Person autenticada".into());
+                }
+                let input: super::delegate_runtime::DelegateInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de delegación inválida".to_string())?;
+                super::delegate_runtime::rpc(self, context, &input)
             }
             // Return to Agent (LXO-170): la persona devuelve el Attempt que tomó; el agente sigue en el mismo Attempt.
             "attempt_return_to_agent" => {
@@ -906,7 +916,8 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "attempt_steer"
         | "attempt_stop_and_send"
         | "attempt_take_over"
-        | "attempt_return_to_agent" => ClientAction::AttemptInstructionCommand,
+        | "attempt_return_to_agent"
+        | "attempt_delegate" => ClientAction::AttemptInstructionCommand,
         "attempt_fork" | "task_race" | "task_race_cancel" => {
             ClientAction::AttemptForkCommand
         }
@@ -969,7 +980,8 @@ mod tests {
             | "attempt_steer"
             | "attempt_stop_and_send"
             | "attempt_take_over"
-            | "attempt_return_to_agent" => {
+            | "attempt_return_to_agent"
+            | "attempt_delegate" => {
                 ClientAction::AttemptInstructionCommand
             }
             "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,

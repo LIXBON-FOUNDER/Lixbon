@@ -117,6 +117,9 @@ mod steer_commands;
 mod steer_runtime;
 mod take_over_runtime;
 mod return_runtime;
+mod delegate_runtime;
+#[cfg(test)]
+mod delegate_e2e_tests;
 #[cfg(test)]
 mod return_e2e_tests;
 #[cfg(test)]

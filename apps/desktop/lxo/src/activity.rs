@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 108] = [
+pub(crate) const MESSAGE_KEYS: [&str; 109] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -101,6 +101,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 108] = [
     "activity.attempt.request_answered",
     "activity.attempt.usage_reported",
     "activity.attempt.ownership_changed",
+    "activity.attempt.delegated",
     "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
@@ -271,6 +272,7 @@ const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
 const OWNERS: [&str; 2] = ["agent", "human"];
+const DELEGATE_SOURCES: [&str; 3] = ["selection", "task", "attempt"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 /// Qué pidió el proveedor y qué se decidió (`attempt.request_answered`, LXO-247): la decisión solo existe en un permiso.
 const REQUEST_KINDS: [&str; 2] = ["permission", "question"];
@@ -633,6 +635,12 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del Attempt.
         "activity.attempt.usage_reported" => format!("El proveedor informó el uso del {at}."),
         // Take Over / Return (LXO-170): solo a quién pasó el workspace.
+        // Delegate (LXO-171): solo de dónde nace.
+        "activity.attempt.delegated" => match a.code("source", &DELEGATE_SOURCES)? {
+            "selection" => format!("El {at} se delegó a partir de una selección de código."),
+            "task" => format!("El {at} se delegó a partir de otra tarea."),
+            _ => format!("El {at} se delegó a partir de otro intento."),
+        },
         "activity.attempt.ownership_changed" => {
             if a.code("to", &OWNERS)? == "human" {
                 format!("El {at} pasó a manos de una persona.")
@@ -989,6 +997,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.request_answered"
         | "activity.attempt.usage_reported"
         | "activity.attempt.ownership_changed"
+        | "activity.attempt.delegated"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;

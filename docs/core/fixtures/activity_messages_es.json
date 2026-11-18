@@ -1054,6 +1054,26 @@
       "text": null
     },
     {
+      "key": "activity.attempt.delegated",
+      "args": { "task": "t-3", "n": 2, "source": "selection" },
+      "text": "El intento 2 de la tarea t-3 se delegó a partir de una selección de código."
+    },
+    {
+      "key": "activity.attempt.delegated",
+      "args": { "task": "t-3", "n": 2, "source": "task" },
+      "text": "El intento 2 de la tarea t-3 se delegó a partir de otra tarea."
+    },
+    {
+      "key": "activity.attempt.delegated",
+      "args": { "task": "t-3", "n": 2, "source": "attempt" },
+      "text": "El intento 2 de la tarea t-3 se delegó a partir de otro intento."
+    },
+    {
+      "key": "activity.attempt.delegated",
+      "args": { "task": "t-3", "n": 2, "source": "otro" },
+      "text": null
+    },
+    {
       "key": "activity.attempt.ownership_changed",
       "args": { "task": "t-3", "n": 2, "to": "human" },
       "text": "El intento 2 de la tarea t-3 pasó a manos de una persona."
