@@ -811,6 +811,18 @@ impl Core {
         }
     }
 
+    /// El Worktree de un Attempt y si está en esta máquina (LXO-170): lo que Return to Agent necesita para mirar los cambios de la persona.
+    pub(super) fn attempt_workspace(&self, attempt_id: &str) -> Result<Option<(crate::store::WorktreeRow, bool)>, QueueError> {
+        self.queue_store(|st| {
+            let Some(w) = st.worktree_of_attempt(attempt_id).map_err(queue_commands::from_store)? else { return Ok(None) };
+            let local = match &w.machine {
+                None => true,
+                Some(m) => super::projects::machine_id_read(st).map_err(queue_commands::from_store)?.as_deref() == Some(m.as_str()),
+            };
+            Ok(Some((w, local)))
+        })
+    }
+
     /// `attempt.ownership_changed` (LXO-170): cambia el dueño del workspace del Attempt. El dueño actual y el hecho son lo mismo: se lee del
     /// último evento (`Store::attempt_ownership`), así que no hay dos fuentes que puedan discrepar. Pasar al mismo dueño es un error, no un hecho vacío.
     pub(super) fn ownership_changed(&self, ctx: &MutationContext, attempt_id: &str, to: store::Owner, request_id: &str, base_commit: Option<&str>) -> Result<(), QueueError> {

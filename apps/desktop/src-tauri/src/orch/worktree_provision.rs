@@ -136,6 +136,21 @@ impl Core {
         Ok(ProvisionedWorktree { dir: PathBuf::from(dir), branch, base, repo_root, task: intent.task_id.clone(), previous_cwd: cwd, reused: true })
     }
 
+    /// El worktree que la Task YA tiene, sin crear, registrar ni adjuntar nada (LXO-170): Return to Agent reanuda el MISMO Attempt en su
+    /// worktree. Es `reused`: quien lo libere no borra nada, porque no lo creó.
+    pub(super) fn existing_worktree_of(&self, task_id: &str) -> Result<ProvisionedWorktree, String> {
+        let (dir, branch, base, repo, cwd) = {
+            let st = self.lock();
+            let t = st.tasks.get(task_id).ok_or_else(|| format!("la Task {task_id} no existe en el estado"))?;
+            match (&t.worktree, &t.branch, &t.base) {
+                (Some(dir), Some(branch), Some(base)) => (dir.clone(), branch.clone(), base.clone(), t.repo.clone(), t.cwd.clone()),
+                _ => return Err(format!("la Task {task_id} no tiene su worktree completo en el estado")),
+            }
+        };
+        let repo_root = git::main_root(&repo).or_else(|| git::toplevel(&repo)).unwrap_or(repo);
+        Ok(ProvisionedWorktree { dir: PathBuf::from(dir), branch, base, repo_root, task: task_id.to_string(), previous_cwd: cwd, reused: true })
+    }
+
     /// Crea el worktree del Attempt y lo registra. Un `Err` no deja nada creado por esta llamada. Un reintento no crea
     /// ninguno: se adjunta al de la Task (ver [`Core::attach_to_task_worktree`]).
     pub(super) fn provision_worktree(&self, intent: &DispatchIntent) -> Result<ProvisionedWorktree, PrepareError> {

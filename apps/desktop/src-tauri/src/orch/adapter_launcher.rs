@@ -158,6 +158,17 @@ impl Launcher for AdapterLauncher {
         Ok(Box::new(AdapterPrepared { core: self.core.clone(), task_id: intent.task_id.clone(), adapter, matrix, request, cancel: CancelToken::new(), worktree, started: Arc::clone(&self.started) }))
     }
 
+    fn adapter_for(&self, provider: &str) -> Option<(Arc<dyn ProviderAdapter>, CapabilityMatrix)> {
+        match LiveRegistry::adapter_for(&self.registry, provider) {
+            AdapterLookup::Found(adapter, matrix) => Some((adapter, matrix)),
+            AdapterLookup::Probing | AdapterLookup::Unknown => None,
+        }
+    }
+
+    fn approval_ttl(&self) -> Duration {
+        self.approval_ttl
+    }
+
     /// El proveedor aceptó la ejecución: se toma y se escucha en su propio hilo.
     fn started(&self, attempt_id: &str) {
         let Some(run) = self.take_started(attempt_id) else { return };

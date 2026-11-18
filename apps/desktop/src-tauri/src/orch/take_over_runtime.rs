@@ -52,7 +52,7 @@ enum Entry {
     Done(Result<Value, QueueError>),
 }
 
-enum Begin {
+pub(super) enum Begin {
     Started,
     Replay(Result<Value, QueueError>),
     InFlight,
@@ -61,11 +61,13 @@ enum Begin {
 pub(super) struct TakeOverState {
     log: Mutex<HashMap<(String, String), Entry>>,
     wait_ms: std::sync::atomic::AtomicU64,
+    /// Los Attempts cuya devolución está en curso (Return to Agent): solo una a la vez, o dos reanudaciones arrancarían dos procesos.
+    returning: Mutex<std::collections::HashSet<String>>,
 }
 
 impl Default for TakeOverState {
     fn default() -> Self {
-        TakeOverState { log: Mutex::new(HashMap::new()), wait_ms: std::sync::atomic::AtomicU64::new(TAKE_WAIT.as_millis() as u64) }
+        TakeOverState { log: Mutex::new(HashMap::new()), wait_ms: std::sync::atomic::AtomicU64::new(TAKE_WAIT.as_millis() as u64), returning: Mutex::new(std::collections::HashSet::new()) }
     }
 }
 
@@ -74,7 +76,7 @@ impl TakeOverState {
         self.log.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn begin(&self, attempt: &str, request_id: &str) -> Begin {
+    pub(super) fn begin(&self, attempt: &str, request_id: &str) -> Begin {
         let mut log = self.log();
         let key = (attempt.to_string(), request_id.to_string());
         match log.get(&key) {
@@ -89,13 +91,19 @@ impl TakeOverState {
         Begin::Started
     }
 
-    fn finish(&self, attempt: &str, request_id: &str, result: Result<Value, QueueError>) {
+    pub(super) fn finish(&self, attempt: &str, request_id: &str, result: Result<Value, QueueError>) {
         self.log().insert((attempt.to_string(), request_id.to_string()), Entry::Done(result));
     }
 
     /// La petición no llegó a actuar (se rechazó antes): no deja rastro y puede repetirse.
-    fn abort(&self, attempt: &str, request_id: &str) {
+    pub(super) fn abort(&self, attempt: &str, request_id: &str) {
         self.log().remove(&(attempt.to_string(), request_id.to_string()));
+    }
+
+    /// Reserva la devolución de `attempt`. `None`: ya hay una en curso. Se libera sola al soltar el guardián.
+    pub(super) fn try_acquire(&self, attempt: &str) -> Option<ReturnGuard<'_>> {
+        let inserted = self.returning.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt.to_string());
+        inserted.then(|| ReturnGuard { registry: self, attempt: attempt.to_string() })
     }
 
     fn wait(&self) -> Duration {
@@ -105,6 +113,18 @@ impl TakeOverState {
     #[cfg(test)]
     pub(super) fn set_wait(&self, wait: Duration) {
         self.wait_ms.store(wait.as_millis() as u64, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// La devolución de un Attempt, reservada mientras dura.
+pub(super) struct ReturnGuard<'a> {
+    registry: &'a TakeOverState,
+    attempt: String,
+}
+
+impl Drop for ReturnGuard<'_> {
+    fn drop(&mut self) {
+        self.registry.returning.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.attempt);
     }
 }
 
