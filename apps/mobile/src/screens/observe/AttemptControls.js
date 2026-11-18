@@ -31,13 +31,15 @@ export default function AttemptControls({ obs, attemptId }) {
   const data = view.data;
   const fresh = view.online && view.fresh && data?.attempt_id === attemptId;
   useEffect(() => {
-    if (!fresh || !pending) return;
+    // Reconcile after the mutation settles: a late transport timeout must not
+    // overwrite an outcome already proved by a read using the business key.
+    if (!fresh || !pending || busy) return;
     const recovered = recoverQueue(data, pending);
     if (recovered) {
       setStatus(recovered === 'failed' ? 'La instrucción figura como fallida en el Core.' : `El Core encontró la solicitud: ${labels[recovered]}.`);
       setPending(null); setDraft('');
     }
-  }, [data, fresh, pending]);
+  }, [data, fresh, pending, busy]);
   const perform = async (operation) => {
     if (!fresh || lock.current) return;
     const kind = operation.kind;
