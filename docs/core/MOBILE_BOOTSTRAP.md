@@ -2,7 +2,7 @@
 
 Estado: **implementado**. Mobile arranca su vista observacional desde la [snapshot compacta del
 Core](QUERIES.md#compact_snapshot) (LXO-94) y sigue los cambios por el Event Log desde su cursor, sin el
-webview ni la interfaz de Desktop. Solo lectura: no hay comandos operacionales, push ni cola offline.
+webview ni la interfaz de Desktop. La bandeja usa lecturas del Core y permite responder preguntas de proveedor (LXO-164).
 
 ## Ruta e identidad
 
@@ -85,7 +85,82 @@ El gateway reparte esos eventos en vivo, pero no los guarda en el replay ni en l
     disco), y los marca como desactualizados con su edad.
   * El gateway admite las dos acciones en `ORCH_ACTIONS` y sus respuestas como `EPHEMERAL_EVENTS`.
 
+## Preguntas del proveedor (LXO-164)
+
+Si el IDE anuncia `mobile_question`, una Attention de categoría `question` con destino
+`attempt` abre la consulta y respuesta de la pregunta. El relé vuelve a autenticar una
+sesión Mobile vigente de la cuenta dueña con cada operación. El gateway asigna el
+identificador de correlación del host y entrega la respuesta únicamente al WebSocket
+que pidió la operación. El contenido de la pregunta y la respuesta no se persiste ni
+se reentrega por el relé cuando se reconecta.
+
+El Core comprueba la Attention, el Attempt, la petición pendiente y la policy vigente.
+Mobile muestra Project, Task e Attempt antes de enviar. La respuesta a la pregunta
+requiere confirmación explícita y reutiliza la entrega idempotente de `attempt_answer`.
+El Event `attempt.question_requested` crea Attention sin guardar el texto de la pregunta.
+El Event `attempt.request_answered` resuelve esa Attention cuando se contesta la última
+pregunta, aunque queden permisos del proveedor. El texto de la respuesta tampoco viaja
+en el Event. Mobile refresca desde el Core y conserva el borrador en memoria si pierde
+la confirmación. La persona puede volver a consultar el estado tras reconectar.
+
+## Aprobación inicial (LXO-165)
+
+Una Attention `approval` incluye `launch_approval: true` si el Core la vinculó al lanzamiento
+de un Attempt. Con la capability `mobile_launch_approval`, la bandeja abre el intento, el
+proveedor, el perfil, el host y la estrategia de worktree. Usa el mismo canal autenticado
+y dirigido que las preguntas. La decisión requiere confirmación y vence con el plazo
+durable del Core. Repetirla devuelve el estado de resolución vigente.
+
+Mobile admite un lanzamiento gestionado con un worktree nuevo y un perfil compatible.
+Los intentos externos, los worktrees enlazados y las continuaciones se resuelven en Desktop.
+En Windows, Codex requiere evidencia positiva de sandbox no elevado. La policy de lanzamiento
+se vuelve a comprobar al decidir y antes de despachar un intento autorizado desde Mobile.
+
 ## Estados en el móvil
+
+### Capacidades del intento (LXO-139)
+
+El host anuncia `core_attempt_capabilities`. La lectura consulta `attempt_detail_v2`
+y `provider_capabilities` y devuelve una matriz resumida del proveedor de ese Attempt.
+Las capabilities ausentes se presentan como desconocidas. Se conservan los estados
+`available`, `unsupported`, `unavailable` y `environment_blocked`, los códigos de
+bloqueo de perfil y el estado de la sesión, sin referencias del proveedor ni diagnósticos
+libres. El mensaje de respuesta es `orch_core_attempt_capabilities`, efímero.
+
+La ficha de Mobile muestra las capacidades y la disponibilidad de la sesión nativa.
+Consulta de nuevo al reconectar, al volver a primer plano, cada 30 segundos y al pulsar
+Actualizar. Mientras el Core sondea consulta cada 3 segundos. La última lectura queda
+solo en memoria, separada por host e intento, y se marca desactualizada cuando la
+conexión o la frescura de la sonda lo requieren. Estos datos no ejecutan acciones.
+
+### ContextPackage guardado (LXO-140)
+
+`core_attempt_context` lee el último paquete guardado del Attempt con
+`context_package_get`; la lectura verifica su identidad y origen. Devuelve metadatos
+de procedencia, revisión, pruebas declaradas, contadores, redacción, recortes y tamaño.
+El objetivo se resume por su tamaño y el contenido del paquete permanece en el host.
+Un paquete ausente tiene estado `absent`; uno corrupto o de otro origen, `invalid`.
+Los campos de contenido se omiten en ambos casos. No construye ni importa paquetes.
+
+La UI distingue entre paquete completo, parcial, adjuntos ausentes y adjuntos cuya
+verificación debe realizarse al recibirlos. Muestra la reanudación nativa por separado,
+en el resumen de capacidades. El mensaje `orch_core_attempt_context` es efímero y la
+memoria móvil se separa por host e intento, con advertencia de antigüedad offline.
+
+### Uso de proveedores (LXO-208)
+
+Home de Supervisar abre Uso de proveedores. `core_usage` llama únicamente a
+`usage_report` del Core y devuelve su informe resumido en `orch_core_usage`, efímero.
+Se validan el contrato, las cuentas como huellas de ocho hexadecimales y los valores
+numéricos. Los errores viajan como código, sin el texto del diagnóstico.
+
+Cada proveedor tiene su tarjeta, con soporte campo por campo, cuota por ventana,
+plan, créditos, tokens y coste declarado cuando existen. Un valor ausente aparece
+como sin dato. El estado y la hora de observación acompañan al resultado, incluidos
+datos antiguos, errores de autenticación y límites de consulta. Se limita el resumen
+a 30 proveedores, 20 ventanas y 30 modelos por proveedor, con aviso explícito de recorte.
+La vista conserva el último informe en memoria por host y consulta solo en primer
+plano, al reconectar, periódicamente y mediante Actualizar uso.
 
 `apps/mobile/src/observe/bootstrap.js` (sin React Native; se prueba con `node --test`).
 

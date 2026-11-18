@@ -112,6 +112,10 @@ hasta validarla en dispositivo.
 El prototipo con datos de ejemplo (`SupervisionScreen.js`, `src/supervision/`)
 sigue en el repo, pero sin montar.
 
+Las vistas de F4 muestran capacidades y contexto guardado dentro del detalle
+del Attempt, y Uso de proveedores desde Home de Supervisar. El contrato y la
+receta de validación están en [Mobile F4](../../docs/core/MOBILE_F4.md).
+
 ## Prototipo de supervisión (Sprint D)
 
 Sección **Supervisar** con datos de ejemplo para validar Mobile como superficie

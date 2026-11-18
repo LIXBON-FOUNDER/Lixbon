@@ -209,11 +209,12 @@ fn un_evento_emitido_en_mutate_se_confirma_con_la_mutacion() {
 }
 
 #[test]
-fn cliente_autenticado_cli_y_desktop_conserva_client_id_actor_y_canal_en_evento() {
+fn cliente_autenticado_conserva_client_id_actor_y_canal_en_evento() {
     let (_l, _d, _c, core) = core_listo();
     let clients = [
         (ClientSurface::Cli, ClientPrincipal::Agent("task-cli-85".into()), "install-cli-85", "cli-secret-85-this-is-at-least-32-bytes-long", Channel::Lxo, "agent", Some("task-cli-85")),
         (ClientSurface::Desktop, ClientPrincipal::Person("person-desktop-85".into()), "install-desktop-85", "desktop-secret-85-this-is-at-least-32-bytes-long", Channel::Ui, "person", Some("person-desktop-85")),
+        (ClientSurface::Mobile, ClientPrincipal::Person("person-mobile-164".into()), "install-mobile-164", "mobile-secret-164-this-is-at-least-32-bytes-long", Channel::Mobile, "person", Some("person-mobile-164")),
     ];
 
     for (index, (surface, principal, installation, secret, channel, actor_kind, actor_id)) in clients.into_iter().enumerate() {
@@ -231,7 +232,7 @@ fn cliente_autenticado_cli_y_desktop_conserva_client_id_actor_y_canal_en_evento(
         assert_eq!(event.client_id.as_deref(), Some(client_id.as_str()));
         assert_eq!(event.actor_kind.as_str(), actor_kind);
         assert_eq!(event.actor_id.as_deref(), actor_id);
-        assert_eq!(event.channel.as_deref(), Some(match channel { Channel::Lxo => "lxo", Channel::Ui => "ui", Channel::Core => "core" }));
+        assert_eq!(event.channel.as_deref(), Some(match channel { Channel::Lxo => "lxo", Channel::Ui => "ui", Channel::Mobile => "mobile", Channel::Core => "core" }));
     }
 }
 

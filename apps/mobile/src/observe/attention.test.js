@@ -53,6 +53,13 @@ describe('2 · destino y navegación', () => {
     assert.equal(attentionTarget(item('b', { project_id: null })).route.projectId, null);
   });
 
+  it('solo la aprobación inicial usa la pantalla de lanzamiento', () => {
+    const approval = item('launch', { category: 'approval', target_kind: 'attempt', target_id: 't-a1', launch_approval: true });
+    assert.equal(attentionTarget(approval, false, true).route.name, 'launchApproval');
+    assert.equal(attentionTarget(approval).route.name, 'attempt');
+    assert.equal(attentionTarget({ ...approval, launch_approval: false }, false, true).route.name, 'attempt');
+  });
+
   it('los demás destinos se describen sin navegar', () => {
     for (const kind of ['project', 'run', 'spawn_request', 'worktree', 'algo_nuevo']) {
       const t = attentionTarget(item('x', { target_kind: kind }));

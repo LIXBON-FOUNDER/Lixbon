@@ -159,6 +159,22 @@ pub fn orch_call(orch: TauriState<'_, Orch>, cmd: String, args: Value) -> Result
     orch.0.rpc_via(Channel::Ui, Caller::User, "", &cmd, &args)
 }
 
+/// La identidad la adjunta el gateway al mensaje del relé. Este límite de
+/// Tauri solo permite leer o responder preguntas de proveedor.
+#[tauri::command(async)]
+pub fn orch_mobile_question(orch: TauriState<'_, Orch>, user_id: u64, session_id: u64, args: Value) -> Result<Value, String> {
+    orch.0.mobile_question(user_id, session_id, args)
+}
+
+#[tauri::command(async)]
+pub fn orch_mobile_launch_approval(orch: TauriState<'_, Orch>, user_id: u64, session_id: u64, args: Value) -> Result<Value, String> {
+    let result = orch.0.mobile_launch_approval(user_id, session_id, args)?;
+    if result["outcome"] == "approved" {
+        orch.0.wake_dispatcher();
+    }
+    Ok(result)
+}
+
 /// RPC dedicado del ADE. La allowlist evita exponer operaciones de escritura a esta superficie F2.
 #[tauri::command(async)]
 pub fn orch_query(orch: TauriState<'_, Orch>, query: String, args: Value) -> Result<Value, String> {

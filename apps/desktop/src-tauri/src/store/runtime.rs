@@ -144,7 +144,12 @@ pub(super) fn validate_initial_approval_decisions(
             event.channel.as_deref(),
             event.at,
         )?;
-    let projection_ok = before.is_some_and(|task| {
+    let mobile_ok = if event.channel.as_deref() == Some("mobile") {
+        super::attempts::attempt_in(c, &attempt_id)?.is_some_and(|attempt| super::initial_approval::mobile_launch_shape(&attempt))
+    } else {
+        true
+    };
+    let projection_ok = mobile_ok && before.is_some_and(|task| {
         task.status == "pending_approval"
             && event.run_id.as_deref() == Some(task.run.as_str())
             && event.project_id == task.project_id

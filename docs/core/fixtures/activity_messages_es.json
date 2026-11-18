@@ -994,6 +994,21 @@
       "text": null
     },
     {
+      "key": "activity.attempt.question_requested",
+      "args": { "task": "t-3", "n": 2, "question": "PRIVATE_SENTINEL" },
+      "text": "El intento 2 de la tarea t-3 pide una respuesta al proveedor."
+    },
+    {
+      "key": "activity.attempt.question_requested",
+      "args": { "task": "t-3" },
+      "text": null
+    },
+    {
+      "key": "activity.attempt.question_requested",
+      "args": { "task": "t-3", "n": "2" },
+      "text": null
+    },
+    {
       "key": "activity.attempt.request_answered",
       "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "allow" },
       "text": "Se permitió lo que el proveedor pedía en el intento 2 de la tarea t-3."

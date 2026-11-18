@@ -168,6 +168,8 @@ pub(super) enum Channel {
     Ui,
     /// El servidor local que usa `lxo`.
     Lxo,
+    /// Relé del gateway, autenticado como sesión de Mobile.
+    Mobile,
     /// Interno del Core (arranque, vigilancia, temporizadores).
     Core,
 }
@@ -177,6 +179,7 @@ impl Channel {
         match self {
             Channel::Ui => "ui",
             Channel::Lxo => "lxo",
+            Channel::Mobile => "mobile",
             Channel::Core => "core",
         }
     }

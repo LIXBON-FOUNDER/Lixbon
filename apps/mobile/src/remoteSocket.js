@@ -110,7 +110,9 @@ export function openRemoteSocket({ base, getToken, sessionId, getSeq, onEvent, o
       status('open');
       // Lo que no llegó a confirmarse se reenvía con su rid: el gateway
       // descarta los repetidos.
-      for (const [rid, p] of pending) sendRaw({ op: 'cmd', rid, command: p.command });
+      for (const [rid, p] of pending) {
+        if (p.command) sendRaw({ op: 'cmd', rid, command: p.command });
+      }
       me.ping = setInterval(() => {
         if (!foreground) return;
         if (Date.now() - lastIn > IDLE_MS) {
@@ -190,7 +192,7 @@ export function openRemoteSocket({ base, getToken, sessionId, getSeq, onEvent, o
   connect();
 
   return {
-    send(command) {
+    send(command, { replay = true } = {}) {
       return new Promise((resolve) => {
         if (stopped) {
           resolve({ ok: false, detail: 'La sesión remota ya terminó' });
@@ -201,8 +203,14 @@ export function openRemoteSocket({ base, getToken, sessionId, getSeq, onEvent, o
           pending.delete(rid);
           resolve({ ok: false, detail: 'Sin conexión con el servidor' });
         }, COMMAND_TIMEOUT_MS);
-        pending.set(rid, { command, resolve, timer });
-        sendRaw({ op: 'cmd', rid, command });
+        pending.set(rid, { command: replay ? command : null, resolve, timer });
+        const frame = { op: 'cmd', rid, command };
+        if (!replay) frame.credential = getToken();
+        if (!sendRaw(frame) && !replay) {
+          clearTimeout(timer);
+          pending.delete(rid);
+          resolve({ ok: false, detail: 'Sin conexión con el servidor' });
+        }
       });
     },
     close() {

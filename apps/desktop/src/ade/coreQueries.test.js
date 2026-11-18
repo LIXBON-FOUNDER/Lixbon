@@ -122,6 +122,7 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.attempt.queue_failed', { task: 'task-1', n: 2, reason: 'interrupted' }],
   ['activity.attempt.instruction_requested', { task: 'task-1', n: 2, mode: 'steer' }],
   ['activity.attempt.instruction_result', { task: 'task-1', n: 2, mode: 'stop_and_send', outcome: 'failed' }, { reason: 'adapter_error' }],
+  ['activity.attempt.question_requested', { task: 'task-1', n: 2 }],
   ['activity.attempt.request_answered', { task: 'task-1', n: 2, kind: 'permission' }, { decision: 'deny' }],
   ...['usage_reported'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
   ['activity.attempt.rejected', { task: 'task-1', n: 1, cause: 'cancelled' }],
