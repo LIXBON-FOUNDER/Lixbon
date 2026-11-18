@@ -165,6 +165,7 @@ def test_review_mobile_rechaza_revision_o_confirmacion_manipulada(client, monkey
 @pytest.mark.parametrize("operation", [
     {"kind": "stop", "confirm": False},
     {"kind": "fork", "confirm": True},
+    {"kind": [], "confirm": True},
     {"kind": "queue", "request_id": "k", "body": "x" * 4001, "confirm": True},
     {"kind": "queue", "request_id": "", "body": "sigue", "confirm": True},
     {"kind": "cancel", "queue_id": "q", "confirm": True, "scope": "desktop"},

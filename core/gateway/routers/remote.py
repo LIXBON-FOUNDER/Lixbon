@@ -483,7 +483,7 @@ async def _queue_mobile_operation(ch, sess, cid: int, payload: dict[str, Any], t
         if "operation" in args:
             op = args["operation"]
             fields = {"queue": {"kind", "request_id", "body", "confirm"}, "cancel": {"kind", "queue_id", "confirm"}, "stop": {"kind", "confirm"}}
-            if not isinstance(op, dict) or op.get("kind") not in fields or set(op) != fields[op["kind"]] or op["confirm"] is not True:
+            if not isinstance(op, dict) or not isinstance(op.get("kind"), str) or op["kind"] not in fields or set(op) != fields[op["kind"]] or op["confirm"] is not True:
                 raise HTTPException(status_code=422, detail="Control inválido")
             if op["kind"] == "queue" and (not isinstance(op["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", op["request_id"])
                     or not isinstance(op["body"], str) or not op["body"].strip() or len(op["body"]) > 4000):
