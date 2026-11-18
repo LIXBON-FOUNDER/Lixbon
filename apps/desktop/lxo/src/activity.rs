@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 107] = [
+pub(crate) const MESSAGE_KEYS: [&str; 108] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -100,6 +100,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 107] = [
     "activity.attempt.question_requested",
     "activity.attempt.request_answered",
     "activity.attempt.usage_reported",
+    "activity.attempt.ownership_changed",
     "activity.attempt.dispatch_ambiguous",
     "activity.provider_session.opened",
     "activity.provider_session.bound",
@@ -269,6 +270,7 @@ fn policy_direction(code: &str) -> &'static str {
 const FORK_STRATEGIES: [&str; 2] = ["clean", "context_package"];
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_*`, LXO-144).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+const OWNERS: [&str; 2] = ["agent", "human"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 /// Qué pidió el proveedor y qué se decidió (`attempt.request_answered`, LXO-247): la decisión solo existe en un permiso.
 const REQUEST_KINDS: [&str; 2] = ["permission", "question"];
@@ -630,6 +632,14 @@ fn attempt(key: &str, a: &A) -> Option<String> {
         },
         // El uso del proveedor (LXO-249): solo el hecho; los números están en el detalle del Attempt.
         "activity.attempt.usage_reported" => format!("El proveedor informó el uso del {at}."),
+        // Take Over / Return (LXO-170): solo a quién pasó el workspace.
+        "activity.attempt.ownership_changed" => {
+            if a.code("to", &OWNERS)? == "human" {
+                format!("El {at} pasó a manos de una persona.")
+            } else {
+                format!("El {at} volvió al agente.")
+            }
+        }
         "activity.attempt.rejected" => format!(
             "Se rechazó el {at}{}.",
             run_closed(a.code("cause", &STOP_CAUSES)?)
@@ -978,6 +988,7 @@ fn format(key: &str, a: &A) -> Option<String> {
         | "activity.attempt.question_requested"
         | "activity.attempt.request_answered"
         | "activity.attempt.usage_reported"
+        | "activity.attempt.ownership_changed"
         | "activity.attempt.dispatch_ambiguous" => attempt(key, a),
         "activity.provider_session.opened" => {
             let at = attempt_of(a)?;

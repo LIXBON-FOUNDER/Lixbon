@@ -683,7 +683,13 @@ Seguimiento:
 
     /// Al arrancar la app no queda ningún PTY vivo de la sesión anterior.
     pub fn orphan_all(&mut self) {
-        let open: Vec<String> = self.tasks.values().filter(|t| !t.status.is_final() && !t.external).map(|t| t.id.clone()).collect();
+        self.orphan_all_except(&[]);
+    }
+
+    /// Como [`State::orphan_all`], salvo las Tasks de `keep`: las que una persona tiene en sus manos (LXO-170). Su Attempt sigue `running` SIN proceso
+    /// a propósito (el agente está interrumpido); cerrarlas al arrancar destruiría el trabajo que la persona tiene a medias.
+    pub fn orphan_all_except(&mut self, keep: &[String]) {
+        let open: Vec<String> = self.tasks.values().filter(|t| !t.status.is_final() && !t.external && !keep.contains(&t.id)).map(|t| t.id.clone()).collect();
         for id in open {
             let _ = self.close(&id, Status::Exited, "Lixbon se cerró con la tarea en marcha");
         }

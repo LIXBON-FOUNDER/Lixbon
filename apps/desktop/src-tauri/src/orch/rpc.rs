@@ -74,6 +74,7 @@ impl Core {
                 | "pending_queue"
                 | "attempt_steer"
                 | "attempt_stop_and_send"
+                | "attempt_take_over"
         ) {
             let expected_channel = match client.identity().surface() {
                 ClientSurface::Desktop => Some(Channel::Ui),
@@ -378,6 +379,15 @@ impl Core {
                 let input: super::steer_runtime::InstructionInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de instrucción inválida".to_string())?;
                 let mode = if cmd == "attempt_steer" { crate::store::InstructionMode::Steer } else { crate::store::InstructionMode::StopAndSend };
                 super::steer_runtime::rpc(self, context, mode, &input)
+            }
+            // Take Over (LXO-170): una persona toma el control del workspace de un Attempt en marcha.
+            "attempt_take_over" => {
+                let context = authenticated_context.as_ref().ok_or("tomar el control de un Attempt requiere una Person autenticada")?;
+                if !matches!(caller, Caller::User) || !context.is_person() {
+                    return Err("tomar el control de un Attempt solo está permitido a una Person autenticada".into());
+                }
+                let input: super::take_over_runtime::TakeOverInput = serde_json::from_value(args.clone()).map_err(|_| "Solicitud de Take Over inválida".to_string())?;
+                super::take_over_runtime::rpc(self, context, &input)
             }
             "attempt_answer" | "attempt_pending_requests" => {
                 let context = authenticated_context.as_ref().ok_or("responder a un proveedor requiere una Person autenticada")?;
@@ -874,7 +884,8 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "attempt_queue_cancel"
         | "pending_queue"
         | "attempt_steer"
-        | "attempt_stop_and_send" => ClientAction::AttemptInstructionCommand,
+        | "attempt_stop_and_send"
+        | "attempt_take_over" => ClientAction::AttemptInstructionCommand,
         "attempt_fork" | "task_race" | "task_race_cancel" => {
             ClientAction::AttemptForkCommand
         }
@@ -935,7 +946,8 @@ mod tests {
             | "attempt_queue_cancel"
             | "pending_queue"
             | "attempt_steer"
-            | "attempt_stop_and_send" => {
+            | "attempt_stop_and_send"
+            | "attempt_take_over" => {
                 ClientAction::AttemptInstructionCommand
             }
             "integrate" | "merge" | "pr" | "review" => ClientAction::HumanDecision,

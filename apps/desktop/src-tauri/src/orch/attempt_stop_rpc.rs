@@ -104,8 +104,14 @@ pub(super) fn stop(
         return Err("attempt_stop_conflict: el Attempt ya no es la ejecución actual de su Task".into());
     }
 
-    core.cancel_adapter_attempt_run(&task_id, &input.attempt_id)
-        .map_err(|error| format!("attempt_stop_unavailable: {error}"))?;
+    // Un Attempt en manos de una persona (LXO-170) no tiene ejecución que cancelar: el agente ya está interrumpido. Detenerlo es cerrarlo.
+    let in_human_hands = core.attempt_owner(&input.attempt_id).is_ok_and(|o| o.owner == crate::store::Owner::Human);
+    if in_human_hands {
+        core.stop_human_owned(&task_id, &input.attempt_id);
+    } else {
+        core.cancel_adapter_attempt_run(&task_id, &input.attempt_id)
+            .map_err(|error| format!("attempt_stop_unavailable: {error}"))?;
+    }
 
     // La terminación del adapter no equivale a un stop confirmado. El pump debe
     // haber asentado el estado terminal exacto en SQLite antes de devolver.

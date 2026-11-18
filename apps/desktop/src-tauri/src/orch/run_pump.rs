@@ -107,6 +107,8 @@ struct PumpState {
     awaiting: Arc<Awaiting>,
     timed_out: AtomicBool,
     finished: AtomicBool,
+    /// La ejecución terminó porque una persona tomó el control (LXO-170): el Attempt NO se cierra, solo se retira la ejecución del registro.
+    handed_over: AtomicBool,
 }
 
 impl Core {
@@ -285,7 +287,7 @@ impl Core {
     }
 
     /// Aplica el desenlace al Attempt (si sigue abierto) y asienta el claim.
-    fn finish_attempt(&self, task: &str, attempt: &str, terminal: Terminal) {
+    pub(super) fn finish_attempt(&self, task: &str, attempt: &str, terminal: Terminal) {
         if !matches!(self.health(), Health::Normal) {
             eprintln!("[core] el Core no está en estado normal: el desenlace de una ejecución queda para la reconciliación de arranque");
             return;
@@ -323,7 +325,7 @@ pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Durati
     let task = run.task_id.clone();
     let attempt = run.handle.attempt_id.clone();
     let (done, awaiting) = core.register_adapter_run(&task, &attempt, cancel.clone());
-    core.set_live_run(&task, LiveRun { adapter: Arc::clone(&run.adapter), matrix: run.matrix.clone(), handle: run.handle.clone(), attempt_id: run.handle.attempt_id.clone(), pending_send: None });
+    core.set_live_run(&task, LiveRun { adapter: Arc::clone(&run.adapter), matrix: run.matrix.clone(), handle: run.handle.clone(), attempt_id: run.handle.attempt_id.clone(), pending_send: None, pending_takeover: None });
     let weak = Arc::downgrade(core);
     let spawned = std::thread::Builder::new().name("adapter-run".into()).spawn(move || pump(weak, run, approval_ttl, done, awaiting));
     if let Err(why) = spawned {
@@ -336,7 +338,7 @@ pub(super) fn spawn_pump(core: &Arc<Core>, run: StartedRun, approval_ttl: Durati
 fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done, awaiting: Arc<Awaiting>) {
     let StartedRun { adapter, matrix, handle, cancel, worktree: _worktree, task_id, .. } = run;
     let attempt = handle.attempt_id.clone();
-    let state = Arc::new(PumpState { awaiting, timed_out: AtomicBool::new(false), finished: AtomicBool::new(false) });
+    let state = Arc::new(PumpState { awaiting, timed_out: AtomicBool::new(false), finished: AtomicBool::new(false), handed_over: AtomicBool::new(false) });
 
     // El vigilante: si el proveedor pidió una respuesta que nadie puede dar, vencido el plazo cancela la ejecución.
     {
@@ -367,6 +369,25 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done, 
         loop {
             let outcome = gated.events(&handle, &cancel, &mut sink);
             let alive = !state.timed_out.load(Ordering::SeqCst) && !cancel.is_cancelled();
+            // Take Over (LXO-170): la interrupción se CONFIRMA aquí, cuando `events` vuelve (el adapter ya cerró el proceso con prueba). Solo entonces el
+            // workspace es de la persona. Si no hubo frontera segura (la ejecución acabó de otra forma) no cambia nada: el dueño sigue siendo el agente.
+            if let Some(core) = core.upgrade() {
+                if let Some(take) = core.take_pending_takeover(&task_id) {
+                    let boundary = alive && matches!(outcome, Ok(RunOutcome::Interrupted) | Ok(RunOutcome::Completed { .. }));
+                    if !boundary {
+                        take.verdict.set(super::live_run::TakeVerdict::NotConfirmed);
+                        return outcome;
+                    }
+                    match core.hand_to_human(&task_id, &attempt, &take) {
+                        Ok(base_commit) => {
+                            state.handed_over.store(true, Ordering::SeqCst);
+                            take.verdict.set(super::live_run::TakeVerdict::TakenOver { base_commit });
+                        }
+                        Err(why) => take.verdict.set(super::live_run::TakeVerdict::Failed(why)),
+                    }
+                    return outcome;
+                }
+            }
             // Stop & Send (LXO-144): el stop se CONFIRMA aquí, cuando `events` vuelve. Solo entonces se envía la instrucción, reanudando la
             // sesión. Si la ejecución acabó de otra forma (falló, se canceló…) no se envía nada y se dice.
             if let Some(core) = core.upgrade() {
@@ -407,6 +428,11 @@ fn pump(core: Weak<Core>, run: StartedRun, approval_ttl: Duration, _done: Done, 
     state.finished.store(true, Ordering::SeqCst);
 
     let Some(core) = core.upgrade() else { return };
+    // Una persona tomó el control: el Attempt sigue `running` (no hay desenlace que aplicar) y solo se retira la ejecución del registro.
+    if state.handed_over.load(Ordering::SeqCst) {
+        core.finish_adapter_run(&task_id, &attempt);
+        return;
+    }
     // `events` devolvió: el adapter mató el proceso antes. Asienta primero el
     // desenlace durable; los waiters de Stop solo despiertan después de comprobar
     // que el Attempt exacto quedó terminal en SQLite.

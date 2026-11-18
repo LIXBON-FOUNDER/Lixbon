@@ -233,13 +233,22 @@ impl Core {
     /// Cierra las tareas que quedaron abiertas al apagarse el Core anterior. Pasa por
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
     pub(super) fn close_orphans(&self) {
+        // Un Attempt que una persona tiene en sus manos (LXO-170) sigue `running` sin proceso A PROPÓSITO: no es un huérfano. Si no se puede saber quiénes
+        // son, no se cierra NADA: es mejor dejar una Task abierta hasta el próximo arranque que destruir trabajo humano a medias.
+        let keep: Vec<String> = match self.human_owned_attempts() {
+            Ok(owned) => owned.into_iter().map(|(_, task)| task).collect(),
+            Err(why) => {
+                eprintln!("[core] no se pudo saber qué Attempts tiene una persona en sus manos: no se cierran huérfanos en este arranque ({why})");
+                return;
+            }
+        };
         let r = self.mutate(|tx| {
             // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
-            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external) {
+            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external && !keep.contains(&t.id)) {
                 tx.no_change();
                 return Ok(());
             }
-            tx.orphan_all();
+            tx.orphan_all_except(&keep);
             Ok(())
         });
         if let Err(e) = r {
@@ -273,8 +282,22 @@ impl Core {
     }
 
     pub(super) fn close_idle_runs(&self) {
-        let live = self.live_ids();
-        let idle = self.lock().idle_runs(state::now_ms(), IDLE_CLOSE_MS, &live);
+        self.close_idle_runs_at(state::now_ms());
+    }
+
+    /// `close_idle_runs` con el reloj que se le dé (las pruebas lo adelantan: la inactividad son 30 minutos).
+    pub(super) fn close_idle_runs_at(&self, now: u64) {
+        let mut live = self.live_ids();
+        // Un Attempt en manos de una persona (LXO-170) no es inactividad: la persona está trabajando en su workspace aunque el agente esté parado.
+        // Sin poder saberlo, este ciclo no cierra nada.
+        match self.human_owned_attempts() {
+            Ok(owned) => live.extend(owned.into_iter().map(|(_, task)| task)),
+            Err(why) => {
+                eprintln!("[core] no se pudo saber qué Attempts tiene una persona en sus manos: este ciclo no cierra runs inactivos ({why})");
+                return;
+            }
+        }
+        let idle = self.lock().idle_runs(now, IDLE_CLOSE_MS, &live);
         for run in idle {
             let noted = self.mutate(|st| {
                 let Some(root) = st.runs.get(&run).map(|r| r.root.clone()) else {

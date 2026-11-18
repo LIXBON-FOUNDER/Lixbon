@@ -21,6 +21,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use super::adapter::{CapabilityMatrix, ProviderAdapter, RunHandle};
+use super::events::MutationContext;
 use super::Core;
 use crate::store::QueueFailure;
 
@@ -56,6 +57,47 @@ impl Verdict {
     }
 }
 
+/// Lo que el bombeo cuenta de un Take Over (LXO-170).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum TakeVerdict {
+    /// La interrupción se confirmó, el workspace quedó estable y el dueño pasó a la persona (`attempt.ownership_changed` ya escrito).
+    /// `base_commit`: la rama en ese instante, si se pudo leer.
+    TakenOver { base_commit: Option<String> },
+    /// La ejecución terminó de otra forma antes de confirmar la interrupción: no hubo frontera segura y el dueño sigue siendo el agente.
+    NotConfirmed,
+    /// La interrupción se confirmó pero no se pudo dejar el dueño anotado: el dueño sigue siendo el agente (y la ejecución, ya parada, se cierra como `exited`).
+    Failed(String),
+}
+
+/// El veredicto que el bombeo deja y quien pidió el Take Over espera.
+#[derive(Default)]
+pub(super) struct TakeCell {
+    slot: Mutex<Option<TakeVerdict>>,
+    signal: Condvar,
+}
+
+impl TakeCell {
+    pub(super) fn set(&self, verdict: TakeVerdict) {
+        *self.slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(verdict);
+        self.signal.notify_all();
+    }
+
+    /// Espera el veredicto hasta `wait`. `None`: no llegó.
+    pub(super) fn wait(&self, wait: Duration) -> Option<TakeVerdict> {
+        let guard = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let (guard, _) = self.signal.wait_timeout_while(guard, wait, |v| v.is_none()).unwrap_or_else(|e| e.into_inner());
+        guard.clone()
+    }
+}
+
+/// Un Take Over esperando a que la interrupción se confirme. Lleva el contexto de quien lo pidió: el hecho de propiedad lo escribe el
+/// bombeo, y debe atribuirse a esa persona, no al Core.
+pub(super) struct PendingTakeover {
+    pub(super) ctx: MutationContext,
+    pub(super) request_id: String,
+    pub(super) verdict: Arc<TakeCell>,
+}
+
 /// Un Stop & Send esperando a que el stop se confirme.
 pub(super) struct PendingSend {
     pub(super) instruction: String,
@@ -68,6 +110,7 @@ pub(super) struct LiveRun {
     pub(super) handle: RunHandle,
     pub(super) attempt_id: String,
     pub(super) pending_send: Option<PendingSend>,
+    pub(super) pending_takeover: Option<PendingTakeover>,
 }
 
 /// Lo que se saca del registro para hablar con el adapter SIN tener el registro tomado (`steer` / `interrupt` pueden tardar).
@@ -114,12 +157,33 @@ impl Core {
         let Some(slot) = self.live_slot(task) else { return false };
         let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
         match guard.as_mut() {
-            Some(live) if live.pending_send.is_none() => {
+            Some(live) if live.pending_send.is_none() && live.pending_takeover.is_none() => {
                 live.pending_send = Some(pending);
                 true
             }
             _ => false,
         }
+    }
+
+    /// Deja un Take Over pendiente. `false`: no hay ejecución viva o ya hay un Stop & Send o un Take Over esperando (solo una interrupción a la vez).
+    pub(super) fn arm_pending_takeover(&self, task: &str, pending: PendingTakeover) -> bool {
+        let Some(slot) = self.live_slot(task) else { return false };
+        let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+        match guard.as_mut() {
+            Some(live) if live.pending_send.is_none() && live.pending_takeover.is_none() => {
+                live.pending_takeover = Some(pending);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// El bombeo recoge el Take Over pendiente cuando `events` ha vuelto; quien lo pidió lo usa para RETIRARLO si no se confirmó a tiempo
+    /// (`None`: el bombeo ya lo había recogido).
+    pub(super) fn take_pending_takeover(&self, task: &str) -> Option<PendingTakeover> {
+        let slot = self.live_slot(task)?;
+        let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+        guard.as_mut()?.pending_takeover.take()
     }
 
     /// El bombeo recoge el Stop & Send pendiente cuando `events` ha vuelto. También lo usa quien lo pidió para RETIRARLO si el stop

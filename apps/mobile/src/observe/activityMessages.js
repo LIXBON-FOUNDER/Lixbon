@@ -96,6 +96,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.attempt.question_requested',
   'activity.attempt.request_answered',
   'activity.attempt.usage_reported',
+  'activity.attempt.ownership_changed',
   'activity.attempt.dispatch_ambiguous',
   'activity.provider_session.opened',
   'activity.provider_session.bound',
@@ -192,6 +193,7 @@ const POLICY_CATEGORIES = {
 const POLICY_LEVELS = { allow: 'permitir', confirm: 'confirmar', elevated: 'elevado', deny: 'denegar' };
 const POLICY_DIRECTIONS = { tighten: 'más restrictiva', loosen: 'menos restrictiva', same: 'mismo nivel efectivo', reset: 'vuelve a heredar' };
 const INSTRUCTION_MODES = new Set(['steer', 'stop_and_send']);
+const OWNERS = new Set(['agent', 'human']);
 const INSTRUCTION_OUTCOMES = new Set(['delivered', 'failed', 'stop_failed', 'stop_timeout']);
 const REQUEST_KINDS = new Set(['permission', 'question']);
 const REQUEST_DECISIONS = new Set(['allow', 'deny']);
@@ -639,6 +641,13 @@ const FORMATTERS = {
     const attempt = attemptOf(args);
     if (!requiredArguments(attempt)) return null;
     return `El proveedor informó el uso del ${attempt}.`;
+  },
+  // Take Over / Return (LXO-170): solo a quién pasó el workspace; ni rutas ni commits viajan en Activity.
+  'activity.attempt.ownership_changed': (args) => {
+    const attempt = attemptOf(args);
+    const to = requiredCode(args, 'to', OWNERS);
+    if (!requiredArguments(attempt, to)) return null;
+    return to === 'human' ? `El ${attempt} pasó a manos de una persona.` : `El ${attempt} volvió al agente.`;
   },
   'activity.attempt.instruction_result': (args) => {
     const attempt = attemptOf(args);

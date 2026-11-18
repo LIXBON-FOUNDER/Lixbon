@@ -796,6 +796,39 @@ impl Core {
         })
     }
 
+    /// El dueño actual del workspace del Attempt (LXO-170): se deriva de su último `attempt.ownership_changed`.
+    pub(super) fn attempt_owner(&self, attempt_id: &str) -> Result<store::Ownership, QueueError> {
+        self.queue_store(|st| st.attempt_ownership(attempt_id).map_err(queue_commands::from_store))
+    }
+
+    /// Los Attempts no finales que están en manos de una persona, como `(attempt_id, task_id)`. Sin almacén abierto, ninguno: los hechos de propiedad
+    /// viven en él. Un error de LECTURA con el almacén abierto sí se devuelve: quien lo usa para PROTEGER trabajo humano (cierre de huérfanos o inactivos)
+    /// debe tratarlo como «no sé» y no cerrar nada.
+    pub(super) fn human_owned_attempts(&self) -> Result<Vec<(String, String)>, QueueError> {
+        match self.storage.with_store(|st| st.human_owned_attempts().map_err(queue_commands::from_store)) {
+            None => Ok(Vec::new()),
+            Some(result) => result,
+        }
+    }
+
+    /// `attempt.ownership_changed` (LXO-170): cambia el dueño del workspace del Attempt. El dueño actual y el hecho son lo mismo: se lee del
+    /// último evento (`Store::attempt_ownership`), así que no hay dos fuentes que puedan discrepar. Pasar al mismo dueño es un error, no un hecho vacío.
+    pub(super) fn ownership_changed(&self, ctx: &MutationContext, attempt_id: &str, to: store::Owner, request_id: &str, base_commit: Option<&str>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let (attempt, task) = steer_commands::rows(st, attempt_id)?;
+            if attempt.status.is_final() {
+                return Err(QueueError::new(QueueErrorKind::Invalid, "attempt_final", format!("el Attempt {attempt_id} ya terminó")));
+            }
+            let from = st.attempt_ownership(attempt_id).map_err(queue_commands::from_store)?.owner;
+            if from == to {
+                return Err(QueueError::new(QueueErrorKind::Invalid, "already_owner", format!("el Attempt {attempt_id} ya es de {}", to.as_str())));
+            }
+            let event = attempt_ops::ownership_changed_fact(&attempt, &task, from, to, request_id, base_commit, ctx, super::state::now_ms() as i64).map_err(queue_commands::from_store)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// `attempt.instruction_requested`.
     pub(super) fn instruction_requested(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, mode: InstructionMode, chars: i64) -> Result<(), QueueError> {
         self.queue_store(|st| {

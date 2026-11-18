@@ -142,6 +142,11 @@ pub(super) fn usage_reported_fact(a: &AttemptRow, t: &TaskRow, usage: &event_kin
     finalize_single(event_kinds::attempt_usage_reported(a, t, usage), ctx, at)
 }
 
+/// El hecho `attempt.ownership_changed` (LXO-170): el workspace pasa a una persona o vuelve al agente.
+pub(super) fn ownership_changed_fact(a: &AttemptRow, t: &TaskRow, from: crate::store::Owner, to: crate::store::Owner, request_id: &str, base_commit: Option<&str>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_ownership_changed(a, t, from, to, request_id, base_commit), ctx, at)
+}
+
 pub(super) fn instruction_result_fact(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_instruction_result(a, t, request_id, mode, outcome, reason), ctx, at)
 }

@@ -18,7 +18,7 @@ use super::initial_approval_tests::e2e::core_with_project_at;
 use super::{Caller, Core};
 
 /// Como `world`, pero con la matriz de capabilities que se pida (un proveedor sin `steer`, sin `resume`…).
-fn world_without(capability: Capability, script: Vec<Step>) -> World {
+pub(super) fn world_without(capability: Capability, script: Vec<Step>) -> World {
     let repo = repo_with_commit();
     let (core, _client, _ctx, project) = core_with_project_at(&repo.to_string_lossy());
     let matrix = CapabilityMatrix::all_available().with(capability, CapabilityState::Unsupported);

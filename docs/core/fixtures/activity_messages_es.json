@@ -1054,6 +1054,21 @@
       "text": null
     },
     {
+      "key": "activity.attempt.ownership_changed",
+      "args": { "task": "t-3", "n": 2, "to": "human" },
+      "text": "El intento 2 de la tarea t-3 pasó a manos de una persona."
+    },
+    {
+      "key": "activity.attempt.ownership_changed",
+      "args": { "task": "t-3", "n": 2, "to": "agent" },
+      "text": "El intento 2 de la tarea t-3 volvió al agente."
+    },
+    {
+      "key": "activity.attempt.ownership_changed",
+      "args": { "task": "t-3", "n": 2, "to": "otro" },
+      "text": null
+    },
+    {
       "key": "activity.provider_session.opened",
       "args": {
         "task": "t-3",
