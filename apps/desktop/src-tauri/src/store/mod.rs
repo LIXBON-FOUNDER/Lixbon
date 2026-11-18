@@ -66,6 +66,7 @@ mod attempt_dispatch_claim_tests;
 mod tasks;
 mod model_pages;
 mod queue;
+mod ownership;
 mod policy;
 mod context_packages;
 #[cfg(test)]
@@ -173,6 +174,7 @@ pub use reviews::{GateDenial, NewReview, ReviewRow, ReviewStatus, Verdict};
 pub use queue::{queue_digest, Enqueued, InstructionMode, InstructionOutcome, NewQueueItem, QueueChange, QueueConfirmation, QueueFailure, QueueItemRow, QueueStatus, Refusal as QueueRefusal, MAX_QUEUE_ATTACHMENTS, MAX_QUEUE_BODY_CHARS, MAX_QUEUE_PENDING};
 // Policy de autonomía (LXO-209): overrides durables por ámbito; las reglas viven en `orch::policy`.
 #[allow(unused_imports)]
+pub use ownership::{Owner, Ownership, OWNERSHIP_KIND};
 pub use policy::{PolicyChange, PolicyOverrideRow, PolicySnapshot, PolicyWrite};
 // ContextPackage guardado (LXO-138): inmutable; lo validan `orch::context_store` y `context_package::parse`.
 #[allow(unused_imports)]

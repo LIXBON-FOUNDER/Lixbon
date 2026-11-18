@@ -20,7 +20,7 @@ use super::deep_link::{self, DeepLink, View};
 use super::events::MutationContext;
 use super::model_read::{args_of, invalid, require_person, with_model};
 use super::{git, review, Caller, Core};
-use crate::store::{AttemptRow, ReviewRow, Store, StoreResult, WorktreeRow, WorktreeState};
+use crate::store::{AttemptRow, Owner, ReviewRow, Store, StoreResult, WorktreeRow, WorktreeState};
 
 const API: u8 = 1;
 const MAX_ID_CHARS: usize = 200;
@@ -41,6 +41,8 @@ struct Item {
 
 struct Loaded {
     workspace: Option<(WorktreeRow, Vec<AttemptRow>)>,
+    /// Los Attempts del workspace que una persona tiene en sus manos (LXO-170).
+    held_by_human: Vec<String>,
     items: Vec<Item>,
     not_scanned: usize,
     local_machine: Option<String>,
@@ -118,7 +120,7 @@ pub(super) fn work_at(core: &Core, caller: &Caller, context: Option<&MutationCon
         "project_id": project_id,
         "path": path,
         "workspace": workspace,
-        "owner": owner_json(&project_id, loaded.workspace.as_ref()),
+        "owner": owner_json(&project_id, loaded.workspace.as_ref(), &loaded.held_by_human),
         "touched_by": touched,
         "touched_truncated": touched_truncated,
         "evidence": {
@@ -138,12 +140,18 @@ fn load(s: &Store, project_id: &str, worktree_id: Option<&str>) -> StoreResult<R
     }
     let local_machine = super::projects::machine_id_read(s)?;
     let mut workspace = None;
+    let mut held_by_human: Vec<String> = Vec::new();
     if let Some(id) = worktree_id {
         let Some(w) = s.worktree_row(id)? else { return Ok(Err(format!("model_not_found: no existe el Worktree {id}"))) };
         if s.task_row(&w.task_id)?.and_then(|t| t.project_id).as_deref() != Some(project_id) {
             return Ok(Err(format!("model_not_found: el Worktree {id} no es de ese Project")));
         }
         let users = s.attempts_of_worktree(&w.id)?;
+        for a in &users {
+            if s.attempt_ownership(&a.id)?.owner == Owner::Human {
+                held_by_human.push(a.id.clone());
+            }
+        }
         workspace = Some((w, users));
     }
     // Los Attempts del Project con worktree: los de cada worktree (incluidos los que lo comparten), los más recientes primero.
@@ -162,16 +170,16 @@ fn load(s: &Store, project_id: &str, worktree_id: Option<&str>) -> StoreResult<R
         let review = s.reviews_of_attempt(&attempt.id)?.pop();
         items.push(Item { attempt, worktree, is_current, review });
     }
-    Ok(Ok(Loaded { workspace, items, not_scanned, local_machine }))
+    Ok(Ok(Loaded { workspace, held_by_human, items, not_scanned, local_machine }))
 }
 
 /// El dueño actual del worktree nombrado: el Attempt vivo que lo usa. Sin worktree, sin dueño (el checkout del Project no es de un Attempt).
-pub(super) fn owner_json(project_id: &str, workspace: Option<&(WorktreeRow, Vec<AttemptRow>)>) -> Value {
+pub(super) fn owner_json(project_id: &str, workspace: Option<&(WorktreeRow, Vec<AttemptRow>)>, held_by_human: &[String]) -> Value {
     let Some((w, users)) = workspace else { return json!({ "state": "none", "reason": "no_workspace", "attempt": null, "candidates": [] }) };
     if w.state == WorktreeState::Removed {
         return json!({ "state": "none", "reason": "worktree_removed", "attempt": null, "candidates": [] });
     }
-    let live: Vec<Value> = users.iter().filter(|a| !a.status.is_final()).map(|a| attempt_json(project_id, a)).collect();
+    let live: Vec<Value> = users.iter().filter(|a| !a.status.is_final()).map(|a| attempt_json(project_id, a, held_by_human.contains(&a.id))).collect();
     match live.len() {
         0 => json!({ "state": "none", "reason": "no_live_attempt", "attempt": null, "candidates": [] }),
         1 => json!({ "state": "owned", "attempt": live[0], "candidates": [] }),
@@ -180,9 +188,9 @@ pub(super) fn owner_json(project_id: &str, workspace: Option<&(WorktreeRow, Vec<
     }
 }
 
-fn attempt_json(project_id: &str, a: &AttemptRow) -> Value {
+fn attempt_json(project_id: &str, a: &AttemptRow, human: bool) -> Value {
     let link = DeepLink { project_id: project_id.to_string(), task_id: Some(a.task_id.clone()), attempt_id: Some(a.id.clone()), view: Some(View::Overview), file: None, line: None, revision: None };
-    json!({ "id": a.id, "task_id": a.task_id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "link": link.to_url().ok() })
+    json!({ "id": a.id, "task_id": a.task_id, "n": a.n, "status": a.status, "provider": a.provider, "model": a.model, "held_by": if human { Owner::Human.as_str() } else { Owner::Agent.as_str() }, "link": link.to_url().ok() })
 }
 
 /// La evidencia con la que se miró un Attempt.

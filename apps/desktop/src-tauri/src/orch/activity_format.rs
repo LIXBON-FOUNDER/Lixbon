@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 73] = [
+pub(super) const KINDS: [&str; 74] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -69,6 +69,7 @@ pub(super) const KINDS: [&str; 73] = [
     "attempt.question_requested",
     "attempt.request_answered",
     "attempt.usage_reported",
+    "attempt.ownership_changed",
     "attempt.dispatch_ambiguous",
     "policy.changed",
     "race.requested",
@@ -143,6 +144,8 @@ const CONTINUITY_REASONS: [&str; 6] = ["preferred", "requested", "provider_chang
 const QUEUE_FAILURES: [&str; 6] = ["unsupported", "environment_blocked", "adapter_unavailable", "adapter_error", "attempt_ended", "interrupted"];
 /// Cómo se pidió una instrucción a un Attempt ocupado y cómo acabó (`attempt.instruction_requested`, `attempt.instruction_result`).
 const INSTRUCTION_MODES: [&str; 2] = ["steer", "stop_and_send"];
+/// Quién tiene en sus manos el workspace de un Attempt (`attempt.ownership_changed`, LXO-170).
+const OWNERS: [&str; 2] = ["agent", "human"];
 const INSTRUCTION_OUTCOMES: [&str; 4] = ["delivered", "failed", "stop_failed", "stop_timeout"];
 /// Qué pidió el proveedor y qué se decidió (`attempt.request_answered`): la decisión solo existe en un permiso.
 const REQUEST_KINDS: [&str; 2] = ["permission", "question"];
@@ -683,6 +686,8 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         ),
         // El uso del proveedor (LXO-249): solo el hecho. Los números están en `attempt_detail.usage`, no en la línea de tiempo.
         "attempt.usage_reported" => rendered("activity.attempt.usage_reported", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n"))]),
+        // Take Over / Return (LXO-170): solo a quién pasó. Ni rutas ni commits viajan en Activity: están en el hecho.
+        "attempt.ownership_changed" => rendered("activity.attempt.ownership_changed", Visual::Info, vec![("task", id(p, "task")), ("n", number(p, "n")), ("to", closed(p, "to", &OWNERS))]),
         "provider_session.opened" => rendered(
             "activity.provider_session.opened",
             Visual::Info,

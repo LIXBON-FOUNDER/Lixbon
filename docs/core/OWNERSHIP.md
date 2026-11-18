@@ -26,7 +26,7 @@ La ruta es un **nombre**, no un patrón: viaja a `git diff` como pathspec litera
 ```json
 { "v": 1, "project_id": "p-1", "path": "src/lib.rs",
   "workspace": { "worktree_id": "wt-t2-a1", "state": "active", "branch": "lx/…", "host": "local" },
-  "owner": { "state": "owned", "attempt": { "id": "t2-a1", "task_id": "t2", "n": 1, "status": "running", "provider": "claude", "model": null, "link": "lixbon://project/p-1/task/t2/attempt/t2-a1?view=overview" }, "candidates": [] },
+  "owner": { "state": "owned", "attempt": { "id": "t2-a1", "task_id": "t2", "n": 1, "status": "running", "provider": "claude", "model": null, "held_by": "agent", "link": "lixbon://project/p-1/task/t2/attempt/t2-a1?view=overview" }, "candidates": [] },
   "touched_by": [ { "attempt_id": "t2-a1", "task_id": "t2", "status": "running", "provider": "claude", "is_current_attempt": true,
                     "evidence": { "source": "live_branch", "base_commit": "…", "head_commit": "…", "provenance": "verified" },
                     "link": "lixbon://project/p-1/task/t2/attempt/t2-a1?view=diff&file=src/lib.rs&revision=…" } ],
@@ -38,6 +38,7 @@ La ruta es un **nombre**, no un patrón: viaja a `git diff` como pathspec litera
 ### Dueño actual y historia de toques son cosas distintas
 
 * **`owner`**: el Attempt **vivo** (no final) que usa el worktree nombrado. Es posesión del *workspace*, no del archivo: el dueño lo es aunque todavía no haya tocado la ruta.
+  * `attempt.held_by` ∈ `agent` · `human` dice quién trabaja ahora en ese workspace: `human` si una persona tomó el control ([TAKE_OVER.md](TAKE_OVER.md)). Es la misma identidad de Attempt; cambia quién tiene las manos puestas.
   * `owned`: hay uno.
   * `none` con `reason`: `no_workspace` (no se nombró worktree), `worktree_removed`, `no_live_attempt` (todos los Attempts que lo usaron terminaron).
   * `ambiguous`: más de uno vivo, con todos en `candidates` y **sin elegir ninguno**. La regla «en serie» de [WORKTREE_SHARED.md](WORKTREE_SHARED.md) y la base de datos lo impiden hoy; el caso está resuelto y probado por si algún día cambia.

@@ -254,7 +254,7 @@ fn dos_attempts_vivos_en_un_worktree_se_devuelven_como_candidatos_y_no_se_elige_
         .expect("almacén abierto")
         .expect("lectura");
     let vivo = |id: &str| crate::store::AttemptRow { id: id.into(), status: crate::store::AttemptStatus::Running, ..attempt.clone() };
-    let owner = |users: Vec<crate::store::AttemptRow>| super::ownership_read::owner_json(&w.project, Some(&(worktree.clone(), users)));
+    let owner = |users: Vec<crate::store::AttemptRow>| super::ownership_read::owner_json(&w.project, Some(&(worktree.clone(), users)), &[]);
 
     let uno = owner(vec![attempt.clone(), vivo("t9-a1")]);
     assert_eq!((uno["state"].as_str(), uno["attempt"]["id"].as_str()), (Some("owned"), Some("t9-a1")), "los finales no cuentan");

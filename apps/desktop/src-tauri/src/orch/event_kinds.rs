@@ -1156,6 +1156,7 @@ pub(super) fn attempt_integrated(a: &AttemptRow, t: &TaskRow) -> Result<EventDra
 // y cuántos adjuntos tiene. El cuerpo es de quien lo escribió y vive en `attempt_queue`.
 
 use crate::store::{InstructionMode, InstructionOutcome, QueueConfirmation, QueueFailure, QueueItemRow};
+use crate::store::Owner;
 
 /// `attempt.queued` (LXO-143): se encoló una instrucción para el Attempt. `position`: pendientes delante, contándola (1 = la
 /// siguiente en entregarse).
@@ -1265,6 +1266,35 @@ impl EventPayload for AttemptInstructionResult {
 
 pub(super) fn attempt_instruction_result(a: &AttemptRow, t: &TaskRow, request_id: &str, mode: InstructionMode, outcome: InstructionOutcome, reason: Option<QueueFailure>) -> Result<EventDraft, EventError> {
     attempt_draft(a, t, &AttemptInstructionResult { task: a.task_id.clone(), n: a.n, request_id: request_id.to_string(), mode, outcome, reason })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Take Over y Return to Agent (LXO-170): el workspace de un Attempt pasa a una persona y vuelve al agente. NO es un estado del Attempt
+// (el vocabulario de estados es compartido): es este hecho, y el dueño actual es el `to` del último. Nunca lleva rutas ni contenido.
+// ---------------------------------------------------------------------------------------------
+
+/// `attempt.ownership_changed` (LXO-170): el dueño del workspace cambió. `request_id`: la petición que lo pidió (la clave de idempotencia).
+/// `base_commit`: solo al pasar a `human`, el commit de la rama en ese instante (la referencia para detectar los cambios de la persona).
+#[derive(Serialize)]
+pub(super) struct AttemptOwnershipChanged {
+    task: String,
+    n: i64,
+    from: Owner,
+    to: Owner,
+    request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_commit: Option<String>,
+}
+
+impl EventPayload for AttemptOwnershipChanged {
+    const KIND: &'static str = "attempt.ownership_changed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_ownership_changed(a: &AttemptRow, t: &TaskRow, from: Owner, to: Owner, request_id: &str, base_commit: Option<&str>) -> Result<EventDraft, EventError> {
+    let key = format!("{}/{}", a.id, request_id);
+    attempt_draft(a, t, &AttemptOwnershipChanged { task: a.task_id.clone(), n: a.n, from, to, request_id: request_id.to_string(), base_commit: base_commit.map(str::to_string) }).map(|d| d.idempotent(key))
 }
 
 /// `attempt.request_answered` (LXO-247): una persona respondió a una petición del proveedor y este la aceptó. `request_id` es el de la

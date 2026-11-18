@@ -811,9 +811,15 @@ impl Tx {
     }
 
     /// Cierra las tareas abiertas que quedaron de una sesión anterior: un `task.status_changed` por tarea.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn orphan_all(&mut self) {
+        self.orphan_all_except(&[]);
+    }
+
+    /// Como `orphan_all`, salvo las Tasks que una persona tiene en sus manos (LXO-170).
+    pub(super) fn orphan_all_except(&mut self, keep: &[String]) {
         let before = self.snapshot_all();
-        self.state_mut().orphan_all();
+        self.state_mut().orphan_all_except(keep);
         self.push_status_changes(before, Some("orphaned"));
     }
 
