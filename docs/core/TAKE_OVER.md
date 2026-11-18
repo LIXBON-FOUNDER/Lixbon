@@ -24,7 +24,7 @@ El vocabulario de estados de un Attempt (`contracts/status-vocabulary.json`) lo 
 * Solo una Person autenticada de Desktop o de la CLI. Un agente no toma el control.
 * La **policy** la trata como un `stop` (`Category::Stop`): interrumpe la ejecución del agente igual, con el mismo riesgo. `confirm` es opcional en Desktop y lo exige la policy base a la CLI.
 
-Respuesta: `{ "status": "TakenOver" | "Replayed", "attempt_id", "request_id", "owner": "human", "base_commit" }`. `base_commit` es la rama en ese instante: la referencia para detectar los cambios de la persona.
+Respuesta: `{ "status": "TakenOver" | "Replayed", "attempt_id", "request_id", "owner": "human", "base_commit" }`. `base_commit` es la rama en ese instante: la referencia para detectar los cambios de la persona. **Cuando devuelve `TakenOver`, la ejecución del agente ya salió del registro** (el Core espera, con tope de 5 s, a que el bombeo la retire tras dar el veredicto): una devolución inmediata no choca con `busy/agent_running`. Si no saliera a tiempo, el dueño ya cambió igualmente y no es un fallo de la toma.
 
 ## Orden de las cosas
 

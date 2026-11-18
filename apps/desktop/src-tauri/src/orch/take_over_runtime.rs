@@ -44,6 +44,8 @@ use crate::store::{AttemptRow, Owner};
 pub(super) const TAKE_WAIT: Duration = Duration::from_secs(15);
 /// Si al vencer el plazo el bombeo ya había recogido la petición, su veredicto está a punto de llegar.
 const VERDICT_GRACE: Duration = Duration::from_secs(5);
+/// Cuánto se espera a que la ejecución tomada salga del registro tras el veredicto (el bombeo lo hace justo después).
+const RUN_GONE_WAIT: Duration = Duration::from_secs(5);
 /// Cuántas peticiones recuerda el Core para repetirlas sin tocar al proveedor.
 const LOG_CAP: usize = 512;
 
@@ -205,9 +207,15 @@ impl Core {
             },
         };
         match verdict {
-            Some(TakeVerdict::TakenOver { base_commit }) => Ok(json!({
+            Some(TakeVerdict::TakenOver { base_commit }) => {
+                // El veredicto lo da el bombeo ANTES de retirar la ejecución del registro (`finish_adapter_run`). Se espera (acotado) a que salga: así,
+                // cuando esto devuelve, el agente ya no corre y una devolución inmediata no choca con `agent_running`. Si no sale a tiempo el dueño ya
+                // cambió igualmente: no es un fallo de la toma, solo se deja de esperar.
+                self.wait_run_gone(&attempt.task_id, &attempt.id);
+                Ok(json!({
                 "status": "TakenOver", "attempt_id": attempt.id, "request_id": request_id, "owner": Owner::Human.as_str(), "base_commit": base_commit,
-            })),
+                }))
+            }
             Some(TakeVerdict::NotConfirmed) => Err(QueueError::new(
                 ErrorKind::Failed,
                 "stop_failed",
@@ -219,6 +227,14 @@ impl Core {
                 format!("la ejecución se interrumpió pero no se pudo dejar el control en manos de la persona: {why}"),
             )),
             None => Err(QueueError::new(ErrorKind::Failed, "stop_timeout", "el proveedor no confirmó la interrupción a tiempo: el Attempt sigue con el agente")),
+        }
+    }
+
+    /// Espera (acotado) a que la ejecución de ese Attempt salga del registro de ejecuciones vivas.
+    fn wait_run_gone(&self, task: &str, attempt_id: &str) {
+        let end = std::time::Instant::now() + RUN_GONE_WAIT;
+        while self.live_view(task).is_some_and(|live| live.attempt_id == attempt_id) && std::time::Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(2));
         }
     }
 
