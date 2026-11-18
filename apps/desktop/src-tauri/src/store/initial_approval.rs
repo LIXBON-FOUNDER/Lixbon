@@ -82,6 +82,7 @@ pub(super) fn has_authenticated_person_identity(
         match channel {
             Some("ui") => Some("desktop"),
             Some("lxo") => Some("cli"),
+            Some("mobile") => Some("mobile"),
             _ => None,
         },
     ) else {
@@ -295,7 +296,7 @@ pub(super) fn has_canonical_run_closed_rejection(
         return Ok(false);
     };
     let rejection_actor_is_authorized = match rejection.actor_kind.as_str() {
-        "person" => has_authenticated_person_identity(
+        "person" if rejection.channel.as_deref() != Some("mobile") => has_authenticated_person_identity(
             conn,
             rejection.actor_id.as_deref(),
             rejection.client_id.as_deref(),
@@ -347,7 +348,7 @@ pub(super) fn has_canonical_run_closed_rejection(
             && event.channel == rejection.channel
             && event.client_id == rejection.client_id;
         let close_actor_is_authorized = match event.actor_kind.as_str() {
-            "person" => has_authenticated_person_identity(
+            "person" if event.channel.as_deref() != Some("mobile") => has_authenticated_person_identity(
                 conn,
                 event.actor_id.as_deref(),
                 event.client_id.as_deref(),
@@ -403,7 +404,8 @@ pub(super) fn canonical_initial_approval_write(
         && event.actor_kind == super::events::ActorKind::Person
         && valid_person_actor_id(event.actor_id.as_deref())
         && valid_person_actor_id(event.client_id.as_deref())
-        && matches!(event.channel.as_deref(), Some("ui" | "lxo"))
+        && matches!(event.channel.as_deref(), Some("ui" | "lxo" | "mobile"))
+        && (event.channel.as_deref() != Some("mobile") || mobile_launch_shape(attempt))
         && event.run_id.as_deref() == Some(task.run_id.as_str())
         && event.project_id == task.project_id
         && event.at > 0
@@ -428,6 +430,15 @@ pub(super) fn canonical_initial_approval_write(
         event.channel.as_deref(),
         event.at,
     )
+}
+
+pub(crate) fn mobile_launch_shape(attempt: &AttemptRow) -> bool {
+    !attempt.external
+        && attempt.worktree_id.is_none()
+        && attempt.provider_session_id.is_none()
+        && attempt.role.as_deref() != Some("escalado")
+        && matches!(attempt.provider.as_str(), "claude" | "codex")
+        && matches!(attempt.profile.as_deref(), Some("explorar" | "proponer" | "delegar_con_revision"))
 }
 
 /// ¿Tiene `attempts` esa columna? Las migraciones 019 y 020 quedan detrás de la barrera del corte: un Core recién cortado

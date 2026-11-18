@@ -619,6 +619,15 @@ impl Core {
         read.map_err(|e| e.to_string())
     }
 
+    pub(super) fn was_approved_from_mobile(&self, attempt_id: &str) -> Result<bool, String> {
+        self.storage.read_store(|st| st.read(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS (SELECT 1 FROM events WHERE entity_kind='attempt' AND entity_id=?1 AND kind='attempt.approved' AND channel='mobile')",
+                [attempt_id], |row| row.get(0)
+            )?)
+        })).ok_or("el almacén no está abierto")?.map_err(|error| error.to_string())
+    }
+
     // ── La policy de autonomía (LXO-209): el almacén solo se toca desde aquí ──────────────────────────────────────────────────
 
     /// La policy guardada AHORA. Se lee en cada Command: nunca se cachea ni se confía en lo que la interfaz vio. Sin almacén abierto o con un
@@ -749,10 +758,21 @@ impl Core {
     }
 
     /// `attempt.request_answered` (LXO-247): lo que una persona respondió a una petición del proveedor, ya aceptada por este.
-    pub(super) fn request_answered(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, kind: &'static str, decision: Option<&'static str>) -> Result<(), QueueError> {
+    pub(super) fn request_answered(&self, ctx: &MutationContext, attempt_id: &str, request_id: &str, kind: &'static str, decision: Option<&'static str>, last_question: Option<bool>) -> Result<(), QueueError> {
         self.queue_store(|st| {
-            let event = steer_commands::answered_event(st, ctx, attempt_id, request_id, kind, decision)?;
+            let event = steer_commands::answered_event(st, ctx, attempt_id, request_id, kind, decision, last_question)?;
             st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn provider_question_requested(&self, attempt_id: &str) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let (attempt, task) = steer_commands::rows(st, attempt_id)?;
+            if attempt.status == crate::store::AttemptStatus::AwaitingTerminalApproval {
+                let event = attempt_ops::question_requested_fact(&attempt, &task, super::state::now_ms() as i64).map_err(queue_commands::from_store)?;
+                st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            }
             Ok(())
         })
     }

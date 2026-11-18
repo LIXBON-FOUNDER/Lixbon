@@ -299,6 +299,14 @@ impl Core {
             ReserveOutcome::Ineligible(why) => return Ok(DispatchResult::Ineligible(why)),
         }
 
+        let mobile_approved = self.was_approved_from_mobile(attempt_id)?;
+        if mobile_approved {
+            let latest = self.attempt_for_answer(attempt_id).map_err(|error| error.to_string())?;
+            if let Err(reason) = super::initial_approval_rpc::guard_mobile_launch(self, &latest, Some(project_id)) {
+                return self.close_unlaunched(&intent, PrepareError::Unavailable(reason));
+            }
+        }
+
         let prepared = match launcher.prepare(&intent) {
             Ok(prepared) => prepared,
             Err(error) => return self.close_unlaunched(&intent, error),

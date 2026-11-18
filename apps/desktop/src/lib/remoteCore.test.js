@@ -1,5 +1,112 @@
 import { describe, it, expect, vi } from 'vitest';
+import providers from '../../../../docs/core/fixtures/api/provider_capabilities.v1.json';
+import contextPreview from '../../../../docs/core/fixtures/api/context_package_preview.v1.json';
+import contextInvalid from '../../../../docs/core/fixtures/api/context_package_preview_invalid.v1.json';
+import usageFixture from '../../../../docs/core/fixtures/api/usage_report.v1.json';
 import { coreErrorCode, handleCoreAction, parseCoreRequest, slimActivity, slimAttempt, slimAttention, slimEvent, slimTaskDetail, CORE_ACTIVITY_MAX_LIMIT, CORE_ATTEMPTS_MAX, CORE_ATTENTION_MAX_LIMIT, CORE_EVENTS_MAX_LIMIT } from './remoteCore';
+
+describe('Mobile F4 · capacidades', () => {
+  const snapshot = { ...providers, status: 'ready', refreshing: false, checked_at_ms: 1234 };
+  it('consulta el proveedor de ese Attempt y elimina referencias y diagnósticos privados', async () => {
+    const attempt = { id: 't-a2', provider: 'fake-parcial', provider_session: { resumable: true, bound: true, status: 'idle', external_ref: 'SENTINEL' } };
+    const call = vi.fn().mockImplementation(async (cmd) => cmd === 'attempt_detail_v2' ? { attempt } : snapshot);
+    const result = await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 't-a2', refresh: true }, call);
+    expect(call).toHaveBeenCalledWith('provider_capabilities', { refresh: true });
+    expect(result.fields.summary.capabilities.resume.state).toBe('unavailable');
+    expect(result.fields.summary.capabilities.steer.state).toBe('unsupported');
+    expect(JSON.stringify(result)).not.toContain('SENTINEL');
+    expect(JSON.stringify(result)).not.toContain('reason');
+  });
+  it('un proveedor ausente se presenta como desconocido y un destino ajeno se rechaza', async () => {
+    const call = vi.fn().mockImplementation(async (cmd) => cmd === 'attempt_detail_v2' ? { attempt: { id: 't-a2', provider: 'nuevo' } } : snapshot);
+    const result = await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 't-a2' }, call);
+    expect(result.fields.summary.capabilities.answer.state).toBe('unknown');
+    expect((await handleCoreAction('core_attempt_capabilities', { rid: 'r', attempt_id: 'ajeno' }, call)).fields.ok).toBe(false);
+  });
+});
+
+describe('Mobile F4 · ContextPackage', () => {
+  const attempt = { id: contextPreview.package.source.attempt_id, task_id: contextPreview.package.source.task_id, provider: contextPreview.package.source.provider };
+  const query = async (preview) => handleCoreAction('core_attempt_context', { rid: 'r', attempt_id: attempt.id }, vi.fn().mockImplementation(async (cmd, args) => {
+    if (cmd === 'attempt_detail_v2') return { attempt };
+    expect(cmd).toBe('context_package_get');
+    expect(args).toEqual({ attempt_id: attempt.id });
+    if (preview instanceof Error) throw preview;
+    return preview;
+  }));
+  it('usa el paquete guardado y transmite solo metadatos del contenido verificado', async () => {
+    const out = await query(contextPreview);
+    expect(out.fields.summary).toMatchObject({ status: 'valid', checksum: 'verified', counts: { decisions: 2, files: 2 }, tests: { passed: 1441 }, portable: false });
+    const raw = JSON.stringify(out.fields.summary);
+    expect(raw).not.toContain(contextPreview.package.objective);
+    expect(raw).not.toContain('attachment_data');
+    expect(raw).not.toContain('thread_summary');
+    expect(raw).not.toContain('command');
+  });
+  it('no publica contenido de un paquete alterado ni del paquete de otro intento', async () => {
+    expect((await query(contextInvalid)).fields.summary).toMatchObject({ status: 'invalid', portable: false });
+    const other = structuredClone(contextPreview);
+    other.package.source.attempt_id = 'another-a1';
+    const out = await query(other);
+    expect(out.fields.summary).toMatchObject({ status: 'invalid', error: 'source_mismatch' });
+    expect(out.fields.summary).not.toHaveProperty('counts');
+  });
+  it('distingue un paquete ausente de uno corrupto y reemplaza el dato antiguo', async () => {
+    expect((await query(new Error('context_store_not_found: privado'))).fields.summary.status).toBe('absent');
+    const out = await query(new Error('context_store_corrupt: privado'));
+    expect(out.fields.summary.status).toBe('invalid');
+    expect(JSON.stringify(out)).not.toContain('privado');
+  });
+  it('conserva las señales de redacción y recorte y el peso total de adjuntos', async () => {
+    const partial = structuredClone(contextPreview);
+    partial.summary.completeness = 'partial';
+    partial.summary.notes = ['truncated', 'redacted', 'attachment_omitted'];
+    partial.summary.counts.redactions = 2;
+    partial.summary.counts.truncated_fields = 1;
+    partial.summary.counts.attachments_bytes = 12 * 1024 * 1024;
+    const out = await query(partial);
+    expect(out.fields.summary).toMatchObject({
+      completeness: 'partial', portability: 'partial', portable: false,
+      notes: ['truncated', 'redacted', 'attachment_omitted'],
+      counts: { redactions: 2, truncated_fields: 1, attachments_bytes: 12 * 1024 * 1024 },
+    });
+  });
+});
+
+describe('Mobile F4 · Usage', () => {
+  const query = async (response) => handleCoreAction('core_usage', { rid: 'r', refresh: true }, vi.fn().mockImplementation(async (cmd, args) => {
+    expect(cmd).toBe('usage_report');
+    expect(args).toEqual({ refresh: true });
+    return response;
+  }));
+  it('mantiene datos parciales, estados y códigos y excluye diagnósticos y cuentas sin huella', async () => {
+    const report = structuredClone(usageFixture);
+    report.providers[0].snapshot.account = 'SENTINEL-ACCOUNT';
+    report.providers[0].snapshot.secret = 'SENTINEL-TOKEN';
+    report.providers[0].snapshot.credits.balance = 'SENTINEL-BALANCE';
+    report.providers[2].error.message = 'SENTINEL-DIAGNOSTIC';
+    const out = await query({ v: 1, status: 'ready', refreshing: false, report });
+    expect(out.fields.summary.providers).toHaveLength(4);
+    expect(out.fields.summary.providers[0].snapshot.account).toBeNull();
+    expect(out.fields.summary.providers[1].snapshot.windows[0].used_percent).toBeNull();
+    expect(out.fields.summary.providers[2].error).toBe('auth_required');
+    expect(JSON.stringify(out)).not.toContain('SENTINEL');
+  });
+  it('cargando no fabrica cuotas y un fallo del contrato no publica datos', async () => {
+    const loading = await query({ v: 1, status: 'loading', refreshing: true, report: null });
+    expect(loading.fields.summary.providers).toEqual([]);
+    const invalid = await query({ v: 99, status: 'ready', refreshing: false, report: usageFixture });
+    expect(invalid.fields.ok).toBe(false);
+  });
+  it('un proveedor stale conserva el dato antiguo y el código de rate limit', async () => {
+    const report = structuredClone(usageFixture);
+    report.providers[0].status = 'stale';
+    report.providers[0].error = { kind: 'rate_limited', message: 'privado' };
+    const out = await query({ v: 1, status: 'ready', refreshing: false, report });
+    expect(out.fields.summary.providers[0]).toMatchObject({ status: 'stale', error: 'rate_limited', snapshot: { models: [{ cost_usd: 0.5 }] } });
+    expect(out.fields.summary.providers[0].snapshot.credits.balance).toBe('42');
+  });
+});
 
 const event = {
   seq: 7, id: 'ev-7', ts: 1000, v: 2, kind: 'task.created', class: 'state',

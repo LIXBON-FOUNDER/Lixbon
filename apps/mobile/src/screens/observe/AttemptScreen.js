@@ -15,6 +15,8 @@ import { Body, Dot, Mono, Notice, StateText, Title, toneColor } from '../../obse
 import { useAttempt } from '../../observe/useAttempts';
 import { FONTS, RADIUS } from '../../theme';
 import { AttentionRow } from './AttentionScreen';
+import CapabilitySummary from './CapabilitySummary';
+import ContextSummary from './ContextSummary';
 
 export function Field({ label, children, mono = false, secondary = false }) {
   const c = useColors();
@@ -102,6 +104,9 @@ export default function AttemptScreen({ obs, route }) {
               <Body muted>Este intento no tiene una sesión del proveedor registrada.</Body>
             )}
           </View>
+
+          <CapabilitySummary obs={obs} attemptId={route.attemptId} />
+          <ContextSummary obs={obs} attemptId={route.attemptId} />
 
           <View style={{ gap: 8 }}>
             <Eyebrow>Worktree</Eyebrow>

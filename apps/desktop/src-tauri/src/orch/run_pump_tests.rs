@@ -133,7 +133,10 @@ fn una_ejecucion_que_completa_deja_el_attempt_done_con_sus_hechos_y_el_claim_ase
     // El trabajo hecho en el worktree se conserva para revisarlo: terminar no lo libera.
     assert!(worktree_dir(&f).is_dir());
     assert_eq!(worktree_state(&f.core, &f.attempt).as_deref(), Some("active"));
-    assert!(!f.core.has_term(&f.task), "la ejecución terminada sale del registro");
+    // `pump` asienta el desenlace y el claim (`finish_attempt`) ANTES de sacar la ejecución del registro (`finish_adapter_run`): así los
+    // waiters de Stop solo despiertan con el Attempt ya terminal en SQLite. Por eso «claim asentado» no implica «ya fuera del registro»:
+    // hay una ventana corta entre las dos cosas y, en una máquina cargada, la prueba caía en ella. Se espera a la salida, con límite.
+    wait_until("la ejecución terminada sale del registro", || !f.core.has_term(&f.task));
 }
 
 #[test]

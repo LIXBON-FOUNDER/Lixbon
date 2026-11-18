@@ -121,6 +121,10 @@ impl AwaitingState {
         self.requests.clone()
     }
 
+    pub(super) fn has_other_questions(&self, id: &str) -> bool {
+        self.requests.iter().any(|r| r.id != id && r.kind == RequestKind::Question)
+    }
+
     pub(super) fn is_due(&self, now: Instant) -> bool {
         self.until.is_some_and(|until| now >= until)
     }

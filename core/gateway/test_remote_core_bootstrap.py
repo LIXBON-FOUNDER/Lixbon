@@ -54,6 +54,9 @@ def host_online(monkeypatch):
     ("core_activity", {"rid": "m5", "task_id": "t1", "cursor": 0, "limit": 30}),
     ("core_attempts", {"rid": "m6", "task_id": "t1"}),
     ("core_attempt", {"rid": "m7", "attempt_id": "t1-a2"}),
+    ("core_attempt_capabilities", {"rid": "m8", "attempt_id": "t1-a2", "refresh": True}),
+    ("core_attempt_context", {"rid": "m9", "attempt_id": "t1-a2"}),
+    ("core_usage", {"rid": "m10", "refresh": True}),
 ])
 def test_el_controller_puede_pedir_las_lecturas_del_core(host_online, action, args):
     hub, ch = host_online
@@ -69,3 +72,16 @@ def test_una_accion_desconocida_sigue_rechazada(host_online):
     with pytest.raises(HTTPException) as err:
         remote_router._queue_command(ch, {"type": "orch", "action": "core_write", "args": {}}, rid="r2")
     assert err.value.status_code == 422
+
+
+@pytest.mark.parametrize("kind", ["orch_core_attempt_capabilities", "orch_core_attempt_context", "orch_core_usage"])
+def test_resumen_f4_es_efimero(kind):
+    async def scenario():
+        hub = RemoteHub()
+        ch = hub.channel("s1", 1)
+        _, queue = hub.attach_controller(ch)
+        hub.publish_events(ch, [{"type": kind, "rid": "r1", "summary": {}}])
+        assert queue.get_nowait()["type"] == kind
+        assert hub.replay(ch, 0) == []
+    asyncio.run(scenario())
+    assert kind not in REMOTE_PERSISTED_EVENTS
