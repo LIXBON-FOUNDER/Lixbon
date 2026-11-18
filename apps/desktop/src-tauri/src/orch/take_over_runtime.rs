@@ -103,7 +103,7 @@ impl TakeOverState {
     /// Reserva la devolución de `attempt`. `None`: ya hay una en curso. Se libera sola al soltar el guardián.
     pub(super) fn try_acquire(&self, attempt: &str) -> Option<ReturnGuard<'_>> {
         let inserted = self.returning.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt.to_string());
-        inserted.then(|| ReturnGuard { state: self, attempt: attempt.to_string() })
+        inserted.then(|| ReturnGuard { registry: self, attempt: attempt.to_string() })
     }
 
     fn wait(&self) -> Duration {
@@ -118,13 +118,13 @@ impl TakeOverState {
 
 /// La devolución de un Attempt, reservada mientras dura.
 pub(super) struct ReturnGuard<'a> {
-    state: &'a TakeOverState,
+    registry: &'a TakeOverState,
     attempt: String,
 }
 
 impl Drop for ReturnGuard<'_> {
     fn drop(&mut self) {
-        self.state.returning.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.attempt);
+        self.registry.returning.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.attempt);
     }
 }
 
