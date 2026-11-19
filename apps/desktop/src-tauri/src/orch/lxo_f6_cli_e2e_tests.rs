@@ -1,4 +1,4 @@
-//! LXO-179 · `lxo delegate` y `lxo attempt handoff` con el binario REAL, como persona, contra el HTTP de un Core con dos proveedores falsos
+//! LXO-179 · `lxo delegate` y `lxo attempt handoff`, y LXO-178 · `lxo open`, con el binario REAL, como persona, contra el HTTP de un Core con dos proveedores falsos
 //! y repositorios git reales. Lo que se comprueba es lo que ninguna prueba con un Core simulado puede: que las peticiones de lxo son las que el
 //! Core acepta (campos exactos, policy, identidad), lo DURABLE que queda (Task, Attempt `pending_approval`, hechos de procedencia) y lo que de
 //! verdad llega al agente receptor tras la aprobación de Desktop. Requiere `LXO_BIN` y usa el almacén seguro del sistema.
@@ -12,7 +12,7 @@ use std::process::Output;
 
 use serde_json::Value;
 
-use super::attempt_e2e_tests::kinds;
+use super::attempt_e2e_tests::{kinds, world};
 use super::dispatch_tests::row;
 use super::fork_e2e_tests::world_duo;
 use super::projects_overview_tests::{registra_agente, RealStoreServer};
@@ -195,6 +195,99 @@ fn lxo_bin_e2e_delegate_handoff_person_real_store() {
     let agente = server.lxo(&["attempt", "handoff", &a1, "--provider", "codex", "--json"], Some((task.as_str(), token)));
     assert_eq!(agente.status.code(), Some(3), "{}", text(&agente));
     assert_eq!(task_count(&w.core), tasks);
+
+    drop(server);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// LXO-178 · `lxo open` con el binario real: el Core valida el destino y emite el enlace canónico (que lxo no inventa), una revisión
+/// obsoleta no se abre, los destinos que no existen salen con su código y, con Lixbon cerrado, `--print` genera el MISMO enlace sin
+/// validar. No lanza ninguna aplicación: eso depende del manejador de `lixbon://` del sistema (LXO-173), que una prueba no debe tocar.
+#[test]
+#[ignore = "requiere un binario lxo real (LXO_BIN) y el almacén seguro del sistema; ver apps/desktop/README.md"]
+fn lxo_bin_e2e_open_person_real_store() {
+    let w = world("claude", None);
+    let a1 = w.finished("open-origen");
+    let task = task_of(&a1);
+    let project = w.project.clone();
+    let dir = std::env::temp_dir().join(format!("lxo-open-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let server = RealStoreServer::start(&w.core, &dir, &dir);
+    let open = |args: &[&str]| -> Value {
+        let mut all = vec!["open"];
+        all.extend_from_slice(args);
+        all.extend(["--print", "--json"]);
+        server.json(&all)
+    };
+
+    // El Core emite la forma canónica; lxo solo la devuelve. Un Project por id o por nombre.
+    let by_id = open(&["project", &project]);
+    assert_eq!((by_id["status"].as_str(), by_id["validated"].as_bool(), by_id["launched"].as_bool()), (Some("printed"), Some(true), Some(false)), "{by_id}");
+    assert_eq!(by_id["link"], format!("lixbon://project/{project}"));
+    assert_eq!(open(&["project", "initial-approval-e2e"])["link"], by_id["link"], "el nombre se resuelve en el Core");
+    let by_task = open(&["task", &task]);
+    assert_eq!(by_task["link"], format!("lixbon://project/{project}/task/{task}"), "el Project sale de la Task");
+    assert_eq!(by_task["target"]["project_id"], project.as_str());
+
+    // Un Attempt con vista, archivo y línea: el archivo va relativo y codificado una sola vez.
+    let diff = open(&["attempt", &a1, "--view", "diff", "--file", "README.md", "--line", "1"]);
+    let diff_link = format!("lixbon://project/{project}/task/{task}/attempt/{a1}?view=diff&file=README.md&line=1");
+    assert_eq!(diff["link"], diff_link, "{diff}");
+    assert_eq!((diff["target"]["view"].as_str(), diff["target"]["line"].as_u64()), (Some("diff"), Some(1)));
+    assert!(!diff["link"].as_str().unwrap().contains(":\\") && !diff.to_string().contains("/tmp"), "ni una ruta absoluta: {diff}");
+    let raro = open(&["attempt", &a1, "--file", "src/a b/ñ#.rs", "--line", "7"]);
+    assert!(raro["link"].as_str().unwrap().ends_with("?file=src/a%20b/%C3%B1%23.rs&line=7"), "{raro}");
+
+    // El resto de los destinos que no existen salen con su código y sin enlace.
+    let sin_review = server.lxo(&["open", "review", &a1, "--print", "--json"], None);
+    assert_eq!(sin_review.status.code(), Some(6), "el Attempt aún no tiene una Review: {}", text(&sin_review));
+    assert_eq!(error_of(&sin_review)["code"], "not_found");
+    assert!(server.lxo(&["open", "attempt", "t999-a1", "--print"], None).status.code() == Some(6), "un Attempt inexistente");
+    assert_eq!(server.lxo(&["open", "project", "no-existe", "--print"], None).status.code(), Some(6));
+
+    // Una revisión obsoleta se dice y no se abre otra por ti (7); la sintaxis mala ni llega al Core (2).
+    let obsoleta = server.lxo(&["open", "attempt", &a1, "--revision", "deadbee", "--print", "--json"], None);
+    assert_eq!(obsoleta.status.code(), Some(7), "{}", text(&obsoleta));
+    assert_eq!(error_of(&obsoleta)["code"], "stale");
+    assert!(error_of(&obsoleta)["error"].as_str().unwrap().contains("vigente") || error_of(&obsoleta)["error"].as_str().unwrap().contains("revisión"));
+    for malo in [&["open", "attempt", a1.as_str(), "--file", "../secreto"][..], &["open", "task", task.as_str(), "--view", "diff"][..], &["open", "carpeta", "x"][..]] {
+        assert_eq!(server.lxo(malo, None).status.code(), Some(2), "{malo:?}");
+    }
+
+    // Con Lixbon cerrado (sin orch.json), --print genera el MISMO enlace a partir de los ids, marcado como no validado.
+    let binary = std::path::PathBuf::from(std::env::var_os("LXO_BIN").expect("define LXO_BIN con el binario lxo"));
+    let vacio = dir.join("home-sin-lixbon");
+    std::fs::create_dir_all(&vacio).unwrap();
+    let cerrado = |args: &[&str]| -> Output {
+        std::process::Command::new(&binary).args(args).env("USERPROFILE", &vacio).env("HOME", &vacio).env_remove("LXO_TASK_ID").env_remove("LXO_CLIENT_TOKEN").output().unwrap()
+    };
+    let casos: [(&[&str], &str); 4] = [
+        (&["project", project.as_str()], by_id["link"].as_str().unwrap()),
+        (&["task", task.as_str(), "--project", project.as_str()], by_task["link"].as_str().unwrap()),
+        (&["attempt", a1.as_str(), "--project", project.as_str(), "--view", "diff", "--file", "README.md", "--line", "1"], diff_link.as_str()),
+        (&["attempt", a1.as_str(), "--project", project.as_str(), "--file", "src/a b/ñ#.rs", "--line", "7"], raro["link"].as_str().unwrap()),
+    ];
+    for (args, esperado) in casos {
+        let mut all = vec!["open"];
+        all.extend_from_slice(args);
+        all.extend(["--print", "--json"]);
+        let out = cerrado(&all);
+        assert!(out.status.success(), "{all:?}: {}", text(&out));
+        let sin: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!((sin["link"].as_str(), sin["validated"].as_bool()), (Some(esperado), Some(false)), "el enlace local es el del Core: {sin}");
+    }
+    let sin_project = cerrado(&["open", "task", &task, "--print", "--json"]);
+    assert_eq!(sin_project.status.code(), Some(5), "{}", text(&sin_project));
+    let sin_print = cerrado(&["open", "project", &project, "--json"]);
+    assert_eq!(sin_print.status.code(), Some(5), "sin Lixbon no hay nada que abrir ni validar: {}", text(&sin_print));
+
+    // Un agente no genera enlaces: el Core lo rechaza (un enlace tampoco concede permisos).
+    w.core.settings.lock().unwrap().enabled = true;
+    let token = "agente-e2e-token-0123456789abcdef-secret";
+    registra_agente(&w.core, &task, "agente-open-install", token);
+    let agente = server.lxo(&["open", "attempt", &a1, "--print", "--json"], Some((task.as_str(), token)));
+    assert_eq!(agente.status.code(), Some(3), "{}", text(&agente));
 
     drop(server);
     let _ = std::fs::remove_dir_all(&dir);

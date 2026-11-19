@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use serde_json::{json, Value};
 
-use crate::f5_support::{self, PreparedPackage, Rpc, SourceFacts};
+use crate::f5_support::{self, value_flag, PreparedPackage, Rpc, SourceFacts};
 use crate::projects::{self, Failure};
 use crate::Args;
 
@@ -68,16 +68,6 @@ struct Request {
 
 fn usage(message: impl Into<String>) -> Failure {
     Failure::Usage(message.into())
-}
-
-fn value_flag(a: &Args, key: &str) -> Result<Option<String>, Failure> {
-    match a.flags.get(key) {
-        None => Ok(None),
-        Some(Value::String(value)) if !value.trim().is_empty() => {
-            Ok(Some(value.trim().to_string()))
-        }
-        _ => Err(usage(format!("--{key} requiere un valor."))),
-    }
 }
 
 fn parse(a: &Args) -> Result<Option<Request>, Failure> {

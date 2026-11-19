@@ -76,9 +76,37 @@ Con una `revision` en el enlace, `revision.state` dice:
 
 Construye el enlace canónico desde entidades y responde con la misma forma que `deep_link_resolve` (el enlace está en `canonical`). Pasa por la misma resolución: no emite un enlace a algo que no existe, no es coherente o no está disponible. `revision` se acepta en mayúsculas y sale normalizada.
 
+## CLI: `lxo open` (LXO-178)
+
+```text
+lxo open project <id|nombre> | task <task_id> | attempt <attempt_id> | review <attempt_id> | artifact <attempt_id>
+         [--project ID|NOMBRE] [--view V] [--file RUTA [--line N]] [--revision SHA] [--print] [--json]
+```
+
+Genera el enlace de una entidad y lo abre en Desktop. **El enlace lo emite el Core** (`deep_link_generate`): lxo no lo construye por su cuenta cuando puede preguntar, así que nunca emite uno que este Core rechazaría.
+
+* `review` y `artifact` son el Attempt con esa vista (`view=review` / `view=artifact`); `--view` no puede contradecirlas. `diff`, `review` y `artifact` necesitan un Attempt, `--line` necesita `--file`, un resumen (`overview`, `activity`) no abre archivos y `--revision` solo va con un Attempt: lxo lo rechaza antes de preguntar.
+* El Project de una Task o de un Attempt sale de la Task en el Core; `--project` (id o nombre) lo fija y el Core comprueba que sea coherente (`link_target_mismatch`).
+* `--file` es **relativo** al Project o al worktree del Attempt: nunca una ruta absoluta, ni `..`, ni `\`, ni `%XX`. Se codifica una sola vez.
+* **Una revisión obsoleta no se abre** (código 7): lxo dice cuál es la vigente y quién decide es la persona (`--revision <vigente>`). Con una revisión que el Core no puede confirmar, lo mismo.
+* **`--print`** solo imprime el enlace. **Sin `--print`** pide al sistema que lo abra con su manejador de `lixbon://` (`rundll32 url.dll,FileProtocolHandler` en Windows, `open` en macOS, `xdg-open` en Linux) **después** de comprobar que hay uno registrado: abrir un esquema desconocido haría saltar un diálogo del sistema en vez de abrir Lixbon. Sin manejador, o si falla, sale con 5 y el mensaje trae el enlace (que sigue siendo válido). **Registrar el manejador es de Desktop ([LXO-173](https://linear.app/lixbon/issue/LXO-173)); hasta entonces `--print` es el camino que funciona.**
+* **Con Lixbon cerrado**, `--print` sigue pudiendo generar el enlace a partir de ids dados a mano (`--project <id>` para una Task o un Attempt; el id para un Project): escribe la forma canónica del esquema sin preguntar y lo marca con `validated: false`. Sin esos ids, o sin `--print`, sale con 5. Un test de extremo a extremo comprueba que el enlace local es idéntico al que emite el Core.
+* El enlace **no concede permisos**: quien lo abre sigue necesitando acceso. Solo una Person autenticada puede pedirlo (un agente recibe 3).
+
+`--json` (v1): `{v, command: "open", status: printed | opened, link, validated, target, revision, launched}`. `target` y `revision` son los del Core (`revision.state`: `not_requested` · `current`); sin Core, `target` sale de lo dado a mano y `revision` es `null`.
+
+| Código | Cuándo |
+|---|---|
+| 2 | uso: tipo o id inválido, vista/archivo/línea/revisión incoherentes, `link_malformed`, `link_target_mismatch` |
+| 3 | autenticación: un agente, no una Person |
+| 4 | contrato o versión del Core que lxo no entiende, o Core sin Task/Attempt |
+| 5 | Lixbon cerrado, worktree en otra máquina (`link_host_unavailable`) o sin manejador de `lixbon://` |
+| 6 | Project, Task o Attempt inexistente, o vista no disponible (`link_not_found`: sin Review, sin Artifacts) |
+| 7 | revisión obsoleta |
+
 ## Qué NO hace
 
-* No registra el manejador del sistema operativo ni navega (LXO-173).
+* No registra el manejador del sistema operativo ni navega (LXO-173). `lxo open` lo usa si está registrado, pero no lo registra.
 * No resuelve `file` contra el disco ni comprueba que exista: eso es de quien lo abre, ya autorizado.
 * No concede permisos ni crea la entidad que nombra (los permisos compartidos son de F9).
 
