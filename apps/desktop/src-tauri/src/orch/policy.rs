@@ -421,7 +421,8 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
         // El primer Attempt de una Task existente y sus continuaciones quedan bajo aprobación Desktop.
         "attempt_start" => (Category::Start, task()),
         "task_create" if args.get("attempt").is_some_and(|a| !a.is_null()) => (Category::Start, Hint { project_id: text(args, "project_id"), ..Hint::default() }),
-        "attempt_retry" | "attempt_resume" => (Category::Start, task()),
+        // Traspasar el contexto a otro agente (LXO-172) lanza un Attempt nuevo de la misma Task: es un arranque, igual que reintentar o continuar.
+        "attempt_retry" | "attempt_resume" | "attempt_handoff" => (Category::Start, task()),
         "attempt_stop" => (Category::Stop, attempt("attempt_id")),
         "attempt_queue" => (Category::Queue, attempt("attempt_id")),
         "attempt_steer" => (Category::Steer, attempt("attempt_id")),

@@ -190,8 +190,8 @@ caducada, atender una clave reutilizada) rompen al menos una prueba cada uno.
 ## Fuera de este slice
 
 El comando de reintento y resume del Attempt (`attempt.retry` y `attempt.resume`, LXO-142: [REINTENTO.md](REINTENTO.md)) ya existe en el Core, pero sigue sin estar en el RPC ni en `lxo`; leer el flujo de eventos del
-proveedor tras lanzar (el runtime), usar un paquete guardado para continuar (el handoff, F6), la UI (LXO-135/136), la aprobación previa
-de un seguimiento (`requires_approval` es siempre `false` aquí) y el handoff entre Tasks (F6, LXO-172).
+proveedor tras lanzar (el runtime), usar un paquete guardado para continuar (el handoff, F6: ya existe, ver [HANDOFF.md](HANDOFF.md)), la UI (LXO-135/136), la aprobación previa
+de un seguimiento (`requires_approval` es siempre `false` aquí) y el handoff entre Tasks (F6, LXO-172: [HANDOFF.md](HANDOFF.md)).
 
 ## Sin validar con la CLI real
 

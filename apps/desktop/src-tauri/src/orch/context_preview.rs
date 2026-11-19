@@ -48,7 +48,7 @@ fn safe_message(raw: &str) -> String {
 }
 
 /// Lo que se calcula SOBRE el paquete: tamaños y qué falta o no se pudo comprobar. No reinterpreta nada de lo que dice.
-fn summary(p: &ContextPackage) -> Value {
+pub(super) fn summary(p: &ContextPackage) -> Value {
     let attachments_total: u64 = p.attachments.iter().map(|a| a.bytes).sum();
     let omitted = p.attachments.iter().filter(|a| a.omitted.is_some()).count();
     // Un adjunto omitido no viaja, así que no hay nada que escanear: solo cuentan los que viajan y no se pudieron escanear.

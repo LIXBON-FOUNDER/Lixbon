@@ -198,6 +198,9 @@ pub struct AttemptRow {
 pub enum AttemptFollowUpKind {
     Retry,
     NativeResume,
+    /// Un Attempt nuevo que arranca de cero con un ContextPackage del anterior (Agent Handoff, LXO-172): `attempt.continued` con
+    /// estrategia `context_package`. Nunca comparte la ProviderSession.
+    Handoff,
 }
 
 /// Qué ejecución se pide. La Task la fija el mutador; el número y el id, también.
@@ -723,8 +726,32 @@ impl Store {
                 {
                     Ok(Some(AttemptFollowUpKind::NativeResume))
                 }
+                "attempt.continued"
+                    if fields.get("strategy").and_then(serde_json::Value::as_str) == Some("context_package") =>
+                {
+                    Ok(Some(AttemptFollowUpKind::Handoff))
+                }
                 _ => Ok(None),
             }
+        })
+    }
+
+    /// El `package_id` con que nació un Attempt por Agent Handoff (LXO-172): lo dice su `attempt.continued` de estrategia `context_package`.
+    /// `None` si el Attempt no nació así. Sirve para que repetir la petición confirme que es EL MISMO traspaso, no otro con otro paquete.
+    pub fn attempt_handoff_package_id(&self, id: &str) -> StoreResult<Option<String>> {
+        self.read(|conn| {
+            let raw: Option<String> = conn
+                .query_row(
+                    "SELECT payload FROM events WHERE entity_kind='attempt' AND entity_id=?1 AND kind='attempt.continued' ORDER BY seq LIMIT 1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(payload) = raw.and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok()) else { return Ok(None) };
+            if payload.get("strategy").and_then(serde_json::Value::as_str) != Some("context_package") {
+                return Ok(None);
+            }
+            Ok(payload.get("package_id").and_then(serde_json::Value::as_str).map(str::to_string))
         })
     }
 

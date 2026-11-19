@@ -1648,6 +1648,15 @@ pub(super) fn runtime_native_continuation(t: &Task, n: u32) -> Result<EventDraft
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 
+/// `attempt.continued` del Attempt `n` de una Task del runtime que arranca de cero con un ContextPackage del `n - 1` (Agent Handoff, LXO-172):
+/// no comparte la ProviderSession. `reason` es `provider_changed` si el receptor es otro proveedor y `requested` si es el mismo (sesión nueva
+/// a petición de la persona). Solo lleva el `package_id` (un hash), nunca el contenido del paquete.
+pub(super) fn runtime_handoff_continuation(t: &Task, n: u32, provider_changed: bool, package_id: &str) -> Result<EventDraft, EventError> {
+    let reason = if provider_changed { ContinuationReason::ProviderChanged } else { ContinuationReason::Requested };
+    let p = AttemptContinued { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, strategy: ContinuityStrategy::ContextPackage, reason, package_id: Some(package_id.to_string()) };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
 /// `attempt.approved` de la decisión de una Person sobre un Attempt inicial pendiente.
 pub(super) fn runtime_attempt_approved(t: &Task, n: u32) -> Result<EventDraft, EventError> {
     let p = AttemptApproved { task: t.id.clone(), n: n as i64 };

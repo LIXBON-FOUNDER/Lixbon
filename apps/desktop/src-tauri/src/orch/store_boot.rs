@@ -910,6 +910,14 @@ impl Core {
             .map_err(|e| e.to_string())
     }
 
+    /// El `package_id` con que nació un Attempt por Agent Handoff (`None` si no nació así).
+    pub(super) fn attempt_handoff_package_id(&self, attempt_id: &str) -> Result<Option<String>, String> {
+        self.storage
+            .with_store(|store| store.attempt_handoff_package_id(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
     /// La ProviderSession a la que está enlazado un Attempt (la que dejó en espera al terminar), si la tiene.
     pub(super) fn attempt_session_record(&self, attempt_id: &str) -> Result<Option<crate::store::ProviderSessionRow>, String> {
         let read = self
