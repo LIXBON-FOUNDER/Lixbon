@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
-use crate::client_auth::RpcFailure;
 use crate::f5_support::{self, PreparedPackage, Rpc, SourceFacts};
 use crate::projects::{self, Failure};
 use crate::Args;
@@ -52,18 +51,6 @@ const FLAGS: [&str; 13] = [
     "timeout-ms",
     "json",
 ];
-const ATTEMPT_STATUSES: [&str; 9] = [
-    "pending_approval",
-    "starting",
-    "running",
-    "waiting",
-    "awaiting_terminal_approval",
-    "done",
-    "failed",
-    "stopped",
-    "exited",
-];
-const FINAL: [&str; 4] = ["done", "failed", "stopped", "exited"];
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_WAIT: u64 = 30 * 60 * 1000;
 
@@ -304,22 +291,7 @@ fn execute(request: Request, rpc: &mut Rpc<'_>) -> Result<Value, Failure> {
 }
 
 fn current_attempt(rpc: &mut Rpc<'_>, attempt_id: &str, task_id: &str) -> Result<Value, Failure> {
-    let detail = f5_support::send("attempt_detail", &json!({ "attempt_id": attempt_id }), rpc)?;
-    let attempt = &detail["attempt"];
-    let status = attempt["status"].as_str().ok_or_else(|| {
-        Failure::Version("El Core devolvió un estado de Attempt que lxo no reconoce.".into())
-    })?;
-    if detail["v"].as_u64() != Some(1)
-        || detail["core_model"].as_str() != Some("task_attempt_v1")
-        || attempt["id"].as_str() != Some(attempt_id)
-        || attempt["task_id"].as_str() != Some(task_id)
-        || !ATTEMPT_STATUSES.contains(&status)
-    {
-        return Err(Failure::Version(
-            "El Core devolvió un Attempt con un formato que este lxo no entiende.".into(),
-        ));
-    }
-    Ok(attempt.clone())
+    f5_support::current_attempt(rpc, attempt_id, task_id)
 }
 
 fn follow(
@@ -334,7 +306,7 @@ fn follow(
         let status = attempt["status"]
             .as_str()
             .expect("current_attempt validates status");
-        if FINAL.contains(&status) {
+        if f5_support::FINAL_STATUSES.contains(&status) {
             return Ok(json!({
                 "timed_out": false,
                 "attempt": attempt,
@@ -411,6 +383,7 @@ pub(super) fn run(a: &Args) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client_auth::RpcFailure;
     use std::cell::RefCell;
     use std::rc::Rc;
 

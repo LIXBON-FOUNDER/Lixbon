@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use crate::client_auth::{self, RpcFailure};
 use crate::events::clean;
-use crate::f5_support;
+use crate::f5_support::{self, selection_text, valid_provider};
 use crate::projects::{self, Failure};
 use crate::tasks;
 use crate::Args;
@@ -138,18 +138,6 @@ fn valid_request_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
-}
-
-fn valid_provider(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-}
-
-fn selection_text(value: &str) -> bool {
-    !value.trim().is_empty() && value.chars().count() <= 128 && !value.chars().any(char::is_control)
 }
 
 fn parse(a: &Args) -> Result<Request, ActionFailure> {

@@ -97,11 +97,38 @@ No se incluye contenido de archivos: el agente lo lee en su worktree a esa revis
 | 8 | Un archivo de un worktree en otra máquina no se delega desde esta | `un_archivo_de_un_worktree_en_otra_maquina_…` |
 | 9 | Solo una Person autenticada | `solo_una_person_autenticada_delega` |
 
+## CLI: `lxo delegate` (LXO-179)
+
+```text
+lxo delegate --project ID|NOMBRE --provider P --profile PERFIL --instruction "…" <origen> [--dry-run] [--json]
+  origen:  --task ID | --attempt ID  (con --new-task)   ·   --file RUTA [--line N [--end-line M]] [--revision SHA]
+```
+
+Es una traducción fiel de `attempt_delegate`: lxo no decide nada que sea del Core, no elige proveedor y no infiere el Project del directorio.
+
+* Pide al menos un origen. Desde una Task o un Attempt exige **`--new-task`** (la acción explícita de crear otra Task; otro Attempt de la misma Task es `lxo attempt retry`).
+* Comprueba antes de enviar lo que no hace falta preguntar al Core: ruta relativa sin `..`, barras invertidas, controles ni `%XX`; rango coherente; revisión hexadecimal. El Core lo vuelve a verificar todo.
+* `--context-package` (id guardado, archivo o `-`) solo con `--attempt`: lxo lo verifica con `context_package_preview` contra ese Attempt y ese Project y envía el texto del paquete.
+* `--dry-run` no escribe: resuelve el origen con `deep_link_generate` (la misma resolución que usa Delegate; una revisión obsoleta falla igual, con 7), lee `policy_effective` (categoría `start`) y enseña el resumen del paquete. Sin Attempt, la revisión se enseña como `not_checked`: no hay una «vigente» con la que compararla.
+* La clave idempotente es `--request-id` o `lxo-delegate-<sha256 de la petición>`: repetir el mismo comando devuelve `Replayed` con la misma Task. Si el Core avisa de `delegate_provenance_failed`, repetirlo repara el hecho.
+* No acepta host, estrategia de worktree ni `--confirm` (`start` nunca lo pide: el Attempt nace `pending_approval` y lo aprueba Desktop).
+
+`--json` (v1): `{v, command: "delegate", status: Requested | Replayed | dry_run, request_id, project_id, task_id, attempt_id, attempt_status, approval_required, approval_surface, source, target, strategy, package_id, package, provenance, link}`. `link` es el enlace `lixbon://` del Attempt nuevo (`null` si el Core no puede generarlo: no estropea una delegación ya hecha) y `source.link`, el del origen.
+
+| Código | Cuándo |
+|---|---|
+| 2 | uso: falta origen, `--new-task` o receptor; ruta o rango inválidos; paquete de otro Attempt/Project; el Core rechaza la petición |
+| 3 | autenticación o policy: un agente, no una Person; `policy_denied` |
+| 4 | contrato o versión del Core que lxo no entiende |
+| 5 | Core no disponible, entorno del proveedor bloqueado u origen en otra máquina |
+| 6 | Project, Attempt o paquete inexistente |
+| 7 | revisión del origen obsoleta |
+
 ## Qué NO hace
 
 * **No crea otro Attempt en la misma Task.** Ese caso es `attempt_retry` (con `provider` distinto si se quiere otro agente): el modelo mantiene «a lo sumo un Attempt activo por Task» y reutilizar sus reglas es mejor que duplicarlas aquí. Delegar desde una Task o un Attempt crea una Task **nueva** y lo exige de forma explícita (`new_task`).
 * **No construye el ContextPackage**: se pide con `context_package_build` y se revisa con `context_package_preview`; aquí solo se verifica.
 * **No elige el proveedor** por la persona, ni comparte worktree, ni amplía permisos (el perfil lo dice la persona, como en `task_create`).
-* **No hay interfaz** (selección en el editor, botón de delegar): LXO-176 (Desktop) y LXO-179 (CLI).
+* **No hay interfaz gráfica** (selección en el editor, botón de delegar): LXO-176 (Desktop). La CLI sí: `lxo delegate` (LXO-179, arriba).
 * La revisión **sin Attempt** no se puede comparar con una «vigente» (no hay de qué): solo se comprueba que exista.
 * No hay prueba de un reinicio del Core entre la creación de la Task y la anotación de su procedencia; el diseño es que repetir la petición lo repare.

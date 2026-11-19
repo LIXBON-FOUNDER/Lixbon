@@ -17,9 +17,11 @@ mod client_auth;
 mod compare;
 mod context;
 mod context_store;
+mod delegate;
 mod events;
 mod f5_support;
 mod fork;
+mod handoff;
 mod integration;
 mod projects;
 mod provider;
@@ -62,6 +64,12 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempts --task <task_id> [--status S] [--provider P] [--json]
   lxo attempt show <attempt_id>                    intentos (ejecuciones) de una tarea, modelo Task/Attempt
   lxo attempt fork <source_attempt_id> [opciones]  fork explícito; nueva Task, procedencia y aprobación humana
+  lxo attempt handoff <attempt_id> --provider P [opciones]
+                                                  traspasa un Attempt terminado a otro agente con un ContextPackage
+                                                  (siguiente Attempt de la misma Task; --dry-run enseña qué viaja)
+  lxo delegate --project ID|NOMBRE --provider P --profile PERFIL --instruction \"...\" (--task|--attempt ID --new-task | --file RUTA)
+                                                  delega a un agente desde una Task, un Attempt o una selección de código;
+                                                  el Core verifica el origen y el Attempt espera la aprobación de Desktop
   lxo race --task <task_id> [opciones]             Race desde el Attempt actual; status, follow y cancelación
   lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
@@ -212,6 +220,7 @@ const BOOL_FLAGS: &[&str] = &[
     "background",
     "confirm",
     "dry-run",
+    "new-task",
     "wait",
     "compare",
     "accept",
@@ -1140,7 +1149,13 @@ fn main() -> ExitCode {
         if a.at(0).as_deref() == Some("attempt") && a.at(1).as_deref() == Some("fork") {
             return fork::run(&a);
         }
+        if a.at(0).as_deref() == Some("attempt") && a.at(1).as_deref() == Some("handoff") {
+            return handoff::run(&a);
+        }
         return attempts::run(&a);
+    }
+    if a.at(0).as_deref() == Some("delegate") {
+        return delegate::run(&a);
     }
     if a.at(0).as_deref() == Some("compare") {
         return compare::run(&a);
