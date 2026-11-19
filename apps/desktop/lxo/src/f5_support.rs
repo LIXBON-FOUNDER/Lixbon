@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::client_auth::{self, RpcFailure};
 use crate::projects::{self, Failure};
+use crate::Args;
 
 const MAX_CONTEXT_PACKAGE_BYTES: usize = 128 * 1024;
 
@@ -71,6 +72,22 @@ pub(super) fn rpc_failure(error: RpcFailure) -> Failure {
             return Failure::Auth(
                 "El Core no autoriza esta decisión desde lxo; hazla desde Lixbon Desktop.".into(),
             );
+        }
+        // Deep links (LXO-168): el Core responde `código: mensaje`.
+        if message.starts_with("link_not_found") {
+            return Failure::NotFound(safe_detail(message));
+        }
+        if message.starts_with("link_host_unavailable") {
+            return Failure::Unavailable(safe_detail(message));
+        }
+        if message.starts_with("link_unauthorized") {
+            return Failure::Auth(safe_detail(message));
+        }
+        if message.starts_with("link_malformed")
+            || message.starts_with("link_target_mismatch")
+            || message.starts_with("link_version_unsupported")
+        {
+            return Failure::Usage(safe_detail(message));
         }
         // Delegate (LXO-171): el origen ya no es el que se vio, o no se puede resolver.
         if message.starts_with("delegate_source_stale") {
@@ -378,6 +395,50 @@ pub(super) fn valid_provider(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// El valor de `--clave`: ausente es `None`; sin valor o vacío es un error de uso.
+pub(super) fn value_flag(a: &Args, key: &str) -> Result<Option<String>, Failure> {
+    match a.flags.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Ok(Some(value.trim().to_string()))
+        }
+        _ => Err(Failure::Usage(format!("--{key} requiere un valor."))),
+    }
+}
+
+/// `<task>-a<n>` canónico: devuelve la Task.
+pub(super) fn task_of_attempt(attempt_id: &str) -> Option<&str> {
+    let (task, raw) = attempt_id.rsplit_once("-a")?;
+    let n: u32 = raw.parse().ok().filter(|n| *n > 0)?;
+    (!task.is_empty() && format!("{task}-a{n}") == attempt_id).then_some(task)
+}
+
+/// Las mismas reglas que `lixbon://` para `file`: relativo, sin `..` ni controles ni doble codificación.
+pub(super) fn check_relative_file(file: &str) -> Result<(), Failure> {
+    let bytes = file.as_bytes();
+    let escaped = |segment: &str| {
+        segment
+            .as_bytes()
+            .windows(3)
+            .any(|w| w[0] == b'%' && w[1].is_ascii_hexdigit() && w[2].is_ascii_hexdigit())
+    };
+    if file.chars().count() > 1024
+        || file.chars().any(|c| c.is_control() || c == '\\')
+        || file.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || file.split('/').any(|segment| {
+            segment.is_empty() || segment == "." || segment == ".." || escaped(segment)
+        })
+    {
+        return Err(Failure::Usage(
+            "--file debe ser una ruta relativa al Project: sin rutas absolutas, `..`, barras \
+             invertidas, controles ni codificación `%XX`."
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Modelo, esfuerzo o rol: una línea de texto sin controles.

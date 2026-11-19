@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use serde_json::{json, Value};
 
 use crate::client_auth::RpcFailure;
-use crate::f5_support::{self, PreparedPackage, Rpc};
+use crate::f5_support::{self, value_flag, PreparedPackage, Rpc};
 use crate::projects::{self, Failure};
 use crate::tasks;
 use crate::Args;
@@ -78,7 +78,6 @@ const FLAGS: [&str; 19] = [
 const INSTRUCTION_MAX: usize = 12_000;
 const REQUEST_ID_MAX: usize = 60;
 const TITLE_MAX: usize = 512;
-const FILE_MAX: usize = 1024;
 const LINE_MAX: u64 = 10_000_000;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -107,16 +106,6 @@ fn usage(message: impl Into<String>) -> Failure {
     Failure::Usage(message.into())
 }
 
-fn value_flag(a: &Args, key: &str) -> Result<Option<String>, Failure> {
-    match a.flags.get(key) {
-        None => Ok(None),
-        Some(Value::String(value)) if !value.trim().is_empty() => {
-            Ok(Some(value.trim().to_string()))
-        }
-        _ => Err(usage(format!("--{key} requiere un valor."))),
-    }
-}
-
 fn required(a: &Args, key: &str) -> Result<String, Failure> {
     value_flag(a, key)?.ok_or_else(|| usage(format!("Falta --{key}.")))
 }
@@ -130,38 +119,6 @@ fn number_flag(a: &Args, key: &str) -> Result<Option<u32>, Failure> {
         .filter(|n| (1..=LINE_MAX).contains(n))
         .map(|n| Some(n as u32))
         .ok_or_else(|| usage(format!("--{key} debe ser un entero entre 1 y {LINE_MAX}.")))
-}
-
-/// Las mismas reglas que `lixbon://` para `file`: relativo, sin `..` ni controles ni doble codificación.
-fn check_file(file: &str) -> Result<(), Failure> {
-    let bytes = file.as_bytes();
-    let escaped = |segment: &str| {
-        segment
-            .as_bytes()
-            .windows(3)
-            .any(|w| w[0] == b'%' && w[1].is_ascii_hexdigit() && w[2].is_ascii_hexdigit())
-    };
-    if file.chars().count() > FILE_MAX
-        || file.chars().any(|c| c.is_control() || c == '\\')
-        || file.starts_with('/')
-        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-        || file.split('/').any(|segment| {
-            segment.is_empty() || segment == "." || segment == ".." || escaped(segment)
-        })
-    {
-        return Err(usage(
-            "--file debe ser una ruta relativa al Project: sin rutas absolutas, `..`, barras \
-             invertidas, controles ni codificación `%XX`.",
-        ));
-    }
-    Ok(())
-}
-
-/// `<task>-a<n>` canónico: devuelve la Task.
-fn task_of_attempt(attempt_id: &str) -> Option<&str> {
-    let (task, raw) = attempt_id.rsplit_once("-a")?;
-    let n: u32 = raw.parse().ok().filter(|n| *n > 0)?;
-    (!task.is_empty() && format!("{task}-a{n}") == attempt_id).then_some(task)
 }
 
 fn id_flag(a: &Args, key: &str) -> Result<Option<String>, Failure> {
@@ -216,7 +173,7 @@ fn parse(a: &Args) -> Result<Option<Request>, Failure> {
         ));
     }
     if let Some(attempt) = &attempt {
-        let from_attempt = task_of_attempt(attempt)
+        let from_attempt = f5_support::task_of_attempt(attempt)
             .ok_or_else(|| usage("--attempt no es un id de Attempt válido (<tarea>-a<n>)."))?;
         if task.as_deref().is_some_and(|task| task != from_attempt) {
             return Err(usage("--attempt no es de la Task indicada con --task."));
@@ -235,7 +192,7 @@ fn parse(a: &Args) -> Result<Option<Request>, Failure> {
         ));
     }
     if let Some(file) = &file {
-        check_file(file)?;
+        f5_support::check_relative_file(file)?;
     }
     if line.is_some() && file.is_none() {
         return Err(usage("--line necesita --file."));
@@ -370,7 +327,7 @@ fn check_source(request: &Request, project_id: &str, rpc: &mut Rpc<'_>) -> Resul
         request
             .attempt
             .as_deref()
-            .and_then(task_of_attempt)
+            .and_then(f5_support::task_of_attempt)
             .map(String::from)
     });
     // `lixbon://` solo admite la revisión bajo un Attempt; sin él, el Core solo comprueba que exista.

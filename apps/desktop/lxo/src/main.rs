@@ -23,6 +23,7 @@ mod f5_support;
 mod fork;
 mod handoff;
 mod integration;
+mod open;
 mod projects;
 mod provider;
 mod race;
@@ -67,6 +68,8 @@ Coordinador (el agente con el que habla el usuario):
   lxo attempt handoff <attempt_id> --provider P [opciones]
                                                   traspasa un Attempt terminado a otro agente con un ContextPackage
                                                   (siguiente Attempt de la misma Task; --dry-run enseña qué viaja)
+  lxo open project|task|attempt|review|artifact <id> [--view V] [--file RUTA [--line N]] [--revision SHA] [--print] [--json]
+                                                  genera y abre el enlace lixbon:// del destino (el Core lo valida); --print solo lo imprime
   lxo delegate --project ID|NOMBRE --provider P --profile PERFIL --instruction \"...\" (--task|--attempt ID --new-task | --file RUTA)
                                                   delega a un agente desde una Task, un Attempt o una selección de código;
                                                   el Core verifica el origen y el Attempt espera la aprobación de Desktop
@@ -221,6 +224,7 @@ const BOOL_FLAGS: &[&str] = &[
     "confirm",
     "dry-run",
     "new-task",
+    "print",
     "wait",
     "compare",
     "accept",
@@ -1156,6 +1160,9 @@ fn main() -> ExitCode {
     }
     if a.at(0).as_deref() == Some("delegate") {
         return delegate::run(&a);
+    }
+    if a.at(0).as_deref() == Some("open") {
+        return open::run(&a);
     }
     if a.at(0).as_deref() == Some("compare") {
         return compare::run(&a);
