@@ -26,6 +26,8 @@ pub(super) struct PreparedPackage {
     pub(super) raw: String,
     pub(super) package_id: String,
     pub(super) revision: Value,
+    /// El resumen que el Core calcula para `context_package_preview`: lo que se va a transferir.
+    pub(super) summary: Value,
 }
 
 pub(super) fn rpc_failure(error: RpcFailure) -> Failure {
@@ -59,9 +61,7 @@ pub(super) fn rpc_failure(error: RpcFailure) -> Failure {
                 safe_detail(message)
             ));
         }
-        if message.starts_with("context_preview_auth_required")
-            || message.starts_with("context_store_auth_required")
-            || message.starts_with("race_auth_required")
+        if message.contains("_auth_required")
             || message.contains("solo está permitido a una Person")
             || message.contains("requiere una Person autenticada")
         {
@@ -71,6 +71,42 @@ pub(super) fn rpc_failure(error: RpcFailure) -> Failure {
             return Failure::Auth(
                 "El Core no autoriza esta decisión desde lxo; hazla desde Lixbon Desktop.".into(),
             );
+        }
+        // Delegate (LXO-171): el origen ya no es el que se vio, o no se puede resolver.
+        if message.starts_with("delegate_source_stale") {
+            return Failure::Stale(safe_detail(message));
+        }
+        if message.starts_with("delegate_source_invalid") {
+            // Lleva el código de `lixbon://`: link_not_found, link_host_unavailable, link_target_mismatch…
+            return if message.contains("link_not_found") {
+                Failure::NotFound(safe_detail(message))
+            } else if message.contains("link_host_unavailable") {
+                Failure::Unavailable(safe_detail(message))
+            } else {
+                Failure::Usage(safe_detail(message))
+            };
+        }
+        if message.starts_with("delegate_invalid")
+            || message.starts_with("delegate_task_exists")
+            || message.starts_with("delegate_source_mismatch")
+            || message.starts_with("delegate_source_unknown_revision")
+            // Handoff (LXO-172): el Core responde sin código a lo que depende de la petición.
+            || message.starts_with("attempt_handoff_conflict")
+            || message.starts_with("solo se traspasa")
+            || message.starts_with("la instrucción")
+            || message.starts_with("provider_unknown")
+            || message.starts_with("provider_start_unsupported")
+        {
+            return Failure::Usage(safe_detail(message));
+        }
+        if message.starts_with("provider_environment_blocked")
+            || message.starts_with("provider_probing")
+            || message.starts_with("attempt_handoff_unavailable")
+        {
+            return Failure::Unavailable(safe_detail(message));
+        }
+        if message.starts_with("delegate_provenance_failed") {
+            return Failure::Internal(safe_detail(message));
         }
         if message.starts_with("context_package_")
             || message.starts_with("race_invalid_request")
@@ -212,6 +248,13 @@ pub(super) fn dry_run_facts(
     rpc: &mut Rpc<'_>,
     source: &SourceFacts,
 ) -> Result<(Value, Value), Failure> {
+    let resource = resource_facts(rpc, source)?;
+    let policy = policy_for(rpc, json!({ "attempt_id": source.attempt_id }), "fork")?;
+    Ok((resource, policy))
+}
+
+/// El estado del worktree, el proceso y las acciones de la Task del origen. Solo lectura.
+pub(super) fn resource_facts(rpc: &mut Rpc<'_>, source: &SourceFacts) -> Result<Value, Failure> {
     let resource = request(
         rpc,
         "resource_inspect",
@@ -225,7 +268,7 @@ pub(super) fn dry_run_facts(
                 .into(),
         ));
     }
-    let resource = json!({
+    Ok(json!({
         "v": resource["v"],
         "task_id": resource["task_id"],
         "worktree": {
@@ -236,31 +279,110 @@ pub(super) fn dry_run_facts(
         "process": resource["process"],
         "health": resource["health"],
         "actions": resource["actions"],
-    });
-    let policy = request(
-        rpc,
-        "policy_effective",
-        json!({ "attempt_id": source.attempt_id }),
-    )?;
-    let category = policy["categories"]
+    }))
+}
+
+/// La policy efectiva de una categoría para el ámbito dado (`attempt_id` o `project_id`). Solo lectura.
+pub(super) fn policy_for(
+    rpc: &mut Rpc<'_>,
+    scope: Value,
+    category: &str,
+) -> Result<Value, Failure> {
+    let policy = request(rpc, "policy_effective", scope)?;
+    let found = policy["categories"]
         .as_array()
         .and_then(|categories| {
             categories
                 .iter()
-                .find(|category| category["category"].as_str() == Some("fork"))
+                .find(|entry| entry["category"].as_str() == Some(category))
         })
         .cloned()
         .ok_or_else(|| {
-            Failure::Version("El Core no devolvió la policy efectiva de fork.".into())
+            Failure::Version(format!(
+                "El Core no devolvió la policy efectiva de {category}."
+            ))
         })?;
-    Ok((
-        resource,
-        json!({
-            "actor": policy["actor"],
-            "revision": policy["revision"],
-            "category": category,
-        }),
-    ))
+    Ok(json!({
+        "actor": policy["actor"],
+        "revision": policy["revision"],
+        "category": found,
+    }))
+}
+
+/// El enlace `lixbon://` canónico de un Attempt recién creado. Es un dato añadido: si el Core no lo
+/// ofrece o falla, la operación ya hecha no se da por mala y el campo queda en `null`.
+pub(super) fn attempt_link(
+    rpc: &mut Rpc<'_>,
+    project_id: &str,
+    task_id: &str,
+    attempt_id: &str,
+) -> Value {
+    let args = json!({
+        "project_id": project_id,
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+    });
+    match rpc("deep_link_generate", &args) {
+        Ok(link) if link["status"].as_str() == Some("ready") => link["canonical"]
+            .as_str()
+            .filter(|url| url.starts_with("lixbon://"))
+            .map(|url| json!(url))
+            .unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
+
+pub(super) const ATTEMPT_STATUSES: [&str; 9] = [
+    "pending_approval",
+    "starting",
+    "running",
+    "waiting",
+    "awaiting_terminal_approval",
+    "done",
+    "failed",
+    "stopped",
+    "exited",
+];
+
+/// Los estados en los que un Attempt ya no cambia por sí solo.
+pub(super) const FINAL_STATUSES: [&str; 4] = ["done", "failed", "stopped", "exited"];
+
+/// El Attempt tal como lo cuenta el Core ahora, comprobado contra la Task que se esperaba.
+pub(super) fn current_attempt(
+    rpc: &mut Rpc<'_>,
+    attempt_id: &str,
+    task_id: &str,
+) -> Result<Value, Failure> {
+    let detail = send("attempt_detail", &json!({ "attempt_id": attempt_id }), rpc)?;
+    let attempt = &detail["attempt"];
+    let status = attempt["status"].as_str().ok_or_else(|| {
+        Failure::Version("El Core devolvió un estado de Attempt que lxo no reconoce.".into())
+    })?;
+    if detail["v"].as_u64() != Some(1)
+        || detail["core_model"].as_str() != Some("task_attempt_v1")
+        || attempt["id"].as_str() != Some(attempt_id)
+        || attempt["task_id"].as_str() != Some(task_id)
+        || !ATTEMPT_STATUSES.contains(&status)
+    {
+        return Err(Failure::Version(
+            "El Core devolvió un Attempt con un formato que este lxo no entiende.".into(),
+        ));
+    }
+    Ok(attempt.clone())
+}
+
+/// Un nombre de proveedor válido, en minúsculas.
+pub(super) fn valid_provider(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// Modelo, esfuerzo o rol: una línea de texto sin controles.
+pub(super) fn selection_text(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= 128 && !value.chars().any(char::is_control)
 }
 
 pub(super) fn context_package(
@@ -395,6 +517,7 @@ pub(super) fn context_package(
         raw,
         package_id,
         revision,
+        summary: preview["summary"].clone(),
     }))
 }
 

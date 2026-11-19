@@ -135,6 +135,7 @@ cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::provider_re
 cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::usage_read_tests::lxo_bin_e2e_usage_person_real_store -- --ignored --exact --nocapture
 cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::context_preview_tests::lxo_bin_e2e_context_person_real_store -- --ignored --exact --nocapture
 cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::context_store_tests::lxo_bin_e2e_context_store_person_real_store -- --ignored --exact --nocapture
+cargo test --locked --lib --manifest-path src-tauri/Cargo.toml orch::lxo_f6_cli_e2e_tests::lxo_bin_e2e_delegate_handoff_person_real_store -- --ignored --exact --nocapture
 ```
 
 El test arranca el servidor HTTP del Core dentro del harness y usa una credencial Agent de fixture. `lxo` recibe un `USERPROFILE` temporal y solo lee el `orch.json` y los cursores de esa carpeta; no utiliza el home ni las credenciales del usuario. La prueba cubre cursor vacío en el head actual, history, paginación y reanudación de `--follow` tras reiniciar el proceso, sin secuencias duplicadas. La segunda (`lxo attention`, LXO-105) cubre el estado vacío, la pregunta de una hija que aparece en su inbox, la respuesta externa que la saca de las activas y el detalle resuelto. CI ejecuta todas en Windows desde `.github/workflows/ci.yml`.

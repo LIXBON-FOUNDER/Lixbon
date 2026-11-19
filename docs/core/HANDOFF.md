@@ -13,8 +13,7 @@ Estado: **implementado en el Core**, conectado al despachador. `[CORE][F6]`, Tra
 | `attempt_fork` | Task nueva a partir de un Attempt | puede cambiar | nueva |
 | **`attempt_handoff`** | Attempt `n + 1` de **la misma Task**, con el contexto del `n` | el que se elija | nueva (nunca se copia) |
 
-Lo hace el Core ([`orch/handoff_runtime.rs`](../../apps/desktop/src-tauri/src/orch/handoff_runtime.rs)); no hay interfaz todavía (selección de proveedor en
-Desktop, `lxo handoff`): son [LXO-176](https://linear.app/lixbon/issue/LXO-176) y [LXO-179](https://linear.app/lixbon/issue/LXO-179).
+Lo hace el Core ([`orch/handoff_runtime.rs`](../../apps/desktop/src-tauri/src/orch/handoff_runtime.rs)). La CLI ya lo pide (`lxo attempt handoff`, [LXO-179](https://linear.app/lixbon/issue/LXO-179); ver más abajo); la selección de receptor en Desktop sigue pendiente ([LXO-177](https://linear.app/lixbon/issue/LXO-177)).
 
 ## Petición
 
@@ -89,6 +88,21 @@ Va en la misma mutación que el Attempt. Nunca lleva el encargo ni el contenido 
 guardado. Resuelve el `failed` del Attempt anterior en Attention, como `attempt.retried`. Activity ya sabe mostrarlo
 ([ACTIVITY.md](ACTIVITY.md)). La procedencia se reconoce por ese hecho y no por el estado actual de la Task (`Store::attempt_follow_up_kind` →
 `Handoff`), así que un replay no confunde un traspaso con un retry ni con un resume.
+
+## CLI: `lxo attempt handoff` (LXO-179)
+
+```text
+lxo attempt handoff <attempt_id> --provider P [--model M] [--effort E] [--instruction "…"] [--context-package sha256:…] [--dry-run] [--json]
+```
+
+Traduce a `attempt_handoff` sin inventar nada. `--provider` es obligatorio (lxo no elige receptor). Antes de pedirlo al Core comprueba que el Attempt esté terminado (si no, remite a `lxo attempt stop`) y, con `--context-package`, que el paquete guardado salga de ese Attempt y de ese Project; que sea el último de la Task y la intención de un traspaso ya hecho los decide el Core.
+
+* `--context-package` es el **id** (`sha256:…`) de un paquete ya guardado, no un archivo: lo que se transfiere es lo que la persona revisó (`lxo context export` / `lxo context import` / `lxo context show`). Sin él, el Core construye uno del worktree del origen.
+* `--dry-run` no escribe: enseña el origen, el receptor, el estado del worktree, la policy (`start`) y, con paquete, el **resumen** de lo que viajaría (`context.summary`), para confirmar antes de traspasar. Sin paquete dice que lo construirá el Core.
+* El Attempt nuevo nace `pending_approval` hasta que Desktop lo apruebe. Repetir el comando devuelve `Replayed` con el Attempt existente (y sin `transfer`: el Core solo lo calcula al crearlo).
+* No acepta `--profile`, `--session`, host ni estrategia de worktree, ni `--confirm` (`start` no lo pide), ni `--request-id` (el traspaso es idempotente por su Attempt origen).
+
+`--json` (v1): `{v, command: "handoff", status: Requested | Replayed | dry_run, task_id, project_id, source_attempt_id, attempt_id, attempt_status, approval_required, approval_surface, target, strategy: "context_package", reason: provider_changed | requested, package_id, transfer, provenance, link}`. `transfer` es el de [la respuesta del Core](#respuesta): `carried` y `left_out` (qué viajó y qué no). Los códigos de salida son los de `lxo delegate` (2 uso, 3 autenticación o policy, 4 contrato, 5 no disponible, 6 inexistente).
 
 ## Qué NO hace
 
