@@ -385,6 +385,14 @@ fn casos() -> Vec<Caso> {
             "info",
         ),
         (
+            "attempt.delegated",
+            State,
+            ("attempt", "t-7-a2"),
+            json!({ "task": "t-7", "n": 2, "source_kind": "selection", "link": "lixbon://project/p-1?file=src%2Fa.rs&line=3", "new_task": false }),
+            "activity.attempt.delegated",
+            "info",
+        ),
+        (
             "attempt.ownership_changed",
             State,
             ("attempt", "t-7-a2"),
@@ -767,13 +775,14 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 107] = [
+const CLAVES: [&str; 108] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
     "activity.attempt.awaiting_terminal_approval",
     "activity.attempt.completed",
     "activity.attempt.continued",
+    "activity.attempt.delegated",
     "activity.attempt.dispatch_ambiguous",
     "activity.attempt.exited",
     "activity.attempt.failed",

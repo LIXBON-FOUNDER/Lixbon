@@ -142,6 +142,21 @@ pub(super) fn usage_reported_fact(a: &AttemptRow, t: &TaskRow, usage: &event_kin
     finalize_single(event_kinds::attempt_usage_reported(a, t, usage), ctx, at)
 }
 
+/// La procedencia de una delegación (LXO-171). Referencias, nunca rutas absolutas ni contenido.
+pub(super) struct Delegation<'a> {
+    pub source_kind: &'static str,
+    pub link: &'a str,
+    pub line_end: Option<u32>,
+    pub revision: Option<&'a str>,
+    pub package_id: Option<&'a str>,
+    pub new_task: bool,
+}
+
+/// El hecho `attempt.delegated` (LXO-171).
+pub(super) fn delegated_fact(a: &AttemptRow, t: &TaskRow, d: &Delegation<'_>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
+    finalize_single(event_kinds::attempt_delegated(a, t, d), ctx, at)
+}
+
 /// El hecho `attempt.ownership_changed` (LXO-170): el workspace pasa a una persona o vuelve al agente.
 pub(super) fn ownership_changed_fact(a: &AttemptRow, t: &TaskRow, from: crate::store::Owner, to: crate::store::Owner, request_id: &str, base_commit: Option<&str>, ctx: &MutationContext, at: i64) -> StoreResult<NewEvent> {
     finalize_single(event_kinds::attempt_ownership_changed(a, t, from, to, request_id, base_commit), ctx, at)

@@ -106,6 +106,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `attempt.question_requested` (LXO-164) | `activity.attempt.question_requested` | `task`, `n`; nunca el texto de la pregunta | warning |
 | `attempt.request_answered` (LXO-247) | `activity.attempt.request_answered` | `task`, `n`, `kind` ∈ `permission` `question`, `decision?` ∈ `allow` `deny` (solo con `permission`; con `question` no debe venir) | info |
 | `attempt.usage_reported` (LXO-249) | `activity.attempt.usage_reported` | `task`, `n` (los números no viajan en Activity: están en `attempt_detail.usage`) | info |
+| `attempt.delegated` (LXO-171) | `activity.attempt.delegated` | `task`, `n`, `source` ∈ `selection` `task` `attempt` (el enlace, el rango y la revisión están en el hecho, no en la línea de tiempo) | info |
 | `attempt.ownership_changed` (LXO-170) | `activity.attempt.ownership_changed` | `task`, `n`, `to` ∈ `agent` `human` (ni rutas ni commits: están en el hecho) | info |
 | `provider_session.opened` (LXO-115) | `activity.provider_session.opened` | `task`, `n`, `provider`, `resumable`, `bound` | info |
 | `provider_session.bound` | `activity.provider_session.bound` | `task`, `binding` ∈ `stream_json` `session_id` | info |

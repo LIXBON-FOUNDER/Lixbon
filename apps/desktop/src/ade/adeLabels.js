@@ -197,6 +197,7 @@ export const ATTEMPT_ACTIVITY_MORE_LABELS = Object.freeze({
   'activity.attempt.request_answered': 'Respuesta al proveedor',
   'activity.attempt.usage_reported': 'Uso informado por el proveedor',
   'activity.attempt.ownership_changed': 'Control del workspace cambiado',
+  'activity.attempt.delegated': 'Trabajo delegado',
   'activity.attempt.dispatch_ambiguous': 'No se sabe si llegó a lanzarse',
 });
 

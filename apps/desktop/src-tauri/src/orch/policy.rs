@@ -430,6 +430,8 @@ fn classify(cmd: &str, args: &Value) -> Option<(Category, Hint)> {
         "attempt_take_over" => (Category::Stop, attempt("attempt_id")),
         // Devolver el Attempt reanuda al agente con un resumen de lo que hizo la persona: es una instrucción al agente (`steer`), no un arranque nuevo.
         "attempt_return_to_agent" => (Category::Steer, attempt("attempt_id")),
+        // Delegar crea una Task y lanza un Attempt nuevo (tras la aprobación): es un arranque (`start`) en ese Project, igual que `task_create` con Attempt (LXO-171).
+        "attempt_delegate" => (Category::Start, Hint { project_id: text(args, "project_id"), ..Hint::default() }),
         "attempt_fork" | "task_race" => (Category::Fork, attempt("source_attempt_id")),
         // Cancelar lo que queda de un Race detiene ejecuciones: es la categoría `stop`.
         "task_race_cancel" => (Category::Stop, Hint::default()),
