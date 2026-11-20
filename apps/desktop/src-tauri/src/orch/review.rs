@@ -189,10 +189,10 @@ pub fn task_diff(state: &impl StateAccess, id: &str, limit: usize) -> Result<Val
 /// Revisión de la persona sobre `head_commit`. Si la rama ya no está en ese
 /// commit al comprobarla, devuelve `head_moved` y no registra nada.
 pub fn review_task(state: &impl StateAccess, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool) -> Result<Value, String> {
-    review_task_with_coverage(state,id,decision,head_commit,comment,confirm,None)
+    review_task_with_coverage(state,id,decision,head_commit,comment,confirm,None,None)
 }
 
-pub(super) fn review_task_with_coverage(state: &impl StateAccess, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool, coverage_override_reason: Option<&str>) -> Result<Value, String> {
+pub(super) fn review_task_with_coverage(state: &impl StateAccess, id: &str, decision: &str, head_commit: &str, comment: Option<&str>, confirm: bool, coverage_override_reason: Option<&str>, coverage_override_digest: Option<&str>) -> Result<Value, String> {
     if !confirm {
         return Err(NEED_CONFIRM_REVIEW.into());
     }
@@ -202,6 +202,7 @@ pub(super) fn review_task_with_coverage(state: &impl StateAccess, id: &str, deci
     if coverage_override_reason.is_some_and(|r|decision!="accepted" || r.trim().is_empty() || r.len()>2000 || r.contains('\0')) {
         return Err("review_coverage_invalid_override: solo aceptar con un motivo no vacío de hasta 2000 bytes".into());
     }
+    if coverage_override_digest.is_some_and(|d|d.len()!=64 || !d.bytes().all(|b|b.is_ascii_hexdigit())) { return Err("review_coverage_invalid_override".into()); }
     let t = target(state, id)?;
     let (base, source) = match resolve_base(&t) {
         Ok((b, s)) => (Some(b), Some(s)),
@@ -216,11 +217,11 @@ pub(super) fn review_task_with_coverage(state: &impl StateAccess, id: &str, deci
     }
     let comment = comment.map(str::trim).filter(|c| !c.is_empty());
     let (did, at) = state.mutate(|st| {
-        if decision == "accepted" { super::review_scope::ensure_acceptance(st,id,head_commit,coverage_override_reason)?; }
+        if decision == "accepted" { super::review_scope::ensure_acceptance(st,id,head_commit,coverage_override_reason,coverage_override_digest)?; }
         let mut data = json!({
             "decision": decision, "base_commit": base, "base_source": source, "head_commit": head_commit, "comment": comment,
             });
-        if let Some(reason)=coverage_override_reason { data["coverage_override_reason"]=json!(super::adapter::redact(reason)); }
+        if let Some(reason)=coverage_override_reason { data["coverage_override_reason"]=json!(super::adapter::redact(reason)); data["coverage_override_digest"]=json!(coverage_override_digest); }
         let did = st.record_decision(id,"review","human",&data)?;
         let at = st.decisions.iter().find(|d| d.id == did).map(|d| d.at).unwrap_or_default();
         Ok((did, at))

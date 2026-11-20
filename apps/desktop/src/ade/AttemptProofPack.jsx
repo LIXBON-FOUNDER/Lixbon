@@ -64,13 +64,13 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
   const pack = state.data ?? null;
 
   const needsCoverageOverride = pack?.coverage?.required && pack.coverage.state !== 'complete';
-  const overrideReason = coverageOverride && coverageOverride.head === pack?.decision.head_commit && coverageOverride.scope === pack?.coverage?.scope_id ? coverageOverride.reason : '';
+  const overrideReason = coverageOverride && coverageOverride.head === pack?.decision.head_commit && coverageOverride.scope === pack?.coverage?.scope_id && coverageOverride.revision === pack?.coverage?.revision ? coverageOverride.reason : '';
   const decide = async (decision) => {
     setBusy(true);
     setError(null);
     try {
       // El HEAD que se manda es el que se mostró, no uno releído ahora.
-      const result = await reviewAttempt({ attemptId: attempt.id, decision, headCommit: pack.decision.head_commit, comment: decision === 'rejected' ? comment : undefined, coverageOverrideReason: decision === 'accepted' && needsCoverageOverride ? overrideReason : undefined });
+      const result = await reviewAttempt({ attemptId: attempt.id, decision, headCommit: pack.decision.head_commit, comment: decision === 'rejected' ? comment : undefined, coverageOverrideReason: decision === 'accepted' && needsCoverageOverride ? overrideReason : undefined, coverageOverrideDigest: pack.coverage?.revision });
       setConfirming(null);
       if (result?.outcome === 'head_moved') {
         setMoved({ expected: result.expected_commit, found: result.found_commit });
@@ -169,7 +169,7 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
                   <label className="nat__field" htmlFor={`${uid}-coverage`}>
                     <span>Aceptar cobertura incompleta: escribe el motivo para asumir los huecos o solapes</span>
                     <textarea id={`${uid}-coverage`} rows={3} maxLength={2000} value={overrideReason}
-                      onChange={(e) => setCoverageOverride({ head: pack.decision.head_commit, scope: pack.coverage.scope_id, reason: e.target.value })}
+                      onChange={(e) => setCoverageOverride({ head: pack.decision.head_commit, scope: pack.coverage.scope_id, revision: pack.coverage.revision, reason: e.target.value })}
                       data-testid="proof-coverage-reason" />
                   </label>
                 )}

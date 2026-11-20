@@ -285,11 +285,11 @@ export async function forkAttempt({ requestId, sourceAttemptId, provider, model,
  * rama se movió, el Core no registra nada y responde `outcome: 'head_moved'`. Aceptar no integra ni abre un PR; rechazar no borra nada.
  * `decision`: `accepted` · `rejected`. Devuelve `{ outcome: 'recorded' | 'head_moved', attempt_id, … }`.
  */
-export const reviewAttempt = ({ attemptId, decision, headCommit, comment, coverageOverrideReason }) => call('attempt_review', {
+export const reviewAttempt = ({ attemptId, decision, headCommit, comment, coverageOverrideReason, coverageOverrideDigest }) => call('attempt_review', {
   attempt_id: attemptId,
   decision,
   head_commit: headCommit,
-  ...(typeof coverageOverrideReason === 'string' && coverageOverrideReason.trim() ? { coverage_override_reason: coverageOverrideReason.trim() } : {}),
+  ...(typeof coverageOverrideReason === 'string' && coverageOverrideReason.trim() ? { coverage_override_reason: coverageOverrideReason.trim(), coverage_override_digest: coverageOverrideDigest } : {}),
   confirm: true,
   ...(typeof comment === 'string' && comment.trim() ? { comment: comment.trim() } : {}),
 });
@@ -304,7 +304,7 @@ export const integrateAttempt = ({ attemptId, action, headCommit, squash = false
   attempt_id: attemptId,
   action,
   head_commit: headCommit,
-  ...(typeof coverageOverrideReason === 'string' && coverageOverrideReason.trim() ? { coverage_override_reason: coverageOverrideReason.trim() } : {}),
+  ...(typeof coverageOverrideReason === 'string' && coverageOverrideReason.trim() ? { coverage_override_reason: coverageOverrideReason.trim(), coverage_override_digest: coverageOverrideDigest } : {}),
   confirm: true,
   ...(action === 'merge' && squash ? { squash: true } : {}),
   ...(action === 'merge' && typeof acceptMovedTarget === 'string' && acceptMovedTarget ? { accept_moved_target: acceptMovedTarget } : {}),

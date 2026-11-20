@@ -36,6 +36,8 @@ pub(super) struct ProofPackInput {
 pub(super) struct ReviewInput {
     #[serde(default)]
     pub coverage_override_reason: Option<String>,
+    #[serde(default)]
+    pub coverage_override_digest: Option<String>,
     pub attempt_id: String,
     pub decision: String,
     pub head_commit: String,
@@ -215,7 +217,7 @@ pub(super) fn review_attempt(core: &Core, context: &MutationContext, input: &Rev
     if !status.is_final() {
         return Err("review_not_final: el Attempt todavía no terminó; aceptar un trabajo en marcha sería aceptar un HEAD que va a cambiar".into());
     }
-    let out = review::review_task_with_coverage(&core.acting(context.clone()), &task_id, &input.decision, &input.head_commit, input.comment.as_deref(), input.confirm, input.coverage_override_reason.as_deref())?;
+    let out = review::review_task_with_coverage(&core.acting(context.clone()), &task_id, &input.decision, &input.head_commit, input.comment.as_deref(), input.confirm, input.coverage_override_reason.as_deref(), input.coverage_override_digest.as_deref())?;
     if out["outcome"] == "recorded" {
         core.emit(review::EV_REVIEWED, &json!({ "task_id": task_id, "decision": input.decision, "head_commit": input.head_commit, "at": out["at"] }));
     }

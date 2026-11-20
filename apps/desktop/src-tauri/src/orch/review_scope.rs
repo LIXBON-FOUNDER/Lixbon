@@ -127,9 +127,11 @@ pub(super) fn coverage(st: &State, attempt: &str, head: &str) -> Value {
         .map(|f| f.to_string())
         .collect();
     let complete = current && uncovered.is_empty() && overlaps.is_empty();
-    json!({"state":if !current {"stale"} else if complete {"complete"} else {"incomplete"},"required":true,
+    let mut out = json!({"state":if !current {"stale"} else if complete {"complete"} else {"incomplete"},"required":true,
         "scope_id":plan["scope_id"],"head_commit":plan["head_commit"],"parts":parts,"total_files":files.len(),
-        "covered_files":files.len()-uncovered.len(),"uncovered_files":uncovered,"overlaps":overlaps})
+        "covered_files":files.len()-uncovered.len(),"uncovered_files":uncovered,"overlaps":overlaps});
+    out["revision"] = json!(hash(&out));
+    out
 }
 
 pub(super) fn ensure_acceptance(
@@ -137,9 +139,17 @@ pub(super) fn ensure_acceptance(
     task: &str,
     head: &str,
     reason: Option<&str>,
+    expected_revision: Option<&str>,
 ) -> Result<(), String> {
     let n = st.attempt_n.get(task).copied().unwrap_or(0);
     let c = coverage(st, &format!("{task}-a{n}"), head);
+    if reason.is_some()
+        && (expected_revision.is_none() || expected_revision != c["revision"].as_str())
+    {
+        return Err(
+            "review_coverage_changed: la cobertura cambió; revisa y confirma de nuevo".into(),
+        );
+    }
     if c["required"] == true
         && c["state"] != "complete"
         && reason.is_none_or(|s| s.trim().is_empty())
@@ -303,11 +313,17 @@ fn submit(core: &Core, ctx: &MutationContext, i: ReportInput) -> Result<Value, S
     }
     // Authorize the assigned reviewer before touching another Task's repository.
     {
-        let st=core.lock();
-        let p=latest(&st,&i.attempt_id).ok_or("review_scope_not_found")?;
-        if p["scope_id"]!=i.scope_id || p["head_commit"]!=i.head_commit {return Err("review_scope_stale".into());}
-        let part=p["parts"].get(i.part).ok_or("review_scope_part_not_found")?;
-        if part["reviewer_id"]!=reviewer {return Err("review_scope_wrong_reviewer".into());}
+        let st = core.lock();
+        let p = latest(&st, &i.attempt_id).ok_or("review_scope_not_found")?;
+        if p["scope_id"] != i.scope_id || p["head_commit"] != i.head_commit {
+            return Err("review_scope_stale".into());
+        }
+        let part = p["parts"]
+            .get(i.part)
+            .ok_or("review_scope_part_not_found")?;
+        if part["reviewer_id"] != reviewer {
+            return Err("review_scope_wrong_reviewer".into());
+        }
     }
     let (task, _) = target(core, ctx, &i.attempt_id, &i.head_commit)?;
     let digest = hash(&serde_json::to_value(&i).map_err(|_| "review_scope_invalid_report")?);
@@ -410,6 +426,7 @@ mod tests {
         let mut v = json!({"attempt_id":a,"head_commit":h,"decision":"accepted","confirm":true});
         if let Some(r) = reason {
             v["coverage_override_reason"] = json!(r);
+            v["coverage_override_digest"] = pack(w, a)["coverage"]["revision"].clone();
         }
         w.desktop("attempt_review", v)
     }
@@ -486,6 +503,34 @@ mod tests {
         assert_eq!(accept(&w, &a, &h, None).unwrap()["outcome"], "recorded");
         assert!(w.desktop("review_scope",json!({"request_id":"new-plan","attempt_id":a,"head_commit":h,"reviewers":reviewers,"assignments":null,"confirm":true})).is_err());
     }
+    #[test]
+    fn changed_coverage_rejects_an_old_override_even_with_the_same_head() {
+        let (w, a, h, reviewers) = setup();
+        let p = make_plan(&w, &a, &h, &reviewers, "coverage-version", Value::Null);
+        let c = agent(&w, &reviewers[0]);
+        report(
+            &w,
+            &c,
+            &p,
+            0,
+            "first-coverage",
+            p["parts"][0]["files"].clone(),
+        )
+        .unwrap();
+        let old = pack(&w, &a)["coverage"]["revision"].clone();
+        report(&w, &c, &p, 0, "withdraw-coverage", json!([])).unwrap();
+        let attempt = json!({"attempt_id":a,"head_commit":h,"decision":"accepted","confirm":true,
+            "coverage_override_reason":"Asumo los huecos que vi antes","coverage_override_digest":old});
+        assert!(w
+            .desktop("attempt_review", attempt)
+            .unwrap_err()
+            .contains("coverage_changed"));
+        assert_eq!(
+            accept(&w, &a, &h, Some("Revisé personalmente la cobertura nueva")).unwrap()["outcome"],
+            "recorded"
+        );
+    }
+
     #[test]
     fn moved_head_invalidates_reports_and_requires_new_review() {
         let (w, a, h, reviewers) = setup();

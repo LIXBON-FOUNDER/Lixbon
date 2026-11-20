@@ -73,8 +73,8 @@ lxo review t1-a1 --accept --accept-uncovered-reason "Revisé personalmente los a
 ```
 
 Desktop exige escribir el motivo en la confirmación. El motivo se liga al HEAD
-y scope mostrados y no se reutiliza al cambiar esos datos. El RPC attempt_review
-recibe coverage_override_reason; la guardia central también protege la revisión
+y scope mostrados y la versión exacta de cobertura; no se reutiliza si otro informe cambia los huecos, aunque HEAD siga igual. Core revalida ese hash bajo la mutación. El RPC attempt_review
+recibe coverage_override_reason y coverage_override_digest (el hash coverage.revision del Proof Pack leído); la guardia central también protege la revisión
 legacy. Mobile envía las revisiones incompletas a Desktop y no puede asumir huecos.
 El rechazo no exige completar partes y no elimina informes ni worktree.
 

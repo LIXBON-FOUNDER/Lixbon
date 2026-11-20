@@ -494,6 +494,7 @@ fn review_rpc(
     }
     if let Some(reason) = &request.coverage_override_reason {
         args["coverage_override_reason"] = json!(reason);
+        args["coverage_override_digest"] = pack["coverage"]["revision"].clone();
     }
     let data =
         rpc("attempt_review", &args).map_err(|error| rpc_failure(error, "attempt_review"))?;
@@ -1124,7 +1125,7 @@ mod tests {
             panic!("review request")
         };
         let mut pack = proof_pack();
-        pack["coverage"] = json!({"required":true,"state":"incomplete","total_files":10,"covered_files":4,"parts":[],"uncovered_files":["b.rs"],"overlaps":[]});
+        pack["coverage"] = json!({"required":true,"revision":"coverage-v1","state":"incomplete","total_files":10,"covered_files":4,"parts":[],"uncovered_files":["b.rs"],"overlaps":[]});
         let calls = Rc::new(RefCell::new(Vec::new()));
         let mut rpc = mock_rpc(pack, Ok(accepted_result()), calls.clone());
         let out = execute(&mut rpc, &request).unwrap();

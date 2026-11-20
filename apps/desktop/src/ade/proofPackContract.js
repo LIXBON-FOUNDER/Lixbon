@@ -60,7 +60,7 @@ export function validateProofPack(response, args) {
     if (!coverage.required && coverage.state !== 'not_requested') throw invalid('coverage sin reparto');
     if (coverage.required) {
       const paths = (v) => Array.isArray(v) && v.length <= 256 && v.every(isText);
-      if (!isText(coverage.scope_id) || !isText(coverage.head_commit) || !Number.isSafeInteger(coverage.total_files) || coverage.total_files < 0 || coverage.total_files > 256
+      if (!isText(coverage.revision) || !isText(coverage.scope_id) || !isText(coverage.head_commit) || !Number.isSafeInteger(coverage.total_files) || coverage.total_files < 0 || coverage.total_files > 256
         || !Number.isSafeInteger(coverage.covered_files) || coverage.covered_files < 0 || coverage.covered_files > coverage.total_files
         || !paths(coverage.uncovered_files) || !paths(coverage.overlaps) || !Array.isArray(coverage.parts) || coverage.parts.length > 8
         || coverage.parts.some((p) => !isObject(p) || !Number.isSafeInteger(p.index) || !isText(p.reviewer_id) || typeof p.valid !== 'boolean' || (p.summary != null && typeof p.summary !== 'string') || !paths(p.files) || !paths(p.reported_files))) throw invalid('coverage fuera del contrato');

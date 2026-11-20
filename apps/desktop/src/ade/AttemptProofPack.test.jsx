@@ -64,12 +64,22 @@ const sent = (calls) => calls.filter((c) => c.command === 'orch_call').map((c) =
 const byId = (id) => screen.getByTestId(id);
 
 const incompleteCoverage = () => ({
-  state: 'incomplete', required: true, scope_id: 'rs-test', head_commit: H1,
+  state: 'incomplete', required: true, scope_id: 'rs-test', revision: 'coverage-v1', head_commit: H1,
   total_files: 2, covered_files: 1, uncovered_files: ['src/login.rs'], overlaps: ['README.md'],
   parts: [{ index: 0, reviewer_id: 'reviewer-a', files: ['README.md'], reported_files: ['README.md'], valid: true }],
 });
 
 describe('Proof Pack · reparto de revisión', () => {
+  it('no reutiliza un motivo si un informe cambia la cobertura con el mismo HEAD', async () => {
+    const first = incompleteCoverage();
+    mountCore({ packs: [pack({ coverage: first }), pack({ coverage: { ...first, revision: 'coverage-v2' } })] });
+    mount(); await flush(); fireEvent.click(byId('proof-accept'));
+    fireEvent.change(byId('proof-coverage-reason'), { target: { value: 'Asumo los huecos mostrados' } });
+    expect(byId('proof-confirm-yes').disabled).toBe(false);
+    fireEvent.click(byId('proof-reload')); await flush();
+    expect(byId('proof-coverage-reason').value).toBe('');
+    expect(byId('proof-confirm-yes').disabled).toBe(true);
+  });
   it('muestra huecos y solapes y exige un motivo humano explícito antes de aceptar', async () => {
     const calls = mountCore({ packs: [pack({ coverage: incompleteCoverage() })] });
     mount(); await flush();
