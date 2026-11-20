@@ -50,6 +50,9 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.project.archived',
   'activity.project.restored',
   'activity.policy.changed',
+  'activity.panel.requested',
+  'activity.panel.panelist_recorded',
+  'activity.panel.completed',
   'activity.race.requested',
   'activity.race.candidate_recorded',
   'activity.race.cancelled',
@@ -507,6 +510,9 @@ const FORMATTERS = {
     return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
   },
   // Race (LXO-215). Nunca el encargo, el paquete ni texto libre.
+  'activity.panel.requested': () => 'Se aprobó un panel de consulta de solo lectura.',
+  'activity.panel.panelist_recorded': () => 'Se registró el resultado de un panelista.',
+  'activity.panel.completed': () => 'Terminó el panel de consulta; revisa su síntesis y los datos ausentes.',
   'activity.race.requested': (args) => {
     const raceId = requiredText(args, 'race_id');
     const source = requiredText(args, 'source');
