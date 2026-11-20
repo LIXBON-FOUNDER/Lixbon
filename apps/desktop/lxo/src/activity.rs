@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 109] = [
+pub(crate) const MESSAGE_KEYS: [&str; 112] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -54,6 +54,9 @@ pub(crate) const MESSAGE_KEYS: [&str; 109] = [
     "activity.project.archived",
     "activity.project.restored",
     "activity.policy.changed",
+    "activity.panel.requested",
+    "activity.panel.panelist_recorded",
+    "activity.panel.completed",
     "activity.race.requested",
     "activity.race.candidate_recorded",
     "activity.race.cancelled",
@@ -879,6 +882,9 @@ fn format(key: &str, a: &A) -> Option<String> {
                 details(&parts)
             ))
         }
+        "activity.panel.requested" => Some("Se aprobó un panel de consulta de solo lectura.".into()),
+        "activity.panel.panelist_recorded" => Some("Se registró el resultado de un panelista.".into()),
+        "activity.panel.completed" => Some("Terminó el panel de consulta; revisa su síntesis y los datos ausentes.".into()),
         "activity.race.requested" => {
             let candidates = a.number("candidates")?;
             let source = a.text("source")?;

@@ -682,87 +682,181 @@
     },
     {
       "key": "activity.race.requested",
-      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 3, "strategy": "clean" },
+      "args": {
+        "race_id": "rc-aaaaaaaaaaaaaaaaaaaa",
+        "source": "t-3-a1",
+        "candidates": 3,
+        "strategy": "clean"
+      },
       "text": "Se pidió un Race de 3 candidatos desde el intento t-3-a1."
     },
     {
       "key": "activity.race.requested",
-      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "context_package" },
+      "args": {
+        "race_id": "rc-aaaaaaaaaaaaaaaaaaaa",
+        "source": "t-3-a1",
+        "candidates": 2,
+        "strategy": "context_package"
+      },
       "text": "Se pidió un Race de 2 candidatos desde el intento t-3-a1 con un paquete de contexto."
     },
     {
       "key": "activity.race.requested",
-      "args": { "race_id": "rc-aaaaaaaaaaaaaaaaaaaa", "source": "t-3-a1", "candidates": 2, "strategy": "otra" },
+      "args": {
+        "race_id": "rc-aaaaaaaaaaaaaaaaaaaa",
+        "source": "t-3-a1",
+        "candidates": 2,
+        "strategy": "otra"
+      },
       "text": null
     },
     {
       "key": "activity.race.candidate_recorded",
-      "args": { "index": 0, "outcome": "launched", "provider": "codex", "attempt_id": "t-9-a1" },
+      "args": {
+        "index": 0,
+        "outcome": "launched",
+        "provider": "codex",
+        "attempt_id": "t-9-a1"
+      },
       "text": "Candidato 1 del Race: se lanzó t-9-a1 con codex."
     },
     {
       "key": "activity.race.candidate_recorded",
-      "args": { "index": 1, "outcome": "failed", "provider": "nope", "code": "race_concurrency_limit" },
+      "args": {
+        "index": 1,
+        "outcome": "failed",
+        "provider": "nope",
+        "code": "race_concurrency_limit"
+      },
       "text": "Candidato 2 del Race: no se pudo lanzar con nope (race_concurrency_limit)."
     },
     {
       "key": "activity.race.candidate_recorded",
-      "args": { "index": 1, "outcome": "launched", "provider": "codex" },
+      "args": {
+        "index": 1,
+        "outcome": "launched",
+        "provider": "codex"
+      },
       "text": null
     },
     {
       "key": "activity.race.cancelled",
-      "args": { "scope": "one", "attempt_id": "t-9-a1", "stopped": 1, "rejected": 0, "failed": 0 },
+      "args": {
+        "scope": "one",
+        "attempt_id": "t-9-a1",
+        "stopped": 1,
+        "rejected": 0,
+        "failed": 0
+      },
       "text": "Se canceló el candidato t-9-a1 del Race."
     },
     {
       "key": "activity.race.cancelled",
-      "args": { "scope": "remaining", "stopped": 1, "rejected": 2, "failed": 1 },
+      "args": {
+        "scope": "remaining",
+        "stopped": 1,
+        "rejected": 2,
+        "failed": 1
+      },
       "text": "Se canceló lo que quedaba del Race: 1 detenidos, 2 rechazados, 1 sin poder detenerse."
     },
     {
       "key": "activity.race.cancelled",
-      "args": { "scope": "one", "stopped": 1, "rejected": 0, "failed": 0 },
+      "args": {
+        "scope": "one",
+        "stopped": 1,
+        "rejected": 0,
+        "failed": 0
+      },
       "text": null
     },
     {
       "key": "activity.policy.changed",
-      "args": { "scope": "global", "category": "steer", "to": "confirm", "direction": "tighten", "revision": 1 },
+      "args": {
+        "scope": "global",
+        "category": "steer",
+        "to": "confirm",
+        "direction": "tighten",
+        "revision": 1
+      },
       "text": "Policy de «corregir» en el ámbito global: de heredado a confirmar (más restrictiva)."
     },
     {
       "key": "activity.policy.changed",
-      "args": { "scope": "project", "scope_id": "p-1", "category": "fork", "from": "deny", "direction": "reset", "revision": 3 },
+      "args": {
+        "scope": "project",
+        "scope_id": "p-1",
+        "category": "fork",
+        "from": "deny",
+        "direction": "reset",
+        "revision": 3
+      },
       "text": "Policy de «bifurcar» en el proyecto p-1: de denegar a heredado (vuelve a heredar)."
     },
     {
       "key": "activity.policy.changed",
-      "args": { "scope": "attempt", "scope_id": "t-3-a1", "category": "integrate", "from": "confirm", "to": "deny", "direction": "tighten", "revision": 4 },
+      "args": {
+        "scope": "attempt",
+        "scope_id": "t-3-a1",
+        "category": "integrate",
+        "from": "confirm",
+        "to": "deny",
+        "direction": "tighten",
+        "revision": 4
+      },
       "text": "Policy de «integrar» en el intento t-3-a1: de confirmar a denegar (más restrictiva)."
     },
     {
       "key": "activity.policy.changed",
-      "args": { "scope": "team", "category": "fork", "direction": "reset", "revision": 3 },
+      "args": {
+        "scope": "team",
+        "category": "fork",
+        "direction": "reset",
+        "revision": 3
+      },
       "text": null
     },
     {
       "key": "activity.policy.changed",
-      "args": { "scope": "project", "category": "fork", "direction": "reset", "revision": 3 },
+      "args": {
+        "scope": "project",
+        "category": "fork",
+        "direction": "reset",
+        "revision": 3
+      },
       "text": null
     },
     {
       "key": "activity.attempt.forked",
-      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "clean" },
+      "args": {
+        "task": "t-9",
+        "n": 1,
+        "source_task": "t-3",
+        "source_n": 2,
+        "strategy": "clean"
+      },
       "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.forked",
-      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "context_package" },
+      "args": {
+        "task": "t-9",
+        "n": 1,
+        "source_task": "t-3",
+        "source_n": 2,
+        "strategy": "context_package"
+      },
       "text": "El intento 1 de la tarea t-9 se bifurcó del intento 2 de la tarea t-3 con un paquete de contexto."
     },
     {
       "key": "activity.attempt.forked",
-      "args": { "task": "t-9", "n": 1, "source_task": "t-3", "source_n": 2, "strategy": "otra" },
+      "args": {
+        "task": "t-9",
+        "n": 1,
+        "source_task": "t-3",
+        "source_n": 2,
+        "strategy": "otra"
+      },
       "text": null
     },
     {
@@ -945,147 +1039,271 @@
     },
     {
       "key": "activity.attempt.instruction_requested",
-      "args": { "task": "t-3", "n": 2, "mode": "steer" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "steer"
+      },
       "text": "Se pidió inyectar una instrucción en el turno en curso del intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.instruction_requested",
-      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "stop_and_send"
+      },
       "text": "Se pidió detener el turno en curso del intento 2 de la tarea t-3 y enviarle una instrucción."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "delivered" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "steer",
+        "outcome": "delivered"
+      },
       "text": "Se inyectó la instrucción en el turno en curso del intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "adapter_error" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "steer",
+        "outcome": "failed",
+        "reason": "adapter_error"
+      },
       "text": "El proveedor no aceptó la instrucción para el turno en curso del intento 2 de la tarea t-3 (el proveedor devolvió un error)."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "delivered" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "stop_and_send",
+        "outcome": "delivered"
+      },
       "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3 y se le envió la instrucción."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "failed", "reason": "adapter_unavailable" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "stop_and_send",
+        "outcome": "failed",
+        "reason": "adapter_unavailable"
+      },
       "text": "Se detuvo el turno en curso del intento 2 de la tarea t-3, pero la instrucción no llegó (el proveedor no estaba disponible)."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_failed" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "stop_and_send",
+        "outcome": "stop_failed"
+      },
       "text": "No se pudo detener el turno en curso del intento 2 de la tarea t-3: no se envió la instrucción."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "stop_and_send", "outcome": "stop_timeout" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "stop_and_send",
+        "outcome": "stop_timeout"
+      },
       "text": "El proveedor no confirmó a tiempo que el turno en curso del intento 2 de la tarea t-3 se hubiera detenido: no se envió la instrucción."
     },
     {
       "key": "activity.attempt.instruction_result",
-      "args": { "task": "t-3", "n": 2, "mode": "steer", "outcome": "failed", "reason": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "steer",
+        "outcome": "failed",
+        "reason": "otro"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.instruction_requested",
-      "args": { "task": "t-3", "n": 2, "mode": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "mode": "otro"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.question_requested",
-      "args": { "task": "t-3", "n": 2, "question": "PRIVATE_SENTINEL" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "question": "PRIVATE_SENTINEL"
+      },
       "text": "El intento 2 de la tarea t-3 pide una respuesta al proveedor."
     },
     {
       "key": "activity.attempt.question_requested",
-      "args": { "task": "t-3" },
+      "args": {
+        "task": "t-3"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.question_requested",
-      "args": { "task": "t-3", "n": "2" },
+      "args": {
+        "task": "t-3",
+        "n": "2"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "allow" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "permission",
+        "decision": "allow"
+      },
       "text": "Se permitió lo que el proveedor pedía en el intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "deny" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "permission",
+        "decision": "deny"
+      },
       "text": "Se denegó lo que el proveedor pedía en el intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "question" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "question"
+      },
       "text": "Se respondió una pregunta del proveedor en el intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "permission" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "permission"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "permission", "decision": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "permission",
+        "decision": "otro"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "question", "decision": "allow" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "question",
+        "decision": "allow"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.request_answered",
-      "args": { "task": "t-3", "n": 2, "kind": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "kind": "otro"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.usage_reported",
-      "args": { "task": "t-3", "n": 2 },
+      "args": {
+        "task": "t-3",
+        "n": 2
+      },
       "text": "El proveedor informó el uso del intento 2 de la tarea t-3."
     },
     {
       "key": "activity.attempt.usage_reported",
-      "args": { "task": "t-3" },
+      "args": {
+        "task": "t-3"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.delegated",
-      "args": { "task": "t-3", "n": 2, "source": "selection" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "source": "selection"
+      },
       "text": "El intento 2 de la tarea t-3 se delegó a partir de una selección de código."
     },
     {
       "key": "activity.attempt.delegated",
-      "args": { "task": "t-3", "n": 2, "source": "task" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "source": "task"
+      },
       "text": "El intento 2 de la tarea t-3 se delegó a partir de otra tarea."
     },
     {
       "key": "activity.attempt.delegated",
-      "args": { "task": "t-3", "n": 2, "source": "attempt" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "source": "attempt"
+      },
       "text": "El intento 2 de la tarea t-3 se delegó a partir de otro intento."
     },
     {
       "key": "activity.attempt.delegated",
-      "args": { "task": "t-3", "n": 2, "source": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "source": "otro"
+      },
       "text": null
     },
     {
       "key": "activity.attempt.ownership_changed",
-      "args": { "task": "t-3", "n": 2, "to": "human" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "to": "human"
+      },
       "text": "El intento 2 de la tarea t-3 pasó a manos de una persona."
     },
     {
       "key": "activity.attempt.ownership_changed",
-      "args": { "task": "t-3", "n": 2, "to": "agent" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "to": "agent"
+      },
       "text": "El intento 2 de la tarea t-3 volvió al agente."
     },
     {
       "key": "activity.attempt.ownership_changed",
-      "args": { "task": "t-3", "n": 2, "to": "otro" },
+      "args": {
+        "task": "t-3",
+        "n": 2,
+        "to": "otro"
+      },
       "text": null
     },
     {
@@ -1241,6 +1459,21 @@
         "attempts": 6
       },
       "text": "Se pasó al modelo de tareas e intentos (6 tareas, 6 intentos)."
+    },
+    {
+      "key": "activity.panel.requested",
+      "args": {},
+      "text": "Se aprobó un panel de consulta de solo lectura."
+    },
+    {
+      "key": "activity.panel.panelist_recorded",
+      "args": {},
+      "text": "Se registró el resultado de un panelista."
+    },
+    {
+      "key": "activity.panel.completed",
+      "args": {},
+      "text": "Terminó el panel de consulta; revisa su síntesis y los datos ausentes."
     }
   ]
 }

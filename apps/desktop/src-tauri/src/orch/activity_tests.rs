@@ -68,6 +68,9 @@ fn casos() -> Vec<Caso> {
     let a = ("agent", "claude");
     let at = ("attention", "att_1");
     vec![
+        ("panel.requested", Decision, ("core", "pn-test"), json!({}), "activity.panel.requested", "info"),
+        ("panel.panelist_recorded", State, ("core", "pn-test"), json!({}), "activity.panel.panelist_recorded", "info"),
+        ("panel.completed", State, ("core", "pn-test"), json!({}), "activity.panel.completed", "info"),
         // state · run
         (
             "run.created",
@@ -775,7 +778,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 108] = [
+const CLAVES: [&str; 111] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
@@ -843,6 +846,9 @@ const CLAVES: [&str; 108] = [
     "activity.provider_session.resumed",
     "activity.race.cancelled",
     "activity.race.candidate_recorded",
+    "activity.panel.requested",
+    "activity.panel.panelist_recorded",
+    "activity.panel.completed",
     "activity.race.requested",
     "activity.run.closed",
     "activity.run.created",
