@@ -97,6 +97,8 @@ def test_resumen_mobile_f4_atraviesa_websocket_y_no_se_repite_al_reconectar(clie
 @pytest.mark.parametrize(("action", "extra"), [
     ("mobile_question", {}),
     ("mobile_launch_approval", {"decision": "approve", "confirm": True}),
+    ("mobile_review", {"decision": {"review_id": "att_1", "head_commit": "a" * 40, "verdict": "accepted", "confirm": True}}),
+    ("mobile_review", {"open_desktop": True}),
 ])
 def test_operacion_mobile_valida_credencial_y_entrega_solo_al_controller(client, monkeypatch, action, extra):
     identities = {
@@ -135,6 +137,25 @@ def test_operacion_mobile_valida_credencial_y_entrega_solo_al_controller(client,
                 channel = remote.hub.get("s1")
                 assert remote.hub.replay(channel, 0) == []
                 assert all(cmd.get("action") != action for _, cmd in channel.recent_cmds)
+
+
+@pytest.mark.parametrize("decision", [
+    {"review_id": "r", "head_commit": "a" * 40, "verdict": "accepted", "confirm": False},
+    {"review_id": "r", "head_commit": "HEAD", "verdict": "accepted", "confirm": True},
+    {"review_id": "r", "head_commit": "a" * 40, "verdict": "approve", "confirm": True},
+    {"review_id": "r", "head_commit": "a" * 40, "verdict": "accepted", "confirm": True, "scope": "desktop"},
+])
+def test_review_mobile_rechaza_revision_o_confirmacion_manipulada(client, monkeypatch, decision):
+    monkeypatch.setattr(remote, "authenticate", lambda *a: {"id": 7, "session_id": 42, "client": "mobile"})
+    with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
+        until(host, "channel")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            phone.send_json({"op": "cmd", "rid": "outer", "credential": "lixbon_at_mobile", "command": {
+                "type": "orch", "action": "mobile_review", "args": {"rid": "r1", "attention_id": "a1", "attempt_id": "t1-a1", "decision": decision},
+            }})
+            assert until(phone, "ack")["status"] == 422
+            assert not any(cmd.get("action") == "mobile_review" for _, cmd in remote.hub.get("s1").recent_cmds)
 
 
 def test_con_eventos_en_el_buffer_no_se_pide_un_snapshot_que_los_borre(client):

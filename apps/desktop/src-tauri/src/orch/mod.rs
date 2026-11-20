@@ -103,6 +103,7 @@ mod attempt_start_rpc_tests;
 mod fork_runtime;
 mod compare_read;
 mod proof_pack;
+mod mobile_review;
 mod integration_attempt;
 mod resource_actions;
 mod attempt_resume_rpc;

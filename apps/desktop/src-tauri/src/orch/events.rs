@@ -154,6 +154,11 @@ impl MutationContext {
             && self.client_id.as_deref().is_some_and(|id| !id.is_empty())
     }
 
+    pub(super) fn is_authenticated_mobile_person(&self) -> bool {
+        matches!((&self.actor, self.channel), (Actor::PersonId(_), Channel::Mobile))
+            && self.client_id.as_deref().is_some_and(|id| !id.is_empty())
+    }
+
     pub(super) fn with_actor(&self, actor: Actor) -> MutationContext {
         let mut context = self.clone();
         context.actor = actor;

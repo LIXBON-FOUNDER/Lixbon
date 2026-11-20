@@ -78,7 +78,7 @@ export function useObserve({ sessions, active }) {
   const send = useCallback(async (command) => {
     const socket = socketRef.current;
     if (!socket) return { ok: false };
-    const privateOperation = command.action === 'mobile_question' || command.action === 'mobile_launch_approval';
+    const privateOperation = ['mobile_question', 'mobile_launch_approval', 'mobile_review'].includes(command.action);
     const res = await socket.send(command, { replay: !privateOperation });
     return res.retry ? { ok: false } : res;
   }, []);

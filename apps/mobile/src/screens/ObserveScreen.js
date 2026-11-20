@@ -21,11 +21,12 @@ import QuestionScreen from './observe/QuestionScreen';
 import LaunchApprovalScreen from './observe/LaunchApprovalScreen';
 import TaskScreen from './observe/TaskScreen';
 import UsageScreen from './observe/UsageScreen';
+import ReviewScreen from './observe/ReviewScreen';
 
 // Pantallas de cada ruta: Home (LXO-108), Proyecto, Atención (LXO-109) y Tarea (LXO-110).
 const ROUTES = {
   home: HomeScreen, project: ProjectScreen, attention: AttentionScreen,
-  task: TaskScreen, attempt: AttemptScreen, usage: UsageScreen,
+  task: TaskScreen, attempt: AttemptScreen, usage: UsageScreen, review: ReviewScreen,
   question: QuestionScreen, launchApproval: LaunchApprovalScreen,
 };
 
@@ -37,6 +38,7 @@ const ROUTE_TITLE = {
   launchApproval: 'Aprobación de lanzamiento',
   project: 'Proyecto',
   usage: 'Uso de proveedores',
+  review: 'Revisión',
 };
 
 export default function ObserveScreen({ obs, onMenu, routes = ROUTES }) {
