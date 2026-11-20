@@ -99,6 +99,9 @@ def test_resumen_mobile_f4_atraviesa_websocket_y_no_se_repite_al_reconectar(clie
     ("mobile_launch_approval", {"decision": "approve", "confirm": True}),
     ("mobile_review", {"decision": {"review_id": "att_1", "head_commit": "a" * 40, "verdict": "accepted", "confirm": True}}),
     ("mobile_review", {"open_desktop": True}),
+    ("mobile_controls", {"operation": {"kind": "queue", "request_id": "q1", "body": "sigue", "confirm": True}}),
+    ("mobile_controls", {"operation": {"kind": "stop", "confirm": True}}),
+    ("mobile_controls", {"operation": {"kind": "cancel", "queue_id": "t1-a1-q1", "confirm": True}}),
 ])
 def test_operacion_mobile_valida_credencial_y_entrega_solo_al_controller(client, monkeypatch, action, extra):
     identities = {
@@ -108,6 +111,7 @@ def test_operacion_mobile_valida_credencial_y_entrega_solo_al_controller(client,
     }
     monkeypatch.setattr(remote, "authenticate", lambda _cookie, token, _limit: identities[token])
     args = {"rid": "p1", "attention_id": "att_1", "attempt_id": "t1-a1", **extra}
+    if action == "mobile_controls": args.pop("attention_id")
     command = {"type": "orch", "action": action, "args": args, "mobile": {"user_id": 8, "session_id": 999}}
     with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
         until(host, "channel")
@@ -156,6 +160,27 @@ def test_review_mobile_rechaza_revision_o_confirmacion_manipulada(client, monkey
             }})
             assert until(phone, "ack")["status"] == 422
             assert not any(cmd.get("action") == "mobile_review" for _, cmd in remote.hub.get("s1").recent_cmds)
+
+
+@pytest.mark.parametrize("operation", [
+    {"kind": "stop", "confirm": False},
+    {"kind": "fork", "confirm": True},
+    {"kind": [], "confirm": True},
+    {"kind": "queue", "request_id": "k", "body": "x" * 4001, "confirm": True},
+    {"kind": "queue", "request_id": "", "body": "sigue", "confirm": True},
+    {"kind": "cancel", "queue_id": "q", "confirm": True, "scope": "desktop"},
+])
+def test_controls_mobile_rechaza_operaciones_manipuladas(client, monkeypatch, operation):
+    monkeypatch.setattr(remote, "authenticate", lambda *a: {"id": 7, "session_id": 42, "client": "mobile"})
+    with client.websocket_connect("/api/remote/sessions/s1/host", headers={"Authorization": "Bearer host"}) as host:
+        until(host, "channel")
+        with client.websocket_connect("/api/remote/sessions/s1/ws", headers={"Authorization": "Bearer phone"}) as phone:
+            until(phone, "channel_status")
+            phone.send_json({"op": "cmd", "rid": "outer", "credential": "lixbon_at_mobile", "command": {
+                "type": "orch", "action": "mobile_controls", "args": {"rid": "r1", "attempt_id": "t1-a1", "operation": operation},
+            }})
+            assert until(phone, "ack")["status"] == 422
+            assert remote.hub.get("s1").mobile_requests == {}
 
 
 def test_con_eventos_en_el_buffer_no_se_pide_un_snapshot_que_los_borre(client):

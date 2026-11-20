@@ -201,7 +201,8 @@ export async function handleOrchAction(action, args = {}, mobile) {
       }
       case 'mobile_question':
       case 'mobile_launch_approval':
-      case 'mobile_review': {
+      case 'mobile_review':
+      case 'mobile_controls': {
         const emit = emitFn;
         const out = await handleMobileAction(action, args, mobile, invoke, async (selection) => {
           const store = useWorkbenchStore.getState();

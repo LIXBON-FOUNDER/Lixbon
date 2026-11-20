@@ -17,7 +17,7 @@ QUEUE_MAX = 1000             # tope defensivo por cola
 MAX_CONTROLLERS = 5          # controllers simultáneos por sesión
 RECENT_COMMANDS = 50         # comandos que se pueden reentregar a un host que reconecta
 COMMAND_REPLAY_SECONDS = 300
-PRIVATE_MOBILE_ACTIONS = frozenset({"mobile_question", "mobile_launch_approval", "mobile_review"})
+PRIVATE_MOBILE_ACTIONS = frozenset({"mobile_question", "mobile_launch_approval", "mobile_review", "mobile_controls"})
 PRIVATE_MOBILE_EVENTS = frozenset(f"orch_{action}" for action in PRIVATE_MOBILE_ACTIONS)
 RECENT_REQUESTS = 200        # rid de comandos ya encolados: un reenvío del móvil no duplica
 # Un host que se reconecta tarda unos segundos: durante ese margen sigue

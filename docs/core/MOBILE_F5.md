@@ -51,6 +51,31 @@ El límite de atomicidad Git/SQLite del Command de revisión se conserva: una
 escritura externa inmediatamente posterior a la comprobación del HEAD no se
 puede bloquear, y la aceptación sigue vinculada al hash exacto recibido.
 
+## Queue y Stop · LXO-167
+
+`mobile_controls` lee un Attempt exacto y su Pending Queue. No acepta un Task
+como sustituto del destino. Queue y Stop recalculan las policies del Core y las
+capabilities Resume/Interrupt; un intento obsoleto o en manos de una persona
+requiere Desktop. No se expone Steer, Stop & Send, Fork ni destrucción de worktrees.
+
+Queue usa el Command existente y una clave de negocio independiente del RID de
+transporte. Repetir clave y texto devuelve el mismo item incluso si el Attempt
+terminó; cambiar el texto produce conflicto. Al perder un ACK, Mobile conserva
+la clave y el texto en memoria y consulta `request_status` al reconectar. Solo
+un reintento explícito envía la misma solicitud. Nada se guarda en una cola offline.
+
+Cancelar comprueba que el item pertenezca al Attempt mostrado y delega al Core,
+que solo retira items todavía queued. Como en Desktop, retirar una instrucción
+no ejecuta trabajo y sigue permitido si la policy Queue cambió a deny/elevated.
+Stop confirma el destino y espera la cancelación del control registrado para
+ese Attempt y su estado durable `stopped`; un timeout o ausencia de control no
+es éxito. El RPC CLI genérico conserva su guardia de identidad anterior.
+
+Las vistas muestran los primeros 30 items pendientes, sus instrucciones hasta
+200 caracteres y los últimos 20 terminados, con recortes explícitos y códigos
+de fallo. Los borradores y claves sin confirmar se conservan mientras la pantalla
+sigue montada, sin persistir texto privado en disco.
+
 ## Validación
 
 Los tests de Core usan repositorios, worktrees, decisiones y Attention reales,

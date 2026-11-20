@@ -184,6 +184,11 @@ pub fn orch_mobile_review(orch: TauriState<'_, Orch>, user_id: u64, session_id: 
     orch.0.mobile_review(user_id, session_id, args)
 }
 
+#[tauri::command(async)]
+pub fn orch_mobile_controls(orch: TauriState<'_, Orch>, user_id: u64, session_id: u64, args: Value) -> Result<Value, String> {
+    orch.0.mobile_controls(user_id, session_id, args)
+}
+
 /// RPC dedicado del ADE. La allowlist evita exponer operaciones de escritura a esta superficie F2.
 #[tauri::command(async)]
 pub fn orch_query(orch: TauriState<'_, Orch>, query: String, args: Value) -> Result<Value, String> {

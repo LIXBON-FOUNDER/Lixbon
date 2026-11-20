@@ -38,7 +38,7 @@ fn la_matriz_base_deja_a_desktop_como_estaba_y_limita_cli_a_instrucciones_y_fork
     for c in CATEGORIES {
         let esperado = if DESKTOP_CONFIRM.contains(&c) { Level::Confirm } else { Level::Allow };
         assert_eq!(baseline(ActorClass::DesktopPerson, c), esperado, "{}", c.as_str());
-        let mobile = if matches!(c, Category::Answer | Category::Start | Category::Review) { Level::Confirm } else { Level::Deny };
+        let mobile = if matches!(c, Category::Answer | Category::Start | Category::Review | Category::Queue | Category::Stop) { Level::Confirm } else { Level::Deny };
         assert_eq!(baseline(ActorClass::MobilePerson, c), mobile);
         for a in [ActorClass::Automation, ActorClass::Agent] {
             assert_eq!(baseline(a, c), Level::Deny, "{} para {}", c.as_str(), a.as_str());

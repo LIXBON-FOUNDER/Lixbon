@@ -1,6 +1,6 @@
 import { CORE_RELAY_PROTOCOL, coreErrorCode } from './remoteCore.js';
 
-const ACTIONS = new Set(['mobile_question', 'mobile_launch_approval', 'mobile_review']);
+const ACTIONS = new Set(['mobile_question', 'mobile_launch_approval', 'mobile_review', 'mobile_controls']);
 
 /** Private relay operations: identity is supplied by the authenticated gateway, never args. */
 export async function handleMobileAction(action, args, mobile, invoke, openDesktop) {

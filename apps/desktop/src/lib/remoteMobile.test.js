@@ -16,6 +16,21 @@ describe('operaciones privadas Mobile', () => {
       expect(invoke).toHaveBeenCalledWith('orch_mobile_review', { userId: 7, sessionId: 42, args: { attempt_id: 't1-a1', attention_id: 'r1' } });
     } finally { link.close(); }
   });
+  it('Queue conserva la clave de negocio al cambiar el RID de transporte', async () => {
+    const seen = [];
+    const invoke = vi.fn(async (command, input) => {
+      seen.push(input.args);
+      return { attempt_id: input.args.attempt_id, queue_id: 't1-a1-q1', status: seen.length === 1 ? 'Queued' : 'Replayed' };
+    });
+    const operation = { kind: 'queue', request_id: 'business-key', body: 'sigue', confirm: true };
+    for (const rid of ['transport-1', 'transport-2']) {
+      const result = await handleMobileAction('mobile_controls', { rid, attempt_id: 't1-a1', operation }, { user_id: 7, session_id: 42 }, invoke);
+      expect(result.fields.rid).toBe(rid);
+      expect(result.fields.result.queue_id).toBe('t1-a1-q1');
+    }
+    expect(seen[0]).toEqual(seen[1]);
+    expect(seen[0]).not.toHaveProperty('rid');
+  });
   it('identidades inválidas y acciones no permitidas no llegan al Core', async () => {
     const invoke = vi.fn();
     for (const mobile of [null, {}, { user_id: 0, session_id: 42 }, { user_id: 7, session_id: '42' }]) {
