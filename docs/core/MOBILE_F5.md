@@ -84,4 +84,4 @@ policy elevada, superficie genérica cerrada y diff grande/binario. Las pruebas
 de host emparejan el enlace real de Mobile con el handler privado; las de
 WebSocket comprueban autenticación, aislamiento, revisión manipulada y replay.
 
-La aceptación nativa conjunta y las evidencias de UI se completan en LXO-49.
+La aceptación conjunta, reproducción y límites se documentan en [MOBILE_F5_QA.md](MOBILE_F5_QA.md) (LXO-49).

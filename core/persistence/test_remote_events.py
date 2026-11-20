@@ -62,6 +62,15 @@ def test_solo_persiste_los_eventos_del_transcript(session_id):
     assert tipos == ["hello", "user_msg", "assistant_done"]
 
 
+@pytest.mark.parametrize("action", ["mobile_question", "mobile_launch_approval", "mobile_review", "mobile_controls"])
+def test_las_operaciones_privadas_f5_no_se_persisten(session_id, action):
+    q.save_remote_events(session_id, [{
+        "type": f"orch_{action}", "seq": 1, "rid": "private-rid", "protocol": 1,
+        "result": {"body": "PRIVATE_INSTRUCTION", "diff": "PRIVATE_PATCH", "head_commit": "a" * 40},
+    }])
+    assert q.list_remote_events(session_id) == []
+
+
 def test_el_razonamiento_las_preguntas_y_el_contexto_se_reproducen(session_id):
     """Al volver a la sesión el móvil necesita lo pensado, lo preguntado, el
     compact y el último contexto; los trozos en vivo siguen sin guardarse."""
