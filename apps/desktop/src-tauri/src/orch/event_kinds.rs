@@ -291,8 +291,12 @@ pub(super) enum PrOutcome {
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(tag = "decision_kind", rename_all = "snake_case")]
 pub(super) enum DecisionRecorded {
+    ReviewScope { decision_id: u64, scope_id: String, head_commit: String },
+    ReviewScopeReport { decision_id: u64, scope_id: String, head_commit: String, part: u64, covered_files: usize },
     Review {
         decision_id: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        coverage_override: Option<bool>,
         outcome: ReviewOutcome,
         head_commit: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -404,6 +408,9 @@ impl DecisionRecorded {
     /// única vía es `Tx::record_spawn_resolution` (`spawn.resolved`).
     pub(super) fn parse(kind: &str, detail: &serde_json::Value) -> Result<DecisionRecorded, String> {
         Ok(match kind {
+            "review_scope" => DecisionRecorded::ReviewScope { decision_id:0, scope_id:req_str(DEC,detail,"scope_id")?, head_commit:req_str(DEC,detail,"head_commit")? },
+            "review_scope_report" => DecisionRecorded::ReviewScopeReport { decision_id:0, scope_id:req_str(DEC,detail,"scope_id")?, head_commit:req_str(DEC,detail,"head_commit")?,
+                part:detail["part"].as_u64().ok_or("review_scope_invalid_part")?, covered_files:detail["files"].as_array().ok_or("review_scope_invalid_files")?.len() },
             "review" => {
                 let outcome = match outcome_str(DEC, detail, "decision", &["accepted", "rejected"])? {
                     "accepted" => ReviewOutcome::Accepted,
@@ -411,6 +418,7 @@ impl DecisionRecorded {
                 };
                 DecisionRecorded::Review {
                     decision_id: 0,
+                    coverage_override: detail.get("coverage_override_reason").and_then(|r|r.as_str()).map(|_|true),
                     outcome,
                     head_commit: req_str(DEC, detail, "head_commit")?,
                     base_commit: opt_str(DEC, detail, "base_commit")?,
@@ -461,7 +469,7 @@ impl DecisionRecorded {
     /// Completa el id que acaba de asignar `State::record_decision`.
     pub(super) fn with_id(mut self, id: u64) -> DecisionRecorded {
         match &mut self {
-            DecisionRecorded::Review { decision_id, .. } | DecisionRecorded::Merge { decision_id, .. } | DecisionRecorded::Pr { decision_id, .. } => {
+            DecisionRecorded::ReviewScope { decision_id, .. } | DecisionRecorded::ReviewScopeReport { decision_id, .. } | DecisionRecorded::Review { decision_id, .. } | DecisionRecorded::Merge { decision_id, .. } | DecisionRecorded::Pr { decision_id, .. } => {
                 *decision_id = id
             }
         }

@@ -29,6 +29,7 @@ mod provider;
 mod race;
 mod panel;
 mod review;
+mod review_scope;
 mod summary;
 mod task_create;
 mod tasks;
@@ -1129,6 +1130,7 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
+    if matches!(a.at(0).as_deref(), Some("review-scope" | "review-report")) { return review_scope::run(&a); }
     if a.at(0).as_deref() == Some("panel") { return panel::run(&a); }
     if a.at(0).as_deref() == Some("race") {
         return race::run(&a);

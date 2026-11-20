@@ -54,6 +54,19 @@ export function validateProofPack(response, args) {
     throw invalid('decision: sin decisión posible trae su motivo y ningún HEAD');
   }
   if (!isObject(response.completeness) || !COMPLETENESS.includes(response.completeness.state) || !Array.isArray(response.completeness.gaps)) throw invalid('completeness inválida');
+  const coverage = response.coverage;
+  if (coverage !== undefined) {
+    if (!isObject(coverage) || typeof coverage.required !== 'boolean' || !['not_requested', 'complete', 'incomplete', 'stale'].includes(coverage.state)) throw invalid('coverage inválida');
+    if (!coverage.required && coverage.state !== 'not_requested') throw invalid('coverage sin reparto');
+    if (coverage.required) {
+      const paths = (v) => Array.isArray(v) && v.length <= 256 && v.every(isText);
+      if (!isText(coverage.scope_id) || !isText(coverage.head_commit) || !Number.isSafeInteger(coverage.total_files) || coverage.total_files < 0 || coverage.total_files > 256
+        || !Number.isSafeInteger(coverage.covered_files) || coverage.covered_files < 0 || coverage.covered_files > coverage.total_files
+        || !paths(coverage.uncovered_files) || !paths(coverage.overlaps) || !Array.isArray(coverage.parts) || coverage.parts.length > 8
+        || coverage.parts.some((p) => !isObject(p) || !Number.isSafeInteger(p.index) || !isText(p.reviewer_id) || typeof p.valid !== 'boolean' || (p.summary != null && typeof p.summary !== 'string') || !paths(p.files) || !paths(p.reported_files))) throw invalid('coverage fuera del contrato');
+      if (coverage.covered_files + coverage.uncovered_files.length !== coverage.total_files || (coverage.state === 'complete' && (coverage.uncovered_files.length || coverage.overlaps.length || coverage.head_commit !== response.revision.head_commit.value))) throw invalid('coverage inconsistente');
+    }
+  }
   return response;
 }
 

@@ -68,6 +68,8 @@ fn casos() -> Vec<Caso> {
     let a = ("agent", "claude");
     let at = ("attention", "att_1");
     vec![
+        ("decision.recorded", Decision, t, json!({"decision_kind":"review_scope","scope_id":"rs-test"}), "activity.decision.review_scope", "info"),
+        ("decision.recorded", Decision, t, json!({"decision_kind":"review_scope_report","scope_id":"rs-test"}), "activity.decision.review_scope_report", "info"),
         ("panel.requested", Decision, ("core", "pn-test"), json!({}), "activity.panel.requested", "info"),
         ("panel.panelist_recorded", State, ("core", "pn-test"), json!({}), "activity.panel.panelist_recorded", "info"),
         ("panel.completed", State, ("core", "pn-test"), json!({}), "activity.panel.completed", "info"),
@@ -778,7 +780,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 111] = [
+const CLAVES: [&str; 113] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
@@ -819,6 +821,8 @@ const CLAVES: [&str; 111] = [
     "activity.decision.pr.already_exists",
     "activity.decision.pr.created",
     "activity.decision.pr.error",
+    "activity.decision.review_scope",
+    "activity.decision.review_scope_report",
     "activity.decision.review.accepted",
     "activity.decision.review.rejected",
     "activity.effect.git_merge.conflict",

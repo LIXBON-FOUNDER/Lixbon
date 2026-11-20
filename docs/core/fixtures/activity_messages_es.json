@@ -1474,6 +1474,20 @@
       "key": "activity.panel.completed",
       "args": {},
       "text": "Terminó el panel de consulta; revisa su síntesis y los datos ausentes."
+    },
+    {
+      "key": "activity.decision.review_scope",
+      "args": {
+        "scope_id": "rs-test"
+      },
+      "text": "Se repartió el alcance de la revisión."
+    },
+    {
+      "key": "activity.decision.review_scope_report",
+      "args": {
+        "scope_id": "rs-test"
+      },
+      "text": "Se recibió un informe de una parte de la revisión."
     }
   ]
 }

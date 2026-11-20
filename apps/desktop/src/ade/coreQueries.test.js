@@ -78,6 +78,8 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.project.location_added', { primary: true, fingerprint_adopted: false }],
   ['activity.project.archived', {}],
   ['activity.project.restored', {}],
+  ['activity.decision.review_scope', { scope_id: 'rs-test' }],
+  ['activity.decision.review_scope_report', { scope_id: 'rs-test' }],
   ['activity.panel.requested', {}],
   ['activity.panel.panelist_recorded', {}],
   ['activity.panel.completed', {}],
