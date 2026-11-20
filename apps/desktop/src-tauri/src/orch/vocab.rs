@@ -92,7 +92,7 @@ pub const PENDING_SPAWN_STATE: [&str; 5] = ["pending", "approved", "rejected", "
 pub const MESSAGE_KIND: [&str; 6] = ["phase", "done", "question", "reply", "note", "exited"];
 
 /// `Decision.kind` que emite el código hoy.
-pub const DECISION_KIND: [&str; 4] = ["merge", "pr", "review", "spawn"];
+pub const DECISION_KIND: [&str; 6] = ["merge", "pr", "review", "review_scope", "review_scope_report", "spawn"];
 
 /// `Task.failure_reason`.
 pub const FAILURE_REASON: [&str; 2] = ["terminal_approval_timeout", "agent_idle_timeout"];
@@ -221,7 +221,7 @@ mod tests {
         assert_ids("review_decision", &REVIEW_DECISION);
         assert!(include_str!("review.rs").contains("[\"accepted\", \"rejected\"]"));
         assert_ids("decision_kind", &DECISION_KIND);
-        let fuentes = [include_str!("integration.rs"), include_str!("review.rs"), include_str!("spawn_approval.rs")].concat();
+        let fuentes = [include_str!("integration.rs"), include_str!("review.rs"), include_str!("review_scope.rs"), include_str!("spawn_approval.rs")].concat();
         for id in DECISION_KIND {
             assert!(fuentes.contains(&format!(", \"{id}\", ")), "ningún record_decision emite ya {id}");
         }

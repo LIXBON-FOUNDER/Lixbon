@@ -1448,6 +1448,8 @@ fn todo_kind_del_vocabulario_emite_exactamente_un_evento_salvo_spawn_que_tiene_s
     for kind in super::vocab::DECISION_KIND {
         let detalle = match kind {
             "review" => json!({ "decision": "accepted", "head_commit": "h" }),
+            "review_scope" => json!({"scope_id":"rs-test","head_commit":"h"}),
+            "review_scope_report" => json!({"scope_id":"rs-test","head_commit":"h","part":0,"files":["a.rs"]}),
             "merge" => json!({ "outcome": "merged", "branch": "b", "squash": false }),
             "pr" => json!({ "outcome": "created", "branch": "b" }),
             "spawn" => json!({ "pending_id": "p", "outcome": "approved" }),

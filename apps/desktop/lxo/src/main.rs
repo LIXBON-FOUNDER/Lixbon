@@ -90,7 +90,7 @@ Coordinador (el agente con el que habla el usuario):
                                                     list/cancel son solo para personas y no requieren confirmación de policy.
   lxo compare --task <task_id> [attempt_id ...] [--status S] [--provider P] [--json]
   lxo compare --race <race_id> [--json]            compara los candidatos lanzados del Race con la evidencia del Core
-  lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
+  lxo review-scope --config plan.json --confirm   reparte el diff por revisor y HEAD\n  lxo review-report --config -                    entrega el informe de la parte por stdin\n  lxo review <attempt_id> [--accept | --reject] [--comment TEXTO] [--open] [--json]
                                                    Proof Pack y decisión sobre el HEAD exacto (solo personas)
   lxo integrate merge|pr <attempt_id|review_id> [--dry-run|--confirm] [--squash] [--accept-moved-target SHA] [--json]
                                                   revisa el destino y la revisión vigente antes de integrar

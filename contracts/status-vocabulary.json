@@ -68,7 +68,7 @@
     "decision_kind": {
       "estado": "vigente",
       "origen": "orch/state.rs::Decision.kind (cadena libre en state.json); los emitidos por el codigo hoy",
-      "ids": ["merge", "pr", "review", "spawn"],
+      "ids": ["merge", "pr", "review", "review_scope", "review_scope_report", "spawn"],
       "reservados": ["release", "discard", "reopen", "stop"]
     },
 

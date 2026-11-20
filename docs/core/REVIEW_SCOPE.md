@@ -33,7 +33,7 @@ rechazar la revisión o trabajar sobre un HEAD nuevo.
 
 ## Entregar el informe
 
-Cada agente usa su propia credencial y `lxo review-report --config report.json`:
+Cada agente usa su propia credencial y `lxo review-report --config report.json`, o `--config -` con JSON por stdin para no escribir en un workspace de solo lectura. Los perfiles permiten solo esa orden adicional de `lxo`; Core limita su efecto a la parte asignada:
 
 ```json
 {

@@ -343,7 +343,7 @@ fn submit(core: &Core, ctx: &MutationContext, i: ReportInput) -> Result<Value, S
         let out=json!({"key":key,"digest":digest,"scope_id":i.scope_id,"attempt_id":i.attempt_id,"head_commit":i.head_commit,
             "part":i.part,"reviewer_id":reviewer,"files":i.files,"summary":super::adapter::redact(&i.summary)});
         let row_actor=match &ctx.actor {Actor::Agent(t)=>t.as_str(),_=>"human"};
-        tx.record_decision(&task,"review_scope_report",row_actor,&out)?;
+        tx.record_decision(&task, "review_scope_report", row_actor, &out)?;
         Ok(out)
     }).map_err(|e|e.to_string())
 }

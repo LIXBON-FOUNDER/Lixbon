@@ -222,7 +222,7 @@ pub(super) fn review_task_with_coverage(state: &impl StateAccess, id: &str, deci
             "decision": decision, "base_commit": base, "base_source": source, "head_commit": head_commit, "comment": comment,
             });
         if let Some(reason)=coverage_override_reason { data["coverage_override_reason"]=json!(super::adapter::redact(reason)); data["coverage_override_digest"]=json!(coverage_override_digest); }
-        let did = st.record_decision(id,"review","human",&data)?;
+        let did = st.record_decision(id, "review", "human", &data)?;
         let at = st.decisions.iter().find(|d| d.id == did).map(|d| d.at).unwrap_or_default();
         Ok((did, at))
     })?;

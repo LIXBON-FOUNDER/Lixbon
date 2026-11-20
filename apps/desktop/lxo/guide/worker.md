@@ -101,3 +101,15 @@ puedes ejecutar tests y comandos para demostrar fallos, pero no editar. Tu infor
 Si tu coordinador te pasa hallazgos (`lxo continue`), responde a **cada uno**, por número: corrígelo
 (con un test que lo cubra) o justifica por qué no aplica. No dejes ninguno sin respuesta. Haz commit
 de las correcciones y cierra con un informe nuevo que liste cada hallazgo y qué hiciste con él.
+
+
+## Informe de una parte de revisión
+
+Si tu encargo incluye `scope_id`, parte, HEAD y archivos asignados, entrega el
+informe desde tu credencial con un solo comando `lxo review-report --config -`
+y JSON por stdin (heredoc). No escribas un config en disco si eres de solo lectura.
+Incluye request_id, attempt_id, scope_id, part, head_commit, files y summary.
+Usa una clave estable al reintentar el mismo informe; un contenido distinto usa
+otra clave. Solo declara archivos de tu parte que realmente revisaste. Si HEAD
+cambió, informa al coordinador y espera un reparto nuevo. Este informe no acepta
+la revisión ni sustituye el cierre habitual con lxo done.
