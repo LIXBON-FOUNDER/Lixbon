@@ -55,6 +55,7 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
   const state = useCoreQuery('attempt_proof_pack', { attempt_id: attempt?.id }, { enabled });
   const [confirming, setConfirming] = useState(null);
   const [comment, setComment] = useState('');
+  const [coverageOverride, setCoverageOverride] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [moved, setMoved] = useState(null);
@@ -62,12 +63,14 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
   if (!enabled) return null;
   const pack = state.data ?? null;
 
+  const needsCoverageOverride = pack?.coverage?.required && pack.coverage.state !== 'complete';
+  const overrideReason = coverageOverride && coverageOverride.head === pack?.decision.head_commit && coverageOverride.scope === pack?.coverage?.scope_id && coverageOverride.revision === pack?.coverage?.revision ? coverageOverride.reason : '';
   const decide = async (decision) => {
     setBusy(true);
     setError(null);
     try {
       // El HEAD que se manda es el que se mostró, no uno releído ahora.
-      const result = await reviewAttempt({ attemptId: attempt.id, decision, headCommit: pack.decision.head_commit, comment: decision === 'rejected' ? comment : undefined });
+      const result = await reviewAttempt({ attemptId: attempt.id, decision, headCommit: pack.decision.head_commit, comment: decision === 'rejected' ? comment : undefined, coverageOverrideReason: decision === 'accepted' && needsCoverageOverride ? overrideReason : undefined, coverageOverrideDigest: pack.coverage?.revision });
       setConfirming(null);
       if (result?.outcome === 'head_moved') {
         setMoved({ expected: result.expected_commit, found: result.found_commit });
@@ -135,6 +138,18 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
             <Row label="Pruebas" evidence={pack.tests}>{String(pack.tests.value)}</Row>
           </dl>
 
+          {pack.coverage?.required && (
+            <div className="ade-notice" data-testid="proof-coverage">
+              <strong>Cobertura de revisión: {pack.coverage.covered_files} de {pack.coverage.total_files} archivos</strong>
+              {pack.coverage.state === 'stale' && <p>El HEAD cambió: los informes anteriores ya no cuentan. Vuelve a repartir y revisar.</p>}
+              <ul>{pack.coverage.parts.map((part) => <li key={part.index}>
+                {part.reviewer_id}: {part.valid ? 'informe recibido' : 'pendiente o invalidado'} · {part.reported_files.length} de {part.files.length} archivos · declarado por el revisor
+                <details><summary>Ver alcance e informe</summary><ul>{part.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul>{part.summary && <p>{part.summary}</p>}</details>
+              </li>)}</ul>
+              {pack.coverage.uncovered_files.length > 0 && <p>Sin cubrir: {pack.coverage.uncovered_files.join(', ')}</p>}
+              {pack.coverage.overlaps.length > 0 && <p>Solapes: {pack.coverage.overlaps.join(', ')}</p>}
+            </div>
+          )}
           <AcceptanceNotice acceptance={pack.acceptance} />
           {recorded && <p role="status" data-testid="proof-recorded">{recorded === 'accepted' ? 'Revisión aceptada. Aceptar no integra nada: la integración es otra decisión.' : 'Revisión rechazada. El intento y su worktree siguen donde estaban.'}</p>}
           {moved && (
@@ -150,6 +165,14 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
                 <p className="nat__hint">
                   {confirming === 'accepted' ? 'Vas a aceptar' : 'Vas a rechazar'} la revisión <span className="mono">{short(head)}</span> exacta. {confirming === 'accepted' ? 'No se integra nada.' : 'No se borra nada.'}
                 </p>
+                {confirming === 'accepted' && needsCoverageOverride && (
+                  <label className="nat__field" htmlFor={`${uid}-coverage`}>
+                    <span>Aceptar cobertura incompleta: escribe el motivo para asumir los huecos o solapes</span>
+                    <textarea id={`${uid}-coverage`} rows={3} maxLength={2000} value={overrideReason}
+                      onChange={(e) => setCoverageOverride({ head: pack.decision.head_commit, scope: pack.coverage.scope_id, revision: pack.coverage.revision, reason: e.target.value })}
+                      data-testid="proof-coverage-reason" />
+                  </label>
+                )}
                 {confirming === 'rejected' && (
                   <label className="nat__field" htmlFor={`${uid}-comment`}>
                     <span>Comentario (opcional; no se guarda en el log de eventos)</span>
@@ -157,7 +180,7 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
                   </label>
                 )}
                 <div className="nat__actions">
-                  <button type="button" className="btn btn--primary btn--sm" disabled={busy || stale} onClick={() => decide(confirming)} data-testid="proof-confirm-yes">{busy ? 'Enviando…' : 'Confirmar'}</button>
+                  <button type="button" className="btn btn--primary btn--sm" disabled={busy || stale || (confirming === 'accepted' && needsCoverageOverride && !overrideReason.trim())} onClick={() => decide(confirming)} data-testid="proof-confirm-yes">{busy ? 'Enviando…' : 'Confirmar'}</button>
                   <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => { setConfirming(null); setError(null); }}>Cancelar</button>
                 </div>
               </div>

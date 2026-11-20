@@ -92,3 +92,6 @@ a Desktop; no se amplía esa autorización genérica.
   inicia la aplicación ni depende de un enlace profundo.
 * Salidas: 0 correcto, 1 error interno, 2 uso/decisión no válida, 3 autenticación/permiso,
   4 versión/contrato, 5 Core no disponible, 6 Attempt inexistente, 7 HEAD movido.
+
+
+LXO-237 añade el campo opcional compatible `coverage`: reparto, partes y archivos cubiertos/sin cubrir/solapados sobre un HEAD exacto. La aceptación con huecos exige `coverage_override_reason` explícito de una Person. Ver [REVIEW_SCOPE.md](REVIEW_SCOPE.md).

@@ -161,7 +161,7 @@ const READ_ONLY_BLOCKED: &[&str] = &["Edit", "Write", "NotebookEdit"];
 
 /// Órdenes de Bash que Claude puede ejecutar sin pedir permiso, en todos sus
 /// perfiles: lista explícita, nunca `Bash(lxo *)`.
-pub const LXO_TOOLS: [&str; 5] = ["Bash(lxo report:*)", "Bash(lxo guide)", "Bash(lxo phase:*)", "Bash(lxo ask:*)", "Bash(lxo check)"];
+pub const LXO_TOOLS: [&str; 6] = ["Bash(lxo report:*)", "Bash(lxo guide)", "Bash(lxo phase:*)", "Bash(lxo ask:*)", "Bash(lxo check)", "Bash(lxo review-report:*)"];
 
 /// `--allowedTools`/`--disallowedTools` aceptan varios valores y se tragarían lo
 /// que venga detrás: van en un solo token `--flag=a,b,c` (probado con Claude 2.1.296).
@@ -187,7 +187,7 @@ pub fn codex_elevated_warns(provider: &str, profile: Profile) -> bool {
 }
 pub const WARN_EXEC: &str = "No interactivo: se lanza con codex exec; la terminal muestra la salida pero no acepta teclado.";
 pub const WARN_EXEC_O: &str = "El host añade -o .lixbon/out/<tarea>/1/last-message.md al lanzar: el informe es el mensaje final del agente, de cualquier tamaño, escrito por la CLI.";
-pub const WARN_DELEGAR: &str = "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.";
+pub const WARN_DELEGAR: &str = "Los comandos de solo lectura y las reglas permitidas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.";
 pub const WARN_CODEX_BIG: &str = "Codex puede rechazar informes de más de unos 50 KB: mantén el mensaje final por debajo de ese tamaño.";
 pub const WARN_LIXBON_CLI: &str = "No interactivo: se lanza con lixbon worker; la terminal muestra la salida pero no acepta teclado. El informe es la respuesta final del modelo y lo entrega el propio CLI.";
 pub const WARN_LIXBON_CLI_PLAN: &str = "La solo lectura la aplica el CLI (modo plan): no hay sandbox del sistema.";
@@ -1161,7 +1161,7 @@ mod tests {
     #[test]
     fn aviso_de_delegar_en_claude() {
         let p = evaluate("claude", Profile::DelegarConRevision, "wt", Detected::Skip, false);
-        assert!(p.warnings.iter().any(|w| w == "Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla."), "{:?}", p.warnings);
+        assert!(p.warnings.iter().any(|w| w == "Los comandos de solo lectura y las reglas permitidas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla."), "{:?}", p.warnings);
         assert!(!p.warnings.iter().any(|w| w.starts_with("Solo se ejecutan sin pedir permiso")));
         let e = evaluate("claude", Profile::Explorar, "wt", Detected::Skip, false);
         assert!(!e.warnings.iter().any(|w| w == WARN_DELEGAR));
@@ -1182,7 +1182,7 @@ mod tests {
     #[test]
     fn lanzadores_con_perfil_y_modelo() {
         let l = launch("claude", Some("opus"), Some("high"), "Lee la tarea", Profile::DelegarConRevision, None).unwrap();
-        assert_eq!(l.command, r#"claude "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)" --permission-mode acceptEdits --model opus --effort high -- "Lee la tarea""#);
+        assert_eq!(l.command, r#"claude "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check),Bash(lxo review-report:*)" --permission-mode acceptEdits --model opus --effort high -- "Lee la tarea""#);
         assert!(!l.piped);
         assert!(launch("opencode", Some("anthropic/claude-sonnet-5"), None, "x", Profile::Explorar, None).is_err());
         let l = launch_with(&evaluate("codex", Profile::Explorar, ".", Detected::Skip, false), Some("gpt-5.5"), Some("high"), "x").unwrap();
@@ -1198,7 +1198,7 @@ mod tests {
     #[test]
     fn explorar_en_claude_sin_herramientas_de_edicion() {
         let l = launch("claude", Some("haiku"), None, "Lee", Profile::Explorar, Some("explorador")).unwrap();
-        assert_eq!(l.command, r#"claude -p --output-format stream-json --verbose --disallowedTools=Edit,Write,NotebookEdit "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)" --permission-mode plan --model haiku -- "Lee""#);
+        assert_eq!(l.command, r#"claude -p --output-format stream-json --verbose --disallowedTools=Edit,Write,NotebookEdit "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check),Bash(lxo review-report:*)" --permission-mode plan --model haiku -- "Lee""#);
         // stream-json va canalizado: el JSONL llega sin pasar por ConPTY.
         assert!(l.piped);
     }
@@ -1207,7 +1207,7 @@ mod tests {
     fn argv_por_perfil_y_proveedor() {
         let wt = "C:\\Users\\USUARIO\\wt";
         let argv = |prov, prof| evaluate(prov, prof, wt, Detected::Skip, false).argv.join(" ");
-        let tools = "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check)";
+        let tools = "--allowedTools=Bash(lxo report:*),Bash(lxo guide),Bash(lxo phase:*),Bash(lxo ask:*),Bash(lxo check),Bash(lxo review-report:*)";
         let plan = format!("claude -p --output-format stream-json --verbose --disallowedTools=Edit,Write,NotebookEdit {tools} --permission-mode plan");
         assert_eq!(argv("claude", Profile::Explorar), plan);
         assert_eq!(argv("claude", Profile::Proponer), plan);
@@ -1629,8 +1629,8 @@ sandbox = \"mxc\"", false)] {
                 assert_eq!(argv.last().unwrap(), prompt);
                 assert_eq!(argv[argv.len() - 2], "--");
                 assert_eq!(argv.iter().filter(|a| *a == "--").count(), 1);
-                // 3. Exactamente las cinco reglas (con lxo check), en un solo token.
-                assert_eq!(flag_list(&argv, "--allowedTools").unwrap().len(), 5);
+                // 3. Exactamente las reglas permitidas (con lxo check), en un solo token.
+                assert_eq!(flag_list(&argv, "--allowedTools").unwrap().len(), 6);
                 assert!(flag_list(&argv, "--allowedTools").unwrap().contains(&"Bash(lxo check)"));
                 assert_eq!(flag_list(&argv, "--allowedTools").unwrap(), LXO_TOOLS);
                 assert_eq!(argv.iter().filter(|a| a.starts_with("--allowedTools")).count(), 1);

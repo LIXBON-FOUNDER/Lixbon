@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 112] = [
+pub(crate) const MESSAGE_KEYS: [&str; 114] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -54,6 +54,8 @@ pub(crate) const MESSAGE_KEYS: [&str; 112] = [
     "activity.project.archived",
     "activity.project.restored",
     "activity.policy.changed",
+    "activity.decision.review_scope",
+    "activity.decision.review_scope_report",
     "activity.panel.requested",
     "activity.panel.panelist_recorded",
     "activity.panel.completed",
@@ -882,6 +884,8 @@ fn format(key: &str, a: &A) -> Option<String> {
                 details(&parts)
             ))
         }
+        "activity.decision.review_scope" => { a.text("scope_id")?; Some("Se repartió el alcance de la revisión.".into()) },
+        "activity.decision.review_scope_report" => { a.text("scope_id")?; Some("Se recibió un informe de una parte de la revisión.".into()) },
         "activity.panel.requested" => Some("Se aprobó un panel de consulta de solo lectura.".into()),
         "activity.panel.panelist_recorded" => Some("Se registró el resultado de un panelista.".into()),
         "activity.panel.completed" => Some("Terminó el panel de consulta; revisa su síntesis y los datos ausentes.".into()),

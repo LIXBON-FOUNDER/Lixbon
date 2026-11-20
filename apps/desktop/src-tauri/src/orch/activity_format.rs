@@ -912,6 +912,8 @@ fn valid_entity(e: &EventRow) -> Option<Value> {
 
 fn render_decision(p: &Value) -> Option<Rendered> {
     match p.get("decision_kind")?.as_str()? {
+        "review_scope" => rendered("activity.decision.review_scope", Visual::Info, vec![("scope_id",id(p,"scope_id"))]),
+        "review_scope_report" => rendered("activity.decision.review_scope_report", Visual::Info, vec![("scope_id",id(p,"scope_id"))]),
         "review" => {
             let (key, visual) = match one_of(p, "outcome", &["accepted", "rejected"])? {
                 "accepted" => ("activity.decision.review.accepted", Visual::Success),

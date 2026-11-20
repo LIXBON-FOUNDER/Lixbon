@@ -65,7 +65,7 @@ impl Core {
     ) -> Result<Value, String> {
         if matches!(
             cmd,
-            "attempt_start"
+            "panel" | "panel_status" | "review_scope" | "review_scope_report" | "attempt_start"
                 | "attempt_retry"
                 | "attempt_resume"
                 | "attempt_handoff"
@@ -101,6 +101,7 @@ impl Core {
             return result;
         }
         // Race (LXO-215): N Forks comparables con su procedencia común. Necesita la clase del actor para volver a comprobar la policy en cada lanzamiento.
+        if let Some(result) = super::review_scope::dispatch(self, &context, cmd, args) { return result; }
         if let Some(result) = super::panel::dispatch(self, &context, cmd, args) { return result; }
         if let Some(result) = super::race_runtime::dispatch(self, class, &context, cmd, args) {
             return result;
@@ -929,7 +930,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         // Escriben un paquete: la autorización de la superficie (Desktop o CLI) la da la acción; que sea Person lo exige el propio comando.
         "context_package_build" | "context_package_import" => ClientAction::AgentOrDesktopCommand,
         "task_create" => ClientAction::AgentOrDesktopCommand,
-        "attempt_review" => ClientAction::AttemptReview,
+        "attempt_review" | "review_scope" => ClientAction::AttemptReview,
         "attempt_integrate" => ClientAction::AttemptIntegration,
         "run_create" | "run_close" | "spawn" | "issue" | "continue" | "phase" | "done"
         | "ask" | "await_reply" | "reply" | "send" | "wait" | "check" | "inbox" => {
@@ -948,6 +949,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "attempt_take_over"
         | "attempt_return_to_agent"
         | "attempt_delegate" => ClientAction::AttemptInstructionCommand,
+        "review_scope_report" => ClientAction::AgentOrDesktopCommand,
         "panel" | "attempt_fork" | "task_race" | "task_race_cancel" => {
             ClientAction::AttemptForkCommand
         }
@@ -1002,7 +1004,7 @@ mod tests {
             }
             // core_restore: el despacho exige además una persona.
             "stop" | "release" | "diff" | "core_restore" => ClientAction::AgentOrDesktopCommand,
-            "attempt_review" => ClientAction::AttemptReview,
+            "attempt_review" | "review_scope" => ClientAction::AttemptReview,
             "attempt_integrate" => ClientAction::AttemptIntegration,
             "attempt_queue"
             | "attempt_queue_cancel"

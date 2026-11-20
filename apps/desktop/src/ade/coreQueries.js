@@ -200,6 +200,8 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.attempt.queue_failed', { required: { task: 'string', n: 'integer', reason: 'string' } }],
   ['activity.attempt.instruction_requested', { required: { task: 'string', n: 'integer', mode: 'string' } }],
   ['activity.attempt.instruction_result', { required: { task: 'string', n: 'integer', mode: 'string', outcome: 'string' }, optional: { reason: 'string' } }],
+  ['activity.decision.review_scope', { required: { scope_id: 'string' } }],
+  ['activity.decision.review_scope_report', { required: { scope_id: 'string' } }],
   ['activity.panel.requested', { required: {} }],
   ['activity.panel.panelist_recorded', { required: {} }],
   ['activity.panel.completed', { required: {} }],

@@ -50,6 +50,8 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.project.archived',
   'activity.project.restored',
   'activity.policy.changed',
+  'activity.decision.review_scope',
+  'activity.decision.review_scope_report',
   'activity.panel.requested',
   'activity.panel.panelist_recorded',
   'activity.panel.completed',
@@ -510,6 +512,8 @@ const FORMATTERS = {
     return `El ${attempt} reintenta el intento ${fromN}${optionalDetails((overrides ?? []).map((o) => RETRY_OVERRIDES[o]))}.`;
   },
   // Race (LXO-215). Nunca el encargo, el paquete ni texto libre.
+  'activity.decision.review_scope': (args) => requiredArguments(requiredText(args, 'scope_id')) ? 'Se repartió el alcance de la revisión.' : null,
+  'activity.decision.review_scope_report': (args) => requiredArguments(requiredText(args, 'scope_id')) ? 'Se recibió un informe de una parte de la revisión.' : null,
   'activity.panel.requested': () => 'Se aprobó un panel de consulta de solo lectura.',
   'activity.panel.panelist_recorded': () => 'Se registró el resultado de un panelista.',
   'activity.panel.completed': () => 'Terminó el panel de consulta; revisa su síntesis y los datos ausentes.',

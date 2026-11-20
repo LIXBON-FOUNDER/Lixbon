@@ -161,6 +161,7 @@ impl Core {
             && d["truncated"] == false && d["files"].as_array().is_some_and(|files| files.len() <= MAX_FILES
                 && files.iter().all(|f| f["patch"].is_string() && f["additions"].is_u64() && f["deletions"].is_u64())));
         let reason = blocked_policy(level).or_else(|| if pack["decision"]["can_decide"] != true { Some("review_unavailable") }
+            else if pack["coverage"]["required"] == true && pack["coverage"]["state"] != "complete" { Some("desktop_required") }
             else if !readable { Some("desktop_required") } else { None });
         if let Some(decision) = input.decision {
             if decision.review_id != input.attention_id { return Err("stale_review: la solicitud de revisión cambió".into()); }
@@ -169,7 +170,7 @@ impl Core {
             if head.as_deref() != Some(decision.head_commit.as_str()) { return Err("head_moved: vuelve a revisar la revisión actual".into()); }
             if let Some(reason) = reason { return Err(format!("{reason}: revisa este trabajo en Desktop")); }
             let out = proof_pack::review_attempt(self, &context, &proof_pack::ReviewInput {
-                attempt_id: input.attempt_id, decision: decision.verdict, head_commit: decision.head_commit, comment: None, confirm: true,
+                attempt_id: input.attempt_id, decision: decision.verdict, head_commit: decision.head_commit, comment: None, confirm: true, coverage_override_reason: None, coverage_override_digest: None,
             })?;
             // Only the bounded acknowledgement leaves the host; no comment or paths.
             return Ok(json!({"attempt_id": out["attempt_id"], "outcome": out["outcome"], "head_commit": out["head_commit"], "decision": out["decision"]}));

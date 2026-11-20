@@ -366,8 +366,10 @@ pub(super) mod e2e {
         assert_eq!(attempt_row(&core, &attempt).0, "pending_approval");
         assert_eq!(core.lock().tasks[&task].status, Status::PendingApproval);
 
-        make_deadline_due(&core, &attempt);
         let rev_before = core.storage.with_store(|s| s.runtime_rev().unwrap()).unwrap();
+        // El barrido de fondo también está activo: la referencia debe tomarse
+        // ANTES de vencer el plazo, o puede haber expirado ya al leerla.
+        make_deadline_due(&core, &attempt);
         core.periodic_sweep();
 
         assert_eq!(attempt_row(&core, &attempt).0, "stopped", "el Attempt vencido queda detenido en las tablas");

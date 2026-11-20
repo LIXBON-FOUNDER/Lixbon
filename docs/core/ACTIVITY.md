@@ -232,3 +232,6 @@ versión nueva, payload ilegible, campo obligatorio ausente); centinelas de secr
 correlación; fallos sin comprimir; flujo real del Core sin respaldo; uno a uno con el Event Log; cursor y
 reconexión; `order=desc`; filtros; permisos; parámetros inválidos y solo lectura. E2E por `POST /rpc` en
 `orch/server.rs::http_rpc_activity_list_es_solo_para_person_autenticada`.
+
+
+Panel (LXO-236): `panel.requested`, `panel.panelist_recorded` y `panel.completed` tienen mensajes humanos en Desktop, Mobile y CLI, sin copiar pregunta ni informes a los argumentos de Activity. Reparto (LXO-237): `decision.recorded` con `decision_kind` `review_scope` o `review_scope_report` proyecta el hecho sin resumen del revisor.

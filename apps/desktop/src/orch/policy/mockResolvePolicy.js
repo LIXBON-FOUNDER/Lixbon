@@ -20,8 +20,8 @@ export const CODEX_REPORT_MARKERS_WARNING = 'Sin red local: entrega con lxo repo
 export const CODEX_REPORT_FILE_WARNING = 'Sin red local: entrega con lxo report (report.json); lxo phase, ask y check no llegan al host.';
 export const CODEX_NO_ASK_WARNING = 'Sin red local, Codex no puede usar lxo ask: no podrá preguntarle a la persona y decidirá solo.';
 export const CODEX_COPY_BLOCK_WARNING = 'La entrega en solo lectura depende de que el agente copie el bloque del informe sin cambios; si el hash no coincide, la tarea termina Failed.';
-/** Órdenes de Bash permitidas a Claude en todos sus perfiles (agents.rs, LXO_TOOLS; cinco reglas desde que se añadió lxo check). Nunca `Bash(lxo *)`. */
-export const LXO_TOOLS = ['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)', 'Bash(lxo check)'];
+/** Órdenes de Bash permitidas a Claude en todos sus perfiles (agents.rs, LXO_TOOLS; incluye check y la entrega acotada de review-report). Nunca `Bash(lxo *)`. */
+export const LXO_TOOLS = ['Bash(lxo report:*)', 'Bash(lxo guide)', 'Bash(lxo phase:*)', 'Bash(lxo ask:*)', 'Bash(lxo check)', 'Bash(lxo review-report:*)'];
 /** Herramientas quitadas en los perfiles sin escritura (agents.rs, READ_ONLY_BLOCKED). */
 export const READ_ONLY_BLOCKED = ['Edit', 'Write', 'NotebookEdit'];
 /** Un solo token `--flag=a,b,c`, como allowed_tools()/disallowed_tools() del host. */
@@ -29,7 +29,7 @@ export const ALLOWED_TOOLS_TOKEN = `--allowedTools=${LXO_TOOLS.join(',')}`;
 export const DISALLOWED_TOOLS_TOKEN = `--disallowedTools=${READ_ONLY_BLOCKED.join(',')}`;
 /** Advertencia exacta del host para Claude + Delegar con revisión (agents.rs). */
 /** Advertencia exacta del host para Claude + Delegar con revisión (agents.rs, WARN_DELEGAR). */
-export const ALLOWED_TOOLS_WARNING = 'Los comandos de solo lectura y las cinco reglas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.';
+export const ALLOWED_TOOLS_WARNING = 'Los comandos de solo lectura y las reglas permitidas de lxo corren sin pedir aprobación. Los comandos que modifican algo esperan aprobación en la terminal; si nadie responde a tiempo, la tarea falla.';
 /** El host (bb0b013) no tiene esta cadena: texto acordado para el modo plan con un modelo que no es Sonnet. */
 /** Codex read-only: límite de tamaño del informe (agents.rs, WARN_CODEX_BIG). */
 export const CODEX_LARGE_REPORT_WARNING = 'Codex puede rechazar informes de más de unos 50 KB: mantén el mensaje final por debajo de ese tamaño.';

@@ -32,7 +32,15 @@ const DECISION_BLOCKS: [&str; 4] = [
     "not_final",
     "no_revision",
 ];
-const FLAGS: [&str; 6] = ["accept", "reject", "comment", "open", "json", "help"];
+const FLAGS: [&str; 7] = [
+    "accept",
+    "reject",
+    "comment",
+    "open",
+    "json",
+    "help",
+    "accept-uncovered-reason",
+];
 
 type Rpc<'a> = &'a mut dyn FnMut(&str, &Value) -> Result<Value, RpcFailure>;
 
@@ -47,7 +55,7 @@ Opciones:
   --accept          acepta el HEAD mostrado por el Proof Pack
   --reject          rechaza el HEAD mostrado por el Proof Pack
   --comment TEXTO   comentario de la decisión (máximo 2000 caracteres)
-  --open            muestra el id para abrirlo manualmente en Desktop; no inicia la app
+  --accept-uncovered-reason TEXTO  acepta explícitamente huecos/solapes con motivo\n  --open            muestra el id para abrirlo manualmente en Desktop; no inicia la app
   --json            {v: 1, proof_pack, review}; review es null si solo se consulta
 
 Si el Core detecta que la rama se movió, no registra la decisión: vuelve a
@@ -84,6 +92,7 @@ struct ReviewRequest {
     attempt_id: String,
     decision: Option<Decision>,
     comment: Option<String>,
+    coverage_override_reason: Option<String>,
     open: bool,
 }
 
@@ -186,6 +195,17 @@ fn parse(a: &Args) -> Result<Request, Failure> {
         attempt_id,
         decision,
         comment,
+        coverage_override_reason: {
+            let reason = text_flag(a, "accept-uncovered-reason")?;
+            if reason.as_ref().is_some_and(|r| r.len() > 2000)
+                || (reason.is_some() && decision != Some(Decision::Accept))
+            {
+                return Err(usage(
+                    "--accept-uncovered-reason requiere --accept y hasta 2000 bytes",
+                ));
+            }
+            reason
+        },
         open: a.b("open"),
     }))
 }
@@ -472,6 +492,10 @@ fn review_rpc(
     if let Some(comment) = &request.comment {
         args["comment"] = json!(comment);
     }
+    if let Some(reason) = &request.coverage_override_reason {
+        args["coverage_override_reason"] = json!(reason);
+        args["coverage_override_digest"] = pack["coverage"]["revision"].clone();
+    }
     let data =
         rpc("attempt_review", &args).map_err(|error| rpc_failure(error, "attempt_review"))?;
     check_review_result(data, request, pack, decision, head_commit)
@@ -637,6 +661,30 @@ fn review_text(pack: &Value, review: Option<&Value>, open: bool) -> String {
         format!("Resumen: {}", evidence_line(&pack["summary"], value_text)),
     ];
 
+    if pack["coverage"]["required"] == true {
+        let c = &pack["coverage"];
+        lines.push(format!(
+            "Cobertura: {} de {} archivos ({})",
+            c["covered_files"],
+            c["total_files"],
+            clean(c["state"].as_str().unwrap_or("unknown"))
+        ));
+        for p in c["parts"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  Parte {} · {} · {} · declarado por el revisor",
+                p["index"],
+                clean(p["reviewer_id"].as_str().unwrap_or("?")),
+                if p["valid"] == true {
+                    "informe recibido"
+                } else {
+                    "pendiente/invalidado"
+                }
+            ));
+        }
+        for key in ["uncovered_files", "overlaps"] {
+            lines.push(format!("  {key}: {}", clean(&c[key].to_string())));
+        }
+    }
     let artifacts = render_artifacts(pack);
     if let Some(first) = artifacts.first() {
         lines.push(format!("Artefactos: {first}"));
@@ -919,6 +967,7 @@ mod tests {
                 attempt_id: "t3-a2".into(),
                 decision: Some(Decision::Accept),
                 comment: Some("revisar".into()),
+                coverage_override_reason: None,
                 open: false,
             }))
         );
@@ -927,6 +976,7 @@ mod tests {
             Ok(Request::Review(ReviewRequest {
                 decision: None,
                 comment: None,
+                coverage_override_reason: None,
                 ..
             }))
         ));
@@ -994,6 +1044,7 @@ mod tests {
                 attempt_id: "t3-a2".into(),
                 decision: None,
                 comment: None,
+                coverage_override_reason: None,
                 open: false,
             },
         )
@@ -1032,6 +1083,7 @@ mod tests {
             attempt_id: "t3-a2".into(),
             decision: Some(Decision::Accept),
             comment: Some("LGTM".into()),
+            coverage_override_reason: None,
             open: false,
         };
         let output = execute(&mut rpc, &request).unwrap();
@@ -1053,6 +1105,40 @@ mod tests {
     }
 
     #[test]
+    fn coverage_override_is_explicit_and_bound_to_the_displayed_head() {
+        assert!(parse(&args(&[
+            "review",
+            "t3-a2",
+            "--accept-uncovered-reason",
+            "motivo"
+        ]))
+        .is_err());
+        let parsed = parse(&args(&[
+            "review",
+            "t3-a2",
+            "--accept",
+            "--accept-uncovered-reason",
+            "Asumo los huecos",
+        ]))
+        .unwrap();
+        let Request::Review(request) = parsed else {
+            panic!("review request")
+        };
+        let mut pack = proof_pack();
+        pack["coverage"] = json!({"required":true,"revision":"coverage-v1","state":"incomplete","total_files":10,"covered_files":4,"parts":[],"uncovered_files":["b.rs"],"overlaps":[]});
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let mut rpc = mock_rpc(pack, Ok(accepted_result()), calls.clone());
+        let out = execute(&mut rpc, &request).unwrap();
+        assert_eq!(
+            calls.borrow()[1].1["coverage_override_reason"],
+            "Asumo los huecos"
+        );
+        assert_eq!(calls.borrow()[1].1["head_commit"], "head-456");
+        assert!(out.human.contains("Cobertura: 4 de 10"));
+        assert!(out.human.contains("b.rs"));
+    }
+
+    #[test]
     fn reject_envia_la_misma_revision_y_no_borra_el_attempt() {
         let calls = Rc::new(RefCell::new(Vec::new()));
         let mut rpc = mock_rpc(proof_pack(), Ok(rejected_result()), calls.clone());
@@ -1062,6 +1148,7 @@ mod tests {
                 attempt_id: "t3-a2".into(),
                 decision: Some(Decision::Reject),
                 comment: None,
+                coverage_override_reason: None,
                 open: false,
             },
         )
@@ -1096,6 +1183,7 @@ mod tests {
                     attempt_id: "t3-a2".into(),
                     decision: Some(Decision::Accept),
                     comment: None,
+                coverage_override_reason: None,
                     open: false,
                 }
             ),
@@ -1118,6 +1206,7 @@ mod tests {
                 attempt_id: "t3-a2".into(),
                 decision: Some(Decision::Accept),
                 comment: None,
+                coverage_override_reason: None,
                 open: true,
             },
         )
