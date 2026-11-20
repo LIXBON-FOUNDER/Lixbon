@@ -513,6 +513,7 @@ impl ProviderAdapter for ClaudeAdapter {
     fn start_panel(&self, req: StartRequest, cap: u64, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         cancel.check()?;
         if !self.panel_supported() { return Err(AdapterError::invalid("panel_limits_unsupported")); }
+        cancel.check()?; // A slow probe must not launch a paid consultation after its deadline.
         self.launch(&req.attempt_id, &req.worktree, &req.prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), None, Some(cap))
     }
 
