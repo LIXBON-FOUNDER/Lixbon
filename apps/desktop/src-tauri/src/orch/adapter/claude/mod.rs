@@ -324,7 +324,7 @@ impl ClaudeAdapter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn launch(&self, attempt_id: &str, worktree: &std::path::Path, prompt: &str, profile: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&ProviderRef>) -> Result<RunHandle, AdapterError> {
+    fn launch(&self, attempt_id: &str, worktree: &std::path::Path, prompt: &str, profile: &str, model: Option<&str>, effort: Option<&str>, resume: Option<&ProviderRef>, panel_budget: Option<u64>) -> Result<RunHandle, AdapterError> {
         if attempt_id.trim().is_empty() || attempt_id.len() > MAX_ID_CHARS {
             return Err(AdapterError::invalid("el attempt_id es texto no vacío de hasta 128 caracteres"));
         }
@@ -342,7 +342,15 @@ impl ClaudeAdapter {
         let model = model.or_else(|| self.cfg.endpoint.as_ref().and_then(Endpoint::model));
         let probe = self.probe_cached();
         let prompt_tool = probe.matrix.is_available(Capability::Answer);
-        let args = build_args(profile, model, effort, resume, prompt_tool)?;
+        let mut args = build_args(profile, model, effort, resume, prompt_tool)?;
+        if let Some(cap) = panel_budget {
+            if profile != Profile::Explorar || cap == 0 { return Err(AdapterError::invalid("panel_read_only_required")); }
+            args.retain(|a| !a.starts_with("--allowedTools=") && !a.starts_with("--disallowedTools="));
+            args.extend(["--tools=Read,Glob,Grep".into(), "--disallowedTools=Bash,Edit,Write,NotebookEdit,Task,Agent".into(),
+                "--strict-mcp-config".into(), "--mcp-config={\"mcpServers\":{}}".into(),
+                "--setting-sources".into(), "".into(),
+                "--max-budget-usd".into(), format!("{}.{:06}", cap / 1_000_000, cap % 1_000_000)]);
+        }
         let (env, env_remove) = launch_env(&self.cfg, &|k| std::env::var(k).ok())?;
         let spec = LaunchSpec { program: self.program()?, args, cwd: worktree.to_path_buf(), env, env_remove };
 
@@ -495,6 +503,19 @@ impl ClaudeAdapter {
 }
 
 impl ProviderAdapter for ClaudeAdapter {
+    fn panel_provider_identity(&self) -> String { "anthropic".into() }
+    fn panel_supported(&self) -> bool {
+        // A configured alternative executable has not been probed by probe_cli.
+        self.cfg.program.is_none() && agents::probe_cli("claude")
+            .and_then(|p| p.help).is_some_and(|h| ["--max-budget-usd", "--tools", "--strict-mcp-config", "--mcp-config", "--setting-sources"].iter().all(|f| help_has(&h, f)))
+    }
+
+    fn start_panel(&self, req: StartRequest, cap: u64, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
+        cancel.check()?;
+        if !self.panel_supported() { return Err(AdapterError::invalid("panel_limits_unsupported")); }
+        self.launch(&req.attempt_id, &req.worktree, &req.prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), None, Some(cap))
+    }
+
     fn id(&self) -> &str {
         &self.cfg.id
     }
@@ -507,7 +528,7 @@ impl ProviderAdapter for ClaudeAdapter {
 
     fn start(&self, req: StartRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         cancel.check()?;
-        self.launch(&req.attempt_id, &req.worktree, &req.prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), None)
+        self.launch(&req.attempt_id, &req.worktree, &req.prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), None, None)
     }
 
     fn events(&self, run: &RunHandle, cancel: &CancelToken, sink: &mut dyn EventSink) -> Result<RunOutcome, AdapterError> {
@@ -612,6 +633,6 @@ impl ProviderAdapter for ClaudeAdapter {
     fn resume(&self, req: ResumeRequest, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
         cancel.check()?;
         let prompt = req.prompt.as_deref().ok_or_else(|| AdapterError::invalid("reanudar una sesión necesita un mensaje para continuar"))?;
-        self.launch(&req.attempt_id, &req.worktree, prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), Some(&req.provider_ref))
+        self.launch(&req.attempt_id, &req.worktree, prompt, &req.profile, req.model.as_deref(), req.effort.as_deref(), Some(&req.provider_ref), None)
     }
 }

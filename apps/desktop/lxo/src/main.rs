@@ -27,6 +27,7 @@ mod open;
 mod projects;
 mod provider;
 mod race;
+mod panel;
 mod review;
 mod summary;
 mod task_create;
@@ -73,7 +74,7 @@ Coordinador (el agente con el que habla el usuario):
   lxo delegate --project ID|NOMBRE --provider P --profile PERFIL --instruction \"...\" (--task|--attempt ID --new-task | --file RUTA)
                                                   delega a un agente desde una Task, un Attempt o una selección de código;
                                                   el Core verifica el origen y el Attempt espera la aprobación de Desktop
-  lxo race --task <task_id> [opciones]             Race desde el Attempt actual; status, follow y cancelación
+  lxo panel --config panel.json --confirm          consulta acotada de solo lectura; panel status <id>\n  lxo race --task <task_id> [opciones]             Race desde el Attempt actual; status, follow y cancelación
   lxo attempt start --task <task_id> --provider <id> --profile <id> --host local --background [--model M] [--effort E] [--worktree new]
   lxo attempt retry <attempt_id> [--provider P] [--model M] [--effort E]
   lxo attempt resume <attempt_id> --message \"...\"
@@ -1128,6 +1129,7 @@ fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
 
 fn main() -> ExitCode {
     let a = parse(std::env::args().skip(1).collect());
+    if a.at(0).as_deref() == Some("panel") { return panel::run(&a); }
     if a.at(0).as_deref() == Some("race") {
         return race::run(&a);
     }

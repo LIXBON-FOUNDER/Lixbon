@@ -151,6 +151,12 @@ impl FakeAdapter {
 }
 
 impl ProviderAdapter for FakeAdapter {
+    fn panel_supported(&self) -> bool { true }
+
+    fn start_panel(&self, req: StartRequest, _max_cost_microusd: u64, cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
+        if req.profile != "explorar" { return Err(AdapterError::invalid("panel_read_only_required")); }
+        self.start(req, cancel)
+    }
     fn id(&self) -> &str {
         &self.id
     }

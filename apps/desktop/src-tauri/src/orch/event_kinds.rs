@@ -2588,3 +2588,36 @@ pub(super) fn environment_blocked(provider: &str, profile: &str, code: agents::E
 pub(super) fn environment_cleared(provider: &str, profile: &str, code: agents::EnvBlock) -> Result<EventDraft, EventError> {
     Ok(EventDraft::new(EntityKind::Agent, provider, &EnvironmentCleared { profile: profile.into(), code })?.run(None).project(None))
 }
+
+// Panel consultations: the question is represented only by its request digest.
+#[derive(Serialize)]
+struct PanelRequested { owner: String, digest: String, source_attempt_id: String, limits: serde_json::Value }
+impl EventPayload for PanelRequested {
+    const KIND: &'static str = "panel.requested";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::Decision;
+}
+#[derive(Serialize)]
+struct PanelCompleted { #[serde(flatten)] result: serde_json::Value }
+impl EventPayload for PanelCompleted {
+    const KIND: &'static str = "panel.completed";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+#[derive(Serialize)]
+struct PanelPanelist { index: usize, result: serde_json::Value }
+impl EventPayload for PanelPanelist {
+    const KIND: &'static str = "panel.panelist_recorded";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+pub(super) fn panel_requested(id: &str, owner: &str, digest: &str, source: &str, limits: serde_json::Value, project: Option<&str>) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Core, id, &PanelRequested { owner: owner.into(), digest: digest.into(), source_attempt_id: source.into(), limits })?
+        .project(project.map(str::to_string)).idempotent(format!("{id}:requested")))
+}
+pub(super) fn panel_completed(id: &str, result: serde_json::Value, project: Option<&str>) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Core, id, &PanelCompleted { result })?.project(project.map(str::to_string)).idempotent(format!("{id}:completed")))
+}
+pub(super) fn panel_panelist(id: &str, index: usize, result: serde_json::Value, project: Option<&str>) -> Result<EventDraft, EventError> {
+    Ok(EventDraft::new(EntityKind::Core, id, &PanelPanelist { index, result })?.project(project.map(str::to_string)).idempotent(format!("{id}:panelist:{index}")))
+}

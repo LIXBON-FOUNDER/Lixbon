@@ -117,6 +117,7 @@ mod queue_runtime;
 mod queue_rpc;
 mod policy;
 mod race_runtime;
+mod panel;
 #[cfg(test)]
 mod policy_tests;
 mod live_run;

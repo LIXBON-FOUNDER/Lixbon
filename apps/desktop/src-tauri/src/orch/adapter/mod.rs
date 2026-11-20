@@ -302,6 +302,16 @@ impl EventSink for RedactingSink<'_> {
 /// La interfaz de un proveedor. Solo `id`, `probe`, `start` y `events` son obligatorios; el resto tiene un valor por
 /// defecto que RECHAZA con `unsupported_capability`: un adapter que no implementa `steer` no puede fingir que lo hace.
 pub trait ProviderAdapter: Send + Sync {
+    /// A bounded, read-only consultation. Default is closed: Start alone proves
+    /// neither a spending cap nor a read-only environment.
+    fn panel_supported(&self) -> bool { false }
+
+    fn panel_provider_identity(&self) -> String { self.id().to_string() }
+
+    fn start_panel(&self, _req: StartRequest, _max_cost_microusd: u64, _cancel: &CancelToken) -> Result<RunHandle, AdapterError> {
+        Err(AdapterError::invalid("panel_limits_unsupported"))
+    }
+
     /// Id estable del proveedor (`[a-z0-9-]`, hasta 64).
     fn id(&self) -> &str;
 

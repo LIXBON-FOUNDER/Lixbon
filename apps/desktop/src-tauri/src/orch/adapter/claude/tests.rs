@@ -988,3 +988,20 @@ fn real_claude_usage_comando_local() {
     assert_eq!(snap.provenance, crate::orch::adapter::Provenance::ProviderQuery);
     assert!(snap.windows.iter().any(|w| w.id == "five_hour" && w.used_percent.is_some()));
 }
+
+#[test]
+fn panel_launch_enforces_read_tools_empty_mcp_and_exact_budget() {
+    let l=FakeLauncher::new(script_of(NORMAL));
+    let a=adapter(cfg(),l.clone());
+    let handle=a.launch("panel-a1", std::path::Path::new("wt"), "consulta", "explorar", None, None, None, Some(12345)).unwrap();
+    let (spec,process)=l.last();
+    assert!(spec.args.contains(&"--tools=Read,Glob,Grep".into()));
+    assert!(spec.args.contains(&"--strict-mcp-config".into()));
+    assert!(spec.args.contains(&"--mcp-config={\"mcpServers\":{}}".into()));
+    let cap=spec.args.iter().position(|a| a=="--max-budget-usd").unwrap();
+    assert_eq!(spec.args[cap+1],"0.012345");
+    assert!(!spec.args.iter().any(|a| a.contains("Bash(lxo")));
+    let _=process.kill();
+    assert!(a.launch("panel-a2",std::path::Path::new("wt"),"q","delegar_con_revision",None,None,None,Some(123)).is_err());
+    assert_eq!(handle.adapter,ID);
+}
