@@ -17,7 +17,7 @@ restrictivo:   allow  <  confirm  <  elevated  <  deny
 
 | categoría | Commands que gobierna | piso |
 |---|---|---|
-| `start` | `task_create` **con** `attempt`, `attempt_start`, `attempt_retry`, `attempt_resume` | `confirm` |
+| `start` | `task_create` **con** `attempt`, `attempt_start`, `attempt_retry`, `attempt_resume`, `attempt_handoff` ([HANDOFF.md](HANDOFF.md)) | `confirm` |
 | `queue` | `attempt_queue` | — |
 | `steer` | `attempt_steer` | — |
 | `stop` | `attempt_stop`, `attempt_stop_and_send`, `task_race_cancel` | — |
@@ -71,7 +71,7 @@ La aprobación inicial móvil requiere un lanzamiento de alcance compatible y co
 * Origen (`source`) = la capa **más cercana** que alcanza el nivel efectivo: `baseline · global · project · attempt · floor`, con su `reason`
   máquina: `baseline_default · baseline_actor · override_global · override_project · override_attempt · safety_floor`.
 
-Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los que nombran una Task (`attempt_retry`, `attempt_resume`,
+Un override de `attempt` aplica a los Commands que **nombran** un Attempt; los que nombran una Task (`attempt_retry`, `attempt_resume`, `attempt_handoff`,
 `resource_*`) evalúan global + project.
 
 `cli_person` puede ejecutar `attempt_review` y `attempt_integrate` con `confirm: true`, sujetos a la policy efectiva y a las guardas de

@@ -819,6 +819,17 @@ impl Core {
         }
     }
 
+    /// `attempt.delegated` (LXO-171): la procedencia de una delegación, UNA vez por Attempt. El hecho es idempotente por su clave (`kind` + Attempt), así que
+    /// repetirlo (la petición se repite) no escribe otro: es lo que permite que repetir la petición repare un hecho que no se pudo anotar la primera vez.
+    pub(super) fn delegation_fact(&self, ctx: &MutationContext, attempt_id: &str, fact: &attempt_ops::Delegation<'_>) -> Result<(), QueueError> {
+        self.queue_store(|st| {
+            let (attempt, task) = steer_commands::rows(st, attempt_id)?;
+            let event = attempt_ops::delegated_fact(&attempt, &task, fact, ctx, super::state::now_ms() as i64).map_err(queue_commands::from_store)?;
+            st.append_events(&[event]).map_err(queue_commands::from_store)?;
+            Ok(())
+        })
+    }
+
     /// El Worktree de un Attempt y si está en esta máquina (LXO-170): lo que Return to Agent necesita para mirar los cambios de la persona.
     pub(super) fn attempt_workspace(&self, attempt_id: &str) -> Result<Option<(crate::store::WorktreeRow, bool)>, QueueError> {
         self.queue_store(|st| {
@@ -903,6 +914,14 @@ impl Core {
     pub(super) fn attempt_follow_up_kind(&self, attempt_id: &str) -> Result<Option<crate::store::AttemptFollowUpKind>, String> {
         self.storage
             .with_store(|store| store.attempt_follow_up_kind(attempt_id))
+            .ok_or_else(|| "el almacén no está abierto".to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    /// El `package_id` con que nació un Attempt por Agent Handoff (`None` si no nació así).
+    pub(super) fn attempt_handoff_package_id(&self, attempt_id: &str) -> Result<Option<String>, String> {
+        self.storage
+            .with_store(|store| store.attempt_handoff_package_id(attempt_id))
             .ok_or_else(|| "el almacén no está abierto".to_string())?
             .map_err(|e| e.to_string())
     }

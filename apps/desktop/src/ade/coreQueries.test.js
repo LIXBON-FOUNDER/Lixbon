@@ -126,6 +126,7 @@ const ACTIVITY_ARGS_CONTRACTS = [
   ['activity.attempt.request_answered', { task: 'task-1', n: 2, kind: 'permission' }, { decision: 'deny' }],
   ...['usage_reported'].map((s) => [`activity.attempt.${s}`, { task: 'task-1', n: 2 }]),
   ['activity.attempt.ownership_changed', { task: 'task-1', n: 2, to: 'agent' }],
+  ['activity.attempt.delegated', { task: 'task-1', n: 2, source: 'attempt' }],
   ['activity.attempt.rejected', { task: 'task-1', n: 1, cause: 'cancelled' }],
   ['activity.attempt.completed', { task: 'task-1', n: 1, has_summary: true }],
   ['activity.attempt.failed', { task: 'task-1', n: 1, reason: 'launch_failed', has_summary: false }],

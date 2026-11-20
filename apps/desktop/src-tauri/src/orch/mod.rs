@@ -108,6 +108,11 @@ mod mobile_controls;
 mod integration_attempt;
 mod resource_actions;
 mod attempt_resume_rpc;
+mod handoff_runtime;
+#[cfg(test)]
+mod handoff_e2e_tests;
+#[cfg(test)]
+mod lxo_f6_cli_e2e_tests;
 mod queue_runtime;
 mod queue_rpc;
 mod policy;
@@ -119,6 +124,9 @@ mod steer_commands;
 mod steer_runtime;
 mod take_over_runtime;
 mod return_runtime;
+mod delegate_runtime;
+#[cfg(test)]
+mod delegate_e2e_tests;
 #[cfg(test)]
 mod return_e2e_tests;
 #[cfg(test)]

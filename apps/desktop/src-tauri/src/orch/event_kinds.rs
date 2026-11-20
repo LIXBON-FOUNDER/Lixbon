@@ -1297,6 +1297,53 @@ pub(super) fn attempt_ownership_changed(a: &AttemptRow, t: &TaskRow, from: Owner
     attempt_draft(a, t, &AttemptOwnershipChanged { task: a.task_id.clone(), n: a.n, from, to, request_id: request_id.to_string(), base_commit: base_commit.map(str::to_string) }).map(|d| d.idempotent(key))
 }
 
+// ---------------------------------------------------------------------------------------------
+// Delegate (LXO-171): una persona delega un trabajo a un agente. La procedencia de la selección es este hecho, una vez por Attempt.
+// ---------------------------------------------------------------------------------------------
+
+/// `attempt.delegated` (LXO-171): de dónde nace la delegación. `source_kind` ∈ `selection` · `task` · `attempt`. `link` es el enlace
+/// `lixbon://` canónico del origen (Project/Task/Attempt/archivo relativo/línea/revisión): **nunca una ruta absoluta** ni contenido. `line_end`: el
+/// final del rango si la selección tiene más de una línea. `revision`: solo sin Attempt (con él viaja en el enlace). `new_task`: la acción explícita
+/// de crear otra Task desde una que ya existía.
+#[derive(Serialize)]
+pub(super) struct AttemptDelegated {
+    task: String,
+    n: i64,
+    source_kind: &'static str,
+    link: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_end: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_id: Option<String>,
+    new_task: bool,
+}
+
+impl EventPayload for AttemptDelegated {
+    const KIND: &'static str = "attempt.delegated";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn attempt_delegated(a: &AttemptRow, t: &TaskRow, d: &super::attempt_ops::Delegation<'_>) -> Result<EventDraft, EventError> {
+    attempt_draft(
+        a,
+        t,
+        &AttemptDelegated {
+            task: a.task_id.clone(),
+            n: a.n,
+            source_kind: d.source_kind,
+            link: d.link.to_string(),
+            line_end: d.line_end,
+            revision: d.revision.map(str::to_string),
+            package_id: d.package_id.map(str::to_string),
+            new_task: d.new_task,
+        },
+    )
+    .map(|e| e.idempotent(a.id.clone()))
+}
+
 /// `attempt.request_answered` (LXO-247): una persona respondió a una petición del proveedor y este la aceptó. `request_id` es el de la
 /// propia petición (ya acotado y sin caracteres de control); `kind` ∈ `permission` · `question`. `decision` ∈ `allow` · `deny` y solo
 /// existe en un permiso: la respuesta a una pregunta es texto libre y NUNCA viaja en el Event (ni su contenido ni su longitud).
@@ -1598,6 +1645,15 @@ pub(super) fn runtime_attempt_adopted(t: &Task, branch: &str, base: &str) -> Res
 /// fallback con ContextPackage no entra por esta vía). Lo emite la misma mutación que crea el Attempt y resuelve el `failed` del anterior.
 pub(super) fn runtime_native_continuation(t: &Task, n: u32) -> Result<EventDraft, EventError> {
     let p = AttemptContinued { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, strategy: ContinuityStrategy::NativeResume, reason: ContinuationReason::Preferred, package_id: None };
+    runtime_attempt(&t.id, &t.run, n, &p)
+}
+
+/// `attempt.continued` del Attempt `n` de una Task del runtime que arranca de cero con un ContextPackage del `n - 1` (Agent Handoff, LXO-172):
+/// no comparte la ProviderSession. `reason` es `provider_changed` si el receptor es otro proveedor y `requested` si es el mismo (sesión nueva
+/// a petición de la persona). Solo lleva el `package_id` (un hash), nunca el contenido del paquete.
+pub(super) fn runtime_handoff_continuation(t: &Task, n: u32, provider_changed: bool, package_id: &str) -> Result<EventDraft, EventError> {
+    let reason = if provider_changed { ContinuationReason::ProviderChanged } else { ContinuationReason::Requested };
+    let p = AttemptContinued { task: t.id.clone(), n: n as i64, from_n: n as i64 - 1, strategy: ContinuityStrategy::ContextPackage, reason, package_id: Some(package_id.to_string()) };
     runtime_attempt(&t.id, &t.run, n, &p)
 }
 

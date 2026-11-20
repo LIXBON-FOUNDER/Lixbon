@@ -914,6 +914,7 @@ fn los_commands_que_no_ejecutan_nada_o_deshacen_no_pasan_por_la_policy() {
         ("resource_delete_worktree", "cleanup"),
         ("attempt_retry", "start"),
         ("attempt_resume", "start"),
+        ("attempt_handoff", "start"),
     ] {
         assert_eq!(classify_for_tests(cmd, &json!({"attempt_id": "t-a1"})), Some(categoria), "{cmd}");
     }

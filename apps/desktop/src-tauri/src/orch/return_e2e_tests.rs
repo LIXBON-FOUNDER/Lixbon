@@ -156,6 +156,17 @@ fn las_comprobaciones_previas_no_tocan_al_proveedor_ni_gastan_la_clave() {
     w.settled(&a, "done");
 }
 
+/// Tomar y devolver sin respiro: cuando `attempt_take_over` devuelve, el agente ya salió del registro, así que la devolución inmediata nunca choca con
+/// `agent_running`. (El bombeo da el veredicto ANTES de retirar la ejecución del registro: sin esperarla, esto fallaba de forma intermitente.)
+#[test]
+fn devolver_justo_despues_de_tomar_nunca_choca_con_agent_running() {
+    for i in 0..12 {
+        let (w, a, _task) = taken(&format!("rt-carrera-{i}"));
+        assert_eq!(give_back(&w, &a, "r-1").unwrap_or_else(|e| panic!("vuelta {i}: {e}"))["status"], "Returned");
+        w.settled(&a, "done");
+    }
+}
+
 #[test]
 fn dos_devoluciones_a_la_vez_no_arrancan_dos_agentes() {
     let (w, a, _task) = taken("rt-guardian");

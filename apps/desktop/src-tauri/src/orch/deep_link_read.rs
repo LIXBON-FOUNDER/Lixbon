@@ -81,6 +81,13 @@ pub(super) fn generate(core: &Core, caller: &Caller, context: Option<&MutationCo
     resolve_link(core, &link)
 }
 
+impl Core {
+    /// Resuelve un enlace ya construido contra el Core (LXO-171: Delegate valida su origen con las mismas reglas que `deep_link_resolve`).
+    pub(super) fn deep_link_resolve_link(&self, link: &DeepLink) -> Result<Value, String> {
+        resolve_link(self, link)
+    }
+}
+
 fn resolve_link(core: &Core, link: &DeepLink) -> Result<Value, String> {
     let canonical = link.to_url().map_err(LinkError::into_rpc)?;
     // Primera lectura: existencia, coherencia y disponibilidad. Devuelve lo necesario para la revisión.
