@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 75] = [
+pub(super) const KINDS: [&str; 78] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -73,6 +73,9 @@ pub(super) const KINDS: [&str; 75] = [
     "attempt.delegated",
     "attempt.dispatch_ambiguous",
     "policy.changed",
+    "panel.requested",
+    "panel.panelist_recorded",
+    "panel.completed",
     "race.requested",
     "race.candidate_recorded",
     "race.cancelled",
@@ -540,6 +543,9 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
             ],
         ),
         // Race (LXO-215): lo pedido, el desenlace de cada candidato y lo cancelado. Nunca el encargo, el paquete ni texto libre.
+        "panel.requested" => rendered("activity.panel.requested", Visual::Info, vec![]),
+        "panel.panelist_recorded" => rendered("activity.panel.panelist_recorded", Visual::Info, vec![]),
+        "panel.completed" => rendered("activity.panel.completed", Visual::Info, vec![]),
         "race.requested" => rendered(
             "activity.race.requested",
             Visual::Info,

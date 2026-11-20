@@ -1046,3 +1046,13 @@ impl Core {
         self.storage.degrade(e.to_string());
     }
 }
+
+impl Core {
+    pub(super) fn panel_events(&self, id: &str) -> Result<Vec<(String,String)>,String> {
+        let q = EventQuery { entity_kind: Some("core".into()), entity_id: Some(id.into()), limit: Some(16), ..EventQuery::default() };
+        match self.storage.events_page(&q) {
+            Some(Ok(p)) => Ok(p.events.into_iter().map(|e| (e.kind,e.payload)).collect()),
+            _ => Err("panel_store_unavailable".into()),
+        }
+    }
+}

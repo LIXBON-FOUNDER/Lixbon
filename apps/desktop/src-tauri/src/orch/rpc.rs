@@ -101,6 +101,7 @@ impl Core {
             return result;
         }
         // Race (LXO-215): N Forks comparables con su procedencia común. Necesita la clase del actor para volver a comprobar la policy en cada lanzamiento.
+        if let Some(result) = super::panel::dispatch(self, &context, cmd, args) { return result; }
         if let Some(result) = super::race_runtime::dispatch(self, class, &context, cmd, args) {
             return result;
         }
@@ -919,7 +920,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "deep_link_resolve" | "deep_link_generate" | "work_at" | "attempt_return_preview" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "deep_link_resolve" | "deep_link_generate" | "work_at" | "attempt_return_preview" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" | "panel_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,
@@ -947,7 +948,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
         | "attempt_take_over"
         | "attempt_return_to_agent"
         | "attempt_delegate" => ClientAction::AttemptInstructionCommand,
-        "attempt_fork" | "task_race" | "task_race_cancel" => {
+        "panel" | "attempt_fork" | "task_race" | "task_race_cancel" => {
             ClientAction::AttemptForkCommand
         }
         "integrate" | "merge" | "pr" | "review" | "resource_clean" | "resource_delete_worktree" | "resource_adopt" | "attempt_share_worktree" | "attempt_share_candidates" | "attempt_approve" | "attempt_reject" | "attempt_lineage" | "attempt_answer" | "attempt_pending_requests" | "policy_set" | "policy_reset" => ClientAction::HumanDecision,
