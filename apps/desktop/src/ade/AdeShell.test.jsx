@@ -153,6 +153,20 @@ afterEach(() => {
   transport.verificationQueryCalls.clear();
 });
 
+describe('AdeShell · revisión solicitada desde Mobile (LXO-49)', () => {
+  it('sale de Activity y abre el Workspace del Project, Task y Attempt exactos', async () => {
+    core(detailOf());
+    render(shell());
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(screen.getByRole('tab', { name: 'Activity' }).getAttribute('aria-selected')).toBe('true');
+    const target = { projectId: PROJECT.id, taskId: ITEM.id, attemptId: `${ITEM.id}-a2` };
+    await act(async () => window.dispatchEvent(new CustomEvent('lixbon-mobile-review-open', { detail: target })));
+    expect(useWorkbenchStore.getState().adeSelection).toMatchObject(target);
+    expect(screen.getByRole('tab', { name: 'Workspace' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('operation-canvas')).toBeTruthy();
+  });
+});
+
 describe('AdeShell · navegación con listas grandes (LXO-95)', () => {
   // Lista grande: en la suite paralela el render supera los 5 s por defecto; se sube el plazo, no se relajan aserciones.
   it('mantiene Operación en una región propia y alcanzable con muchos Projects y Tasks', { timeout: 20_000 }, async () => {

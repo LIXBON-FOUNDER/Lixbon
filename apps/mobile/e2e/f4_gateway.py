@@ -23,6 +23,7 @@ from core.gateway.routers import remote
 USER = {"id": 7, "email": "ana@lixbon.com", "first_name": "Ana", "last_name": "Prueba", "plan": "pro"}
 SESSION = {"id": "f4-e2e", "user_id": 7, "status": "online", "title": "Mobile F4", "source": "ide", "machine": "E2E Android", "host_connected": True}
 CAPS = ["core_snapshot", "core_events", "core_task", "core_activity", "core_attention", "core_attempts", "core_attempt", "core_attempt_capabilities", "core_attempt_context", "core_usage"]
+CORE_FIXTURE = Path(__file__).with_name("f4_core.mjs")
 state = {"scenario": "ready", "requests": [], "queries": [], "failures": []}
 remote.hub = remote_hub.RemoteHub()
 remote._owner_required = lambda *a, **k: dict(SESSION)
@@ -33,7 +34,7 @@ remote.list_remote_events = lambda *a, **k: []
 
 
 async def host():
-    proc = await asyncio.create_subprocess_exec("node", str(Path(__file__).with_name("f4_core.mjs")), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+    proc = await asyncio.create_subprocess_exec("node", str(CORE_FIXTURE), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
     try:
         for _ in range(100):
             try:
@@ -54,14 +55,18 @@ async def host():
                     continue
                 if frame.get("type") != "orch":
                     continue
-                state["requests"].append({"action": frame["action"], "scenario": state["scenario"]})
-                proc.stdin.write((json.dumps({**frame, "scenario": state["scenario"]}) + "\n").encode())
+                state["requests"].append({"action": frame["action"], "scenario": state["scenario"], "operation": frame.get("args", {}).get("operation", {}).get("kind"), "mutation": any(k in frame.get("args", {}) for k in ("operation", "reply", "decision", "open_desktop"))})
+                proc.stdin.write((json.dumps({**frame, "scenario": state["scenario"], "epoch": state.get("epoch", 0)}) + "\n").encode())
                 await proc.stdin.drain()
                 response = json.loads(await proc.stdout.readline())
                 if "error" in response:
                     state["failures"].append(response["error"])
                     continue
                 state["queries"].extend(response["queries"])
+                if response.get("effect"):
+                    state.setdefault("effects", []).append(response["effect"])
+                if response.get("drop"):
+                    continue  # fixture: commit succeeded but its private response was lost
                 encoded = json.dumps(response["event"])
                 if "PRIVATE_SENTINEL" in encoded or "Normalizar el uso de cada proveedor sin fingir" in encoded:
                     state["failures"].append("Private Core contents escaped the host allowlist")
