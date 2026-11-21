@@ -14,7 +14,7 @@ import { useMcpStore } from '../store/mcpStore';
 import { useProblemsStore } from '../store/problemsStore';
 
 import { DeepLinkGate } from '../ade/DeepLinkGate';
-import { restoreIdeAttempt } from '../ade/f6Navigation';
+import { restoreIdeAttempt, useIdeAttempt } from '../ade/f6Navigation';
 import { StatusBar } from './StatusBar';
 import { useAvisoFlotante } from '../chat/avisoFlotante';
 import { UpdateModal } from '../components/UpdateModal';
@@ -144,6 +144,7 @@ export function AppShell() {
     modalView, closeModal,
   } = useAppStore();
   const mode = useWorkbenchStore((s) => s.mode);
+  const ideScope = useIdeAttempt((s) => s.scope);
   const page = useWorkbenchStore((s) => s.page);
   const { updateInfo, installUpdate, isDownloading, downloadProgress, dismissed, dismissUpdate, error: updateError } = useVersion();
   const [skipWelcome, setSkipWelcome] = useState(false);
@@ -204,6 +205,11 @@ export function AppShell() {
 
   return (
     <div className="shell">
+      {!showWelcome && ideScope?.root === workspaceRoot && mode !== 'orch' && <div className="f6-ide" role="region" aria-label="Workspace del Attempt">
+        {ideScope.task_id} / {ideScope.attempt_id} · {ideScope.branch ?? 'sin rama'} · {ideScope.host ?? 'host no informado'}
+        {' '}<button className="lk" onClick={() => useWorkbenchStore.getState().setMode('editor')}>Editor y terminal</button>
+        {' '}<button className="lk" onClick={() => useWorkbenchStore.getState().setMode('design')}>Navegador del workspace</button>
+      </div>}
       <div className="shell__body">
         {showWelcome ? (
           <Welcome onSkip={() => setSkipWelcome(true)} />
