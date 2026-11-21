@@ -49,7 +49,7 @@ function AcceptanceNotice({ acceptance }) {
   );
 }
 
-export function AttemptProofPack({ attempt, onDecided, active = true }) {
+export function AttemptProofPack({ attempt, onDecided, active = true, expectedRevision }) {
   const uid = useId();
   const enabled = Boolean(active && attempt?.id && attempt.status !== 'pending_approval');
   const state = useCoreQuery('attempt_proof_pack', { attempt_id: attempt?.id }, { enabled });
@@ -92,8 +92,10 @@ export function AttemptProofPack({ attempt, onDecided, active = true }) {
   const head = pack?.decision.head_commit;
   // Con el HEAD movido, Aceptar/Rechazar no vuelven hasta que el Proof Pack muestre el HEAD nuevo.
   const stale = Boolean(moved && head === moved.expected);
-  const canDecide = Boolean(pack?.decision.can_decide) && !stale && !busy;
+  const linkMoved = Boolean(expectedRevision && pack && !(pack.decision.head_commit ?? pack.revision.head_commit.value)?.startsWith(expectedRevision));
+  const canDecide = !linkMoved && Boolean(pack?.decision.can_decide) && !stale && !busy;
 
+  if (linkMoved) return <p role="alert">link_stale: el Proof Pack corresponde a otra revisión; vuelve a resolver el enlace.</p>;
   return (
     <section className="cmp pp" aria-labelledby={`${uid}-title`} data-testid="proof-pack">
       <div className="cmp__head">

@@ -507,6 +507,8 @@ impl Core {
             "attempt_detail" => model_read::attempt_detail(self, &caller, authenticated_context.as_ref(), args),
             "attempt_detail_v2" => model_read::attempt_detail_v2(self, &caller, authenticated_context.as_ref(), args),
             // Deep links `lixbon://` (LXO-168): validar la forma, resolver el destino y generar el enlace canónico. Solo lectura.
+            "project_workspace" => super::deep_link_read::project_workspace(self, &caller, authenticated_context.as_ref(), args),
+            "attempt_workspace" => super::deep_link_read::workspace(self, &caller, authenticated_context.as_ref(), args),
             "deep_link_resolve" => super::deep_link_read::resolve(self, &caller, authenticated_context.as_ref(), args),
             "deep_link_generate" => super::deep_link_read::generate(self, &caller, authenticated_context.as_ref(), args),
             // Quién posee un archivo/worktree y qué Attempts lo tocaron (LXO-169). Solo lectura.
@@ -921,7 +923,7 @@ fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
         "status" | "projects" | "projects_overview" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
-        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "deep_link_resolve" | "deep_link_generate" | "work_at" | "attempt_return_preview" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" | "panel_status" => ClientAction::Read,
+        | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "project_workspace" | "attempt_workspace" | "deep_link_resolve" | "deep_link_generate" | "work_at" | "attempt_return_preview" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" | "panel_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
         "project_add" | "project_archive" | "project_locate" | "projects_import_recents"
         | "remove_run" => ClientAction::UiCommand,

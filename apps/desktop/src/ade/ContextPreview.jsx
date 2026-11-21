@@ -77,7 +77,7 @@ function Rejected({ response }) {
   );
 }
 
-function Accepted({ response }) {
+export function ContextPackageResult({ response }) {
   const { package: pkg, summary } = response;
   const size = sizeEstimate(summary);
   const sections = describeSections(pkg, summary);
@@ -301,7 +301,7 @@ export function ContextPreview() {
         {state.status === 'error' && (
           <p className="cp-note cp-note--warn" role="alert" data-testid="context-preview-error">{state.message.replace(/^[a-z_]+: /, '')}</p>
         )}
-        {state.status === 'done' && (state.response.status === 'invalid' ? <Rejected response={state.response} /> : <Accepted response={state.response} />)}
+        {state.status === 'done' && (state.response.status === 'invalid' ? <Rejected response={state.response} /> : <ContextPackageResult response={state.response} />)}
       </div>
     </section>
   );

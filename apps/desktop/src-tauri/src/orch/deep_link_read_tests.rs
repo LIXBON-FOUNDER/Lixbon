@@ -184,3 +184,60 @@ fn generate_emite_el_enlace_canonico_y_no_a_algo_inexistente() {
     assert_eq!(code(w.desktop("deep_link_generate", json!({ "task_id": task }))), "model_invalid_request");
     assert_eq!(code(w.desktop("deep_link_generate", json!({ "project_id": w.project, "line": "3" }))), "model_invalid_request");
 }
+
+#[test]
+fn desktop_workspace_resuelve_ids_y_archivo_dentro_del_worktree_y_no_rutas_del_cliente() {
+    let (w, a) = done();
+    let r = w.desktop("attempt_workspace", json!({ "attempt_id": a, "file": "src.txt" })).unwrap();
+    assert_eq!(r["attempt_id"], a);
+    assert_eq!(r["project_id"], w.project);
+    let root = std::path::Path::new(r["root"].as_str().unwrap());
+    let file = std::path::Path::new(r["file"].as_str().unwrap());
+    assert!(root.is_dir() && file.is_file() && file.starts_with(root));
+    for bad in ["../README.md", "/etc/passwd", "C:/secret", "src\\secret", "%2e%2e/a"] {
+        assert_eq!(code(w.desktop("attempt_workspace", json!({ "attempt_id": a, "file": bad }))), "link_malformed");
+    }
+    assert_eq!(code(w.desktop("attempt_workspace", json!({ "attempt_id": a, "file": "missing.txt" }))), "link_not_found");
+    assert_eq!(code(w.desktop("attempt_workspace", json!({ "attempt_id": a, "root": "/tmp" }))), "model_invalid_request");
+    assert_eq!(code(w.desktop("attempt_workspace", json!({ "attempt_id": "missing-a1" }))), "link_not_found");
+    // Host authorization precedes filesystem access even if the path still exists on this machine.
+    w.core.storage.with_store(|s| s.write(|tx| Ok(tx.execute("UPDATE meta SET value = 'otra-maquina' WHERE key = 'machine_id'", [])?))).unwrap().unwrap();
+    assert_eq!(code(w.desktop("attempt_workspace", json!({ "attempt_id": a }))), "link_host_unavailable");
+}
+
+#[test]
+fn desktop_workspace_no_filtra_nada_sin_person_autenticada() {
+    let (w, _) = done();
+    for caller in [Caller::Agent(None), Caller::User] {
+        let err = super::deep_link_read::workspace(&w.core, &caller, None, &json!({ "root": "/etc" })).unwrap_err();
+        assert!(err.starts_with("link_unauthorized:"));
+    }
+}
+
+#[test]
+fn desktop_project_workspace_solo_usa_la_ubicacion_local_registrada() {
+    let (w, a) = done();
+    let r = w.desktop("project_workspace", json!({"project_id":w.project})).unwrap();
+    assert_eq!(r["project_id"], w.project);
+    assert!(std::path::Path::new(r["root"].as_str().unwrap()).is_dir());
+    assert_eq!(code(w.desktop("project_workspace", json!({"project_id":w.project,"file":"../fuera"}))), "link_malformed");
+    assert_eq!(code(w.desktop("project_workspace", json!({"project_id":"missing"}))), "link_not_found");
+    let err = super::deep_link_read::project_workspace(&w.core, &Caller::Agent(Some(task_of(&a))), None, &json!({})).unwrap_err();
+    assert!(err.starts_with("link_unauthorized:"));
+    w.core.storage.with_store(|s| s.write(|tx| Ok(tx.execute("UPDATE meta SET value = 'otra-maquina' WHERE key = 'machine_id'", [])?))).unwrap().unwrap();
+    assert_eq!(code(w.desktop("project_workspace", json!({"project_id":w.project}))), "link_host_unavailable");
+}
+
+#[cfg(unix)]
+#[test]
+fn desktop_workspace_rechaza_symlink_que_sale_de_la_raiz() {
+    let (w, a) = done();
+    let dir = worktree(&w.core, &a);
+    std::os::unix::fs::symlink(std::env::temp_dir(), std::path::Path::new(&dir).join("escape")).unwrap();
+    let outside = std::env::temp_dir().join(format!("lxo-workspace-{}.txt", std::process::id()));
+    std::fs::write(&outside, b"outside").unwrap();
+    let relative = format!("escape/{}", outside.file_name().unwrap().to_string_lossy());
+    let result = w.desktop("attempt_workspace", json!({ "attempt_id": a, "file": relative }));
+    std::fs::remove_file(outside).unwrap();
+    assert_eq!(code(result), "link_unauthorized");
+}

@@ -94,7 +94,7 @@ export function CodeEditor({ path, content, options, reveal, baseline, diagnosti
         if (u.selectionSet || u.docChanged) {
           const sel = u.state.selection.main;
           const line = u.state.doc.lineAt(sel.head);
-          cbs.current.onCursor?.({ line: line.number, col: sel.head - line.from + 1, selected: Math.abs(sel.to - sel.from) });
+          cbs.current.onCursor?.({ line: line.number, col: sel.head - line.from + 1, selected: Math.abs(sel.to - sel.from), selectionStartLine: u.state.doc.lineAt(sel.from).number, selectionEndLine: u.state.doc.lineAt(sel.to).number });
         }
       }),
     ],

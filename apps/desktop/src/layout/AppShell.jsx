@@ -13,6 +13,8 @@ import { useFileViewStore } from '../store/fileViewStore';
 import { useMcpStore } from '../store/mcpStore';
 import { useProblemsStore } from '../store/problemsStore';
 
+import { DeepLinkGate } from '../ade/DeepLinkGate';
+import { restoreIdeAttempt } from '../ade/f6Navigation';
 import { StatusBar } from './StatusBar';
 import { useAvisoFlotante } from '../chat/avisoFlotante';
 import { UpdateModal } from '../components/UpdateModal';
@@ -151,7 +153,7 @@ export function AppShell() {
   useAvisoFlotante(); // la mascota sobre otras apps cuando el agente termina
 
   useEffect(() => {
-    useAppStore.getState().restoreWorkspace();
+    Promise.resolve(useAppStore.getState().restoreWorkspace()).then(restoreIdeAttempt);
     useGitStore.getState().startAutoFetch();
   }, []);
 
@@ -220,6 +222,7 @@ export function AppShell() {
         )}
       </div>
 
+      <DeepLinkGate />
       {!showWelcome && <StatusBar />}
 
       {page === 'settings' && <SettingsPage />}

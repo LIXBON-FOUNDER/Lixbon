@@ -26,6 +26,8 @@ const ADE_READ_QUERIES: &[&str] = &[
     // El mismo detalle con la URL del PR redactada (LXO-244).
     "attempt_detail_v2",
     // Resolver y generar enlaces `lixbon://` (LXO-168). Solo lectura.
+    "project_workspace",
+    "attempt_workspace",
     "deep_link_resolve",
     "deep_link_generate",
     // Quién posee un archivo/worktree y qué Attempts lo tocaron (LXO-169). Solo lectura.

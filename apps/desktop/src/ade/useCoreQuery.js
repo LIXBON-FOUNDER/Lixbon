@@ -16,6 +16,7 @@ const POLL_MS = 15_000;
 const TIMEOUT_MESSAGE = 'ade_query_timeout: el Core no respondió dentro del umbral del cliente';
 
 function coreArgs(query, args) {
+  if (['deep_link_resolve', 'deep_link_generate', 'work_at', 'project_workspace', 'attempt_workspace', 'attempt_return_preview'].includes(query)) return args;
   if (query === 'projects_overview') return { archived: args.archived ?? 'exclude' };
   if (query === 'attention_list') {
     return {

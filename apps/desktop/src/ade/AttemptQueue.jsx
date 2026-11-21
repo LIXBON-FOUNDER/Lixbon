@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cancelQueued, describeCommandError, newRequestId, queueInstruction, steerAttempt, stopAndSend } from './attemptCommands';
 import { formatUtc } from './attemptFormat';
 import { describeCapability, providerOf } from './capabilityModel';
+import { queryAdeCore } from './coreQueries';
 import { useCoreQuery } from './useCoreQuery';
 import { useProviderCapabilities } from './useProviderCapabilities';
 
@@ -106,7 +107,7 @@ function availability(caps, attempt) {
  * borrador se conserva si el Core rechaza el envío y la clave de idempotencia se reutiliza mientras el texto y el modo no cambien. El
  * dock muestra lo que el Core dice: nada se da por entregado hasta que el Core lo confirma.
  */
-export function AttemptQueue({ attempt }) {
+export function AttemptQueue({ attempt, active = true, contextSource }) {
   const [draft, setDraft] = useState('');
   const [chosen, setChosen] = useState('queue');
   const [confirming, setConfirming] = useState(false);
@@ -120,10 +121,10 @@ export function AttemptQueue({ attempt }) {
   const live = Boolean(attempt?.id) && attempt.status !== 'pending_approval';
   // Con el intento en marcha o con algo pendiente la cola se relee deprisa: ver la entrega «en vivo» no puede tardar 15 s.
   const [hot, setHot] = useState(false);
-  const queue = useCoreQuery('pending_queue', { attempt_id: attempt?.id ?? null }, { enabled: live, pollMs: hot ? HOT_POLL_MS : undefined });
+  const queue = useCoreQuery('pending_queue', { attempt_id: attempt?.id ?? null }, { enabled: active && live, pollMs: hot ? HOT_POLL_MS : undefined });
   const pendingCount = queue.data?.items?.length ?? 0;
   useEffect(() => { setHot(running || pendingCount > 0); }, [running, pendingCount]);
-  const caps = useProviderCapabilities({ enabled: running && Boolean(attempt?.provider) });
+  const caps = useProviderCapabilities({ enabled: active && running && Boolean(attempt?.provider) });
   if (!live) return null;
 
   const data = queue.data ?? null;
@@ -228,6 +229,17 @@ export function AttemptQueue({ attempt }) {
               );
             })}
           </div>
+          {contextSource && <button type="button" className="lk" disabled={busy || !active} onClick={async () => {
+            setBusy(true); setError(null);
+            try {
+              const link = await queryAdeCore('deep_link_generate', contextSource);
+              if (link.status !== 'ready') throw new Error('link_stale: vuelve a revisar la selección antes de adjuntarla.');
+              const ref = `\nContexto verificado: ${link.canonical}`;
+              setDraft((text) => { if (text.length + ref.length > MAX_QUEUE_CHARS) return text; return text + ref; });
+              reset();
+            } catch (e) { setError(describeCommandError(e)); }
+            finally { setBusy(false); }
+          }}>Añadir referencia del archivo actual</button>}
           <textarea
             className="aq__text"
             aria-label="Instrucción para el intento"

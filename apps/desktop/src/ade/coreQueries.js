@@ -1,3 +1,4 @@
+import { F6_QUERY_SPECS } from './f6Contract';
 import { invoke } from '@tauri-apps/api/core';
 import {
   RESOURCE_DIRTY_VALUES,
@@ -656,6 +657,7 @@ function validateTaskDetail(response, args) {
  * Las vNext del modelo Task/Attempt (LXO-119) viven en `coreModelContract.js`.
  */
 const QUERY_SPECS = Object.freeze({
+  ...F6_QUERY_SPECS,
   projects_overview: { request: projectsOverviewRequest, validate: validateProjectsOverview },
   tasks_by_project: { request: tasksByProjectRequest, validate: validateTasksByProject },
   task_detail: { request: taskDetailRequest, validate: validateTaskDetail },

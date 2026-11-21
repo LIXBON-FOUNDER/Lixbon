@@ -19,7 +19,8 @@ import { SearchPanel } from '../sections/Search/SearchPanel';
 import { McpList } from '../sections/Extensions/McpList';
 import { LogoMark } from '../components/Logo';
 import { SpinRing } from '../components/Ring';
-import { lazy, Suspense } from 'react';
+import { IdeOwnershipBanner, IdeAgentSidecars } from '../ade/IdeAgentWork';
+import { lazy, Suspense, useState } from 'react';
 
 const TeamDock = lazy(() => import('../team/dock/TeamDock'));
 
@@ -40,6 +41,7 @@ function AgentRail({ visible, onOpen }) {
 }
 
 export function EditorMode({ active }) {
+  const [ideTarget, setIdeTarget] = useState(null);
   const { sideOpen, sideView, agentOpen, rightView, sizes, toggleAgent, toggleSide, setSize, persistSizes } = useWorkbenchStore();
   const compact = useIsCompact();
   const terminalOpen = useAppStore((s) => s.panels.terminal);
@@ -60,6 +62,7 @@ export function EditorMode({ active }) {
 
       <div className="wb__col">
         <Panel id="code" className="wb__grow">
+          <IdeOwnershipBanner active={active} onSelect={setIdeTarget} />
           <EditorArea />
         </Panel>
         <Collapse axis="y" open={terminalOpen} size={sizes.terminal + GAP}>
@@ -70,6 +73,7 @@ export function EditorMode({ active }) {
         </Collapse>
       </div>
 
+      <IdeAgentSidecars target={ideTarget} active={active} onClose={() => setIdeTarget(null)} />
       {active && (
         <RightDock open={agentOpen}>
           {rightView === 'team'

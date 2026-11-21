@@ -23,6 +23,7 @@ import { StartupCutNotice } from './StartupCutNotice';
 import { migratePersistedSelection, resolveNavTarget } from './cutoverNavigation';
 import { COPY, navNoticeCopy, navRejectText } from './adeLabels';
 import { readLegacyAdeSelection } from '../store/workbenchStore';
+import { AttemptTransfer } from './AttemptTransfer';
 import { useCoreQuery } from './useCoreQuery';
 import { AdeSourceSwitch } from './preview/AdeSourceSwitch';
 import './AdeShell.css';
@@ -471,7 +472,8 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       setWorkspaceView('workspace');
     };
     window.addEventListener('lixbon-mobile-review-open', openReview);
-    return () => window.removeEventListener('lixbon-mobile-review-open', openReview);
+    window.addEventListener('lixbon:ade-open', openReview);
+    return () => { window.removeEventListener('lixbon-mobile-review-open', openReview); window.removeEventListener('lixbon:ade-open', openReview); };
   }, [setAdeSelection]);
   const jumpPaletteOpen = useWorkbenchStore((s) => s.jumpPaletteOpen);
   const setJumpPaletteOpen = useWorkbenchStore((s) => s.setJumpPaletteOpen);
@@ -1017,6 +1019,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
               {selectedTaskId && (
                 <div className="ade__task-overview scroll">
                   <TaskWorkspace {...workspaceProps} variant="workspace" />
+                  {coreModel.vNext && <AttemptTransfer key={selectedTaskId} task={{ id: selectedTaskId }} projectId={selectedProjectId} active={workspaceActive && workspaceView === 'workspace'} />}
                   <AttemptHistory
                     taskId={selectedTaskId}
                     coreModel={coreModel}
@@ -1027,6 +1030,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
                   />
                   {selectedAttemptId && (
                     <AttemptDetail
+                      projectId={selectedProjectId}
                       attemptId={selectedAttemptId}
                       taskId={selectedTaskId}
                       coreModel={coreModel}

@@ -1,0 +1,10 @@
+.f6-card { padding: 10px 12px; margin: 8px 0; border: 1px solid var(--border, #383838); border-radius: 8px; font-size: 12px; }
+.f6-card h4 { margin: 4px 0 8px; }
+.f6-card label { display: block; margin: 8px 0; }
+.f6-card textarea { display: block; width: 100%; resize: vertical; }
+.f6-card select, .f6-card input:not([type="checkbox"]) { max-width: 100%; }
+.f6-card code { overflow-wrap: anywhere; }
+.f6-link { position: fixed; right: 16px; top: 60px; bottom: 38px; width: min(780px, calc(100vw - 32px)); z-index: 1100; padding: 16px; overflow: auto; background: var(--bg, #202020); color: var(--fg, #eee); border: 1px solid var(--border, #444); border-radius: 10px; box-shadow: 0 10px 40px #0008; }
+.f6-ide { padding: 6px 12px; border-bottom: 1px solid var(--border, #383838); font-size: 12px; }
+.f6-sidecar { width: min(440px, 38vw); overflow: auto; flex-shrink: 0; padding: 12px; }
+.f6-sidecar [hidden] { display: none !important; }

@@ -25,7 +25,6 @@ use serde_json::Value;
 
 pub use canonical::{canonical, fingerprint, package_id_of, sha256_hex};
 pub use secrets::{contains_secret, redact};
-#[cfg(test)]
 pub(crate) use secrets::REDACTED;
 
 pub const SCHEMA_VERSION: u32 = 1;

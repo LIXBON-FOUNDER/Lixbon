@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "deep-links",
+  "description": "Only the main Desktop window receives protocol links; links still require Core authorization.",
+  "windows": ["main"],
+  "permissions": ["deep-link:allow-get-current"]
+}
