@@ -58,7 +58,10 @@ export const useTerminalStore = create((set, get) => ({
   /** Ejecuta un comando en el terminal activo (crea uno si no hay). Lo usan Run/Build y Git. */
   runCommand: (cmd) => {
     const { sessions, activeKey, addSession } = get();
-    const active = sessions.find((t) => t.key === activeKey);
+    const cwd = useAppStore.getState().workspaceRoot || null;
+    const active = sessions.find((t) => t.key === activeKey && t.cwd === cwd)
+      ?? sessions.find((t) => t.cwd === cwd);
+    if (active) set({ activeKey: active.key });
     if (active?.id) {
       termWrite(active.id, cmd + '\r').catch(() => {});
       return;

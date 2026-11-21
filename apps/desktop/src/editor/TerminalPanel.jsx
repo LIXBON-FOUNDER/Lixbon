@@ -183,7 +183,10 @@ export function TerminalPanel() {
 
   // No antes de conocer la carpeta de trabajo: el PTY hereda el cwd al nacer.
   useEffect(() => {
-    if (workspaceReady && terminalVisible &&  !sessions.some((s) => s.cwd === (root || null))) addSession();
+    if (!workspaceReady || !terminalVisible) return;
+    const sameWorkspace = sessions.filter((s) => s.cwd === (root || null));
+    if (!sameWorkspace.length) addSession();
+    else if (!sameWorkspace.some((s) => s.key === activeKey)) useTerminalStore.getState().setActive(sameWorkspace[0].key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceReady, terminalVisible, root]);
 
