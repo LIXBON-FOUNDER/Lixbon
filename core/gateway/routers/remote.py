@@ -25,6 +25,7 @@ from typing import Any
 
 from fastapi import APIRouter, Cookie, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 from core.config import PUBLIC_BASE_URL
 from core.gateway import deps
@@ -35,12 +36,15 @@ from core.persistence.queries import (
     count_remote_events,
     create_remote_session,
     end_remote_session,
+    forget_remote_session,
     get_remote_session,
     list_remote_events,
     list_remote_sessions,
     log_audit_event,
     register_device_token,
+    rename_remote_session,
     save_remote_events,
+    set_remote_session_flags,
     touch_remote_session,
     update_remote_session_meta,
 )
@@ -62,7 +66,10 @@ HOST_IDLE_SECONDS = 60
 TOUCH_EVERY_SECONDS = 30
 MAX_EVENTS_PER_BATCH = 200
 AGENTS = ("lixbon", "claude")
-CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch", "config")
+# git_diff, tree, read_file y git_log: solo lectura, para los paneles de Coding;
+# procs/stop_proc: los comandos en segundo plano del entorno (verlos y pararlos).
+CONTROLLER_COMMANDS = ("prompt", "interrupt", "approve", "request_snapshot", "files", "orch", "config",
+                       "git_diff", "tree", "read_file", "git_log", "procs", "stop_proc")
 # Lo que un controller puede pedirle al orquestador del host. El host vuelve a
 # validar cada acción: esto solo evita reenviar basura.
 # `core_snapshot` y `core_events` son lecturas del Core para el bootstrap de
@@ -225,15 +232,81 @@ async def list_sessions_endpoint(
     counts = count_remote_events(user["id"])
     # El estado real de conexión lo da el hub, no la BD (que solo se refresca
     # cuando el host publica eventos o pasa el barrido).
+    # Las sesiones en la nube llevan además el estado de su entorno.
+    from core.persistence import coding as coding_store
+    entornos = coding_store.por_sesiones([s["id"] for s in sessions if s["source"] == "cloud"])
     for sess in sessions:
+        if sess["id"] in entornos:
+            sess["sandbox"] = coding_store.publico(entornos[sess["id"]])
         ch = hub.get(sess["id"])
         connected = bool(ch and hub.host_online(ch))
         sess["host_connected"] = connected
         sess["controllers"] = len(ch.controllers) if ch else 0
         sess["transcript_events"] = counts.get(sess["id"], 0)
+        # «Te necesita»: una aprobación o una pregunta sin responder.
+        sess["needs_you"] = bool(ch) and _te_necesita(ch)
         if connected and sess["status"] != "ended":
             sess["status"] = "online"
     return {"sessions": sessions}
+
+
+def _te_necesita(ch) -> bool:
+    abiertas: set[str] = set()
+    for ev in ch.buffer:
+        kind, rid = ev.get("type"), str(ev.get("id") or "")
+        if kind in ("approval_request", "choice_request"):
+            abiertas.add(rid)
+        elif kind in ("approval_resolved", "choice_resolved", "question_answered"):
+            abiertas.discard(rid)
+        elif kind in ("bye", "assistant_done"):
+            abiertas.clear()
+    return bool(abiertas)
+
+
+class SesionCambios(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    pinned: bool | None = None
+    archived: bool | None = None
+
+
+@router.patch("/api/remote/sessions/{session_id}")
+async def update_session_endpoint(
+    session_id: str, payload: SesionCambios,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """Renombrar, fijar o archivar una sesión desde la barra (nube, CLI o IDE)."""
+    sess = _owner_required(session_id, lixbon_session, authorization)
+    out = sess
+    if payload.title is not None:
+        out = await asyncio.to_thread(rename_remote_session, session_id, payload.title, sess["user_id"])
+        if not out:
+            raise HTTPException(status_code=422, detail="El nombre no puede estar vacío")
+    if payload.pinned is not None or payload.archived is not None:
+        out = await asyncio.to_thread(set_remote_session_flags, session_id, sess["user_id"],
+                                      payload.pinned, payload.archived)
+    hub.notify_user(sess["user_id"], {"type": "session_updated", "session": out})
+    return {"session": out}
+
+
+@router.post("/api/remote/sessions/{session_id}/forget", status_code=204)
+async def forget_session_endpoint(
+    session_id: str,
+    lixbon_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
+    """Quita del historial una sesión del CLI o el IDE (antes la termina)."""
+    sess = _owner_required(session_id, lixbon_session, authorization)
+    if sess["source"] == "cloud":
+        raise HTTPException(status_code=409, detail="Las sesiones en la nube se eliminan desde Coding")
+    end_remote_session(session_id)
+    ch = hub.get(session_id)
+    if ch:
+        hub.push_command(ch, {"type": "bye", "reason": "ended"})
+    hub.drop(session_id)
+    await asyncio.to_thread(forget_remote_session, session_id, sess["user_id"])
+    hub.notify_user(sess["user_id"], {"type": "session_ended", "session_id": session_id})
+    return Response(status_code=204)
 
 
 @router.delete("/api/remote/sessions/{session_id}")
@@ -334,6 +407,10 @@ async def _publish(ch, sess: dict[str, Any], events: Any) -> int:
     if now - ch.last_touch > TOUCH_EVERY_SECONDS:
         ch.last_touch = now
         await asyncio.to_thread(touch_remote_session, session_id)
+        if sess.get("source") == "cloud":
+            # El entorno de Coding se pausa por inactividad: un turno en marcha cuenta.
+            from core.persistence import coding as coding_store
+            await asyncio.to_thread(coding_store.tocar, session_id)
     # El transcript se guarda DESPUÉS de repartirlo: el relay manda, la BD es
     # lo que hace que la conversación siga ahí cuando la sesión termine.
     try:
@@ -343,9 +420,12 @@ async def _publish(ch, sess: dict[str, Any], events: Any) -> int:
 
     for ev in clean:
         if ev.get("type") == "hello":
+            # En Coding el título es del usuario (primer mensaje o renombrar):
+            # el host no lo pisa al conectar o reanudar.
+            titulo = None if sess.get("source") == "cloud" else ev.get("title")
             updated = await asyncio.to_thread(
                 update_remote_session_meta, session_id,
-                ev.get("title"), _agent(ev.get("agent")), ev.get("workspace"),
+                titulo, _agent(ev.get("agent")), ev.get("workspace"),
             )
             if updated:
                 hub.notify_user(sess["user_id"], {"type": "session_updated", "session": updated})
@@ -385,7 +465,15 @@ async def _controller_first(ch, sess: dict[str, Any], from_seq: int) -> list[dic
     return [status_ev] + stored + buffered
 
 
-def _queue_command(ch, payload: dict[str, Any], rid: Any = None) -> None:
+def _suelo_comandos(ch, queue) -> int:
+    """Lo que el host debe dar por visto al engancharse: justo antes del primer
+    comando que espera en su cola. Con ch.cmd_seq a secas, tras un reinicio del
+    gateway el host descartaba los comandos encolados mientras reconectaba."""
+    seqs = [c.get("cmd_seq", 0) for c in list(getattr(queue, "_queue", ())) if isinstance(c, dict)]
+    return min(seqs) - 1 if seqs else ch.cmd_seq
+
+
+def _queue_command(ch, payload: dict[str, Any], rid: Any = None, require_online: bool = True) -> None:
     """Valida un comando del controller y lo encola para el host."""
     kind = payload.get("type")
     if kind not in CONTROLLER_COMMANDS:
@@ -393,11 +481,13 @@ def _queue_command(ch, payload: dict[str, Any], rid: Any = None) -> None:
     attachments = _clean_attachments(payload.get("attachments")) if kind == "prompt" else []
     if kind == "prompt" and not (payload.get("text") or "").strip() and not attachments:
         raise HTTPException(status_code=422, detail="El prompt está vacío")
-    if not hub.host_online(ch):
+    if require_online and not hub.host_online(ch):
         raise HTTPException(status_code=409, detail="El host no está conectado ahora mismo")
     if hub.seen_request(ch, rid):
         return
     command = {k: payload.get(k) for k in ("type", "text", "id", "decision", "from_seq") if k in payload}
+    if kind in ("tree", "read_file"):
+        command["path"] = str(payload.get("path") or "")[:500]
     if kind == "prompt":
         if attachments:
             command["attachments"] = attachments
@@ -526,7 +616,7 @@ async def host_commands_stream(
         try:
             # cmd_seq actual: si el gateway se reinició el contador vuelve a
             # empezar y el host debe olvidar su último comando visto.
-            async for chunk in _sse(queue, first=[{"type": "channel", "cmd_seq": ch.cmd_seq}]):
+            async for chunk in _sse(queue, first=[{"type": "channel", "cmd_seq": _suelo_comandos(ch, queue)}]):
                 yield chunk
         finally:
             _host_detached(ch, sess, gen_id)
@@ -832,7 +922,7 @@ async def host_ws(ws: WebSocket, session_id: str, last_cmd: int | None = None) -
 
     why = "error"
     try:
-        first = [{"type": "channel", "cmd_seq": ch.cmd_seq}]
+        first = [{"type": "channel", "cmd_seq": _suelo_comandos(ch, queue)}]
         why = await _ws_run(ws, lambda send: _ws_pump(queue, send, first), listen, HOST_IDLE_SECONDS)
     except WebSocketDisconnect:
         pass

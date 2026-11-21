@@ -647,9 +647,9 @@ func (t *Turn) approveAndRun(ctx context.Context, tool string, args map[string]a
 		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(tools.AskSummary(args), 100), ReadOnly: true})
 		s.Stats.Actions++
 		return s.Tools.Execute(ctx, tool, args), nil
-	case "show_image":
+	case "show_image", "show_preview":
 		// Va en su propia fila, no plegada con las lecturas: es para el usuario.
-		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(pyStr(args["path"]), 200)})
+		t.emit(Event{Kind: EventAction, Tool: tool, Text: textutil.Head(previewOrPath(tool, args), 200)})
 		result, failed, elapsed := t.execute(ctx, tool, args)
 		s.Stats.Actions++
 		t.emit(Event{Kind: EventActionResult, Tool: tool, Result: result, Summary: textutil.Head(firstLine(result), 120),
@@ -812,7 +812,7 @@ func (t *Turn) Fetch(ctx context.Context, args map[string]any) (string, error) {
 
 // AskTools son las herramientas del modo ask: ver el proyecto e internet y
 // preguntar, nunca cambiar nada. En el navegador abre y lee, sin clics.
-var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user", "show_image",
+var AskTools = []string{"list_files", "find_files", "read_file", "outline", "search", "web_search", "fetch_url", "ask_user", "show_image", "show_preview",
 	"browser_navigate", "browser_snapshot", "browser_get_text", "browser_screenshot", "browser_scroll", "browser_back",
 	"browser_tabs", "browser_wait", "browser_viewport"}
 
@@ -867,4 +867,13 @@ func (t *Turn) runMCP(ctx context.Context, tool string, args map[string]any) (st
 		Summary: textutil.Head(firstLine(result), 120), Failed: strings.HasPrefix(result, "[ERROR]"),
 		Elapsed: time.Since(started)})
 	return result, nil
+}
+
+// previewOrPath es lo que se ve en la fila: la ruta de la imagen o el puerto
+// y la ruta de la vista previa.
+func previewOrPath(tool string, args map[string]any) string {
+	if tool == "show_preview" {
+		return fmt.Sprintf("localhost:%v%s", args["port"], pyStr(args["path"]))
+	}
+	return pyStr(args["path"])
 }

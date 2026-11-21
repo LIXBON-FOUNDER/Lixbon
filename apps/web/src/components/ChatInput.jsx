@@ -2,8 +2,11 @@
 // valen con cualquier modelo. El audio no se acepta: el gateway no transcribe.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  IconClip, IconFile, IconImage, IconMic, IconSearch, IconSend, IconStop, IconX,
+  IconClip, IconMic, IconRefresh, IconSearch, IconSend, IconStop, IconX,
 } from './Icons';
+import { DocTile } from './FileCard';
+import { Recorte, Rombos } from './Pulido';
+import { fmtBytes } from '../lib/archivos';
 import { OndaVoz, TiempoGrabado } from './OndaVoz';
 import { ShimmerText } from './ShimmerText';
 import { AvisoCuota, ModeloMenu } from './Razonamiento';
@@ -26,13 +29,16 @@ const ALTO_MAX = 180;
 let siguienteId = 0;
 
 export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model, onModelChange, webSearch, onToggleWeb, contextUso, modelVision = false, placeholder, initialText = '', tools = null,
-  nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso, commands = [] }) {
+  nivelesRazonar = [], razonar = 'auto', onRazonar, avisoCuota = null, onCerrarAviso, commands = [], modelsOff, usoExtra = null }) {
   const t = useT('chat');
   const ref = useRef(null);
   const fileRef = useRef(null);
   const [attachments, setAttachments] = useState([]);
   const [error, setError] = useState('');
   const [arrastrando, setArrastrando] = useState(false);
+  // Con texto, la caja se marca (halo y «Enviar» en verde).
+  const [hayTexto, setHayTexto] = useState(Boolean(initialText));
+  const [volando, setVolando] = useState(false);
   const [filtro, setFiltro] = useState(null);
   const sugerencias = filtro === null ? [] : commands.filter((c) => c.cmd.startsWith(filtro.toLowerCase()));
 
@@ -55,6 +61,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
   useEffect(() => {
     if (!initialText || !ref.current) return;
     ref.current.value = initialText;
+    setHayTexto(Boolean(initialText.trim()));
     ajustarAlto();
     ref.current.focus();
     ref.current.setSelectionRange(initialText.length, initialText.length);
@@ -65,10 +72,30 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       const el = ref.current;
       if (!el) return;
       el.value = el.value ? `${el.value.replace(/\s+$/, '')} ${texto}` : texto;
+      setHayTexto(Boolean(el.value.trim()));
       ajustarAlto();
       el.focus();
     }, [ajustarAlto]),
   );
+
+  const subirDoc = useCallback(async (id, file) => {
+    const avance = (pct) => setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, pct } : a)));
+    try {
+      const doc = await subirDocumento(file, avance);
+      setAttachments((prev) => prev.map((a) => (
+        a.id === id ? { ...a, ...doc, kind: 'doc', estado: 'listo', pct: 100 } : a
+      )));
+    } catch (err) {
+      setAttachments((prev) => prev.map((a) => (
+        a.id === id ? { ...a, estado: 'error', motivo: mensajeDeError(err, file.name) } : a
+      )));
+    }
+  }, []);
+
+  const reintentar = (a) => {
+    setAttachments((prev) => prev.map((x) => (x.id === a.id ? { ...x, estado: 'leyendo', pct: 0, motivo: '' } : x)));
+    subirDoc(a.id, a.file);
+  };
 
   const anadirArchivos = useCallback(async (archivos) => {
     const lista = Array.from(archivos || []);
@@ -99,13 +126,13 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           // pasar por el sub-agente de descripción.
           setAttachments((prev) => [...prev, {
             id, kind: 'image', filename: nombre, preview: preparada.dataUrl,
-            base64: preparada.base64, text: '', estado: 'listo',
+            base64: preparada.base64, text: '', estado: 'listo', size: file.size,
           }]);
           continue;
         }
         setAttachments((prev) => [...prev, {
           id, kind: 'image', filename: nombre, preview: preparada.dataUrl,
-          text: '', estado: 'leyendo',
+          text: '', estado: 'leyendo', size: file.size,
         }]);
         try {
           const descripcion = await describirImagen(preparada.base64);
@@ -120,19 +147,12 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       }
 
       setAttachments((prev) => [...prev, {
-        id, kind: 'doc', filename: nombre, text: '', estado: 'leyendo',
+        id, kind: 'doc', filename: nombre, text: '', estado: 'leyendo', pct: 0, size: file.size, file,
       }]);
-      try {
-        const doc = await subirDocumento(file);
-        setAttachments((prev) => prev.map((a) => (
-          a.id === id ? { ...a, ...doc, kind: 'doc', estado: 'listo' } : a
-        )));
-      } catch (err) {
-        setError(mensajeDeError(err, nombre));
-        setAttachments((prev) => prev.filter((a) => a.id !== id));
-      }
+      // Sin esperar: todos los adjuntos aparecen ya y suben a la vez.
+      subirDoc(id, file);
     }
-  }, [modelVision, t]);
+  }, [modelVision, t, subirDoc]);
 
   useEffect(() => {
     let dentro = 0;
@@ -199,6 +219,9 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
     }
 
     el.value = '';
+    setHayTexto(false);
+    setVolando(true);
+    setTimeout(() => setVolando(false), 340);
     setFiltro(null);
     el.style.height = '';
     el.style.overflowY = 'hidden';
@@ -209,12 +232,14 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
   const alEscribir = () => {
     ajustarAlto();
     const valor = ref.current?.value || '';
+    setHayTexto(Boolean(valor.trim()));
     setFiltro(commands.length && /^\/\S*$/.test(valor) ? valor : null);
   };
 
   const completar = (cmd) => {
     const el = ref.current;
     el.value = `${cmd} `;
+    setHayTexto(true);
     setFiltro(null);
     ajustarAlto();
     el.focus();
@@ -237,7 +262,8 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
   };
 
   const pickFiles = (e) => {
-    const archivos = e.target.files;
+    // Copia antes de vaciar el input: la FileList se vacía con value = ''.
+    const archivos = Array.from(e.target.files || []);
     e.target.value = '';
     anadirArchivos(archivos);
   };
@@ -253,7 +279,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
   const aviso = error || (dictado.error && t(ERRORES_DICTADO[dictado.error] || 'dictateErrGeneric', { code: dictado.error }));
 
   return (
-    <div className={arrastrando ? 'chat-input is-dropping' : 'chat-input'}>
+    <div className={`chat-input ${arrastrando ? 'is-dropping' : ''} ${hayTexto || attachments.some((a) => a.estado === 'listo') ? 'has-texto' : ''}`}>
       <AvisoCuota aviso={avisoCuota} onCerrar={onCerrarAviso} />
       <div className="chat-input__box">
       {arrastrando && (
@@ -268,33 +294,49 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
 
       {attachments.length > 0 && (
         <div className="chat-input__chips">
-          {attachments.map((a) => (
-            <span
-              key={a.id}
-              className={a.estado === 'leyendo' ? 'attach-chip is-loading' : 'attach-chip'}
-              title={a.truncated ? t('truncatedTitle') : a.filename}
-            >
-              {a.kind === 'image' && a.preview
-                ? <img className="attach-chip__thumb" src={a.preview} alt="" />
-                : a.kind === 'image' ? <IconImage size={13} /> : <IconFile size={13} />}
-              <span className="attach-chip__name">{a.filename}</span>
-              {a.estado === 'leyendo' && (
-                <span className="attach-chip__trunc">
-                  {a.kind === 'image' ? t('readingImage') : t('reading')}
-                </span>
-              )}
-              {a.truncated && a.estado === 'listo' && (
-                <span className="attach-chip__trunc">{t('truncated')}</span>
-              )}
-              <button
-                className="attach-chip__x"
-                onClick={() => quitar(a.id)}
-                aria-label={t('removeAttachment', { name: a.filename })}
+          {attachments.map((a) => {
+            const ext = (a.filename.split('.').pop() || '').toLowerCase();
+            const cargando = a.estado === 'leyendo';
+            const fallo = a.estado === 'error';
+            let info;
+            if (fallo) info = t('attachFailed');
+            else if (cargando && a.kind === 'image') info = t('readingImage');
+            else if (cargando) info = a.pct ? t('uploadingPct', { pct: a.pct }) : t('uploading');
+            else if (a.truncated) info = t('truncated');
+            else info = [a.kind === 'image' ? t('imageKind') : ext.toUpperCase(), a.size ? fmtBytes(a.size) : ''].filter(Boolean).join(' · ');
+            return (
+              <span
+                key={a.id}
+                className={`attach-chip ${cargando ? 'is-loading' : ''} ${fallo ? 'is-error' : ''}`}
+                title={fallo ? a.motivo : a.truncated ? t('truncatedTitle') : undefined}
+                aria-busy={cargando}
               >
-                <IconX size={12} />
-              </button>
-            </span>
-          ))}
+                <span className="attach-chip__media">
+                  {a.kind === 'image' && a.preview
+                    ? <img className="attach-chip__thumb" src={a.preview} alt="" />
+                    : <DocTile ext={ext} size="s" />}
+                  {cargando && <Rombos />}
+                </span>
+                <span className="attach-chip__txt">
+                  <Recorte texto={a.filename} />
+                  <small>{info}</small>
+                </span>
+                {fallo && a.file ? (
+                  <button className="attach-chip__x" onClick={() => reintentar(a)} aria-label={t('retryAttachment', { name: a.filename })} title={t('retryAttachment', { name: a.filename })}>
+                    <IconRefresh size={14} />
+                  </button>
+                ) : (
+                  <button
+                    className="attach-chip__x"
+                    onClick={() => quitar(a.id)}
+                    aria-label={t('removeAttachment', { name: a.filename })}
+                  >
+                    <IconX size={12} />
+                  </button>
+                )}
+              </span>
+            );
+          })}
         </div>
       )}
       {aviso && <div className="chat-input__error">{aviso}</div>}
@@ -404,7 +446,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
       <div className="chat-input__meta">
         {/* El anillo va en todo cuadro de mensaje, también vacío y en Visuals:
             es el único sitio donde se ve el cupo semanal. */}
-        <ContextoUso uso={contextUso} />
+        <ContextoUso uso={contextUso} extra={usoExtra} />
         {busy && onStop ? (
           <button
             className="chat-input__send is-stop"
@@ -417,7 +459,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
           </button>
         ) : (
           <button
-            className="chat-input__send"
+            className={`chat-input__send ${volando ? 'is-volando' : ''}`}
             type="button"
             onClick={send}
             disabled={busy || leyendo}
@@ -445,6 +487,7 @@ export function ChatInput({ onSend, onStop, busy, models, modelInfo = {}, model,
               niveles={nivelesRazonar}
               razonar={razonar}
               onRazonar={onRazonar}
+              apagados={modelsOff}
             />
           )}
         </div>

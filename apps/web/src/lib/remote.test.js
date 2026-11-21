@@ -10,6 +10,12 @@ const SUCIA = 'https://user:SENTINEL_CREDENTIAL@github.com/o/r/pull/7?token=SENT
 const snap = (id, pr) => ({ runs: [{ id: 'r1' }], tasks: [{ id, run: 'r1', status: 'done', pr_url: pr }], messages: [], live: [] });
 const aplica = (...eventos) => eventos.reduce(remoteReducer, initialRemoteState);
 
+test('los enlaces de PR de Coding pasan por el mismo saneado que los del orquestador', () => {
+  const s = aplica({ type: 'pr', url: SUCIA }, { type: 'pr', url: 'javascript:alert(1)' });
+  assert.equal(s.pr.url, 'https://github.com/o/r/pull/7');
+  assert.deepEqual(s.items.map((item) => item.url), [s.pr.url]);
+});
+
 test('un orch con pr_url sucia llega saneado a la UI', () => {
   const s = aplica({ type: 'orch', seq: 1, ...snap('t1', SUCIA) });
   assert.equal(s.orch.tasks[0].pr_url, 'https://github.com/o/r/pull/7');

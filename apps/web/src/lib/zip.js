@@ -28,7 +28,7 @@ export function crearZip(archivos) {
   const { hora, fecha } = fechaDos();
   for (const { name, code } of archivos) {
     const nombre = enc.encode(name);
-    const datos = enc.encode(code);
+    const datos = typeof code === 'string' ? enc.encode(code) : code; // texto o bytes (Uint8Array)
     const crc = crc32(datos);
     const local = new DataView(new ArrayBuffer(30));
     local.setUint32(0, 0x04034b50, true);

@@ -87,7 +87,7 @@
 }
 
 .ffield__label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--ink-muted);
 }
 
@@ -98,7 +98,7 @@
   border-radius: var(--radius);
   background: var(--field);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   outline: none;
   transition: background 0.18s ease;
 }
@@ -116,7 +116,7 @@
 }
 
 .ffield__error {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--danger-ink);
 }
 
@@ -134,7 +134,7 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   text-decoration: none;
   transition: opacity 0.15s ease;
@@ -150,7 +150,7 @@
 }
 
 .auth__switch {
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
   color: var(--ink-muted);
 }
@@ -166,7 +166,7 @@
 
 .auth__link {
   align-self: flex-start;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-muted);
   transition: color 0.15s ease;
 }
@@ -184,7 +184,7 @@
   border-radius: var(--radius);
   background: var(--field-error);
   color: var(--danger-ink);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .auth__notice {
@@ -192,7 +192,7 @@
   border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   text-wrap: pretty;
 }
 
@@ -201,7 +201,7 @@
   align-items: center;
   gap: 12px;
   color: var(--ink-label);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .auth__divider::before,
@@ -227,7 +227,7 @@
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: opacity 0.15s ease;
 }
@@ -249,7 +249,7 @@
 
   /* 16px es el mínimo que evita que iOS haga zoom al enfocar el campo. */
   .ffield__input {
-    font-size: 16px;
+    font-size: 17px;
   }
 }
 
@@ -274,7 +274,7 @@
   position: absolute; left: 40px; right: 40px; bottom: 44px; z-index: 2;
   display: flex; flex-direction: column; gap: 10px;
 }
-.auth__lamina-texto span { font-family: var(--font-ui); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #CFC6B3; }
+.auth__lamina-texto span { font-family: var(--font-ui); font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #CFC6B3; }
 .auth__lamina-texto p { max-width: 460px; font-family: var(--font-display); font-size: clamp(30px, 3vw, 42px); line-height: 1.05; letter-spacing: -0.02em; color: #F6EEDC; }
 .auth__lamina-texto em { font-style: italic; color: #D7E38A; }
 .auth__panel { align-self: center; justify-self: center; width: min(440px, 100%); padding: 48px 24px; }

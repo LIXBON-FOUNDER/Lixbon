@@ -37,6 +37,7 @@ import { Board, DesignSystemPicker, Inspector } from '../components/VisualsPanel
 import { PiezaEditor, PiezaVista } from '../components/PiezaEditor';
 import { Desplegable } from '../components/Desplegable';
 import { MensajeError, Razonamiento } from '../components/Mensajes';
+import { GenerandoImagen, anotarDuracionImagen } from '../components/GenerandoImagen';
 import {
   IconArrowLeft, IconCheck, IconChevron, IconCode, IconDots, IconDownload, IconExternal, IconFile, IconHistory,
   IconGrid, IconImage, IconLayers, IconPanel, IconPencil, IconPhone, IconPointer, IconRedo, IconRows, IconSearch, IconShare, IconTablet, IconTrash, IconUndo, IconWindow, IconX,
@@ -698,12 +699,16 @@ function Estudio({ id }) {
 
   const generarImagen = async (prompt, tam = tamano) => {
     const cid = await asegurarConversacion();
-    setMessages((prev) => [...prev, { role: 'user', content: prompt }, { role: 'assistant', content: '', generandoImagen: true }]);
+    const inicio = Date.now();
+    setMessages((prev) => [...prev, { role: 'user', content: prompt }, {
+      role: 'assistant', content: '', generandoImagen: true, inicio, ancho: tam.width, alto: tam.height,
+    }]);
     setBusy(true);
     try {
       const r = await api.post('/api/images/generate', {
         prompt, width: tam.width, height: tam.height, conversation_id: cid, source: 'visuals',
       }, { timeout: 600000 });
+      anotarDuracionImagen(Date.now() - inicio);
       const ext = (r.data.mime || 'image/jpeg').includes('png') ? 'png' : 'jpg';
       const n = pieces.filter((p) => p.output && !p.source).length + 1;
       const nombre = `imagen-${n}.${ext}`;
@@ -1076,7 +1081,7 @@ function Estudio({ id }) {
                 ) : (
                   <div key={i} className={`msg msg--assistant ${m.error ? 'msg--error' : ''}`}>
                     {(() => {
-                      if (m.generandoImagen) return <span className="msg__thinking">{t('generatingImage')}</span>;
+                      if (m.generandoImagen) return <GenerandoImagen inicio={m.inicio} ancho={m.ancho} alto={m.alto} />;
                       if (m.error) return <MensajeError>{m.content}</MensajeError>;
                       const activo = busy && i === messages.length - 1;
                       const r = activo && vivo ? vivo : null;

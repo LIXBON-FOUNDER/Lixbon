@@ -22,6 +22,7 @@ import integraciones from './integraciones';
 import github from './github';
 import cupo from './cupo';
 import espacios from './espacios';
+import coding from './coding';
 
 export const DICTIONARIES = {
   common,
@@ -38,6 +39,7 @@ export const DICTIONARIES = {
   guiasShell,
   shared,
   remote,
+  coding,
   notFound,
   dialogs,
   mascota,

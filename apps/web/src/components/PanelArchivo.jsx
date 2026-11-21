@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { IconX, IconCopiar } from './Icons';
 import { Markdown } from './Markdown';
-import { TONO_ARCHIVO, descargarArchivo } from './FileCard';
+import { DocTile, descargarArchivo } from './FileCard';
 import { fmtBytes } from '../lib/archivos';
 import { useT } from '../i18n/useT';
 
@@ -51,7 +51,7 @@ export function PanelArchivo({ archivo, onClose }) {
   return (
     <aside className="panel-archivo" aria-label={info.name}>
       <header className="panel-archivo__cab">
-        <span className={`filecard__tipo ${TONO_ARCHIVO[info.ext] ? `is-${TONO_ARCHIVO[info.ext]}` : ''}`} aria-hidden="true">{(info.ext || 'txt').slice(0, 4).toUpperCase()}</span>
+        <DocTile ext={info.ext} />
         <div className="panel-archivo__titulos">
           <strong>{info.name}</strong>
           <small>{info.label} · {lineas} {lineas === 1 ? t('line') : t('lines')} · {fmtBytes(new Blob([contenido]).size)}</small>

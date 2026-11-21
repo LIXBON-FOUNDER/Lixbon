@@ -42,7 +42,7 @@
   padding: 7px 10px;
   background: var(--primary);
   color: var(--on-primary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
   text-wrap: pretty;
   pointer-events: none;
@@ -119,9 +119,9 @@
   animation: mascota-zzz 2.4s linear infinite;
 }
 
-.mascota-zzz i:nth-child(1) { font-size: 12px; }
-.mascota-zzz i:nth-child(2) { font-size: 14px; animation-delay: 0.8s; }
-.mascota-zzz i:nth-child(3) { font-size: 17px; animation-delay: 1.6s; }
+.mascota-zzz i:nth-child(1) { font-size: 13px; }
+.mascota-zzz i:nth-child(2) { font-size: 15px; animation-delay: 0.8s; }
+.mascota-zzz i:nth-child(3) { font-size: 18px; animation-delay: 1.6s; }
 
 @keyframes mascota-zzz {
   0% { opacity: 0; transform: translate(0, 0); }
@@ -305,8 +305,8 @@
 
 .mascota-elegir__retrato .mascota-sprite + .mascota-sprite { margin-left: -16px; }
 
-.mascota-elegir__nombre { font-size: 13px; font-weight: 500; }
-.mascota-elegir__sub { font-size: 12px; opacity: 0.72; }
+.mascota-elegir__nombre { font-size: 14px; font-weight: 500; }
+.mascota-elegir__sub { font-size: 13px; opacity: 0.72; }
 
 .mascota-segmentos {
   display: flex;
@@ -319,7 +319,7 @@
   padding: 0 12px;
   border-radius: var(--radius-chip);
   background: var(--bg-secondary);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--ink-soft);
 }
 

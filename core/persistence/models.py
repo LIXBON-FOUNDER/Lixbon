@@ -120,6 +120,8 @@ class Conversation(Base):
     archived: Mapped[int] = mapped_column(nullable=False, default=0)
     # Espacio al que pertenece (sus instrucciones, archivos y memoria van en cada turno).
     espacio_id: Mapped[str | None] = mapped_column(Text)
+    # 1 = fijada arriba en la barra lateral.
+    pinned: Mapped[int] = mapped_column(nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -539,7 +541,7 @@ class RemoteSession(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)          # uuid corto (12 hex)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)        # "cli" | "ide"
+    source: Mapped[str] = mapped_column(Text, nullable=False)        # "cli" | "ide" | "cloud" (Coding)
     title: Mapped[str] = mapped_column(Text, nullable=False)         # carpeta del workspace
     machine: Mapped[str | None] = mapped_column(Text)                # hostname del host
     agent: Mapped[str | None] = mapped_column(Text)                  # "lixbon" | "claude"
@@ -551,6 +553,9 @@ class RemoteSession(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_seen_at: Mapped[str] = mapped_column(Text, nullable=False)
     ended_at: Mapped[str | None] = mapped_column(Text)
+    # Gestión desde la barra lateral (nube, CLI e IDE): fijar arriba y archivar.
+    pinned: Mapped[int] = mapped_column(nullable=False, default=0)
+    archived: Mapped[int] = mapped_column(nullable=False, default=0)
 
 
 class RemoteEvent(Base):
@@ -1192,6 +1197,41 @@ class ConnectorPendingAction(Base):
     calls_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CodingSandbox(Base):
+    """Entorno aislado (contenedor) de una sesión de Coding en la nube.
+
+    La sesión es una `remote_sessions` con source="cloud": el host es el CLI
+    corriendo dentro del contenedor, así que el relay /remote no cambia. Aquí
+    va lo propio del entorno. El token del contenedor (`lixbon_ct_…`) solo se
+    guarda hasheado y solo vale para esta sesión; NULL = revocado."""
+    __tablename__ = "coding_sandboxes"
+    __table_args__ = (
+        Index("idx_coding_sandboxes_user", "user_id", "estado"),
+    )
+
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("remote_sessions.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    repo: Mapped[str] = mapped_column(Text, nullable=False)                # owner/name
+    default_branch: Mapped[str] = mapped_column(Text, nullable=False)
+    branch: Mapped[str | None] = mapped_column(Text)                       # lixbon/<tema>
+    mode: Mapped[str] = mapped_column(Text, nullable=False)                # auto|manual|ask|plan
+    model: Mapped[str | None] = mapped_column(Text)
+    container_id: Mapped[str | None] = mapped_column(Text)
+    volume: Mapped[str] = mapped_column(Text, nullable=False)
+    host_port: Mapped[int | None] = mapped_column()                        # proxy :7000 en 127.0.0.1
+    token_hash: Mapped[str | None] = mapped_column(Text, unique=True)
+    # creada | preparando | activa | pausada | error | terminada
+    estado: Mapped[str] = mapped_column(Text, nullable=False, default="creada")
+    error: Mapped[str | None] = mapped_column(Text)
+    pr_url: Mapped[str | None] = mapped_column(Text)
+    pending_prompt_json: Mapped[str | None] = mapped_column(Text)          # primer mensaje hasta que el host conecte
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_activity_at: Mapped[str] = mapped_column(Text, nullable=False)
+    paused_at: Mapped[str | None] = mapped_column(Text)
+    ended_at: Mapped[str | None] = mapped_column(Text)
 
 
 class ConversationCompaction(Base):

@@ -131,6 +131,10 @@ def init_db() -> None:
         # /remote: qué agente maneja la sesión (Lixbon o Claude Code) y en qué carpeta
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS agent TEXT",
         "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS workspace TEXT",
+        # Barra lateral: fijar y archivar sesiones (nube, CLI, IDE) y fijar chats
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS pinned INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE remote_sessions ADD COLUMN IF NOT EXISTS archived INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned INTEGER NOT NULL DEFAULT 0",
         # Visuals: límites por plan (NULL = valor por defecto del plan en código)
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max INTEGER",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS visuals_max_mb INTEGER",

@@ -4,6 +4,7 @@ import hashlib
 import json as _json
 import math
 import os
+import re
 import secrets
 import struct
 from datetime import datetime, timedelta, timezone
@@ -2251,6 +2252,7 @@ def _conversation_to_dict(c: Conversation) -> dict[str, Any]:
         # Las legacy (NULL) son de la web, igual que en el filtro de listado.
         "source": c.source or "web",
         "archived": bool(c.archived),
+        "pinned": bool(c.pinned),
         "espacio_id": c.espacio_id,
         "created_at": c.created_at,
         "updated_at": c.updated_at,
@@ -2264,7 +2266,7 @@ CHAT_SOURCES = ("web", "mobile")
 
 def list_conversations(
     user_id: int, limit: int = 50, offset: int = 0, q: str | None = None,
-    source: str | None = None, archived: bool | None = None,
+    source: str | None = None, archived: bool | None = None, pinned: bool | None = None,
 ) -> list[dict[str, Any]]:
     """Conversaciones del usuario, más recientes primero. `q` busca en el título.
     `source` filtra por superficie (web/mobile/ide/cli); web y mobile comparten
@@ -2285,7 +2287,20 @@ def list_conversations(
             stmt = stmt.where(Conversation.title.ilike(f"%{q}%"))
         if archived is not None:
             stmt = stmt.where(Conversation.archived == int(archived))
+        if pinned is not None:
+            stmt = stmt.where(Conversation.pinned == int(pinned))
         return [_conversation_to_dict(c) for c in s.scalars(stmt).all()]
+
+
+def set_conversation_pinned(conversation_id: str, user_id: int, pinned: bool) -> bool:
+    with get_session() as s:
+        conv = s.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        conv.pinned = int(pinned)
+        if pinned:
+            conv.archived = 0
+        return True
 
 
 def set_conversation_archived(conversation_id: str, user_id: int, archived: bool) -> bool:
@@ -2786,6 +2801,8 @@ REMOTE_PERSISTED_EVENTS = frozenset({
     "hello", "snapshot", "user_msg", "assistant_done", "tool_use",
     "tool_result", "notice", "command_result", "error", "bye",
     "reasoning", "question_answered", "compacted", "context", "image_shown",
+    # Coding en la nube: estado del entorno, rama, PR y vista previa abierta.
+    "sandbox_status", "branch", "pr", "preview_shown",
 })
 # Recorte por texto y por evento: un tool_result puede traer un archivo entero
 # y un snapshot, la conversación completa del host.
@@ -2818,6 +2835,8 @@ def _remote_session_to_dict(r: RemoteSession) -> dict[str, Any]:
         "created_at": r.created_at,
         "last_seen_at": r.last_seen_at,
         "ended_at": r.ended_at,
+        "pinned": bool(r.pinned),
+        "archived": bool(r.archived),
     }
 
 
@@ -2915,6 +2934,52 @@ def update_remote_session_meta(
         return _remote_session_to_dict(r) if changed else None
 
 
+def rename_remote_session(session_id: str, title: str, user_id: int | None = None) -> dict[str, Any] | None:
+    """Cambia el título aunque la sesión ya haya terminado (gestión desde la barra)."""
+    clean = re.sub(r"\s+", " ", (title or "").strip())[:120]
+    if not clean:
+        return None
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or (user_id is not None and r.user_id != user_id):
+            return None
+        if r.title != clean:
+            r.title = clean
+        return _remote_session_to_dict(r)
+
+
+def set_remote_session_flags(
+    session_id: str, user_id: int, pinned: bool | None = None, archived: bool | None = None,
+) -> dict[str, Any] | None:
+    """Fijar / archivar desde la barra (cualquier origen). Archivar gana a fijar."""
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or r.user_id != user_id:
+            return None
+        if pinned is not None:
+            r.pinned = int(pinned)
+            if pinned:
+                r.archived = 0
+        if archived is not None:
+            r.archived = int(archived)
+            if archived:
+                r.pinned = 0
+        return _remote_session_to_dict(r)
+
+
+def forget_remote_session(session_id: str, user_id: int) -> bool:
+    """Quita del historial una sesión del CLI o el IDE (la de la nube se borra
+    con su entorno desde Coding)."""
+    from core.persistence.models import CodingSandbox
+    with get_session() as s:
+        r = s.get(RemoteSession, session_id)
+        if not r or r.user_id != user_id or s.get(CodingSandbox, session_id):
+            return False
+        s.execute(delete(RemoteEvent).where(RemoteEvent.session_id == session_id))
+        s.delete(r)
+        return True
+
+
 def touch_remote_session(session_id: str, status: str | None = None) -> None:
     with get_session() as s:
         r = s.get(RemoteSession, session_id)
@@ -2951,7 +3016,10 @@ def sweep_remote_sessions(offline_after_s: int = 60, end_after_h: int = 24) -> i
         ).rowcount
         changed += s.execute(
             update(RemoteSession)
-            .where(RemoteSession.status == "offline", RemoteSession.last_seen_at < ended_cutoff)
+            # Las de Coding (source=cloud) siguen vivas mientras su entorno esté
+            # pausado: las cierra core/sandbox/ciclo.py al borrar el entorno.
+            .where(RemoteSession.status == "offline", RemoteSession.last_seen_at < ended_cutoff,
+                   RemoteSession.source != "cloud")
             .values(status="ended", ended_at=now_iso(), share_token_hash=None)
         ).rowcount
         return changed
@@ -2965,12 +3033,16 @@ def purge_remote_sessions(max_idle_days: int = 7) -> int:
         stale = select(RemoteSession.id).where(
             RemoteSession.last_seen_at < cutoff,
             or_(RemoteSession.ended_at.is_(None), RemoteSession.ended_at < cutoff),
+            # Las de Coding solo se borran después de destruir su contenedor.
+            or_(RemoteSession.source != "cloud", RemoteSession.status == "ended"),
         )
         ids = list(s.scalars(stale).all())
         if not ids:
             return 0
         # Sin depender del ON DELETE CASCADE (SQLite no lo aplica sin PRAGMA).
+        from core.persistence.models import CodingSandbox
         s.execute(delete(RemoteEvent).where(RemoteEvent.session_id.in_(ids)))
+        s.execute(delete(CodingSandbox).where(CodingSandbox.session_id.in_(ids)))
         s.execute(delete(RemoteSession).where(RemoteSession.id.in_(ids)))
         return len(ids)
 
@@ -3022,6 +3094,13 @@ def save_remote_events(session_id: str, events: list[dict[str, Any]]) -> int:
                     .where(RemoteEvent.session_id == session_id, RemoteEvent.seq < cutoff)
                 )
     return len(rows)
+
+
+def max_remote_event_seq(session_id: str) -> int:
+    """Último seq guardado de la sesión: el hub sigue desde ahí al recrear el
+    canal (tras reiniciar el gateway), para no repetir números."""
+    with get_session() as s:
+        return int(s.scalar(select(func.max(RemoteEvent.seq)).where(RemoteEvent.session_id == session_id)) or 0)
 
 
 def list_remote_events(session_id: str, from_seq: int = 0,

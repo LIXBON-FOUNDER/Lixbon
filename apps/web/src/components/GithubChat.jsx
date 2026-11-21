@@ -4,6 +4,7 @@
 // modelo: comparten sus clases `modelo-menu__*`.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n/useT';
+import { Rombos } from './Pulido';
 import { useDismiss } from '../hooks/useDismiss';
 import { useSalida } from '../hooks/useSalida';
 import { IconCheck, IconChevron, IconExternal, IconSearch } from './Icons';
@@ -257,10 +258,12 @@ export function ConfirmacionGithub({ accion, estado, onResolver, deshabilitada =
       {accion.riesgo && <p className="gh-confirma__riesgo">{t(`risk_${accion.riesgo}`)}</p>}
 
       <div className="gh-confirma__acciones">
-        <button type="button" className="pill-btn pill-btn--outline" disabled={bloqueada}
+        <button type="button" className="pill-btn pill-btn--ghost" disabled={bloqueada}
           onClick={() => onResolver(false)}>{t('reject')}</button>
-        <button type="button" className="pill-btn pill-btn--primary" disabled={bloqueada}
-          onClick={() => onResolver(true)}>{estado === 'enviando' ? t('resolving') : t('accept')}</button>
+        <button type="button" className={`pill-btn pill-btn--marca ${estado === 'enviando' ? 'is-esperando' : ''}`} disabled={bloqueada}
+          aria-busy={estado === 'enviando'} onClick={() => onResolver(true)}>
+          {estado === 'enviando' && <Rombos />}{estado === 'enviando' ? t('resolving').replace(/…$/, '') : t('accept')}
+        </button>
       </div>
     </div>
   );

@@ -20,9 +20,16 @@ export function duracion(ms) {
 }
 
 /** Icono de la ficha según la herramienta del paso. */
-function iconoDe(nombre = '') {
+export function iconoDe(nombre = '') {
   if (nombre === 'busqueda') return 'buscar';
   if (nombre === 'fuente') return 'globo';
+  // Herramientas del CLI (sesiones de Coding).
+  if (nombre === 'run_command' || nombre === 'read_output' || nombre === 'stop_command') return 'terminal';
+  if (nombre.startsWith('browser_') || nombre === 'show_preview') return 'navegador';
+  if (nombre === 'web_search') return 'buscar';
+  if (nombre === 'fetch_url') return 'globo';
+  if (nombre === 'todo') return 'lista';
+  if (nombre === 'show_image') return 'imagen';
   if (nombre.includes('search')) return 'buscar';
   if (nombre.includes('list_files') || nombre.includes('list_tree')) return 'carpeta';
   if (nombre.includes('file')) return 'archivo';

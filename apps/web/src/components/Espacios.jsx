@@ -174,13 +174,14 @@ export function VentanaInstrucciones({ espacio, onClose, onListo }) {
 }
 
 /** Crear o editar un agente: tarea, horario y herramientas. */
-export function VentanaAgente({ espacio, agente = null, onClose, onListo }) {
+// `inicial`: valores de una plantilla (nombre, tarea, días, hora).
+export function VentanaAgente({ espacio, agente = null, inicial = null, onClose, onListo }) {
   const t = useT('espacios');
   const tc = useT('common');
-  const [nombre, setNombre] = useState(agente?.nombre || '');
-  const [tarea, setTarea] = useState(agente?.tarea || '');
-  const [dias, setDias] = useState(agente?.dias || [0, 2, 4]);
-  const [hora, setHora] = useState(agente?.hora || '10:00');
+  const [nombre, setNombre] = useState(agente?.nombre || inicial?.nombre || '');
+  const [tarea, setTarea] = useState(agente?.tarea || inicial?.tarea || '');
+  const [dias, setDias] = useState(agente?.dias || inicial?.dias || [0, 2, 4]);
+  const [hora, setHora] = useState(agente?.hora || inicial?.hora || '10:00');
   const [internet, setInternet] = useState(agente?.internet || false);
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');

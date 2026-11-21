@@ -1,9 +1,18 @@
 // Iconos de la web: todos salen de @lixbon/icons (shared/icons).
 // Los nombres de siempre se quedan como envoltorios de <Icono>, así no cambia
 // ninguna importación. `relleno` pinta la gemela rellena (ítem activo).
-import { Icono, Interruptor as Int } from '@lixbon/icons';
+import { Icono as IconoBase, IconoDoble as IconoDobleBase, Interruptor as InterruptorBase } from '@lixbon/icons';
 
-export { Icono, IconoDoble, Interruptor, usePulso, NOMBRES } from '@lixbon/icons';
+export { usePulso, NOMBRES } from '@lixbon/icons';
+
+// La web pinta los iconos un poco más grandes que el tamaño que pide cada
+// pantalla (16 → 18, 18 → 20): así crecen todos a la vez, a juego con la
+// escala tipográfica, sin tocar @lixbon/icons (lo comparten las demás apps).
+export const escalaIcono = (size) => (typeof size === 'number' && size <= 28 ? Math.round(size * 1.125) : size);
+export const Icono = ({ size = 18, ...p }) => <IconoBase size={escalaIcono(size)} {...p} />;
+export const IconoDoble = ({ size = 18, ...p }) => <IconoDobleBase size={escalaIcono(size)} {...p} />;
+export const Interruptor = ({ size = 18, ...p }) => <InterruptorBase size={escalaIcono(size)} {...p} />;
+const Int = Interruptor;
 
 // Copiar: pasa a «hecho» mientras dura el aviso de copiado.
 export const IconCopiar = ({ hecho, size = 18, className }) => <Int tipo="copiar" on={!!hecho} size={size} className={className} />;

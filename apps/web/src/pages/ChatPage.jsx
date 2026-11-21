@@ -16,11 +16,12 @@ import { Logo, LogoMark } from '../components/Logo';
 import { useShell } from '../components/AppShell';
 import { ChatInput } from '../components/ChatInput';
 import { guardarRazonar, leerRazonar, nivelesDe, thinkDe } from '../lib/razonamiento';
-import { Markdown } from '../components/Markdown';
+import { Markdown, PedirAlChat } from '../components/Markdown';
+import { Aviso, Recorte } from '../components/Pulido';
 import { ThreadSkeleton } from '../components/Skeleton';
 import { ShareDialog } from '../components/ShareDialog';
 import { VerifyBanner } from '../components/VerifyBanner';
-import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu, IconPencil, IconChevron, IconTrash, IconCopiar, IconAlert } from '../components/Icons';
+import { IconShare, IconArrowDown, IconGlobe, IconLayers, IconMenu, IconPencil, IconChevron, IconTrash, IconCopiar } from '../components/Icons';
 import { Desplegable } from '../components/Desplegable';
 import { AbrirArchivo } from '../components/FileCard';
 import { PanelArchivo } from '../components/PanelArchivo';
@@ -51,11 +52,48 @@ const CONTEXT_WINDOW = 20; // mensajes previos que se envían como contexto
 const estimarTokens = (msgs) => Math.round(msgs.reduce((n, m) => n + (m.content?.length || 0), 0) / 3.5);
 
 
-// «Buenas tardes, Gabriel» según la hora del navegador: sin punto final.
-function saludo(t, nombre) {
-  const hora = new Date().getHours();
-  const s = t(hora < 12 ? 'greetMorning' : hora < 20 ? 'greetAfternoon' : 'greetNight');
-  return nombre ? `${s}, ${nombre}` : s;
+// El saludo del chat vacío: frases naturales según la franja del día (de
+// 00:00 a 04:59 ya no es «Buenos días»), sin repetir la última que se vio. Las
+// que llevan {{n}} usan el nombre: una de cada cuatro. Los días especiales
+// (lunes, viernes, domingo, la vuelta tras una semana) tienen prioridad una
+// vez al día. Sin punto final.
+const CLAVE_SALUDO = 'lixbon.saludo';
+
+function franjaDe(h) {
+  if (h < 5) return 'madrugada';
+  if (h < 8) return 'temprano';
+  if (h < 12) return 'manana';
+  if (h < 15) return 'mediodia';
+  if (h < 19) return 'tarde';
+  if (h < 22) return 'noche';
+  return 'tardeNoche';
+}
+
+function elegirSaludo(t, nombre) {
+  const ahora = new Date();
+  let previo = {};
+  try { previo = JSON.parse(localStorage.getItem(CLAVE_SALUDO) || '{}'); } catch { /* sin almacenamiento */ }
+  const hoy = ahora.toDateString();
+  const dia = ahora.getDay();
+  const especial = (Date.now() - (previo.visto || Date.now())) > 7 * 86400000 ? 'vuelta'
+    : dia === 1 ? 'lunes' : dia === 5 ? 'viernes' : dia === 0 ? 'domingo' : null;
+  let grupo = franjaDe(ahora.getHours());
+  if (especial && previo.especial !== hoy && ahora.getHours() >= 6) grupo = especial;
+  const lista = (t(`saludos.${grupo}`) || []).filter((f) => nombre || !f.includes('{{n}}'));
+  const opciones = lista.length > 1 ? lista.filter((f) => f !== previo.frase) : lista;
+  const frase = opciones[Math.floor(Math.random() * opciones.length)] || t('greetMorning');
+  try {
+    localStorage.setItem(CLAVE_SALUDO, JSON.stringify({
+      frase, visto: Date.now(), especial: grupo === especial ? hoy : previo.especial,
+    }));
+  } catch { /* sin almacenamiento */ }
+  return frase.replace('{{n}}', nombre || '');
+}
+
+function useSaludo(t, nombre) {
+  // Se elige una vez por visita al chat vacío, no en cada render.
+  const [frase] = useState(() => elegirSaludo(t, nombre));
+  return frase;
 }
 
 // Debajo de cada respuesta terminada: copiar el texto.
@@ -88,7 +126,7 @@ function TituloChat({ titulo, editable, onRename, onDelete }) {
   const cerrar = useCallback(() => setMenu(false), []);
   useDismiss(menu, raiz, cerrar);
 
-  if (!editable) return <h1 className="chat-header__title">{titulo}</h1>;
+  if (!editable) return <Recorte as="h1" texto={titulo} className="chat-header__title" />;
   if (editando) {
     const confirmar = () => {
       setEditando(false);
@@ -110,7 +148,7 @@ function TituloChat({ titulo, editable, onRename, onDelete }) {
   return (
     <div className="chat-header__titulo" ref={raiz}>
       <button type="button" className="chat-header__title-btn" onClick={() => setMenu((v) => !v)} aria-haspopup="menu" aria-expanded={menu}>
-        <h1 className="chat-header__title">{titulo}</h1>
+        <Recorte as="h1" texto={titulo} className="chat-header__title" />
         <IconChevron size={14} />
       </button>
       <Desplegable abierto={menu} className="sb-menu chat-header__menu-titulo" role="menu">
@@ -184,6 +222,7 @@ export default function ChatPage() {
   const tc = useT('common');
   useSeo({ title: t('seoTitle'), path: '/chat', noindex: true });
   const { user, loading } = useAuth();
+  const fraseSaludo = useSaludo(t, user?.first_name);
   const confirmar = useConfirmar();
   const { id: routeConvId } = useParams();
   const navigate = useNavigate();
@@ -753,11 +792,18 @@ export default function ChatPage() {
 
   const empty = messages.length === 0;
   const ultimo = messages[messages.length - 1];
+  const ultimoChat = conversations.find((c) => c.id !== routeConvId && c.title);
+  const horaAhora = new Date().toLocaleTimeString(document.documentElement.lang || 'es', { hour: '2-digit', minute: '2-digit' });
+  const reintentar = () => {
+    const u = [...messages].reverse().find((x) => x.role === 'user');
+    if (u && !busy) send(u.content);
+  };
   const escribiendo = busy && ultimo?.role === 'assistant' && Boolean(ultimo.content);
 
   return (
     <>
       <AbrirArchivo.Provider value={abrirArchivo}>
+      <PedirAlChat.Provider value={busy ? null : send}>
       <main className="chat-main">
         <header className="chat-header">
           <button
@@ -817,8 +863,13 @@ export default function ChatPage() {
         ) : empty ? (
           <HeroInicio cielo>
             <h2 className={`chat-hero__title ${user ? '' : 'chat-hero__title--invitado'}`}>
-              {user ? <><LogoMark size={34} className="chat-hero__marca" /><span>{saludo(t, user.first_name)}</span></> : t('emptyTitleGuest')}
+              {user ? <><LogoMark size={34} className="chat-hero__marca" /><span>{fraseSaludo}</span></> : t('emptyTitleGuest')}
             </h2>
+            {user && ultimoChat && (
+              <p className="chat-hero__sub">
+                {t('heroSub', { hora: horaAhora })} <button type="button" onClick={() => navigate(`/c/${ultimoChat.id}`)}>«{ultimoChat.title}»</button> {t('heroSubOr')}
+              </p>
+            )}
             <div className="chat-hero__input">
               <ChatInput onSend={send} onStop={stop} busy={busy} models={models} modelInfo={modelInfo} model={model} onModelChange={setModel} modelVision={modelVision}
                 webSearch={webSearch} onToggleWeb={() => setWebSearch((v) => !v)} contextUso={usoCtx}
@@ -858,7 +909,7 @@ export default function ChatPage() {
                       )}
                       {(() => {
                         if (m.cuota) return <CupoAgotado aviso={m.cuota} />;
-                        if (m.error) return <MensajeError>{m.content}</MensajeError>;
+                        if (m.error) return <MensajeError onReintentar={i === messages.length - 1 && !busy ? reintentar : undefined}>{m.content}</MensajeError>;
                         if (!m.content) return !searching && !m.reasoning && !m.herramienta && !m.confirmacion && <LineaTrabajo texto={t('thinking')} inicio={m.inicio} fichas={fichasDe(m.pasos)} />;
                         const activo = busy && i === messages.length - 1;
                         if (!tieneVisual(m.content)) return <Markdown streaming={activo}>{m.content}</Markdown>;
@@ -883,10 +934,7 @@ export default function ChatPage() {
                           onResolver={(aprobar) => resolverAccion(i, aprobar)} />
                       )}
                       {m.aviso && (
-                        <p className={`msg__aviso ${m.avisoError ? 'is-error' : ''}`} role="status">
-                          <IconAlert size={15} />
-                          <span>{m.aviso}</span>
-                        </p>
+                        <Aviso tipo={m.avisoError ? 'mal' : 'info'} icono={m.avisoError ? 'alerta' : 'en-curso'} texto={m.aviso} className="msg__aviso-nuevo" />
                       )}
                       {m.content && !m.error && !(busy && i === messages.length - 1) && <AccionesRespuesta texto={sinBloquesVisuales(m.content)} />}
                     </div>
@@ -921,6 +969,7 @@ export default function ChatPage() {
           <div className={`chat-toast ${toast.leaving ? 'is-leaving' : ''}`}>{toast.text}</div>
         )}
       </main>
+      </PedirAlChat.Provider>
       </AbrirArchivo.Provider>
 
       {archivoAbierto && <PanelArchivo archivo={archivoAbierto} onClose={cerrarArchivo} />}

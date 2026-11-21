@@ -190,12 +190,26 @@
   --primary: #FFFFFF;
   --on-primary: #0E0E0E;
 
-  --code-bg: #0A0A0A;
+  /* El código sube un tono sobre el panel (antes era un pozo negro) y su
+     cabecera otro más. */
+  --code-bg: #1C1C1C;
+  --code-head: #232323;
   --code-ink: #EDEDED;
   --code-inline: #EDEDED; /* el código en línea ya se distingue por su fondo */
+  --code-gutter: #5C5C5C;
   --scrim: rgba(0, 0, 0, 0.66);
   --shadow-rgb: 0, 0, 0;
   --sombra-menu: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 16px 40px rgba(0, 0, 0, 0.55);
+  /* Menús, globos y ventanas: dos tonos por encima del panel, con un filo de
+     luz y sombra para que no se confundan con el chat. */
+  --pop: #262626;
+  --pop-in: #1E1E1E;
+  /* El verde de marca como relleno (enviar, «Mejorar plan», progreso,
+     selección); --accent queda para texto e iconos. */
+  --accent-fill: #B4C64E;
+  --accent-fill-hover: #C2D35B;
+  --on-accent-fill: #14160A;
+  --accent-tinte: rgba(180, 198, 78, 0.12);
 
   --field: #222222;
   --field-focus: #2A2A2A;
@@ -204,9 +218,10 @@
 
   /* Tipografías propias (@lixbon/fonts, en shared/fonts): Lixbon Brand Sans
      para la interfaz y todo lo que se lee de corrido (también el chat), y
-     Lixbon Brand Serif solo en titulares. --font-brand sigue en Fraunces
-     porque es la letra del logotipo, no un texto. */
-  --font-brand: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+     Lixbon Brand Serif solo en titulares (y --font-brand). Sin otras letras:
+     el código también usa Lixbon Brand Sans (--font-mono). El logotipo es
+     un dibujo (Logo.jsx), no una letra de la interfaz. */
+  --font-brand: 'Lixbon Brand Serif', 'Iowan Old Style', Georgia, serif;
   --font-ui: 'Lixbon Brand Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Lixbon Brand Serif', 'Iowan Old Style', Georgia, serif;
   --font-sub: var(--font-ui);
@@ -215,18 +230,20 @@
      15 texto del chat · 17 título de modal o panel · 20 sección · 26 página.
      Pesos: 400 texto, 500 títulos/etiquetas/botones; 600 solo negritas del
      Markdown. La serifa (--font-display) solo en titulares de marca. */
-  --fs-meta: 12px;
-  --fs-sec: 13px;
-  --fs-ui: 14px;
-  --fs-texto: 15px;
-  --fs-titulo: 17px;
+  --fs-meta: 13px;
+  --fs-sec: 14px;
+  --fs-ui: 15px;
+  --fs-texto: 16px;
+  --fs-titulo: 18px;
   --fs-seccion: 20px;
   --fs-pagina: 26px;
   --peso-texto: 400;
   --peso-titulo: 500;
   --display-peso: 400;
   --display-tracking: -0.015em;  /* Lixbon Brand Serif ya viene ajustada */
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  /* También el código va en la letra de marca (decisión del usuario):
+     cifras tabulares para que columnas y números sigan alineados. */
+  --font-mono: 'Lixbon Brand Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
   --radius: 8px;
   --radius-box: 8px;
@@ -304,6 +321,53 @@
   --field-focus: #E4DDCC;
   --field-error: #F6E3D3;
   --field-disabled: #EDE7DA;
+
+  /* Pulido del claro (2026-11-12): papel más limpio, paneles casi blancos que
+     se despegan y textos que pasan 4,5:1 hasta en 13 px. */
+  --linea: rgba(23, 20, 14, 0.10);
+  --surface-0: #EAE5DA;
+  --surface-1: #FFFEFB;
+  --surface-2: #F5F1E8;
+  --surface-3: #EFEADF;
+  --surface-4: #E6E0D2;
+  --surface-5: #DCD5C4;
+  --card-elevada: #FFFFFF;
+  --lienzo: #E9E4D8;
+  --panel: #FFFEFB;
+  --sombra-panel: 0 1px 2px rgba(23, 20, 14, 0.07), 0 0 0 1px rgba(23, 20, 14, 0.04);
+  --ink: #14120D;
+  --ink-rgb: 20, 18, 13;
+  --ink-title: #14120D;
+  --ink-body: #25211A;
+  --ink-soft: #3E382D;
+  --ink-muted: #555043;
+  --ink-label: #3E382D;
+  --ink-faint: #625C4E;
+  --ink-disabled: #ABA392;
+  --accent: #4C5A10;
+  --accent-soft: rgba(140, 160, 40, 0.16);
+  --ok: #17703B;
+  --ok-soft: rgba(23, 112, 59, 0.10);
+  --info: #1D5BC2;
+  --info-soft: rgba(29, 91, 194, 0.09);
+  --warn: #965000;
+  --warn-soft: rgba(176, 100, 0, 0.11);
+  --danger: #A1300E;
+  --danger-ink: #A1300E;
+  --danger-soft: rgba(161, 48, 14, 0.08);
+  --primary: #14120D;
+  --on-primary: #FFFEFB;
+  --code-bg: #F7F3EA;
+  --code-head: #EFE9DD;
+  --code-ink: #25211A;
+  --code-inline: #25211A;
+  --code-gutter: #ABA392;
+  --sombra-menu: 0 0 0 1px rgba(23, 20, 14, 0.08), 0 18px 44px rgba(23, 20, 14, 0.16);
+  --field: #F2EDE3;
+  --field-focus: #EFEADF;
+  --pop: #FFFFFF;
+  --pop-in: #F5F1E8;
+  --accent-tinte: rgba(140, 160, 40, 0.14);
 }
 
 *,
@@ -328,7 +392,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
@@ -454,7 +518,7 @@ body::-webkit-scrollbar,
 }
 
 .eyebrow {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--ink-label);
@@ -475,7 +539,7 @@ body::-webkit-scrollbar,
   height: 36px;
   padding: 0 15px;
   border-radius: var(--radius);
-  font-size: 13.5px;
+  font-size: 14.5px;
   white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;
 }
@@ -571,7 +635,7 @@ body::-webkit-scrollbar,
   padding: 8px 10px;
   border-radius: var(--radius);
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: 14.5px;
   text-align: left;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -655,7 +719,7 @@ body::-webkit-scrollbar,
   padding: 8px 10px;
   border-radius: var(--radius);
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   transition: background 0.1s ease, color 0.1s ease;
 }
@@ -684,7 +748,7 @@ body::-webkit-scrollbar,
 .select-menu__vacio {
   padding: 8px 10px;
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* No es cuestión de ancho de pantalla: un portátil táctil necesita lo mismo
@@ -871,7 +935,7 @@ body::-webkit-scrollbar,
   padding: 10px 16px;
   border-radius: var(--radius);
   background: var(--warn-soft);
-  font-size: 13px;
+  font-size: 14px;
   animation: fade-in 0.2s ease;
 }
 
@@ -899,7 +963,7 @@ body::-webkit-scrollbar,
   border-radius: var(--radius);
   background: var(--warn);
   color: var(--on-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 .pill-btn.verify-bar__btn:hover:not(:disabled) { background: var(--warn); filter: brightness(1.08); }
@@ -925,3 +989,7 @@ body::-webkit-scrollbar,
    (Lixbon Brand Sans es estrecha); a 1.5 no se veían. El icono toma siempre
    el color de su texto (currentColor): nada de iconos en acento por adorno. */
 :root .ico { stroke-width: 1.75; }
+
+/* El código va en Lixbon Brand Sans: cifras tabulares para que números,
+   columnas de diff y tiempos sigan alineados como en una monoespaciada. */
+code, pre, kbd, samp { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }

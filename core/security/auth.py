@@ -68,6 +68,7 @@ def exigir_correo_verificado(user_data: dict[str, Any]) -> dict[str, Any]:
 
 
 ACCESS_TOKEN_PREFIX = "lixbon_at_"
+CODING_TOKEN_PREFIX = "lixbon_ct_"
 
 
 def resolve_credential(lixbon_session: str | None, authorization: str | None,
@@ -84,6 +85,15 @@ def resolve_credential(lixbon_session: str | None, authorization: str | None,
         return None
     if token.startswith(ACCESS_TOKEN_PREFIX):
         return validate_access_token(token)
+    if token.startswith(CODING_TOKEN_PREFIX):
+        # Token del contenedor de una sesión de Coding: solo vale en las rutas
+        # que fija core/sandbox/alcance.py (inferencia y el host de SU sesión).
+        from core.persistence.coding import validar_token
+        from core.sandbox.alcance import token_admitido
+        datos = validar_token(token)
+        if not datos or not token_admitido(datos["coding_session_id"]):
+            return None
+        return datos
     return validate_api_key(token, ip_address=ip)
 
 
@@ -228,4 +238,9 @@ async def security_headers_middleware(request: Request, call_next):
     response: Response = await call_next(request)
     for header, value in SECURITY_HEADERS.items():
         response.headers[header] = value
+    # La vista previa de Coding se muestra en un iframe de la propia web (con
+    # CSP sandbox: origen opaco). Solo ahí se permite enmarcar, y solo desde Lixbon.
+    path = request.url.path
+    if path.startswith("/api/coding/sessions/") and "/preview/" in path:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
     return response

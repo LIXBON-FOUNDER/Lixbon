@@ -1,4 +1,4 @@
-import { IconAlert } from './Icons';
+import { Aviso } from './Pulido';
 import { useT } from '../i18n/useT';
 
 export function Razonamiento({ texto, activo }) {
@@ -13,11 +13,14 @@ export function Razonamiento({ texto, activo }) {
   );
 }
 
-export function MensajeError({ children }) {
+// El error en rojo tintado: qué pasó en una línea y, si se puede, «Reintentar»
+// a la derecha (no un texto rojo suelto).
+export function MensajeError({ children, onReintentar }) {
+  const t = useT('chat');
   return (
-    <span className="msg__error">
-      <IconAlert size={15} />
-      <span>{children}</span>
-    </span>
+    <Aviso tipo="mal" icono="sin-conexion" titulo={t('errorTitle')} texto={children} role="alert"
+      acciones={onReintentar && (
+        <button type="button" className="pill-btn pill-btn--outline" onClick={onReintentar}>{t('retry')}</button>
+      )} />
   );
 }
