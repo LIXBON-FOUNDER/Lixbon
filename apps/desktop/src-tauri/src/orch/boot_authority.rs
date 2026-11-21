@@ -324,15 +324,15 @@ impl Core {
         }
     }
 
-    /// El corte Task/Attempt en el arranque (LXO-234): tras las migraciones anteriores y con `core.lock` tomado, solo con
-    /// el interruptor de dogfood y sin una espera de restauración. `true` si cortó ahora. Si falla, el arranque se
+    /// El corte Task/Attempt en el arranque (LXO-234, activo por defecto desde LXO-235): tras las migraciones anteriores y con `core.lock`
+    /// tomado, salvo que `LIXBON_AGENTIC_CUT=0` lo apague y sin una espera de restauración. `true` si cortó ahora. Si falla, el arranque se
     /// bloquea (D13): la transacción del corte se deshizo y la base quedó como estaba.
     fn cut_if_switched(&self, data: &Path, core: &Path) -> Result<bool, OpenStoreError> {
         if !super::agentic_cut::switch_on() {
             return Ok(false);
         }
         if super::agentic_cut::held(core) {
-            eprintln!("[core] {} está puesto, pero tras restaurar la copia previa no se vuelve a cortar ({} en {})", super::agentic_cut::SWITCH, super::agentic_cut::HOLD_FILE, core.display());
+            eprintln!("[core] el corte Task/Attempt está activo ({}), pero tras restaurar la copia previa no se vuelve a cortar ({} en {})", super::agentic_cut::SWITCH, super::agentic_cut::HOLD_FILE, core.display());
             return Ok(false);
         }
         let outcome = self.storage.with_store(|s| super::agentic_cut::run(s, core, data, env!("CARGO_PKG_VERSION"))).ok_or_else(|| authority_error("el almacén no está abierto"))?;
@@ -356,7 +356,7 @@ impl Core {
             }
             Err(e) => {
                 let msg = format!(
-                    "no se pudo pasar al modelo Task/Attempt: {e}. La base no cambió. Para arrancar con el modelo anterior, quita {}=1",
+                    "no se pudo pasar al modelo Task/Attempt: {e}. La base no cambió. Para arrancar con el modelo anterior, pon {}=0",
                     super::agentic_cut::SWITCH
                 );
                 super::startup_cut::record(super::startup_cut::failed_view(&msg));

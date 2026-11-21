@@ -1,8 +1,9 @@
 # Runtime sobre las tablas Task/Attempt (LXO-232)
 
-Estado: **implementado y probado; se usa en una base ya cortada**. El arranque corta la base con el interruptor de
-dogfood `LIXBON_AGENTIC_CUT=1` (LXO-234, [Activación](CORTE_EJECUCION.md#activación)). Sin cortar, el runtime sigue
-con `legacy_state` y el espejo `state.json` exactamente como antes.
+Estado: **implementado y probado; se usa en una base ya cortada**. El arranque corta la base salvo que
+`LIXBON_AGENTIC_CUT=0` lo apague (activo por defecto desde LXO-235, aún sin publicar; hasta LXO-234 solo cortaba con `=1`;
+[Activación](CORTE_EJECUCION.md#activación)). Sin cortar, el runtime sigue con `legacy_state` y el espejo `state.json`
+exactamente como antes.
 
 Mapeo del legado y decisiones: la [ADR de LXO-112](CORTE_TASK_ATTEMPT.md). Ejecución del corte: [CORTE_EJECUCION.md](CORTE_EJECUCION.md).
 

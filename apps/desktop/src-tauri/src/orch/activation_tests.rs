@@ -1,4 +1,5 @@
-//! LXO-234 · activación del corte Task/Attempt en el arranque, con el interruptor de dogfood (`LIXBON_AGENTIC_CUT=1`):
+//! LXO-234 · activación del corte Task/Attempt en el arranque, con su interruptor (`LIXBON_AGENTIC_CUT`; activo por defecto desde LXO-235,
+//! en pruebas se fija por hilo):
 //! corte, uso normal y reinicio; un corte que falla bloquea el arranque y deja la base intacta; y la restauración de la
 //! copia previa de punta a punta (`lxo core restore` → siguiente arranque). Más una prueba sobre la copia de una base
 //! real, que se lanza a mano (`LIXBON_REAL_COPY`).
@@ -57,6 +58,19 @@ fn copias(core_dir: &Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(core_dir.join("backups")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
     v.sort();
     v
+}
+
+/// LXO-235: en producción el corte está ACTIVO por defecto y solo se apaga con un valor inequívoco; un valor raro no lo desactiva.
+#[test]
+fn el_corte_esta_activo_por_defecto_y_solo_se_apaga_diciendolo_claro() {
+    use super::agentic_cut::enabled_by;
+    assert!(enabled_by(None), "sin la variable corta");
+    for on in ["1", "", " ", "true", "yes", "si", "2", "cualquier cosa"] {
+        assert!(enabled_by(Some(on)), "{on:?} no apaga el corte");
+    }
+    for off in ["0", "false", "FALSE", "off", "Off", "no", "NO", " 0 "] {
+        assert!(!enabled_by(Some(off)), "{off:?} apaga el corte");
+    }
 }
 
 #[test]

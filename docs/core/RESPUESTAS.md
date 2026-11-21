@@ -89,7 +89,7 @@ aplicación**, no en un navegador con el Core simulado:
 Cómo repetirlo (lo que no es evidente):
 
 * Aislar los datos: `USERPROFILE` a una carpeta temporal (el Core vive en `~/.lixbon/core`) y `CLAUDE_CONFIG_DIR` a la configuración real de Claude para que la CLI tenga sesión.
-* El modelo Task/Attempt **no está activo por defecto**: `LIXBON_AGENTIC_CUT=1` corta la base al arrancar (sobre la carpeta aislada es seguro) y, para que el Core **lance** Attempts, hay que
+* El modelo Task/Attempt corta la base al arrancar (con LXO-235 es el comportamiento por defecto; en una build anterior hace falta `LIXBON_AGENTIC_CUT=1`; sobre la carpeta aislada es seguro) y, para que el Core **lance** Attempts, hay que
   activar el Orquestador (`enabled: true` en los ajustes). Sin eso `task_create` responde «requiere el lifecycle de lanzamiento verificado».
 * El ADE vive en el modo «Orquestar» → pestaña «Core», y solo se monta con una carpeta abierta o tras «Continuar sin carpeta».
 * Para manejar la ventana sin tocar nada a mano: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` y `WEBVIEW2_USER_DATA_FOLDER` propio, y hablarle por CDP.
