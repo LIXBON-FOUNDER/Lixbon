@@ -1,3 +1,4 @@
+import OpenOnDesktop from './OpenOnDesktop';
 // AttentionScreen.js — bandeja de Attention de Supervisar.
 //
 // Lista en el orden del Core con filtros por Project, categoría y severidad, agrupación opcional por Project,
@@ -156,14 +157,14 @@ export default function AttentionScreen({ obs, route }) {
           <View key={g.projectId || 'none'} style={{ gap: 8 }}>
             <Eyebrow style={{ paddingHorizontal: 4 }}>{`${g.name} · ${g.items.length}`}</Eyebrow>
             {g.items.map((item) => (
-              <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} />
+              <View key={item.id} style={{ gap: 6 }}><AttentionRow item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} /><OpenOnDesktop obs={obs} target={{ attention_id: item.id }} /></View>
             ))}
           </View>
         ))
       ) : (
         <View style={{ gap: 8 }}>
           {list.items.map((item) => (
-            <AttentionRow key={item.id} item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} />
+            <View key={item.id} style={{ gap: 6 }}><AttentionRow item={item} names={names} now={now} onOpen={open} canAnswer={canAnswer} canApprove={canApprove} canReview={canReview} /><OpenOnDesktop obs={obs} target={{ attention_id: item.id }} /></View>
           ))}
         </View>
       )}

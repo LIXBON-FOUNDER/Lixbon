@@ -18,7 +18,7 @@ vi.mock('@tauri-apps/plugin-deep-link', () => ({ getCurrent: vi.fn(async () => n
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ show: native.show, unminimize: async () => {}, setFocus: async () => {} }) }));
 
 const attempt = { id: 't3-a1', task_id: 't3', project_id: 'p1', n: 1, status: 'running', provider: 'fake-completo', provider_session: { resumable: true } };
-const link = (over = {}) => ({ v: 1, status: 'ready', canonical: 'lixbon://project/p1/task/t3', target: { project_id: 'p1', task_id: 't3', attempt_id: null, view: 'overview', file: null, line: null, revision: null }, revision: { state: 'not_requested', current: null, requested: null }, ...over });
+const link = (over = {}) => ({ v: 1, status: 'ready', canonical: 'lixbon://project/p1/task/t3?view=overview', target: { project_id: 'p1', task_id: 't3', attempt_id: null, view: 'overview', file: null, line: null, revision: null }, revision: { state: 'not_requested', current: null, requested: null }, ...over });
 const owner = (over = {}) => ({ v: 1, attempt_id: attempt.id, owner: 'agent', can_return: false, blocker: null, human_changes: null, ...over });
 const flush = () => act(async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); invoke.mockReset(); resetOutstandingQueries(); native.receive = null; native.show.mockReset(); useTerminalStore.setState({ sessions: [], activeKey: null }); });
@@ -91,7 +91,7 @@ describe('F6 boundaries', () => {
   });
 
   it('resolves a warm link through Core and refuses stale navigation until explicit confirmation', async () => {
-    const stale = link({ status: 'stale', revision: { state: 'stale', requested: 'aaaaaaa', current: 'bbbbbbb' }, target: { ...link().target, revision: 'aaaaaaa' } });
+    const stale = link({ canonical: 'lixbon://project/p1/task/t3?view=overview&revision=aaaaaaa', status: 'stale', revision: { state: 'stale', requested: 'aaaaaaa', current: 'bbbbbbb' }, target: { ...link().target, revision: 'aaaaaaa' } });
     invoke.mockImplementation(async (_, p) => p.query === 'deep_link_resolve' ? stale : link());
     useWorkbenchStore.setState({ mode: 'editor' });
     render(<DeepLinkGate />); await flush();
@@ -102,5 +102,43 @@ describe('F6 boundaries', () => {
     expect(useWorkbenchStore.getState().adeSelection).toMatchObject({ projectId: 'p1', taskId: 't3' });
     expect(useWorkbenchStore.getState().mode).toBe('orch');
     expect(invoke.mock.calls.some(([, p]) => p.query === 'deep_link_generate' && p.args.revision === undefined)).toBe(true);
+  });
+
+  it('Handoff shows a verified package, uses the same Task and keeps source/package after a failure', async () => {
+    const pkg = validVariant((r) => Object.assign(r.package.source, { project_id: 'p1', task_id: 't3', attempt_id: 't3-a1' }));
+    invoke.mockImplementation(async (_, p) => {
+      if (p.query === 'provider_capabilities') return live();
+      if (p.query === 'context_package_preview' || p.cmd === 'context_package_build') return pkg;
+      if (p.cmd === 'attempt_handoff') throw new Error('context_package_source_mismatch');
+    });
+    render(<AttemptTransfer attempt={{ ...attempt, status: 'done' }} />);
+    fireEvent.click(screen.getByText('Agent Handoff…')); await flush();
+    fireEvent.change(screen.getByLabelText('Proveedor receptor'), { target: { value: 'fake-completo' } });
+    fireEvent.click(screen.getByText('Construir y verificar ContextPackage')); await flush();
+    fireEvent.click(screen.getByLabelText(/Revisé el origen/));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar transferencia' })); await flush();
+    const sent = invoke.mock.calls.find(([, p]) => p.cmd === 'attempt_handoff')[1];
+    expect(sent.args).toEqual({ task_id: 't3', from_attempt_id: 't3-a1', provider: 'fake-completo', package_id: pkg.package_id });
+    expect(screen.getByTestId('context-preview-valid')).toBeTruthy();
+    expect(screen.getByLabelText('Proveedor receptor').value).toBe('fake-completo');
+    expect(screen.getByRole('alert')).toBeTruthy();
+  });
+
+  it('Return requires the current Core preview and does not offer returning without verified changes', async () => {
+    invoke.mockImplementation(async (_, p) => p.query === 'attempt_return_preview'
+      ? owner({ owner: 'human', can_return: true }) : p.query === 'provider_capabilities' ? live() : null);
+    render(<AttemptOwnership attempt={attempt} />); await flush();
+    fireEvent.click(screen.getByText('Return to Agent…'));
+    expect(screen.getByRole('button', { name: 'Confirmar' }).disabled).toBe(true);
+    expect(invoke.mock.calls.some(([c]) => c === 'orch_call')).toBe(false);
+  });
+
+  it('acknowledges remote opening only after resolving the URL and showing the destination', async () => {
+    invoke.mockImplementation(async () => link());
+    render(<DeepLinkGate />); await flush();
+    const ack = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('lixbon:open-link', { detail: { url: 'lixbon://project/p1/task/t3?view=overview', ack } })));
+    await flush();
+    expect(ack).toHaveBeenCalledWith(true); expect(native.show).toHaveBeenCalledTimes(1);
   });
 });

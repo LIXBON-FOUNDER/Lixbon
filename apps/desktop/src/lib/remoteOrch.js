@@ -225,9 +225,16 @@ export async function handleOrchAction(action, args = {}, mobile) {
       case 'core_attempt':
       case 'core_attempt_capabilities':
       case 'core_attempt_context':
+      case 'core_desktop_link':
       case 'core_usage': {
         // Bootstrap observacional de Mobile (LXO-107): lectura del Core con la identidad del IDE.
-        const out = await handleCoreAction(action, args, (cmd, a) => invoke('orch_call', { cmd, args: a }));
+        const out = await handleCoreAction(action, args, (cmd, a) => invoke('orch_call', { cmd, args: a }), async (url) => {
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('desktop_unavailable')), 10000);
+            const ack = (opened) => { clearTimeout(timer); if (opened) resolve(); else reject(new Error('desktop_unavailable')); };
+            window.dispatchEvent(new CustomEvent('lixbon:open-link', { detail: { url, ack } }));
+          });
+        });
         emitFn?.(out.type, out.fields);
         return;
       }

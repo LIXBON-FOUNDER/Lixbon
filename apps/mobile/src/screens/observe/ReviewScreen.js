@@ -1,6 +1,6 @@
+import OpenOnDesktop from './OpenOnDesktop';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 import { useDialogs } from '../../components/dialogs';
 import { Eyebrow, PillButton } from '../../components/ui';
 import { Body, Mono, Notice, Title } from '../../observe/ui';
@@ -60,7 +60,7 @@ export default function ReviewScreen({ obs, route }) {
       setReviewed(false); view.invalidate(); obs.retry(); view.refresh();
     } finally { setBusy(false); lock.current = false; }
   };
-  const openDesktop = async () => {
+  const openLegacyDesktop = async () => {
     if (!view.online || busy || lock.current) return;
     lock.current = true; setBusy(true);
     try {
@@ -71,6 +71,7 @@ export default function ReviewScreen({ obs, route }) {
   const code = status || view.error || data?.blocked_reason;
   return <View style={{ gap: 14 }}>
     <Title>Revisión del trabajo</Title>
+    {attemptId && <OpenOnDesktop key={`${attemptId}-${head || "unknown"}`} obs={obs} target={{ attempt_id: attemptId, view: "review", ...(head && { revision: head }) }} />}
     <Mono selectable>{`Tarea ${data?.task_id || route.taskId || '…'} · Intento ${attemptId || '…'}`}</Mono>
     {resolveError && <Notice>{resolveError}</Notice>}
     {!view.supported && <Notice>Actualiza Lixbon en el escritorio para revisar desde Mobile.</Notice>}
@@ -98,10 +99,9 @@ export default function ReviewScreen({ obs, route }) {
         accessibilityLabel="He revisado esta revisión" disabled={busy} onPress={() => setReviewed((value) => !value)} style={{ minHeight: 48, justifyContent: 'center' }}>
         <Body>{reviewed ? '☑ He revisado esta revisión' : '☐ He revisado esta revisión'}</Body>
       </Pressable>}
+      {!obs.capabilities?.includes('core_desktop_link') && <PillButton outline label="Open on Desktop" disabled={!view.online || busy} onPress={openLegacyDesktop} />}
       <PillButton label="Aceptar revisión" disabled={!ready} style={{ minHeight: 48 }} onPress={() => decide('accepted')} />
       <PillButton outline label="Rechazar revisión" disabled={!ready} style={{ minHeight: 48 }} onPress={() => decide('rejected')} />
-      <PillButton outline label="Open on Desktop" disabled={!view.online || busy || !data.project_id} style={{ minHeight: 48 }} onPress={openDesktop} />
-      {typeof data.desktop_link === 'string' && data.desktop_link.startsWith('lixbon://project/') && <PillButton outline label="Copiar enlace para Desktop" onPress={() => Clipboard.setStringAsync(data.desktop_link)} />}
     </>}
     {view.online && !busy && <PillButton outline label="Actualizar revisión" style={{ minHeight: 48 }} onPress={() => { setReviewed(false); view.refresh(); }} />}
   </View>;

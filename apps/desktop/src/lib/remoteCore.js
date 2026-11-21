@@ -7,6 +7,7 @@
 //
 // Ninguna de estas acciones escribe en el Core. Contrato: docs/core/MOBILE_BOOTSTRAP.md.
 
+import { desktopLinkRequest, desktopLink } from './remoteDesktopLink.js';
 import { CAPABILITIES, validateProviderCapabilities } from '../ade/providerCapabilitiesContract.js';
 import { validateContextPreview } from '../ade/contextPreviewContract.js';
 import { USAGE_FIELDS, validateUsageResponse } from '../ade/usageContract.js';
@@ -330,6 +331,10 @@ export function slimActivity(a) {
 export function parseCoreRequest(action, raw = {}) {
   const rid = typeof raw.rid === 'string' && RID.test(raw.rid) ? raw.rid : null;
   if (!rid) return { rid: null, code: 'invalid_request' };
+  if (action === 'core_desktop_link') {
+    const args = desktopLinkRequest(raw);
+    return args ? { rid, args } : { rid, code: 'invalid_request' };
+  }
   if (action === 'core_usage') {
     if (raw.refresh !== undefined && typeof raw.refresh !== 'boolean') return { rid, code: 'invalid_request' };
     return { rid, args: { refresh: raw.refresh === true } };
@@ -416,7 +421,7 @@ export function parseCoreRequest(action, raw = {}) {
  * Atiende `core_snapshot` o `core_events` y devuelve el evento que se emite al controller.
  * `call(cmd, args)` llama al Core con la identidad del IDE (`orch_call`).
  */
-export async function handleCoreAction(action, raw, call) {
+export async function handleCoreAction(action, raw, call, openDesktop) {
   const type =
     {
       core_events: 'orch_core_events',
@@ -427,12 +432,14 @@ export async function handleCoreAction(action, raw, call) {
       core_attempt: 'orch_core_attempt',
       core_attempt_capabilities: 'orch_core_attempt_capabilities',
       core_attempt_context: 'orch_core_attempt_context',
+      core_desktop_link: 'orch_core_desktop_link',
       core_usage: 'orch_core_usage',
     }[action] ||
     'orch_core_snapshot';
   const req = parseCoreRequest(action, raw || {});
   if (req.code) return { type, fields: { rid: req.rid, ok: false, code: req.code, protocol: CORE_RELAY_PROTOCOL } };
   try {
+    if (action === 'core_desktop_link') return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, ...await desktopLink(req.args, call, openDesktop) } };
     if (action === 'core_usage') {
       const report = await call('usage_report', req.args);
       return { type, fields: { rid: req.rid, ok: true, protocol: CORE_RELAY_PROTOCOL, summary: slimUsage(report) } };
