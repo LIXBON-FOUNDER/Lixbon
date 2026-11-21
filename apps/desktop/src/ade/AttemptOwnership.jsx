@@ -22,9 +22,13 @@ export function AttemptOwnership({ attempt, active = true, onChanged }) {
     guard.current = true; setBusy(true); setError(null);
     try {
       // New key after a rejected request: the Core remembers failed outcomes as well.
-      await invoke('orch_call', { cmd: confirm === 'take' ? 'attempt_take_over' : 'attempt_return_to_agent',
+      const result = await invoke('orch_call', { cmd: confirm === 'take' ? 'attempt_take_over' : 'attempt_return_to_agent',
         args: { attempt_id: attempt.id, request_id: newRequestId(), confirm: true } });
       const took = confirm === 'take';
+      if (result?.attempt_id !== attempt.id || result.owner !== (took ? 'human' : 'agent')
+        || ![took ? 'TakenOver' : 'Returned', 'Replayed'].includes(result.status)) {
+        throw new Error('invalid_response: Core no confirmó el cambio de propietario de este Attempt.');
+      }
       setConfirm(null); state.retry(); onChanged?.();
       // Core has confirmed its safe boundary; only now may this CTA open the human workspace.
       if (took) await openAttemptWorkspace(attempt.id);
