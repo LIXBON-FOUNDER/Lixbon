@@ -1,3 +1,4 @@
+import OpenOnDesktop from './OpenOnDesktop';
 // AttemptScreen.js — un intento (Attempt) de Supervisar (LXO-126, LXO-127; solo lectura).
 //
 // Se llega desde la lista de intentos de su tarea o desde una Attention que apunta a ese intento exacto. Todo lo
@@ -74,6 +75,7 @@ export default function AttemptScreen({ obs, route }) {
             <Body muted>{m.lifecycle}</Body>
           </View>
 
+          <OpenOnDesktop key={`desktop-${route.attemptId}`} obs={obs} target={{ attempt_id: route.attemptId }} />
           <AttemptControls key={route.attemptId} obs={obs} attemptId={route.attemptId} />
           <View style={{ gap: 8 }}>
             <Eyebrow>Ejecución</Eyebrow>

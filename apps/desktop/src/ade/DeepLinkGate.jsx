@@ -73,6 +73,7 @@ export function DeepLinkGate() {
         const win = getCurrentWindow();
         await win.show(); await win.unminimize(); await win.setFocus();
       }
+      return response;
     } catch (e) { if (seq.current === mine) setState({ status: 'error', message: String(e) }); }
   };
   useEffect(() => {
@@ -87,7 +88,7 @@ export function DeepLinkGate() {
       } catch { /* A browser preview has no native protocol transport. */ }
     })();
     // Also used by explicit Open-in-ADE actions; it still resolves through Core.
-    const event = (e) => accept([e.detail?.url]);
+    const event = (e) => { if (!dead && e.detail?.url) resolve(e.detail.url).then((r) => e.detail.ack?.(r?.status === 'ready')); };
     window.addEventListener('lixbon:open-link', event);
     return () => { dead = true; ++seq.current; off?.(); window.removeEventListener('lixbon:open-link', event); };
   }, []);

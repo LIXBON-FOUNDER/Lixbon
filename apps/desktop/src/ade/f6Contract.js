@@ -19,6 +19,15 @@ export function validateLink(r) {
     || (t.revision != null && !/^[a-fA-F0-9]{7,64}$/.test(t.revision))
     || !['not_requested', 'current', 'stale', 'unknown'].includes(r.revision?.state)
     || ((r.status === 'ready') !== ['not_requested', 'current'].includes(r.revision?.state))) fail('deep_link', 'destino o revisión inválidos');
+  try {
+    const u = new URL(r.canonical);
+    const path = `/${t.project_id}${t.task_id ? `/task/${t.task_id}` : ''}${t.attempt_id ? `/attempt/${t.attempt_id}` : ''}`;
+    const keys = [...u.searchParams.keys()];
+    if (u.protocol !== 'lixbon:' || u.hostname !== 'project' || u.username || u.password || u.port || u.hash || u.pathname !== path
+      || new Set(keys).size !== keys.length || keys.some((k) => !['view', 'file', 'line', 'revision', 'v'].includes(k))
+      || (u.searchParams.has('v') && u.searchParams.get('v') !== '1')) fail('deep_link', 'URL canónica inválida');
+    for (const k of ['view', 'file', 'line', 'revision']) if (u.searchParams.get(k) !== (t[k] == null ? null : String(t[k]))) fail('deep_link', 'URL y destino diferentes');
+  } catch { fail('deep_link', 'URL canónica inválida'); }
   return r;
 }
 

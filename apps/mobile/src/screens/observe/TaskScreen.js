@@ -1,3 +1,4 @@
+import OpenOnDesktop from './OpenOnDesktop';
 // TaskScreen.js — Task Detail de Supervisar (LXO-110, solo lectura).
 //
 // Identidad (Project + Task), estado real con sus señales (pregunta, revisión, integración), proveedor y modelo
@@ -60,6 +61,7 @@ export default function TaskScreen({ obs, route }) {
           <View style={{ gap: 8 }}>
             <Eyebrow>{m.projectName || (m.projectId ? `Proyecto ${m.projectId.slice(0, 8)}` : 'Sin proyecto')}</Eyebrow>
             <Title>{m.title}</Title>
+            <OpenOnDesktop key={route.taskId} obs={obs} target={{ task_id: route.taskId }} />
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
               <StateText tone={m.statusMeta.tone}>{m.statusMeta.label}</StateText>
               {m.phase ? <Body muted>{`${m.phase}${m.phaseAt ? ` · ${ageText(m.phaseAt, obs.now)}` : ''}`}</Body> : null}

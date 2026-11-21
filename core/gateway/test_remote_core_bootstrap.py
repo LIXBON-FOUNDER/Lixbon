@@ -57,6 +57,7 @@ def host_online(monkeypatch):
     ("core_attempt_capabilities", {"rid": "m8", "attempt_id": "t1-a2", "refresh": True}),
     ("core_attempt_context", {"rid": "m9", "attempt_id": "t1-a2"}),
     ("core_usage", {"rid": "m10", "refresh": True}),
+    ("core_desktop_link", {"rid": "m11", "attempt_id": "t1-a2", "open_desktop": True}),
 ])
 def test_el_controller_puede_pedir_las_lecturas_del_core(host_online, action, args):
     hub, ch = host_online
@@ -74,7 +75,7 @@ def test_una_accion_desconocida_sigue_rechazada(host_online):
     assert err.value.status_code == 422
 
 
-@pytest.mark.parametrize("kind", ["orch_core_attempt_capabilities", "orch_core_attempt_context", "orch_core_usage"])
+@pytest.mark.parametrize("kind", ["orch_core_attempt_capabilities", "orch_core_attempt_context", "orch_core_desktop_link", "orch_core_usage"])
 def test_resumen_f4_es_efimero(kind):
     async def scenario():
         hub = RemoteHub()
