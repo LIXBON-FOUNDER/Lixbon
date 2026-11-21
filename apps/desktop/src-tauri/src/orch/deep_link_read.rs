@@ -185,3 +185,68 @@ fn project_has_local_location(s: &Store, project_id: &str) -> StoreResult<bool> 
     let Some(me) = super::projects::machine_id_read(s)? else { return Ok(false) };
     Ok(s.project_locations(Some(project_id))?.iter().any(|l| l.machine == me))
 }
+
+/// Desktop workspace location, resolved from an explicit Attempt, never from a URL path.
+/// Authorization, host and state checks precede touching the filesystem. A relative file may
+/// be opened only if its canonical path stays inside the canonical worktree (including symlinks).
+pub(super) fn workspace(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    authorize(caller, context)?;
+    let empty = Map::new();
+    let map = args_of(args, &["attempt_id", "file"], &empty)?;
+    let id = map.get("attempt_id").and_then(Value::as_str).ok_or_else(|| invalid("falta attempt_id"))?;
+    let file = match map.get("file") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(f)) => { deep_link::check_file(f).map_err(LinkError::into_rpc)?; Some(f.as_str()) },
+        _ => return Err(invalid("file debe ser texto")),
+    };
+    let (project, task, w) = with_model(core, |s| {
+        let Some(a) = s.attempt_row(id)? else { return Ok(Err(not_found("el Attempt no existe").into_rpc())) };
+        let Some(t) = s.task_row(&a.task_id)? else { return Ok(Err(not_found("la Task no existe").into_rpc())) };
+        let Some(w) = s.worktree_of_attempt(id)? else { return Ok(Err(not_found("el Attempt no tiene worktree").into_rpc())) };
+        if w.state == WorktreeState::Removed || w.path.is_none() {
+            return Ok(Err(not_found("el worktree ya no está disponible").into_rpc()));
+        }
+        if !worktree_is_local(s, &w)? {
+            return Ok(Err(LinkError::new(LinkCode::HostUnavailable, "el worktree está en otra máquina").into_rpc()));
+        }
+        Ok(Ok((t.project_id, a.task_id, w)))
+    })?;
+    let root = std::fs::canonicalize(w.path.as_deref().unwrap_or_default()).map_err(|_| not_found("el worktree no está en disco").into_rpc())?;
+    if !root.is_dir() { return Err(not_found("el worktree no es un directorio").into_rpc()); }
+    let path = file.map(|f| {
+        let path = std::fs::canonicalize(root.join(f)).map_err(|_| not_found("el archivo no está disponible").into_rpc())?;
+        if !path.starts_with(&root) || !path.is_file() {
+            return Err(LinkError::new(LinkCode::Unauthorized, "el archivo sale del worktree o no es un archivo").into_rpc());
+        }
+        Ok(path.to_string_lossy().into_owned())
+    }).transpose()?;
+    let revision = w.branch.as_deref().and_then(|b| super::review::branch_head(&w.repo, b));
+    Ok(json!({"v":1, "project_id": project, "task_id":task, "attempt_id":id,
+        "worktree_id":w.id, "root":root.to_string_lossy(), "file":path,
+        "branch":w.branch, "host":w.machine, "revision":revision}))
+}
+
+pub(super) fn project_workspace(core: &Core, caller: &Caller, context: Option<&MutationContext>, args: &Value) -> Result<Value, String> {
+    authorize(caller, context)?;
+    let empty = Map::new();
+    let map = args_of(args, &["project_id", "file"], &empty)?;
+    let project = map.get("project_id").and_then(Value::as_str).ok_or_else(|| invalid("falta project_id"))?;
+    let file = match map.get("file") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(f)) => { deep_link::check_file(f).map_err(LinkError::into_rpc)?; Some(f.as_str()) },
+        _ => return Err(invalid("file debe ser texto")),
+    };
+    let location = with_model(core, |s| {
+        if s.project(project)?.is_none() { return Ok(Err(not_found("el Project no existe").into_rpc())); }
+        let me = super::projects::machine_id_read(s)?;
+        let local = s.project_locations(Some(project))?.into_iter().find(|l| Some(&l.machine) == me.as_ref() && l.primary);
+        Ok(local.ok_or_else(|| LinkError::new(LinkCode::HostUnavailable, "el Project no tiene ubicación primaria local").into_rpc()))
+    })?;
+    let root = std::fs::canonicalize(location.path).map_err(|_| not_found("la ubicación no está disponible").into_rpc())?;
+    let path = file.map(|f| {
+        let p = std::fs::canonicalize(root.join(f)).map_err(|_| not_found("el archivo no está disponible").into_rpc())?;
+        if !p.starts_with(&root) || !p.is_file() { return Err(LinkError::new(LinkCode::Unauthorized, "el archivo sale del Project").into_rpc()); }
+        Ok(p.to_string_lossy().into_owned())
+    }).transpose()?;
+    Ok(json!({"v":1, "project_id": project, "root":root.to_string_lossy(), "file":path}))
+}

@@ -79,7 +79,7 @@ function TerminalInstance({ session, active }) {
         await opened;
         if (disposed) return;
         // cwd explícito: el PTY nace con él y ya no se puede cambiar.
-        const id = await termOpen(session.shell, useAppStore.getState().workspaceRoot || null);
+        const id = await termOpen(session.shell, session.cwd || useAppStore.getState().workspaceRoot || null);
         if (disposed) { termClose(id).catch(() => {}); return; }
         idRef.current = id;
         setSessionId(session.key, id);
@@ -138,7 +138,9 @@ function TerminalInstance({ session, active }) {
 
 /** Pestañas de sesión y acciones; BottomDock las coloca en su propia barra. */
 export function TerminalTabs() {
-  const { sessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
+  const { sessions: allSessions, activeKey, addSession, closeSession, setActive } = useTerminalStore();
+  const root = useAppStore((s) => s.workspaceRoot);
+  const sessions = allSessions.filter((s) => s.cwd === (root || null));
   return (
     <div className="terminal-tabs">
       {sessions.map((s, i) => (
@@ -175,20 +177,24 @@ export function TerminalTabs() {
 
 export function TerminalPanel() {
   const { sessions, activeKey, addSession } = useTerminalStore();
+  const root = useAppStore((s) => s.workspaceRoot);
   const workspaceReady = useAppStore((s) => s.workspaceReady);
   const terminalVisible = useAppStore((s) => s.panels.terminal);
 
   // No antes de conocer la carpeta de trabajo: el PTY hereda el cwd al nacer.
   useEffect(() => {
-    if (workspaceReady && terminalVisible && sessions.length === 0) addSession();
+    if (!workspaceReady || !terminalVisible) return;
+    const sameWorkspace = sessions.filter((s) => s.cwd === (root || null));
+    if (!sameWorkspace.length) addSession();
+    else if (!sameWorkspace.some((s) => s.key === activeKey)) useTerminalStore.getState().setActive(sameWorkspace[0].key);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceReady, terminalVisible]);
+  }, [workspaceReady, terminalVisible, root]);
 
   return (
     <div className="terminal-panel">
       <div className="terminal-body">
         {sessions.map((s) => (
-          <TerminalInstance key={s.key} session={s} active={s.key === activeKey} />
+          <TerminalInstance key={s.key} session={s} active={s.key === activeKey && s.cwd === (root || null)} />
         ))}
         {sessions.length === 0 && <div className="terminal-empty">Sin terminales abiertos.</div>}
       </div>

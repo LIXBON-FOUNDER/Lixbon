@@ -2,6 +2,7 @@
 // El objeto xterm vive fuera de React (en TerminalPanel), aquí solo la lista de
 // sesiones y cuál está activa. La creación real del PTY la hace TerminalPanel.
 
+import { useAppStore } from './appStore';
 import { create } from 'zustand';
 import { termClose, termWrite } from '../lib/tauri';
 
@@ -29,9 +30,9 @@ export const useTerminalStore = create((set, get) => ({
   pending: {}, // key -> comando encolado hasta que el PTY tenga id (Run/Build)
 
   /** Registra una sesión nueva (aún sin id de PTY) y la deja activa. */
-  addSession: (shell = get().defaultShell) => {
+  addSession: (shell = get().defaultShell, cwd = useAppStore.getState().workspaceRoot || null) => {
     const key = `term-${seq++}`;
-    const session = { key, id: null, shell, title: SHELL_LABEL[shell] || shell };
+    const session = { key, id: null, shell, cwd, title: SHELL_LABEL[shell] || shell };
     set((s) => ({ sessions: [...s.sessions, session], activeKey: key }));
     return key;
   },
@@ -57,7 +58,10 @@ export const useTerminalStore = create((set, get) => ({
   /** Ejecuta un comando en el terminal activo (crea uno si no hay). Lo usan Run/Build y Git. */
   runCommand: (cmd) => {
     const { sessions, activeKey, addSession } = get();
-    const active = sessions.find((t) => t.key === activeKey);
+    const cwd = useAppStore.getState().workspaceRoot || null;
+    const active = sessions.find((t) => t.key === activeKey && t.cwd === cwd)
+      ?? sessions.find((t) => t.cwd === cwd);
+    if (active) set({ activeKey: active.key });
     if (active?.id) {
       termWrite(active.id, cmd + '\r').catch(() => {});
       return;

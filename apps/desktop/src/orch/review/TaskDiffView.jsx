@@ -42,7 +42,7 @@ function Counts({ f }) {
   return <><span className="tdv__add">+{f.additions || 0}</span> <span className="tdv__del">−{f.deletions || 0}</span></>;
 }
 
-export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onReviewed }) {
+export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onReviewed, focusFile, focusLine, readOnly = false }) {
   const [state, setState] = useState({ status: 'loading' });
   const [confirm, setConfirm] = useState(null); // 'accepted' | 'rejected' | null
   const [comment, setComment] = useState('');
@@ -94,6 +94,13 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
     }
   }
 
+  useEffect(() => {
+    if (state.status === 'ready' && focusFile) {
+      const target = document.getElementById(`tdv-${focusFile}`);
+      target?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [state, focusFile]);
+
   if (state.status === 'loading') return <div className="tdv" role="status">Cargando diff…</div>;
   if (state.status === 'error') {
     return (
@@ -124,6 +131,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
         <span className="tdv__totals">{files.length} archivo{files.length === 1 ? '' : 's'} · <span className="tdv__add">+{totalAdd}</span> <span className="tdv__del">−{totalDel}</span></span>
         <button className="lk" onClick={load} disabled={sending}>Recargar diff</button>
       </div>
+      {focusFile && <p>Destino: {focusFile}{focusLine ? `:${focusLine}` : ''}{!files.some((f) => f.path === focusFile) ? ' · este archivo no tiene cambios en esta revisión' : ''}</p>}
       {diff.base_source === BASE_SOURCES.mergeBase && (
         <div className="tdv__notice tdv__notice--warn" data-testid="tdv-merge-base">
           Base aproximada: esta tarea no tiene base_commit registrado y la base se tomó con git merge-base. El diff puede incluir o dejar fuera cambios.
@@ -174,7 +182,7 @@ export function TaskDiffView({ taskId, api = defaultReviewApi, onDecided, onRevi
       {unknown && <div className="tdv__notice tdv__notice--error" role="alert">Respuesta inesperada del host: {String(result.outcome ?? JSON.stringify(result))}</div>}
       {sendError && <div className="tdv__notice tdv__notice--error" role="alert">{sendError}</div>}
 
-      {!done && !moved && (
+      {!readOnly && !done && !moved && (
         confirm ? (
           <div className="tdv__confirm" data-testid="tdv-confirm">
             <p>{confirm === REVIEW_DECISIONS.accepted

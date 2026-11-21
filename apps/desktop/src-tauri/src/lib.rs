@@ -1418,6 +1418,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             team::segunda_instancia(app, &argv);
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .manage(WorkspaceRoot(Mutex::new(None)))
         .manage(Terminals(Mutex::new(HashMap::new())))
         .manage(mcp::McpServers::default())
@@ -1432,6 +1433,12 @@ pub fn run() {
             pending: Arc::new(Mutex::new(HashSet::new())),
         })
         .setup(|app| {
+            // AppImage/dev installations need the user's desktop protocol entry as well.
+            #[cfg(target_os = "linux")]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register_all()?;
+            }
             // Hilo que emite los lotes de cambios de disco al frontend.
             let pending = app.state::<FsWatchState>().pending.clone();
             spawn_fs_emitter(app.handle().clone(), pending);

@@ -20,6 +20,8 @@ import { attemptDuration, formatUtc } from './attemptFormat';
 import { ATTEMPT_DETAIL_V2 } from './coreModelContract';
 import { CoreModelNotice, StatusText } from './CoreModelNotice';
 import { PathText } from './PathText';
+import { AttemptOwnership } from './AttemptOwnership';
+import { AttemptTransfer } from './AttemptTransfer';
 import { useCoreQuery } from './useCoreQuery';
 
 /**
@@ -45,7 +47,7 @@ function Row({ label, children }) {
   return (<><dt>{label}</dt><dd>{children}</dd></>);
 }
 
-export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
+export function AttemptDetail({ attemptId, taskId, projectId, coreModel, onSelectTask, onOpenAttempt, onBack, active = true }) {
   const enabled = Boolean(active && attemptId && coreModel?.vNext);
   // Mientras el intento está activo se relee deprisa: «Detener», la cola y los avisos dependen de verlo `running` a tiempo (con el sondeo
   // normal, de 15 s, un intento corto terminaba antes de pintarse como activo).
@@ -85,6 +87,8 @@ export function AttemptDetail({ attemptId, taskId, coreModel, onSelectTask, onOp
           <p className="ade-notice ade-notice--warn" role="status" data-code="attempt_detail_v2_unsupported">{COPY.attemptDetailV2Unsupported}</p>
         )}
         <AttemptContextLine attempt={attempt} />
+        <AttemptOwnership key={`owner-${attempt.id}`} attempt={attempt} active={active} onChanged={state.retry} />
+        <AttemptTransfer key={`transfer-${attempt.id}`} attempt={attempt} projectId={projectId} active={active} />
         <dl>
           <Row label="Intento"><span className="mono">{attempt.id}</span> · #{attempt.n}</Row>
           <Row label="Task">
