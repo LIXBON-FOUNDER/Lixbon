@@ -281,6 +281,8 @@ impl Core {
         }
         // El latido: renueva el lease de lo que este runtime sostiene y anota lo que ya se cerró.
         self.process_ownership_sync();
+        // Caduca las sesiones remotas sin uso y la memoria de reintentos vieja.
+        self.remote_sweep();
         self.sweep_initial_approvals();
         self.dispatch_waiting_approved();
     }
