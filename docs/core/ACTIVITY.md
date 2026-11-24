@@ -137,6 +137,7 @@ no son del tipo esperado, el item cae al respaldo.
 | `project.location_added` | `activity.project.location_added` | `primary`, `fingerprint_adopted` | info |
 | `project.archived` · `project.restored` | `activity.project.archived` / `.restored` | — | info |
 | `project.relocated` | `activity.project.relocated` | `fingerprint_adopted`, `confirmed_mismatch` | info |
+| `host.registered` (LXO-182) | `activity.host.registered` | `is_self`, `verified` | info |
 | `spawn.requested` | `activity.spawn.requested` | `parent_task`, `title`, `provider`, `profile`, `role?`, `model?`, `effort?`, `shared`, `policy_status` | warning si `blocked` |
 | `spawn.resolved` | `activity.spawn.<outcome>` con `outcome` ∈ `approved` `rejected` `launch_failed` `timeout` `coordinator_closed` `cancelled_run_removed` | `task?`, `has_reason` | `approved` success · `launch_failed` error · `rejected` y `timeout` warning · el resto info |
 | `environment.blocked` / `environment.cleared` | `activity.environment.blocked` / `.cleared` | `provider`, `profile`, `code` | warning / success |

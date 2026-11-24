@@ -419,6 +419,18 @@ impl AuthenticatedClient {
     }
 }
 
+/// El estado de UNA credencial ya conocida (por su `credential_id`), sin necesitar su secreto: lo que una sesión remota comprueba en cada
+/// llamada para que revocar un dispositivo surta efecto con la sesión abierta (LXO-184).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialState {
+    Active,
+    Expired,
+    /// La credencial o su instalación están revocadas.
+    Revoked,
+    /// No hay ninguna credencial con ese id.
+    Unknown,
+}
+
 /// Resultado de autenticación necesario para distinguir token desconocido, vencido y revocado.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientAuthentication {
@@ -650,6 +662,24 @@ impl Store {
             return Ok(ClientAuthentication::Expired(authenticated));
         }
         Ok(ClientAuthentication::Active(authenticated))
+    }
+
+    /// El estado de una credencial por su id: revocada si ella o su instalación lo están, vencida pasado el TTL, o desconocida.
+    pub fn credential_state(&self, credential_id: &str, now: i64) -> StoreResult<CredentialState> {
+        let row: Option<(i64, Option<i64>, Option<i64>)> = self
+            .conn
+            .query_row(
+                "SELECT cred.created_at, cred.revoked_at, cli.revoked_at FROM client_credentials AS cred JOIN clients AS cli ON cli.client_id = cred.client_id WHERE cred.credential_id = ?1",
+                [credential_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        Ok(match row {
+            None => CredentialState::Unknown,
+            Some((_, Some(_), _)) | Some((_, _, Some(_))) => CredentialState::Revoked,
+            Some((created_at, None, None)) if now.saturating_sub(created_at) >= CLIENT_CREDENTIAL_TTL_MS => CredentialState::Expired,
+            Some(_) => CredentialState::Active,
+        })
     }
 
     pub fn revoke_credential(&mut self, credential_id: &str, at: i64) -> StoreResult<bool> {

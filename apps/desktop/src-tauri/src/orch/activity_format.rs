@@ -31,7 +31,7 @@ fn supports(kind: &str, v: i64) -> bool {
 pub(super) const UNKNOWN_KEY: &str = "activity.unknown";
 
 /// Todos los `kind` que sabe formatear. Una prueba exige que cada `kind` de `event_kinds.rs` esté aquí.
-pub(super) const KINDS: [&str; 78] = [
+pub(super) const KINDS: [&str; 79] = [
     "run.created",
     "run.closed",
     "run.removed",
@@ -103,6 +103,7 @@ pub(super) const KINDS: [&str; 78] = [
     "project.archived",
     "project.restored",
     "project.relocated",
+    "host.registered",
     "spawn.requested",
     "spawn.resolved",
     "environment.blocked",
@@ -796,6 +797,7 @@ fn render(e: &EventRow, p: &Value) -> Option<Rendered> {
         ),
         "project.archived" => rendered("activity.project.archived", Visual::Info, vec![]),
         "project.restored" => rendered("activity.project.restored", Visual::Info, vec![]),
+        "host.registered" => rendered("activity.host.registered", Visual::Info, vec![("is_self", flag(p, "is_self")), ("verified", flag(p, "verified"))]),
         "project.relocated" => rendered(
             "activity.project.relocated",
             Visual::Info,

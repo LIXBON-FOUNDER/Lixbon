@@ -234,6 +234,10 @@ impl PreparedLaunch for AdapterPrepared {
         match called {
             Ok(Ok(handle)) => {
                 let attempt_id = self.request.attempt_id().to_string();
+                // El proceso ya tiene dueño: queda anotado ahora, no en el próximo barrido (si el Core muere entre medias nadie sabría de él).
+                if let Some(core) = self.core.upgrade() {
+                    core.process_ownership_sync();
+                }
                 let AdapterPrepared { task_id, adapter, matrix, cancel, worktree, started, .. } = *self;
                 started.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt_id, StartedRun { task_id, adapter, matrix, handle, cancel, worktree });
                 StartOutcome::Running

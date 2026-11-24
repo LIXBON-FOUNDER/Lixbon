@@ -2196,6 +2196,34 @@ pub(super) fn project_location_added(project_id: &str, primary: bool, fingerprin
 }
 
 // ---------------------------------------------------------------------------------------------
+// host.registered (LXO-182)
+// ---------------------------------------------------------------------------------------------
+//
+// Un host entró en el registro de hosts, o uno que ya estaba pasó a estar verificado (se fijó su clave). Clase `state`, entidad `host`
+// (id = `host_id`), sin Project ni run y sin `idem_key`: un host puede nacer sin clave y verificarse después, y son dos hechos. Lo escribe el
+// propio Core. Nunca lleva la clave, el nombre ni la ruta: solo QUÉ pasó.
+
+/// Un host quedó registrado o verificado.
+#[derive(Serialize)]
+pub(super) struct HostRegistered {
+    /// ¿Es el host de este Core (y no un par)?
+    is_self: bool,
+    /// ¿Tiene ya su clave fijada, o sea, puede probar quién es?
+    verified: bool,
+}
+
+impl EventPayload for HostRegistered {
+    const KIND: &'static str = "host.registered";
+    const VERSION: i64 = 1;
+    const CLASS: EventClass = EventClass::State;
+}
+
+pub(super) fn host_registered(host_id: &str, is_self: bool, verified: bool) -> Result<EventDraft, EventError> {
+    let p = HostRegistered { is_self, verified };
+    Ok(EventDraft::new(EntityKind::Host, host_id, &p)?.project(None).run(None))
+}
+
+// ---------------------------------------------------------------------------------------------
 // attention.risk_acted
 // ---------------------------------------------------------------------------------------------
 
