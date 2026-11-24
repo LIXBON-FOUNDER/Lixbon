@@ -345,6 +345,13 @@ impl Core {
         }
         let _ = std::fs::remove_file(discovery);
         let identity = self.ensure_cli_identity_with(installation_file, secrets)?;
+        // Identidad de host (LXO-182). Un fallo aquí no impide arrancar: el host queda sin verificar y se ve en `hosts_list`.
+        if let Err(error) = self.host_identity_ensure_with(secrets) {
+            // Antes del corte Task/Attempt el registro de hosts no existe: no es un fallo.
+            if !error.starts_with("core_model_inactive") {
+                eprintln!("[core] no se pudo registrar la identidad de este host: {error}");
+            }
+        }
         self.revoke_stale_cli_and_agent_credentials(&identity.client_id)?;
         let h = server::start(self.clone())?;
         if let Err(error) = write_private_json(discovery, &json!({
