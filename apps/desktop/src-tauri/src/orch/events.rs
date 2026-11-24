@@ -218,6 +218,8 @@ pub(super) enum EntityKind {
     Race,
     /// Un ámbito de la policy de autonomía (`global`, `project:<id>`, `attempt:<id>`) (LXO-209).
     Policy,
+    /// Una máquina conocida por este Core (LXO-182). Id = `host_id`.
+    Host,
 }
 
 impl EntityKind {
@@ -238,6 +240,7 @@ impl EntityKind {
             EntityKind::Core => "core",
             EntityKind::Policy => "policy",
             EntityKind::Race => "race",
+            EntityKind::Host => "host",
         }
     }
 }

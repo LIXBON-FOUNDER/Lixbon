@@ -152,6 +152,7 @@ const ACTIVITY_ARG_SCHEMAS = new Map([
   ['activity.project.archived', { required: {} }],
   ['activity.project.restored', { required: {} }],
   ['activity.project.relocated', { required: { fingerprint_adopted: 'boolean', confirmed_mismatch: 'boolean' } }],
+  ['activity.host.registered', { required: { is_self: 'boolean', verified: 'boolean' } }],
   ['activity.spawn.requested', {
     required: {
       parent_task: 'string', title: 'text', provider: 'string', profile: 'string',

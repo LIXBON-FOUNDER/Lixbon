@@ -653,6 +653,14 @@ fn casos() -> Vec<Caso> {
             "info",
         ),
         (
+            "host.registered",
+            State,
+            ("host", "host-1"),
+            json!({ "is_self": true, "verified": true }),
+            "activity.host.registered",
+            "info",
+        ),
+        (
             "project.archived",
             Decision,
             p,
@@ -780,7 +788,7 @@ fn casos() -> Vec<Caso> {
 
 /// Snapshot de las claves de mensaje: cambiar una clave publicada rompe a los clientes que la traducen.
 /// Si cambia a propósito, se actualiza esta lista y `docs/core/ACTIVITY.md` en el mismo PR.
-const CLAVES: [&str; 113] = [
+const CLAVES: [&str; 114] = [
     "activity.artifact.created",
     "activity.attempt.adopted",
     "activity.attempt.approved",
@@ -837,6 +845,7 @@ const CLAVES: [&str; 113] = [
     "activity.effect.process.not_launched",
     "activity.environment.blocked",
     "activity.environment.cleared",
+    "activity.host.registered",
     "activity.policy.changed",
     "activity.project.archived",
     "activity.project.location_added",

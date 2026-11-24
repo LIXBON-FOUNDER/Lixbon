@@ -721,6 +721,8 @@ volver a archivar es legítimo) y `state_rev` NULL. Nunca copian rutas, remotos,
 * **Guarda de snapshot.** `FingerprintChange { from, to }` lleva la huella que la política leyó; la transacción
   comprueba que sigue siendo la guardada y, en `join`, que «es la principal» sigue siendo cierto EN ESA MÁQUINA (la principal es por `(project_id, machine)`: la de otra máquina no cuenta y la primera ubicación de una máquina nueva es su principal). Si no, rollback:
   el payload no puede describir un estado que ya no existe.
+* `host.registered` (LXO-182, `state`, entidad `host`) vive en [HOSTS.md](HOSTS.md): un host nace, o uno sin verificar fija su
+  clave; `{ is_self, verified }`. Refrescar `last_seen` no emite nada.
 * Las APIs del almacén que cambiaban filas sin su hecho (`location_put`, `project_set_fingerprint`,
   `project_set_archived`, `project_create`) son `#[cfg(test)]`; una prueba de arquitectura impide usarlas en
   producción. Con el Core en `DegradedReadOnly` las cuatro decisiones se rechazan (frontera `registry_write`).

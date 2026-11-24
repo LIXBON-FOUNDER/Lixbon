@@ -12,6 +12,9 @@ mod context_package;
 mod attention_rules;
 mod attention_read;
 mod projects_overview;
+mod host_identity;
+mod host_ops;
+mod process_ownership;
 // Snapshot compacta para clientes ligeros (LXO-94).
 mod compact_snapshot;
 mod activity_format;
@@ -64,6 +67,10 @@ mod attention_update_api_tests;
 mod attention_read_tests;
 #[cfg(test)]
 mod projects_overview_tests;
+#[cfg(test)]
+mod host_identity_tests;
+#[cfg(test)]
+mod process_ownership_tests;
 #[cfg(test)]
 mod compact_snapshot_tests;
 #[cfg(test)]
@@ -381,6 +388,8 @@ pub struct Core {
     take_overs: take_over_runtime::TakeOverState,
     /// Return to Agent (LXO-170): las peticiones ya atendidas (idempotencia) y los Attempts que se están devolviendo ahora mismo.
     returns: take_over_runtime::TakeOverState,
+    /// Identifica a ESTE runtime (una vida del Core) en la propiedad de procesos (LXO-183): lo que otro runtime dejó vivo, no es suyo.
+    runtime_instance: String,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -429,6 +438,7 @@ impl Default for Orch {
             instructions: steer_runtime::InstructionState::default(),
             take_overs: take_over_runtime::TakeOverState::default(),
             returns: take_over_runtime::TakeOverState::default(),
+            runtime_instance: crate::store::new_uuid(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]

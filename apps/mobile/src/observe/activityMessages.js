@@ -59,6 +59,7 @@ export const ACTIVITY_V1_MESSAGE_KEYS = Object.freeze([
   'activity.race.candidate_recorded',
   'activity.race.cancelled',
   'activity.project.relocated',
+  'activity.host.registered',
   'activity.spawn.requested',
   'activity.spawn.approved',
   'activity.spawn.rejected',
@@ -870,6 +871,13 @@ const FORMATTERS = {
     const adopted = requiredBoolean(args, 'fingerprint_adopted');
     return requiredArguments(primary, adopted)
       ? `Se añadió una ubicación al proyecto${primary ? ' como principal' : ''}${adopted ? ' y se adoptó su huella' : ''}.`
+      : null;
+  },
+  'activity.host.registered': (args) => {
+    const isSelf = requiredBoolean(args, 'is_self');
+    const verified = requiredBoolean(args, 'verified');
+    return requiredArguments(isSelf, verified)
+      ? `${isSelf ? 'Este equipo' : 'Un equipo'} se registró como host${verified ? ' con su clave verificada' : ', sin clave verificada'}.`
       : null;
   },
   'activity.project.archived': () => 'Se archivó el proyecto.',
