@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::adapter::{lanza_en_custodia, supervisor};
 use super::attempt_e2e_tests::world;
 use super::initial_approval_tests::e2e::restart_fixture_core;
-use super::process_ownership::ReconcileReport;
+use super::process_ownership::{KillObserver, ReconcileReport};
 use super::state::now_ms;
 use super::Core;
 use crate::proctable::{Fate, Os, Presence, Proc, RealOs};
@@ -321,4 +321,91 @@ fn antes_del_corte_no_hay_propiedad_de_procesos_y_no_rompe_nada() {
     let (_l, _d, _c, core) = super::attention_read_tests::core_listo();
     assert!(core.process_ownership_sync().is_none());
     assert_eq!(core.process_ownership_reconcile(), ReconcileReport::default());
+}
+
+// ---------------------------------------------------------------------------------------------
+// La presencia de un proceso, el observador del kill y los ganchos del Core
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn la_presencia_distingue_vivo_muerto_pid_reutilizado_y_duda() {
+    let p = Proc { pid: 4242, start: 777 };
+    let con = |start: Option<u64>, table: Option<Vec<(u32, u32)>>| FalsoOs { start, table, fate: Fate::Gone, terminados: vec![] };
+    // Existe y es el mismo (misma hora de creación).
+    assert_eq!(crate::proctable::presence(&mut con(Some(777), Some(vec![(4242, 1)])), p), Presence::Alive);
+    // El pid existe pero es de OTRO proceso: el registrado murió.
+    assert_eq!(crate::proctable::presence(&mut con(Some(778), Some(vec![(4242, 1)])), p), Presence::Gone);
+    // No existe y la tabla se leyó entera: murió.
+    assert_eq!(crate::proctable::presence(&mut con(None, Some(vec![(1, 0)])), p), Presence::Gone);
+    // No se puede leer ni la hora ni la tabla, o el pid figura pero su hora es ilegible: es duda, nunca «muerto».
+    assert_eq!(crate::proctable::presence(&mut con(None, None), p), Presence::Unknown);
+    assert_eq!(crate::proctable::presence(&mut con(None, Some(vec![(4242, 1)])), p), Presence::Unknown);
+}
+
+#[test]
+fn con_la_presencia_en_duda_no_se_intenta_matar_nada() {
+    let w = world("claude", None);
+    let attempt = attempt_de(&w, "own-13");
+    deja_el_runtime_anterior(&w.core, &attempt, 4242, Some(777));
+    // El pid figura en la tabla pero su hora de creación no se puede leer, y el sistema mataría a cualquiera que se le pida.
+    let mut os = FalsoOs { start: None, table: Some(vec![(4242, 1)]), fate: Fate::Killed, terminados: vec![] };
+    let r = w.core.process_ownership_reconcile_with(&mut os);
+    assert_eq!(r.unproven, vec![attempt], "{r:?}");
+    assert!(os.terminados.is_empty(), "sin identidad probada no se termina a nadie: {:?}", os.terminados);
+}
+
+#[test]
+fn el_observador_solo_cuenta_como_cerrada_la_raiz_registrada() {
+    let mut os = FalsoOs { start: Some(777), table: Some(vec![]), fate: Fate::Killed, terminados: vec![] };
+    let mut visto = KillObserver { inner: &mut os, root: 4242, killed_root: false };
+    // Terminar a un DESCENDIENTE no es haber cerrado la raíz.
+    assert_eq!(visto.terminate(Proc { pid: 5555, start: 1 }), Fate::Killed);
+    assert!(!visto.killed_root);
+}
+
+#[test]
+fn el_observador_no_cuenta_una_raiz_que_ya_no_existia() {
+    let mut os = FalsoOs { start: None, table: Some(vec![]), fate: Fate::Gone, terminados: vec![] };
+    let mut visto = KillObserver { inner: &mut os, root: 4242, killed_root: false };
+    assert_eq!(visto.terminate(Proc { pid: 4242, start: 777 }), Fate::Gone);
+    assert!(!visto.killed_root);
+}
+
+#[test]
+fn el_observador_anota_que_se_termino_a_la_raiz() {
+    let mut os = FalsoOs { start: Some(777), table: Some(vec![]), fate: Fate::Killed, terminados: vec![] };
+    let mut visto = KillObserver { inner: &mut os, root: 4242, killed_root: false };
+    assert_eq!(visto.terminate(Proc { pid: 4242, start: 777 }), Fate::Killed);
+    assert!(visto.killed_root);
+}
+
+#[test]
+fn el_barrido_periodico_deja_la_propiedad_al_dia() {
+    let _serie = super::pty::pruebas::serie_custodia();
+    let w = world("claude", None);
+    let attempt = attempt_de(&w, "own-14");
+    let _p = lanza_en_custodia(&attempt);
+    w.core.process_ownership_sync().unwrap();
+    assert_eq!(filas(&w.core, &attempt)[0].state, OwnershipState::Unproven);
+    // El barrido reintenta el cierre de la custodia y, después, anota lo que pasó: el proceso queda liberado, no «a la vista» para siempre.
+    w.core.periodic_sweep();
+    let f = &filas(&w.core, &attempt)[0];
+    assert_eq!((f.state, f.release_reason), (OwnershipState::Released, Some(ReleaseReason::Closed)), "el barrido no actualizó la propiedad");
+}
+
+#[test]
+fn lanzar_un_attempt_anota_la_propiedad_en_el_momento_sin_esperar_al_barrido() {
+    let _serie = super::pty::pruebas::serie_custodia();
+    let w = world("claude", None);
+    // Otro Attempt ya tiene un proceso con dueño abierto que nadie ha anotado todavía.
+    let otro = attempt_de(&w, "own-15a");
+    let _p = lanza_en_custodia(&otro);
+    assert!(filas(&w.core, &otro).is_empty());
+    // Lanzar un Attempt de verdad (adapter falso) pasa por el lanzador, que anota lo que el supervisor tiene abierto al aceptar el proceso.
+    let lanzado = attempt_de(&w, "own-15b");
+    w.approve(&lanzado);
+    w.settled(&lanzado, "done");
+    assert_eq!(filas(&w.core, &otro).len(), 1, "el lanzamiento no anotó la propiedad");
+    supervisor::reap();
+    w.core.process_ownership_sync();
 }

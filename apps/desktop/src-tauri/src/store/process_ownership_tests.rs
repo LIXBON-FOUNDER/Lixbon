@@ -239,3 +239,16 @@ fn la_base_protege_la_identidad_y_la_historia() {
     // Y una hora de creación que no es un número no entra.
     assert!(raw(&mut w.s, "INSERT INTO process_ownership (process_id, attempt_id, host_id, runtime_instance, root_pid, root_start, state, lease_until, heartbeat_at, registered_at) VALUES ('z', 'a', 'h', 'r', 1, 'abc', 'held', 1, 1, 1)").is_err());
 }
+
+#[test]
+fn el_mismo_pid_con_otra_hora_de_creacion_es_otro_proceso_y_no_una_renovacion() {
+    let t = Tmp::new();
+    let mut w = mundo(t.path());
+    w.s.ownership_sync(HOST, "rt-1", &[hecho(&w.a2, 4242, Some(777), false)], 1_000, LEASE).unwrap();
+    // El pid se reutilizó: es otro proceso. Renovar la fila dejaría registrada una identidad que ya no es la del proceso vivo.
+    let r = w.s.ownership_sync(HOST, "rt-1", &[hecho(&w.a2, 4242, Some(999), false)], 2_000, LEASE).unwrap();
+    assert_eq!((r.registered, r.renewed, r.released), (1, 0, 1), "{r:?}");
+    let historia = w.s.ownership_of_attempt(&w.a2).unwrap();
+    assert_eq!((historia[0].root_start, historia[0].state), (Some(777), OwnershipState::Released));
+    assert_eq!((historia[1].root_start, historia[1].state), (Some(999), OwnershipState::Held));
+}

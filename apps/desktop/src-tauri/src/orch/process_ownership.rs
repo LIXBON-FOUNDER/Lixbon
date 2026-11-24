@@ -182,10 +182,10 @@ fn resolve_row(row: &OwnershipRow, os: &mut dyn Os) -> (OwnershipResolution, Buc
 }
 
 /// Delega TODO en el sistema operativo que envuelve y solo anota si se terminó a la raíz registrada.
-struct KillObserver<'a> {
-    inner: &'a mut dyn Os,
-    root: u32,
-    killed_root: bool,
+pub(super) struct KillObserver<'a> {
+    pub(super) inner: &'a mut dyn Os,
+    pub(super) root: u32,
+    pub(super) killed_root: bool,
 }
 
 impl Os for KillObserver<'_> {
