@@ -195,6 +195,8 @@ impl Process for ChildProcess {
 
     fn set_owner(&self, owner: &str) {
         *self.owner.lock().unwrap_or_else(|e| e.into_inner()) = Some(owner.to_string());
+        // Desde aquí el proceso tiene un dueño CONOCIDO: el supervisor lo anota para que el Core lo registre de forma durable (LXO-183).
+        super::supervisor::hold(owner, &self.family);
     }
 
     fn stderr_tail(&self) -> String {
@@ -210,6 +212,17 @@ impl ChildProcess {
 }
 
 impl Family {
+    /// La identidad de la raíz (pid, hora de creación, grupo), o `None` si el árbol está ocupado cerrándose (entonces no se anota ahora).
+    pub(super) fn identity(&self) -> Option<(u32, Option<u64>, Option<u32>)> {
+        let tree = self.tree.try_lock().ok()?;
+        Some(tree.identity())
+    }
+
+    /// ¿Ya se cerró el árbol y se reapeó la raíz? Un árbol cerrado no tiene nada que registrar.
+    pub(super) fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     /// Cierra TODO el árbol de la raíz comprobando la identidad de cada proceso (`proctable::kill_tree`) y, solo si se
     /// comprobó su muerte, reapea la raíz. `true` si no queda nada. Si no se puede probar (identidad ilegible, tabla de
     /// procesos no fiable) NO se hace un kill ciego del resto del árbol: el árbol y la raíz sin reapear se conservan para

@@ -892,11 +892,17 @@ impl Core {
     }
 
     /// Arranque: lo `delivering` falla (`interrupted`: nunca se reintenta) y lo `queued` de un Attempt terminado también.
-    pub(super) fn queue_recover_at_boot(&self) {
+    pub(super) fn queue_recover_at_boot(&self) -> super::recovery::Step {
         match self.queue_store(queue_commands::recover) {
-            Ok(r) if r.interrupted + r.ended == 0 => {}
-            Ok(r) => eprintln!("[core] cola de instrucciones: {} interrumpida(s), {} de Attempts terminados; {} se conservan", r.interrupted, r.ended, r.kept),
-            Err(why) => eprintln!("[core] no se pudo recuperar la cola de instrucciones al arrancar: {why}"),
+            Ok(r) if r.interrupted + r.ended == 0 => super::recovery::Step::done(0),
+            Ok(r) => {
+                eprintln!("[core] cola de instrucciones: {} interrumpida(s), {} de Attempts terminados; {} se conservan", r.interrupted, r.ended, r.kept);
+                super::recovery::Step::done(r.interrupted + r.ended)
+            }
+            Err(why) => {
+                eprintln!("[core] no se pudo recuperar la cola de instrucciones al arrancar: {why}");
+                super::recovery::Step::blocked("no se pudo recuperar la cola de instrucciones")
+            }
         }
     }
 

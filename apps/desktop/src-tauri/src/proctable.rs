@@ -235,6 +235,31 @@ impl Tree {
         }
     }
 
+    /// La identidad de la raíz tal como se capturó: su pid, su hora de creación (si se pudo probar) y su grupo de procesos (Unix).
+    /// Es lo que el registro de propiedad (LXO-183) guarda para reconocer el proceso tras un reinicio.
+    pub(crate) fn identity(&self) -> (u32, Option<u64>, Option<u32>) {
+        (self.pid, self.start, self.pgid)
+    }
+
+    /// Reconstruye el árbol de un proceso que lanzó un runtime ANTERIOR, a partir de su identidad guardada (LXO-183). No hay Job
+    /// (Windows) ni la raíz anclada: la propiedad de los descendientes se PRUEBA como siempre (`ownership`), y lo que no se pueda
+    /// probar termina en `Err`, no en un kill ajeno. La raíz se da por viva solo si [`presence`] lo confirma; si no, `kill_tree` lo ve.
+    pub(crate) fn adopt(pid: u32, start: Option<u64>, pgid: Option<u32>) -> Tree {
+        Tree {
+            pid,
+            start,
+            root_dead: false,
+            root_gone: false,
+            seen: Vec::new(),
+            unproven: Vec::new(),
+            group: None,
+            pgid,
+            pinned: false,
+            #[cfg(windows)]
+            job_from_start: false,
+        }
+    }
+
     /// Declara que el proceso raíz no se reapeará hasta [`root_exited`] (lo garantiza quien espera al hijo: ver
     /// [`wait_root`]). Solo así el pid de la raíz es una prueba de propiedad del grupo.
     pub(crate) fn pin_root(&mut self) {
@@ -265,6 +290,29 @@ impl Tree {
     #[cfg(test)]
     pub(crate) fn group_members(&self) -> Option<Vec<u32>> {
         self.group.as_ref()?.members()
+    }
+}
+
+/// Qué se sabe de un proceso concreto que se registró en otro momento.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Presence {
+    /// Existe y su hora de creación es la registrada: es ese proceso.
+    Alive,
+    /// No existe, o ese pid es ahora de OTRO proceso (otra hora de creación): el registrado murió.
+    Gone,
+    /// No se pudo consultar (tabla ilegible, proceso sin permisos): ni vivo ni muerto probado.
+    Unknown,
+}
+
+/// ¿Sigue vivo el proceso `p`? Un pid solo no basta: se compara la hora de creación. La duda es `Unknown`, nunca «muerto».
+pub(crate) fn presence(os: &mut dyn Os, p: Proc) -> Presence {
+    match os.start(p.pid) {
+        Some(start) if start == p.start => Presence::Alive,
+        Some(_) => Presence::Gone,
+        None => match os.table() {
+            Some(table) if !table.iter().any(|(pid, _)| *pid == p.pid) && !os.opaque().contains(&p.pid) => Presence::Gone,
+            _ => Presence::Unknown,
+        },
     }
 }
 

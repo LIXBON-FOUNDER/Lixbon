@@ -707,6 +707,21 @@ pub(crate) fn runtime_session_status_in(c: &Connection, id: &str, from: SessionS
     Ok(())
 }
 
+/// Su Attempt terminó (o se retiró): una sesión resumible queda `idle`, esperando un seguimiento; una que no lo es se CIERRA, porque `idle`
+/// exige `resumable = 1` (migración 009) y dejarla `open` sería quedar atada a un Attempt que ya no corre. Solo toca una sesión `open`.
+pub(crate) fn runtime_session_release_in(c: &Connection, id: &str, at: i64) -> StoreResult<()> {
+    require_active(c)?;
+    c.execute(
+        "UPDATE provider_sessions SET
+           status = CASE WHEN resumable = 1 THEN 'idle' ELSE 'closed' END,
+           closed_at = CASE WHEN resumable = 1 THEN closed_at ELSE max(updated_at, ?2) END,
+           updated_at = max(updated_at, ?2)
+         WHERE id = ?1 AND status = 'open'",
+        params![id, at],
+    )?;
+    Ok(())
+}
+
 /// El Thread de una Task, si aún no lo tiene (`th-<task>`).
 pub(crate) fn runtime_thread_ensure_in(c: &Connection, task_id: &str, run_id: &str, at: i64) -> StoreResult<String> {
     require_active(c)?;

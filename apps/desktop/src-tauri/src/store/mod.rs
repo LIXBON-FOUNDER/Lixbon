@@ -44,6 +44,8 @@ mod lock;
 mod migrate;
 mod private;
 mod projects;
+mod hosts;
+mod process_ownership;
 mod attempts;
 mod continuity;
 mod retries;
@@ -104,6 +106,10 @@ mod context_packages_tests;
 #[cfg(test)]
 mod adopted_attempts_tests;
 #[cfg(test)]
+mod hosts_tests;
+#[cfg(test)]
+mod process_ownership_tests;
+#[cfg(test)]
 mod tests;
 
 use std::path::{Path, PathBuf};
@@ -126,7 +132,7 @@ pub(crate) use events::{insert_derived_in, EventProjector};
 pub use authority::{check_promotion_identity, new_uuid, new_uuid_v7, sha256_hex, AuthMeta, AuthorityFacts, PromotionPlan, FENCE_VERSION, MODE_SQLITE_AUTHORITATIVE, NO_SOURCE};
 pub use backup::backup_to;
 #[allow(unused_imports)]
-pub use clients::{AuthenticatedClient, ClientAction, ClientAuthentication, ClientClaims, ClientCredential, ClientIdentity, ClientIdentityError, ClientPrincipal, ClientRegistration, ClientScope, ClientStoreError, ClientSurface, DeviceIdentity, CLIENT_CREDENTIAL_TTL_MS, CORE_CLIENT_ID};
+pub use clients::{AuthenticatedClient, ClientAction, ClientAuthentication, ClientClaims, ClientCredential, CredentialState, ClientIdentity, ClientIdentityError, ClientPrincipal, ClientRegistration, ClientScope, ClientStoreError, ClientSurface, DeviceIdentity, CLIENT_CREDENTIAL_TTL_MS, CORE_CLIENT_ID};
 pub use crash::crash_point;
 pub use error::{StoreError, StoreResult};
 // `EventPage` y `EventRow` los consume la API de lectura de E1b; hasta entonces solo las pruebas.
@@ -182,6 +188,8 @@ pub use context_packages::{NewStoredPackage, PackageOrigin, PutOutcome, StoredPa
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
+pub use hosts::{HostChange, HostInfo, HostRow};
+pub use process_ownership::{OwnedFact, OwnershipRow, OwnershipState, ReleaseReason, OwnershipResolution, SyncReport};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 #[cfg(test)]

@@ -170,6 +170,20 @@ vs `failed`, relocalización, archivados, filtro `machine`, `unassigned`, cohere
 el snapshot, solo Person, parámetros inválidos, solo lectura) y
 `orch/server.rs::http_rpc_projects_overview_es_solo_para_person_autenticada` (E2E por `POST /rpc`).
 
+## `hosts_list` (LXO-182)
+
+Los hosts (máquinas) que este Core conoce, con las ubicaciones de proyecto de cada uno. Solo lectura, sin argumentos, solo para una
+Person autenticada. Antes del corte Task/Attempt responde `core_model_inactive`. La identidad es `host_id`; la ruta de una ubicación
+solo tiene sentido dentro de su host. Un host parado figura `stale`, nunca desaparece. Contrato completo y respuestas de error en
+[HOSTS.md](HOSTS.md).
+
+## `recovery_report` (LXO-185)
+
+Cómo salió la recuperación del último arranque (procesos, Attempts huérfanos, claims de despacho, cola de instrucciones, journal de efectos) y si el Core
+puede lanzar trabajo nuevo. Solo lectura, sin argumentos, solo para una Person autenticada (un Agent recibe `recovery_report_auth_required`). `health` es
+`complete`, `incomplete` (algún paso `blocked`: no se lanzan Attempts nuevos y `blocking` dice por qué) o `unknown` (el arranque no terminó). Sin pids ni rutas.
+Contrato completo en [RECOVERY.md](RECOVERY.md).
+
 ## `tasks_by_project`
 
 Lista paginada de las Tasks de un Project. Implementación: `orch/tasks_read.rs` (`list`).

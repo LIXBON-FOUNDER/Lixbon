@@ -115,10 +115,8 @@ impl Core {
         }
         // Reconciliar hechos v2 agrega solo `effect.observed`; nunca vuelve a ejecutar
         // Git, PTY ni filesystem. En modo legacy no hay Event Log y las líneas se conservan.
-        match self.reconcile_unrecorded_effects(data) {
-            Ok(report) => self.announce_reconciled_effects(&report),
-            Err(error) => eprintln!("[core] no se pudo leer el journal de efectos ({:?})", error.kind()),
-        }
+        // Es el último paso de la recuperación (LXO-185): deja su desenlace en el informe.
+        self.recover_effects(data);
         // Líneas v1/corruptas o v2 que no pudieron importarse requieren revisión: se avisa,
         // no se esconde ni se descarta su diagnóstico.
         match Self::unrecorded_effects(data) {
@@ -209,15 +207,9 @@ impl Core {
             Ok(_) => {}
             Err(e) => self.mirror_failed_at_boot(proof, &e.to_string()),
         }
-        if needs_orphan {
-            self.close_orphans();
-        }
-        // Tras cerrar las huérfanas: cada claim en vuelo se asienta (con su evidencia) o queda `ambiguous` (LXO-246).
-        if on_tables {
-            self.reconcile_dispatch_claims_at_boot();
-            // Después de cerrar las huérfanas: lo pendiente de un Attempt que ya no corre falla con motivo.
-            self.queue_recover_at_boot();
-        }
+        // La recuperación de lo que dejó el runtime anterior, en el orden fijo de `recovery.rs` (LXO-185): procesos (LXO-183), Attempts
+        // huérfanos, claims en vuelo (LXO-246) y cola de instrucciones. El journal de efectos es su último paso y corre en `init_in`.
+        self.recover_at_boot(data, needs_orphan, on_tables);
         // `close_orphans` puede haber avanzado la fila: el informe lleva la revisión
         // realmente confirmada al terminar el arranque, no la que se cargó.
         let rev = match self.storage.confirmed_rev() {
@@ -232,27 +224,33 @@ impl Core {
 
     /// Cierra las tareas que quedaron abiertas al apagarse el Core anterior. Pasa por
     /// `mutate` (persiste en SQLite); si no hay nada que cerrar, no escribe.
-    pub(super) fn close_orphans(&self) {
+    pub(super) fn close_orphans(&self) -> super::recovery::Step {
         // Un Attempt que una persona tiene en sus manos (LXO-170) sigue `running` sin proceso A PROPÓSITO: no es un huérfano. Si no se puede saber quiénes
         // son, no se cierra NADA: es mejor dejar una Task abierta hasta el próximo arranque que destruir trabajo humano a medias.
         let keep: Vec<String> = match self.human_owned_attempts() {
             Ok(owned) => owned.into_iter().map(|(_, task)| task).collect(),
             Err(why) => {
                 eprintln!("[core] no se pudo saber qué Attempts tiene una persona en sus manos: no se cierran huérfanos en este arranque ({why})");
-                return;
+                return super::recovery::Step::blocked("no se pudo saber qué Attempts tiene una persona en sus manos: no se cerró ninguno");
             }
         };
         let r = self.mutate(|tx| {
             // Una Task `not_started` no tiene proceso que pudiera haber quedado huérfano: no es motivo para escribir.
-            if !tx.tasks.values().any(|t| t.status.has_attempt() && !t.status.is_final() && !t.external && !keep.contains(&t.id)) {
+            let open = tx.tasks.values().filter(|t| t.status.has_attempt() && !t.status.is_final() && !t.external && !keep.contains(&t.id)).count();
+            if open == 0 {
                 tx.no_change();
-                return Ok(());
+                return Ok(0);
             }
             tx.orphan_all_except(&keep);
-            Ok(())
+            Ok(open)
         });
-        if let Err(e) = r {
-            eprintln!("[core] no se pudieron cerrar las tareas huérfanas: {e}");
+        match r {
+            Ok(closed) if keep.is_empty() => super::recovery::Step::done(closed),
+            Ok(closed) => super::recovery::Step::done_with(closed, format!("{} Attempt(s) en manos de una persona se conservan", keep.len())),
+            Err(e) => {
+                eprintln!("[core] no se pudieron cerrar las tareas huérfanas: {e}");
+                super::recovery::Step::blocked("no se pudieron cerrar las tareas que dejó en marcha el runtime anterior")
+            }
         }
     }
 
@@ -277,6 +275,12 @@ impl Core {
         if let Some(_permit) = custody_sweep_permit() {
             super::adapter::supervisor::reap();
         }
+        // El latido: renueva el lease de lo que este runtime sostiene y anota lo que ya se cerró.
+        self.process_ownership_sync();
+        // Si la recuperación del arranque quedó bloqueada, reintenta lo que se puede repetir sin riesgo (procesos de otros runtimes, journal).
+        self.recovery_retry();
+        // Caduca las sesiones remotas sin uso y la memoria de reintentos vieja.
+        self.remote_sweep();
         self.sweep_initial_approvals();
         self.dispatch_waiting_approved();
     }
@@ -325,6 +329,8 @@ impl Core {
             // Lo que no se pudo cerrar con prueba de los procesos de los adapters (LXO-242): se reintenta antes de salir.
             super::adapter::supervisor::reap();
         }
+        // Constancia final: lo cerrado queda liberado y lo que no se pudo cerrar queda `unproven` para el próximo arranque.
+        self.process_ownership_sync();
         self.stop_server();
     }
 
@@ -345,6 +351,13 @@ impl Core {
         }
         let _ = std::fs::remove_file(discovery);
         let identity = self.ensure_cli_identity_with(installation_file, secrets)?;
+        // Identidad de host (LXO-182). Un fallo aquí no impide arrancar: el host queda sin verificar y se ve en `hosts_list`.
+        if let Err(error) = self.host_identity_ensure_with(secrets) {
+            // Antes del corte Task/Attempt el registro de hosts no existe: no es un fallo.
+            if !error.starts_with("core_model_inactive") {
+                eprintln!("[core] no se pudo registrar la identidad de este host: {error}");
+            }
+        }
         self.revoke_stale_cli_and_agent_credentials(&identity.client_id)?;
         let h = server::start(self.clone())?;
         if let Err(error) = write_private_json(discovery, &json!({
@@ -448,7 +461,7 @@ mod tests {
 impl Core {
     /// La reconciliación demuestra que el efecto ocurrió, pero NO repara `legacy_state`: la persona debe
     /// comprobar el estado (tarea, rama, PR, proceso) antes de repetir la acción.
-    fn announce_reconciled_effects(&self, report: &RecoveryReport) {
+    pub(super) fn announce_reconciled_effects(&self, report: &RecoveryReport) {
         if let Some(kind) = report.ack_failed {
             eprintln!("[core] no se pudo compactar el journal de efectos ({kind:?}); se reintentará al arrancar");
         }
