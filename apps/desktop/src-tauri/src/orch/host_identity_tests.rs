@@ -291,9 +291,10 @@ fn hosts_list_es_solo_para_una_person_y_no_acepta_argumentos() {
     let agente_cli = agente(&core, "t-host", "install-agent-hosts", "agent-hosts-secret-0123456789abcdef-xyz");
 
     let err = rpc(&core, &agente_cli, "hosts_list", json!({})).unwrap_err();
-    assert!(err.contains("hosts_list_auth_required") || err.contains("no autorizado") || err.contains("denied") || err.contains("no permite"), "{err}");
+    // No se imprime la respuesta entera: viene de una llamada con credenciales y el diagnóstico solo necesita el código.
+    assert!(err.contains("hosts_list_auth_required") || err.contains("no autorizado") || err.contains("denied") || err.contains("no permite"), "un Agent no recibió el rechazo esperado");
     let err = rpc(&core, &persona_cli, "hosts_list", json!({ "machine": "otra" })).unwrap_err();
-    assert!(err.starts_with("hosts_list_invalid_request"), "{err}");
+    assert!(err.starts_with("hosts_list_invalid_request"), "un argumento desconocido no recibió hosts_list_invalid_request");
     assert!(rpc(&core, &persona_cli, "hosts_list", json!({})).is_ok());
 }
 
@@ -319,7 +320,7 @@ fn antes_del_corte_el_registro_de_hosts_no_existe_y_no_rompe_nada() {
     assert!(core.host_identity_ensure_with(&secrets).unwrap_err().starts_with("core_model_inactive"));
     assert!(core.host_proof_issue_with(&secrets).is_err());
     let err = rpc(&core, &person(&core), "hosts_list", json!({})).unwrap_err();
-    assert!(err.starts_with("core_model_inactive"), "{err}");
+    assert!(err.starts_with("core_model_inactive"), "antes del corte hosts_list no respondió core_model_inactive");
     let err = core.host_peer_register(&firma("par", &clave_nueva(), &info("par"), now_ms() as i64)).unwrap_err();
     assert!(err.starts_with("core_model_inactive"), "{err}");
 }
