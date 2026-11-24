@@ -438,7 +438,7 @@ fn la_produccion_no_usa_las_apis_sin_evento_y_solo_project_ops_construye_las_dec
                 (".project_join_recorded(", &["project_ops.rs"]),
                 (".project_relocate_recorded(", &["project_ops.rs"]),
                 (".project_set_archived_recorded(", &["project_ops.rs"]),
-                ("finalize_one(", &["events.rs", "project_ops.rs"]),
+                ("finalize_one(", &["events.rs", "project_ops.rs", "host_ops.rs"]),
             ] {
                 assert!(!l.contains(simbolo) || donde.contains(&nombre.as_str()), "{nombre}:{}: «{simbolo}» solo puede aparecer en {donde:?}", n + 1);
             }

@@ -13,6 +13,7 @@ mod attention_rules;
 mod attention_read;
 mod projects_overview;
 mod host_identity;
+mod host_ops;
 // Snapshot compacta para clientes ligeros (LXO-94).
 mod compact_snapshot;
 mod activity_format;

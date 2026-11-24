@@ -742,7 +742,7 @@ fn el_almacen_la_promocion_y_win32_solo_se_tocan_desde_su_frontera() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("orch");
     // (símbolo, archivos donde puede aparecer)
     let permitidos: [(&str, &[&str]); 17] = [
-        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs", "client_identity.rs"]),
+        ("with_store(", &["store_boot.rs", "boot_authority.rs", "projects.rs", "client_identity.rs", "host_identity.rs"]),
         ("save_legacy_state", &["store_boot.rs"]),
         ("commit_authoritative", &["store_boot.rs"]),
         // Desde el corte (LXO-232) el estado se confirma en las tablas, también solo desde la persistencia.

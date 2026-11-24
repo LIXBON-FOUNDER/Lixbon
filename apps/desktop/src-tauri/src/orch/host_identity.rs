@@ -32,8 +32,8 @@ use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey, ED25519};
 use serde_json::{json, Value};
 
-use super::event_kinds;
-use super::events::{finalize_one, Actor, MutationContext};
+use super::events::{Actor, MutationContext};
+use super::host_ops::registered_event;
 use super::mutation::Health;
 use super::state::now_ms;
 use super::{Caller, Core};
@@ -167,11 +167,6 @@ fn local_info() -> HostInfo {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         capabilities: CAPABILITIES.iter().map(|c| (*c).to_string()).collect(),
     }
-}
-
-fn registered_event(host_id: &str, is_self: bool, verified: bool, at: i64) -> Result<crate::store::NewEvent, String> {
-    let draft = event_kinds::host_registered(host_id, is_self, verified).map_err(|e| e.to_string())?;
-    finalize_one(draft, &MutationContext::core(), at, &|_: &str| None)
 }
 
 fn store_error(error: StoreError) -> String {
