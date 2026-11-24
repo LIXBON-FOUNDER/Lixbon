@@ -242,11 +242,17 @@ impl Core {
 
     /// Arranque: concilia los claims que quedaron en vuelo. Va DESPUÉS de cerrar las tareas huérfanas: un claim cuyo Attempt
     /// acabó con evidencia canónica se asienta; el resto pasa a `ambiguous` y no se relanza. Un fallo se dice y no impide arrancar.
-    pub(super) fn reconcile_dispatch_claims_at_boot(&self) {
+    pub(super) fn reconcile_dispatch_claims_at_boot(&self) -> super::recovery::Step {
         match self.dispatch_reconcile_in_flight() {
-            Ok(0) => {}
-            Ok(changed) => eprintln!("[core] se conciliaron {changed} claim(s) de despacho que quedaron en vuelo"),
-            Err(why) => eprintln!("[core] no se pudieron conciliar los claims de despacho al arrancar: {why}"),
+            Ok(0) => super::recovery::Step::done(0),
+            Ok(changed) => {
+                eprintln!("[core] se conciliaron {changed} claim(s) de despacho que quedaron en vuelo");
+                super::recovery::Step::done(changed)
+            }
+            Err(why) => {
+                eprintln!("[core] no se pudieron conciliar los claims de despacho al arrancar: {why}");
+                super::recovery::Step::blocked("no se pudieron conciliar los claims de despacho que quedaron en vuelo")
+            }
         }
     }
 
@@ -282,6 +288,10 @@ impl Core {
     pub(super) fn dispatch_attempt(&self, attempt_id: &str, launcher: &dyn Launcher) -> Result<DispatchResult, String> {
         if !matches!(self.health(), Health::Normal) {
             return Err("el Core no está en estado normal: no se despacha".into());
+        }
+        // La recuperación del arranque no pudo reconciliar algo con seguridad (LXO-185): ningún proceso nuevo hasta resolverlo.
+        if let Some(why) = self.recovery_blocks_launch() {
+            return Err(format!("la recuperación del arranque está incompleta: no se despacha ({why})"));
         }
         let Some(snapshot) = self.dispatch_snapshot(attempt_id)? else {
             return Ok(DispatchResult::Ineligible("el Attempt no existe".into()));
@@ -372,7 +382,8 @@ impl Core {
         };
         let mut out = Vec::new();
         for id in candidates {
-            if !matches!(self.health(), Health::Normal) {
+            // Sin repetir un error por candidato en cada barrido: el motivo ya se dijo al arrancar y está en `recovery_report`.
+            if !matches!(self.health(), Health::Normal) || self.recovery_blocks_launch().is_some() {
                 break;
             }
             match self.dispatch_attempt(&id, launcher) {

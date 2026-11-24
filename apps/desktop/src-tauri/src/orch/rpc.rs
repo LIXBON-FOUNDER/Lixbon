@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use serde_json::{json, Value};
-use super::{host_identity, activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, context_store, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
+use super::{host_identity, recovery, activity_read, attention_read, compact_snapshot, model_read, projects_overview, provider_registry, context_preview, context_store, usage_read, resource_inventory, tasks_read, CLOSE_REMINDER, Caller, Core, MAX_DEPTH, agents, b, git, integration, issues, kinds, n, review, roles, s};
 use super::events::{Actor, Channel, MutationContext};
 use super::mutation::IdempotentMutation;
 use super::state::{Kind, NewTask, Status, Task};
@@ -482,6 +482,7 @@ impl Core {
             "projects" => self.projects_list(b(args, "all")),
             "projects_overview" => projects_overview::overview(self, &caller, authenticated_context.as_ref(), args),
             "hosts_list" => host_identity::list(self, &caller, authenticated_context.as_ref(), args),
+            "recovery_report" => recovery::report_query(self, &caller, authenticated_context.as_ref(), args),
             "compact_snapshot" => compact_snapshot::snapshot(self, &caller, authenticated_context.as_ref(), args),
             "activity_list" => activity_read::list(self, &caller, authenticated_context.as_ref(), args),
             "resource_inventory" => resource_inventory::inventory(self, &caller, authenticated_context.as_ref(), args),
@@ -922,7 +923,7 @@ impl Core {
 /// política por principal/superficie está centralizada en `AuthenticatedClient::authorize`.
 fn rpc_action(cmd: &str) -> ClientAction {
     match cmd {
-        "status" | "projects" | "projects_overview" | "hosts_list" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
+        "status" | "projects" | "projects_overview" | "hosts_list" | "recovery_report" | "compact_snapshot" | "attention_list" | "attention_detail" | "activity_list"
         | "resource_inventory" | "tasks_by_project" | "task_detail" | "spawn_status" | "agents" | "roles" | "list" | "show" | "core_model"
         | "task_list_v2" | "task_detail_v2" | "attempts_by_task" | "attempt_detail" | "attempt_detail_v2" | "project_workspace" | "attempt_workspace" | "deep_link_resolve" | "deep_link_generate" | "work_at" | "attempt_return_preview" | "attempt_compare" | "attempt_proof_pack" | "attempt_integration_preview" | "resource_inspect" | "resource_adopt_preview" | "provider_capabilities" | "context_package_preview" | "context_package_get" | "usage_report" | "policy_effective" | "task_race_status" | "panel_status" => ClientAction::Read,
         "events" => ClientAction::EventLogRead,
@@ -995,7 +996,7 @@ mod tests {
 
     fn expected_cli_action(cmd: &str) -> ClientAction {
         match cmd {
-            "status" | "projects" | "projects_overview" | "hosts_list" | "attention_list" | "attention_detail" | "activity_list" | "resource_inventory"
+            "status" | "projects" | "projects_overview" | "hosts_list" | "recovery_report" | "attention_list" | "attention_detail" | "activity_list" | "resource_inventory"
             | "spawn_status" | "agents" | "roles" | "list" | "show" => ClientAction::Read,
             "events" => ClientAction::EventLogRead,
             "project_add" | "project_archive" | "project_locate" | "projects_import_recents"

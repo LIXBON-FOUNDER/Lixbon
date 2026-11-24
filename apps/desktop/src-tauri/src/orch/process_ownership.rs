@@ -81,6 +81,7 @@ impl Core {
     }
 
     /// Al arrancar: resuelve las filas vivas que dejó un runtime anterior, con el sistema operativo real.
+    #[cfg_attr(not(test), allow(dead_code))] // el arranque pasa por `recovery::recover_at_boot`; esto lo usan las pruebas
     pub(super) fn process_ownership_reconcile(&self) -> ReconcileReport {
         self.process_ownership_reconcile_with(&mut RealOs::default())
     }

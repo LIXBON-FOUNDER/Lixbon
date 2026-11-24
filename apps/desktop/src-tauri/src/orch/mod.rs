@@ -15,6 +15,7 @@ mod projects_overview;
 mod host_identity;
 mod host_ops;
 mod process_ownership;
+mod recovery;
 mod remote_session;
 // Snapshot compacta para clientes ligeros (LXO-94).
 mod compact_snapshot;
@@ -72,6 +73,8 @@ mod projects_overview_tests;
 mod host_identity_tests;
 #[cfg(test)]
 mod process_ownership_tests;
+#[cfg(test)]
+mod recovery_tests;
 #[cfg(test)]
 mod remote_session_tests;
 #[cfg(test)]
@@ -395,6 +398,8 @@ pub struct Core {
     runtime_instance: String,
     /// Sesiones remotas abiertas por un relay y su memoria de reintentos (LXO-184, solo memoria).
     remote: remote_session::RemoteState,
+    /// Cómo salió la recuperación del último arranque y si el Core puede lanzar trabajo nuevo (LXO-185).
+    recovery: recovery::RecoveryCell,
     #[cfg(test)]
     launched: Mutex<Vec<String>>,
     /// En pruebas: al arrancar la fase git de la snapshot avisa por el canal y
@@ -445,6 +450,7 @@ impl Default for Orch {
             returns: take_over_runtime::TakeOverState::default(),
             runtime_instance: crate::store::new_uuid(),
             remote: Default::default(),
+            recovery: Default::default(),
             #[cfg(test)]
             launched: Mutex::new(Vec::new()),
             #[cfg(test)]
