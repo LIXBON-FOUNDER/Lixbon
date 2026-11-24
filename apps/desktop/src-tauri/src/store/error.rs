@@ -51,6 +51,8 @@ pub enum StoreError {
     ProjectConflict(String),
     /// El registro de hosts rechaza la operación (suplantación de un `host_id`, clave repetida, prueba ya vista, host propio duplicado).
     HostConflict(String),
+    /// La propiedad de procesos no puede aplicar la operación (un Attempt con un proceso vivo de otro runtime sin resolver).
+    OwnershipConflict(String),
     /// Un evento del Event Log no cumple el contrato (campos vacíos, payload que no es un objeto JSON
     /// o pasa de 8 KiB, cursor negativo…). Se rechaza ANTES de tocar la base.
     InvalidEvent(String),
@@ -193,6 +195,7 @@ impl fmt::Display for StoreError {
             StoreError::RevOutOfRange { rev } => write!(f, "la revisión {rev} está fuera de rango y no se puede avanzar; los datos de autoridad no se dan por buenos"),
             StoreError::ProjectConflict(m) => write!(f, "registro de proyectos: {m}"),
             StoreError::HostConflict(m) => write!(f, "registro de hosts: {m}"),
+            StoreError::OwnershipConflict(m) => write!(f, "propiedad de procesos: {m}"),
             StoreError::InvalidEvent(m) => write!(f, "evento inválido: {m}"),
             StoreError::InvalidAttention(m) => write!(f, "attention inválida: {m}"),
             StoreError::AgenticModelInactive => f.write_str(

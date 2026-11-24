@@ -209,6 +209,8 @@ impl Core {
             Ok(_) => {}
             Err(e) => self.mirror_failed_at_boot(proof, &e.to_string()),
         }
+        // Los PROCESOS que dejó el runtime anterior se resuelven siempre, haya o no Attempts huérfanos que cerrar (LXO-183).
+        self.process_ownership_reconcile();
         if needs_orphan {
             self.close_orphans();
         }
@@ -277,6 +279,8 @@ impl Core {
         if let Some(_permit) = custody_sweep_permit() {
             super::adapter::supervisor::reap();
         }
+        // El latido: renueva el lease de lo que este runtime sostiene y anota lo que ya se cerró.
+        self.process_ownership_sync();
         self.sweep_initial_approvals();
         self.dispatch_waiting_approved();
     }
@@ -325,6 +329,8 @@ impl Core {
             // Lo que no se pudo cerrar con prueba de los procesos de los adapters (LXO-242): se reintenta antes de salir.
             super::adapter::supervisor::reap();
         }
+        // Constancia final: lo cerrado queda liberado y lo que no se pudo cerrar queda `unproven` para el próximo arranque.
+        self.process_ownership_sync();
         self.stop_server();
     }
 

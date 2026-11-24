@@ -21,7 +21,7 @@
 //! * **El registro no se mantiene bloqueado mientras corre un cierre**: `reap` toma una copia y reintenta fuera del candado.
 //! * **El dueño es el Attempt** (`<task>-a<n>`): permite decir «esa Task tiene un proceso sin cerrar» sin adivinar por pid.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use super::process::Family;
 
@@ -31,6 +31,67 @@ struct Entry {
 }
 
 static CUSTODY: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+
+/// Los procesos con dueño CONOCIDO que siguen abiertos (LXO-183). Débiles: el supervisor no alarga la vida de ninguna familia; una
+/// familia cerrada o soltada simplemente deja de aparecer. Lo lee el Core para registrar la propiedad de forma durable.
+static HELD: Mutex<Vec<(String, Weak<Family>)>> = Mutex::new(Vec::new());
+
+fn held() -> MutexGuard<'static, Vec<(String, Weak<Family>)>> {
+    HELD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Anota que `family` tiene como dueño a `owner` (un Attempt `<task>-a<n>`). Idempotente.
+pub(super) fn hold(owner: &str, family: &Arc<Family>) {
+    let mut held = held();
+    held.retain(|(_, w)| w.strong_count() > 0);
+    let ptr = Arc::as_ptr(family);
+    if let Some(entry) = held.iter_mut().find(|(_, w)| w.as_ptr() == ptr) {
+        entry.0 = owner.to_string();
+    } else {
+        held.push((owner.to_string(), Arc::downgrade(family)));
+    }
+}
+
+/// Un proceso abierto con dueño conocido, tal como lo ve el supervisor ahora.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedProcess {
+    /// El Attempt dueño (`<task>-a<n>`).
+    pub owner: String,
+    pub pid: u32,
+    /// Hora de creación de la raíz (token opaco), si se pudo probar. Sin ella el proceso no se puede reconocer después.
+    pub start: Option<u64>,
+    /// Unix: el grupo de procesos de la raíz.
+    pub pgid: Option<u32>,
+    /// Su último cierre no se pudo probar: sigue en custodia.
+    pub in_custody: bool,
+}
+
+/// Los procesos con dueño que siguen abiertos: los que se sostienen y los que están en custodia. Sin duplicados y sin los ya cerrados.
+pub fn owned_snapshot() -> Vec<OwnedProcess> {
+    let mut found: Vec<(*const Family, OwnedProcess)> = Vec::new();
+    let mut push = |owner: &str, family: &Arc<Family>, in_custody: bool| {
+        if family.is_closed() {
+            return;
+        }
+        let ptr = Arc::as_ptr(family);
+        if let Some((_, existing)) = found.iter_mut().find(|(p, _)| *p == ptr) {
+            existing.in_custody |= in_custody;
+            return;
+        }
+        if let Some((pid, start, pgid)) = family.identity() {
+            found.push((ptr, OwnedProcess { owner: owner.to_string(), pid, start, pgid, in_custody }));
+        }
+    };
+    let held_now: Vec<(String, Arc<Family>)> = held().iter().filter_map(|(o, w)| w.upgrade().map(|f| (o.clone(), f))).collect();
+    let in_custody: Vec<(String, Arc<Family>)> = custody().iter().filter_map(|e| e.owner.clone().map(|o| (o, Arc::clone(&e.family)))).collect();
+    for (owner, family) in &held_now {
+        push(owner, family, false);
+    }
+    for (owner, family) in &in_custody {
+        push(owner, family, true);
+    }
+    found.into_iter().map(|(_, p)| p).collect()
+}
 
 fn custody() -> MutexGuard<'static, Vec<Entry>> {
     CUSTODY.lock().unwrap_or_else(|e| e.into_inner())

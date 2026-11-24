@@ -45,6 +45,7 @@ mod migrate;
 mod private;
 mod projects;
 mod hosts;
+mod process_ownership;
 mod attempts;
 mod continuity;
 mod retries;
@@ -106,6 +107,8 @@ mod context_packages_tests;
 mod adopted_attempts_tests;
 #[cfg(test)]
 mod hosts_tests;
+#[cfg(test)]
+mod process_ownership_tests;
 #[cfg(test)]
 mod tests;
 
@@ -186,6 +189,7 @@ pub use context_packages::{NewStoredPackage, PackageOrigin, PutOutcome, StoredPa
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
 pub use hosts::{HostChange, HostInfo, HostRow};
+pub use process_ownership::{OwnedFact, OwnershipRow, OwnershipState, ReleaseReason, OwnershipResolution, SyncReport};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 #[cfg(test)]

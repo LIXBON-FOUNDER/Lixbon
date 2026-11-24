@@ -182,6 +182,18 @@ fn store_error(error: StoreError) -> String {
 // Core
 // ---------------------------------------------------------------------------------------------
 
+/// El `machine_id` de este Core (que es su `host_id`), creándolo la primera vez. Solo desde una escritura.
+pub(super) fn machine_id_of(st: &mut Store) -> StoreResult<String> {
+    match st.meta(META_MACHINE)? {
+        Some(m) => Ok(m),
+        None => {
+            let m = new_uuid();
+            st.meta_set(META_MACHINE, &m)?;
+            Ok(m)
+        }
+    }
+}
+
 impl Core {
     fn require_hosts_writable(&self) -> Result<(), String> {
         match self.health() {
@@ -199,14 +211,7 @@ impl Core {
             if !st.agentic_model_active()? {
                 return Err(StoreError::AgenticModelInactive);
             }
-            let host_id = match st.meta(META_MACHINE)? {
-                Some(m) => m,
-                None => {
-                    let m = new_uuid();
-                    st.meta_set(META_MACHINE, &m)?;
-                    m
-                }
-            };
+            let host_id = machine_id_of(st)?;
             let public_key = key_for(secrets, &host_id).map(|k| to_hex(k.public_key().as_ref()));
             let event = registered_event(&host_id, true, public_key.is_some(), now).map_err(StoreError::InvalidEvent)?;
             let (row, _) = st.host_self_record(&host_id, &local_info(), public_key.as_deref(), now, &event)?;
