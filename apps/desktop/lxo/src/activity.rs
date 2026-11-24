@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 const MAX_ARGUMENT_LENGTH: usize = 120;
 const MAX_MESSAGE_LENGTH: usize = 480;
 
-pub(crate) const MESSAGE_KEYS: [&str; 114] = [
+pub(crate) const MESSAGE_KEYS: [&str; 115] = [
     "activity.run.created",
     "activity.run.closed",
     "activity.run.removed",
@@ -63,6 +63,7 @@ pub(crate) const MESSAGE_KEYS: [&str; 114] = [
     "activity.race.candidate_recorded",
     "activity.race.cancelled",
     "activity.project.relocated",
+    "activity.host.registered",
     "activity.spawn.requested",
     "activity.spawn.approved",
     "activity.spawn.rejected",
@@ -1207,6 +1208,15 @@ fn format(key: &str, a: &A) -> Option<String> {
                 } else {
                     ""
                 }
+            ))
+        }
+        "activity.host.registered" => {
+            let is_self = a.boolean("is_self")?;
+            let verified = a.boolean("verified")?;
+            Some(format!(
+                "{} se registró como host{}.",
+                if is_self { "Este equipo" } else { "Un equipo" },
+                if verified { " con su clave verificada" } else { ", sin clave verificada" }
             ))
         }
         "activity.project.archived" => Some("Se archivó el proyecto.".into()),

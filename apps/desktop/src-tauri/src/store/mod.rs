@@ -44,6 +44,7 @@ mod lock;
 mod migrate;
 mod private;
 mod projects;
+mod hosts;
 mod attempts;
 mod continuity;
 mod retries;
@@ -103,6 +104,8 @@ mod policy_tests;
 mod context_packages_tests;
 #[cfg(test)]
 mod adopted_attempts_tests;
+#[cfg(test)]
+mod hosts_tests;
 #[cfg(test)]
 mod tests;
 
@@ -182,6 +185,7 @@ pub use context_packages::{NewStoredPackage, PackageOrigin, PutOutcome, StoredPa
 // Task como intención (LXO-113): inerte hasta el corte; hasta entonces solo la usan `orch::task_ops` y las pruebas.
 #[allow(unused_imports)]
 pub use tasks::{IntentChange, IntentField, NewRun, NewTaskIntent, RunRow, TaskIntent, TaskOrigin, TaskRemoval, TaskRow, AGENTIC_MODEL, AGENTIC_MODEL_KEY};
+pub use hosts::{HostChange, HostInfo, HostRow};
 pub use projects::{new_project_id, ChangeOutcome, Fingerprint, FingerprintChange, LocationMark, LocationRow, NewLocation, ProjectRow};
 pub use migrate::{embedded, migrate_capped, Migration, MigrationReport};
 #[cfg(test)]

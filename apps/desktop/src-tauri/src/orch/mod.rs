@@ -12,6 +12,8 @@ mod context_package;
 mod attention_rules;
 mod attention_read;
 mod projects_overview;
+mod host_identity;
+mod host_ops;
 // Snapshot compacta para clientes ligeros (LXO-94).
 mod compact_snapshot;
 mod activity_format;
@@ -64,6 +66,8 @@ mod attention_update_api_tests;
 mod attention_read_tests;
 #[cfg(test)]
 mod projects_overview_tests;
+#[cfg(test)]
+mod host_identity_tests;
 #[cfg(test)]
 mod compact_snapshot_tests;
 #[cfg(test)]

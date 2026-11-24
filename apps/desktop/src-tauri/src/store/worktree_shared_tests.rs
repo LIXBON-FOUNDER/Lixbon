@@ -254,7 +254,7 @@ fn la_026_se_aplica_sobre_una_base_en_la_025_y_conserva_lo_que_hay() {
     };
     let s = Store::open_with(t.path(), &super::migrate::embedded_post_cut(), "t").unwrap();
     let mut w = Mundo { s, project: String::new(), hija, otra: otra.clone(), ajena };
-    assert_eq!(w.s.schema_version().unwrap(), 26);
+    assert_eq!(w.s.schema_version().unwrap(), 27);
     assert_eq!(w.s.worktree_of_attempt(&a_id).unwrap().unwrap().id, x_id, "lo que ya estaba enlazado sigue ahí");
     let b = w.s.attempts_of_task(&otra).unwrap().pop().expect("el Attempt de la otra Task");
     assert_eq!(engancha(&mut w, &x_id, &b.id).unwrap(), ChangeOutcome::Changed, "con la 026 sí");

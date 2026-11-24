@@ -400,6 +400,22 @@
       "text": "Se añadió una ubicación al proyecto como principal y se adoptó su huella."
     },
     {
+      "key": "activity.host.registered",
+      "args": {
+        "is_self": true,
+        "verified": true
+      },
+      "text": "Este equipo se registró como host con su clave verificada."
+    },
+    {
+      "key": "activity.host.registered",
+      "args": {
+        "is_self": false,
+        "verified": false
+      },
+      "text": "Un equipo se registró como host, sin clave verificada."
+    },
+    {
       "key": "activity.project.archived",
       "args": {},
       "text": "Se archivó el proyecto."
