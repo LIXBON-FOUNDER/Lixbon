@@ -37,7 +37,7 @@ use super::error::{StoreError, StoreResult};
 use super::events::{insert_events_projected, NewEvent};
 use super::reviews::{runtime_decision_insert_in, runtime_review_insert_in};
 use super::sessions::{
-    env_block_set_in, runtime_message_insert_in, runtime_session_insert_in, runtime_session_status_in, runtime_thread_ensure_in,
+    env_block_set_in, runtime_message_insert_in, runtime_session_insert_in, runtime_session_release_in, runtime_session_status_in, runtime_thread_ensure_in,
     thread_messages_mark_read_in, NewThreadMessage, SessionBinding, SessionStatus,
 };
 use super::tasks::{require_active, runtime_run_insert_in, runtime_run_update_in, runtime_task_discard_in, runtime_task_insert_in, runtime_task_update_in, RuntimeTask, TaskOrigin};
@@ -1378,7 +1378,7 @@ fn apply_task(c: &Connection, p: Option<&DocTask>, t: &DocTask) -> StoreResult<(
     sync_attempt(c, p.filter(|_| !fresh), t, &mut cur, at)?;
     if cur.status.is_final() && !was_final {
         if let Some(ps) = &cur.provider_session_id {
-            runtime_session_status_in(c, ps, SessionStatus::Open, SessionStatus::Idle, at)?;
+            runtime_session_release_in(c, ps, at)?;
         }
     }
     sync_artifacts(c, p, t, &cur, fresh && p.is_some(), at)
@@ -1392,7 +1392,7 @@ fn retire_task(c: &Connection, id: &str, at: i64) -> StoreResult<()> {
             let end = at.max(cur.started_at.unwrap_or(cur.created_at)).max(cur.created_at);
             runtime_attempt_stop_in(c, &cur.id, end).map_err(|e| mapping(format!("{id}: el Attempt {} no se puede parar ({e})", cur.id)))?;
             if let Some(ps) = &cur.provider_session_id {
-                runtime_session_status_in(c, ps, SessionStatus::Open, SessionStatus::Idle, at)?;
+                runtime_session_release_in(c, ps, at)?;
             }
         }
     }
