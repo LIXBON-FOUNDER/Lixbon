@@ -460,3 +460,14 @@ fn una_sesion_que_se_usa_no_caduca_aunque_pase_el_tiempo_desde_que_se_abrio() {
     w.core.remote_age_session(&c.session_id, SESSION_IDLE_MS - 1_000);
     assert!(c.llama(&mut relay, "u-2", "status", json!({})).is_ok(), "usar la sesión renueva su plazo");
 }
+
+#[test]
+fn el_barrido_periodico_del_core_retira_las_sesiones_remotas_caducadas() {
+    let w = world("claude", None);
+    let mut relay = Relay::new(&w.core);
+    let c = Cliente::conecta(&mut relay);
+    w.core.remote_age_session(&c.session_id, SESSION_IDLE_MS + 1_000);
+    // Nadie llama ni abre otra sesión: solo el barrido periódico puede retirarla (sin él la memoria de una sesión muerta se acumularía).
+    w.core.periodic_sweep();
+    assert_eq!(w.core.remote_session_count(), 0);
+}
