@@ -10,15 +10,16 @@ import { RightDock } from '../../layout/RightDock';
 import { Popover } from '../../components/Popover';
 import { useWorkbenchStore } from '../../store/workbenchStore';
 import { usePreviewStore } from './previewStore';
-import { PreviewSidebar } from './PreviewSidebar';
+import { PreviewSidebar, NewMenu } from './PreviewSidebar';
 import { PreviewWorkspace } from './PreviewWorkspace';
 import { PreviewAttention } from './PreviewAttention';
-import { PreviewCompare } from './PreviewCompare';
+import { PreviewCompare, CompareFiles } from './PreviewCompare';
 import { PreviewProofPack } from './PreviewProofPack';
 import { PreviewReview } from './PreviewReview';
-import { PreviewMap, PreviewHosts, PreviewUsage } from './PreviewFleet';
+import { PreviewMap, PreviewHosts, PreviewUsage, HostSidebar } from './PreviewFleet';
 import { PreviewInspector } from './PreviewInspector';
 import { PreviewOverlays } from './PreviewOverlays';
+import { IntegrationsSidebar, IntegrationsView } from './IntegrationsView';
 import { AdeSourceSwitch } from './AdeSourceSwitch';
 import { I, Tabs } from './PreviewUi';
 import '../AdeShell.css';
@@ -59,6 +60,7 @@ function SimulateMenu() {
 }
 
 function Canvas({ view }) {
+  if (view === 'integrations') return <IntegrationsView />;
   if (view === 'attention') return <PreviewAttention />;
   if (view === 'compare') return <PreviewCompare />;
   if (view === 'proof') return <PreviewProofPack />;
@@ -80,15 +82,16 @@ export function PreviewShell({ leftOpen = true, rightOpen = true, drawerOpen, on
   const sub = view === 'proof' || view === 'review' || view === 'compare';
   return (
     <div className="wb wb--orch ade__layout pv-shell" data-testid="ade-preview">
-      <AdeActivityRail view={view} onSelect={setView} hostsAvailable needsAttention={attention > 0} />
+      <AdeActivityRail view={view} onSelect={setView} hostsAvailable needsAttention={attention > 0} onIntegrations={() => setView('integrations')} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead">
-            <span className="panelhead__title">Trabajo</span>
+            <span className="panelhead__title">{view === 'hosts' ? 'Hosts' : view === 'compare' ? 'Cambios' : view === 'integrations' ? 'Integraciones' : 'Trabajo'}</span>
             <span className="panelhead__fill" />
-            <AdeSourceSwitch />
+            {view === 'workspace' && <NewMenu />}
           </div>
-          <PreviewSidebar />
+          {view === 'hosts' ? <HostSidebar /> : view === 'compare' ? <CompareFiles /> : view === 'integrations' ? <IntegrationsSidebar /> : <PreviewSidebar />}
+          <div className="pv-source-footer"><AdeSourceSwitch /></div>
         </Panel>
         <Gutter sizeKey="side" />
       </Collapse>

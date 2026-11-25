@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Modal } from '../../components/Modal';
 import { providerName } from '../../orch/agent/agentIdentity';
-import { usePreviewStore, attemptById, taskOf, attemptsOfTask } from './previewStore';
+import { usePreviewStore, attemptById, taskOf } from './previewStore';
 import { PROJECTS, PROVIDERS, USAGE, POLICIES } from './previewData';
 import { I } from './PreviewUi';
 import { agentName, hostOf, MODES, attemptName } from './previewVocab';
@@ -37,24 +37,21 @@ function Fork({ ov, onClose }) {
   const [policy, setPolicy] = useState(src.policy);
   const [text, setText] = useState(ov.text || '');
   const branch = src.readonly ? null : `${task.branchBase}-${prov}`;
-  const next = String.fromCharCode(65 + attemptsOfTask(s, task.id).length);
   const setProvider = (p) => { setProv(p); setModel(PROVIDERS[p].models[0]); };
   return (
-    <Modal title="Nuevo Intento en paralelo" subtitle={`${task.title} · el ${attemptName(src)} sigue en marcha`} onClose={onClose} size="sm">
-      <p className="pv-modal__p">Arranca desde el mismo <b>ContextPackage {src.ctx}</b>, con su propio worktree.</p>
+    <Modal title="Nuevo intento" subtitle={task.title} onClose={onClose} size="sm" footer={<Actions><button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button><button type="button" className="btn btn--accent" onClick={() => s.fork({ attemptId: src.id, provider: prov, model, host, policy, text: text.trim() || undefined })}>Lanzar intento</button></Actions>}>
+      <div className="pv-launch">
+      <Field label="Qué tiene que conseguir" wide><textarea className="pv-textarea" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={task.objective} autoFocus /></Field>
       <div className="pv-grid2">
         <Field label="Agente"><select className="pv-select" value={prov} onChange={(e) => setProvider(e.target.value)}>{Object.keys(PROVIDERS).map((p) => <option key={p} value={p}>{providerName(p)}</option>)}</select></Field>
         <Field label="Modelo"><select className="pv-select" value={model} onChange={(e) => setModel(e.target.value)}>{PROVIDERS[prov].models.map((m) => <option key={m}>{m}</option>)}</select></Field>
-        <Field label="Ejecutar en"><select className="pv-select" value={host} onChange={(e) => setHost(e.target.value)}>{s.hosts.map((h) => <option key={h.id} value={h.id} disabled={h.status === 'offline'}>{h.name}{h.status === 'offline' ? ' · desconectado' : ''}</option>)}</select></Field>
-        <Field label="Perfil de autonomía"><select className="pv-select" value={policy} onChange={(e) => setPolicy(e.target.value)}>{Object.entries(POLICIES).map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select></Field>
+        <Field label="Host"><select className="pv-select" value={host} onChange={(e) => setHost(e.target.value)}>{s.hosts.map((h) => <option key={h.id} value={h.id} disabled={h.status === 'offline'}>{h.name}{h.status === 'offline' ? ' · desconectado' : ''}</option>)}</select></Field>
+        <Field label="Autonomía"><select className="pv-select" value={policy} onChange={(e) => setPolicy(e.target.value)}>{Object.entries(POLICIES).map(([id, l]) => <option key={id} value={id}>{l}</option>)}</select></Field>
       </div>
       <QuotaWarning provider={prov} onSwitch={() => setProvider('codex')} />
-      <Field label="Instrucción (opcional)" wide><textarea className="pv-textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder="El mismo objetivo de la Task, salvo que añadas un matiz…" /></Field>
+      <div className="pv-launch__context"><span>Contexto</span><div className="pv-wrap"><span className="pv-tag">Objetivo de la tarea</span><span className="pv-tag">Paquete {src.ctx}</span></div></div>
       <p className="pv-muted"><I n="branch" size={12} /> Worktree nuevo: <span className="mono">{branch || 'ninguno (solo lectura)'}</span> en {hostOf(host).name}. El {attemptName(src)} no se toca.</p>
-      <Actions>
-        <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
-        <button type="button" className="btn btn--accent" onClick={() => s.fork({ attemptId: src.id, provider: prov, model, host, policy, text: text.trim() || undefined })}>Arrancar el Intento {next}</button>
-      </Actions>
+      </div>
     </Modal>
   );
 }

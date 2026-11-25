@@ -53,7 +53,7 @@ function Problems() {
             <div className="prob__filehead"><span className="mono">{rel}</span><span className="count">{list.length}</span></div>
             {list.map((p, i) => (
               <div key={i} className="prob__row">
-                <StatusIcon kind={p.severity === 'error' ? 'error' : 'permission'} size={14} />
+                <StatusIcon kind={p.severity === 'error' ? 'code-error' : 'permission'} size={14} />
                 <button className="prob__location" onClick={() => useFileViewStore.getState().revealLine(p.path, p.line)}>
                 <span className="prob__msg">{p.message}</span>
                 {p.code && <span className="mono prob__code">{p.code}</span>}

@@ -3,7 +3,7 @@ html[data-ui='ide'] { --primary: #FFFFFF; --on-primary: #111111; --radius: 6px; 
 html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFFFFF; }
 [data-ui='ide'] .btn--primary, [data-ui='ide'] .btn--accent { background: var(--primary); color: var(--on-primary); }
 [data-ui='ide'] .wb { gap: 0; padding: 2px 8px 2px 0; }
-[data-ui='ide'] .panel { border-radius: 12px; background: var(--surface-1); }
+[data-ui='ide'] .panel, [data-ui='ide'] .wbpanel { border-radius: 12px; background: var(--surface-1); }
 [data-ui='ide'] .rail { width: 60px; padding-top: 8px; gap: 8px; }
 [data-ui='ide'] .rail__btn { width: 36px; height: 36px; }
 [data-ui='ide'] .panelhead { height: 48px; min-height: 48px; }
@@ -56,6 +56,9 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 .modelmenu__levels button { flex: 1; min-height: 28px; color: var(--ink-muted); font-size: 13px; border-radius: 4px; }
 .modelmenu__levels button.is-active { background: var(--surface-5); color: var(--ink); }
 .modelmenu__hint { margin: 8px 14px 14px; line-height: 1.5; }
+.modelmenu__effort { padding: 0 8px; }
+.modelmenu__effort > input { width: calc(100% - 16px); margin: 8px; accent-color: var(--ink-soft); }
+.modelmenu__effort .modelmenu__levels { margin: 0; }
 .modelmenu__settings { display: flex; width: 100%; justify-content: space-between; padding: 10px 14px; font-size: 13px; }
 @keyframes modelmenu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .modelmenu { animation: none; } }
@@ -67,7 +70,7 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 /* Editor, Git y búsqueda: las mismas líneas de caja, texto e icono del IDE. */
 [data-ui='ide'] .filetree { --tree-step: 21px; }
 [data-ui='ide'] .filetree__toolbar { min-height: 48px; padding: 0 12px 0 20px; }
-[data-ui='ide'] .filetree__root-name { font-size: 14px; font-weight: 500; }
+[data-ui='ide'] .filetree__root-name { font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: .1px; }
 [data-ui='ide'] .filetree__body { padding: 6px 8px; }
 [data-ui='ide'] .filetree__node { height: 34px; gap: 10px; font-size: 14px; border-radius: 6px; }
 [data-ui='ide'] .filetree__node.is-active { background: var(--surface-3); color: var(--ink); }
@@ -87,8 +90,17 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 [data-ui='ide'] .scm2__gen { font-size: 13px; gap: 8px; text-align: left; }
 [data-ui='ide'] .scm2__commitrow { flex-wrap: wrap; gap: 8px; }
 [data-ui='ide'] .scm2__commitrow > .btn--primary { width: 100%; justify-content: center; font-size: 13px; }
-[data-ui='ide'] .scm2__grouphead { min-height: 36px; font-size: 13px; padding-left: 20px; font-weight: 400; }
+[data-ui='ide'] .scm2__grouphead { min-height: 36px; font-size: 13px; padding-left: 20px; font-weight: 400; text-transform: none; letter-spacing: .1px; }
 [data-ui='ide'] .scm2__file { min-height: 34px; margin: 0 8px; }
+[data-ui='ide'] .gitdock { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+[data-ui='ide'] .wb--git .gitmain > .panelhead { height: auto; min-height: 48px; padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
+[data-ui='ide'] .wb--git .gitmain > .panelhead .panelhead__meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+[data-ui='ide'] .gitdock__pr { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+[data-ui='ide'] .gitdock__pr .ghlayout { flex-direction: column; min-width: 0; flex: 1; }
+[data-ui='ide'] .gitdock__pr .ghlist { flex: none; width: 100%; max-height: 112px; overflow-y: auto; }
+[data-ui='ide'] .gitdock__pr .ghd { display: flex; flex-direction: column; padding: 0 20px 20px; }
+[data-ui='ide'] .gitdock__pr .ghd__main, [data-ui='ide'] .gitdock__pr .ghside { width: 100%; min-width: 0; }
+[data-ui='ide'] .gitdock__pr .ghd__title { font-size: 16px; font-weight: 500; }
 [data-ui='ide'] .quickopen__overlay, [data-ui='ide'] .quickopen, [data-ui='ide'] .tsearch__results { animation: none; transition: none; }
 [data-ui='ide'] .quickopen { width: min(640px, calc(100vw - 48px)); padding: 8px; border-radius: 14px; }
 [data-ui='ide'] .quickopen__box { min-height: 46px; padding: 0 12px; }
@@ -107,4 +119,4 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 [data-ui='ide'] .ssec--card { padding: 0; background: transparent; }
 [data-ui='ide'] .allow__chip { padding: 6px 10px; border-radius: 6px; font-weight: 400; }
 @media (max-width: 760px) { [data-ui='ide'] .prob__row { flex-wrap: wrap; } [data-ui='ide'] .sm__body { padding: 16px; } }
-@media (min-width: 1180px) { [data-ui='ide'] .modeswitch__label { display: inline; } }
+@media (min-width: 1180px) { [data-ui='ide'] .modeswitch { --tab-w: 82px; } [data-ui='ide'] .modeswitch__label { display: inline; } }

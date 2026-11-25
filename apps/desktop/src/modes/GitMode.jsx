@@ -26,9 +26,10 @@ export function GitMode() {
   const diffData = useAppStore((s) => s.diffData);
   const workspaceRoot = useAppStore((s) => s.workspaceRoot);
   const { stage, unstage, discard, fileDiff } = useGitStore();
-  const [tab, setTab] = useState(diffData ? 'diff' : 'pr');
+  const [tab, setTab] = useState('diff');
   const [viewMode, setViewMode] = useState(readMode);
   const [runId, setRunId] = useState(null);
+  const [rightTab, setRightTab] = useState('pr');
   const meta = diffData?.meta;
 
   useEffect(() => { if (diffData) setTab('diff'); }, [diffData]);
@@ -96,7 +97,10 @@ export function GitMode() {
         </div>
       </Panel>
       <RightDock open={rightOpen}>
-        <AgentPanel onClose={toggleAgent} />
+        <div className="gitdock">
+          <div className="panelhead"><Segmented size="sm" width={112} value={rightTab} onChange={setRightTab} options={[{value: 'pr', label: 'Pull request'}, {value: 'agent', label: 'Agente'}]} /></div>
+          {rightTab === 'pr' ? <div className="gitdock__pr"><GitHubView onOpenRun={(id) => { setRunId(id); setTab('actions'); }} /></div> : <AgentPanel onClose={toggleAgent} />}
+        </div>
       </RightDock>
     </div>
   );

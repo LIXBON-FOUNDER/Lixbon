@@ -13,14 +13,13 @@ import { listFiles } from '../lib/tauri';
 import { runCommand } from '../lib/commands';
 import { useAnchoredAbove } from '../lib/useAnchoredPopover';
 import { ModelPicker } from './ModelPicker';
-import { Select } from '../components/Select';
+import { ClaudeModelPicker } from './ClaudeModelPicker';
 import { CLAUDE_MODES, claudeModelOptions } from '../lib/claudeCode';
 import { SLASH_COMMANDS, GROUP_LABELS, CLAUDE_ALIASES, claudeSlashCommands } from './slashCommands';
 import { prepareOrchestrate } from '../store/orchStore';
 import { useDraftStore, EMPTY_DRAFT, setDraftText, setDraftImages, setDraftMentions } from '../store/draftStore';
 import { Switch } from '../components/Switch';
 import { ClaudeMark } from '../components/Logo';
-import { EffortSlider } from './EffortSlider';
 import { ComposerQuota } from './ComposerQuota';
 import { ProgressRing } from '../components/Ring';
 import {
@@ -509,11 +508,8 @@ export function ChatInputBar() {
         </div>
 
         {isClaude
-          ? <Select up className="modelpicker modelpicker--claude" value={ccModel} onChange={setCcModel} options={modelOptions} title="Modelo de Claude Code" />
+          ? <ClaudeModelPicker value={ccModel} onChange={setCcModel} options={modelOptions} levels={effortLevels} effort={ccEffort} onEffort={setCcEffort} />
           : <ModelPicker />}
-        {isClaude && effortLevels.length > 0 && (
-          <EffortSlider levels={effortLevels} value={ccEffort} onChange={setCcEffort} />
-        )}
 
         <div className="chat-inputbar__fill" />
 

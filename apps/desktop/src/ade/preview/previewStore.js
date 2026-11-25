@@ -45,6 +45,7 @@ export const usePreviewStore = create((set, get) => ({
   ...initial(),
 
   setView: (view) => set({ view }),
+  inspectHost: (hostId) => set({ inspectedHostId: hostId }),
   setOverlay: (overlay) => set({ overlay }),
   toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
   toggleExpanded: (id) => set((s) => ({ expanded: { ...s.expanded, [id]: !s.expanded[id] } })),

@@ -104,7 +104,7 @@ function TaskBlock({ task, project }) {
   );
 }
 
-function NewMenu() {
+export function NewMenu() {
   const s = usePreviewStore();
   const ref = useRef(null);
   const [open, setOpen] = useState(false);
@@ -154,7 +154,6 @@ export function PreviewSidebar() {
           <input value={s.filter.q} onChange={(e) => s.setFilter({ q: e.target.value })} placeholder="Buscar trabajo…" aria-label="Buscar trabajo" />
         </label>
         <button type="button" className={`ic${chips.length || s.filter.hostId ? ' is-on' : ''}`} onClick={() => setFilterOpen((v) => !v)} aria-label="Filtros" aria-expanded={filterOpen} title="Filtros"><I n="sliders" size={14} /></button>
-        <NewMenu />
       </div>
       {filterOpen && (
         <div className="pv-nav__filter">
