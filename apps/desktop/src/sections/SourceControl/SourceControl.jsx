@@ -1,3 +1,4 @@
+import { FileIcon } from '@lixbon/icons/file-icons';
 // SourceControl.jsx — panel izquierdo del modo Git: rama, mensaje de commit
 // (con propuesta del modelo), cambios preparados y sin preparar, historial y
 // el estado del pull request de la rama.
@@ -27,7 +28,7 @@ function FileRow({ c, active, stat, onOpen, onStage, onDiscard }) {
   return (
     <div className={`scm2__file ${active ? 'is-active' : ''}`}>
       <button className="scm2__fileopen" onClick={onOpen} title={c.path}>
-        <Badge c={c} />
+        <FileIcon nombre={c.path} size={16} /><Badge c={c} />
         <span className="scm2__name">{fileName(c.path)}</span>
         <span className="mono scm2__dir">{dirName(c.path)}</span>
       </button>
@@ -213,11 +214,11 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
             onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey && canCommit) run(commit); }}
           />
           <button className="lk scm2__gen" onClick={() => run(generateMessage)} disabled={generating || changes.length === 0}>
-            {generating ? <SpinRing size={11} /> : <LogoMark size={11} />} Generar mensaje
+            {generating ? <SpinRing size={14} /> : <LogoMark size={14} />} Escribir el mensaje con el agente
           </button>
         </div>
         <div className="scm2__commitrow">
-          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Commit{staged.length ? ` (${staged.length})` : ''}</button>
+          <button className="btn btn--primary" onClick={() => run(commit)} disabled={!canCommit} title="Ctrl ↵">Hacer commit en {branch || 'la rama'}</button>
           <button className="btn btn--ghost" onClick={() => run(commitAndPush)} disabled={!canCommit || !hasRemote}>Commit y push</button>
           {netLabel && <span className="scm2__muted">{netLabel}…</span>}
         </div>
@@ -248,7 +249,7 @@ export function SourceControl({ selected, onSelect, onOpenPr }) {
         )}
         <section className="scm2__group">
           <div className="scm2__grouphead">
-            <span>Cambios</span><span className="count">{unstaged.length}</span>
+            <span>Sin preparar</span><span className="count">{unstaged.length}</span>
             <div className="panelhead__fill" />
             {unstaged.length > 0 && <button className="lk" onClick={stageAll}>Preparar todos</button>}
           </div>

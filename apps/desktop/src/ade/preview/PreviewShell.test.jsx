@@ -28,8 +28,8 @@ describe('Vista previa del ADE', () => {
 
   it('cuenta Attention en un solo sitio del navegador y lo abre', () => {
     mount();
-    const need = screen.getByRole('button', { name: /Esperan tu decisión/ });
-    expect(within(need).getByText('9')).toBeTruthy();
+    const need = screen.getByRole('button', { name: /9 esperan tu decisión/ });
+    expect(within(need).getByText('9 esperan tu decisión')).toBeTruthy();
     fireEvent.click(need);
     expect(tab('Attention').getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('heading', { name: 'Attention' })).toBeTruthy();
