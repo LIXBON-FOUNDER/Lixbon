@@ -1,5 +1,7 @@
+import { TEXT } from '../../theme';
+import { TextInput } from '../../components/Typography';
 import React, { useEffect, useRef, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import {  View } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import { useDialogs } from '../../components/dialogs';
 import { Eyebrow, PillButton, useColors } from '../../components/ui';
@@ -75,7 +77,7 @@ export default function AttemptControls({ obs, attemptId }) {
     {data?.stop_control?.reason && data.stop_control.reason !== data.queue_control?.reason && <Body muted>{messages[data.stop_control.reason] || 'Stop no está disponible en este estado.'}</Body>}
     <TextInput accessibilityLabel="Instrucción para la cola" multiline maxLength={4000} editable={!busy && !pending}
       value={pending?.body ?? draft} onChangeText={setDraft} placeholder="Instrucción para el siguiente turno"
-      placeholderTextColor={colors.inkMuted} style={{ minHeight: 88, padding: 12, fontSize: 16, textAlignVertical: 'top', color: colors.ink, backgroundColor: colors.surface2 }} />
+      placeholderTextColor={colors.inkMuted} style={{ minHeight: 88, padding: 12, fontSize: TEXT.body, textAlignVertical: 'top', color: colors.ink, backgroundColor: colors.surface2 }} />
     <PillButton label={pending ? 'Reintentar misma solicitud' : 'Encolar instrucción'} style={{ minHeight: 48 }} disabled={!queueAllowed || !(pending?.body ?? draft).trim()}
       onPress={() => perform({ kind: 'queue', request_id: pending?.request_id || Crypto.randomUUID(), body: pending?.body ?? draft.trim() })} />
     {pending && <Notice>Solicitud sin confirmar. Un reintento usa el mismo identificador y texto. Reconectar solo consulta su estado.</Notice>}

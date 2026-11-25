@@ -4,12 +4,12 @@
 // relé (`core_attention`). Categoría y severidad son las del Core; abrir una fila no la resuelve ni la marca.
 
 export const CATEGORY = Object.freeze({
-  question: { label: 'Pregunta', icon: 'message' },
-  approval: { label: 'Aprobación', icon: 'key' },
-  review_ready: { label: 'Lista para revisar', icon: 'eye' },
+  question: { label: 'Pregunta', icon: 'question' },
+  approval: { label: 'Aprobación', icon: 'permission' },
+  review_ready: { label: 'Lista para revisar', icon: 'review' },
   conflict: { label: 'Conflicto', icon: 'git' },
-  failed: { label: 'Fallo', icon: 'warning' },
-  environment_blocked: { label: 'Entorno bloqueado', icon: 'console' },
+  failed: { label: 'Fallo', icon: 'failed' },
+  environment_blocked: { label: 'Entorno bloqueado', icon: 'network-blocked' },
   risk: { label: 'Riesgo', icon: 'flash' },
 });
 export const CATEGORIES = Object.freeze(Object.keys(CATEGORY));

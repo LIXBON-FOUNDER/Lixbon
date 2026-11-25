@@ -9,16 +9,17 @@ export const RADIUS_SM = 6;
 export const RADIUS_PILL = 6;
 export const RADIUS_BOX = 8;
 
-export const MOTION = { sheet: 560, drawer: 600, fade: 480 };
+export const MOTION = { sheet: 380, sheetClose: 220, drawer: 380, fade: 180, menu: 180, menuClose: 120, segment: 200, press: 0.97, spinner: 800 };
+export const CURVES = { out: [0.23, 1, 0.32, 1], screen: [0.77, 0, 0.175, 1], sheet: [0.32, 0.72, 0, 1] };
 
 // En Android los TTF sueltos no responden a fontWeight: cada peso es una familia.
 export const FONTS = {
-  brand: 'Fraunces-LightItalic',
-  serif: 'SourceSerif4',
-  ui: 'Geist',
-  uiMedium: 'Geist-Medium',
-  uiSemiBold: 'Geist-SemiBold',
-  uiBold: 'Geist-SemiBold',
+  brand: 'LixbonBrandSerif',
+  serif: 'LixbonBrandSerif',
+  ui: 'LixbonBrandSans',
+  uiMedium: 'LixbonBrandSans-Medium',
+  uiSemiBold: 'LixbonBrandSans-Medium',
+  uiBold: 'LixbonBrandSans-Medium',
   mono: 'GeistMono',
   monoMedium: 'GeistMono-Medium',
 };
@@ -46,12 +47,12 @@ const DARK_BASE = {
   raised: '#262626',
   onRaised: '#F2F2F0',
   ink: '#F2F2F0',
-  inkBody: '#D6D6D3',
-  ink70: '#B0B0AD',
-  inkSoft: '#B0B0AD',
-  inkMuted: '#8A8A86',
-  inkLabel: '#8A8A86',
-  inkFaint: '#5E5E5C',
+  inkBody: '#EDEDED',
+  ink70: '#D4D4D4',
+  inkSoft: '#D4D4D4',
+  inkMuted: '#A3A3A3',
+  inkLabel: '#A3A3A3',
+  inkFaint: '#9A9A9A',
   inkRgb: '242,242,240',
   primary: '#F2F2F0',
   onPrimary: '#0E0E0E',
@@ -84,9 +85,9 @@ const LIGHT_BASE = {
   inkBody: '#2E2E2B',
   ink70: '#4E4E49',
   inkSoft: '#4E4E49',
-  inkMuted: '#76766F',
-  inkLabel: '#76766F',
-  inkFaint: '#A3A39B',
+  inkMuted: '#5F5F5B',
+  inkLabel: '#5F5F5B',
+  inkFaint: '#666662',
   inkRgb: '25,25,23',
   primary: '#191917',
   onPrimary: '#F6F5F1',
@@ -109,6 +110,9 @@ export function buildTheme(mode, accentId) {
   const [a, aDeep, aRgb] = base.dark ? accent.dark : accent.light;
   return {
     ...base,
+    dangerAction: '#CF3A20',
+    onDanger: '#FFFFFF',
+    dangerInk: base.dark ? '#FF9B85' : '#A52B16',
     accent: a,
     accentDeep: aDeep,
     accentRgb: aRgb,
@@ -128,3 +132,12 @@ export function buildTheme(mode, accentId) {
 
 export const DARK = buildTheme('dark', 'lima');
 export const LIGHT = buildTheme('light', 'lima');
+
+export const TEXT = Object.freeze({ meta: 13, secondary: 14, body: 16, row: 17, title: 20, greeting: 26, heading: 28, brand: 30, empty: 22 });
+
+export const TEXTO = 20;
+export const ICONO_CENTRO = 32;
+export const ETIQUETA = 56;
+export const CAJA = 8;
+export const RELLENO_CAJA = TEXTO - CAJA;
+export const LINEAS = Object.freeze({ texto: TEXTO, iconoCentro: ICONO_CENTRO, etiqueta: ETIQUETA, caja: CAJA, relleno: TEXTO - CAJA, icono: 24, espacioIcono: ETIQUETA - TEXTO - 24, menuCaja: 6, menuIcono: 18, menuTexto: 50, tacto: 44 });

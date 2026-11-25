@@ -1,3 +1,6 @@
+import { Pressable } from '../../components/MotionPressable';
+import { TEXT } from '../../theme';
+import { Text } from '../../components/Typography';
 import OpenOnDesktop from './OpenOnDesktop';
 // AttentionScreen.js — bandeja de Attention de Supervisar.
 //
@@ -5,7 +8,7 @@ import OpenOnDesktop from './OpenOnDesktop';
 // icono por categoría, severidad, destino y edad. Las Attention de una Task abren su detalle (LXO-110); abrir
 // no cambia su estado. Las preguntas de un Attempt pueden abrir su pantalla de respuesta (LXO-164).
 import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import {   View } from 'react-native';
 
 import Icon from '../../components/Icon';
 import { useDialogs } from '../../components/dialogs';
@@ -47,7 +50,7 @@ function FilterChip({ label, value, onPress }) {
         backgroundColor: pressed ? c.pressed : on ? c.surface3 : c.surface2,
       })}
     >
-      <Text style={{ fontFamily: on ? FONTS.uiMedium : FONTS.ui, fontSize: 13, color: on ? c.ink : c.inkMuted }}>{on ? value : label}</Text>
+      <Text style={{ fontFamily: on ? FONTS.uiMedium : FONTS.ui, fontSize: TEXT.meta, color: on ? c.ink : c.inkMuted }}>{on ? value : label}</Text>
       <Icon name="chevron-down" size={12} color={c.inkMuted} />
     </Pressable>
   );
@@ -79,8 +82,8 @@ export function AttentionRow({ item, names, now, onOpen, inert = false, canAnswe
     >
       <Icon name={cat.icon} size={18} color={sev.tone === 'error' ? c.danger : sev.tone === 'warn' ? c.warn : c.inkMuted} />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.ink }}>{cat.label}</Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{cat.label}</Text>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {`${target.label} · ${projectLabel(item.project_id, names)} · ${ageText(item.created_at, now)}`}
         </Text>
       </View>

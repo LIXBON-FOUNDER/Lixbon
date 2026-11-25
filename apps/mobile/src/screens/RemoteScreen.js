@@ -1,3 +1,9 @@
+import { MOTION } from '../theme';
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
+import { FileIcon } from '@lixbon/icons/file-icons';
+import { TEXT } from '../theme';
+import { Text, TextInput } from '../components/Typography';
 // RemoteScreen.js — sección Remoto: sesiones /remote del IDE o del CLI, sea
 // cual sea su agente (Lixbon o Claude Code). Sin sesión abierta muestra la
 // lista; con una, el hilo por turnos del lienzo «Chat remoto»: lo que el
@@ -6,7 +12,7 @@
 // preguntas y el compact van encima del compositor. Todo se ejecuta en la
 // máquina host; esto es un mando.
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, AppState, BackHandler, Easing, FlatList, Keyboard, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Animated, AppState, BackHandler, Easing, FlatList, Keyboard, Linking,  RefreshControl, ScrollView,   View } from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
@@ -111,7 +117,7 @@ function RemoteListView({ remote, onOpen, onMenu }) {
       >
         {!!remote.error && (
           <View style={{ padding: 14, marginBottom: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>{remote.error}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.danger }}>{remote.error}</Text>
           </View>
         )}
         {remote.loading && remote.sessions.length === 0 ? (
@@ -132,16 +138,16 @@ function EmptySessions({ base }) {
     <FadeUp style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingBottom: 60, gap: 14 }}>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {['lixbon', 'claude'].map((agent) => (
-          <View key={agent} style={{ width: 44, height: 44, borderRadius: RADIUS, backgroundColor: agentStyle(agent, c).soft, alignItems: 'center', justifyContent: 'center' }}>
+          <View key={agent} style={{ width: 44, height: 44, borderRadius: RADIUS, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}>
             <AgentMark agent={agent} size={agent === 'claude' ? 22 : 26} />
           </View>
         ))}
       </View>
-      <Text style={{ fontFamily: FONTS.serif, fontSize: 26, lineHeight: 31, color: c.ink, textAlign: 'center' }}>Sin sesiones remotas</Text>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
+      <Text style={{ fontFamily: FONTS.serif, fontSize: TEXT.greeting, lineHeight: 31, color: c.ink, textAlign: 'center' }}>Sin sesiones remotas</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
         Escribe <Text style={{ fontFamily: FONTS.mono, color: c.inkBody }}>/remote</Text> en el IDE o en el CLI, con Lixbon o con Claude Code, y la sesión aparece aquí al instante.
       </Text>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkFaint }}>Misma cuenta · {base.replace(/^https?:\/\//, '')}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>Misma cuenta · {base.replace(/^https?:\/\//, '')}</Text>
     </FadeUp>
   );
 }
@@ -582,7 +588,7 @@ function RemoteSessionView({ session, onBack, onUsage }) {
               inverted
               data={blocks}
               keyExtractor={(b) => b.key}
-              contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 }}
+              contentContainerStyle={{ paddingHorizontal: LINEAS.texto, paddingTop: 16, paddingBottom: 12 }}
               keyboardShouldPersistTaps="handled"
               onScroll={onListScroll}
               scrollEventThrottle={100}
@@ -732,13 +738,13 @@ function SessionHeader({ session, state, link, agent, usage, question, compactin
         <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
       <View style={{ flex: 1, minWidth: 0, alignItems: 'center', gap: 2 }}>
-        <Text numberOfLines={1} style={{ maxWidth: '100%', fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>
+        <Text numberOfLines={1} style={{ maxWidth: '100%', fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>
           {meta.title || session.title || 'Sesión remota'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {!state.ended && !slow && state.hostConnected &&
             (breathing ? <LiveDot size={6} color={a.dot} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: a.dot }} />)}
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
             {status}
           </Text>
         </View>
@@ -771,14 +777,14 @@ function SessionEmpty({ state, agent }) {
   const c = useColors();
   const a = agentStyle(agent, c);
   if (!state.hostConnected && !state.ended) {
-    return <SkeletonLines widths={['84%', '62%', '74%']} height={13} style={{ paddingHorizontal: 20, paddingTop: 16 }} />;
+    return <SkeletonLines widths={['84%', '62%', '74%']} height={13} style={{ paddingHorizontal: LINEAS.texto, paddingTop: 16 }} />;
   }
   return (
     <FadeUp style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, gap: 14 }}>
-      <View style={{ width: 44, height: 44, borderRadius: RADIUS, backgroundColor: a.soft, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 44, height: 44, borderRadius: RADIUS, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}>
         <AgentMark agent={agent} size={agent === 'claude' ? 22 : 26} />
       </View>
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>
         {`Conectado con ${a.label}. Pídele algo o toca + para adjuntar y ver sus comandos.`}
       </Text>
     </FadeUp>
@@ -842,7 +848,7 @@ function ErrorBox({ text, style }) {
   const c = useColors();
   return (
     <View style={[{ padding: 12, borderRadius: RADIUS, backgroundColor: c.dangerSoft }, style]}>
-      <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.danger }}>
+      <Text selectable style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.danger }}>
         {text}
       </Text>
     </View>
@@ -976,7 +982,7 @@ function ThinkLive({ label, secs, text, compact = false }) {
           crece mientras el modelo piensa. Entero queda en «Pensó». */}
       {!!tail.trim() && (
         <View style={{ maxHeight: THINK_LINES * THINK_LH, overflow: 'hidden', justifyContent: 'flex-end' }}>
-          <Text style={{ flexShrink: 0, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: THINK_LH, color: c.inkMuted }}>{tail.trim()}</Text>
+          <Text style={{ flexShrink: 0, fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: THINK_LH, color: c.inkMuted }}>{tail.trim()}</Text>
         </View>
       )}
     </FadeUp>
@@ -996,12 +1002,12 @@ function ThoughtRow({ item, open, onToggle }) {
         style={{ minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10 }}
       >
         <Icon name="bulb" size={15} color={c.inkMuted} strokeWidth={1.7} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>{secs ? `Pensó ${secs} s` : 'Pensó'}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>{secs ? `Pensó ${secs} s` : 'Pensó'}</Text>
         <View style={{ flex: 1 }} />
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />
       </Pressable>
       {open && (
-        <Text selectable style={{ paddingLeft: 25, paddingBottom: 8, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkMuted }}>
+        <Text selectable style={{ paddingLeft: 25, paddingBottom: 8, fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 20, color: c.inkMuted }}>
           {item.text}
         </Text>
       )}
@@ -1029,7 +1035,7 @@ function SummaryRow({ label, interrupted, adds, dels, open, onToggle }) {
       })}
     >
       <Icon name={interrupted ? 'stop' : 'tick'} size={15} color={interrupted ? c.danger : c.good} strokeWidth={1.8} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkBody }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>{label}</Text>
       {(adds > 0 || dels > 0) && <LineCounts adds={adds} dels={dels} />}
       <View style={{ flex: 1 }} />
       <Icon name={open ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />
@@ -1040,7 +1046,7 @@ function SummaryRow({ label, interrupted, adds, dels, open, onToggle }) {
 function ProseLine({ text }) {
   const c = useColors();
   return (
-    <Text selectable style={{ paddingVertical: 4, fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkBody }}>
+    <Text selectable style={{ paddingVertical: 4, fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 20, color: c.inkBody }}>
       {text.trim()}
     </Text>
   );
@@ -1114,10 +1120,10 @@ function ToolRow({ it, waitingTool, open, onToggle }) {
         <Icon name={icon} size={15} color={tone} strokeWidth={1.7} />
         {it.running && !st.waiting ? (
           <View style={{ width: 60 }}>
-            <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
+            <ShimmerText text={verb} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary }} />
           </View>
         ) : (
-          <Text numberOfLines={1} style={{ width: 60, fontFamily: FONTS.ui, fontSize: 13.5, color: tone }}>
+          <Text numberOfLines={1} style={{ width: 60, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: tone }}>
             {verb}
           </Text>
         )}
@@ -1125,7 +1131,7 @@ function ToolRow({ it, waitingTool, open, onToggle }) {
           {target}
         </Text>
         {hasDiff && !st.denied && <LineCounts adds={it.adds} dels={it.dels} />}
-        {!!meta && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: c.inkFaint }}>{meta}</Text>}
+        {!!meta && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>{meta}</Text>}
         {expandable && <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} color={c.inkFaint} strokeWidth={2} />}
       </Pressable>
 
@@ -1191,15 +1197,15 @@ function ActionsRow({ items, running, waitingTool, onPress }) {
         </View>
         {running && !now.st.waiting ? (
           <View style={{ flex: 1, minWidth: 0 }}>
-            <ShimmerText text={label} style={{ fontFamily: FONTS.ui, fontSize: 13.5 }} />
+            <ShimmerText text={label} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary }} />
           </View>
         ) : single ? (
-          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: 13.5, color: one.st.bad ? c.danger : c.inkMuted }}>
+          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: one.st.bad ? c.danger : c.inkMuted }}>
             {`${one.verb} `}
             <Text style={{ fontFamily: one.mono ? FONTS.mono : FONTS.ui, fontSize: one.mono ? 12.5 : 13.5, color: c.inkBody }}>{one.target}</Text>
           </Text>
         ) : (
-          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: 13.5, color: bad ? c.danger : c.inkBody }}>
+          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: bad ? c.danger : c.inkBody }}>
             {label}
           </Text>
         )}
@@ -1241,11 +1247,11 @@ function TimelineSheet({ turn, focus, live, agent, open, toggle, onClose }) {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 18, paddingHorizontal: 16, paddingBottom: 10 }}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Text accessibilityRole="header" style={{ fontFamily: FONTS.serif, fontSize: 22, lineHeight: 26, color: c.ink }}>
+            <Text accessibilityRole="header" style={{ fontFamily: FONTS.serif, fontSize: TEXT.empty, lineHeight: 26, color: c.ink }}>
               Línea de tiempo
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{sub}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{sub}</Text>
               {(turn.adds > 0 || turn.dels > 0) && <LineCounts adds={turn.adds} dels={turn.dels} />}
             </View>
           </View>
@@ -1253,7 +1259,7 @@ function TimelineSheet({ turn, focus, live, agent, open, toggle, onClose }) {
             <Icon name="x" size={18} color={c.inkMuted} strokeWidth={1.8} />
           </Pressable>
         </View>
-        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingBottom: 12 }}>
           {work.map((it, i) => {
             const onLayout =
               it.key === focus
@@ -1336,12 +1342,12 @@ function CommandBox({ it, state }) {
       ))}
       {it.running ? (
         <View style={{ marginTop: 6 }}>
-          <ShimmerText text={`Corriendo en el equipo · ${secs || '0,0 s'}`} style={{ fontFamily: FONTS.ui, fontSize: 12 }} />
+          <ShimmerText text={`Corriendo en el equipo · ${secs || '0,0 s'}`} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta }} />
         </View>
       ) : (
         <View style={{ marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name={failed ? 'warning' : 'tick'} size={13} color={failed ? c.danger : c.good} strokeWidth={2} />
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: failed ? c.danger : c.good }}>{footer}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: failed ? c.danger : c.good }}>{footer}</Text>
         </View>
       )}
     </View>
@@ -1358,7 +1364,7 @@ function DiffView({ item, style, maxHeight }) {
       <View style={{ minWidth: '100%' }}>
         {lines.map((ln, i) =>
           ln.gap ? (
-            <Text key={i} style={{ paddingVertical: 3, paddingLeft: 12, paddingRight: 10, fontFamily: FONTS.ui, fontSize: 11.5, lineHeight: 17, color: c.inkFaint }}>
+            <Text key={i} style={{ paddingVertical: 3, paddingLeft: 12, paddingRight: 10, fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkFaint }}>
               {ln.text}
             </Text>
           ) : (
@@ -1446,14 +1452,14 @@ function QaRecord({ item, label }) {
     <FadeUp style={{ marginVertical: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="message" size={14} color={c.inkMuted} strokeWidth={1.7} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{`${label} preguntó`}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{`${label} preguntó`}</Text>
       </View>
-      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{item.question}</Text>
+      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{item.question}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
         <View style={{ paddingTop: 3 }}>
           <Icon name="tick" size={14} color={c.accentDeep} strokeWidth={1.9} />
         </View>
-        <Text selectable style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13.5, color: c.accentDeep }}>{item.answer}</Text>
+        <Text selectable style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.accentDeep }}>{item.answer}</Text>
       </View>
     </FadeUp>
   );
@@ -1467,14 +1473,14 @@ function QaBatchRecord({ item }) {
     <FadeUp style={{ marginVertical: 6, paddingHorizontal: 14, paddingVertical: 12, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="tick" size={13} color={c.good} strokeWidth={2.2} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {n === item.total ? `Respondiste ${n} preguntas` : `Respondiste ${n} de ${item.total} preguntas`}
         </Text>
       </View>
       {item.rows.map((r, i) => (
         <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{r.header || r.question}</Text>
-          <Text selectable style={{ flexShrink: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.ink }}>{r.answer}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted }}>{r.header || r.question}</Text>
+          <Text selectable style={{ flexShrink: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.ink }}>{r.answer}</Text>
         </View>
       ))}
     </FadeUp>
@@ -1489,8 +1495,8 @@ function ChangesView({ changes, open, toggle }) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 }}>
         <Icon name="edit" size={22} color={c.inkFaint} strokeWidth={1.6} />
-        <Text style={{ textAlign: 'center', fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>Aún no hay cambios</Text>
-        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 19, color: c.inkMuted }}>
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>Aún no hay cambios</Text>
+        <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 19, color: c.inkMuted }}>
           Cuando el agente edite, cree o borre archivos, cada turno aparece aquí con su diff.
         </Text>
       </View>
@@ -1503,10 +1509,10 @@ function ChangesView({ changes, open, toggle }) {
     <FlatList
       data={changes}
       keyExtractor={(x) => x.turn.key}
-      contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 }}
+      contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 4, paddingBottom: 16 }}
       ListHeaderComponent={
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, paddingBottom: 4 }}>
-          <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+          <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
             {`${files} ${files === 1 ? 'archivo' : 'archivos'} en esta sesión`}
           </Text>
           <LineCounts adds={adds} dels={dels} />
@@ -1524,7 +1530,7 @@ function ChangesCard({ turn, title, open, toggle }) {
   const { s } = useScale();
   return (
     <FadeUp style={{ marginVertical: s(6), borderRadius: RADIUS, backgroundColor: c.surface1, overflow: 'hidden' }}>
-      <Text numberOfLines={2} style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2, fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>
+      <Text numberOfLines={2} style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 2, fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted }}>
         {title.trim() || 'Cambios del turno'}
       </Text>
       {turn.files.map((f) => {
@@ -1552,7 +1558,7 @@ function ChangesCard({ turn, title, open, toggle }) {
           {turn.tests && (
             <View style={{ height: 26, paddingHorizontal: 9, borderRadius: RADIUS_SM, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: turn.tests.ok ? c.goodSoft : c.dangerSoft }}>
               <Icon name={turn.tests.ok ? 'tick' : 'warning'} size={12} color={turn.tests.ok ? c.good : c.danger} strokeWidth={2.2} />
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: turn.tests.ok ? c.good : c.danger }}>{testsLabel(turn.tests)}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: turn.tests.ok ? c.good : c.danger }}>{testsLabel(turn.tests)}</Text>
             </View>
           )}
           {!!turn.commit && (
@@ -1589,14 +1595,14 @@ function CompactedRow({ item, open, onToggle }) {
         <View style={{ flex: 1, height: 1, backgroundColor: c.surface5 }} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="compress" size={13} color={c.inkMuted} strokeWidth={1.8} />
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{label}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{label}</Text>
         </View>
         <View style={{ flex: 1, height: 1, backgroundColor: c.surface5 }} />
       </Pressable>
       {open && !!item.summary && (
         <View style={{ marginTop: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: RADIUS, backgroundColor: c.surface1, gap: 4 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Resumen que conserva el agente</Text>
-          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13.5, lineHeight: 20, color: c.inkBody }}>{item.summary}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Resumen que conserva el agente</Text>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 20, color: c.inkBody }}>{item.summary}</Text>
         </View>
       )}
     </FadeUp>
@@ -1620,14 +1626,14 @@ function WaitingStrip({ tasks, agent }) {
     <FadeUp style={{ marginHorizontal: 12, marginBottom: 8, padding: 12, borderRadius: RADIUS, backgroundColor: a.soft, gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <LiveDot size={6} color={a.dot} />
-        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 13.5, color: a.ink }}>
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: a.ink }}>
           {tasks.length === 1 ? 'Esperando a una tarea en segundo plano' : `Esperando a ${tasks.length} tareas en segundo plano`}
         </Text>
       </View>
       {tasks.map((t) => (
         <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: a.ink }}>{TASK_LABEL[t.type] || 'tarea'}</Text>
-          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkBody }}>{t.description || t.id}</Text>
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkBody }}>{t.description || t.id}</Text>
           {!!t.since && <Text style={{ fontFamily: FONTS.mono, fontSize: 11, color: c.inkMuted }}>{ago(now - t.since)}</Text>}
         </View>
       ))}
@@ -1662,14 +1668,14 @@ function CommandCard({ item, agent, context }) {
         <View key={i} style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 12, paddingTop: 8 }}>
           <View style={{ width: 6, height: 6, borderRadius: 3, marginTop: 7, backgroundColor: c[TONE_COLOR[r.tone]] || c.inkFaint }} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.ink }}>{r.label}</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{r.label}</Text>
             {!!r.detail && <Text selectable style={{ fontFamily: FONTS.mono, fontSize: 11.5, lineHeight: 17, color: c.inkMuted }}>{r.detail}</Text>}
           </View>
         </View>
       ))}
       {all.length > COMMAND_ROWS && (
         <Pressable onPress={() => setExpanded((v) => !v)} style={{ minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${all.length - COMMAND_ROWS} más`}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.accent }}>{expanded ? 'Ver menos' : `Ver ${all.length - COMMAND_ROWS} más`}</Text>
         </Pressable>
       )}
       {!!item.text &&
@@ -1680,7 +1686,7 @@ function CommandCard({ item, agent, context }) {
         ))}
       {item.diff && all.length <= COMMAND_ROWS && item.text.split('\n').length > 60 && (
         <Pressable onPress={() => setExpanded((v) => !v)} style={{ minHeight: 36, justifyContent: 'center', paddingHorizontal: 12 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.accent }}>{expanded ? 'Ver menos' : 'Ver el diff completo'}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.accent }}>{expanded ? 'Ver menos' : 'Ver el diff completo'}</Text>
         </Pressable>
       )}
       <View style={{ height: 12 }} />
@@ -1730,13 +1736,13 @@ function UserRow({ item, busy }) {
           </View>
         )}
         {!!text && (
-          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(15), lineHeight: t(22.5), color: c.ink }}>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: t(16), lineHeight: t(22.5), color: c.ink }}>
             {text}
           </Text>
         )}
       </View>
-      {item.origin === 'local' && <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint, marginTop: 4 }}>Desde el equipo</Text>}
-      {item.local && item.sent && busy && <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkFaint, marginTop: 4 }}>En cola · el agente lo verá al terminar</Text>}
+      {item.origin === 'local' && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint, marginTop: 4 }}>Desde el equipo</Text>}
+      {item.local && item.sent && busy && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint, marginTop: 4 }}>En cola · el agente lo verá al terminar</Text>}
     </FadeUp>
   );
 }
@@ -1752,7 +1758,7 @@ function ApprovalCard({ approval, onDecide }) {
     <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name={isCommand ? 'console' : 'edit'} size={16} color={c.accent} strokeWidth={1.7} />
-        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{isCommand ? '¿Ejecutar este comando?' : '¿Aplicar este cambio?'}</Text>
+        <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{isCommand ? '¿Ejecutar este comando?' : '¿Aplicar este cambio?'}</Text>
         {hasDiff && <LineCounts adds={approval.adds} dels={approval.dels} />}
       </View>
       {hasDiff ? (
@@ -1769,10 +1775,10 @@ function ApprovalCard({ approval, onDecide }) {
       )}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Pressable onPress={() => onDecide(approval.id, 'deny')} accessibilityRole="button" style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
-          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14.5, color: c.onRaised }}>Rechazar</Text>
+          <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.onRaised }}>Rechazar</Text>
         </Pressable>
         <Pressable onPress={() => onDecide(approval.id, 'allow')} accessibilityRole="button" style={({ pressed }) => [btn, { backgroundColor: c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}>
-          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.onPrimary }}>Permitir</Text>
+          <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.secondary, color: c.onPrimary }}>Permitir</Text>
         </Pressable>
       </View>
     </FadeUp>
@@ -1788,10 +1794,10 @@ function QuestionCard({ choice, agent, onChoose }) {
     <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="message" size={14} color={a.ink} strokeWidth={1.7} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: a.ink }}>{`${a.label} pregunta`}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: a.ink }}>{`${a.label} pregunta`}</Text>
       </View>
-      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: 15, lineHeight: 21, color: c.ink }}>{choice.title}</Text>
-      {!!choice.body && <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkBody }}>{choice.body}</Text>}
+      <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, lineHeight: 21, color: c.ink }}>{choice.title}</Text>
+      {!!choice.body && <Text selectable style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkBody }}>{choice.body}</Text>}
       {choice.options.length > 0 && (
         <ScrollView style={{ maxHeight: 260 }} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
           {choice.options.map((o) => (
@@ -1803,17 +1809,17 @@ function QuestionCard({ choice, agent, onChoose }) {
             >
               <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label || o.value}</Text>
-                  {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: a.ink }}>{o.badge}</Text>}
+                  <Text style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{o.label || o.value}</Text>
+                  {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: a.ink }}>{o.badge}</Text>}
                 </View>
-                {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>{o.description}</Text>}
+                {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted }}>{o.description}</Text>}
               </View>
               <Icon name="chevron-right" size={13} color={c.inkFaint} strokeWidth={2} />
             </Pressable>
           ))}
         </ScrollView>
       )}
-      {choice.free && <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{choice.options.length ? 'O escribe otra respuesta abajo' : 'Escribe tu respuesta abajo'}</Text>}
+      {choice.free && <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{choice.options.length ? 'O escribe otra respuesta abajo' : 'Escribe tu respuesta abajo'}</Text>}
     </FadeUp>
   );
 }
@@ -1826,7 +1832,7 @@ function ChoiceCard({ choice, onChoose }) {
     <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="layers" size={16} color={c.accent} />
-        <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{choice.title}</Text>
+        <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{choice.title}</Text>
       </View>
       {!!choice.body && (
         <Text selectable numberOfLines={8} style={{ fontFamily: FONTS.mono, fontSize: 12, lineHeight: 18, color: c.inkBody }}>{choice.body}</Text>
@@ -1839,15 +1845,15 @@ function ChoiceCard({ choice, onChoose }) {
             style={({ pressed }) => ({ minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 6, borderRadius: RADIUS_SM, backgroundColor: pressed ? c.surface3 : c.bg })}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label || o.value}</Text>
-              {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: 11.5, color: c.accent }}>{o.badge}</Text>}
+              <Text style={{ flex: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{o.label || o.value}</Text>
+              {!!o.badge && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.accent }}>{o.badge}</Text>}
             </View>
-            {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted, marginTop: 2 }}>{o.description}</Text>}
+            {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted, marginTop: 2 }}>{o.description}</Text>}
           </Pressable>
         ))}
       </ScrollView>
       <Pressable onPress={() => onChoose(choice.id, '')} style={{ height: 44, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Cancelar</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Cancelar</Text>
       </Pressable>
     </FadeUp>
   );
@@ -1859,7 +1865,7 @@ function Spinner({ size = 15 }) {
   const spin = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (reduced) return undefined;
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: MOTION.spinner, easing: Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [spin, reduced]);
@@ -1902,7 +1908,7 @@ function CompactCard({ compact }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Spinner />
         <View style={{ flex: 1 }}>
-          <ShimmerText text="Compactando la conversación" style={{ fontFamily: FONTS.uiMedium, fontSize: 14 }} />
+          <ShimmerText text="Compactando la conversación" style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary }} />
         </View>
         {pct !== null && <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${pct} %`}</Text>}
       </View>
@@ -1910,7 +1916,7 @@ function CompactCard({ compact }) {
         <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, left, width, borderRadius: 2, backgroundColor: c.accent }} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{pct === null ? 'Resumiendo la conversación' : COMPACT_STEP(pct, compact?.messages)}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{pct === null ? 'Resumiendo la conversación' : COMPACT_STEP(pct, compact?.messages)}</Text>
         {compact?.before != null && (
           <Text style={{ fontFamily: FONTS.mono, fontSize: 12.5, color: c.inkMuted }}>{`${compact.before} %${compact.estimate != null ? ` → ~${compact.estimate} %` : ''}`}</Text>
         )}
@@ -1933,7 +1939,7 @@ function ContextRing({ context, compacting, onPress }) {
       spin.setValue(0);
       return undefined;
     }
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1100, easing: Easing.linear, useNativeDriver: true }));
+    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: MOTION.spinner, easing: Easing.linear, useNativeDriver: true }));
     loop.start();
     return () => loop.stop();
   }, [compacting, spin, reduced]);
@@ -1991,8 +1997,8 @@ function ContextPopover({ context, compacted, bottom, busy, compacting, canCompa
             <Circle cx="22" cy="22" r="18" fill="none" strokeWidth="4" strokeLinecap="round" stroke={color} strokeDasharray={`${((BIG_RING * Math.min(100, context.pct)) / 100).toFixed(1)} ${BIG_RING.toFixed(1)}`} rotation={-90} origin="22, 22" />
           </Svg>
           <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Contexto de la sesión</Text>
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 22, letterSpacing: -0.4, color: c.ink }}>{`${context.pct} % usado`}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Contexto de la sesión</Text>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.title, letterSpacing: -0.4, color: c.ink }}>{`${context.pct} % usado`}</Text>
           </View>
         </View>
         <View style={{ gap: 8 }}>
@@ -2006,7 +2012,7 @@ function ContextPopover({ context, compacted, bottom, busy, compacting, canCompa
           {parts.map((p) => (
             <View key={p.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: p.color }} />
-              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 13, color: c.inkBody }}>{p.label}</Text>
+              <Text style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkBody }}>{p.label}</Text>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 12, color: c.inkMuted }}>{`${p.pct} %`}</Text>
             </View>
           ))}
@@ -2014,7 +2020,7 @@ function ContextPopover({ context, compacted, bottom, busy, compacting, canCompa
             <Text style={{ fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkFaint }}>{`${fmtTokens(context.tokens)} de ${fmtTokens(context.window)} tokens`}</Text>
           )}
         </View>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 18, color: warn ? c.warn : c.inkMuted }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: warn ? c.warn : c.inkMuted }}>
           {warn ? `Queda poco espacio. Al ${lv.auto} % se compacta solo; compactar ahora resume la conversación sin perder el hilo.` : `Al ${lv.auto} % se compacta solo.`}
         </Text>
         {canCompact && (
@@ -2025,7 +2031,7 @@ function ContextPopover({ context, compacted, bottom, busy, compacting, canCompa
             accessibilityState={{ disabled }}
             style={({ pressed }) => ({ height: 44, borderRadius: RADIUS, alignItems: 'center', justifyContent: 'center', backgroundColor: disabled ? c.surface4 : c.primary, transform: [{ scale: pressed && !disabled ? 0.98 : 1 }] })}
           >
-            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: disabled ? c.inkMuted : c.onPrimary }}>
+            <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.secondary, color: disabled ? c.inkMuted : c.onPrimary }}>
               {compacting ? 'Compactando…' : busy ? 'Disponible al terminar el turno' : 'Compactar ahora'}
             </Text>
           </Pressable>
@@ -2044,7 +2050,7 @@ function QuotaModal({ usage, onClose, onDaily }) {
     <Overlay onClose={onClose} label="Cerrar uso" center>
       <FadeUp distance={6} accessibilityViewIsModal style={{ width: '100%', paddingTop: 18, paddingHorizontal: 16, paddingBottom: 10, borderRadius: RADIUS, backgroundColor: c.sheet, gap: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text accessibilityRole="header" style={{ flex: 1, fontFamily: FONTS.serif, fontSize: 24, lineHeight: 28, color: c.ink }}>Uso y límites</Text>
+          <Text accessibilityRole="header" style={{ flex: 1, fontFamily: FONTS.serif, fontSize: TEXT.empty, lineHeight: 28, color: c.ink }}>Uso y límites</Text>
           <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar" style={{ width: 44, height: 44, margin: -8, marginLeft: 0, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="x" size={18} color={c.inkMuted} strokeWidth={1.8} />
           </Pressable>
@@ -2053,15 +2059,15 @@ function QuotaModal({ usage, onClose, onDaily }) {
         {plan && (
           <View style={{ padding: 12, borderRadius: RADIUS, backgroundColor: c.surface3, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>Plan {String(plan.name || plan.id || '')}</Text>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>El mismo cupo en web, IDE y móvil</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>Plan {String(plan.name || plan.id || '')}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>El mismo cupo en web, IDE y móvil</Text>
             </View>
             <Pressable
               onPress={() => Linking.openURL(`${api.base}/plans`)}
               accessibilityRole="link"
               style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: RADIUS_SM, justifyContent: 'center', backgroundColor: pressed ? c.surface5 : c.raised })}
             >
-              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.onRaised }}>Mejorar</Text>
+              <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.onRaised }}>Mejorar</Text>
             </Pressable>
           </View>
         )}
@@ -2072,7 +2078,7 @@ function QuotaModal({ usage, onClose, onDaily }) {
           </>
         )}
         <Pressable onPress={onDaily} accessibilityRole="button" style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Ver uso por día</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Ver uso por día</Text>
           <Icon name="chevron-right" size={13} color={c.inkMuted} strokeWidth={2} />
         </Pressable>
       </FadeUp>
@@ -2115,7 +2121,7 @@ function CommandsSheet({ agent, commands, tiles, onPick }) {
             ) : (
               <Icon name={tile.icon} size={20} color={tile.danger ? c.danger : c.inkBody} strokeWidth={1.7} />
             )}
-            <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: tile.danger ? c.danger : c.inkBody }}>{tile.label}</Text>
+            <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: tile.danger ? c.danger : c.inkBody }}>{tile.label}</Text>
           </Pressable>
         ))}
       </View>
@@ -2130,14 +2136,14 @@ function CommandsSheet({ agent, commands, tiles, onPick }) {
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel="Filtrar comandos"
-          style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: 15, color: c.ink }}
+          style={{ flex: 1, paddingVertical: 0, fontFamily: FONTS.ui, fontSize: TEXT.body, color: c.ink }}
         />
       </View>
       <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
         {list.map((cmd, i) => (
           <View key={`${cmd.group || ''}${cmd.name}`}>
             {(i === 0 || cmd.group !== list[i - 1]?.group) && (
-              <Text style={{ paddingHorizontal: 12, paddingTop: i ? 10 : 0, paddingBottom: 4, fontFamily: FONTS.uiMedium, fontSize: 12.5, color: c.inkMuted }}>
+              <Text style={{ paddingHorizontal: 12, paddingTop: i ? 10 : 0, paddingBottom: 4, fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.inkMuted }}>
                 {groupLabel(cmd.group)}
               </Text>
             )}
@@ -2151,14 +2157,14 @@ function CommandsSheet({ agent, commands, tiles, onPick }) {
                 {cmd.args ? <Text style={{ color: c.inkMuted }}> {cmd.args}</Text> : null}
               </Text>
               {!!cmd.description && (
-                <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+                <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
                   {cmd.description}
                 </Text>
               )}
             </Pressable>
           </View>
         ))}
-        {list.length === 0 && <Text style={{ padding: 12, fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Ningún comando coincide</Text>}
+        {list.length === 0 && <Text style={{ padding: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Ningún comando coincide</Text>}
       </ScrollView>
     </View>
   );
@@ -2222,7 +2228,7 @@ function RemoteComposer({
           {slashMatches.map((cmd) => (
             <SuggestionRow key={`${cmd.group || ''}${cmd.name}`} onPress={() => (cmd.args ? onChangeInput(`/${cmd.name} `) : onRunCommand(`/${cmd.name}`))}>
               <Text style={{ fontFamily: FONTS.mono, fontSize: 13.5, color: c.ink }}>/{cmd.name}</Text>
-              <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+              <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
                 {cmd.description}
               </Text>
             </SuggestionRow>
@@ -2235,12 +2241,12 @@ function RemoteComposer({
           {mentionResults === null ? (
             <SkeletonLines widths={['60%', '45%']} style={{ padding: 12 }} />
           ) : mentionResults.length === 0 ? (
-            <Text style={{ padding: 12, fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>Ningún archivo coincide</Text>
+            <Text style={{ padding: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Ningún archivo coincide</Text>
           ) : (
             mentionResults.map((f) => (
               <SuggestionRow key={f.path} onPress={() => onPickMention(f)}>
-                <Icon name="file" size={14} color={c.inkSoft} />
-                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.ink }}>
+                <FileIcon nombre={f.name} size={24} color={c.inkSoft} />
+                <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.ink }}>
                   {f.name}
                 </Text>
                 <Text numberOfLines={1} style={{ flex: 1, textAlign: 'right', fontFamily: FONTS.mono, fontSize: 11.5, color: c.inkMuted }}>
@@ -2283,7 +2289,7 @@ function RemoteComposer({
             selectionColor={c.accent}
             accessibilityLabel="Mensaje para el agente"
             multiline
-            style={{ flex: 1, minHeight: 40, maxHeight: 140, paddingHorizontal: 4, paddingTop: 10, paddingBottom: 10, fontFamily: FONTS.ui, fontSize: 15, lineHeight: 20, color: c.ink }}
+            style={{ flex: 1, minHeight: 40, maxHeight: 140, paddingHorizontal: 4, paddingTop: 10, paddingBottom: 10, fontFamily: FONTS.ui, fontSize: TEXT.body, lineHeight: 20, color: c.ink }}
           />
           {context && <ContextRing context={context} compacting={compacting} onPress={onContext} />}
           <Pressable

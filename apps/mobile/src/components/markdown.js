@@ -1,8 +1,10 @@
+import { Pressable } from './MotionPressable';
+import { Text } from './Typography';
 // markdown.js — estilos y reglas de las respuestas en Markdown (chat y control
 // remoto). Los bloques de código llevan cabecera con el lenguaje y copiar.
 import * as Clipboard from 'expo-clipboard';
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import {  ScrollView,  View } from 'react-native';
 
 import { FONTS, RADIUS, RADIUS_SM } from '../theme';
 import Icon from './Icon';
@@ -11,7 +13,7 @@ export function markdownStyles(c, t) {
   // react-native-markdown-display trae borde gris por defecto en el código.
   const code = { fontFamily: FONTS.mono, fontSize: t(13), lineHeight: t(20.8), color: c.inkBody, borderWidth: 0 };
   return {
-    body: { fontFamily: FONTS.ui, fontSize: t(15), lineHeight: t(22.5), color: c.inkBody },
+    body: { fontFamily: FONTS.ui, fontSize: t(16), lineHeight: t(22.5), color: c.inkBody },
     paragraph: { marginTop: 0, marginBottom: 12 },
     heading1: { fontFamily: FONTS.uiSemiBold, fontSize: t(19), color: c.ink, marginTop: 6, marginBottom: 8 },
     heading2: { fontFamily: FONTS.uiSemiBold, fontSize: t(17), color: c.ink, marginTop: 6, marginBottom: 8 },
@@ -25,13 +27,13 @@ export function markdownStyles(c, t) {
     bullet_list_icon: { color: c.inkMuted, marginLeft: 4, marginRight: 8 },
     ordered_list_icon: { color: c.inkMuted, fontFamily: FONTS.ui, marginRight: 8 },
     blockquote: { backgroundColor: 'transparent', borderLeftWidth: 2, borderLeftColor: c.surface6, paddingHorizontal: 12, marginVertical: 4 },
-    code_inline: { ...code, fontSize: t(13.5), color: c.ink, backgroundColor: c.surface3, borderRadius: 4, paddingHorizontal: 4 },
+    code_inline: { ...code, fontSize: t(14), color: c.ink, backgroundColor: c.surface3, borderRadius: 4, paddingHorizontal: 4 },
     code_block: { ...code, backgroundColor: c.codeBg, borderRadius: RADIUS, padding: 12, marginVertical: 6 },
     fence: { ...code, backgroundColor: c.codeBg, borderRadius: RADIUS, padding: 12, marginVertical: 6 },
     hr: { backgroundColor: c.borderSoft, height: 1, marginVertical: 12 },
     table: { borderColor: c.surface4, borderWidth: 1, borderRadius: RADIUS, marginBottom: 12 },
-    th: { fontFamily: FONTS.uiMedium, fontSize: t(13.5), color: c.ink, padding: 8 },
-    td: { fontFamily: FONTS.ui, fontSize: t(13.5), color: c.inkBody, padding: 8 },
+    th: { fontFamily: FONTS.uiMedium, fontSize: t(14), color: c.ink, padding: 8 },
+    td: { fontFamily: FONTS.ui, fontSize: t(14), color: c.inkBody, padding: 8 },
     tr: { borderColor: c.surface4 },
   };
 }

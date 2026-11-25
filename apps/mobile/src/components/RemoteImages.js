@@ -1,3 +1,6 @@
+import { Pressable } from './MotionPressable';
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // RemoteImages.js — las imágenes del chat remoto: las que manda la persona y
 // las que el agente le enseña con show_image. El host las sube al gateway con
 // el id que ya viaja en el evento, así que una recién llegada puede tardar un
@@ -5,7 +8,7 @@
 // pantalla completa (pellizcar acerca, deslizar hacia abajo cierra) con
 // Guardar y Compartir.
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, Modal, PanResponder, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Animated, Image, Modal, PanResponder,   View, useWindowDimensions } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
@@ -76,7 +79,7 @@ export function ShownImageCard({ item, maxWidth }) {
   return (
     <View style={{ gap: 6, marginVertical: 8 }}>
       <ImageThumb image={item} width={maxWidth} height={height} radius={RADIUS} label={item.caption || item.name} />
-      <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>
+      <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted }}>
         {item.caption ? `${item.caption} · ${item.name}` : `${item.name} · toca para ampliar`}
       </Text>
     </View>
@@ -237,8 +240,8 @@ export function ImageViewer({ image, onClose, download }) {
             <Icon name="x" size={20} color="#F2F2F0" />
           </Pressable>
           <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14, color: '#F2F2F0' }}>{image.name || 'Imagen'}</Text>
-            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: '#8A8A86' }}>
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: '#F2F2F0' }}>{image.name || 'Imagen'}</Text>
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: '#8A8A86' }}>
               {[image.shown ? 'El agente te la enseñó' : 'La enviaste tú', image.w > 0 ? `${image.w}×${image.h}` : ''].filter(Boolean).join(' · ')}
             </Text>
           </View>
@@ -248,13 +251,13 @@ export function ImageViewer({ image, onClose, download }) {
             <RemoteImage image={image} resizeMode="contain" style={{ width: imgW, height: imgH, backgroundColor: 'transparent' }} />
           </Animated.View>
         </View>
-        {!!note && <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 13, color: '#D6D6D3', paddingBottom: 8 }}>{note}</Text>}
+        {!!note && <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: '#D6D6D3', paddingBottom: 8 }}>{note}</Text>}
         <View style={{ paddingHorizontal: 16, paddingBottom: Math.max(insets.bottom, 12) + 6, gap: 10 }}>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <ViewerButton label={busy === 'save' ? 'Guardando…' : 'Guardar'} onPress={save} disabled={!!busy} />
             <ViewerButton label={busy === 'share' ? 'Preparando…' : 'Compartir'} onPress={share} disabled={!!busy} />
           </View>
-          <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: 12, color: '#5E5E5C' }}>
+          <Text style={{ textAlign: 'center', fontFamily: FONTS.ui, fontSize: TEXT.meta, color: '#5E5E5C' }}>
             pellizca para acercar · desliza hacia abajo para cerrar
           </Text>
         </View>
@@ -271,7 +274,7 @@ function ViewerButton({ label, onPress, disabled }) {
       accessibilityRole="button"
       style={({ pressed }) => ({ flex: 1, height: 44, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? '#333330' : '#262626', opacity: disabled ? 0.6 : 1 })}
     >
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: '#F2F2F0' }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: '#F2F2F0' }}>{label}</Text>
     </Pressable>
   );
 }

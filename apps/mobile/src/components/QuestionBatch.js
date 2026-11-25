@@ -1,3 +1,6 @@
+import { Pressable } from './MotionPressable';
+import { TEXT } from '../theme';
+import { Text, TextInput } from './Typography';
 // QuestionBatch.js — la tanda de preguntas del agente (ask_user con varias
 // preguntas) como una tarjeta con pestañas, igual que en la terminal: una
 // pestaña por pregunta, casillas si admite varias y círculos si es una sola,
@@ -5,7 +8,7 @@
 // se responde de una vez con batchValue; lo que quede vacío lo decide el
 // agente.
 import React, { forwardRef, useImperativeHandle, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import {  ScrollView,   View } from 'react-native';
 
 import Icon from './Icon';
 import { FadeUp, agentStyle, useColors } from './ui';
@@ -81,8 +84,8 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
     <FadeUp accessibilityRole="alert" style={{ marginHorizontal: 12, marginBottom: 8, padding: 14, borderRadius: RADIUS, backgroundColor: c.surface2, gap: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="message" size={14} color={a.ink} strokeWidth={1.7} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: a.ink }}>{`${a.label} pregunta`}</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>{q ? `· ${tab + 1} de ${n}` : '· repasa'}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: a.ink }}>{`${a.label} pregunta`}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{q ? `· ${tab + 1} de ${n}` : '· repasa'}</Text>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
@@ -98,7 +101,7 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
               style={{ height: 32, paddingHorizontal: 10, borderRadius: RADIUS_SM, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: on ? c.ink : c.bg }}
             >
               {done && !on && <Icon name="tick" size={12} color={c.accentDeep} strokeWidth={2.2} />}
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: on ? c.bg : done ? c.accentDeep : c.inkSoft }}>{x.header || `Pregunta ${i + 1}`}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: on ? c.bg : done ? c.accentDeep : c.inkSoft }}>{x.header || `Pregunta ${i + 1}`}</Text>
             </Pressable>
           );
         })}
@@ -107,8 +110,8 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
       {q ? (
         <>
           <View style={{ gap: 3 }}>
-            <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: 15, lineHeight: 21, color: c.ink }}>{q.question}</Text>
-            {q.multiple && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Puedes marcar varias</Text>}
+            <Text selectable style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, lineHeight: 21, color: c.ink }}>{q.question}</Text>
+            {q.multiple && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Puedes marcar varias</Text>}
           </View>
           <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
             {q.options.map((o, j) => {
@@ -123,15 +126,15 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
                 >
                   <Mark round={!q.multiple} on={on} />
                   <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-                    <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>{o.label}</Text>
-                    {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, lineHeight: 17, color: c.inkMuted }}>{o.description}</Text>}
+                    <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>{o.label}</Text>
+                    {!!o.description && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 17, color: c.inkMuted }}>{o.description}</Text>}
                   </View>
                 </Pressable>
               );
             })}
             {editing ? (
               <View style={{ padding: 10, borderRadius: RADIUS_SM, backgroundColor: c.surface4, gap: 10 }}>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Otra respuesta</Text>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Otra respuesta</Text>
                 <TextInput
                   autoFocus
                   value={draft}
@@ -143,7 +146,7 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
                   accessibilityLabel="Otra respuesta"
                   placeholder="Escribe tu respuesta"
                   placeholderTextColor={c.inkMuted}
-                  style={{ height: 42, borderRadius: RADIUS_SM, paddingHorizontal: 10, backgroundColor: c.bg, color: c.ink, fontFamily: FONTS.ui, fontSize: 14 }}
+                  style={{ height: 42, borderRadius: RADIUS_SM, paddingHorizontal: 10, backgroundColor: c.bg, color: c.ink, fontFamily: FONTS.ui, fontSize: TEXT.secondary }}
                 />
                 <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
                   <SmallButton label="Volver a las opciones" onPress={() => setEditing(false)} />
@@ -169,7 +172,7 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
                 <View style={{ width: 18, alignItems: 'center' }}>
                   <Icon name="pencil" size={13} color={c.inkMuted} strokeWidth={2} />
                 </View>
-                <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: other[tab] ? c.ink : c.inkSoft }}>
+                <Text numberOfLines={2} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: other[tab] ? c.ink : c.inkSoft }}>
                   {other[tab] ? `«${other[tab]}»` : 'Otra respuesta…'}
                 </Text>
               </Pressable>
@@ -185,18 +188,18 @@ const QuestionBatch = forwardRef(function QuestionBatch({ choice, agent, onChoos
           <View style={{ gap: 10, paddingVertical: 2 }}>
             {qs.map((x, i) => (
               <Pressable key={i} onPress={() => goTo(i)} accessibilityRole="button" style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{x.header || `Pregunta ${i + 1}`}</Text>
-                <Text style={{ flexShrink: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: answers[i] ? (other[i] ? c.ink70 : c.ink) : c.warn }}>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted }}>{x.header || `Pregunta ${i + 1}`}</Text>
+                <Text style={{ flexShrink: 1, textAlign: 'right', fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: answers[i] ? (other[i] ? c.ink70 : c.ink) : c.warn }}>
                   {answers[i] ? answers[i] : 'Sin responder · elegir'}
                 </Text>
               </Pressable>
             ))}
           </View>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>Lo que quede sin responder lo decide el agente.</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>Lo que quede sin responder lo decide el agente.</Text>
           <View style={{ gap: 6 }}>
             <Button primary label="Enviar respuestas" onPress={send} />
             <Pressable onPress={close} accessibilityRole="button" style={{ height: 40, alignItems: 'center', justifyContent: 'center' }}>
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkSoft }}>Cerrar sin responder</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkSoft }}>Cerrar sin responder</Text>
             </Pressable>
           </View>
         </>
@@ -225,7 +228,7 @@ function Button({ label, onPress, primary = false, disabled = false }) {
       accessibilityState={{ disabled }}
       style={({ pressed }) => ({ flex: 1, height: 44, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', opacity: disabled ? 0.4 : 1, backgroundColor: primary ? c.primary : pressed ? c.surface5 : c.raised })}
     >
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: primary ? c.onPrimary : c.onRaised }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: primary ? c.onPrimary : c.onRaised }}>{label}</Text>
     </Pressable>
   );
 }
@@ -238,7 +241,7 @@ function SmallButton({ label, onPress, primary = false }) {
       accessibilityRole="button"
       style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: RADIUS_SM, alignItems: 'center', justifyContent: 'center', backgroundColor: primary ? c.primary : pressed ? c.surface5 : c.raised })}
     >
-      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 13, color: primary ? c.onPrimary : c.onRaised }}>{label}</Text>
+      <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: primary ? c.onPrimary : c.onRaised }}>{label}</Text>
     </Pressable>
   );
 }

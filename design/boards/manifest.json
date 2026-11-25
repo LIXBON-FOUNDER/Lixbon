@@ -1,0 +1,470 @@
+{
+  "exportDate": "2026-11-24",
+  "source": "https://claude.ai/artifact/NvpgXNKNQGsnQ3Kb5wKdEB",
+  "version": "Exportación actual; contiene cambios v116/v117. No es una copia histórica v111.",
+  "boards": [
+    {
+      "title": "IDE · Editor con agente",
+      "path": "06-ide/IdeNuevoEditor.dc.html",
+      "issues": [
+        "LXR-4",
+        "LXR-6",
+        "LXR-9"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "53d133f8f817a14aa85b7f345647110308fb35452a457cb577720ad4647e1b4f"
+    },
+    {
+      "title": "IDE · Modo Agente",
+      "path": "06-ide/IdeNuevoAgente.dc.html",
+      "issues": [
+        "LXR-2",
+        "LXR-3",
+        "LXR-6",
+        "LXR-7"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "3ff9b90f57acb3818f1119ffd0c32e58a8e60b083486ddc67020dd64e33aeba7"
+    },
+    {
+      "title": "IDE · Git y pull request",
+      "path": "06-ide/IdeNuevoGit.dc.html",
+      "issues": [
+        "LXR-10",
+        "LXR-4"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "82eba18fb1f234db0b0da0d44c84ec1adc7c07c38ea2a9eb1bb755b0ec202f29"
+    },
+    {
+      "title": "IDE · Paleta de comandos (Ctrl K)",
+      "path": "06-ide/IdeNuevoPaleta.dc.html",
+      "issues": [
+        "LXR-11"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "322bd2374094fb9e5cf310d286368c6399f69ca5b29b38ca8a3dc9e50a8eb9e6"
+    },
+    {
+      "title": "IDE · Ajustes (ventana)",
+      "path": "06-ide/IdeNuevoAjustes.dc.html",
+      "issues": [
+        "LXR-12"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "01b0c16328300f246ddb56b85937391b306d0d4f9e8a6db0029c4d23290bd23b"
+    },
+    {
+      "title": "IDE · Iconos de archivo",
+      "path": "06-ide/IdeNuevoArchivos.dc.html",
+      "issues": [
+        "LXR-4"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "4da1ee0d3a7e1f8b25f9af77f3de5372850f4f025f9d169ad5034e3b8a370206"
+    },
+    {
+      "title": "IDE · Modo Diseño",
+      "path": "06-ide/IdeNuevoDiseno.dc.html",
+      "issues": [
+        "LXR-23"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "db441b6d552db89925765d4760c6f61bf3b0b017187278a81c314e3e6b6aba84"
+    },
+    {
+      "title": "IDE · Decisiones de diseño",
+      "path": "06-ide/IdeNotas.dc.html",
+      "issues": [
+        "LXR-2"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "0acc68f23c1a9b8173dff4b6abed9bd32bcb64c375b744522b0874a39a0a5001"
+    },
+    {
+      "title": "IDE · Modelo y razonamiento",
+      "path": "06-ide/IdeNuevoModelo.dc.html",
+      "issues": [
+        "LXR-8"
+      ],
+      "sourceBundle": "ide.html",
+      "sourceSha256": "272efb60c5ad1133020df7c17fa2a9fbb3b8972b1ba07fbd47c86064e14abefe",
+      "boardSha256": "e14d519d15a3cd348fa83405b52b0fbcc5efb85c6cb1601f7f503dfb2dd44a86"
+    },
+    {
+      "title": "ADE · Intento en marcha · Tarea",
+      "path": "05-ade/AdeNuevoWorkspace.dc.html",
+      "issues": [
+        "LXR-13",
+        "LXR-14",
+        "LXR-15",
+        "LXR-2",
+        "LXR-3",
+        "LXR-6"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "ca1c0b44406ed58ca4837b4b149b2d3020b5c96bf9a391c5225764f6add051b5"
+    },
+    {
+      "title": "ADE · Atención (decisiones)",
+      "path": "05-ade/AdeNuevoAtencion.dc.html",
+      "issues": [
+        "LXR-13",
+        "LXR-16",
+        "LXR-3"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "b9f6946f248ac5f5da6fd3c00db7711dc1652bc2a22e18d4e40987c32eb4d2e1"
+    },
+    {
+      "title": "ADE · Comparar intentos",
+      "path": "05-ade/AdeNuevoComparar.dc.html",
+      "issues": [
+        "LXR-17",
+        "LXR-4"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "daa038a455301a15533dbf2e853dd543aa1c22e17720913aa4e6eed8f744c5eb"
+    },
+    {
+      "title": "ADE · Mapa de dependencias",
+      "path": "05-ade/AdeNuevoMapa.dc.html",
+      "issues": [
+        "LXR-20",
+        "LXR-4"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "aa5d7ad251ad1dca552644b7937ec475c7ea8f689884cb1e323bfa0d46eda492"
+    },
+    {
+      "title": "ADE · Hosts",
+      "path": "05-ade/AdeNuevoHosts.dc.html",
+      "issues": [
+        "LXR-21",
+        "LXR-3"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "07085509619a61d241da06aae6ada57748aac1eac0e8ef04b6aa7c0fe97d1b3d"
+    },
+    {
+      "title": "ADE · Intento para revisar · Contexto",
+      "path": "05-ade/AdeNuevoContexto.dc.html",
+      "issues": [
+        "LXR-13",
+        "LXR-14",
+        "LXR-18"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "27dcd3a9d25d7a2d0cd9bfac92996bbcc02beb5381708c4ebd9ffb203dde6693"
+    },
+    {
+      "title": "ADE · Lanzar un intento",
+      "path": "05-ade/AdeNuevoIntento.dc.html",
+      "issues": [
+        "LXR-22"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "9291b66cdb1510c5ef6fb3017b4b2ffc04154f7f004070c02a3f2ed81d942e61"
+    },
+    {
+      "title": "ADE · Inspector · Autonomía",
+      "path": "05-ade/AdeNuevoAutonomia.dc.html",
+      "issues": [
+        "LXR-13",
+        "LXR-18"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "77e25f72a27700fb130e5bf444b4cea220258253697f90e149151c5244e16a9d"
+    },
+    {
+      "title": "ADE · Decisiones de diseño",
+      "path": "05-ade/AdeNotas.dc.html",
+      "issues": [
+        "LXR-2"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "50a98fc8051eef9e912cd71e113ce8acaac91e8dec8f8d70badb25bb721a6672"
+    },
+    {
+      "title": "ADE · Intento de Lixbon · Cambios",
+      "path": "05-ade/AdeNuevoLixbon.dc.html",
+      "issues": [
+        "LXR-13",
+        "LXR-14",
+        "LXR-19"
+      ],
+      "sourceBundle": "ade.html",
+      "sourceSha256": "12e43b3961d992eb09785c1ba6b1d3355c707bfdf8ba47e515db868f7a91ebbc",
+      "boardSha256": "31a05f6cd07caabea236c3c3d9ca79a79c833a31f4f508b2625a5f2ac4028e02"
+    },
+    {
+      "title": "Mobile · Inicio y navegación",
+      "path": "07-mobile/MovilNavegacion.dc.html",
+      "issues": [
+        "LXR-24",
+        "LXR-28"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "db7474e3844b4075dd38d32682c13f2c6c08a73331f136138e36aac13e2ca36b"
+    },
+    {
+      "title": "Mobile · Remoto",
+      "path": "07-mobile/MovilRemoto.dc.html",
+      "issues": [
+        "LXR-37"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "515445a80d96f2d67c57bf49dc0e903ef6894c1affa494e4643267be90424955"
+    },
+    {
+      "title": "Mobile · Sesión · acciones",
+      "path": "07-mobile/MovilSesionAcciones.dc.html",
+      "issues": [
+        "LXR-33"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "fd111ccb0b2c1df74f03eb9cd774b47515da3eb6e021144d1d49caa15b6246f7"
+    },
+    {
+      "title": "Mobile · Chat · respuestas",
+      "path": "07-mobile/MovilChat.dc.html",
+      "issues": [
+        "LXR-24",
+        "LXR-29"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "2c65480fe063817355b87785e57e2cf4955424791f409d699e5a956a9435c08e"
+    },
+    {
+      "title": "Mobile · Sesión remota",
+      "path": "07-mobile/MovilSesion.dc.html",
+      "issues": [
+        "LXR-33"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "7fa479ddc1abbc85a96174e60422046105358e1dde1db292d8c6660f9e9b2d66"
+    },
+    {
+      "title": "Mobile · Supervisar",
+      "path": "07-mobile/MovilSupervisar.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-34"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "204ede957cf607e6dc09e52f6a99d87d3ca0e48c0333cf5c9d7c6de3f7b5e030"
+    },
+    {
+      "title": "Mobile · Chat · escribir",
+      "path": "07-mobile/MovilChatMenus.dc.html",
+      "issues": [
+        "LXR-29",
+        "LXR-30"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "0939929c23e0d6c9856ce952ba09652eb1f6d6b01d9507a17d1e6edee4553a96"
+    },
+    {
+      "title": "Mobile · Sesión · detalles",
+      "path": "07-mobile/MovilDetalles.dc.html",
+      "issues": [
+        "LXR-33"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "b882eb09e3d52044a5726d8f07f1766bd7a5211e00115e9fe33be751f1a54a6b"
+    },
+    {
+      "title": "Mobile · Intento y decisiones",
+      "path": "07-mobile/MovilIntento.dc.html",
+      "issues": [
+        "LXR-34"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "d2e4844a9ffd6af8a9e08284ff507f7ad2d2576882bffdb26721e6273e0865a3"
+    },
+    {
+      "title": "Mobile · Chat · historial",
+      "path": "07-mobile/MovilChatHistorial.dc.html",
+      "issues": [
+        "LXR-28"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "8ea3f7c71e12d7d71bdc2a2b87d6118baec166cd7564d9744955f8f644bbc593"
+    },
+    {
+      "title": "Mobile · Decisiones de diseño",
+      "path": "07-mobile/MovilNotas.dc.html",
+      "issues": [
+        "LXR-24"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "737d66f90af48f5aca74422654f60b653f15f4920e5b620e00b41a7929a82e48"
+    },
+    {
+      "title": "Mobile · Estados · carga y conexión",
+      "path": "07-mobile/MovilEstados.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-35"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "f6629a007380ff6c65363f6297ac0f1e6cd7d1c81e6bf7d3f079c391a08d78a3"
+    },
+    {
+      "title": "Mobile · Estados · error, vacío y éxito",
+      "path": "07-mobile/MovilEstados2.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-38"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "46403c69996d3d8cd4071ec6d432a63faae604404bc957ccc0c234fe13b50847"
+    },
+    {
+      "title": "Mobile · Uso detallado",
+      "path": "07-mobile/MovilTu.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-38"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "2c7b90a7ab9bec59b046b92ba9e430673e5e1459e48b0d30bfd77ef2480aea7c"
+    },
+    {
+      "title": "Mobile · Archivos en las conversaciones",
+      "path": "07-mobile/MovilArchivos.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-31"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "ddbe132f237a4188e33549211c403f6da1a89c37b6efc2ec28ad843a2e8c0f83"
+    },
+    {
+      "title": "Mobile · Menciones con @",
+      "path": "07-mobile/MovilMenciones.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-31"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "78892384b3dc503ceb83fcd7455d0c77111bdd10a86e1b57454e3d110a0fd9a9"
+    },
+    {
+      "title": "Mobile · Contexto y consumo",
+      "path": "07-mobile/MovilContexto.dc.html",
+      "issues": [
+        "LXR-32"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "8efce9960af7b5466dd1fb7581cd628dc5b1383ca6b6ac26137eb29759918595"
+    },
+    {
+      "title": "Mobile · Contexto · estados",
+      "path": "07-mobile/MovilContextoEstados.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-32"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "075a188bdc41815995a264ea94485fe2d9c67dc44240bdeac8ca8238ef2119f7"
+    },
+    {
+      "title": "Mobile · Ajustes · cuenta",
+      "path": "07-mobile/MovilAjustes.dc.html",
+      "issues": [
+        "LXR-36"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "fbc445dae82df4e8cc3998b56a6d94cf16c001ca5e9ffb15d0597387c6e1f490"
+    },
+    {
+      "title": "Mobile · Ajustes · app",
+      "path": "07-mobile/MovilAjustes2.dc.html",
+      "issues": [
+        "LXR-30",
+        "LXR-36"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "5fd8b72e5e689af217f368854f1ced0f9a34686534fda8caa3aad71a3234a496"
+    },
+    {
+      "title": "Mobile · Ajustes · conexiones y datos",
+      "path": "07-mobile/MovilAjustes3.dc.html",
+      "issues": [
+        "LXR-36"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "41906e64c2087c6bbf8cb1efa26bab78eb1c6995d0a12ddcd1c010a941dba369"
+    },
+    {
+      "title": "Mobile · Ajustes · más",
+      "path": "07-mobile/MovilAjustes4.dc.html",
+      "issues": [
+        "LXR-25",
+        "LXR-36"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "5fda0082b785381680e3a87fc50001a02e2af45f7943eeb1f00c444b9ecebe01"
+    },
+    {
+      "title": "Mobile · Modelo, esfuerzo y modo",
+      "path": "07-mobile/MovilModelo.dc.html",
+      "issues": [
+        "LXR-30"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "189e7887ad9b64466d99ac95affa58441d84cc8e7d90647700d31be1ee89a48d"
+    },
+    {
+      "title": "Mobile · Movimiento y tacto",
+      "path": "07-mobile/MovilMovimiento.dc.html",
+      "issues": [
+        "LXR-27"
+      ],
+      "sourceBundle": "lixbon-design.html",
+      "sourceSha256": "f8d5166d6a0982e0212373dd9ff368b82b2757ffd20e629c07818d0de5e89310",
+      "boardSha256": "7bd1cb870587a13195af3e85d2d3ab0f847d3f0f055a87d4a01226b54de73a74"
+    }
+  ]
+}

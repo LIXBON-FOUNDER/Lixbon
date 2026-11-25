@@ -44,7 +44,7 @@
   50% { transform: translate(40px, -30px) scale(1.08); }
 }
 .auth__wordmark { position: relative; display: flex; align-items: center; gap: 10px; }
-.auth__wordmark .brand { font-size: 15px; letter-spacing: 0.04em; }
+.auth__wordmark .brand { font-size: var(--text-chat, 15px); letter-spacing: 0.04em; }
 .auth__bigmark {
   position: absolute;
   right: -40px;
@@ -61,9 +61,9 @@
   gap: 14px;
   max-width: 420px;
 }
-.auth__headline { font-size: 32px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
-.auth__lede { font-size: 15px; line-height: 1.55; color: var(--ink-70); }
-.auth__modes { position: relative; margin-top: 32px; font-size: 11.5px; color: var(--ink-50); }
+.auth__headline { font-size: var(--text-input, 32px); font-weight: var(--weight-title, 600); line-height: 1.15; letter-spacing: -0.02em; }
+.auth__lede { font-size: var(--text-chat, 15px); line-height: 1.55; color: var(--ink-70); }
+.auth__modes { position: relative; margin-top: 32px; font-size: var(--text-meta, 11.5px); color: var(--ink-50); }
 
 .auth__main {
   flex: 1;
@@ -75,7 +75,7 @@
 }
 .auth__card { width: 380px; max-width: 100%; display: flex; flex-direction: column; gap: 20px; padding: 24px 0; }
 .auth__title { display: flex; flex-direction: column; gap: 6px; }
-.auth__h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.auth__h1 { font-size: var(--text-input, 24px); font-weight: var(--weight-title, 600); letter-spacing: -0.01em; }
 .auth__sub { color: var(--ink-soft); }
 
 .auth .auth__seg { display: flex; }
@@ -85,27 +85,27 @@
 .auth__fields { display: flex; flex-direction: column; gap: 14px; animation: lx-auth-swap 0.3s var(--ease) both; }
 @keyframes lx-auth-swap { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
 .auth .auth__field { flex: none; height: 40px; padding: 0 8px 0 12px; }
-.auth .auth__field input { font-size: 13.5px; }
-.auth .auth__field input.mono { font-size: 12.5px; }
+.auth .auth__field input { font-size: var(--text-row, 13.5px); }
+.auth .auth__field input.mono { font-size: var(--text-meta, 12.5px); }
 .auth__pwlabel { display: flex; justify-content: space-between; align-items: center; }
-.auth .auth__pwlabel .lk { font-size: 12px; }
-.auth__hint { font-size: 12px; color: var(--ink-35); line-height: 1.5; }
+.auth .auth__pwlabel .lk { font-size: var(--text-meta, 12px); }
+.auth__hint { font-size: var(--text-meta, 12px); color: var(--ink-35); line-height: 1.5; }
 
 .auth__actions { display: flex; flex-direction: column; gap: 10px; }
 .auth__social { display: flex; flex-direction: column; gap: 8px; }
 .auth .auth__social-btn { background: var(--surface-3); color: var(--ink); }
 .auth .auth__social-btn:hover:not(:disabled) { background: var(--surface-4); }
-.auth__or { display: flex; align-items: center; gap: 12px; font-size: 11.5px; color: var(--ink-35); }
+.auth__or { display: flex; align-items: center; gap: 12px; font-size: var(--text-meta, 11.5px); color: var(--ink-35); }
 .auth__or::before, .auth__or::after { content: ''; flex: 1; height: 1px; background: var(--surface-4); }
-.auth .auth__cta { height: 42px; justify-content: center; gap: 10px; font-size: 13.5px; }
-.auth__signup { font-size: 12.5px; color: var(--ink-50); text-align: center; }
+.auth .auth__cta { height: 42px; justify-content: center; gap: 10px; font-size: var(--text-row, 13.5px); }
+.auth__signup { font-size: var(--text-meta, 12.5px); color: var(--ink-50); text-align: center; }
 .auth .auth__signup .lk { display: inline; font-size: inherit; }
 
-.auth .auth__advtoggle { align-self: center; gap: 6px; font-size: 12px; color: var(--ink-35); }
+.auth .auth__advtoggle { align-self: center; gap: 6px; font-size: var(--text-meta, 12px); color: var(--ink-35); }
 .auth .auth__advtoggle svg { transition: transform 0.3s var(--ease); }
 .auth__advtoggle.is-open svg { transform: rotate(180deg); }
 .auth__advanced { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
-.auth__urlstatus { font-size: 12px; color: var(--ink-50); }
+.auth__urlstatus { font-size: var(--text-meta, 12px); color: var(--ink-50); }
 .auth__urlstatus.is-ok { color: var(--good); }
 .auth__urlstatus.is-error { color: var(--danger); }
 

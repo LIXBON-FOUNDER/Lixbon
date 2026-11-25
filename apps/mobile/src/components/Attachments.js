@@ -1,7 +1,11 @@
+import { Pressable } from './MotionPressable';
+import { FileIcon } from '@lixbon/icons/file-icons';
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // Attachments.js — adjuntos del compositor (chat y control remoto): selector
 // de origen, lectura en segundo plano y las miniaturas que se ven mientras.
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Image,  ScrollView,  View } from 'react-native';
 
 import { pickDocuments, pickImages, readAttachment } from '../attachments';
 import { useApi } from '../state';
@@ -130,12 +134,12 @@ export function AttachmentChip({ item, onRemove }) {
   const ext = (item.name.split('.').pop() || '').toUpperCase();
   return (
     <View style={{ maxWidth: 230, height: 64, paddingLeft: 12, paddingRight: reading ? 14 : 4, borderRadius: RADIUS_SM, backgroundColor: c.surface4, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-      <Icon name="file" size={20} color={c.inkSoft} />
+      <FileIcon nombre={item.name} size={24} color={c.inkSoft} />
       <View style={{ flexShrink: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 13.5, color: c.ink }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>
           {item.name}
         </Text>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.inkMuted }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
           {reading ? 'Leyendo…' : ext || 'Documento'}
         </Text>
       </View>
@@ -167,9 +171,9 @@ export function MentionChip({ mention, onRemove }) {
         backgroundColor: c.accentSoft,
       }}
     >
-      <Text style={{ fontFamily: FONTS.monoMedium, fontSize: 12, color: c.accentDeep }}>@</Text>
+      <FileIcon nombre={mention.name} size={24} color={c.inkSoft} />
       <View style={{ flexShrink: 1 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: 12, color: c.ink }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, color: c.ink }}>
           {mention.name}
         </Text>
         <Text numberOfLines={1} style={{ fontFamily: FONTS.mono, fontSize: 9.5, color: c.inkLabel }}>

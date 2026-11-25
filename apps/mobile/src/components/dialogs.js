@@ -1,3 +1,11 @@
+import { Pressable } from './MotionPressable';
+import Reanimated, { Easing as NativeEasing, useAnimatedStyle, useSharedValue, withTiming, runOnJS, cancelAnimation } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { CURVES } from '../theme';
+import { dismissSheet, sheetDrag } from './motion';
+import { LINEAS } from '../theme';
+import { TEXT } from '../theme';
+import { Text, TextInput } from './Typography';
 // dialogs.js — hojas inferiores, confirmaciones y avisos del sistema visual
 // (Modal de RN sin animación propia: la subida y el velo los anima el sheet).
 // API por promesas:
@@ -6,7 +14,7 @@
 //   sheet({ title, render: (close) => <…/> })   contenido propio
 //   toast('Copiado') · toast('Conversación eliminada', { action: { label: 'Deshacer', onPress } })
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Animated, KeyboardAvoidingView, Modal,  ScrollView,   View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FONTS, MOTION, RADIUS, RADIUS_SM } from '../theme';
@@ -16,77 +24,83 @@ import { EASE, useColors, useReducedMotion } from './ui';
 const DialogContext = createContext(null);
 export const useDialogs = () => useContext(DialogContext);
 
-/// Hoja inferior animada: el velo se funde y el panel sube 24px mientras
-/// aparece. `onClosed` llega cuando terminó de salir.
-export function BottomSheet({ visible, onDismiss, onClosed, children, keyboard = false, padding = 12 }) {
+export function BottomSheet({ visible, onDismiss, onClosed, children, keyboard = false, padding = LINEAS.menuCaja }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
   const { height } = useWindowDimensions();
-  const anim = useRef(new Animated.Value(0)).current;
+  const progress = useSharedValue(0);
+  const drag = useSharedValue(0);
+  const panelHeight = useSharedValue(height * 0.86);
   const [mounted, setMounted] = useState(visible);
-
+  const callbacks = useRef({ onClosed, onDismiss, visible });
+  callbacks.current = { onClosed, onDismiss, visible };
+  const close = () => { if (callbacks.current.visible) return; setMounted(false); callbacks.current.onClosed?.(); };
+  const dismiss = () => callbacks.current.onDismiss?.();
   useEffect(() => {
     if (visible) {
       setMounted(true);
-      anim.setValue(0);
-      Animated.timing(anim, { toValue: 1, duration: reduced ? 0 : MOTION.sheet, easing: EASE, useNativeDriver: true }).start();
+      drag.value = 0;
+      progress.value = withTiming(1, { duration: reduced ? 120 : MOTION.sheet, easing: NativeEasing.bezier(...CURVES.sheet) });
     } else if (mounted) {
-      Animated.timing(anim, { toValue: 0, duration: reduced ? 0 : 280, easing: EASE, useNativeDriver: true }).start(() => {
-        setMounted(false);
-        onClosed?.();
-      });
+      progress.value = withTiming(0, { duration: reduced ? 120 : MOTION.sheetClose, easing: NativeEasing.bezier(...CURVES.sheet) }, (finished) => { if (finished) runOnJS(close)(); });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-
+    return () => cancelAnimation(progress);
+  }, [visible, reduced]);
+  const panelStyle = useAnimatedStyle(() => ({ opacity: progress.value, transform: reduced ? [] : [{ translateY: (1 - progress.value) * panelHeight.value + drag.value }] }));
+  const scrimStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
+  const gesture = Gesture.Pan().minDistance(4).onUpdate((event) => {
+    if (!reduced) drag.value = sheetDrag(event.translationY);
+  }).onEnd((event) => {
+    if (dismissSheet(event.translationY, event.velocityY / 1000)) runOnJS(dismiss)();
+    else drag.value = withTiming(0, { duration: MOTION.sheetClose, easing: NativeEasing.bezier(...CURVES.sheet) });
+  }).onFinalize((event, succeeded) => { if (!succeeded) drag.value = withTiming(0, { duration: MOTION.sheetClose }); });
   if (!mounted) return null;
+  const panel = <Reanimated.View onLayout={(event) => { panelHeight.value = event.nativeEvent.layout.height; }} style={[{
+    maxHeight: height * 0.86, backgroundColor: c.sheet, borderTopLeftRadius: RADIUS, borderTopRightRadius: RADIUS,
+    paddingHorizontal: padding, paddingBottom: 24 + insets.bottom,
+  }, panelStyle]}>
+    <GestureDetector gesture={gesture}><View accessible accessibilityRole="button" accessibilityLabel="Cerrar hoja" accessibilityActions={[{ name: 'activate', label: 'Cerrar hoja' }]} onAccessibilityAction={() => onDismiss?.()} onAccessibilityTap={onDismiss} style={{ height: LINEAS.tacto, alignItems: 'center', justifyContent: 'center' }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.surface6 }} /></View></GestureDetector>
+    {children}
+  </Reanimated.View>;
+  return <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onDismiss}>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Reanimated.View style={[{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }, scrimStyle]}><Pressable accessibilityLabel="Cerrar" onPress={onDismiss} style={{ flex: 1, backgroundColor: c.scrim }} /></Reanimated.View>
+      {keyboard ? <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">{panel}</KeyboardAvoidingView> : <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">{panel}</View>}
+    </GestureHandlerRootView>
+  </Modal>;
+}
 
-  const panel = (
-    <Animated.View
-      style={{
-        maxHeight: height * 0.86,
-        backgroundColor: c.sheet,
-        borderTopLeftRadius: RADIUS,
-        borderTopRightRadius: RADIUS,
-        paddingTop: 10,
-        paddingHorizontal: padding,
-        paddingBottom: 24 + insets.bottom,
-        opacity: anim,
-        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
-      }}
-    >
-      <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: c.surface6, marginBottom: 8 }} />
-      {children}
-    </Animated.View>
-  );
-
-  return (
-    <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onDismiss}>
-      <Animated.View style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, opacity: anim }}>
-        <Pressable accessibilityLabel="Cerrar" onPress={onDismiss} style={{ flex: 1, backgroundColor: c.scrim }} />
-      </Animated.View>
-      {keyboard ? (
-        // 'padding' también en Android: con edge-to-edge la ventana ya no se
-        // redimensiona sola y el campo quedaba debajo del teclado.
-        <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
-          {panel}
-        </KeyboardAvoidingView>
-      ) : (
-        <View style={{ flex: 1, justifyContent: 'flex-end' }} pointerEvents="box-none">
-          {panel}
-        </View>
-      )}
-    </Modal>
-  );
+export function AnchoredMenu({ visible, anchor, onDismiss, onClosed, children, padding = LINEAS.menuCaja }) {
+  const c = useColors();
+  const reduced = useReducedMotion();
+  const { width, height } = useWindowDimensions();
+  const [mounted, setMounted] = useState(visible);
+  const progress = useSharedValue(0);
+  const callbacks = useRef({ onClosed, visible }); callbacks.current = { onClosed, visible };
+  const close = () => { if (callbacks.current.visible) return; setMounted(false); callbacks.current.onClosed?.(); };
+  useEffect(() => {
+    if (visible) { setMounted(true); progress.value = withTiming(1, { duration: MOTION.menu, easing: NativeEasing.bezier(...CURVES.out) }); }
+    else if (mounted) progress.value = withTiming(0, { duration: MOTION.menuClose, easing: NativeEasing.bezier(...CURVES.out) }, (finished) => { if (finished) runOnJS(close)(); });
+    return () => cancelAnimation(progress);
+  }, [visible, reduced]);
+  const animated = useAnimatedStyle(() => ({ opacity: progress.value, transform: reduced ? [] : [{ scale: 0.96 + progress.value * 0.04 }] }));
+  if (!mounted) return null;
+  const menuWidth = Math.min(340, width - 2 * LINEAS.caja);
+  const left = Math.max(LINEAS.caja, Math.min(anchor.x, width - menuWidth - LINEAS.caja));
+  const bottom = Math.max(LINEAS.caja, height - anchor.y + LINEAS.caja);
+  return <Modal visible transparent animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={onDismiss}>
+    <Pressable accessibilityLabel="Cerrar menú" onPress={onDismiss} style={{ flex: 1 }} />
+    <Reanimated.View style={[{ position: 'absolute', left, bottom, width: menuWidth, maxHeight: Math.max(100, anchor.y - 2 * LINEAS.caja), padding, backgroundColor: c.sheet, borderRadius: RADIUS, transformOrigin: [Math.max(0, Math.min(menuWidth, anchor.x + anchor.width / 2 - left)), '100%', 0] }, animated]}>{children}</Reanimated.View>
+  </Modal>;
 }
 
 export function SheetTitle({ children, detail }) {
   const c = useColors();
   return (
     <View style={{ marginTop: 8, marginBottom: 8, marginHorizontal: 8, gap: 6 }}>
-      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 19, letterSpacing: -0.2, color: c.ink }}>{children}</Text>
-      {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.ink70 }}>{detail}</Text>}
+      <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.title, letterSpacing: -0.2, color: c.ink }}>{children}</Text>
+      {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.ink70 }}>{detail}</Text>}
     </View>
   );
 }
@@ -105,33 +119,33 @@ export function SheetItem({ item, onPress }) {
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 14,
+        gap: LINEAS.menuTexto - LINEAS.menuIcono - LINEAS.icono,
         minHeight: item.description ? 64 : 52,
-        paddingHorizontal: item.description ? 12 : 14,
+        paddingHorizontal: LINEAS.menuIcono - LINEAS.menuCaja,
         paddingVertical: item.description ? 10 : 0,
         borderRadius: RADIUS,
         backgroundColor: item.selected ? c.surface4 : pressed ? c.pressed : 'transparent',
       })}
     >
-      {!!item.icon && <Icon name={item.icon} size={19} color={item.danger ? c.danger : c.inkSoft} />}
+      {!!item.icon && <Icon name={item.icon} size={LINEAS.icono} color={item.danger ? c.danger : c.inkSoft} />}
       {!!item.swatch && <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: item.swatch }} />}
       <View style={{ flex: 1, gap: 2 }}>
         <Text
           numberOfLines={1}
           style={{
             fontFamily: item.mono ? FONTS.mono : item.description ? FONTS.uiMedium : FONTS.ui,
-            fontSize: item.mono ? 14 : 15,
+            fontSize: item.mono ? 14 : 16,
             color,
           }}
         >
           {item.label}
         </Text>
-        {!!item.description && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{item.description}</Text>}
+        {!!item.description && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{item.description}</Text>}
       </View>
-      {!!item.value2 && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{item.value2}</Text>}
+      {!!item.value2 && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{item.value2}</Text>}
       {!!item.badge && (
         <View style={{ height: 24, justifyContent: 'center', paddingHorizontal: 8, borderRadius: RADIUS_SM, backgroundColor: c.surface4 }}>
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12, color: c.ink70 }}>{item.badge}</Text>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>{item.badge}</Text>
         </View>
       )}
       {item.selected && <Icon name="check" size={18} color={c.accent} strokeWidth={2} />}
@@ -145,13 +159,13 @@ function SheetButtons({ cancelLabel = 'Cancelar', confirmLabel, danger, onCancel
   return (
     <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginHorizontal: 8 }}>
       <Pressable onPress={onCancel} style={({ pressed }) => [btn, { backgroundColor: c.raised, opacity: pressed ? 0.85 : 1 }]}>
-        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 15, color: c.onRaised }}>{cancelLabel}</Text>
+        <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.onRaised }}>{cancelLabel}</Text>
       </Pressable>
       <Pressable
         onPress={onConfirm}
-        style={({ pressed }) => [btn, { backgroundColor: danger ? c.dangerSoft : c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
+        style={({ pressed }) => [btn, { backgroundColor: danger ? c.dangerAction : c.primary, transform: [{ scale: pressed ? 0.98 : 1 }] }]}
       >
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 15, color: danger ? c.danger : c.onPrimary }}>{confirmLabel || 'Aceptar'}</Text>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: danger ? c.onDanger : c.onPrimary }}>{confirmLabel || 'Aceptar'}</Text>
       </Pressable>
     </View>
   );
@@ -243,6 +257,7 @@ export function DialogProvider({ children }) {
   };
 
   const api = { prompt, confirm, sheet, toast };
+  const SheetFrame = sheetState?.anchor ? AnchoredMenu : BottomSheet;
 
   return (
     <DialogContext.Provider value={api}>
@@ -281,7 +296,7 @@ export function DialogProvider({ children }) {
               borderRadius: RADIUS,
               paddingHorizontal: 14,
               fontFamily: FONTS.uiMedium,
-              fontSize: 16,
+              fontSize: TEXT.body,
               color: c.ink,
             }}
           />
@@ -294,7 +309,7 @@ export function DialogProvider({ children }) {
         />
       </BottomSheet>
 
-      <BottomSheet
+      <SheetFrame anchor={sheetState?.anchor}
         visible={sheetOpen}
         keyboard={!!sheetState?.keyboard}
         onDismiss={() => closeSheet(null)}
@@ -312,11 +327,11 @@ export function DialogProvider({ children }) {
               <SheetItem key={item.divider ? `d${i}` : String(item.value)} item={item} onPress={() => closeSheet(item.value)} />
             ))}
             {(sheetState?.items || []).length === 0 && (
-              <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted, margin: 12 }}>{sheetState?.emptyLabel || 'Sin opciones.'}</Text>
+              <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted, margin: 12 }}>{sheetState?.emptyLabel || 'Sin opciones.'}</Text>
             )}
           </ScrollView>
         )}
-      </BottomSheet>
+      </SheetFrame>
 
       {toastState != null && (
         <Animated.View
@@ -346,7 +361,7 @@ export function DialogProvider({ children }) {
             }}
           >
             {!!toastState.icon && <Icon name={toastState.icon} size={17} color={c.accent} strokeWidth={2} />}
-            <Text style={{ flex: 1, paddingVertical: 12, fontFamily: FONTS.ui, fontSize: 14.5, color: c.onRaised }}>{toastState.message}</Text>
+            <Text style={{ flex: 1, paddingVertical: 12, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.onRaised }}>{toastState.message}</Text>
             {!!toastState.action && (
               <Pressable
                 onPress={() => {
@@ -362,7 +377,7 @@ export function DialogProvider({ children }) {
                   backgroundColor: pressed ? 'rgba(255,255,255,0.06)' : 'transparent',
                 })}
               >
-                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 14.5, color: c.accent }}>{toastState.action.label}</Text>
+                <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.secondary, color: c.accent }}>{toastState.action.label}</Text>
               </Pressable>
             )}
           </View>

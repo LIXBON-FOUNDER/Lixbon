@@ -1,3 +1,4 @@
+import { Icono } from '@lixbon/icons';
 // SettingsPage.jsx — Ajustes en una ventana centrada sobre el modo activo:
 // navegación por grupos con icono e indicador deslizante a la izquierda y la
 // sección elegida a la derecha. Esc o un clic fuera la cierran, y el modo de
@@ -23,6 +24,9 @@ import {
   IconCode, IconKeyboard, IconServer, IconExtensions, IconMascota, IconGitBranch, IconBook,
 } from '../components/Icons';
 
+const IconAppearance = (props) => <Icono nombre="paleta" {...props} />;
+const IconMcp = (props) => <Icono nombre="nodos" {...props} />;
+
 const GROUPS = [
   { label: 'Cuenta', items: [
     { id: 'profile', label: 'Perfil y cuenta', icon: IconUser, keywords: 'perfil nombre foto api key claves sesion cerrar eliminar', Page: ProfilePage },
@@ -31,11 +35,11 @@ const GROUPS = [
   { label: 'Inteligencia', items: [
     { id: 'agent', label: 'Agente y permisos', icon: IconShield, keywords: 'agente permisos aprobar comandos permitidos allowlist herramientas autonomia modo', Page: AgentPage },
     { id: 'orch', label: 'Orquestador', icon: IconNodes, keywords: 'orquestador agentes coordinador hijos roles explorador implementador revisor skill lxo worktree experimental', Page: OrchestratorPage },
-    { id: 'mcp', label: 'Servidores MCP', icon: IconPuzzle, keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
+    { id: 'mcp', label: 'Servidores MCP', icon: IconMcp, keywords: 'mcp servidores extensiones herramientas github postgres playwright importar claude cursor vscode', Page: McpPage },
     { id: 'skills', label: 'Skills', icon: IconBook, keywords: 'skills comandos catalogo instalar adversary marketing calificar version', Page: SkillsPage },
   ] },
   { label: 'Espacio de trabajo', items: [
-    { id: 'editor', label: 'Interfaz y editor', icon: IconCode, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
+    { id: 'editor', label: 'Interfaz y editor', icon: IconAppearance, keywords: 'interfaz tamaño zoom letra tipografia editor fuente tabulacion ajuste linea terminal shell', Page: EditorPage },
     { id: 'git', label: 'Git', icon: IconGitBranch, keywords: 'git commit mensaje conventional commits idioma generar claude lixbon', Page: GitPage },
     { id: 'keys', label: 'Atajos de teclado', icon: IconKeyboard, keywords: 'atajos teclado keybindings combinacion', Page: Keybindings },
     { id: 'mascota', label: 'Mascota', icon: IconMascota, keywords: 'mascota gael leya pixel animacion kart latigo aviso flotante dormir', Page: MascotaPage },

@@ -1,3 +1,7 @@
+import { Pressable } from '../components/MotionPressable';
+import { LINEAS } from '../theme';
+import { TEXT } from '../theme';
+import { Text } from '../components/Typography';
 // RemoteOrch.js — el orquestador de agentes del IDE, visto desde el control
 // remoto. El IDE manda un snapshot (`state.orch`) cada vez que cambia y atiende
 // las acciones que se le piden (`orch` + action): parar una tarea, ver su
@@ -5,7 +9,7 @@
 // pide: el run en curso arriba con sus fases y agentes, los anteriores debajo,
 // el detalle de cada agente como línea de tiempo y los ajustes en secciones.
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking,  ScrollView,  View } from 'react-native';
 
 import Icon from '../components/Icon';
 import { LiveDot } from '../components/RemoteSessionList';
@@ -118,7 +122,7 @@ function Activity({ task, orch }) {
       {!!task.spec && (
         <View style={{ gap: 6 }}>
           <Eyebrow>Encargo</Eyebrow>
-          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkBody }}>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.inkBody }}>
             {task.spec}
           </Text>
         </View>
@@ -129,9 +133,9 @@ function Activity({ task, orch }) {
             <FadeUp key={i} delay={Math.min(i, 8) * 30} style={{ flexDirection: 'row', gap: 14 }}>
               <Text style={{ width: 42, paddingTop: 2, fontFamily: FONTS.mono, fontSize: 12, color: e.ask ? c.warn : c.inkMuted }}>{clock(e.at)}</Text>
               <View style={{ flex: 1, gap: 2 }}>
-                <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: e.ask ? c.warn : c.ink }}>{e.title}</Text>
+                <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: e.ask ? c.warn : c.ink }}>{e.title}</Text>
                 {!!e.detail && (
-                  <Text selectable numberOfLines={6} style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+                  <Text selectable numberOfLines={6} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 19, color: c.inkMuted }}>
                     {e.detail}
                   </Text>
                 )}
@@ -140,19 +144,19 @@ function Activity({ task, orch }) {
           ))}
         </View>
       ) : (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Aún no ha informado de nada.</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Aún no ha informado de nada.</Text>
       )}
       {!!task.summary && (
         <View style={{ gap: 6 }}>
           <Eyebrow>Informe final</Eyebrow>
-          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkBody }}>
+          <Text selectable style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.inkBody }}>
             {task.summary}
           </Text>
           {task.files?.length > 0 && <Text style={[mono(c), { color: c.inkMuted }]}>{task.files.join(' · ')}</Text>}
         </View>
       )}
       {open.length > 0 && (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 19, color: c.inkMuted }}>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 19, color: c.inkMuted }}>
           Las preguntas las responde el coordinador; si necesita tu decisión, te la pide en la conversación.
         </Text>
       )}
@@ -173,7 +177,7 @@ function Terminal({ task, state, send }) {
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{live ? 'En vivo · se actualiza sola' : 'La terminal ya se cerró'}</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{live ? 'En vivo · se actualiza sola' : 'La terminal ya se cerró'}</Text>
         <PillButton size="sm" outline icon="refresh" label="Actualizar" onPress={() => send('term', { task: task.id })} />
       </View>
       <ScrollView nestedScrollEnabled style={{ maxHeight: 460, borderRadius: RADIUS, backgroundColor: c.codeBg }} contentContainerStyle={{ padding: 12 }}>
@@ -191,7 +195,7 @@ function Diff({ task, state, send }) {
   useEffect(() => {
     send('diff', { task: task.id });
   }, [task.id, task.updated, send]);
-  if (!d) return <Text style={{ fontFamily: FONTS.ui, fontSize: 14, color: c.inkMuted }}>Cargando…</Text>;
+  if (!d) return <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Cargando…</Text>;
   const lines = (d.diff || '').split('\n').slice(0, 1500);
   return (
     <View style={{ gap: 10 }}>
@@ -210,7 +214,7 @@ function Diff({ task, state, send }) {
                   mono(c),
                   {
                     paddingHorizontal: 10,
-                    fontSize: 11.5,
+                    fontSize: TEXT.meta,
                     color: add ? c.good : del ? c.danger : l.startsWith('@@') ? c.info : l.startsWith('diff ') ? c.ink : c.inkSoft,
                     backgroundColor: add ? 'rgba(134,214,148,0.1)' : del ? 'rgba(240,140,124,0.1)' : 'transparent',
                   },
@@ -223,7 +227,7 @@ function Diff({ task, state, send }) {
         </View>
       )}
       {(d.truncated || (d.diff || '').split('\n').length > 1500) && (
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>El diff es muy largo: se muestra solo el principio.</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>El diff es muy largo: se muestra solo el principio.</Text>
       )}
     </View>
   );
@@ -247,10 +251,10 @@ function TaskDetail({ task, state, send, onBack }) {
           <Icon name="arrow-left" size={20} color={c.inkBody} />
         </IconButton>
         <View style={{ flex: 1, gap: 1 }}>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: 16, color: c.ink }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.body, color: c.ink }}>
             {roleName(task)}
           </Text>
-          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+          <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
             {sub} · {elapsed(task, now)}
           </Text>
         </View>
@@ -297,11 +301,11 @@ function ActiveRun({ run, orch, now, onOpen }) {
       <View style={{ gap: 4 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <LiveDot size={6} />
-          <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkMuted }}>
+          <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
             {['En curso', run.repo, root && elapsed(root, now)].filter(Boolean).join(' · ')}
           </Text>
         </View>
-        <ShimmerText text={run.objective} base={c.ink} highlight={c.inkMuted} style={{ fontFamily: FONTS.uiMedium, fontSize: 16 }} />
+        <ShimmerText text={run.objective} base={c.ink} highlight={c.inkMuted} style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.body }} />
       </View>
       {kids.length > 0 && (
         <View accessibilityLabel={`${kids.filter((k) => k.status === 'done').length} de ${kids.length} tareas entregadas`} style={{ flexDirection: 'row', gap: 4 }}>
@@ -325,8 +329,8 @@ function ActiveRun({ run, orch, now, onOpen }) {
         >
           <Icon name="warning" size={17} color={c.warn} />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: 14, color: c.ink }}>El {roleName(asking).toLowerCase()} está esperando una respuesta</Text>
-            <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.ink70 }}>
+            <Text style={{ fontFamily: FONTS.uiMedium, fontSize: TEXT.secondary, color: c.ink }}>El {roleName(asking).toLowerCase()} está esperando una respuesta</Text>
+            <Text numberOfLines={2} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.ink70 }}>
               {questions[0].body}
             </Text>
           </View>
@@ -341,10 +345,10 @@ function ActiveRun({ run, orch, now, onOpen }) {
             style={({ pressed }) => ({ minHeight: 44, paddingLeft: t.depth > 1 ? (t.depth - 1) * 14 : 0, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.7 : 1 })}
           >
             <StatusMark status={t.status} />
-            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: 14, color: t.status === 'starting' ? c.inkMuted : c.ink }}>
+            <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: t.status === 'starting' ? c.inkMuted : c.ink }}>
               {roleName(t)}
             </Text>
-            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+            <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
               {AGENTS[t.agent] || t.agent} · {STATUS[t.status] || t.status}
             </Text>
           </Pressable>
@@ -370,7 +374,7 @@ function Runs({ state, send, onOpen }) {
   if (!runs.length) {
     return (
       <FadeUp style={{ alignItems: 'center', gap: 12, paddingVertical: 48, paddingHorizontal: 16 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>Todavía no hay runs. Escribe en la conversación:</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 21, color: c.inkMuted, textAlign: 'center' }}>Todavía no hay runs. Escribe en la conversación:</Text>
         <Text style={[mono(c), { paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS_SM, backgroundColor: c.sheet, color: c.ink }]}>/orquestar &lt;objetivo&gt;</Text>
       </FadeUp>
     );
@@ -409,10 +413,10 @@ function Runs({ state, send, onOpen }) {
                 style={({ pressed }) => ({ minHeight: 58, paddingVertical: 8, paddingHorizontal: 4, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.7 : 1 })}
               >
                 <View style={{ flex: 1, gap: 2 }}>
-                  <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkBody }}>
+                  <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkBody }}>
                     {r.objective}
                   </Text>
-                  <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: r.failed ? c.danger : c.inkMuted }}>
+                  <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: r.failed ? c.danger : c.inkMuted }}>
                     {r.failed ? 'Fallida' : 'Cerrada'} · {ago(r.root?.updated || r.created)}
                   </Text>
                 </View>
@@ -466,7 +470,7 @@ function Settings({ state, send, onBack }) {
         <IconButton onPress={onBack} label="Volver al orquestador">
           <Icon name="arrow-left" size={20} color={c.inkBody} />
         </IconButton>
-        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>Ajustes del orquestador</Text>
+        <Text style={{ fontFamily: FONTS.uiSemiBold, fontSize: TEXT.row, color: c.ink }}>Ajustes del orquestador</Text>
       </View>
 
       <Section>
@@ -507,7 +511,7 @@ function Settings({ state, send, onBack }) {
         <Row title="Volver a consultar" icon="refresh" onPress={() => send('agents', { refresh: true })} chevron={false} />
       </Section>
 
-      <Text style={{ paddingHorizontal: 4, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>
+      <Text style={{ paddingHorizontal: 4, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>
         Los agentes del IDE lo activan con <Text style={{ fontFamily: FONTS.mono, color: c.ink70 }}>/orquestar</Text>.
       </Text>
     </View>
@@ -549,19 +553,19 @@ export default function RemoteOrch({ state, sendCommand, core }) {
   if (!orch) {
     body = (
       <View style={{ alignItems: 'center', gap: 14, paddingVertical: 48 }}>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, color: c.inkMuted }}>Cargando el orquestador…</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>Cargando el orquestador…</Text>
         <PillButton size="sm" outline icon="refresh" label="Actualizar" onPress={() => send('refresh', {})} />
       </View>
     );
   } else if (!orch.enabled) {
     body = (
       <FadeUp style={{ alignItems: 'center', gap: 14, paddingVertical: 40, paddingHorizontal: 8 }}>
-        <Text style={{ fontFamily: FONTS.serif, fontSize: 28, lineHeight: 33, color: c.ink, textAlign: 'center' }}>Orquestador de agentes</Text>
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 14.5, lineHeight: 22, color: c.inkMuted, textAlign: 'center' }}>
+        <Text style={{ fontFamily: FONTS.serif, fontSize: TEXT.heading, lineHeight: 33, color: c.ink, textAlign: 'center' }}>Orquestador de agentes</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.secondary, lineHeight: 22, color: c.inkMuted, textAlign: 'center' }}>
           Un chat del IDE coordina a un equipo de agentes (Claude Code, Codex, Gemini…): reparte el objetivo, elige quién hace cada parte, espera sus informes y te cuenta el resultado.
         </Text>
         <PillButton label="Activar en el IDE" onPress={() => send('enable', { on: true })} style={{ marginTop: 6 }} />
-        <Text style={{ fontFamily: FONTS.ui, fontSize: 12.5, color: c.inkFaint }}>Experimental</Text>
+        <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkFaint }}>Experimental</Text>
       </FadeUp>
     );
   } else if (task) {
@@ -572,7 +576,7 @@ export default function RemoteOrch({ state, sendCommand, core }) {
     body = (
       <View style={{ gap: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', minHeight: 44 }}>
-          <Text style={{ flex: 1, paddingLeft: 4, fontFamily: FONTS.ui, fontSize: 13, color: c.inkMuted }}>{orch.workspace || ''}</Text>
+          <Text style={{ flex: 1, paddingLeft: 4, fontFamily: FONTS.ui, fontSize: TEXT.meta, color: c.inkMuted }}>{orch.workspace || ''}</Text>
           <IconButton onPress={() => setView('settings')} label="Ajustes del orquestador">
             <Icon name="gear" size={19} color={c.inkBody} />
           </IconButton>
@@ -583,7 +587,7 @@ export default function RemoteOrch({ state, sendCommand, core }) {
   }
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: LINEAS.caja, paddingTop: 4, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
       <CoreStatus core={core} />
       {body}
     </ScrollView>

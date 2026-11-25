@@ -1,3 +1,10 @@
+import { Pressable } from './MotionPressable';
+import { useReducedMotion } from './motionPreference';
+export { useReducedMotion } from './motionPreference';
+import { LINEAS } from '../theme';
+import { StatusIcon } from '@lixbon/icons/status';
+import { TEXT } from '../theme';
+import { Text } from './Typography';
 // ui.js — primitivas del sistema visual: tema activo con acento elegible,
 // marca, campos y botones de relleno (sin bordes), selector deslizante,
 // interruptor, tarjetas, cabeceras, filas de ajustes y la luz ambiente.
@@ -7,9 +14,9 @@ import {
   Animated,
   Easing,
   Image,
-  Pressable,
+
   StyleSheet,
-  Text,
+
   View,
   useColorScheme,
   useWindowDimensions,
@@ -23,7 +30,7 @@ import { FONTS, MOTION, RADIUS, RADIUS_SM, buildTheme } from '../theme';
 import { UI_DEFAULTS, usePrefs } from '../state';
 import Icon from './Icon';
 
-export const EASE = Easing.bezier(0.22, 1, 0.36, 1);
+export const EASE = Easing.bezier(0.23, 1, 0.32, 1);
 export const SPRING = Easing.bezier(0.3, 1.2, 0.5, 1);
 
 // ── Tema activo ──────────────────────────────────────────────────────────────
@@ -48,18 +55,6 @@ export function avatarUri(base, user) {
   const url = user?.avatar_url;
   if (typeof url !== 'string' || !url) return null;
   return /^https?:/.test(url) ? url : `${base}${url}`;
-}
-
-// Sin animaciones si el sistema lo pide o si el usuario las apagó.
-export function useReducedMotion() {
-  const { motion } = useUi();
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduced).catch(() => {});
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduced);
-    return () => sub?.remove();
-  }, []);
-  return reduced || !motion;
 }
 
 const TEXT_SCALE = { sm: 0.93, md: 1, lg: 1.1 };
@@ -107,7 +102,6 @@ export function LixLogo({ size = 28, color }) {
 export function LogoMark({ size = 26 }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32">
-      <Rect x="0" y="0" width="32" height="32" rx="9" ry="9" fill="#1B1A17" />
       <Polygon points="16,3.2 3.2,16 16,16" fill="#DCD6BC" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
       <Polygon points="16,3.2 28.8,16 16,16" fill="#C7BE9F" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
       <Polygon points="3.2,16 16,28.8 16,16" fill="#4B5327" stroke="#1B1A17" strokeWidth="0.9" strokeLinejoin="round" />
@@ -147,6 +141,8 @@ export function agentStyle(agent, c) {
 }
 
 export function AgentMark({ agent, size = 18 }) {
+  const c = useColors();
+  if (agent === 'codex') return <StatusIcon kind="codex" size={size} color={c.ink} />;
   return agent === 'claude' ? <ClaudeMark size={size} /> : <LogoMark size={size} />;
 }
 
@@ -249,8 +245,8 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
   const c = useColors();
   const lg = size === 'lg';
   const sm = size === 'sm';
-  const bg = danger ? c.dangerSoft : outline ? c.surface4 : accent ? c.accent : c.primary;
-  const fg = danger ? c.danger : outline ? c.ink : accent ? c.onAccent : c.onPrimary;
+  const bg = danger ? c.dangerAction : outline ? c.surface4 : accent ? c.accent : c.primary;
+  const fg = danger ? c.onDanger : outline ? c.ink : accent ? c.onAccent : c.onPrimary;
   return (
     <Pressable
       onPress={onPress}
@@ -264,7 +260,7 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
           gap: 8,
           borderRadius: sm ? RADIUS_SM : RADIUS,
           paddingHorizontal: sm ? 12 : 18,
-          minHeight: lg ? 50 : sm ? 36 : 44,
+          minHeight: lg ? 50 : LINEAS.tacto,
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: bg,
@@ -275,7 +271,7 @@ export function PillButton({ label, onPress, disabled = false, danger = false, o
       ]}
     >
       {icon ? <Icon name={icon} size={16} color={fg} /> : null}
-      <Text style={{ flexShrink: 1, textAlign: 'center', fontFamily: danger || outline ? FONTS.uiMedium : FONTS.uiSemiBold, fontSize: sm ? 13.5 : 15, color: fg }}>{label}</Text>
+      <Text style={{ flexShrink: 1, textAlign: 'center', fontFamily: danger || outline ? FONTS.uiMedium : FONTS.uiSemiBold, fontSize: sm ? TEXT.secondary : TEXT.body, color: fg }}>{label}</Text>
     </Pressable>
   );
 }
@@ -329,7 +325,7 @@ export function Chip({ label, icon, onPress, active = false, mono = false }) {
         numberOfLines={1}
         style={{
           fontFamily: mono ? FONTS.mono : active ? FONTS.uiMedium : FONTS.ui,
-          fontSize: mono ? 12 : 13.5,
+          fontSize: mono ? 12 : TEXT.secondary,
           color: active ? c.onPrimary : c.ink70,
         }}
       >
@@ -361,9 +357,9 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
       placed.current = true;
       return;
     }
+    w.setValue(l.width);
     Animated.parallel([
-      Animated.timing(x, { toValue: l.x, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
-      Animated.timing(w, { toValue: l.width, duration: MOTION.fade, easing: EASE, useNativeDriver: false }),
+      Animated.timing(x, { toValue: l.x, duration: MOTION.segment, easing: Easing.bezier(0.77, 0, 0.175, 1), useNativeDriver: true }),
     ]).start();
   }, [value, layouts, x, w, reduced]);
 
@@ -385,7 +381,8 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
           style={{
             position: 'absolute',
             top: 3,
-            left: x,
+            left: 0,
+            transform: [{ translateX: x }],
             width: w,
             height: h,
             borderRadius: lg ? RADIUS_SM : 5,
@@ -404,6 +401,7 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
               const { x: lx, width } = e.nativeEvent.layout;
               setLayouts((cur) => (cur[o.value]?.x === lx && cur[o.value]?.width === width ? cur : { ...cur, [o.value]: { x: lx, width } }));
             }}
+            hitSlop={{ top: 7, bottom: 7 }}
             accessibilityRole="radio"
             accessibilityLabel={o.a11y || (typeof o.label === 'string' ? o.label : undefined)}
             accessibilityState={{ selected: active }}
@@ -424,7 +422,7 @@ export function Segmented({ options, value, onChange, stretch = false, size = 'm
             {o.label ? (
               <Text
                 numberOfLines={1}
-                style={{ fontFamily: active ? FONTS.uiMedium : FONTS.ui, fontSize: o.size || (lg ? 14 : 13.5), color: active ? c.ink : c.inkMuted }}
+                style={{ fontFamily: active ? FONTS.uiMedium : FONTS.ui, fontSize: o.size || TEXT.secondary, color: active ? c.ink : c.inkMuted }}
               >
                 {o.label}
               </Text>
@@ -490,14 +488,14 @@ export function Toggle({ value, onChange, disabled = false, label }) {
 
 export function Card({ children, style }) {
   const c = useColors();
-  return <View style={[{ backgroundColor: c.sheet, borderRadius: RADIUS, padding: 16 }, style]}>{children}</View>;
+  return <View style={[{ backgroundColor: c.sheet, borderRadius: RADIUS, padding: LINEAS.relleno }, style]}>{children}</View>;
 }
 
 /// Encabezado de grupo (Fijadas, Hoy, Plan…): sin versalitas, apagado.
 export function Eyebrow({ children, style }) {
   const c = useColors();
   // Etiqueta de grupo en mono y versalitas, para que no compita con las filas.
-  return <Text style={[{ fontFamily: FONTS.monoMedium, fontSize: 11, letterSpacing: 0.9, textTransform: 'uppercase', color: c.inkMuted }, style]}>{children}</Text>;
+  return <Text style={[{ fontFamily: FONTS.uiMedium, fontSize: TEXT.meta, letterSpacing: 0.1, textTransform: 'uppercase', color: c.inkMuted }, style]}>{children}</Text>;
 }
 
 /// Sección de ajustes: encabezado y un bloque de filas sobre la tarjeta.
@@ -505,7 +503,7 @@ export function Section({ title, children, delay = 0, style }) {
   const c = useColors();
   return (
     <FadeUp delay={delay} style={[{ gap: 8 }, style]}>
-      {!!title && <Eyebrow style={{ paddingHorizontal: 4 }}>{title}</Eyebrow>}
+      {!!title && <Eyebrow style={{ paddingHorizontal: LINEAS.relleno }}>{title}</Eyebrow>}
       <View style={{ borderRadius: RADIUS, backgroundColor: c.sheet, paddingVertical: 4, overflow: 'hidden' }}>{children}</View>
     </FadeUp>
   );
@@ -522,24 +520,24 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
       accessibilityRole={onPress ? 'button' : undefined}
       style={({ pressed }) => ({
         minHeight: detail ? 64 : 52,
-        paddingHorizontal: 14,
+        paddingHorizontal: LINEAS.relleno,
         paddingVertical: detail ? 10 : 0,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: LINEAS.espacioIcono,
         backgroundColor: pressed && onPress ? c.pressed : 'transparent',
       })}
     >
       {icon ? <RowIcon name={icon} danger={danger} /> : null}
       <View style={{ flex: 1, gap: 2 }}>
-        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: 15, color: danger ? c.danger : c.ink }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONTS.ui, fontSize: TEXT.body, color: danger ? c.danger : c.ink }}>
           {title}
         </Text>
-        {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: 13, lineHeight: 18, color: c.inkMuted }}>{detail}</Text>}
+        {!!detail && <Text style={{ fontFamily: FONTS.ui, fontSize: TEXT.meta, lineHeight: 18, color: c.inkMuted }}>{detail}</Text>}
       </View>
       {right}
       {value != null && (
-        <Text numberOfLines={1} style={{ maxWidth: 170, fontFamily: FONTS.ui, fontSize: 13.5, color: c.inkMuted }}>
+        <Text numberOfLines={1} style={{ maxWidth: 170, fontFamily: FONTS.ui, fontSize: TEXT.secondary, color: c.inkMuted }}>
           {value}
         </Text>
       )}
@@ -553,8 +551,8 @@ export function Row({ title, detail, value, right, onPress, chevron = !!onPress,
 export function RowIcon({ name, danger = false, children }) {
   const c = useColors();
   return (
-    <View style={{ width: 28, height: 28, borderRadius: RADIUS_SM, backgroundColor: danger ? c.dangerSoft : c.surface4, alignItems: 'center', justifyContent: 'center' }}>
-      {children || <Icon name={name} size={15} color={danger ? c.danger : c.inkBody} />}
+    <View style={{ width: LINEAS.icono, height: LINEAS.icono, borderRadius: RADIUS_SM, backgroundColor: 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+      {children || <Icon name={name} size={LINEAS.icono} color={danger ? c.danger : c.inkBody} />}
     </View>
   );
 }
@@ -574,11 +572,11 @@ export function Meter({ value, width, color }) {
 export function StackHeader({ title, onBack, right = null }) {
   const c = useColors();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: 2, height: 50 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: LINEAS.iconoCentro - LINEAS.tacto / 2, paddingTop: 2, height: 50 }}>
       <IconButton onPress={onBack} label="Volver">
         <Icon name="arrow-left" size={20} color={c.inkBody} />
       </IconButton>
-      <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: 17, color: c.ink }}>
+      <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONTS.uiSemiBold, fontSize: TEXT.row, color: c.ink }}>
         {title}
       </Text>
       {right}
@@ -590,7 +588,7 @@ export function StackHeader({ title, onBack, right = null }) {
 export function ScreenTitle({ children, style }) {
   const c = useColors();
   return (
-    <Text style={[{ fontFamily: FONTS.serif, fontSize: 32, lineHeight: 37, letterSpacing: -0.3, color: c.ink }, style]}>
+    <Text style={[{ fontFamily: FONTS.serif, fontSize: TEXT.heading, lineHeight: 34, letterSpacing: -0.3, color: c.ink }, style]}>
       {children}
     </Text>
   );
@@ -602,7 +600,7 @@ export function ChatHeader({ title, onLeading, leadingIcon = 'menu', onTitle, tr
   const c = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingTop: insets.top + 2, height: insets.top + 50 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: LINEAS.iconoCentro - LINEAS.tacto / 2, paddingTop: insets.top + 2, height: insets.top + 50 }}>
       <IconButton onPress={onLeading} label={leadingIcon === 'menu' ? 'Abrir menú' : 'Volver'}>
         <Icon name={leadingIcon} size={leadingIcon === 'menu' ? 22 : 20} color={c.inkBody} />
       </IconButton>
@@ -623,7 +621,7 @@ export function ChatHeader({ title, onLeading, leadingIcon = 'menu', onTitle, tr
       >
         {dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dot === 'live' ? c.accent : c.inkFaint }} />}
         {!!title && (
-          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: 15, color: c.ink }}>
+          <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONTS.uiMedium, fontSize: TEXT.body, color: c.ink }}>
             {title}
           </Text>
         )}
