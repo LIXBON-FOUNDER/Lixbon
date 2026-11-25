@@ -41,7 +41,7 @@ export function ModelPicker() {
   // para abrir un <select> nativo por JS, así que al menos se enfoca y se
   // intenta el click (funciona en Chromium/WebView2 con foco previo).
   useEffect(() => {
-    const onFocusRequest = () => { setKeyboard(true); setOpen(true); };
+    const onFocusRequest = () => { if (!selectRef.current?.getClientRects().length) return; setKeyboard(true); setOpen(true); };
     window.addEventListener('lixbon:focus-model-picker', onFocusRequest);
     return () => window.removeEventListener('lixbon:focus-model-picker', onFocusRequest);
   }, []);

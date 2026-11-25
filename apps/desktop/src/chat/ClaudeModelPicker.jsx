@@ -15,7 +15,7 @@ export function ClaudeModelPicker({ value, onChange, options, levels, effort, on
   const selected = options.find((option) => option.value === value);
   const close = () => { setOpen(false); anchor.current?.focus(); };
   useEffect(() => {
-    const focus = () => { setKeyboard(true); setOpen(true); };
+    const focus = () => { if (!anchor.current?.getClientRects().length) return; setKeyboard(true); setOpen(true); };
     window.addEventListener('lixbon:focus-model-picker', focus);
     return () => window.removeEventListener('lixbon:focus-model-picker', focus);
   }, []);

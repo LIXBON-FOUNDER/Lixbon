@@ -94,6 +94,12 @@
 [data-ui='ide'] .twk__section { padding: 20px; border-radius: 12px; }
 [data-ui='ide'] .twk__section-title { font-size: 13px; text-transform: none; letter-spacing: .1px; font-weight: 500; }
 [data-ui='ide'] .twk__row { font-size: 14px; }
+[data-ui='ide'] .twk__design-summary { display: flex; flex-direction: column; gap: 24px; padding: 16px 20px; }
+[data-ui='ide'] .twk__design-section h3 { margin: 0 0 10px; color: var(--ink-muted); font-size: 13px; font-weight: 500; }
+[data-ui='ide'] .twk__design-section p { margin: 0; font-size: 14px; line-height: 1.5; }
+[data-ui='ide'] .twk__details { margin: 0 20px 20px; color: var(--ink-muted); font-size: 13px; }
+[data-ui='ide'] .twk__details > summary { cursor: pointer; padding: 8px 0; }
+[data-ui='ide'] .twk--workspace .twk__design-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 @media (max-width: 900px) {
   [data-ui='ide'] .pv-ws { padding: 8px 12px; }
   [data-ui='ide'] .pv-ws__attline { flex-wrap: wrap; }
