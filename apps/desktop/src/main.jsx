@@ -21,6 +21,7 @@ import "./styles/orch.css";
 import "./styles/mascota.css";
 import "./styles/ide.css";
 import "./styles/redesign.css";
+import "./styles/ade-redesign.css";
 import { initUiScale } from "./lib/uiScale";
 import { initFrameSize } from "./lib/frameSize";
 import { useCodexTermStore } from "./orch/codexterm/codexTermStore";

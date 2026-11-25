@@ -22,7 +22,7 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 [data-ui='ide'] .msg--user { align-self: flex-end; width: fit-content; max-width: 90%; padding: 10px 12px; background: var(--surface-3); border-radius: 12px 12px 4px 12px; }
 [data-ui='ide'] .chatpanel--wide .msg--user { max-width: 90%; padding: 10px 12px; }
 [data-ui='ide'] .msg__agent { display: none; }
-[data-ui='ide'] .md-inline-code, [data-ui='ide'] .activity-row__target { color: #C9A6F5; font-family: var(--font-mono); font-weight: 400; background: none; padding: 0; border-radius: 0; }
+[data-ui='ide'] .md-inline-code, [data-ui='ide'] .activity-row__target { color: var(--x-ref); font-family: var(--font-mono); font-weight: 400; background: none; padding: 0; border-radius: 0; }
 [data-ui='ide'] .chatpanel--wide .chat-inputbar { width: calc(100% - 16px); max-width: 692px; margin: 0 auto 8px; padding: 12px 12px 10px; background: var(--surface-3); border-radius: 12px; box-shadow: none; }
 [data-ui='ide'] .chat-inputbar__textarea { min-height: 24px; font-size: 15px; }
 [data-ui='ide'] .chat-inputbar__row { margin-top: 8px; min-height: 28px; }
@@ -80,7 +80,7 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 [data-ui='ide'] .prob__row { display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
 [data-ui='ide'] .prob__location { flex: 1; min-width: 0; display: flex; gap: 10px; text-align: left; align-items: center; }
 [data-ui='ide'] .prob__fix { font-size: 13px; flex: none; }
-[data-ui='ide'] .prob__code { color: var(--ref); }
+[data-ui='ide'] .prob__code { color: var(--x-ref); }
 [data-ui='ide'] .scm2__commit { padding: 0 8px 16px; gap: 12px; }
 [data-ui='ide'] .scm2__msg { padding: 12px; background: var(--surface-3); border-radius: 6px; }
 [data-ui='ide'] .scm2__msg textarea { font-size: 14px; min-height: 56px; }
@@ -107,3 +107,4 @@ html[data-ui='ide'][data-theme='light'] { --primary: #191917; --on-primary: #FFF
 [data-ui='ide'] .ssec--card { padding: 0; background: transparent; }
 [data-ui='ide'] .allow__chip { padding: 6px 10px; border-radius: 6px; font-weight: 400; }
 @media (max-width: 760px) { [data-ui='ide'] .prob__row { flex-wrap: wrap; } [data-ui='ide'] .sm__body { padding: 16px; } }
+@media (min-width: 1180px) { [data-ui='ide'] .modeswitch__label { display: inline; } }

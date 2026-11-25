@@ -111,13 +111,13 @@ function NewMenu() {
   const pick = (fn) => () => { setOpen(false); fn(); };
   return (
     <>
-      <button ref={ref} type="button" className="ic" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label="Nuevo" title="Nueva Task o Intento">
-        <I n="plus" size={15} />
+      <button ref={ref} type="button" className="lk pv-newtask" onClick={() => setOpen((v) => !v)} aria-haspopup="menu" aria-expanded={open} aria-label="Nueva tarea" title="Nueva tarea o intento">
+        <I n="plus" size={14} /> Nueva tarea
       </button>
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} align="right">
         <div className="menu" role="menu">
           <button type="button" className="menu__item pv-menu__item" role="menuitem" onClick={pick(() => s.setOverlay({ type: 'newtask' }))}>
-            <span className="pv-menu__main">Nueva Task…</span><span className="pv-menu__hint">Un objetivo durable. Arranca su primer Intento.</span>
+            <span className="pv-menu__main">Nueva tarea…</span><span className="pv-menu__hint">Un objetivo durable. Arranca su primer intento.</span>
           </button>
           <button type="button" className="menu__item pv-menu__item" role="menuitem" onClick={pick(() => s.openFork(s.sel.attemptId))}>
             <span className="pv-menu__main">Nuevo Intento de esta Task…</span><span className="pv-menu__hint">Otra ejecución del mismo objetivo.</span>
@@ -199,7 +199,7 @@ export function PreviewSidebar() {
                 <span className="pv-project__name">{p.name}</span>
                 <span className="panelhead__fill" />
                 {!open && attn > 0 && <AttnFlag n={attn} />}
-                <span className="pv-project__meta">{active > 0 ? `${active} en ejecución` : atts.length ? 'en reposo' : 'sin trabajo'}</span>
+                <span className="pv-project__meta">{active > 0 ? `${active} en marcha` : 'sin actividad'}</span>
               </button>
               {open && (
                 <div className="pv-project__body">

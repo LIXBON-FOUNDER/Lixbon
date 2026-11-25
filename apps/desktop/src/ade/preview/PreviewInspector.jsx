@@ -26,8 +26,8 @@ function TaskTab({ task }) {
       {task.constraints.length > 0 && <Section title="Restricciones"><ul className="pv-insp__list pv-insp__list--plain">{task.constraints.map((c) => <li key={c}>{c}</li>)}</ul></Section>}
       {task.decisions.length > 0 && <Section title="Decisiones tomadas"><ul className="pv-insp__list pv-insp__list--plain">{task.decisions.map((c) => <li key={c}>{c}</li>)}</ul></Section>}
       {task.run && (
-        <Section title="Coordinador" aside={<span className="pv-tag pv-tag--dim">Run</span>}>
-          <p className="pv-insp__p">Forma parte de <b>{task.run}</b>. Tasks hermanas: {siblings.map((c) => c.title).join(', ') || '—'}.</p>
+        <Section title="Tarea principal">
+          <p className="pv-insp__p">Forma parte de <b>{task.run}</b>{siblings.length > 0 && <>, junto con {siblings.map((c) => c.title).join(' e ')}</>}.</p>
         </Section>
       )}
     </>
@@ -116,9 +116,9 @@ export function PreviewInspector() {
   const task = taskOf(s, a);
   return (
     <>
-      <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__meta">{task.title} · Intento {a.label}</span></div>
+      <div className="panelhead"><span className="panelhead__title">Inspector</span><span className="panelhead__fill" /><span className="panelhead__meta">Intento {a.label}</span></div>
       <div className="pv-insp__tabs">
-        <Tabs value={tab} onChange={setTab} label="Inspector" options={[{ id: 'task', label: 'Task' }, { id: 'changes', label: 'Cambios' }, { id: 'context', label: 'Contexto' }, { id: 'autonomy', label: 'Autonomía' }]} />
+        <Tabs value={tab} onChange={setTab} label="Inspector" options={[{ id: 'task', label: 'Tarea' }, { id: 'changes', label: 'Cambios' }, { id: 'context', label: 'Contexto' }, { id: 'autonomy', label: 'Autonomía' }]} />
       </div>
       <div className="ade__inspector-content scroll">
         {tab === 'task' && <TaskTab task={task} />}

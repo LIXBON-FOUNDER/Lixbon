@@ -130,8 +130,8 @@ function locationLastSeen(value) {
 }
 
 const WORKSPACE_VIEWS = [
-  { key: 'workspace', label: 'Workspace' },
-  { key: 'attention', label: 'Attention' },
+  { key: 'workspace', label: 'Intento' },
+  { key: 'attention', label: 'Atención' },
   { key: 'activity', label: 'Activity' },
 ];
 
@@ -395,7 +395,7 @@ function useProjectTaskContinuation(projectId, firstPage, enabled) {
 const ACTIVITY_SCOPES = [
   { kind: 'global', label: 'Global' },
   { kind: 'project', label: 'Project' },
-  { kind: 'task', label: 'Task' },
+  { kind: 'task', label: 'Tarea' },
 ];
 
 /** Alcance de Activity: preferencia explícita si sigue disponible; si no, el más específico que haya seleccionado. */
@@ -934,7 +934,7 @@ export function AdeShell({ active, modeActive = true, leftOpen, rightOpen, drawe
       <AdeActivityRail view={workspaceView} onSelect={changeWorkspaceView} />
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
-          <div className="panelhead"><span className="panelhead__title">Orquestador</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>
+          <div className="panelhead"><span className="panelhead__title">Trabajo</span><span className="ade__source">Navegador</span><AdeSourceSwitch /></div>
           <div className="ade__nav-content">
             <section className="ade__nav-section ade__nav-scroll-region ade__nav-projects-scroll" aria-label="Projects y Tasks" tabIndex={0}>
               <ProjectsSidebar

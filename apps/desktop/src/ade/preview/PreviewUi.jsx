@@ -116,6 +116,7 @@ export function Tabs({ value, onChange, options, label, idPrefix }) {
             role="tab"
             id={idPrefix ? `${idPrefix}-tab-${o.id}` : undefined}
             aria-selected={selected}
+            aria-label={o.label}
             tabIndex={selected ? 0 : -1}
             className={`ade-view-switch__tab${selected ? ' is-active' : ''}`}
             onClick={() => onChange(o.id)}

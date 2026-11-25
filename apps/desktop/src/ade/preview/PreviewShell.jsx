@@ -25,8 +25,8 @@ import '../AdeShell.css';
 import './preview.css';
 
 const VIEWS = [
-  { id: 'workspace', label: 'Workspace', icon: 'panel' },
-  { id: 'attention', label: 'Attention', icon: 'warn' },
+  { id: 'workspace', label: 'Intento', icon: 'panel' },
+  { id: 'attention', label: 'Atención', icon: 'warn' },
   { id: 'compare', label: 'Comparar', icon: 'split' },
   { id: 'map', label: 'Mapa', icon: 'nodes' },
   { id: 'hosts', label: 'Hosts', icon: 'server' },
@@ -84,7 +84,7 @@ export function PreviewShell({ leftOpen = true, rightOpen = true, drawerOpen, on
       <Collapse open={leftOpen} size={Math.max(sizes.side, 280) + 8}>
         <Panel id="ade-nav" className="sidepanel ade__nav">
           <div className="panelhead">
-            <span className="panelhead__title">Orquestador</span>
+            <span className="panelhead__title">Trabajo</span>
             <span className="panelhead__fill" />
             <AdeSourceSwitch />
           </div>

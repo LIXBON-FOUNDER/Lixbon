@@ -8,8 +8,8 @@ import { I, RiskTag, Loc, Agent, SimBadge } from './PreviewUi';
 import { KIND_META, attemptName } from './previewVocab';
 
 const GROUPS = [
-  { id: 'block', title: 'Bloquean a un agente', kinds: ['permission', 'question'], hint: 'El agente no puede seguir hasta que respondas.' },
-  { id: 'review', title: 'Listos para tu revisión', kinds: ['review'], hint: 'Primero la evidencia, después el diff.' },
+  { id: 'block', title: 'Esperan tu decisión', kinds: ['permission', 'question'], hint: 'El agente no puede seguir hasta que respondas.' },
+  { id: 'review', title: 'Para revisar', kinds: ['review'], hint: 'Primero la evidencia, después el diff.' },
   { id: 'problems', title: 'Problemas', kinds: ['failed', 'conflict', 'host'], hint: 'Algo se rompió o no se alcanza.' },
 ];
 const RISK_ORDER = { high: 0, medium: 1, low: 2, none: 3 };
@@ -24,11 +24,12 @@ export function DecisionButtons({ item, from = 'ADE' }) {
   if (item.kind === 'permission') {
     return (
       <div className="pv-decide">
-        <button type="button" className="btn btn--sm pv-btn--danger" onClick={() => resolve('deny')}>Denegar <kbd>D</kbd></button>
+        <button type="button" className="btn btn--sm pv-btn--danger" onClick={() => resolve('deny')}>Rechazar <kbd>D</kbd></button>
         <button type="button" className="btn btn--ghost btn--sm" onClick={() => resolve('allow_once')}>Permitir una vez <kbd>A</kbd></button>
         {item.risk !== 'high'
           ? <button type="button" className="btn btn--accent btn--sm" onClick={() => resolve('allow_attempt')}>Permitir en este Intento</button>
-          : <span className="pv-muted">Riesgo alto: sin opción «siempre». Lee la orden antes.</span>}
+          : <span className="pv-muted">Riesgo alto: solo se puede permitir una vez</span>}
+        {a && <button type="button" className="lk" onClick={() => go('workspace')}>Responder al agente</button>}
       </div>
     );
   }
@@ -107,9 +108,9 @@ export function AttentionCard({ item, compact = false, detail = false }) {
           <code className="mono">{item.command}</code>
           {!compact && (
             <dl className="pv-card__facts">
-              <div><dt>Riesgo</dt><dd>{item.riskLabel}</dd></div>
-              {item.reason && <div><dt>Motivo</dt><dd>{item.reason}</dd></div>}
-              <div><dt>Alcance si lo permites</dt><dd>{item.scope}</dd></div>
+              <div><dt>Qué hace</dt><dd>{item.riskLabel || 'No informado'}</dd></div>
+              <div><dt>Por qué</dt><dd>{item.reason || 'No informado'}</dd></div>
+              <div><dt>Alcance</dt><dd>{item.scope || 'No informado'}</dd></div>
               <div><dt>Perfil</dt><dd>{a ? 'Fuera de lo permitido: pregunta' : '—'}</dd></div>
             </dl>
           )}
@@ -138,7 +139,7 @@ function DecisionContext({ item }) {
       )}
       {item.before && (
         <section>
-          <h3 className="ssec__label">Justo antes, el agente</h3>
+          <h3 className="ssec__label">Lo que hizo antes de pedirlo</h3>
           <ol className="pv-ctx__steps">{item.before.map((t) => <li key={t}>{t}</li>)}</ol>
         </section>
       )}
@@ -176,9 +177,10 @@ export function PreviewAttention() {
   const s = usePreviewStore();
   const [picked, setPicked] = useState([]);
   const [selId, setSelId] = useState(null);
+  const [filter, setFilter] = useState('all');
   const lastIdx = useRef(0);
   const listRef = useRef(null);
-  const items = s.attention;
+  const items = s.attention.filter((item) => filter === 'all' || (filter === 'permissions' ? item.kind === 'permission' : item.kind === 'review'));
   const groups = GROUPS.map((g) => ({ ...g, list: items.filter((x) => g.kinds.includes(x.kind)).sort((a, b) => RISK_ORDER[a.risk] - RISK_ORDER[b.risk]) })).filter((g) => g.list.length);
   const flat = groups.flatMap((g) => g.list);
   // Al resolver una, se pasa a la que ocupa su lugar.
@@ -211,11 +213,14 @@ export function PreviewAttention() {
     <div className="pv-inbox" onKeyDown={onKeyDown}>
       <section className="pv-inbox__list" aria-label="Solicitudes">
         <header className="pv-view__head">
-          <h1 className="pv-view__title">Attention</h1>
+          <h1 className="pv-view__title">Atención</h1>
           <span className="pv-muted">{items.length ? `${items.length} ${items.length === 1 ? 'espera' : 'esperan'} una decisión` : 'Nada pendiente'}</span>
           <span className="panelhead__fill" />
           {items.some((i) => i.kind === 'host') && <button type="button" className="lk" onClick={() => items.filter((i) => i.kind === 'host').forEach((i) => s.resolveAttention(i.id, 'snooze'))}>Posponer avisos de hosts</button>}
         </header>
+        <div className="pv-attention-filters" role="group" aria-label="Filtrar decisiones">
+          {[['all', 'Todo'], ['permissions', 'Permisos'], ['reviews', 'Revisiones']].map(([id, label]) => <button type="button" key={id} aria-pressed={filter === id} className={`pv-chipbtn${filter === id ? ' is-on' : ''}`} onClick={() => { setFilter(id); setPicked([]); }}>{label}</button>)}
+        </div>
         {batchable.length > 1 && (
           <div className="pv-callout">
             <span><b>En lote</b> · {batchable.length} permisos de riesgo bajo del mismo tipo.</span>
